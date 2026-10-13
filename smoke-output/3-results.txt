@@ -1,0 +1,9 @@
+startup_ok=1 swagger_http=200
+login_http=200
+access_token_length=821 refresh_token_length=409
+refresh_http=200
+refreshed_access_token_length=821
+logout_http=200
+--- status codes:
+     60 200
+      2 400
