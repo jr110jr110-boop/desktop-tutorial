@@ -135,6 +135,12 @@ namespace WebApi
 
             var mappingConfig = new MapperConfiguration(cfg =>
             {
+                // AutoMapper 10 scans every extension method of System.Linq.Enumerable, including private ones.
+                // .NET 7+ added private generic-math helpers (for example MaxFloat<T>) whose type constraints make
+                // that scan throw at startup ("violates the constraint of type 'T'"). Only public methods are
+                // meant to be used for mapping, so limit the scan to them (AutoMapper 12+ handles this itself).
+                cfg.ShouldMapMethod = method => method.IsPublic;
+
                 cfg.AddProfile(new ProStatMappingProfile());
                 cfg.AddProfile(new EquipmentAssemblyMappingProfile());
                 cfg.AddProfile(new EquipmentBomMappingProfile());

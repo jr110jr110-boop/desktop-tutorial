@@ -57,6 +57,8 @@ namespace MsTests
 
             var siteSettings = services.GetSiteSettings();
             siteSettings.ActiveDatabase = ActiveDatabase.InMemoryDatabase;
+            // appsettings.json has no LocalDb section; the in-memory database only needs a name.
+            siteSettings.ConnectionStrings.LocalDb ??= new Localdb { InitialCatalog = "IRNNCO_Tests" };
 
             services.AddRequiredEfInternalServices(siteSettings); // It's added to access services from the dbcontext, remove it if you are using the normal `AddDbContext` and normal constructor dependency injection.
             services.AddDbContextPool<ApplicationDbContext>((serviceProvider, optionsBuilder) =>
@@ -66,6 +68,9 @@ namespace MsTests
             });
 
             _serviceProvider = services.BuildServiceProvider();
+
+            // An in-memory database receives the HasData seed rows (roles, role claims) only through EnsureCreated.
+            _serviceProvider.RunScopedService<ApplicationDbContext>(context => context.Database.EnsureCreated());
 
             _siteSettings = _serviceProvider.GetRequiredService<IOptionsSnapshot<SiteSettings>>();
             //_siteSettings.Value.ActiveDatabase = ActiveDatabase.InMemoryDatabase;
