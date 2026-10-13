@@ -93,7 +93,8 @@ jobs:
           git config user.name "innco-ci"
           git config user.email "innco-ci@users.noreply.github.com"
           git checkout --orphan innco-ci-results
-          git rm -rq --cached .
+          # -f: the EF step changes tracked migration files, and an unborn branch has no tip to compare with
+          git rm -rqf --cached .
           git add -f ci-output
           git commit -q -m "CI results for ${{ github.sha }}"
           git push -f origin innco-ci-results
