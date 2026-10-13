@@ -145,6 +145,16 @@ jobs:
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/smoke.sh
 
+      - name: Query check (queries the GET requests cannot reach)
+        continue-on-error: true
+        working-directory: src/WebApi
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
+        run: |
+          set -o pipefail
+          dotnet run --project ../../.github/ci-tools/QueryCheck/QueryCheck.csproj -c Release 2>&1 | tee ../../smoke-output/6-querycheck.log
+
       - name: Publish smoke results to innco-ci-smoke branch
         if: always()
         run: |

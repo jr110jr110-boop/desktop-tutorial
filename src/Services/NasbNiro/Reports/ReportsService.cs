@@ -301,6 +301,9 @@ namespace Services.NasbNiro.Reports
             .ThenBy(x => x.WorkOrderId)
             .ThenBy(x => x.ProcessId);
 
+        // EF Core 3+ cannot return an IQueryable inside a projection (EF Core 2.2 ran it as a separate query
+        // for every row). The price / weight-percent series does not depend on the selected report row, so it
+        // is loaded once with its own query and attached to the result.
         public async Task<ResponseDto<ResponseProgressReportDto>> GetProgressReportByWorkOrderIdAsync(GetProgressReportDto dto, CancellationToken cancellationToken)
         {
             var result = await
@@ -308,16 +311,6 @@ namespace Services.NasbNiro.Reports
                     from report in _progressReportsQuery
                     where report.WorkOrderId == dto.Id && report.ReportDate <= dto.ToDate
                     orderby report.ReportDate descending
-                    let prices_weightPercents = _progressReportsQuery
-                        .Where(x => x.WorkOrderId == dto.Id && x.ReportDate <= dto.ToDate)
-                        .Select(x => new
-                        {
-                            price_actual = x.ActualPrice,
-                            price_planned = x.PlannedPrice,
-                            date = x.ReportDate,
-                            wp_actual = x.ActualWeightPercent,
-                            wp_planned = x.PlannedWeightPercent
-                        })
                     select new ResponseProgressReportDto
                     {
                         Id = report.Id,
@@ -332,25 +325,17 @@ namespace Services.NasbNiro.Reports
                         ActualWeightPercent = report.ActualWeightPercent,
                         RemainingDays = report.WorkOrderRemainingDays,
                         WorkOrderTitle = report.WorkOrderTitle,
-                        Prices = prices_weightPercents
-                            .Select(x => new PriceReport()
-                            {
-                                Actual = x.price_actual,
-                                Planned = x.price_planned,
-                                Date = x.date
-                            })
-                            .ToArray(),
-                        WeightPercents = prices_weightPercents
-                            .Select(x => new WeightPercentReport()
-                            {
-                                Actual = x.wp_actual,
-                                Planned = x.wp_planned,
-                                Date = x.date
-                            })
-                            .ToArray(),
                     }
                 )
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (result != null)
+            {
+                await SetProgressSeriesAsync(
+                    result,
+                    _progressReportsQuery.Where(x => x.WorkOrderId == dto.Id && x.ReportDate <= dto.ToDate),
+                    cancellationToken);
+            }
 
             return ResponseDtoHelper.Ok(result);
         }
@@ -362,16 +347,6 @@ namespace Services.NasbNiro.Reports
                    from report in _progressReportsQuery
                    where report.ContractId == dto.Id && report.ReportDate <= dto.ToDate
                    orderby report.ReportDate descending
-                   let prices_weightPercents = _progressReportsQuery
-                       .Where(x => x.ContractId == dto.Id && x.ReportDate <= dto.ToDate)
-                       .Select(x => new
-                       {
-                           price_actual = x.ActualPrice,
-                           price_planned = x.PlannedPrice,
-                           date = x.ReportDate,
-                           wp_actual = x.ActualWeightPercent,
-                           wp_planned = x.PlannedWeightPercent
-                       })
                    select new ResponseProgressReportDto
                    {
                        Id = report.Id,
@@ -386,27 +361,54 @@ namespace Services.NasbNiro.Reports
                        ActualWeightPercent = report.ContractActualWeightPercent,
                        RemainingDays = report.ContractRemainingDays,
                        WorkOrderTitle = report.WorkOrderTitle,
-                       Prices = prices_weightPercents
-                           .Select(x => new PriceReport()
-                           {
-                               Actual = x.price_actual,
-                               Planned = x.price_planned,
-                               Date = x.date
-                           })
-                           .ToArray(),
-                       WeightPercents = prices_weightPercents
-                           .Select(x => new WeightPercentReport()
-                           {
-                               Actual = x.wp_actual,
-                               Planned = x.wp_planned,
-                               Date = x.date
-                           })
-                           .ToArray(),
                    }
                )
-               .FirstOrDefaultAsync();
+               .FirstOrDefaultAsync(cancellationToken);
+
+            if (result != null)
+            {
+                await SetProgressSeriesAsync(
+                    result,
+                    _progressReportsQuery.Where(x => x.ContractId == dto.Id && x.ReportDate <= dto.ToDate),
+                    cancellationToken);
+            }
 
             return ResponseDtoHelper.Ok(result);
+        }
+
+        private static async Task SetProgressSeriesAsync(
+            ResponseProgressReportDto result,
+            IQueryable<ProgressReport> reports,
+            CancellationToken cancellationToken)
+        {
+            var series = await reports
+                .Select(x => new
+                {
+                    price_actual = x.ActualPrice,
+                    price_planned = x.PlannedPrice,
+                    date = x.ReportDate,
+                    wp_actual = x.ActualWeightPercent,
+                    wp_planned = x.PlannedWeightPercent
+                })
+                .ToListAsync(cancellationToken);
+
+            result.Prices = series
+                .Select(x => new PriceReport()
+                {
+                    Actual = x.price_actual,
+                    Planned = x.price_planned,
+                    Date = x.date
+                })
+                .ToArray();
+
+            result.WeightPercents = series
+                .Select(x => new WeightPercentReport()
+                {
+                    Actual = x.wp_actual,
+                    Planned = x.wp_planned,
+                    Date = x.date
+                })
+                .ToArray();
         }
 
         public async Task<ResponseDto<IEnumerable<ProgressReportDto>>> GetAllProgressReportAsync(DateTimeOffset toDate, CancellationToken cancellationToken)

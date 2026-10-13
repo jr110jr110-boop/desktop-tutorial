@@ -750,23 +750,14 @@ namespace Services.NasbNiro
 
         private async Task AddProgressReportAsync(int processId, CancellationToken cancellationToken)
         {
-            var _contracts = _unitOfWork.Set<ContractEntity>();
             var progressReports = _unitOfWork.Set<ProgressReport>();
 
             var data = await (
                     from process in _processes.Where(x => !x.Deleted && x.Id == processId)
                     let workOrder = process.Bom.Assembly.WorkOrder
                     let contract = process.Bom.Assembly.WorkOrder.Contract
-                    let processesOfCompany = _contracts
-                         .Where(c => !c.Deleted)
-                         .SelectMany(c => c.WorkOrders)
-                         .Where(wo => !wo.Deleted)
-                         .SelectMany(x => x.Assemblies)
-                         .Where(asm => !asm.Deleted)
-                         .SelectMany(asm => asm.Boms)
-                         .Where(bom => !bom.Deleted)
-                         .SelectMany(bom => bom.Processes)
-                         .Where(p => !p.Deleted)
+                    // (EF Core 3+ cannot keep an IQueryable in a 'let'. The company-wide process list that was
+                    // here was never used in the result, so it was removed together with its count.)
                     let processesOfContract = workOrder.Contract.WorkOrders
                          .Where(wo => !wo.Deleted)
                          .SelectMany(x => x.Assemblies)
@@ -814,7 +805,6 @@ namespace Services.NasbNiro
                     let contractLevelActualProgress = validProcessesCount == 0 ? 0 : processesOfContract
                         .Where(p => p.ActualEndDate != null && p.ActualEndDate <= DateTimeOffset.UtcNow)
                         .Count() * 100.0D / validProcessesCount
-                    let validCompanyProcessesCount = processesOfCompany.Count()
                     let actualWeightPercentBuyOrder = processesOfBom.Where(p => p.ProcessStatus == ProcessStatus.ProcessIsCompleted)
                         .Select(p => p.WeightPercent).Sum()
                     let plannedWeightPercentBuyOrder = process.Bom.Assembly.Boms

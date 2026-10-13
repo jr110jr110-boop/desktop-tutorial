@@ -276,8 +276,6 @@ namespace WebApi
                 });
             });
 
-            app.UseCors(CorsPolicyName);
-
             loggerFactory
                 .AddDbLogger(serviceProvider: app.ApplicationServices, minLevel: LogLevel.Warning);
 
@@ -327,6 +325,9 @@ namespace WebApi
 
             // Endpoint routing (replaces app.UseMvc of ASP.NET Core 2.2).
             app.UseRouting();
+            // With endpoint routing, CORS must sit between UseRouting and UseEndpoints; otherwise controllers
+            // with [EnableCors] (AdminSettings, ApiSettings) fail with "a middleware was not found that supports CORS".
+            app.UseCors(CorsPolicyName);
             app.UseAuthentication();
             app.UseAuthorization();
 
