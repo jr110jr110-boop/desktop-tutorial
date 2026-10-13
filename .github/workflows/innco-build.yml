@@ -1,0 +1,103 @@
+name: INNCO API .NET 10 build
+
+# Compiles the upgraded INNCO API on a clean Windows machine and stores the logs
+# on the `innco-ci-results` branch. Secrets in appsettings.json are placeholders.
+
+on:
+  push:
+    branches: [ innco-net10-build ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: innco-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Tool versions
+        run: |
+          mkdir -p ci-output
+          dotnet --info > ci-output/0-dotnet-info.txt 2>&1 || true
+          head -n 20 ci-output/0-dotnet-info.txt
+
+      - name: Restore
+        id: restore
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          dotnet restore Base.sln 2>&1 | tee ci-output/1-restore.log
+
+      - name: Build solution
+        id: build
+        if: steps.restore.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          dotnet build Base.sln --no-restore -c Release 2>&1 | tee ci-output/2-build.log
+
+      - name: Build and run tests
+        id: tests
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          dotnet test src/MsTests/MsTests.csproj -c Release 2>&1 | tee ci-output/3-tests.log
+
+      - name: EF Core model check (migrations add)
+        id: ef
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        working-directory: src/WebApi
+        run: |
+          set -o pipefail
+          dotnet tool restore 2>&1 | tee ../../ci-output/4-ef.log
+          dotnet ef migrations add Net10ModelCheck --project ../DataLayer/DataLayer.csproj --startup-project WebApi.csproj --context ApplicationDbContext 2>&1 | tee -a ../../ci-output/4-ef.log
+          mkdir -p ../../ci-output/migration
+          cp ../DataLayer/Migrations/*Net10ModelCheck* ../../ci-output/migration/
+          cp ../DataLayer/Migrations/ApplicationDbContextModelSnapshot.cs ../../ci-output/migration/
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "sha=${{ github.sha }}"
+            echo "restore=${{ steps.restore.outcome }}"
+            echo "build=${{ steps.build.outcome }}"
+            echo "tests=${{ steps.tests.outcome }}"
+            echo "ef=${{ steps.ef.outcome }}"
+          } > ci-output/summary.txt
+          cat ci-output/summary.txt
+
+      - name: Publish logs to innco-ci-results branch
+        if: always()
+        run: |
+          git config user.name "innco-ci"
+          git config user.email "innco-ci@users.noreply.github.com"
+          git checkout --orphan innco-ci-results
+          git rm -rq --cached .
+          git add -f ci-output
+          git commit -q -m "CI results for ${{ github.sha }}"
+          git push -f origin innco-ci-results
+
+      - name: Fail when the build failed
+        if: steps.build.outcome != 'success'
+        run: exit 1

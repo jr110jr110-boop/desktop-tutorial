@@ -1,0 +1,50 @@
+﻿using System;
+
+namespace Entities.Model
+{
+    public class Document
+    {
+        public Document(string path, string mimType)
+        {
+            Path = path;
+            MimType = mimType;
+        }
+
+        public Guid Id { get; protected set; }
+        public string Path { get; protected set; }
+        public DateTimeOffset RegisterDate { get; protected set; }
+        public string MimType { get; protected set; }
+        public string Description { get; protected set; }
+
+        public Document SetDescription(string description)
+        {
+            Description = description;
+            return this;
+        }
+
+        public string Name { get; protected set; }
+        public Document SetName(string name)
+        {
+            Name = name;
+            return this;
+        }
+
+        public string Code { get; protected set; }
+        public Document SetCode(string code)
+        {
+            Code = code;
+            return this;
+        }
+
+        public Document SetPath(string path)
+        {
+            this.Path = path;
+            return this;
+        }
+
+        public void SetMimeType(string mimType)
+        {
+            this.MimType = mimType;
+        }
+    }
+}

@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup Label="Globals">
+    <SccProjectName>SAK</SccProjectName>
+    <SccProvider>SAK</SccProvider>
+    <SccAuxPath>SAK</SccAuxPath>
+    <SccLocalPath>SAK</SccLocalPath>
+  </PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>DataLayer</AssemblyName>
+    <PackageId>DataLayer</PackageId>
+    <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
+    <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
+    <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Migrations\20220106165252_V2022_01_06_2022.cs" />
+    <Compile Remove="Migrations\20220106165252_V2022_01_06_2022.Designer.cs" />
+    <Compile Remove="Migrations\20220106170809_V2022_01_06_2037.cs" />
+    <Compile Remove="Migrations\20220106170809_V2022_01_06_2037.Designer.cs" />
+    <Compile Remove="Migrations\20220130061435_V2022_01_30_0943.cs" />
+    <Compile Remove="Migrations\20220130061435_V2022_01_30_0943.Designer.cs" />
+    <Compile Remove="Migrations\20220130063531_V2022_01_30_1005.cs" />
+    <Compile Remove="Migrations\20220130063531_V2022_01_30_1005.Designer.cs" />
+    <Compile Remove="Migrations\20220130070036_V2022_01_30_1030.cs" />
+    <Compile Remove="Migrations\20220130070036_V2022_01_30_1030.Designer.cs" />
+    <Compile Remove="Migrations\20220130084029_V2022_01_30_1209.cs" />
+    <Compile Remove="Migrations\20220130084029_V2022_01_30_1209.Designer.cs" />
+    <Compile Remove="Migrations\20220130085903_V2022_01_30_1228.cs" />
+    <Compile Remove="Migrations\20220130085903_V2022_01_30_1228.Designer.cs" />
+    <Compile Remove="Migrations\20220404173956_V2022_04_04_2209.cs" />
+    <Compile Remove="Migrations\20220404173956_V2022_04_04_2209.Designer.cs" />
+    <Compile Remove="Migrations\20220405064002_V2022_04_05_1109.cs" />
+    <Compile Remove="Migrations\20220405064002_V2022_04_05_1109.Designer.cs" />
+    <Compile Remove="Migrations\20220727045110_V2022_07_27_0920.cs" />
+    <Compile Remove="Migrations\20220727045110_V2022_07_27_0920.Designer.cs" />
+    <Compile Remove="Migrations\20220727060805_V2022_07_27_1037.cs" />
+    <Compile Remove="Migrations\20220727060805_V2022_07_27_1037.Designer.cs" />
+    <Compile Remove="Migrations\20220826182104_V2022_08_26_2250.cs" />
+    <Compile Remove="Migrations\20220826182104_V2022_08_26_2250.Designer.cs" />
+    <Compile Remove="Migrations\20221031051717_2022_10_31_0846.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Entities\Entities.csproj" />
+    <ProjectReference Include="..\ViewModels\ViewModels.csproj" />
+  </ItemGroup>
+</Project>
