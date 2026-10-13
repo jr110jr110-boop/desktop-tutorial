@@ -29,6 +29,8 @@ namespace MsTests
         {
             var services = new ServiceCollection();
             services.AddOptions();
+            // The web host registers logging in the real application; the managers need ILogger<T>.
+            services.AddLogging();
             services.AddScoped<IWebHostEnvironment, TestWebHostEnvironment>();
 
             //var configuration = new ConfigurationBuilder()
