@@ -322,10 +322,11 @@ namespace Services.NasbNiro
 
             if (!string.IsNullOrEmpty(buyOrderProcessPaginationParams.Contains))
             {
+                // Split the search text before building the query: inside an expression tree, C# 13+
+                // binds Split() to the params ReadOnlySpan overload, which expression trees cannot hold.
+                var searchTerms = buyOrderProcessPaginationParams.Contains.Split();
                 query = query.Where(x =>
-                    buyOrderProcessPaginationParams
-                    .Contains.Split()
-                    .Any(s => x.Attribute != null && x.Attribute.Contains(s)));
+                    searchTerms.Any(s => x.Attribute != null && x.Attribute.Contains(s)));
             }
 
             IQueryable<ResponseBuyOrderProcessesDto> resultQuery =
