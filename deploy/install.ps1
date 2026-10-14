@@ -566,7 +566,8 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     Write-Step "IIS site '$SiteName' on port $Port"
     foreach ($other in @(Get-Website | Where-Object { $_.Name -ne $SiteName })) {
         $usesPort = @($other.bindings.Collection | Where-Object { $_.protocol -eq 'http' -and $_.bindingInformation -like "*:$($Port):" }).Count -gt 0
-        if ($usesPort) {
+        $autoStart = "$($other.serverAutoStart)" -eq 'True'
+        if ($usesPort -and ($other.State -eq 'Started' -or $autoStart)) {
             if ($other.State -eq 'Started') { Stop-Website -Name $other.Name }
             Set-ItemProperty "IIS:\Sites\$($other.Name)" -Name serverAutoStart -Value $false
             Write-Info "Stopped site '$($other.Name)' because it used port $Port."

@@ -284,6 +284,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path D:\Import\old-app\UploadedDocuments, D:\Import\old-app\wwwroot\Documents | Out-Null
           Set-Content -Path D:\Import\old-app\UploadedDocuments\old-upload.txt -Value 'old upload'
           Set-Content -Path D:\Import\old-app\wwwroot\Documents\old-doc.txt -Value 'old document'
+          # fresh backup through the scheduled task, so it contains the document uploaded in step 1
+          $started = Get-Date
+          Start-ScheduledTask -TaskName 'INNCO daily backup'
+          do { Start-Sleep -Seconds 5; $info = Get-ScheduledTaskInfo -TaskName 'INNCO daily backup' }
+          while ((Get-ScheduledTask -TaskName 'INNCO daily backup').State -eq 'Running' -or $info.LastRunTime -lt $started.AddSeconds(-5))
+          "backup task result=$($info.LastTaskResult)" | Tee-Object -FilePath install-output\3-restore-run-backup.txt
           $bak = Get-ChildItem D:\INNCO\Backup\database -Filter '*.bak' | Sort-Object LastWriteTime | Select-Object -Last 1
           Copy-Item $bak.FullName D:\Import\IRNNCO.bak
           powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -RestoreBackup D:\Import\IRNNCO.bak -ReplaceDatabase -UploadedFilesFrom D:\Import\old-app | Tee-Object -FilePath install-output\3-restore-run.txt
@@ -294,18 +300,21 @@ jobs:
         if: always()
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Continue'
           $o = 'install-output'
           New-Item -ItemType Directory -Force -Path "$o\logs" | Out-Null
           Copy-Item D:\INNCO\logs\* "$o\logs" -Recurse -ErrorAction SilentlyContinue
           Copy-Item D:\INNCO\Backup\backup-log.txt $o -ErrorAction SilentlyContinue
           Get-ChildItem D:\INNCO -Recurse -Depth 2 | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 300 | Set-Content "$o\tree.txt"
-          & icacls.exe D:\INNCO D:\INNCO\app D:\INNCO\app\UploadedDocuments D:\INNCO\logs D:\INNCO\Backup | Out-File "$o\acl.txt"
+          foreach ($d in 'D:\INNCO', 'D:\INNCO\app', 'D:\INNCO\app\UploadedDocuments', 'D:\INNCO\app\appsettings.Production.json', 'D:\INNCO\logs', 'D:\INNCO\Backup') { & icacls.exe $d | Out-File -Append "$o\acl.txt" }
           Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'IIS AspNetCore Module V2' } -MaxEvents 40 -ErrorAction SilentlyContinue |
             Format-List TimeCreated, Id, Message | Out-String -Width 300 | Set-Content "$o\eventlog-ancm.txt"
           Get-ChildItem C:\inetpub\logs\LogFiles -Recurse -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 60 } | Set-Content "$o\iis-access-tail.txt"
           Import-Module WebAdministration
           Get-Website | Format-Table -AutoSize Name, State, PhysicalPath, @{n='Bindings';e={($_.bindings.Collection | ForEach-Object { $_.bindingInformation }) -join ', '}} | Out-String -Width 300 | Set-Content "$o\iis-sites.txt"
           Get-ItemProperty IIS:\AppPools\INNCO | Select-Object name, state, managedRuntimeVersion, startMode | Format-List | Out-String | Add-Content "$o\iis-sites.txt"
+          Get-ChildItem $o -Filter '*-run.txt' | ForEach-Object { $t = Get-Content $_.FullName; $t | Set-Content -Encoding UTF8 $_.FullName }
+          exit 0
 
       - name: Publish install results to innco-ci-install branch
         if: always()
