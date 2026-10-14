@@ -211,9 +211,12 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p package-output
-          dotnet publish src/WebApi/WebApi.csproj -c Release -o package-output/app 2>&1 | tee package-output/publish.log
+          dotnet publish src/WebApi/WebApi.csproj -c Release -r win-x64 --self-contained false -o package-output/app 2>&1 | tee package-output/publish.log
           mkdir -p package-output/app/wwwroot
           cp -r .github/ci-frontend-dist/. package-output/app/wwwroot/
+          cp deploy/install.ps1 deploy/backup.ps1 package-output/
+          mkdir -p package-output/installers
+          cp deploy/installers/README.txt package-output/installers/
           {
             echo "source_sha=${{ github.sha }}"
             echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -232,3 +235,86 @@ jobs:
           git add -f package-output
           git commit -q -m "Package for ${{ github.sha }}"
           git push -f origin innco-package
+
+  install-test:
+    # Runs install.ps1 end to end on a clean Windows Server with SQL Server 2022 Express, the way IT will:
+    # 1) first install with an empty database, 2) an update run, 3) restore of the backup that run 1 made,
+    # together with the uploaded files of an "old program" folder. Results go to the innco-ci-install branch.
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Get the CI scripts
+        uses: actions/checkout@v4
+
+      - name: Get the package
+        uses: actions/checkout@v4
+        with:
+          ref: innco-package
+          path: pkg
+
+      - name: Install SQL Server 2022 Express
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path install-output | Out-Null
+          choco install sql-server-express -y --no-progress --limit-output | Out-File install-output\0-sql-install.txt
+          Get-Service -Name 'MSSQL*' | Format-Table -AutoSize Name, Status | Out-String | Tee-Object -Append install-output\0-sql-install.txt
+          (Get-CimInstance Win32_OperatingSystem).Caption | Tee-Object -Append install-output\0-sql-install.txt
+
+      - name: 1 - First install (empty database)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -AdminPassword 'Ci#Adm1n-Install-2026' | Tee-Object -FilePath install-output\1-first-run.txt
+          "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\1-first-run.txt
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 1-first
+
+      - name: 2 - Update run (keeps database, settings and files)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -SkipFirstBackup | Tee-Object -FilePath install-output\2-update-run.txt
+          "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\2-update-run.txt
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 2-update
+
+      - name: 3 - Restore the backup and bring over old uploaded files
+        continue-on-error: true
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path D:\Import\old-app\UploadedDocuments, D:\Import\old-app\wwwroot\Documents | Out-Null
+          Set-Content -Path D:\Import\old-app\UploadedDocuments\old-upload.txt -Value 'old upload'
+          Set-Content -Path D:\Import\old-app\wwwroot\Documents\old-doc.txt -Value 'old document'
+          $bak = Get-ChildItem D:\INNCO\Backup\database -Filter '*.bak' | Sort-Object LastWriteTime | Select-Object -Last 1
+          Copy-Item $bak.FullName D:\Import\IRNNCO.bak
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -RestoreBackup D:\Import\IRNNCO.bak -ReplaceDatabase -UploadedFilesFrom D:\Import\old-app | Tee-Object -FilePath install-output\3-restore-run.txt
+          "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\3-restore-run.txt
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 3-restore
+
+      - name: Collect logs
+        if: always()
+        shell: powershell
+        run: |
+          $o = 'install-output'
+          New-Item -ItemType Directory -Force -Path "$o\logs" | Out-Null
+          Copy-Item D:\INNCO\logs\* "$o\logs" -Recurse -ErrorAction SilentlyContinue
+          Copy-Item D:\INNCO\Backup\backup-log.txt $o -ErrorAction SilentlyContinue
+          Get-ChildItem D:\INNCO -Recurse -Depth 2 | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 300 | Set-Content "$o\tree.txt"
+          & icacls.exe D:\INNCO D:\INNCO\app D:\INNCO\app\UploadedDocuments D:\INNCO\logs D:\INNCO\Backup | Out-File "$o\acl.txt"
+          Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'IIS AspNetCore Module V2' } -MaxEvents 40 -ErrorAction SilentlyContinue |
+            Format-List TimeCreated, Id, Message | Out-String -Width 300 | Set-Content "$o\eventlog-ancm.txt"
+          Get-ChildItem C:\inetpub\logs\LogFiles -Recurse -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 60 } | Set-Content "$o\iis-access-tail.txt"
+          Import-Module WebAdministration
+          Get-Website | Format-Table -AutoSize Name, State, PhysicalPath, @{n='Bindings';e={($_.bindings.Collection | ForEach-Object { $_.bindingInformation }) -join ', '}} | Out-String -Width 300 | Set-Content "$o\iis-sites.txt"
+          Get-ItemProperty IIS:\AppPools\INNCO | Select-Object name, state, managedRuntimeVersion, startMode | Format-List | Out-String | Add-Content "$o\iis-sites.txt"
+
+      - name: Publish install results to innco-ci-install branch
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "innco-ci"
+          git config user.email "innco-ci@users.noreply.github.com"
+          git checkout --orphan innco-ci-install
+          git rm -rqf --cached .
+          git add -f install-output
+          git commit -q -m "Install test for ${{ github.sha }}"
+          git push -f origin innco-ci-install
