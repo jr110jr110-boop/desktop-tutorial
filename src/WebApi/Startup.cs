@@ -342,6 +342,25 @@ namespace WebApi
                 endpoints.MapControllerRoute(
                     name: "default",
                     pattern: "{controller=Home}/{action=Index}/{id?}");
+
+                // The Vue front-end can be published into wwwroot (deploy/install.ps1 does this), so the whole
+                // system runs as one IIS site. Browser addresses such as /contracts/12 are neither files nor API
+                // endpoints: they get index.html and the Vue router shows the page. Unknown /api addresses keep
+                // their 404, and without a front-end in wwwroot nothing changes.
+                endpoints.MapFallback(async context =>
+                {
+                    var indexFile = env.WebRootFileProvider.GetFileInfo("index.html");
+                    var isPageRequest = HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method);
+                    if (!isPageRequest || context.Request.Path.StartsWithSegments("/api") || !indexFile.Exists)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+
+                    context.Response.ContentType = "text/html; charset=utf-8";
+                    context.Response.Headers.CacheControl = "no-cache";
+                    await context.Response.SendFileAsync(indexFile);
+                }).AllowAnonymous();
             });
 
             // As before, the middlewares below only run for requests that are not handled by a controller.

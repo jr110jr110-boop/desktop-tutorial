@@ -21,6 +21,22 @@ done
 echo "startup_ok=$ok swagger_http=$code" | tee -a "$OUT/3-results.txt"
 curl -s "$BASE/swagger/v1/swagger.json" -o "$OUT/swagger.json" || true
 
+# Front-end served by the API from wwwroot (one IIS site): pages, assets, and API paths that must stay 404.
+if [ -f src/WebApi/wwwroot/index.html ]; then
+  for p in "" "login" "contract/list" "contract/update/12" "workflowGroup/list"; do
+    code=$(curl -s -o "$OUT/page.tmp" -w '%{http_code}' "$BASE/$p")
+    if grep -q '<div id="app">' "$OUT/page.tmp"; then kind=index.html; else kind=other; fi
+    echo "ui_page /$p http=$code body=$kind" | tee -a "$OUT/3-results.txt"
+  done
+  asset=$(grep -o -m1 '/assets/index\.[0-9a-f]*\.js' src/WebApi/wwwroot/index.html)
+  echo "ui_asset $asset $(curl -s -o /dev/null -w 'http=%{http_code} type=%{content_type}' "$BASE$asset")" | tee -a "$OUT/3-results.txt"
+  echo "ui_favicon $(curl -s -o /dev/null -w 'http=%{http_code}' "$BASE/favicon.ico")" | tee -a "$OUT/3-results.txt"
+  echo "api_unknown_path $(curl -s -o /dev/null -w 'http=%{http_code}' "$BASE/api/v1/NoSuchThing/xyz") (expect 404)" | tee -a "$OUT/3-results.txt"
+  echo "ui_post_to_page $(curl -s -o /dev/null -w 'http=%{http_code}' -X POST "$BASE/contract/list") (expect 404)" | tee -a "$OUT/3-results.txt"
+  echo "swagger_ui $(curl -s -o /dev/null -w 'http=%{http_code}' "$BASE/swagger/index.html")" | tee -a "$OUT/3-results.txt"
+  rm -f "$OUT/page.tmp"
+fi
+
 curl -s -X POST "$BASE/api/v1/Accounts/login" -H 'Content-Type: application/json' \
   -d '{"userName":"Admin","password":"Ci#Adm1n-Build-2026"}' \
   -o "$OUT/login.json" -w 'login_http=%{http_code}\n' | tee -a "$OUT/3-results.txt"

@@ -1,0 +1,1 @@
+import{_ as s,A as c,o as e,q as o,p as t,b as _,bc as i,T as p}from"./index.d47450bc.js";const f={};function l(m,u){const a=c("router-view");return e(),o(a,null,{default:t(({Component:n,route:r})=>[_(p,{mode:"out-in",name:"fade"},{default:t(()=>[(e(),o(i(n),{key:r.path}))]),_:2},1024)]),_:1})}var v=s(f,[["render",l]]);export{v as default};

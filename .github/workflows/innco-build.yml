@@ -104,15 +104,26 @@ jobs:
         run: exit 1
 
   smoke:
-    # Runs the API for real against an empty SQL Server 2022 (Linux container).
+    # Runs the API for real against an empty SQL Server (Linux container): 2022 and 2025 Express.
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: '2022'
+            image: '2022-latest'
+            pid: 'Developer'
+          - tag: '2025-express'
+            image: '2025-latest'
+            pid: 'Express'
     services:
       mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
+        image: mcr.microsoft.com/mssql/server:${{ matrix.image }}
         env:
           ACCEPT_EULA: 'Y'
+          MSSQL_PID: ${{ matrix.pid }}
           MSSQL_SA_PASSWORD: 'Ci_Sql_Passw0rd_2026'
         ports:
           - 1433:1433
@@ -132,10 +143,21 @@ jobs:
           mkdir -p smoke-output
           dotnet build src/WebApi/WebApi.csproj -c Release 2>&1 | tee smoke-output/1-build.log
 
+      - name: Put the built front-end into wwwroot (served by the API)
+        run: |
+          mkdir -p src/WebApi/wwwroot
+          cp -r .github/ci-frontend-dist/. src/WebApi/wwwroot/
+          ls src/WebApi/wwwroot
+
       - name: Wait for SQL Server
         run: |
           for i in $(seq 1 90); do (echo > /dev/tcp/127.0.0.1/1433) >/dev/null 2>&1 && break; sleep 2; done
           sleep 25
+          for t in /opt/mssql-tools18/bin/sqlcmd /opt/mssql-tools/bin/sqlcmd; do
+            docker exec ${{ job.services.mssql.id }} $t -C -S localhost -U sa -P 'Ci_Sql_Passw0rd_2026' -h -1 \
+              -Q "SET NOCOUNT ON; SELECT @@VERSION; SELECT SERVERPROPERTY('Edition')" > smoke-output/0-sql-version.txt 2>&1 && break
+          done
+          cat smoke-output/0-sql-version.txt || true
 
       - name: Run API and call endpoints
         continue-on-error: true
@@ -155,13 +177,58 @@ jobs:
           set -o pipefail
           dotnet run --project ../../.github/ci-tools/QueryCheck/QueryCheck.csproj -c Release 2>&1 | tee ../../smoke-output/6-querycheck.log
 
-      - name: Publish smoke results to innco-ci-smoke branch
+      - name: Publish smoke results to innco-ci-smoke-<sql> branch
         if: always()
         run: |
           git config user.name "innco-ci"
           git config user.email "innco-ci@users.noreply.github.com"
-          git checkout --orphan innco-ci-smoke
+          git checkout --orphan innco-ci-smoke-${{ matrix.tag }}
           git rm -rqf --cached .
           git add -f smoke-output
-          git commit -q -m "Smoke results for ${{ github.sha }}"
-          git push -f origin innco-ci-smoke
+          git commit -q -m "Smoke results (SQL Server ${{ matrix.tag }}) for ${{ github.sha }}"
+          git push -f origin innco-ci-smoke-${{ matrix.tag }}
+
+  package:
+    # Publishes the API (Release, framework-dependent, for IIS + .NET 10 Hosting Bundle) with the
+    # front-end in wwwroot, and stores it on the innco-package branch.
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish WebApi
+        run: |
+          set -o pipefail
+          mkdir -p package-output
+          dotnet publish src/WebApi/WebApi.csproj -c Release -o package-output/app 2>&1 | tee package-output/publish.log
+          mkdir -p package-output/app/wwwroot
+          cp -r .github/ci-frontend-dist/. package-output/app/wwwroot/
+          {
+            echo "source_sha=${{ github.sha }}"
+            echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            dotnet --version | sed 's/^/sdk=/'
+            dotnet --list-runtimes | grep AspNetCore | tail -n1 | sed 's/^/aspnetcore_runtime=/'
+          } > package-output/BUILD-INFO.txt
+          cat package-output/BUILD-INFO.txt
+          du -sh package-output/app
+
+      - name: Store package on innco-package branch
+        run: |
+          git config user.name "innco-ci"
+          git config user.email "innco-ci@users.noreply.github.com"
+          git checkout --orphan innco-package
+          git rm -rqf --cached .
+          git add -f package-output
+          git commit -q -m "Package for ${{ github.sha }}"
+          git push -f origin innco-package
