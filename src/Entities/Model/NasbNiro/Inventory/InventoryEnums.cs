@@ -122,6 +122,9 @@ namespace Entities.Model.NasbNiro.Inventory
 
         /// <summary>مدیر مهندسی / معاونت طراحی و ساخت</summary>
         Engineering = 5,
+
+        /// <summary>واحد مالی: scrap sale price (at least three quotes) and the deposit into the company account (WI-WH-004, corrected).</summary>
+        Finance = 6,
     }
 
     public enum InventoryDocumentStatus

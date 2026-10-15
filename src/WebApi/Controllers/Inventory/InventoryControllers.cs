@@ -260,7 +260,7 @@ namespace WebApi.Controllers
 
         /// <summary>submit, approve-warehouse, approve-planning, post, cancel; the role is checked inside.</summary>
         [HttpPost("action")]
-        [Authorize(Roles = InventoryRoles.Documents)]
+        [Authorize(Roles = InventoryRoles.Counts)]
         public async Task<IActionResult> ActionAsync([FromBody] StockCountActionDto dto, CancellationToken ct) => Ok(await _service.CountActionAsync(dto, ct));
     }
 

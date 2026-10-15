@@ -154,6 +154,8 @@ namespace Services.NasbNiro.Inventory
                     MinutesNumber = d.MinutesNumber,
                     WeighbridgeDocumentId = d.WeighbridgeDocumentId,
                     DepositReference = d.DepositReference,
+                    PriceQuotes = d.PriceQuotes,
+                    FinanceApprovedAt = d.FinanceApprovedAt,
                     WarehouseApprovedAt = d.WarehouseApprovedAt,
                     PlanningApprovedAt = d.PlanningApprovedAt,
                     Lines = d.Lines.OrderBy(l => l.RowNumber).Select(l => new DocumentLineDto
@@ -190,12 +192,12 @@ namespace Services.NasbNiro.Inventory
                 .Select(d => new
                 {
                     d.CreatorUserId, d.ConfirmedByUserId, d.CancelledByUserId, d.ExitCheckedByUserId, d.QcLoadingApprovedByUserId,
-                    d.WarehouseApprovedByUserId, d.PlanningApprovedByUserId,
+                    d.WarehouseApprovedByUserId, d.PlanningApprovedByUserId, d.FinanceApprovedByUserId,
                 }).FirstAsync(cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[]
             {
                 raw.CreatorUserId, raw.ConfirmedByUserId, raw.CancelledByUserId, raw.ExitCheckedByUserId, raw.QcLoadingApprovedByUserId,
-                raw.WarehouseApprovedByUserId, raw.PlanningApprovedByUserId,
+                raw.WarehouseApprovedByUserId, raw.PlanningApprovedByUserId, raw.FinanceApprovedByUserId,
             }, cancellationToken);
             document.CreatorName = names.Name(raw.CreatorUserId);
             document.ConfirmedByName = names.Name(raw.ConfirmedByUserId);
@@ -204,6 +206,7 @@ namespace Services.NasbNiro.Inventory
             document.QcLoadingApprovedByName = names.Name(raw.QcLoadingApprovedByUserId);
             document.WarehouseApprovedByName = names.Name(raw.WarehouseApprovedByUserId);
             document.PlanningApprovedByName = names.Name(raw.PlanningApprovedByUserId);
+            document.FinanceApprovedByName = names.Name(raw.FinanceApprovedByUserId);
             return ResponseDtoHelper.Ok(document);
         }
 
@@ -433,7 +436,12 @@ namespace Services.NasbNiro.Inventory
             document.MinutesNumber = InventoryText.Clean(dto.MinutesNumber);
             document.WeighbridgeDocumentId = dto.WeighbridgeDocumentId;
             document.DepositReference = InventoryText.Clean(dto.DepositReference);
+            document.PriceQuotes = InventoryText.Clean(dto.PriceQuotes);
         }
+
+        /// <summary>Number of offers in the price inquiry text (one per line or separated by "|").</summary>
+        internal static int ScrapQuoteCount(string quotes) =>
+            string.IsNullOrWhiteSpace(quotes) ? 0 : quotes.Split(new[] { '|', '\n', '؛' }, StringSplitOptions.RemoveEmptyEntries).Count(q => q.Trim().Length > 0);
 
         /// <summary>Any change to a draft cancels the approvals given to it.</summary>
         private static void ClearApprovals(InventoryDocument document)
@@ -444,6 +452,8 @@ namespace Services.NasbNiro.Inventory
             document.PlanningApprovedByUserId = null;
             document.QcLoadingApprovedAt = null;
             document.QcLoadingApprovedByUserId = null;
+            document.FinanceApprovedAt = null;
+            document.FinanceApprovedByUserId = null;
         }
 
         /// <summary>Which warehouse kinds each document type may use (quarantine, scrap, contractor, customer property).</summary>
@@ -1152,9 +1162,12 @@ namespace Services.NasbNiro.Inventory
                 if (document.MinutesNumber == null) missing.Add("شماره صورت‌جلسه فروش (FO-WH-020)");
                 if (!document.WeighbridgeDocumentId.HasValue) missing.Add("تصویر قبض باسکول");
                 if (document.DepositReference == null) missing.Add("شماره واریز به حساب شرکت");
+                if (ScrapQuoteCount(document.PriceQuotes) < 3) missing.Add("استعلام قیمت از حداقل سه خریدار");
             }
             if (missing.Count > 0) return "پیش از تایید این موارد را کامل کنید: " + string.Join("، ", missing);
 
+            if (type == InventoryDocumentType.ScrapSale && !document.FinanceApprovedAt.HasValue)
+                return "فروش ضایعات پیش از خروج، تایید واحد مالی (قیمت و واریز به حساب شرکت) را لازم دارد.";
             if (type == InventoryDocumentType.CustomerDelivery && !document.QcLoadingApprovedAt.HasValue)
                 return "تحویل به مشتری تایید بارگیری کنترل کیفیت لازم دارد.";
             if (InventoryDocumentRules.NeedsApprovals(type) && !document.StockCountId.HasValue &&
@@ -1178,8 +1191,8 @@ namespace Services.NasbNiro.Inventory
                 case ApprovalKind.Planning:
                     if (!InventoryDocumentRules.NeedsApprovals(document.Type)) return ResponseDtoHelper.BadRequest<DocumentDto>("این سند تایید جداگانه لازم ندارد.");
                     bool warehouse = dto.Kind == ApprovalKind.Warehouse;
-                    if (!_user.IsInRole(warehouse ? InventoryRoles.RoleWarehouse : InventoryRoles.RolePlanning))
-                        return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + (warehouse ? " (نقش انبار لازم است)" : " (نقش برنامه‌ریزی و کنترل پروژه لازم است)"));
+                    if (!_user.IsInRole(warehouse ? InventoryRoles.RoleWarehouseSupervisor : InventoryRoles.RolePlanning))
+                        return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + (warehouse ? " (نقش سرپرست انبار لازم است)" : " (نقش برنامه‌ریزی و کنترل پروژه لازم است)"));
                     int? other = warehouse ? document.PlanningApprovedByUserId : document.WarehouseApprovedByUserId;
                     if (me == document.CreatorUserId || me == other) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.SameUser);
                     if (warehouse) { document.WarehouseApprovedAt = now; document.WarehouseApprovedByUserId = me; }
@@ -1190,6 +1203,15 @@ namespace Services.NasbNiro.Inventory
                     if (!_user.IsInRole(InventoryRoles.RoleQuality)) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + " (نقش کنترل کیفیت لازم است)");
                     document.QcLoadingApprovedAt = now;
                     document.QcLoadingApprovedByUserId = me;
+                    break;
+                case ApprovalKind.Finance:
+                    if (document.Type != InventoryDocumentType.ScrapSale) return ResponseDtoHelper.BadRequest<DocumentDto>("تایید مالی فقط برای فروش ضایعات است.");
+                    if (!_user.IsInRole(InventoryRoles.Finance)) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + " (نقش مالی لازم است)");
+                    if (me == document.CreatorUserId) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.SameUser);
+                    if (document.DepositReference == null || ScrapQuoteCount(document.PriceQuotes) < 3)
+                        return ResponseDtoHelper.BadRequest<DocumentDto>("پیش از تایید مالی، شماره واریز به حساب شرکت و استعلام قیمت از حداقل سه خریدار ثبت شود.");
+                    document.FinanceApprovedAt = now;
+                    document.FinanceApprovedByUserId = me;
                     break;
                 default:
                     return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.InvalidData);

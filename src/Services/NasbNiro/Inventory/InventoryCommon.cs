@@ -32,36 +32,45 @@ namespace Services.NasbNiro.Inventory
         public int UserId =>
             int.TryParse(_httpContextAccessor.HttpContext?.User?.Identity?.GetUserId(), out int id) ? id : 0;
 
-        public bool IsInRole(string role) => _httpContextAccessor.HttpContext?.User?.IsInRole(role) == true;
+        /// <summary>One role, or several separated by commas (any of them).</summary>
+        public bool IsInRole(string role) =>
+            !string.IsNullOrWhiteSpace(role) && role.Split(',').Any(r => _httpContextAccessor.HttpContext?.User?.IsInRole(r.Trim()) == true);
     }
 
     /// <summary>Role names (as written in the JWT) allowed to change each part of the module.</summary>
     public static class InventoryRoles
     {
-        public const string MasterData = "PMO,WAREHOUSE,ENGINEERING";
-        public const string Documents = "PMO,WAREHOUSE";
+        public const string MasterData = "PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING";
+        public const string Documents = "PMO,WAREHOUSE,WHSUPERVISOR";
+
+        /// <summary>Stock counts: the warehouse counts, the supervisor and planning approve.</summary>
+        public const string Counts = "PMO,WAREHOUSE,WHSUPERVISOR,PLANNING";
         public const string Production = "PMO,WAREHOUSE,ENGINEERING,ENGINEER,ASSEMBLER,QC";
         public const string Routing = "PMO,ENGINEERING";
         public const string Qc = "PMO,QC";
         public const string Finance = "PMO,FINANCIAL";
 
         /// <summary>Who may write a material request: production and planning.</summary>
-        public const string MaterialRequest = "PMO,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE";
+        public const string MaterialRequest = "PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR";
 
         /// <summary>Approvals of material requests (planning or manufacturing) and of NCRs (quality, engineering, manufacturing).</summary>
-        public const string Approvers = "PMO,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE";
+        public const string Approvers = "PMO,PLANNING,WHSUPERVISOR,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE,FINANCIAL";
 
         /// <summary>Exit check of goods leaving the premises (guard).</summary>
-        public const string ExitCheck = "PMO,WAREHOUSE,SECURITY";
+        public const string ExitCheck = "PMO,WAREHOUSE,WHSUPERVISOR,SECURITY";
 
         /// <summary>Requests for new item codes: engineering asks, planning approves.</summary>
-        public const string ItemRequest = "PMO,ENGINEERING,ENGINEER,WAREHOUSE,QC,CONSTRUCTION";
+        public const string ItemRequest = "PMO,PLANNING,ENGINEERING,ENGINEER,WAREHOUSE,WHSUPERVISOR,QC,CONSTRUCTION";
 
-        public const string Planning = "PMO";
+        /// <summary>WI-WH-002: planning and project control gives the codes and keeps the coding tables.</summary>
+        public const string Planning = "PMO,PLANNING";
 
         // single roles used for the approvals
-        public const string RolePlanning = "PMO";
-        public const string RoleWarehouse = "WAREHOUSE";
+        // single roles used for the approvals (decision 1404-07-24: adjustments and counts need the warehouse supervisor
+        // and the planning and project control manager, never the storekeeper who prepared them)
+        public const string RolePlanning = "PLANNING,PMO";
+        public const string RoleWarehouse = "WAREHOUSE,WHSUPERVISOR";
+        public const string RoleWarehouseSupervisor = "WHSUPERVISOR";
         public const string RoleManufacturing = "CONSTRUCTION";
         public const string RoleQuality = "QC";
         public const string RoleEngineering = "ENGINEERING";

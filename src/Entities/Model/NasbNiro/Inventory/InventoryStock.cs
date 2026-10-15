@@ -158,6 +158,13 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>Reference of the deposit to the company bank account (no personal accounts).</summary>
         public string DepositReference { get; set; }
 
+        /// <summary>Price inquiry of a scrap sale: at least three buyers and their offers (rial).</summary>
+        public string PriceQuotes { get; set; }
+
+        /// <summary>Finance checked the price and the deposit into the company account (a different person from the storekeeper).</summary>
+        public DateTimeOffset? FinanceApprovedAt { get; set; }
+        public int? FinanceApprovedByUserId { get; set; }
+
         // ----- approvals of adjustments: the warehouse supervisor (not the creator) and the planning manager
         public DateTimeOffset? WarehouseApprovedAt { get; set; }
         public int? WarehouseApprovedByUserId { get; set; }

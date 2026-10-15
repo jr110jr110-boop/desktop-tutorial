@@ -196,6 +196,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string MinutesNumber { get; set; }
         public Guid? WeighbridgeDocumentId { get; set; }
         public string DepositReference { get; set; }
+
+        /// <summary>Scrap sale: the offers of at least three buyers, for example "بازیافت الف: 120,000,000 | ...".</summary>
+        public string PriceQuotes { get; set; }
         public List<SaveDocumentLineDto> Lines { get; set; } = new List<SaveDocumentLineDto>();
     }
 
@@ -317,6 +320,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string WarehouseApprovedByName { get; set; }
         public DateTimeOffset? PlanningApprovedAt { get; set; }
         public string PlanningApprovedByName { get; set; }
+        public string PriceQuotes { get; set; }
+        public DateTimeOffset? FinanceApprovedAt { get; set; }
+        public string FinanceApprovedByName { get; set; }
         public List<DocumentLineDto> Lines { get; set; } = new List<DocumentLineDto>();
     }
 

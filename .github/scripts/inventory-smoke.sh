@@ -52,6 +52,10 @@ user prod.ci 9 'Ci#Prod-User-2026' 2
 user qc.ci 5 'Ci#Qc-User-2026' 3
 user eng.ci 4 'Ci#Eng-User-2026' 4
 user sec.ci 10 'Ci#Sec-User-2026' 5
+user sup.ci 12 'Ci#Sup-User-2026' 6
+user plan.ci 11 'Ci#Plan-User-2026' 7
+SUP_TOKEN=$(login sup.ci 'Ci#Sup-User-2026'); PLAN_TOKEN=$(login plan.ci 'Ci#Plan-User-2026')
+[ -n "$SUP_TOKEN" ] && [ -n "$PLAN_TOKEN" ] && ok "login warehouse supervisor and planning users" || bad "login warehouse supervisor and planning users"
 WH_TOKEN=$(login wh.ci 'Ci#Wh-User-2026'); PROD_TOKEN=$(login prod.ci 'Ci#Prod-User-2026'); QC_TOKEN=$(login qc.ci 'Ci#Qc-User-2026')
 ENG_TOKEN=$(login eng.ci 'Ci#Eng-User-2026'); SEC_TOKEN=$(login sec.ci 'Ci#Sec-User-2026')
 [ -n "$WH_TOKEN" ] && [ -n "$PROD_TOKEN" ] && [ -n "$QC_TOKEN" ] && [ -n "$ENG_TOKEN" ] && [ -n "$SEC_TOKEN" ] && ok "login warehouse, production, QC, engineering, security users" || bad "login warehouse, production, QC, engineering, security users"
@@ -224,7 +228,7 @@ call POST inventory/sepidar/mappings '{"entityType":"WorkOrder","entityId":1,"se
 
 # ---------------------------------------------------------------- role checks
 call POST Accounts/register-user '{"userName":"fin.ci","name":"مالی","lastName":"آزمون","email":"fin.ci@example.com","roleIds":[3],"password":"Ci#Fin-User-2026","phoneNumber":"09120000000","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345678"}'
-TOKEN=$(login fin.ci 'Ci#Fin-User-2026')
+TOKEN=$(login fin.ci 'Ci#Fin-User-2026'); FIN_TOKEN=$TOKEN
 if [ -n "$TOKEN" ]; then
   ok "login financial user"
   call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "financial user cannot write documents (403)" || bad "financial user cannot write documents (403) got $CODE"
@@ -358,8 +362,10 @@ AI=$(val .data.id)
 call POST "inventory/documents/$AI/confirm"; check "adjustment without approvals rejected" '.success == false'
 call POST "inventory/documents/$AI/approve" '{"kind":1}'; check "planning user cannot approve as warehouse" '.success == false'
 call POST "inventory/documents/$AI/approve" '{"kind":2}'; check "creator cannot approve" '.success == false'
-as "$WH_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":1}'; check "warehouse supervisor approves" '.success and .data.warehouseApprovedAt != null'
-as "$PMO2_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":2}'; check "planning approves" '.success and .data.planningApprovedAt != null'
+as "$WH_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":1}'; check "storekeeper cannot approve an adjustment (segregation)" '.success == false'
+as "$SUP_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":1}'; check "warehouse supervisor approves" '.success and .data.warehouseApprovedAt != null'
+as "$SUP_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":2}'; check "supervisor cannot also approve for planning" '.success == false'
+as "$PLAN_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":2}'; check "planning manager approves" '.success and .data.planningApprovedAt != null'
 call POST "inventory/documents/$AI/confirm"; check "approved adjustment confirmed" '.success and (.data.number|startswith("AI-"))'
 
 # ---------------------------------------------------------------- scrap sale (WI-WH-004)
@@ -367,7 +373,12 @@ call POST inventory/documents "{\"type\":13,\"documentDate\":\"2026-10-19T00:00:
 check "scrap receipt outside the scrap warehouse rejected" '.success == false'
 call POST inventory/documents "{\"type\":14,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$WS,\"driverName\":\"کریمی\",\"vehiclePlate\":\"55ب123-11\",\"receiverName\":\"خریدار\",\"lines\":[{\"itemId\":$PLATE,\"quantity\":5,\"lotId\":$PLOT}]}"
 WSD=$(val .data.id); call POST "inventory/documents/$WSD/confirm"; check "scrap sale without buyer, minutes, weighbridge, deposit rejected" '.success == false and (.message|contains("باسکول"))'
-call POST inventory/documents "{\"id\":$WSD,\"type\":14,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$WS,\"driverName\":\"کریمی\",\"vehiclePlate\":\"55ب123-11\",\"receiverName\":\"خریدار\",\"buyerName\":\"بازیافت آزمون\",\"minutesNumber\":\"FO-WH-020/7\",\"weighbridgeDocumentId\":\"$DOCID\",\"depositReference\":\"واریز 99887\",\"lines\":[{\"itemId\":$PLATE,\"quantity\":5,\"lotId\":$PLOT}]}"
+call POST inventory/documents "{\"id\":$WSD,\"type\":14,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$WS,\"driverName\":\"کریمی\",\"vehiclePlate\":\"55ب123-11\",\"receiverName\":\"خریدار\",\"buyerName\":\"بازیافت آزمون\",\"minutesNumber\":\"FO-WH-020/7\",\"weighbridgeDocumentId\":\"$DOCID\",\"depositReference\":\"واریز 99887\",\"priceQuotes\":\"بازیافت آزمون: 50000000 | خریدار دوم: 45000000\",\"lines\":[{\"itemId\":$PLATE,\"quantity\":5,\"lotId\":$PLOT}]}"
+call POST "inventory/documents/$WSD/confirm"; check "scrap sale with two quotes rejected" '.success == false and (.message|contains("سه خریدار"))'
+call POST inventory/documents "{\"id\":$WSD,\"type\":14,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$WS,\"driverName\":\"کریمی\",\"vehiclePlate\":\"55ب123-11\",\"receiverName\":\"خریدار\",\"buyerName\":\"بازیافت آزمون\",\"minutesNumber\":\"FO-WH-020/7\",\"weighbridgeDocumentId\":\"$DOCID\",\"depositReference\":\"واریز 99887\",\"priceQuotes\":\"بازیافت آزمون: 50000000 | خریدار دوم: 45000000 | خریدار سوم: 41000000\",\"lines\":[{\"itemId\":$PLATE,\"quantity\":5,\"lotId\":$PLOT}]}"
+call POST "inventory/documents/$WSD/confirm"; check "scrap sale without finance approval rejected" '.success == false and (.message|contains("مالی"))'
+call POST "inventory/documents/$WSD/approve" '{"kind":6}'; check "creator cannot approve the scrap sale for finance" '.success == false'
+as "$FIN_TOKEN" POST "inventory/documents/$WSD/approve" '{"kind":6}'; check "finance approves price and deposit" '.success and .data.financeApprovedAt != null'
 call POST "inventory/documents/$WSD/confirm"; check "scrap sale confirmed" '.success and (.data.number|startswith("WS-")) and .data.depositReference == "واریز 99887"'
 
 # ---------------------------------------------------------------- cycle count of the standard parts
@@ -379,8 +390,9 @@ call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"submit\"}"; check "
 call POST inventory/counts/lines "{\"id\":$CNT,\"lines\":$LINES}"; check "counts saved: one difference of -3" '.success and .data.differencesCount == 1'
 call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"submit\"}"; check "count submitted" '.success and .data.status == 1'
 call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"post\"}"; check "post before approvals rejected" '.success == false'
-as "$WH_TOKEN" POST inventory/counts/action "{\"id\":$CNT,\"action\":\"approve-warehouse\"}"; check "count approved by warehouse" '.success'
-as "$PMO2_TOKEN" POST inventory/counts/action "{\"id\":$CNT,\"action\":\"approve-planning\"}"; check "count approved by planning" '.success and .data.status == 2'
+as "$WH_TOKEN" POST inventory/counts/action "{\"id\":$CNT,\"action\":\"approve-warehouse\"}"; check "storekeeper cannot approve the count" '.success == false'
+as "$SUP_TOKEN" POST inventory/counts/action "{\"id\":$CNT,\"action\":\"approve-warehouse\"}"; check "count approved by warehouse supervisor" '.success'
+as "$PLAN_TOKEN" POST inventory/counts/action "{\"id\":$CNT,\"action\":\"approve-planning\"}"; check "count approved by planning" '.success and .data.status == 2'
 call GET "inventory/stock/items?ItemId=$BOLT"; BEFORE=$(val '.data.data[0].onHand')
 call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"post\"}"; check "count posted: decrease adjustment made" '.success and .data.status == 3 and (.data.decreaseDocumentNumber|startswith("AD-"))'
 call GET "inventory/stock/items?ItemId=$BOLT"; check "bolt stock lowered by 3" ".data.data[0].onHand == ($BEFORE - 3)"

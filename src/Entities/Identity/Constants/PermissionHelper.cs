@@ -309,6 +309,10 @@ namespace Entities.Identity.Constants
             yield return new RoleClaim() { Id = 900, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.ConstructionResponseRole.Id };
             yield return new RoleClaim() { Id = 901, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.ConstructionResponseRole.Id };
             yield return new RoleClaim() { Id = 1000, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.SecurityResponseRole.Id };
+            yield return new RoleClaim() { Id = 1100, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.PlanningResponseRole.Id };
+            yield return new RoleClaim() { Id = 1101, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.PlanningResponseRole.Id };
+            yield return new RoleClaim() { Id = 1200, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.WarehouseSupervisorResponseRole.Id };
+            yield return new RoleClaim() { Id = 1201, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.WarehouseSupervisorResponseRole.Id };
             #endregion
         }
     }

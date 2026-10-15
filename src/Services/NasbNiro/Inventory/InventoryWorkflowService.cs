@@ -412,7 +412,7 @@ namespace Services.NasbNiro.Inventory
                 {
                     if (count.Status != StockCountStatus.Submitted) return ResponseDtoHelper.BadRequest<StockCountDto>("فقط شمارش ارسال‌شده تایید می‌شود.");
                     bool warehouse = action == "approve-warehouse";
-                    if (!_user.IsInRole(warehouse ? InventoryRoles.RoleWarehouse : InventoryRoles.RolePlanning))
+                    if (!_user.IsInRole(warehouse ? InventoryRoles.RoleWarehouseSupervisor : InventoryRoles.RolePlanning))
                         return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.NotAllowed + (warehouse ? " (سرپرست انبار)" : " (برنامه‌ریزی و کنترل پروژه)"));
                     int? other = warehouse ? count.PlanningApprovedByUserId : count.WarehouseApprovedByUserId;
                     if (me == count.CreatorUserId || me == other) return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.SameUser);

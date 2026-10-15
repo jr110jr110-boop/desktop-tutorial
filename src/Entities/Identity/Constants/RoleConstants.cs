@@ -85,6 +85,24 @@ namespace Entities.Identity.Constants
             Description = "انتظامات (کنترل خروج کالا)"
         };
 
+        // Decision 1404-07-24: approvals of adjustments and stock counts are by the warehouse supervisor and the
+        // planning and project control manager (segregation of duties from the storekeeper); planning gives item codes.
+        public const string Planning = nameof(Planning);
+        public static readonly ResponseRole PlanningResponseRole = new ResponseRole()
+        {
+            Id = 11,
+            Name = Planning.ToUpper(),
+            Description = "برنامه‌ریزی و کنترل پروژه"
+        };
+
+        public const string WarehouseSupervisor = "WHSupervisor";
+        public static readonly ResponseRole WarehouseSupervisorResponseRole = new ResponseRole()
+        {
+            Id = 12,
+            Name = WarehouseSupervisor.ToUpper(),
+            Description = "سرپرست انبار"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -97,6 +115,8 @@ namespace Entities.Identity.Constants
             yield return EngineerResponseRole;
             yield return ConstructionResponseRole;
             yield return SecurityResponseRole;
+            yield return PlanningResponseRole;
+            yield return WarehouseSupervisorResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)
