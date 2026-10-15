@@ -235,6 +235,168 @@ else
 fi
 TOKEN=$ADMIN_TOKEN
 
+# ================================================================ phase 2: standard warehouse flows
+TOKEN=$ADMIN_TOKEN
+user pmo2.ci 1 'Ci#Pmo2-User-2026' 6
+PMO2_TOKEN=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$PMO2_TOKEN" ] && ok "login second planning user" || bad "login second planning user"
+TOKEN=$ADMIN_TOKEN
+
+# ---------------------------------------------------------------- coding (WI-WH-002)
+call GET "inventory/coding/values?scheme=PartStatus"; check "coding tables seeded: 42 part statuses, 5 stockable (★)" '(.data|length) == 42 and ([.data[]|select(.isStockable)]|length) == 5'
+call GET "inventory/coding/check?code=02130001010003"; check "part code check: assembly Rotor, final part" '.data.groupCode == "02" and (.data.segments[1].meaning == "Rotor") and .data.stageCode == "03" and .data.errors == ["این کد قبلاً ثبت شده است: 02130001010003"]'
+call GET "inventory/coding/check?code=02600001010003"; check "assembly 600 outside every range rejected" '.data.isValid == false'
+call GET "inventory/coding/check?code=02130009010014"; check "milling status (14) is not a stockable stage" '.data.stageNotStockable == true and .data.isValid == true'
+call GET "inventory/coding/check?code=16.10.05.001.2"; check "MESC code -> group 08" '.data.groupCode == "08" and .data.isValid'
+call GET "inventory/coding/check?code=0213000101"; check "short code rejected" '.data.isValid == false'
+as "$WH_TOKEN" POST inventory/items '{"code":"02130009010003","title":"قطعه بدون درخواست","unit":"عدد"}'; check "warehouse user cannot create a new code" '.success == false'
+call POST inventory/items '{"code":"02130009010014","title":"مرحله فرز","unit":"عدد"}'; check "item with a non-stockable stage rejected (★)" '.success == false'
+
+# new item request: engineering asks, planning approves
+as "$ENG_TOKEN" POST inventory/coding/requests '{"title":"پوسته خام ریخته‌گری","groupCode":"02","proposedCode":"02101002010010","technicalCode":"101020100","unit":"عدد","trackingMode":2,"reason":"پروژه آزمایشی"}'
+check "item request by engineering" '.success and (.data.number|startswith("IR-")) and .data.status == 0'
+IR=$(val .data.id)
+as "$ENG_TOKEN" POST inventory/coding/requests/review "{\"id\":$IR,\"approve\":true}"; [ "$CODE" = "403" ] && ok "engineering cannot approve its own request (403)" || bad "engineering cannot approve its own request (403) got $CODE"
+call POST inventory/coding/requests/review "{\"id\":$IR,\"approve\":true}"; check "planning approves -> item created" '.success and .data.status == 1 and .data.itemCode == "02101002010010"'
+CAST=$(val .data.itemId)
+item ROUGH '{"code":"02101002010001","title":"پوسته رافینگ","unit":"عدد","trackingMode":2}' "rough-machined stage of the casing"
+call GET "inventory/coding/check?code=02101002010002"; check "other stages of the same part are listed" '(.data.otherStages|length) == 2'
+item PLATE '{"code":"01003010060101","title":"ورق SS304","unit":"kg","trackingMode":1}' "SS304 plate (lot, needs inspection)"
+
+# ---------------------------------------------------------------- warehouses of phase 2
+call POST inventory/warehouses '{"code":"WH-QA","title":"قرنطینه","kind":5}'; WQ=$(val .data.id)
+call POST inventory/warehouses '{"code":"WH-SC","title":"ضایعات","kind":6}'; WS=$(val .data.id)
+call POST inventory/warehouses '{"code":"WH-K1","title":"پیمانکار ماشینکاری","kind":7}'; WK=$(val .data.id)
+[ "$WQ" != "null" ] && [ "$WS" != "null" ] && [ "$WK" != "null" ] && ok "quarantine, scrap and contractor warehouses" || bad "quarantine, scrap and contractor warehouses"
+
+# ---------------------------------------------------------------- quarantine and incoming inspection
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-17T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PLATE,\"quantity\":10}]}"
+check "receipt of an item that needs inspection outside quarantine rejected" '.success == false'
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-17T00:00:00\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"referenceNumber\":\"INV-501\",\"lines\":[
+ {\"itemId\":$PLATE,\"quantity\":50,\"heatNumber\":\"HT-55\",\"unitPrice\":2500000},
+ {\"itemId\":$CAST,\"quantity\":3,\"serialNumbers\":[\"C-1\",\"C-2\",\"C-3\"]}]}"
+RQ=$(val .data.id)
+call POST "inventory/documents/$RQ/confirm"; check "receipt into quarantine confirmed" '.success and .data.status == 1'
+call GET "inventory/stock/lots?ItemId=$PLATE"; check "lot gets the label number YYDDDNNNN" '(.data.data[0].lotNumber|test("^[0-9]{9}$")) and .data.data[0].heatNumber == "HT-55"'
+PLOT=$(val '.data.data[0].id')
+call POST inventory/documents "{\"type\":6,\"documentDate\":\"2026-10-17T00:00:00\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"lines\":[{\"itemId\":$PLATE,\"quantity\":1,\"lotId\":$PLOT}]}"
+check "transfer out of quarantine without QC rejected" '.success == false'
+call GET "inventory/quality/inspections?Status=0"; check "two inspections waiting" '.data.data|length == 2'
+QI_P=$(jq -r ".data.data[]|select(.itemId==$PLATE)|.id" "$B"); QI_C=$(jq -r ".data.data[]|select(.itemId==$CAST)|.id" "$B")
+call POST inventory/quality/inspections "{\"id\":$QI_P,\"acceptedQuantity\":45,\"rejectedQuantity\":5}"; [ "$CODE" = "200" ] && check "QC by planning user: reject reason is required" '.success == false' || bad "QC call failed $CODE"
+as "$WH_TOKEN" POST inventory/quality/inspections "{\"id\":$QI_P,\"acceptedQuantity\":45,\"rejectedQuantity\":5,\"rejectReason\":\"x\"}"; [ "$CODE" = "403" ] && ok "warehouse user cannot record inspection (403)" || bad "warehouse user cannot record inspection (403) got $CODE"
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI_P,\"acceptedQuantity\":45,\"rejectedQuantity\":5,\"reportNumber\":\"QC-IR-12\",\"rejectReason\":\"ترک سطحی در لبه ورق\"}"
+check "plate inspection: 45 released, 5 to NCR" '.success and .data.status == 1 and (.data.releaseDocumentNumber|startswith("QR-")) and (.data.ncrNumber|startswith("NCR-"))'
+NCR1=$(val .data.ncrId)
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI_C,\"acceptedQuantity\":2,\"rejectedQuantity\":1,\"rejectedSerialNumbers\":[\"C-3\"],\"rejectReason\":\"تخلخل در فلنج\"}"
+check "casting inspection: C-3 rejected" '.success and .data.rejectedSerialNumbers == ["C-3"]'
+NCR2=$(val .data.ncrId)
+call GET "inventory/stock?ItemId=$PLATE"; check "plate: 45 in main warehouse, 5 in quarantine" "([.data.data[]|select(.warehouseId==$W1)|.quantity]|add) == 45 and ([.data.data[]|select(.warehouseId==$WQ)|.quantity]|add) == 5"
+call POST "inventory/documents/$RQ/cancel" '{"reason":"test"}'; check "receipt with finished inspections cannot be cancelled" '.success == false'
+
+# ---------------------------------------------------------------- NCR (PR-QC-002)
+ncr() { as "$QC_TOKEN" POST inventory/quality/ncr "$1"; }
+ncr "{\"id\":$NCR1,\"severity\":1,\"disposition\":4,\"source\":1,\"causeCategory\":2,\"rootCause\":\"ورق معیوب از تامین‌کننده\"}"; check "NCR1 classified: minor, scrap" '.success and .data.severity == 1 and .data.disposition == 4'
+as "$QC_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":4}"; check "NCR1 signed by QC" '.success and .data.qualityApprovedAt != null and .data.status == 0'
+as "$QC_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":5}"; check "QC cannot sign for engineering" '.success == false'
+as "$ENG_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":5}"; check "NCR1 signed by engineering" '.success'
+as "$PROD_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":3}"; check "NCR1 signed by manufacturing -> approved" '.success and .data.status == 1'
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR1,\"targetWarehouseId\":$W1}"; check "scrap disposition needs the scrap warehouse" '.success == false'
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR1,\"targetWarehouseId\":$WS}"; check "NCR1 executed: moved to scrap" '.success and .data.status == 2 and (.data.resultDocumentNumber|startswith("TR-"))'
+call GET "inventory/stock?ItemId=$PLATE"; check "plate: 5 in scrap" "([.data.data[]|select(.warehouseId==$WS)|.quantity]|add) == 5"
+as "$QC_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR1,\"effectivenessCheck\":\"ok\"}"; check "close without corrective action rejected" '.success == false'
+ncr "{\"id\":$NCR1,\"severity\":1,\"disposition\":4,\"source\":1,\"causeCategory\":2,\"rootCause\":\"ورق معیوب\",\"correctiveAction\":\"بازرسی اولتراسونیک در محل تامین‌کننده\"}"
+as "$QC_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR1,\"effectivenessCheck\":\"دو محموله بعدی بدون عیب\"}"; check "NCR1 closed" '.success and .data.status == 3'
+
+ncr "{\"id\":$NCR2,\"severity\":2,\"disposition\":1,\"source\":1,\"customerApprovalRequired\":true}"
+as "$QC_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR2,\"kind\":4}"; check "major NCR without committee minutes rejected" '.success == false'
+ncr "{\"id\":$NCR2,\"severity\":2,\"disposition\":1,\"source\":1,\"customerApprovalRequired\":true,\"committeeMinutesNumber\":\"TC-14\",\"committeeMembers\":\"QC، مهندسی، تولید\",\"concessionNumber\":\"CN-3\"}"
+as "$QC_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR2,\"kind\":4}"; as "$ENG_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR2,\"kind\":5}"
+as "$PROD_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR2,\"kind\":3}"; check "concession still needs its permit" '.success and .data.status == 0'
+as "$ENG_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR2,\"concession\":true}"; check "concession without customer approval rejected (contract requires it)" '.success == false'
+ncr "{\"id\":$NCR2,\"severity\":2,\"disposition\":1,\"source\":1,\"customerApprovalRequired\":true,\"committeeMinutesNumber\":\"TC-14\",\"committeeMembers\":\"QC، مهندسی، تولید\",\"concessionNumber\":\"CN-3\",\"customerApprovalReference\":\"نامه کارفرما 55/2\"}"
+check "signatures kept when only the customer reference is added" '.data.qualityApprovedAt != null'
+as "$ENG_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR2,\"concession\":true}"; check "concession issued -> approved" '.success and .data.status == 1'
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR2,\"targetWarehouseId\":$W1}"; check "NCR2 executed: C-3 released with concession" '.success and .data.status == 2 and (.data.resultDocumentNumber|startswith("QR-"))'
+call GET "inventory/stock/serials?Contains=C-3&ItemId=$CAST"; check "C-3 in the main warehouse" ".data.data[0].warehouseId == $W1 and .data.data[0].status == 2"
+call POST inventory/documents "{\"type\":6,\"documentDate\":\"2026-10-17T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$WS,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"
+check "transfer to scrap without NCR rejected" '.success == false'
+
+# ---------------------------------------------------------------- stage conversion (label genealogy)
+call POST inventory/documents "{\"type\":12,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-1\"],\"direction\":1},{\"itemId\":$ROUGH,\"quantity\":1,\"direction\":2}]}"
+check "conversion without source row rejected" '.success == false'
+call POST inventory/documents "{\"type\":12,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-1\"],\"direction\":1},{\"itemId\":$ROUGH,\"quantity\":1,\"direction\":2,\"sourceRowNumber\":1}]}"
+SC=$(val .data.id); call POST "inventory/documents/$SC/confirm"; check "stage conversion confirmed" '.success and (.data.number|startswith("SC-"))'
+call GET "inventory/stock/serials?ItemId=$ROUGH"; check "new label linked to the casting label C-1" '(.data.data[0].serialNumber|test("^[0-9]{9}$")) and .data.data[0].sourceSerialNumber == "C-1"'
+call GET "inventory/stock/serials?Contains=C-1&ItemId=$CAST"; check "C-1 marked converted" '.data.data[0].status == 6'
+
+# ---------------------------------------------------------------- subcontractor
+call POST ProviderCategories '{"categoryName":"پیمانکاران ماشینکاری"}'; CAT=$(jq -r '.data.id // .id // empty' "$B")
+call POST Provider "{\"name\":\"کارگاه ماشینکاری آزمون\",\"categoryId\":${CAT:-0}}"; PRV=$(jq -r '.data.id // empty' "$B")
+[ -n "$PRV" ] && ok "subcontractor created" || bad "subcontractor created"
+call POST inventory/documents "{\"type\":9,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$WK,\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-2\"]}]}"
+check "subcontract issue without contractor rejected" '.success == false'
+call POST inventory/documents "{\"type\":9,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$WK,\"providerId\":${PRV:-0},\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-2\"]}]}"
+SI=$(val .data.id); call POST "inventory/documents/$SI/confirm"; check "subcontract issue needs driver, plate, receiver" '.success == false'
+call POST inventory/documents "{\"id\":$SI,\"type\":9,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$WK,\"providerId\":${PRV:-0},\"driverName\":\"احمدی\",\"vehiclePlate\":\"12ع345-67\",\"receiverName\":\"مدیر کارگاه\",\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-2\"]}]}"
+call POST "inventory/documents/$SI/confirm"; check "subcontract issue confirmed: C-2 at the contractor" '.success and (.data.number|startswith("SI-"))'
+as "$SEC_TOKEN" POST "inventory/documents/$SI/exit-check" '{"note":"بازدید شد"}'; check "guard records the exit" '.success and .data.exitCheckedAt != null'
+as "$SEC_TOKEN" POST "inventory/documents/$SI/exit-check" '{}'; check "second exit check rejected" '.success == false'
+call POST "inventory/documents/$SI/cancel" '{"reason":"x"}'; check "document that left the premises cannot be cancelled" '.success == false'
+call POST inventory/documents "{\"type\":6,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$WK,\"destinationWarehouseId\":$W1,\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-2\"]}]}"
+check "plain transfer out of the contractor warehouse rejected" '.success == false'
+call POST inventory/documents "{\"type\":10,\"documentDate\":\"2026-10-19T00:00:00\",\"warehouseId\":$WK,\"destinationWarehouseId\":$WQ,\"providerId\":${PRV:-0},\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-2\"]}]}"
+SB=$(val .data.id); call POST "inventory/documents/$SB/confirm"; check "return from contractor into quarantine" '.success and (.data.number|startswith("SB-"))'
+call GET "inventory/quality/inspections?Status=0"; check "return from contractor waits for inspection" '.data.data|length == 1'
+
+# ---------------------------------------------------------------- customer delivery needs a contract and QC loading approval
+call POST inventory/documents "{\"type\":11,\"documentDate\":\"2026-10-19T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"
+check "customer delivery without contract rejected" '.success == false'
+
+# ---------------------------------------------------------------- adjustment: warehouse supervisor + planning
+call POST inventory/documents "{\"type\":7,\"documentDate\":\"2026-10-19T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":5,\"locationId\":$L2}]}"
+AI=$(val .data.id)
+call POST "inventory/documents/$AI/confirm"; check "adjustment without approvals rejected" '.success == false'
+call POST "inventory/documents/$AI/approve" '{"kind":1}'; check "planning user cannot approve as warehouse" '.success == false'
+call POST "inventory/documents/$AI/approve" '{"kind":2}'; check "creator cannot approve" '.success == false'
+as "$WH_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":1}'; check "warehouse supervisor approves" '.success and .data.warehouseApprovedAt != null'
+as "$PMO2_TOKEN" POST "inventory/documents/$AI/approve" '{"kind":2}'; check "planning approves" '.success and .data.planningApprovedAt != null'
+call POST "inventory/documents/$AI/confirm"; check "approved adjustment confirmed" '.success and (.data.number|startswith("AI-"))'
+
+# ---------------------------------------------------------------- scrap sale (WI-WH-004)
+call POST inventory/documents "{\"type\":13,\"documentDate\":\"2026-10-19T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"
+check "scrap receipt outside the scrap warehouse rejected" '.success == false'
+call POST inventory/documents "{\"type\":14,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$WS,\"driverName\":\"کریمی\",\"vehiclePlate\":\"55ب123-11\",\"receiverName\":\"خریدار\",\"lines\":[{\"itemId\":$PLATE,\"quantity\":5,\"lotId\":$PLOT}]}"
+WSD=$(val .data.id); call POST "inventory/documents/$WSD/confirm"; check "scrap sale without buyer, minutes, weighbridge, deposit rejected" '.success == false and (.message|contains("باسکول"))'
+call POST inventory/documents "{\"id\":$WSD,\"type\":14,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$WS,\"driverName\":\"کریمی\",\"vehiclePlate\":\"55ب123-11\",\"receiverName\":\"خریدار\",\"buyerName\":\"بازیافت آزمون\",\"minutesNumber\":\"FO-WH-020/7\",\"weighbridgeDocumentId\":\"$DOCID\",\"depositReference\":\"واریز 99887\",\"lines\":[{\"itemId\":$PLATE,\"quantity\":5,\"lotId\":$PLOT}]}"
+call POST "inventory/documents/$WSD/confirm"; check "scrap sale confirmed" '.success and (.data.number|startswith("WS-")) and .data.depositReference == "واریز 99887"'
+
+# ---------------------------------------------------------------- cycle count of the standard parts
+call POST inventory/counts "{\"kind\":1,\"countDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$W1,\"groupCode\":\"50.\"}"; check "cycle count started with a snapshot" '.success and (.data.number|startswith("CNT-")) and .data.linesCount >= 1'
+CNT=$(val .data.id)
+LINES=$(jq -c '[.data.lines|to_entries[]|{lineId:.value.id,countedQuantity:(if .key==0 then .value.systemQuantity-3 else .value.systemQuantity end)}]' "$B")
+call POST inventory/counts "{\"kind\":1,\"countDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$W1}"; check "second open count of the same warehouse rejected" '.success == false'
+call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"submit\"}"; check "submit before every line is counted rejected" '.success == false'
+call POST inventory/counts/lines "{\"id\":$CNT,\"lines\":$LINES}"; check "counts saved: one difference of -3" '.success and .data.differencesCount == 1'
+call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"submit\"}"; check "count submitted" '.success and .data.status == 1'
+call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"post\"}"; check "post before approvals rejected" '.success == false'
+as "$WH_TOKEN" POST inventory/counts/action "{\"id\":$CNT,\"action\":\"approve-warehouse\"}"; check "count approved by warehouse" '.success'
+as "$PMO2_TOKEN" POST inventory/counts/action "{\"id\":$CNT,\"action\":\"approve-planning\"}"; check "count approved by planning" '.success and .data.status == 2'
+call GET "inventory/stock/items?ItemId=$BOLT"; BEFORE=$(val '.data.data[0].onHand')
+call POST inventory/counts/action "{\"id\":$CNT,\"action\":\"post\"}"; check "count posted: decrease adjustment made" '.success and .data.status == 3 and (.data.decreaseDocumentNumber|startswith("AD-"))'
+call GET "inventory/stock/items?ItemId=$BOLT"; check "bolt stock lowered by 3" ".data.data[0].onHand == ($BEFORE - 3)"
+
+# annual count freezes the warehouse
+call POST inventory/counts "{\"kind\":2,\"countDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$W2}"; ANN=$(val .data.id)
+call POST inventory/documents "{\"type\":6,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$W2,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"
+D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "warehouse frozen during the annual count" '.success == false and (.message|contains("انبارگردانی"))'
+call POST inventory/counts/action "{\"id\":$ANN,\"action\":\"cancel\"}"
+call POST "inventory/documents/$D/confirm"; check "after the count is cancelled the transfer is confirmed" '.success'
+
+# ---------------------------------------------------------------- roles of the new users
+as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
+as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'
+TOKEN=$ADMIN_TOKEN
+
 echo "--- inventory: $pass passed, $fail failed" | tee -a "$R"
 rm -f "$B"
 kill "$APP_PID" 2>/dev/null; sleep 3; kill -9 "$APP_PID" 2>/dev/null || true

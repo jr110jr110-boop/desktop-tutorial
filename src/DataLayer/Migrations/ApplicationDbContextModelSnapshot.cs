@@ -316,6 +316,22 @@ namespace DataLayer.Migrations
                             Description = "مهندس",
                             Name = "ENGINEER",
                             NormalizedName = "ENGINEER"
+                        },
+                        new
+                        {
+                            Id = 9,
+                            ConcurrencyStamp = "00000009-0000-0000-0000-000000000000",
+                            Description = "تولید",
+                            Name = "CONSTRUCTION",
+                            NormalizedName = "CONSTRUCTION"
+                        },
+                        new
+                        {
+                            Id = 10,
+                            ConcurrencyStamp = "00000010-0000-0000-0000-000000000000",
+                            Description = "انتظامات (کنترل خروج کالا)",
+                            Name = "SECURITY",
+                            NormalizedName = "SECURITY"
                         });
                 });
 
@@ -629,6 +645,41 @@ namespace DataLayer.Migrations
                             ClaimType = "permission",
                             ClaimValue = "Traceability",
                             RoleId = 7
+                        },
+                        new
+                        {
+                            Id = 801,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 7
+                        },
+                        new
+                        {
+                            Id = 402,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 8
+                        },
+                        new
+                        {
+                            Id = 900,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 9
+                        },
+                        new
+                        {
+                            Id = 901,
+                            ClaimType = "permission",
+                            ClaimValue = "Traceability",
+                            RoleId = 9
+                        },
+                        new
+                        {
+                            Id = 1000,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 10
                         });
                 });
 
@@ -2516,6 +2567,76 @@ namespace DataLayer.Migrations
                     b.ToTable("InvAssemblyLinks", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.CodingValue", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsStockable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("RangeFrom")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RangeTo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Scheme")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Scheme", "Model", "Code")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("InvCodingValues", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.DocumentNumberSequence", b =>
                 {
                     b.Property<int>("Id")
@@ -2557,6 +2678,10 @@ namespace DataLayer.Migrations
                     b.Property<int?>("BuyOrderId")
                         .HasColumnType("int");
 
+                    b.Property<string>("BuyerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("CancelReason")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -2585,9 +2710,17 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("DepositReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Destination")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<int?>("DestinationWarehouseId")
                         .HasColumnType("int");
@@ -2595,18 +2728,61 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("DocumentDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("DriverName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExitCheckNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ExitCheckedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ExitCheckedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("InspectionId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaterialRequestId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("MinutesNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<int>("ModifierUserId")
                         .HasColumnType("int");
 
                     b.Property<DateTimeOffset>("ModifyDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("NcrId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Number")
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<DateTimeOffset?>("PlanningApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PlanningApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("ProviderId")
                         .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("QcLoadingApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("QcLoadingApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReceiverName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("ReferenceNumber")
                         .HasMaxLength(100)
@@ -2630,11 +2806,27 @@ namespace DataLayer.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
+                    b.Property<int?>("StockCountId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VehiclePlate")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("WarehouseApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("WarehouseApprovedByUserId")
                         .HasColumnType("int");
 
                     b.Property<int>("WarehouseId")
                         .HasColumnType("int");
+
+                    b.Property<Guid?>("WeighbridgeDocumentId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int?>("WorkOrderId")
                         .HasColumnType("int");
@@ -2646,6 +2838,10 @@ namespace DataLayer.Migrations
                     b.HasIndex("ContractId");
 
                     b.HasIndex("DestinationWarehouseId");
+
+                    b.HasIndex("MaterialRequestId");
+
+                    b.HasIndex("NcrId");
 
                     b.HasIndex("Number")
                         .IsUnique()
@@ -2683,6 +2879,9 @@ namespace DataLayer.Migrations
                     b.Property<int?>("DestinationLocationId")
                         .HasColumnType("int");
 
+                    b.Property<int>("Direction")
+                        .HasColumnType("int");
+
                     b.Property<int>("DocumentId")
                         .HasColumnType("int");
 
@@ -2708,6 +2907,9 @@ namespace DataLayer.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SourceRowNumber")
                         .HasColumnType("int");
 
                     b.Property<decimal?>("UnitPrice")
@@ -2765,6 +2967,10 @@ namespace DataLayer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("BaseCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -2779,11 +2985,19 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("GroupCode")
+                        .HasMaxLength(4)
+                        .HasColumnType("nvarchar(4)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
                     b.Property<int?>("ItemGroupId")
                         .HasColumnType("int");
+
+                    b.Property<string>("LegacyCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Material")
                         .HasMaxLength(200)
@@ -2792,6 +3006,10 @@ namespace DataLayer.Migrations
                     b.Property<decimal?>("MaxStock")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("MescCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<decimal>("MinStock")
                         .HasPrecision(18, 4)
@@ -2803,13 +3021,25 @@ namespace DataLayer.Migrations
                     b.Property<DateTimeOffset>("ModifyDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<bool>("RequiresIncomingInspection")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("SepidarCode")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<int?>("ShelfLifeDays")
+                        .HasColumnType("int");
+
                     b.Property<string>("Specification")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("StageCode")
+                        .HasMaxLength(4)
+                        .HasColumnType("nvarchar(4)");
 
                     b.Property<string>("Standard")
                         .HasMaxLength(200)
@@ -2838,11 +3068,19 @@ namespace DataLayer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BaseCode");
+
                     b.HasIndex("Code")
                         .IsUnique()
                         .HasFilter("[Deleted] = 0");
 
                     b.HasIndex("ItemGroupId");
+
+                    b.HasIndex("LegacyCode");
+
+                    b.HasIndex("MescCode");
+
+                    b.HasIndex("TechnicalCode");
 
                     b.HasIndex("Title");
 
@@ -2881,9 +3119,15 @@ namespace DataLayer.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<DateTime?>("ExpiryDate")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("HeatNumber")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsCustomerProperty")
+                        .HasColumnType("bit");
 
                     b.Property<int>("ItemId")
                         .HasColumnType("int");
@@ -2899,6 +3143,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTimeOffset>("ModifyDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("ParentLotId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime?>("ProductionDate")
                         .HasColumnType("datetime2");
 
@@ -2908,6 +3155,8 @@ namespace DataLayer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("HeatNumber");
+
+                    b.HasIndex("ParentLotId");
 
                     b.HasIndex("ProviderId");
 
@@ -2967,6 +3216,441 @@ namespace DataLayer.Migrations
                     b.HasIndex("ParentId");
 
                     b.ToTable("InvItemGroups", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.ItemRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("GroupCode")
+                        .HasMaxLength(4)
+                        .HasColumnType("nvarchar(4)");
+
+                    b.Property<int?>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Material")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("MescCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("ProposedCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("ReviewNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ReviewedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Specification")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Standard")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TechnicalCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("TrackingMode")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Number] IS NOT NULL");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("InvItemRequests", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.MaterialRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("ManufacturingApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ManufacturingApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTimeOffset?>("PlanningApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PlanningApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Purpose")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("RejectedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("RequestDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("WarehouseId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Number] IS NOT NULL");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.HasIndex("Status", "RequestDate");
+
+                    b.ToTable("InvMaterialRequests", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.MaterialRequestLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal>("IssuedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MaterialRequestId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("MaterialRequestId");
+
+                    b.ToTable("InvMaterialRequestLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.NonConformance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CauseCategory")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CommitteeMembers")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CommitteeMinutesNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset?>("ConcessionApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ConcessionApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ConcessionNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CorrectiveAction")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime?>("CorrectiveActionDueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CorrectiveActionOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CustomerApprovalReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("CustomerApprovalRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("Disposition")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DispositionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("EffectivenessCheck")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTimeOffset?>("EngineeringApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("EngineeringApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ExecutedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ExecutedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("InspectionId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LotId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ManufacturingApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ManufacturingApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("OwnedByContractor")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ProviderId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("QualityApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("QualityApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int?>("ReceiptDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ReportDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Requirement")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("ResultDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RootCause")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SerialNumbers")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TargetWarehouseId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WarehouseId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("LotId");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("ProviderId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.HasIndex("Status", "ReportDate");
+
+                    b.ToTable("InvNonConformances", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.OperationTemplate", b =>
@@ -3161,6 +3845,129 @@ namespace DataLayer.Migrations
                     b.ToTable("InvPartOperationFiles", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.QcInspection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AcceptedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("InspectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("InspectedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LotId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("NcrId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ReceiptDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReceiptLineId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("RejectedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("RejectedSerialNumbers")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int?>("ReleaseDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ReportDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReportNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SerialNumbers")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TargetLocationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TargetWarehouseId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("WarehouseId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("LotId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Number] IS NOT NULL");
+
+                    b.HasIndex("ReceiptDocumentId");
+
+                    b.HasIndex("TargetWarehouseId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("Status", "WarehouseId");
+
+                    b.ToTable("InvQcInspections", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.SepidarMapping", b =>
                 {
                     b.Property<int>("Id")
@@ -3239,6 +4046,12 @@ namespace DataLayer.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<int?>("SourceLotId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SourceSerialUnitId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -3257,6 +4070,10 @@ namespace DataLayer.Migrations
                     b.HasIndex("ParentSerialUnitId");
 
                     b.HasIndex("SerialNumber");
+
+                    b.HasIndex("SourceLotId");
+
+                    b.HasIndex("SourceSerialUnitId");
 
                     b.HasIndex("WarehouseId");
 
@@ -3310,6 +4127,154 @@ namespace DataLayer.Migrations
                         .IsUnique();
 
                     b.ToTable("InvStockBalances", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.StockCount", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CountDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DecreaseDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("GroupCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("IncreaseDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTimeOffset?>("PlanningApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PlanningApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("PostedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PostedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("SnapshotAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("WarehouseApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("WarehouseApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("WarehouseId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("WarehouseId");
+
+                    b.ToTable("InvStockCounts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.StockCountLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CountedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("CountedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LotId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal?>("RecountedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("StockCountId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("SystemQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("LotId");
+
+                    b.HasIndex("StockCountId");
+
+                    b.ToTable("InvStockCountLines", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.StockTransaction", b =>
@@ -4592,6 +5557,16 @@ namespace DataLayer.Migrations
                         .HasForeignKey("DestinationWarehouseId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.MaterialRequest", "MaterialRequest")
+                        .WithMany()
+                        .HasForeignKey("MaterialRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.NonConformance", "Ncr")
+                        .WithMany()
+                        .HasForeignKey("NcrId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Providers.Provider", "Provider")
                         .WithMany()
                         .HasForeignKey("ProviderId")
@@ -4613,6 +5588,10 @@ namespace DataLayer.Migrations
                     b.Navigation("Contract");
 
                     b.Navigation("DestinationWarehouse");
+
+                    b.Navigation("MaterialRequest");
+
+                    b.Navigation("Ncr");
 
                     b.Navigation("Provider");
 
@@ -4697,12 +5676,19 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryLot", "ParentLot")
+                        .WithMany()
+                        .HasForeignKey("ParentLotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Providers.Provider", "Provider")
                         .WithMany()
                         .HasForeignKey("ProviderId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Item");
+
+                    b.Navigation("ParentLot");
 
                     b.Navigation("Provider");
                 });
@@ -4715,6 +5701,98 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.ItemRequest", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Item");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.MaterialRequest", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.WorkOrder", "WorkOrder")
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Warehouse");
+
+                    b.Navigation("WorkOrder");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.MaterialRequestLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.MaterialRequest", "MaterialRequest")
+                        .WithMany("Lines")
+                        .HasForeignKey("MaterialRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+
+                    b.Navigation("MaterialRequest");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.NonConformance", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", "Contract")
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryLot", "Lot")
+                        .WithMany()
+                        .HasForeignKey("LotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Providers.Provider", "Provider")
+                        .WithMany()
+                        .HasForeignKey("ProviderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.WorkOrder", "WorkOrder")
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Contract");
+
+                    b.Navigation("Item");
+
+                    b.Navigation("Lot");
+
+                    b.Navigation("Provider");
+
+                    b.Navigation("Warehouse");
+
+                    b.Navigation("WorkOrder");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.OperationTemplate", b =>
@@ -4790,6 +5868,47 @@ namespace DataLayer.Migrations
                     b.Navigation("PartOperation");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.QcInspection", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryLot", "Lot")
+                        .WithMany()
+                        .HasForeignKey("LotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryDocument", "ReceiptDocument")
+                        .WithMany()
+                        .HasForeignKey("ReceiptDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "TargetWarehouse")
+                        .WithMany()
+                        .HasForeignKey("TargetWarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+
+                    b.Navigation("Lot");
+
+                    b.Navigation("ReceiptDocument");
+
+                    b.Navigation("TargetWarehouse");
+
+                    b.Navigation("Warehouse");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.SerialUnit", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
@@ -4813,6 +5932,16 @@ namespace DataLayer.Migrations
                         .HasForeignKey("ParentSerialUnitId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryLot", "SourceLot")
+                        .WithMany()
+                        .HasForeignKey("SourceLotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.SerialUnit", "SourceSerialUnit")
+                        .WithMany()
+                        .HasForeignKey("SourceSerialUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "Warehouse")
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -4830,6 +5959,10 @@ namespace DataLayer.Migrations
                     b.Navigation("Lot");
 
                     b.Navigation("ParentSerialUnit");
+
+                    b.Navigation("SourceLot");
+
+                    b.Navigation("SourceSerialUnit");
 
                     b.Navigation("Warehouse");
 
@@ -4867,6 +6000,50 @@ namespace DataLayer.Migrations
                     b.Navigation("Lot");
 
                     b.Navigation("Warehouse");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.StockCount", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Warehouse");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.StockCountLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.WarehouseLocation", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryLot", "Lot")
+                        .WithMany()
+                        .HasForeignKey("LotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.StockCount", "StockCount")
+                        .WithMany("Lines")
+                        .HasForeignKey("StockCountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+
+                    b.Navigation("Location");
+
+                    b.Navigation("Lot");
+
+                    b.Navigation("StockCount");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.StockTransaction", b =>
@@ -5200,6 +6377,11 @@ namespace DataLayer.Migrations
                     b.Navigation("Items");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.MaterialRequest", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.PartOperation", b =>
                 {
                     b.Navigation("Files");
@@ -5208,6 +6390,11 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.SerialUnit", b =>
                 {
                     b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.StockCount", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.Warehouse", b =>
