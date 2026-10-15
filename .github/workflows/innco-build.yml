@@ -169,6 +169,14 @@ jobs:
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/smoke.sh
 
+      - name: Warehouse and traceability scenario
+        continue-on-error: true
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://127.0.0.1:5080
+          ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
+        run: bash .github/scripts/inventory-smoke.sh
+
       - name: Query check (queries the GET requests cannot reach)
         continue-on-error: true
         working-directory: src/WebApi
