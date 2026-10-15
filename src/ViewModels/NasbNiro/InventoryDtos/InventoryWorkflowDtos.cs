@@ -524,4 +524,49 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         public string Note { get; set; }
     }
+
+    // ------------------------------------------------------------------------------------------
+    // Opening stock from the old warehouse data
+    // ------------------------------------------------------------------------------------------
+
+    public class OpeningImportDto
+    {
+        public DateTime DocumentDate { get; set; }
+        public string Reference { get; set; }
+
+        /// <summary>Locations that do not exist yet are created.</summary>
+        public bool CreateLocations { get; set; } = true;
+
+        /// <summary>When some rows have errors: still bring in the rows without errors.</summary>
+        public bool ImportValidRows { get; set; }
+
+        public List<OpeningImportRowDto> Rows { get; set; } = new List<OpeningImportRowDto>();
+    }
+
+    public class OpeningImportRowDto
+    {
+        /// <summary>New code, or the old (legacy) code of the item.</summary>
+        public string ItemCode { get; set; }
+        public string WarehouseCode { get; set; }
+        public string LocationCode { get; set; }
+        public decimal Quantity { get; set; }
+        public string LotNumber { get; set; }
+        public string HeatNumber { get; set; }
+        public string CertificateNumber { get; set; }
+
+        /// <summary>Company label number (YYDDDNNNN) of the piece or package.</summary>
+        public string LabelNumber { get; set; }
+        public List<string> SerialNumbers { get; set; } = new List<string>();
+        public decimal? UnitPrice { get; set; }
+        public string Description { get; set; }
+    }
+
+    public class OpeningImportResultDto
+    {
+        public List<int> DocumentIds { get; set; } = new List<int>();
+        public int Lines { get; set; }
+        public int LocationsCreated { get; set; }
+        public int Skipped { get; set; }
+        public List<string> Errors { get; set; } = new List<string>();
+    }
 }

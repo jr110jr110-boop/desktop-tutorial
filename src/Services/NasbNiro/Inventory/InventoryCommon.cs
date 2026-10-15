@@ -116,7 +116,8 @@ namespace Services.NasbNiro.Inventory
 
         /// <summary>Needs the warehouse supervisor and the planning manager to approve before it is confirmed.</summary>
         public static bool NeedsApprovals(InventoryDocumentType type) =>
-            type == InventoryDocumentType.AdjustmentIncrease || type == InventoryDocumentType.AdjustmentDecrease;
+            type == InventoryDocumentType.AdjustmentIncrease || type == InventoryDocumentType.AdjustmentDecrease ||
+            type == InventoryDocumentType.OpeningBalance;
 
         /// <summary>Status of a serial unit that leaves the stock with this document.</summary>
         public static SerialUnitStatus OutgoingStatus(InventoryDocumentType type)

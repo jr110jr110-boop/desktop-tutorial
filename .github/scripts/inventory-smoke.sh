@@ -404,6 +404,16 @@ D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "warehouse 
 call POST inventory/counts/action "{\"id\":$ANN,\"action\":\"cancel\"}"
 call POST "inventory/documents/$D/confirm"; check "after the count is cancelled the transfer is confirmed" '.success'
 
+# ---------------------------------------------------------------- opening stock from the old warehouse data
+call GET "inventory/items/$BOLT"; BOLT_CODE=$(val .data.code)
+OPEN_ROWS="[{\"itemCode\":\"$BOLT_CODE\",\"warehouseCode\":\"WH-RM\",\"locationCode\":\"Z9/1\",\"quantity\":7,\"labelNumber\":\"041940002\"},{\"itemCode\":\"02999999999999\",\"warehouseCode\":\"WH-RM\",\"quantity\":1}]"
+call POST inventory/documents/import-opening "{\"documentDate\":\"2026-10-21T00:00:00\",\"rows\":$OPEN_ROWS}"; check "opening import with an unknown item creates nothing" '.success and (.data.documentIds|length) == 0 and (.data.errors|length) == 1'
+call POST inventory/documents/import-opening "{\"documentDate\":\"2026-10-21T00:00:00\",\"importValidRows\":true,\"rows\":$OPEN_ROWS}"; check "opening import of the valid rows: one draft, location created" '.success and (.data.documentIds|length) == 1 and .data.locationsCreated == 1'
+OB=$(val '.data.documentIds[0]')
+call POST "inventory/documents/$OB/confirm"; check "opening balance needs the two approvals" '.success == false'
+as "$SUP_TOKEN" POST "inventory/documents/$OB/approve" '{"kind":1}'; as "$PLAN_TOKEN" POST "inventory/documents/$OB/approve" '{"kind":2}'
+call POST "inventory/documents/$OB/confirm"; check "approved opening balance confirmed" '.success and (.data.number|startswith("OB-"))'
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'

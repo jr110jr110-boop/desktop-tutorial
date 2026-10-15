@@ -95,7 +95,18 @@ namespace WebApi.Controllers
     public class InventoryDocumentsController : ControllerBase
     {
         private readonly IInventoryDocumentService _service;
-        public InventoryDocumentsController(IInventoryDocumentService service) => _service = service;
+        private readonly IOpeningStockService _opening;
+        public InventoryDocumentsController(IInventoryDocumentService service, IOpeningStockService opening)
+        {
+            _service = service;
+            _opening = opening;
+        }
+
+        /// <summary>Opening stock from the cleaned old warehouse data: one draft per warehouse (needs the two approvals).</summary>
+        [HttpPost("import-opening")]
+        [Authorize(Roles = InventoryRoles.Documents)]
+        [RequestSizeLimit(50_000_000)]
+        public async Task<IActionResult> ImportOpeningAsync([FromBody] OpeningImportDto dto, CancellationToken ct) => Ok(await _opening.ImportAsync(dto, ct));
 
         [HttpGet]
         public async Task<IActionResult> GetAsync([FromQuery] DocumentQuery query, CancellationToken ct) =>
