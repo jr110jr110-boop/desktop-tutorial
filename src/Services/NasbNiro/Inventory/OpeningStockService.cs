@@ -49,6 +49,7 @@ namespace Services.NasbNiro.Inventory
 
             var lines = new Dictionary<int, List<SaveDocumentLineDto>>();
             var serialsSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var locationCodes = new Dictionary<long, string>(); // (warehouse, line index) -> location code
             for (int index = 0; index < rows.Count; index++)
             {
                 OpeningImportRowDto row = rows[index];
@@ -67,26 +68,11 @@ namespace Services.NasbNiro.Inventory
                 Warehouse warehouse = warehouses.FirstOrDefault(w => string.Equals(w.Code, InventoryText.Clean(row.WarehouseCode), StringComparison.OrdinalIgnoreCase));
                 if (warehouse == null) { result.Errors.Add(label + $"انبار «{row.WarehouseCode}» تعریف نشده است."); continue; }
 
-                int? locationId = null;
+                // locations are only checked here; missing ones are created after the whole file is checked
                 string locationCode = InventoryText.Clean(row.LocationCode)?.ToUpperInvariant();
-                if (locationCode != null)
-                {
-                    WarehouseLocation location = warehouse.Locations.FirstOrDefault(l => !l.Deleted && string.Equals(l.Code, locationCode, StringComparison.OrdinalIgnoreCase));
-                    if (location == null)
-                    {
-                        if (!dto.CreateLocations) { result.Errors.Add(label + $"محل {locationCode} در انبار {warehouse.Code} نیست."); continue; }
-                        location = new WarehouseLocation
-                        {
-                            WarehouseId = warehouse.Id, Code = locationCode, Title = locationCode, IsActive = true,
-                            CreateDate = DateTimeOffset.Now, CreatorUserId = _user.UserId, ModifyDate = DateTimeOffset.Now, ModifierUserId = _user.UserId,
-                        };
-                        _uow.Set<WarehouseLocation>().Add(location);
-                        warehouse.Locations.Add(location);
-                        await _uow.SaveChangesAsync(cancellationToken);
-                        result.LocationsCreated++;
-                    }
-                    locationId = location.Id;
-                }
+                if (locationCode != null && !dto.CreateLocations &&
+                    !warehouse.Locations.Any(l => !l.Deleted && string.Equals(l.Code, locationCode, StringComparison.OrdinalIgnoreCase)))
+                { result.Errors.Add(label + $"محل {locationCode} در انبار {warehouse.Code} نیست."); continue; }
 
                 List<string> serials = (row.SerialNumbers ?? new List<string>()).Select(InventoryText.Clean).Where(s => s != null).Distinct().ToList();
                 decimal quantity = row.Quantity;
@@ -111,11 +97,11 @@ namespace Services.NasbNiro.Inventory
                 }
 
                 if (!lines.TryGetValue(warehouse.Id, out List<SaveDocumentLineDto> list)) lines[warehouse.Id] = list = new List<SaveDocumentLineDto>();
+                locationCodes[list.Count + warehouse.Id * 1_000_000L] = locationCode;
                 list.Add(new SaveDocumentLineDto
                 {
                     ItemId = item.Id,
                     Quantity = quantity,
-                    LocationId = locationId,
                     LotNumber = item.TrackingMode == ItemTrackingMode.Lot ? lot : null,
                     HeatNumber = InventoryText.Clean(row.HeatNumber),
                     CertificateNumber = InventoryText.Clean(row.CertificateNumber),
@@ -127,6 +113,30 @@ namespace Services.NasbNiro.Inventory
 
             if (result.Errors.Count > 0 && !dto.ImportValidRows)
                 return ResponseDtoHelper.Ok(result); // nothing created: fix the file first (or ask to import the valid rows)
+
+            // create the missing locations, then put the location of every line
+            foreach (var pair in lines)
+            {
+                Warehouse warehouse = warehouses.First(w => w.Id == pair.Key);
+                for (int i = 0; i < pair.Value.Count; i++)
+                {
+                    if (!locationCodes.TryGetValue(i + warehouse.Id * 1_000_000L, out string code) || code == null) continue;
+                    WarehouseLocation location = warehouse.Locations.FirstOrDefault(l => !l.Deleted && string.Equals(l.Code, code, StringComparison.OrdinalIgnoreCase));
+                    if (location == null)
+                    {
+                        location = new WarehouseLocation
+                        {
+                            WarehouseId = warehouse.Id, Code = code, Title = code, IsActive = true,
+                            CreateDate = DateTimeOffset.Now, CreatorUserId = _user.UserId, ModifyDate = DateTimeOffset.Now, ModifierUserId = _user.UserId,
+                        };
+                        _uow.Set<WarehouseLocation>().Add(location);
+                        warehouse.Locations.Add(location);
+                        await _uow.SaveChangesAsync(cancellationToken);
+                        result.LocationsCreated++;
+                    }
+                    pair.Value[i].LocationId = location.Id;
+                }
+            }
 
             foreach (var pair in lines)
             {
