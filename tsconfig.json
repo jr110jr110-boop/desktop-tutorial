@@ -1,0 +1,29 @@
+{
+   "extends": "@vue/tsconfig/tsconfig.web.json",
+   "include": [
+      "env.d.ts",
+      "src/**/*",
+      "src/**/*.vue"
+   ],
+   "exclude": [
+      "node_modules"
+   ],
+   "compilerOptions": {
+      "baseUrl": ".",
+      "paths": {
+         "@/*": [
+            "./src/*"
+         ]
+      },
+      "allowJs": true,
+      "strict": false,
+      "lib": [
+         "esnext"
+      ]
+   },
+   "references": [
+      {
+         "path": "./tsconfig.vite-config.json"
+      }
+   ]
+}
