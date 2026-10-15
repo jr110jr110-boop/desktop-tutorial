@@ -50,11 +50,12 @@ call POST inventory/groups "{\"code\":\"TRB-ROT\",\"title\":\"روتور\",\"par
 G2=$(val .data.id)
 call POST inventory/groups "{\"id\":$G1,\"code\":\"TRB\",\"title\":\"توربین\",\"parentId\":$G2}"; check "group cycle rejected" '.success == false'
 
-item() { call POST inventory/items "$1"; check "item $2" '.success and .data.id > 0'; val .data.id; }
-RAW=$(item "{\"code\":\"RM-001\",\"title\":\"میلگرد فورج 26NiCrMoV\",\"itemGroupId\":$G2,\"unit\":\"kg\",\"trackingMode\":1,\"material\":\"26NiCrMoV14-5\",\"minStock\":100,\"sepidarCode\":\"5001\"}" "RM-001 (lot)")
-SHAFT=$(item "{\"code\":\"SH-100\",\"title\":\"شفت روتور\",\"itemGroupId\":$G2,\"unit\":\"عدد\",\"trackingMode\":2,\"technicalCode\":\"DWG-SH-100\"}" "SH-100 (serial)")
-BOLT=$(item "{\"code\":\"BT-300\",\"title\":\"پیچ M24\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":500}" "BT-300 (none)")
-ROTOR=$(item "{\"code\":\"RT-900\",\"title\":\"روتور کامل\",\"itemGroupId\":$G1,\"unit\":\"عدد\",\"trackingMode\":2}" "RT-900 (serial)")
+# item VAR JSON LABEL : creates the item and stores its id in VAR (no subshell, so the counters stay right)
+item() { call POST inventory/items "$2"; check "item $3" '.success and .data.id > 0'; printf -v "$1" '%s' "$(val .data.id)"; }
+item RAW "{\"code\":\"RM-001\",\"title\":\"میلگرد فورج 26NiCrMoV\",\"itemGroupId\":$G2,\"unit\":\"kg\",\"trackingMode\":1,\"material\":\"26NiCrMoV14-5\",\"minStock\":100,\"sepidarCode\":\"5001\"}" "RM-001 (lot)"
+item SHAFT "{\"code\":\"SH-100\",\"title\":\"شفت روتور\",\"itemGroupId\":$G2,\"unit\":\"عدد\",\"trackingMode\":2,\"technicalCode\":\"DWG-SH-100\"}" "SH-100 (serial)"
+item BOLT "{\"code\":\"BT-300\",\"title\":\"پیچ M24\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":500}" "BT-300 (none)"
+item ROTOR "{\"code\":\"RT-900\",\"title\":\"روتور کامل\",\"itemGroupId\":$G1,\"unit\":\"عدد\",\"trackingMode\":2}" "RT-900 (serial)"
 call POST inventory/items '{"code":"RM-001","title":"تکراری","unit":"kg"}'; check "duplicate item code rejected" '.success == false'
 call GET "inventory/items/by-code?code=sh-100"; check "item by code (case-insensitive)" ".data.id == $SHAFT"
 
