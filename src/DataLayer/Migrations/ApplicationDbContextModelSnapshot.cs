@@ -332,6 +332,22 @@ namespace DataLayer.Migrations
                             Description = "انتظامات (کنترل خروج کالا)",
                             Name = "SECURITY",
                             NormalizedName = "SECURITY"
+                        },
+                        new
+                        {
+                            Id = 11,
+                            ConcurrencyStamp = "00000011-0000-0000-0000-000000000000",
+                            Description = "برنامه‌ریزی و کنترل پروژه",
+                            Name = "PLANNING",
+                            NormalizedName = "PLANNING"
+                        },
+                        new
+                        {
+                            Id = 12,
+                            ConcurrencyStamp = "00000012-0000-0000-0000-000000000000",
+                            Description = "سرپرست انبار",
+                            Name = "WHSUPERVISOR",
+                            NormalizedName = "WHSUPERVISOR"
                         });
                 });
 
@@ -680,6 +696,34 @@ namespace DataLayer.Migrations
                             ClaimType = "permission",
                             ClaimValue = "Warehouse",
                             RoleId = 10
+                        },
+                        new
+                        {
+                            Id = 1100,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 11
+                        },
+                        new
+                        {
+                            Id = 1101,
+                            ClaimType = "permission",
+                            ClaimValue = "Traceability",
+                            RoleId = 11
+                        },
+                        new
+                        {
+                            Id = 1200,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 12
+                        },
+                        new
+                        {
+                            Id = 1201,
+                            ClaimType = "permission",
+                            ClaimValue = "Traceability",
+                            RoleId = 12
                         });
                 });
 
@@ -2742,6 +2786,12 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ExitCheckedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("FinanceApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("FinanceApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("InspectionId")
                         .HasColumnType("int");
 
@@ -2770,6 +2820,10 @@ namespace DataLayer.Migrations
 
                     b.Property<int?>("PlanningApprovedByUserId")
                         .HasColumnType("int");
+
+                    b.Property<string>("PriceQuotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<int?>("ProviderId")
                         .HasColumnType("int");
