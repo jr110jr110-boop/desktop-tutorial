@@ -126,6 +126,9 @@ namespace IocConfig
             services.AddScoped<IInventoryStockService, InventoryStockService>();
             services.AddScoped<ITraceabilityService, TraceabilityService>();
             services.AddScoped<ISepidarLinkService, SepidarLinkService>();
+            services.AddScoped<IInventoryCodingService, InventoryCodingService>();
+            services.AddScoped<IInventoryQualityService, InventoryQualityService>();
+            services.AddScoped<IInventoryWorkflowService, InventoryWorkflowService>();
             return services;
         }
     }

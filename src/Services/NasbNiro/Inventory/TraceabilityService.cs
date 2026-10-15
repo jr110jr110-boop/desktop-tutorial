@@ -43,7 +43,6 @@ namespace Services.NasbNiro.Inventory
     /// </summary>
     public class TraceabilityService : ITraceabilityService
     {
-        private const int SerialSequenceType = 99;
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
 
@@ -314,16 +313,8 @@ namespace Services.NasbNiro.Inventory
             string serialNumber = InventoryText.Clean(dto.SerialNumber);
             if (serialNumber == null)
             {
-                int year = InventoryText.PersianYear(DateTime.Now);
-                DbSet<DocumentNumberSequence> sequences = _uow.Set<DocumentNumberSequence>();
-                DocumentNumberSequence sequence = await sequences.FirstOrDefaultAsync(s => s.Type == SerialSequenceType && s.Year == year, cancellationToken);
-                if (sequence == null)
-                {
-                    sequence = new DocumentNumberSequence { Type = SerialSequenceType, Year = year };
-                    sequences.Add(sequence);
-                }
-                sequence.LastNumber++;
-                serialNumber = $"SN-{year}-{sequence.LastNumber:000000}";
+                // company label number YYDDDNNNN (the same counter as the warehouse labels)
+                serialNumber = (await InventoryNumbers.NextLabelsAsync(_uow, DateTime.Now, 1, cancellationToken))[0];
             }
             if (await Units.AnyAsync(u => !u.Deleted && u.ItemId == item.Id && u.SerialNumber == serialNumber, cancellationToken))
                 return ResponseDtoHelper.BadRequest<SerialUnitDto>($"سریال {serialNumber} برای این کالا قبلاً ثبت شده است.");

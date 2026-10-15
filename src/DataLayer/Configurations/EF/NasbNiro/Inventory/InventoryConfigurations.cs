@@ -28,6 +28,14 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.ApplyConfiguration(new PartOperationConfiguration());
             builder.ApplyConfiguration(new PartOperationFileConfiguration());
             builder.ApplyConfiguration(new AssemblyLinkConfiguration());
+            builder.ApplyConfiguration(new CodingValueConfiguration());
+            builder.ApplyConfiguration(new ItemRequestConfiguration());
+            builder.ApplyConfiguration(new QcInspectionConfiguration());
+            builder.ApplyConfiguration(new NonConformanceConfiguration());
+            builder.ApplyConfiguration(new MaterialRequestConfiguration());
+            builder.ApplyConfiguration(new MaterialRequestLineConfiguration());
+            builder.ApplyConfiguration(new StockCountConfiguration());
+            builder.ApplyConfiguration(new StockCountLineConfiguration());
         }
     }
 
@@ -69,8 +77,18 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Property(x => x.Weight).HasPrecision(18, 3);
             builder.Property(x => x.MinStock).HasPrecision(18, 4);
             builder.Property(x => x.MaxStock).HasPrecision(18, 4);
+            builder.Property(x => x.GroupCode).HasMaxLength(4);
+            builder.Property(x => x.StageCode).HasMaxLength(4);
+            builder.Property(x => x.BaseCode).HasMaxLength(InventoryColumns.Code);
+            builder.Property(x => x.MescCode).HasMaxLength(InventoryColumns.Code);
+            builder.Property(x => x.LegacyCode).HasMaxLength(100);
+            builder.Property(x => x.RequiresIncomingInspection).HasDefaultValue(true);
             builder.HasIndex(x => x.Code).IsUnique().HasFilter(InventoryColumns.NotDeleted);
             builder.HasIndex(x => x.Title);
+            builder.HasIndex(x => x.BaseCode);
+            builder.HasIndex(x => x.MescCode);
+            builder.HasIndex(x => x.LegacyCode);
+            builder.HasIndex(x => x.TechnicalCode);
             builder.HasOne(x => x.ItemGroup).WithMany(x => x.Items).HasForeignKey(x => x.ItemGroupId).OnDelete(DeleteBehavior.Restrict);
         }
     }
@@ -125,6 +143,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.HasIndex(x => x.HeatNumber);
             builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.Provider).WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.ParentLot).WithMany().HasForeignKey(x => x.ParentLotId).OnDelete(DeleteBehavior.Restrict);
         }
     }
 
@@ -143,6 +162,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.ParentSerialUnit).WithMany(x => x.Children).HasForeignKey(x => x.ParentSerialUnitId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.SourceSerialUnit).WithMany().HasForeignKey(x => x.SourceSerialUnitId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.SourceLot).WithMany().HasForeignKey(x => x.SourceLotId).OnDelete(DeleteBehavior.Restrict);
         }
     }
 
@@ -156,7 +177,19 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Property(x => x.Description).HasMaxLength(InventoryColumns.Text);
             builder.Property(x => x.CancelReason).HasMaxLength(InventoryColumns.Text);
             builder.Property(x => x.SepidarReference).HasMaxLength(100);
+            builder.Property(x => x.DriverName).HasMaxLength(200);
+            builder.Property(x => x.VehiclePlate).HasMaxLength(50);
+            builder.Property(x => x.ReceiverName).HasMaxLength(200);
+            builder.Property(x => x.Destination).HasMaxLength(InventoryColumns.Title);
+            builder.Property(x => x.ExitCheckNote).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.BuyerName).HasMaxLength(200);
+            builder.Property(x => x.MinutesNumber).HasMaxLength(100);
+            builder.Property(x => x.DepositReference).HasMaxLength(100);
             builder.HasIndex(x => x.Number).IsUnique().HasFilter("[Number] IS NOT NULL");
+            builder.HasIndex(x => x.MaterialRequestId);
+            builder.HasIndex(x => x.NcrId);
+            builder.HasOne(x => x.MaterialRequest).WithMany().HasForeignKey(x => x.MaterialRequestId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Ncr).WithMany().HasForeignKey(x => x.NcrId).OnDelete(DeleteBehavior.Restrict);
             builder.HasIndex(x => new { x.Type, x.Status, x.DocumentDate });
             builder.HasIndex(x => x.SepidarStatus);
             builder.HasOne(x => x.Warehouse).WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
@@ -303,6 +336,155 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.HasOne(x => x.ChildSerialUnit).WithMany().HasForeignKey(x => x.ChildSerialUnitId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.ChildLot).WithMany().HasForeignKey(x => x.ChildLotId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class CodingValueConfiguration : IEntityTypeConfiguration<CodingValue>
+    {
+        public void Configure(EntityTypeBuilder<CodingValue> builder)
+        {
+            builder.ToTable("InvCodingValues");
+            builder.Property(x => x.Scheme).HasMaxLength(30).IsRequired();
+            builder.Property(x => x.Code).HasMaxLength(20).IsRequired();
+            builder.Property(x => x.Title).HasMaxLength(InventoryColumns.Title).IsRequired();
+            builder.Property(x => x.Model).HasMaxLength(20);
+            builder.Property(x => x.Description).HasMaxLength(InventoryColumns.Text);
+            builder.HasIndex(x => new { x.Scheme, x.Model, x.Code }).IsUnique().HasFilter(InventoryColumns.NotDeleted);
+        }
+    }
+
+    public class ItemRequestConfiguration : IEntityTypeConfiguration<ItemRequest>
+    {
+        public void Configure(EntityTypeBuilder<ItemRequest> builder)
+        {
+            builder.ToTable("InvItemRequests");
+            builder.Property(x => x.Number).HasMaxLength(30);
+            builder.Property(x => x.Title).HasMaxLength(InventoryColumns.Title).IsRequired();
+            builder.Property(x => x.GroupCode).HasMaxLength(4);
+            builder.Property(x => x.ProposedCode).HasMaxLength(InventoryColumns.Code);
+            builder.Property(x => x.TechnicalCode).HasMaxLength(100);
+            builder.Property(x => x.Material).HasMaxLength(200);
+            builder.Property(x => x.Standard).HasMaxLength(200);
+            builder.Property(x => x.MescCode).HasMaxLength(InventoryColumns.Code);
+            builder.Property(x => x.Unit).HasMaxLength(50);
+            builder.Property(x => x.Specification).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.Reason).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.ReviewNote).HasMaxLength(InventoryColumns.Text);
+            builder.HasIndex(x => x.Number).IsUnique().HasFilter("[Number] IS NOT NULL");
+            builder.HasIndex(x => x.Status);
+            builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class QcInspectionConfiguration : IEntityTypeConfiguration<QcInspection>
+    {
+        public void Configure(EntityTypeBuilder<QcInspection> builder)
+        {
+            builder.ToTable("InvQcInspections");
+            builder.Property(x => x.Number).HasMaxLength(30);
+            builder.Property(x => x.Quantity).HasPrecision(18, 4);
+            builder.Property(x => x.AcceptedQuantity).HasPrecision(18, 4);
+            builder.Property(x => x.RejectedQuantity).HasPrecision(18, 4);
+            builder.Property(x => x.SerialNumbers).HasMaxLength(InventoryColumns.LongText);
+            builder.Property(x => x.RejectedSerialNumbers).HasMaxLength(InventoryColumns.LongText);
+            builder.Property(x => x.ReportNumber).HasMaxLength(100);
+            builder.Property(x => x.Note).HasMaxLength(InventoryColumns.Text);
+            builder.HasIndex(x => x.Number).IsUnique().HasFilter("[Number] IS NOT NULL");
+            builder.HasIndex(x => new { x.Status, x.WarehouseId });
+            builder.HasIndex(x => x.ReceiptDocumentId);
+            builder.HasOne(x => x.ReceiptDocument).WithMany().HasForeignKey(x => x.ReceiptDocumentId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Lot).WithMany().HasForeignKey(x => x.LotId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Warehouse).WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.TargetWarehouse).WithMany().HasForeignKey(x => x.TargetWarehouseId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class NonConformanceConfiguration : IEntityTypeConfiguration<NonConformance>
+    {
+        public void Configure(EntityTypeBuilder<NonConformance> builder)
+        {
+            builder.ToTable("InvNonConformances");
+            builder.Property(x => x.Number).HasMaxLength(30).IsRequired();
+            builder.Property(x => x.Quantity).HasPrecision(18, 4);
+            builder.Property(x => x.SerialNumbers).HasMaxLength(InventoryColumns.LongText);
+            builder.Property(x => x.Requirement).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.Description).HasMaxLength(InventoryColumns.LongText);
+            builder.Property(x => x.RootCause).HasMaxLength(InventoryColumns.LongText);
+            builder.Property(x => x.DispositionNote).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.CommitteeMinutesNumber).HasMaxLength(100);
+            builder.Property(x => x.CommitteeMembers).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.ConcessionNumber).HasMaxLength(100);
+            builder.Property(x => x.CustomerApprovalReference).HasMaxLength(200);
+            builder.Property(x => x.CorrectiveAction).HasMaxLength(InventoryColumns.LongText);
+            builder.Property(x => x.CorrectiveActionOwner).HasMaxLength(200);
+            builder.Property(x => x.EffectivenessCheck).HasMaxLength(InventoryColumns.LongText);
+            builder.HasIndex(x => x.Number).IsUnique();
+            builder.HasIndex(x => new { x.Status, x.ReportDate });
+            builder.HasIndex(x => x.ItemId);
+            builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Lot).WithMany().HasForeignKey(x => x.LotId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Warehouse).WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Provider).WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class MaterialRequestConfiguration : IEntityTypeConfiguration<MaterialRequest>
+    {
+        public void Configure(EntityTypeBuilder<MaterialRequest> builder)
+        {
+            builder.ToTable("InvMaterialRequests");
+            builder.Property(x => x.Number).HasMaxLength(30);
+            builder.Property(x => x.Purpose).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.RejectReason).HasMaxLength(InventoryColumns.Text);
+            builder.HasIndex(x => x.Number).IsUnique().HasFilter("[Number] IS NOT NULL");
+            builder.HasIndex(x => new { x.Status, x.RequestDate });
+            builder.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Warehouse).WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class MaterialRequestLineConfiguration : IEntityTypeConfiguration<MaterialRequestLine>
+    {
+        public void Configure(EntityTypeBuilder<MaterialRequestLine> builder)
+        {
+            builder.ToTable("InvMaterialRequestLines");
+            builder.Property(x => x.Quantity).HasPrecision(18, 4);
+            builder.Property(x => x.IssuedQuantity).HasPrecision(18, 4);
+            builder.Property(x => x.Description).HasMaxLength(InventoryColumns.Text);
+            builder.HasOne(x => x.MaterialRequest).WithMany(x => x.Lines).HasForeignKey(x => x.MaterialRequestId).OnDelete(DeleteBehavior.Cascade);
+            builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class StockCountConfiguration : IEntityTypeConfiguration<StockCount>
+    {
+        public void Configure(EntityTypeBuilder<StockCount> builder)
+        {
+            builder.ToTable("InvStockCounts");
+            builder.Property(x => x.Number).HasMaxLength(30).IsRequired();
+            builder.Property(x => x.GroupCode).HasMaxLength(InventoryColumns.Code);
+            builder.Property(x => x.Description).HasMaxLength(InventoryColumns.Text);
+            builder.HasIndex(x => x.Number).IsUnique();
+            builder.HasOne(x => x.Warehouse).WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class StockCountLineConfiguration : IEntityTypeConfiguration<StockCountLine>
+    {
+        public void Configure(EntityTypeBuilder<StockCountLine> builder)
+        {
+            builder.ToTable("InvStockCountLines");
+            builder.Property(x => x.SystemQuantity).HasPrecision(18, 4);
+            builder.Property(x => x.CountedQuantity).HasPrecision(18, 4);
+            builder.Property(x => x.RecountedQuantity).HasPrecision(18, 4);
+            builder.Property(x => x.Note).HasMaxLength(InventoryColumns.Text);
+            builder.HasOne(x => x.StockCount).WithMany(x => x.Lines).HasForeignKey(x => x.StockCountId).OnDelete(DeleteBehavior.Cascade);
+            builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.Lot).WithMany().HasForeignKey(x => x.LotId).OnDelete(DeleteBehavior.Restrict);
         }
     }
 }

@@ -73,8 +73,16 @@ namespace Entities.Identity.Constants
         public static readonly ResponseRole ConstructionResponseRole = new ResponseRole()
         {
             Id = 9,
-            Name = Engineer.ToUpper(),
+            Name = Construction.ToUpper(),
             Description = "تولید"
+        };
+
+        public const string Security = nameof(Security);
+        public static readonly ResponseRole SecurityResponseRole = new ResponseRole()
+        {
+            Id = 10,
+            Name = Security.ToUpper(),
+            Description = "انتظامات (کنترل خروج کالا)"
         };
 
         public static IEnumerable<ResponseRole> GetResponseRoles()
@@ -87,6 +95,8 @@ namespace Entities.Identity.Constants
             yield return WareHouseResponseRole;
             yield return AssemblerResponseRole;
             yield return EngineerResponseRole;
+            yield return ConstructionResponseRole;
+            yield return SecurityResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)

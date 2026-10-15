@@ -172,6 +172,13 @@ namespace Services.NasbNiro.Inventory
                 MaxStock = i.MaxStock,
                 IsActive = i.IsActive,
                 SepidarCode = i.SepidarCode,
+                GroupCode = i.GroupCode,
+                StageCode = i.StageCode,
+                BaseCode = i.BaseCode,
+                MescCode = i.MescCode,
+                LegacyCode = i.LegacyCode,
+                RequiresIncomingInspection = i.RequiresIncomingInspection,
+                ShelfLifeDays = i.ShelfLifeDays,
                 OnHand = balances.Where(b => b.ItemId == i.Id).Sum(b => (decimal?)b.Quantity) ?? 0,
             });
         }
@@ -182,7 +189,12 @@ namespace Services.NasbNiro.Inventory
             IQueryable<InventoryItem> items = Items.Where(i => !i.Deleted);
             string text = InventoryText.Clean(query.Contains);
             if (text != null)
-                items = items.Where(i => i.Code.Contains(text) || i.Title.Contains(text) || i.TechnicalCode.Contains(text));
+                items = items.Where(i => i.Code.Contains(text) || i.Title.Contains(text) || i.TechnicalCode.Contains(text) ||
+                                         i.LegacyCode.Contains(text) || i.MescCode.Contains(text));
+            string groupCode = InventoryText.Clean(query.GroupCode);
+            if (groupCode != null) items = items.Where(i => i.GroupCode == groupCode);
+            string baseCode = InventoryText.Clean(query.BaseCode);
+            if (baseCode != null) items = items.Where(i => i.BaseCode == baseCode);
             if (query.ItemGroupId.HasValue)
             {
                 List<int> groupIds = await GroupWithChildrenAsync(query.ItemGroupId.Value, cancellationToken);
@@ -229,7 +241,7 @@ namespace Services.NasbNiro.Inventory
         public async Task<ResponseDto<InventoryItemDto>> SaveItemAsync(SaveInventoryItemDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.InvalidData);
-            string code = InventoryText.Clean(dto.Code);
+            string code = ItemCodeRules.Normalize(dto.Code);
             string title = InventoryText.Clean(dto.Title);
             string unit = InventoryText.Clean(dto.Unit);
             if (code == null) return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.CodeRequired);
@@ -244,11 +256,30 @@ namespace Services.NasbNiro.Inventory
             if (await Items.AnyAsync(i => !i.Deleted && i.Code == code && i.Id != (dto.Id ?? 0), cancellationToken))
                 return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.DuplicateCode + code);
 
-            InventoryItem item;
+            InventoryItem item = null;
             if (dto.Id.HasValue)
             {
                 item = await Items.FirstOrDefaultAsync(i => i.Id == dto.Id.Value && !i.Deleted, cancellationToken);
                 if (item == null) return ResponseDtoHelper.NotFound<InventoryItemDto>(InventoryMessages.ItemNotFound);
+            }
+
+            // WI-WH-002: a new code (or a changed one) must follow the company coding; planning (PMO) gives the codes
+            bool codeChanged = item == null || !string.Equals(item.Code, code, StringComparison.OrdinalIgnoreCase);
+            List<CodingValue> codingValues = await InventoryCodingData.LoadAsync(_uow, _user.UserId, cancellationToken);
+            CodeCheckDto check = ItemCodeRules.Check(code, codingValues);
+            if (codeChanged)
+            {
+                if (!_user.IsInRole(InventoryRoles.RolePlanning))
+                    return ResponseDtoHelper.BadRequest<InventoryItemDto>("کد جدید را واحد برنامه‌ریزی و کنترل پروژه می‌دهد؛ از «درخواست کد کالا» استفاده کنید.");
+                if (!check.IsValid) return ResponseDtoHelper.BadRequest<InventoryItemDto>("کد مطابق دستورالعمل WI-WH-002 نیست: " + string.Join(" | ", check.Errors));
+                if (check.StageNotStockable) return ResponseDtoHelper.BadRequest<InventoryItemDto>(check.Warnings.First());
+            }
+            string mesc = check.MescCode ?? ItemCodeRules.Normalize(dto.MescCode);
+            if (mesc != null && await Items.AnyAsync(i => !i.Deleted && i.MescCode == mesc && i.Id != (dto.Id ?? 0), cancellationToken))
+                return ResponseDtoHelper.BadRequest<InventoryItemDto>("قطعه‌ای با همین کد MESC قبلاً ثبت شده است.");
+
+            if (item != null)
+            {
                 if (item.TrackingMode != dto.TrackingMode &&
                     await _uow.Set<StockTransaction>().AnyAsync(t => t.ItemId == item.Id, cancellationToken))
                     return ResponseDtoHelper.BadRequest<InventoryItemDto>("این کالا گردش انبار دارد و نوع ردیابی آن قابل تغییر نیست.");
@@ -273,6 +304,13 @@ namespace Services.NasbNiro.Inventory
             item.MaxStock = dto.MaxStock;
             item.IsActive = dto.IsActive;
             item.SepidarCode = InventoryText.Clean(dto.SepidarCode);
+            item.GroupCode = check.GroupCode;
+            item.StageCode = check.StageCode;
+            item.BaseCode = check.BaseCode;
+            item.MescCode = mesc;
+            item.LegacyCode = InventoryText.Clean(dto.LegacyCode) ?? item.LegacyCode;
+            item.RequiresIncomingInspection = dto.RequiresIncomingInspection;
+            item.ShelfLifeDays = dto.ShelfLifeDays > 0 ? dto.ShelfLifeDays : null;
             Stamp(item, !dto.Id.HasValue);
             await _uow.SaveChangesAsync(cancellationToken);
 
@@ -333,13 +371,14 @@ namespace Services.NasbNiro.Inventory
             Dictionary<string, InventoryItem> items = (await Items.Where(i => !i.Deleted).ToListAsync(cancellationToken))
                 .GroupBy(i => i.Code, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
             HashSet<int> itemsWithMoves = (await _uow.Set<StockTransaction>().Select(t => t.ItemId).Distinct().ToListAsync(cancellationToken)).ToHashSet();
+            List<CodingValue> codingValues = await InventoryCodingData.LoadAsync(_uow, _user.UserId, cancellationToken);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             for (int index = 0; index < rows.Count; index++)
             {
                 ImportItemRowDto row = rows[index];
                 int rowNumber = index + 2; // row 1 of the sheet is the header
-                string code = InventoryText.Clean(row?.Code);
+                string code = ItemCodeRules.Normalize(row?.Code);
                 string title = InventoryText.Clean(row?.Title);
                 if (code == null && title == null) continue; // empty row
                 if (code == null) { result.Errors.Add($"ردیف {rowNumber}: کد خالی است."); continue; }
@@ -389,6 +428,16 @@ namespace Services.NasbNiro.Inventory
                 if (row.Weight.HasValue) item.Weight = row.Weight;
                 if (row.MinStock.HasValue && row.MinStock.Value >= 0) item.MinStock = row.MinStock.Value;
                 item.SepidarCode = InventoryText.Clean(row.SepidarCode) ?? item.SepidarCode;
+                item.LegacyCode = InventoryText.Clean(row.LegacyCode) ?? item.LegacyCode;
+                // existing data is imported as it is; codes outside WI-WH-002 are listed for cleanup (data-quality report)
+                CodeCheckDto check = ItemCodeRules.Check(code, codingValues);
+                item.GroupCode = check.GroupCode ?? item.GroupCode;
+                item.StageCode = check.StageCode;
+                item.BaseCode = check.BaseCode ?? code;
+                item.MescCode = check.MescCode ?? ItemCodeRules.Normalize(row.MescCode) ?? item.MescCode;
+                if (isNew) item.RequiresIncomingInspection = item.GroupCode != "05";
+                if (!check.IsValid) result.Warnings.Add($"ردیف {rowNumber}: کد {code} مطابق WI-WH-002 نیست: {string.Join("؛ ", check.Errors)}");
+                else if (check.StageNotStockable) result.Warnings.Add($"ردیف {rowNumber}: کد {code} وضعیت غیرانبارشی دارد (★).");
                 Stamp(item, isNew);
             }
 

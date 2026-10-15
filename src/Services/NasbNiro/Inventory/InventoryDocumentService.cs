@@ -22,6 +22,23 @@ namespace Services.NasbNiro.Inventory
         Task<ResponseDto<bool>> DeleteDraftAsync(int id, CancellationToken cancellationToken);
         Task<ResponseDto<DocumentDto>> ConfirmAsync(int id, CancellationToken cancellationToken);
         Task<ResponseDto<DocumentDto>> CancelAsync(int id, CancelDocumentDto dto, CancellationToken cancellationToken);
+
+        /// <summary>Approval of a draft: adjustments (warehouse supervisor + planning) or the QC loading approval of a delivery.</summary>
+        Task<ResponseDto<DocumentDto>> ApproveAsync(int id, ApproveDocumentDto dto, CancellationToken cancellationToken);
+
+        /// <summary>The guard checks goods leaving the premises against the confirmed document.</summary>
+        Task<ResponseDto<DocumentDto>> ExitCheckAsync(int id, ExitCheckDto dto, CancellationToken cancellationToken);
+
+        /// <summary>Documents made by quality control (release from quarantine, NCR dispositions) and by stock counts.</summary>
+        Task<ResponseDto<DocumentDto>> CreateSystemDocumentAsync(SaveDocumentDto dto, SystemDocumentLinks links, bool confirm, CancellationToken cancellationToken);
+    }
+
+    /// <summary>What a system-made document belongs to.</summary>
+    public class SystemDocumentLinks
+    {
+        public int? NcrId { get; set; }
+        public int? InspectionId { get; set; }
+        public int? StockCountId { get; set; }
     }
 
     /// <summary>
@@ -118,6 +135,27 @@ namespace Services.NasbNiro.Inventory
                     CancelReason = d.CancelReason,
                     SepidarStatus = d.SepidarStatus,
                     SepidarReference = d.SepidarReference,
+                    WarehouseKind = d.Warehouse.Kind,
+                    DestinationWarehouseKind = d.DestinationWarehouse != null ? d.DestinationWarehouse.Kind : (WarehouseKind?)null,
+                    MaterialRequestId = d.MaterialRequestId,
+                    MaterialRequestNumber = d.MaterialRequest.Number,
+                    NcrId = d.NcrId,
+                    NcrNumber = d.Ncr.Number,
+                    InspectionId = d.InspectionId,
+                    StockCountId = d.StockCountId,
+                    DriverName = d.DriverName,
+                    VehiclePlate = d.VehiclePlate,
+                    ReceiverName = d.ReceiverName,
+                    Destination = d.Destination,
+                    ExitCheckedAt = d.ExitCheckedAt,
+                    ExitCheckNote = d.ExitCheckNote,
+                    QcLoadingApprovedAt = d.QcLoadingApprovedAt,
+                    BuyerName = d.BuyerName,
+                    MinutesNumber = d.MinutesNumber,
+                    WeighbridgeDocumentId = d.WeighbridgeDocumentId,
+                    DepositReference = d.DepositReference,
+                    WarehouseApprovedAt = d.WarehouseApprovedAt,
+                    PlanningApprovedAt = d.PlanningApprovedAt,
                     Lines = d.Lines.OrderBy(l => l.RowNumber).Select(l => new DocumentLineDto
                     {
                         Id = l.Id,
@@ -138,6 +176,8 @@ namespace Services.NasbNiro.Inventory
                         DestinationLocationCode = l.DestinationLocation.Code,
                         UnitPrice = l.UnitPrice,
                         Description = l.Description,
+                        Direction = l.Direction,
+                        SourceRowNumber = l.SourceRowNumber,
                         SerialNumbers = l.Serials.OrderBy(s => s.Id).Select(s => s.SerialNumber).ToList(),
                     }).ToList(),
                 })
@@ -147,44 +187,108 @@ namespace Services.NasbNiro.Inventory
 
             // names of the users who created, confirmed or cancelled the document
             var raw = await Documents.Where(d => d.Id == id)
-                .Select(d => new { d.CreatorUserId, d.ConfirmedByUserId, d.CancelledByUserId }).FirstAsync(cancellationToken);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(
-                _uow, new int?[] { raw.CreatorUserId, raw.ConfirmedByUserId, raw.CancelledByUserId }, cancellationToken);
+                .Select(d => new
+                {
+                    d.CreatorUserId, d.ConfirmedByUserId, d.CancelledByUserId, d.ExitCheckedByUserId, d.QcLoadingApprovedByUserId,
+                    d.WarehouseApprovedByUserId, d.PlanningApprovedByUserId,
+                }).FirstAsync(cancellationToken);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[]
+            {
+                raw.CreatorUserId, raw.ConfirmedByUserId, raw.CancelledByUserId, raw.ExitCheckedByUserId, raw.QcLoadingApprovedByUserId,
+                raw.WarehouseApprovedByUserId, raw.PlanningApprovedByUserId,
+            }, cancellationToken);
             document.CreatorName = names.Name(raw.CreatorUserId);
             document.ConfirmedByName = names.Name(raw.ConfirmedByUserId);
             document.CancelledByName = names.Name(raw.CancelledByUserId);
+            document.ExitCheckedByName = names.Name(raw.ExitCheckedByUserId);
+            document.QcLoadingApprovedByName = names.Name(raw.QcLoadingApprovedByUserId);
+            document.WarehouseApprovedByName = names.Name(raw.WarehouseApprovedByUserId);
+            document.PlanningApprovedByName = names.Name(raw.PlanningApprovedByUserId);
             return ResponseDtoHelper.Ok(document);
         }
 
         // -------------------------------------------------------------------------------- drafts
 
-        public async Task<ResponseDto<DocumentDto>> SaveDraftAsync(SaveDocumentDto dto, CancellationToken cancellationToken)
+        public Task<ResponseDto<DocumentDto>> SaveDraftAsync(SaveDocumentDto dto, CancellationToken cancellationToken) =>
+            SaveDraftCoreAsync(dto, null, cancellationToken);
+
+        public async Task<ResponseDto<DocumentDto>> CreateSystemDocumentAsync(SaveDocumentDto dto, SystemDocumentLinks links, bool confirm, CancellationToken cancellationToken)
+        {
+            if (dto == null || links == null) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.InvalidData);
+            dto.Id = null;
+            ResponseDto<DocumentDto> saved = await SaveDraftCoreAsync(dto, links, cancellationToken);
+            if (!saved.Success || !confirm) return saved;
+            return await ConfirmAsync(saved.Data.Id, cancellationToken);
+        }
+
+        private async Task<ResponseDto<DocumentDto>> SaveDraftCoreAsync(SaveDocumentDto dto, SystemDocumentLinks system, CancellationToken cancellationToken)
         {
             if (dto == null) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.InvalidData);
             if (!InventoryDocumentRules.IsKnown(dto.Type)) return ResponseDtoHelper.BadRequest<DocumentDto>("نوع سند نامعتبر است.");
             if (dto.DocumentDate == default) return ResponseDtoHelper.BadRequest<DocumentDto>("تاریخ سند را وارد کنید.");
 
+            // a document made by quality control keeps its lines; only the exit data may be completed
+            InventoryDocument existing = null;
+            if (dto.Id.HasValue)
+            {
+                existing = await Documents.Include(d => d.Lines).ThenInclude(l => l.Serials)
+                    .FirstOrDefaultAsync(d => d.Id == dto.Id.Value && !d.Deleted, cancellationToken);
+                if (existing == null) return ResponseDtoHelper.NotFound<DocumentDto>(InventoryMessages.DocumentNotFound);
+                if (existing.Status != InventoryDocumentStatus.Draft) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.OnlyDraftEditable);
+                if (existing.NcrId.HasValue || existing.InspectionId.HasValue || existing.StockCountId.HasValue)
+                    return await SaveSystemDraftHeaderAsync(existing, dto, cancellationToken);
+            }
+            if (system == null && InventoryDocumentRules.IsSystemOnly(dto.Type))
+                return ResponseDtoHelper.BadRequest<DocumentDto>("سند ترخیص از قرنطینه فقط از نتیجه بازرسی کنترل کیفیت یا NCR ساخته می‌شود.");
+
             Warehouse warehouse = await _uow.Set<Warehouse>().FirstOrDefaultAsync(w => w.Id == dto.WarehouseId && !w.Deleted, cancellationToken);
             if (warehouse == null) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.WarehouseNotFound);
 
+            bool conversion = InventoryDocumentRules.IsConversion(dto.Type);
             int targetWarehouseId = dto.WarehouseId;
-            if (InventoryDocumentRules.IsTransfer(dto.Type))
+            Warehouse destination = null;
+            bool keepsDestination = InventoryDocumentRules.IsTransfer(dto.Type) || conversion ||
+                                    (InventoryDocumentRules.IsIncoming(dto.Type) && warehouse.Kind == WarehouseKind.Quarantine);
+            if (InventoryDocumentRules.IsTransfer(dto.Type) && !dto.DestinationWarehouseId.HasValue)
+                return ResponseDtoHelper.BadRequest<DocumentDto>("انبار مقصد انتقال را انتخاب کنید.");
+            if (keepsDestination && dto.DestinationWarehouseId.HasValue)
             {
-                if (!dto.DestinationWarehouseId.HasValue) return ResponseDtoHelper.BadRequest<DocumentDto>("انبار مقصد انتقال را انتخاب کنید.");
-                if (!await _uow.Set<Warehouse>().AnyAsync(w => w.Id == dto.DestinationWarehouseId.Value && !w.Deleted, cancellationToken))
-                    return ResponseDtoHelper.BadRequest<DocumentDto>("انبار مقصد پیدا نشد.");
-                targetWarehouseId = dto.DestinationWarehouseId.Value;
+                destination = await _uow.Set<Warehouse>().FirstOrDefaultAsync(w => w.Id == dto.DestinationWarehouseId.Value && !w.Deleted, cancellationToken);
+                if (destination == null) return ResponseDtoHelper.BadRequest<DocumentDto>("انبار مقصد پیدا نشد.");
+                if (InventoryDocumentRules.IsTransfer(dto.Type) || conversion) targetWarehouseId = destination.Id;
             }
             else
             {
                 dto.DestinationWarehouseId = null;
             }
 
+            string ruleError = CheckWarehouseRules(dto, warehouse, destination, system);
+            if (ruleError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(ruleError);
+
             string referenceError = await CheckReferencesAsync(dto, cancellationToken);
             if (referenceError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(referenceError);
 
             List<SaveDocumentLineDto> lines = (dto.Lines ?? new List<SaveDocumentLineDto>()).Where(l => l != null).ToList();
             if (lines.Count == 0) return ResponseDtoHelper.BadRequest<DocumentDto>("سند حداقل یک ردیف لازم دارد.");
+
+            string conversionError = CheckConversionLines(dto.Type, lines);
+            if (conversionError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(conversionError);
+
+            MaterialRequest request = null;
+            if (dto.Type == InventoryDocumentType.Issue)
+            {
+                if (!dto.MaterialRequestId.HasValue)
+                    return ResponseDtoHelper.BadRequest<DocumentDto>("حواله فقط بر اساس درخواست کالای تاییدشده صادر می‌شود؛ درخواست را انتخاب کنید.");
+                request = await _uow.Set<MaterialRequest>().Include(r => r.Lines)
+                    .FirstOrDefaultAsync(r => r.Id == dto.MaterialRequestId.Value && !r.Deleted, cancellationToken);
+                string requestError = CheckRequest(request, lines.Select(l => (l.ItemId, l.Quantity)), dto.Id);
+                if (requestError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(requestError);
+                dto.WorkOrderId = request.WorkOrderId;
+            }
+            else
+            {
+                dto.MaterialRequestId = null;
+            }
 
             List<int> itemIds = lines.Select(l => l.ItemId).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>()
@@ -205,8 +309,14 @@ namespace Services.NasbNiro.Inventory
                 if (!items.TryGetValue(line.ItemId, out InventoryItem item)) return ResponseDtoHelper.BadRequest<DocumentDto>(row + InventoryMessages.ItemNotFound);
                 if (line.Quantity <= 0) return ResponseDtoHelper.BadRequest<DocumentDto>(row + "مقدار باید بیشتر از صفر باشد.");
                 if (line.UnitPrice < 0) return ResponseDtoHelper.BadRequest<DocumentDto>(row + "فی نمی‌تواند منفی باشد.");
-                if (line.LocationId.HasValue && (!locations.TryGetValue(line.LocationId.Value, out var loc) || loc.WarehouseId != dto.WarehouseId))
+                bool inLine = conversion && line.Direction == DocumentLineDirection.In;
+                int lineWarehouseId = inLine ? targetWarehouseId : dto.WarehouseId;
+                if (line.LocationId.HasValue && (!locations.TryGetValue(line.LocationId.Value, out var loc) || loc.WarehouseId != lineWarehouseId))
                     return ResponseDtoHelper.BadRequest<DocumentDto>(row + "محل انتخاب‌شده متعلق به این انبار نیست.");
+                if (!conversion) line.Direction = DocumentLineDirection.ByType;
+                if (!inLine) line.SourceRowNumber = null;
+                if (dto.Type == InventoryDocumentType.PurchaseReceipt && item.RequiresIncomingInspection && warehouse.Kind != WarehouseKind.Quarantine)
+                    return ResponseDtoHelper.BadRequest<DocumentDto>(row + $"کالای {item.Code} بازرسی ورودی لازم دارد؛ رسید خرید آن در انبار قرنطینه ثبت می‌شود.");
                 if (InventoryDocumentRules.IsTransfer(dto.Type))
                 {
                     if (line.DestinationLocationId.HasValue && (!locations.TryGetValue(line.DestinationLocationId.Value, out var dest) || dest.WarehouseId != targetWarehouseId))
@@ -238,12 +348,9 @@ namespace Services.NasbNiro.Inventory
             }
 
             InventoryDocument document;
-            if (dto.Id.HasValue)
+            if (existing != null)
             {
-                document = await Documents.Include(d => d.Lines).ThenInclude(l => l.Serials)
-                    .FirstOrDefaultAsync(d => d.Id == dto.Id.Value && !d.Deleted, cancellationToken);
-                if (document == null) return ResponseDtoHelper.NotFound<DocumentDto>(InventoryMessages.DocumentNotFound);
-                if (document.Status != InventoryDocumentStatus.Draft) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.OnlyDraftEditable);
+                document = existing;
                 _uow.Set<InventoryDocumentLine>().RemoveRange(document.Lines);
                 document.Lines = new List<InventoryDocumentLine>();
             }
@@ -255,6 +362,9 @@ namespace Services.NasbNiro.Inventory
                     CreateDate = DateTimeOffset.Now,
                     CreatorUserId = _user.UserId,
                     Lines = new List<InventoryDocumentLine>(),
+                    NcrId = system?.NcrId,
+                    InspectionId = system?.InspectionId,
+                    StockCountId = system?.StockCountId,
                 };
                 Documents.Add(document);
             }
@@ -269,6 +379,9 @@ namespace Services.NasbNiro.Inventory
             document.ContractId = dto.ContractId;
             document.ReferenceNumber = InventoryText.Clean(dto.ReferenceNumber);
             document.Description = InventoryText.Clean(dto.Description);
+            document.MaterialRequestId = dto.MaterialRequestId;
+            SetHeaderExtras(document, dto);
+            ClearApprovals(document);
             document.ModifyDate = DateTimeOffset.Now;
             document.ModifierUserId = _user.UserId;
 
@@ -288,12 +401,141 @@ namespace Services.NasbNiro.Inventory
                     DestinationLocationId = line.DestinationLocationId,
                     UnitPrice = line.UnitPrice,
                     Description = InventoryText.Clean(line.Description),
+                    Direction = line.Direction,
+                    SourceRowNumber = line.SourceRowNumber,
                     Serials = line.SerialNumbers.Select(s => new InventoryDocumentLineSerial { SerialNumber = s }).ToList(),
                 });
             }
 
             await _uow.SaveChangesAsync(cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);
+        }
+
+        private async Task<ResponseDto<DocumentDto>> SaveSystemDraftHeaderAsync(InventoryDocument document, SaveDocumentDto dto, CancellationToken cancellationToken)
+        {
+            document.DocumentDate = dto.DocumentDate.Date;
+            document.ReferenceNumber = InventoryText.Clean(dto.ReferenceNumber);
+            document.Description = InventoryText.Clean(dto.Description);
+            SetHeaderExtras(document, dto);
+            document.ModifyDate = DateTimeOffset.Now;
+            document.ModifierUserId = _user.UserId;
+            await _uow.SaveChangesAsync(cancellationToken);
+            return await GetDocumentAsync(document.Id, cancellationToken);
+        }
+
+        private static void SetHeaderExtras(InventoryDocument document, SaveDocumentDto dto)
+        {
+            document.DriverName = InventoryText.Clean(dto.DriverName);
+            document.VehiclePlate = InventoryText.Clean(dto.VehiclePlate);
+            document.ReceiverName = InventoryText.Clean(dto.ReceiverName);
+            document.Destination = InventoryText.Clean(dto.Destination);
+            document.BuyerName = InventoryText.Clean(dto.BuyerName);
+            document.MinutesNumber = InventoryText.Clean(dto.MinutesNumber);
+            document.WeighbridgeDocumentId = dto.WeighbridgeDocumentId;
+            document.DepositReference = InventoryText.Clean(dto.DepositReference);
+        }
+
+        /// <summary>Any change to a draft cancels the approvals given to it.</summary>
+        private static void ClearApprovals(InventoryDocument document)
+        {
+            document.WarehouseApprovedAt = null;
+            document.WarehouseApprovedByUserId = null;
+            document.PlanningApprovedAt = null;
+            document.PlanningApprovedByUserId = null;
+            document.QcLoadingApprovedAt = null;
+            document.QcLoadingApprovedByUserId = null;
+        }
+
+        /// <summary>Which warehouse kinds each document type may use (quarantine, scrap, contractor, customer property).</summary>
+        private static string CheckWarehouseRules(SaveDocumentDto dto, Warehouse source, Warehouse destination, SystemDocumentLinks system)
+        {
+            InventoryDocumentType type = dto.Type;
+            bool fromQc = system?.NcrId != null || system?.InspectionId != null;
+            bool takesOut = InventoryDocumentRules.IsOutgoing(type) || InventoryDocumentRules.IsTransfer(type) || InventoryDocumentRules.IsConversion(type);
+            bool adjustment = InventoryDocumentRules.NeedsApprovals(type);
+
+            if (source.Kind == WarehouseKind.Quarantine && takesOut && !fromQc && !adjustment)
+                return "کالای انبار قرنطینه فقط با نتیجه بازرسی کنترل کیفیت یا تصمیم NCR خارج می‌شود.";
+            if (source.Kind == WarehouseKind.Scrap && takesOut && type != InventoryDocumentType.ScrapSale && !adjustment)
+                return "از انبار ضایعات فقط با سند فروش ضایعات خارج می‌شود.";
+            if ((type == InventoryDocumentType.ScrapReceipt || type == InventoryDocumentType.ScrapSale) && source.Kind != WarehouseKind.Scrap)
+                return "رسید و فروش ضایعات فقط در انبار ضایعات ثبت می‌شود.";
+            if (source.Kind == WarehouseKind.Scrap && InventoryDocumentRules.IsIncoming(type) && type != InventoryDocumentType.ScrapReceipt && !adjustment)
+                return "ورود به انبار ضایعات با رسید ضایعات یا تصمیم NCR است.";
+            if (destination != null && destination.Kind == WarehouseKind.Scrap && !fromQc)
+                return "انتقال به انبار ضایعات فقط با تصمیم NCR (کنترل کیفیت) انجام می‌شود؛ برای ضایعات کارگاه رسید ضایعات بزنید.";
+
+            if (type == InventoryDocumentType.SubcontractIssue)
+            {
+                if (destination == null || destination.Kind != WarehouseKind.Subcontractor) return "مقصد ارسال به پیمانکار باید انبار مجازی همان پیمانکار باشد.";
+                if (source.Kind == WarehouseKind.Subcontractor) return "مبدا ارسال به پیمانکار انبار شرکت است.";
+                if (!dto.ProviderId.HasValue) return "پیمانکار (تامین‌کننده) را انتخاب کنید.";
+            }
+            else if (type == InventoryDocumentType.SubcontractReturn)
+            {
+                if (source.Kind != WarehouseKind.Subcontractor) return "مبدا برگشت از پیمانکار باید انبار مجازی پیمانکار باشد.";
+                if (destination == null || destination.Kind == WarehouseKind.Subcontractor) return "مقصد برگشت از پیمانکار انبار شرکت (ترجیحاً قرنطینه) است.";
+                if (!dto.ProviderId.HasValue) return "پیمانکار (تامین‌کننده) را انتخاب کنید.";
+            }
+            else if (source.Kind == WarehouseKind.Subcontractor && takesOut && !adjustment)
+            {
+                return "کالای نزد پیمانکار فقط با سند برگشت از پیمانکار برمی‌گردد.";
+            }
+            else if (destination != null && destination.Kind == WarehouseKind.Subcontractor)
+            {
+                return "ارسال به پیمانکار با سند «ارسال به پیمانکار» انجام می‌شود.";
+            }
+
+            if (type == InventoryDocumentType.CustomerPropertyReceipt)
+            {
+                if (source.Kind != WarehouseKind.CustomerProperty) return "اموال مشتری در انبار اموال مشتری نگهداری می‌شود.";
+                if (!dto.ContractId.HasValue) return "قرارداد (مشتری) را انتخاب کنید.";
+            }
+            else if (source.Kind == WarehouseKind.CustomerProperty && InventoryDocumentRules.IsIncoming(type) && !adjustment)
+            {
+                return "ورود به انبار اموال مشتری فقط با رسید اموال مشتری است.";
+            }
+
+            if (type == InventoryDocumentType.CustomerDelivery && !dto.ContractId.HasValue) return "قرارداد (مشتری) تحویل را انتخاب کنید.";
+            if (type == InventoryDocumentType.Issue && source.Kind == WarehouseKind.Subcontractor) return "از انبار پیمانکار حواله صادر نمی‌شود.";
+            return null;
+        }
+
+        private static string CheckConversionLines(InventoryDocumentType type, List<SaveDocumentLineDto> lines)
+        {
+            if (!InventoryDocumentRules.IsConversion(type)) return null;
+            if (!lines.Any(l => l.Direction == DocumentLineDirection.Out) || !lines.Any(l => l.Direction == DocumentLineDirection.In))
+                return "تبدیل مرحله حداقل یک ردیف «خروج مرحله قبل» و یک ردیف «ورود مرحله بعد» لازم دارد.";
+            if (lines.Any(l => l.Direction != DocumentLineDirection.Out && l.Direction != DocumentLineDirection.In))
+                return "جهت همه ردیف‌های تبدیل مرحله (خروج یا ورود) را مشخص کنید.";
+            for (int i = 0; i < lines.Count; i++)
+            {
+                SaveDocumentLineDto line = lines[i];
+                if (line.Direction != DocumentLineDirection.In) continue;
+                if (!line.SourceRowNumber.HasValue) return $"ردیف {i + 1}: ردیف مبدا (مرحله قبل) را مشخص کنید.";
+                int source = line.SourceRowNumber.Value;
+                if (source < 1 || source > lines.Count || lines[source - 1].Direction != DocumentLineDirection.Out)
+                    return $"ردیف {i + 1}: ردیف مبدا باید یکی از ردیف‌های خروج همین سند باشد.";
+            }
+            return null;
+        }
+
+        /// <summary>The issue must stay within an approved request: same items, not more than what is left.</summary>
+        private string CheckRequest(MaterialRequest request, IEnumerable<(int ItemId, decimal Quantity)> lines, int? documentId)
+        {
+            if (request == null) return "درخواست کالا پیدا نشد.";
+            if (request.Status != MaterialRequestStatus.Approved)
+                return $"درخواست کالای {request.Number ?? request.Id.ToString()} هنوز تایید نهایی (برنامه‌ریزی و تولید) نشده یا بسته شده است.";
+            foreach (var group in lines.GroupBy(l => l.ItemId))
+            {
+                List<MaterialRequestLine> requested = request.Lines.Where(l => l.ItemId == group.Key).ToList();
+                if (requested.Count == 0) return "کالای این ردیف در درخواست کالا نیست.";
+                decimal left = requested.Sum(l => l.Quantity - l.IssuedQuantity);
+                decimal wanted = group.Sum(l => l.Quantity);
+                if (wanted > left)
+                    return $"مقدار حواله ({InventoryText.Number(wanted)}) بیشتر از مانده درخواست ({InventoryText.Number(left)}) است.";
+            }
+            return null;
         }
 
         private async Task<string> CheckReferencesAsync(SaveDocumentDto dto, CancellationToken cancellationToken)
@@ -483,13 +725,43 @@ namespace Services.NasbNiro.Inventory
 
             InventoryDocumentType type = document.Type;
             bool incoming = InventoryDocumentRules.IsIncoming(type);
-            bool outgoing = InventoryDocumentRules.IsOutgoing(type);
             bool transfer = InventoryDocumentRules.IsTransfer(type);
+            bool conversion = InventoryDocumentRules.IsConversion(type);
 
-            if (!await _uow.Set<Warehouse>().AnyAsync(w => w.Id == document.WarehouseId && !w.Deleted && w.IsActive, cancellationToken))
-                return ResponseDtoHelper.BadRequest<DocumentDto>("انبار سند فعال نیست.");
-            if (transfer && !await _uow.Set<Warehouse>().AnyAsync(w => w.Id == document.DestinationWarehouseId && !w.Deleted && w.IsActive, cancellationToken))
-                return ResponseDtoHelper.BadRequest<DocumentDto>("انبار مقصد فعال نیست.");
+            Warehouse source = await _uow.Set<Warehouse>().FirstOrDefaultAsync(w => w.Id == document.WarehouseId && !w.Deleted && w.IsActive, cancellationToken);
+            if (source == null) return ResponseDtoHelper.BadRequest<DocumentDto>("انبار سند فعال نیست.");
+            Warehouse destination = null;
+            if (document.DestinationWarehouseId.HasValue)
+            {
+                destination = await _uow.Set<Warehouse>().FirstOrDefaultAsync(w => w.Id == document.DestinationWarehouseId && !w.Deleted && w.IsActive, cancellationToken);
+                if (destination == null) return ResponseDtoHelper.BadRequest<DocumentDto>("انبار مقصد فعال نیست.");
+            }
+            if (transfer && destination == null) return ResponseDtoHelper.BadRequest<DocumentDto>("انبار مقصد انتقال را انتخاب کنید.");
+            // where the "in" side of the document goes
+            Warehouse inWarehouse = transfer || conversion ? destination ?? source : source;
+
+            string headerError = CheckBeforeConfirm(document);
+            if (headerError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(headerError);
+
+            // during an annual stock count the warehouse is frozen: only the count's own adjustments are posted
+            if (!document.StockCountId.HasValue)
+            {
+                var touched = new List<int> { document.WarehouseId };
+                if (document.DestinationWarehouseId.HasValue) touched.Add(document.DestinationWarehouseId.Value);
+                bool frozen = await _uow.Set<StockCount>().AnyAsync(c => !c.Deleted && c.Kind == StockCountKind.Annual &&
+                    (c.Status == StockCountStatus.Counting || c.Status == StockCountStatus.Submitted || c.Status == StockCountStatus.Approved) &&
+                    touched.Contains(c.WarehouseId), cancellationToken);
+                if (frozen) return ResponseDtoHelper.BadRequest<DocumentDto>("انبارگردانی سالانه این انبار باز است؛ تا ثبت نتیجه شمارش، سند جدید تایید نمی‌شود.");
+            }
+
+            MaterialRequest request = null;
+            if (type == InventoryDocumentType.Issue)
+            {
+                request = await _uow.Set<MaterialRequest>().Include(r => r.Lines)
+                    .FirstOrDefaultAsync(r => r.Id == document.MaterialRequestId && !r.Deleted, cancellationToken);
+                string requestError = CheckRequest(request, document.Lines.Select(l => (l.ItemId, l.Quantity)), document.Id);
+                if (requestError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(requestError);
+            }
 
             List<int> itemIds = document.Lines.Select(l => l.ItemId).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>()
@@ -515,6 +787,15 @@ namespace Services.NasbNiro.Inventory
                 if (!items.TryGetValue(line.ItemId, out InventoryItem item) || item.Deleted) { errors.Add(row + InventoryMessages.ItemNotFound); continue; }
                 if (!item.IsActive) { errors.Add(row + $"کالای {item.Code} غیرفعال است."); continue; }
 
+                // a stage conversion takes out on its "out" lines and brings in on its "in" lines
+                bool lineIn = incoming || (conversion && line.Direction == DocumentLineDirection.In);
+                int lineWarehouseId = lineIn ? inWarehouse.Id : document.WarehouseId;
+                InventoryDocumentLine sourceLine = conversion && lineIn && line.SourceRowNumber.HasValue
+                    ? document.Lines.FirstOrDefault(l => l.RowNumber == line.SourceRowNumber.Value)
+                    : null;
+                if (type == InventoryDocumentType.PurchaseReceipt && item.RequiresIncomingInspection && source.Kind != WarehouseKind.Quarantine)
+                { errors.Add(row + $"کالای {item.Code} بازرسی ورودی لازم دارد؛ رسید خرید آن در انبار قرنطینه ثبت می‌شود."); continue; }
+
                 // ----- lot
                 int? lotId = null;
                 InventoryLot newLot = null;
@@ -526,8 +807,11 @@ namespace Services.NasbNiro.Inventory
                         if (lot == null) { errors.Add(row + "بچ این ردیف پیدا نشد."); continue; }
                         lotId = lot.Id;
                     }
-                    else if (incoming && line.LotNumber != null)
+                    else if (lineIn)
                     {
+                        // no lot number typed: the company label number (YYDDDNNNN) becomes the lot number
+                        if (line.LotNumber == null)
+                            line.LotNumber = (await InventoryNumbers.NextLabelsAsync(_uow, document.DocumentDate, 1, cancellationToken))[0];
                         InventoryLot lot = itemLots.FirstOrDefault(l => string.Equals(l.LotNumber, line.LotNumber, StringComparison.OrdinalIgnoreCase));
                         if (lot != null)
                         {
@@ -545,7 +829,10 @@ namespace Services.NasbNiro.Inventory
                                     HeatNumber = line.HeatNumber,
                                     CertificateNumber = line.CertificateNumber,
                                     ProviderId = document.ProviderId,
-                                    ProductionDate = type == InventoryDocumentType.ProductionReceipt ? document.DocumentDate : (DateTime?)null,
+                                    ProductionDate = type == InventoryDocumentType.ProductionReceipt || conversion ? document.DocumentDate : (DateTime?)null,
+                                    ExpiryDate = item.ShelfLifeDays.HasValue ? document.DocumentDate.AddDays(item.ShelfLifeDays.Value) : (DateTime?)null,
+                                    ParentLotId = sourceLine?.LotId,
+                                    IsCustomerProperty = source.Kind == WarehouseKind.CustomerProperty,
                                     CreateDate = now,
                                     CreatorUserId = _user.UserId,
                                     ModifyDate = now,
@@ -571,7 +858,15 @@ namespace Services.NasbNiro.Inventory
                 // ----- serial items: one move per piece
                 if (item.TrackingMode == ItemTrackingMode.Serial)
                 {
-                    var serials = line.Serials?.ToList() ?? new List<InventoryDocumentLineSerial>();
+                    if (line.Serials == null) line.Serials = new List<InventoryDocumentLineSerial>();
+                    // pieces made here get the company label number when no serial is typed
+                    if (lineIn && line.Serials.Count == 0 && InventoryText.IsWhole(line.Quantity) && line.Quantity > 0 &&
+                        type != InventoryDocumentType.ProductionReturn && type != InventoryDocumentType.AdjustmentIncrease)
+                    {
+                        foreach (string label in await InventoryNumbers.NextLabelsAsync(_uow, document.DocumentDate, (int)line.Quantity, cancellationToken))
+                            line.Serials.Add(new InventoryDocumentLineSerial { SerialNumber = label });
+                    }
+                    var serials = line.Serials.ToList();
                     if (!InventoryText.IsWhole(line.Quantity) || serials.Count != (int)line.Quantity)
                     {
                         errors.Add(row + $"کالای {item.Code} سریالی است؛ تعداد سریال‌ها ({serials.Count}) باید برابر مقدار ({InventoryText.Number(line.Quantity)}) باشد.");
@@ -581,7 +876,7 @@ namespace Services.NasbNiro.Inventory
                     // a serial item may also belong to a lot (for example blades of one heat)
                     int? serialLotId = line.LotId;
                     InventoryLot serialNewLot = null;
-                    if (incoming && !serialLotId.HasValue && line.LotNumber != null)
+                    if (lineIn && !serialLotId.HasValue && line.LotNumber != null)
                     {
                         InventoryLot lot = itemLots.FirstOrDefault(l => string.Equals(l.LotNumber, line.LotNumber, StringComparison.OrdinalIgnoreCase));
                         if (lot != null) serialLotId = lot.Id;
@@ -603,13 +898,15 @@ namespace Services.NasbNiro.Inventory
                         if (serialNewLot != null) line.Lot = serialNewLot; else line.LotId = serialLotId;
                     }
 
+                    List<InventoryDocumentLineSerial> sourceSerials = sourceLine?.Serials?.OrderBy(x => x.Id).ToList();
+                    int serialIndex = 0;
                     foreach (InventoryDocumentLineSerial serialRow in serials)
                     {
                         SerialUnit unit = knownUnits.FirstOrDefault(u => u.ItemId == item.Id &&
                             string.Equals(u.SerialNumber, serialRow.SerialNumber, StringComparison.OrdinalIgnoreCase));
                         string label = $"سریال {serialRow.SerialNumber} ({item.Code})";
 
-                        if (incoming)
+                        if (lineIn)
                         {
                             if (unit == null)
                             {
@@ -626,6 +923,17 @@ namespace Services.NasbNiro.Inventory
                                     CreateDate = now,
                                     CreatorUserId = _user.UserId,
                                 };
+                                // label genealogy: the piece of the previous stage it was made from
+                                if (sourceLine != null)
+                                {
+                                    if (sourceSerials != null && serialIndex < sourceSerials.Count)
+                                    {
+                                        string sourceNumber = sourceSerials[serialIndex].SerialNumber;
+                                        unit.SourceSerialUnit = knownUnits.FirstOrDefault(u => u.ItemId == sourceLine.ItemId &&
+                                            string.Equals(u.SerialNumber, sourceNumber, StringComparison.OrdinalIgnoreCase));
+                                    }
+                                    if (unit.SourceSerialUnit == null) unit.SourceLotId = sourceLine.LotId;
+                                }
                                 _uow.Set<SerialUnit>().Add(unit);
                                 knownUnits.Add(unit);
                             }
@@ -641,7 +949,7 @@ namespace Services.NasbNiro.Inventory
                             }
 
                             unit.Status = SerialUnitStatus.InStock;
-                            unit.WarehouseId = document.WarehouseId;
+                            unit.WarehouseId = lineWarehouseId;
                             unit.LocationId = line.LocationId;
                             if (serialNewLot != null) unit.Lot = serialNewLot;
                             else if (serialLotId.HasValue) unit.LotId = serialLotId;
@@ -651,10 +959,11 @@ namespace Services.NasbNiro.Inventory
 
                             moves.Add(new Move
                             {
-                                Line = line, ItemId = item.Id, WarehouseId = document.WarehouseId, LocationId = line.LocationId,
+                                Line = line, ItemId = item.Id, WarehouseId = lineWarehouseId, LocationId = line.LocationId,
                                 LotId = unit.LotId, NewLot = unit.Lot != null && unit.Lot.Id == 0 ? unit.Lot : null,
                                 Unit = unit, Quantity = 1, UnitPrice = line.UnitPrice,
                             });
+                            serialIndex++;
                         }
                         else
                         {
@@ -688,9 +997,7 @@ namespace Services.NasbNiro.Inventory
                             }
                             else
                             {
-                                unit.Status = type == InventoryDocumentType.Issue ? SerialUnitStatus.InProduction
-                                    : type == InventoryDocumentType.SupplierReturn ? SerialUnitStatus.ReturnedToSupplier
-                                    : SerialUnitStatus.Scrapped;
+                                unit.Status = InventoryDocumentRules.OutgoingStatus(type);
                                 unit.WarehouseId = null;
                                 unit.LocationId = null;
                                 if (type == InventoryDocumentType.Issue && document.WorkOrderId.HasValue) unit.WorkOrderId = document.WorkOrderId;
@@ -704,11 +1011,11 @@ namespace Services.NasbNiro.Inventory
                 }
 
                 // ----- quantity (and lot) items
-                if (incoming)
+                if (lineIn)
                 {
                     moves.Add(new Move
                     {
-                        Line = line, ItemId = item.Id, WarehouseId = document.WarehouseId, LocationId = line.LocationId,
+                        Line = line, ItemId = item.Id, WarehouseId = lineWarehouseId, LocationId = line.LocationId,
                         LotId = lotId, NewLot = newLot, Quantity = line.Quantity, UnitPrice = line.UnitPrice,
                     });
                 }
@@ -756,6 +1063,65 @@ namespace Services.NasbNiro.Inventory
                 });
             }
 
+            // receipts into quarantine wait for incoming inspection, one inspection per line
+            if (document.NcrId == null && document.StockCountId == null && type != InventoryDocumentType.QcRelease && inWarehouse.Kind == WarehouseKind.Quarantine)
+            {
+                foreach (InventoryDocumentLine line in document.Lines.Where(l => incoming || transfer || l.Direction == DocumentLineDirection.In).OrderBy(l => l.RowNumber))
+                {
+                    _uow.Set<QcInspection>().Add(new QcInspection
+                    {
+                        Number = await InventoryNumbers.NextNumberAsync(_uow, InventoryNumbers.Inspection, "QI", document.DocumentDate, cancellationToken),
+                        ReceiptDocument = document,
+                        ReceiptLineId = line.Id,
+                        ItemId = line.ItemId,
+                        LotId = line.Lot == null ? line.LotId : null,
+                        Lot = line.Lot,
+                        WarehouseId = inWarehouse.Id,
+                        LocationId = transfer ? line.DestinationLocationId : line.LocationId,
+                        Quantity = line.Quantity,
+                        SerialNumbers = line.Serials == null || line.Serials.Count == 0 ? null : string.Join("\n", line.Serials.OrderBy(x => x.Id).Select(x => x.SerialNumber)),
+                        TargetWarehouseId = incoming ? document.DestinationWarehouseId : null,
+                        Status = InspectionStatus.Pending,
+                        CreateDate = now,
+                        CreatorUserId = _user.UserId,
+                    });
+                }
+            }
+
+            // what has been issued against the material request
+            if (request != null)
+            {
+                foreach (InventoryDocumentLine line in document.Lines)
+                {
+                    decimal quantity = line.Quantity;
+                    foreach (MaterialRequestLine requested in request.Lines.Where(l => l.ItemId == line.ItemId).OrderBy(l => l.RowNumber))
+                    {
+                        decimal take = Math.Min(quantity, requested.Quantity - requested.IssuedQuantity);
+                        if (take <= 0) continue;
+                        requested.IssuedQuantity += take;
+                        quantity -= take;
+                    }
+                }
+                if (request.Lines.All(l => l.IssuedQuantity >= l.Quantity))
+                {
+                    request.Status = MaterialRequestStatus.Closed;
+                    request.ClosedAt = now;
+                    request.ClosedByUserId = _user.UserId;
+                }
+            }
+
+            if (document.NcrId.HasValue)
+            {
+                NonConformance ncr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == document.NcrId.Value, cancellationToken);
+                if (ncr != null && ncr.Status == NcrStatus.Approved)
+                {
+                    ncr.Status = NcrStatus.Executed;
+                    ncr.ResultDocumentId = document.Id;
+                    ncr.ExecutedAt = now;
+                    ncr.ExecutedByUserId = _user.UserId;
+                }
+            }
+
             document.Number = await NextNumberAsync(type, document.DocumentDate, cancellationToken);
             document.Status = InventoryDocumentStatus.Confirmed;
             document.ConfirmedAt = now;
@@ -767,6 +1133,87 @@ namespace Services.NasbNiro.Inventory
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
             return await GetDocumentAsync(document.Id, cancellationToken);
+        }
+
+        /// <summary>Data the document needs before it is confirmed: exit data, scrap sale data, approvals.</summary>
+        private static string CheckBeforeConfirm(InventoryDocument document)
+        {
+            InventoryDocumentType type = document.Type;
+            var missing = new List<string>();
+            if (InventoryDocumentRules.LeavesPremises(type))
+            {
+                if (document.DriverName == null) missing.Add("نام راننده");
+                if (document.VehiclePlate == null) missing.Add("شماره پلاک");
+                if (document.ReceiverName == null) missing.Add("تحویل‌گیرنده");
+            }
+            if (type == InventoryDocumentType.ScrapSale)
+            {
+                if (document.BuyerName == null) missing.Add("خریدار");
+                if (document.MinutesNumber == null) missing.Add("شماره صورت‌جلسه فروش (FO-WH-020)");
+                if (!document.WeighbridgeDocumentId.HasValue) missing.Add("تصویر قبض باسکول");
+                if (document.DepositReference == null) missing.Add("شماره واریز به حساب شرکت");
+            }
+            if (missing.Count > 0) return "پیش از تایید این موارد را کامل کنید: " + string.Join("، ", missing);
+
+            if (type == InventoryDocumentType.CustomerDelivery && !document.QcLoadingApprovedAt.HasValue)
+                return "تحویل به مشتری تایید بارگیری کنترل کیفیت لازم دارد.";
+            if (InventoryDocumentRules.NeedsApprovals(type) && !document.StockCountId.HasValue &&
+                (!document.WarehouseApprovedAt.HasValue || !document.PlanningApprovedAt.HasValue))
+                return "سند تعدیل پیش از تایید، تایید سرپرست انبار و مدیر برنامه‌ریزی و کنترل پروژه را لازم دارد.";
+            return null;
+        }
+
+        public async Task<ResponseDto<DocumentDto>> ApproveAsync(int id, ApproveDocumentDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.InvalidData);
+            InventoryDocument document = await Documents.FirstOrDefaultAsync(d => d.Id == id && !d.Deleted, cancellationToken);
+            if (document == null) return ResponseDtoHelper.NotFound<DocumentDto>(InventoryMessages.DocumentNotFound);
+            if (document.Status != InventoryDocumentStatus.Draft) return ResponseDtoHelper.BadRequest<DocumentDto>("فقط سند پیش‌نویس تایید می‌شود.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            int me = _user.UserId;
+
+            switch (dto.Kind)
+            {
+                case ApprovalKind.Warehouse:
+                case ApprovalKind.Planning:
+                    if (!InventoryDocumentRules.NeedsApprovals(document.Type)) return ResponseDtoHelper.BadRequest<DocumentDto>("این سند تایید جداگانه لازم ندارد.");
+                    bool warehouse = dto.Kind == ApprovalKind.Warehouse;
+                    if (!_user.IsInRole(warehouse ? InventoryRoles.RoleWarehouse : InventoryRoles.RolePlanning))
+                        return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + (warehouse ? " (نقش انبار لازم است)" : " (نقش برنامه‌ریزی و کنترل پروژه لازم است)"));
+                    int? other = warehouse ? document.PlanningApprovedByUserId : document.WarehouseApprovedByUserId;
+                    if (me == document.CreatorUserId || me == other) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.SameUser);
+                    if (warehouse) { document.WarehouseApprovedAt = now; document.WarehouseApprovedByUserId = me; }
+                    else { document.PlanningApprovedAt = now; document.PlanningApprovedByUserId = me; }
+                    break;
+                case ApprovalKind.Quality:
+                    if (document.Type != InventoryDocumentType.CustomerDelivery) return ResponseDtoHelper.BadRequest<DocumentDto>("تایید بارگیری فقط برای تحویل به مشتری است.");
+                    if (!_user.IsInRole(InventoryRoles.RoleQuality)) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + " (نقش کنترل کیفیت لازم است)");
+                    document.QcLoadingApprovedAt = now;
+                    document.QcLoadingApprovedByUserId = me;
+                    break;
+                default:
+                    return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.InvalidData);
+            }
+            document.ModifyDate = now;
+            document.ModifierUserId = me;
+            string saveError = await SaveAsync(cancellationToken);
+            if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
+            return await GetDocumentAsync(id, cancellationToken);
+        }
+
+        public async Task<ResponseDto<DocumentDto>> ExitCheckAsync(int id, ExitCheckDto dto, CancellationToken cancellationToken)
+        {
+            InventoryDocument document = await Documents.FirstOrDefaultAsync(d => d.Id == id && !d.Deleted, cancellationToken);
+            if (document == null) return ResponseDtoHelper.NotFound<DocumentDto>(InventoryMessages.DocumentNotFound);
+            if (!InventoryDocumentRules.LeavesPremises(document.Type)) return ResponseDtoHelper.BadRequest<DocumentDto>("این سند خروج از شرکت ندارد.");
+            if (document.Status != InventoryDocumentStatus.Confirmed) return ResponseDtoHelper.BadRequest<DocumentDto>("خروج فقط برای سند تاییدشده ثبت می‌شود.");
+            if (document.ExitCheckedAt.HasValue) return ResponseDtoHelper.BadRequest<DocumentDto>("خروج این سند قبلاً ثبت شده است.");
+            document.ExitCheckedAt = DateTimeOffset.Now;
+            document.ExitCheckedByUserId = _user.UserId;
+            document.ExitCheckNote = InventoryText.Clean(dto?.Note);
+            string saveError = await SaveAsync(cancellationToken);
+            if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
+            return await GetDocumentAsync(id, cancellationToken);
         }
 
         private async Task<string> SaveAsync(CancellationToken cancellationToken)
@@ -795,6 +1242,14 @@ namespace Services.NasbNiro.Inventory
             InventoryDocument document = await Documents.FirstOrDefaultAsync(d => d.Id == id && !d.Deleted, cancellationToken);
             if (document == null) return ResponseDtoHelper.NotFound<DocumentDto>(InventoryMessages.DocumentNotFound);
             if (document.Status != InventoryDocumentStatus.Confirmed) return ResponseDtoHelper.BadRequest<DocumentDto>("فقط سند تاییدشده باطل می‌شود. سند پیش‌نویس را حذف کنید.");
+            if (document.Type == InventoryDocumentType.QcRelease || document.InspectionId.HasValue)
+                return ResponseDtoHelper.BadRequest<DocumentDto>("سند ترخیص از قرنطینه نتیجه بازرسی کنترل کیفیت است و باطل نمی‌شود؛ در صورت اشتباه، کالا با NCR یا انتقال برگردانده شود.");
+            if (document.ExitCheckedAt.HasValue)
+                return ResponseDtoHelper.BadRequest<DocumentDto>("کالای این سند از شرکت خارج شده است؛ برگشت آن با سند ورود جداگانه ثبت می‌شود.");
+            List<QcInspection> inspections = await _uow.Set<QcInspection>()
+                .Where(q => q.ReceiptDocumentId == id && !q.Deleted).ToListAsync(cancellationToken);
+            if (inspections.Any(q => q.Status == InspectionStatus.Done))
+                return ResponseDtoHelper.BadRequest<DocumentDto>("بازرسی کالای این رسید انجام شده است؛ رسید باطل نمی‌شود. کالای مردود با NCR برگشت داده می‌شود.");
 
             List<StockTransaction> transactions = await _uow.Set<StockTransaction>()
                 .Where(t => t.DocumentId == id && !t.IsReversal).ToListAsync(cancellationToken);
@@ -826,7 +1281,8 @@ namespace Services.NasbNiro.Inventory
 
                     List<StockTransaction> mine = transactions.Where(t => t.SerialUnitId == unit.Id).OrderBy(t => t.Id).ToList();
                     StockTransaction firstOfMine = mine.First();
-                    if (InventoryDocumentRules.IsIncoming(document.Type))
+                    bool cameIn = !InventoryDocumentRules.IsTransfer(document.Type) && mine.All(t => t.Quantity > 0);
+                    if (cameIn)
                     {
                         StockTransaction before = unitHistory.Where(t => t.SerialUnitId == unit.Id && t.Id < firstOfMine.Id)
                             .OrderByDescending(t => t.Id).FirstOrDefault();
@@ -836,13 +1292,9 @@ namespace Services.NasbNiro.Inventory
                         {
                             unit.Delete(); // created by this receipt
                         }
-                        else if (before != null && before.Quantity < 0 && before.Document.Type == InventoryDocumentType.SupplierReturn)
+                        else if (before != null && before.Quantity < 0 && !InventoryDocumentRules.IsTransfer(before.Document.Type))
                         {
-                            unit.Status = SerialUnitStatus.ReturnedToSupplier;
-                        }
-                        else if (before != null && before.Quantity < 0 && before.Document.Type == InventoryDocumentType.AdjustmentDecrease)
-                        {
-                            unit.Status = SerialUnitStatus.Scrapped;
+                            unit.Status = InventoryDocumentRules.OutgoingStatus(before.Document.Type);
                         }
                         else
                         {
@@ -886,6 +1338,47 @@ namespace Services.NasbNiro.Inventory
                     TransactionDate = document.DocumentDate, DocumentId = document.Id, DocumentLineId = t.DocumentLineId,
                     IsReversal = true, CreatedAt = now, CreatedByUserId = _user.UserId,
                 });
+            }
+
+            foreach (QcInspection inspection in inspections) inspection.Delete();
+
+            if (document.MaterialRequestId.HasValue)
+            {
+                MaterialRequest request = await _uow.Set<MaterialRequest>().Include(r => r.Lines)
+                    .FirstOrDefaultAsync(r => r.Id == document.MaterialRequestId.Value, cancellationToken);
+                List<InventoryDocumentLine> lines = await _uow.Set<InventoryDocumentLine>().Where(l => l.DocumentId == id).ToListAsync(cancellationToken);
+                if (request != null)
+                {
+                    foreach (InventoryDocumentLine line in lines)
+                    {
+                        decimal quantity = line.Quantity;
+                        foreach (MaterialRequestLine requested in request.Lines.Where(l => l.ItemId == line.ItemId).OrderByDescending(l => l.RowNumber))
+                        {
+                            decimal back = Math.Min(quantity, requested.IssuedQuantity);
+                            if (back <= 0) continue;
+                            requested.IssuedQuantity -= back;
+                            quantity -= back;
+                        }
+                    }
+                    if (request.Status == MaterialRequestStatus.Closed && request.Lines.Any(l => l.IssuedQuantity < l.Quantity))
+                    {
+                        request.Status = MaterialRequestStatus.Approved;
+                        request.ClosedAt = null;
+                        request.ClosedByUserId = null;
+                    }
+                }
+            }
+
+            if (document.NcrId.HasValue)
+            {
+                NonConformance ncr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == document.NcrId.Value, cancellationToken);
+                if (ncr != null && ncr.Status == NcrStatus.Executed && ncr.ResultDocumentId == document.Id)
+                {
+                    ncr.Status = NcrStatus.Approved;
+                    ncr.ResultDocumentId = null;
+                    ncr.ExecutedAt = null;
+                    ncr.ExecutedByUserId = null;
+                }
             }
 
             document.Status = InventoryDocumentStatus.Cancelled;

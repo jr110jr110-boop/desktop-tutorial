@@ -26,7 +26,15 @@ namespace Entities.Model.NasbNiro.Inventory
         public Provider Provider { get; set; }
 
         public DateTime? ProductionDate { get; set; }
+        public DateTime? ExpiryDate { get; set; }
         public string Description { get; set; }
+
+        /// <summary>The lot this one was made from (previous stage of the part, see StageConversion).</summary>
+        public int? ParentLotId { get; set; }
+        public InventoryLot ParentLot { get; set; }
+
+        /// <summary>Customer or subcontractor property: not company stock (ISO 9001 8.5.3).</summary>
+        public bool IsCustomerProperty { get; set; }
     }
 
     /// <summary>One physical piece with its own serial number.</summary>
@@ -58,6 +66,14 @@ namespace Entities.Model.NasbNiro.Inventory
         public WorkOrder WorkOrder { get; set; }
 
         public string Description { get; set; }
+
+        /// <summary>The piece this one was made from (previous stage, old label), see StageConversion.</summary>
+        public int? SourceSerialUnitId { get; set; }
+        public SerialUnit SourceSerialUnit { get; set; }
+
+        /// <summary>The lot of the previous stage, when the piece was made from a lot (for example a casting batch).</summary>
+        public int? SourceLotId { get; set; }
+        public InventoryLot SourceLot { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -108,6 +124,46 @@ namespace Entities.Model.NasbNiro.Inventory
         public string SepidarReference { get; set; }
         public DateTimeOffset? SepidarExportedAt { get; set; }
 
+        // ----- links
+        /// <summary>Approved material request an issue is made against (no issue without one).</summary>
+        public int? MaterialRequestId { get; set; }
+        public MaterialRequest MaterialRequest { get; set; }
+
+        public int? NcrId { get; set; }
+        public NonConformance Ncr { get; set; }
+
+        public int? InspectionId { get; set; }
+        public int? StockCountId { get; set; }
+
+        // ----- exit from the premises (برگه خروج): returns, subcontract, delivery, scrap sale
+        public string DriverName { get; set; }
+        public string VehiclePlate { get; set; }
+        public string ReceiverName { get; set; }
+        public string Destination { get; set; }
+        public DateTimeOffset? ExitCheckedAt { get; set; }
+        public int? ExitCheckedByUserId { get; set; }
+        public string ExitCheckNote { get; set; }
+
+        /// <summary>QC approval of the loading before a customer delivery.</summary>
+        public DateTimeOffset? QcLoadingApprovedAt { get; set; }
+        public int? QcLoadingApprovedByUserId { get; set; }
+
+        // ----- scrap sale (WI-WH-004, FO-WH-020)
+        public string BuyerName { get; set; }
+        public string MinutesNumber { get; set; }
+
+        /// <summary>Weighbridge ticket (photo), uploaded through api/v1/Documents.</summary>
+        public Guid? WeighbridgeDocumentId { get; set; }
+
+        /// <summary>Reference of the deposit to the company bank account (no personal accounts).</summary>
+        public string DepositReference { get; set; }
+
+        // ----- approvals of adjustments: the warehouse supervisor (not the creator) and the planning manager
+        public DateTimeOffset? WarehouseApprovedAt { get; set; }
+        public int? WarehouseApprovedByUserId { get; set; }
+        public DateTimeOffset? PlanningApprovedAt { get; set; }
+        public int? PlanningApprovedByUserId { get; set; }
+
         public ICollection<InventoryDocumentLine> Lines { get; set; }
 
         [Timestamp]
@@ -145,6 +201,12 @@ namespace Entities.Model.NasbNiro.Inventory
 
         public decimal? UnitPrice { get; set; }
         public string Description { get; set; }
+
+        /// <summary>Only for a stage conversion: the line takes the part out (old stage) or brings it in (new stage).</summary>
+        public DocumentLineDirection Direction { get; set; }
+
+        /// <summary>Stage conversion "in" line: row number of the "out" line it was made from (label genealogy).</summary>
+        public int? SourceRowNumber { get; set; }
 
         public ICollection<InventoryDocumentLineSerial> Serials { get; set; }
     }

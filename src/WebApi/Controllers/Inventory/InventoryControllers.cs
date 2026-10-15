@@ -119,6 +119,149 @@ namespace WebApi.Controllers
         [HttpPost("{id:int}/cancel")]
         [Authorize(Roles = InventoryRoles.Documents)]
         public async Task<IActionResult> CancelAsync(int id, [FromBody] CancelDocumentDto dto, CancellationToken ct) => Ok(await _service.CancelAsync(id, dto, ct));
+
+        /// <summary>Adjustment approvals (warehouse supervisor, planning) and the QC loading approval of a delivery; the role is checked inside.</summary>
+        [HttpPost("{id:int}/approve")]
+        [Authorize(Roles = InventoryRoles.Approvers)]
+        public async Task<IActionResult> ApproveAsync(int id, [FromBody] ApproveDocumentDto dto, CancellationToken ct) => Ok(await _service.ApproveAsync(id, dto, ct));
+
+        [HttpPost("{id:int}/exit-check")]
+        [Authorize(Roles = InventoryRoles.ExitCheck)]
+        public async Task<IActionResult> ExitCheckAsync(int id, [FromBody] ExitCheckDto dto, CancellationToken ct) => Ok(await _service.ExitCheckAsync(id, dto, ct));
+    }
+
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/inventory/coding")]
+    public class InventoryCodingController : ControllerBase
+    {
+        private readonly IInventoryCodingService _service;
+        public InventoryCodingController(IInventoryCodingService service) => _service = service;
+
+        [HttpGet("values")]
+        public async Task<IActionResult> ValuesAsync([FromQuery] string scheme, CancellationToken ct) => Ok(await _service.GetValuesAsync(scheme, ct));
+
+        [HttpPost("values")]
+        [Authorize(Roles = InventoryRoles.Planning)]
+        public async Task<IActionResult> SaveValueAsync([FromBody] SaveCodingValueDto dto, CancellationToken ct) => Ok(await _service.SaveValueAsync(dto, ct));
+
+        [HttpGet("check")]
+        public async Task<IActionResult> CheckAsync([FromQuery] string code, [FromQuery] int? itemId, CancellationToken ct) => Ok(await _service.CheckCodeAsync(code, itemId, ct));
+
+        [HttpGet("requests")]
+        public async Task<IActionResult> RequestsAsync([FromQuery] Entities.Model.NasbNiro.Inventory.ItemRequestStatus? status, CancellationToken ct) => Ok(await _service.GetRequestsAsync(status, ct));
+
+        [HttpPost("requests")]
+        [Authorize(Roles = InventoryRoles.ItemRequest)]
+        public async Task<IActionResult> SaveRequestAsync([FromBody] SaveItemRequestDto dto, CancellationToken ct) => Ok(await _service.SaveRequestAsync(dto, ct));
+
+        [HttpPost("requests/review")]
+        [Authorize(Roles = InventoryRoles.Planning)]
+        public async Task<IActionResult> ReviewRequestAsync([FromBody] ReviewItemRequestDto dto, CancellationToken ct) => Ok(await _service.ReviewRequestAsync(dto, ct));
+    }
+
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/inventory/quality")]
+    public class InventoryQualityController : ControllerBase
+    {
+        private readonly IInventoryQualityService _service;
+        public InventoryQualityController(IInventoryQualityService service) => _service = service;
+
+        [HttpGet("inspections")]
+        public async Task<IActionResult> InspectionsAsync([FromQuery] InspectionQuery query, CancellationToken ct) =>
+            Ok((await _service.GetInspectionsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("inspections/{id:int}")]
+        public async Task<IActionResult> InspectionAsync(int id, CancellationToken ct) => Ok(await _service.GetInspectionAsync(id, ct));
+
+        [HttpPost("inspections")]
+        [Authorize(Roles = InventoryRoles.Qc)]
+        public async Task<IActionResult> RecordInspectionAsync([FromBody] RecordInspectionDto dto, CancellationToken ct) => Ok(await _service.RecordInspectionAsync(dto, ct));
+
+        [HttpGet("ncr")]
+        public async Task<IActionResult> NcrsAsync([FromQuery] NcrQuery query, CancellationToken ct) =>
+            Ok((await _service.GetNcrsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("ncr/{id:int}")]
+        public async Task<IActionResult> NcrAsync(int id, CancellationToken ct) => Ok(await _service.GetNcrAsync(id, ct));
+
+        [HttpPost("ncr")]
+        [Authorize(Roles = InventoryRoles.Qc)]
+        public async Task<IActionResult> SaveNcrAsync([FromBody] SaveNcrDto dto, CancellationToken ct) => Ok(await _service.SaveNcrAsync(dto, ct));
+
+        /// <summary>QC, engineering and manufacturing managers sign; engineering issues the concession. The role is checked inside.</summary>
+        [HttpPost("ncr/approve")]
+        [Authorize(Roles = InventoryRoles.Approvers)]
+        public async Task<IActionResult> ApproveNcrAsync([FromBody] ApproveNcrDto dto, CancellationToken ct) => Ok(await _service.ApproveNcrAsync(dto, ct));
+
+        [HttpPost("ncr/execute")]
+        [Authorize(Roles = "PMO,QC,WAREHOUSE")]
+        public async Task<IActionResult> ExecuteNcrAsync([FromBody] ExecuteNcrDto dto, CancellationToken ct) => Ok(await _service.ExecuteNcrAsync(dto, ct));
+
+        [HttpPost("ncr/close")]
+        [Authorize(Roles = InventoryRoles.Qc)]
+        public async Task<IActionResult> CloseNcrAsync([FromBody] CloseNcrDto dto, CancellationToken ct) => Ok(await _service.CloseNcrAsync(dto, ct));
+
+        [HttpGet("ncr/{id:int}/supplier-return")]
+        public async Task<IActionResult> SupplierReturnAsync(int id, CancellationToken ct) => Ok(await _service.GetSupplierReturnReportAsync(id, ct));
+    }
+
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/inventory/material-requests")]
+    public class MaterialRequestsController : ControllerBase
+    {
+        private readonly IInventoryWorkflowService _service;
+        public MaterialRequestsController(IInventoryWorkflowService service) => _service = service;
+
+        [HttpGet]
+        public async Task<IActionResult> GetAsync([FromQuery] MaterialRequestQuery query, CancellationToken ct) =>
+            Ok((await _service.GetRequestsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetByIdAsync(int id, CancellationToken ct) => Ok(await _service.GetRequestAsync(id, ct));
+
+        [HttpPost]
+        [Authorize(Roles = InventoryRoles.MaterialRequest)]
+        public async Task<IActionResult> SaveAsync([FromBody] SaveMaterialRequestDto dto, CancellationToken ct) => Ok(await _service.SaveRequestAsync(dto, ct));
+
+        [HttpDelete("{id:int}")]
+        [Authorize(Roles = InventoryRoles.MaterialRequest)]
+        public async Task<IActionResult> DeleteAsync(int id, CancellationToken ct) => Ok(await _service.DeleteRequestAsync(id, ct));
+
+        /// <summary>submit, approve-planning, approve-manufacturing, reject, close; the role is checked inside.</summary>
+        [HttpPost("action")]
+        [Authorize(Roles = InventoryRoles.MaterialRequest)]
+        public async Task<IActionResult> ActionAsync([FromBody] MaterialRequestActionDto dto, CancellationToken ct) => Ok(await _service.RequestActionAsync(dto, ct));
+    }
+
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/inventory/counts")]
+    public class StockCountsController : ControllerBase
+    {
+        private readonly IInventoryWorkflowService _service;
+        public StockCountsController(IInventoryWorkflowService service) => _service = service;
+
+        [HttpGet]
+        public async Task<IActionResult> GetAsync([FromQuery] int? warehouseId, CancellationToken ct) => Ok(await _service.GetCountsAsync(warehouseId, ct));
+
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetByIdAsync(int id, CancellationToken ct) => Ok(await _service.GetCountAsync(id, ct));
+
+        [HttpPost]
+        [Authorize(Roles = InventoryRoles.Documents)]
+        public async Task<IActionResult> StartAsync([FromBody] StartStockCountDto dto, CancellationToken ct) => Ok(await _service.StartCountAsync(dto, ct));
+
+        [HttpPost("lines")]
+        [Authorize(Roles = InventoryRoles.Documents)]
+        public async Task<IActionResult> LinesAsync([FromBody] SaveCountLinesDto dto, CancellationToken ct) => Ok(await _service.SaveCountLinesAsync(dto, ct));
+
+        /// <summary>submit, approve-warehouse, approve-planning, post, cancel; the role is checked inside.</summary>
+        [HttpPost("action")]
+        [Authorize(Roles = InventoryRoles.Documents)]
+        public async Task<IActionResult> ActionAsync([FromBody] StockCountActionDto dto, CancellationToken ct) => Ok(await _service.CountActionAsync(dto, ct));
     }
 
     [ApiController]

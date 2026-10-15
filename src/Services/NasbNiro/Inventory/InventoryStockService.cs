@@ -179,6 +179,11 @@ namespace Services.NasbNiro.Inventory
                 ProviderName = l.Provider.Name,
                 ProductionDate = l.ProductionDate,
                 Description = l.Description,
+                ExpiryDate = l.ExpiryDate,
+                ParentLotId = l.ParentLotId,
+                ParentLotNumber = l.ParentLot.LotNumber,
+                ParentItemCode = l.ParentLot.Item.Code,
+                IsCustomerProperty = l.IsCustomerProperty,
                 OnHand = balances.Where(b => b.LotId == l.Id).Sum(b => (decimal?)b.Quantity) ?? 0,
             });
 
@@ -259,6 +264,11 @@ namespace Services.NasbNiro.Inventory
                 WorkOrderCode = u.WorkOrder.Code,
                 Description = u.Description,
                 CreateDate = u.CreateDate,
+                SourceSerialUnitId = u.SourceSerialUnitId,
+                SourceSerialNumber = u.SourceSerialUnit.SerialNumber,
+                SourceItemCode = u.SourceSerialUnit != null ? u.SourceSerialUnit.Item.Code : u.SourceLot.Item.Code,
+                SourceLotId = u.SourceLotId,
+                SourceLotNumber = u.SourceLot.LotNumber,
             });
 
         public async Task<ResponseDto<PagedList<SerialUnitDto>>> GetSerialsAsync(SerialQuery query, CancellationToken cancellationToken)

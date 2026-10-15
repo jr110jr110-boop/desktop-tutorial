@@ -44,6 +44,27 @@ namespace Services.NasbNiro.Inventory
         public const string Routing = "PMO,ENGINEERING";
         public const string Qc = "PMO,QC";
         public const string Finance = "PMO,FINANCIAL";
+
+        /// <summary>Who may write a material request: production and planning.</summary>
+        public const string MaterialRequest = "PMO,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE";
+
+        /// <summary>Approvals of material requests (planning or manufacturing) and of NCRs (quality, engineering, manufacturing).</summary>
+        public const string Approvers = "PMO,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE";
+
+        /// <summary>Exit check of goods leaving the premises (guard).</summary>
+        public const string ExitCheck = "PMO,WAREHOUSE,SECURITY";
+
+        /// <summary>Requests for new item codes: engineering asks, planning approves.</summary>
+        public const string ItemRequest = "PMO,ENGINEERING,ENGINEER,WAREHOUSE,QC,CONSTRUCTION";
+
+        public const string Planning = "PMO";
+
+        // single roles used for the approvals
+        public const string RolePlanning = "PMO";
+        public const string RoleWarehouse = "WAREHOUSE";
+        public const string RoleManufacturing = "CONSTRUCTION";
+        public const string RoleQuality = "QC";
+        public const string RoleEngineering = "ENGINEERING";
     }
 
     public static class InventoryDocumentRules
@@ -52,16 +73,54 @@ namespace Services.NasbNiro.Inventory
             type == InventoryDocumentType.PurchaseReceipt ||
             type == InventoryDocumentType.ProductionReceipt ||
             type == InventoryDocumentType.ProductionReturn ||
-            type == InventoryDocumentType.AdjustmentIncrease;
+            type == InventoryDocumentType.AdjustmentIncrease ||
+            type == InventoryDocumentType.ScrapReceipt ||
+            type == InventoryDocumentType.OpeningBalance ||
+            type == InventoryDocumentType.CustomerPropertyReceipt;
 
         public static bool IsOutgoing(InventoryDocumentType type) =>
             type == InventoryDocumentType.Issue ||
             type == InventoryDocumentType.SupplierReturn ||
-            type == InventoryDocumentType.AdjustmentDecrease;
+            type == InventoryDocumentType.AdjustmentDecrease ||
+            type == InventoryDocumentType.CustomerDelivery ||
+            type == InventoryDocumentType.ScrapSale;
 
-        public static bool IsTransfer(InventoryDocumentType type) => type == InventoryDocumentType.Transfer;
+        public static bool IsTransfer(InventoryDocumentType type) =>
+            type == InventoryDocumentType.Transfer ||
+            type == InventoryDocumentType.SubcontractIssue ||
+            type == InventoryDocumentType.SubcontractReturn ||
+            type == InventoryDocumentType.QcRelease;
 
-        public static bool IsKnown(InventoryDocumentType type) => IsIncoming(type) || IsOutgoing(type) || IsTransfer(type);
+        public static bool IsConversion(InventoryDocumentType type) => type == InventoryDocumentType.StageConversion;
+
+        public static bool IsKnown(InventoryDocumentType type) => IsIncoming(type) || IsOutgoing(type) || IsTransfer(type) || IsConversion(type);
+
+        /// <summary>Made only by the system (inspection or NCR), never typed by a user.</summary>
+        public static bool IsSystemOnly(InventoryDocumentType type) => type == InventoryDocumentType.QcRelease;
+
+        /// <summary>Goods leave the premises: driver, vehicle and receiver are written and the guard checks the exit.</summary>
+        public static bool LeavesPremises(InventoryDocumentType type) =>
+            type == InventoryDocumentType.SupplierReturn ||
+            type == InventoryDocumentType.SubcontractIssue ||
+            type == InventoryDocumentType.CustomerDelivery ||
+            type == InventoryDocumentType.ScrapSale;
+
+        /// <summary>Needs the warehouse supervisor and the planning manager to approve before it is confirmed.</summary>
+        public static bool NeedsApprovals(InventoryDocumentType type) =>
+            type == InventoryDocumentType.AdjustmentIncrease || type == InventoryDocumentType.AdjustmentDecrease;
+
+        /// <summary>Status of a serial unit that leaves the stock with this document.</summary>
+        public static SerialUnitStatus OutgoingStatus(InventoryDocumentType type)
+        {
+            switch (type)
+            {
+                case InventoryDocumentType.Issue: return SerialUnitStatus.InProduction;
+                case InventoryDocumentType.SupplierReturn: return SerialUnitStatus.ReturnedToSupplier;
+                case InventoryDocumentType.CustomerDelivery: return SerialUnitStatus.Delivered;
+                case InventoryDocumentType.StageConversion: return SerialUnitStatus.Converted;
+                default: return SerialUnitStatus.Scrapped;
+            }
+        }
 
         public static string NumberPrefix(InventoryDocumentType type)
         {
@@ -75,6 +134,15 @@ namespace Services.NasbNiro.Inventory
                 case InventoryDocumentType.Transfer: return "TR";
                 case InventoryDocumentType.AdjustmentIncrease: return "AI";
                 case InventoryDocumentType.AdjustmentDecrease: return "AD";
+                case InventoryDocumentType.SubcontractIssue: return "SI";
+                case InventoryDocumentType.SubcontractReturn: return "SB";
+                case InventoryDocumentType.CustomerDelivery: return "CD";
+                case InventoryDocumentType.StageConversion: return "SC";
+                case InventoryDocumentType.ScrapReceipt: return "WR";
+                case InventoryDocumentType.ScrapSale: return "WS";
+                case InventoryDocumentType.OpeningBalance: return "OB";
+                case InventoryDocumentType.QcRelease: return "QR";
+                case InventoryDocumentType.CustomerPropertyReceipt: return "CP";
                 default: return "DC";
             }
         }
@@ -91,8 +159,71 @@ namespace Services.NasbNiro.Inventory
                 case InventoryDocumentType.Transfer: return "انتقال";
                 case InventoryDocumentType.AdjustmentIncrease: return "تعدیل افزایشی";
                 case InventoryDocumentType.AdjustmentDecrease: return "تعدیل کاهشی";
+                case InventoryDocumentType.SubcontractIssue: return "ارسال به پیمانکار";
+                case InventoryDocumentType.SubcontractReturn: return "برگشت از پیمانکار";
+                case InventoryDocumentType.CustomerDelivery: return "تحویل به مشتری";
+                case InventoryDocumentType.StageConversion: return "تبدیل مرحله";
+                case InventoryDocumentType.ScrapReceipt: return "رسید ضایعات";
+                case InventoryDocumentType.ScrapSale: return "فروش ضایعات";
+                case InventoryDocumentType.OpeningBalance: return "موجودی اول دوره";
+                case InventoryDocumentType.QcRelease: return "ترخیص از قرنطینه";
+                case InventoryDocumentType.CustomerPropertyReceipt: return "رسید اموال مشتری";
                 default: return type.ToString();
             }
+        }
+    }
+
+    /// <summary>Running numbers of documents, requests and labels, one counter per kind and Persian year.</summary>
+    internal static class InventoryNumbers
+    {
+        // counter kinds that are not warehouse document types (those use their own type number)
+        public const int Serial = 99;
+        public const int Label = 98;
+        public const int Inspection = 97;
+        public const int Ncr = 96;
+        public const int MaterialRequest = 95;
+        public const int StockCount = 94;
+        public const int ItemRequest = 93;
+
+        public static async Task<int> NextAsync(IUnitOfWork uow, int kind, int year, CancellationToken cancellationToken)
+        {
+            DbSet<DocumentNumberSequence> sequences = uow.Set<DocumentNumberSequence>();
+            DocumentNumberSequence sequence = sequences.Local.FirstOrDefault(s => s.Type == kind && s.Year == year)
+                ?? await sequences.FirstOrDefaultAsync(s => s.Type == kind && s.Year == year, cancellationToken);
+            if (sequence == null)
+            {
+                sequence = new DocumentNumberSequence { Type = kind, Year = year, LastNumber = 0 };
+                sequences.Add(sequence);
+            }
+            sequence.LastNumber++;
+            return sequence.LastNumber;
+        }
+
+        /// <summary>For example "NCR-1405-00012".</summary>
+        public static async Task<string> NextNumberAsync(IUnitOfWork uow, int kind, string prefix, DateTime date, CancellationToken cancellationToken)
+        {
+            int year = InventoryText.PersianYear(date);
+            int number = await NextAsync(uow, kind, year, cancellationToken);
+            return $"{prefix}-{year}-{number:00000}";
+        }
+
+        /// <summary>
+        /// Company label number YYDDDNNNN: two digits of the Persian year, the day of the year and a daily counter
+        /// (the format already printed on the warehouse labels).
+        /// </summary>
+        public static async Task<List<string>> NextLabelsAsync(IUnitOfWork uow, DateTime date, int count, CancellationToken cancellationToken)
+        {
+            var calendar = new PersianCalendar();
+            int yy = calendar.GetYear(date) % 100;
+            int ddd = calendar.GetDayOfYear(date);
+            int day = yy * 1000 + ddd; // one counter per day
+            var labels = new List<string>();
+            for (int i = 0; i < count; i++)
+            {
+                int n = await NextAsync(uow, Label, day, cancellationToken);
+                labels.Add(string.Format(CultureInfo.InvariantCulture, "{0:00}{1:000}{2:0000}", yy, ddd, n));
+            }
+            return labels;
         }
     }
 
@@ -159,5 +290,7 @@ namespace Services.NasbNiro.Inventory
         public const string DocumentNotFound = "سند انبار پیدا نشد.";
         public const string OnlyDraftEditable = "فقط سند پیش‌نویس قابل ویرایش یا حذف است.";
         public const string ConcurrencyConflict = "اطلاعات هم‌زمان توسط کاربر دیگری تغییر کرد. صفحه را دوباره باز کنید و دوباره تلاش کنید.";
+        public const string NotAllowed = "شما مجوز این کار را ندارید.";
+        public const string SameUser = "تایید باید توسط شخص دیگری غیر از ثبت‌کننده یا تاییدکننده قبلی انجام شود.";
     }
 }

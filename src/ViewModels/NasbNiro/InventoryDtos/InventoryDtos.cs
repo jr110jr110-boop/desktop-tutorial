@@ -46,6 +46,10 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public decimal? MaxStock { get; set; }
         public bool IsActive { get; set; } = true;
         public string SepidarCode { get; set; }
+        public string MescCode { get; set; }
+        public string LegacyCode { get; set; }
+        public bool RequiresIncomingInspection { get; set; } = true;
+        public int? ShelfLifeDays { get; set; }
     }
 
     public class InventoryItemDto
@@ -68,11 +72,20 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public bool IsActive { get; set; }
         public string SepidarCode { get; set; }
         public decimal OnHand { get; set; }
+        public string GroupCode { get; set; }
+        public string StageCode { get; set; }
+        public string BaseCode { get; set; }
+        public string MescCode { get; set; }
+        public string LegacyCode { get; set; }
+        public bool RequiresIncomingInspection { get; set; }
+        public int? ShelfLifeDays { get; set; }
     }
 
     public class InventoryItemQuery : PaginationParams
     {
         public string Contains { get; set; }
+        public string GroupCode { get; set; }
+        public string BaseCode { get; set; }
         public int? ItemGroupId { get; set; }
         public ItemTrackingMode? TrackingMode { get; set; }
         public bool? IsActive { get; set; }
@@ -97,6 +110,11 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public decimal? Weight { get; set; }
         public decimal? MinStock { get; set; }
         public string SepidarCode { get; set; }
+
+        /// <summary>Old code (RayDana / Excel); not used as the item code.</summary>
+        public string LegacyCode { get; set; }
+
+        public string MescCode { get; set; }
     }
 
     public class ImportItemsResultDto
@@ -105,6 +123,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int Updated { get; set; }
         public int GroupsCreated { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
+
+        /// <summary>Imported, but the code does not follow WI-WH-002.</summary>
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     public class SaveWarehouseDto
@@ -166,7 +187,26 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? ContractId { get; set; }
         public string ReferenceNumber { get; set; }
         public string Description { get; set; }
+        public int? MaterialRequestId { get; set; }
+        public string DriverName { get; set; }
+        public string VehiclePlate { get; set; }
+        public string ReceiverName { get; set; }
+        public string Destination { get; set; }
+        public string BuyerName { get; set; }
+        public string MinutesNumber { get; set; }
+        public Guid? WeighbridgeDocumentId { get; set; }
+        public string DepositReference { get; set; }
         public List<SaveDocumentLineDto> Lines { get; set; } = new List<SaveDocumentLineDto>();
+    }
+
+    public class ApproveDocumentDto
+    {
+        public ApprovalKind Kind { get; set; }
+    }
+
+    public class ExitCheckDto
+    {
+        public string Note { get; set; }
     }
 
     public class SaveDocumentLineDto
@@ -181,6 +221,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? DestinationLocationId { get; set; }
         public decimal? UnitPrice { get; set; }
         public string Description { get; set; }
+        public DocumentLineDirection Direction { get; set; }
+        public int? SourceRowNumber { get; set; }
         public List<string> SerialNumbers { get; set; } = new List<string>();
     }
 
@@ -250,6 +292,31 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string CancelReason { get; set; }
         public SepidarSyncStatus SepidarStatus { get; set; }
         public string SepidarReference { get; set; }
+        public WarehouseKind WarehouseKind { get; set; }
+        public WarehouseKind? DestinationWarehouseKind { get; set; }
+        public int? MaterialRequestId { get; set; }
+        public string MaterialRequestNumber { get; set; }
+        public int? NcrId { get; set; }
+        public string NcrNumber { get; set; }
+        public int? InspectionId { get; set; }
+        public int? StockCountId { get; set; }
+        public string DriverName { get; set; }
+        public string VehiclePlate { get; set; }
+        public string ReceiverName { get; set; }
+        public string Destination { get; set; }
+        public DateTimeOffset? ExitCheckedAt { get; set; }
+        public string ExitCheckedByName { get; set; }
+        public string ExitCheckNote { get; set; }
+        public DateTimeOffset? QcLoadingApprovedAt { get; set; }
+        public string QcLoadingApprovedByName { get; set; }
+        public string BuyerName { get; set; }
+        public string MinutesNumber { get; set; }
+        public Guid? WeighbridgeDocumentId { get; set; }
+        public string DepositReference { get; set; }
+        public DateTimeOffset? WarehouseApprovedAt { get; set; }
+        public string WarehouseApprovedByName { get; set; }
+        public DateTimeOffset? PlanningApprovedAt { get; set; }
+        public string PlanningApprovedByName { get; set; }
         public List<DocumentLineDto> Lines { get; set; } = new List<DocumentLineDto>();
     }
 
@@ -273,6 +340,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string DestinationLocationCode { get; set; }
         public decimal? UnitPrice { get; set; }
         public string Description { get; set; }
+        public DocumentLineDirection Direction { get; set; }
+        public int? SourceRowNumber { get; set; }
         public List<string> SerialNumbers { get; set; } = new List<string>();
     }
 
@@ -394,6 +463,11 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ProviderName { get; set; }
         public DateTime? ProductionDate { get; set; }
         public string Description { get; set; }
+        public DateTime? ExpiryDate { get; set; }
+        public int? ParentLotId { get; set; }
+        public string ParentLotNumber { get; set; }
+        public string ParentItemCode { get; set; }
+        public bool IsCustomerProperty { get; set; }
         public decimal OnHand { get; set; }
     }
 
@@ -449,6 +523,13 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string WorkOrderCode { get; set; }
         public string Description { get; set; }
         public DateTimeOffset CreateDate { get; set; }
+
+        /// <summary>Previous stage of the part (old label) it was made from.</summary>
+        public int? SourceSerialUnitId { get; set; }
+        public string SourceSerialNumber { get; set; }
+        public string SourceItemCode { get; set; }
+        public int? SourceLotId { get; set; }
+        public string SourceLotNumber { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------

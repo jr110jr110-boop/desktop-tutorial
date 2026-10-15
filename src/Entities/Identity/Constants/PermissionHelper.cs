@@ -304,6 +304,11 @@ namespace Entities.Identity.Constants
                 ClaimValue = Traceability,
                 RoleId = RoleConstants.AssemblerResponseRole.Id,
             };
+            yield return new RoleClaim() { Id = 801, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.AssemblerResponseRole.Id };
+            yield return new RoleClaim() { Id = 402, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.EngineerResponseRole.Id };
+            yield return new RoleClaim() { Id = 900, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.ConstructionResponseRole.Id };
+            yield return new RoleClaim() { Id = 901, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.ConstructionResponseRole.Id };
+            yield return new RoleClaim() { Id = 1000, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.SecurityResponseRole.Id };
             #endregion
         }
     }
