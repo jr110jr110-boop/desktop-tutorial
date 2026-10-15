@@ -1,1 +1,0 @@
-import{d as a,o as t,c as o,b as s,a1 as c,h as n,i}from"./index.aea37f41.js";const m=a({props:{active:{type:Boolean,default:!1}},setup(e){return(l,r)=>e.active?(t(),o("div",{key:0,class:n([{"w-100 vh-100":e.active},"position-relative"])},[s(c,{class:"list-loader"})],2)):i("",!0)}});export{m as _};

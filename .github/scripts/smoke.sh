@@ -23,7 +23,7 @@ curl -s "$BASE/swagger/v1/swagger.json" -o "$OUT/swagger.json" || true
 
 # Front-end served by the API from wwwroot (one IIS site): pages, assets, and API paths that must stay 404.
 if [ -f src/WebApi/wwwroot/index.html ]; then
-  for p in "" "login" "contract/list" "contract/update/12" "workflowGroup/list" "inventory/documents/new" "inventory/trace"; do
+  for p in "" "login" "contract/list" "contract/update/12" "workflowGroup/list" "inventory/documents/new" "inventory/trace" "inventory/ncr/new" "inventory/material-requests/new" "inventory/counts" "inventory/inspections" "inventory/item-requests" "inventory/coding"; do
     code=$(curl -s -o "$OUT/page.tmp" -w '%{http_code}' "$BASE/$p")
     if grep -q '<div id="app">' "$OUT/page.tmp"; then kind=index.html; else kind=other; fi
     echo "ui_page /$p http=$code body=$kind" | tee -a "$OUT/3-results.txt"
