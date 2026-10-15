@@ -355,7 +355,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
     {
         public int? Id { get; set; }
         public DateTime RequestDate { get; set; }
-        public int WorkOrderId { get; set; }
+        public int? WorkOrderId { get; set; }
         public int? WarehouseId { get; set; }
         public string Purpose { get; set; }
         public List<SaveMaterialRequestLineDto> Lines { get; set; } = new List<SaveMaterialRequestLineDto>();
@@ -384,7 +384,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Number { get; set; }
         public DateTime RequestDate { get; set; }
         public MaterialRequestStatus Status { get; set; }
-        public int WorkOrderId { get; set; }
+        public int? WorkOrderId { get; set; }
         public string WorkOrderCode { get; set; }
         public string WarehouseTitle { get; set; }
         public string Purpose { get; set; }

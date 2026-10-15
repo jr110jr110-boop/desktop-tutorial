@@ -131,8 +131,10 @@ namespace Services.NasbNiro.Inventory
         {
             if (dto == null) return ResponseDtoHelper.BadRequest<MaterialRequestDto>(InventoryMessages.InvalidData);
             if (dto.RequestDate == default) return ResponseDtoHelper.BadRequest<MaterialRequestDto>("تاریخ درخواست را وارد کنید.");
-            if (!await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId && !w.Deleted, cancellationToken))
-                return ResponseDtoHelper.BadRequest<MaterialRequestDto>("دستور ساخت (پروژه) درخواست را انتخاب کنید.");
+            if (dto.WorkOrderId.HasValue && !await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId.Value && !w.Deleted, cancellationToken))
+                return ResponseDtoHelper.BadRequest<MaterialRequestDto>("دستور ساخت پیدا نشد.");
+            if (!dto.WorkOrderId.HasValue && InventoryText.Clean(dto.Purpose) == null)
+                return ResponseDtoHelper.BadRequest<MaterialRequestDto>("دستور ساخت (پروژه) را انتخاب کنید؛ برای مصرف عمومی یا تعمیرات، محل مصرف را در «شرح» بنویسید.");
             if (dto.WarehouseId.HasValue && !await _uow.Set<Warehouse>().AnyAsync(w => w.Id == dto.WarehouseId.Value && !w.Deleted, cancellationToken))
                 return ResponseDtoHelper.BadRequest<MaterialRequestDto>(InventoryMessages.WarehouseNotFound);
             List<SaveMaterialRequestLineDto> lines = (dto.Lines ?? new List<SaveMaterialRequestLineDto>()).Where(l => l != null).ToList();

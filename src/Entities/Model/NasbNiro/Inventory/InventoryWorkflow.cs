@@ -160,7 +160,8 @@ namespace Entities.Model.NasbNiro.Inventory
         public DateTime RequestDate { get; set; }
         public MaterialRequestStatus Status { get; set; }
 
-        public int WorkOrderId { get; set; }
+        /// <summary>Project / work order (cost centre). Empty only for general use (maintenance, overhead) with a written purpose.</summary>
+        public int? WorkOrderId { get; set; }
         public WorkOrder WorkOrder { get; set; }
 
         /// <summary>Warehouse the material is wanted from (optional).</summary>

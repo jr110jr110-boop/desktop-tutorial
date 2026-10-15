@@ -43,6 +43,23 @@ TOKEN=$(login Admin 'Ci#Adm1n-Build-2026')
 [ -n "$TOKEN" ] && ok "login admin (PMO)" || bad "login admin (PMO)"
 ADMIN_TOKEN=$TOKEN
 
+# users of the other roles (approvals must come from different people)
+user() { # user NAME ROLEID PASSWORD N
+  call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"0912000000$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"001234567$4\"}"
+}
+user wh.ci 6 'Ci#Wh-User-2026' 1
+user prod.ci 9 'Ci#Prod-User-2026' 2
+user qc.ci 5 'Ci#Qc-User-2026' 3
+user eng.ci 4 'Ci#Eng-User-2026' 4
+user sec.ci 10 'Ci#Sec-User-2026' 5
+WH_TOKEN=$(login wh.ci 'Ci#Wh-User-2026'); PROD_TOKEN=$(login prod.ci 'Ci#Prod-User-2026'); QC_TOKEN=$(login qc.ci 'Ci#Qc-User-2026')
+ENG_TOKEN=$(login eng.ci 'Ci#Eng-User-2026'); SEC_TOKEN=$(login sec.ci 'Ci#Sec-User-2026')
+[ -n "$WH_TOKEN" ] && [ -n "$PROD_TOKEN" ] && [ -n "$QC_TOKEN" ] && [ -n "$ENG_TOKEN" ] && [ -n "$SEC_TOKEN" ] && ok "login warehouse, production, QC, engineering, security users" || bad "login warehouse, production, QC, engineering, security users"
+as() { local t=$TOKEN; TOKEN=$1; shift; call "$@"; TOKEN=$t; } # as TOKEN METHOD PATH [JSON]
+
+# item codes per WI-WH-002 (material, part, MESC standard part, product)
+C_RAW=01001025120101; C_SHAFT=02130001010003; C_BOLT=50.10.12.024.1; C_ROTOR=031TS250PB1405
+
 # ---------------------------------------------------------------- master data
 call POST inventory/groups '{"code":"TRB","title":"توربین بخار"}'; check "group create" '.success and .data.id > 0'
 G1=$(val .data.id)
@@ -52,12 +69,12 @@ call POST inventory/groups "{\"id\":$G1,\"code\":\"TRB\",\"title\":\"توربی�
 
 # item VAR JSON LABEL : creates the item and stores its id in VAR (no subshell, so the counters stay right)
 item() { call POST inventory/items "$2"; check "item $3" '.success and .data.id > 0'; printf -v "$1" '%s' "$(val .data.id)"; }
-item RAW "{\"code\":\"RM-001\",\"title\":\"میلگرد فورج 26NiCrMoV\",\"itemGroupId\":$G2,\"unit\":\"kg\",\"trackingMode\":1,\"material\":\"26NiCrMoV14-5\",\"minStock\":100,\"sepidarCode\":\"5001\"}" "RM-001 (lot)"
-item SHAFT "{\"code\":\"SH-100\",\"title\":\"شفت روتور\",\"itemGroupId\":$G2,\"unit\":\"عدد\",\"trackingMode\":2,\"technicalCode\":\"DWG-SH-100\"}" "SH-100 (serial)"
-item BOLT "{\"code\":\"BT-300\",\"title\":\"پیچ M24\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":500}" "BT-300 (none)"
-item ROTOR "{\"code\":\"RT-900\",\"title\":\"روتور کامل\",\"itemGroupId\":$G1,\"unit\":\"عدد\",\"trackingMode\":2}" "RT-900 (serial)"
-call POST inventory/items '{"code":"RM-001","title":"تکراری","unit":"kg"}'; check "duplicate item code rejected" '.success == false'
-call GET "inventory/items/by-code?code=sh-100"; check "item by code (case-insensitive)" ".data.id == $SHAFT"
+item RAW "{\"code\":\"$C_RAW\",\"title\":\"میلگرد فورج 26NiCrMoV\",\"itemGroupId\":$G2,\"unit\":\"kg\",\"trackingMode\":1,\"material\":\"26NiCrMoV14-5\",\"minStock\":100,\"sepidarCode\":\"5001\",\"requiresIncomingInspection\":false}" "material (lot)"
+item SHAFT "{\"code\":\"$C_SHAFT\",\"title\":\"شفت روتور\",\"itemGroupId\":$G2,\"unit\":\"عدد\",\"trackingMode\":2,\"technicalCode\":\"130010100\",\"requiresIncomingInspection\":false}" "part (serial)"
+item BOLT "{\"code\":\"$C_BOLT\",\"title\":\"پیچ M24\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":500,\"requiresIncomingInspection\":false}" "MESC standard part (none)"
+item ROTOR "{\"code\":\"$C_ROTOR\",\"title\":\"روتور کامل\",\"itemGroupId\":$G1,\"unit\":\"عدد\",\"trackingMode\":2}" "product (serial)"
+call POST inventory/items "{\"code\":\"$C_RAW\",\"title\":\"تکراری\",\"unit\":\"kg\"}"; check "duplicate item code rejected" '.success == false'
+call GET "inventory/items/by-code?code=$C_SHAFT"; check "item by code" ".data.id == $SHAFT"
 
 call POST inventory/warehouses '{"code":"WH-RM","title":"انبار مواد و قطعات","kind":2,"sepidarCode":"101"}'; check "warehouse 1" '.success'
 W1=$(val .data.id)
@@ -97,8 +114,8 @@ D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "receipt of
 call DELETE "inventory/documents/$D"
 
 # ---------------------------------------------------------------- shortage
-call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1000}]}"
-D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "issue beyond stock rejected" '.success == false and (.message|length) > 0'
+call POST inventory/documents "{\"type\":6,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$W2,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1000}]}"
+D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "transfer beyond stock rejected" '.success == false and (.message|length) > 0'
 call DELETE "inventory/documents/$D"
 
 # ---------------------------------------------------------------- transfer
@@ -108,17 +125,31 @@ call POST "inventory/documents/$TR/confirm"; check "transfer confirmed" '.succes
 call GET "inventory/stock/serials?Contains=S-1&ItemId=$SHAFT"; check "S-1 now in WH-WIP / M-01" ".data.data[0].warehouseId == $W2 and .data.data[0].locationCode == \"M-01\""
 call GET "inventory/stock?ItemId=$BOLT"; check "bolts split 60 / 40" '[.data.data[]|.quantity]|sort == [40,60]'
 
-# ---------------------------------------------------------------- issue to production
-call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$RAW,\"quantity\":100,\"lotId\":$LOT},{\"itemId\":$SHAFT,\"quantity\":1,\"serialNumbers\":[\"S-2\"]}]}"
+# ---------------------------------------------------------------- issue to production (against an approved material request)
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$RAW,\"quantity\":1,\"lotId\":$LOT}]}"
+check "issue without a material request rejected" '.success == false'
+call POST inventory/material-requests "{\"requestDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"ساخت روتور آزمایشی\",\"lines\":[{\"itemId\":$RAW,\"quantity\":100},{\"itemId\":$SHAFT,\"quantity\":1}]}"
+check "material request draft" '.success and .data.status == 0'
+MR=$(val .data.id)
+call POST inventory/material-requests/action "{\"id\":$MR,\"action\":\"submit\"}"; check "material request submitted + numbered" '.success and .data.status == 1 and (.data.number|startswith("MR-"))'
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$MR,\"lines\":[{\"itemId\":$RAW,\"quantity\":1,\"lotId\":$LOT}]}"
+check "issue against a request not yet approved rejected" '.success == false'
+call POST inventory/material-requests/action "{\"id\":$MR,\"action\":\"approve-planning\"}"; check "request approved by planning" '.success and .data.planningApproved and .data.status == 1'
+call POST inventory/material-requests/action "{\"id\":$MR,\"action\":\"approve-manufacturing\"}"; check "planning user cannot also approve for manufacturing" '.success == false'
+as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$MR,\"action\":\"approve-manufacturing\"}"; check "request approved by manufacturing -> approved" '.success and .data.status == 2'
+call GET "inventory/material-requests/$MR"; check "request shows availability" ".data.lines[0].available == 500.5 and .data.lines[0].shortage == 0"
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$MR,\"lines\":[{\"itemId\":$RAW,\"quantity\":150,\"lotId\":$LOT}]}"
+check "issue above the requested quantity rejected" '.success == false'
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$MR,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"
+check "issue of an item not in the request rejected" '.success == false'
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$MR,\"lines\":[{\"itemId\":$RAW,\"quantity\":100,\"lotId\":$LOT},{\"itemId\":$SHAFT,\"quantity\":1,\"serialNumbers\":[\"S-2\"]}]}"
 IS=$(val .data.id)
-call POST "inventory/documents/$IS/confirm"; check "issue confirmed" '.success and (.data.number|startswith("IS-"))'
+call POST "inventory/documents/$IS/confirm"; check "issue confirmed" '.success and (.data.number|startswith("IS-")) and .data.materialRequestNumber != null'
+call GET "inventory/material-requests/$MR"; check "request fully issued -> closed" '.data.status == 4 and .data.lines[0].issuedQuantity == 100 and (.data.issues|length) == 1'
 call GET "inventory/stock/items?ItemId=$RAW"; check "stock RM-001 = 400.5" '.data.data[0].onHand == 400.5'
 call GET "inventory/stock/serials?Contains=S-2&ItemId=$SHAFT"; check "S-2 in production" '.data.data[0].status == 1'
-call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$RAW,\"quantity\":1}]}"
-D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "lot item issue without lot rejected" '.success == false'
-call DELETE "inventory/documents/$D"
 call GET "inventory/stock/kardex?ItemId=$RAW"; check "kardex RM-001: 2 rows, closing 400.5" '(.data.rows|length) == 2 and .data.closingBalance == 400.5 and .data.rows[1].balance == 400.5'
-call GET "inventory/stock/items?LowStockOnly=true"; check "low-stock list has BT-300 (100 < 500)" '[.data.data[]|.itemCode]|index("BT-300") != null'
+call GET "inventory/stock/items?LowStockOnly=true"; check "low-stock list has the bolt (100 < 500)" "[.data.data[]|.itemCode]|index(\"$C_BOLT\") != null"
 
 # ---------------------------------------------------------------- routing, operations, QC
 call POST inventory/trace/templates "{\"itemId\":$SHAFT,\"sequence\":10,\"title\":\"تراشکاری خشن\"}"; check "template 10" '.success'
@@ -143,7 +174,7 @@ call POST inventory/trace/operations/files "{\"partOperationId\":$OP2,\"document
 call GET "inventory/trace/operations?QcStatus=2"; check "QC queue filter" '.data.data|length >= 1'
 
 # ---------------------------------------------------------------- assembly + traceability
-call POST inventory/trace/serials "{\"itemId\":$ROTOR,\"applyRouting\":true}"; check "rotor serial created (auto number)" '.success and (.data.serialNumber|startswith("SN-")) and .data.status == 1'
+call POST inventory/trace/serials "{\"itemId\":$ROTOR,\"applyRouting\":true}"; check "rotor serial created (label number YYDDDNNNN)" '.success and (.data.serialNumber|test("^[0-9]{9}$")) and .data.status == 1'
 RT=$(val .data.id)
 call POST inventory/trace/assembly/install "{\"parentSerialUnitId\":$RT,\"childSerialUnitId\":$S1}"; check "install of a serial still in stock rejected" '.success == false'
 call POST inventory/trace/assembly/install "{\"parentSerialUnitId\":$RT,\"childSerialUnitId\":$S2}"; check "S-2 installed in rotor" '.success'
@@ -153,8 +184,8 @@ call POST inventory/trace/assembly/install "{\"parentSerialUnitId\":$RT,\"childL
 call GET "inventory/trace/serial/$RT"; check "rotor trace: child S-2 + lot H-7781" '(.data.children|map(.serialNumber)|index("S-2")) != null and (.data.lotComponents|map(.childLotNumber)|index("H-7781")) != null'
 call GET "inventory/trace/serial/$S2"; check "S-2 trace: parent rotor, 2 operations, receipt + issue moves" ".data.unit.status == 3 and .data.ancestors[0].id == $RT and (.data.operations|length) == 2 and (.data.movements|length) >= 2"
 call GET "inventory/trace/lot/$LOT"; check "lot trace: used in rotor (where-used)" "(.data.topAssemblies|map(.id)|index($RT)) != null and (.data.movements|length) >= 2"
-call GET "inventory/trace/search?q=S/SH-100/S-2"; check "scan label S/SH-100/S-2" ".data.serials[0].id == $S2"
-call GET "inventory/trace/search?q=L/RM-001/H-7781"; check "scan label L/RM-001/H-7781" ".data.lots[0].id == $LOT"
+call GET "inventory/trace/search?q=S/$C_SHAFT/S-2"; check "scan label S/<code>/S-2" ".data.serials[0].id == $S2"
+call GET "inventory/trace/search?q=L/$C_RAW/H-7781"; check "scan label L/<code>/H-7781" ".data.lots[0].id == $LOT"
 call GET "inventory/trace/search?q=LOC/WH-RM/A-01"; check "scan label LOC/WH-RM/A-01" ".data.locations[0].id == $L1"
 
 # ---------------------------------------------------------------- cancel rules
@@ -166,11 +197,11 @@ call GET "inventory/stock/kardex?ItemId=$BOLT"; check "bolt kardex shows reversa
 call POST inventory/trace/assembly/remove "{\"assemblyLinkId\":$LINK,\"notes\":\"تعویض\"}"; check "S-2 removed from rotor" '.success'
 call GET "inventory/stock/serials?Contains=S-2&ItemId=$SHAFT"; check "S-2 back to in-production" '.data.data[0].status == 1'
 call DELETE "inventory/items/$BOLT"; check "item with transactions cannot be deleted" '.success == false'
-call POST inventory/items "{\"id\":$BOLT,\"code\":\"BT-300\",\"title\":\"پیچ M24\",\"unit\":\"عدد\",\"trackingMode\":1}"; check "tracking mode locked after movements" '.success == false'
+call POST inventory/items "{\"id\":$BOLT,\"code\":\"$C_BOLT\",\"title\":\"پیچ M24\",\"unit\":\"عدد\",\"trackingMode\":1}"; check "tracking mode locked after movements" '.success == false'
 
 # ---------------------------------------------------------------- Excel import
-call POST inventory/items/import '[{"code":"BL-200","title":"پره ردیف 1","groupCode":"TRB-BLD","groupTitle":"پره‌ها","unit":"عدد","trackingMode":"سریال"},{"code":"RM-001","title":"میلگرد فورج (به‌روز)","unit":"kg","trackingMode":"بچ"}]'
-check "import: 1 new, 1 updated, 1 group" '.success and .data.created == 1 and .data.updated == 1 and .data.groupsCreated == 1'
+call POST inventory/items/import "[{\"code\":\"BL-200\",\"title\":\"پره ردیف 1\",\"groupCode\":\"TRB-BLD\",\"groupTitle\":\"پره‌ها\",\"unit\":\"عدد\",\"trackingMode\":\"سریال\",\"legacyCode\":\"RD-77\"},{\"code\":\"$C_RAW\",\"title\":\"میلگرد فورج (به‌روز)\",\"unit\":\"kg\",\"trackingMode\":\"بچ\"}]"
+check "import: 1 new, 1 updated, 1 group; non-standard code listed as warning" '.success and .data.created == 1 and .data.updated == 1 and .data.groupsCreated == 1 and (.data.warnings|length) == 1'
 
 # ---------------------------------------------------------------- Sepidar
 call GET inventory/sepidar/check; check "sepidar check: RC and IS pending (transfer cancelled before export)" '.success and .data.pendingDocuments == 2'
