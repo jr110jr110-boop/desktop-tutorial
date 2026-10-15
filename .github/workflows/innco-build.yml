@@ -70,9 +70,11 @@ jobs:
         run: |
           set -o pipefail
           dotnet tool restore 2>&1 | tee ../../ci-output/4-ef.log
-          dotnet ef migrations add Net10ModelCheck --project ../DataLayer/DataLayer.csproj --startup-project WebApi.csproj --context ApplicationDbContext 2>&1 | tee -a ../../ci-output/4-ef.log
+          # a new name generates a real migration to keep; Net10ModelCheck must come out empty
+          NAME=$(cat ../../.github/migration-name.txt 2>/dev/null || echo Net10ModelCheck)
+          dotnet ef migrations add "$NAME" --project ../DataLayer/DataLayer.csproj --startup-project WebApi.csproj --context ApplicationDbContext 2>&1 | tee -a ../../ci-output/4-ef.log
           mkdir -p ../../ci-output/migration
-          cp ../DataLayer/Migrations/*Net10ModelCheck* ../../ci-output/migration/
+          cp ../DataLayer/Migrations/*"$NAME"* ../../ci-output/migration/
           cp ../DataLayer/Migrations/ApplicationDbContextModelSnapshot.cs ../../ci-output/migration/
 
       - name: Summary

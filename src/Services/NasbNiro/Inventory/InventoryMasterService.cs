@@ -1,0 +1,512 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Common.Results;
+using DataLayer.Context;
+using Entities.Model.NasbNiro.Inventory;
+using Microsoft.EntityFrameworkCore;
+using ViewModels.NasbNiro.InventoryDtos;
+using ViewModels.NasbNiro.Pagination;
+
+namespace Services.NasbNiro.Inventory
+{
+    public interface IInventoryMasterService
+    {
+        Task<ResponseDto<List<ItemGroupDto>>> GetGroupsAsync(CancellationToken cancellationToken);
+        Task<ResponseDto<ItemGroupDto>> SaveGroupAsync(SaveItemGroupDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<bool>> DeleteGroupAsync(int id, CancellationToken cancellationToken);
+
+        Task<ResponseDto<PagedList<InventoryItemDto>>> GetItemsAsync(InventoryItemQuery query, CancellationToken cancellationToken);
+        Task<ResponseDto<InventoryItemDto>> GetItemAsync(int id, CancellationToken cancellationToken);
+        Task<ResponseDto<InventoryItemDto>> GetItemByCodeAsync(string code, CancellationToken cancellationToken);
+        Task<ResponseDto<InventoryItemDto>> SaveItemAsync(SaveInventoryItemDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<bool>> DeleteItemAsync(int id, CancellationToken cancellationToken);
+        Task<ResponseDto<ImportItemsResultDto>> ImportItemsAsync(List<ImportItemRowDto> rows, CancellationToken cancellationToken);
+
+        Task<ResponseDto<List<WarehouseDto>>> GetWarehousesAsync(CancellationToken cancellationToken);
+        Task<ResponseDto<WarehouseDto>> SaveWarehouseAsync(SaveWarehouseDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<LocationDto>> SaveLocationAsync(SaveLocationDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<bool>> DeleteLocationAsync(int id, CancellationToken cancellationToken);
+    }
+
+    public class InventoryMasterService : IInventoryMasterService
+    {
+        private readonly IUnitOfWork _uow;
+        private readonly IInventoryUserContext _user;
+
+        public InventoryMasterService(IUnitOfWork uow, IInventoryUserContext user)
+        {
+            _uow = uow ?? throw new ArgumentNullException(nameof(uow));
+            _user = user ?? throw new ArgumentNullException(nameof(user));
+        }
+
+        private DbSet<ItemGroup> Groups => _uow.Set<ItemGroup>();
+        private DbSet<InventoryItem> Items => _uow.Set<InventoryItem>();
+        private DbSet<Warehouse> Warehouses => _uow.Set<Warehouse>();
+        private DbSet<WarehouseLocation> Locations => _uow.Set<WarehouseLocation>();
+
+        private void Stamp(Entities.Model.BaseEntity entity, bool isNew)
+        {
+            DateTimeOffset now = DateTimeOffset.Now;
+            if (isNew)
+            {
+                entity.CreateDate = now;
+                entity.CreatorUserId = _user.UserId;
+            }
+            entity.ModifyDate = now;
+            entity.ModifierUserId = _user.UserId;
+        }
+
+        // -------------------------------------------------------------------------------- groups
+
+        public async Task<ResponseDto<List<ItemGroupDto>>> GetGroupsAsync(CancellationToken cancellationToken)
+        {
+            List<ItemGroupDto> groups = await Groups
+                .Where(g => !g.Deleted)
+                .OrderBy(g => g.Code)
+                .Select(g => new ItemGroupDto
+                {
+                    Id = g.Id,
+                    Code = g.Code,
+                    Title = g.Title,
+                    Description = g.Description,
+                    ParentId = g.ParentId,
+                    ParentTitle = g.Parent.Title,
+                    ItemsCount = g.Items.Count(i => !i.Deleted),
+                })
+                .ToListAsync(cancellationToken);
+            return ResponseDtoHelper.Ok(groups);
+        }
+
+        public async Task<ResponseDto<ItemGroupDto>> SaveGroupAsync(SaveItemGroupDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return ResponseDtoHelper.BadRequest<ItemGroupDto>(InventoryMessages.InvalidData);
+            string code = InventoryText.Clean(dto.Code);
+            string title = InventoryText.Clean(dto.Title);
+            if (code == null) return ResponseDtoHelper.BadRequest<ItemGroupDto>(InventoryMessages.CodeRequired);
+            if (title == null) return ResponseDtoHelper.BadRequest<ItemGroupDto>(InventoryMessages.TitleRequired);
+
+            if (await Groups.AnyAsync(g => !g.Deleted && g.Code == code && g.Id != (dto.Id ?? 0), cancellationToken))
+                return ResponseDtoHelper.BadRequest<ItemGroupDto>(InventoryMessages.DuplicateCode + code);
+
+            ItemGroup group;
+            if (dto.Id.HasValue)
+            {
+                group = await Groups.FirstOrDefaultAsync(g => g.Id == dto.Id.Value && !g.Deleted, cancellationToken);
+                if (group == null) return ResponseDtoHelper.NotFound<ItemGroupDto>(InventoryMessages.GroupNotFound);
+            }
+            else
+            {
+                group = new ItemGroup();
+                Groups.Add(group);
+            }
+
+            if (dto.ParentId.HasValue)
+            {
+                // The parent must exist and must not be the group itself or one of its sub-groups.
+                List<(int Id, int? ParentId)> all = (await Groups.Where(g => !g.Deleted).Select(g => new { g.Id, g.ParentId }).ToListAsync(cancellationToken))
+                    .Select(g => (g.Id, g.ParentId)).ToList();
+                if (!all.Any(g => g.Id == dto.ParentId.Value))
+                    return ResponseDtoHelper.BadRequest<ItemGroupDto>(InventoryMessages.GroupNotFound);
+                if (dto.Id.HasValue)
+                {
+                    int? cursor = dto.ParentId;
+                    for (int guard = 0; cursor.HasValue && guard < 100; guard++)
+                    {
+                        if (cursor.Value == dto.Id.Value)
+                            return ResponseDtoHelper.BadRequest<ItemGroupDto>("گروه نمی‌تواند زیرمجموعه خودش باشد.");
+                        cursor = all.FirstOrDefault(g => g.Id == cursor.Value).ParentId;
+                    }
+                }
+            }
+
+            group.Code = code;
+            group.Title = title;
+            group.Description = InventoryText.Clean(dto.Description);
+            group.ParentId = dto.ParentId;
+            Stamp(group, !dto.Id.HasValue);
+            await _uow.SaveChangesAsync(cancellationToken);
+
+            return ResponseDtoHelper.Ok(new ItemGroupDto
+            {
+                Id = group.Id, Code = group.Code, Title = group.Title, Description = group.Description, ParentId = group.ParentId,
+            });
+        }
+
+        public async Task<ResponseDto<bool>> DeleteGroupAsync(int id, CancellationToken cancellationToken)
+        {
+            ItemGroup group = await Groups.FirstOrDefaultAsync(g => g.Id == id && !g.Deleted, cancellationToken);
+            if (group == null) return ResponseDtoHelper.NotFound<bool>(InventoryMessages.GroupNotFound);
+            if (await Groups.AnyAsync(g => g.ParentId == id && !g.Deleted, cancellationToken) ||
+                await Items.AnyAsync(i => i.ItemGroupId == id && !i.Deleted, cancellationToken))
+                return ResponseDtoHelper.BadRequest<bool>("این گروه زیرگروه یا کالا دارد و حذف نمی‌شود.");
+            group.Delete();
+            Stamp(group, false);
+            await _uow.SaveChangesAsync(cancellationToken);
+            return ResponseDtoHelper.Ok(true);
+        }
+
+        // --------------------------------------------------------------------------------- items
+
+        private IQueryable<InventoryItemDto> ItemProjection(IQueryable<InventoryItem> source)
+        {
+            IQueryable<StockBalance> balances = _uow.Set<StockBalance>();
+            return source.Select(i => new InventoryItemDto
+            {
+                Id = i.Id,
+                Code = i.Code,
+                Title = i.Title,
+                ItemGroupId = i.ItemGroupId,
+                ItemGroupCode = i.ItemGroup.Code,
+                ItemGroupTitle = i.ItemGroup.Title,
+                Unit = i.Unit,
+                TrackingMode = i.TrackingMode,
+                TechnicalCode = i.TechnicalCode,
+                Material = i.Material,
+                Standard = i.Standard,
+                Specification = i.Specification,
+                Weight = i.Weight,
+                MinStock = i.MinStock,
+                MaxStock = i.MaxStock,
+                IsActive = i.IsActive,
+                SepidarCode = i.SepidarCode,
+                OnHand = balances.Where(b => b.ItemId == i.Id).Sum(b => (decimal?)b.Quantity) ?? 0,
+            });
+        }
+
+        public async Task<ResponseDto<PagedList<InventoryItemDto>>> GetItemsAsync(InventoryItemQuery query, CancellationToken cancellationToken)
+        {
+            query ??= new InventoryItemQuery();
+            IQueryable<InventoryItem> items = Items.Where(i => !i.Deleted);
+            string text = InventoryText.Clean(query.Contains);
+            if (text != null)
+                items = items.Where(i => i.Code.Contains(text) || i.Title.Contains(text) || i.TechnicalCode.Contains(text));
+            if (query.ItemGroupId.HasValue)
+            {
+                List<int> groupIds = await GroupWithChildrenAsync(query.ItemGroupId.Value, cancellationToken);
+                items = items.Where(i => i.ItemGroupId.HasValue && groupIds.Contains(i.ItemGroupId.Value));
+            }
+            if (query.TrackingMode.HasValue) items = items.Where(i => i.TrackingMode == query.TrackingMode.Value);
+            if (query.IsActive.HasValue) items = items.Where(i => i.IsActive == query.IsActive.Value);
+
+            PagedList<InventoryItemDto> page = await PagedList<InventoryItemDto>.CreateAsync(
+                ItemProjection(items.OrderBy(i => i.Code)), query.PageNumber, query.PageSize, cancellationToken);
+            return ResponseDtoHelper.Ok(page);
+        }
+
+        private async Task<List<int>> GroupWithChildrenAsync(int groupId, CancellationToken cancellationToken)
+        {
+            var all = await Groups.Where(g => !g.Deleted).Select(g => new { g.Id, g.ParentId }).ToListAsync(cancellationToken);
+            var result = new List<int> { groupId };
+            for (int i = 0; i < result.Count && i < 10000; i++)
+            {
+                int current = result[i];
+                result.AddRange(all.Where(g => g.ParentId == current && !result.Contains(g.Id)).Select(g => g.Id));
+            }
+            return result;
+        }
+
+        public async Task<ResponseDto<InventoryItemDto>> GetItemAsync(int id, CancellationToken cancellationToken)
+        {
+            InventoryItemDto item = await ItemProjection(Items.Where(i => i.Id == id && !i.Deleted)).FirstOrDefaultAsync(cancellationToken);
+            return item == null
+                ? ResponseDtoHelper.NotFound<InventoryItemDto>(InventoryMessages.ItemNotFound)
+                : ResponseDtoHelper.Ok(item);
+        }
+
+        public async Task<ResponseDto<InventoryItemDto>> GetItemByCodeAsync(string code, CancellationToken cancellationToken)
+        {
+            code = InventoryText.Clean(code);
+            if (code == null) return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.CodeRequired);
+            InventoryItemDto item = await ItemProjection(Items.Where(i => i.Code == code && !i.Deleted)).FirstOrDefaultAsync(cancellationToken);
+            return item == null
+                ? ResponseDtoHelper.NotFound<InventoryItemDto>(InventoryMessages.ItemNotFound)
+                : ResponseDtoHelper.Ok(item);
+        }
+
+        public async Task<ResponseDto<InventoryItemDto>> SaveItemAsync(SaveInventoryItemDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.InvalidData);
+            string code = InventoryText.Clean(dto.Code);
+            string title = InventoryText.Clean(dto.Title);
+            string unit = InventoryText.Clean(dto.Unit);
+            if (code == null) return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.CodeRequired);
+            if (title == null) return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.TitleRequired);
+            if (unit == null) return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.UnitRequired);
+            if (!Enum.IsDefined(typeof(ItemTrackingMode), dto.TrackingMode))
+                return ResponseDtoHelper.BadRequest<InventoryItemDto>("نوع ردیابی نامعتبر است.");
+            if (dto.MinStock < 0 || dto.MaxStock < 0)
+                return ResponseDtoHelper.BadRequest<InventoryItemDto>("حداقل و حداکثر موجودی نمی‌تواند منفی باشد.");
+            if (dto.ItemGroupId.HasValue && !await Groups.AnyAsync(g => g.Id == dto.ItemGroupId.Value && !g.Deleted, cancellationToken))
+                return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.GroupNotFound);
+            if (await Items.AnyAsync(i => !i.Deleted && i.Code == code && i.Id != (dto.Id ?? 0), cancellationToken))
+                return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.DuplicateCode + code);
+
+            InventoryItem item;
+            if (dto.Id.HasValue)
+            {
+                item = await Items.FirstOrDefaultAsync(i => i.Id == dto.Id.Value && !i.Deleted, cancellationToken);
+                if (item == null) return ResponseDtoHelper.NotFound<InventoryItemDto>(InventoryMessages.ItemNotFound);
+                if (item.TrackingMode != dto.TrackingMode &&
+                    await _uow.Set<StockTransaction>().AnyAsync(t => t.ItemId == item.Id, cancellationToken))
+                    return ResponseDtoHelper.BadRequest<InventoryItemDto>("این کالا گردش انبار دارد و نوع ردیابی آن قابل تغییر نیست.");
+            }
+            else
+            {
+                item = new InventoryItem();
+                Items.Add(item);
+            }
+
+            item.Code = code;
+            item.Title = title;
+            item.ItemGroupId = dto.ItemGroupId;
+            item.Unit = unit;
+            item.TrackingMode = dto.TrackingMode;
+            item.TechnicalCode = InventoryText.Clean(dto.TechnicalCode);
+            item.Material = InventoryText.Clean(dto.Material);
+            item.Standard = InventoryText.Clean(dto.Standard);
+            item.Specification = InventoryText.Clean(dto.Specification);
+            item.Weight = dto.Weight;
+            item.MinStock = dto.MinStock;
+            item.MaxStock = dto.MaxStock;
+            item.IsActive = dto.IsActive;
+            item.SepidarCode = InventoryText.Clean(dto.SepidarCode);
+            Stamp(item, !dto.Id.HasValue);
+            await _uow.SaveChangesAsync(cancellationToken);
+
+            return await GetItemAsync(item.Id, cancellationToken);
+        }
+
+        public async Task<ResponseDto<bool>> DeleteItemAsync(int id, CancellationToken cancellationToken)
+        {
+            InventoryItem item = await Items.FirstOrDefaultAsync(i => i.Id == id && !i.Deleted, cancellationToken);
+            if (item == null) return ResponseDtoHelper.NotFound<bool>(InventoryMessages.ItemNotFound);
+            if (await _uow.Set<StockTransaction>().AnyAsync(t => t.ItemId == id, cancellationToken) ||
+                await _uow.Set<InventoryDocumentLine>().AnyAsync(l => l.ItemId == id, cancellationToken) ||
+                await _uow.Set<SerialUnit>().AnyAsync(s => s.ItemId == id && !s.Deleted, cancellationToken))
+                return ResponseDtoHelper.BadRequest<bool>("این کالا در اسناد یا ردیابی استفاده شده است. به‌جای حذف، آن را غیرفعال کنید.");
+            item.Delete();
+            Stamp(item, false);
+            await _uow.SaveChangesAsync(cancellationToken);
+            return ResponseDtoHelper.Ok(true);
+        }
+
+        private static ItemTrackingMode? ParseTracking(string value)
+        {
+            string text = InventoryText.Clean(value)?.ToLowerInvariant();
+            switch (text)
+            {
+                case null:
+                case "0":
+                case "none":
+                case "بدون":
+                case "بدون ردیابی":
+                case "تعدادی":
+                    return ItemTrackingMode.None;
+                case "1":
+                case "lot":
+                case "batch":
+                case "بچ":
+                case "سری ساخت":
+                case "شماره ذوب":
+                    return ItemTrackingMode.Lot;
+                case "2":
+                case "serial":
+                case "سریال":
+                case "سریالی":
+                    return ItemTrackingMode.Serial;
+                default:
+                    return null;
+            }
+        }
+
+        public async Task<ResponseDto<ImportItemsResultDto>> ImportItemsAsync(List<ImportItemRowDto> rows, CancellationToken cancellationToken)
+        {
+            var result = new ImportItemsResultDto();
+            if (rows == null || rows.Count == 0) return ResponseDtoHelper.BadRequest<ImportItemsResultDto>("فایل هیچ ردیفی ندارد.");
+            if (rows.Count > 20000) return ResponseDtoHelper.BadRequest<ImportItemsResultDto>("حداکثر ۲۰٬۰۰۰ ردیف در هر بار.");
+
+            Dictionary<string, ItemGroup> groups = (await Groups.Where(g => !g.Deleted).ToListAsync(cancellationToken))
+                .GroupBy(g => g.Code, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, InventoryItem> items = (await Items.Where(i => !i.Deleted).ToListAsync(cancellationToken))
+                .GroupBy(i => i.Code, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            HashSet<int> itemsWithMoves = (await _uow.Set<StockTransaction>().Select(t => t.ItemId).Distinct().ToListAsync(cancellationToken)).ToHashSet();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (int index = 0; index < rows.Count; index++)
+            {
+                ImportItemRowDto row = rows[index];
+                int rowNumber = index + 2; // row 1 of the sheet is the header
+                string code = InventoryText.Clean(row?.Code);
+                string title = InventoryText.Clean(row?.Title);
+                if (code == null && title == null) continue; // empty row
+                if (code == null) { result.Errors.Add($"ردیف {rowNumber}: کد خالی است."); continue; }
+                if (!seen.Add(code)) { result.Errors.Add($"ردیف {rowNumber}: کد {code} در فایل تکراری است."); continue; }
+                ItemTrackingMode? tracking = ParseTracking(row.TrackingMode);
+                if (tracking == null) { result.Errors.Add($"ردیف {rowNumber}: نوع ردیابی «{row.TrackingMode}» شناخته نشد."); continue; }
+
+                ItemGroup group = null;
+                string groupCode = InventoryText.Clean(row.GroupCode);
+                if (groupCode != null && !groups.TryGetValue(groupCode, out group))
+                {
+                    group = new ItemGroup { Code = groupCode, Title = InventoryText.Clean(row.GroupTitle) ?? groupCode };
+                    Stamp(group, true);
+                    Groups.Add(group);
+                    groups[groupCode] = group;
+                    result.GroupsCreated++;
+                }
+
+                bool isNew = !items.TryGetValue(code, out InventoryItem item);
+                if (isNew)
+                {
+                    if (title == null) { result.Errors.Add($"ردیف {rowNumber}: شرح کالای {code} خالی است."); continue; }
+                    item = new InventoryItem { Code = code, Unit = "عدد", IsActive = true, TrackingMode = tracking.Value };
+                    Items.Add(item);
+                    items[code] = item;
+                    result.Created++;
+                }
+                else
+                {
+                    if (item.TrackingMode != tracking.Value && !string.IsNullOrWhiteSpace(row.TrackingMode))
+                    {
+                        if (itemsWithMoves.Contains(item.Id))
+                            result.Errors.Add($"ردیف {rowNumber}: کالای {code} گردش دارد؛ نوع ردیابی آن عوض نشد.");
+                        else
+                            item.TrackingMode = tracking.Value;
+                    }
+                    result.Updated++;
+                }
+
+                if (title != null) item.Title = title;
+                if (group != null) item.ItemGroup = group;
+                item.Unit = InventoryText.Clean(row.Unit) ?? item.Unit ?? "عدد";
+                item.TechnicalCode = InventoryText.Clean(row.TechnicalCode) ?? item.TechnicalCode;
+                item.Material = InventoryText.Clean(row.Material) ?? item.Material;
+                item.Standard = InventoryText.Clean(row.Standard) ?? item.Standard;
+                item.Specification = InventoryText.Clean(row.Specification) ?? item.Specification;
+                if (row.Weight.HasValue) item.Weight = row.Weight;
+                if (row.MinStock.HasValue && row.MinStock.Value >= 0) item.MinStock = row.MinStock.Value;
+                item.SepidarCode = InventoryText.Clean(row.SepidarCode) ?? item.SepidarCode;
+                Stamp(item, isNew);
+            }
+
+            await _uow.SaveChangesAsync(cancellationToken);
+            return ResponseDtoHelper.Ok(result);
+        }
+
+        // ---------------------------------------------------------------------------- warehouses
+
+        public async Task<ResponseDto<List<WarehouseDto>>> GetWarehousesAsync(CancellationToken cancellationToken)
+        {
+            List<WarehouseDto> list = await Warehouses
+                .Where(w => !w.Deleted)
+                .OrderBy(w => w.Code)
+                .Select(w => new WarehouseDto
+                {
+                    Id = w.Id,
+                    Code = w.Code,
+                    Title = w.Title,
+                    Kind = w.Kind,
+                    Description = w.Description,
+                    IsActive = w.IsActive,
+                    SepidarCode = w.SepidarCode,
+                    Locations = w.Locations.Where(l => !l.Deleted).OrderBy(l => l.Code).Select(l => new LocationDto
+                    {
+                        Id = l.Id, WarehouseId = l.WarehouseId, WarehouseCode = w.Code, Code = l.Code, Title = l.Title, IsActive = l.IsActive,
+                    }).ToList(),
+                })
+                .ToListAsync(cancellationToken);
+            return ResponseDtoHelper.Ok(list);
+        }
+
+        public async Task<ResponseDto<WarehouseDto>> SaveWarehouseAsync(SaveWarehouseDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return ResponseDtoHelper.BadRequest<WarehouseDto>(InventoryMessages.InvalidData);
+            string code = InventoryText.Clean(dto.Code);
+            string title = InventoryText.Clean(dto.Title);
+            if (code == null) return ResponseDtoHelper.BadRequest<WarehouseDto>(InventoryMessages.CodeRequired);
+            if (title == null) return ResponseDtoHelper.BadRequest<WarehouseDto>(InventoryMessages.TitleRequired);
+            if (!Enum.IsDefined(typeof(WarehouseKind), dto.Kind)) return ResponseDtoHelper.BadRequest<WarehouseDto>("نوع انبار نامعتبر است.");
+            if (await Warehouses.AnyAsync(w => !w.Deleted && w.Code == code && w.Id != (dto.Id ?? 0), cancellationToken))
+                return ResponseDtoHelper.BadRequest<WarehouseDto>(InventoryMessages.DuplicateCode + code);
+
+            Warehouse warehouse;
+            if (dto.Id.HasValue)
+            {
+                warehouse = await Warehouses.FirstOrDefaultAsync(w => w.Id == dto.Id.Value && !w.Deleted, cancellationToken);
+                if (warehouse == null) return ResponseDtoHelper.NotFound<WarehouseDto>(InventoryMessages.WarehouseNotFound);
+            }
+            else
+            {
+                warehouse = new Warehouse();
+                Warehouses.Add(warehouse);
+            }
+            warehouse.Code = code;
+            warehouse.Title = title;
+            warehouse.Kind = dto.Kind;
+            warehouse.Description = InventoryText.Clean(dto.Description);
+            warehouse.IsActive = dto.IsActive;
+            warehouse.SepidarCode = InventoryText.Clean(dto.SepidarCode);
+            Stamp(warehouse, !dto.Id.HasValue);
+            await _uow.SaveChangesAsync(cancellationToken);
+
+            return ResponseDtoHelper.Ok(new WarehouseDto
+            {
+                Id = warehouse.Id, Code = warehouse.Code, Title = warehouse.Title, Kind = warehouse.Kind,
+                Description = warehouse.Description, IsActive = warehouse.IsActive, SepidarCode = warehouse.SepidarCode,
+            });
+        }
+
+        public async Task<ResponseDto<LocationDto>> SaveLocationAsync(SaveLocationDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return ResponseDtoHelper.BadRequest<LocationDto>(InventoryMessages.InvalidData);
+            string code = InventoryText.Clean(dto.Code);
+            if (code == null) return ResponseDtoHelper.BadRequest<LocationDto>(InventoryMessages.CodeRequired);
+            Warehouse warehouse = await Warehouses.FirstOrDefaultAsync(w => w.Id == dto.WarehouseId && !w.Deleted, cancellationToken);
+            if (warehouse == null) return ResponseDtoHelper.NotFound<LocationDto>(InventoryMessages.WarehouseNotFound);
+            if (await Locations.AnyAsync(l => !l.Deleted && l.WarehouseId == dto.WarehouseId && l.Code == code && l.Id != (dto.Id ?? 0), cancellationToken))
+                return ResponseDtoHelper.BadRequest<LocationDto>(InventoryMessages.DuplicateCode + code);
+
+            WarehouseLocation location;
+            if (dto.Id.HasValue)
+            {
+                location = await Locations.FirstOrDefaultAsync(l => l.Id == dto.Id.Value && !l.Deleted, cancellationToken);
+                if (location == null) return ResponseDtoHelper.NotFound<LocationDto>(InventoryMessages.LocationNotFound);
+                if (location.WarehouseId != dto.WarehouseId &&
+                    await _uow.Set<StockBalance>().AnyAsync(b => b.LocationId == location.Id && b.Quantity != 0, cancellationToken))
+                    return ResponseDtoHelper.BadRequest<LocationDto>("این محل موجودی دارد و به انبار دیگری منتقل نمی‌شود.");
+            }
+            else
+            {
+                location = new WarehouseLocation();
+                Locations.Add(location);
+            }
+            location.WarehouseId = dto.WarehouseId;
+            location.Code = code;
+            location.Title = InventoryText.Clean(dto.Title);
+            location.IsActive = dto.IsActive;
+            Stamp(location, !dto.Id.HasValue);
+            await _uow.SaveChangesAsync(cancellationToken);
+
+            return ResponseDtoHelper.Ok(new LocationDto
+            {
+                Id = location.Id, WarehouseId = location.WarehouseId, WarehouseCode = warehouse.Code,
+                Code = location.Code, Title = location.Title, IsActive = location.IsActive,
+            });
+        }
+
+        public async Task<ResponseDto<bool>> DeleteLocationAsync(int id, CancellationToken cancellationToken)
+        {
+            WarehouseLocation location = await Locations.FirstOrDefaultAsync(l => l.Id == id && !l.Deleted, cancellationToken);
+            if (location == null) return ResponseDtoHelper.NotFound<bool>(InventoryMessages.LocationNotFound);
+            if (await _uow.Set<StockBalance>().AnyAsync(b => b.LocationId == id && b.Quantity != 0, cancellationToken))
+                return ResponseDtoHelper.BadRequest<bool>("این محل موجودی دارد و حذف نمی‌شود.");
+            location.Delete();
+            Stamp(location, false);
+            await _uow.SaveChangesAsync(cancellationToken);
+            return ResponseDtoHelper.Ok(true);
+        }
+    }
+}

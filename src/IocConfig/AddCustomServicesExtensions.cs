@@ -16,6 +16,7 @@ using Services.NasbNiro.Contracts;
 using Services.NasbNiro.DateTimeService;
 using Services.NasbNiro.ExternalServices;
 using Services.NasbNiro.Holidays;
+using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Reports;
 using Services.NasbNiro.WorkOrders;
 using Services.Services;
@@ -117,6 +118,14 @@ namespace IocConfig
             services.AddScoped<IWorkflowGroupService, WorkflowGroupService>();
             services.AddScoped<IWorkflowStationService, WorkflowStationService>();
             services.AddScoped<IMachineService, MachineService>();
+
+            // Warehouse, part traceability and Sepidar link
+            services.AddScoped<IInventoryUserContext, InventoryUserContext>();
+            services.AddScoped<IInventoryMasterService, InventoryMasterService>();
+            services.AddScoped<IInventoryDocumentService, InventoryDocumentService>();
+            services.AddScoped<IInventoryStockService, InventoryStockService>();
+            services.AddScoped<ITraceabilityService, TraceabilityService>();
+            services.AddScoped<ISepidarLinkService, SepidarLinkService>();
             return services;
         }
     }

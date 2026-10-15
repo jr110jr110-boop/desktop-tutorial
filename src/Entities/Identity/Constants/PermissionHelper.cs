@@ -24,6 +24,11 @@ namespace Entities.Identity.Constants
         public const string EquipmentBom = "EquipmentBom";
         public const string EquipmentProcess = "EquipmentProcess";
 
+        // Warehouse and part traceability module
+        public const string Warehouse = "Warehouse";
+        public const string Traceability = "Traceability";
+        public const string SepidarLink = "SepidarLink";
+
 
         public static IEnumerable<RoleClaim> GetRoleClaims()
         {
@@ -197,6 +202,107 @@ namespace Entities.Identity.Constants
                 ClaimType = Type,
                 ClaimValue = Process,
                 RoleId = RoleConstants.EngineerResponseRole.Id,
+            };
+            #endregion
+
+            #region Warehouse_and_traceability_RoleClaims (PMO 112-114, Commercial 202, Engineering 308-309, Engineer 401, Financial 500+, QC 600+, WareHouse 700+, Assembler 800+)
+            yield return new RoleClaim()
+            {
+                Id = 112,
+                ClaimType = Type,
+                ClaimValue = Warehouse,
+                RoleId = RoleConstants.PMOResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 113,
+                ClaimType = Type,
+                ClaimValue = Traceability,
+                RoleId = RoleConstants.PMOResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 114,
+                ClaimType = Type,
+                ClaimValue = SepidarLink,
+                RoleId = RoleConstants.PMOResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 202,
+                ClaimType = Type,
+                ClaimValue = Warehouse,
+                RoleId = RoleConstants.CommercialResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 308,
+                ClaimType = Type,
+                ClaimValue = Warehouse,
+                RoleId = RoleConstants.EngineeringResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 309,
+                ClaimType = Type,
+                ClaimValue = Traceability,
+                RoleId = RoleConstants.EngineeringResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 401,
+                ClaimType = Type,
+                ClaimValue = Traceability,
+                RoleId = RoleConstants.EngineerResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 500,
+                ClaimType = Type,
+                ClaimValue = Warehouse,
+                RoleId = RoleConstants.FinancialResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 501,
+                ClaimType = Type,
+                ClaimValue = SepidarLink,
+                RoleId = RoleConstants.FinancialResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 600,
+                ClaimType = Type,
+                ClaimValue = Traceability,
+                RoleId = RoleConstants.QCResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 601,
+                ClaimType = Type,
+                ClaimValue = Warehouse,
+                RoleId = RoleConstants.QCResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 700,
+                ClaimType = Type,
+                ClaimValue = Warehouse,
+                RoleId = RoleConstants.WareHouseResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 701,
+                ClaimType = Type,
+                ClaimValue = Traceability,
+                RoleId = RoleConstants.WareHouseResponseRole.Id,
+            };
+            yield return new RoleClaim()
+            {
+                Id = 800,
+                ClaimType = Type,
+                ClaimValue = Traceability,
+                RoleId = RoleConstants.AssemblerResponseRole.Id,
             };
             #endregion
         }

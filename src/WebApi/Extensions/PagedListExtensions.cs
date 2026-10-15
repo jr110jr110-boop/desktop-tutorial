@@ -22,5 +22,16 @@ namespace WebApi.Extensions
             return new ResponseDto<PaginatedResult<T>>
                 (responseContract.Success, responseContract.Message, data);
         }
+
+        /// <summary>Like <see cref="ToPaginatedResult{T}"/>, but keeps the error message when the list could not be made.</summary>
+        public static ResponseDto<PaginatedResult<T>>
+            ToPaginatedResultSafe<T>(this ResponseDto<PagedList<T>> responseContract)
+        {
+            if (responseContract?.Data == null)
+            {
+                return new ResponseDto<PaginatedResult<T>>(false, responseContract?.Message, null);
+            }
+            return responseContract.ToPaginatedResult();
+        }
     }
 }

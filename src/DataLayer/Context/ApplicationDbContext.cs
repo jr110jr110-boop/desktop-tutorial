@@ -8,6 +8,7 @@ using Common.PersianToolkit;
 using DataLayer.Configurations.EF;
 using DataLayer.Configurations.EF.Identity;
 using DataLayer.Configurations.EF.NasbNiro;
+using DataLayer.Configurations.EF.NasbNiro.Inventory;
 using DataLayer.Mappings;
 using Entities.AuditableEntity;
 using Entities.Identity;
@@ -15,6 +16,7 @@ using Entities.Model;
 using Entities.Model.NasbNiro.ContractEquipments;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Equipments;
+using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Providers;
 using Entities.Model.NasbNiro.Reports;
 using Entities.Model.NasbNiro.Tenders;
@@ -78,6 +80,26 @@ namespace DataLayer.Context
         public virtual DbSet<WorkOrderHistory> WorkOrderHistories { get; set; }
         public virtual DbSet<ProgressReport> ProgressReports { get; set; }
         public virtual DbSet<ProviderCategory> Categories { get; set; }
+        #endregion
+
+        #region Inventory and traceability
+        public virtual DbSet<ItemGroup> InventoryItemGroups { get; set; }
+        public virtual DbSet<InventoryItem> InventoryItems { get; set; }
+        public virtual DbSet<Warehouse> Warehouses { get; set; }
+        public virtual DbSet<WarehouseLocation> WarehouseLocations { get; set; }
+        public virtual DbSet<SepidarMapping> SepidarMappings { get; set; }
+        public virtual DbSet<InventoryLot> InventoryLots { get; set; }
+        public virtual DbSet<SerialUnit> SerialUnits { get; set; }
+        public virtual DbSet<InventoryDocument> InventoryDocuments { get; set; }
+        public virtual DbSet<InventoryDocumentLine> InventoryDocumentLines { get; set; }
+        public virtual DbSet<InventoryDocumentLineSerial> InventoryDocumentLineSerials { get; set; }
+        public virtual DbSet<StockTransaction> StockTransactions { get; set; }
+        public virtual DbSet<StockBalance> StockBalances { get; set; }
+        public virtual DbSet<DocumentNumberSequence> DocumentNumberSequences { get; set; }
+        public virtual DbSet<OperationTemplate> OperationTemplates { get; set; }
+        public virtual DbSet<PartOperation> PartOperations { get; set; }
+        public virtual DbSet<PartOperationFile> PartOperationFiles { get; set; }
+        public virtual DbSet<AssemblyLink> AssemblyLinks { get; set; }
         #endregion
 
         #region BaseClass
@@ -318,6 +340,9 @@ namespace DataLayer.Context
             builder.ApplyConfiguration(new SetWorkOrderHistoryConfigurations());
             builder.ApplyConfiguration(new SetProgressReportsConfigurations());
             builder.ApplyConfiguration(new SetProviderCategoryConfigurations());
+
+            // Warehouse and part traceability (new "Inv" tables)
+            builder.AddInventoryConfigurations();
 
             // This should be placed here, at the end.
             builder.AddAuditableShadowProperties();
