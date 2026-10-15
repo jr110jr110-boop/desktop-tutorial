@@ -199,11 +199,11 @@ onMounted(() => {
       <div
         v-if="$route.name !== 'Login' && isReady"
         :style="'width: ' + hiddenSidebarWidth"
-        class="min-w-0" />
+        class="min-w-0 d-print-none" />
       <div
         v-if="$route.name !== 'Login' && isReady"
         :style="'width: ' + sidebarWidth"
-        class="shadow-sm sidebar position-fixed right-0"
+        class="shadow-sm sidebar position-fixed right-0 d-print-none"
         style="top: 52px"
         @mouseout="
           state.screenWidth >= 1200 && changeSidebarExpandState(false, false)

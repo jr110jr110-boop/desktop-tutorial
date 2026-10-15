@@ -105,6 +105,23 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.inventory"
+        has-sub
+        route-name="Inventory"
+        tag="inventory-collapse"
+        title="انبار و ردیابی قطعات">
+        <CopyIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="
+            String($route.name || '').startsWith('Inventory')
+              ? Colors.primary
+              : Colors.primaryLight
+          "
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.providers"
         has-sub
         route-name="Providers"
@@ -238,6 +255,18 @@ const links = {
       routeName: "MachineList",
       disabled: !accessList.includes("Machine"),
     },
+  ] as Links[],
+  inventory: [
+    { title: "اسناد انبار (رسید، حواله، انتقال)", routeName: "InventoryDocuments", disabled: !accessList.includes("Warehouse") },
+    { title: "موجودی", routeName: "InventoryStock", disabled: !accessList.includes("Warehouse") },
+    { title: "کاردکس", routeName: "InventoryKardex", disabled: !accessList.includes("Warehouse") },
+    { title: "ردیابی قطعات (اسکن)", routeName: "InventoryTrace", disabled: !accessList.includes("Traceability") },
+    { title: "کارتابل مراحل ساخت و QC", routeName: "InventoryOperations", disabled: !accessList.includes("Traceability") },
+    { title: "مسیر ساخت", routeName: "InventoryRouting", disabled: !accessList.includes("Traceability") },
+    { title: "کالاها و کدینگ", routeName: "InventoryItems", disabled: !accessList.includes("Warehouse") },
+    { title: "گروه‌بندی کالا", routeName: "InventoryGroups", disabled: !accessList.includes("Warehouse") },
+    { title: "انبارها و محل‌ها", routeName: "InventoryWarehouses", disabled: !accessList.includes("Warehouse") },
+    { title: "ارتباط با سپیدار", routeName: "InventorySepidar", disabled: !accessList.includes("SepidarLink") },
   ] as Links[],
   holidays: [
     {

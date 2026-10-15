@@ -370,27 +370,45 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: "equipment-estimation",
         name: "ReportEquipmentEstimation",
+        meta: { title: "برآورد اولیه هزینه و زمان" },
         component: () => import("@/views/report/pages/EquipmentEstimation.vue"),
       },
       {
         path: "contract-progress",
         name: "ReportContractProgress",
+        meta: { title: "گزارش پیشرفت قرارداد" },
         component: () => import("@/views/report/pages/ContractProgress.vue"),
       },
       {
         path: "work-order-progress",
         name: "ReportWorkOrderProgress",
+        meta: { title: "گزارش پیشرفت دستور ساخت" },
         component: () => import("@/views/report/pages/WorkOrderProgress.vue"),
       },
       {
         path: "material-balance",
         name: "ReportMaterialBalance",
+        meta: { title: "بالانس مواد و احتیاجات" },
         component: () => import("@/views/report/pages/MaterialBalance.vue"),
       },
     ],
   },
 
   // Not Found
+
+  // Warehouse, part traceability and Sepidar link
+  { path: "/inventory/items", name: "InventoryItems", component: () => import("@/views/inventory/Items.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/groups", name: "InventoryGroups", component: () => import("@/views/inventory/Groups.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/warehouses", name: "InventoryWarehouses", component: () => import("@/views/inventory/Warehouses.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/documents", name: "InventoryDocuments", component: () => import("@/views/inventory/Documents.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/documents/:id", name: "InventoryDocumentEdit", component: () => import("@/views/inventory/DocumentEdit.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/stock", name: "InventoryStock", component: () => import("@/views/inventory/Stock.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/kardex", name: "InventoryKardex", component: () => import("@/views/inventory/Kardex.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/trace", name: "InventoryTrace", component: () => import("@/views/inventory/Trace.vue"), meta: { access: "traceability" } },
+  { path: "/inventory/routing", name: "InventoryRouting", component: () => import("@/views/inventory/Routing.vue"), meta: { access: "traceability" } },
+  { path: "/inventory/operations", name: "InventoryOperations", component: () => import("@/views/inventory/Operations.vue"), meta: { access: "traceability" } },
+  { path: "/inventory/sepidar", name: "InventorySepidar", component: () => import("@/views/inventory/Sepidar.vue"), meta: { access: "sepidar" } },
+  { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",
     component: () => import("@/views/NotFound.vue"),
@@ -402,14 +420,14 @@ const router = createRouter({
   routes,
 });
 
-const accessList = localStorage.getItem("accessList") || [];
-
 const handleHasNoAccess = (next) => {
   showWarnNotification("شما به این صفحه دسترسی ندارید");
   next({ name: "Dashboard" });
 };
 
 router.beforeEach((to, from, next) => {
+  // read on every navigation: the list changes when another user logs in without reloading the page
+  const accessList = localStorage.getItem("accessList") || [];
   if (to.name === "Login") {
     if (!window.localStorage.getItem("token")) next();
     else next({ name: "Dashboard" });
@@ -430,6 +448,15 @@ router.beforeEach((to, from, next) => {
         else handleHasNoAccess(next);
       else if (to.meta.access === "machine")
         if (accessList.includes("Machine")) next();
+        else handleHasNoAccess(next);
+      else if (to.meta.access === "warehouse")
+        if (accessList.includes("Warehouse")) next();
+        else handleHasNoAccess(next);
+      else if (to.meta.access === "traceability")
+        if (accessList.includes("Traceability")) next();
+        else handleHasNoAccess(next);
+      else if (to.meta.access === "sepidar")
+        if (accessList.includes("SepidarLink")) next();
         else handleHasNoAccess(next);
       else if (to.meta.access === "tender")
         if (accessList.includes("Tender")) next();

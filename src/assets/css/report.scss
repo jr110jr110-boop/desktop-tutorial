@@ -1,0 +1,177 @@
+/*
+ * Reports and printed outputs: B Zar, right to left, A4.
+ * Use class "ks-report" on a report page; everything printed uses the same rules.
+ * The installed Windows font is used when present, otherwise the copy shipped with the app.
+ * B Zar has no Latin letters, so Latin text (codes, units) falls back to IRANYekan.
+ */
+@font-face {
+  font-family: "B Zar";
+  font-style: normal;
+  font-weight: normal;
+  font-display: swap;
+  src: local("B Zar"), local("BZar"), url("../fonts/bzar/BZar.woff") format("woff"), url("../fonts/bzar/BZar.ttf") format("truetype");
+  unicode-range: U+0020-0040, U+005B-005D, U+007B-007D, U+00A0-00FF, U+0600-06FF, U+200C-200F, U+2010-2027, U+FB50-FDFF, U+FE70-FEFF;
+}
+
+$ReportFont: "B Zar", IRANYekan, Tahoma, sans-serif;
+
+.ks-report {
+  direction: rtl;
+  text-align: right;
+  font-family: $ReportFont;
+  font-size: 16px;
+  font-synthesis: weight;
+
+  h1, h2, h3, h4, h5, h6, p, span, th, td, div, a, b, strong, label, li, small, button, select, option, input, textarea, caption {
+    font-family: $ReportFont;
+  }
+  h1 { font-size: 1.45rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.1rem; }
+  .small, small { font-size: 0.92em; }
+
+  /* codes stay Latin with Latin digits so they read the same as on the labels */
+  .inv-ltr, .ltr, code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.9em;
+    white-space: nowrap;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  table th {
+    font-weight: bold;
+    background: #eef1f5;
+    border-bottom: 2px solid #9aa5b1;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  table td,
+  table th {
+    padding: 0.35rem 0.5rem;
+    text-align: right;
+  }
+  table td {
+    border-bottom: 1px solid #dde2e8;
+    vertical-align: middle;
+  }
+  table tbody tr:nth-child(even) td {
+    background-color: #fafbfc;
+  }
+  table tfoot td {
+    font-weight: bold;
+    border-top: 2px solid #9aa5b1;
+  }
+  .num {
+    text-align: left;
+    white-space: nowrap;
+  }
+}
+
+/* header and signature block of a printed report (see components/common/KsReportHeader.vue) */
+.ks-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 2px solid #1f3a5f;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+
+  .logo { height: 44px; }
+  .title { font-size: 1.35rem; font-weight: bold; margin: 0; }
+  .subtitle { font-size: 0.95rem; color: #444; }
+  .meta { font-size: 0.85rem; color: #444; text-align: left; line-height: 1.6; }
+}
+.ks-signatures {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 4), 1fr);
+  gap: 1rem;
+  margin-top: 2.5rem;
+  text-align: center;
+  break-inside: avoid;
+
+  div {
+    border-top: 1px solid #333;
+    padding-top: 0.35rem;
+    font-size: 0.95rem;
+  }
+}
+.print-only {
+  display: none !important;
+}
+
+@page {
+  size: A4;
+  margin: 14mm 12mm 16mm 12mm;
+
+  @bottom-center {
+    content: "صفحه " counter(page) " از " counter(pages);
+    font-family: "B Zar", IRANYekan, sans-serif;
+    font-size: 10pt;
+    color: #555;
+  }
+}
+
+@media print {
+  html, body {
+    background: #fff !important;
+    direction: rtl;
+  }
+  body {
+    font-family: $ReportFont;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body * {
+    box-shadow: none !important;
+  }
+  /* the menu, the top bar and every button stay on screen */
+  nav, aside, .ks-navbar, .navbar, .sidebar, .blur-overlay, .d-print-none, button, .btn, .inv-pager, .inv-filters, .inv-scan,
+  .inv-modal-backdrop, .toast, .notification {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-only.ks-report-header {
+    display: flex !important;
+  }
+  .screen-only {
+    display: none !important;
+  }
+  a {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+  .ks-report, .ks-report * {
+    font-family: $ReportFont;
+  }
+  .ks-report .inv-ltr, .ks-report .ltr, .ks-report code {
+    font-family: Consolas, "Courier New", monospace;
+  }
+  .inv-card, .background-color {
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 0 0.5rem 0 !important;
+    background: #fff !important;
+  }
+  table { page-break-inside: auto; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, img, .inv-timeline .step { break-inside: avoid; page-break-inside: avoid; }
+  h1, h2, h3 { break-after: avoid; page-break-after: avoid; }
+  input, select, textarea {
+    border: none !important;
+    background: transparent !important;
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 0 !important;
+  }
+  .table-responsive { overflow: visible !important; }
+}
