@@ -414,6 +414,18 @@ call POST "inventory/documents/$OB/confirm"; check "opening balance needs the tw
 as "$SUP_TOKEN" POST "inventory/documents/$OB/approve" '{"kind":1}'; as "$PLAN_TOKEN" POST "inventory/documents/$OB/approve" '{"kind":2}'
 call POST "inventory/documents/$OB/confirm"; check "approved opening balance confirmed" '.success and (.data.number|startswith("OB-"))'
 
+# ---------------------------------------------------------------- cost accounting and the Sepidar link
+TOKEN=$ADMIN_TOKEN
+call GET "finance/events?PageSize=200"; check "accounting events written for confirmed documents" '.success and (.data.data|length) > 5'
+check "every accounting event is balanced" '[.data.data[] | ([.lines[].debit]|add) == ([.lines[].credit]|add)] | all'
+call GET finance/valuation; check "stock value equals the inventory balance of the events" '.success and .data.totalValue > 0 and .data.totalValue == .data.totalEventsBalance'
+call GET finance/accounts; check "account roles seeded for Sepidar mapping" '.success and ([.data[].role]|index("GRNI")) != null'
+call POST finance/accounts '{"role":"Inventory","title":"موجودی کالا","sepidarAccountCode":"1-105","isActive":true}'; check "Sepidar account code saved" '.success'
+call GET finance/check; check "Sepidar readiness check lists unmapped roles" '.success and (.data.unmappedRoles|length) > 0'
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/finance/events/export" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary '{"markExported":false}')
+[ "$CODE" = "200" ] && grep -q "کلید رویداد" "$B" && ok "voucher file for Sepidar" || bad "voucher file for Sepidar ($CODE)"
+call GET finance/costs; check "cost report of work orders" '.success'
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'

@@ -11,6 +11,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
     {
         public static void AddInventoryConfigurations(this ModelBuilder builder)
         {
+            builder.AddFinanceConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());
@@ -237,6 +238,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
         public void Configure(EntityTypeBuilder<StockTransaction> builder)
         {
             builder.ToTable("InvStockTransactions");
+            builder.Property(x => x.UnitCost).HasPrecision(22, 4);
+            builder.Property(x => x.CostAmount).HasPrecision(22, 2);
             builder.Property(x => x.Quantity).HasPrecision(18, 4);
             builder.Property(x => x.UnitPrice).HasPrecision(22, 4);
             builder.HasIndex(x => new { x.ItemId, x.WarehouseId, x.TransactionDate });
@@ -486,6 +489,82 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.Lot).WithMany().HasForeignKey(x => x.LotId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public static class FinanceModelBuilderExtensions
+    {
+        // Cost accounting and the Sepidar link: tables start with "Fin".
+        public static void AddFinanceConfigurations(this ModelBuilder builder)
+        {
+            builder.Entity<Entities.Model.NasbNiro.Finance.ItemCost>(b =>
+            {
+                b.ToTable("FinItemCosts");
+                b.Property(x => x.Quantity).HasPrecision(18, 4);
+                b.Property(x => x.Value).HasPrecision(22, 2);
+                b.Property(x => x.AverageCost).HasPrecision(22, 4);
+                b.Property(x => x.LastPurchasePrice).HasPrecision(22, 4);
+                b.HasIndex(x => x.ItemId).IsUnique();
+                b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<Entities.Model.NasbNiro.Finance.CostEntry>(b =>
+            {
+                b.ToTable("FinCostEntries");
+                b.Property(x => x.Quantity).HasPrecision(18, 4);
+                b.Property(x => x.Amount).HasPrecision(22, 2);
+                b.Property(x => x.CostCenter).HasMaxLength(50);
+                b.Property(x => x.SourceType).HasMaxLength(50).IsRequired();
+                b.Property(x => x.SourceNumber).HasMaxLength(50);
+                b.Property(x => x.Description).HasMaxLength(500);
+                b.HasIndex(x => x.WorkOrderId);
+                b.HasIndex(x => x.ContractId);
+                b.HasIndex(x => new { x.SourceType, x.SourceId });
+                b.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<Entities.Model.NasbNiro.Finance.AccountingEvent>(b =>
+            {
+                b.ToTable("FinAccountingEvents");
+                b.Property(x => x.SourceType).HasMaxLength(50).IsRequired();
+                b.Property(x => x.SourceNumber).HasMaxLength(50);
+                b.Property(x => x.Description).HasMaxLength(500);
+                b.Property(x => x.ExternalReference).HasMaxLength(100);
+                b.Property(x => x.Error).HasMaxLength(2000);
+                b.HasIndex(x => x.Key).IsUnique();
+                b.HasIndex(x => new { x.Status, x.EventDate });
+                b.HasIndex(x => new { x.SourceType, x.SourceId });
+            });
+            builder.Entity<Entities.Model.NasbNiro.Finance.AccountingEventLine>(b =>
+            {
+                b.ToTable("FinAccountingEventLines");
+                b.Property(x => x.AccountRole).HasMaxLength(50).IsRequired();
+                b.Property(x => x.Debit).HasPrecision(22, 2);
+                b.Property(x => x.Credit).HasPrecision(22, 2);
+                b.Property(x => x.Quantity).HasPrecision(18, 4);
+                b.Property(x => x.CostCenter).HasMaxLength(50);
+                b.Property(x => x.Description).HasMaxLength(500);
+                b.HasIndex(x => x.AccountRole);
+                b.HasOne(x => x.Event).WithMany(x => x.Lines).HasForeignKey(x => x.EventId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(x => x.Provider).WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<Entities.Model.NasbNiro.Finance.AccountMapping>(b =>
+            {
+                b.ToTable("FinAccountMappings");
+                b.Property(x => x.Role).HasMaxLength(50).IsRequired();
+                b.Property(x => x.Title).HasMaxLength(200);
+                b.Property(x => x.SepidarAccountCode).HasMaxLength(50);
+                b.Property(x => x.Description).HasMaxLength(500);
+                b.HasIndex(x => x.Role).IsUnique();
+            });
+            builder.Entity<Entities.Model.NasbNiro.Finance.CostCenter>(b =>
+            {
+                b.ToTable("FinCostCenters");
+                b.Property(x => x.Code).HasMaxLength(50).IsRequired();
+                b.Property(x => x.Title).HasMaxLength(200).IsRequired();
+                b.Property(x => x.SepidarCode).HasMaxLength(50);
+                b.HasIndex(x => x.Code).IsUnique();
+            });
         }
     }
 }

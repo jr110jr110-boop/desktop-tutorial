@@ -51,10 +51,13 @@ namespace Services.NasbNiro.Inventory
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
 
-        public InventoryDocumentService(IUnitOfWork uow, IInventoryUserContext user)
+        private readonly Finance.ICostingService _costing;
+
+        public InventoryDocumentService(IUnitOfWork uow, IInventoryUserContext user, Finance.ICostingService costing)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _costing = costing ?? throw new ArgumentNullException(nameof(costing));
         }
 
         private DbSet<InventoryDocument> Documents => _uow.Set<InventoryDocument>();
@@ -1053,9 +1056,11 @@ namespace Services.NasbNiro.Inventory
             string shortage = Allocate(moves, book, items);
             if (shortage != null) return ResponseDtoHelper.BadRequest<DocumentDto>(shortage);
 
+            var posted = new List<StockTransaction>();
             foreach (Move move in moves)
             {
-                _uow.Set<StockTransaction>().Add(new StockTransaction
+                StockTransaction transaction;
+                _uow.Set<StockTransaction>().Add(transaction = new StockTransaction
                 {
                     ItemId = move.ItemId,
                     WarehouseId = move.WarehouseId,
@@ -1071,6 +1076,7 @@ namespace Services.NasbNiro.Inventory
                     CreatedAt = now,
                     CreatedByUserId = _user.UserId,
                 });
+                posted.Add(transaction);
             }
 
             // receipts into quarantine wait for incoming inspection, one inspection per line
@@ -1133,6 +1139,8 @@ namespace Services.NasbNiro.Inventory
             }
 
             document.Number = await NextNumberAsync(type, document.DocumentDate, cancellationToken);
+            // value (weighted average), work order cost and the accounting event for Sepidar
+            await _costing.PostDocumentAsync(document, posted, cancellationToken);
             document.Status = InventoryDocumentStatus.Confirmed;
             document.ConfirmedAt = now;
             document.ConfirmedByUserId = _user.UserId;
@@ -1351,16 +1359,20 @@ namespace Services.NasbNiro.Inventory
                 return ResponseDtoHelper.BadRequest<DocumentDto>("این سند باطل نمی‌شود چون کالای آن مصرف یا جابه‌جا شده است: " + string.Join("، ",
                     shortages.Select(b => items.TryGetValue(b.ItemId, out InventoryItem item) ? item.Code : b.ItemId.ToString())));
 
+            var reversals = new List<StockTransaction>();
             foreach (StockTransaction t in transactions)
             {
-                _uow.Set<StockTransaction>().Add(new StockTransaction
+                var reversal = new StockTransaction
                 {
                     ItemId = t.ItemId, WarehouseId = t.WarehouseId, LocationId = t.LocationId, LotId = t.LotId,
                     SerialUnitId = t.SerialUnitId, Quantity = -t.Quantity, UnitPrice = t.UnitPrice,
                     TransactionDate = document.DocumentDate, DocumentId = document.Id, DocumentLineId = t.DocumentLineId,
                     IsReversal = true, CreatedAt = now, CreatedByUserId = _user.UserId,
-                });
+                };
+                _uow.Set<StockTransaction>().Add(reversal);
+                reversals.Add(reversal);
             }
+            await _costing.ReverseDocumentAsync(document, transactions, reversals, cancellationToken);
 
             foreach (QcInspection inspection in inspections) inspection.Delete();
 

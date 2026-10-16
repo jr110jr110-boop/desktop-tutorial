@@ -255,6 +255,13 @@ namespace Entities.Model.NasbNiro.Inventory
         public decimal Quantity { get; set; }
 
         public decimal? UnitPrice { get; set; }
+
+        /// <summary>Weighted average cost used for this movement (rial per unit); null for movements made before costing.</summary>
+        public decimal? UnitCost { get; set; }
+
+        /// <summary>Value of the movement in rial, signed like the quantity.</summary>
+        public decimal? CostAmount { get; set; }
+
         public DateTime TransactionDate { get; set; }
 
         public int DocumentId { get; set; }
