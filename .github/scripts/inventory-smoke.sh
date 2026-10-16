@@ -54,6 +54,10 @@ user eng.ci 4 'Ci#Eng-User-2026' 4
 user sec.ci 10 'Ci#Sec-User-2026' 5
 user sup.ci 12 'Ci#Sup-User-2026' 6
 user plan.ci 11 'Ci#Plan-User-2026' 7
+user com.ci 2 'Ci#Com-User-2026' 9
+call POST Accounts/register-user "{\"userName\":\"ceo.ci\",\"name\":\"ceo.ci\",\"lastName\":\"آزمون\",\"email\":\"ceo.ci@example.com\",\"roleIds\":[13],\"password\":\"Ci#Ceo-User-2026\",\"phoneNumber\":\"09120000019\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"0012345619\"}"
+COM_TOKEN=$(login com.ci 'Ci#Com-User-2026'); CEO_TOKEN=$(login ceo.ci 'Ci#Ceo-User-2026')
+[ -n "$COM_TOKEN" ] && [ -n "$CEO_TOKEN" ] && ok "login commercial and CEO users" || bad "login commercial and CEO users"
 SUP_TOKEN=$(login sup.ci 'Ci#Sup-User-2026'); PLAN_TOKEN=$(login plan.ci 'Ci#Plan-User-2026')
 [ -n "$SUP_TOKEN" ] && [ -n "$PLAN_TOKEN" ] && ok "login warehouse supervisor and planning users" || bad "login warehouse supervisor and planning users"
 WH_TOKEN=$(login wh.ci 'Ci#Wh-User-2026'); PROD_TOKEN=$(login prod.ci 'Ci#Prod-User-2026'); QC_TOKEN=$(login qc.ci 'Ci#Qc-User-2026')
@@ -90,6 +94,10 @@ call POST inventory/warehouses/locations "{\"warehouseId\":$W1,\"code\":\"A-02\"
 L2=$(val .data.id)
 call POST inventory/warehouses/locations "{\"warehouseId\":$W2,\"code\":\"M-01\"}"; check "location M-01" '.success'
 L3=$(val .data.id)
+
+# go-live switch: receipts without a PMIS purchase order are allowed until procurement is switched on (tested at the end)
+call GET procurement/settings; check "procurement settings seeded from the procedures" '.success and ([.data[].key]|index("PettyCashLimit")) != null'
+call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "purchase order rule switched off for go-live" '.success and .data.value == 0'
 
 # ---------------------------------------------------------------- purchase receipt
 DOC="{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"referenceNumber\":\"PO-77\",\"lines\":[
@@ -425,6 +433,79 @@ call GET finance/check; check "Sepidar readiness check lists unmapped roles" '.s
 CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/finance/events/export" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary '{"markExported":false}')
 [ "$CODE" = "200" ] && grep -q "کلید رویداد" "$B" && ok "voucher file for Sepidar" || bad "voucher file for Sepidar ($CODE)"
 call GET finance/costs; check "cost report of work orders" '.success'
+
+# ---------------------------------------------------------------- procurement: request -> inquiry -> order -> receipt -> invoice -> payment
+TOKEN=$ADMIN_TOKEN
+call POST Provider "{\"name\":\"تامین‌کننده الف آزمون\",\"categoryId\":${CAT:-0}}"; PA=$(jq -r '.data.id // empty' "$B")
+call POST Provider "{\"name\":\"تامین‌کننده ب آزمون\",\"categoryId\":${CAT:-0}}"; PB=$(jq -r '.data.id // empty' "$B")
+[ -n "$PA" ] && [ -n "$PB" ] && ok "two suppliers created" || bad "two suppliers created"
+as "$WH_TOKEN" POST procurement/requests "{\"source\":1,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":100}]}"
+check "only planning writes a BOM purchase request" '.success == false'
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"نقطه سفارش پیچ\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":100,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014 گرید 8.8 با گواهی 3.1\"}]}"
+check "purchase request submitted (40M rial)" '.success and .data.status == 1 and .data.estimatedAmount == 40000000'
+PRQ=$(val .data.id); PRL=$(val '.data.lines[0].id')
+as "$WH_TOKEN" POST procurement/requests/action "{\"id\":$PRQ,\"action\":\"approve-planning\"}"; check "requester cannot approve own request" '.success == false'
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PRQ,\"action\":\"approve-planning\"}"; check "planning approved; medium purchase still waits for the CEO" '.success and .data.status == 1'
+as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PRQ,\"action\":\"approve-management\"}"; check "CEO approval completes the request" '.success and .data.status == 2'
+as "$COM_TOKEN" POST procurement/suppliers/evaluate "{\"providerId\":$PA,\"kind\":1,\"evaluationDate\":\"2026-10-22T00:00:00\",\"lines\":[{\"question\":\"کیفیت\",\"weight\":3,\"score\":90},{\"question\":\"تحویل به موقع\",\"weight\":2,\"score\":88},{\"question\":\"سابقه\",\"weight\":1}]}"
+check "supplier evaluation: weighted score and grade A" '.success and .data.grade == 1 and .data.score == 89.2'
+QA="{\"providerId\":$PA,\"quoteNumber\":\"Q-A\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL,\"quantity\":100,\"unitPrice\":390000}]}"
+QB="{\"providerId\":$PB,\"quoteNumber\":\"Q-B\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL,\"quantity\":100,\"unitPrice\":380000}]}"
+as "$WH_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$PRQ,\"quotes\":[$QA]}"; check "only commercial takes quotes" '.success == false'
+as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$PRQ,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA]}"
+check "inquiry needs two quotes for 40M rial" '.success and .data.requiredQuotes == 2'
+INQ=$(val .data.id); QAID=$(val '.data.quotes[0].id')
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$INQ,\"quoteId\":$QAID}"; check "one quote is not enough" '.success == false'
+as "$COM_TOKEN" POST procurement/inquiries "{\"id\":$INQ,\"purchaseRequestId\":$PRQ,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA,$QB]}"; check "second quote added" '.success and (.data.quotes|length) == 2'
+QAID=$(val ".data.quotes[] | select(.providerId == $PA) | .id")
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$INQ,\"quoteId\":$QAID}"; check "choosing a dearer quote needs a reason" '.success == false'
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$INQ,\"quoteId\":$QAID,\"reason\":\"گرید A و تحویل 20 روزه\"}"; check "quote selected, inquiry approved" '.success and .data.status == 2'
+as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$INQ"; check "purchase order draft from the inquiry" '.success and .data.status == 0 and .data.totalAmount == 39000000'
+PO=$(val .data.id); POL=$(val '.data.lines[0].id')
+as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO,\"action\":\"approve\"}"; check "buyer cannot approve the order" '.success == false'
+call POST procurement/orders/action "{\"id\":$PO,\"action\":\"approve\"}"; check "order approved by PMO" '.success and .data.status == 1'
+as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO,\"action\":\"release\"}"; check "order released to the supplier" '.success and .data.status == 2'
+call GET "procurement/requests/$PRQ"; check "request marked ordered" '.data.status == 3'
+
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO,\"referenceNumber\":\"حواله الف-1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":60,\"locationId\":$L2,\"purchaseOrderLineId\":$POL}]}"
+D=$(val .data.id); call POST "inventory/documents/$D/confirm"
+check "receipt against the order: supplier and order price taken" ".success and .data.providerId == $PA and .data.lines[0].unitPrice == 390000"
+call GET "procurement/orders/$PO"; check "order partly received (60 of 100)" '.data.status == 3 and .data.lines[0].receivedQuantity == 60'
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO,\"lines\":[{\"itemId\":$BOLT,\"quantity\":50,\"locationId\":$L2,\"purchaseOrderLineId\":$POL}]}"
+D2=$(val .data.id); call POST "inventory/documents/$D2/confirm"; check "receipt above the open order quantity rejected" '.success == false'
+call DELETE "inventory/documents/$D2"
+
+as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$PO,\"invoiceNumber\":\"F-1001\",\"invoiceDate\":\"2026-10-23T00:00:00\",\"isOfficial\":true,\"lines\":[{\"orderLineId\":$POL,\"quantity\":70,\"unitPrice\":390000}]}"
+check "invoice above the received quantity rejected (three-way match)" '.success == false'
+as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$PO,\"invoiceNumber\":\"F-1001\",\"invoiceDate\":\"2026-10-23T00:00:00\",\"isOfficial\":true,\"lines\":[{\"orderLineId\":$POL,\"quantity\":60,\"unitPrice\":390000}]}"
+check "invoice matched with order and receipt" '.success and .data.status == 1 and .data.totalAmount == 25740000'
+SINV=$(val .data.id)
+as "$COM_TOKEN" POST procurement/invoices/action "{\"id\":$SINV,\"action\":\"approve\"}"; check "invoice creator cannot approve it" '.success == false'
+as "$FIN_TOKEN" POST procurement/invoices/action "{\"id\":$SINV,\"action\":\"approve\"}"; check "finance approves the invoice" '.success and .data.status == 3'
+as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$PO,\"invoiceNumber\":\"F-1001\",\"invoiceDate\":\"2026-10-23T00:00:00\",\"lines\":[{\"orderLineId\":$POL,\"quantity\":1,\"unitPrice\":390000}]}"
+check "same supplier invoice number cannot be registered twice" '.success == false'
+as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SINV,\"amount\":30000000}"; check "payment above the invoice rejected" '.success == false'
+as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SINV,\"amount\":25740000,\"deductions\":0}"; check "payment request for the approved invoice" '.success and .data.status == 0'
+PAY=$(val .data.id)
+as "$COM_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"approve\"}"; check "buyer cannot approve the payment" '.success == false'
+call POST procurement/payments/action "{\"id\":$PAY,\"action\":\"approve\"}"; check "payment approved by PMO" '.success and .data.status == 1'
+as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\"}"; check "payment needs the bank or Sepidar reference" '.success == false'
+as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\"}"; check "finance records the payment" '.success and .data.status == 2'
+call GET "finance/events?PageSize=0"
+check "invoice event: GRNI cleared, VAT and payable to the supplier" '[.data.data[] | select(.sourceType == "SupplierInvoice")] | length == 1 and (.[0].lines | map(select(.accountRole == "AccountsPayable")) | .[0].credit) == 25740000'
+check "goods received not invoiced is zero for the supplier" "[.data.data[] | select(.status != 9) | .lines[] | select(.accountRole == \"GRNI\" and .providerId == $PA) | (.debit - .credit)] | add == 0"
+check "every accounting event is balanced (with procurement)" '[.data.data[] | ([.lines[].debit]|add) == ([.lines[].credit]|add)] | all'
+call GET finance/valuation; check "stock value still equals the events after procurement" '.data.totalValue == .data.totalEventsBalance'
+as "$COM_TOKEN" GET "procurement/suppliers?contains=الف"; check "supplier list shows grade and on-time delivery" '.success and .data[0].grade == 1 and .data[0].receiptLines == 1'
+
+# switching the purchase order rule on: only petty-cash purchases are received without an order
+call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "purchase order rule switched on" '.success and .data.value == 1'
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-23T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"locationId\":$L2}]}"
+D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "receipt without order and price rejected" '.success == false'; call DELETE "inventory/documents/$D"
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-23T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"locationId\":$L2,\"unitPrice\":60000000}]}"
+D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "receipt without order above petty cash rejected" '.success == false'; call DELETE "inventory/documents/$D"
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-23T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":2,\"locationId\":$L2,\"unitPrice\":400000}]}"
+D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "petty-cash receipt without order accepted" '.success'
 
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"

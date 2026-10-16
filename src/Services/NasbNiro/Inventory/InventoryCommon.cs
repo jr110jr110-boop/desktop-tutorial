@@ -78,6 +78,10 @@ namespace Services.NasbNiro.Inventory
 
     public static class InventoryDocumentRules
     {
+        /// <summary>Purchase receipt and supplier return may reference a PMIS purchase order.</summary>
+        public static bool UsesPurchaseOrder(InventoryDocumentType type) =>
+            type == InventoryDocumentType.PurchaseReceipt || type == InventoryDocumentType.SupplierReturn;
+
         public static bool IsIncoming(InventoryDocumentType type) =>
             type == InventoryDocumentType.PurchaseReceipt ||
             type == InventoryDocumentType.ProductionReceipt ||

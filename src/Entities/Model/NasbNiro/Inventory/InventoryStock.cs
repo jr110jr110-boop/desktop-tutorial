@@ -103,6 +103,10 @@ namespace Entities.Model.NasbNiro.Inventory
         public int? BuyOrderId { get; set; }
         public BuyOrder BuyOrder { get; set; }
 
+        /// <summary>PMIS purchase order of a purchase receipt or supplier return (procurement module).</summary>
+        public int? PurchaseOrderId { get; set; }
+        public Entities.Model.NasbNiro.Procurement.PurchaseOrder PurchaseOrder { get; set; }
+
         public int? WorkOrderId { get; set; }
         public WorkOrder WorkOrder { get; set; }
 
@@ -208,6 +212,10 @@ namespace Entities.Model.NasbNiro.Inventory
 
         public decimal? UnitPrice { get; set; }
         public string Description { get; set; }
+
+        /// <summary>Purchase order line received or returned by this line.</summary>
+        public int? PurchaseOrderLineId { get; set; }
+        public Entities.Model.NasbNiro.Procurement.PurchaseOrderLine PurchaseOrderLine { get; set; }
 
         /// <summary>Only for a stage conversion: the line takes the part out (old stage) or brings it in (new stage).</summary>
         public DocumentLineDirection Direction { get; set; }

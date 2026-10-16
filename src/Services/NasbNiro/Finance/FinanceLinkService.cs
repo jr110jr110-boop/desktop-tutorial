@@ -297,7 +297,7 @@ namespace Services.NasbNiro.Finance
 
             // reconciliation: stock sub-ledger (item values) against the inventory lines of the accounting events
             var ledger = await _uow.Set<AccountingEventLine>()
-                .Where(l => l.AccountRole.StartsWith(AccountRoles.Inventory) && l.Event.Status != AccountingEventStatus.NotRequired)
+                .Where(l => (l.AccountRole == AccountRoles.Inventory || l.AccountRole.StartsWith(AccountRoles.Inventory + ".")) && l.Event.Status != AccountingEventStatus.NotRequired)
                 .GroupBy(l => l.AccountRole).Select(g => new { Role = g.Key, Balance = g.Sum(l => l.Debit - l.Credit) }).ToListAsync(cancellationToken);
             var subLedger = allCosts.GroupBy(c => AccountRoles.InventoryOf(c.Code)).ToDictionary(g => g.Key, g => g.Sum(c => c.Value));
             foreach (string role in subLedger.Keys.Union(ledger.Select(l => l.Role)).OrderBy(r => r))

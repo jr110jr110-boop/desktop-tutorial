@@ -183,6 +183,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? DestinationWarehouseId { get; set; }
         public int? ProviderId { get; set; }
         public int? BuyOrderId { get; set; }
+        /// <summary>PMIS purchase order (procurement). A purchase receipt without it is a petty-cash purchase.</summary>
+        public int? PurchaseOrderId { get; set; }
         public int? WorkOrderId { get; set; }
         public int? ContractId { get; set; }
         public string ReferenceNumber { get; set; }
@@ -223,6 +225,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? LocationId { get; set; }
         public int? DestinationLocationId { get; set; }
         public decimal? UnitPrice { get; set; }
+        public int? PurchaseOrderLineId { get; set; }
         public string Description { get; set; }
         public DocumentLineDirection Direction { get; set; }
         public int? SourceRowNumber { get; set; }
@@ -280,6 +283,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? ProviderId { get; set; }
         public string ProviderName { get; set; }
         public int? BuyOrderId { get; set; }
+        public int? PurchaseOrderId { get; set; }
+        public string PurchaseOrderNumber { get; set; }
         public int? WorkOrderId { get; set; }
         public string WorkOrderCode { get; set; }
         public int? ContractId { get; set; }
@@ -345,6 +350,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? DestinationLocationId { get; set; }
         public string DestinationLocationCode { get; set; }
         public decimal? UnitPrice { get; set; }
+        public int? PurchaseOrderLineId { get; set; }
         public string Description { get; set; }
         public DocumentLineDirection Direction { get; set; }
         public int? SourceRowNumber { get; set; }

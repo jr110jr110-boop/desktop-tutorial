@@ -52,9 +52,14 @@ namespace Services.NasbNiro.Inventory
         private readonly IInventoryUserContext _user;
 
         private readonly Finance.ICostingService _costing;
+        private readonly Procurement.IProcurementService _procurement;
+        private readonly Procurement.IPayablesService _payables;
 
-        public InventoryDocumentService(IUnitOfWork uow, IInventoryUserContext user, Finance.ICostingService costing)
+        public InventoryDocumentService(IUnitOfWork uow, IInventoryUserContext user, Finance.ICostingService costing,
+            Procurement.IProcurementService procurement, Procurement.IPayablesService payables)
         {
+            _procurement = procurement ?? throw new ArgumentNullException(nameof(procurement));
+            _payables = payables ?? throw new ArgumentNullException(nameof(payables));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
@@ -126,6 +131,8 @@ namespace Services.NasbNiro.Inventory
                     ProviderId = d.ProviderId,
                     ProviderName = d.Provider.Name,
                     BuyOrderId = d.BuyOrderId,
+                    PurchaseOrderId = d.PurchaseOrderId,
+                    PurchaseOrderNumber = d.PurchaseOrder.Number,
                     WorkOrderId = d.WorkOrderId,
                     WorkOrderCode = d.WorkOrder.Code,
                     ContractId = d.ContractId,
@@ -180,6 +187,7 @@ namespace Services.NasbNiro.Inventory
                         DestinationLocationId = l.DestinationLocationId,
                         DestinationLocationCode = l.DestinationLocation.Code,
                         UnitPrice = l.UnitPrice,
+                        PurchaseOrderLineId = l.PurchaseOrderLineId,
                         Description = l.Description,
                         Direction = l.Direction,
                         SourceRowNumber = l.SourceRowNumber,
@@ -381,6 +389,7 @@ namespace Services.NasbNiro.Inventory
             document.DestinationWarehouseId = dto.DestinationWarehouseId;
             document.ProviderId = dto.ProviderId;
             document.BuyOrderId = dto.BuyOrderId;
+            document.PurchaseOrderId = InventoryDocumentRules.UsesPurchaseOrder(dto.Type) ? dto.PurchaseOrderId : null;
             document.WorkOrderId = dto.WorkOrderId;
             document.ContractId = dto.ContractId;
             document.ReferenceNumber = InventoryText.Clean(dto.ReferenceNumber);
@@ -406,6 +415,7 @@ namespace Services.NasbNiro.Inventory
                     LocationId = line.LocationId,
                     DestinationLocationId = line.DestinationLocationId,
                     UnitPrice = line.UnitPrice,
+                    PurchaseOrderLineId = InventoryDocumentRules.UsesPurchaseOrder(dto.Type) ? line.PurchaseOrderLineId : null,
                     Description = InventoryText.Clean(line.Description),
                     Direction = line.Direction,
                     SourceRowNumber = line.SourceRowNumber,
@@ -753,7 +763,7 @@ namespace Services.NasbNiro.Inventory
             // where the "in" side of the document goes
             Warehouse inWarehouse = transfer || conversion ? destination ?? source : source;
 
-            string headerError = CheckBeforeConfirm(document);
+            string headerError = CheckBeforeConfirm(document) ?? await CheckPurchaseOrderAsync(document, cancellationToken);
             if (headerError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(headerError);
 
             // during an annual stock count the warehouse is frozen: only the count's own adjustments are posted
@@ -1148,9 +1158,79 @@ namespace Services.NasbNiro.Inventory
             document.ModifyDate = now;
             document.ModifierUserId = _user.UserId;
 
+            if (type == InventoryDocumentType.SupplierReturn && document.ProviderId.HasValue)
+                await _payables.OnSupplierReturnAsync(document.ProviderId.Value, document.Number, cancellationToken);
+
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
+            await RefreshPurchaseOrderAsync(document, cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);
+        }
+
+        /// <summary>After a receipt or return of an order is confirmed or cancelled: received quantity and status of the order.</summary>
+        private async Task RefreshPurchaseOrderAsync(InventoryDocument document, CancellationToken cancellationToken)
+        {
+            if (!document.PurchaseOrderId.HasValue) return;
+            await _procurement.RefreshOrderAsync(document.PurchaseOrderId.Value, cancellationToken);
+            await SaveAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Purchase receipt against a PMIS purchase order (WI-WH-001 / WI-PO): the order must be released, of the same supplier,
+        /// each line from the order, quantity within the open quantity plus tolerance; the price is taken from the order.
+        /// Without an order only a petty-cash purchase (every line priced, total within the petty-cash limit) is accepted,
+        /// unless the purchase order rule is switched off (go-live period).
+        /// </summary>
+        private async Task<string> CheckPurchaseOrderAsync(InventoryDocument document, CancellationToken cancellationToken)
+        {
+            if (!InventoryDocumentRules.UsesPurchaseOrder(document.Type)) return null;
+            Dictionary<string, decimal> s = await Procurement.ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
+            if (!document.PurchaseOrderId.HasValue)
+            {
+                if (document.Lines.Any(l => l.PurchaseOrderLineId.HasValue)) return "ردیف سفارش خرید بدون سفارش خرید در سرآیند ثبت شده است.";
+                if (document.Type != InventoryDocumentType.PurchaseReceipt || s[Procurement.ProcurementSettingKeys.EnforcePurchaseOrder] == 0) return null;
+                if (document.Lines.Any(l => !l.UnitPrice.HasValue))
+                    return "رسید خرید بدون سفارش خرید فقط برای خرید تنخواه است و فی همه ردیف‌ها لازم است.";
+                decimal total = document.Lines.Sum(l => l.Quantity * l.UnitPrice.Value);
+                decimal limit = s[Procurement.ProcurementSettingKeys.PettyCashLimit];
+                return total > limit ? $"مبلغ این رسید ({total:0} ریال) از سقف خرید تنخواه ({limit:0} ریال) بیشتر است؛ رسید باید به سفارش خرید ابلاغ‌شده متصل باشد." : null;
+            }
+
+            Entities.Model.NasbNiro.Procurement.PurchaseOrder order = await _uow.Set<Entities.Model.NasbNiro.Procurement.PurchaseOrder>()
+                .Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == document.PurchaseOrderId.Value && !o.Deleted, cancellationToken);
+            if (order == null) return "سفارش خرید پیدا نشد.";
+            if (document.ProviderId.HasValue && document.ProviderId != order.ProviderId) return "تامین‌کننده سند با تامین‌کننده سفارش خرید یکی نیست.";
+            document.ProviderId = order.ProviderId;
+            document.WorkOrderId ??= order.WorkOrderId;
+            document.ContractId ??= order.ContractId;
+            if (document.Type == InventoryDocumentType.PurchaseReceipt &&
+                order.Status != Entities.Model.NasbNiro.Procurement.PurchaseOrderStatus.Released &&
+                order.Status != Entities.Model.NasbNiro.Procurement.PurchaseOrderStatus.PartlyReceived)
+                return $"سفارش خرید {order.Number} ابلاغ نشده یا تکمیل/بسته شده است.";
+            decimal tolerance = s[Procurement.ProcurementSettingKeys.ReceiptTolerancePercent] / 100m;
+            foreach (InventoryDocumentLine line in document.Lines)
+            {
+                string row = $"ردیف {line.RowNumber}: ";
+                var orderLine = order.Lines.FirstOrDefault(l => l.Id == line.PurchaseOrderLineId);
+                if (orderLine == null) return row + "ردیف سفارش خرید را انتخاب کنید.";
+                if (orderLine.ItemId != line.ItemId) return row + "کالای ردیف با کالای سفارش خرید یکی نیست.";
+                if (document.Type == InventoryDocumentType.PurchaseReceipt)
+                    line.UnitPrice = orderLine.UnitPrice; // the value of the receipt is the order price (rial)
+            }
+            foreach (var g in document.Lines.GroupBy(l => l.PurchaseOrderLineId.Value))
+            {
+                var orderLine = order.Lines.First(l => l.Id == g.Key);
+                decimal quantity = g.Sum(l => l.Quantity);
+                if (document.Type == InventoryDocumentType.PurchaseReceipt)
+                {
+                    decimal open = orderLine.Quantity * (1 + tolerance) - orderLine.ReceivedQuantity;
+                    if (quantity > open)
+                        return $"ردیف {orderLine.RowNumber} سفارش {order.Number}: سفارش {orderLine.Quantity}، دریافت‌شده {orderLine.ReceivedQuantity}؛ دریافت بیش از سفارش مجاز نیست.";
+                }
+                else if (quantity > orderLine.ReceivedQuantity)
+                    return $"ردیف {orderLine.RowNumber} سفارش {order.Number}: برگشت بیش از مقدار دریافت‌شده است.";
+            }
+            return null;
         }
 
         /// <summary>Data the document needs before it is confirmed: exit data, scrap sale data, approvals.</summary>
@@ -1428,6 +1508,7 @@ namespace Services.NasbNiro.Inventory
 
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
+            await RefreshPurchaseOrderAsync(document, cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);
         }
     }

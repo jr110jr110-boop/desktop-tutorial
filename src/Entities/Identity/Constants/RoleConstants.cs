@@ -103,6 +103,14 @@ namespace Entities.Identity.Constants
             Description = "سرپرست انبار"
         };
 
+        public const string Ceo = "CEO";
+        public static readonly ResponseRole CeoResponseRole = new ResponseRole()
+        {
+            Id = 13,
+            Name = Ceo,
+            Description = "مدیرعامل"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -117,6 +125,7 @@ namespace Entities.Identity.Constants
             yield return SecurityResponseRole;
             yield return PlanningResponseRole;
             yield return WarehouseSupervisorResponseRole;
+            yield return CeoResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)
