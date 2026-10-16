@@ -138,3 +138,7 @@ export async function downloadFile(documentId: string, fileName: string) {
     /* shown by the caller */
   }
 }
+
+/** Purchase orders that can still be received (released or partly received); used by the purchase receipt. */
+export const getOpenPurchaseOrders = () => call("get", "procurement/orders", undefined, clean({ OpenForReceipt: true, PageSize: 200 }));
+export const getPurchaseOrderForReceipt = (id: number) => call("get", "procurement/orders/" + id);

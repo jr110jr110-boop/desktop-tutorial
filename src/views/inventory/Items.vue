@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import readXlsxFile from "read-excel-file";
+import CodeCheck from "@/components/inventory/CodeCheck.vue";
 import { deleteItem, getGroups, getItems, importItems, saveItem } from "@/api/InventoryAPIs";
 import { fail, labelCode, num, ok, openLabels, trackingModes } from "@/composables/inventory";
 
@@ -18,6 +19,7 @@ const selected = ref<number[]>([]);
 const emptyForm = () => ({
   id: null, code: "", title: "", itemGroupId: null, unit: "عدد", trackingMode: 0, technicalCode: "", material: "",
   standard: "", specification: "", weight: null, minStock: 0, maxStock: null, isActive: true, sepidarCode: "",
+  mescCode: "", legacyCode: "", requiresIncomingInspection: true, shelfLifeDays: null,
 });
 const form = ref<any>(null);
 const saving = ref(false);
@@ -96,6 +98,8 @@ const fields = [
   { key: "weight", label: "وزن", words: ["وزن", "weight"] },
   { key: "minStock", label: "نقطه سفارش", words: ["نقطه سفارش", "حداقل موجودی", "min stock", "min"] },
   { key: "sepidarCode", label: "کد سپیدار", words: ["کد سپیدار", "sepidar"] },
+  { key: "legacyCode", label: "کد قدیمی (فقط برای جستجو)", words: ["کد قدیم", "کد قبلی", "legacy", "old code"] },
+  { key: "mescCode", label: "کد MESC", words: ["mesc", "کد mesc"] },
 ];
 const importer = ref<any>(null);
 
@@ -148,6 +152,8 @@ async function runImport() {
     weight: toNumber(cell(r, "weight")),
     minStock: toNumber(cell(r, "minStock")),
     sepidarCode: cell(r, "sepidarCode") !== null ? String(cell(r, "sepidarCode")) : null,
+    legacyCode: cell(r, "legacyCode") !== null ? String(cell(r, "legacyCode")) : null,
+    mescCode: cell(r, "mescCode") !== null ? String(cell(r, "mescCode")) : null,
   }));
   imp.busy = true;
   const [data, error] = await importItems(rows);
@@ -252,8 +258,9 @@ onMounted(() => {
       <div class="inv-modal">
         <h2 class="inv-title mb-3">{{ form.id ? "ویرایش کالا" : "کالای جدید" }}</h2>
         <div class="row g-2">
-          <div class="col-md-4"><label class="form-label small">کد *</label><input v-model="form.code" class="form-control form-control-sm inv-ltr" /></div>
+          <div class="col-md-4"><label class="form-label small">کد * (۱۴ رقم یا MESC)</label><input v-model="form.code" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-8"><label class="form-label small">شرح *</label><input v-model="form.title" class="form-control form-control-sm" /></div>
+          <div class="col-12"><CodeCheck :code="form.code" :item-id="form.id" /></div>
           <div class="col-md-6">
             <label class="form-label small">گروه</label>
             <select v-model="form.itemGroupId" class="form-select form-select-sm">
@@ -276,9 +283,18 @@ onMounted(() => {
           <div class="col-md-3"><label class="form-label small">نقطه سفارش</label><input v-model.number="form.minStock" class="form-control form-control-sm" type="number" /></div>
           <div class="col-md-3"><label class="form-label small">حداکثر موجودی</label><input v-model.number="form.maxStock" class="form-control form-control-sm" type="number" /></div>
           <div class="col-md-3"><label class="form-label small">کد سپیدار</label><input v-model="form.sepidarCode" class="form-control form-control-sm inv-ltr" /></div>
+          <div class="col-md-3"><label class="form-label small">کد MESC</label><input v-model="form.mescCode" class="form-control form-control-sm inv-ltr" /></div>
+          <div class="col-md-3"><label class="form-label small">کد قدیمی (جستجو)</label><input v-model="form.legacyCode" class="form-control form-control-sm inv-ltr" /></div>
+          <div class="col-md-3">
+            <label class="form-label small">ماندگاری (روز)</label>
+            <input v-model.number="form.shelfLifeDays" class="form-control form-control-sm" placeholder="الکترود، رنگ، مواد شیمیایی" type="number" />
+          </div>
+          <div class="col-md-3 d-flex align-items-end">
+            <label class="form-check small"><input v-model="form.requiresIncomingInspection" class="form-check-input" type="checkbox" /> بازرسی ورودی لازم دارد (رسید در قرنطینه)</label>
+          </div>
           <div class="col-12 form-check ms-2"><input id="itemActive" v-model="form.isActive" class="form-check-input" type="checkbox" /><label class="form-check-label small" for="itemActive">فعال</label></div>
         </div>
-        <p class="inv-muted mt-2">نوع ردیابی بعد از اولین گردش انبار قابل تغییر نیست. قطعات حساس توربین را «سریال» و مواد با گواهی ذوب را «بچ» تعریف کنید.</p>
+        <p class="inv-muted mt-2">کد جدید را فقط برنامه‌ریزی و کنترل پروژه ثبت می‌کند؛ بقیه از «درخواست کد کالا» استفاده کنند. نوع ردیابی بعد از اولین گردش انبار قابل تغییر نیست. قطعات حساس توربین را «سریال» و مواد با گواهی ذوب را «بچ» تعریف کنید.</p>
         <div class="d-flex gap-2 justify-content-end mt-3">
           <button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button>
           <button :disabled="saving" class="btn btn-sm btn-primary" @click="save">ذخیره</button>

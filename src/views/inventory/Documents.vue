@@ -3,7 +3,8 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { getDocuments, getWarehouses } from "@/api/InventoryAPIs";
-import { documentStatuses, documentTypes, fail, jalali, num, sepidarStatuses } from "@/composables/inventory";
+import { documentStatuses, documentTypes, typeOrder, fail, jalali, num, sepidarStatuses } from "@/composables/inventory";
+import { hasRole, InventoryRoles } from "@/composables/roles";
 
 const router = useRouter();
 const docs = ref<any[]>([]);
@@ -12,6 +13,12 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = 30;
 const loading = ref(false);
+const canImport = hasRole(InventoryRoles.documents);
+function createFromSelect(e: any) {
+  const value = Number(e.target.value);
+  e.target.value = "";
+  if (value) create(value);
+}
 const filters = ref({ Contains: "", Type: null as number | null, Status: null as number | null, WarehouseId: null as number | null, From: "", To: "" });
 
 async function load() {
@@ -62,7 +69,11 @@ onMounted(async () => {
         <div class="dropdown">
           <div class="d-flex flex-wrap gap-1 d-print-none">
             <button class="btn btn-sm btn-outline-secondary" @click="printReport">چاپ فهرست</button>
-            <button v-for="(t, k) in documentTypes" :key="k" class="btn btn-sm btn-outline-primary" @click="create(Number(k))">+ {{ t }}</button>
+            <router-link v-if="canImport" :to="{ name: 'InventoryOpeningImport' }" class="btn btn-sm btn-outline-secondary">ورود موجودی اول دوره</router-link>
+            <select class="form-select form-select-sm" style="width: 220px" @change="createFromSelect">
+              <option selected value="">+ سند جدید ...</option>
+              <option v-for="k in typeOrder" :key="k" :value="k">{{ documentTypes[k] }}</option>
+            </select>
           </div>
         </div>
       </div>
