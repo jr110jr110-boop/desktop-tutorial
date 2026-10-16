@@ -5,7 +5,7 @@ import {
   addAllWorkflow,
   addSingleWorkflow,
   getWorkflowById,
-} from "@/api/WorkflowAPIs";
+} from "@/api/WorkFlowAPIs";
 import { getUserListEngineerAll } from "@/api/UserAPIs";
 import { Colors } from "@/assets/colors";
 import router from "@/router";
@@ -15,7 +15,7 @@ import KsModal from "@/components/common/KsModal.vue";
 import KsSelect from "@/components/common/KsSelect.vue";
 import KsInput from "@/components/common/KsInput.vue";
 
-import type Workflow from "@/types/Workflow";
+import type Workflow from "@/types/WorkFlow";
 import type User from "@/types/User";
 import showErrorNotification from "@/composables/showErrorNotification";
 import showSuccessNotification from "@/composables/showSuccessNotification";

@@ -175,3 +175,69 @@ $ReportFont: "B Zar", IRANYekan, Tahoma, sans-serif;
   }
   .table-responsive { overflow: visible !important; }
 }
+
+/*
+ * Printed forms of the company (components/print/PrintForm.vue): a bordered A4 sheet with the logo and the title,
+ * a box of the document fields, the table of lines, the signature boxes and the footer with the form code.
+ */
+.print-form {
+  border: 1.2px solid #000;
+  font-size: 13px;
+  break-inside: auto;
+  margin-bottom: 6mm;
+
+  .pf-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.4rem 0.8rem;
+    border-bottom: 1.2px solid #000;
+  }
+  .pf-title { font-size: 1.7rem; font-weight: bold; margin: 0; flex: 1; text-align: right; }
+  .pf-logo { height: 52px; }
+  .pf-box { border-bottom: 1.2px solid #000; padding: 0.35rem 0.8rem; }
+  .pf-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.15rem 1.5rem; }
+  .pf-field, .pf-note { line-height: 1.7; }
+  .pf-note { border-top: 1px dotted #999; margin-top: 0.15rem; padding-top: 0.15rem; }
+  .pf-body { padding: 0; }
+  .pf-body table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .pf-body th { background: #6b7f3a; color: #fff; border: 1px solid #000; padding: 0.2rem 0.3rem; text-align: center; }
+  .pf-body td { border: 1px solid #555; padding: 0.2rem 0.3rem; vertical-align: middle; background: #fff !important; }
+  .pf-body tbody tr:nth-child(even) td { background: #fff !important; }
+  .pf-body table.pf-sub th { background: #e5e7ea; color: #000; font-size: 10.5px; }
+  .pf-body table.pf-sub td { font-size: 11px; }
+  .pf-body .num { text-align: center; }
+  .pf-statement { border-top: 1.2px solid #000; padding: 0.5rem 0.8rem; line-height: 2; }
+  .pf-signatures {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 3), 1fr);
+    border-top: 1.2px solid #000;
+    break-inside: avoid;
+  }
+  .pf-sign {
+    border-left: 1px solid #000;
+    padding: 0.35rem 0.6rem;
+    min-height: 26mm;
+    text-align: right;
+  }
+  .pf-sign:last-child { border-left: none; }
+  .pf-sign-title { font-weight: bold; }
+  .pf-sign-hint { font-size: 11px; color: #333; }
+  .pf-sign-space { height: 13mm; }
+  .pf-sign-name { font-size: 11px; }
+  .pf-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1.2px solid #000;
+    padding: 0.3rem 0.8rem;
+    font-weight: bold;
+  }
+  .pf-code { border: 1.2px solid #000; padding: 0.1rem 0.8rem; }
+}
+
+@media print {
+  .print-form { margin: 0 0 6mm 0; }
+  .print-form.print-only { display: block !important; }
+}

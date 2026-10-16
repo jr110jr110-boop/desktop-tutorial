@@ -1,6 +1,6 @@
 import type { AxiosError } from "axios";
 import axios from "axios";
-import type WorkflowGroup from "@/types/WorkflowGroup";
+import type WorkflowGroup from "@/types/WorkFlowGroup";
 
 const apiUrl = import.meta.env.VITE_API_URL.toString();
 const authToken = "Bearer " + window.localStorage.getItem("token");

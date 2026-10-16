@@ -1,42 +1,10 @@
-import axios, { type AxiosError } from "axios";
+import { call, clean, http, postForFile, saveBlob, rowsOf, type Result } from "@/api/ApiClient";
 
 // Warehouse, part traceability and Sepidar link (api/v1/inventory/...).
-// The token is read on every request (not once when the file loads), so a refreshed token is used at once.
+// The shared client (token on every request, [data, error] results) lives in ApiClient.ts.
 
-const apiUrl = import.meta.env.VITE_API_URL.toString();
-
-const http = axios.create({ baseURL: apiUrl + "api/v1/" });
-http.interceptors.request.use((config) => {
-  const token = window.localStorage.getItem("token");
-  if (token) {
-    config.headers = config.headers || {};
-    config.headers["Authorization"] = "Bearer " + token;
-  }
-  return config;
-});
-
-export type Result = [any, null] | [null, AxiosError | Error];
-
-async function call(method: "get" | "post" | "put" | "delete", url: string, body?: any, params?: any): Promise<Result> {
-  try {
-    const { data } = await http.request({ method, url, data: body, params });
-    if (data && data.success === false) return [null, new Error(data.message || "خطا")];
-    return [data && "data" in data ? data.data : data, null];
-  } catch (error: any) {
-    if (error?.response?.status === 403) return [null, new Error("شما اجازه این کار را ندارید.")];
-    if (error?.response?.status === 401) return [null, new Error("دوباره وارد سامانه شوید.")];
-    return [null, error];
-  }
-}
-
-function clean(params: any) {
-  const result: any = {};
-  Object.keys(params || {}).forEach((k) => {
-    const v = params[k];
-    if (v !== null && v !== undefined && v !== "") result[k] = v;
-  });
-  return result;
-}
+export type { Result } from "@/api/ApiClient";
+export { saveBlob, rowsOf };
 
 const base = "inventory/";
 
@@ -64,6 +32,46 @@ export const saveDocument = (dto: any) => call("post", base + "documents", dto);
 export const deleteDocument = (id: number) => call("delete", base + "documents/" + id);
 export const confirmDocument = (id: number) => call("post", base + "documents/" + id + "/confirm");
 export const cancelDocument = (id: number, reason: string) => call("post", base + "documents/" + id + "/cancel", { reason });
+/** kind: 1 warehouse supervisor, 2 planning, 4 quality (loading of a delivery), 6 finance (scrap sale). */
+export const approveDocument = (id: number, kind: number) => call("post", base + "documents/" + id + "/approve", { kind });
+export const exitCheckDocument = (id: number, note: string) => call("post", base + "documents/" + id + "/exit-check", { note });
+export const importOpening = (dto: any) => call("post", base + "documents/import-opening", dto);
+
+// coding (WI-WH-002) and requests for new item codes
+export const getCodingValues = (scheme: string) => call("get", base + "coding/values", undefined, clean({ scheme }));
+export const saveCodingValue = (dto: any) => call("post", base + "coding/values", dto);
+export const checkCode = (code: string, itemId?: number | null) => call("get", base + "coding/check", undefined, clean({ code, itemId }));
+export const getItemRequests = (status?: number | null) => call("get", base + "coding/requests", undefined, clean({ status }));
+export const saveItemRequest = (dto: any) => call("post", base + "coding/requests", dto);
+export const reviewItemRequest = (dto: any) => call("post", base + "coding/requests/review", dto);
+
+// incoming inspection and non-conformance reports (NCR)
+export const getInspections = (params: any) => call("get", base + "quality/inspections", undefined, clean(params));
+export const recordInspection = (dto: any) => call("post", base + "quality/inspections", dto);
+export const getNcrs = (params: any) => call("get", base + "quality/ncr", undefined, clean(params));
+export const getNcr = (id: number) => call("get", base + "quality/ncr/" + id);
+export const saveNcr = (dto: any) => call("post", base + "quality/ncr", dto);
+export const approveNcr = (dto: any) => call("post", base + "quality/ncr/approve", dto);
+export const executeNcr = (dto: any) => call("post", base + "quality/ncr/execute", dto);
+export const closeNcr = (dto: any) => call("post", base + "quality/ncr/close", dto);
+export const getSupplierReturnReport = (id: number) => call("get", base + "quality/ncr/" + id + "/supplier-return");
+
+// material requests
+export const getMaterialRequests = (params: any) => call("get", base + "material-requests", undefined, clean(params));
+export const getMaterialRequest = (id: number) => call("get", base + "material-requests/" + id);
+export const saveMaterialRequest = (dto: any) => call("post", base + "material-requests", dto);
+export const deleteMaterialRequest = (id: number) => call("delete", base + "material-requests/" + id);
+/** action: submit, approve-planning, approve-manufacturing, reject, close. */
+export const materialRequestAction = (id: number, action: string, reason?: string) =>
+  call("post", base + "material-requests/action", { id, action, reason });
+
+// stock counts
+export const getStockCounts = (warehouseId?: number | null) => call("get", base + "counts", undefined, clean({ warehouseId }));
+export const getStockCount = (id: number) => call("get", base + "counts/" + id);
+export const startStockCount = (dto: any) => call("post", base + "counts", dto);
+export const saveCountLines = (dto: any) => call("post", base + "counts/lines", dto);
+/** action: submit, approve-warehouse, approve-planning, post, cancel. */
+export const stockCountAction = (id: number, action: string) => call("post", base + "counts/action", { id, action });
 
 // stock
 export const getBalances = (params: any) => call("get", base + "stock", undefined, clean(params));
@@ -98,23 +106,8 @@ export const getSepidarMappings = (entityType: string) => call("get", base + "se
 export const saveSepidarMapping = (dto: any) => call("post", base + "sepidar/mappings", dto);
 
 /** Downloads the CSV export. Returns an error message, or null when the file was saved. */
-export async function exportSepidar(documentIds: number[], markExported: boolean): Promise<string | null> {
-  try {
-    const response = await http.post(base + "sepidar/export", { documentIds, markExported }, { responseType: "blob" });
-    const type = response.headers["content-type"] || "";
-    if (type.includes("application/json")) {
-      const text = await (response.data as Blob).text();
-      const json = JSON.parse(text);
-      return json.message || "خطا";
-    }
-    const disposition = response.headers["content-disposition"] || "";
-    const match = /filename="?([^";]+)"?/.exec(disposition);
-    saveBlob(response.data, match ? match[1] : "sepidar-export.csv");
-    return null;
-  } catch (error: any) {
-    return error?.message || "خطا";
-  }
-}
+export const exportSepidar = (documentIds: number[], markExported: boolean): Promise<string | null> =>
+  postForFile(base + "sepidar/export", { documentIds, markExported }, "sepidar-export.csv");
 
 // shared helpers that use the existing endpoints
 export const getProviders = () => call("get", "Provider", undefined, { PageSize: 0 });
@@ -144,22 +137,4 @@ export async function downloadFile(documentId: string, fileName: string) {
   } catch {
     /* shown by the caller */
   }
-}
-
-export function saveBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
-
-/** Paged API answers carry { data: [...], totalItems, ... }; plain lists come back as arrays. */
-export function rowsOf(value: any): any[] {
-  if (Array.isArray(value)) return value;
-  if (value && Array.isArray(value.data)) return value.data;
-  return [];
 }

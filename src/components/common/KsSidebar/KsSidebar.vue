@@ -149,6 +149,7 @@
 </template>
 
 <script lang="ts" setup>
+import { hasRole, InventoryRoles } from "@/composables/roles";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -266,6 +267,12 @@ const links = {
     { title: "کالاها و کدینگ", routeName: "InventoryItems", disabled: !accessList.includes("Warehouse") },
     { title: "گروه‌بندی کالا", routeName: "InventoryGroups", disabled: !accessList.includes("Warehouse") },
     { title: "انبارها و محل‌ها", routeName: "InventoryWarehouses", disabled: !accessList.includes("Warehouse") },
+    { title: "درخواست کالا", routeName: "InventoryMaterialRequests", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.materialRequest) },
+    { title: "قرنطینه و بازرسی ورودی", routeName: "InventoryInspections", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.qc) },
+    { title: "گزارش عدم انطباق (NCR)", routeName: "InventoryNcrs", disabled: !accessList.includes("Warehouse") },
+    { title: "شمارش و انبارگردانی", routeName: "InventoryStockCounts", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.counts) },
+    { title: "درخواست کد کالا", routeName: "InventoryItemRequests", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.itemRequest) },
+    { title: "جدول‌های کدینگ (WI-WH-002)", routeName: "InventoryCoding", disabled: !accessList.includes("Warehouse") },
     { title: "ارتباط با سپیدار", routeName: "InventorySepidar", disabled: !accessList.includes("SepidarLink") },
   ] as Links[],
   holidays: [

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type _Process from "@/types/Process";
 import type { AxiosRequestConfig } from "axios";
-import type WorkflowGroup from "@/types/WorkflowGroup";
+import type WorkflowGroup from "@/types/WorkFlowGroup";
 import { onMounted, ref, type Ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -16,7 +16,7 @@ import { changeDocumentFile, changeDocumentInfo } from "@/api/DocumentAPIs";
 import { getMachineList } from "@/api/MachineAPIs";
 import { getMockFile } from "@/composables/getMockFile";
 import { downloadFile } from "@/composables/downloadFile";
-import { getWorkflowGroupList } from "@/api/WorkflowGroupAPIs";
+import { getWorkflowGroupList } from "@/api/WorkFlowGroupAPIs";
 import showErrorNotification from "@/composables/showErrorNotification";
 import showSuccessNotification from "@/composables/showSuccessNotification";
 import showWarnNotification from "@/composables/showWarnNotification";

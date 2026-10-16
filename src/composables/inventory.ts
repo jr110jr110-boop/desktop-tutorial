@@ -18,8 +18,12 @@ export const warehouseKinds: Record<number, string> = {
   4: "محصول ساخته‌شده",
   5: "قرنطینه / بازرسی",
   6: "ضایعات",
+  7: "پیمانکار (انبار مجازی)",
+  8: "اموال مشتری / مرجوعی",
+  9: "مدل‌های ریخته‌گری",
 };
 
+/** InventoryDocumentType of the API. */
 export const documentTypes: Record<number, string> = {
   1: "رسید خرید",
   2: "رسید ساخت",
@@ -29,10 +33,66 @@ export const documentTypes: Record<number, string> = {
   6: "انتقال",
   7: "تعدیل افزایشی",
   8: "تعدیل کاهشی",
+  9: "ارسال به پیمانکار",
+  10: "برگشت از پیمانکار",
+  11: "تحویل به مشتری",
+  12: "تبدیل مرحله",
+  13: "رسید ضایعات",
+  14: "فروش ضایعات",
+  15: "موجودی اول دوره",
+  16: "ترخیص از قرنطینه",
+  17: "رسید اموال مشتری",
 };
 
-export const incomingTypes = [1, 2, 3, 7];
-export const outgoingTypes = [4, 5, 8];
+export const incomingTypes = [1, 2, 3, 7, 13, 15, 17];
+export const outgoingTypes = [4, 5, 8, 11, 14];
+export const transferTypes = [6, 9, 10, 16];
+/** Goods leave the premises: driver, vehicle and receiver are written and the guard checks the exit. */
+export const leavesPremisesTypes = [5, 9, 11, 14];
+/** Adjustments and opening balances need the warehouse supervisor and the planning manager. */
+export const needsApprovalTypes = [7, 8, 15];
+/** Made by the system (inspection or NCR), never typed by a user. */
+export const systemOnlyTypes = [16];
+/** Types that can reference a purchase order. */
+export const purchaseOrderTypes = [1, 5];
+/** Order of the "new document" buttons. */
+export const typeOrder = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 17, 7, 8];
+
+/** Not decided by the company: the label stays "to be set by quality assurance". */
+export const NO_FORM_CODE = "کد فرم: (توسط تضمین کیفیت تعیین شود)";
+
+/** Form codes of the company for the warehouse documents (the others have no code yet). */
+export const formCodes: Record<number, string> = {
+  1: "001-04-FO-WH",
+  2: "001-04-FO-WH",
+  3: "001-04-FO-WH",
+  15: "001-04-FO-WH",
+  17: "001-04-FO-WH",
+  4: "002-04-FO-WH",
+  9: "002-04-FO-WH",
+  11: "002-04-FO-WH",
+  5: "002-04-FO-WH",
+  13: "FO-WH-001",
+  14: "FO-WH-002",
+};
+
+export const distributionText = "توزیع نسخ: ۱- انبار  ۲- بازرگانی  ۳- برنامه‌ریزی و کنترل پروژه";
+
+/** DocumentLineDirection: only a stage conversion has it. */
+export const lineDirections: Record<number, string> = {
+  1: "خروج مرحله قبل",
+  2: "ورود مرحله بعد",
+};
+
+/** ApprovalKind of the API. */
+export const approvalKinds: Record<number, string> = {
+  1: "سرپرست انبار",
+  2: "مدیر برنامه‌ریزی و کنترل پروژه",
+  3: "مدیر تولید",
+  4: "کنترل کیفیت",
+  5: "مدیر مهندسی",
+  6: "واحد مالی",
+};
 
 export const documentStatuses: Record<number, string> = {
   0: "پیش‌نویس",
@@ -54,6 +114,7 @@ export const serialStatuses: Record<number, string> = {
   3: "نصب‌شده در مجموعه",
   4: "تحویل مشتری",
   5: "برگشت به تامین‌کننده",
+  6: "تبدیل به مرحله بعد",
   9: "ضایعات",
 };
 
@@ -72,6 +133,39 @@ export const qcStatuses: Record<number, string> = {
   4: "تایید مشروط",
 };
 
+export const inspectionStatuses: Record<number, string> = { 0: "منتظر بازرسی", 1: "بازرسی شد" };
+export const ncrSources: Record<number, string> = { 1: "بازرسی ورودی", 2: "حین ساخت", 3: "بازرسی نهایی", 4: "مشتری", 5: "پیمانکار" };
+export const ncrSeverities: Record<number, string> = { 0: "تعیین نشده", 1: "جزئی (Minor)", 2: "عمده (Major)" };
+export const ncrCauses: Record<number, string> = { 0: "—", 1: "نیروی انسانی", 2: "مواد", 3: "روش", 4: "تجهیزات", 5: "نقشه", 6: "محیط" };
+export const ncrDispositions: Record<number, string> = {
+  0: "تعیین نشده",
+  1: "استفاده با مجوز ارفاقی",
+  2: "دوباره‌کاری",
+  3: "تعمیر (با مجوز ارفاقی)",
+  4: "ضایعات",
+  5: "مرجوعی به تامین‌کننده / پیمانکار",
+};
+export const ncrStatuses: Record<number, string> = { 0: "باز", 1: "تصمیم تایید شد", 2: "اجرا شد (پیگیری اقدام اصلاحی)", 3: "بسته شد", 4: "ابطال" };
+export const materialRequestStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "ارسال شد (منتظر تایید)", 2: "تایید شد", 3: "رد شد", 4: "بسته شد" };
+export const itemRequestStatuses: Record<number, string> = { 0: "منتظر بررسی برنامه‌ریزی", 1: "تایید و کد داده شد", 2: "رد شد" };
+export const countKinds: Record<number, string> = { 1: "شمارش ادواری", 2: "انبارگردانی سالانه" };
+export const countStatuses: Record<number, string> = { 0: "در حال شمارش", 1: "ارسال برای تایید", 2: "تایید شد", 3: "ثبت شد", 4: "ابطال" };
+export const codingSchemes: Record<string, string> = {
+  Group: "گروه کالا (رقم ۱ و ۲)",
+  Assembly: "محدوده مجموعه‌ها (جدول ۴)",
+  PartStatus: "وضعیت قطعه (جدول ۳)",
+  MaterialShape: "مشخصه فیزیکی متریال",
+  MaterialGrade: "جنس متریال",
+  MaterialType: "نوع متریال",
+  MaterialStatus: "وضعیت متریال",
+  ProductType: "نوع محصول",
+  ModelPart: "بخش مدل (M/P/C)",
+  ModelMaterial: "جنس مدل",
+  ToolCategory: "دسته ابزار و ابزار دقیق",
+  ConsumableCategory: "دسته ملزومات",
+  AssetCategory: "دسته اموال",
+};
+
 export function jalali(value: string | null | undefined, withTime = false): string {
   if (!value) return "";
   const m = moment(value);
@@ -83,9 +177,19 @@ export function today(): string {
   return moment().format("YYYY-MM-DD");
 }
 
+/** Amounts in rial: whole numbers with thousands separators. */
+export function rial(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  return Math.round(Number(value)).toLocaleString("en-US");
+}
+
 export function num(value: number | null | undefined): string {
   if (value === null || value === undefined) return "";
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+export function printPage() {
+  window.print();
 }
 
 export function ok(message: string) {

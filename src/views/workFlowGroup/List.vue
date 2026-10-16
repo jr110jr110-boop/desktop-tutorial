@@ -7,8 +7,8 @@ import type TableValue from "@/types/TableValue";
 
 import KsTable from "@/components/common/KsTable.vue";
 import KsButton from "@/components/common/KsButton.vue";
-import type WorkflowGroup from "@/types/WorkflowGroup";
-import { getWorkflowGroupList } from "@/api/WorkflowGroupAPIs";
+import type WorkflowGroup from "@/types/WorkFlowGroup";
+import { getWorkflowGroupList } from "@/api/WorkFlowGroupAPIs";
 import FlowChartIcon from "@/components/icons/FlowChartIcon.vue";
 
 import showErrorNotification from "@/composables/showErrorNotification";

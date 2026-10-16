@@ -1,6 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
+import { InventoryRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -279,7 +280,7 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: "/workflow/Group/list",
     name: "WorkflowGroupList",
-    component: () => import("@/views/workflowGroup/List.vue"),
+    component: () => import("@/views/workFlowGroup/List.vue"),
     meta: {
       access: "workflow",
     },
@@ -288,7 +289,7 @@ const routes: Array<RouteRecordRaw> = [
     path: "/workflow/Group/update/:id?",
     name: "WorkflowGroupUpdate",
     props: true,
-    component: () => import("@/views/workflowGroup/Update.vue"),
+    component: () => import("@/views/workFlowGroup/Update.vue"),
     meta: {
       access: "workflow",
     },
@@ -297,7 +298,7 @@ const routes: Array<RouteRecordRaw> = [
     path: "/workflow/FlowChart/:id?",
     name: "WorkflowChart",
     props: true,
-    component: () => import("@/views/workflowGroup/FlowChart.vue"),
+    component: () => import("@/views/workFlowGroup/FlowChart.vue"),
     meta: {
       access: "workflow",
     },
@@ -408,6 +409,15 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/routing", name: "InventoryRouting", component: () => import("@/views/inventory/Routing.vue"), meta: { access: "traceability" } },
   { path: "/inventory/operations", name: "InventoryOperations", component: () => import("@/views/inventory/Operations.vue"), meta: { access: "traceability" } },
   { path: "/inventory/sepidar", name: "InventorySepidar", component: () => import("@/views/inventory/Sepidar.vue"), meta: { access: "sepidar" } },
+  { path: "/inventory/coding", name: "InventoryCoding", component: () => import("@/views/inventory/Coding.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/item-requests", name: "InventoryItemRequests", component: () => import("@/views/inventory/ItemRequests.vue"), meta: { access: "warehouse", roles: InventoryRoles.itemRequest } },
+  { path: "/inventory/material-requests", name: "InventoryMaterialRequests", component: () => import("@/views/inventory/MaterialRequests.vue"), meta: { access: "warehouse", roles: InventoryRoles.materialRequest } },
+  { path: "/inventory/material-requests/:id", name: "InventoryMaterialRequestEdit", component: () => import("@/views/inventory/MaterialRequestEdit.vue"), meta: { access: "warehouse", roles: InventoryRoles.materialRequest } },
+  { path: "/inventory/inspections", name: "InventoryInspections", component: () => import("@/views/inventory/Inspections.vue"), meta: { access: "warehouse", roles: InventoryRoles.qc } },
+  { path: "/inventory/ncr", name: "InventoryNcrs", component: () => import("@/views/inventory/Ncrs.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/ncr/:id", name: "InventoryNcrEdit", component: () => import("@/views/inventory/NcrEdit.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/counts", name: "InventoryStockCounts", component: () => import("@/views/inventory/StockCounts.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
+  { path: "/inventory/counts/:id", name: "InventoryStockCountEdit", component: () => import("@/views/inventory/StockCountEdit.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

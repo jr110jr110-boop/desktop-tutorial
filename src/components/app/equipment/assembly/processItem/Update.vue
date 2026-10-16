@@ -4,9 +4,9 @@ import type { Ref } from "vue";
 import { onMounted, ref } from "vue";
 import { useEquipmentAssembly } from "@/store";
 import { EQUIPMENT_PROCESS_MODEL } from "@/models";
-import { getWorkflowGroupList } from "@/api/WorkflowGroupAPIs";
+import { getWorkflowGroupList } from "@/api/WorkFlowGroupAPIs";
 import { getMachineList } from "@/api/MachineAPIs";
-import type WorkflowGroup from "@/types/WorkflowGroup";
+import type WorkflowGroup from "@/types/WorkFlowGroup";
 import type Machine from "@/types/Machine";
 
 import KsInput from "@/components/common/KsInput.vue";

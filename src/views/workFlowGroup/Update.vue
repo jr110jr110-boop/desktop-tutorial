@@ -2,14 +2,14 @@
 import { onMounted, ref } from "vue";
 import type { Ref, PropType } from "vue";
 import { useRouter } from "vue-router";
-import type WorkflowGroup from "@/types/WorkflowGroup";
+import type WorkflowGroup from "@/types/WorkFlowGroup";
 import KsUpdateForm from "@/components/common/KsUpdateForm.vue";
 import KsInput from "@/components/common/KsInput.vue";
 import {
   addWorkflowGroup,
   editWorkflowGroup,
   getWorkflowGroupById,
-} from "@/api/WorkflowGroupAPIs";
+} from "@/api/WorkFlowGroupAPIs";
 import CogIcon from "@/components/icons/CogIcon.vue";
 import showErrorNotification from "@/composables/showErrorNotification";
 

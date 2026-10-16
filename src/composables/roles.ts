@@ -1,0 +1,107 @@
+// Roles of the API (names in the JWT, upper case) and the role lists each endpoint accepts.
+// The lists mirror the [Authorize(Roles = ...)] attributes of the controllers and the checks inside the services,
+// so a page or a button is shown only to the people who can really use it. The API checks again on every call.
+//
+// The UI gives a user one role: the first one of the token (stored by the login page as "userRole").
+
+export const Roles = {
+  PMO: "PMO",
+  COMMERCIAL: "COMMERCIAL",
+  FINANCIAL: "FINANCIAL",
+  ENGINEERING: "ENGINEERING",
+  QC: "QC",
+  WAREHOUSE: "WAREHOUSE",
+  ASSEMBLER: "ASSEMBLER",
+  ENGINEER: "ENGINEER",
+  CONSTRUCTION: "CONSTRUCTION",
+  SECURITY: "SECURITY",
+  PLANNING: "PLANNING",
+  WHSUPERVISOR: "WHSUPERVISOR",
+  CEO: "CEO",
+} as const;
+
+export const roleTitles: Record<string, string> = {
+  PMO: "معاونت PMO",
+  COMMERCIAL: "بازرگانی",
+  FINANCIAL: "مالی",
+  ENGINEERING: "مهندسی",
+  QC: "کنترل کیفیت",
+  WAREHOUSE: "انبار",
+  ASSEMBLER: "مونتاژ",
+  ENGINEER: "مهندس",
+  CONSTRUCTION: "تولید",
+  SECURITY: "انتظامات (کنترل خروج)",
+  PLANNING: "برنامه‌ریزی و کنترل پروژه",
+  WHSUPERVISOR: "سرپرست انبار",
+  CEO: "مدیرعامل",
+};
+
+const list = (csv: string) => csv.split(",");
+
+/** Warehouse (InventoryRoles in the API). */
+export const InventoryRoles = {
+  masterData: list("PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING"),
+  documents: list("PMO,WAREHOUSE,WHSUPERVISOR"),
+  counts: list("PMO,WAREHOUSE,WHSUPERVISOR,PLANNING"),
+  production: list("PMO,WAREHOUSE,ENGINEERING,ENGINEER,ASSEMBLER,QC"),
+  routing: list("PMO,ENGINEERING"),
+  qc: list("PMO,QC"),
+  finance: list("PMO,FINANCIAL"),
+  materialRequest: list("PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR"),
+  approvers: list("PMO,PLANNING,WHSUPERVISOR,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE,FINANCIAL"),
+  exitCheck: list("PMO,WAREHOUSE,WHSUPERVISOR,SECURITY"),
+  itemRequest: list("PMO,PLANNING,ENGINEERING,ENGINEER,WAREHOUSE,WHSUPERVISOR,QC,CONSTRUCTION"),
+  planning: list("PMO,PLANNING"),
+  // single roles checked inside the document service
+  approveWarehouse: ["WHSUPERVISOR"],
+  approvePlanning: ["PLANNING", "PMO"],
+  approveQuality: ["QC"],
+  executeNcr: list("PMO,QC,WAREHOUSE"),
+};
+
+/** Finance controller. */
+export const FinanceRoles = {
+  readers: list("PMO,CEO,FINANCIAL,PLANNING"),
+  writers: list("PMO,FINANCIAL"),
+};
+
+/** Procurement (ProcurementRoles in the API). */
+export const ProcurementRoles = {
+  requesters: list("PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING,ENGINEER,CONSTRUCTION,QC,ASSEMBLER,COMMERCIAL"),
+  planning: list("PLANNING,PMO"),
+  management: list("CEO,PMO"),
+  commercial: list("COMMERCIAL,PMO"),
+  technical: list("ENGINEERING,QC,CONSTRUCTION,PMO"),
+  orderApproval: list("PMO,CEO"),
+  finance: list("FINANCIAL,PMO"),
+  serviceAcceptance: list("QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO"),
+  // the controller adds ASSEMBLER and ENGINEER to the readers of the services
+  readers: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER"),
+  // the financial committee approval is by the PMO deputy only (see ProcurementService.InquiryActionAsync)
+  committeeFinancial: ["PMO"],
+};
+
+/** The role of the signed-in user (upper case), or "" when it is unknown. */
+export function currentRole(): string {
+  try {
+    const raw = localStorage.getItem("userRole") || "";
+    return raw.split(",")[0].trim().toUpperCase();
+  } catch {
+    return "";
+  }
+}
+
+export function hasRole(allowed: string[] | undefined | null): boolean {
+  if (!allowed || allowed.length === 0) return true;
+  return allowed.includes(currentRole());
+}
+
+/** The access list is stored by the login page as a comma separated text. */
+export function hasAccess(claim: string | undefined | null): boolean {
+  if (!claim) return true;
+  try {
+    return (localStorage.getItem("accessList") || "").split(",").includes(claim);
+  } catch {
+    return false;
+  }
+}
