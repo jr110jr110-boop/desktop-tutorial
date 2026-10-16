@@ -159,15 +159,16 @@ namespace Services.NasbNiro.Finance
             {
                 if (!Valued(t)) { t.UnitCost = 0; t.CostAmount = 0; continue; }
                 ItemCost cost = costs[t.ItemId];
+                decimal outAmount = R(t.Quantity * cost.AverageCost);
                 t.UnitCost = cost.AverageCost;
-                t.CostAmount = R(t.Quantity * cost.AverageCost);
-                residuals += Apply(cost, t.Quantity, t.CostAmount);
-                AddRole(AccountRoles.InventoryOf(codes[t.ItemId]), t.CostAmount);
+                t.CostAmount = outAmount;
+                residuals += Apply(cost, t.Quantity, outAmount);
+                AddRole(AccountRoles.InventoryOf(codes[t.ItemId]), outAmount);
                 if (t.DocumentLineId.HasValue)
                 {
-                    outValueByLine[t.DocumentLineId.Value] = (outValueByLine.TryGetValue(t.DocumentLineId.Value, out decimal v) ? v : 0) - t.CostAmount;
+                    outValueByLine[t.DocumentLineId.Value] = (outValueByLine.TryGetValue(t.DocumentLineId.Value, out decimal v) ? v : 0) - outAmount;
                     if (lines.TryGetValue(t.DocumentLineId.Value, out InventoryDocumentLine ol))
-                        outValueByRow[ol.RowNumber] = (outValueByRow.TryGetValue(ol.RowNumber, out decimal r) ? r : 0) - t.CostAmount;
+                        outValueByRow[ol.RowNumber] = (outValueByRow.TryGetValue(ol.RowNumber, out decimal r) ? r : 0) - outAmount;
                 }
             }
 
@@ -196,11 +197,12 @@ namespace Services.NasbNiro.Finance
                     unit = 0;
                 else
                     unit = cost.AverageCost; // returns and adjustments without a price
+                decimal inAmount = R(t.Quantity * unit);
                 t.UnitCost = Math.Round(unit, 4);
-                t.CostAmount = R(t.Quantity * unit);
+                t.CostAmount = inAmount;
                 if ((type == InventoryDocumentType.PurchaseReceipt) && t.UnitPrice > 0) cost.LastPurchasePrice = t.UnitPrice;
-                residuals += Apply(cost, t.Quantity, t.CostAmount);
-                AddRole(AccountRoles.InventoryOf(codes[t.ItemId]), t.CostAmount);
+                residuals += Apply(cost, t.Quantity, inAmount);
+                AddRole(AccountRoles.InventoryOf(codes[t.ItemId]), inAmount);
             }
             if (residuals != 0)
             {
