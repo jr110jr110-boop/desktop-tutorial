@@ -498,6 +498,9 @@ check "every accounting event is balanced (with procurement)" '[.data.data[] | (
 call GET finance/valuation; check "stock value still equals the events after procurement" '.data.totalValue == .data.totalEventsBalance'
 as "$COM_TOKEN" GET "procurement/suppliers?contains=الف"; check "supplier list shows grade and on-time delivery" '.success and .data[0].grade == 1 and .data[0].receiptLines == 1'
 
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "CEO dashboard: stock value, payables and projects" '.success and .data.stockValue > 0 and .data.payablesOpen == 0 and .data.receivedNotInvoiced > 0 and .data.openPurchaseOrders == 1'
+as "$WH_TOKEN" GET finance/ceo-dashboard; [ "$CODE" = "403" ] && ok "storekeeper cannot open the CEO dashboard (403)" || bad "storekeeper cannot open the CEO dashboard (403) got $CODE"
+
 # switching the purchase order rule on: only petty-cash purchases are received without an order
 call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "purchase order rule switched on" '.success and .data.value == 1'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-23T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"locationId\":$L2}]}"

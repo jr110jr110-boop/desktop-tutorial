@@ -129,6 +129,7 @@ namespace IocConfig
             services.AddScoped<IOpeningStockService, OpeningStockService>();
             services.AddScoped<Services.NasbNiro.Finance.ICostingService, Services.NasbNiro.Finance.CostingService>();
             services.AddScoped<Services.NasbNiro.Finance.IFinanceLinkService, Services.NasbNiro.Finance.FinanceLinkService>();
+            services.AddScoped<Services.NasbNiro.Finance.ICeoDashboardService, Services.NasbNiro.Finance.CeoDashboardService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();

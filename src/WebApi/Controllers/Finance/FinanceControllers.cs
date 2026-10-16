@@ -64,5 +64,10 @@ namespace WebApi.Controllers
         [HttpGet("valuation")]
         [Authorize(Roles = Readers)]
         public async Task<IActionResult> ValuationAsync([FromQuery] string contains, CancellationToken ct) => Ok(await _service.GetValuationAsync(contains, ct));
+
+        /// <summary>CEO dashboard: stock, projects (price, cost, commitments), procurement, payables, quality, Sepidar link.</summary>
+        [HttpGet("ceo-dashboard")]
+        [Authorize(Roles = "CEO,PMO")]
+        public async Task<IActionResult> CeoDashboardAsync([FromServices] ICeoDashboardService dashboard, CancellationToken ct) => Ok(await dashboard.GetAsync(ct));
     }
 }
