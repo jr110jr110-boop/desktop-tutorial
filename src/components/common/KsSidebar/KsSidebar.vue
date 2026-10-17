@@ -122,6 +122,19 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.procurement"
+        has-sub
+        route-name="Procurement"
+        tag="procurement-collapse"
+        title="تدارکات">
+        <ShoppingCartIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Procurement') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.finance"
         has-sub
         route-name="Finance"
@@ -162,7 +175,7 @@
 </template>
 
 <script lang="ts" setup>
-import { FinanceRoles, hasRole, InventoryRoles } from "@/composables/roles";
+import { FinanceRoles, hasRole, InventoryRoles, ProcurementRoles } from "@/composables/roles";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -287,6 +300,15 @@ const links = {
     { title: "درخواست کد کالا", routeName: "InventoryItemRequests", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.itemRequest) },
     { title: "جدول‌های کدینگ (WI-WH-002)", routeName: "InventoryCoding", disabled: !accessList.includes("Warehouse") },
     { title: "ارتباط با سپیدار", routeName: "InventorySepidar", disabled: !accessList.includes("SepidarLink") },
+  ] as Links[],
+  procurement: [
+    { title: "درخواست خرید", routeName: "ProcurementRequests", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "استعلام و کمیته خرید", routeName: "ProcurementInquiries", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "سفارش خرید", routeName: "ProcurementOrders", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "فاکتور تامین‌کننده", routeName: "ProcurementInvoices", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "درخواست پرداخت", routeName: "ProcurementPayments", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "لیست تامین‌کنندگان و ارزیابی", routeName: "ProcurementSuppliers", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "تنظیمات و آستانه‌های خرید", routeName: "ProcurementSettings", disabled: !hasRole(ProcurementRoles.readers) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },

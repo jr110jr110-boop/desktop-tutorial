@@ -1,7 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
-import { currentRole, FinanceRoles, hasRole, InventoryRoles, Roles } from "@/composables/roles";
+import { currentRole, FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -420,6 +420,16 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/counts/:id", name: "InventoryStockCountEdit", component: () => import("@/views/inventory/StockCountEdit.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
   { path: "/inventory/opening-import", name: "InventoryOpeningImport", component: () => import("@/views/inventory/OpeningImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.documents } },
   // Finance and cost accounting
+  { path: "/procurement/settings", name: "ProcurementSettings", component: () => import("@/views/procurement/Settings.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/requests", name: "ProcurementRequests", component: () => import("@/views/procurement/Requests.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/requests/:id", name: "ProcurementRequestEdit", component: () => import("@/views/procurement/RequestEdit.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/inquiries", name: "ProcurementInquiries", component: () => import("@/views/procurement/Inquiries.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/inquiries/:id", name: "ProcurementInquiryEdit", component: () => import("@/views/procurement/InquiryEdit.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/orders", name: "ProcurementOrders", component: () => import("@/views/procurement/Orders.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/orders/:id", name: "ProcurementOrderEdit", component: () => import("@/views/procurement/OrderEdit.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/invoices", name: "ProcurementInvoices", component: () => import("@/views/procurement/Invoices.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/payments", name: "ProcurementPayments", component: () => import("@/views/procurement/Payments.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/suppliers", name: "ProcurementSuppliers", component: () => import("@/views/procurement/Suppliers.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/finance/ceo-dashboard", name: "FinanceCeoDashboard", component: () => import("@/views/finance/CeoDashboard.vue"), meta: { roles: FinanceRoles.ceo } },
   { path: "/finance/events", name: "FinanceEvents", component: () => import("@/views/finance/Events.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/finance/accounts", name: "FinanceAccounts", component: () => import("@/views/finance/Accounts.vue"), meta: { roles: FinanceRoles.readers } },

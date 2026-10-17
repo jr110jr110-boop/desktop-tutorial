@@ -610,6 +610,10 @@ onMounted(async () => {
       doc.value.materialRequestId = Number(route.query.request);
       await fillFromRequest();
     }
+    if (route.query.order && doc.value.type === 1) {
+      doc.value.purchaseOrderId = Number(route.query.order);
+      await onOrderChange();
+    }
   } else {
     const [data, error] = await getDocument(Number(route.params.id));
     if (error) return fail(error);
