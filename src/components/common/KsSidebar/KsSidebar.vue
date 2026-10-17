@@ -122,6 +122,19 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.finance"
+        has-sub
+        route-name="Finance"
+        tag="finance-collapse"
+        title="مالی و بهای تمام‌شده">
+        <ChartLineIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Finance') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.providers"
         has-sub
         route-name="Providers"
@@ -149,7 +162,7 @@
 </template>
 
 <script lang="ts" setup>
-import { hasRole, InventoryRoles } from "@/composables/roles";
+import { FinanceRoles, hasRole, InventoryRoles } from "@/composables/roles";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -274,6 +287,14 @@ const links = {
     { title: "درخواست کد کالا", routeName: "InventoryItemRequests", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.itemRequest) },
     { title: "جدول‌های کدینگ (WI-WH-002)", routeName: "InventoryCoding", disabled: !accessList.includes("Warehouse") },
     { title: "ارتباط با سپیدار", routeName: "InventorySepidar", disabled: !accessList.includes("SepidarLink") },
+  ] as Links[],
+  finance: [
+    { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },
+    { title: "رویدادهای حسابداری و سند سپیدار", routeName: "FinanceEvents", disabled: !hasRole(FinanceRoles.readers) },
+    { title: "بهای تمام‌شده پروژه و دستور ساخت", routeName: "FinanceCosts", disabled: !hasRole(FinanceRoles.readers) },
+    { title: "ارزش‌گذاری موجودی", routeName: "FinanceValuation", disabled: !hasRole(FinanceRoles.readers) },
+    { title: "نگاشت حساب‌ها و مراکز هزینه", routeName: "FinanceAccounts", disabled: !hasRole(FinanceRoles.readers) },
+    { title: "آمادگی سپیدار", routeName: "FinanceReadiness", disabled: !hasRole(FinanceRoles.readers) },
   ] as Links[],
   holidays: [
     {

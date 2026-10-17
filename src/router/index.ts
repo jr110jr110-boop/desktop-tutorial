@@ -1,7 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
-import { InventoryRoles } from "@/composables/roles";
+import { currentRole, FinanceRoles, hasRole, InventoryRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -419,6 +419,13 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/counts", name: "InventoryStockCounts", component: () => import("@/views/inventory/StockCounts.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
   { path: "/inventory/counts/:id", name: "InventoryStockCountEdit", component: () => import("@/views/inventory/StockCountEdit.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
   { path: "/inventory/opening-import", name: "InventoryOpeningImport", component: () => import("@/views/inventory/OpeningImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.documents } },
+  // Finance and cost accounting
+  { path: "/finance/ceo-dashboard", name: "FinanceCeoDashboard", component: () => import("@/views/finance/CeoDashboard.vue"), meta: { roles: FinanceRoles.ceo } },
+  { path: "/finance/events", name: "FinanceEvents", component: () => import("@/views/finance/Events.vue"), meta: { roles: FinanceRoles.readers } },
+  { path: "/finance/accounts", name: "FinanceAccounts", component: () => import("@/views/finance/Accounts.vue"), meta: { roles: FinanceRoles.readers } },
+  { path: "/finance/costs", name: "FinanceCosts", component: () => import("@/views/finance/Costs.vue"), meta: { roles: FinanceRoles.readers } },
+  { path: "/finance/valuation", name: "FinanceValuation", component: () => import("@/views/finance/Valuation.vue"), meta: { roles: FinanceRoles.readers } },
+  { path: "/finance/readiness", name: "FinanceReadiness", component: () => import("@/views/finance/Readiness.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",
@@ -436,45 +443,36 @@ const handleHasNoAccess = (next) => {
   next({ name: "Dashboard" });
 };
 
+// meta.access = the claim (accessList) the page needs; meta.roles = the roles the API allows (JWT role, see composables/roles.ts)
+const claims: Record<string, string> = {
+  user: "Account",
+  contract: "Contract",
+  equipment: "Equipment",
+  workflow: "Workflow",
+  machine: "Machine",
+  warehouse: "Warehouse",
+  traceability: "Traceability",
+  sepidar: "SepidarLink",
+  tender: "Tender",
+};
+
 router.beforeEach((to, from, next) => {
   // read on every navigation: the list changes when another user logs in without reloading the page
-  const accessList = localStorage.getItem("accessList") || [];
+  const accessList = localStorage.getItem("accessList") || "";
+  const loggedIn = !!window.localStorage.getItem("token");
   if (to.name === "Login") {
-    if (!window.localStorage.getItem("token")) next();
+    if (!loggedIn) next();
     else next({ name: "Dashboard" });
-  } else {
-    if (!window.localStorage.getItem("token")) next({ name: "Login" });
-    else {
-      if (to.meta.access === "user")
-        if (accessList.includes("Account")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "contract")
-        if (accessList.includes("Contract")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "equipment")
-        if (accessList.includes("Equipment")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "workflow")
-        if (accessList.includes("Workflow")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "machine")
-        if (accessList.includes("Machine")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "warehouse")
-        if (accessList.includes("Warehouse")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "traceability")
-        if (accessList.includes("Traceability")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "sepidar")
-        if (accessList.includes("SepidarLink")) next();
-        else handleHasNoAccess(next);
-      else if (to.meta.access === "tender")
-        if (accessList.includes("Tender")) next();
-        else handleHasNoAccess(next);
-      else next();
-    }
+    return;
   }
+  if (!loggedIn) return next({ name: "Login" });
+  // the CEO starts on the CEO dashboard
+  if (to.name === "Dashboard" && currentRole() === Roles.CEO) return next({ name: "FinanceCeoDashboard" });
+  const claim = typeof to.meta.access === "string" ? claims[to.meta.access] : undefined;
+  if (claim && !accessList.includes(claim)) return handleHasNoAccess(next);
+  const roles = to.meta.roles as string[] | undefined;
+  if (roles && !hasRole(roles)) return handleHasNoAccess(next);
+  next();
 });
 
 export default router;

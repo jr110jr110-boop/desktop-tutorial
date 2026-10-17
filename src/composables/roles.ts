@@ -61,6 +61,7 @@ export const InventoryRoles = {
 
 /** Finance controller. */
 export const FinanceRoles = {
+  ceo: list("CEO,PMO"),
   readers: list("PMO,CEO,FINANCIAL,PLANNING"),
   writers: list("PMO,FINANCIAL"),
 };
