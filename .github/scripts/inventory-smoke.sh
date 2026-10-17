@@ -496,7 +496,7 @@ check "invoice event: GRNI cleared, VAT and payable to the supplier" '[.data.dat
 check "goods received not invoiced is zero for the supplier" "[.data.data[] | select(.status != 9) | .lines[] | select(.accountRole == \"GRNI\" and .providerId == $PA) | (.debit - .credit)] | add == 0"
 check "every accounting event is balanced (with procurement)" '[.data.data[] | ([.lines[].debit]|add) == ([.lines[].credit]|add)] | all'
 call GET finance/valuation; check "stock value still equals the events after procurement" '.data.totalValue == .data.totalEventsBalance'
-as "$COM_TOKEN" GET "procurement/suppliers?contains=الف"; check "supplier list shows grade and on-time delivery" '.success and .data[0].grade == 1 and .data[0].receiptLines == 1'
+as "$COM_TOKEN" GET "procurement/suppliers?contains=%D8%A7%D9%84%D9%81"; check "supplier list shows grade and on-time delivery" '.success and .data[0].grade == 1 and .data[0].receiptLines == 1'
 
 as "$CEO_TOKEN" GET finance/ceo-dashboard; check "CEO dashboard: stock value, payables and projects" '.success and .data.stockValue > 0 and .data.payablesOpen == 0 and .data.receivedNotInvoiced > 0 and .data.openPurchaseOrders == 1'
 as "$WH_TOKEN" GET finance/ceo-dashboard; [ "$CODE" = "403" ] && ok "storekeeper cannot open the CEO dashboard (403)" || bad "storekeeper cannot open the CEO dashboard (403) got $CODE"
