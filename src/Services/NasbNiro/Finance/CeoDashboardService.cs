@@ -126,7 +126,7 @@ namespace Services.NasbNiro.Finance
             Alert(d.EventsFailed > 0, "danger", $"{d.EventsFailed} رویداد حسابداری به سپیدار ارسال نشده (خطا)", "/finance/events");
             Alert(d.LateOrderLines > 0, "warning", $"{d.LateOrderLines} ردیف سفارش خرید از موعد تحویل گذشته است", "/procurement/orders");
             Alert(d.ItemsBelowMinimum > 0, "warning", $"{d.ItemsBelowMinimum} کالا زیر حداقل موجودی است", "/inventory/stock");
-            Alert(d.OpenNcrs > 0, "info", $"{d.OpenNcrs} گزارش عدم انطباق باز است", "/inventory/ncrs");
+            Alert(d.OpenNcrs > 0, "info", $"{d.OpenNcrs} گزارش عدم انطباق باز است", "/inventory/ncr");
             Alert(d.PaymentsWaitingApproval > 0, "info", $"{d.PaymentsWaitingApproval} درخواست پرداخت در انتظار تایید یا پرداخت", "/procurement/payments");
             Alert(d.SupplierEvaluationsDue > 0, "info", $"ارزیابی دوره‌ای {d.SupplierEvaluationsDue} تامین‌کننده سررسید شده است", "/procurement/suppliers");
             return ResponseDtoHelper.Ok(d);

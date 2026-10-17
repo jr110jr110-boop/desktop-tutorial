@@ -521,7 +521,7 @@ namespace Services.NasbNiro.Procurement
             switch (action)
             {
                 case "approve-financial":
-                    if (!_user.IsInRole("PMO")) return Bad<InquiryDto>(NotAllowed + " (معاونت PMO)");
+                    if (!_user.IsInRole(ProcurementRoles.Finance)) return Bad<InquiryDto>(NotAllowed + " (مدیر مالی یا معاونت PMO)");
                     i.FinancialApprovedAt = now; i.FinancialApprovedByUserId = Me; break;
                 case "approve-commercial":
                     if (!_user.IsInRole(ProcurementRoles.Commercial)) return Bad<InquiryDto>(NotAllowed + " (مدیر بازرگانی)");
