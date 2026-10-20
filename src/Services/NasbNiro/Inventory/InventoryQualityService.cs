@@ -421,7 +421,7 @@ namespace Services.NasbNiro.Inventory
             if (dto.AffectedEquipmentId.HasValue && !await _uow.Set<MeasuringEquipment>().AnyAsync(e => e.Id == dto.AffectedEquipmentId.Value && !e.Deleted, cancellationToken))
                 return ResponseDtoHelper.BadRequest<NcrDto>("تجهیز اندازه‌گیری مرتبط پیدا نشد.");
             if (dto.CostImpact < 0 || dto.TimeImpactDays < 0) return ResponseDtoHelper.BadRequest<NcrDto>("اثر هزینه و زمان نمی‌تواند منفی باشد.");
-            Dictionary<string, decimal> qualitySettings = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+            Dictionary<string, decimal> qualitySettings = await Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
             NonConformance ncr;
             if (dto.Id.HasValue)
@@ -486,7 +486,7 @@ namespace Services.NasbNiro.Inventory
                 // decision deadline: minor 7 days, major 14 days from the report date (company settings), unless QC sets one
                 if (dto.DueDate.HasValue) ncr.DueDate = dto.DueDate.Value.Date;
                 else if (!ncr.DueDate.HasValue || severityChanged)
-                    ncr.DueDate = ncr.ReportDate.Date.AddDays((int)qualitySettings[ncr.Severity == NcrSeverity.Major ? QualitySettingKeys.NcrMajorDays : QualitySettingKeys.NcrMinorDays]);
+                    ncr.DueDate = ncr.ReportDate.Date.AddDays((int)qualitySettings[ncr.Severity == NcrSeverity.Major ? Quality.QualitySettingKeys.NcrMajorDays : Quality.QualitySettingKeys.NcrMinorDays]);
             }
             // cause analysis and corrective action can be completed until the NCR is closed
             ncr.CauseCategory = dto.CauseCategory;
@@ -533,8 +533,8 @@ namespace Services.NasbNiro.Inventory
                 return ResponseDtoHelper.BadRequest<NcrDto>("عدم انطباق عمده با تصمیم کمیته فنی است؛ شماره صورت‌جلسه و اعضای کمیته را وارد کنید.");
             if (ncr.Severity == NcrSeverity.Major)
             {
-                int minMembers = (int)(await QualitySettingKeys.LoadAsync(_uow, cancellationToken))[QualitySettingKeys.MajorNcrCommitteeMin];
-                if (QualityText.SplitList(ncr.CommitteeMembers).Count < minMembers)
+                int minMembers = (int)(await Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken))[Quality.QualitySettingKeys.MajorNcrCommitteeMin];
+                if (Quality.QualityText.SplitList(ncr.CommitteeMembers).Count < minMembers)
                     return ResponseDtoHelper.BadRequest<NcrDto>($"کمیته عدم انطباق عمده باید حداقل {minMembers} عضو (QC، مهندسی، ساخت) داشته باشد؛ اعضا را با ویرگول یا در خط‌های جدا بنویسید.");
             }
             if (ncr.Disposition == NcrDisposition.Scrap && ncr.OwnedByContractor)
