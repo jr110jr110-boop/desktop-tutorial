@@ -50,6 +50,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string LegacyCode { get; set; }
         public bool RequiresIncomingInspection { get; set; } = true;
         public int? ShelfLifeDays { get; set; }
+
+        /// <summary>EN 10204 certificate type (2.2, 3.1, 3.2) the lot must have, verified by QC, before incoming inspection can accept it.</summary>
+        public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
     }
 
     public class InventoryItemDto
@@ -79,6 +82,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string LegacyCode { get; set; }
         public bool RequiresIncomingInspection { get; set; }
         public int? ShelfLifeDays { get; set; }
+        public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
     }
 
     public class InventoryItemQuery : PaginationParams

@@ -222,6 +222,14 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string CorrectiveAction { get; set; }
         public string CorrectiveActionOwner { get; set; }
         public DateTime? CorrectiveActionDueDate { get; set; }
+
+        // quality module additions (spec 5.5)
+        public DateTime? DueDate { get; set; }
+        public Entities.Model.NasbNiro.Quality.RootCauseMethod RootCauseMethod { get; set; }
+        public decimal? CostImpact { get; set; }
+        public int? TimeImpactDays { get; set; }
+        public string CustomerReturnRef { get; set; }
+        public int? AffectedEquipmentId { get; set; }
     }
 
     public class ApproveNcrDto
@@ -313,6 +321,18 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public DateTimeOffset? ClosedAt { get; set; }
         public string ClosedByName { get; set; }
         public string CreatorName { get; set; }
+
+        // quality module additions (spec 5.5)
+        public DateTime? DueDate { get; set; }
+        public bool Overdue { get; set; }
+        public Entities.Model.NasbNiro.Quality.RootCauseMethod RootCauseMethod { get; set; }
+        public int? CapaId { get; set; }
+        public string CapaNumber { get; set; }
+        public decimal? CostImpact { get; set; }
+        public int? TimeImpactDays { get; set; }
+        public string CustomerReturnRef { get; set; }
+        public int? AffectedEquipmentId { get; set; }
+        public string SourceRecordNumber { get; set; }
     }
 
     /// <summary>Everything the commercial unit needs to follow a return to the supplier.</summary>

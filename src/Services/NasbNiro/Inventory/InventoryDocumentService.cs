@@ -54,10 +54,12 @@ namespace Services.NasbNiro.Inventory
         private readonly Finance.ICostingService _costing;
         private readonly Procurement.IProcurementService _procurement;
         private readonly Procurement.IPayablesService _payables;
+        private readonly Quality.IReleaseService _release;
 
         public InventoryDocumentService(IUnitOfWork uow, IInventoryUserContext user, Finance.ICostingService costing,
-            Procurement.IProcurementService procurement, Procurement.IPayablesService payables)
+            Procurement.IProcurementService procurement, Procurement.IPayablesService payables, Quality.IReleaseService release)
         {
+            _release = release ?? throw new ArgumentNullException(nameof(release));
             _procurement = procurement ?? throw new ArgumentNullException(nameof(procurement));
             _payables = payables ?? throw new ArgumentNullException(nameof(payables));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
@@ -765,6 +767,12 @@ namespace Services.NasbNiro.Inventory
 
             string headerError = CheckBeforeConfirm(document) ?? await CheckPurchaseOrderAsync(document, cancellationToken);
             if (headerError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(headerError);
+            // customer delivery needs a signed release note for the work order (API Q1 / ISO 9001 8.6)
+            if (document.Type == InventoryDocumentType.CustomerDelivery)
+            {
+                string releaseError = await _release.CheckDeliveryAsync(document.WorkOrderId, cancellationToken);
+                if (releaseError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(releaseError);
+            }
 
             // during an annual stock count the warehouse is frozen: only the count's own adjustments are posted
             if (!document.StockCountId.HasValue)

@@ -7,6 +7,7 @@ using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Inventory;
+using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using ViewModels.NasbNiro.InventoryDtos;
 using ViewModels.NasbNiro.Pagination;
@@ -37,12 +38,17 @@ namespace Services.NasbNiro.Inventory
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IInventoryDocumentService _documents;
+        private readonly Services.NasbNiro.Quality.ICapaService _capa;
+        private readonly Services.NasbNiro.Quality.IMaterialService _material;
 
-        public InventoryQualityService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents)
+        public InventoryQualityService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents,
+            Services.NasbNiro.Quality.ICapaService capa, Services.NasbNiro.Quality.IMaterialService material)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _documents = documents ?? throw new ArgumentNullException(nameof(documents));
+            _capa = capa ?? throw new ArgumentNullException(nameof(capa));
+            _material = material ?? throw new ArgumentNullException(nameof(material));
         }
 
         private DbSet<QcInspection> Inspections => _uow.Set<QcInspection>();
@@ -169,6 +175,12 @@ namespace Services.NasbNiro.Inventory
 
             string rejectReason = InventoryText.Clean(dto.RejectReason);
             if (dto.RejectedQuantity > 0 && rejectReason == null) return ResponseDtoHelper.BadRequest<InspectionDto>("شرح عدم انطباق کالای مردود را بنویسید.");
+
+            if (dto.AcceptedQuantity > 0)
+            {
+                string certificateProblem = await _material.CheckRequiredCertificateAsync(inspection.ItemId, inspection.LotId, cancellationToken);
+                if (certificateProblem != null) return ResponseDtoHelper.BadRequest<InspectionDto>(certificateProblem);
+            }
 
             int? targetId = dto.TargetWarehouseId ?? inspection.TargetWarehouseId;
             if (dto.AcceptedQuantity > 0)
@@ -332,6 +344,15 @@ namespace Services.NasbNiro.Inventory
             CorrectiveActionDueDate = n.CorrectiveActionDueDate,
             EffectivenessCheck = n.EffectivenessCheck,
             ClosedAt = n.ClosedAt,
+            DueDate = n.DueDate,
+            RootCauseMethod = n.RootCauseMethod,
+            CapaId = n.CapaId,
+            CapaNumber = n.Capa.Number,
+            CostImpact = n.CostImpact,
+            TimeImpactDays = n.TimeImpactDays,
+            CustomerReturnRef = n.CustomerReturnRef,
+            AffectedEquipmentId = n.AffectedEquipmentId,
+            SourceRecordNumber = n.SourceRecordNumber,
             // filled after loading
             ReceiptNumber = n.SerialNumbers,
         });
@@ -360,6 +381,7 @@ namespace Services.NasbNiro.Inventory
             NcrDto ncr = await NcrProjection(Ncrs.Where(n => n.Id == id && !n.Deleted)).FirstOrDefaultAsync(cancellationToken);
             if (ncr == null) return ResponseDtoHelper.NotFound<NcrDto>("گزارش عدم انطباق پیدا نشد.");
             ncr.SerialNumbers = Lines(ncr.ReceiptNumber);
+            ncr.Overdue = ncr.DueDate.HasValue && ncr.DueDate.Value.Date < DateTime.Today && (ncr.Status == NcrStatus.Open);
             ncr.ReceiptNumber = ncr.ReceiptDocumentId.HasValue
                 ? await _uow.Set<InventoryDocument>().Where(d => d.Id == ncr.ReceiptDocumentId.Value).Select(d => d.Number).FirstOrDefaultAsync(cancellationToken)
                 : null;
@@ -396,6 +418,10 @@ namespace Services.NasbNiro.Inventory
         public async Task<ResponseDto<NcrDto>> SaveNcrAsync(SaveNcrDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.InvalidData);
+            if (dto.AffectedEquipmentId.HasValue && !await _uow.Set<MeasuringEquipment>().AnyAsync(e => e.Id == dto.AffectedEquipmentId.Value && !e.Deleted, cancellationToken))
+                return ResponseDtoHelper.BadRequest<NcrDto>("تجهیز اندازه‌گیری مرتبط پیدا نشد.");
+            if (dto.CostImpact < 0 || dto.TimeImpactDays < 0) return ResponseDtoHelper.BadRequest<NcrDto>("اثر هزینه و زمان نمی‌تواند منفی باشد.");
+            Dictionary<string, decimal> qualitySettings = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
             NonConformance ncr;
             if (dto.Id.HasValue)
@@ -436,6 +462,7 @@ namespace Services.NasbNiro.Inventory
 
             if (ncr.Status == NcrStatus.Open)
             {
+                bool severityChanged = ncr.Severity != dto.Severity;
                 bool decisionChanged = ncr.Severity != dto.Severity || ncr.Disposition != dto.Disposition ||
                                        ncr.CustomerApprovalRequired != dto.CustomerApprovalRequired;
                 ncr.ReportDate = dto.ReportDate == default ? ncr.ReportDate == default ? DateTime.Today : ncr.ReportDate : dto.ReportDate.Date;
@@ -456,6 +483,10 @@ namespace Services.NasbNiro.Inventory
                 if (dto.WorkOrderId.HasValue) ncr.WorkOrderId = dto.WorkOrderId;
                 if (dto.ContractId.HasValue) ncr.ContractId = dto.ContractId;
                 if (decisionChanged) ClearApprovals(ncr);
+                // decision deadline: minor 7 days, major 14 days from the report date (company settings), unless QC sets one
+                if (dto.DueDate.HasValue) ncr.DueDate = dto.DueDate.Value.Date;
+                else if (!ncr.DueDate.HasValue || severityChanged)
+                    ncr.DueDate = ncr.ReportDate.Date.AddDays((int)qualitySettings[ncr.Severity == NcrSeverity.Major ? QualitySettingKeys.NcrMajorDays : QualitySettingKeys.NcrMinorDays]);
             }
             // cause analysis and corrective action can be completed until the NCR is closed
             ncr.CauseCategory = dto.CauseCategory;
@@ -463,11 +494,22 @@ namespace Services.NasbNiro.Inventory
             ncr.CorrectiveAction = InventoryText.Clean(dto.CorrectiveAction);
             ncr.CorrectiveActionOwner = InventoryText.Clean(dto.CorrectiveActionOwner);
             ncr.CorrectiveActionDueDate = dto.CorrectiveActionDueDate;
+            ncr.RootCauseMethod = Enum.IsDefined(typeof(RootCauseMethod), dto.RootCauseMethod) ? dto.RootCauseMethod : RootCauseMethod.None;
+            ncr.CostImpact = dto.CostImpact;
+            ncr.TimeImpactDays = dto.TimeImpactDays;
+            ncr.CustomerReturnRef = InventoryText.Clean(dto.CustomerReturnRef);
+            if (dto.AffectedEquipmentId.HasValue) ncr.AffectedEquipmentId = dto.AffectedEquipmentId;
             ncr.ModifyDate = now;
             ncr.ModifierUserId = _user.UserId;
             try
             {
                 await _uow.SaveChangesAsync(cancellationToken);
+                // a major nonconformance always has a CAPA: the system drafts it, QA assigns the owner (ISO 9001 10.2)
+                if (ncr.Severity == NcrSeverity.Major && !ncr.CapaId.HasValue)
+                {
+                    ncr.Capa = await _capa.DraftAsync(CapaSource.Ncr, ncr.Id, $"{ncr.Number}: {ncr.Description}", true, cancellationToken);
+                    await _uow.SaveChangesAsync(cancellationToken);
+                }
             }
             catch (DbUpdateConcurrencyException)
             {
@@ -489,6 +531,12 @@ namespace Services.NasbNiro.Inventory
             if (ncr.Disposition == NcrDisposition.None) return ResponseDtoHelper.BadRequest<NcrDto>("ابتدا تصمیم (مجوز ارفاقی، دوباره‌کاری، تعمیر، ضایعات، مرجوعی) را مشخص کنید.");
             if (ncr.Severity == NcrSeverity.Major && (ncr.CommitteeMinutesNumber == null || ncr.CommitteeMembers == null))
                 return ResponseDtoHelper.BadRequest<NcrDto>("عدم انطباق عمده با تصمیم کمیته فنی است؛ شماره صورت‌جلسه و اعضای کمیته را وارد کنید.");
+            if (ncr.Severity == NcrSeverity.Major)
+            {
+                int minMembers = (int)(await QualitySettingKeys.LoadAsync(_uow, cancellationToken))[QualitySettingKeys.MajorNcrCommitteeMin];
+                if (QualityText.SplitList(ncr.CommitteeMembers).Count < minMembers)
+                    return ResponseDtoHelper.BadRequest<NcrDto>($"کمیته عدم انطباق عمده باید حداقل {minMembers} عضو (QC، مهندسی، ساخت) داشته باشد؛ اعضا را با ویرگول یا در خط‌های جدا بنویسید.");
+            }
             if (ncr.Disposition == NcrDisposition.Scrap && ncr.OwnedByContractor)
                 return ResponseDtoHelper.BadRequest<NcrDto>("کالای متعلق به پیمانکار/مشتری ضایعات شرکت نمی‌شود؛ تصمیم «مرجوعی» را انتخاب کنید.");
 
@@ -537,6 +585,8 @@ namespace Services.NasbNiro.Inventory
             NonConformance ncr = await Ncrs.FirstOrDefaultAsync(n => n.Id == dto.Id && !n.Deleted, cancellationToken);
             if (ncr == null) return ResponseDtoHelper.NotFound<NcrDto>("گزارش عدم انطباق پیدا نشد.");
             if (ncr.Status != NcrStatus.Approved) return ResponseDtoHelper.BadRequest<NcrDto>("تصمیم این گزارش هنوز تایید نشده یا قبلاً اجرا شده است.");
+            if (ncr.CustomerApprovalRequired && NeedsConcession(ncr.Disposition) && ncr.CustomerApprovalReference == null)
+                return ResponseDtoHelper.BadRequest<NcrDto>("قرارداد تایید انحراف توسط مشتری را لازم دارد؛ بدون شماره نامه/تایید مشتری تصمیم اجرا نمی‌شود.");
             if (await _uow.Set<InventoryDocument>().AnyAsync(d => d.NcrId == ncr.Id && d.Status == InventoryDocumentStatus.Draft && !d.Deleted, cancellationToken))
                 return ResponseDtoHelper.BadRequest<NcrDto>("سند انبار این گزارش ساخته شده و منتظر تایید انبار است.");
             DateTimeOffset now = DateTimeOffset.Now;

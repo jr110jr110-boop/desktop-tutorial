@@ -132,6 +132,18 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.ICeoDashboardService, Services.NasbNiro.Finance.CeoDashboardService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
+
+            // quality module (QC + QA)
+            services.AddScoped<Services.NasbNiro.Quality.IItpService, Services.NasbNiro.Quality.ItpService>();
+            services.AddScoped<Services.NasbNiro.Quality.IInspectionService, Services.NasbNiro.Quality.InspectionService>();
+            services.AddScoped<Services.NasbNiro.Quality.ICalibrationService, Services.NasbNiro.Quality.CalibrationService>();
+            services.AddScoped<Services.NasbNiro.Quality.IPersonnelService, Services.NasbNiro.Quality.PersonnelService>();
+            services.AddScoped<Services.NasbNiro.Quality.IMaterialService, Services.NasbNiro.Quality.MaterialService>();
+            services.AddScoped<Services.NasbNiro.Quality.ICapaService, Services.NasbNiro.Quality.CapaService>();
+            services.AddScoped<Services.NasbNiro.Quality.IReleaseService, Services.NasbNiro.Quality.ReleaseService>();
+            services.AddScoped<Services.NasbNiro.Quality.IDocumentControlService, Services.NasbNiro.Quality.DocumentControlService>();
+            services.AddScoped<Services.NasbNiro.Quality.IAuditReviewService, Services.NasbNiro.Quality.AuditReviewService>();
+            services.AddScoped<Services.NasbNiro.Quality.IQualityDashboardService, Services.NasbNiro.Quality.QualityDashboardService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<IInventoryQualityService, InventoryQualityService>();
             services.AddScoped<IInventoryWorkflowService, InventoryWorkflowService>();

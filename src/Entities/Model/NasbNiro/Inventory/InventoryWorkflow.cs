@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Providers;
+using Entities.Model.NasbNiro.Quality;
 
 namespace Entities.Model.NasbNiro.Inventory
 {
@@ -145,6 +146,26 @@ namespace Entities.Model.NasbNiro.Inventory
         public string EffectivenessCheck { get; set; }
         public DateTimeOffset? ClosedAt { get; set; }
         public int? ClosedByUserId { get; set; }
+
+        // ----- quality module additions (PR-QC-002 / spec 5.5)
+        /// <summary>Date the decision is due: 7 days for a minor, 14 days for a major NCR (company settings).</summary>
+        public DateTime? DueDate { get; set; }
+
+        public RootCauseMethod RootCauseMethod { get; set; }
+
+        /// <summary>The corrective action record; a major NCR gets one drafted by the system.</summary>
+        public int? CapaId { get; set; }
+        public Capa Capa { get; set; }
+
+        public decimal? CostImpact { get; set; }
+        public int? TimeImpactDays { get; set; }
+        public string CustomerReturnRef { get; set; }
+
+        /// <summary>Measuring instrument found out of tolerance that caused this NCR.</summary>
+        public int? AffectedEquipmentId { get; set; }
+
+        /// <summary>Record or report the system drafted this NCR from (QIR-/TR- number).</summary>
+        public string SourceRecordNumber { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }

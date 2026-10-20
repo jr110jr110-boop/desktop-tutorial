@@ -179,6 +179,7 @@ namespace Services.NasbNiro.Inventory
                 LegacyCode = i.LegacyCode,
                 RequiresIncomingInspection = i.RequiresIncomingInspection,
                 ShelfLifeDays = i.ShelfLifeDays,
+                RequiredCertificateType = i.RequiredCertificateType,
                 OnHand = balances.Where(b => b.ItemId == i.Id).Sum(b => (decimal?)b.Quantity) ?? 0,
             });
         }
@@ -310,6 +311,7 @@ namespace Services.NasbNiro.Inventory
             item.MescCode = mesc;
             item.LegacyCode = InventoryText.Clean(dto.LegacyCode) ?? item.LegacyCode;
             item.RequiresIncomingInspection = dto.RequiresIncomingInspection;
+            item.RequiredCertificateType = dto.RequiredCertificateType;
             item.ShelfLifeDays = dto.ShelfLifeDays > 0 ? dto.ShelfLifeDays : null;
             Stamp(item, !dto.Id.HasValue);
             await _uow.SaveChangesAsync(cancellationToken);

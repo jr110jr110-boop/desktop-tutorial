@@ -1,3 +1,4 @@
+using DataLayer.Configurations.EF.NasbNiro.Quality;
 using Entities.Model.NasbNiro.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -13,6 +14,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
         {
             builder.AddFinanceConfigurations();
             builder.AddProcurementConfigurations();
+            builder.AddQualityConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());
@@ -426,6 +428,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Property(x => x.CorrectiveAction).HasMaxLength(InventoryColumns.LongText);
             builder.Property(x => x.CorrectiveActionOwner).HasMaxLength(200);
             builder.Property(x => x.EffectivenessCheck).HasMaxLength(InventoryColumns.LongText);
+            builder.Property(x => x.CostImpact).HasPrecision(22, 2);
+            builder.Property(x => x.CustomerReturnRef).HasMaxLength(200);
+            builder.Property(x => x.SourceRecordNumber).HasMaxLength(50);
+            builder.HasOne(x => x.Capa).WithMany().HasForeignKey(x => x.CapaId).OnDelete(DeleteBehavior.Restrict);
             builder.HasIndex(x => x.Number).IsUnique();
             builder.HasIndex(x => new { x.Status, x.ReportDate });
             builder.HasIndex(x => x.ItemId);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Entities.Model.NasbNiro.Quality;
 
 namespace Entities.Model.NasbNiro.Inventory
 {
@@ -68,6 +69,9 @@ namespace Entities.Model.NasbNiro.Inventory
 
         /// <summary>Lots expire (electrodes, chemicals, paint): issued first-expired-first-out.</summary>
         public int? ShelfLifeDays { get; set; }
+
+        /// <summary>EN 10204 certificate type the incoming inspection needs before the lot is accepted (empty = none).</summary>
+        public CertificateType? RequiredCertificateType { get; set; }
     }
 
     /// <summary>

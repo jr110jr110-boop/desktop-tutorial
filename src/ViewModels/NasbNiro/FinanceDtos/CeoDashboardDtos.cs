@@ -35,6 +35,13 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int OpenNcrs { get; set; }
         public int OpenMaterialRequests { get; set; }
         public int DocumentsWaitingApproval { get; set; }
+        public int OverdueCapas { get; set; }
+        public int CalibrationOverdue { get; set; }
+        public int CalibrationDue30 { get; set; }
+        public int PendingHPoints { get; set; }
+        public int QualificationsLapsing { get; set; }
+        public int ComplaintsOverdue { get; set; }
+        public int WitnessNoticesDue { get; set; }
 
         // Sepidar link
         public int EventsPending { get; set; }

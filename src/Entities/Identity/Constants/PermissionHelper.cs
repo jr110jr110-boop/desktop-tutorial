@@ -318,6 +318,8 @@ namespace Entities.Identity.Constants
             yield return new RoleClaim() { Id = 1302, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.CeoResponseRole.Id };
             yield return new RoleClaim() { Id = 1303, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.CeoResponseRole.Id };
             yield return new RoleClaim() { Id = 1304, ClaimType = Type, ClaimValue = SepidarLink, RoleId = RoleConstants.CeoResponseRole.Id };
+            yield return new RoleClaim() { Id = 1400, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.QAResponseRole.Id };
+            yield return new RoleClaim() { Id = 1401, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.QAResponseRole.Id };
             #endregion
         }
     }

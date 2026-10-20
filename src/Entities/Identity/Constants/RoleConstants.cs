@@ -111,6 +111,15 @@ namespace Entities.Identity.Constants
             Description = "مدیرعامل"
         };
 
+        // Quality module: document control, audits, CAPA administration and management review (★ provisional decision)
+        public const string QA = "QA";
+        public static readonly ResponseRole QAResponseRole = new ResponseRole()
+        {
+            Id = 14,
+            Name = QA,
+            Description = "تضمین کیفیت"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -126,6 +135,7 @@ namespace Entities.Identity.Constants
             yield return PlanningResponseRole;
             yield return WarehouseSupervisorResponseRole;
             yield return CeoResponseRole;
+            yield return QAResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)

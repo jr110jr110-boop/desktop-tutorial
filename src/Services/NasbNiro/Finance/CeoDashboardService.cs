@@ -27,7 +27,13 @@ namespace Services.NasbNiro.Finance
     {
         private readonly IUnitOfWork _uow;
 
-        public CeoDashboardService(IUnitOfWork uow) => _uow = uow ?? throw new ArgumentNullException(nameof(uow));
+        private readonly Quality.IQualityDashboardService _quality;
+
+        public CeoDashboardService(IUnitOfWork uow, Quality.IQualityDashboardService quality)
+        {
+            _uow = uow ?? throw new ArgumentNullException(nameof(uow));
+            _quality = quality ?? throw new ArgumentNullException(nameof(quality));
+        }
 
         public async Task<ResponseDto<CeoDashboardDto>> GetAsync(CancellationToken ct)
         {
@@ -129,6 +135,17 @@ namespace Services.NasbNiro.Finance
             Alert(d.OpenNcrs > 0, "info", $"{d.OpenNcrs} گزارش عدم انطباق باز است", "/inventory/ncr");
             Alert(d.PaymentsWaitingApproval > 0, "info", $"{d.PaymentsWaitingApproval} درخواست پرداخت در انتظار تایید یا پرداخت", "/procurement/payments");
             Alert(d.SupplierEvaluationsDue > 0, "info", $"ارزیابی دوره‌ای {d.SupplierEvaluationsDue} تامین‌کننده سررسید شده است", "/procurement/suppliers");
+
+            // quality: deadlines and gates computed by the quality module, shown here without any manual step
+            var q = await _quality.GetCountsAsync(ct);
+            d.OverdueCapas = q.OverdueCapas;
+            d.CalibrationOverdue = q.CalibrationOverdue;
+            d.CalibrationDue30 = q.CalibrationDue30;
+            d.PendingHPoints = q.PendingHPoints;
+            d.QualificationsLapsing = q.QualificationsLapsing;
+            d.ComplaintsOverdue = q.ComplaintsOverdue;
+            d.WitnessNoticesDue = q.WitnessNoticesDue;
+            foreach (var a in q.Alerts) d.Alerts.Add(new DashboardAlertDto { Level = a.Level, Text = a.Text, Link = a.Link });
             return ResponseDtoHelper.Ok(d);
         }
     }
