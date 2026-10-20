@@ -38,11 +38,11 @@ namespace Services.NasbNiro.Inventory
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IInventoryDocumentService _documents;
-        private readonly Services.NasbNiro.Quality.ICapaService _capa;
-        private readonly Services.NasbNiro.Quality.IMaterialService _material;
+        private readonly Quality.ICapaService _capa;
+        private readonly Quality.IMaterialService _material;
 
         public InventoryQualityService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents,
-            Services.NasbNiro.Quality.ICapaService capa, Services.NasbNiro.Quality.IMaterialService material)
+            Quality.ICapaService capa, Quality.IMaterialService material)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
