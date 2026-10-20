@@ -375,7 +375,7 @@ namespace WebApi.Controllers
 
         [HttpGet("work-orders/{workOrderId:int}/data-book")]
         [Authorize(Roles = QualityRoles.Readers)]
-        public async Task<IActionResult> DataBookAsync(int workOrderId, CancellationToken ct) => Ok(await _service.GetDataBookAsync(workOrderId, ct));
+        public async Task<IActionResult> DataBookAsync(int workOrderId, [FromQuery] string variant, CancellationToken ct) => Ok(await _service.GetDataBookAsync(workOrderId, variant, ct));
     }
 
     /// <summary>Document control, record retention, the quality dashboard and the company-changeable numbers.</summary>

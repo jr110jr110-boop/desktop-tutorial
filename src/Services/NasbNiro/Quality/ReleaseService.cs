@@ -23,7 +23,7 @@ namespace Services.NasbNiro.Quality
         Task<ResponseDto<ReleaseNoteDto>> SaveNoteAsync(SaveReleaseNoteDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<ReleaseNoteDto>> NoteActionAsync(ReleaseNoteActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<ReleaseChecksDto>> GetChecksAsync(int workOrderId, CancellationToken cancellationToken);
-        Task<ResponseDto<DataBookDto>> GetDataBookAsync(int workOrderId, CancellationToken cancellationToken);
+        Task<ResponseDto<DataBookDto>> GetDataBookAsync(int workOrderId, string variant, CancellationToken cancellationToken);
 
         /// <summary>Null when a Released note exists for the work order, otherwise the Persian reason (customer delivery gate, ISO 8.6).</summary>
         Task<string> CheckDeliveryAsync(int? workOrderId, CancellationToken cancellationToken);
@@ -188,14 +188,38 @@ namespace Services.NasbNiro.Quality
                 SourceKind = "ReleaseNote", SourceId = note?.Id, Number = note?.Number, Title = "برگه ترخیص کیفی و گواهی انطباق با MR و SPEC",
                 Status = note == null ? "-" : note.Status.ToString(), Mandatory = false, Missing = note == null || note.Status != ReleaseNoteStatus.Released,
             });
+            // client relevance: until the MDL table exists, an entry is for the client when its ITP activity has a client point
+            var clientActivities = new HashSet<int>(itp == null ? new List<int>() : itp.Activities.Where(x => x.PointClient != ItpPoint.None).Select(x => x.Id));
+            var reportActivity = reports.Where(r => r.ItpActivityId.HasValue).ToDictionary(r => r.Id, r => r.ItpActivityId.Value);
+            var recordActivity = await _uow.Set<QcRecord>().Where(r => r.WorkOrderId == wo.Id && !r.Deleted && r.ItpActivityId.HasValue).ToDictionaryAsync(r => r.Id, r => r.ItpActivityId.Value, cancellationToken);
+            foreach (DataBookEntryDto e in book.Sections.SelectMany(x => x.Entries))
+            {
+                switch (e.SourceKind)
+                {
+                    case "Itp": case "ReleaseNote": case "Ncr": e.ClientRelevant = true; break;
+                    case "ItpActivity": e.ClientRelevant = e.SourceId.HasValue && clientActivities.Contains(e.SourceId.Value); break;
+                    case "TestReport": e.ClientRelevant = e.SourceId.HasValue && reportActivity.TryGetValue(e.SourceId.Value, out int ra) && clientActivities.Contains(ra); break;
+                    case "QcRecord": e.ClientRelevant = e.SourceId.HasValue && recordActivity.TryGetValue(e.SourceId.Value, out int qa) && clientActivities.Contains(qa); break;
+                }
+            }
             book.MissingCount = book.Sections.Where(s => s.No != 10).SelectMany(s => s.Entries).Count(e => e.Mandatory && e.Missing);
             return book;
         }
 
-        public async Task<ResponseDto<DataBookDto>> GetDataBookAsync(int workOrderId, CancellationToken cancellationToken)
+        public async Task<ResponseDto<DataBookDto>> GetDataBookAsync(int workOrderId, string variant, CancellationToken cancellationToken)
         {
             WorkOrder wo = await _uow.Set<WorkOrder>().FirstOrDefaultAsync(w => w.Id == workOrderId && !w.Deleted, cancellationToken);
-            return wo == null ? QualityText.NotFound<DataBookDto>("دستور کار پیدا نشد.") : ResponseDtoHelper.Ok(await BuildBookAsync(wo, cancellationToken));
+            if (wo == null) return QualityText.NotFound<DataBookDto>("دستور کار پیدا نشد.");
+            string v = Clean(variant)?.ToLowerInvariant() ?? "company";
+            if (v != "company" && v != "client") return Bad<DataBookDto>("نوع کتاب نهایی باید company یا client باشد.");
+            DataBookDto book = await BuildBookAsync(wo, cancellationToken);
+            book.Variant = v;
+            if (v == "client")
+            {
+                foreach (DataBookSectionDto sec in book.Sections) sec.Entries = sec.Entries.Where(e => e.ClientRelevant).ToList();
+                book.MissingCount = book.Sections.Where(x => x.No != 10).SelectMany(x => x.Entries).Count(e => e.Mandatory && e.Missing);
+            }
+            return ResponseDtoHelper.Ok(book);
         }
 
         // -------------------------------------------------------------------------------- release checks

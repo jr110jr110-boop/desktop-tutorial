@@ -80,6 +80,8 @@ namespace ViewModels.NasbNiro.QualityDtos
         public Guid? DocumentId { get; set; }
         public bool Mandatory { get; set; }
         public bool Missing { get; set; }
+        /// <summary>True when the client must receive this entry (client point on its ITP activity, ITP, NCR list, release note).</summary>
+        public bool ClientRelevant { get; set; }
     }
 
     public class DataBookSectionDto
@@ -94,6 +96,8 @@ namespace ViewModels.NasbNiro.QualityDtos
         public int WorkOrderId { get; set; }
         public string WorkOrderCode { get; set; }
         public int MissingCount { get; set; }
+        /// <summary>company (every entry, internal book) or client (only what the client receives).</summary>
+        public string Variant { get; set; } = "company";
         public List<DataBookSectionDto> Sections { get; set; } = new List<DataBookSectionDto>();
     }
 }
