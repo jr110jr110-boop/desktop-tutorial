@@ -174,6 +174,19 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.fn"
+        has-sub
+        route-name="Fn"
+        tag="fn-collapse"
+        title="حسابداری مالی">
+        <ChartLineIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Fn') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.providers"
         has-sub
         route-name="Providers"
@@ -201,7 +214,7 @@
 </template>
 
 <script lang="ts" setup>
-import { FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
+import { FinanceRoles, FnRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -386,6 +399,46 @@ const links = {
     { title: "ارزش‌گذاری موجودی", routeName: "FinanceValuation", disabled: !hasRole(FinanceRoles.readers) },
     { title: "نگاشت حساب‌ها و مراکز هزینه", routeName: "FinanceAccounts", disabled: !hasRole(FinanceRoles.readers) },
     { title: "آمادگی سپیدار", routeName: "FinanceReadiness", disabled: !hasRole(FinanceRoles.readers) },
+  ] as Links[],
+  fn: [
+    { title: "داشبورد مالی", routeName: "FnDashboard", disabled: !hasRole(FnRoles.readers) },
+    { title: "بررسی راه‌اندازی حسابداری", routeName: "FnSetupCheck", disabled: !hasRole(FnRoles.readers) },
+    { title: "دفتر کل: سال و دوره مالی", routeName: "FnYears", disabled: !hasRole(FnRoles.readers) },
+    { title: "دفتر کل: سرفصل حساب‌ها و تفصیلی", routeName: "FnAccounts", disabled: !hasRole(FnRoles.readers) },
+    { title: "دفتر کل: اسناد حسابداری", routeName: "FnVouchers", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: دفتر روزنامه", routeName: "FnReportJournal", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: دفتر کل و معین", routeName: "FnReportLedger", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: تراز آزمایشی", routeName: "FnReportTrial", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: مرور حساب", routeName: "FnReportReview", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: ترازنامه", routeName: "FnReportBalance", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: سود و زیان", routeName: "FnReportIncome", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: سودآوری پروژه", routeName: "FnReportProfit", disabled: !hasRole(FnRoles.readers) },
+    { title: "گزارش: کنترل مغایرت دفاتر", routeName: "FnReportRecon", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: حساب بانکی و صندوق", routeName: "FnTreasuryAccounts", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: تنخواه و تسویه", routeName: "FnPettyCash", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: پرداخت‌ها", routeName: "FnPayments", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: دریافت‌ها", routeName: "FnReceipts", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: چک‌ها و دسته‌چک", routeName: "FnCheques", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: چک و سفته تضمینی", routeName: "FnGuarantees", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: صورت‌حساب بانکی", routeName: "FnStatements", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: مغایرت‌گیری بانکی", routeName: "FnReconciliations", disabled: !hasRole(FnRoles.readers) },
+    { title: "خزانه: وضعیت نقدینگی", routeName: "FnCashPosition", disabled: !hasRole(FnRoles.readers) },
+    { title: "مطالبات: مشتریان", routeName: "FnCustomers", disabled: !hasRole(FnRoles.readers) },
+    { title: "مطالبات: فاکتور فروش و صورت‌وضعیت", routeName: "FnInvoices", disabled: !hasRole(FnRoles.readers) },
+    { title: "مطالبات: سنی مطالبات", routeName: "FnAgeing", disabled: !hasRole(FnRoles.readers) },
+    { title: "مالیات", routeName: "FnTax", disabled: !hasRole(FnRoles.readers) },
+    { title: "دارایی ثابت: رده‌ها", routeName: "FnAssetClasses", disabled: !hasRole(FnRoles.readers) },
+    { title: "دارایی ثابت: دفتر دارایی‌ها", routeName: "FnAssets", disabled: !hasRole(FnRoles.readers) },
+    { title: "دارایی ثابت: استهلاک ماهانه", routeName: "FnDepreciation", disabled: !hasRole(FnRoles.readers) },
+    { title: "دارایی ثابت: فروش و اسقاط", routeName: "FnDisposals", disabled: !hasRole(FnRoles.readers) },
+    { title: "دارایی ثابت: گزارش‌ها و تحویل اموال", routeName: "FnAssetReports", disabled: !hasRole(FnRoles.readers) },
+    { title: "حقوق: تنظیمات", routeName: "FnPayrollMasters", disabled: !hasRole(FnRoles.payrollReaders) },
+    { title: "حقوق: پرسنل و وام", routeName: "FnPayrollEmployees", disabled: !hasRole(FnRoles.payrollReaders) },
+    { title: "حقوق: کارکرد و مرخصی", routeName: "FnPayrollAttendance", disabled: !hasRole(FnRoles.payrollReaders) },
+    { title: "حقوق: اجرای حقوق", routeName: "FnPayrollRuns", disabled: !hasRole(FnRoles.payrollReaders) },
+    { title: "حقوق: فیش‌های حقوقی", routeName: "FnPayslips", disabled: !hasRole(FnRoles.payrollReaders) },
+    { title: "حقوق: گزارش‌های بیمه و مالیات", routeName: "FnPayrollReports", disabled: !hasRole(FnRoles.payrollReaders) },
+    { title: "صندوق خروجی سپیدار", routeName: "FnSepidar", disabled: !hasRole(FnRoles.outbox) },
   ] as Links[],
   holidays: [
     {

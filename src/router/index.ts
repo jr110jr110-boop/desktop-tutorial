@@ -1,7 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
-import { currentRole, FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
+import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -436,6 +436,47 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/finance/costs", name: "FinanceCosts", component: () => import("@/views/finance/Costs.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/finance/valuation", name: "FinanceValuation", component: () => import("@/views/finance/Valuation.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/finance/readiness", name: "FinanceReadiness", component: () => import("@/views/finance/Readiness.vue"), meta: { roles: FinanceRoles.readers } },
+  // Accounting (F1 + F2): ledger, treasury, receivables, tax, fixed assets, payroll, Sepidar outbox
+  { path: "/fn/dashboard", name: "FnDashboard", component: () => import("@/views/fn/Dashboard.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/setup-check", name: "FnSetupCheck", component: () => import("@/views/fn/SetupCheck.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/years", name: "FnYears", component: () => import("@/views/fn/Years.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/accounts", name: "FnAccounts", component: () => import("@/views/fn/Accounts.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/vouchers", name: "FnVouchers", component: () => import("@/views/fn/Vouchers.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/vouchers/:id", name: "FnVoucherEdit", component: () => import("@/views/fn/VoucherEdit.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/journal", name: "FnReportJournal", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "journal" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/ledger", name: "FnReportLedger", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "general-ledger" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/trial-balance", name: "FnReportTrial", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "trial-balance" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/account-review", name: "FnReportReview", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "account-review" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/balance-sheet", name: "FnReportBalance", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "balance-sheet" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/income-statement", name: "FnReportIncome", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "income-statement" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/project-profitability", name: "FnReportProfit", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "project-profitability" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/reports/reconciliation", name: "FnReportRecon", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "reconciliation" }, meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/accounts", name: "FnTreasuryAccounts", component: () => import("@/views/fn/TreasuryAccounts.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/petty-cash", name: "FnPettyCash", component: () => import("@/views/fn/PettyCash.vue"), meta: {} },
+  { path: "/fn/treasury/payments", name: "FnPayments", component: () => import("@/views/fn/Payments.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/receipts", name: "FnReceipts", component: () => import("@/views/fn/Receipts.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/cheques", name: "FnCheques", component: () => import("@/views/fn/Cheques.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/guarantees", name: "FnGuarantees", component: () => import("@/views/fn/Guarantees.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/statements", name: "FnStatements", component: () => import("@/views/fn/Statements.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/reconciliations", name: "FnReconciliations", component: () => import("@/views/fn/Reconciliations.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/treasury/cash-position", name: "FnCashPosition", component: () => import("@/views/fn/CashPosition.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/receivables/customers", name: "FnCustomers", component: () => import("@/views/fn/Customers.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/receivables/customers/:id/statement", name: "FnCustomerStatement", component: () => import("@/views/fn/CustomerStatement.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/receivables/invoices", name: "FnInvoices", component: () => import("@/views/fn/Invoices.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/receivables/ageing", name: "FnAgeing", component: () => import("@/views/fn/Ageing.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/tax", name: "FnTax", component: () => import("@/views/fn/Tax.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/assets/classes", name: "FnAssetClasses", component: () => import("@/views/fn/AssetClasses.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/assets/register", name: "FnAssets", component: () => import("@/views/fn/Assets.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/assets/depreciation", name: "FnDepreciation", component: () => import("@/views/fn/Depreciation.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/assets/disposals", name: "FnDisposals", component: () => import("@/views/fn/Disposals.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/assets/reports", name: "FnAssetReports", component: () => import("@/views/fn/AssetReports.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/payroll/setup", name: "FnPayrollMasters", component: () => import("@/views/fn/PayrollMasters.vue"), meta: { roles: FnRoles.payrollReaders } },
+  { path: "/fn/payroll/employees", name: "FnPayrollEmployees", component: () => import("@/views/fn/PayrollEmployees.vue"), meta: { roles: FnRoles.payrollReaders } },
+  { path: "/fn/payroll/attendance", name: "FnPayrollAttendance", component: () => import("@/views/fn/PayrollAttendance.vue"), meta: { roles: FnRoles.payrollReaders } },
+  { path: "/fn/payroll/runs", name: "FnPayrollRuns", component: () => import("@/views/fn/PayrollRuns.vue"), meta: { roles: FnRoles.payrollReaders } },
+  { path: "/fn/payroll/payslips", name: "FnPayslips", component: () => import("@/views/fn/Payslips.vue"), meta: { roles: FnRoles.payrollReaders } },
+  { path: "/fn/payroll/reports", name: "FnPayrollReports", component: () => import("@/views/fn/PayrollReports.vue"), meta: { roles: FnRoles.payrollReaders } },
+  { path: "/fn/sepidar", name: "FnSepidar", component: () => import("@/views/fn/Sepidar.vue"), meta: { roles: FnRoles.outbox } },
   // Quality (QC + QA): the paths of the alert links of the API (/quality/capa, /quality/calibration, /quality/itp, ...) are kept
   { path: "/quality/dashboard", name: "QualityDashboard", component: () => import("@/views/quality/Dashboard.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/itp", name: "QualityItps", component: () => import("@/views/quality/ItpList.vue"), meta: { roles: QualityRoles.readers } },
