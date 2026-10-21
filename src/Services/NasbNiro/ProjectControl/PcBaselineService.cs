@@ -444,13 +444,18 @@ namespace Services.NasbNiro.ProjectControl
             if (dto.Decision == PcChangeDecision.None || !Enum.IsDefined(typeof(PcChangeDecision), dto.Decision)) return "تصمیم را مشخص کنید.";
             if (c.Recommendation == null) return "ابتدا مدیر پروژه پیشنهاد خود را ثبت کند.";
             await EnsureAuthoritiesAsync(cancellationToken);
-            decimal amount = Math.Abs(c.ImpactDeltaCost ?? 0m);
-            int delay = Math.Abs(c.ImpactDeltaDays ?? 0);
+            // authority is judged on the larger of the computed impact and what the client/requester asks for
+            decimal amount = Math.Max(Math.Abs(c.ImpactDeltaCost ?? 0m), Math.Abs(c.RequestedPriceDelta));
+            int delay = Math.Max(Math.Abs(c.ImpactDeltaDays ?? 0), Math.Abs(c.RequestedDaysDelta));
             List<PcApprovalAuthority> authorities = await _uow.Set<PcApprovalAuthority>().AsNoTracking().Where(a => a.CanDecide).ToListAsync(cancellationToken);
             PcApprovalAuthority mine = authorities.FirstOrDefault(a => _user.IsInRole(a.Role) && (a.MaxAmount == null || amount <= a.MaxAmount) && (a.MaxDelayDays == null || delay <= a.MaxDelayDays));
             if (mine == null)
             {
-                c.Escalated = true;
+                if (!c.Escalated)
+                {
+                    c.Escalated = true; // kept even though the decision is refused: the CEO sees it on the dashboard
+                    await _uow.SaveChangesAsync(cancellationToken);
+                }
                 return authorities.Any(a => _user.IsInRole(a.Role)) ? "مبلغ یا تاخیر از حد اختیار شما بیشتر است؛ تصمیم با مدیرعامل است." : PcText.NotAllowed;
             }
             if (Clean(dto.Note) == null) return "دلیل تصمیم را بنویسید.";
