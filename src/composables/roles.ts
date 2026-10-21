@@ -21,6 +21,10 @@ export const Roles = {
   QA: "QA",
   PROJECTMANAGER: "PROJECTMANAGER",
   DCC: "DCC",
+  FINANCEMANAGER: "FINANCEMANAGER",
+  PAYROLL: "PAYROLL",
+  TREASURY: "TREASURY",
+  AUDITOR: "AUDITOR",
 } as const;
 
 export const roleTitles: Record<string, string> = {
@@ -40,6 +44,10 @@ export const roleTitles: Record<string, string> = {
   QA: "تضمین کیفیت",
   PROJECTMANAGER: "مدیر پروژه",
   DCC: "کنترل مدارک پروژه",
+  FINANCEMANAGER: "مدیر مالی",
+  PAYROLL: "حقوق و دستمزد",
+  TREASURY: "خزانه‌داری",
+  AUDITOR: "حسابرس",
 };
 
 const list = (csv: string) => csv.split(",");
@@ -68,8 +76,33 @@ export const InventoryRoles = {
 /** Finance controller. */
 export const FinanceRoles = {
   ceo: list("CEO,PMO"),
-  readers: list("PMO,CEO,FINANCIAL,PLANNING"),
+  readers: list("PMO,CEO,FINANCIAL,FINANCEMANAGER,PLANNING"),
   writers: list("PMO,FINANCIAL"),
+};
+
+/**
+ * Accounting module F1 + F2 (FinanceRoles in LedgerCommon.cs). The GET endpoints accept the readers; every write checks its role
+ * inside the service (segregation of duties), so these lists only decide which screens and buttons are shown.
+ */
+export const FnRoles = {
+  readers: list("FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,AUDITOR"),
+  /** vouchers, customers, invoices, tax rates, assets */
+  accountants: list("FINANCIAL,FINANCEMANAGER"),
+  /** finalising vouchers, closing periods and years, accounts, approving payments */
+  managers: ["FINANCEMANAGER"],
+  /** bank accounts, cash boxes, payments, cheques */
+  treasury: list("TREASURY,FINANCEMANAGER"),
+  treasuryAndAccountants: list("TREASURY,FINANCIAL,FINANCEMANAGER"),
+  /** post events, draft invoices from milestones, create the fiscal year */
+  systemJobs: list("FINANCIAL,FINANCEMANAGER,PMO"),
+  /** payroll preparation and master data */
+  payrollUsers: list("PAYROLL,FINANCEMANAGER"),
+  /** the only roles that read individual salary data */
+  payrollReaders: list("PAYROLL,FINANCEMANAGER,CEO"),
+  /** Sepidar outbox (payroll packages are filtered by payrollReaders in the API) */
+  outbox: list("FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL,AUDITOR"),
+  /** prepares the non-payroll packages */
+  outboxPrepare: list("FINANCIAL,FINANCEMANAGER"),
 };
 
 /** Procurement (ProcurementRoles in the API). */
