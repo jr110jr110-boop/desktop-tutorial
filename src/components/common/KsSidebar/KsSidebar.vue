@@ -135,6 +135,19 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.quality"
+        has-sub
+        route-name="Quality"
+        tag="quality-collapse"
+        title="کیفیت (QC و QA)">
+        <BriefcaseIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Quality') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.finance"
         has-sub
         route-name="Finance"
@@ -175,7 +188,7 @@
 </template>
 
 <script lang="ts" setup>
-import { FinanceRoles, hasRole, InventoryRoles, ProcurementRoles } from "@/composables/roles";
+import { FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, QualityRoles } from "@/composables/roles";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -309,6 +322,12 @@ const links = {
     { title: "درخواست پرداخت", routeName: "ProcurementPayments", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "لیست تامین‌کنندگان و ارزیابی", routeName: "ProcurementSuppliers", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "تنظیمات و آستانه‌های خرید", routeName: "ProcurementSettings", disabled: !hasRole(ProcurementRoles.readers) },
+  ] as Links[],
+  quality: [
+    { title: "داشبورد کیفیت", routeName: "QualityDashboard", disabled: !hasRole(QualityRoles.readers) },
+    { title: "برنامه بازرسی و آزمون (ITP)", routeName: "QualityItps", disabled: !hasRole(QualityRoles.readers) },
+    { title: "سوابق بازرسی", routeName: "QualityRecords", disabled: !hasRole(QualityRoles.readers) },
+    { title: "گزارش‌های آزمون", routeName: "QualityReports", disabled: !hasRole(QualityRoles.readers) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },

@@ -18,6 +18,7 @@ export const Roles = {
   PLANNING: "PLANNING",
   WHSUPERVISOR: "WHSUPERVISOR",
   CEO: "CEO",
+  QA: "QA",
 } as const;
 
 export const roleTitles: Record<string, string> = {
@@ -34,6 +35,7 @@ export const roleTitles: Record<string, string> = {
   PLANNING: "برنامه‌ریزی و کنترل پروژه",
   WHSUPERVISOR: "سرپرست انبار",
   CEO: "مدیرعامل",
+  QA: "تضمین کیفیت",
 };
 
 const list = (csv: string) => csv.split(",");
@@ -106,3 +108,30 @@ export function hasAccess(claim: string | undefined | null): boolean {
     return false;
   }
 }
+
+/**
+ * Quality module (QualityRoles in the API). The controller only requires a reader role on the GET endpoints;
+ * the write roles are checked inside the services, so they are listed here to show or hide the buttons.
+ */
+export const QualityRoles = {
+  readers: list("PMO,CEO,QC,QA,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,PLANNING,WAREHOUSE,WHSUPERVISOR,COMMERCIAL"),
+  /** only QC inspects, tests, calibrates, notifies and releases control points */
+  inspectors: ["QC"],
+  managers: list("QC,QA,PMO"),
+  engineering: list("ENGINEERING,ENGINEER"),
+  /** ITP, WPS and PQR are prepared by quality and engineering */
+  planners: list("QC,QA,PMO,ENGINEERING,ENGINEER"),
+  /** acceptance limits of an ITP parameter */
+  limits: list("ENGINEERING,ENGINEER,PMO"),
+  /** inspection records: QC always; operators only for activities that are not on an ITP (self-inspection) */
+  recordWriters: list("QC,PMO,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER"),
+  capaStaff: list("QA,QC,PMO"),
+  capaClosers: list("QA,QC"),
+  certificateWriters: list("QC,QA,PMO,WAREHOUSE,WHSUPERVISOR,ENGINEERING"),
+  documentApprovers: list("QA,PMO,CEO"),
+  documentReviewers: list("QA,QC,PMO,ENGINEERING,ENGINEER"),
+  audit: list("QA,PMO"),
+  review: list("QA,PMO,CEO"),
+  complaints: list("QA,QC,PMO,COMMERCIAL"),
+  settings: list("QA,PMO,CEO"),
+};

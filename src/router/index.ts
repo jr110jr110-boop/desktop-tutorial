@@ -1,7 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
-import { currentRole, FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, Roles } from "@/composables/roles";
+import { currentRole, FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, QualityRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -436,6 +436,14 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/finance/costs", name: "FinanceCosts", component: () => import("@/views/finance/Costs.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/finance/valuation", name: "FinanceValuation", component: () => import("@/views/finance/Valuation.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/finance/readiness", name: "FinanceReadiness", component: () => import("@/views/finance/Readiness.vue"), meta: { roles: FinanceRoles.readers } },
+  // Quality (QC + QA): the paths of the alert links of the API (/quality/capa, /quality/calibration, /quality/itp, ...) are kept
+  { path: "/quality/dashboard", name: "QualityDashboard", component: () => import("@/views/quality/Dashboard.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/itp", name: "QualityItps", component: () => import("@/views/quality/ItpList.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/itp/:id", name: "QualityItpEdit", component: () => import("@/views/quality/ItpEdit.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/records", name: "QualityRecords", component: () => import("@/views/quality/Records.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/records/:id", name: "QualityRecordEdit", component: () => import("@/views/quality/RecordEdit.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/reports", name: "QualityReports", component: () => import("@/views/quality/Reports.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/reports/:id", name: "QualityReportEdit", component: () => import("@/views/quality/ReportEdit.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",
