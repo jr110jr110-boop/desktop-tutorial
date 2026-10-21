@@ -236,7 +236,7 @@ namespace Services.NasbNiro.Procurement
 
                     // capital lines: a draft fixed asset is opened for finance to complete (class, cost centre, in-use date); the invoice event above is unchanged
                     foreach (SupplierInvoiceLine l in invoice.Lines.Where(x => x.OrderLine.IsCapital))
-                        await Services.NasbNiro.Finance.AssetDrafts.AddFromInvoiceLineAsync(_uow, invoice, l, Me, cancellationToken);
+                        await AssetDrafts.AddFromInvoiceLineAsync(_uow, invoice, l, Me, cancellationToken);
                     break;
                 }
                 case "cancel":
