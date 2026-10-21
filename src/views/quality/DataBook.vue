@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import DataBookPrint from "@/components/quality/print/DataBookPrint.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { getDataBook } from "@/api/QualityAPIs";
@@ -10,6 +13,10 @@ const route = useRoute();
 const workOrderId = Number(route.params.workOrderId);
 const variant = ref<"company" | "client">("company");
 const book = ref<any>(null);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 const kindNames: Record<string, string> = {
   Itp: "برنامه بازرسی", ItpActivity: "فعالیت ITP", TestReport: "گزارش آزمون", QcRecord: "سابقه بازرسی", Ncr: "عدم انطباق", ReleaseNote: "برگه ترخیص",
   MaterialCertificate: "گواهی مواد", WeldLog: "گزارش جوشکاری", Wps: "WPS", Pqr: "PQR", Qualification: "گواهی صلاحیت", Equipment: "گواهی کالیبراسیون",
@@ -39,6 +46,7 @@ onMounted(load);
 
 <template>
   <div v-if="book" class="inv-page">
+    <DataBookPrint :book="book" :variant="variant" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -52,7 +60,7 @@ onMounted(load);
             <button :class="variant === 'client' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="(variant = 'client'), load()">نسخه کارفرما</button>
           </div>
           <router-link :to="{ name: 'QualityReleaseNotes', query: { workOrderId } }" class="btn btn-sm btn-outline-secondary">برگه‌های ترخیص</router-link>
-          <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ فهرست</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ فهرست مطالب</button>
         </div>
       </div>
       <div v-for="s in book.sections" :key="s.no" class="mb-3">

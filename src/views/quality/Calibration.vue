@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import CalibrationPrint from "@/components/quality/print/CalibrationPrint.vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import QPager from "@/components/quality/QPager.vue";
+import { rowsOf } from "@/api/ApiClient";
 import { getCalibrationIntervals, getEquipmentDue, getEquipmentList, getOotCases, saveCalibrationInterval, saveEquipment } from "@/api/QualityAPIs";
 import { fail, jalali, ok, printPage } from "@/composables/inventory";
 import { equipmentBadge, equipmentStatuses, equipmentTypes, ootStatuses, usePaged } from "@/composables/quality";
@@ -23,6 +27,16 @@ const oot = usePaged(getOotCases, ootFilters);
 const intervals = ref<any[]>([]);
 const form = ref<any>(null);
 const busy = ref(false);
+const pmode = ref<"control" | "units" | "needs">("control");
+const printRows = ref<any[]>([]);
+async function doPrint(mode: "control" | "units" | "needs") {
+  const [data, error] = await getEquipmentList({ PageSize: 500 });
+  if (error) return fail(error);
+  printRows.value = rowsOf(data);
+  pmode.value = mode;
+  await nextTick();
+  printForm();
+}
 
 function blank() {
   return { id: null, name: "", type: 1, maker: "", model: "", serialNumber: "", ownerUnit: "", location: "", range: "", accuracy: "", requiresCalibration: true, intervalMonths: null, note: "" };
@@ -70,12 +84,16 @@ onMounted(register.load);
 
 <template>
   <div class="inv-page ks-report">
+    <CalibrationPrint :kind="pmode" :rows="printRows" />
     <KsReportHeader title="تجهیزات اندازه‌گیری و کالیبراسیون" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <h1 class="inv-title screen-only">تجهیزات اندازه‌گیری و کالیبراسیون</h1>
         <div class="d-flex gap-2 d-print-none">
           <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ فهرست</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint('control')">FO-QC-007</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint('units')">FO-QC-008</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint('needs')">FO-QC-009</button>
           <button class="btn btn-sm btn-outline-secondary" @click="printLabels(tab === 'due' ? due.rows.value : register.rows.value)">چاپ برچسب‌های صفحه</button>
           <button v-if="canQc" class="btn btn-sm btn-primary" @click="form = blank()">تجهیز جدید</button>
         </div>

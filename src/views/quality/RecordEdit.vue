@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import RecordPrint from "@/components/quality/print/RecordPrint.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -21,6 +24,12 @@ const lots = ref<any[]>([]);
 const activities = ref<any[]>([]);
 const equipment = ref<any[]>([]);
 const busy = ref(false);
+const pmode = ref<"dimensional" | "order" | "inspection">("inspection");
+async function doPrint(mode: any = null) {
+  if (mode !== null) pmode.value = mode;
+  await nextTick();
+  printForm();
+}
 const canWrite = hasRole(QualityRoles.recordWriters);
 const isQc = hasRole(QualityRoles.inspectors);
 
@@ -99,6 +108,7 @@ onMounted(async () => {
 
 <template>
   <div v-if="rec" class="inv-page">
+    <RecordPrint v-if="!isNew" :rec="rec" :kind="pmode" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -108,6 +118,9 @@ onMounted(async () => {
         </div>
         <div class="d-flex gap-2">
           <router-link :to="{ name: 'QualityRecords' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button v-if="!isNew" class="btn btn-sm btn-outline-secondary" @click="doPrint('inspection')">چاپ سابقه بازرسی</button>
+          <button v-if="!isNew" class="btn btn-sm btn-outline-secondary" @click="doPrint('dimensional')">چاپ DCF (FO-QC-14)</button>
+          <button v-if="!isNew" class="btn btn-sm btn-outline-secondary" @click="doPrint('order')">چاپ حکم بازرسی (FO-QC-018)</button>
           <button v-if="!isNew" class="btn btn-sm btn-outline-secondary" @click="router.push({ name: 'QualityRecordEdit', params: { id: 'new' } })">بازرسی جدید</button>
           <button v-if="isNew && canWrite" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ثبت</button>
         </div>

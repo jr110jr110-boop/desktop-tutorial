@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import WpsPrint from "@/components/quality/print/WpsPrint.vue";
 import { onMounted, ref } from "vue";
 import QPager from "@/components/quality/QPager.vue";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -16,6 +19,12 @@ const pqrs = ref<any[]>([]);
 const wps = ref<any>(null);
 const pqrForm = ref<any>(null);
 const busy = ref(false);
+const printPqr = ref<any>(null);
+async function doPrint(pqr: any = null) {
+  printPqr.value = pqr;
+  await nextTick();
+  printForm();
+}
 const canPlan = hasRole(QualityRoles.planners);
 const canQc = hasRole(QualityRoles.inspectors);
 const canEng = hasRole(QualityRoles.engineering);
@@ -95,6 +104,8 @@ onMounted(() => {
 
 <template>
   <div class="inv-page">
+    <WpsPrint v-if="printPqr" :pqr="printPqr" />
+    <WpsPrint v-else-if="wps && wps.id" :wps="wps" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <h1 class="inv-title">WPS و PQR</h1>
@@ -133,6 +144,7 @@ onMounted(() => {
             <b>{{ wps.id ? "WPS " + wps.number + " / " + wps.revision : "WPS جدید" }}</b>
             <div class="d-flex flex-wrap gap-2">
               <span v-if="wps.id" :class="{ ok: wps.status === 1, bad: wps.status === 2 }" class="inv-badge">{{ wpsStatuses[wps.status] }}</span>
+              <button v-if="wps.id" class="btn btn-sm btn-outline-secondary" @click="doPrint()">چاپ WPS</button>
               <button v-if="canPlan && wps.id && wps.status === 0 && !editing" class="btn btn-sm btn-outline-primary" @click="editing = true">ویرایش</button>
               <button v-if="canPlan && wps.id && wps.status !== 2" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('obsolete')">منسوخ کردن</button>
               <button class="btn btn-sm btn-outline-secondary" @click="wps = null">بستن</button>
@@ -195,6 +207,7 @@ onMounted(() => {
               <td class="inv-ltr">{{ p.number }}</td><td class="inv-ltr">{{ p.codeEdition }}</td><td class="inv-ltr">{{ p.process }}</td><td>{{ p.resultsDocumentId ? "پیوست شد" : "—" }}</td>
               <td><span :class="p.approved ? 'ok' : 'warn'" class="inv-badge">{{ p.approved ? "تایید: " + p.approvedByName : "تایید نشده" }}</span></td>
               <td class="text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" @click="doPrint(p)">چاپ</button>
                 <button v-if="canPlan && !p.approved" class="btn btn-sm btn-outline-secondary" @click="pqrForm = { ...p }">ویرایش</button>
                 <button v-if="canEng && !p.approved" class="btn btn-sm btn-outline-success" @click="approvePqr(p)">تایید مهندسی</button>
               </td>

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import ItpPrint from "@/components/quality/print/ItpPrint.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { addItpRelease, getItp, itpAction, itpActivityAction, saveItp, saveItpActivity, setItpLimits } from "@/api/QualityAPIs";
@@ -21,6 +24,10 @@ import { hasRole, QualityRoles } from "@/composables/roles";
 const route = useRoute();
 const itp = ref<any>(null);
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 const selectedId = ref<number | null>(null);
 const edit = ref<any>(null);
 const approve = ref({ reference: "", date: today() });
@@ -131,6 +138,7 @@ onMounted(async () => {
 
 <template>
   <div v-if="itp" class="inv-page">
+    <ItpPrint :itp="itp" />
     <div class="inv-card screen-only">
       <div class="inv-toolbar">
         <div>
@@ -141,6 +149,7 @@ onMounted(async () => {
         </div>
         <div class="d-flex flex-wrap gap-2">
           <router-link :to="{ name: 'QualityItps' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ ITP</button>
           <router-link :to="{ name: 'QualityReleaseNotes', query: { workOrderId: itp.workOrderId } }" class="btn btn-sm btn-outline-secondary">برگه‌های ترخیص</router-link>
         </div>
       </div>

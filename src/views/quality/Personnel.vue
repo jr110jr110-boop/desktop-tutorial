@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import WelderCardPrint from "@/components/quality/print/WelderCardPrint.vue";
 import { computed, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import QPager from "@/components/quality/QPager.vue";
@@ -14,6 +17,10 @@ import { hasRole, QualityRoles } from "@/composables/roles";
 const tab = ref<"persons" | "qualifications" | "continuity">("persons");
 const canManage = hasRole(QualityRoles.managers);
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 
 const personFilters = ref({ Contains: "", Employer: null as number | null, IsActive: true as boolean | null });
 const persons = usePaged(getPersons, personFilters);
@@ -97,6 +104,7 @@ onMounted(persons.load);
 
 <template>
   <div class="inv-page ks-report">
+    <WelderCardPrint v-if="selected" :person="selected" />
     <KsReportHeader title="پرسنل صلاحیت‌دار و گواهی‌ها" />
     <div class="inv-card">
       <div class="inv-toolbar">
@@ -179,6 +187,7 @@ onMounted(persons.load);
           <div class="d-flex justify-content-between align-items-center">
             <b>{{ selected.name }} <span class="inv-ltr">{{ selected.personnelCode }}</span></b>
             <div class="d-flex gap-2 d-print-none">
+              <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ کارت صلاحیت</button>
               <button v-if="canManage" class="btn btn-sm btn-outline-primary" @click="personForm = { ...selected }">ویرایش شخص</button>
               <button v-if="canManage" class="btn btn-sm btn-outline-primary" @click="qualForm = blankQual(selected.id)">گواهی جدید</button>
               <button class="btn btn-sm btn-outline-secondary" @click="selected = null">بستن</button>

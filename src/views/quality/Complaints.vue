@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import ComplaintPrint from "@/components/quality/print/ComplaintPrint.vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -20,6 +23,10 @@ const response = ref("");
 const ncrId = ref<number | null>(null);
 const severity = ref(0);
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 
 const blank = () => ({ id: null, workOrderId: null, receivedDate: today(), channel: "", description: "", severity: 0, status: 0 });
 const editable = () => c.value && (!c.value.id || c.value.status <= 1);
@@ -59,6 +66,7 @@ onMounted(list.load);
 
 <template>
   <div class="inv-page ks-report">
+    <ComplaintPrint v-if="c && c.id" :c="c" />
     <KsReportHeader title="شکایت‌های مشتری" />
     <div class="inv-card">
       <div class="inv-toolbar">
@@ -94,6 +102,7 @@ onMounted(list.load);
           <div class="d-flex gap-2">
             <span v-if="c.id" :class="{ ok: c.status >= 2, warn: c.status < 2 }" class="inv-badge">{{ complaintStatuses[c.status] }}</span>
             <button v-if="editable() && canWrite" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
+            <button v-if="c.id" class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ فرم</button>
             <button class="btn btn-sm btn-outline-secondary" @click="c = null">بستن</button>
           </div>
         </div>

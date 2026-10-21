@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import CapaPrint from "@/components/quality/print/CapaPrint.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -13,6 +16,10 @@ const route = useRoute();
 const router = useRouter();
 const capa = ref<any>(null);
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 const note = ref("");
 const cancelNote = ref("");
 const evidence = ref<string | null>(null);
@@ -81,6 +88,7 @@ onMounted(async () => {
 
 <template>
   <div v-if="capa" class="inv-page">
+    <CapaPrint v-if="capa.id" :capa="capa" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -91,6 +99,7 @@ onMounted(async () => {
         </div>
         <div class="d-flex gap-2">
           <router-link :to="{ name: 'QualityCapas' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button v-if="capa.id" class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ فرم FO-QA-017</button>
           <button v-if="editable" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
         </div>
       </div>

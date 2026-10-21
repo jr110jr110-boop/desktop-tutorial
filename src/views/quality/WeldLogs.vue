@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import WeldLogPrint from "@/components/quality/print/WeldLogPrint.vue";
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -21,6 +24,11 @@ const wpsList = ref<any[]>([]);
 const welders = ref<any[]>([]);
 const reports = ref<any[]>([]);
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
+const weldLabel = () => (list.rows.value[0]?.workOrderCode || "") + (filters.value.SerialNumber ? " / " + filters.value.SerialNumber : "");
 
 const blank = () => ({
   weldDate: today(), workOrderId: filters.value.WorkOrderId, serialNumber: "", jointNo: "", wpsId: null, qualificationId: null, fillerBatch: "", preheatC: null, interpassC: null, vt: 0, note: "", reportIds: [] as number[],
@@ -64,12 +72,13 @@ onMounted(list.load);
 
 <template>
   <div class="inv-page ks-report">
+    <WeldLogPrint :rows="list.rows.value" :label="weldLabel()" />
     <KsReportHeader title="گزارش جوشکاری (Weld Log)" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <h1 class="inv-title screen-only">گزارش جوشکاری</h1>
         <div class="d-flex gap-2 d-print-none">
-          <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ گزارش</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ گزارش</button>
           <router-link :to="{ name: 'QualityWps' }" class="btn btn-sm btn-outline-secondary">WPS و PQR</router-link>
           <button v-if="canQc" class="btn btn-sm btn-primary" @click="openForm">اتصال جوش جدید</button>
         </div>

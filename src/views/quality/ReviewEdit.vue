@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import ReviewPrint from "@/components/quality/print/ReviewPrint.vue";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -15,6 +18,10 @@ const input = ref<any>(null);
 const decision = ref<any>(null);
 const minutes = ref<string | null>(null);
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 const canWrite = hasRole(QualityRoles.review);
 
 async function load() {
@@ -59,6 +66,7 @@ onMounted(load);
 
 <template>
   <div v-if="review" class="inv-page">
+    <ReviewPrint :review="review" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -68,6 +76,7 @@ onMounted(load);
         </div>
         <div class="d-flex flex-wrap gap-2 align-items-end">
           <router-link :to="{ name: 'QualityReviews' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ صورتجلسه (FO-QA-022)</button>
           <template v-if="canWrite">
             <button v-if="review.status === 0" :disabled="busy" class="btn btn-sm btn-primary" @click="act('hold')">جلسه برگزار شد</button>
             <button v-if="review.status === 1" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="act('redraft')">بازگشت به پیش‌نویس</button>

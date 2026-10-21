@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import CalibrationPrint from "@/components/quality/print/CalibrationPrint.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -14,6 +17,12 @@ const eq = ref<any>(null);
 const cal = ref<any>(null);
 const reason = ref("");
 const busy = ref(false);
+const pmode = ref<"handover" | "identity">("identity");
+async function doPrint(mode: any = null) {
+  if (mode !== null) pmode.value = mode;
+  await nextTick();
+  printForm();
+}
 const canQc = hasRole(QualityRoles.inspectors);
 const lastEvent = computed(() => (eq.value?.events || [])[0] || null);
 
@@ -63,6 +72,7 @@ onMounted(async () => {
 
 <template>
   <div v-if="eq" class="inv-page">
+    <CalibrationPrint :kind="pmode" :eq="eq" />
     <div class="inv-card screen-only">
       <div class="inv-toolbar">
         <div>
@@ -72,6 +82,8 @@ onMounted(async () => {
         </div>
         <div class="d-flex flex-wrap gap-2">
           <router-link :to="{ name: 'QualityCalibration' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint('identity')">چاپ شناسنامه (FO-QC-011)</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint('handover')">چاپ فرم تحویل (FO-QC-010)</button>
           <button v-if="canQc" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره مشخصات</button>
           <button v-if="canQc && eq.requiresCalibration" class="btn btn-sm btn-outline-success" @click="cal = blankEvent()">ثبت کالیبراسیون</button>
         </div>

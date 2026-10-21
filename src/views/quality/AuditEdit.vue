@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import AuditPrint from "@/components/quality/print/AuditPrint.vue";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -13,6 +16,10 @@ const audit = ref<any>(null);
 const finding = ref<any>(null);
 const reportDoc = ref<string | null>(null);
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 const canWrite = hasRole(QualityRoles.audit);
 
 async function load() {
@@ -47,6 +54,7 @@ onMounted(load);
 
 <template>
   <div v-if="audit" class="inv-page">
+    <AuditPrint :audit="audit" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -55,6 +63,7 @@ onMounted(load);
         </div>
         <div class="d-flex gap-2">
           <router-link :to="{ name: 'QualityAudits' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ گزارش (FO-QA-018)</button>
           <button v-if="canWrite && audit.status === 0" :disabled="busy" class="btn btn-sm btn-primary" @click="act('done')">ممیزی انجام شد</button>
           <button v-if="canWrite && audit.status === 1" :disabled="busy" class="btn btn-sm btn-success" @click="act('close')">بستن ممیزی</button>
         </div>

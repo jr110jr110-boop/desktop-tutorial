@@ -138,3 +138,18 @@ export const reviewInputCategories: Record<number, string> = {
   5: "عملکرد فرایندها و انطباق محصول", 6: "عدم انطباق‌ها و اقدامات اصلاحی", 7: "نتایج پایش و اندازه‌گیری", 8: "نتایج ممیزی‌ها",
   9: "عملکرد تامین‌کنندگان بیرونی", 10: "کفایت منابع", 11: "اثربخشی اقدامات مقابله با ریسک", 12: "فرصت‌های بهبود",
 };
+
+/**
+ * Prints one form of the page. The page keeps the form in a v-if (print-only) block; while the browser prints,
+ * the body gets a class that hides every other block of the page (see inventory.scss).
+ */
+export async function printForm() {
+  document.body.classList.add("q-form-print");
+  const clear = () => document.body.classList.remove("q-form-print");
+  window.addEventListener("afterprint", clear, { once: true });
+  try {
+    window.print();
+  } finally {
+    setTimeout(clear, 1500);
+  }
+}

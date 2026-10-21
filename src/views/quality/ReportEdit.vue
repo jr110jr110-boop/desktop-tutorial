@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import TestReportPrint from "@/components/quality/print/TestReportPrint.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -22,6 +25,10 @@ const equipment = ref<any[]>([]);
 const qualifications = ref<any[]>([]);
 const rejectReason = ref("");
 const busy = ref(false);
+async function doPrint() {
+  await nextTick();
+  printForm();
+}
 const isQc = hasRole(QualityRoles.inspectors);
 
 const editable = computed(() => rep.value && (isNew || rep.value.status === 0 || rep.value.status === 3));
@@ -148,6 +155,7 @@ onMounted(async () => {
 
 <template>
   <div v-if="rep" class="inv-page">
+    <TestReportPrint v-if="rep.id" :rep="rep" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -158,6 +166,7 @@ onMounted(async () => {
         </div>
         <div class="d-flex flex-wrap gap-2">
           <router-link :to="{ name: 'QualityReports' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button v-if="rep.id" class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ گزارش</button>
           <button v-if="editable && isQc" :disabled="busy" class="btn btn-sm btn-primary" @click="save()">ذخیره</button>
           <button v-if="!isNew && editable && isQc" :disabled="busy" class="btn btn-sm btn-outline-success" @click="act('submit')">ارسال برای تایید</button>
           <button v-if="rep.status === 1 && isQc" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید (غیر از آزمونگر)</button>

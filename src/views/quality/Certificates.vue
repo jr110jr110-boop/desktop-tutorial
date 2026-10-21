@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import CertificatePrint from "@/components/quality/print/CertificatePrint.vue";
 import { onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import QPager from "@/components/quality/QPager.vue";
@@ -21,6 +24,12 @@ const item = ref<any>(null);
 const lots = ref<any[]>([]);
 const verifyNote = ref<Record<number, string>>({});
 const busy = ref(false);
+const printCert = ref<any>(null);
+async function doPrint(c: any) {
+  printCert.value = c;
+  await nextTick();
+  printForm();
+}
 
 const blank = () => ({ id: null, lotId: null, type: 2, number: "", issuer: "", documentId: null, summary: "" });
 
@@ -61,6 +70,7 @@ onMounted(list.load);
 
 <template>
   <div class="inv-page ks-report">
+    <CertificatePrint v-if="printCert" :cert="printCert" />
     <KsReportHeader title="گواهی‌های مواد (EN 10204)" />
     <div class="inv-card">
       <div class="inv-toolbar">
@@ -97,7 +107,7 @@ onMounted(list.load);
             <tr v-if="!list.rows.value.length"><td colspan="9" class="text-center inv-muted">گواهی‌ای نیست.</td></tr>
             <tr v-for="c in list.rows.value" :key="c.id">
               <td><span class="inv-ltr">{{ c.itemCode }}</span> {{ c.itemTitle }}</td><td class="inv-ltr">{{ c.lotNumber }}</td><td class="inv-ltr">{{ c.heatNumber }}</td>
-              <td>{{ certificateTypes[c.type] }}</td><td class="inv-ltr">{{ c.number }}</td><td>{{ c.issuer }}</td><td>{{ c.creatorName }}</td>
+              <td>{{ certificateTypes[c.type] }}</td><td class="inv-ltr">{{ c.number }} <button class="btn btn-sm btn-link p-0 d-print-none" @click="doPrint(c)">چاپ</button></td><td>{{ c.issuer }}</td><td>{{ c.creatorName }}</td>
               <td>
                 <span :class="{ ok: c.result === 1, bad: c.result === 2, warn: c.result === 0 }" class="inv-badge">{{ certificateResults[c.result] }}</span>
                 <div v-if="c.verifiedByName" class="small">{{ c.verifiedByName }} {{ jalali(c.verifiedAt) }}</div>

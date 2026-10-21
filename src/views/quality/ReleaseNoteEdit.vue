@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import ReleasePrint from "@/components/quality/print/ReleasePrint.vue";
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import WorkOrderSelect from "@/components/quality/WorkOrderSelect.vue";
@@ -16,6 +19,12 @@ const checks = ref<any[]>([]);
 const canRelease = ref(false);
 const reason = ref("");
 const busy = ref(false);
+const pmode = ref<"note" | "coc">("note");
+async function doPrint(mode: any = null) {
+  if (mode !== null) pmode.value = mode;
+  await nextTick();
+  printForm();
+}
 const canManage = hasRole(QualityRoles.managers);
 const isQc = hasRole(QualityRoles.inspectors);
 const draft = () => isNew || note.value?.status === 0;
@@ -70,6 +79,7 @@ onMounted(async () => {
 
 <template>
   <div v-if="note" class="inv-page">
+    <ReleasePrint v-if="!isNew" :note="note" :kind="pmode" />
     <div class="inv-card screen-only">
       <div class="inv-toolbar">
         <div>
@@ -79,6 +89,8 @@ onMounted(async () => {
         </div>
         <div class="d-flex flex-wrap gap-2">
           <router-link :to="{ name: 'QualityReleaseNotes' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button v-if="!isNew" class="btn btn-sm btn-outline-secondary" @click="doPrint('note')">چاپ برگه ترخیص</button>
+          <button v-if="!isNew && note.status === 1" class="btn btn-sm btn-outline-secondary" @click="doPrint('coc')">چاپ گواهی انطباق</button>
           <router-link v-if="note.workOrderId" :to="{ name: 'QualityDataBook', params: { workOrderId: note.workOrderId } }" class="btn btn-sm btn-outline-secondary">دیتابوک نهایی</router-link>
           <button v-if="draft() && canManage" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
           <button v-if="!isNew && note.status === 0 && isQc" :disabled="busy || !canRelease" class="btn btn-sm btn-success" @click="act('release')">صدور ترخیص و گواهی انطباق (مدیر QC)</button>

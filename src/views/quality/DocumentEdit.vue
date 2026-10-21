@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick } from "vue";
+import { printForm } from "@/composables/quality";
+import TransmittalPrint from "@/components/quality/print/TransmittalPrint.vue";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -13,6 +16,12 @@ const route = useRoute();
 const doc = ref<any>(null);
 const rev = ref<any>(null);
 const busy = ref(false);
+const printRev = ref<any>(null);
+async function doPrint(r: any) {
+  printRev.value = r;
+  await nextTick();
+  printForm();
+}
 const effective = ref(today());
 const recipients = ref<{ userIds: (number | null)[]; units: string }>({ userIds: [null], units: "" });
 const distributeFor = ref<number | null>(null);
@@ -66,6 +75,7 @@ onMounted(load);
 
 <template>
   <div v-if="doc" class="inv-page">
+    <TransmittalPrint v-if="printRev" :doc="doc" :rev="printRev" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -110,6 +120,7 @@ onMounted(load);
           </template>
           <button v-if="r.status === 3 && canApprove" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act(r.id, 'obsolete')">منسوخ</button>
           <button v-if="r.status === 3 && canReview" class="btn btn-sm btn-outline-secondary" @click="distributeFor = r.id">توزیع</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint(r)">چاپ فرم توزیع</button>
         </div>
       </div>
       <p class="small mb-1">{{ r.changeSummary }} <DocAttach :model-value="r.fileDocumentId" :disabled="true" title="فایل بازنگری" /></p>
