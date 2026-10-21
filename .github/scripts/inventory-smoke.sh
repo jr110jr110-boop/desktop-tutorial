@@ -1519,6 +1519,204 @@ as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason
 as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"دوباره"}'; no "finance: a closed year is not closed twice"
 as "$FIN_TOKEN" POST $FG/vouchers '{"date":"2021-07-01T00:00:00","lines":[{"accountCode":"80108","debit":1},{"accountCode":"10101","credit":1}]}'; no "finance: no voucher can be written into a closed year"
 
+# =============================================================================================== release F2
+TOKEN=$ADMIN_TOKEN
+FA=finance/assets; FP=finance/payroll; FS=finance/sepidar
+
+# --- F1 leftover: the VAT season report takes purchases from the posted supplier invoices (season 3 of 1405 holds F-1001 and F-1002)
+as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=3"
+check "finance: VAT season 3 of 1405 takes purchases from the posted supplier invoices (net 39000000, VAT 3900000)" '.success and .data.purchasesNet == 39000000 and .data.purchasesVat == 3900000'
+check "finance: the supplier purchase row shows net 39000000, VAT 3900000 and 2 documents" '([.data.rows[]|select(.side == "Purchases" and .netAmount == 39000000 and .vatAmount == 3900000 and .documents == 2)]|length) == 1'
+
+# --- F1 leftover: bank reconciliation approval, exact rules
+as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک ج - آزمون تطبیق","bankName":"ملت","accountNumber":"100324200003","iban":"IR700170000000100324200003"}'; BA3=$(val .data.id)
+as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک د - آزمون تطبیق","bankName":"ملت","accountNumber":"100324200004","iban":"IR430170000000100324200004"}'; BA4=$(val .data.id)
+[ -n "$BA3" ] && [ "$BA3" != "null" ] && [ -n "$BA4" ] && [ "$BA4" != "null" ] && ok "finance: two more bank accounts for the reconciliation rules" || bad "finance: two more bank accounts for the reconciliation rules"
+as "$TR_TOKEN" POST $FT/statements/import "{\"bankAccountId\":$BA3,\"openingBalance\":0,\"closingBalance\":5000,\"rows\":[{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سود روزشمار\",\"deposit\":5000}]}"; check "finance: statement of account C imported" '.success and (.data.lines|length) == 1'
+STC=$(val .data.id); STCLINE=$(val '.data.lines[0].id')
+as "$TR_TOKEN" POST $FT/reconciliations "{\"statementId\":$STC}"; check "finance: reconciliation of account C created by treasury" '.success and .data.status == 0'
+RCC=$(val .data.id)
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCC,\"action\":\"approve\"}"; nomsg "finance: a reconciliation with a difference is refused" "مغایرت صفر نیست"
+as "$FIN_TOKEN" POST $FT/statements/match "{\"statementId\":$STC,\"lineId\":$STCLINE,\"kind\":\"interest\"}"; check "finance: the interest line is matched" '.success'
+as "$FM_TOKEN" POST $FG/post-events
+as "$TR_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCC,\"action\":\"refresh\"}"; check "finance: reconciliation of account C refreshed with zero difference" '.success and .data.difference == 0 and .data.bankBalance == 5000 and .data.bookBalance == 5000'
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCC,\"action\":\"approve\"}"; check "finance: zero difference is approved by a user other than the preparer" '.success and .data.status == 1 and (.data.approvedByName|length) > 0 and .data.approvedByName != .data.preparedByName'
+as "$TR_TOKEN" POST $FT/statements/import "{\"bankAccountId\":$BA4,\"openingBalance\":0,\"closingBalance\":0,\"rows\":[{\"date\":\"${TODAY}T00:00:00\",\"description\":\"واریز\",\"deposit\":100},{\"date\":\"${TODAY}T00:00:00\",\"description\":\"برداشت\",\"withdrawal\":100}]}"; STD=$(val .data.id)
+as "$FM_TOKEN" POST $FT/reconciliations "{\"statementId\":$STD}"; RCD=$(val .data.id)
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCD,\"action\":\"approve\"}"; nomsg "finance: the preparer of a reconciliation cannot approve it" "تهیه‌کننده"
+
+# --- F1 leftover: cancelling the only cheque of a supplier payment returns the payment requests to Approved (capital purchase, 9900000 with VAT)
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"خرید سرمایه‌ای آزمون\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"estimatedUnitPrice\":9000000,\"technicalRequirements\":\"آزمون\"}]}"; check "f2: capital purchase request submitted" '.success and .data.status == 1'
+F2RQ=$(val .data.id); F2RL=$(val '.data.lines[0].id')
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$F2RQ,\"action\":\"approve-planning\"}"; check "f2: capital purchase request approved by planning" '.success and .data.status == 2'
+as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"orderDate\":\"2026-10-25T00:00:00\",\"providerId\":$PA,\"vatPercent\":10,\"requirements\":\"آزمون\",\"deliveryDate\":\"2026-11-10T00:00:00\",\"lines\":[{\"requestLineId\":$F2RL,\"itemId\":$BOLT,\"quantity\":1,\"unitPrice\":9000000,\"isCapital\":true}]}"; check "f2: capital purchase order saved" '.success and .data.totalAmount == 9900000'
+F2PO=$(val .data.id); F2POL=$(val '.data.lines[0].id')
+call POST procurement/orders/action "{\"id\":$F2PO,\"action\":\"approve\"}"
+as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$F2PO,\"action\":\"release\"}"; check "f2: capital purchase order released" '.success and .data.status == 2'
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-25T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$F2PO,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"locationId\":$L2,\"purchaseOrderLineId\":$F2POL}]}"; F2D=$(val .data.id)
+call POST "inventory/documents/$F2D/confirm"; check "f2: capital purchase received" '.success'
+as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$F2PO,\"invoiceNumber\":\"F-1003\",\"invoiceDate\":\"2026-10-25T00:00:00\",\"isOfficial\":true,\"lines\":[{\"orderLineId\":$F2POL,\"quantity\":1,\"unitPrice\":9000000}]}"; F2INV=$(val .data.id)
+as "$FIN_TOKEN" POST procurement/invoices/action "{\"id\":$F2INV,\"action\":\"approve\"}"; check "f2: capital invoice approved by finance" '.success and .data.status == 3'
+as "$FM_TOKEN" GET "$FA?Status=0&PageSize=0"; check "f2: the approved capital invoice line drafted a fixed asset of 9000000 (source: supplier invoice line)" '.success and ([.data.data[]|select(.source == 2 and .cost == 9000000 and .status == 0)]|length) == 1'
+as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$F2INV,\"amount\":9900000}"; F2PAY=$(val .data.id)
+call POST procurement/payments/action "{\"id\":$F2PAY,\"action\":\"approve\"}"; check "f2: payment request approved" '.success and .data.status == 1'
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":1,\"paymentRequestIds\":[$F2PAY],\"lines\":[{\"instrument\":3,\"amount\":9900000,\"bankAccountId\":$BA1,\"chequeSerial\":502,\"chequeDueDate\":\"${TODAY}T00:00:00\",\"chequeSayadId\":\"5555666677778888\"}]}"; check "f2: payment by a single cheque drafted" '.success and .data.status == 0 and .data.netAmount == 9900000'
+F2PM=$(val .data.id)
+as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$F2PM,\"action\":\"approve\"}"
+as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$F2PM,\"action\":\"post\"}"; check "f2: payment posted" '.success and .data.status == 2'
+as "$FM_TOKEN" GET "$FT/issued-cheques?PageSize=0"; F2CHQ=$(jq -r '[.data.data[]|select(.serial == 502)][0].id' "$B")
+as "$TR_TOKEN" POST $FT/issued-cheques/action "{\"id\":$F2CHQ,\"action\":\"cancel\",\"note\":\"آزمون ابطال\"}"; check "f2: the cheque is cancelled" '.success and .data.status == 3'
+as "$FM_TOKEN" GET "$FT/payments/$F2PM"; check "finance: cancelling the only cheque cancels the payment" '.success and .data.status == 3'
+as "$TR_TOKEN" GET "$FT/payable-requests?PageSize=0"; check "finance: the payment request is Approved again and payable (net 9900000)" '.success and ([.data.data[]|select(.id == '$F2PAY' and .netAmount == 9900000)]|length) == 1'
+as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET "$FG/reports/reconciliation"; check "finance: ledgers agree with sub-ledgers after the cheque cancellation" '.success and .data.clean == true'
+
+# --- fixed assets: classes, rates not invented
+as "$FM_TOKEN" GET $FA/classes; check "assets: classes are seeded with a source, flagged for verification and without invented rates" '.success and (.data|length) >= 10 and ([.data[]|select(.code == "MCH" and .verify == true and (.source|length) > 0 and .hasRate == false)]|length) == 1 and ([.data[]|select(.code == "LND" and .hasRate == true)]|length) == 1'
+as "$FM_TOKEN" GET $FG/setup-check; check "assets: set-up check lists the missing rates in modules and keeps the ledger problems apart" '.success and ([.data.problems[].code]|sort) == ["VAT_RATE_MISSING"] and ([.data.modules[]|select(.module == "Assets" and .ok == false and (.missing|index("MCH")) != null)]|length) == 1'
+as "$PAYR_TOKEN" GET $FA/classes; [ "$CODE" = "403" ] && ok "assets: payroll user cannot read fixed assets (403)" || bad "assets: payroll user cannot read fixed assets (403) got $CODE"
+call POST finance/cost-centers '{"code":"CC-F2","title":"مرکز هزینه آزمون F2","isProduction":true}'; check "assets: production cost centre saved" '.success and .data.isProduction == true'
+CCF2=$(val .data.id)
+as "$FIN_TOKEN" POST $FA/classes '{"code":"TST","title":"رده آزمون","assetAccountCode":"20103","accumulatedAccountCode":"20203","method":1,"ratePercent":12,"startRule":1,"idleRatePercent":30,"idleAfterMonths":0,"salvagePercent":0,"source":"آزمون CI - نرخ فرضی فقط برای آزمون","verify":true,"isActive":true}'; check "assets: test class with a rate saved" '.success and .data.hasRate == true'
+CLS1=$(val .data.id)
+as "$FIN_TOKEN" POST $FA/classes '{"code":"TNR","title":"رده بدون نرخ","assetAccountCode":"20103","accumulatedAccountCode":"20203","method":1,"startRule":1,"idleRatePercent":30,"idleAfterMonths":0,"salvagePercent":0,"source":"آزمون","verify":true,"isActive":true}'; check "assets: class without a rate saved" '.success and .data.hasRate == false'
+CLS2=$(val .data.id)
+as "$COM_TOKEN" POST $FA/classes '{"code":"XXX","title":"x"}'; [ "$CODE" = "403" ] && ok "assets: commercial user cannot save classes (403)" || bad "assets: commercial user cannot save classes (403) got $CODE"
+
+# --- assets: draft, approval by a second person, offset account
+AJ() { echo "{\"title\":\"$1\",\"classId\":$2,\"costCenterId\":$CCF2,\"acquisitionDate\":\"2026-06-22T00:00:00\",\"inUseDate\":\"$3T00:00:00\",\"cost\":$4,\"source\":1,\"offsetAccountCode\":\"${5:-10505}\"}"; }
+as "$FIN_TOKEN" POST $FA "$(AJ 'دستگاه آزمون یک' $CLS1 2026-06-25 120000000)"; check "assets: asset saved as a draft with a temporary code" '.success and .data.status == 0 and (.data.code|startswith("TMP-"))'
+AS1=$(val .data.id)
+as "$FIN_TOKEN" POST $FA/action "{\"id\":$AS1,\"action\":\"approve\"}"; nomsg "assets: the creator cannot approve the asset" "شخص دیگری"
+as "$FIN_TOKEN" POST $FA "$(AJ 'دستگاه بدون حساب طرف' $CLS1 2026-06-25 1000000 | jq -c 'del(.offsetAccountCode)')"; AS0=$(val .data.id)
+as "$FM_TOKEN" POST $FA/action "{\"id\":$AS0,\"action\":\"approve\"}"; nomsg "assets: approval needs the account the cost sits in now" "حساب طرف بستانکار"
+as "$FM_TOKEN" POST $FA/action "{\"id\":$AS1,\"action\":\"approve\"}"; check "assets: finance manager approves: final code and acquisition posted" '.success and .data.status == 1 and (.data.code|startswith("TST-0001"))'
+as "$FIN_TOKEN" POST $FA "$(AJ 'دستگاه آزمون دو' $CLS1 2026-06-22 60000000)"; AS2=$(val .data.id)
+as "$FM_TOKEN" POST $FA/action "{\"id\":$AS2,\"action\":\"approve\"}"
+as "$FIN_TOKEN" POST $FA/action "{\"id\":$AS2,\"action\":\"idle-from\",\"date\":\"2026-06-22T00:00:00\"}"; check "assets: asset put idle" '.success and .data.status == 2'
+as "$FIN_TOKEN" POST $FA "$(AJ 'دستگاه بدون نرخ' $CLS2 2026-06-25 10000000)"; AS3=$(val .data.id)
+as "$FM_TOKEN" POST $FA/action "{\"id\":$AS3,\"action\":\"approve\"}"; check "assets: asset of the class without a rate approved" '.success and .data.status == 1'
+as "$FM_TOKEN" GET $FG/years; PTIR=$(jq -r '.data[]|select(.year == 1405)|.periods[]|select(.startDate|startswith("2026-06-22"))|.id' "$B")
+[ -n "$PTIR" ] && [ "$PTIR" != "null" ] && ok "assets: period Tir 1405 found" || bad "assets: period Tir 1405 found"
+as "$FIN_TOKEN" POST $FA/depreciation/prepare/$PTIR; nomsg "assets: depreciation is refused while a class has no rate or useful life (names the class)" "TNR"
+as "$FIN_TOKEN" POST $FA/classes "{\"id\":$CLS2,\"code\":\"TNR\",\"title\":\"رده بدون نرخ\",\"assetAccountCode\":\"20103\",\"accumulatedAccountCode\":\"20203\",\"method\":1,\"ratePercent\":12,\"startRule\":1,\"idleRatePercent\":30,\"idleAfterMonths\":0,\"salvagePercent\":0,\"source\":\"آزمون CI - نرخ فرضی\",\"verify\":true,\"isActive\":true}"; check "assets: rate entered for the class" '.success and .data.hasRate == true'
+as "$FM_TOKEN" POST $FA/depreciation/prepare/$PTIR; check "assets: depreciation of Tir 1405 prepared: 1200000 + 180000 (idle 30%) + 100000" '.success and .data.status == 0 and .data.totalAmount == 1480000 and .data.assetCount == 3'
+DRN=$(val .data.id)
+as "$FM_TOKEN" POST $FA/depreciation/action "{\"id\":$DRN,\"action\":\"approve\"}"; nomsg "assets: the preparer of the depreciation cannot approve it" "شخص دیگری"
+as "$FIN_TOKEN" POST $FA/depreciation/prepare/$PTIR; check "assets: depreciation prepared again by the accountant" '.success and .data.totalAmount == 1480000'
+as "$FIN_TOKEN" POST $FA/depreciation/action "{\"id\":$DRN,\"action\":\"approve\"}"; no "assets: only the finance manager approves depreciation"
+as "$FM_TOKEN" POST $FA/depreciation/action "{\"id\":$DRN,\"action\":\"approve\"}"; check "assets: depreciation approved" '.success and .data.status == 1'
+as "$FIN_TOKEN" POST $FA/depreciation/prepare/$PTIR; no "assets: an approved depreciation run is final"
+as "$FM_TOKEN" GET "$FA/$AS1"; check "assets: accumulated depreciation 1200000, book value 118800000" '.success and .data.accumulatedDepreciation == 1200000 and .data.bookValue == 118800000'
+as "$FM_TOKEN" GET "$FA/$AS2"; check "assets: idle asset depreciated at 30% of the rate: 180000" '.success and .data.accumulatedDepreciation == 180000'
+as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET "$FA/reports/depreciation-schedule?year=1405"; check "assets: depreciation schedule of 1405 totals 1480000 in Tir" '.success and .data.total == 1480000 and ([.data.assets[]|select(.months[3] == 1200000)]|length) == 1'
+as "$FM_TOKEN" GET "$FA/reports/movement?year=1405"; check "assets: movement report returned" '.success'
+as "$FM_TOKEN" GET "$FA/reports/handover?custodian=x"; check "assets: handover report returned" '.success'
+
+# --- disposal: sale in Mordad with catch-up depreciation (1200000), book value 117600000, loss 17600000
+as "$FIN_TOKEN" POST $FA/disposals "{\"assetId\":$AS1,\"date\":\"2026-07-25T00:00:00\",\"kind\":1,\"proceedsAmount\":100000000,\"proceedsMethod\":1,\"cashBoxId\":$CB}"; check "assets: disposal previews catch-up depreciation 1200000, book value 117600000 and a loss of 17600000" '.success and .data.status == 0 and .data.catchUpDepreciation == 1200000 and .data.bookValue == 117600000 and .data.gainLoss == -17600000'
+DSP=$(val .data.id)
+as "$FIN_TOKEN" POST $FA/disposals/action "{\"id\":$DSP,\"action\":\"approve\"}"; no "assets: the accountant cannot approve a disposal"
+as "$FM_TOKEN" POST $FA/disposals/action "{\"id\":$DSP,\"action\":\"approve\"}"; check "assets: finance manager approves the disposal" '.success'
+as "$FM_TOKEN" GET "$FA/$AS1"; check "assets: the sold asset is disposed" '.success and .data.status == 4'
+as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET "$FG/reports/reconciliation"; check "assets: ledgers agree with sub-ledgers after assets" '.success and .data.clean == true'
+as "$FM_TOKEN" GET "$FA/depreciation/runs?PageSize=0"; check "assets: depreciation runs listed" '.success and ([.data.data[]|select(.id == '$DRN' and .status == 1)]|length) == 1'
+
+# --- payroll: confidentiality
+as "$FIN_TOKEN" GET $FP/employees; [ "$CODE" = "403" ] && ok "payroll: accountant cannot read employees (403)" || bad "payroll: accountant cannot read employees (403) got $CODE"
+as "$ADMIN_TOKEN" GET $FP/payslips; [ "$CODE" = "403" ] && ok "payroll: PMO cannot read payslips (403)" || bad "payroll: PMO cannot read payslips (403) got $CODE"
+as "$TR_TOKEN" GET $FP/runs; [ "$CODE" = "403" ] && ok "payroll: treasury cannot read payroll runs (403)" || bad "payroll: treasury cannot read payroll runs (403) got $CODE"
+as "$PAYR_TOKEN" GET finance/dashboard; [ "$CODE" = "403" ] && ok "payroll: payroll user still has no finance dashboard (403)" || bad "payroll: payroll user still has no finance dashboard (403) got $CODE"
+
+# --- payroll: master data, the statutory values are not seeded
+as "$PAYR_TOKEN" GET "$FP/setup?year=1405"; check "payroll: set-up lists the missing rate keys and the tax brackets" '.success and .data.ok == false and (.data.missingRateKeys|index("MinimumDailyWage")) != null and .data.taxBracketsMissing == true'
+as "$PAYR_TOKEN" GET "$FP/rates?Year=0"; check "payroll: only the long-standing ratios are seeded, with source and verify flag" '.success and ([.data[]|select(.verify == true and (.source|length) > 0)]|length) >= 5 and ([.data[]|select(.key == "MinimumDailyWage")]|length) == 0'
+as "$PAYR_TOKEN" GET $FP/items; check "payroll: payroll items are seeded" '.success and ([.data[]|select(.code == "BASE_WAGE" or .code == "OVERTIME" or .code == "SS_EMPLOYEE" or .code == "INCOME_TAX")]|length) == 4'
+as "$PAYR_TOKEN" POST $FP/workshops '{"code":"1234567890","name":"کارگاه آزمون","employerName":"شرکت آزمون","address":"آزمون","branch":"آزمون","isActive":true}'; check "payroll: insurance workshop saved" '.success and .data.id > 0'
+PWS=$(val .data.id)
+EJ() { jq -nc --arg c "$1" --arg n "$2" --arg l "$3" --arg nc "$4" --arg iban "$5" --argjson w "$PWS" '{personnelCode:$c,firstName:$n,lastName:$l,nationalCode:$nc,gender:1,maritalStatus:1,childrenCount:0,insuranceNumber:("99"+$c),insuranceJobCode:"1111",workshopId:$w,hireDate:"2020-01-01T00:00:00",employmentType:1,jobTitle:"کارشناس آزمون",unit:"آزمون",dailyWage:600000,bankIban:$iban,isActive:true}'; }
+as "$PAYR_TOKEN" POST $FP/employees "$(EJ T001 آزمون یک 123 IR270170000000100324200001)"; no "payroll: an invalid national code is refused"
+as "$PAYR_TOKEN" POST $FP/employees "$(EJ T001 آزمون یک 0499370899 IR000000000000000000000000)"; no "payroll: an IBAN with a wrong check digit is refused"
+as "$PAYR_TOKEN" POST $FP/employees "$(EJ T001 آزمون یک 0499370899 IR270170000000100324200001)"; check "payroll: employee saved" '.success and .data.id > 0'
+PE1=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/employees "$(EJ T002 آزمون دو 0499370899 IR270170000000100324200001)"; no "payroll: the same national code cannot be used twice"
+as "$FIN_TOKEN" POST $FP/employees "$(EJ T003 آزمون سه 0013542419 IR270170000000100324200001)"; [ "$CODE" = "403" ] && ok "payroll: accountant cannot save employees (403)" || bad "payroll: accountant cannot save employees (403) got $CODE"
+as "$CEO_TOKEN" GET "$FP/employees/$PE1"; check "payroll: the CEO may read employee data" '.success and .data.id == '$PE1
+as "$CEO_TOKEN" POST $FP/employees "$(EJ T004 آزمون چهار 1234567891 IR270170000000100324200001)"; no "payroll: the CEO cannot change payroll data"
+as "$FIN_TOKEN" GET finance/employees/directory; check "payroll: the directory shows name, title and unit only" '.success and ([.data[]|select(.id == '$PE1')]|length) == 1 and ([.data[]|has("dailyWage")]|any|not)'
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":6,\"daysWorked\":30,\"overtimeHours\":10}"; check "payroll: attendance of Shahrivar 1405 saved" '.success'
+as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":6,"note":"آزمون"}'; check "payroll: run of Shahrivar 1405 created" '.success and .data.status == 0'
+PRUN=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; nomsg "payroll: calculation without the statutory values fails and lists the missing keys" "HousingAllowance"
+SRC='آزمون CI - مقدار فرضی فقط برای آزمون'
+for KV in SeniorityDaily=10000 HousingAllowance=9000000 GroceryAllowance=4000000 MinimumDailyWage=500000 InsuranceCeilingDaily=900000 DailyWorkHours=8; do
+  as "$PAYR_TOKEN" POST $FP/rates "{\"year\":1405,\"key\":\"${KV%%=*}\",\"value\":${KV##*=},\"source\":\"$SRC\",\"verify\":true}"
+done
+check "payroll: statutory rates entered by payroll with a source" '.success and .data.key == "DailyWorkHours"'
+as "$PAYR_TOKEN" POST $FP/rates '{"year":1405,"key":"X","value":1}'; no "payroll: a rate without a source is refused"
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; nomsg "payroll: calculation without tax brackets fails" "TaxBrackets"
+as "$PAYR_TOKEN" POST $FP/tax-brackets '{"year":1405,"brackets":[{"fromAmount":0,"toAmount":240000000,"ratePercent":0},{"fromAmount":240000000,"ratePercent":10}]}'; check "payroll: tax brackets saved" '.success and (.data|length) == 2'
+as "$PAYR_TOKEN" POST $FP/tax-brackets '{"year":1405,"brackets":[{"fromAmount":0,"toAmount":100,"ratePercent":0},{"fromAmount":200,"ratePercent":10}]}'; no "payroll: tax brackets must be contiguous"
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; check "payroll: calculated: gross 32350000, insurance 1890000 (7% up to the ceiling), employer 6210000 (20% + 3%), tax 1046000, net 29414000" '.success and .data.run.status == 1 and .data.run.totalGross == 32350000 and .data.run.totalEmployeeInsurance == 1890000 and .data.run.totalEmployerInsurance == 6210000 and .data.run.totalTax == 1046000 and .data.run.totalNet == 29414000'
+as "$PAYR_TOKEN" GET "$FP/payslips?RunId=$PRUN"; check "payroll: payslip shows base wage 18000000 and overtime 1050000 (1.4 x hourly wage x 10 hours)" '.success and (.data.data|length) == 1 and .data.data[0].net == 29414000 and ([.data.data[0].lines[]|select(.itemCode == "BASE_WAGE" and .amount == 18000000)]|length) == 1 and ([.data.data[0].lines[]|select(.itemCode == "OVERTIME" and .amount == 1050000)]|length) == 1'
+PSL=$(val '.data.data[0].id')
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/approve; nomsg "payroll: the preparer cannot approve the run" "شخص دیگری"
+as "$FIN_TOKEN" POST $FP/runs/$PRUN/approve; [ "$CODE" = "403" ] && ok "payroll: accountant cannot approve the run (403)" || bad "payroll: accountant cannot approve the run (403) got $CODE"
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/post; no "payroll: a run that is not approved cannot be posted"
+as "$FM_TOKEN" POST $FP/runs/$PRUN/approve; check "payroll: finance manager approves the run" '.success and .data.status == 2 and (.data.approvedByName|length) > 0'
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":6,\"daysWorked\":28}"; no "payroll: attendance of an approved month is locked"
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; no "payroll: an approved run is immutable"
+as "$PAYR_TOKEN" DELETE $FP/runs/$PRUN; no "payroll: an approved run cannot be deleted"
+as "$PAYR_TOKEN" POST $FP/tax-brackets '{"year":1405,"brackets":[{"fromAmount":0,"ratePercent":1}]}'; no "payroll: tax brackets of a year with an approved run are frozen"
+as "$PAYR_TOKEN" GET "$FP/reports/insurance-list?year=1405&month=6"; check "payroll: insurance list of the approved run: one worker, capped base 27000000" '.success and (.data.rows|length) == 1 and .data.rows[0].insurableCapped == 27000000'
+as "$PAYR_TOKEN" GET "$FP/reports/tax-list?year=1405&month=6"; check "payroll: tax list of the approved run: tax 1046000" '.success and .data.totalTax == 1046000'
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/post; check "payroll: posted to the ledger as totals" '.success and .data.status == 3 and .data.accountingEventId != null'
+as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET "$FG/reports/reconciliation"; check "payroll: ledgers agree with sub-ledgers after the payroll voucher" '.success and .data.clean == true'
+as "$PAYR_TOKEN" GET "$FP/runs/$PRUN/bank-transfer"; check "payroll: bank transfer list shows the employee IBAN and the net" '.success and (.data|length) == 1 and .data[0].amount == 29414000'
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":3,\"payrollRunId\":$PRUN,\"lines\":[{\"instrument\":2,\"amount\":29414000,\"bankAccountId\":$BA1,\"reference\":\"PAYROLL-1405-06\"}]}"; check "payroll: payment of the run drafted by treasury for the net total" '.success and .data.status == 0 and .data.netAmount == 29414000'
+PRPM=$(val .data.id)
+as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$PRPM,\"action\":\"approve\"}"
+as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$PRPM,\"action\":\"post\"}"; check "payroll: payment of the run posted" '.success and .data.status == 2'
+as "$PAYR_TOKEN" GET "$FP/runs/$PRUN"; check "payroll: the run is Paid" '.success and .data.status == 4'
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":3,\"payrollRunId\":$PRUN,\"lines\":[{\"instrument\":2,\"amount\":29414000,\"bankAccountId\":$BA1}]}"; no "payroll: a run cannot be paid twice"
+as "$PAYR_TOKEN" GET "$FP/leave-balances?year=1405"; check "payroll: leave balances returned" '.success'
+as "$PAYR_TOKEN" GET "$FP/reports/employee-year?employeeId=$PE1&year=1405"; check "payroll: employee year summary returned" '.success'
+as "$PAYR_TOKEN" GET "$FP/setup?year=1405"; check "payroll: set-up is complete for 1405" '.success and .data.ok == true'
+
+# --- Sepidar outbox: tax and insurance packages, approval by a second person, Excel export
+as "$PAYR_TOKEN" POST $FS/generate "{\"kind\":3,\"year\":1405,\"month\":6,\"workshopId\":$PWS}"; check "outbox: insurance list package generated by payroll" '.success and .data.status == 0 and .data.version == 1 and .data.rowCount == 1 and (.data.number|startswith("SEP-"))'
+OP1=$(val .data.id)
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"approve\"}"; nomsg "outbox: the preparer cannot approve the package" "شخص دیگری"
+as "$FM_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"approve\"}"; check "outbox: finance manager approves the package" '.success and .data.status == 1'
+BX="$B.xlsx"; XC=$(curl -s -o "$BX" -w '%{http_code}' -H "Authorization: Bearer $PAYR_TOKEN" "$API/$FS/packages/$OP1/export")
+[ "$XC" = "200" ] && [ "$(head -c 2 "$BX")" = "PK" ] && ok "outbox: export is an Excel workbook" || bad "outbox: export is an Excel workbook (http $XC)"
+rm -f "$BX"
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"send\"}"; nomsg "outbox: sending without a configured exchange folder says so" "پیکربندی نشده"
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-sent\"}"; no "outbox: marking as sent needs a reference"
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-sent\",\"reference\":\"TRK-INS-1\"}"; check "outbox: marked as sent with a reference" '.success and .data.status == 3 and .data.externalReference == "TRK-INS-1"'
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-rejected\"}"; no "outbox: a rejection needs a reason"
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-accepted\"}"; check "outbox: accepted" '.success and .data.status == 4'
+as "$PAYR_TOKEN" POST $FS/generate "{\"kind\":3,\"year\":1405,\"month\":6,\"workshopId\":$PWS}"; check "outbox: a new package for the same period is version 2" '.success and .data.version == 2'
+OP2=$(val .data.id)
+as "$PAYR_TOKEN" GET "$FS/packages/$OP1"; check "outbox: the earlier package is superseded" '.success and .data.status == 6 and .data.supersededByPackageId == '$OP2
+as "$FIN_TOKEN" GET "$FS/packages/$OP2"; no "outbox: payroll packages are hidden from the accountants"
+as "$FIN_TOKEN" POST $FS/generate '{"kind":4,"year":1405,"month":6}'; no "outbox: the accountant cannot prepare a payroll package"
+as "$PAYR_TOKEN" POST $FS/generate '{"kind":2,"year":1405,"season":3}'; no "outbox: payroll cannot prepare a VAT package"
+as "$FIN_TOKEN" POST $FS/generate '{"kind":2,"year":1405,"season":3}'; check "outbox: VAT season package generated with Summary and Parties tables" '.success and .data.status == 0 and ([.data.tables[].name]|index("Summary")) != null and ([.data.tables[].name]|index("Parties")) != null'
+OP3=$(val .data.id)
+as "$FIN_TOKEN" POST $FS/action "{\"id\":$OP3,\"action\":\"approve\"}"; no "outbox: only the finance manager approves a VAT package"
+as "$FM_TOKEN" POST $FS/action "{\"id\":$OP3,\"action\":\"approve\"}"; check "outbox: VAT package approved" '.success and .data.status == 1'
+as "$FIN_TOKEN" POST $FS/generate '{"kind":1,"year":1405,"month":1}'; no "outbox: a period without data gives no empty package"
+as "$FM_TOKEN" GET "$FS/packages?PageSize=0"; check "outbox: the finance manager sees the VAT package and no payroll package" '.success and ([.data.data[]|select(.id == '$OP3')]|length) == 1 and ([.data.data[]|select(.kind == 3 or .kind == 4)]|length) >= 0'
+as "$PAYR_TOKEN" GET $FS/summary; check "outbox: summary counters returned" '.success and (.data.pending|type) == "number" and (.data.readyToSend|type) == "number"'
+as "$WH_TOKEN" GET $FS/summary; [ "$CODE" = "403" ] && ok "outbox: storekeeper has no access (403)" || bad "outbox: storekeeper has no access (403) got $CODE"
+
+# --- dashboards and set-up check
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "dashboard: CEO finance block carries the Sepidar, assets and payroll counters" '.success and (.data.finance.sepidarPendingPackages|type) == "number" and (.data.finance.assetsCount|type) == "number" and (.data.finance.assetsNetBookValue|type) == "number" and (.data.finance.depreciationRunsWaiting|type) == "number" and (.data.finance.payrollRunsInProgress|type) == "number"'
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "dashboard: two assets are on the books (one sold, one draft excluded)" '.data.finance.assetsCount >= 2'
+as "$FM_TOKEN" GET $FG/setup-check; check "set-up check: the payroll module is complete for the year and the assets module still lists the unrated classes" '.success and ([.data.modules[]|select(.module == "Payroll" and .ok == true)]|length) == 1 and ([.data.modules[]|select(.module == "Assets" and .ok == false and (.missing|index("TNR")) == null)]|length) == 1'
+
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'
