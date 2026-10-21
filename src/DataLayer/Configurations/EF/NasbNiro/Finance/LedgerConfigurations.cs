@@ -24,7 +24,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.ToTable("FnFiscalYears");
                 b.Property(x => x.Title).HasMaxLength(20).IsRequired();
                 b.Property(x => x.Jurisdiction).HasMaxLength(10);
-                b.HasIndex(x => x.Year).IsUnique();
+                b.Property(x => x.LegalEntityId).HasDefaultValue(1);
+                b.HasIndex(x => new { x.LegalEntityId, x.Year }).IsUnique();
                 b.HasOne(x => x.OpeningVoucher).WithMany().HasForeignKey(x => x.OpeningVoucherId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.ClosingVoucher).WithMany().HasForeignKey(x => x.ClosingVoucherId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -129,6 +130,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.AccountNumber).HasMaxLength(50);
                 b.Property(x => x.Iban).HasMaxLength(34);
                 b.Property(x => x.CurrencyCode).HasMaxLength(10);
+                b.Property(x => x.LegalEntityId).HasDefaultValue(1);
                 b.HasOne(x => x.Account).WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<FnCashBox>(b =>

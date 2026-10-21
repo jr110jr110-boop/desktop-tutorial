@@ -162,6 +162,15 @@ namespace Entities.Identity.Constants
             Description = "خزانه‌داری"
         };
 
+        // Finance release F3: the auditor (حسابرس) reads all finance data, including the audit trail, and writes nothing.
+        public const string Auditor = "AUDITOR";
+        public static readonly ResponseRole AuditorResponseRole = new ResponseRole()
+        {
+            Id = 28,
+            Name = Auditor,
+            Description = "حسابرس"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -183,6 +192,7 @@ namespace Entities.Identity.Constants
             yield return FinanceManagerResponseRole;
             yield return PayrollResponseRole;
             yield return TreasuryResponseRole;
+            yield return AuditorResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)

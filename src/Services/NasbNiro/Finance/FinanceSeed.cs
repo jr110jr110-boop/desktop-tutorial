@@ -215,11 +215,18 @@ namespace Services.NasbNiro.Finance
             yield return new FnTaxRate { Kind = FnTaxKind.PerformanceRetention, Rate = 10m, EffectiveFrom = from, Jurisdiction = Iran, Verify = true, Source = "پیش‌فرض قراردادها (قابل ویرایش برای هر قرارداد) — توسط مالی تایید شود" };
         }
 
+        public const string SettingCloseEnforce = "CloseChecklist.Enforce";
+        public const string SettingParallelMonths = "ParallelRun.RequiredMonths";
+        public const string SettingSepidarExport = "Finance:SepidarFullExport";
+
         public static IEnumerable<FnSetting> SettingSeeds()
         {
             yield return new FnSetting { Key = "BaseCurrency", Value = "IRR", Title = "ارز پایه شرکت" };
             yield return new FnSetting { Key = "Jurisdiction", Value = Iran, Title = "حوزه قضایی (قوانین مالی و مالیاتی)" };
             yield return new FnSetting { Key = "MatchDays", Value = "3", Title = "بازه روز برای تطبیق خودکار صورت‌حساب بانکی (★)" };
+            yield return new FnSetting { Key = SettingCloseEnforce, Value = "0", Title = "الزام فهرست کنترل بستن دوره برای قفل کردن دوره (۱ = فعال؛ پیش از راه‌اندازی خاموش است)" };
+            yield return new FnSetting { Key = SettingSepidarExport, Value = "0", Title = "خروجی کامل اسناد برای سپیدار (جایگزین؛ پیش‌فرض خاموش است و مسیر صف خروجی F2 فعال می‌ماند)" };
+            yield return new FnSetting { Key = SettingParallelMonths, Value = "3", Title = "تعداد ماه‌های متوالی بدون مغایرت توضیح‌نشده برای راه‌اندازی (★)" };
         }
 
         // ------------------------------------------------------------------------------------------ persistence
@@ -235,6 +242,7 @@ namespace Services.NasbNiro.Finance
             try
             {
                 if (_done) return;
+                await EnsureLegalEntitiesAsync(uow, ct);
                 await EnsureSettingsAsync(uow, ct);
                 await EnsureChartAsync(uow, ct);
                 await EnsureMappingAsync(uow, ct);
@@ -243,6 +251,19 @@ namespace Services.NasbNiro.Finance
                 _done = true;
             }
             finally { Gate.Release(); }
+        }
+
+        /// <summary>The main company (entity 1). Other entities are created by the finance manager.</summary>
+        public const int MainEntityId = 1;
+
+        public static async Task EnsureLegalEntitiesAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            if (await uow.Set<FnLegalEntity>().AnyAsync(ct)) return;
+            uow.Set<FnLegalEntity>().Add(new FnLegalEntity
+            {
+                Code = "MAIN", Name = "شرکت اصلی", Jurisdiction = Iran, BaseCurrency = "IRR", IsActive = true, CreatedAt = DateTimeOffset.Now,
+            });
+            await uow.SaveChangesAsync(ct);
         }
 
         public static async Task EnsureSettingsAsync(IUnitOfWork uow, CancellationToken ct)
@@ -336,37 +357,42 @@ namespace Services.NasbNiro.Finance
             "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
         };
 
-        /// <summary>Creates the Persian fiscal year containing the date with its 12 periods (idempotent). Saves.</summary>
-        public static async Task<FnFiscalYear> EnsureFiscalYearAsync(IUnitOfWork uow, DateTime date, CancellationToken ct)
+        /// <summary>The number of the fiscal year containing the date (through the fiscal calendar).</summary>
+        public static int YearNumberOf(FnLegalEntity entity, DateTime date) => FiscalCalendars.Current.YearOf(date);
+
+        /// <summary>Creates the Persian fiscal year of the main company containing the date with its 12 periods (idempotent). Saves.</summary>
+        public static Task<FnFiscalYear> EnsureFiscalYearAsync(IUnitOfWork uow, DateTime date, CancellationToken ct) =>
+            EnsureEntityYearAsync(uow, null, date, ct);
+
+        /// <summary>Creates the fiscal year of the legal entity containing the date with its 12 periods (idempotent). Saves. Null entity = the main company.</summary>
+        public static async Task<FnFiscalYear> EnsureEntityYearAsync(IUnitOfWork uow, FnLegalEntity entity, DateTime date, CancellationToken ct)
         {
-            int year = PersianYearOf(date);
-            FnFiscalYear found = await uow.Set<FnFiscalYear>().Include(y => y.Periods).FirstOrDefaultAsync(y => y.Year == year, ct);
+            int entityId = entity?.Id ?? MainEntityId;
+            int year = YearNumberOf(entity, date);
+            FnFiscalYear found = await uow.Set<FnFiscalYear>().Include(y => y.Periods).FirstOrDefaultAsync(y => y.LegalEntityId == entityId && y.Year == year, ct);
             if (found != null) return found;
             await YearGate.WaitAsync(ct);
             try
             {
-                found = await uow.Set<FnFiscalYear>().Include(y => y.Periods).FirstOrDefaultAsync(y => y.Year == year, ct);
+                found = await uow.Set<FnFiscalYear>().Include(y => y.Periods).FirstOrDefaultAsync(y => y.LegalEntityId == entityId && y.Year == year, ct);
                 if (found != null) return found;
-                return await CreateYearAsync(uow, year, ct);
+                return await CreateYearAsync(uow, entity, entityId, year, ct);
             }
             finally { YearGate.Release(); }
         }
 
         private static readonly SemaphoreSlim YearGate = new SemaphoreSlim(1, 1);
 
-        private static async Task<FnFiscalYear> CreateYearAsync(IUnitOfWork uow, int year, CancellationToken ct)
+        private static async Task<FnFiscalYear> CreateYearAsync(IUnitOfWork uow, FnLegalEntity entity, int entityId, int year, CancellationToken ct)
         {
+            IFiscalCalendar cal = FiscalCalendars.Current;
             var fy = new FnFiscalYear
             {
-                Year = year, Title = year.ToString(CultureInfo.InvariantCulture), StartDate = YearStart(year), EndDate = YearEnd(year),
-                Status = FnYearStatus.Open, Jurisdiction = Iran, Periods = new List<FnPeriod>(),
+                Year = year, Title = year.ToString(CultureInfo.InvariantCulture), StartDate = cal.YearStart(year), EndDate = cal.YearEnd(year),
+                Status = FnYearStatus.Open, Jurisdiction = entity?.Jurisdiction ?? Iran, LegalEntityId = entityId, Periods = new List<FnPeriod>(),
             };
             for (int m = 1; m <= 12; m++)
-            {
-                DateTime start = PersianDate(year, m, 1);
-                DateTime end = m == 12 ? YearEnd(year) : PersianDate(year, m + 1, 1).AddDays(-1);
-                fy.Periods.Add(new FnPeriod { Number = m, Title = MonthNames[m - 1] + " " + year, StartDate = start, EndDate = end, Status = FnPeriodStatus.Open });
-            }
+                fy.Periods.Add(new FnPeriod { Number = m, Title = cal.PeriodTitle(year, m), StartDate = cal.PeriodStart(year, m), EndDate = cal.PeriodEnd(year, m), Status = FnPeriodStatus.Open });
             uow.Set<FnFiscalYear>().Add(fy);
             await uow.SaveChangesAsync(ct);
             return fy;

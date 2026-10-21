@@ -118,6 +118,8 @@ namespace Entities.Model.NasbNiro.Finance
         GuaranteeReceived = 46,
         GuaranteeGiven = 47,
         GuaranteeClosed = 48,
+        /// <summary>Intercompany posting (mirrored in both entities).</summary>
+        Intercompany = 70,
         DepreciationRun = 50,
         AssetAcquisition = 51,
         AssetDisposal = 52,
@@ -149,6 +151,9 @@ namespace Entities.Model.NasbNiro.Finance
         public AccountingEventType Type { get; set; }
         public DateTime EventDate { get; set; }
         public AccountingEventStatus Status { get; set; }
+
+        /// <summary>The legal entity whose ledger the event posts to (F3); the column defaults to the main company (1).</summary>
+        public int LegalEntityId { get; set; }
 
         /// <summary>"InventoryDocument", "SupplierInvoice", "PurchaseOrder"...</summary>
         public string SourceType { get; set; }

@@ -26,7 +26,7 @@ namespace WebApi.Controllers
 
         [HttpGet("years")]
         [Authorize(Roles = FinanceRoles.Readers)]
-        public async Task<IActionResult> YearsAsync(CancellationToken ct) => Ok(await _gl.GetYearsAsync(ct));
+        public async Task<IActionResult> YearsAsync([FromQuery] int? legalEntityId, CancellationToken ct) => Ok(await _gl.GetYearsAsync(legalEntityId, ct));
 
         [HttpPost("years/ensure")]
         public async Task<IActionResult> EnsureYearAsync([FromBody] EnsureYearDto dto, CancellationToken ct) => Ok(await _gl.EnsureYearAsync(dto, ct));

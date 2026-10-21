@@ -17,7 +17,7 @@ namespace Services.NasbNiro.Finance
 {
     public interface IGlService
     {
-        Task<ResponseDto<List<FiscalYearDto>>> GetYearsAsync(CancellationToken cancellationToken);
+        Task<ResponseDto<List<FiscalYearDto>>> GetYearsAsync(int? legalEntityId, CancellationToken cancellationToken);
         Task<ResponseDto<FiscalYearDto>> EnsureYearAsync(EnsureYearDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<FiscalYearDto>> PeriodActionAsync(PeriodActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<FiscalYearDto>> CloseYearAsync(int id, CloseYearDto dto, CancellationToken cancellationToken);
@@ -44,7 +44,7 @@ namespace Services.NasbNiro.Finance
     /// Final vouchers are immutable; a reversal voucher corrects them. No transactions are available, so every operation
     /// validates everything first and saves once.
     /// </summary>
-    public class GlService : IGlService
+    public partial class GlService : IGlService, IGlControlsService, ILegalEntityService, IMigrationService
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -67,29 +67,32 @@ namespace Services.NasbNiro.Finance
 
         // ================================================================================== fiscal years and periods
 
-        public async Task<ResponseDto<List<FiscalYearDto>>> GetYearsAsync(CancellationToken ct)
+        public async Task<ResponseDto<List<FiscalYearDto>>> GetYearsAsync(int? legalEntityId, CancellationToken ct)
         {
             await FinanceSeed.EnsureAsync(_uow, ct);
-            return ResponseDtoHelper.Ok(await LoadYearsAsync(null, ct));
+            int entityId = await EntityScope.ResolveAsync(_uow, legalEntityId, Me, ct);
+            return ResponseDtoHelper.Ok(await LoadYearsAsync(null, entityId, ct));
         }
 
-        private async Task<List<FiscalYearDto>> LoadYearsAsync(int? onlyYearId, CancellationToken ct)
+        private async Task<List<FiscalYearDto>> LoadYearsAsync(int? onlyYearId, int? entityId, CancellationToken ct)
         {
             IQueryable<FnFiscalYear> q = _uow.Set<FnFiscalYear>().AsNoTracking().Include(y => y.Periods);
             if (onlyYearId.HasValue) q = q.Where(y => y.Id == onlyYearId.Value);
+            if (entityId.HasValue) q = q.Where(y => y.LegalEntityId == entityId.Value);
             List<FnFiscalYear> years = await q.OrderBy(y => y.Year).ToListAsync(ct);
-            var counts = await _uow.Set<FnVoucher>().AsNoTracking()
-                .GroupBy(v => new { v.Date, Final = v.Status == FnVoucherStatus.Final })
-                .Select(g => new { g.Key.Date, g.Key.Final, Count = g.Count() }).ToListAsync(ct);
+            List<int> yearIds = years.Select(y => y.Id).ToList();
+            var counts = await _uow.Set<FnVoucher>().AsNoTracking().Where(v => yearIds.Contains(v.FiscalYearId))
+                .GroupBy(v => new { v.FiscalYearId, v.Date, Final = v.Status == FnVoucherStatus.Final })
+                .Select(g => new { g.Key.FiscalYearId, g.Key.Date, g.Key.Final, Count = g.Count() }).ToListAsync(ct);
             return years.Select(y => new FiscalYearDto
             {
                 Id = y.Id, Year = y.Year, Title = y.Title, StartDate = y.StartDate, EndDate = y.EndDate, Status = y.Status,
-                OpeningVoucherId = y.OpeningVoucherId, ClosingVoucherId = y.ClosingVoucherId,
+                OpeningVoucherId = y.OpeningVoucherId, ClosingVoucherId = y.ClosingVoucherId, LegalEntityId = y.LegalEntityId, IsImported = y.IsImported,
                 Periods = y.Periods.OrderBy(p => p.Number).Select(p => new PeriodDto
                 {
                     Id = p.Id, FiscalYearId = p.FiscalYearId, Number = p.Number, Title = p.Title, StartDate = p.StartDate, EndDate = p.EndDate, Status = p.Status,
-                    Vouchers = counts.Where(c => c.Date >= p.StartDate && c.Date <= p.EndDate).Sum(c => c.Count),
-                    NonFinalVouchers = counts.Where(c => !c.Final && c.Date >= p.StartDate && c.Date <= p.EndDate).Sum(c => c.Count),
+                    Vouchers = counts.Where(c => c.FiscalYearId == y.Id && c.Date >= p.StartDate && c.Date <= p.EndDate).Sum(c => c.Count),
+                    NonFinalVouchers = counts.Where(c => c.FiscalYearId == y.Id && !c.Final && c.Date >= p.StartDate && c.Date <= p.EndDate).Sum(c => c.Count),
                 }).ToList(),
             }).ToList();
         }
@@ -98,11 +101,14 @@ namespace Services.NasbNiro.Finance
         {
             if (!_user.IsInRole(FinanceRoles.SystemJobs)) return Bad<FiscalYearDto>(NotAllowed);
             if (dto == null || dto.Date == default) return Bad<FiscalYearDto>("تاریخ را وارد کنید.");
-            int year = FinanceSeed.PersianYearOf(dto.Date);
-            if (year < 1300 || year > 1600) return Bad<FiscalYearDto>("سال مالی خارج از محدوده مجاز است.");
             await FinanceSeed.EnsureAsync(_uow, ct);
-            FnFiscalYear fy = await FinanceSeed.EnsureFiscalYearAsync(_uow, dto.Date, ct);
-            return ResponseDtoHelper.Ok((await LoadYearsAsync(fy.Id, ct)).First());
+            int entityId = await EntityScope.ResolveAsync(_uow, dto.LegalEntityId, Me, ct);
+            FnLegalEntity entity = await _uow.Set<FnLegalEntity>().FirstOrDefaultAsync(x => x.Id == entityId, ct);
+            if (entity == null || !entity.IsActive) return Bad<FiscalYearDto>("واحد حقوقی پیدا نشد یا غیرفعال است.");
+            int year = FinanceSeed.YearNumberOf(entity, dto.Date);
+            if (year < 1300 || year > 1600) return Bad<FiscalYearDto>("سال مالی خارج از محدوده مجاز است.");
+            FnFiscalYear fy = await FinanceSeed.EnsureEntityYearAsync(_uow, entity, dto.Date, ct);
+            return ResponseDtoHelper.Ok((await LoadYearsAsync(fy.Id, null, ct)).First());
         }
 
         public async Task<ResponseDto<FiscalYearDto>> PeriodActionAsync(PeriodActionDto dto, CancellationToken ct)
@@ -116,6 +122,8 @@ namespace Services.NasbNiro.Finance
             {
                 case "lock":
                     if (p.Status != FnPeriodStatus.Open) return Bad<FiscalYearDto>("فقط دوره باز قفل می‌شود.");
+                    string gate = await LockGateAsync(p, ct);
+                    if (gate != null) return Bad<FiscalYearDto>(gate);
                     p.Status = FnPeriodStatus.Locked;
                     p.LockedAt = DateTimeOffset.Now;
                     break;
@@ -141,7 +149,7 @@ namespace Services.NasbNiro.Finance
             _uow.Set<FnPeriodLog>().Add(new FnPeriodLog { PeriodId = p.Id, Action = action, Reason = Clean(dto.Reason), UserId = Me, At = DateTimeOffset.Now });
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<FiscalYearDto>("همزمان توسط کاربر دیگری تغییر کرد؛ دوباره تلاش کنید."); }
-            return ResponseDtoHelper.Ok((await LoadYearsAsync(p.FiscalYearId, ct)).First());
+            return ResponseDtoHelper.Ok((await LoadYearsAsync(p.FiscalYearId, null, ct)).First());
         }
 
         // ================================================================================== year-end close
@@ -168,7 +176,8 @@ namespace Services.NasbNiro.Finance
             if (!byCode.TryGetValue("50901", out FnAccount summary) || !byCode.TryGetValue("50301", out FnAccount retained))
                 return Bad<FiscalYearDto>("حساب‌های خلاصه سود و زیان (50901) و سود انباشته (50301) در کدینگ نیست.");
 
-            FnFiscalYear next = await FinanceSeed.EnsureFiscalYearAsync(_uow, year.EndDate.AddDays(1), ct);
+            FnLegalEntity yearEntity = await _uow.Set<FnLegalEntity>().FirstOrDefaultAsync(x => x.Id == year.LegalEntityId, ct);
+            FnFiscalYear next = await FinanceSeed.EnsureEntityYearAsync(_uow, yearEntity, year.EndDate.AddDays(1), ct);
             if (next.Status != FnYearStatus.Open) return Bad<FiscalYearDto>("سال مالی بعد بسته است.");
 
             // balances of the year per account and detail
@@ -261,7 +270,7 @@ namespace Services.NasbNiro.Finance
             }
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException ex) { return Bad<FiscalYearDto>("بستن سال انجام نشد: " + (ex.InnerException?.Message ?? ex.Message)); }
-            return ResponseDtoHelper.Ok((await LoadYearsAsync(year.Id, ct)).First());
+            return ResponseDtoHelper.Ok((await LoadYearsAsync(year.Id, null, ct)).First());
         }
 
         // ================================================================================== chart of accounts
@@ -408,12 +417,17 @@ namespace Services.NasbNiro.Finance
             List<int> ids = rows.Select(v => v.Id).ToList();
             Dictionary<int, int> reversedBy = await _uow.Set<FnVoucher>().Where(v => v.ReversesVoucherId != null && ids.Contains(v.ReversesVoucherId.Value))
                 .ToDictionaryAsync(v => v.ReversesVoucherId.Value, v => v.Id, ct);
+            Dictionary<int, int> attachmentCounts = await _uow.Set<FnVoucherAttachment>().Where(a => ids.Contains(a.VoucherId))
+                .GroupBy(a => a.VoucherId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
             return rows.Select(v => new VoucherDto
             {
                 Id = v.Id, FiscalYearId = v.FiscalYearId, FiscalYearTitle = v.FiscalYear?.Title, Number = v.Number, TemporaryNumber = v.TemporaryNumber, Date = v.Date,
                 Type = v.Type, Status = v.Status, Description = v.Description, SourceType = v.SourceType, SourceId = v.SourceId, SourceNumber = v.SourceNumber,
                 AccountingEventId = v.AccountingEventId, ReversesVoucherId = v.ReversesVoucherId, ReversedByVoucherId = reversedBy.TryGetValue(v.Id, out int rb) ? rb : (int?)null,
                 LatePosting = v.LatePosting, TotalAmount = v.TotalAmount, CreatedByUserId = v.CreatedByUserId,
+                LegalEntityId = v.FiscalYear == null ? 0 : v.FiscalYear.LegalEntityId, IsImported = v.IsImported,
+                CeoApprovedByUserId = v.CeoApprovedByUserId, CeoApprovedAt = v.CeoApprovedAt,
+                AttachmentCount = attachmentCounts.TryGetValue(v.Id, out int ac) ? ac : 0,
                 CreatorName = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId), CreatedAt = v.CreatedAt,
                 CheckedByName = v.CheckedByUserId == 0 ? "سیستم" : names.Name(v.CheckedByUserId), CheckedAt = v.CheckedAt,
                 FinalizedByName = names.Name(v.FinalizedByUserId), FinalizedAt = v.FinalizedAt,
@@ -434,6 +448,11 @@ namespace Services.NasbNiro.Finance
             query ??= new VoucherQuery();
             IQueryable<FnVoucher> q = _uow.Set<FnVoucher>();
             if (query.FiscalYearId.HasValue) q = q.Where(v => v.FiscalYearId == query.FiscalYearId.Value);
+            else
+            {
+                int entityId = await EntityScope.ResolveAsync(_uow, query.LegalEntityId, Me, ct);
+                q = q.Where(v => v.FiscalYear.LegalEntityId == entityId);
+            }
             if (query.From.HasValue) q = q.Where(v => v.Date >= query.From.Value.Date);
             if (query.To.HasValue) q = q.Where(v => v.Date <= query.To.Value.Date);
             if (query.Status.HasValue) q = q.Where(v => v.Status == query.Status.Value);
@@ -460,17 +479,19 @@ namespace Services.NasbNiro.Finance
         // ================================================================================== vouchers: writing
 
         /// <summary>Checks the date against the periods. Locked periods are open to the finance manager only; closed ones to nobody.</summary>
-        private async Task<(FnFiscalYear Year, string Error)> CheckDateAsync(DateTime date, CancellationToken ct)
+        private async Task<(FnFiscalYear Year, string Error)> CheckDateAsync(DateTime date, int entityId, CancellationToken ct)
         {
-            PeriodCache cache = await PeriodCache.LoadAsync(_uow, ct);
+            PeriodCache cache = await PeriodCache.LoadAsync(_uow, ct, entityId);
             FnPeriod p = cache.Find(date);
             if (p == null)
             {
-                int y = FinanceSeed.PersianYearOf(date);
+                FnLegalEntity entity = await _uow.Set<FnLegalEntity>().FirstOrDefaultAsync(x => x.Id == entityId, ct);
+                if (entity == null || !entity.IsActive) return (null, "واحد حقوقی پیدا نشد یا غیرفعال است.");
+                int y = FinanceSeed.YearNumberOf(entity, date);
                 int latest = cache.Years.Count == 0 ? 0 : cache.Years.Max(x => x.Year);
                 if (cache.Years.Count == 0 || y <= latest + 1)
                 {
-                    cache.Add(await FinanceSeed.EnsureFiscalYearAsync(_uow, date, ct));
+                    cache.Add(await FinanceSeed.EnsureEntityYearAsync(_uow, entity, date, ct));
                     p = cache.Find(date);
                 }
                 if (p == null) return (null, $"سال مالی {y} تعریف نشده است.");
@@ -544,7 +565,13 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<VoucherDto>(NotAllowed);
             if (dto == null || dto.Date == default) return Bad<VoucherDto>("تاریخ سند را وارد کنید.");
             await FinanceSeed.EnsureAsync(_uow, ct);
-            var date = await CheckDateAsync(dto.Date.Date, ct);
+            int entityId = await EntityScope.ResolveAsync(_uow, dto.LegalEntityId, Me, ct);
+            if (dto.Id.HasValue && !dto.LegalEntityId.HasValue)
+            {
+                int? existing = await _uow.Set<FnVoucher>().Where(x => x.Id == dto.Id.Value).Select(x => (int?)x.FiscalYear.LegalEntityId).FirstOrDefaultAsync(ct);
+                if (existing.HasValue) entityId = existing.Value;
+            }
+            var date = await CheckDateAsync(dto.Date.Date, entityId, ct);
             if (date.Error != null) return Bad<VoucherDto>(date.Error);
             var built = await BuildLinesAsync(dto.Lines, true, ct);
             if (built.Error != null) return Bad<VoucherDto>(built.Error);
@@ -555,6 +582,7 @@ namespace Services.NasbNiro.Finance
                 v = await _uow.Set<FnVoucher>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct);
                 if (v == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
                 if (v.Status == FnVoucherStatus.Final) return Bad<VoucherDto>("سند قطعی ویرایش نمی‌شود؛ سند اصلاحی (برگشتی) صادر کنید.");
+                if (v.IsImported) return Bad<VoucherDto>("سند واردشده از سپیدار فقط خواندنی است.");
                 if (v.Type == FnVoucherType.Auto || v.Type == FnVoucherType.Closing || v.Type == FnVoucherType.YearEndTemporaryClose)
                     return Bad<VoucherDto>("سند خودکار یا پایان سال ویرایش نمی‌شود.");
                 _uow.Set<FnVoucherLine>().RemoveRange(v.Lines);
@@ -602,6 +630,7 @@ namespace Services.NasbNiro.Finance
             if (dto == null || Clean(dto.Action) == null) return Bad<VoucherDto>("اطلاعات ارسال‌شده کامل نیست.");
             string action = dto.Action.Trim().ToLowerInvariant();
             if (action == "finalize") return await FinalizeOneAsync(dto.Id, ct);
+            if (action == "ceo-approve") return await CeoApproveAsync(dto.Id, ct);
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<VoucherDto>(NotAllowed);
             FnVoucher v = await _uow.Set<FnVoucher>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.Id, ct);
             if (v == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
@@ -610,6 +639,8 @@ namespace Services.NasbNiro.Finance
                 case "check":
                     if (v.Status != FnVoucherStatus.Draft) return Bad<VoucherDto>("فقط پیش‌نویس کنترل می‌شود.");
                     if (v.Type != FnVoucherType.Auto && v.CreatedByUserId == Me) return Bad<VoucherDto>(SameUser);
+                    string checkGate = (await VoucherGateAsync(new List<int> { v.Id }, false, ct)).GetValueOrDefault(v.Id);
+                    if (checkGate != null) return Bad<VoucherDto>(checkGate);
                     v.Status = FnVoucherStatus.Checked;
                     v.CheckedByUserId = Me;
                     v.CheckedAt = DateTimeOffset.Now;
@@ -637,12 +668,14 @@ namespace Services.NasbNiro.Finance
             if (original.Type == FnVoucherType.Opening || original.Type == FnVoucherType.Closing || original.Type == FnVoucherType.YearEndTemporaryClose)
                 return Bad<VoucherDto>("سند افتتاحیه و اختتامیه برگشت نمی‌خورد.");
             if (await _uow.Set<FnVoucher>().AnyAsync(x => x.ReversesVoucherId == original.Id, ct)) return Bad<VoucherDto>("برای این سند قبلاً سند برگشتی صادر شده است.");
+            if (original.IsImported) return Bad<VoucherDto>("سند واردشده از سپیدار فقط خواندنی است.");
+            int originalEntity = await _uow.Set<FnFiscalYear>().Where(y => y.Id == original.FiscalYearId).Select(y => y.LegalEntityId).FirstAsync(ct);
             DateTime date = (dto.Date ?? original.Date).Date;
-            var check = await CheckDateAsync(date, ct);
+            var check = await CheckDateAsync(date, originalEntity, ct);
             if (check.Error != null && dto.Date == null)
             {
                 date = DateTime.Today;
-                check = await CheckDateAsync(date, ct);
+                check = await CheckDateAsync(date, originalEntity, ct);
             }
             if (check.Error != null) return Bad<VoucherDto>(check.Error);
             var reversal = new FnVoucher
@@ -673,6 +706,8 @@ namespace Services.NasbNiro.Finance
                 if (v == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
                 if (v.Status != FnVoucherStatus.Checked) return Bad<VoucherDto>("فقط سند کنترل‌شده قطعی می‌شود.");
                 if (v.Type != FnVoucherType.Auto && v.CreatedByUserId == Me) return Bad<VoucherDto>(SameUser);
+                string finGate = (await VoucherGateAsync(new List<int> { v.Id }, true, ct)).GetValueOrDefault(v.Id);
+                if (finGate != null) return Bad<VoucherDto>(finGate);
                 var period = await _uow.Set<FnPeriod>().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.FiscalYearId == v.FiscalYearId && p.StartDate <= v.Date && p.EndDate >= v.Date, ct);
                 if (period == null || period.Status == FnPeriodStatus.Closed || period.FiscalYear.Status != FnYearStatus.Open) return Bad<VoucherDto>("دوره مالی سند بسته است.");
                 int max = await _uow.Set<FnVoucher>().Where(x => x.FiscalYearId == v.FiscalYearId && x.Number != null).MaxAsync(x => (int?)x.Number, ct) ?? 0;
@@ -703,7 +738,13 @@ namespace Services.NasbNiro.Finance
                 result = new FinalizeResultDto();
                 IQueryable<FnVoucher> q = _uow.Set<FnVoucher>().Where(v => v.Status == FnVoucherStatus.Checked && v.Date <= dto.UpTo.Date);
                 if (dto.FiscalYearId.HasValue) q = q.Where(v => v.FiscalYearId == dto.FiscalYearId.Value);
+                else
+                {
+                    int entityId = await EntityScope.ResolveAsync(_uow, dto.LegalEntityId, Me, ct);
+                    q = q.Where(v => v.FiscalYear.LegalEntityId == entityId);
+                }
                 List<FnVoucher> vouchers = await q.OrderBy(v => v.Date).ThenBy(v => v.TemporaryNumber).ThenBy(v => v.Id).ToListAsync(ct);
+                Dictionary<int, string> gates = await VoucherGateAsync(vouchers.Select(v => v.Id).ToList(), true, ct);
                 List<FnFiscalYear> years = await _uow.Set<FnFiscalYear>().Include(y => y.Periods).ToListAsync(ct);
                 var touched = new List<FnVoucher>();
                 foreach (var group in vouchers.GroupBy(v => v.FiscalYearId))
@@ -715,6 +756,7 @@ namespace Services.NasbNiro.Finance
                         FnPeriod p = year.Periods.FirstOrDefault(x => x.StartDate <= v.Date && x.EndDate >= v.Date);
                         if (year.Status != FnYearStatus.Open || p == null || p.Status == FnPeriodStatus.Closed) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: دوره بسته است."); continue; }
                         if (v.Type != FnVoucherType.Auto && v.CreatedByUserId == Me) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: تهیه‌کننده نمی‌تواند قطعی کند."); continue; }
+                        if (gates.TryGetValue(v.Id, out string gateMessage)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: {gateMessage}"); continue; }
                         v.Number = ++max;
                         v.Status = FnVoucherStatus.Final;
                         v.FinalizedByUserId = Me;
@@ -747,16 +789,20 @@ namespace Services.NasbNiro.Finance
 
         // ================================================================================== opening balance
 
-        public async Task<ResponseDto<VoucherDto>> ImportOpeningAsync(OpeningImportDto dto, CancellationToken ct)
+        public Task<ResponseDto<VoucherDto>> ImportOpeningAsync(OpeningImportDto dto, CancellationToken ct) => ImportOpeningCoreAsync(dto, true, ct);
+
+        /// <summary>The opening import; the migration wizard calls it with manualRules = false (imported details keep the guessed type).</summary>
+        private async Task<ResponseDto<VoucherDto>> ImportOpeningCoreAsync(OpeningImportDto dto, bool manualRules, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<VoucherDto>(NotAllowed);
             List<OpeningRowDto> rows = (dto?.Rows ?? new List<OpeningRowDto>()).Where(r => r != null).ToList();
             if (rows.Count == 0) return Bad<VoucherDto>("فایل هیچ ردیفی ندارد.");
             if (rows.Count > 20000) return Bad<VoucherDto>("حداکثر ۲۰٬۰۰۰ ردیف در هر بار.");
             await FinanceSeed.EnsureAsync(_uow, ct);
+            int defaultEntity = await EntityScope.ResolveAsync(_uow, null, Me, ct);
             FnFiscalYear year = dto.FiscalYearId.HasValue
                 ? await _uow.Set<FnFiscalYear>().FirstOrDefaultAsync(y => y.Id == dto.FiscalYearId.Value, ct)
-                : await FinanceSeed.EnsureFiscalYearAsync(_uow, DateTime.Today, ct);
+                : await FinanceSeed.EnsureEntityYearAsync(_uow, await _uow.Set<FnLegalEntity>().FirstOrDefaultAsync(x => x.Id == defaultEntity, ct), DateTime.Today, ct);
             if (year == null) return ResponseDtoHelper.NotFound<VoucherDto>("سال مالی پیدا نشد.");
             if (year.Status != FnYearStatus.Open) return Bad<VoucherDto>("سال مالی بسته است.");
             if (await _uow.Set<FnVoucher>().AnyAsync(v => v.FiscalYearId == year.Id && v.Type == FnVoucherType.Opening, ct))
@@ -780,7 +826,7 @@ namespace Services.NasbNiro.Finance
                 }
                 else if (l.Debit != 0 || l.Credit != 0) split.Add(l);
             }
-            var built = await BuildLinesAsync(split, true, ct);
+            var built = await BuildLinesAsync(split, manualRules, ct);
             if (built.Error != null) return Bad<VoucherDto>(built.Error);
             var voucher = new FnVoucher
             {
@@ -804,7 +850,7 @@ namespace Services.NasbNiro.Finance
             DateTime today = DateTime.Today;
             void Problem(string code, string message) => result.Problems.Add(new SetupProblemDto { Code = code, Message = message });
 
-            FnPeriod period = await _uow.Set<FnPeriod>().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.StartDate <= today && p.EndDate >= today, ct);
+            FnPeriod period = await _uow.Set<FnPeriod>().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.FiscalYear.LegalEntityId == FinanceSeed.MainEntityId && p.StartDate <= today && p.EndDate >= today, ct);
             if (period == null) Problem("FISCAL_YEAR_MISSING", "برای امروز سال مالی تعریف نشده است.");
             else if (period.Status != FnPeriodStatus.Open || period.FiscalYear.Status != FnYearStatus.Open) Problem("PERIOD_NOT_OPEN", "دوره مالی امروز باز نیست.");
             if (!await _uow.Set<FnAccount>().AnyAsync(a => a.Level == FnAccountLevel.Subsidiary, ct)) Problem("CHART_EMPTY", "کدینگ حساب‌ها خالی است.");

@@ -30,12 +30,16 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public FnYearStatus Status { get; set; }
         public int? OpeningVoucherId { get; set; }
         public int? ClosingVoucherId { get; set; }
+        public int LegalEntityId { get; set; }
+        public bool IsImported { get; set; }
         public List<PeriodDto> Periods { get; set; } = new List<PeriodDto>();
     }
 
     public class EnsureYearDto
     {
         public DateTime Date { get; set; }
+        /// <summary>Default: the user's default legal entity.</summary>
+        public int? LegalEntityId { get; set; }
     }
 
     public class PeriodActionDto
@@ -169,6 +173,11 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? ReversedByVoucherId { get; set; }
         public bool LatePosting { get; set; }
         public decimal TotalAmount { get; set; }
+        public int LegalEntityId { get; set; }
+        public bool IsImported { get; set; }
+        public int? CeoApprovedByUserId { get; set; }
+        public DateTimeOffset? CeoApprovedAt { get; set; }
+        public int AttachmentCount { get; set; }
         public int CreatedByUserId { get; set; }
         public string CreatorName { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
@@ -202,6 +211,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
     public class SaveVoucherDto
     {
         public int? Id { get; set; }
+        /// <summary>Default: the user's default legal entity (an existing voucher keeps its entity).</summary>
+        public int? LegalEntityId { get; set; }
         public DateTime Date { get; set; }
         public string Description { get; set; }
         public List<SaveVoucherLineDto> Lines { get; set; } = new List<SaveVoucherLineDto>();
@@ -210,6 +221,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
     public class VoucherQuery : PaginationParams
     {
         public int? FiscalYearId { get; set; }
+        /// <summary>Default: the user's default legal entity (ignored when a fiscal year is given).</summary>
+        public int? LegalEntityId { get; set; }
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
         public FnVoucherStatus? Status { get; set; }
@@ -233,6 +246,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
     public class FinalizeUpToDto
     {
         public int? FiscalYearId { get; set; }
+        public int? LegalEntityId { get; set; }
         public DateTime UpTo { get; set; }
     }
 
@@ -273,6 +287,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
     public class LedgerReportQuery : PaginationParams
     {
         public int? FiscalYearId { get; set; }
+        /// <summary>Default: the user's default legal entity (ignored when a fiscal year is given).</summary>
+        public int? LegalEntityId { get; set; }
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
         /// <summary>Include Draft and Checked vouchers (default: final vouchers only).</summary>

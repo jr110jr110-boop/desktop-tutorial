@@ -215,7 +215,7 @@ namespace Services.NasbNiro.Finance
             await EnsureAsync(ct);
             int last = PersianCal.Index(DateTime.Today) - 1;
             DateTime end = PersianCal.EndOfIndex(last);
-            FnPeriod period = await _uow.Set<FnPeriod>().AsNoTracking().FirstOrDefaultAsync(p => p.StartDate <= end && p.EndDate >= end, ct);
+            FnPeriod period = await _uow.Set<FnPeriod>().AsNoTracking().FirstOrDefaultAsync(p => p.StartDate <= end && p.EndDate >= end && p.FiscalYear.LegalEntityId == FinanceSeed.MainEntityId, ct);
             if (period == null) return "no period";
             if (await _uow.Set<FnDepreciationRun>().AnyAsync(r => r.PeriodId == period.Id, ct)) return "exists";
             ResponseDto<DepreciationRunDto> result = await PrepareCoreAsync(period.Id, ct);

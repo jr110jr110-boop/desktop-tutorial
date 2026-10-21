@@ -36,10 +36,12 @@ namespace Services.NasbNiro.Finance
     public class LedgerReportService : ILedgerReportService
     {
         private readonly IUnitOfWork _uow;
+        private readonly Inventory.IInventoryUserContext _user;
 
-        public LedgerReportService(IUnitOfWork uow)
+        public LedgerReportService(IUnitOfWork uow, Inventory.IInventoryUserContext user)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
+            _user = user ?? throw new ArgumentNullException(nameof(user));
         }
 
         private static ResponseDto<T> Bad<T>(string m) => ResponseDtoHelper.BadRequest<T>(m);
@@ -58,9 +60,11 @@ namespace Services.NasbNiro.Finance
             if (q.FiscalYearId.HasValue) year = await _uow.Set<FnFiscalYear>().AsNoTracking().FirstOrDefaultAsync(y => y.Id == q.FiscalYearId.Value, ct);
             else
             {
+                // the user's default legal entity (or the one asked for) decides which ledger is reported
+                int entityId = await EntityScope.ResolveAsync(_uow, q.LegalEntityId, _user.UserId, ct);
                 DateTime today = DateTime.Today;
-                year = await _uow.Set<FnFiscalYear>().AsNoTracking().FirstOrDefaultAsync(y => y.StartDate <= today && y.EndDate >= today, ct)
-                    ?? await _uow.Set<FnFiscalYear>().AsNoTracking().OrderByDescending(y => y.Year).FirstOrDefaultAsync(ct);
+                year = await _uow.Set<FnFiscalYear>().AsNoTracking().Where(y => y.LegalEntityId == entityId).FirstOrDefaultAsync(y => y.StartDate <= today && y.EndDate >= today, ct)
+                    ?? await _uow.Set<FnFiscalYear>().AsNoTracking().Where(y => y.LegalEntityId == entityId).OrderByDescending(y => y.Year).FirstOrDefaultAsync(ct);
             }
             if (year == null) return (null, "سال مالی پیدا نشد.");
             DateTime from = q.From.HasValue ? q.From.Value.Date : year.StartDate;

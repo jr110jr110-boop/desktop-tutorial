@@ -17,6 +17,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddFinanceConfigurations();
             builder.AddLedgerConfigurations();
             builder.AddAssetsPayrollConfigurations();
+            builder.AddCompletenessConfigurations();
             builder.AddProcurementConfigurations();
             builder.AddQualityConfigurations();
             builder.AddProjectControlConfigurations();
@@ -545,6 +546,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.Property(x => x.Description).HasMaxLength(500);
                 b.Property(x => x.ExternalReference).HasMaxLength(100);
                 b.Property(x => x.Error).HasMaxLength(2000);
+                b.Property(x => x.LegalEntityId).HasDefaultValue(1);
                 b.HasIndex(x => x.Key).IsUnique();
                 b.HasIndex(x => new { x.Status, x.EventDate });
                 b.HasIndex(x => new { x.SourceType, x.SourceId });

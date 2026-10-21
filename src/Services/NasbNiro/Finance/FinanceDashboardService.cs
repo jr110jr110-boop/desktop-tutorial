@@ -59,7 +59,7 @@ namespace Services.NasbNiro.Finance
             d.VouchersWaitingFinalize = await _uow.Set<FnVoucher>().CountAsync(v => v.Status == FnVoucherStatus.Checked, ct);
             d.UnpostedEvents = await _uow.Set<AccountingEvent>().CountAsync(e => e.Status == AccountingEventStatus.Pending || e.Status == AccountingEventStatus.Exported ||
                                                                               e.Status == AccountingEventStatus.Failed || e.Status == AccountingEventStatus.Sent, ct);
-            d.OpenPeriods = await _uow.Set<FnPeriod>().CountAsync(p => p.Status == FnPeriodStatus.Open && p.FiscalYear.Status == FnYearStatus.Open, ct);
+            d.OpenPeriods = await _uow.Set<FnPeriod>().CountAsync(p => p.Status == FnPeriodStatus.Open && p.FiscalYear.Status == FnYearStatus.Open && p.FiscalYear.LegalEntityId == FinanceSeed.MainEntityId, ct);
             var openRecs = await _uow.Set<FnBankReconciliation>().AsNoTracking().Where(r => r.Status == 0).Select(r => r.Difference).ToListAsync(ct);
             d.UnapprovedReconciliations = openRecs.Count;
             d.ReconciliationDifference = openRecs.Sum(x => Math.Abs(x));

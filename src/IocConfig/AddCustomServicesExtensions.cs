@@ -133,6 +133,10 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.IEventPostingService, Services.NasbNiro.Finance.EventPostingService>();
             services.AddScoped<Services.NasbNiro.Finance.ILedgerReportService, Services.NasbNiro.Finance.LedgerReportService>();
             services.AddScoped<Services.NasbNiro.Finance.IGlService, Services.NasbNiro.Finance.GlService>();
+            services.AddScoped<Services.NasbNiro.Finance.IGlControlsService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.ILegalEntityService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.IMigrationService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.ISepidarFullExportService, Services.NasbNiro.Finance.SepidarFullExportService>();
             services.AddScoped<Services.NasbNiro.Finance.ITreasuryService, Services.NasbNiro.Finance.TreasuryService>();
             services.AddScoped<Services.NasbNiro.Finance.IReceivablesService, Services.NasbNiro.Finance.ReceivablesService>();
             services.AddScoped<Services.NasbNiro.Finance.ITaxService, Services.NasbNiro.Finance.TaxService>();

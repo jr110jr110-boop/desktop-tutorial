@@ -17,7 +17,7 @@ namespace Services.NasbNiro.Finance
         public const string Managers = "FINANCEMANAGER";
         public const string TreasuryUsers = "TREASURY,FINANCEMANAGER";
         public const string TreasuryAndAccountants = "TREASURY,FINANCIAL,FINANCEMANAGER";
-        public const string Readers = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO";
+        public const string Readers = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,AUDITOR";
         /// <summary>Triggers the system jobs (post events, draft invoices).</summary>
         public const string SystemJobs = "FINANCIAL,FINANCEMANAGER,PMO";
         public const string Creator = "creator";
@@ -28,7 +28,14 @@ namespace Services.NasbNiro.Finance
         /// <summary>The only roles that read individual salary data.</summary>
         public const string PayrollReaders = "PAYROLL,FINANCEMANAGER,CEO";
         /// <summary>Sepidar outbox: lists, exports and the counters (payroll packages are filtered by <see cref="PayrollReaders"/>).</summary>
-        public const string OutboxReaders = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL";
+        // release F3
+        /// <summary>The auditor (حسابرس): read-only on all finance data, including the audit trail; never payroll personal data.</summary>
+        public const string Auditors = "AUDITOR";
+        /// <summary>Who reads the audit trail.</summary>
+        public const string AuditReaders = "FINANCEMANAGER,CEO,AUDITOR";
+        /// <summary>The CEO approves vouchers above the approval threshold.</summary>
+        public const string Ceo = "CEO";
+        public const string OutboxReaders = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL,AUDITOR";
     }
 
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (the finance module uses 441..480).</summary>
@@ -50,6 +57,9 @@ namespace Services.NasbNiro.Finance
         public const int AssetCode = 452;
         /// <summary>Temporary codes of draft assets.</summary>
         public const int AssetDraft = 453;
+        // release F3 (561..600 are reserved for the F3 counters of the whole system)
+        public const int IntercompanyPost = 561;
+        public const int VoucherExport = 562;
     }
 
     internal static class LedgerMath
@@ -215,10 +225,10 @@ namespace Services.NasbNiro.Finance
     {
         public List<FnFiscalYear> Years { get; private set; } = new List<FnFiscalYear>();
 
-        public static async Task<PeriodCache> LoadAsync(IUnitOfWork uow, CancellationToken ct)
+        public static async Task<PeriodCache> LoadAsync(IUnitOfWork uow, CancellationToken ct, int legalEntityId = FinanceSeed.MainEntityId)
         {
             var c = new PeriodCache();
-            c.Years = await uow.Set<FnFiscalYear>().Include(y => y.Periods).OrderBy(y => y.Year).ToListAsync(ct);
+            c.Years = await uow.Set<FnFiscalYear>().Include(y => y.Periods).Where(y => y.LegalEntityId == legalEntityId).OrderBy(y => y.Year).ToListAsync(ct);
             return c;
         }
 

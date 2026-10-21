@@ -209,6 +209,7 @@ namespace DataLayer.Context
             validateEntities();
             setShadowProperties();
             this.ApplyCorrectYeKe();
+            FinanceAuditTrail.Capture(this, this.GetService<IHttpContextAccessor>());
         }
 
         private void setShadowProperties()

@@ -36,6 +36,10 @@ namespace Entities.Model.NasbNiro.Finance
         public int? ClosingVoucherId { get; set; }
         public FnVoucher ClosingVoucher { get; set; }
         public string Jurisdiction { get; set; }
+        /// <summary>The legal entity of the year (F3); existing years belong to the main company (entity 1). No foreign key: the column defaults to 1.</summary>
+        public int LegalEntityId { get; set; }
+        /// <summary>A historical year imported from Sepidar: read-only, never mixed with PMIS vouchers.</summary>
+        public bool IsImported { get; set; }
         public DateTimeOffset? ClosedAt { get; set; }
         public int? ClosedByUserId { get; set; }
         public ICollection<FnPeriod> Periods { get; set; }
@@ -148,6 +152,11 @@ namespace Entities.Model.NasbNiro.Finance
         public FnVoucher ReversesVoucher { get; set; }
         public bool LatePosting { get; set; }
         public decimal TotalAmount { get; set; }
+        /// <summary>Imported from Sepidar (read-only history; excluded from the segregation checks).</summary>
+        public bool IsImported { get; set; }
+        /// <summary>CEO approval, required when the amount reaches an approval threshold.</summary>
+        public int? CeoApprovedByUserId { get; set; }
+        public DateTimeOffset? CeoApprovedAt { get; set; }
 
         public int CreatedByUserId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
@@ -239,6 +248,8 @@ namespace Entities.Model.NasbNiro.Finance
         public int AccountId { get; set; }
         public FnAccount Account { get; set; }
         public bool IsActive { get; set; } = true;
+        /// <summary>Legal entity of the account (F3 seam; defaults to the main company).</summary>
+        public int LegalEntityId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public int CreatedByUserId { get; set; }
     }

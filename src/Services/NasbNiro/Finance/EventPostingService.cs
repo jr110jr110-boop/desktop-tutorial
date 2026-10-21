@@ -62,7 +62,9 @@ namespace Services.NasbNiro.Finance
                 if (accountById.TryGetValue(m.AccountId.Value, out FnAccount a) && a.IsActive && a.Level == FnAccountLevel.Subsidiary) roleAccount[m.Role] = a;
 
             Dictionary<string, FnAccount> accountByCode = accountById.Values.ToDictionary(a => a.Code);
-            PeriodCache periods = await PeriodCache.LoadAsync(_uow, ct);
+            // periods per legal entity (F3): the main company keeps its Persian calendar, other entities have their own years
+            var periodsByEntity = new Dictionary<int, PeriodCache>();
+            Dictionary<int, FnLegalEntity> entities = await _uow.Set<FnLegalEntity>().ToDictionaryAsync(x => x.Id, ct);
             var details = new DetailResolver(_uow);
             Dictionary<string, int> costCenters = await _uow.Set<CostCenter>().ToDictionaryAsync(c => c.Code, c => c.Id, StringComparer.OrdinalIgnoreCase, ct);
             var voucherOfEvent = new Dictionary<int, FnVoucher>();
@@ -93,7 +95,14 @@ namespace Services.NasbNiro.Finance
                     if (lines.Count == 0) { e.Status = AccountingEventStatus.NotRequired; result.NotRequired++; continue; }
 
                     string error = null;
-                    var resolved = await ResolveDateAsync(e.EventDate, periods, ct);
+                    int entityId = e.LegalEntityId <= 0 ? FinanceSeed.MainEntityId : e.LegalEntityId;
+                    if (!periodsByEntity.TryGetValue(entityId, out PeriodCache periods))
+                    {
+                        periods = await PeriodCache.LoadAsync(_uow, ct, entityId);
+                        periodsByEntity[entityId] = periods;
+                    }
+                    entities.TryGetValue(entityId, out FnLegalEntity entity);
+                    var resolved = await ResolveDateAsync(e.EventDate, periods, entity, ct);
                     if (resolved.Error != null) error = resolved.Error;
 
                     // accounts first: no half-built voucher when a role has no mapping
@@ -206,16 +215,16 @@ namespace Services.NasbNiro.Finance
             return result;
         }
 
-        private async Task<(FnFiscalYear Year, FnPeriod Period, bool Late, string Error)> ResolveDateAsync(DateTime date, PeriodCache cache, CancellationToken ct)
+        private async Task<(FnFiscalYear Year, FnPeriod Period, bool Late, string Error)> ResolveDateAsync(DateTime date, PeriodCache cache, FnLegalEntity entity, CancellationToken ct)
         {
             FnPeriod p = cache.Find(date);
             if (p == null)
             {
-                int y = FinanceSeed.PersianYearOf(date);
+                int y = FinanceSeed.YearNumberOf(entity, date);
                 int latest = cache.Years.Count == 0 ? 0 : cache.Years.Max(x => x.Year);
                 if (cache.Years.Count == 0 || y <= latest + 1)
                 {
-                    FnFiscalYear created = await FinanceSeed.EnsureFiscalYearAsync(_uow, date, ct);
+                    FnFiscalYear created = await FinanceSeed.EnsureEntityYearAsync(_uow, entity, date, ct);
                     cache.Add(created);
                     p = cache.Find(date);
                 }
