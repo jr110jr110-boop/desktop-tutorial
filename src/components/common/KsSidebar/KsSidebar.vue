@@ -328,6 +328,12 @@ const links = {
     { title: "برنامه بازرسی و آزمون (ITP)", routeName: "QualityItps", disabled: !hasRole(QualityRoles.readers) },
     { title: "سوابق بازرسی", routeName: "QualityRecords", disabled: !hasRole(QualityRoles.readers) },
     { title: "گزارش‌های آزمون", routeName: "QualityReports", disabled: !hasRole(QualityRoles.readers) },
+    { title: "تجهیزات اندازه‌گیری و کالیبراسیون", routeName: "QualityCalibration", disabled: !hasRole(QualityRoles.readers) },
+    { title: "پرسنل صلاحیت‌دار و گواهی‌ها", routeName: "QualityPersonnel", disabled: !hasRole(QualityRoles.readers) },
+    { title: "WPS و PQR", routeName: "QualityWps", disabled: !hasRole(QualityRoles.readers) },
+    { title: "گزارش جوشکاری", routeName: "QualityWeldLogs", disabled: !hasRole(QualityRoles.readers) },
+    { title: "گواهی‌های مواد (EN 10204)", routeName: "QualityCertificates", disabled: !hasRole(QualityRoles.readers) },
+    { title: "ردیابی سریال و بچ", routeName: "QualityTraceability", disabled: !hasRole(QualityRoles.readers) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },
