@@ -4,7 +4,7 @@ import { ref, watch } from "vue";
 import { getWorkOrders, rowsOf } from "@/api/InventoryAPIs";
 
 const props = defineProps({ modelValue: { type: Number, default: null }, contractId: { type: Number, default: null }, disabled: Boolean, placeholder: { type: String, default: "همه دستورهای ساخت" } });
-const emit = defineEmits(["update:modelValue", "change"]);
+const emit = defineEmits(["update:modelValue", "change", "select"]);
 const list = ref<any[]>([]);
 let all: any[] | null = null;
 
@@ -19,6 +19,7 @@ function pick(v: string) {
   const value = v === "" ? null : Number(v);
   emit("update:modelValue", value);
   emit("change", value);
+  emit("select", list.value.find((w) => w.id === value) || null);
 }
 watch(() => props.contractId, load, { immediate: true });
 </script>

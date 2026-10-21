@@ -9,12 +9,15 @@ import Milestones from "@/components/pc/commercial/Milestones.vue";
 import Guarantees from "@/components/pc/commercial/Guarantees.vue";
 import Penalties from "@/components/pc/commercial/Penalties.vue";
 import Variations from "@/components/pc/commercial/Variations.vue";
+import PaymentStatementPrint from "@/components/pc/print/PaymentStatementPrint.vue";
+import GuaranteeListPrint from "@/components/pc/print/GuaranteeListPrint.vue";
 import { printPage } from "@/composables/inventory";
-import { pcContractId } from "@/composables/projectControl";
+import { pcContractId, usePcPrint } from "@/composables/projectControl";
 
 // One page for the commercial side; the tab is chosen by the route (milestones, guarantees, penalties, variations) so the alert links of the CEO dashboard open the right tab.
 const props = defineProps({ tab: { type: String, default: "milestones" } });
 const router = useRouter();
+const { job, run } = usePcPrint();
 const tabs = [
   { key: "milestones", title: "مراحل پرداخت" },
   { key: "guarantees", title: "ضمانت‌نامه‌ها" },
@@ -35,12 +38,14 @@ const current = computed({ get: () => props.tab, set: (k: string) => router.push
       <NeedContract v-if="!pcContractId" />
       <template v-else>
         <PcTabs v-model="current" :tabs="tabs" />
-        <Milestones v-if="tab === 'milestones'" :contract-id="pcContractId" />
-        <Guarantees v-else-if="tab === 'guarantees'" :contract-id="pcContractId" />
+        <Milestones v-if="tab === 'milestones'" :contract-id="pcContractId" @payment-request="(m: any) => run('payment', m)" />
+        <Guarantees v-else-if="tab === 'guarantees'" :contract-id="pcContractId" @print="(rows: any[]) => run('guarantees', rows)" />
         <Penalties v-else-if="tab === 'penalties'" :contract-id="pcContractId" />
         <Variations v-else :contract-id="pcContractId" />
       </template>
     </div>
+    <PaymentStatementPrint v-if="job?.kind === 'payment'" :m="job.data" />
+    <GuaranteeListPrint v-else-if="job?.kind === 'guarantees'" :rows="job.data" :contract-id="pcContractId" />
   </div>
 </template>
 

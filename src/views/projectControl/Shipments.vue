@@ -9,11 +9,12 @@ import { getShipments, saveShipment, shipmentAction } from "@/api/ProjectControl
 import { getReleaseNotes } from "@/api/QualityAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, today } from "@/composables/inventory";
-import { contractLabel, pcContractId, shipmentStatuses } from "@/composables/projectControl";
+import ShipmentPrint from "@/components/pc/print/ShipmentPrint.vue";
+import { contractLabel, pcContractId, shipmentStatuses, usePcPrint } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Shipments: planned -> packed (needs a released quality release note) -> released by planning -> shipped -> delivered -> handover minutes.
-const emit = defineEmits(["print"]);
+const { job, run } = usePcPrint();
 const rows = ref<any[]>([]);
 const status = ref<number | null>(null);
 const form = ref<any>(null);
@@ -109,13 +110,14 @@ defineExpose({ rows });
                 <button v-if="canPack && r.status === 2" class="btn btn-sm btn-outline-primary me-1" @click="ask(r, 'ship')">ارسال</button>
                 <button v-if="canDeliver && r.status === 3" class="btn btn-sm btn-outline-primary me-1" @click="ask(r, 'deliver')">تحویل</button>
                 <button v-if="canHandover && r.status === 4" class="btn btn-sm btn-outline-success me-1" @click="ask(r, 'handover')">صورتجلسه</button>
-                <button class="btn btn-sm btn-outline-secondary" @click="emit('print', r)">چاپ فهرست بسته‌بندی</button>
+                <button class="btn btn-sm btn-outline-secondary" @click="run('shipment', r)">چاپ فهرست بسته‌بندی</button>
               </td>
             </tr>
           </tbody>
         </table>
       </template>
     </div>
+    <ShipmentPrint v-if="job?.kind === 'shipment'" :s="job.data" />
     <div v-if="form" class="inv-modal-backdrop" @click.self="form = null">
       <div class="inv-modal">
         <h3 class="h6">محموله جدید</h3>

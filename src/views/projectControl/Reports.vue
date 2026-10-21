@@ -7,11 +7,13 @@ import JDate from "@/components/pc/JDate.vue";
 import { generateReport, getReport, getReports, releaseReport } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, rial } from "@/composables/inventory";
-import { contractLabel, fx, idx, milestoneLine, parseContent, pcContractId, pct, phases, reportKinds } from "@/composables/projectControl";
+import ClientReportPrint from "@/components/pc/print/ClientReportPrint.vue";
+import WeeklyReportPrint from "@/components/pc/print/WeeklyReportPrint.vue";
+import CeoReportPrint from "@/components/pc/print/CeoReportPrint.vue";
+import { contractLabel, idx, milestoneLine, parseContent, pcContractId, pct, phases, reportKinds, usePcPrint } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Periodic reports. The content is frozen when the report is generated (hash); the project manager releases it. The client report shows SPI and CPI only when the contract terms allow it.
-const emit = defineEmits(["print"]);
 const rows = ref<any[]>([]);
 const kind = ref<number | null>(null);
 const gen = ref<{ kind: number; date: string | null }>({ kind: 1, date: null });
@@ -20,6 +22,7 @@ const busy = ref(false);
 const canGenerate = hasRole(ProjectControlRoles.reportGenerate);
 const canRelease = hasRole(ProjectControlRoles.projectManagers);
 const kinds = [1, 2, 3];
+const { job, run } = usePcPrint();
 
 async function load() {
   if (!pcContractId.value) return;
@@ -80,11 +83,15 @@ watch(pcContractId, load);
       </template>
     </div>
 
+    <ClientReportPrint v-if="job?.kind === 'report' && job.data.kind === 1" :report="job.data" />
+    <WeeklyReportPrint v-else-if="job?.kind === 'report' && job.data.kind === 2" :report="job.data" />
+    <CeoReportPrint v-else-if="job?.kind === 'report' && job.data.kind === 3" :report="job.data" />
+
     <div v-if="d" class="inv-modal-backdrop" @click.self="d = null">
       <div class="inv-modal" style="max-width: 900px; width: 96%; max-height: 92vh; overflow: auto">
         <div class="d-flex justify-content-between mb-2">
           <h3 class="h6">{{ reportKinds[d.kind] }} — <span class="inv-ltr">{{ d.number }}</span> — {{ jalali(d.dataDate) }}</h3>
-          <div class="d-flex gap-2"><button v-if="canRelease && !d.releasedAt" :disabled="busy" class="btn btn-sm btn-success" @click="release">انتشار</button><button class="btn btn-sm btn-outline-secondary" @click="emit('print', d)">چاپ</button><button class="btn btn-sm btn-secondary" @click="d = null">بستن</button></div>
+          <div class="d-flex gap-2"><button v-if="canRelease && !d.releasedAt" :disabled="busy" class="btn btn-sm btn-success" @click="release">انتشار</button><button class="btn btn-sm btn-outline-secondary" @click="run('report', d)">چاپ</button><button class="btn btn-sm btn-secondary" @click="d = null">بستن</button></div>
         </div>
         <p v-if="!d.releasedAt" class="alert alert-warning py-1 small">این گزارش هنوز منتشر نشده است (برای ارسال به کارفرما باید مدیر پروژه منتشر کند).</p>
         <div v-if="!d.c" class="alert alert-danger">محتوای گزارش خوانده نشد.</div>

@@ -8,12 +8,13 @@ import JDate from "@/components/pc/JDate.vue";
 import { changeAction, getActivities, getAuthorities, getChange, getChanges, saveAuthority, saveChange } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, rial } from "@/composables/inventory";
-import { changeDecisions, changeOrigins, changeStatuses, changeTypes, contractLabel, pcContractId, unitTitle, votes } from "@/composables/projectControl";
+import ChangePrint from "@/components/pc/print/ChangePrint.vue";
+import { changeDecisions, changeOrigins, changeStatuses, changeTypes, contractLabel, pcContractId, unitTitle, usePcPrint, votes } from "@/composables/projectControl";
 import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Change control: register (the change board is formed from the affected units), impact analysis (CPM before/after), PM recommendation, board votes, decision within the
 // approval authority; an approved change makes a new approved baseline. The authorities are edited by the CEO.
-const emit = defineEmits(["print"]);
+const { job, run } = usePcPrint();
 const tab = ref("changes");
 const tabs = [{ key: "changes", title: "درخواست‌های تغییر" }, { key: "authority", title: "سطوح اختیار تصمیم‌گیری" }];
 const rows = ref<any[]>([]);
@@ -123,6 +124,7 @@ watch(pcContractId, load);
       </div>
     </div>
 
+    <ChangePrint v-if="job?.kind === 'change'" :c="job.data" :activities="acts" />
     <div v-if="form" class="inv-modal-backdrop" @click.self="form = null">
       <div class="inv-modal" style="max-width: 860px; width: 96%">
         <h3 class="h6">{{ form.id ? "ویرایش " + form.number : "درخواست تغییر جدید" }}</h3>
@@ -154,7 +156,7 @@ watch(pcContractId, load);
     <div v-if="d" class="inv-modal-backdrop" @click.self="d = null">
       <div class="inv-modal" style="max-width: 980px; width: 96%; max-height: 92vh; overflow: auto">
         <div class="d-flex justify-content-between"><h3 class="h6">درخواست تغییر <span class="inv-ltr">{{ d.number }}</span> — <span :class="statusBadge(d.status)" class="inv-badge">{{ changeStatuses[d.status] }}</span></h3>
-          <div class="d-flex gap-2"><button class="btn btn-sm btn-outline-secondary" @click="emit('print', d)">چاپ فرم</button><button class="btn btn-sm btn-secondary" @click="d = null">بستن</button></div></div>
+          <div class="d-flex gap-2"><button class="btn btn-sm btn-outline-secondary" @click="run('change', d)">چاپ فرم</button><button class="btn btn-sm btn-secondary" @click="d = null">بستن</button></div></div>
         <div class="row g-2 small mb-2">
           <div class="col-md-4">منشأ: {{ changeOrigins[d.origin] }}</div><div class="col-md-4">نوع: {{ changeTypes[d.type] }}</div><div class="col-md-4">مهلت تحلیل: {{ jalali(d.dueDate) }}</div>
           <div class="col-12">شرح: {{ d.description }}</div><div class="col-12">دلیل: {{ d.reason }}</div>

@@ -7,10 +7,12 @@ import JDate from "@/components/pc/JDate.vue";
 import { getDeliverables, getResponseCodes, getTransmittal, getTransmittals, recordTransmittalResponse, saveTransmittal } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, today } from "@/composables/inventory";
-import { contractLabel, pcContractId, transmittalDirections, transmittalPurposes } from "@/composables/projectControl";
+import TransmittalPrint from "@/components/pc/print/TransmittalPrint.vue";
+import { contractLabel, pcContractId, transmittalDirections, transmittalPurposes, usePcPrint } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Transmittals of MDL documents to the client (and incoming ones) with the client's response code for every line.
+const { job, run } = usePcPrint();
 const rows = ref<any[]>([]);
 const onlyOverdue = ref(false);
 const direction = ref<number | null>(null);
@@ -21,7 +23,6 @@ const codes = ref<any[]>([]);
 const resp = ref<any>(null);
 const busy = ref(false);
 const can = hasRole(ProjectControlRoles.dccOnly);
-const emit = defineEmits(["print"]);
 
 async function load() {
   if (!pcContractId.value) return;
@@ -99,6 +100,7 @@ watch(pcContractId, load);
       </template>
     </div>
 
+    <TransmittalPrint v-if="job?.kind === 'transmittal'" :t="job.data" />
     <div v-if="detail" class="inv-modal-backdrop" @click.self="detail = null">
       <div class="inv-modal" style="max-width: 900px; width: 96%">
         <h3 class="h6">ترنسمیتال <span class="inv-ltr">{{ detail.number }}</span> — {{ transmittalDirections[detail.direction] }} — {{ jalali(detail.transmittalDate) }}</h3>
@@ -112,7 +114,7 @@ watch(pcContractId, load);
             </tr>
           </tbody>
         </table>
-        <div class="d-flex justify-content-between"><button class="btn btn-sm btn-outline-secondary" @click="emit('print', detail)">چاپ ترنسمیتال</button><button class="btn btn-sm btn-secondary" @click="detail = null">بستن</button></div>
+        <div class="d-flex justify-content-between"><button class="btn btn-sm btn-outline-secondary" @click="run('transmittal', detail)">چاپ ترنسمیتال</button><button class="btn btn-sm btn-secondary" @click="detail = null">بستن</button></div>
       </div>
     </div>
     <div v-if="resp" class="inv-modal-backdrop" @click.self="resp = null">

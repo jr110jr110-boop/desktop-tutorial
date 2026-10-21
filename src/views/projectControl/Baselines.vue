@@ -6,12 +6,14 @@ import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import { baselineAction, createBaseline, deleteCostLine, getActivities, getBaselines, getCostLines, getTerms, getWbs, saveCostLine } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
+import BaselinePrint from "@/components/pc/print/BaselinePrint.vue";
 import { fail, jalali, ok, printPage, rial } from "@/composables/inventory";
-import { baselineKinds, baselineStatuses, costClasses, pcContractId, resourceClasses, sumOf, unitTitle } from "@/composables/projectControl";
+import { baselineKinds, baselineStatuses, costClasses, pcContractId, resourceClasses, sumOf, unitTitle, usePcPrint } from "@/composables/projectControl";
 import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Baselines (WI-PL-009 17): created from the calculated plan by planning, signed by the manager of every unit that owns activities,
 // approved by the PMO deputy. Cost baseline lines (CBS) are kept per project and are compared with the BAC of the baseline.
+const { job, run } = usePcPrint();
 const tab = ref("baselines");
 const tabs = [
   { key: "baselines", title: "خط مبنای زمانی" },
@@ -133,7 +135,7 @@ watch(pcContractId, () => { sel.value = null; load(); loadCost(); });
           <div v-if="sel" class="border rounded p-3 d-print-none">
             <div class="inv-toolbar">
               <b>خط مبنا R{{ sel.number }} — {{ sel.reason }}</b>
-              <div class="d-flex gap-2"><button class="btn btn-sm btn-outline-secondary" @click="sel = null">بستن</button></div>
+              <div class="d-flex gap-2"><button class="btn btn-sm btn-outline-secondary" @click="run('baseline', sel)">چاپ برگه تایید</button><button class="btn btn-sm btn-outline-secondary" @click="sel = null">بستن</button></div>
             </div>
             <table class="table table-sm">
               <thead><tr><th>امضاکننده (واحد)</th><th>نقش</th><th>امضا‌کننده</th><th>تاریخ امضا</th></tr></thead>
@@ -184,6 +186,7 @@ watch(pcContractId, () => { sel.value = null; load(); loadCost(); });
         </div>
       </template>
     </div>
+    <BaselinePrint v-if="job?.kind === 'baseline'" :b="job.data" />
   </div>
 </template>
 

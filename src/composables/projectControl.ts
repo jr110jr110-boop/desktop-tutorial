@@ -1,5 +1,5 @@
-import { ref } from "vue";
-import { NO_FORM_CODE_TEXT } from "@/composables/quality";
+import { nextTick, ref } from "vue";
+import { NO_FORM_CODE_TEXT, printForm } from "@/composables/quality";
 
 // Names and helpers for the project control (PMO) pages. Enums of the API (PcEnums.cs) are numbers in the JSON.
 export { NO_FORM_CODE_TEXT };
@@ -184,3 +184,18 @@ export const unitOptions: [string, string][] = [
   ["WAREHOUSE", "انبار"], ["WHSUPERVISOR", "سرپرست انبار"], ["PLANNING", "برنامه‌ریزی"], ["PROJECTMANAGER", "مدیر پروژه"], ["FINANCIAL", "مالی"], ["DCC", "کنترل مدارک"],
 ];
 export const unitText = (u: string | null | undefined): string => (u ? unitOptions.find((x) => x[0] === String(u).toUpperCase())?.[1] || u : "");
+
+/**
+ * Printing a form: the page keeps the form to print in `job`, renders only that print component (it must be a direct child of .inv-page)
+ * and calls the browser print once it is in the DOM.
+ */
+export function usePcPrint() {
+  const job = ref<{ kind: string; data: any } | null>(null);
+  async function run(kind: string, data: any) {
+    job.value = { kind, data };
+    await nextTick();
+    await nextTick();
+    printForm();
+  }
+  return { job, run };
+}

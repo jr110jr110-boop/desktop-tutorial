@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
@@ -7,20 +7,22 @@ import JDate from "@/components/pc/JDate.vue";
 import WorkOrderOfContract from "@/components/pc/WorkOrderOfContract.vue";
 import { deliverableAction, draftMdr, getDeliverables, saveDeliverable } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
-import { fail, jalali, ok, printPage } from "@/composables/inventory";
-import { contractLabel, issueStates, pcContractId, pct } from "@/composables/projectControl";
+import { fail, jalali, ok } from "@/composables/inventory";
+import MdrPrint from "@/components/pc/print/MdrPrint.vue";
+import { contractLabel, issueStates, pcContractId, pct, usePcPrint } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // MDR: the master document register of a work order (all deliverables); MDL: the part that is submitted to the client (ClientSubmittal).
 const props = defineProps({ mdl: Boolean });
 const rows = ref<any[]>([]);
 const workOrderId = ref<number | null>(null);
+const woCode = ref("");
 const state = ref<number | null>(null);
 const text = ref("");
 const form = ref<any>(null);
 const rev = ref<any>(null);
 const busy = ref(false);
-const printing = ref(false);
+const { job, run } = usePcPrint();
 const canDraft = hasRole(ProjectControlRoles.mdrDraft);
 const canEdit = hasRole(ProjectControlRoles.dcc);
 const canApprove = hasRole(ProjectControlRoles.internalApprove);
@@ -64,11 +66,7 @@ async function act(r: any, action: string, extra: any = {}) {
 }
 const badge = (s: number) => (s === 3 ? "ok" : s === 0 ? "info" : "warn");
 const blank = () => ({ workOrderId: workOrderId.value, documentNumber: "", title: "", clientSubmittal: props.mdl, standardSource: "", discipline: "", documentType: "", required: true, plannedDate: null });
-async function doPrint() {
-  printing.value = true;
-  await nextTick();
-  printPage();
-}
+const doPrint = () => run("mdr", list.value);
 onMounted(load);
 watch([pcContractId, () => props.mdl], () => { workOrderId.value = null; load(); });
 defineExpose({ rows });
@@ -88,7 +86,7 @@ defineExpose({ rows });
       <NeedContract v-if="!pcContractId" />
       <template v-else>
         <div class="inv-filters mb-2 d-print-none">
-          <WorkOrderOfContract v-model="workOrderId" :contract-id="pcContractId" @change="load" />
+          <WorkOrderOfContract v-model="workOrderId" :contract-id="pcContractId" @change="load" @select="(w: any) => (woCode = w?.code || '')" />
           <select v-model="state" class="form-select form-select-sm" @change="load"><option :value="null">همه وضعیت‌ها</option><option v-for="(n, k) in issueStates" :key="k" :value="Number(k)">{{ n }}</option></select>
           <input v-model="text" class="form-control form-control-sm" placeholder="شماره یا عنوان" />
           <button v-if="canDraft && !mdl" :disabled="busy || !workOrderId" class="btn btn-sm btn-outline-primary" title="دستور ساخت را انتخاب کنید" @click="draft">ساخت پیش‌نویس از قالب</button>
@@ -122,6 +120,7 @@ defineExpose({ rows });
       </template>
     </div>
 
+    <MdrPrint v-if="job?.kind === 'mdr'" :rows="job.data" :contract-id="pcContractId" :mdl="mdl" :work-order-code="woCode" />
     <div v-if="form" class="inv-modal-backdrop" @click.self="form = null">
       <div class="inv-modal">
         <h3 class="h6">{{ form.id ? "ویرایش سند" : "سند جدید" }}</h3>
