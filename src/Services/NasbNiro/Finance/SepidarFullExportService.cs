@@ -113,8 +113,10 @@ namespace Services.NasbNiro.Finance
                 if (row == null) { row = new FnExportLayoutColumn { Key = c.Key }; _uow.Set<FnExportLayoutColumn>().Add(row); cols.Add(row); }
                 row.Title = Clean(c.Title); row.SortOrder = c.SortOrder; row.IsActive = c.IsActive;
             }
+            // the saved layout is the whole layout: columns that are not listed are switched off (never deleted)
+            foreach (FnExportLayoutColumn old in cols.Where(c => input.All(i => i.Key != c.Key))) old.IsActive = false;
             await _uow.SaveChangesAsync(ct);
-            return ResponseDtoHelper.Ok(cols.OrderBy(c => c.SortOrder).ThenBy(c => c.Id).Select(ToDto).ToList());
+            return ResponseDtoHelper.Ok(cols.OrderByDescending(c => c.IsActive).ThenBy(c => c.SortOrder).ThenBy(c => c.Id).Select(ToDto).ToList());
         }
 
         // ------------------------------------------------------------------------------------------ mapping
