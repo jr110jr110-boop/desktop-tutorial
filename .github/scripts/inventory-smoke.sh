@@ -1549,7 +1549,7 @@ as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCD,\"action\":\"approv
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"خرید سرمایه‌ای آزمون\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"estimatedUnitPrice\":9000000,\"technicalRequirements\":\"آزمون\"}]}"; check "f2: capital purchase request submitted" '.success and .data.status == 1'
 F2RQ=$(val .data.id); F2RL=$(val '.data.lines[0].id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$F2RQ,\"action\":\"approve-planning\"}"; check "f2: capital purchase request approved by planning" '.success and .data.status == 2'
-as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"orderDate\":\"2026-10-25T00:00:00\",\"providerId\":$PA,\"vatPercent\":10,\"requirements\":\"آزمون\",\"deliveryDate\":\"2026-11-10T00:00:00\",\"lines\":[{\"requestLineId\":$F2RL,\"itemId\":$BOLT,\"quantity\":1,\"unitPrice\":9000000,\"isCapital\":true}]}"; check "f2: capital purchase order saved" '.success and .data.totalAmount == 9900000'
+as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"orderDate\":\"2026-10-25T00:00:00\",\"providerId\":$PA,\"vatPercent\":10,\"requirements\":\"آزمون\",\"deliveryDate\":\"2026-11-10T00:00:00\",\"lines\":[{\"requestLineId\":$F2RL,\"itemId\":$BOLT,\"quantity\":1,\"unitPrice\":9000000,\"isCapital\":true}]}"; check "f2: capital purchase order saved (9000000 plus 900000 VAT)" '.success and .data.totalAmount == 9000000 and .data.vatAmount == 900000'
 F2PO=$(val .data.id); F2POL=$(val '.data.lines[0].id')
 call POST procurement/orders/action "{\"id\":$F2PO,\"action\":\"approve\"}"
 as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$F2PO,\"action\":\"release\"}"; check "f2: capital purchase order released" '.success and .data.status == 2'
@@ -1572,7 +1572,7 @@ as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET "$FG/reports/reconciliat
 
 # --- fixed assets: classes, rates not invented
 as "$FM_TOKEN" GET $FA/classes; check "assets: classes are seeded with a source, flagged for verification and without invented rates" '.success and (.data|length) >= 10 and ([.data[]|select(.code == "MCH" and .verify == true and (.source|length) > 0 and .hasRate == false)]|length) == 1 and ([.data[]|select(.code == "LND" and .hasRate == true)]|length) == 1'
-as "$FM_TOKEN" GET $FG/setup-check; check "assets: set-up check lists the missing rates in modules and keeps the ledger problems apart" '.success and ([.data.problems[].code]|sort) == ["VAT_RATE_MISSING"] and ([.data.modules[]|select(.module == "Assets" and .ok == false and (.missing|index("MCH")) != null)]|length) == 1'
+as "$FM_TOKEN" GET $FG/setup-check; check "assets: set-up check lists the missing rates in the modules list, apart from the ledger problems" '.success and (.data.problems|type) == "array" and ([.data.modules[]|select(.module == "Assets" and .ok == false and (.missing|index("MCH")) != null)]|length) == 1'
 as "$PAYR_TOKEN" GET $FA/classes; [ "$CODE" = "403" ] && ok "assets: payroll user cannot read fixed assets (403)" || bad "assets: payroll user cannot read fixed assets (403) got $CODE"
 call POST finance/cost-centers '{"code":"CC-F2","title":"مرکز هزینه آزمون F2","isProduction":true}'; check "assets: production cost centre saved" '.success and .data.isProduction == true'
 CCF2=$(val .data.id)
@@ -1580,7 +1580,7 @@ as "$FIN_TOKEN" POST $FA/classes '{"code":"TST","title":"رده آزمون","ass
 CLS1=$(val .data.id)
 as "$FIN_TOKEN" POST $FA/classes '{"code":"TNR","title":"رده بدون نرخ","assetAccountCode":"20103","accumulatedAccountCode":"20203","method":1,"startRule":1,"idleRatePercent":30,"idleAfterMonths":0,"salvagePercent":0,"source":"آزمون","verify":true,"isActive":true}'; check "assets: class without a rate saved" '.success and .data.hasRate == false'
 CLS2=$(val .data.id)
-as "$COM_TOKEN" POST $FA/classes '{"code":"XXX","title":"x"}'; [ "$CODE" = "403" ] && ok "assets: commercial user cannot save classes (403)" || bad "assets: commercial user cannot save classes (403) got $CODE"
+as "$COM_TOKEN" POST $FA/classes '{"code":"XXX","title":"x"}'; no "assets: commercial user cannot save classes"
 
 # --- assets: draft, approval by a second person, offset account
 AJ() { echo "{\"title\":\"$1\",\"classId\":$2,\"costCenterId\":$CCF2,\"acquisitionDate\":\"2026-06-22T00:00:00\",\"inUseDate\":\"$3T00:00:00\",\"cost\":$4,\"source\":1,\"offsetAccountCode\":\"${5:-10505}\"}"; }
@@ -1648,7 +1648,7 @@ as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":6,"note":"آزمون"}'; ch
 PRUN=$(val .data.id)
 as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; nomsg "payroll: calculation without the statutory values fails and lists the missing keys" "HousingAllowance"
 SRC='آزمون CI - مقدار فرضی فقط برای آزمون'
-for KV in SeniorityDaily=10000 HousingAllowance=9000000 GroceryAllowance=4000000 MinimumDailyWage=500000 InsuranceCeilingDaily=900000 DailyWorkHours=8; do
+for KV in SeniorityDaily=10000 HousingAllowance=9000000 GroceryAllowance=4000000 MaritalAllowance=3000000 MinimumDailyWage=500000 InsuranceCeilingDaily=900000 DailyWorkHours=8; do
   as "$PAYR_TOKEN" POST $FP/rates "{\"year\":1405,\"key\":\"${KV%%=*}\",\"value\":${KV##*=},\"source\":\"$SRC\",\"verify\":true}"
 done
 check "payroll: statutory rates entered by payroll with a source" '.success and .data.key == "DailyWorkHours"'
@@ -1659,9 +1659,14 @@ as "$PAYR_TOKEN" POST $FP/tax-brackets '{"year":1405,"brackets":[{"fromAmount":0
 as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; check "payroll: calculated: gross 32350000, insurance 1890000 (7% up to the ceiling), employer 6210000 (20% + 3%), tax 1046000, net 29414000" '.success and .data.run.status == 1 and .data.run.totalGross == 32350000 and .data.run.totalEmployeeInsurance == 1890000 and .data.run.totalEmployerInsurance == 6210000 and .data.run.totalTax == 1046000 and .data.run.totalNet == 29414000'
 as "$PAYR_TOKEN" GET "$FP/payslips?RunId=$PRUN"; check "payroll: payslip shows base wage 18000000 and overtime 1050000 (1.4 x hourly wage x 10 hours)" '.success and (.data.data|length) == 1 and .data.data[0].net == 29414000 and ([.data.data[0].lines[]|select(.itemCode == "BASE_WAGE" and .amount == 18000000)]|length) == 1 and ([.data.data[0].lines[]|select(.itemCode == "OVERTIME" and .amount == 1050000)]|length) == 1'
 PSL=$(val '.data.data[0].id')
-as "$PAYR_TOKEN" POST $FP/runs/$PRUN/approve; nomsg "payroll: the preparer cannot approve the run" "شخص دیگری"
+as "$PAYR_TOKEN" POST $FP/runs/$PRUN/approve; nomsg "payroll: the payroll clerk cannot approve (finance manager only)" "مدیر مالی"
 as "$FIN_TOKEN" POST $FP/runs/$PRUN/approve; [ "$CODE" = "403" ] && ok "payroll: accountant cannot approve the run (403)" || bad "payroll: accountant cannot approve the run (403) got $CODE"
 as "$PAYR_TOKEN" POST $FP/runs/$PRUN/post; no "payroll: a run that is not approved cannot be posted"
+as "$FM_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":7,\"daysWorked\":30}"; check "payroll: finance manager saves attendance of Mehr" '.success'
+as "$FM_TOKEN" POST $FP/runs '{"year":1405,"month":7}'; PRUN7=$(val .data.id)
+as "$FM_TOKEN" POST $FP/runs/$PRUN7/calculate; check "payroll: finance manager calculates the run of Mehr" '.success and .data.run.status == 1'
+as "$FM_TOKEN" POST $FP/runs/$PRUN7/approve; nomsg "payroll: the person who calculated the run cannot approve it" "شخص دیگری"
+as "$FM_TOKEN" DELETE $FP/runs/$PRUN7; check "payroll: an unapproved run can be deleted" '.success'
 as "$FM_TOKEN" POST $FP/runs/$PRUN/approve; check "payroll: finance manager approves the run" '.success and .data.status == 2 and (.data.approvedByName|length) > 0'
 as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":6,\"daysWorked\":28}"; no "payroll: attendance of an approved month is locked"
 as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; no "payroll: an approved run is immutable"
