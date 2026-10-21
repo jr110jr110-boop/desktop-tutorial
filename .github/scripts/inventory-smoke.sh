@@ -1241,8 +1241,9 @@ if [ "${PCMSP%% *}" = "200" ] && echo "$PCMSP" | grep -qi "xml" && grep -q "<Pro
 rm -f "$OUT/pc-msp.tmp"
 
 as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\"}"; no "pc: final book of an incomplete data book is refused"
-as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: final book (client variant) issued as controlled document R01 with a hash" '.success and .data.revision == "R01" and (.data.hash|length) > 10 and .data.controlledDocumentId != null and (.data.documentCode|endswith("-L"))'
-as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: re-issue makes revision R02" '.success and .data.revision == "R02"'
+as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: incomplete final book by DCC refused (PMO only)" '.success == false'
+call POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: final book (client variant) issued as controlled document R01 with a hash" '.success and .data.revision == "R01" and (.data.hash|length) > 10 and .data.controlledDocumentId != null and (.data.documentCode|endswith("-L"))'
+call POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: re-issue makes revision R02" '.success and .data.revision == "R02"'
 as "$DCC_TOKEN" GET "$PC/final-books?WorkOrderId=$PCW1"; check "pc: final books listed" '.success and (.data.data|length) == 2'
 
 # --- second contract: WBS generation from the work order, plan run, cycle checks (new and legacy predecessors)

@@ -477,6 +477,8 @@ namespace Services.NasbNiro.ProjectControl
             if (!built.Success || built.Data == null) return Bad<PcFinalBookDto>(built.Message ?? "ساخت کتاب نهایی ممکن نشد.");
             DataBookDto book = built.Data;
             if (book.MissingCount > 0 && !dto.AllowIncomplete) return Bad<PcFinalBookDto>($"کتاب نهایی {book.MissingCount} مورد الزامی ناقص دارد؛ برای صدور موقت «صدور ناقص» را انتخاب کنید.");
+            if (book.MissingCount > 0 && !_user.IsInRole(ProjectControlRoles.Pmo))
+                return Bad<PcFinalBookDto>("صدور کتاب نهایی ناقص فقط با تایید معاونت PMO مجاز است.");
 
             DateTimeOffset now = DateTimeOffset.Now;
             string json = JsonSerializer.Serialize(book);
