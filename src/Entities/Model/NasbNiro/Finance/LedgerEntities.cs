@@ -114,6 +114,8 @@ namespace Entities.Model.NasbNiro.Finance
         /// <summary>Only for the tax and insurance exports.</summary>
         public string SepidarCode { get; set; }
         public string Jurisdiction { get; set; }
+        /// <summary>Monetary item in foreign currency (cash/bank, receivable, payable, advance, loan): revalued at period end (F3).</summary>
+        public bool IsMonetaryForeign { get; set; }
     }
 
     public class FnDetailAccount
@@ -157,6 +159,9 @@ namespace Entities.Model.NasbNiro.Finance
         /// <summary>CEO approval, required when the amount reaches an approval threshold.</summary>
         public int? CeoApprovedByUserId { get; set; }
         public DateTimeOffset? CeoApprovedAt { get; set; }
+        /// <summary>Accrual-type manual voucher: the system drafts its reversal on day 1 of the next period (F3).</summary>
+        public bool ReverseNextPeriod { get; set; }
+        public int? AutoReversalVoucherId { get; set; }
 
         public int CreatedByUserId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }

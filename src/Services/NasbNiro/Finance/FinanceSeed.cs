@@ -218,6 +218,8 @@ namespace Services.NasbNiro.Finance
         public const string SettingCloseEnforce = "CloseChecklist.Enforce";
         public const string SettingParallelMonths = "ParallelRun.RequiredMonths";
         public const string SettingSepidarExport = "Finance:SepidarFullExport";
+        public const string SettingFxRateType = "Fx.RateType";
+        public const string SettingFxAutoReverse = "Fx.AutoReverse";
 
         public static IEnumerable<FnSetting> SettingSeeds()
         {
@@ -226,6 +228,8 @@ namespace Services.NasbNiro.Finance
             yield return new FnSetting { Key = "MatchDays", Value = "3", Title = "بازه روز برای تطبیق خودکار صورت‌حساب بانکی (★)" };
             yield return new FnSetting { Key = SettingCloseEnforce, Value = "0", Title = "الزام فهرست کنترل بستن دوره برای قفل کردن دوره (۱ = فعال؛ پیش از راه‌اندازی خاموش است)" };
             yield return new FnSetting { Key = SettingSepidarExport, Value = "0", Title = "خروجی کامل اسناد برای سپیدار (جایگزین؛ پیش‌فرض خاموش است و مسیر صف خروجی F2 فعال می‌ماند)" };
+            yield return new FnSetting { Key = SettingFxRateType, Value = "1", Title = "نوع نرخ ارز برای تسعیر پایان دوره (۱ رسمی، ۲ توافقی، ۳ آزاد) ★" };
+            yield return new FnSetting { Key = SettingFxAutoReverse, Value = "1", Title = "برگشت خودکار سند تسعیر در روز اول دوره بعد (۱ = فعال) ★" };
             yield return new FnSetting { Key = SettingParallelMonths, Value = "3", Title = "تعداد ماه‌های متوالی بدون مغایرت توضیح‌نشده برای راه‌اندازی (★)" };
         }
 

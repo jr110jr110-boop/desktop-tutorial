@@ -60,6 +60,20 @@ namespace Services.NasbNiro.Finance
         // release F3 (561..600 are reserved for the F3 counters of the whole system)
         public const int IntercompanyPost = 561;
         public const int VoucherExport = 562;
+        public const int FxRevaluation = 563;
+        public const int FxSettlement = 564;
+        public const int LetterOfCredit = 565;
+        public const int Budget = 566;
+        public const int OverheadAllocation = 567;
+        public const int WorkOrderClose = 568;
+        public const int RevenueRecognition = 569;
+        public const int Deferral = 570;
+        public const int Provision = 571;
+        public const int Loan = 572;
+        public const int SettlementRun = 573;
+        public const int PaymentProposal = 574;
+        public const int DunningLetter = 575;
+        public const int TaxAdjustment = 576;
     }
 
     internal static class LedgerMath
