@@ -40,6 +40,13 @@ const tiles = (d: any) => [
   { title: "سند انبار در انتظار تایید", value: num(d.documentsWaitingApproval), link: "/inventory/documents" },
   { title: "رویداد حسابداری در صف", value: num(d.eventsPending), sub: d.lastEventSent ? "آخرین ارسال " + jalali(d.lastEventSent, true) : "", link: "/finance/events" },
   { title: "رویداد حسابداری ناموفق", value: num(d.eventsFailed), link: "/finance/events", warn: d.eventsFailed > 0 },
+  { title: "CAPA عقب‌افتاده", value: num(d.overdueCapas), link: "/quality/capa", warn: d.overdueCapas > 0 },
+  { title: "کالیبراسیون عقب‌افتاده", value: num(d.calibrationOverdue), link: "/quality/calibration", warn: d.calibrationOverdue > 0 },
+  { title: "کالیبراسیون سررسید ۳۰ روز آینده", value: num(d.calibrationDue30), link: "/quality/calibration" },
+  { title: "نقاط توقف (H/W) در انتظار", value: num(d.pendingHPoints), link: "/quality/itp", warn: d.pendingHPoints > 0 },
+  { title: "گواهی‌های در آستانه انقضا", value: num(d.qualificationsLapsing), link: "/quality/personnel", warn: d.qualificationsLapsing > 0 },
+  { title: "شکایت مشتری عقب‌افتاده", value: num(d.complaintsOverdue), link: "/quality/complaints", warn: d.complaintsOverdue > 0 },
+  { title: "اعلام بازرسی شاهد سررسیدشده", value: num(d.witnessNoticesDue), link: "/quality/itp" },
 ];
 
 onMounted(load);

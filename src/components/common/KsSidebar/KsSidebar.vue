@@ -334,6 +334,13 @@ const links = {
     { title: "گزارش جوشکاری", routeName: "QualityWeldLogs", disabled: !hasRole(QualityRoles.readers) },
     { title: "گواهی‌های مواد (EN 10204)", routeName: "QualityCertificates", disabled: !hasRole(QualityRoles.readers) },
     { title: "ردیابی سریال و بچ", routeName: "QualityTraceability", disabled: !hasRole(QualityRoles.readers) },
+    { title: "اقدام اصلاحی و پیشگیرانه (CAPA)", routeName: "QualityCapas", disabled: !hasRole(QualityRoles.readers) },
+    { title: "برگه‌های ترخیص", routeName: "QualityReleaseNotes", disabled: !hasRole(QualityRoles.readers) },
+    { title: "شکایات مشتری", routeName: "QualityComplaints", disabled: !hasRole(QualityRoles.readers) },
+    { title: "کنترل مدارک", routeName: "QualityDocuments", disabled: !hasRole(QualityRoles.readers) },
+    { title: "ممیزی داخلی", routeName: "QualityAudits", disabled: !hasRole(QualityRoles.readers) },
+    { title: "بازنگری مدیریت", routeName: "QualityReviews", disabled: !hasRole(QualityRoles.readers) },
+    { title: "تنظیمات کیفیت", routeName: "QualitySettings", disabled: !hasRole(QualityRoles.readers) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },

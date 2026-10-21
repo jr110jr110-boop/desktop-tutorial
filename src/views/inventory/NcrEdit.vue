@@ -17,6 +17,8 @@ import {
   rowsOf,
   saveNcr,
 } from "@/api/InventoryAPIs";
+import { getEquipmentList } from "@/api/QualityAPIs";
+import { qualityFormCodes, rootCauseMethods } from "@/composables/quality";
 import {
   fail,
   jalali,
@@ -31,7 +33,7 @@ import {
   today,
   warehouseKinds,
 } from "@/composables/inventory";
-import { hasRole, InventoryRoles, Roles } from "@/composables/roles";
+import { hasRole, InventoryRoles, QualityRoles, Roles } from "@/composables/roles";
 
 // Non-conformance report (FO-QC-013, procedure PR-QC-002): quality creates it, quality / engineering / manufacturing sign,
 // engineering issues the concession, the warehouse executes the decision, quality closes it after the effectiveness check.
@@ -49,6 +51,7 @@ const targetWarehouseId = ref<number | null>(null);
 const effectiveness = ref("");
 const cancelReason = ref("");
 const supplierReturn = ref<any>(null);
+const equipment = ref<any[]>([]);
 const printMode = ref<"ncr" | "return">("ncr");
 
 const isNew = computed(() => !ncr.value?.id);
@@ -60,8 +63,13 @@ const targetOptions = computed(() =>
   ncr.value?.disposition === 4 ? warehouses.value.filter((w) => w.kind === 6) : warehouses.value.filter((w) => ![5, 6, 7].includes(w.kind))
 );
 const canQc = hasRole(InventoryRoles.qc);
+const equipmentLabel = (id: number | null) => {
+  const e = equipment.value.find((x) => x.id === id);
+  return e ? `${e.code} ${e.name}` : "-";
+};
 const canSign = (role: string) => hasRole([role]);
 const canExecute = hasRole(InventoryRoles.executeNcr);
+const canCapa = hasRole(QualityRoles.capaStaff);
 
 function blank() {
   return {
@@ -94,6 +102,12 @@ function blank() {
     correctiveAction: "",
     correctiveActionOwner: "",
     correctiveActionDueDate: null,
+    dueDate: null,
+    rootCauseMethod: 0,
+    costImpact: null,
+    timeImpactDays: null,
+    customerReturnRef: "",
+    affectedEquipmentId: null,
   };
 }
 
@@ -103,6 +117,7 @@ function load(dto: any) {
     reportDate: (dto.reportDate || "").slice(0, 10),
     serialText: (dto.serialNumbers || []).join("\n"),
     correctiveActionDueDate: dto.correctiveActionDueDate ? dto.correctiveActionDueDate.slice(0, 10) : null,
+    dueDate: dto.dueDate ? dto.dueDate.slice(0, 10) : null,
   };
   item.value = { id: dto.itemId, code: dto.itemCode, title: dto.itemTitle, unit: dto.unit };
   targetWarehouseId.value = dto.targetWarehouseId;
@@ -131,6 +146,13 @@ async function save(silent = false): Promise<boolean> {
       .map((s: string) => s.trim())
       .filter(Boolean),
     correctiveActionDueDate: n.correctiveActionDueDate || null,
+    // quality module additions (spec 5.5); an empty due date lets the API apply its default (minor 7 days, major 14 days)
+    dueDate: n.dueDate || null,
+    rootCauseMethod: Number(n.rootCauseMethod) || 0,
+    costImpact: n.costImpact === "" || n.costImpact === null ? null : Number(n.costImpact),
+    timeImpactDays: n.timeImpactDays === "" || n.timeImpactDays === null ? null : Number(n.timeImpactDays),
+    customerReturnRef: n.customerReturnRef || null,
+    affectedEquipmentId: n.affectedEquipmentId || null,
   });
   busy.value = false;
   if (error) {
@@ -198,6 +220,7 @@ onMounted(async () => {
   getProviders().then(([list]) => (providers.value = rowsOf(list)));
   getWorkOrders().then(([list]) => (workOrders.value = rowsOf(list)));
   getContracts().then(([list]) => (contracts.value = rowsOf(list)));
+  getEquipmentList({ PageSize: 300 }).then(([list]) => (equipment.value = rowsOf(list)));
   if (route.params.id === "new") {
     ncr.value = blank();
   } else {
@@ -215,7 +238,7 @@ onMounted(async () => {
     <PrintForm
       v-if="printMode === 'ncr' && !isNew"
       title="گزارش عدم انطباق (NCR)"
-      form-code="FO-QC-013"
+      :form-code="qualityFormCodes.ncr"
       :fields="[
         { label: 'شماره', value: ncr.number, ltr: true },
         { label: 'تاریخ', value: jalali(ncr.reportDate) },
@@ -227,6 +250,13 @@ onMounted(async () => {
         { label: 'رسید', value: ncr.receiptNumber || '-', ltr: true },
         { label: 'دستور ساخت', value: ncr.workOrderCode || '-' },
         { label: 'قرارداد', value: ncr.contractCode || '-' },
+        { label: 'مهلت تصمیم', value: jalali(ncr.dueDate) || '-' },
+        { label: 'روش تحلیل علت', value: rootCauseMethods[ncr.rootCauseMethod] },
+        { label: 'اثر هزینه (ریال)', value: ncr.costImpact === null || ncr.costImpact === undefined ? '-' : rial(ncr.costImpact) },
+        { label: 'اثر زمان (روز)', value: ncr.timeImpactDays ?? '-' },
+        { label: 'مرجع برگشت مشتری', value: ncr.customerReturnRef || '-', ltr: true },
+        { label: 'CAPA مرتبط', value: ncr.capaNumber || '-', ltr: true },
+        { label: 'تجهیز اندازه‌گیری مرتبط', value: equipmentLabel(ncr.affectedEquipmentId), ltr: true },
       ]"
       :signatures="[
         { title: 'کنترل کیفیت', name: ncr.qualityApprovedByName, date: jalali(ncr.qualityApprovedAt) },
@@ -234,7 +264,7 @@ onMounted(async () => {
         { title: 'تولید', name: ncr.manufacturingApprovedByName, date: jalali(ncr.manufacturingApprovedAt) },
         { title: 'معاونت طراحی و ساخت (مجوز ارفاقی)', name: ncr.concessionApprovedByName, date: jalali(ncr.concessionApprovedAt) },
       ]"
-      distribution="توزیع نسخ: ۱- کنترل کیفیت ۲- مهندسی ۳- تولید ۴- انبار ۵- برنامه‌ریزی و کنترل پروژه">
+      distribution="توزیع نسخ: ۱- کنترل کیفیت ۲- مهندسی ۳- تولید ۴- انبار ۵- برنامه‌ریزی و کنترل پروژه ۶- تضمین کیفیت">
       <table>
         <thead>
           <tr>
@@ -563,6 +593,56 @@ onMounted(async () => {
         <button :disabled="busy" class="btn btn-sm btn-outline-danger" @click="close(true)">ابطال گزارش</button>
       </div>
       <p v-if="ncr.closedAt" class="small mt-2 mb-0">بسته شد: {{ ncr.closedByName }} {{ jalali(ncr.closedAt, true) }} — {{ ncr.effectivenessCheck }}</p>
+    </div>
+
+    <div v-if="!isNew" class="inv-card screen-only">
+      <h2 class="inv-title mb-2">مهلت، پیامدها و CAPA</h2>
+      <div class="row g-2">
+        <div class="col-md-3">
+          <label class="form-label small mb-0">مهلت تصمیم <span v-if="ncr.overdue" class="inv-badge bad">از مهلت گذشته</span></label>
+          <input v-model="ncr.dueDate" :disabled="!open" class="form-control form-control-sm" type="date" />
+          <span class="inv-muted">پیش‌فرض: جزئی ۷ روز، عمده ۱۴ روز (تنظیمات کیفیت)</span>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-0">روش تحلیل علت ریشه‌ای</label>
+          <select v-model="ncr.rootCauseMethod" :disabled="!editableFollowUp" class="form-select form-select-sm">
+            <option v-for="(t, k) in rootCauseMethods" :key="k" :value="Number(k)">{{ t }}</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-0">اثر هزینه (ریال)</label>
+          <input v-model="ncr.costImpact" :disabled="!editableFollowUp" class="form-control form-control-sm" min="0" type="number" />
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-0">اثر زمان (روز)</label>
+          <input v-model="ncr.timeImpactDays" :disabled="!editableFollowUp" class="form-control form-control-sm" min="0" type="number" />
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-0">مرجع برگشت از مشتری</label>
+          <input v-model="ncr.customerReturnRef" :disabled="!editableFollowUp" class="form-control form-control-sm inv-ltr" />
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-0">تجهیز اندازه‌گیری دخیل</label>
+          <select v-model="ncr.affectedEquipmentId" :disabled="!editableFollowUp" class="form-select form-select-sm">
+            <option :value="null">-</option>
+            <option v-for="e in equipment" :key="e.id" :value="e.id">{{ e.code }} - {{ e.name }}</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-0">CAPA مرتبط</label>
+          <div class="small pt-1">
+            <router-link v-if="ncr.capaId" :to="'/quality/capa/' + ncr.capaId" class="inv-ltr">{{ ncr.capaNumber }}</router-link>
+            <router-link
+              v-else-if="canCapa"
+              :to="{ path: '/quality/capa/new', query: { source: 1, sourceId: ncr.id, problem: 'گزارش عدم انطباق ' + ncr.number + ': ' + (ncr.description || '') } }">
+              ثبت CAPA برای این NCR
+            </router-link>
+            <span v-else class="inv-muted">ندارد</span>
+          </div>
+        </div>
+      </div>
+      <p v-if="ncr.sourceRecordNumber" class="small mt-2 mb-0">ایجاد خودکار از سند کیفیت: <span class="inv-ltr">{{ ncr.sourceRecordNumber }}</span></p>
+      <p v-if="ncr.severity === 2" class="inv-muted mt-2 mb-0">عدم انطباق عمده کمیته فنی با حداقل سه عضو (کیفیت، مهندسی، تولید) می‌خواهد و CAPA آن را سیستم پیش‌نویس می‌کند.</p>
     </div>
   </div>
 </template>

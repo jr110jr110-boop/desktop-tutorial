@@ -132,3 +132,9 @@ export function usePaged(fetcher: (params: any) => Promise<any>, filters: Ref<an
   const pages = () => Math.max(1, Math.ceil(total.value / pageSize));
   return { rows, total, page, loading, load, search, go, pages };
 }
+
+export const reviewInputCategories: Record<number, string> = {
+  1: "وضعیت اقدامات جلسات قبل", 2: "تغییر در موضوعات داخلی و خارجی", 3: "رضایت مشتری و بازخورد", 4: "میزان تحقق اهداف کیفیت",
+  5: "عملکرد فرایندها و انطباق محصول", 6: "عدم انطباق‌ها و اقدامات اصلاحی", 7: "نتایج پایش و اندازه‌گیری", 8: "نتایج ممیزی‌ها",
+  9: "عملکرد تامین‌کنندگان بیرونی", 10: "کفایت منابع", 11: "اثربخشی اقدامات مقابله با ریسک", 12: "فرصت‌های بهبود",
+};
