@@ -269,7 +269,7 @@ namespace Services.NasbNiro.Finance
             return rows.Select(p => new PaymentDto
             {
                 Id = p.Id, Number = p.Number, Date = p.Date, Status = p.Status, Purpose = p.Purpose, ProviderId = p.ProviderId,
-                ProviderName = p.ProviderId.HasValue && providers.TryGetValue(p.ProviderId.Value, out string pn) ? pn : null, PettyCashId = p.PettyCashId,
+                ProviderName = p.ProviderId.HasValue && providers.TryGetValue(p.ProviderId.Value, out string pn) ? pn : null, PettyCashId = p.PettyCashId, PayrollRunId = p.PayrollRunId,
                 PayeeName = p.PayeeName, Description = p.Description, GrossAmount = p.GrossAmount, DeductionAmount = p.DeductionAmount, NetAmount = p.NetAmount,
                 CreatorName = names.Name(p.CreatedByUserId), PostedByName = names.Name(p.PostedByUserId), PostedAt = p.PostedAt, IbanApprovedByUserId = p.IbanApprovedByUserId,
                 Lines = p.Lines.OrderBy(l => l.RowNumber).Select(l => new PaymentLineDto
@@ -326,7 +326,7 @@ namespace Services.NasbNiro.Finance
             }
 
             decimal gross, deductions;
-            int? providerId = null, pettyCashId = null;
+            int? providerId = null, pettyCashId = null, payrollRunId = null;
             string payee;
             List<PaymentRequest> requests = new List<PaymentRequest>();
             string registeredIban = null;
@@ -358,6 +358,19 @@ namespace Services.NasbNiro.Finance
                 pettyCashId = petty.Id;
                 gross = top; deductions = 0;
                 payee = (await InventoryUsers.GetNamesAsync(_uow, new int?[] { petty.HolderUserId }, ct)).Name(petty.HolderUserId) ?? petty.HolderTitle;
+            }
+            else if (dto.Purpose == FnPaymentPurpose.Payroll)
+            {
+                if (!dto.PayrollRunId.HasValue) return Bad<PaymentDto>("دوره حقوق (پرداخت‌نشده) را مشخص کنید.");
+                FnPayrollRun run = await _uow.Set<FnPayrollRun>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == dto.PayrollRunId.Value, ct);
+                if (run == null) return Bad<PaymentDto>("دوره حقوق پیدا نشد.");
+                if (run.Status != FnPayrollStatus.Posted) return Bad<PaymentDto>("فقط دوره حقوق تاییدشده‌ای که سند حسابداری آن ثبت شده پرداخت می‌شود.");
+                int selfId = payment?.Id ?? 0;
+                if (await _uow.Set<FnPayment>().AnyAsync(x => x.PayrollRunId == run.Id && x.Status != FnDocStatus.Cancelled && x.Id != selfId, ct))
+                    return Bad<PaymentDto>("برای این دوره حقوق قبلاً سند پرداخت صادر شده است.");
+                payrollRunId = run.Id;
+                gross = run.TotalNet; deductions = 0;
+                payee = $"حقوق و دستمزد {run.Year}/{run.Month:00}";
             }
             else return Bad<PaymentDto>("نوع پرداخت نامعتبر است.");
             decimal net = gross - deductions;
@@ -398,7 +411,7 @@ namespace Services.NasbNiro.Finance
                     }
                     case FnInstrument.Cheque:
                     {
-                        if (dto.Purpose != FnPaymentPurpose.Supplier) return Bad<PaymentDto>($"ردیف {row}: تنخواه با چک شارژ نمی‌شود.");
+                        if (dto.Purpose != FnPaymentPurpose.Supplier) return Bad<PaymentDto>($"ردیف {row}: این نوع پرداخت (تنخواه یا حقوق) با چک انجام نمی‌شود.");
                         if (!l.BankAccountId.HasValue || !banks.TryGetValue(l.BankAccountId.Value, out FnBankAccount bank) || !bank.IsActive) return Bad<PaymentDto>($"ردیف {row}: حساب بانکی چک پیدا نشد یا غیرفعال است.");
                         IQueryable<FnIssuedCheque> leaves = _uow.Set<FnIssuedCheque>().Include(x => x.ChequeBook);
                         FnIssuedCheque leaf = l.IssuedChequeId.HasValue
@@ -440,7 +453,7 @@ namespace Services.NasbNiro.Finance
                 payment.Lines = new List<FnPaymentLine>();
                 payment.Requests = new List<FnPaymentRequestLink>();
             }
-            payment.Date = date; payment.Purpose = dto.Purpose; payment.ProviderId = providerId; payment.PettyCashId = pettyCashId; payment.PayeeName = payee;
+            payment.Date = date; payment.Purpose = dto.Purpose; payment.ProviderId = providerId; payment.PettyCashId = pettyCashId; payment.PayrollRunId = payrollRunId; payment.PayeeName = payee;
             payment.Description = Clean(dto.Description); payment.GrossAmount = gross; payment.DeductionAmount = deductions; payment.NetAmount = net;
             payment.IbanApprovedByUserId = null;
             foreach (FnPaymentLine l in lines) payment.Lines.Add(l);
@@ -563,6 +576,7 @@ namespace Services.NasbNiro.Finance
             var eventLines = new List<AccountingEventLine>();
             AccountingEventType type;
             var requests = new List<PaymentRequest>();
+            FnPayrollRun payrollRun = null;
             if (p.Purpose == FnPaymentPurpose.Supplier)
             {
                 type = AccountingEventType.SupplierPayment;
@@ -575,6 +589,14 @@ namespace Services.NasbNiro.Finance
                 }
                 List<FnPaymentDeduction> typed = await _uow.Set<FnPaymentDeduction>().Where(d => ids.Contains(d.PaymentRequestId)).ToListAsync(ct);
                 foreach (PaymentRequest r in requests) eventLines.AddRange(RequestLines(r, typed.Where(d => d.PaymentRequestId == r.Id)));
+            }
+            else if (p.Purpose == FnPaymentPurpose.Payroll)
+            {
+                type = AccountingEventType.PayrollPayment;
+                payrollRun = await _uow.Set<FnPayrollRun>().FirstOrDefaultAsync(x => x.Id == p.PayrollRunId, ct);
+                if (payrollRun == null || payrollRun.Status != FnPayrollStatus.Posted) return "دوره حقوق دیگر در وضعیت «ثبت‌شده» نیست.";
+                if (payrollRun.TotalNet != p.NetAmount) return "مبلغ پرداخت با خالص پرداختی دوره حقوق فرق دارد.";
+                eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.PayrollPayable, Debit = p.NetAmount, Description = "پرداخت حقوق " + p.Number });
             }
             else
             {
@@ -610,6 +632,7 @@ namespace Services.NasbNiro.Finance
             {
                 r.Status = PaymentRequestStatus.Paid; r.PaidAt = now; r.PaidByUserId = Me; r.PaymentReference = p.Number;
             }
+            if (payrollRun != null) { payrollRun.Status = FnPayrollStatus.Paid; payrollRun.PaidAt = now; }
             p.Status = FnDocStatus.Posted; p.PostedByUserId = Me; p.PostedAt = now;
             return null;
         }

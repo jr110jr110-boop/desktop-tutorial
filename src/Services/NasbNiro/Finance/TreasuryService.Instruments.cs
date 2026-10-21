@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.ProjectControl;
+using Entities.Model.NasbNiro.Procurement;
 using Entities.Model.NasbNiro.Providers;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
@@ -499,11 +500,43 @@ namespace Services.NasbNiro.Finance
                 {
                     if (c.Status != FnIssuedChequeStatus.Issued) return Bad<IssuedChequeDto>("فقط چک صادرشده باطل می‌شود.");
                     if (Clean(dto.Note) == null) return Bad<IssuedChequeDto>("علت ابطال چک را بنویسید.");
-                    _costing.AddEvent(AccountingEventType.IssuedChequeCancelled, date, "FnIssuedCheque", c.Id, c.Serial.ToString(), $"ابطال چک صادره {c.Serial}", new[]
+                    FnPayment source = c.PaymentId.HasValue
+                        ? await _uow.Set<FnPayment>().Include(x => x.Lines).Include(x => x.Requests).FirstOrDefaultAsync(x => x.Id == c.PaymentId.Value, ct) : null;
+                    AccountingEvent original = null;
+                    // a payment that consists of this one cheque only is cancelled as a whole and its requests can be paid again
+                    bool whole = source != null && source.Purpose == FnPaymentPurpose.Supplier && source.Status == FnDocStatus.Posted && source.Lines.Count == 1
+                        && source.Lines.First().IssuedChequeId == c.Id && source.Requests.Count > 0;
+                    if (whole)
                     {
-                        new AccountingEventLine { AccountRole = AccountRoles.ChequesPayable, Debit = c.Amount, ProviderId = c.ProviderId, Description = "ابطال چک " + c.Serial },
-                        new AccountingEventLine { AccountRole = AccountRoles.AccountsPayable, Credit = c.Amount, ProviderId = c.ProviderId, Description = "بازگشت بدهی - چک ابطال‌شده " + c.Serial },
-                    });
+                        original = await _uow.Set<AccountingEvent>().Include(e => e.Lines)
+                            .FirstOrDefaultAsync(e => e.SourceType == "FnPayment" && e.SourceId == source.Id && e.Type == AccountingEventType.SupplierPayment && e.ReversesEventId == null, ct);
+                        whole = original != null;
+                    }
+                    if (whole)
+                    {
+                        AccountingEvent reversal = _costing.AddEvent(AccountingEventType.Reversal, date, "FnPayment", source.Id, source.Number, $"ابطال پرداخت {source.Number} (ابطال چک {c.Serial})",
+                            original.Lines.OrderBy(l => l.RowNumber).Select(l => new AccountingEventLine
+                            {
+                                AccountRole = l.AccountRole, Debit = l.Credit, Credit = l.Debit, ProviderId = l.ProviderId, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId,
+                                CostCenter = l.CostCenter, PartyType = l.PartyType, PartyId = l.PartyId, Description = "ابطال - " + l.Description,
+                            }).ToList());
+                        reversal.ReversesEventId = original.Id;
+                        List<int> requestIds = source.Requests.Select(k => k.PaymentRequestId).ToList();
+                        foreach (PaymentRequest r in await _uow.Set<PaymentRequest>().Where(r => requestIds.Contains(r.Id)).ToListAsync(ct))
+                        {
+                            if (r.Status != PaymentRequestStatus.Paid) continue;
+                            r.Status = PaymentRequestStatus.Approved; r.PaidAt = null; r.PaidByUserId = null; r.PaymentReference = null;
+                        }
+                        source.Status = FnDocStatus.Cancelled;
+                    }
+                    else
+                    {
+                        _costing.AddEvent(AccountingEventType.IssuedChequeCancelled, date, "FnIssuedCheque", c.Id, c.Serial.ToString(), $"ابطال چک صادره {c.Serial}", new[]
+                        {
+                            new AccountingEventLine { AccountRole = AccountRoles.ChequesPayable, Debit = c.Amount, ProviderId = c.ProviderId, Description = "ابطال چک " + c.Serial },
+                            new AccountingEventLine { AccountRole = AccountRoles.AccountsPayable, Credit = c.Amount, ProviderId = c.ProviderId, Description = "بازگشت بدهی - چک ابطال‌شده " + c.Serial },
+                        });
+                    }
                     c.Status = FnIssuedChequeStatus.Cancelled; c.VoidReason = Clean(dto.Note);
                     break;
                 }

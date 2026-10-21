@@ -65,6 +65,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Title { get; set; }
         public string SepidarCode { get; set; }
         public bool IsActive { get; set; } = true;
+        /// <summary>Production cost centre: payroll and depreciation post to the production accounts.</summary>
+        public bool IsProduction { get; set; }
     }
 
     public class FinanceCheckDto

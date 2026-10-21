@@ -16,6 +16,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
         {
             builder.AddFinanceConfigurations();
             builder.AddLedgerConfigurations();
+            builder.AddAssetsPayrollConfigurations();
             builder.AddProcurementConfigurations();
             builder.AddQualityConfigurations();
             builder.AddProjectControlConfigurations();

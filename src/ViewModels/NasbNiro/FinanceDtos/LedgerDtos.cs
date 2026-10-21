@@ -444,6 +444,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public List<SetupProblemDto> Problems { get; set; } = new List<SetupProblemDto>();
         /// <summary>Seeded ratios that finance must confirm once (not problems).</summary>
         public List<string> ToVerify { get; set; } = new List<string>();
+        /// <summary>Release F2: what the optional modules (assets, payroll) still need; these do not count as problems of the ledger.</summary>
+        public List<SetupModuleDto> Modules { get; set; } = new List<SetupModuleDto>();
     }
 
     // ============================================================================================ tax
@@ -627,6 +629,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? ProviderId { get; set; }
         public string ProviderName { get; set; }
         public int? PettyCashId { get; set; }
+        public int? PayrollRunId { get; set; }
         public string PayeeName { get; set; }
         public string Description { get; set; }
         public decimal GrossAmount { get; set; }
@@ -648,6 +651,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         /// <summary>Approved payment requests (of one supplier) paid by this payment.</summary>
         public List<int> PaymentRequestIds { get; set; } = new List<int>();
         public int? PettyCashId { get; set; }
+        /// <summary>Payroll purpose: the Posted payroll run that is paid (the amount is the run's net total).</summary>
+        public int? PayrollRunId { get; set; }
         /// <summary>Amount of a petty-cash top-up.</summary>
         public decimal? TopUpAmount { get; set; }
         public string Description { get; set; }
@@ -1207,6 +1212,14 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int IssuedChequesDue7Count { get; set; }
         public decimal NetProfitYtd { get; set; }
         public int FinanceSetupProblems { get; set; }
+        // release F2: Sepidar outbox (tax and insurance packages), fixed assets, payroll progress (counts only, never salary figures)
+        public int SepidarPendingPackages { get; set; }
+        public int SepidarFailedPackages { get; set; }
+        public DateTimeOffset? SepidarLastSentAt { get; set; }
+        public int AssetsCount { get; set; }
+        public decimal AssetsNetBookValue { get; set; }
+        public int DepreciationRunsWaiting { get; set; }
+        public int PayrollRunsInProgress { get; set; }
         public List<GrossMarginRowDto> GrossMargins { get; set; } = new List<GrossMarginRowDto>();
         public List<DashboardAlertDto> Alerts { get; set; } = new List<DashboardAlertDto>();
     }

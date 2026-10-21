@@ -630,7 +630,7 @@ namespace Services.NasbNiro.Procurement
                         Id = l.Id, RowNumber = l.RowNumber, RequestLineId = l.RequestLineId, RequestNumber = l.RequestLine?.PurchaseRequest?.Number,
                         ItemId = l.ItemId, ItemCode = l.Item?.Code, ItemTitle = l.Item?.Title, Description = l.Description, Unit = l.Unit,
                         Quantity = l.Quantity, UnitPrice = l.UnitPrice, Amount = Math.Round(l.Quantity * l.UnitPrice, 0), DeliveryDate = l.DeliveryDate,
-                        WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, ReceivedQuantity = l.ReceivedQuantity, AcceptedQuantity = acc,
+                        WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, IsCapital = l.IsCapital, ReceivedQuantity = l.ReceivedQuantity, AcceptedQuantity = acc,
                         InvoicedQuantity = l.InvoicedQuantity, OpenQuantity = Math.Max(0, l.Quantity - l.ReceivedQuantity), LastReceiptDate = l.LastReceiptDate,
                         Late = (l.DeliveryDate ?? o.DeliveryDate).HasValue && l.ReceivedQuantity < l.Quantity && (l.DeliveryDate ?? o.DeliveryDate) < DateTime.Today &&
                                o.Status != PurchaseOrderStatus.Closed && o.Status != PurchaseOrderStatus.Cancelled,
@@ -786,7 +786,7 @@ namespace Services.NasbNiro.Procurement
                 {
                     RowNumber = rowNumber++, RequestLineId = l.RequestLineId, ItemId = l.ItemId, Description = Clean(l.Description), Unit = Clean(l.Unit) ?? "عدد",
                     Quantity = l.Quantity, UnitPrice = Math.Round(l.UnitPrice * rate, 4), DeliveryDate = l.DeliveryDate?.Date ?? order.DeliveryDate,
-                    WorkOrderId = l.WorkOrderId ?? dto.WorkOrderId, ContractId = l.ContractId ?? dto.ContractId,
+                    WorkOrderId = l.WorkOrderId ?? dto.WorkOrderId, ContractId = l.ContractId ?? dto.ContractId, IsCapital = l.IsCapital,
                 });
             }
             order.TotalAmount = Math.Round(order.Lines.Sum(l => l.Quantity * l.UnitPrice), 0);

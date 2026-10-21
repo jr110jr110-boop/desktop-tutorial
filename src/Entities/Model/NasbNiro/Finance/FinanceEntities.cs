@@ -121,7 +121,10 @@ namespace Entities.Model.NasbNiro.Finance
         DepreciationRun = 50,
         AssetAcquisition = 51,
         AssetDisposal = 52,
+        AssetImprovement = 53,
+        AssetCommissioned = 54,
         PayrollRun = 60,
+        PayrollPayment = 61,
         Reversal = 99,
     }
 
@@ -229,5 +232,7 @@ namespace Entities.Model.NasbNiro.Finance
         public string Title { get; set; }
         public string SepidarCode { get; set; }
         public bool IsActive { get; set; } = true;
+        /// <summary>Production cost centre: payroll and depreciation post to the production accounts (otherwise administrative).</summary>
+        public bool IsProduction { get; set; }
     }
 }

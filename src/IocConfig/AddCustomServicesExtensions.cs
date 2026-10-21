@@ -138,6 +138,13 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.ITaxService, Services.NasbNiro.Finance.TaxService>();
             services.AddScoped<Services.NasbNiro.Finance.IFinanceDashboardService, Services.NasbNiro.Finance.FinanceDashboardService>();
             services.AddHostedService<Services.NasbNiro.Finance.FinanceEventPostHostedService>();
+            // release F2: fixed assets, payroll and insurance, Sepidar outbox
+            services.AddScoped<Services.NasbNiro.Finance.IAssetService, Services.NasbNiro.Finance.AssetService>();
+            services.AddScoped<Services.NasbNiro.Finance.IPayrollMasterService, Services.NasbNiro.Finance.PayrollMasterService>();
+            services.AddScoped<Services.NasbNiro.Finance.IPayrollRunService, Services.NasbNiro.Finance.PayrollRunService>();
+            services.AddScoped<Services.NasbNiro.Finance.ISepidarOutboxService, Services.NasbNiro.Finance.SepidarOutboxService>();
+            services.AddSingleton<Services.NasbNiro.Finance.ISepidarClient, Services.NasbNiro.Finance.FileSepidarClient>();
+            services.AddHostedService<Services.NasbNiro.Finance.FinanceF2HostedService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
 

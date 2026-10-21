@@ -108,13 +108,19 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<VatSeasonDto>> GetVatSeasonAsync(int year, int season, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<VatSeasonDto>("شما مجوز این کار را ندارید");
+            return await BuildVatSeasonAsync(_uow, year, season, ct);
+        }
+
+        /// <summary>The season report without a role check (shared with the Sepidar outbox job).</summary>
+        internal static async Task<ResponseDto<VatSeasonDto>> BuildVatSeasonAsync(IUnitOfWork uow, int year, int season, CancellationToken ct)
+        {
             if (year < 1300 || year > 1600 || season < 1 || season > 4) return Bad<VatSeasonDto>("سال یا فصل نامعتبر است.");
             DateTime from = FinanceSeed.PersianDate(year, (season - 1) * 3 + 1, 1);
             DateTime next = season == 4 ? FinanceSeed.PersianDate(year + 1, 1, 1) : FinanceSeed.PersianDate(year, season * 3 + 1, 1);
             DateTime to = next.AddDays(-1);
             var dto = new VatSeasonDto { Year = year, Season = season, From = from, To = to };
 
-            var sales = await _uow.Set<FnSalesInvoice>().AsNoTracking()
+            var sales = await uow.Set<FnSalesInvoice>().AsNoTracking()
                 .Where(i => i.Status == FnDocStatus.Posted && i.Date >= from && i.Date <= to)
                 .Select(i => new { i.CustomerId, CustomerName = i.Customer.Name, i.Customer.EconomicCode, i.Type, i.NetAmount, i.VatAmount }).ToListAsync(ct);
             foreach (var g in sales.GroupBy(s => s.CustomerId))
@@ -125,17 +131,27 @@ namespace Services.NasbNiro.Finance
                 dto.SalesNet += net; dto.SalesVat += vat;
             }
 
-            // purchases: the VAT debit lines of the accounting events of the season (one row per document)
-            var purchases = await _uow.Set<AccountingEventLine>().AsNoTracking()
-                .Where(l => l.AccountRole == AccountRoles.Vat && l.Event.Status != AccountingEventStatus.NotRequired && l.Event.EventDate >= from && l.Event.EventDate <= to)
+            // purchases: the approved supplier invoices of the season (net and VAT from the invoice itself, one row per supplier)
+            var invoices = await uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking()
+                .Where(i => !i.Deleted && i.Status == Entities.Model.NasbNiro.Procurement.SupplierInvoiceStatus.Approved && i.InvoiceDate >= from && i.InvoiceDate <= to)
+                .Select(i => new { i.ProviderId, ProviderName = i.Provider.Name, i.NetAmount, i.VatAmount }).ToListAsync(ct);
+            foreach (var g in invoices.GroupBy(i => i.ProviderId))
+            {
+                decimal net = g.Sum(x => x.NetAmount), vat = g.Sum(x => x.VatAmount);
+                dto.Rows.Add(new VatSeasonRowDto { Side = "Purchases", PartyName = g.First().ProviderName, NetAmount = net, VatAmount = vat, Documents = g.Count() });
+                dto.PurchasesNet += net; dto.PurchasesVat += vat;
+            }
+            // other documents that carry purchase VAT (not supplier invoices): VAT only, one row per document
+            var others = await uow.Set<AccountingEventLine>().AsNoTracking()
+                .Where(l => l.AccountRole == AccountRoles.Vat && l.Event.Status != AccountingEventStatus.NotRequired && l.Event.SourceType != "SupplierInvoice"
+                            && l.Event.EventDate >= from && l.Event.EventDate <= to)
                 .GroupBy(l => new { l.EventId, l.Event.Description, l.Event.SourceNumber })
                 .Select(g => new { g.Key.Description, g.Key.SourceNumber, Vat = g.Sum(x => x.Debit - x.Credit) }).Take(5000).ToListAsync(ct);
-            foreach (var p in purchases.Where(p => p.Vat != 0))
+            foreach (var p in others.Where(p => p.Vat != 0))
             {
                 dto.Rows.Add(new VatSeasonRowDto { Side = "Purchases", PartyName = p.Description ?? p.SourceNumber, VatAmount = p.Vat, Documents = 1 });
                 dto.PurchasesVat += p.Vat;
             }
-            dto.PurchasesNet = 0;   // the purchase net is not kept on the VAT line; the VAT amount is what the return needs
             dto.VatPayable = dto.SalesVat - dto.PurchasesVat;
             return ResponseDtoHelper.Ok(dto);
         }

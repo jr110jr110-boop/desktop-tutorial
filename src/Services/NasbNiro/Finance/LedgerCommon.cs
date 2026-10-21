@@ -21,6 +21,14 @@ namespace Services.NasbNiro.Finance
         /// <summary>Triggers the system jobs (post events, draft invoices).</summary>
         public const string SystemJobs = "FINANCIAL,FINANCEMANAGER,PMO";
         public const string Creator = "creator";
+
+        // release F2
+        /// <summary>Payroll preparation and the payroll master data.</summary>
+        public const string PayrollUsers = "PAYROLL,FINANCEMANAGER";
+        /// <summary>The only roles that read individual salary data.</summary>
+        public const string PayrollReaders = "PAYROLL,FINANCEMANAGER,CEO";
+        /// <summary>Sepidar outbox: lists, exports and the counters (payroll packages are filtered by <see cref="PayrollReaders"/>).</summary>
+        public const string OutboxReaders = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL";
     }
 
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (the finance module uses 441..480).</summary>
@@ -33,6 +41,15 @@ namespace Services.NasbNiro.Finance
         public const int PettyCashSettlement = 445;
         public const int Guarantee = 446;
         public const int Reconciliation = 447;
+        // release F2
+        public const int OutboxPackage = 448;
+        public const int DepreciationRun = 449;
+        public const int AssetDisposal = 450;
+        public const int PayrollRun = 451;
+        /// <summary>Asset codes per class (the "year" of the counter is the class id).</summary>
+        public const int AssetCode = 452;
+        /// <summary>Temporary codes of draft assets.</summary>
+        public const int AssetDraft = 453;
     }
 
     internal static class LedgerMath
@@ -148,6 +165,12 @@ namespace Services.NasbNiro.Finance
                 case FnDetailType.PettyCash:
                     name = await _uow.Set<FnPettyCash>().Where(x => x.Id == id).Select(x => x.HolderTitle).FirstOrDefaultAsync(ct);
                     break;
+                case FnDetailType.Asset:
+                {
+                    var a = await _uow.Set<FnAsset>().Where(x => x.Id == id).Select(x => new { x.Code, x.Title }).FirstOrDefaultAsync(ct);
+                    name = a == null ? null : (a.Code + " " + a.Title).Trim();
+                    break;
+                }
             }
             if (string.IsNullOrWhiteSpace(name)) name = Prefix(type) + "-" + id;
             return name.Length > 300 ? name.Substring(0, 300) : name;

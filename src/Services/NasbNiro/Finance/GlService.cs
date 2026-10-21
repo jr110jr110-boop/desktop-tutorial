@@ -826,6 +826,9 @@ namespace Services.NasbNiro.Finance
             if (!vat) Problem("VAT_RATE_MISSING", "نرخ مالیات بر ارزش افزوده برای سال جاری در جدول نرخ‌ها تعریف نشده است.");
 
             result.ToVerify = (await _uow.Set<FnTaxRate>().Where(r => r.Verify).Select(r => r.Kind).Distinct().ToListAsync(ct)).Select(k => k.ToString()).ToList();
+            // release F2: the optional modules report what they still need (rates are entered by finance, never invented); this is not a ledger problem
+            result.Modules.Add(await AssetService.CheckSetupAsync(_uow, ct));
+            result.Modules.Add(await PayrollMasterService.CheckSetupAsync(_uow, PersianCal.Year(today), ct));
             result.Ok = result.Problems.Count == 0;
             return ResponseDtoHelper.Ok(result);
         }

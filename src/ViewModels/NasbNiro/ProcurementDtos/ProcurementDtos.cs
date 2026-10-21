@@ -250,6 +250,8 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public DateTime? DeliveryDate { get; set; }
         public int? WorkOrderId { get; set; }
         public int? ContractId { get; set; }
+        /// <summary>Capital purchase: the approved invoice line drafts a fixed asset for finance to complete.</summary>
+        public bool IsCapital { get; set; }
     }
 
     public class PurchaseOrderQuery : PaginationParams
@@ -330,6 +332,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public DateTime? DeliveryDate { get; set; }
         public int? WorkOrderId { get; set; }
         public int? ContractId { get; set; }
+        public bool IsCapital { get; set; }
 
         /// <summary>Physically received (receipts minus returns) or accepted services.</summary>
         public decimal ReceivedQuantity { get; set; }

@@ -135,6 +135,19 @@ namespace Services.NasbNiro.Finance
             dto.NetProfitYtd = await NetProfitAsync(FinanceSeed.YearStart(FinanceSeed.PersianYearOf(today)), today, ct);
             dto.FinanceSetupProblems = (await _gl.SetupCheckAsync(ct)).Data?.Problems.Count ?? 0;
 
+            // release F2: counters only (no person-level data): Sepidar packages, fixed assets, depreciation and payroll in progress
+            await F2Seed.EnsureAsync(_uow, ct);
+            OutboxSummaryDto outbox = await SepidarOutboxService.CountersAsync(_uow, ct);
+            dto.SepidarPendingPackages = outbox.Pending + outbox.ReadyToSend;
+            dto.SepidarFailedPackages = outbox.Failed;
+            dto.SepidarLastSentAt = outbox.LastSentAt;
+            var assets = await _uow.Set<FnAsset>().AsNoTracking().Where(a => a.Status != FnAssetStatus.Draft && a.Status != FnAssetStatus.Disposed)
+                .GroupBy(a => 1).Select(g => new { Count = g.Count(), Cost = g.Sum(a => a.Cost), Accumulated = g.Sum(a => a.AccumulatedDepreciation) }).FirstOrDefaultAsync(ct);
+            dto.AssetsCount = assets?.Count ?? 0;
+            dto.AssetsNetBookValue = assets == null ? 0 : assets.Cost - assets.Accumulated;
+            dto.DepreciationRunsWaiting = await _uow.Set<FnDepreciationRun>().AsNoTracking().CountAsync(r => r.Status == FnRunStatus.Draft, ct);
+            dto.PayrollRunsInProgress = await _uow.Set<FnPayrollRun>().AsNoTracking().CountAsync(r => r.Status < FnPayrollStatus.Paid, ct);
+
             // gross margin per contract: invoiced net (credit notes deducted) against the cost entries
             var revenue = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.ContractId != null)
                 .GroupBy(i => i.ContractId.Value).Select(g => new { g.Key, Net = g.Sum(i => i.Type == FnInvoiceType.CreditNote ? -i.NetAmount : i.NetAmount) }).ToListAsync(ct);

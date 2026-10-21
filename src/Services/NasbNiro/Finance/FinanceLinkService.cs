@@ -109,7 +109,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<List<CostCenterDto>>> GetCostCentersAsync(CancellationToken cancellationToken)
         {
             List<CostCenterDto> list = await _uow.Set<CostCenter>().OrderBy(c => c.Code)
-                .Select(c => new CostCenterDto { Id = c.Id, Code = c.Code, Title = c.Title, SepidarCode = c.SepidarCode, IsActive = c.IsActive })
+                .Select(c => new CostCenterDto { Id = c.Id, Code = c.Code, Title = c.Title, SepidarCode = c.SepidarCode, IsActive = c.IsActive, IsProduction = c.IsProduction })
                 .ToListAsync(cancellationToken);
             return ResponseDtoHelper.Ok(list);
         }
@@ -128,6 +128,7 @@ namespace Services.NasbNiro.Finance
             center.Title = title;
             center.SepidarCode = string.IsNullOrWhiteSpace(dto.SepidarCode) ? null : dto.SepidarCode.Trim();
             center.IsActive = dto.IsActive;
+            center.IsProduction = dto.IsProduction;
             await _uow.SaveChangesAsync(cancellationToken);
             dto.Id = center.Id;
             return ResponseDtoHelper.Ok(dto);

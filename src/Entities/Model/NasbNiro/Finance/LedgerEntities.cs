@@ -343,7 +343,7 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal Amount { get; set; }
     }
 
-    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2 }
+    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2, Payroll = 3 }
 
     public class FnPayment
     {
@@ -354,6 +354,8 @@ namespace Entities.Model.NasbNiro.Finance
         public FnPaymentPurpose Purpose { get; set; }
         public int? ProviderId { get; set; }
         public int? PettyCashId { get; set; }
+        /// <summary>Payroll payment: the posted payroll run (totals only; person level stays in payroll).</summary>
+        public int? PayrollRunId { get; set; }
         public string PayeeName { get; set; }
         public string Description { get; set; }
         /// <summary>Total of the payment requests (before deductions) or the top-up.</summary>

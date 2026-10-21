@@ -319,6 +319,9 @@ namespace Entities.Model.NasbNiro.Procurement
         public int? WorkOrderId { get; set; }
         public int? ContractId { get; set; }
 
+        /// <summary>Capital purchase: the approved invoice line drafts a fixed asset for finance to complete.</summary>
+        public bool IsCapital { get; set; }
+
         /// <summary>Accepted quantity (goods: QC-released receipts; services: service acceptance).</summary>
         public decimal ReceivedQuantity { get; set; }
         public decimal InvoicedQuantity { get; set; }
