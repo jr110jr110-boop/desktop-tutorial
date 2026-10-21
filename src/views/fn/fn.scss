@@ -1,0 +1,50 @@
+@import "../inventory/inventory.scss";
+
+/* accounting pages: amounts are left aligned numbers, totals are bold */
+.inv-page .fn-num {
+  text-align: left;
+  direction: ltr;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.inv-page tr.fn-total td {
+  font-weight: 700;
+  background: #f4f6f8;
+}
+.inv-page .fn-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.75rem;
+}
+.inv-page .fn-tile {
+  border: 1px solid #e3e7ec;
+  border-radius: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  background: #fbfcfd;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.inv-page .fn-tile .t {
+  font-size: 0.78rem;
+  color: #6c757d;
+}
+.inv-page .fn-tile .v {
+  font-size: 1.15rem;
+  font-weight: 700;
+  direction: ltr;
+  text-align: right;
+}
+.inv-page .fn-tile.bad { border-color: #f1aeb5; background: #fff5f5; }
+.inv-page .fn-tile.warn { border-color: #ffe69c; background: #fffbea; }
+.inv-page .fn-tile.ok { border-color: #a3cfbb; background: #f3fbf6; }
+.inv-page .fn-section {
+  font-weight: 700;
+  margin: 1rem 0 0.4rem;
+}
+.inv-page .fn-lines input, .inv-page .fn-lines select {
+  min-width: 70px;
+}
+.inv-page .fn-auto {
+  background: #fff8e1;
+}
