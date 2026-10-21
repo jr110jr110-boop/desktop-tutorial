@@ -404,6 +404,14 @@ namespace DataLayer.Migrations
                             Description = "خزانه‌داری",
                             Name = "TREASURY",
                             NormalizedName = "TREASURY"
+                        },
+                        new
+                        {
+                            Id = 28,
+                            ConcurrencyStamp = "00000028-0000-0000-0000-000000000000",
+                            Description = "حسابرس",
+                            Name = "AUDITOR",
+                            NormalizedName = "AUDITOR"
                         });
                 });
 
@@ -899,6 +907,13 @@ namespace DataLayer.Migrations
                             ClaimType = "permission",
                             ClaimValue = "Warehouse",
                             RoleId = 19
+                        },
+                        new
+                        {
+                            Id = 2800,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 28
                         });
                 });
 
@@ -2794,6 +2809,11 @@ namespace DataLayer.Migrations
                     b.Property<Guid>("Key")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("LegalEntityId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<int?>("ReversesEventId")
                         .HasColumnType("int");
 
@@ -3090,6 +3110,30 @@ namespace DataLayer.Migrations
                     b.HasIndex("ParentId");
 
                     b.ToTable("FnAccounts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnApprovalThreshold", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("MinAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("FnApprovalThresholds", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAsset", b =>
@@ -3424,6 +3468,34 @@ namespace DataLayer.Migrations
                     b.ToTable("FnAssetHistory", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttachmentRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("VoucherType")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.ToTable("FnAttachmentRules", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", b =>
                 {
                     b.Property<int>("Id")
@@ -3525,6 +3597,58 @@ namespace DataLayer.Migrations
                     b.ToTable("FnAttendanceWorkOrders", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAuditLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("AfterJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("EntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Ip")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("EntityType", "EntityId");
+
+                    b.ToTable("FnAuditLogs", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -3564,6 +3688,11 @@ namespace DataLayer.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
+
+                    b.Property<int>("LegalEntityId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -3795,6 +3924,39 @@ namespace DataLayer.Migrations
                     b.ToTable("FnChequeBooks", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnCloseChecklist", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("OverriddenAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("OverriddenByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OverrideReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("PeriodId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RedItems")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PeriodId")
+                        .IsUnique();
+
+                    b.ToTable("FnCloseChecklists", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnCustomer", b =>
                 {
                     b.Property<int>("Id")
@@ -4005,6 +4167,30 @@ namespace DataLayer.Migrations
                     b.ToTable("FnDetailAccounts", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDetailSepidarMap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("DetailAccountId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SepidarCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DetailAccountId")
+                        .IsUnique();
+
+                    b.ToTable("FnDetailSepidarMaps", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployee", b =>
                 {
                     b.Property<int>("Id")
@@ -4192,6 +4378,38 @@ namespace DataLayer.Migrations
                     b.ToTable("FnEmployeeLoans", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnExportLayoutColumn", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("FnExportLayoutColumns", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnFiscalYear", b =>
                 {
                     b.Property<int>("Id")
@@ -4212,9 +4430,17 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("EndDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<bool>("IsImported")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Jurisdiction")
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
+
+                    b.Property<int>("LegalEntityId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<int?>("OpeningVoucherId")
                         .HasColumnType("int");
@@ -4244,7 +4470,7 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("OpeningVoucherId");
 
-                    b.HasIndex("Year")
+                    b.HasIndex("LegalEntityId", "Year")
                         .IsUnique();
 
                     b.ToTable("FnFiscalYears", (string)null);
@@ -4362,6 +4588,104 @@ namespace DataLayer.Migrations
                     b.ToTable("FnInsuranceWorkshops", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnIntercompanyPair", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountAId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("AccountBId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EntityAId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EntityBId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountAId");
+
+                    b.HasIndex("AccountBId");
+
+                    b.HasIndex("EntityAId");
+
+                    b.HasIndex("EntityBId");
+
+                    b.ToTable("FnIntercompanyPairs", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnIntercompanyPost", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("ChargerEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CounterAccountAId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CounterAccountBId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("EventAId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EventBId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("PairId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("PairId");
+
+                    b.ToTable("FnIntercompanyPosts", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnIssuedCheque", b =>
                 {
                     b.Property<int>("Id")
@@ -4460,6 +4784,83 @@ namespace DataLayer.Migrations
                         .IsUnique();
 
                     b.ToTable("FnLeaveBalances", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnLegalEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BaseCurrency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Jurisdiction")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("FnLegalEntities", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnMigrationAccountMap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SepidarCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("SepidarCode")
+                        .IsUnique();
+
+                    b.ToTable("FnMigrationAccountMaps", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnOutboxPackage", b =>
@@ -4563,6 +4964,128 @@ namespace DataLayer.Migrations
                     b.HasIndex("Kind", "Year", "Month", "Season", "WorkshopId");
 
                     b.ToTable("FnOutboxPackages", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnParallelDifference", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("AccountTitle")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("DetailCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("ExplainedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ExplainedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Explanation")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("PmisCredit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("PmisDebit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("RunId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("SepidarCredit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("SepidarDebit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.ToTable("FnParallelDifferences", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnParallelRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Differs")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IncludeDraft")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Matched")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PeriodId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PmisOnly")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Rows")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SepidarOnly")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SignOffNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("SignedOffAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("SignedOffByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Unexplained")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("UnexplainedAtSignOff")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("UploadedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PeriodId");
+
+                    b.HasIndex("LegalEntityId", "PeriodId");
+
+                    b.ToTable("FnParallelRuns", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayment", b =>
@@ -5962,6 +6485,59 @@ namespace DataLayer.Migrations
                     b.ToTable("FnTaxRates", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnTemplateInstance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("PeriodId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("VoucherId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TemplateId", "PeriodId")
+                        .IsUnique();
+
+                    b.ToTable("FnTemplateInstances", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnUserSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Value")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("FnUserSettings", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucher", b =>
                 {
                     b.Property<int>("Id")
@@ -5971,6 +6547,12 @@ namespace DataLayer.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<int?>("AccountingEventId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CeoApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CeoApprovedByUserId")
                         .HasColumnType("int");
 
                     b.Property<DateTimeOffset?>("CheckedAt")
@@ -6000,6 +6582,9 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("FiscalYearId")
                         .HasColumnType("int");
+
+                    b.Property<bool>("IsImported")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("LatePosting")
                         .HasColumnType("bit");
@@ -6058,6 +6643,104 @@ namespace DataLayer.Migrations
                     b.HasIndex("FiscalYearId", "Status");
 
                     b.ToTable("FnVouchers", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("AddedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("AddedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("VoucherId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VoucherId");
+
+                    b.ToTable("FnVoucherAttachments", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherExport", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Content")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("ExportedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ExportedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("PeriodId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Rows")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SupersedeReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("SupersededByExportId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("TotalCredit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalDebit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("Vouchers")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("PeriodId", "Status");
+
+                    b.ToTable("FnVoucherExports", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherLine", b =>
@@ -6137,6 +6820,84 @@ namespace DataLayer.Migrations
                     b.HasIndex("VoucherId");
 
                     b.ToTable("FnVoucherLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DayOfMonth")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("FnVoucherTemplates", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherTemplateLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Credit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("Debit")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("Detail1Id")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("Detail2Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("TemplateId");
+
+                    b.ToTable("FnVoucherTemplateLines", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.ItemCost", b =>
@@ -15787,6 +16548,16 @@ namespace DataLayer.Migrations
                     b.Navigation("Asset");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttachmentRule", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAccount", "Account")
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Account");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", "Employee")
@@ -15871,6 +16642,17 @@ namespace DataLayer.Migrations
                     b.Navigation("BankAccount");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnCloseChecklist", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnPeriod", "Period")
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Period");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDepreciationLine", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnAsset", "Asset")
@@ -15899,6 +16681,17 @@ namespace DataLayer.Migrations
                         .IsRequired();
 
                     b.Navigation("Period");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDetailSepidarMap", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnDetailAccount", "DetailAccount")
+                        .WithMany()
+                        .HasForeignKey("DetailAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("DetailAccount");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployee", b =>
@@ -15939,6 +16732,52 @@ namespace DataLayer.Migrations
                     b.Navigation("OpeningVoucher");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnIntercompanyPair", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAccount", "AccountA")
+                        .WithMany()
+                        .HasForeignKey("AccountAId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAccount", "AccountB")
+                        .WithMany()
+                        .HasForeignKey("AccountBId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnLegalEntity", "EntityA")
+                        .WithMany()
+                        .HasForeignKey("EntityAId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnLegalEntity", "EntityB")
+                        .WithMany()
+                        .HasForeignKey("EntityBId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountA");
+
+                    b.Navigation("AccountB");
+
+                    b.Navigation("EntityA");
+
+                    b.Navigation("EntityB");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnIntercompanyPost", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnIntercompanyPair", "Pair")
+                        .WithMany()
+                        .HasForeignKey("PairId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Pair");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnIssuedCheque", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnChequeBook", "ChequeBook")
@@ -15948,6 +16787,39 @@ namespace DataLayer.Migrations
                         .IsRequired();
 
                     b.Navigation("ChequeBook");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnMigrationAccountMap", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAccount", "Account")
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnParallelDifference", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnParallelRun", "Run")
+                        .WithMany("Differences")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnParallelRun", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnPeriod", "Period")
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Period");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPaymentDeduction", b =>
@@ -16173,6 +17045,17 @@ namespace DataLayer.Migrations
                     b.Navigation("Invoice");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnTemplateInstance", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnVoucherTemplate", "Template")
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Template");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucher", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnFiscalYear", "FiscalYear")
@@ -16189,6 +17072,28 @@ namespace DataLayer.Migrations
                     b.Navigation("FiscalYear");
 
                     b.Navigation("ReversesVoucher");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherAttachment", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnVoucher", "Voucher")
+                        .WithMany()
+                        .HasForeignKey("VoucherId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Voucher");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherExport", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnPeriod", "Period")
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Period");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherLine", b =>
@@ -16222,6 +17127,25 @@ namespace DataLayer.Migrations
                     b.Navigation("Detail2");
 
                     b.Navigation("Voucher");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherTemplateLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAccount", "Account")
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnVoucherTemplate", "Template")
+                        .WithMany("Lines")
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+
+                    b.Navigation("Template");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.ItemCost", b =>
@@ -18320,6 +19244,11 @@ namespace DataLayer.Migrations
                     b.Navigation("Periods");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnParallelRun", b =>
+                {
+                    b.Navigation("Differences");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayment", b =>
                 {
                     b.Navigation("Lines");
@@ -18362,6 +19291,11 @@ namespace DataLayer.Migrations
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucher", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnVoucherTemplate", b =>
                 {
                     b.Navigation("Lines");
                 });

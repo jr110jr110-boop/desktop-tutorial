@@ -1722,6 +1722,206 @@ as "$FM_TOKEN" GET $FG/setup-check; check "set-up check: the payroll module is c
 
 TOKEN=$ADMIN_TOKEN
 
+# ---------------------------------------------------------------- finance completeness (release F3, milestone 1)
+TOKEN=$ADMIN_TOKEN
+FE=finance/entities; FM2=finance/migration; FAU=finance/audit; FSX=finance/sepidar-export
+user2 fm2.ci 17 'Ci#Fm2-User-2026' 09120000031 0012345631
+user2 aud.ci 28 'Ci#Aud-User-2026' 09120000032 0012345632
+FM2_TOKEN=$(login fm2.ci 'Ci#Fm2-User-2026'); AUD_TOKEN=$(login aud.ci 'Ci#Aud-User-2026')
+[ -n "$FM2_TOKEN" ] && [ -n "$AUD_TOKEN" ] && ok "f3: login second finance manager and the auditor (role 28)" || bad "f3: login second finance manager and the auditor (role 28)"
+
+# --- Sepidar migration: chart of accounts (preview, then commit)
+ACC_BAD='{"rows":[{"code":"1019901","title":"صندوق قدیم","level":3},{"code":"8019902","title":"هزینه قدیم","level":3},{"code":"5039901","title":"سرمایه قدیم","level":3,"nature":"Credit"},{"code":"10101","title":"موجود","level":3},{"code":"","title":"بدون کد","level":3}]}'
+as "$FIN_TOKEN" POST "$FM2/accounts" "$ACC_BAD"; no "f3 migration: the accountant cannot import the chart"
+as "$FM_TOKEN" POST "$FM2/accounts" "$ACC_BAD"; check "f3 migration: account preview counts 3 new, 1 existing, 1 error and writes nothing" '.success and .data.dryRun == true and .data.committed == false and .data.total == 5 and .data.new == 3 and .data.existing == 1 and .data.errors == 1'
+as "$FM_TOKEN" POST "$FM2/accounts?commit=true" "$ACC_BAD"; check "f3 migration: commit with an error row is not applied" '.success and .data.committed == false'
+as "$FM_TOKEN" GET "$FG/accounts?PageSize=0&Contains=1019901"; check "f3 migration: nothing was created by the failed commit" '.success and ([.data.data[]|select(.code == "1019901")]|length) == 0'
+ACC_OK=$(jq -c '.rows |= map(select(.code != ""))' <<< "$ACC_BAD")
+as "$FM_TOKEN" POST "$FM2/accounts?commit=true" "$ACC_OK"; check "f3 migration: chart committed (3 new, 1 existing)" '.success and .data.committed == true and .data.new == 3 and .data.existing == 1 and .data.errors == 0'
+as "$FM_TOKEN" POST "$FM2/accounts" "$ACC_OK"; check "f3 migration: a second preview reports the codes as mapped" '.success and .data.new == 0 and .data.mapped == 4'
+as "$FM_TOKEN" GET "$FG/accounts?PageSize=0"; check "f3 migration: new accounts exist with the Sepidar code kept" '([.data.data[]|select(.code == "1019901" and .sepidarCode == "1019901")]|length) == 1 and ([.data.data[]|select(.code == "5039901")]|length) == 1'
+
+# --- detail accounts: type guess with a review flag
+DET='{"rows":[{"code":"SD-1","title":"بانک ملی - جاری"},{"code":"SD-2","title":"نمونه بدون نوع"},{"code":"SD-3","title":"مشتری یک","type":"Customer"}]}'
+as "$FM_TOKEN" POST "$FM2/details" "$DET"; check "f3 migration: detail preview guesses Bank, flags one for review, keeps the given type" '.success and .data.new == 2 and .data.review == 1 and ([.data.rows[]|select(.code == "SD-1")][0].guessedType) == "Bank" and ([.data.rows[]|select(.code == "SD-2")][0].status) == "Review"'
+as "$FM_TOKEN" POST "$FM2/details?commit=true" "$DET"; check "f3 migration: details committed" '.success and .data.committed == true'
+as "$FM_TOKEN" POST "$FM2/details" "$DET"; check "f3 migration: a second detail preview shows all three as existing" '.success and .data.existing == 3 and .data.new == 0'
+
+# --- opening balances of a fresh past year: unknown codes, unbalanced, then commit
+as "$FM_TOKEN" POST $FG/years/ensure '{"date":"2020-06-01T00:00:00"}'; check "f3 migration: fiscal year 1399 ensured" '.success and .data.year == 1399'
+Y99=$(val .data.id)
+as "$FM_TOKEN" POST "$FM2/opening" "{\"fiscalYearId\":$Y99,\"rows\":[{\"accountCode\":\"1019901\",\"debit\":5000000},{\"accountCode\":\"9999999\",\"credit\":4000000}]}"
+check "f3 migration: opening preview lists the unknown account and the imbalance" '.success and (.data.unknownAccounts|index("9999999")) != null and .data.balanced == false and .data.difference == 1000000 and .data.committed == false'
+as "$FM_TOKEN" POST "$FM2/opening?commit=true" "{\"fiscalYearId\":$Y99,\"rows\":[{\"accountCode\":\"1019901\",\"debit\":5000000},{\"accountCode\":\"9999999\",\"credit\":4000000}]}"; check "f3 migration: opening with unknown account is not committed" '.success and .data.committed == false'
+OPEN_OK="{\"fiscalYearId\":$Y99,\"rows\":[{\"accountCode\":\"1019901\",\"debit\":5000000},{\"accountCode\":\"5039901\",\"credit\":5000000}]}"
+as "$FM_TOKEN" POST "$FM2/opening?commit=true" "$OPEN_OK"; check "f3 migration: balanced opening committed as one voucher" '.success and .data.committed == true and .data.balanced == true and .data.totalDebit == 5000000 and .data.totalCredit == 5000000 and .data.voucherId > 0'
+OPV=$(val .data.voucherId)
+as "$FM_TOKEN" POST "$FM2/opening" "$OPEN_OK"; check "f3 migration: a year takes only one opening" '.success and .data.alreadyHasOpening == true and (.data.errors|length) >= 1'
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$OPV,\"action\":\"finalize\"}"; no "f3 migration: the importer cannot finalize its own opening voucher"
+as "$FM2_TOKEN" POST $FG/vouchers/action "{\"id\":$OPV,\"action\":\"finalize\"}"; check "f3 migration: the second finance manager finalizes it" '.success and .data.status == 2 and .data.totalAmount == 5000000'
+as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y99"; check "f3 migration: the trial balance of 1399 equals the imported opening" '.success and .data.balanced == true and .data.totalDebit == 5000000 and .data.totalCredit == 5000000'
+
+# --- imported historical year (read-only, periods closed) and its vouchers
+IY='{"year":1398,"title":"1398 (سپیدار)","startDate":"2019-03-21T00:00:00","endDate":"2020-03-19T00:00:00"}'
+as "$FIN_TOKEN" POST "$FM2/imported-years" "$IY"; no "f3 migration: only the finance manager creates an imported year"
+as "$FM_TOKEN" POST "$FM2/imported-years" "$IY"; check "f3 migration: imported year 1398 has 12 closed periods" '.success and .data.isImported == true and (.data.periods|length) == 12 and ([.data.periods[]|select(.status == 2)]|length) == 12'
+Y98=$(val .data.id); IP1=$(val '.data.periods[0].id'); IP2=$(val '.data.periods[1].id'); IP3=$(val '.data.periods[2].id')
+HIST='{"rows":[{"number":1,"date":"2019-04-01T00:00:00","description":"سند تاریخی یک","accountCode":"1019901","debit":1000},{"number":1,"date":"2019-04-01T00:00:00","accountCode":"5039901","credit":1000},{"number":2,"date":"2019-05-01T00:00:00","description":"سند تاریخی دو","accountCode":"1019901","debit":2500},{"number":2,"date":"2019-05-01T00:00:00","accountCode":"5039901","credit":2500}]}'
+as "$FM_TOKEN" POST "$FM2/vouchers/import" "$(jq -c ". + {fiscalYearId:$Y98,dryRun:true}" <<< "$HIST")"; check "f3 migration: historical preview 2 vouchers, 4 lines, 3500" '.success and .data.vouchers == 2 and .data.lines == 4 and .data.totalDebit == 3500 and .data.totalCredit == 3500 and (.data.errors|length) == 0 and .data.committed == false'
+as "$FM_TOKEN" POST "$FM2/vouchers/import" "$(jq -c ". + {fiscalYearId:$Y98,dryRun:true} | .rows += [{number:3,date:\"2021-01-01T00:00:00\",accountCode:\"1019901\",debit:10},{number:3,date:\"2021-01-01T00:00:00\",accountCode:\"5039901\",credit:10}]" <<< "$HIST")"; check "f3 migration: a voucher dated outside the year is an error" '.success and (.data.errors|length) == 1'
+as "$FM_TOKEN" POST "$FM2/vouchers/import" "$(jq -c ". + {fiscalYearId:$Y98,dryRun:false}" <<< "$HIST")"; check "f3 migration: historical vouchers committed" '.success and .data.committed == true and .data.vouchers == 2'
+as "$FM_TOKEN" POST "$FM2/vouchers/import" "$(jq -c ". + {fiscalYearId:$Y98,dryRun:false}" <<< "$HIST")"; check "f3 migration: the same numbers cannot be imported twice" '.success and .data.committed == false and (.data.errors|length) >= 1'
+as "$FM_TOKEN" GET "$FG/vouchers?FiscalYearId=$Y98&PageSize=0"; check "f3 migration: imported vouchers are final, imported and keep their numbers" '(.data.data|length) == 2 and ([.data.data[]|select(.status == 2 and .isImported == true)]|length) == 2 and ([.data.data[].number]|sort) == [1,2]'
+HV1=$(val '.data.data[]|select(.number == 1)|.id')
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$HV1,\"action\":\"reverse\"}"; no "f3 migration: an imported voucher cannot be reversed or edited"
+as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y98"; check "f3 migration: the imported year's trial balance is exactly the import" '.success and .data.totalDebit == 3500 and .data.totalCredit == 3500'
+TB98=$(val .data.totalDebit)
+
+# --- parallel run
+as "$FM_TOKEN" GET "$FM2/parallel-run/status"; check "f3 parallel run: nothing signed off yet" '.success and .data.requiredMonths == 3 and .data.consecutiveCleanPeriods == 0 and .data.goLiveReady == false'
+as "$FM_TOKEN" POST "$FM2/parallel-run/compare" "{\"periodId\":$IP1,\"rows\":[{\"accountCode\":\"1019901\",\"debit\":1000},{\"accountCode\":\"5039901\",\"credit\":1000}]}"; check "f3 parallel run: period 1 matches both rows exactly" '.success and .data.rows == 2 and .data.matched == 2 and .data.pmisOnly == 0 and .data.sepidarOnly == 0 and .data.differs == 0 and .data.unexplained == 0'
+RUN1=$(val .data.id)
+as "$FIN_TOKEN" POST "$FM2/parallel-run/$RUN1/sign-off" '{"note":"x"}'; no "f3 parallel run: only the finance manager signs off"
+as "$FM_TOKEN" POST "$FM2/parallel-run/$RUN1/sign-off" '{"note":"بدون مغایرت"}'; check "f3 parallel run: period 1 signed off" '.success and .data.signedOff == true and .data.unexplainedAtSignOff == 0'
+as "$FM_TOKEN" GET "$FM2/parallel-run/status"; check "f3 parallel run: one clean period is not enough" '.success and .data.consecutiveCleanPeriods == 1 and .data.goLiveReady == false'
+as "$FM_TOKEN" POST "$FM2/parallel-run/compare" "{\"periodId\":$IP2,\"rows\":[{\"accountCode\":\"1019901\",\"debit\":2500},{\"accountCode\":\"5039901\",\"credit\":2400},{\"accountCode\":\"8019902\",\"debit\":100}]}"; check "f3 parallel run: period 2 gives one match, one amount difference and one Sepidar-only row" '.success and .data.rows == 3 and .data.matched == 1 and .data.differs == 1 and .data.sepidarOnly == 1 and .data.pmisOnly == 0 and .data.unexplained == 2'
+RUN2=$(val .data.id); DIF1=$(val '.data.differences[0].id'); DIF2=$(val '.data.differences[1].id')
+as "$FM_TOKEN" POST "$FM2/parallel-run/$RUN2/explain" "{\"differenceId\":$DIF1,\"explanation\":\"کسری در سپیدار\"}"; check "f3 parallel run: explaining one difference leaves one unexplained" '.success and .data.unexplained == 1'
+as "$FM_TOKEN" POST "$FM2/parallel-run/$RUN2/explain" "{\"differenceId\":$DIF2,\"explanation\":\"سند هنوز وارد نشده\"}"; check "f3 parallel run: all explained" '.success and .data.unexplained == 0'
+as "$FM_TOKEN" POST "$FM2/parallel-run/$RUN2/sign-off" '{"note":"توضیح داده شد"}'; check "f3 parallel run: period 2 signed off" '.success and .data.signedOff == true'
+as "$FM_TOKEN" POST "$FM2/parallel-run/compare" "{\"periodId\":$IP3,\"rows\":[]}"; check "f3 parallel run: an empty upload for an empty period is clean" '.success and .data.rows == 0 and .data.unexplained == 0'
+RUN3=$(val .data.id)
+as "$FM_TOKEN" POST "$FM2/parallel-run/$RUN3/sign-off" '{}'; check "f3 parallel run: period 3 signed off" '.success and .data.signedOff == true'
+as "$FM_TOKEN" GET "$FM2/parallel-run/status"; check "f3 parallel run: three consecutive clean periods make the go-live ready" '.success and .data.consecutiveCleanPeriods == 3 and .data.goLiveReady == true'
+as "$FM_TOKEN" POST $FG/settings '{"key":"ParallelRun.RequiredMonths","value":"4"}'; check "f3 parallel run: required months is a setting" '.success and .data.value == "4"'
+as "$FM_TOKEN" GET "$FM2/parallel-run/status"; check "f3 parallel run: four months are now required" '.data.requiredMonths == 4 and .data.goLiveReady == false'
+as "$FM_TOKEN" POST $FG/settings '{"key":"ParallelRun.RequiredMonths","value":"3"}'
+as "$FIN_TOKEN" POST $FG/settings '{"key":"ParallelRun.RequiredMonths","value":"1"}'; no "f3 settings: only the finance manager changes settings"
+as "$FM_TOKEN" POST $FG/settings '{"key":"Nonexistent.Key","value":"1"}'; no "f3 settings: unknown keys are refused"
+
+# --- second legal entity (Persian calendar, DE jurisdiction), intercompany and consolidation
+as "$FIN_TOKEN" POST $FE '{"code":"DE1","name":"شرکت دوم","jurisdiction":"DE","baseCurrency":"EUR"}'; no "f3 entities: only the finance manager creates a legal entity"
+as "$FM_TOKEN" POST $FE '{"code":"DE1","name":"شرکت دوم","jurisdiction":"DE","baseCurrency":"EUR"}'; check "f3 entities: second legal entity created" '.success and .data.id > 1 and .data.jurisdiction == "DE"'
+E2=$(val .data.id)
+as "$FM_TOKEN" POST $FG/years/ensure "{\"date\":\"${TODAY}T00:00:00\",\"legalEntityId\":$E2}"; check "f3 entities: the second entity gets its own Persian fiscal year with 12 periods" '.success and .data.legalEntityId == '$E2' and (.data.periods|length) == 12 and .data.id != '$FYT
+Y2=$(val .data.id)
+PEND2=$(jq -r --arg t "$TODAY" '.data.periods[]|select((.startDate[0:10] <= $t) and (.endDate[0:10] >= $t))|.id' "$B")
+as "$FIN_TOKEN" POST $FG/vouchers "{\"legalEntityId\":$E2,\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند واحد دوم\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":7000},{\"accountCode\":\"10101\",\"credit\":7000}]}"; check "f3 entities: a voucher in the second entity" '.success and .data.legalEntityId == '$E2
+EV1=$(val .data.id)
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$EV1,\"action\":\"check\"}"
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$EV1,\"action\":\"finalize\"}"; check "f3 entities: the second entity numbers its vouchers from 1" '.success and .data.status == 2 and .data.number == 1'
+as "$FM_TOKEN" GET "$FG/vouchers?LegalEntityId=1&PageSize=0"; check "f3 entities: the second entity's voucher is absent from the main company's list" '.success and ([.data.data[]|select(.id == '$EV1')]|length) == 0'
+as "$FM_TOKEN" GET "$FG/vouchers?LegalEntityId=$E2&PageSize=0"; check "f3 entities: and present in its own list" '.success and ([.data.data[]|select(.id == '$EV1')]|length) == 1'
+as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y2"; check "f3 entities: the second entity's trial balance is exactly its voucher" '.success and .data.totalDebit == 7000 and .data.totalCredit == 7000'
+as "$FM_TOKEN" GET "$FG/years?legalEntityId=1"; check "f3 entities: the main company's years do not include the second entity's" '.success and ([.data[]|select(.id == '$Y2')]|length) == 0'
+as "$FM_TOKEN" POST $FE/pairs "{\"title\":\"بین شرکتی\",\"entityAId\":1,\"entityBId\":$E2,\"accountACode\":\"1019901\",\"accountBCode\":\"5039901\"}"; check "f3 entities: intercompany pair saved" '.success and .data.accountACode == "1019901"'
+PAIR=$(val .data.id)
+as "$FIN_TOKEN" POST $FE/intercompany/post "{\"pairId\":$PAIR,\"date\":\"${TODAY}T00:00:00\",\"amount\":4000000,\"chargerEntityId\":1,\"counterAccountACode\":\"60102\",\"counterAccountBCode\":\"80108\",\"description\":\"خدمات بین شرکتی\"}"; check "f3 entities: intercompany posting creates a voucher on each side" '.success and .data.voucherAId > 0 and .data.voucherBId > 0 and (.data.number|startswith("IC-"))'
+ICA=$(val .data.voucherAId); ICB=$(val .data.voucherBId)
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$ICA,\"action\":\"finalize\"}"; check "f3 entities: side A final" '.success and .data.status == 2 and .data.legalEntityId == 1'
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$ICB,\"action\":\"finalize\"}"; check "f3 entities: side B final in the second entity" '.success and .data.status == 2 and .data.legalEntityId == '$E2
+as "$FM_TOKEN" GET "$FE/consolidation?From=${TODAY}&To=${TODAY}&Rates=$E2=1"; check "f3 entities: the two sides mirror (+4,000,000 / -4,000,000) and the consolidation balances" '.success and .data.pairs[0].matched == true and .data.pairs[0].balanceA == 4000000 and .data.pairs[0].balanceB == -4000000 and .data.balanced == true and ([.data.rows[]|select(.accountCode == "1019901")][0].consolidated) == 0 and ([.data.rows[]|select(.accountCode == "5039901")][0].consolidated) == 0'
+as "$FM_TOKEN" GET "$FE/consolidation?From=${TODAY}&To=${TODAY}"; no "f3 entities: consolidation of another currency needs a rate input"
+
+# --- audit trail
+as "$FM_TOKEN" GET "$FAU?EntityType=FnLegalEntity&PageSize=0"; check "f3 audit: the creation of the second entity is in the trail" '.success and ([.data.data[]|select(.action == "Added")]|length) >= 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=FnVoucher&EntityId=$V1&PageSize=0"; check "f3 audit: finalizing the first manual voucher left before and after values and the user" '.success and ([.data.data[]|select(.action == "Modified" and (.beforeJson|tostring|contains("Checked")) and (.afterJson|tostring|contains("Final")) and (.userName|length) > 0)]|length) >= 1'
+JE=$(EJ T001 آزمون یک 0499370899 IR950190000000200000000003)
+as "$PAYR_TOKEN" POST $FP/employees "$(jq -c ". + {id:$PE1}" <<< "$JE")"; check "f3 audit: the employee's bank account is changed" '.success'
+as "$FM_TOKEN" GET "$FAU?EntityType=FnEmployee&EntityId=$PE1&PageSize=0"; check "f3 audit: the IBAN change is recorded masked (last four digits only)" '.success and ([.data.data[]|select((.beforeJson|tostring|contains("****0001")) and (.afterJson|tostring|contains("****0003")) and ((.afterJson|tostring|contains("IR9501900")|not)))]|length) >= 1'
+as "$AUD_TOKEN" GET "$FAU?PageSize=10"; check "f3 audit: the auditor reads the trail" '.success'
+as "$AUD_TOKEN" GET "$FG/vouchers?PageSize=5"; check "f3 audit: the auditor reads vouchers" '.success'
+as "$AUD_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y98"; check "f3 audit: the auditor reads reports" '.success and .data.totalDebit == 3500'
+as "$AUD_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":10},{\"accountCode\":\"10101\",\"credit\":10}]}"; [ "$CODE" = "403" ] || refused && ok "f3 audit: the auditor cannot write vouchers" || bad "f3 audit: the auditor cannot write vouchers"
+as "$AUD_TOKEN" GET $FP/employees; [ "$CODE" = "403" ] && ok "f3 audit: the auditor cannot read payroll employees (403)" || bad "f3 audit: the auditor cannot read payroll employees (403) got $CODE"
+as "$AUD_TOKEN" GET $FP/payslips; [ "$CODE" = "403" ] && ok "f3 audit: the auditor cannot read payslips (403)" || bad "f3 audit: the auditor cannot read payslips (403) got $CODE"
+as "$AUD_TOKEN" GET $FP/runs; [ "$CODE" = "403" ] && ok "f3 audit: the auditor cannot read payroll runs (403)" || bad "f3 audit: the auditor cannot read payroll runs (403) got $CODE"
+as "$FIN_TOKEN" GET "$FAU?PageSize=10"; [ "$CODE" = "403" ] && ok "f3 audit: the accountant has no access to the trail (403)" || bad "f3 audit: the accountant has no access to the trail (403) got $CODE"
+
+# --- period-close checklist
+as "$FIN_TOKEN" POST $FG/vouchers "{\"legalEntityId\":$E2,\"date\":\"${TODAY}T00:00:00\",\"description\":\"پیش‌نویس باز\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":300},{\"accountCode\":\"10101\",\"credit\":300}]}"
+as "$FM_TOKEN" GET "$FG/close-checklist/$PEND2"; check "f3 close: an open draft makes the item red, the lock is still free while the checklist is not enforced" '.success and ([.data.items[]|select(.key == "NonFinalVouchers")][0].status) == "Red" and ([.data.items[]|select(.key == "NonFinalVouchers")][0].count) == 1 and .data.enforced == false and .data.canLock == true and ([.data.items[]|select(.key == "Intercompany")][0].status) == "Green"'
+as "$FM_TOKEN" POST $FG/settings '{"key":"CloseChecklist.Enforce","value":"1"}'; check "f3 close: enforcement switched on" '.success and .data.value == "1"'
+as "$FM_TOKEN" GET "$FG/close-checklist/$PEND2"; check "f3 close: enforced, the period cannot be locked" '.data.enforced == true and .data.canLock == false and .data.redCount >= 1'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PEND2,\"action\":\"lock\"}"; nomsg "f3 close: the lock is refused while items are red" "فهرست کنترل"
+as "$FIN_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"reason":"x"}'; no "f3 close: only the finance manager overrides"
+as "$FM_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{}'; no "f3 close: an override needs a reason"
+as "$FM_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"reason":"پیش‌نویس به ماه بعد منتقل می‌شود"}'; check "f3 close: override with a reason" '.success and .data.overridden == true and .data.canLock == true and (.data.overrideReason|length) > 0'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PEND2,\"action\":\"lock\"}"; check "f3 close: the period locks after the override" '.success'
+as "$FM_TOKEN" POST $FG/settings '{"key":"CloseChecklist.Enforce","value":"0"}'; check "f3 close: enforcement switched off again" '.success and .data.value == "0"'
+
+# --- voucher controls: approval threshold above which the CEO approves
+as "$FIN_TOKEN" POST $FG/approval-thresholds '{"minAmount":1500000}'; no "f3 controls: only the finance manager sets thresholds"
+as "$FM_TOKEN" POST $FG/approval-thresholds '{"minAmount":1500000,"note":"آزمون"}'; check "f3 controls: threshold of 1,500,000 saved" '.success and .data.minAmount == 1500000 and .data.isActive == true'
+THR=$(val .data.id)
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند بالای حد\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":2000000},{\"accountCode\":\"10101\",\"credit\":2000000}]}"; TV=$(val .data.id)
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"check\"}"
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"finalize\"}"; nomsg "f3 controls: a voucher above the threshold needs the CEO first" "مدیرعامل"
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"ceo-approve\"}"; no "f3 controls: the finance manager cannot give the CEO approval"
+as "$CEO_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"ceo-approve\"}"; check "f3 controls: CEO approval recorded" '.success and (.data.ceoApprovedByUserId|type) == "number"'
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"finalize\"}"; check "f3 controls: the voucher finalizes after the CEO approval" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FG/approval-thresholds "{\"id\":$THR,\"minAmount\":1500000,\"isActive\":false}"; check "f3 controls: threshold deactivated" '.success and .data.isActive == false'
+
+# --- attachment rule
+as "$FM_TOKEN" POST $FG/attachment-rules '{"accountCode":"1019901","note":"سند این حساب پیوست می‌خواهد"}'; check "f3 controls: attachment rule on account 1019901" '.success and .data.accountCode == "1019901"'
+RULE=$(val .data.id)
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"نیازمند پیوست\",\"lines\":[{\"accountCode\":\"1019901\",\"debit\":1000},{\"accountCode\":\"5039901\",\"credit\":1000}]}"; AV=$(val .data.id)
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$AV,\"action\":\"check\"}"; nomsg "f3 controls: a voucher without the required attachment cannot be checked" "پیوست"
+as "$FIN_TOKEN" POST $FG/attachments "{\"voucherId\":$AV,\"documentId\":\"6f1c2a3e-8c1d-4a55-9d3e-0a1b2c3d4e5f\",\"title\":\"فاکتور\"}"; check "f3 controls: attachment added" '.success and .data.id > 0'
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$AV,\"action\":\"check\"}"; check "f3 controls: checked once the attachment exists" '.success and .data.status == 1'
+as "$FM_TOKEN" GET "$FG/vouchers/$AV"; check "f3 controls: the voucher shows its attachment count" '.success and .data.attachmentCount == 1'
+as "$FM_TOKEN" POST $FG/attachment-rules "{\"id\":$RULE,\"accountCode\":\"1019901\",\"isActive\":false}"; check "f3 controls: rule deactivated" '.success and .data.isActive == false'
+
+# --- copy, template vouchers, mass entry
+as "$FIN_TOKEN" POST $FG/vouchers/copy "{\"id\":$V1}"; check "f3 controls: copy of a final voucher is a new draft with the same amounts" '.success and .data.status == 0 and .data.number == null and .data.totalAmount == 1000000 and .data.id != '$V1' and (.data.lines|length) == 2'
+CPV=$(val .data.id)
+as "$FIN_TOKEN" POST $FG/templates '{"title":"اجاره ماهانه","dayOfMonth":5,"lines":[{"accountCode":"80108","debit":300000},{"accountCode":"10101","credit":300000}]}'; check "f3 controls: voucher template saved" '.success and (.data.lines|length) == 2'
+PCUR=$(as "$FM_TOKEN" GET "$FG/years" >/dev/null; jq -r --arg t "$TODAY" '.data[]|select(.legalEntityId == 1 and .isImported == false)|.periods[]|select((.startDate[0:10] <= $t) and (.endDate[0:10] >= $t))|.id' "$B" | head -n1)
+as "$FIN_TOKEN" POST $FG/templates/generate "{\"periodId\":$PCUR}"; check "f3 controls: the template is drafted once for the period" '.success and .data.drafted == 1 and .data.skipped == 0 and (.data.voucherIds|length) == 1'
+TPV=$(val '.data.voucherIds[0]')
+as "$FIN_TOKEN" POST $FG/templates/generate "{\"periodId\":$PCUR}"; check "f3 controls: generating again drafts nothing" '.success and .data.drafted == 0 and .data.skipped == 1'
+as "$FIN_TOKEN" GET "$FG/vouchers/$TPV"; check "f3 controls: the drafted voucher is a draft dated on day 5 of the Persian month" '.success and .data.status == 0 and .data.totalAmount == 300000'
+MASS="{\"rows\":[{\"group\":\"g1\",\"date\":\"${TODAY}T00:00:00\",\"description\":\"گروه یک\",\"accountCode\":\"80108\",\"debit\":100},{\"group\":\"g1\",\"date\":\"${TODAY}T00:00:00\",\"accountCode\":\"10101\",\"credit\":100},{\"group\":\"g2\",\"date\":\"${TODAY}T00:00:00\",\"description\":\"گروه دو\",\"accountCode\":\"80108\",\"debit\":200},{\"group\":\"g2\",\"date\":\"${TODAY}T00:00:00\",\"accountCode\":\"10101\",\"credit\":200}]}"
+as "$FIN_TOKEN" POST $FG/vouchers/mass-import "$(jq -c '. + {dryRun:true} | .rows += [{group:"g3",date:"'${TODAY}'T00:00:00",accountCode:"7777777",debit:5},{group:"g3",date:"'${TODAY}'T00:00:00",accountCode:"10101",credit:5}]' <<< "$MASS")"; check "f3 controls: mass entry preview counts 2 good vouchers and 1 error and creates nothing" '.success and .data.dryRun == true and .data.vouchers == 2 and .data.lines == 4 and (.data.errors|length) == 1 and (.data.voucherIds|length) == 0'
+as "$FIN_TOKEN" POST $FG/vouchers/mass-import "$(jq -c '. + {dryRun:false}' <<< "$MASS")"; check "f3 controls: mass entry creates 2 drafts" '.success and .data.vouchers == 2 and (.data.voucherIds|length) == 2 and (.data.errors|length) == 0'
+
+# --- full voucher export for Sepidar (fallback path; off by default)
+as "$FM_TOKEN" GET $FSX/status; check "f3 export: the full export is off by default" '.success and .data == false'
+as "$FM_TOKEN" POST $FSX/export "{\"periodId\":$IP1}"; nomsg "f3 export: exporting while the switch is off is refused" "غیرفعال"
+as "$FM_TOKEN" GET $FSX/layout; check "f3 export: default layout has the 9 standard columns active" '.success and ([.data[]|select(.isActive)]|length) == 9 and .data[0].key == "VoucherNo"'
+as "$FM_TOKEN" GET "$FSX/account-mapping?onlyUnmapped=true"; check "f3 export: mapping screen lists the accounts without a Sepidar code" '.success and ([.data[]|select(.code == "80108")]|length) == 1 and ([.data[]|select(.code == "1019901")]|length) == 0'
+as "$FM_TOKEN" POST $FG/settings '{"key":"Finance:SepidarFullExport","value":"1"}'; check "f3 export: switched on" '.success and .data.value == "1"'
+as "$FM_TOKEN" GET "$FSX/preview/$PEND2"; check "f3 export: unmapped accounts of the locked second-entity period are listed as errors" '.success and (.data.unmappedAccounts|index("80108")) != null and (.data.unmappedAccounts|index("10101")) != null and (.data.errors|length) >= 1'
+as "$FM_TOKEN" POST $FSX/export "{\"periodId\":$PEND2}"; no "f3 export: a period with unmapped accounts is not exported"
+as "$FM_TOKEN" POST $FSX/account-mapping '{"code":"80108","sepidarCode":"9801"}'; check "f3 export: account mapped" '.success and .data.mapped == true'
+as "$FM_TOKEN" GET "$FSX/preview/$IP1"; check "f3 export: preview of imported period 1 is clean, 1 voucher and 2 rows" '.success and .data.enabled == true and .data.vouchers == 1 and .data.rows == 2 and .data.totalDebit == 1000 and .data.totalCredit == 1000 and (.data.errors|length) == 0 and .data.alreadyExported == false'
+as "$FIN_TOKEN" POST $FSX/export "{\"periodId\":$IP1}"; no "f3 export: only the finance manager exports"
+as "$FM_TOKEN" POST $FSX/export "{\"periodId\":$IP1}"; check "f3 export: period 1 exported with a hash" '.success and .data.rows == 2 and .data.totalDebit == 1000 and (.data.sha256|length) == 64 and .data.status == 1 and (.data.number|startswith("EXP-"))'
+EX1=$(val .data.id); EXH1=$(val .data.sha256)
+as "$FM_TOKEN" POST $FSX/export "{\"periodId\":$IP1}"; nomsg "f3 export: a second export of the same period is refused" "علت جایگزینی"
+as "$FM_TOKEN" POST $FSX/layout '{"columns":[{"key":"VoucherNo","title":"No.","sortOrder":1,"isActive":true},{"key":"Date","title":"تاریخ","sortOrder":2,"isActive":true},{"key":"AccountCode","title":"کد حساب","sortOrder":3,"isActive":true},{"key":"Debit","title":"بدهکار","sortOrder":4,"isActive":true},{"key":"Credit","title":"بستانکار","sortOrder":5,"isActive":true}]}'; check "f3 export: the column layout is configurable" '.success and ([.data[]|select(.isActive)]|length) == 5'
+as "$FIN_TOKEN" POST $FSX/layout '{"columns":[{"key":"Debit","title":"x","sortOrder":1,"isActive":true}]}'; no "f3 export: only the finance manager changes the layout"
+as "$FM_TOKEN" POST $FSX/export "{\"periodId\":$IP1,\"supersedeReason\":\"تغییر قالب ستون‌ها\"}"; check "f3 export: superseding with a reason creates a second export" '.success and .data.id != '$EX1' and .data.status == 1'
+EX1B=$(val .data.id)
+as "$FM_TOKEN" GET "$FSX/exports?periodId=$IP1"; check "f3 export: the first export is kept as superseded, the new one is active" '.success and ([.data[]|select(.status == 2 and .id == '$EX1' and .supersedeReason != null)]|length) == 1 and ([.data[]|select(.status == 1 and .id == '$EX1B')]|length) == 1'
+as "$FM_TOKEN" POST $FSX/export "{\"periodId\":$IP2}"; check "f3 export: period 2 exported" '.success and .data.totalDebit == 2500'
+EX2TOT=$(val .data.totalDebit)
+[ "$((1000 + EX2TOT))" = "$TB98" ] && ok "f3 export: the exports of the closed periods add up exactly to the ledger of the year ($TB98)" || bad "f3 export: the exports of the closed periods add up exactly to the ledger of the year (got $((1000 + EX2TOT)) vs $TB98)"
+XF="$B.csv"; curl -s -o "$XF" -H "Authorization: Bearer $FM_TOKEN" "$API/$FSX/exports/$EX1B/file"
+[ "$(head -c 3 "$XF" | od -An -tx1 | tr -d ' ')" = "efbbbf" ] && ok "f3 export: the file is UTF-8 with BOM" || bad "f3 export: the file is UTF-8 with BOM"
+[ "$(tail -c +4 "$XF" | sha256sum | cut -d' ' -f1)" = "$(as "$FM_TOKEN" GET "$FSX/exports?periodId=$IP1" >/dev/null; jq -r '.data[]|select(.id == '$EX1B')|.sha256' "$B")" ] && ok "f3 export: the file's SHA-256 equals the recorded hash" || bad "f3 export: the file's SHA-256 equals the recorded hash"
+[ "$(tail -n +2 "$XF" | wc -l)" = "2" ] && head -n1 "$XF" | grep -q "No\." && ok "f3 export: the file has the configured header and exactly the two ledger rows" || bad "f3 export: the file has the configured header and exactly the two ledger rows"
+grep -q "1019901,1000,0" "$XF" && grep -q "5039901,0,1000" "$XF" && ok "f3 export: debit and credit per account match the ledger" || bad "f3 export: debit and credit per account match the ledger"
+grep -Eq '^1,13(97|98)/' "$XF" && ok "f3 export: dates are Persian (no Gregorian date in the file)" || bad "f3 export: dates are Persian (no Gregorian date in the file)"
+rm -f "$XF"
+as "$AUD_TOKEN" GET "$FSX/exports?periodId=$IP1"; check "f3 export: the auditor sees the export records" '.success and (.data|length) == 2'
+as "$AUD_TOKEN" POST $FSX/export "{\"periodId\":$IP3}"; no "f3 export: the auditor cannot export"
+as "$FM_TOKEN" POST $FSX/detail-mapping '{"code":"SD-1","sepidarCode":"D-1"}'; check "f3 export: detail mapped to a Sepidar code" '.success and .data.sepidarCode == "D-1"'
+as "$FM_TOKEN" GET "$FSX/detail-mapping?onlyUnmapped=true"; check "f3 export: unmapped details exclude it" '.success and ([.data[]|select(.code == "SD-1")]|length) == 0 and ([.data[]|select(.code == "SD-2")]|length) == 1'
+as "$FM_TOKEN" POST $FG/settings '{"key":"Finance:SepidarFullExport","value":"0"}'; check "f3 export: switched off again" '.success and .data.value == "0"'
+
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'
