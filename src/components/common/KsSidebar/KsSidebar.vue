@@ -358,6 +358,10 @@ const links = {
   projectControl: [
     { title: "داشبورد سبد پروژه‌ها", routeName: "ProjectControlPortfolio", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "فضای کار پروژه", routeName: "ProjectControlProject", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "ساختار شکست کار (WBS)", routeName: "ProjectControlWbs", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "فعالیت‌ها، وابستگی‌ها و تقویم", routeName: "ProjectControlActivities", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "کنترل زمان‌بندی (CPM)", routeName: "ProjectControlSchedule", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "نمودار گانت", routeName: "ProjectControlGantt", disabled: !hasRole(ProjectControlRoles.readers) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },

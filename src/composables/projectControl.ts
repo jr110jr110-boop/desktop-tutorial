@@ -177,3 +177,10 @@ export function milestoneLine(text: string): string {
 
 /** Sums a number field of rows. */
 export const sumOf = (rows: any[], key: string): number => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+
+/** Units that own activities; the value is the role of the unit manager (baseline signatures use the same names). */
+export const unitOptions: [string, string][] = [
+  ["ENGINEERING", "مهندسی"], ["CONSTRUCTION", "تولید"], ["ASSEMBLER", "مونتاژ"], ["QC", "کنترل کیفیت"], ["QA", "تضمین کیفیت"], ["COMMERCIAL", "بازرگانی"],
+  ["WAREHOUSE", "انبار"], ["WHSUPERVISOR", "سرپرست انبار"], ["PLANNING", "برنامه‌ریزی"], ["PROJECTMANAGER", "مدیر پروژه"], ["FINANCIAL", "مالی"], ["DCC", "کنترل مدارک"],
+];
+export const unitText = (u: string | null | undefined): string => (u ? unitOptions.find((x) => x[0] === String(u).toUpperCase())?.[1] || u : "");

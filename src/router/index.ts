@@ -469,6 +469,10 @@ const routes: Array<RouteRecordRaw> = [
   // Project control (PMO): the paths of the alert links of the API (/project-control/portfolio, guarantees, changes, milestones, transmittals, penalties) are kept
   { path: "/project-control/portfolio", name: "ProjectControlPortfolio", component: () => import("@/views/projectControl/Portfolio.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/project", name: "ProjectControlProject", component: () => import("@/views/projectControl/Project.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/wbs", name: "ProjectControlWbs", component: () => import("@/views/projectControl/Wbs.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/activities", name: "ProjectControlActivities", component: () => import("@/views/projectControl/Activities.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/schedule", name: "ProjectControlSchedule", component: () => import("@/views/projectControl/Schedule.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/gantt", name: "ProjectControlGantt", component: () => import("@/views/projectControl/Gantt.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",
