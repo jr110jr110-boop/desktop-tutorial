@@ -73,7 +73,7 @@ watch(() => props.contractId, load);
           <div class="col-6"><label class="form-label small mb-0">تغییر زمان (روز)</label><input v-model.number="form.daysDelta" class="form-control form-control-sm" type="number" /></div>
         </div>
         <label class="form-label small mb-0">درخواست تغییر مرتبط</label>
-        <select v-model="form.changeRequestId" class="form-select form-select-sm mb-3"><option :value="null">-</option><option v-for="c in changes" :key="c.id" :value="c.id">{{ c.number }} {{ c.title }}</option></select>
+        <select v-model="form.changeRequestId" class="form-select form-select-sm mb-3"><option :value="null">-</option><option v-for="c in changes" :key="c.id" :value="c.id">{{ c.number }} {{ (c.description || "").slice(0, 50) }}</option></select>
         <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-secondary" @click="form = null">انصراف</button><button :disabled="busy || !form.description" class="btn btn-sm btn-primary" @click="save">ذخیره</button></div>
       </div>
     </div>
