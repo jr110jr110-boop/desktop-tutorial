@@ -476,6 +476,10 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/baselines", name: "ProjectControlBaselines", component: () => import("@/views/projectControl/Baselines.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/progress", name: "ProjectControlProgress", component: () => import("@/views/projectControl/Progress.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/evm", name: "ProjectControlEvm", component: () => import("@/views/projectControl/Evm.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/milestones", name: "ProjectControlMilestones", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "milestones" }, meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/guarantees", name: "ProjectControlGuarantees", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "guarantees" }, meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/penalties", name: "ProjectControlPenalties", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "penalties" }, meta: { roles: ProjectControlRoles.penalties } },
+  { path: "/project-control/variations", name: "ProjectControlVariations", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "variations" }, meta: { roles: ProjectControlRoles.variations } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

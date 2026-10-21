@@ -365,6 +365,10 @@ const links = {
     { title: "خط مبنا و هزینه", routeName: "ProjectControlBaselines", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "پیشرفت و منحنی S", routeName: "ProjectControlProgress", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "ارزش کسب‌شده و جریان نقدی", routeName: "ProjectControlEvm", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "مراحل پرداخت", routeName: "ProjectControlMilestones", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "ضمانت‌نامه‌ها", routeName: "ProjectControlGuarantees", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "جریمه تاخیر", routeName: "ProjectControlPenalties", disabled: !hasRole(ProjectControlRoles.penalties) },
+    { title: "دستور تغییر", routeName: "ProjectControlVariations", disabled: !hasRole(ProjectControlRoles.variations) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },
