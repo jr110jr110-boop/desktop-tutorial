@@ -231,6 +231,10 @@ namespace Services.NasbNiro.Finance
             decimal opening = R(dto.OpeningBalance), closing = R(dto.ClosingBalance);
             if (opening + lines.Sum(l => l.Deposit) - lines.Sum(l => l.Withdrawal) != closing)
                 return Bad<BankStatementDto>("مانده پایانی با مانده ابتدایی و گردش‌ها نمی‌خواند؛ فایل صورت‌حساب را بررسی کنید.");
+            DateTime from = lines.Min(l => l.Date), to = lines.Max(l => l.Date);
+            bool already = await _uow.Set<FnBankStatement>().AnyAsync(x => x.BankAccountId == bank.Id && x.FromDate == from && x.ToDate == to
+                && x.OpeningBalance == opening && x.ClosingBalance == closing && x.Lines.Count == lines.Count, ct);
+            if (already) return Bad<BankStatementDto>("این صورت‌حساب (همین بازه و مانده‌ها) قبلاً وارد شده است.");
             var st = new FnBankStatement
             {
                 BankAccountId = bank.Id, FromDate = lines.Min(l => l.Date), ToDate = lines.Max(l => l.Date), OpeningBalance = opening, ClosingBalance = closing,
