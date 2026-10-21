@@ -19,7 +19,7 @@ const selected = ref<number[]>([]);
 const emptyForm = () => ({
   id: null, code: "", title: "", itemGroupId: null, unit: "عدد", trackingMode: 0, technicalCode: "", material: "",
   standard: "", specification: "", weight: null, minStock: 0, maxStock: null, isActive: true, sepidarCode: "",
-  mescCode: "", legacyCode: "", requiresIncomingInspection: true, shelfLifeDays: null,
+  mescCode: "", legacyCode: "", requiresIncomingInspection: true, shelfLifeDays: null, requiredCertificateType: null,
 });
 const form = ref<any>(null);
 const saving = ref(false);
@@ -291,6 +291,14 @@ onMounted(() => {
           </div>
           <div class="col-md-3 d-flex align-items-end">
             <label class="form-check small"><input v-model="form.requiresIncomingInspection" class="form-check-input" type="checkbox" /> بازرسی ورودی لازم دارد (رسید در قرنطینه)</label>
+            <label class="small mt-2 d-block">گواهی مواد لازم (EN 10204)
+              <select v-model="form.requiredCertificateType" class="form-select form-select-sm">
+                <option :value="null">لازم نیست</option>
+                <option :value="1">2.2</option>
+                <option :value="2">3.1</option>
+                <option :value="3">3.2</option>
+              </select>
+            </label>
           </div>
           <div class="col-12 form-check ms-2"><input id="itemActive" v-model="form.isActive" class="form-check-input" type="checkbox" /><label class="form-check-label small" for="itemActive">فعال</label></div>
         </div>
