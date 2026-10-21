@@ -480,6 +480,11 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/guarantees", name: "ProjectControlGuarantees", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "guarantees" }, meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/penalties", name: "ProjectControlPenalties", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "penalties" }, meta: { roles: ProjectControlRoles.penalties } },
   { path: "/project-control/variations", name: "ProjectControlVariations", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "variations" }, meta: { roles: ProjectControlRoles.variations } },
+  { path: "/project-control/mdr", name: "ProjectControlMdr", component: () => import("@/views/projectControl/Mdr.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/mdl", name: "ProjectControlMdl", component: () => import("@/views/projectControl/Mdr.vue"), props: { mdl: true }, meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/transmittals", name: "ProjectControlTransmittals", component: () => import("@/views/projectControl/Transmittals.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/mdr-templates", name: "ProjectControlMdrTemplates", component: () => import("@/views/projectControl/DocSetup.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/final-books", name: "ProjectControlFinalBooks", component: () => import("@/views/projectControl/FinalBooks.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

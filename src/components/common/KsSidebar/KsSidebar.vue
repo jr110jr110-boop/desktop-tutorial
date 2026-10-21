@@ -369,6 +369,11 @@ const links = {
     { title: "ضمانت‌نامه‌ها", routeName: "ProjectControlGuarantees", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "جریمه تاخیر", routeName: "ProjectControlPenalties", disabled: !hasRole(ProjectControlRoles.penalties) },
     { title: "دستور تغییر", routeName: "ProjectControlVariations", disabled: !hasRole(ProjectControlRoles.variations) },
+    { title: "فهرست مدارک (MDR)", routeName: "ProjectControlMdr", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "مدارک کارفرما (MDL)", routeName: "ProjectControlMdl", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "ترنسمیتال", routeName: "ProjectControlTransmittals", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "قالب و کد پاسخ مدارک", routeName: "ProjectControlMdrTemplates", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "کتاب نهایی", routeName: "ProjectControlFinalBooks", disabled: !hasRole(ProjectControlRoles.finalBooks) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },
