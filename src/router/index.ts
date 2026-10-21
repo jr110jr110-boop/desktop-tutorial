@@ -1,7 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
-import { currentRole, FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, QualityRoles, Roles } from "@/composables/roles";
+import { currentRole, FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -466,6 +466,9 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/quality/management-reviews", name: "QualityReviews", component: () => import("@/views/quality/Reviews.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/management-reviews/:id", name: "QualityReviewEdit", component: () => import("@/views/quality/ReviewEdit.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/settings", name: "QualitySettings", component: () => import("@/views/quality/Settings.vue"), meta: { roles: QualityRoles.readers } },
+  // Project control (PMO): the paths of the alert links of the API (/project-control/portfolio, guarantees, changes, milestones, transmittals, penalties) are kept
+  { path: "/project-control/portfolio", name: "ProjectControlPortfolio", component: () => import("@/views/projectControl/Portfolio.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/project", name: "ProjectControlProject", component: () => import("@/views/projectControl/Project.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

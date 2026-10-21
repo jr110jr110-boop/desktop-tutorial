@@ -47,6 +47,17 @@ const tiles = (d: any) => [
   { title: "گواهی‌های در آستانه انقضا", value: num(d.qualificationsLapsing), link: "/quality/personnel", warn: d.qualificationsLapsing > 0 },
   { title: "شکایت مشتری عقب‌افتاده", value: num(d.complaintsOverdue), link: "/quality/complaints", warn: d.complaintsOverdue > 0 },
   { title: "اعلام بازرسی شاهد سررسیدشده", value: num(d.witnessNoticesDue), link: "/quality/itp" },
+  // project control (PMO)
+  { title: "پروژه‌های فعال", value: num(d.pcActiveProjects), link: "/project-control/portfolio" },
+  { title: "پروژه قرمز (SPI یا CPI)", value: num(d.pcProjectsRed), link: "/project-control/portfolio", warn: d.pcProjectsRed > 0 },
+  { title: "پروژه زرد (SPI یا CPI)", value: num(d.pcProjectsAmber), link: "/project-control/portfolio", warn: d.pcProjectsAmber > 0 },
+  { title: "فعالیت پروژه با تاخیر", value: num(d.pcLateActivities), link: "/project-control/activities", warn: d.pcLateActivities > 0 },
+  { title: "درخواست تغییر باز", value: num(d.pcOpenChangeRequests), sub: d.pcOverdueChangeRequests + " از مهلت تحلیل گذشته", link: "/project-control/changes", warn: d.pcOverdueChangeRequests > 0 },
+  { title: "ضمانت‌نامه در آستانه انقضا", value: num(d.pcGuaranteeAlerts), link: "/project-control/guarantees", warn: d.pcGuaranteeAlerts > 0 },
+  { title: "مرحله پرداخت سررسیدشده", value: num(d.pcOverdueMilestones), link: "/project-control/milestones", warn: d.pcOverdueMilestones > 0 },
+  { title: "گام شروع پروژه از مهلت گذشته", value: num(d.pcOverdueInitiationSteps), link: "/project-control/portfolio", warn: d.pcOverdueInitiationSteps > 0 },
+  { title: "پاسخ کارفرما به مدارک عقب‌افتاده", value: num(d.pcOverdueClientResponses), link: "/project-control/transmittals", warn: d.pcOverdueClientResponses > 0 },
+  { title: "جریمه تاخیر محاسبه‌شده (ریال)", value: rial(d.pcPenaltyExposure), link: "/project-control/penalties", warn: d.pcPenaltyExposure > 0 },
 ];
 
 onMounted(load);

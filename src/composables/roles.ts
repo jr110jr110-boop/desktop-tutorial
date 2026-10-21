@@ -19,6 +19,8 @@ export const Roles = {
   WHSUPERVISOR: "WHSUPERVISOR",
   CEO: "CEO",
   QA: "QA",
+  PROJECTMANAGER: "PROJECTMANAGER",
+  DCC: "DCC",
 } as const;
 
 export const roleTitles: Record<string, string> = {
@@ -36,6 +38,8 @@ export const roleTitles: Record<string, string> = {
   WHSUPERVISOR: "سرپرست انبار",
   CEO: "مدیرعامل",
   QA: "تضمین کیفیت",
+  PROJECTMANAGER: "مدیر پروژه",
+  DCC: "کنترل مدارک پروژه",
 };
 
 const list = (csv: string) => csv.split(",");
@@ -134,4 +138,44 @@ export const QualityRoles = {
   review: list("QA,PMO,CEO"),
   complaints: list("QA,QC,PMO,COMMERCIAL"),
   settings: list("QA,PMO,CEO"),
+};
+
+/**
+ * Project control (PMO) module (ProjectControlRoles in PcCommon.cs). The GET endpoints accept the readers; every write checks
+ * its role inside the service (segregation of duties), so these lists only decide which buttons are shown.
+ */
+export const ProjectControlRoles = {
+  readers: list("PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,QC,QA,CONSTRUCTION,ASSEMBLER,WAREHOUSE,WHSUPERVISOR"),
+  /** planning manager; the PMO deputy can do the same */
+  planning: list("PLANNING,PMO"),
+  projectManagers: list("PROJECTMANAGER,PMO"),
+  planningOrPm: list("PLANNING,PROJECTMANAGER,PMO"),
+  commercial: list("COMMERCIAL,PMO"),
+  ceo: ["CEO"],
+  pmo: ["PMO"],
+  /** engineering documents: DCC and engineering move the document states */
+  dcc: list("DCC,ENGINEERING,ENGINEER,PMO"),
+  dccOnly: list("DCC,PMO"),
+  /** unit managers propose manual progress, confirm daily reports and register change requests */
+  unitManagers: list("ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,QC,QA,COMMERCIAL,WAREHOUSE,WHSUPERVISOR,PLANNING,PROJECTMANAGER,PMO"),
+  terms: list("PMO,PLANNING,COMMERCIAL,PROJECTMANAGER"),
+  initiationStart: list("PMO,PLANNING,COMMERCIAL"),
+  charter: list("PMO,PLANNING,PROJECTMANAGER"),
+  reviews: list("COMMERCIAL,PMO,PLANNING"),
+  /** guarantees, milestone payment steps */
+  commercialFinance: list("COMMERCIAL,FINANCIAL,PMO"),
+  penalties: list("COMMERCIAL,PMO,PROJECTMANAGER,PLANNING,CEO"),
+  variations: list("COMMERCIAL,PMO,PROJECTMANAGER"),
+  costs: list("FINANCIAL,PMO"),
+  finalBooks: list("DCC,PMO,QC"),
+  mdrDraft: list("PLANNING,DCC,ENGINEERING,PMO"),
+  mdrTemplates: list("ENGINEERING,DCC,PMO"),
+  internalApprove: list("ENGINEERING,PMO"),
+  shipmentPack: list("PLANNING,PMO,WAREHOUSE,WHSUPERVISOR"),
+  shipmentDeliver: list("PLANNING,PMO,COMMERCIAL,WAREHOUSE,WHSUPERVISOR"),
+  shipmentHandover: list("PLANNING,PMO,COMMERCIAL"),
+  reportGenerate: list("PLANNING,PROJECTMANAGER,PMO,CEO"),
+  claims: list("PLANNING,PROJECTMANAGER,PMO,COMMERCIAL"),
+  claimSettle: list("COMMERCIAL,PMO,CEO"),
+  claimDesign: list("ENGINEERING,CONSTRUCTION,PMO"),
 };

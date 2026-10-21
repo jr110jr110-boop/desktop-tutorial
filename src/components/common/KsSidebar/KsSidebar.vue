@@ -148,6 +148,19 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.projectControl"
+        has-sub
+        route-name="ProjectControl"
+        tag="project-control-collapse"
+        title="کنترل پروژه">
+        <ChartLineIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('ProjectControl') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.finance"
         has-sub
         route-name="Finance"
@@ -188,7 +201,7 @@
 </template>
 
 <script lang="ts" setup>
-import { FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, QualityRoles } from "@/composables/roles";
+import { FinanceRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -341,6 +354,10 @@ const links = {
     { title: "ممیزی داخلی", routeName: "QualityAudits", disabled: !hasRole(QualityRoles.readers) },
     { title: "بازنگری مدیریت", routeName: "QualityReviews", disabled: !hasRole(QualityRoles.readers) },
     { title: "تنظیمات کیفیت", routeName: "QualitySettings", disabled: !hasRole(QualityRoles.readers) },
+  ] as Links[],
+  projectControl: [
+    { title: "داشبورد سبد پروژه‌ها", routeName: "ProjectControlPortfolio", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "فضای کار پروژه", routeName: "ProjectControlProject", disabled: !hasRole(ProjectControlRoles.readers) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },
