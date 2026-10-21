@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Procurement;
 using ViewModels.NasbNiro.Pagination;
 
@@ -420,6 +421,17 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public decimal Deductions { get; set; }
         public string DeductionNote { get; set; }
         public string Description { get; set; }
+        /// <summary>Deductions by kind (withholding, retention...). Their sum may not exceed Deductions; when Deductions is 0 it becomes their sum.</summary>
+        public List<PaymentDeductionDto> DeductionLines { get; set; } = new List<PaymentDeductionDto>();
+    }
+
+    public class PaymentDeductionDto
+    {
+        public FnDeductionKind Kind { get; set; }
+        public decimal Base { get; set; }
+        public decimal RatePercent { get; set; }
+        public decimal Amount { get; set; }
+        public string Note { get; set; }
     }
 
     public class PaymentRequestDto
@@ -449,6 +461,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string PaidByName { get; set; }
         public string PaymentReference { get; set; }
         public string RejectReason { get; set; }
+        public List<PaymentDeductionDto> DeductionLines { get; set; } = new List<PaymentDeductionDto>();
     }
 
     public class ProcurementListQuery : PaginationParams
@@ -478,6 +491,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string SepidarCode { get; set; }
         public string NationalId { get; set; }
         public string EconomicCode { get; set; }
+        public string Iban { get; set; }
 
         // performance (for the periodic evaluation)
         public int Orders { get; set; }
@@ -499,6 +513,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string SepidarCode { get; set; }
         public string NationalId { get; set; }
         public string EconomicCode { get; set; }
+        public string Iban { get; set; }
     }
 
     public class SaveSupplierEvaluationDto

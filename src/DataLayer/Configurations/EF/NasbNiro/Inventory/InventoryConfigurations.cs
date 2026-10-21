@@ -1,3 +1,4 @@
+using DataLayer.Configurations.EF.NasbNiro.Finance;
 using DataLayer.Configurations.EF.NasbNiro.ProjectControl;
 using DataLayer.Configurations.EF.NasbNiro.Quality;
 using Entities.Model.NasbNiro.Inventory;
@@ -14,6 +15,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
         public static void AddInventoryConfigurations(this ModelBuilder builder)
         {
             builder.AddFinanceConfigurations();
+            builder.AddLedgerConfigurations();
             builder.AddProcurementConfigurations();
             builder.AddQualityConfigurations();
             builder.AddProjectControlConfigurations();

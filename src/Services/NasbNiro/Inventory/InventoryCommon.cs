@@ -48,7 +48,7 @@ namespace Services.NasbNiro.Inventory
         public const string Production = "PMO,WAREHOUSE,ENGINEERING,ENGINEER,ASSEMBLER,QC";
         public const string Routing = "PMO,ENGINEERING";
         public const string Qc = "PMO,QC";
-        public const string Finance = "PMO,FINANCIAL";
+        public const string Finance = "PMO,FINANCIAL,FINANCEMANAGER";
 
         /// <summary>Who may write a material request: production and planning.</summary>
         public const string MaterialRequest = "PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR";

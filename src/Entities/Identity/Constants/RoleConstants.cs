@@ -137,6 +137,31 @@ namespace Entities.Identity.Constants
             Description = "کنترل مدارک پروژه"
         };
 
+        // Finance module (full accounting inside PMIS) (★ provisional decision)
+        public const string FinanceManager = "FINANCEMANAGER";
+        public static readonly ResponseRole FinanceManagerResponseRole = new ResponseRole()
+        {
+            Id = 17,
+            Name = FinanceManager,
+            Description = "مدیر مالی"
+        };
+
+        public const string Payroll = "PAYROLL";
+        public static readonly ResponseRole PayrollResponseRole = new ResponseRole()
+        {
+            Id = 18,
+            Name = Payroll,
+            Description = "حقوق و دستمزد"
+        };
+
+        public const string Treasury = "TREASURY";
+        public static readonly ResponseRole TreasuryResponseRole = new ResponseRole()
+        {
+            Id = 19,
+            Name = Treasury,
+            Description = "خزانه‌داری"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -155,6 +180,9 @@ namespace Entities.Identity.Constants
             yield return QAResponseRole;
             yield return ProjectManagerResponseRole;
             yield return DccResponseRole;
+            yield return FinanceManagerResponseRole;
+            yield return PayrollResponseRole;
+            yield return TreasuryResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)

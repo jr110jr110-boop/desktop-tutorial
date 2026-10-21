@@ -15,7 +15,7 @@ namespace WebApi.Controllers
     [Route("api/v1/finance")]
     public class FinanceLinkController : ControllerBase
     {
-        private const string Readers = "PMO,CEO,FINANCIAL,PLANNING";
+        private const string Readers = "PMO,CEO,FINANCIAL,FINANCEMANAGER,PLANNING";
         private readonly IFinanceLinkService _service;
         public FinanceLinkController(IFinanceLinkService service) => _service = service;
 

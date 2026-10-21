@@ -97,17 +97,44 @@ namespace Entities.Model.NasbNiro.Finance
         SupplierInvoice = 20,
         SupplierAdvance = 21,
         PaymentRequest = 22,
+
+        // general ledger, treasury, receivables (release F1); the 50+ and 60+ values are kept for release F2
+        CustomerReceipt = 30,
+        SupplierPayment = 31,
+        ChequeReceived = 32,
+        ChequeDeposited = 33,
+        ChequeCleared = 34,
+        ChequeBounced = 35,
+        ChequeEndorsed = 36,
+        ChequeReturned = 37,
+        IssuedChequeCleared = 38,
+        IssuedChequeCancelled = 39,
+        PettyCashTopUp = 40,
+        PettyCashSettlement = 41,
+        BankFee = 42,
+        BankInterest = 43,
+        SalesInvoice = 44,
+        SalesCreditNote = 45,
+        GuaranteeReceived = 46,
+        GuaranteeGiven = 47,
+        GuaranteeClosed = 48,
+        DepreciationRun = 50,
+        AssetAcquisition = 51,
+        AssetDisposal = 52,
+        PayrollRun = 60,
         Reversal = 99,
     }
 
     public enum AccountingEventStatus
     {
-        /// <summary>Waiting to be sent to Sepidar.</summary>
+        /// <summary>Not yet posted to the PMIS ledger (Sepidar only receives tax and insurance data).</summary>
         Pending = 0,
         Sent = 1,
         Failed = 2,
         /// <summary>Exported to a file and entered in Sepidar by hand.</summary>
         Exported = 3,
+        /// <summary>Turned into a voucher of the PMIS general ledger.</summary>
+        Posted = 4,
         /// <summary>Has a zero amount or nothing to send.</summary>
         NotRequired = 9,
     }
@@ -169,6 +196,15 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal? Quantity { get; set; }
 
         public string Description { get; set; }
+
+        /// <summary>Other first-detail party: "Customer", "BankAccount", "CashBox", "PettyCash", "Employee", "Asset" (suppliers use ProviderId).</summary>
+        public string PartyType { get; set; }
+        public int? PartyId { get; set; }
+
+        // optional foreign currency amount of the line
+        public string CurrencyCode { get; set; }
+        public decimal? CurrencyAmount { get; set; }
+        public decimal? Rate { get; set; }
     }
 
     /// <summary>Which Sepidar account (کل/معین) each account role posts to; detail accounts come from SepidarMapping.</summary>
@@ -180,6 +216,9 @@ namespace Entities.Model.NasbNiro.Finance
         public string SepidarAccountCode { get; set; }
         public string Description { get; set; }
         public bool IsActive { get; set; } = true;
+
+        /// <summary>The PMIS ledger account (subsidiary) this role posts to.</summary>
+        public int? AccountId { get; set; }
     }
 
     /// <summary>Cost centres (مراکز هزینه) for costs that are not charged to a work order.</summary>

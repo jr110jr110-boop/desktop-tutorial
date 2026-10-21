@@ -33,6 +33,58 @@ namespace Services.NasbNiro.Finance
         public const string SupplierAdvance = "SupplierAdvance"; // پیش‌پرداخت به تامین‌کننده
         public const string PurchasedServices = "PurchasedServices"; // خدمات و پیمانکاری خریداری‌شده
 
+        // ---- general ledger, treasury, receivables (release F1)
+        public const string Cash = "Cash";                                // صندوق
+        public const string BankForeign = "BankForeign";                  // بانک ارزی
+        public const string PettyCash = "PettyCash";                      // تنخواه‌گردان
+        public const string FundsInTransit = "FundsInTransit";            // وجوه در راه
+        public const string AccountsReceivable = "AccountsReceivable";    // حساب‌های دریافتنی تجاری (مشتری)
+        public const string ChequesReceivable = "ChequesReceivable";      // اسناد دریافتنی (چک‌های در جریان)
+        public const string ChequesInCollection = "ChequesInCollection";  // چک‌های در جریان وصول
+        public const string ChequesBounced = "ChequesBounced";            // چک‌های برگشتی
+        public const string RetentionReceivable = "RetentionReceivable";  // کسور حسن انجام کار نزد کارفرما
+        public const string WithholdingReceivable = "WithholdingReceivable"; // مالیات تکلیفی کسرشده توسط کارفرما
+        public const string InsuranceRetentionReceivable = "InsuranceRetentionReceivable"; // سپرده بیمه کسرشده توسط کارفرما
+        public const string EmployeeAdvance = "EmployeeAdvance";          // مساعده و وام کارکنان
+        public const string ChequesPayable = "ChequesPayable";            // اسناد پرداختنی (چک‌های صادره)
+        public const string WithholdingPayable = "WithholdingPayable";    // مالیات تکلیفی پرداختنی
+        public const string VatSales = "VatSales";                        // مالیات بر ارزش افزوده فروش
+        public const string PerformanceRetentionPayable = "PerformanceRetentionPayable"; // سپرده حسن انجام کار پیمانکاران
+        public const string InsuranceRetentionPayable = "InsuranceRetentionPayable";     // سپرده بیمه پیمانکاران
+        public const string OtherPayable = "OtherPayable";                // سایر پرداختنی‌ها
+        public const string CustomerAdvance = "CustomerAdvance";          // پیش‌دریافت از کارفرمایان
+        public const string RevenueContracts = "RevenueContracts";        // درآمد قراردادهای ساخت
+        public const string RevenueSales = "RevenueSales";                // فروش قطعات و خدمات
+        public const string SalesReturns = "SalesReturns";                // برگشت از فروش و تخفیفات
+        public const string InterestIncome = "InterestIncome";            // سود سپرده
+        public const string FxGain = "FxGain";                            // سود تسعیر ارز
+        public const string BankFees = "BankFees";                        // کارمزد بانکی
+        public const string FxLoss = "FxLoss";                            // زیان تسعیر ارز
+        public const string GuaranteeIssued = "GuaranteeIssued";          // ضمانت‌نامه‌های صادره (انتظامی)
+        public const string GuaranteeIssuedContra = "GuaranteeIssuedContra";
+        public const string GuaranteeChequesReceived = "GuaranteeChequesReceived"; // چک‌های تضمینی دریافتی (انتظامی)
+        public const string GuaranteeChequesContra = "GuaranteeChequesContra";
+
+        // ---- release F2 (payroll, fixed assets): defined now so the mapping is complete
+        public const string PayrollPayable = "PayrollPayable";
+        public const string InsurancePayable = "InsurancePayable";
+        public const string PayrollTaxPayable = "PayrollTaxPayable";
+        public const string PayrollExpenseAdmin = "PayrollExpenseAdmin";
+        public const string PayrollExpenseIndirect = "PayrollExpenseIndirect";
+        public const string PayrollExpenseDirect = "PayrollExpenseDirect";
+        public const string EmployerInsuranceAdmin = "EmployerInsuranceAdmin";
+        public const string EmployerInsuranceProduction = "EmployerInsuranceProduction";
+        public const string SeveranceExpense = "SeveranceExpense";
+        public const string SeveranceProvision = "SeveranceProvision";
+        public const string BonusProvision = "BonusProvision";
+        public const string LeaveProvision = "LeaveProvision";
+        public const string DepreciationProduction = "DepreciationProduction";
+        public const string DepreciationAdmin = "DepreciationAdmin";
+        public const string AssetGainOnDisposal = "AssetGainOnDisposal";
+        public const string AssetLossOnDisposal = "AssetLossOnDisposal";
+        public const string AssetUnderConstruction = "AssetUnderConstruction";
+        public const string CapitalAdvance = "CapitalAdvance";
+
         public static string InventoryOf(string itemCode)
         {
             string prefix = itemCode != null && itemCode.Length >= 2 && char.IsDigit(itemCode[0]) && char.IsDigit(itemCode[1]) ? itemCode.Substring(0, 2) : null;
@@ -67,6 +119,54 @@ namespace Services.NasbNiro.Finance
             yield return (Vat, "مالیات بر ارزش افزوده خرید");
             yield return (SupplierAdvance, "پیش‌پرداخت خرید");
             yield return (PurchasedServices, "خدمات و پیمانکاری خریداری‌شده");
+            yield return (Cash, "صندوق");
+            yield return (BankForeign, "بانک - ارزی");
+            yield return (PettyCash, "تنخواه‌گردان");
+            yield return (FundsInTransit, "وجوه در راه");
+            yield return (AccountsReceivable, "حساب‌های دریافتنی تجاری");
+            yield return (ChequesReceivable, "اسناد دریافتنی (چک‌های در جریان)");
+            yield return (ChequesInCollection, "چک‌های در جریان وصول");
+            yield return (ChequesBounced, "چک‌های برگشتی");
+            yield return (RetentionReceivable, "کسور حسن انجام کار نزد کارفرما");
+            yield return (WithholdingReceivable, "مالیات تکلیفی کسرشده توسط کارفرما");
+            yield return (InsuranceRetentionReceivable, "سپرده بیمه کسرشده توسط کارفرما");
+            yield return (EmployeeAdvance, "مساعده و وام کارکنان");
+            yield return (ChequesPayable, "اسناد پرداختنی (چک‌های صادره)");
+            yield return (WithholdingPayable, "مالیات تکلیفی پرداختنی");
+            yield return (VatSales, "مالیات بر ارزش افزوده فروش");
+            yield return (PerformanceRetentionPayable, "سپرده حسن انجام کار پیمانکاران");
+            yield return (InsuranceRetentionPayable, "سپرده بیمه پیمانکاران");
+            yield return (OtherPayable, "سایر پرداختنی‌ها");
+            yield return (CustomerAdvance, "پیش‌دریافت از کارفرمایان");
+            yield return (RevenueContracts, "درآمد قراردادهای ساخت");
+            yield return (RevenueSales, "فروش قطعات و خدمات");
+            yield return (SalesReturns, "برگشت از فروش و تخفیفات");
+            yield return (InterestIncome, "سود سپرده");
+            yield return (FxGain, "سود تسعیر ارز");
+            yield return (BankFees, "کارمزد بانکی");
+            yield return (FxLoss, "زیان تسعیر ارز");
+            yield return (GuaranteeIssued, "ضمانت‌نامه‌های صادره (انتظامی)");
+            yield return (GuaranteeIssuedContra, "طرف حساب ضمانت‌نامه‌ها (انتظامی)");
+            yield return (GuaranteeChequesReceived, "چک‌های تضمینی دریافتی (انتظامی)");
+            yield return (GuaranteeChequesContra, "طرف حساب چک‌های تضمینی (انتظامی)");
+            yield return (PayrollPayable, "حقوق و دستمزد پرداختنی");
+            yield return (InsurancePayable, "حق بیمه پرداختنی");
+            yield return (PayrollTaxPayable, "مالیات حقوق پرداختنی");
+            yield return (PayrollExpenseAdmin, "هزینه حقوق اداری");
+            yield return (PayrollExpenseIndirect, "هزینه حقوق غیرمستقیم تولید");
+            yield return (PayrollExpenseDirect, "دستمزد مستقیم");
+            yield return (EmployerInsuranceAdmin, "بیمه سهم کارفرما - اداری");
+            yield return (EmployerInsuranceProduction, "بیمه سهم کارفرما - تولید");
+            yield return (SeveranceExpense, "هزینه مزایای پایان خدمت");
+            yield return (SeveranceProvision, "ذخیره مزایای پایان خدمت");
+            yield return (BonusProvision, "ذخیره عیدی و پاداش");
+            yield return (LeaveProvision, "ذخیره مرخصی");
+            yield return (DepreciationProduction, "هزینه استهلاک تولید");
+            yield return (DepreciationAdmin, "هزینه استهلاک اداری");
+            yield return (AssetGainOnDisposal, "سود فروش دارایی");
+            yield return (AssetLossOnDisposal, "زیان فروش دارایی");
+            yield return (AssetUnderConstruction, "دارایی در جریان تکمیل");
+            yield return (CapitalAdvance, "پیش‌پرداخت سرمایه‌ای");
         }
     }
 

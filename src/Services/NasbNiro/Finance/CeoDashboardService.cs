@@ -29,9 +29,12 @@ namespace Services.NasbNiro.Finance
 
         private readonly Quality.IQualityDashboardService _quality;
         private readonly ProjectControl.IPcReportService _projectControl;
+        private readonly IFinanceDashboardService _finance;
 
-        public CeoDashboardService(IUnitOfWork uow, Quality.IQualityDashboardService quality, ProjectControl.IPcReportService projectControl)
+        public CeoDashboardService(IUnitOfWork uow, Quality.IQualityDashboardService quality, ProjectControl.IPcReportService projectControl,
+            IFinanceDashboardService finance)
         {
+            _finance = finance ?? throw new ArgumentNullException(nameof(finance));
             _projectControl = projectControl ?? throw new ArgumentNullException(nameof(projectControl));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _quality = quality ?? throw new ArgumentNullException(nameof(quality));
@@ -161,6 +164,9 @@ namespace Services.NasbNiro.Finance
             Alert(pc.OverdueMilestones > 0, "info", $"{pc.OverdueMilestones} مرحله پرداخت از موعد گذشته است", "/project-control/milestones");
             Alert(pc.OverdueClientResponses > 0, "info", $"{pc.OverdueClientResponses} پاسخ کارفرما به مدارک ارسالی عقب افتاده است", "/project-control/transmittals");
             Alert(pc.PenaltyExposure > 0, "warning", "جریمه تاخیر محاسبه‌شده وجود دارد", "/project-control/penalties");
+            // finance module: cash, receivables, cheques, profit, margins
+            d.Finance = await _finance.GetCeoFinanceAsync(ct);
+            d.Alerts.AddRange(d.Finance.Alerts);
             return ResponseDtoHelper.Ok(d);
         }
     }

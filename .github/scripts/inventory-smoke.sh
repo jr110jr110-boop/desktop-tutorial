@@ -12,7 +12,7 @@ B="$OUT/inv-body.tmp"
 mkdir -p "$OUT"; : > "$R"; : > "$F"
 
 cd src/WebApi
-dotnet bin/Release/net10.0/WebApi.dll > "$OUT/7-inventory-app.log" 2>&1 &
+Finance__AutoPost=false dotnet bin/Release/net10.0/WebApi.dll > "$OUT/7-inventory-app.log" 2>&1 &
 APP_PID=$!
 cd ../..
 for i in $(seq 1 120); do

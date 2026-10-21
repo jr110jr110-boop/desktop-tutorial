@@ -21,10 +21,10 @@ namespace Services.NasbNiro.Procurement
         public const string Technical = "ENGINEERING,QC,CONSTRUCTION,PMO";
         /// <summary>Approves and releases purchase orders and payment requests (PMO deputy).</summary>
         public const string OrderApproval = "PMO,CEO";
-        public const string Finance = "FINANCIAL,PMO";
+        public const string Finance = "FINANCIAL,FINANCEMANAGER,TREASURY,PMO";
         /// <summary>Accepts services and subcontract work (not the buyer).</summary>
         public const string ServiceAcceptance = "QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO";
-        public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION";
+        public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION";
     }
 
     /// <summary>Company thresholds (rial). Defaults come from the procedures; management can change them.</summary>

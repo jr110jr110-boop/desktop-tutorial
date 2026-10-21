@@ -61,6 +61,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int EventsFailed { get; set; }
         public DateTimeOffset? LastEventSent { get; set; }
 
+        /// <summary>General ledger, treasury and receivables figures (finance module).</summary>
+        public CeoFinanceDto Finance { get; set; } = new CeoFinanceDto();
+
         public List<ProjectCostDto> Projects { get; set; } = new List<ProjectCostDto>();
         public List<DashboardAlertDto> Alerts { get; set; } = new List<DashboardAlertDto>();
     }

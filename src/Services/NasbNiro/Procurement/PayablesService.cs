@@ -46,13 +46,15 @@ namespace Services.NasbNiro.Procurement
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly ICostingService _costing;
+        private readonly ITreasuryService _treasury;
         private readonly IProcurementService _procurement;
 
-        public PayablesService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, IProcurementService procurement)
+        public PayablesService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, IProcurementService procurement, ITreasuryService treasury)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
+            _treasury = treasury ?? throw new ArgumentNullException(nameof(treasury));
             _procurement = procurement ?? throw new ArgumentNullException(nameof(procurement));
         }
 
@@ -253,6 +255,8 @@ namespace Services.NasbNiro.Procurement
         {
             List<PaymentRequest> rows = await query.Include(p => p.Provider).Include(p => p.PurchaseOrder).Include(p => p.Invoice).ToListAsync(cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(p => new int?[] { p.CreatorUserId, p.ApprovedByUserId, p.PaidByUserId }), cancellationToken);
+            List<int> requestIds = rows.Select(p => p.Id).ToList();
+            List<FnPaymentDeduction> typed = await _uow.Set<FnPaymentDeduction>().AsNoTracking().Where(d => requestIds.Contains(d.PaymentRequestId)).OrderBy(d => d.Id).ToListAsync(cancellationToken);
             return rows.Select(p => new PaymentRequestDto
             {
                 Id = p.Id, Number = p.Number, Type = p.Type, Status = p.Status, RequestDate = p.RequestDate, ProviderId = p.ProviderId, ProviderName = p.Provider?.Name,
@@ -261,6 +265,7 @@ namespace Services.NasbNiro.Procurement
                 Description = p.Description, CreateDate = p.CreateDate, CreatorName = names.Name(p.CreatorUserId), ApprovedAt = p.ApprovedAt,
                 ApprovedByName = names.Name(p.ApprovedByUserId), PaidAt = p.PaidAt, PaidByName = names.Name(p.PaidByUserId), PaymentReference = p.PaymentReference,
                 RejectReason = p.RejectReason,
+                DeductionLines = typed.Where(d => d.PaymentRequestId == p.Id).Select(d => new PaymentDeductionDto { Kind = d.Kind, Base = d.Base, RatePercent = d.RatePercent, Amount = d.Amount, Note = d.Note }).ToList(),
             }).ToList();
         }
 
@@ -282,6 +287,12 @@ namespace Services.NasbNiro.Procurement
             if (dto == null) return Bad<PaymentRequestDto>("اطلاعات ارسال‌شده کامل نیست.");
             if (!_user.IsInRole(ProcurementRoles.Commercial)) return Bad<PaymentRequestDto>(NotAllowed + " (بازرگانی)");
             if (dto.Amount <= 0 || dto.Deductions < 0 || dto.Deductions > dto.Amount) return Bad<PaymentRequestDto>("مبلغ یا کسورات نامعتبر است.");
+            List<PaymentDeductionDto> typedLines = (dto.DeductionLines ?? new List<PaymentDeductionDto>()).Where(d => d != null && d.Amount != 0).ToList();
+            if (typedLines.Any(d => d.Amount < 0 || !Enum.IsDefined(typeof(FnDeductionKind), d.Kind))) return Bad<PaymentRequestDto>("کسورات تفکیک‌شده نامعتبر است.");
+            decimal typedSum = typedLines.Sum(d => Math.Round(d.Amount, 0));
+            decimal totalDeductions = dto.Deductions == 0 && typedSum > 0 ? typedSum : Math.Round(dto.Deductions, 0);
+            if (typedSum > totalDeductions) return Bad<PaymentRequestDto>("مجموع کسورات تفکیک‌شده از کل کسورات بیشتر است.");
+            if (totalDeductions > dto.Amount) return Bad<PaymentRequestDto>("مبلغ یا کسورات نامعتبر است.");
             PurchaseOrder order = dto.PurchaseOrderId.HasValue
                 ? await _uow.Set<PurchaseOrder>().FirstOrDefaultAsync(o => o.Id == dto.PurchaseOrderId.Value && !o.Deleted, cancellationToken) : null;
             SupplierInvoice invoice = dto.InvoiceId.HasValue
@@ -352,7 +363,13 @@ namespace Services.NasbNiro.Procurement
             payment.PurchaseOrderId = order.Id;
             payment.InvoiceId = invoice?.Id;
             payment.Amount = Math.Round(dto.Amount, 0);
-            payment.Deductions = Math.Round(dto.Deductions, 0);
+            payment.Deductions = totalDeductions;
+            if (dto.Id.HasValue) _uow.Set<FnPaymentDeduction>().RemoveRange(await _uow.Set<FnPaymentDeduction>().Where(d => d.PaymentRequestId == payment.Id).ToListAsync(cancellationToken));
+            foreach (PaymentDeductionDto d in typedLines)
+                _uow.Set<FnPaymentDeduction>().Add(new FnPaymentDeduction
+                {
+                    PaymentRequest = payment, Kind = d.Kind, Base = Math.Round(d.Base, 0), RatePercent = d.RatePercent, Amount = Math.Round(d.Amount, 0), Note = d.Note?.Trim(),
+                });
             payment.DeductionNote = Clean(dto.DeductionNote);
             payment.QcApproved = qcApproved;
             payment.Description = Clean(dto.Description);
@@ -382,6 +399,8 @@ namespace Services.NasbNiro.Procurement
                     if (!_user.IsInRole(ProcurementRoles.Finance)) return Bad<PaymentRequestDto>(NotAllowed + " (مالی)");
                     if (p.CreatorUserId == Me || p.ApprovedByUserId == Me) return Bad<PaymentRequestDto>(SameUser);
                     if (Clean(dto.Reference) == null) return Bad<PaymentRequestDto>("شماره سند پرداخت در سپیدار یا شماره پیگیری بانک را وارد کنید.");
+                    string legacyError = await _treasury.AddLegacyPaymentAsync(p, dto.Reference, cancellationToken);
+                    if (legacyError != null) return Bad<PaymentRequestDto>(legacyError);
                     p.Status = PaymentRequestStatus.Paid;
                     p.PaidAt = now;
                     p.PaidByUserId = Me;
@@ -430,7 +449,7 @@ namespace Services.NasbNiro.Procurement
                     ProviderId = p.Id, ProviderName = p.Name, Grade = pr?.Grade ?? SupplierGrade.NotEvaluated, Score = pr?.Score, EvaluatedAt = pr?.EvaluatedAt,
                     NextEvaluation = pr?.NextEvaluation, EvaluationDue = pr?.NextEvaluation.HasValue == true && pr.NextEvaluation <= DateTime.Today,
                     Categories = pr?.Categories, IsStrategic = pr?.IsStrategic ?? false, Blocked = pr?.Blocked ?? false, BlockReason = pr?.BlockReason,
-                    Warnings = pr?.Warnings ?? 0, SepidarCode = pr?.SepidarCode, NationalId = pr?.NationalId, EconomicCode = pr?.EconomicCode,
+                    Warnings = pr?.Warnings ?? 0, SepidarCode = pr?.SepidarCode, NationalId = pr?.NationalId, EconomicCode = pr?.EconomicCode, Iban = pr?.Iban,
                     Orders = orders.FirstOrDefault(o => o.Key == p.Id)?.Count ?? 0, OrderedAmount = orders.FirstOrDefault(o => o.Key == p.Id)?.Amount ?? 0,
                     ReceiptLines = ls.Count, LateReceiptLines = ls.Count(l => l.Late),
                     OnTimePercent = ls.Count == 0 ? (decimal?)null : Math.Round(100m * ls.Count(l => !l.Late) / ls.Count, 1),
@@ -466,6 +485,9 @@ namespace Services.NasbNiro.Procurement
             profile.SepidarCode = Clean(dto.SepidarCode);
             profile.NationalId = Clean(dto.NationalId);
             profile.EconomicCode = Clean(dto.EconomicCode);
+            string iban = Clean(dto.Iban)?.Replace(" ", "").ToUpperInvariant();
+            if (iban != null && !Finance.LedgerMath.IbanValid(Finance.LedgerMath.Digits(iban))) return Bad<SupplierProfileDto>("شماره شبا نامعتبر است.");
+            profile.Iban = iban == null ? null : Finance.LedgerMath.Digits(iban);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok((await GetSuppliersAsync(null, cancellationToken)).Data.First(p => p.ProviderId == dto.ProviderId));
         }

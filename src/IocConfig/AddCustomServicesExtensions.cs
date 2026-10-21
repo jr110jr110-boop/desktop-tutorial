@@ -130,6 +130,14 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.ICostingService, Services.NasbNiro.Finance.CostingService>();
             services.AddScoped<Services.NasbNiro.Finance.IFinanceLinkService, Services.NasbNiro.Finance.FinanceLinkService>();
             services.AddScoped<Services.NasbNiro.Finance.ICeoDashboardService, Services.NasbNiro.Finance.CeoDashboardService>();
+            services.AddScoped<Services.NasbNiro.Finance.IEventPostingService, Services.NasbNiro.Finance.EventPostingService>();
+            services.AddScoped<Services.NasbNiro.Finance.ILedgerReportService, Services.NasbNiro.Finance.LedgerReportService>();
+            services.AddScoped<Services.NasbNiro.Finance.IGlService, Services.NasbNiro.Finance.GlService>();
+            services.AddScoped<Services.NasbNiro.Finance.ITreasuryService, Services.NasbNiro.Finance.TreasuryService>();
+            services.AddScoped<Services.NasbNiro.Finance.IReceivablesService, Services.NasbNiro.Finance.ReceivablesService>();
+            services.AddScoped<Services.NasbNiro.Finance.ITaxService, Services.NasbNiro.Finance.TaxService>();
+            services.AddScoped<Services.NasbNiro.Finance.IFinanceDashboardService, Services.NasbNiro.Finance.FinanceDashboardService>();
+            services.AddHostedService<Services.NasbNiro.Finance.FinanceEventPostHostedService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
 

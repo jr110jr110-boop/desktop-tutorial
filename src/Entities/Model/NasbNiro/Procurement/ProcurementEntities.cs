@@ -494,6 +494,9 @@ namespace Entities.Model.NasbNiro.Procurement
         public string NationalId { get; set; }
         public string EconomicCode { get; set; }
 
+        /// <summary>Registered IBAN (شبا) for bank transfers; a transfer to another IBAN needs the finance manager.</summary>
+        public string Iban { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
