@@ -1,3 +1,4 @@
+using Common.Results;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -300,7 +301,7 @@ namespace WebApi.Controllers.ProjectControl
 
         [HttpGet("guarantees/alerts")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
-        public async Task<IActionResult> GuaranteeAlertsAsync([FromQuery] int? contractId, CancellationToken ct) => Ok(await _commercial.GuaranteeAlertsAsync(contractId, ct));
+        public async Task<IActionResult> GuaranteeAlertsAsync([FromQuery] int? contractId, CancellationToken ct) => Ok(ResponseDtoHelper.Ok(await _commercial.GuaranteeAlertsAsync(contractId, ct)));
 
         [HttpPost("penalties/compute/{contractId:int}")]
         public async Task<IActionResult> ComputePenaltiesAsync(int contractId, CancellationToken ct) => Ok(await _commercial.ComputePenaltiesAsync(contractId, ct));
@@ -488,6 +489,6 @@ namespace WebApi.Controllers.ProjectControl
 
         [HttpGet("dashboard")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
-        public async Task<IActionResult> DashboardAsync(CancellationToken ct) => Ok(await _report.GetDashboardAsync(ct));
+        public async Task<IActionResult> DashboardAsync(CancellationToken ct) => Ok(ResponseDtoHelper.Ok(await _report.GetDashboardAsync(ct)));
     }
 }
