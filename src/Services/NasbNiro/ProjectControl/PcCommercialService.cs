@@ -145,7 +145,7 @@ namespace Services.NasbNiro.ProjectControl
             PcPaymentMilestone m = await _uow.Set<PcPaymentMilestone>().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
             if (m == null) return PcText.NotFound<bool>("مرحله پرداخت پیدا نشد.");
             if (m.Status != PcMilestoneStatus.Planned) return Bad<bool>("مرحله سررسیدشده حذف نمی‌شود.");
-            m.Deleted = true; m.ModifyDate = DateTimeOffset.Now; m.ModifierUserId = Me;
+            m.Delete(); m.ModifyDate = DateTimeOffset.Now; m.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(true);
         }

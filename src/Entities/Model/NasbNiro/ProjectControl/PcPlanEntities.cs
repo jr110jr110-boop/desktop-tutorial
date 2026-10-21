@@ -33,6 +33,10 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public string ResponsibleUnit { get; set; }
         public int Sort { get; set; }
         public bool IsGenerated { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
     }
 
     public class PcActivity : BaseEntity

@@ -196,6 +196,8 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public string ReviewNote { get; set; }
         public int? ReviewedByUserId { get; set; }
         public DateTimeOffset? ReviewedAt { get; set; }
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
     }
 
     // ------------------------------------------------------------------------------ MDR / MDL (company decision)

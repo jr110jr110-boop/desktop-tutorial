@@ -213,7 +213,7 @@ namespace Services.NasbNiro.ProjectControl
             if (await _uow.Set<PcWbsNode>().AnyAsync(x => x.ParentId == id && !x.Deleted, cancellationToken)) return Bad<bool>("گره زیرمجموعه دارد و حذف نمی‌شود.");
             if (await _uow.Set<PcActivity>().AnyAsync(a => a.WbsNodeId == id && !a.Deleted, cancellationToken)) return Bad<bool>("گره فعالیت دارد و حذف نمی‌شود.");
             if (await _uow.Set<PcBaselineActivity>().AnyAsync(a => a.WbsNodeId == id, cancellationToken)) return Bad<bool>("گره در مبنای زمانی ثبت شده و حذف نمی‌شود.");
-            n.Deleted = true; n.ModifyDate = DateTimeOffset.Now; n.ModifierUserId = Me;
+            n.Delete(); n.ModifyDate = DateTimeOffset.Now; n.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(true);
         }
@@ -728,7 +728,7 @@ namespace Services.NasbNiro.ProjectControl
             if (await _uow.Set<PcPaymentMilestone>().AnyAsync(x => x.ActivityId == id && !x.Deleted, cancellationToken)) return Bad<bool>("فعالیت به مرحله پرداخت وصل است.");
             List<PcDependency> deps = await _uow.Set<PcDependency>().Where(d => d.PredecessorId == id || d.SuccessorId == id).ToListAsync(cancellationToken);
             _uow.Set<PcDependency>().RemoveRange(deps);
-            a.Deleted = true; a.ModifyDate = DateTimeOffset.Now; a.ModifierUserId = Me;
+            a.Delete(); a.ModifyDate = DateTimeOffset.Now; a.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(true);
         }
