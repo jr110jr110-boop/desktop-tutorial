@@ -473,6 +473,9 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/activities", name: "ProjectControlActivities", component: () => import("@/views/projectControl/Activities.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/schedule", name: "ProjectControlSchedule", component: () => import("@/views/projectControl/Schedule.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/gantt", name: "ProjectControlGantt", component: () => import("@/views/projectControl/Gantt.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/baselines", name: "ProjectControlBaselines", component: () => import("@/views/projectControl/Baselines.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/progress", name: "ProjectControlProgress", component: () => import("@/views/projectControl/Progress.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/evm", name: "ProjectControlEvm", component: () => import("@/views/projectControl/Evm.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

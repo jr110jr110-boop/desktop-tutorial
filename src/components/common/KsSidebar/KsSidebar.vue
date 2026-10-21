@@ -362,6 +362,9 @@ const links = {
     { title: "فعالیت‌ها، وابستگی‌ها و تقویم", routeName: "ProjectControlActivities", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "کنترل زمان‌بندی (CPM)", routeName: "ProjectControlSchedule", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "نمودار گانت", routeName: "ProjectControlGantt", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "خط مبنا و هزینه", routeName: "ProjectControlBaselines", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "پیشرفت و منحنی S", routeName: "ProjectControlProgress", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "ارزش کسب‌شده و جریان نقدی", routeName: "ProjectControlEvm", disabled: !hasRole(ProjectControlRoles.readers) },
   ] as Links[],
   finance: [
     { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },
