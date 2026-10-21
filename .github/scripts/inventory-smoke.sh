@@ -1007,9 +1007,9 @@ as "$PLAN_TOKEN" GET "$PC/claims?ContractId=$PCT"; check "pc: claims file opened
 
 # --- equipment code and MDR/MDL from the template
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PCW1,\"contractId\":$PCT,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"25\"}"; check "pc: equipment project code PU1002501" '.success and .data.equipmentProjectCode == "PU1002501"'
-as "$PLAN_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; no "pc: planning cannot draft the MDR (DCC only)"
+as "$QC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; no "pc: QC cannot draft the MDR"
 as "$DCC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; check "pc: MDR drafted from the pump template" '.success and .data.linesDrafted == 12'
-as "$DCC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"
+as "$DCC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; no "pc: the MDR is drafted once per work order"
 as "$DCC_TOKEN" GET "$PC/mdr?WorkOrderId=$PCW1&PageSize=0"
 check "pc: MDR has 12 lines, 11 on the client list (MDL subset), each with a standard source" '(.data.data|length) == 12 and ([.data.data[]|select(.clientSubmittal)]|length) == 11 and ([.data.data[]|select(.standardSource != null)]|length) == 12'
 check "pc: template standard sources are marked to be verified" '[.data.data[]|select((.standardSource // "")|contains("to be verified"))]|length >= 1'
@@ -1059,7 +1059,7 @@ check "pc: CPM early dates of A, C and D" '([.data.items[]|select(.code=="PC-A")
 check "pc: activity B has total float 2 (2026-11-05..06)" '[.data.items[]|select(.code=="PC-B")][0]|(.totalFloat == 2 and (.earlyStart|startswith("2026-11-05")) and (.earlyFinish|startswith("2026-11-06")) and .critical == false)'
 check "pc: critical path is A, C, D" '.data.criticalPath == ["PC-A","PC-C","PC-D"]'
 as "$PM_TOKEN" GET "$PC/activities?ContractId=$PCT&OnlyCritical=true&PageSize=0"; check "pc: critical activity filter" '(.data.data|length) == 3'
-as "$PLAN_TOKEN" GET "$PC/executive-plan?From=2026-11-02&Days=14&PageSize=0"; check "pc: executive plan (look-ahead) lists the activities" '.success'
+as "$PLAN_TOKEN" GET "$PC/executive-plan?ContractId=$PCT&From=2026-11-02&Days=14&PageSize=0"; check "pc: executive plan (look-ahead) lists the activities" '.success'
 
 # --- baseline 0: signatures of the unit managers, approval by the PMO deputy
 as "$PLAN_TOKEN" POST $PC/baselines "{\"contractId\":$PCT,\"reason\":\"مبنای اولیه\"}"
@@ -1158,7 +1158,7 @@ as "$PLAN_TOKEN" GET "$PC/cash-flow/$PCT"; check "pc: cash flow curve (S curve) 
 
 # --- change request: scenario, impact on the critical path, board, authority, new baseline
 PCCH="{\"contractId\":$PCT,\"origin\":2,\"type\":2,\"managerAgreement\":\"موافقت مدیر برنامه‌ریزی\",\"description\":\"افزایش زمان ساخت به دلیل تعمیر قالب\",\"reason\":\"عیب قالب\",\"requestedDaysDelta\":2,\"requestedPriceDelta\":100000000,\"scenario\":[{\"activityId\":$PCC,\"durationDelta\":2,\"budgetDelta\":100000000}]}"
-as "$WH_TOKEN" POST $PC/changes "$PCCH"; no "pc: warehouse user is not a requester of changes"
+as "$SEC_TOKEN" POST $PC/changes "$PCCH"; no "pc: security user is not a requester of changes"
 as "$PLAN_TOKEN" POST $PC/changes "$(echo "$PCCH" | jq -c 'del(.managerAgreement)')"; no "pc: internal request needs the requester manager's agreement"
 as "$PLAN_TOKEN" POST $PC/changes "$PCCH"; check "pc: change request drafted with its scenario" '.success and .data.status == 0 and (.data.scenario|length) == 1 and (.data.number|length) > 0'
 PCCHID=$(val .data.id)
@@ -1196,10 +1196,10 @@ as "$COM_TOKEN" POST $PC/milestones/evaluate/$QCT; check "pc: released note and 
 as "$QC_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"x\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 1)T00:00:00\",\"amount\":1}"; no "pc: QC cannot define payment milestones"
 as "$COM_TOKEN" POST $PC/milestones/action "{\"id\":$PCMS1,\"action\":\"paid\"}"; no "pc: a milestone that is only due cannot be marked paid"
 
-call POST ContractGuaranty "{\"title\":\"ضمانت‌نامه حسن انجام کار\",\"bank\":\"ملی\",\"no\":\"PC-G-1\",\"price\":\"500,000,000\",\"regDate\":\"$(dd -300)T00:00:00\",\"dueDate\":\"$(dd 10)T00:00:00\",\"contractEntityId\":$QCT}"; check "pc: legacy contract guaranty created (text amount)" '.success'
+call POST ContractGuaranty "{\"title\":\"ضمانت‌نامه حسن انجام کار\",\"bank\":\"ملی\",\"no\":\"PC-G-1\",\"price\":\"500,000,000\",\"regDate\":\"$(dd -300)T00:00:00\",\"dueDate\":\"$(dd 10)T00:00:00\",\"contractEntityId\":$PCT}"; check "pc: legacy contract guaranty created (text amount)" '.success'
 as "$COM_TOKEN" POST $PC/guarantees/parse; check "pc: legacy guarantees parsed into typed side data" '.success and .data.created >= 1'
-as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$QCT&PageSize=0"; check "pc: guarantee amount parsed to 500,000,000, expiry in 10 days" '.success and ([.data.data[]|select(.no=="PC-G-1")][0]|(.amountDecimal == 500000000 and .parseFailed == false and .daysToExpiry == 10))'
-as "$COM_TOKEN" GET "$PC/guarantees/alerts?contractId=$QCT"; check "pc: guarantee alert listed at the 14-day level" '(if type == "array" then . else .data end) | ([.[]|select(.no=="PC-G-1")][0]|(.alertLevel == 14 and .daysToExpiry == 10))'
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "pc: guarantee amount parsed to 500,000,000, expiry in 10 days" '.success and ([.data.data[]|select(.no=="PC-G-1")][0]|(.amountDecimal == 500000000 and .parseFailed == false and .daysToExpiry == 10))'
+as "$COM_TOKEN" GET "$PC/guarantees/alerts?contractId=$PCT"; check "pc: guarantee alert listed at the 14-day level" '(if type == "array" then . else .data end) | ([.[]|select(.no=="PC-G-1")][0]|(.alertLevel == 14 and .daysToExpiry == 10))'
 as "$QC_TOKEN" POST $PC/guarantees/parse; no "pc: QC cannot parse guarantees"
 
 call POST Contracts '{"code":"PC-CT-P","title":"قرارداد آزمون جریمه","status":1,"employer":"کارفرمای آزمون"}'; PCP=$(val .data.id)
@@ -1229,7 +1229,7 @@ check "pc: client monthly report carries progress but no SPI/CPI" '.success and 
 PCREP=$(val .data.id)
 as "$PM_TOKEN" POST $PC/reports/$PCREP/release; check "pc: project manager releases the client report" '.success and .data.releasedAt != null'
 as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.clientReportShowsIndices = true')"; check "pc: contract allows indices in the client report" '.success and .data.clientReportShowsIndices == true'
-as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1}"; check "pc: client report shows SPI/CPI only when the contract allows it" '(.data.content|fromjson|(.spi // .Spi)) != null'
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1,\"dataDate\":\"2026-11-06T00:00:00\"}"; check "pc: client report shows SPI/CPI only when the contract allows it" '(.data.content|fromjson|(.spi // .Spi)) != null'
 as "$PLAN_TOKEN" POST $PC/terms "$PCTERMS" >/dev/null
 as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":2}"; check "pc: internal weekly report generated" '.success and .data.kind == 2'
 as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":3}"; check "pc: CEO monthly report generated" '.success and .data.kind == 3'
@@ -1241,7 +1241,7 @@ if [ "${PCMSP%% *}" = "200" ] && echo "$PCMSP" | grep -qi "xml" && grep -q "<Pro
 rm -f "$OUT/pc-msp.tmp"
 
 as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\"}"; no "pc: final book of an incomplete data book is refused"
-as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: final book (client variant) issued as controlled document R01 with a hash" '.success and .data.revision == "R01" and (.data.hash|length) > 10 and .data.controlledDocumentId != null and (.data.documentCode|endswith("-C"))'
+as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: final book (client variant) issued as controlled document R01 with a hash" '.success and .data.revision == "R01" and (.data.hash|length) > 10 and .data.controlledDocumentId != null and (.data.documentCode|endswith("-L"))'
 as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: re-issue makes revision R02" '.success and .data.revision == "R02"'
 as "$DCC_TOKEN" GET "$PC/final-books?WorkOrderId=$PCW1"; check "pc: final books listed" '.success and (.data.data|length) == 2'
 
