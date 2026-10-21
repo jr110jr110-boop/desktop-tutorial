@@ -888,6 +888,13 @@ namespace DataLayer.Migrations
                         },
                         new
                         {
+                            Id = 1800,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 18
+                        },
+                        new
+                        {
                             Id = 1900,
                             ClaimType = "permission",
                             ClaimValue = "Warehouse",
@@ -2920,6 +2927,9 @@ namespace DataLayer.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsProduction")
+                        .HasColumnType("bit");
+
                     b.Property<string>("SepidarCode")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -3080,6 +3090,439 @@ namespace DataLayer.Migrations
                     b.HasIndex("ParentId");
 
                     b.ToTable("FnAccounts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAsset", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AccumulatedDepreciation")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<DateTime?>("AcquisitionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ClassId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<decimal>("Cost")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("CostCenterId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CustodianEmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CustodianTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("DepreciatedThrough")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DisposedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("InUseDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Maker")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("OffsetAccountCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<decimal>("OpeningAccumulated")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal>("SalvageValue")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<string>("Serial")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SourceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal>("YearStartAccumulated")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("YearStartYear")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("Source", "SourceId");
+
+                    b.ToTable("FnAssets", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAssetClass", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccumulatedAccountCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("AssetAccountCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("IdleAfterMonths")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("IdleRatePercent")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsIntangible")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Jurisdiction")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("RatePercent")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("SalvagePercent")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("StartRule")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal?>("UsefulLifeYears")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<bool>("Verify")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("FnAssetClasses", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAssetDisposal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AccumulatedAtDisposal")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("BankAccountId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("BookValue")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("CashBoxId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("CatchUpDepreciation")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("GainLoss")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("PreparedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("PreparedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ProceedsAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("ProceedsMethod")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssetId");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.ToTable("FnAssetDisposals", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAssetHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssetId");
+
+                    b.ToTable("FnAssetHistory", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AbsenceDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<decimal>("DaysWorked")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("HolidayHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<string>("InputsJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<decimal>("MissionDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("NightHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<decimal>("OvertimeHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<decimal>("PaidLeaveDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("ShiftType")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("UnpaidLeaveDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId", "Year", "Month")
+                        .IsUnique();
+
+                    b.ToTable("FnAttendanceSheets", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceWorkOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Hours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("SheetId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SheetId", "WorkOrderId")
+                        .IsUnique();
+
+                    b.ToTable("FnAttendanceWorkOrders", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankAccount", b =>
@@ -3405,6 +3848,124 @@ namespace DataLayer.Migrations
                     b.ToTable("FnCustomers", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDepreciationLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AccumulatedAfter")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("BookValueBefore")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("ClassId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CostCenterId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("IdleMonths")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Months")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RunId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ThroughMonth")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("YearStartAccumulatedAfter")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("YearStartYearAfter")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssetId");
+
+                    b.HasIndex("RunId", "AssetId")
+                        .IsUnique();
+
+                    b.ToTable("FnDepreciationLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDepreciationRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AccountingEventId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("AssetCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("PeriodId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("PreparedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("PreparedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("PeriodId")
+                        .IsUnique();
+
+                    b.ToTable("FnDepreciationRuns", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDetailAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -3442,6 +4003,193 @@ namespace DataLayer.Migrations
                         .HasFilter("[LinkedEntityId] IS NOT NULL");
 
                     b.ToTable("FnDetailAccounts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployee", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BankIban")
+                        .HasMaxLength(34)
+                        .HasColumnType("nvarchar(34)");
+
+                    b.Property<DateTime?>("BirthDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("BirthPlace")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("ChildrenCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CostCenterId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("DailyWage")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("DefaultWorkOrderId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EmploymentType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("EndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ExemptionFlags")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("FatherName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Gender")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("HardAndHarmful")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("HireDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("InsuranceJobCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("InsuranceNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("JobTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("MaritalStatus")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NationalCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("PersonnelCode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int?>("QualifiedPersonId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkshopId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NationalCode")
+                        .IsUnique();
+
+                    b.HasIndex("PersonnelCode")
+                        .IsUnique();
+
+                    b.HasIndex("WorkshopId");
+
+                    b.ToTable("FnEmployees", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeLoan", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Balance")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FirstMonth")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FirstYear")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("InstallmentAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Principal")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.ToTable("FnEmployeeLoans", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnFiscalYear", b =>
@@ -3562,6 +4310,58 @@ namespace DataLayer.Migrations
                     b.ToTable("FnGuarantees", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnInsuranceWorkshop", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Branch")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ContractRow")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("EmployerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsContractor")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RateSet")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("FnInsuranceWorkshops", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnIssuedCheque", b =>
                 {
                     b.Property<int>("Id")
@@ -3625,6 +4425,146 @@ namespace DataLayer.Migrations
                     b.ToTable("FnIssuedCheques", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnLeaveBalance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("CarriedForward")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Entitled")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("LastMonth")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Used")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId", "Year")
+                        .IsUnique();
+
+                    b.ToTable("FnLeaveBalances", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnOutboxPackage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset?>("ExportedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("FileDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("FromDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("RowCount")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SupersededByPackageId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ToDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkshopId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("Kind", "Year", "Month", "Season", "WorkshopId");
+
+                    b.ToTable("FnOutboxPackages", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayment", b =>
                 {
                     b.Property<int>("Id")
@@ -3670,6 +4610,9 @@ namespace DataLayer.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<int?>("PayrollRunId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("PettyCashId")
                         .HasColumnType("int");
 
@@ -3697,6 +4640,9 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("Number")
                         .IsUnique();
+
+                    b.HasIndex("PayrollRunId")
+                        .HasFilter("[PayrollRunId] IS NOT NULL");
 
                     b.ToTable("FnPayments", (string)null);
                 });
@@ -3819,6 +4765,405 @@ namespace DataLayer.Migrations
                     b.HasIndex("PaymentRequestId");
 
                     b.ToTable("FnPaymentRequestLinks", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayrollItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("Calculation")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("Condition")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<decimal>("Factor")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("Factor2")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("Formula")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("Insurable")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemCodes")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Jurisdiction")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("ProRata")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RateKey")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<bool>("ReducesTaxable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("Taxable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Variant")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("Verify")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("FnPayrollItems", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayrollRateTable", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<decimal>("Value")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<bool>("Verify")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Year", "Key")
+                        .IsUnique();
+
+                    b.ToTable("FnPayrollRateTables", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayrollRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AccountingEventId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CalculatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EmployeeCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("PostedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PostedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PreparedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("TotalEmployeeInsurance")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalEmployerInsurance")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalGross")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalInsurable")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalNet")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalOtherDeductions")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalProvisions")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalTax")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TotalTaxable")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("WorkshopId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("Year", "Month", "WorkshopId")
+                        .IsUnique()
+                        .HasFilter("[WorkshopId] IS NOT NULL");
+
+                    b.ToTable("FnPayrollRuns", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayslip", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CostCenterId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("DaysPaid")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("EmployeeInsurance")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("EmployerInsurance")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("GrossEarnings")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("InsurableTotal")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("Net")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("OtherDeductions")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("Provisions")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("RunId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Tax")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("TaxableTotal")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("WorkshopId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("RunId", "EmployeeId")
+                        .IsUnique();
+
+                    b.ToTable("FnPayslips", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayslipAllocation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("PayslipId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Share")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<int>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PayslipId");
+
+                    b.ToTable("FnPayslipAllocations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayslipLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("Base")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("Insurable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemCode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PayslipId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Taxable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PayslipId");
+
+                    b.ToTable("FnPayslipLines", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPeriod", b =>
@@ -4535,6 +5880,37 @@ namespace DataLayer.Migrations
                         .IsUnique();
 
                     b.ToTable("FnSettings", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnTaxBracket", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("FromAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("RatePercent")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal?>("ToAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Year", "FromAmount")
+                        .IsUnique();
+
+                    b.ToTable("FnTaxBrackets", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnTaxRate", b =>
@@ -7246,6 +8622,9 @@ namespace DataLayer.Migrations
                     b.Property<decimal>("InvoicedQuantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("IsCapital")
+                        .HasColumnType("bit");
 
                     b.Property<int?>("ItemId")
                         .HasColumnType("int");
@@ -14376,6 +15755,60 @@ namespace DataLayer.Migrations
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAsset", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAssetClass", "Class")
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Class");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAssetDisposal", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAssetHistory", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAsset", "Asset")
+                        .WithMany("History")
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceWorkOrder", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", "Sheet")
+                        .WithMany("WorkOrders")
+                        .HasForeignKey("SheetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Sheet");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankAccount", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnAccount", "Account")
@@ -14436,6 +15869,57 @@ namespace DataLayer.Migrations
                         .IsRequired();
 
                     b.Navigation("BankAccount");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDepreciationLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnDepreciationRun", "Run")
+                        .WithMany("Lines")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Asset");
+
+                    b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDepreciationRun", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnPeriod", "Period")
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Period");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployee", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnInsuranceWorkshop", "Workshop")
+                        .WithMany()
+                        .HasForeignKey("WorkshopId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Workshop");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeLoan", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnFiscalYear", b =>
@@ -14505,6 +15989,47 @@ namespace DataLayer.Migrations
                     b.Navigation("Payment");
 
                     b.Navigation("PaymentRequest");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayslip", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnPayrollRun", "Run")
+                        .WithMany("Payslips")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayslipAllocation", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnPayslip", "Payslip")
+                        .WithMany("Allocations")
+                        .HasForeignKey("PayslipId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Payslip");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayslipLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnPayslip", "Payslip")
+                        .WithMany("Lines")
+                        .HasForeignKey("PayslipId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Payslip");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPeriod", b =>
@@ -16765,6 +18290,16 @@ namespace DataLayer.Migrations
                     b.Navigation("Lines");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAsset", b =>
+                {
+                    b.Navigation("History");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", b =>
+                {
+                    b.Navigation("WorkOrders");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankStatement", b =>
                 {
                     b.Navigation("Lines");
@@ -16773,6 +18308,11 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnChequeBook", b =>
                 {
                     b.Navigation("Leaves");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnDepreciationRun", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnFiscalYear", b =>
@@ -16785,6 +18325,18 @@ namespace DataLayer.Migrations
                     b.Navigation("Lines");
 
                     b.Navigation("Requests");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayrollRun", b =>
+                {
+                    b.Navigation("Payslips");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPayslip", b =>
+                {
+                    b.Navigation("Allocations");
+
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnPettyCashSettlement", b =>
