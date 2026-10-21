@@ -966,6 +966,320 @@ check "CEO dashboard carries the quality counts and alerts" '.success and .data.
 as "$QA_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "QA user cannot write warehouse documents (403)" || bad "QA user cannot write warehouse documents (403) got $CODE"
 TOKEN=$ADMIN_TOKEN
 
+# ================================================================ PROJECT CONTROL (PMO) MODULE (release 1)
+# Own contracts: PCT (exact CPM / EVM / change control scenario), PCT2 (WBS generation + legacy predecessor cycles),
+# PCP (late penalty). Schedule dates are fixed (calendar Mon-Fri, start Monday 2026-11-02) so every figure is exact.
+TOKEN=$ADMIN_TOKEN
+PC=projectcontrol
+call POST Accounts/register-user '{"userName":"pm.ci","name":"pm.ci","lastName":"آزمون","email":"pm.ci@example.com","roleIds":[15],"password":"Ci#Pm-User-2026","phoneNumber":"09120000022","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345622"}'
+call POST Accounts/register-user '{"userName":"dcc.ci","name":"dcc.ci","lastName":"آزمون","email":"dcc.ci@example.com","roleIds":[16],"password":"Ci#Dcc-User-2026","phoneNumber":"09120000023","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345623"}'
+PM_TOKEN=$(login pm.ci 'Ci#Pm-User-2026'); DCC_TOKEN=$(login dcc.ci 'Ci#Dcc-User-2026')
+[ -n "$PM_TOKEN" ] && [ -n "$DCC_TOKEN" ] && ok "pc: login project manager (role 15) and DCC (role 16)" || bad "pc: login project manager (role 15) and DCC (role 16)"
+PMID=$(uid "$PM_TOKEN"); PLANID=$(uid "$PLAN_TOKEN")
+[ -n "$PMID" ] && [ -n "$PLANID" ] && ok "pc: user ids resolved" || bad "pc: user ids resolved"
+
+as "$PLAN_TOKEN" POST $PC/calendars '{"name":"Mon-Fri","workingWeekdays":62,"hoursPerDay":8,"useCompanyHolidays":false}'; check "pc: working calendar saved (Mon-Fri)" '.success and .data.id > 0 and .data.workingWeekdays == 62'
+PCCAL=$(val .data.id)
+as "$PM_TOKEN" POST $PC/calendars '{"name":"x","workingWeekdays":62,"hoursPerDay":8}'; no "pc: project manager cannot write calendars"
+as "$PLAN_TOKEN" POST $PC/calendars '{"name":"bad","workingWeekdays":0,"hoursPerDay":8}'; no "pc: calendar without any working day rejected"
+
+# --- contract, pump equipment, work order, terms
+call POST Contracts '{"code":"PC-CT-01","title":"قرارداد آزمون کنترل پروژه","status":1,"employer":"کارفرمای آزمون"}'; check "pc: contract created" '.success and .data.id > 0'
+PCT=$(val .data.id)
+call POST Equipments '{"code":"PC-EQ-PUMP","title":"Process Pump API 610"}'; PEQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PCT,\"equipmentId\":$PEQ,\"count\":1}"; check "pc: contract equipment" '.success'
+call POST WorkOrders "{\"contractId\":$PCT,\"equipmentId\":$PEQ,\"code\":\"PC-WO-1\",\"title\":\"Pump 1\",\"description\":\"x\",\"count\":1}"; check "pc: work order created" '.success and .data.id > 0'
+PCW1=$(val .data.id)
+PCTERMS="{\"contractId\":$PCT,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000,\"vatPercent\":10,\"advancePercent\":10,\"retentionPercent\":5,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"accrualMode\":1,\"clientReviewDays\":14,\"managementReserve\":0,\"autoSnapshot\":true,\"clientReportShowsIndices\":false}"
+as "$WH_TOKEN" POST $PC/terms "$PCTERMS"; no "pc: warehouse cannot write contract terms"
+as "$PLAN_TOKEN" POST $PC/terms "$PCTERMS"; check "pc: contract terms saved (value, penalty, calendar, start)" '.success and .data.valueExVat == 1000000000 and .data.dataDateWeekday == 3 and .data.clientReportShowsIndices == false'
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.vatPercent = 101')"; no "pc: percentage above 100 rejected"
+
+# --- initiation (WI-PL-009 sections 3-8) and the 9-character project code
+as "$PLAN_TOKEN" POST $PC/initiation/start/$PCT; check "pc: initiation started: 10 steps" '.success and (.data.steps|length) == 10'
+as "$PLAN_TOKEN" POST $PC/terms/generate-code "{\"contractId\":$PCT,\"category\":1}"; check "pc: project code generated (9 characters, MA)" '.success and (.data.projectCode|length) == 9 and (.data.projectCode|contains("MA"))'
+as "$PLAN_TOKEN" POST $PC/terms/generate-code "{\"contractId\":$PCT,\"category\":1}"; no "pc: project code is issued once"
+as "$PLAN_TOKEN" POST $PC/initiation/action "{\"contractId\":$PCT,\"step\":3,\"note\":\"units notified\"}"; check "pc: units notified step done" '.success'
+as "$PLAN_TOKEN" POST $PC/initiation/action "{\"contractId\":$PCT,\"step\":4,\"projectManagerUserId\":$PMID}"; no "pc: planning cannot select the project manager"
+as "$CEO_TOKEN" POST $PC/initiation/action "{\"contractId\":$PCT,\"step\":4,\"projectManagerUserId\":$PMID}"; check "pc: CEO selects the project manager" '.success'
+call GET "$PC/terms/$PCT"; check "pc: terms show the manager and the code" ".success and .data.projectManagerUserId == $PMID and .data.projectCode != null"
+as "$PLAN_TOKEN" GET "$PC/claims?ContractId=$PCT"; check "pc: claims file opened with the initiation (read)" '.success'
+
+# --- equipment code and MDR/MDL from the template
+as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PCW1,\"contractId\":$PCT,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"25\"}"; check "pc: equipment project code PU1002501" '.success and .data.equipmentProjectCode == "PU1002501"'
+as "$PLAN_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; no "pc: planning cannot draft the MDR (DCC only)"
+as "$DCC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; check "pc: MDR drafted from the pump template" '.success and .data.linesDrafted == 12'
+as "$DCC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"
+as "$DCC_TOKEN" GET "$PC/mdr?WorkOrderId=$PCW1&PageSize=0"
+check "pc: MDR has 12 lines, 11 on the client list (MDL subset), each with a standard source" '(.data.data|length) == 12 and ([.data.data[]|select(.clientSubmittal)]|length) == 11 and ([.data.data[]|select(.standardSource != null)]|length) == 12'
+check "pc: template standard sources are marked to be verified" '[.data.data[]|select((.standardSource // "")|contains("to be verified"))]|length >= 1'
+CL_IDS=$(jq -c '[.data.data[]|select(.clientSubmittal)|.id]' "$B"); INT_ID=$(jq -r '[.data.data[]|select(.clientSubmittal|not)|.id][0]' "$B")
+
+# --- supply chain for two activities: one purchase order with two lines (60 and 40 plates)
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"ورق پروژه کنترل\",\"submit\":true,\"lines\":[{\"itemId\":$PLATE,\"quantity\":60,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ASTM A516-70 با گواهی 3.1\"},{\"itemId\":$PLATE,\"quantity\":40,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ASTM A516-70 با گواهی 3.1\"}]}"
+check "pc: purchase request with two lines submitted (40M rial)" '.success and .data.status == 1 and (.data.lines|length) == 2 and .data.estimatedAmount == 40000000'
+PCPR=$(val .data.id); PRL1=$(val '.data.lines[]|select(.quantity==60)|.id'); PRL2=$(val '.data.lines[]|select(.quantity==40)|.id')
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PCPR,\"action\":\"approve-planning\"}"
+as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PCPR,\"action\":\"approve-management\"}"; check "pc: purchase request approved" '.success and .data.status == 2'
+PQA="{\"providerId\":$PA,\"quoteNumber\":\"PC-Q-A\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL1,\"quantity\":60,\"unitPrice\":390000},{\"requestLineId\":$PRL2,\"quantity\":40,\"unitPrice\":390000}]}"
+PQB="{\"providerId\":$PB,\"quoteNumber\":\"PC-Q-B\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL1,\"quantity\":60,\"unitPrice\":380000},{\"requestLineId\":$PRL2,\"quantity\":40,\"unitPrice\":380000}]}"
+as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$PCPR,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$PQA,$PQB]}"; check "pc: inquiry with two quotes" '.success and (.data.quotes|length) == 2'
+PCINQ=$(val .data.id); PQAID=$(val ".data.quotes[]|select(.providerId == $PA)|.id")
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$PCINQ,\"quoteId\":$PQAID,\"reason\":\"گرید A و تحویل 20 روزه\"}"; check "pc: quote selected" '.success and .data.status == 2'
+as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$PCINQ"; check "pc: purchase order draft with two lines" '.success and (.data.lines|length) == 2'
+PCPO=$(val .data.id); POL1=$(val '.data.lines[]|select(.quantity==60)|.id'); POL2=$(val '.data.lines[]|select(.quantity==40)|.id')
+as "$ADMIN_TOKEN" POST procurement/orders/action "{\"id\":$PCPO,\"action\":\"approve\"}"
+as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PCPO,\"action\":\"release\"}"; check "pc: purchase order released" '.success and .data.status == 2'
+
+# --- four activities (weights 0: they count equally in the physical percent), budgets 1,000,000,000 rial
+actp() { as "$PLAN_TOKEN" POST $PC/activities "$1"; }
+actp "{\"contractId\":$PCT,\"code\":\"PC-A\",\"title\":\"صدور مدارک مهندسی\",\"sourceType\":4,\"sourceId\":0,\"workOrderId\":$PCW1,\"durationDays\":3,\"responsibleUnit\":\"ENGINEERING\",\"progressMethod\":1,\"weight\":0,\"budgetAtCompletion\":300000000,\"phase\":1}"
+check "pc: activity A (engineering issue, 3 days)" '.success and .data.id > 0 and .data.responsibleUnit == "ENGINEERING"'; PCA=$(val .data.id)
+actp "{\"contractId\":$PCT,\"code\":\"PC-B\",\"title\":\"تامین ورق الف\",\"sourceType\":6,\"durationDays\":2,\"responsibleUnit\":\"PLANNING\",\"progressMethod\":2,\"weight\":0,\"budgetAtCompletion\":200000000,\"phase\":2,\"purchaseOrderLineId\":$POL1}"
+check "pc: activity B (supply receipt, 60 plates)" '.success and .data.id > 0'; PCB=$(val .data.id)
+actp "{\"contractId\":$PCT,\"code\":\"PC-C\",\"title\":\"ساخت\",\"sourceType\":7,\"durationDays\":4,\"responsibleUnit\":\"CONSTRUCTION\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":400000000,\"phase\":3}"
+check "pc: activity C (manual progress)" '.success and .data.id > 0'; PCC=$(val .data.id)
+actp "{\"contractId\":$PCT,\"code\":\"PC-D\",\"title\":\"تامین ورق ب\",\"sourceType\":6,\"durationDays\":1,\"responsibleUnit\":\"PLANNING\",\"progressMethod\":2,\"weight\":0,\"budgetAtCompletion\":100000000,\"phase\":2,\"purchaseOrderLineId\":$POL2}"
+check "pc: activity D (supply receipt, 40 plates)" '.success and .data.id > 0'; PCD=$(val .data.id)
+actp "{\"contractId\":$PCT,\"code\":\"PC-X\",\"title\":\"x\",\"sourceType\":6,\"durationDays\":1,\"progressMethod\":2}"; no "pc: supply activity without an order line rejected"
+as "$WH_TOKEN" POST $PC/activities "{\"contractId\":$PCT,\"code\":\"PC-Y\",\"title\":\"y\",\"durationDays\":1}"; no "pc: warehouse cannot write activities"
+
+pcdep() { as "$PLAN_TOKEN" POST $PC/dependencies "{\"contractId\":$PCT,\"predecessorId\":$1,\"successorId\":$2,\"type\":1,\"lagDays\":0}"; }
+pcdep $PCA $PCB; check "pc: dependency A to B" '.success'
+pcdep $PCA $PCC; pcdep $PCB $PCD; check "pc: dependency B to D" '.success'
+pcdep $PCC $PCD; check "pc: dependency C to D" '.success'
+pcdep $PCD $PCA; no "pc: cycle D to A rejected on save"
+pcdep $PCB $PCB; no "pc: self dependency rejected"
+pcdep $PCA $PCB; no "pc: duplicate dependency rejected"
+
+# --- CPM: exact dates, float and the critical path
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":false,\"mirror\":true}"
+check "pc: CPM finishes on 2026-11-11 after 8 working days, no cycle" '.success and .data.hasCycle == false and .data.projectFinishOffset == 8 and (.data.projectFinish|startswith("2026-11-11")) and (.data.projectStart|startswith("2026-11-02"))'
+check "pc: CPM early dates of A, C and D" '([.data.items[]|select(.code=="PC-A")][0].earlyFinish|startswith("2026-11-04")) and ([.data.items[]|select(.code=="PC-C")][0].earlyFinish|startswith("2026-11-10")) and ([.data.items[]|select(.code=="PC-D")][0].earlyStart|startswith("2026-11-11"))'
+check "pc: activity B has total float 2 (2026-11-05..06)" '[.data.items[]|select(.code=="PC-B")][0]|(.totalFloat == 2 and (.earlyStart|startswith("2026-11-05")) and (.earlyFinish|startswith("2026-11-06")) and .critical == false)'
+check "pc: critical path is A, C, D" '.data.criticalPath == ["PC-A","PC-C","PC-D"]'
+as "$PM_TOKEN" GET "$PC/activities?ContractId=$PCT&OnlyCritical=true&PageSize=0"; check "pc: critical activity filter" '(.data.data|length) == 3'
+as "$PLAN_TOKEN" GET "$PC/executive-plan?From=2026-11-02&Days=14&PageSize=0"; check "pc: executive plan (look-ahead) lists the activities" '.success'
+
+# --- baseline 0: signatures of the unit managers, approval by the PMO deputy
+as "$PLAN_TOKEN" POST $PC/baselines "{\"contractId\":$PCT,\"reason\":\"مبنای اولیه\"}"
+check "pc: baseline 0 drafted: 4 activities, BAC 1,000,000,000, 3 unit signatures" '.success and .data.number == 0 and .data.status == 0 and .data.activityCount == 4 and .data.bac == 1000000000 and (.data.signatures|length) == 3'
+PCB0=$(val .data.id)
+call POST $PC/baselines/action "{\"id\":$PCB0,\"action\":\"approve\"}"; no "pc: baseline cannot be approved before the managers sign"
+as "$PM_TOKEN" POST $PC/baselines/action "{\"id\":$PCB0,\"action\":\"sign\"}"; no "pc: project manager is not a signing unit"
+as "$PROD_TOKEN" POST $PC/baselines/action "{\"id\":$PCB0,\"action\":\"sign\"}"; check "pc: construction manager signs" '.success and ([.data.signatures[]|select(.unitRole=="CONSTRUCTION")][0].signedAt != null)'
+as "$ENG_TOKEN" POST $PC/baselines/action "{\"id\":$PCB0,\"action\":\"sign\"}"; check "pc: engineering manager signs" '.success and .data.status == 0'
+as "$PLAN_TOKEN" POST $PC/baselines/action "{\"id\":$PCB0,\"action\":\"sign\"}"; check "pc: planning manager signs -> managers signed" '.success and .data.status == 1'
+as "$PM_TOKEN" POST $PC/baselines/action "{\"id\":$PCB0,\"action\":\"approve\"}"; no "pc: only the PMO deputy approves a baseline"
+call POST $PC/baselines/action "{\"id\":$PCB0,\"action\":\"approve\"}"; check "pc: baseline 0 approved and current" '.success and .data.status == 2 and .data.isCurrent == true and .data.bac == 1000000000'
+call GET "$PC/terms/$PCT"; check "pc: terms point to the current baseline" ".data.currentBaselineId == $PCB0"
+
+# --- engineering progress from the MDR (60/80/100) and the transmittal response codes
+as "$DCC_TOKEN" POST $PC/mdr/action "{\"id\":$INT_ID,\"action\":\"first-issue\",\"revision\":\"A\"}"; check "pc: internal document first issue = 60 percent" '.success and .data.issueState == 1 and .data.progressPercent == 60'
+as "$DCC_TOKEN" POST $PC/mdr/action "{\"id\":$INT_ID,\"action\":\"internal-approve\"}"; no "pc: DCC cannot approve internally (engineering manager only)"
+as "$ENG_TOKEN" POST $PC/mdr/action "{\"id\":$INT_ID,\"action\":\"internal-approve\"}"; check "pc: engineering manager approves the internal document = 100 percent" '.success and .data.issueState == 3 and .data.progressPercent == 100'
+PCT_BAD=$(jq -nc --argjson c $PCT --argjson i $INT_ID '{contractId:$c,direction:1,transmittalDate:"2026-10-01T00:00:00",lines:[{deliverableId:$i,purpose:1}]}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PCT_BAD"; no "pc: outgoing transmittal with an internal-only document rejected"
+PCT1=$(jq -nc --argjson c $PCT --argjson ids "$CL_IDS" '{contractId:$c,direction:1,transmittalDate:"2026-10-01T00:00:00",reference:"Letter 1",lines:($ids|map({deliverableId:.,purpose:1}))}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PCT1"
+check "pc: transmittal T1 of the 11 client documents, response due 14 days later" '.success and (.data.number|length) > 0 and (.data.lines|length) == 11 and (.data.responseDue|startswith("2026-10-15"))'
+TR1=$(val .data.id); TL1=$(jq -r '.data.lines[0].id' "$B"); TL2=$(jq -r '.data.lines[1].id' "$B"); TL3=$(jq -r '.data.lines[2].id' "$B"); TL4=$(jq -r '.data.lines[3].id' "$B")
+as "$DCC_TOKEN" GET "$PC/transmittals?OnlyOverdue=true&PageSize=0"; check "pc: unanswered transmittal past its due date is overdue" "[.data.data[]|select(.id == $TR1)]|length == 1"
+as "$DCC_TOKEN" POST $PC/transmittals/response "{\"transmittalLineId\":$TL1,\"responseCode\":\"Z\",\"responseDate\":\"2026-10-10T00:00:00\"}"; no "pc: unknown response code rejected"
+as "$DCC_TOKEN" POST $PC/transmittals/response "{\"transmittalLineId\":$TL1,\"responseCode\":\"A\",\"responseDate\":\"2026-10-10T00:00:00\"}"; check "pc: client code A approves the document" '.success'
+as "$DCC_TOKEN" POST $PC/transmittals/response "{\"transmittalLineId\":$TL2,\"responseCode\":\"A\",\"responseDate\":\"2026-10-10T00:00:00\"}"
+as "$DCC_TOKEN" POST $PC/transmittals/response "{\"transmittalLineId\":$TL3,\"responseCode\":\"B\",\"responseDate\":\"2026-10-10T00:00:00\"}"; check "pc: client code B (approved with comments) also approves" '.success'
+as "$DCC_TOKEN" POST $PC/transmittals/response "{\"transmittalLineId\":$TL4,\"responseCode\":\"C\",\"responseDate\":\"2026-10-10T00:00:00\"}"; check "pc: client code C leaves the document unapproved" '.success'
+PCT2L=$(jq -nc --argjson c $PCT --argjson ids "$CL_IDS" '{contractId:$c,direction:1,transmittalDate:"2026-10-12T00:00:00",reference:"Letter 2",lines:($ids[3:7]|map({deliverableId:.,purpose:1}))}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PCT2L"; check "pc: second transmittal re-sends four documents" '.success and (.data.lines|length) == 4'
+as "$DCC_TOKEN" GET "$PC/mdr?WorkOrderId=$PCW1&PageSize=0"
+check "pc: MDR states: 3+1 approved, 4 at second issue, 4 at first issue" '([.data.data[]|select(.issueState==3)]|length) == 4 and ([.data.data[]|select(.issueState==2)]|length) == 4 and ([.data.data[]|select(.issueState==1)]|length) == 4'
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirror\":false}"
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
+check "pc: engineering activity A is exactly 80 percent (average over 12 documents)" '[.data.data[]|select(.code=="PC-A")][0].percentCache == 80'
+
+# --- supply progress from the receipt, the incoming inspection and the NCR
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"purchaseOrderId\":$PCPO,\"referenceNumber\":\"PC-INV-1\",\"lines\":[{\"itemId\":$PLATE,\"quantity\":60,\"heatNumber\":\"HT-PC1\",\"purchaseOrderLineId\":$POL1},{\"itemId\":$PLATE,\"quantity\":40,\"heatNumber\":\"HT-PC2\",\"purchaseOrderLineId\":$POL2}]}"
+check "pc: plate receipt against the order drafted" '.success and (.data.lines|length) == 2'
+PCRCV=$(val .data.id); call POST "inventory/documents/$PCRCV/confirm"; check "pc: plate receipt into quarantine confirmed" '.success and .data.status == 1'
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirror\":false}"
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
+check "pc: received plates in quarantine = temporary receipt = 70 percent for B and D" '([.data.data[]|select(.code=="PC-B")][0].percentCache == 70) and ([.data.data[]|select(.code=="PC-D")][0].percentCache == 70)'
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirror\":false}"
+
+# --- cost entries (actual cost 600,000,000 by 2026-11-06) and manual progress that needs another person's approval
+pccost() { as "$FIN_TOKEN" POST $PC/costs "{\"contractId\":$PCT,\"kind\":$1,\"entryDate\":\"$2T00:00:00\",\"amount\":$3,\"description\":\"$4\"}"; }
+pccost 1 2026-11-03 400000000 "مواد اولیه"; check "pc: cost entry 400M recorded against the contract" '.success and .data.contractId > 0 and .data.amount == 400000000'
+pccost 3 2026-11-05 200000000 "دستمزد"; check "pc: cost entry 200M recorded" '.success'
+as "$PLAN_TOKEN" POST $PC/costs "{\"contractId\":$PCT,\"kind\":1,\"entryDate\":\"2026-11-03T00:00:00\",\"amount\":1,\"description\":\"x\"}"; no "pc: planning cannot post costs (finance only)"
+as "$PLAN_TOKEN" POST $PC/manual-progress "{\"activityId\":$PCC,\"percent\":50,\"comment\":\"نیمی از ساخت انجام شد\"}"; check "pc: manual progress proposed (pending)" '.success and .data.state == 0 and .data.percent == 50'
+PCMP=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/manual-progress "{\"activityId\":$PCA,\"percent\":50}"; no "pc: manual progress on a system-measured activity rejected"
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=2026-11-06"
+check "pc: EVM stage 1: PV 700M, EV 450M (A 80%, B 70%, D 70%, C unapproved excluded), AC 600M" '.success and .data.fromBaseline == true and .data.bac == 1000000000 and .data.pv == 700000000 and .data.ev == 450000000 and .data.ac == 600000000 and .data.cv == -150000000 and .data.sv == -250000000'
+check "pc: EVM stage 1 indices: CPI 0.75, SPI 0.6429, both red, corrective action required" '.data.cpi == 0.75 and .data.spi == 0.6429 and .data.cpiStatus == "red" and .data.spiStatus == "red" and .data.correctiveActionRequired == true'
+as "$PLAN_TOKEN" POST $PC/manual-progress/decide "{\"id\":$PCMP,\"approve\":true}"; no "pc: the proposer cannot approve their own manual progress"
+as "$PM_TOKEN" POST $PC/manual-progress/decide "{\"id\":$PCMP,\"approve\":true}"; no "pc: project manager is not the approver of manual progress"
+call POST $PC/manual-progress/decide "{\"id\":$PCMP,\"approve\":true,\"note\":\"تایید\"}"; check "pc: manual progress approved by a different person" '.success and .data.state == 1'
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=2026-11-06"; check "pc: EVM after approving C at 50 percent: EV 650M" '.data.ev == 650000000 and .data.cpi == 1.0833'
+
+# --- weekly snapshot (immutable) and the scheduled run
+PCSNAPDATE=$(dd -14)
+as "$PLAN_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT,\"dataDate\":\"${PCSNAPDATE}T00:00:00\"}"
+check "pc: weekly snapshot taken with 4 lines, BAC and hash" '.success and (.data.lines|length) == 4 and .data.bac == 1000000000 and (.data.hash|length) > 10'
+PCSNAP=$(val .data.id); PCSNAPHASH=$(val .data.hash)
+as "$PLAN_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT,\"dataDate\":\"${PCSNAPDATE}T00:00:00\"}"; no "pc: second snapshot for the same data date rejected"
+as "$PLAN_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT,\"dataDate\":\"2030-01-02T00:00:00\"}"; no "pc: snapshot with a future data date rejected"
+as "$PLAN_TOKEN" GET "$PC/snapshots/$PCSNAP"; check "pc: snapshot unchanged after later progress (hash identical)" ".data.hash == \"$PCSNAPHASH\""
+as "$PLAN_TOKEN" POST $PC/snapshots/run-due '{"asOf":"2026-11-11T12:00:00"}'; check "pc: scheduled snapshot run takes the Wednesday snapshot" '.success and .data.snapshotsTaken >= 1'
+as "$PLAN_TOKEN" POST $PC/snapshots/run-due '{"asOf":"2026-11-11T12:00:00"}'; check "pc: second run takes nothing (one per data date)" '.success and .data.snapshotsTaken == 0'
+as "$PM_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT}"; no "pc: project manager cannot take snapshots (planning)"
+
+# --- QC accepts plate A; plate B is rejected: NCR classified as rework caps D at 80 percent
+as "$QC_TOKEN" GET "inventory/quality/inspections?Status=0&PageSize=0"
+PCQI1=$(jq -r ".data.data[]|select(.receiptDocumentId==$PCRCV and .quantity==60)|.id" "$B"); PCQI2=$(jq -r ".data.data[]|select(.receiptDocumentId==$PCRCV and .quantity==40)|.id" "$B")
+[ -n "$PCQI1" ] && [ -n "$PCQI2" ] && ok "pc: two incoming inspections waiting for the receipt" || bad "pc: two incoming inspections waiting for the receipt"
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$PCQI1,\"acceptedQuantity\":60,\"rejectedQuantity\":0,\"reportNumber\":\"QC-PC-1\"}"; check "pc: plate A accepted (60)" '.success and .data.status == 1'
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$PCQI2,\"acceptedQuantity\":0,\"rejectedQuantity\":40,\"reportNumber\":\"QC-PC-2\",\"rejectReason\":\"ترک سطحی در لبه ورق\"}"; check "pc: plate B rejected (40) -> NCR" '.success and (.data.ncrNumber|startswith("NCR-"))'
+PCNCR=$(val .data.ncrId)
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirror\":false}"
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
+check "pc: B is 100 after QC accept; D with an unclassified NCR stays at 70" '([.data.data[]|select(.code=="PC-B")][0].percentCache == 100) and ([.data.data[]|select(.code=="PC-D")][0].percentCache == 70)'
+as "$QC_TOKEN" POST inventory/quality/ncr "{\"id\":$PCNCR,\"severity\":1,\"disposition\":2,\"source\":1,\"causeCategory\":2,\"rootCause\":\"ورق معیوب از تامین‌کننده\"}"; check "pc: NCR classified: minor, rework (still open)" '.success and .data.disposition == 2'
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirror\":false}"
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
+check "pc: D is capped at 80 percent while the rework NCR is open" '[.data.data[]|select(.code=="PC-D")][0].percentCache == 80'
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=2026-11-06"
+check "pc: EVM stage 2 exact: PV 700M, EV 720M, AC 600M, CV 120M, SV 20M" '.data.pv == 700000000 and .data.ev == 720000000 and .data.ac == 600000000 and .data.cv == 120000000 and .data.sv == 20000000'
+check "pc: EVM stage 2 indices: CPI 1.2, SPI 1.0286, EAC 833,333,333.33" '.data.cpi == 1.2 and .data.spi == 1.0286 and .data.eacTypical == 833333333.33 and .data.cpiStatus == "green" and .data.spiStatus == "green" and .data.correctiveActionRequired == false'
+as "$PLAN_TOKEN" GET "$PC/progress/$PCT"; check "pc: physical progress is the average of the four activities" '.success and .data.physicalPercent == 77.5'
+as "$PLAN_TOKEN" GET "$PC/cash-flow/$PCT"; check "pc: cash flow curve (S curve) is returned" '.success'
+
+# --- change request: scenario, impact on the critical path, board, authority, new baseline
+PCCH="{\"contractId\":$PCT,\"origin\":2,\"type\":2,\"managerAgreement\":\"موافقت مدیر برنامه‌ریزی\",\"description\":\"افزایش زمان ساخت به دلیل تعمیر قالب\",\"reason\":\"عیب قالب\",\"requestedDaysDelta\":2,\"requestedPriceDelta\":100000000,\"scenario\":[{\"activityId\":$PCC,\"durationDelta\":2,\"budgetDelta\":100000000}]}"
+as "$WH_TOKEN" POST $PC/changes "$PCCH"; no "pc: warehouse user is not a requester of changes"
+as "$PLAN_TOKEN" POST $PC/changes "$(echo "$PCCH" | jq -c 'del(.managerAgreement)')"; no "pc: internal request needs the requester manager's agreement"
+as "$PLAN_TOKEN" POST $PC/changes "$PCCH"; check "pc: change request drafted with its scenario" '.success and .data.status == 0 and (.data.scenario|length) == 1 and (.data.number|length) > 0'
+PCCHID=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"register\"}"
+check "pc: registered; board = project manager, planning, construction, commercial; due date set" '.success and .data.status == 1 and ([.data.board[].role]|sort) == ["COMMERCIAL","CONSTRUCTION","PLANNING","PROJECTMANAGER"] and .data.dueDate != null'
+call POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"decide\",\"decision\":1,\"note\":\"x\"}"; no "pc: decision before the impact analysis rejected"
+as "$PLAN_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"analyze\"}"
+check "pc: impact analysis: +2 days, +100M, on the critical path, C and D move" '.success and .data.status == 2 and .data.impactDeltaDays == 2 and .data.impactDeltaCost == 100000000 and .data.impactOnCriticalPath == true and ([.data.impactActivities[].code]|index("PC-C") != null) and ([.data.impactActivities[].code]|index("PC-D") != null)'
+as "$PLAN_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"recommend\",\"note\":\"تایید با رعایت مهلت\"}"; no "pc: planning cannot give the project manager's recommendation"
+as "$PM_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"recommend\",\"note\":\"تایید با رعایت مهلت\"}"; check "pc: project manager recommends" '.success and .data.recommendation != null'
+call POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"decide\",\"decision\":1,\"note\":\"x\"}"; no "pc: decision before the board has voted rejected"
+as "$PM_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"vote\",\"vote\":1}"; check "pc: project manager votes" '.success'
+as "$PLAN_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"vote\",\"vote\":1}"
+as "$PROD_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"vote\",\"vote\":1}"
+as "$COM_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"vote\",\"vote\":1}"; check "pc: all four board members voted" '.success and ([.data.board[]|select(.vote == 1)]|length) == 4'
+as "$PM_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"decide\",\"decision\":1,\"note\":\"x\"}"; no "pc: project manager recommends only, cannot decide (authority table)"
+call POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"decide\",\"decision\":1,\"note\":\"تایید معاون PMO\"}"
+check "pc: PMO deputy approves within authority -> implementing, baseline attached" '.success and .data.status == 4 and .data.decision == 1 and .data.baselineId != null'
+call GET "$PC/baselines?ContractId=$PCT&PageSize=0"
+check "pc: baseline 1 approved and current (BAC 1.1bn); baseline 0 superseded" '([.data.data[]|select(.number==1)][0]|(.status == 2 and .isCurrent == true and .bac == 1100000000 and .changeRequestId != null)) and ([.data.data[]|select(.number==0)][0].status == 3)'
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
+check "pc: plan re-run: C now 6 days ends 2026-11-12, D 2026-11-13, budget of C 500M" '([.data.data[]|select(.code=="PC-C")][0]|(.durationDays == 6 and (.earlyFinish|startswith("2026-11-12")) and .budgetAtCompletion == 500000000)) and ([.data.data[]|select(.code=="PC-D")][0].earlyFinish|startswith("2026-11-13"))'
+as "$PM_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"close\"}"; no "pc: only planning closes a change"
+as "$PLAN_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"close\"}"; check "pc: change closed" '.success and .data.status == 5'
+as "$PLAN_TOKEN" GET "$PC/changes?ContractId=$PCT"; check "pc: change list is paged" '.success and (.data.data|length) >= 1'
+call GET "$PC/approval-authorities"; check "pc: approval authority table seeded (PMO up to 5bn rial and 30 days; PM recommends only)" '.success and ([.data[]|select(.role=="PMO")][0]|(.canDecide == true and .maxAmount == 5000000000 and .maxDelayDays == 30)) and ([.data[]|select(.role=="PROJECTMANAGER")][0].canDecide == false)'
+as "$CEO_TOKEN" GET "$PC/approval-authorities"; check "pc: the CEO also reads the table" '.success'
+
+# --- commercial: payment milestones, guarantee alerts, late penalty (contract PCP)
+as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"پرداخت پس از ترخیص کیفی\",\"kind\":3,\"trigger\":4,\"workOrderId\":$WO1,\"amount\":50000000}"; check "pc: payment milestone on the release note trigger" '.success and .data.status == 0 and .data.seq == 1'
+PCMS1=$(val .data.id)
+as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"پرداخت تاریخ‌دار\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd -1)T00:00:00\",\"amount\":10000000}"; check "pc: payment milestone on a date" '.success'
+as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"پرداخت پیشرفت\",\"kind\":2,\"trigger\":2,\"triggerPercent\":100,\"amount\":10000000}"
+as "$COM_TOKEN" POST $PC/milestones/evaluate/$QCT; check "pc: released note and a past date make two milestones due; progress one stays planned" '.success and .data.becameDue == 2 and ([.data.milestones[]|select(.status == 1)]|length) == 2'
+as "$QC_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"x\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 1)T00:00:00\",\"amount\":1}"; no "pc: QC cannot define payment milestones"
+as "$COM_TOKEN" POST $PC/milestones/action "{\"id\":$PCMS1,\"action\":\"paid\"}"; no "pc: a milestone that is only due cannot be marked paid"
+
+call POST ContractGuaranty "{\"title\":\"ضمانت‌نامه حسن انجام کار\",\"bank\":\"ملی\",\"no\":\"PC-G-1\",\"price\":\"500,000,000\",\"regDate\":\"$(dd -300)T00:00:00\",\"dueDate\":\"$(dd 10)T00:00:00\",\"contractEntityId\":$QCT}"; check "pc: legacy contract guaranty created (text amount)" '.success'
+as "$COM_TOKEN" POST $PC/guarantees/parse; check "pc: legacy guarantees parsed into typed side data" '.success and .data.created >= 1'
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$QCT&PageSize=0"; check "pc: guarantee amount parsed to 500,000,000, expiry in 10 days" '.success and ([.data.data[]|select(.no=="PC-G-1")][0]|(.amountDecimal == 500000000 and .parseFailed == false and .daysToExpiry == 10))'
+as "$COM_TOKEN" GET "$PC/guarantees/alerts?contractId=$QCT"; check "pc: guarantee alert listed at the 14-day level" '(if type == "array" then . else .data end) | ([.[]|select(.no=="PC-G-1")][0]|(.alertLevel == 14 and .daysToExpiry == 10))'
+as "$QC_TOKEN" POST $PC/guarantees/parse; no "pc: QC cannot parse guarantees"
+
+call POST Contracts '{"code":"PC-CT-P","title":"قرارداد آزمون جریمه","status":1,"employer":"کارفرمای آزمون"}'; PCP=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PCP,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"contractDeliveryDate\":\"$(dd -14)T00:00:00\",\"dataDateWeekday\":3,\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "pc: penalty contract terms saved" '.success'
+as "$COM_TOKEN" POST $PC/penalties/compute/$PCP; check "pc: late penalty 14 days x 1 percent per week of 1bn = 20,000,000" '.success and (.data|length) == 1 and .data[0].lateDays == 14 and .data[0].amount == 20000000 and .data[0].baseAmount == 1000000000'
+PCPEN=$(val '.data[0].id')
+as "$COM_TOKEN" POST $PC/penalties/decide "{\"id\":$PCPEN,\"status\":1,\"reason\":\"بخشودگی\"}"; no "pc: only the CEO waives a penalty"
+as "$CEO_TOKEN" POST $PC/penalties/decide "{\"id\":$PCPEN,\"status\":1,\"reason\":\"بخشودگی به دلیل تاخیر کارفرما\"}"; check "pc: CEO waives the penalty -> amount 0" '.success and .data.status == 1 and .data.amount == 0'
+as "$COM_TOKEN" POST $PC/penalties/compute/$PCP; check "pc: a decided penalty is not recomputed" '.success and .data[0].amount == 0 and .data[0].status == 1'
+
+# --- shipping gate: packing needs a released quality release note (the single record is the Quality one)
+as "$WH_TOKEN" POST $PC/shipments "{\"contractId\":$QCT,\"workOrderId\":$WO2,\"packingList\":\"1 crate\"}"; check "pc: shipment planned for the unreleased work order" '.success and .data.status == 0 and (.data.number|startswith("SH"))'
+PCSH2=$(val .data.id)
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH2,\"action\":\"pack\",\"packingVerification\":\"checked\"}"; nomsg "pc: packing without a released release note is blocked" "بدون برگه ترخیص"
+as "$WH_TOKEN" POST $PC/shipments "{\"contractId\":$QCT,\"workOrderId\":$WO1,\"packingList\":\"2 crates\"}"; PCSH1=$(val .data.id)
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"pack\"}"; no "pc: packing needs the verification result"
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"pack\",\"packingVerification\":\"matches the packing list\"}"; check "pc: released work order packed; release note linked" ".success and .data.status == 1 and .data.releaseNoteId == $RN1"
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"release\"}"; no "pc: shipping release belongs to planning"
+as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"release\"}"; check "pc: planning releases the shipment" '.success and .data.status == 2'
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"ship\",\"waybill\":\"WB-100\",\"shippingDocuments\":\"packing list, CoC\"}"; check "pc: shipped" '.success and .data.status == 3'
+as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"deliver\",\"deliveryReceiptNumber\":\"DR-1\"}"; check "pc: delivered" '.success and .data.status == 4 and .data.deliveredAt != null'
+as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"handover\",\"handoverMinutesNumber\":\"HM-1\"}"; check "pc: handover minutes recorded" '.success and .data.status == 5'
+
+# --- reports: client report has no indices unless the contract says so; MS Project export; final book
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1}"
+check "pc: client monthly report carries progress but no SPI/CPI" '.success and (.data.hash|length) > 10 and (.data.content|fromjson|(.physicalPercent // .PhysicalPercent)) != null and ((.data.content|fromjson|(.spi // .Spi)) == null) and ((.data.content|fromjson|(.cpi // .Cpi)) == null)'
+PCREP=$(val .data.id)
+as "$PM_TOKEN" POST $PC/reports/$PCREP/release; check "pc: project manager releases the client report" '.success and .data.releasedAt != null'
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.clientReportShowsIndices = true')"; check "pc: contract allows indices in the client report" '.success and .data.clientReportShowsIndices == true'
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1}"; check "pc: client report shows SPI/CPI only when the contract allows it" '(.data.content|fromjson|(.spi // .Spi)) != null'
+as "$PLAN_TOKEN" POST $PC/terms "$PCTERMS" >/dev/null
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":2}"; check "pc: internal weekly report generated" '.success and .data.kind == 2'
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":3}"; check "pc: CEO monthly report generated" '.success and .data.kind == 3'
+as "$PM_TOKEN" GET "$PC/reports?ContractId=$PCT"; check "pc: reports are listed (paged)" '.success and (.data.data|length) >= 3'
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":4}"; no "pc: final book is not a periodic report"
+
+PCMSP=$(curl -s -o "$OUT/pc-msp.tmp" -w '%{http_code} %{content_type}' "$API/$PC/export/msproject/$PCT" -H "Authorization: Bearer $PLAN_TOKEN")
+if [ "${PCMSP%% *}" = "200" ] && echo "$PCMSP" | grep -qi "xml" && grep -q "<Project" "$OUT/pc-msp.tmp" && [ "$(grep -o '<Task>' "$OUT/pc-msp.tmp" | wc -l)" -eq 5 ] && python3 -I -c 'import sys,xml.dom.minidom as m; m.parse(sys.argv[1])' "$OUT/pc-msp.tmp" 2>/dev/null; then ok "pc: MS Project XML export is well-formed with 5 tasks (project + 4)"; else echo "$PCMSP" > "$B"; head -c 600 "$OUT/pc-msp.tmp" >> "$B"; bad "pc: MS Project XML export is well-formed with 5 tasks (project + 4)"; fi
+rm -f "$OUT/pc-msp.tmp"
+
+as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\"}"; no "pc: final book of an incomplete data book is refused"
+as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: final book (client variant) issued as controlled document R01 with a hash" '.success and .data.revision == "R01" and (.data.hash|length) > 10 and .data.controlledDocumentId != null and (.data.documentCode|endswith("-C"))'
+as "$DCC_TOKEN" POST $PC/final-books "{\"workOrderId\":$PCW1,\"variant\":\"client\",\"allowIncomplete\":true}"; check "pc: re-issue makes revision R02" '.success and .data.revision == "R02"'
+as "$DCC_TOKEN" GET "$PC/final-books?WorkOrderId=$PCW1"; check "pc: final books listed" '.success and (.data.data|length) == 2'
+
+# --- second contract: WBS generation from the work order, plan run, cycle checks (new and legacy predecessors)
+call POST Contracts '{"code":"PC-CT-02","title":"قرارداد آزمون WBS","status":1,"employer":"کارفرمای آزمون"}'; PCT2=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PCT2,\"equipmentId\":$PEQ,\"count\":1}"
+call POST WorkOrders "{\"contractId\":$PCT2,\"equipmentId\":$PEQ,\"code\":\"PC-WO-3\",\"title\":\"Pump 3\",\"description\":\"x\",\"count\":1}"; PCW3=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PCT2,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "pc: second contract terms" '.success'
+as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PCW3,\"contractId\":$PCT2,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"25\"}"; check "pc: second equipment code PU1502501 (unique across contracts)" '.success and .data.equipmentProjectCode == "PU1502501"'
+as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$PCT2,\"workOrderIds\":[$PCW3]}"
+check "pc: WBS generated from the work order: 4 nodes, 6 activities, 5 dependencies, 12 MDR lines" '.success and .data.nodesCreated == 4 and .data.activitiesCreated == 6 and .data.dependenciesCreated == 5 and .data.mdrLinesDrafted == 12'
+as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$PCT2,\"workOrderIds\":[$PCW3]}"; check "pc: generating again creates nothing twice" '(.success == false) or (.data.nodesCreated == 0 and .data.activitiesCreated == 0)'
+as "$PLAN_TOKEN" GET "$PC/wbs?ContractId=$PCT2&PageSize=0"; check "pc: generated WBS nodes are listed" '.success and (.data.data|length) == 4'
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT2,\"forecast\":false,\"mirror\":true}"
+check "pc: generated plan: MDR 10 + MDL 10 + packing 2 = 22 working days, ends 2026-12-01" '.success and .data.hasCycle == false and .data.projectFinishOffset == 22 and (.data.projectFinish|startswith("2026-12-01"))'
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT2&PageSize=0"
+PCMDRACT=$(jq -r '[.data.data[]|select(.title|contains("MDR"))|select(.title|contains("MDL")|not)][0].id' "$B"); PCDELACT=$(jq -r '[.data.data[]|select(.title|contains("تحویل به کارفرما"))][0].id' "$B")
+as "$PLAN_TOKEN" POST $PC/dependencies "{\"contractId\":$PCT2,\"predecessorId\":$PCDELACT,\"successorId\":$PCMDRACT,\"type\":1,\"lagDays\":0}"; no "pc: cycle delivered -> MDR rejected"
+as "$PLAN_TOKEN" POST $PC/wbs/auto-weights/$PCT2
+as "$PLAN_TOKEN" GET "$PC/need-by?ContractId=$PCT2&PageSize=0"; check "pc: need-by dates listing" '.success'
+as "$PLAN_TOKEN" GET "$PC/notices?WorkOrderId=$PCW3&PageSize=0"; check "pc: inspection notice listing" '.success'
+
+# legacy assembly predecessors now run the same cycle detection
+call POST Assemblies "{\"title\":\"Casing\",\"code\":\"PC-ASM-1\",\"workOrderId\":$PCW3,\"assemblerDuration\":1}"; PCAS1=$(jq -r '.data.id // empty' "$B")
+call POST Assemblies "{\"title\":\"Rotor\",\"code\":\"PC-ASM-2\",\"workOrderId\":$PCW3,\"assemblerDuration\":1}"; PCAS2=$(jq -r '.data.id // empty' "$B")
+[ -n "$PCAS1" ] && [ -n "$PCAS2" ] && ok "pc: two legacy assemblies created" || bad "pc: two legacy assemblies created"
+call PUT Assemblies/set-predecessor "{\"id\":$PCAS2,\"predecessorId\":$PCAS1}"; check "pc: legacy assembly predecessor 1 -> 2 accepted" '.success'
+call PUT Assemblies/set-predecessor "{\"id\":$PCAS1,\"predecessorId\":$PCAS2}"; no "pc: legacy assembly loop 2 -> 1 rejected"
+call PUT Assemblies/set-predecessor "{\"id\":$PCAS1,\"predecessorId\":$PCAS1}"; no "pc: legacy assembly self link rejected"
+
+# --- dashboards
+as "$PM_TOKEN" GET $PC/dashboard; check "pc: PMO dashboard: active projects, red projects, late activities, guarantee alerts, exposure" '.success and .data.activeProjects >= 2 and .data.guaranteeAlerts >= 1 and .data.openChangeRequests >= 0 and (.data.worst|length) >= 1'
+as "$CEO_TOKEN" GET "$PC/portfolio?PageSize=0"; check "pc: portfolio has one row for the main contract" ".success and ([.data.data[]|select(.contractId == $PCT)]|length) == 1"
+as "$CEO_TOKEN" GET finance/ceo-dashboard
+check "pc: CEO dashboard carries the project control counts" '.success and .data.pcActiveProjects >= 2 and .data.pcGuaranteeAlerts >= 1 and (.data.pcPenaltyExposure != null) and (.data.pcOverdueClientResponses >= 1)'
+as "$SEC_TOKEN" GET $PC/dashboard; [ "$CODE" = "403" ] && ok "pc: security user cannot open the PMO dashboard (403)" || bad "pc: security user cannot open the PMO dashboard (403) got $CODE"
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'
