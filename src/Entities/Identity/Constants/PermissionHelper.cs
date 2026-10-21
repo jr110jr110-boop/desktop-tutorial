@@ -320,6 +320,12 @@ namespace Entities.Identity.Constants
             yield return new RoleClaim() { Id = 1304, ClaimType = Type, ClaimValue = SepidarLink, RoleId = RoleConstants.CeoResponseRole.Id };
             yield return new RoleClaim() { Id = 1400, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.QAResponseRole.Id };
             yield return new RoleClaim() { Id = 1401, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.QAResponseRole.Id };
+            yield return new RoleClaim() { Id = 1500, ClaimType = Type, ClaimValue = Contract, RoleId = RoleConstants.ProjectManagerResponseRole.Id };
+            yield return new RoleClaim() { Id = 1501, ClaimType = Type, ClaimValue = WorkOrder, RoleId = RoleConstants.ProjectManagerResponseRole.Id };
+            yield return new RoleClaim() { Id = 1502, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.ProjectManagerResponseRole.Id };
+            yield return new RoleClaim() { Id = 1600, ClaimType = Type, ClaimValue = Contract, RoleId = RoleConstants.DccResponseRole.Id };
+            yield return new RoleClaim() { Id = 1601, ClaimType = Type, ClaimValue = WorkOrder, RoleId = RoleConstants.DccResponseRole.Id };
+            yield return new RoleClaim() { Id = 1602, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.DccResponseRole.Id };
             #endregion
         }
     }

@@ -56,6 +56,9 @@ namespace Entities.Model.NasbNiro.Finance
         public int? ContractId { get; set; }
         public ContractEntity Contract { get; set; }
 
+        /// <summary>Project control: the WBS node this cost belongs to, when finance knows it (nullable).</summary>
+        public int? WbsNodeId { get; set; }
+
         /// <summary>Cost centre code (when the cost is not for a work order, for example maintenance).</summary>
         public string CostCenter { get; set; }
 

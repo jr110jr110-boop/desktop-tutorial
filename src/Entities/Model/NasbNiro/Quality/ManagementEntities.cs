@@ -140,6 +140,10 @@ namespace Entities.Model.NasbNiro.Quality
         public string RetentionClass { get; set; }
         public string ResponsibleUnit { get; set; }
 
+        /// <summary>Project records (final data books) are linked to the contract and work order.</summary>
+        public int? ContractId { get; set; }
+        public int? WorkOrderId { get; set; }
+
         public ICollection<DocumentRevisionRecord> Revisions { get; set; }
     }
 

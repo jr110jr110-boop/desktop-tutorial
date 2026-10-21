@@ -28,9 +28,11 @@ namespace Services.NasbNiro.Finance
         private readonly IUnitOfWork _uow;
 
         private readonly Quality.IQualityDashboardService _quality;
+        private readonly ProjectControl.IPcReportService _projectControl;
 
-        public CeoDashboardService(IUnitOfWork uow, Quality.IQualityDashboardService quality)
+        public CeoDashboardService(IUnitOfWork uow, Quality.IQualityDashboardService quality, ProjectControl.IPcReportService projectControl)
         {
+            _projectControl = projectControl ?? throw new ArgumentNullException(nameof(projectControl));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _quality = quality ?? throw new ArgumentNullException(nameof(quality));
         }
@@ -146,6 +148,19 @@ namespace Services.NasbNiro.Finance
             d.ComplaintsOverdue = q.ComplaintsOverdue;
             d.WitnessNoticesDue = q.WitnessNoticesDue;
             foreach (var a in q.Alerts) d.Alerts.Add(new DashboardAlertDto { Level = a.Level, Text = a.Text, Link = a.Link });
+
+            // project control: schedule and cost performance, change requests, guarantees, penalties (computed, read only)
+            var pc = await _projectControl.GetDashboardAsync(ct);
+            d.PcActiveProjects = pc.ActiveProjects; d.PcProjectsRed = pc.ProjectsRed; d.PcProjectsAmber = pc.ProjectsAmber; d.PcLateActivities = pc.LateActivities;
+            d.PcOpenChangeRequests = pc.OpenChangeRequests; d.PcOverdueChangeRequests = pc.OverdueChangeRequests; d.PcGuaranteeAlerts = pc.GuaranteeAlerts;
+            d.PcOverdueMilestones = pc.OverdueMilestones; d.PcOverdueInitiationSteps = pc.OverdueInitiationSteps; d.PcOverdueClientResponses = pc.OverdueClientResponses; d.PcPenaltyExposure = pc.PenaltyExposure;
+            Alert(pc.ProjectsRed > 0, "danger", $"{pc.ProjectsRed} پروژه در وضعیت قرمز برنامه یا هزینه است", "/project-control/portfolio");
+            Alert(pc.ProjectsAmber > 0, "warning", $"{pc.ProjectsAmber} پروژه در وضعیت زرد برنامه یا هزینه است", "/project-control/portfolio");
+            Alert(pc.GuaranteeAlerts > 0, "warning", $"{pc.GuaranteeAlerts} ضمانت‌نامه به سررسید ۳۰ روز یا کمتر رسیده است", "/project-control/guarantees");
+            Alert(pc.OverdueChangeRequests > 0, "warning", $"{pc.OverdueChangeRequests} درخواست تغییر از مهلت تحلیل گذشته است", "/project-control/changes");
+            Alert(pc.OverdueMilestones > 0, "info", $"{pc.OverdueMilestones} مرحله پرداخت از موعد گذشته است", "/project-control/milestones");
+            Alert(pc.OverdueClientResponses > 0, "info", $"{pc.OverdueClientResponses} پاسخ کارفرما به مدارک ارسالی عقب افتاده است", "/project-control/transmittals");
+            Alert(pc.PenaltyExposure > 0, "warning", "جریمه تاخیر محاسبه‌شده وجود دارد", "/project-control/penalties");
             return ResponseDtoHelper.Ok(d);
         }
     }

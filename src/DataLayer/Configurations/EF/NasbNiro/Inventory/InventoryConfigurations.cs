@@ -1,3 +1,4 @@
+using DataLayer.Configurations.EF.NasbNiro.ProjectControl;
 using DataLayer.Configurations.EF.NasbNiro.Quality;
 using Entities.Model.NasbNiro.Inventory;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddFinanceConfigurations();
             builder.AddProcurementConfigurations();
             builder.AddQualityConfigurations();
+            builder.AddProjectControlConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());

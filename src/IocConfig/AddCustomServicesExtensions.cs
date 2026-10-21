@@ -145,6 +145,15 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Quality.IAuditReviewService, Services.NasbNiro.Quality.AuditReviewService>();
             services.AddScoped<Services.NasbNiro.Quality.IQualityDashboardService, Services.NasbNiro.Quality.QualityDashboardService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcCommercialService, Services.NasbNiro.ProjectControl.PcCommercialService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcMdrService, Services.NasbNiro.ProjectControl.PcMdrService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcScheduleService, Services.NasbNiro.ProjectControl.PcScheduleService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcBaselineService, Services.NasbNiro.ProjectControl.PcBaselineService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcReportService, Services.NasbNiro.ProjectControl.PcReportService>();
+            services.AddHostedService<Services.NasbNiro.ProjectControl.PcSnapshotHostedService>();
+
             services.AddScoped<IInventoryQualityService, InventoryQualityService>();
             services.AddScoped<IInventoryWorkflowService, InventoryWorkflowService>();
             return services;

@@ -107,7 +107,10 @@ namespace Services.NasbNiro
 
         private async Task<(bool, string)> IsValidPredecessorAsync(int assemblyId, int predecessorId, CancellationToken cancellationToken)
         {
-            while (true)
+            // cycle guard: a link to itself is a loop, and a visited set stops the walk if the stored data already contains a loop
+            if (predecessorId == assemblyId) return (false, EquipmentAssemblyMessages.PredecessorCausesLoop);
+            var visited = new System.Collections.Generic.HashSet<int>();
+            while (visited.Add(predecessorId))
             {
                 int? predecessorOfPredecessor =
                     await _equipmentAssemblies
@@ -120,6 +123,7 @@ namespace Services.NasbNiro
 
                 predecessorId = predecessorOfPredecessor.Value;
             }
+            return (false, EquipmentAssemblyMessages.PredecessorCausesLoop);
         }
         #endregion
 

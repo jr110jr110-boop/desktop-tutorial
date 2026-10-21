@@ -120,6 +120,23 @@ namespace Entities.Identity.Constants
             Description = "تضمین کیفیت"
         };
 
+        // Project control module: project manager (appointed by the CEO charter) and project documents control (DCC) (★ provisional decision)
+        public const string ProjectManager = "PROJECTMANAGER";
+        public static readonly ResponseRole ProjectManagerResponseRole = new ResponseRole()
+        {
+            Id = 15,
+            Name = ProjectManager,
+            Description = "مدیر پروژه"
+        };
+
+        public const string Dcc = "DCC";
+        public static readonly ResponseRole DccResponseRole = new ResponseRole()
+        {
+            Id = 16,
+            Name = Dcc,
+            Description = "کنترل مدارک پروژه"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -136,6 +153,8 @@ namespace Entities.Identity.Constants
             yield return WarehouseSupervisorResponseRole;
             yield return CeoResponseRole;
             yield return QAResponseRole;
+            yield return ProjectManagerResponseRole;
+            yield return DccResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)

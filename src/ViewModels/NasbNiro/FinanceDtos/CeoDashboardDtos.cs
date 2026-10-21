@@ -43,6 +43,19 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int ComplaintsOverdue { get; set; }
         public int WitnessNoticesDue { get; set; }
 
+        // project control (PMO)
+        public int PcActiveProjects { get; set; }
+        public int PcProjectsRed { get; set; }
+        public int PcProjectsAmber { get; set; }
+        public int PcLateActivities { get; set; }
+        public int PcOpenChangeRequests { get; set; }
+        public int PcOverdueChangeRequests { get; set; }
+        public int PcGuaranteeAlerts { get; set; }
+        public int PcOverdueMilestones { get; set; }
+        public int PcOverdueInitiationSteps { get; set; }
+        public int PcOverdueClientResponses { get; set; }
+        public decimal PcPenaltyExposure { get; set; }
+
         // Sepidar link
         public int EventsPending { get; set; }
         public int EventsFailed { get; set; }

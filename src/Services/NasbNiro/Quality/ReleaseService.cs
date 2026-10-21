@@ -85,6 +85,7 @@ namespace Services.NasbNiro.Quality
             var s8 = new DataBookSectionDto { No = 8, Name = "فهرست عدم انطباق و مجوز ارفاقی" };
             var s9 = new DataBookSectionDto { No = 9, Name = "گواهی کالیبراسیون تجهیزات به‌کاررفته" };
             var s10 = new DataBookSectionDto { No = 10, Name = "برگه ترخیص و گواهی انطباق" };
+            var s11 = new DataBookSectionDto { No = 11, Name = "فهرست مدارک مهندسی (MDR / MDL)" };
             book.Sections.AddRange(new[] { s1, s2, s3, s4, s5, s6, s7, s8, s9, s10 });
 
             // 1: ITP
@@ -188,6 +189,15 @@ namespace Services.NasbNiro.Quality
                 SourceKind = "ReleaseNote", SourceId = note?.Id, Number = note?.Number, Title = "برگه ترخیص کیفی و گواهی انطباق با MR و SPEC",
                 Status = note == null ? "-" : note.Status.ToString(), Mandatory = false, Missing = note == null || note.Status != ReleaseNoteStatus.Released,
             });
+            // 11: the master document register of project control; the lines marked ClientSubmittal are the MDL (the client list)
+            foreach (Entities.Model.NasbNiro.ProjectControl.PcEngineeringDeliverable d in await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcEngineeringDeliverable>().Where(d => d.WorkOrderId == wo.Id && !d.Deleted).OrderBy(d => d.DocumentNumber).ThenBy(d => d.Id).ToListAsync(cancellationToken))
+                s11.Entries.Add(new DataBookEntryDto
+                {
+                    SourceKind = "Mdr", SourceId = d.Id, Number = d.DocumentNumber + (d.Revision == null ? string.Empty : " rev " + d.Revision), Title = d.Title + (d.ClientSubmittal ? " [MDL]" : string.Empty),
+                    Status = d.IssueState + (d.ClientResponseCode == null ? string.Empty : " — " + d.ClientResponseCode), DocumentId = d.DocumentId, Mandatory = d.Required,
+                    Missing = d.Required && d.IssueState != Entities.Model.NasbNiro.ProjectControl.PcIssueState.Approved, ClientRelevant = d.ClientSubmittal,
+                });
+            if (s11.Entries.Count > 0) book.Sections.Add(s11);
             // client relevance: until the MDL table exists, an entry is for the client when its ITP activity has a client point
             var clientActivities = new HashSet<int>(itp == null ? new List<int>() : itp.Activities.Where(x => x.PointClient != ItpPoint.None).Select(x => x.Id));
             var reportActivity = reports.Where(r => r.ItpActivityId.HasValue).ToDictionary(r => r.Id, r => r.ItpActivityId.Value);
@@ -279,7 +289,7 @@ namespace Services.NasbNiro.Quality
                 Detail = ootPending == 0 ? "-" : $"{ootPending} سند در انتظار ارزیابی اثر است.",
             });
             DataBookDto book = await BuildBookAsync(wo, cancellationToken);
-            var missing = book.Sections.Where(s => s.No != 10).SelectMany(s => s.Entries.Where(e => e.Mandatory && e.Missing).Select(e => s.No + ": " + (e.Number ?? e.Title))).ToList();
+            var missing = book.Sections.Where(s => s.No != 10 && s.No != 11).SelectMany(s => s.Entries.Where(e => e.Mandatory && e.Missing).Select(e => s.No + ": " + (e.Number ?? e.Title))).ToList();
             checks.Add(new ReleaseCheckDto
             {
                 Code = "DATABOOK_COMPLETE", Title = "فهرست کتاب نهایی (Final Data Book) مورد الزامی ناقص ندارد", Passed = missing.Count == 0,

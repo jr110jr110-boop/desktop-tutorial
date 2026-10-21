@@ -234,7 +234,10 @@ namespace Services.NasbNiro
 
         private async Task<(bool, string)> IsValidPredecessorAsync(int bomId, int predecessorId, CancellationToken cancellationToken)
         {
-            while (true)
+            // cycle guard: a link to itself is a loop, and a visited set stops the walk if the stored data already contains a loop
+            if (predecessorId == bomId) return (false, EquipmentBomMessages.PredecessorCausesLoop);
+            var visited = new System.Collections.Generic.HashSet<int>();
+            while (visited.Add(predecessorId))
             {
                 int? predecessorOfPredecessor = await _equipmentBoms
                    .Where(x => !x.Deleted && x.Id == predecessorId)
@@ -246,6 +249,7 @@ namespace Services.NasbNiro
 
                 predecessorId = predecessorOfPredecessor.Value;
             }
+            return (false, EquipmentBomMessages.PredecessorCausesLoop);
         }
 
         public async EquipmentBomResult DeleteEquipmentBomAsync(int equipmentBomId, CancellationToken cancellationToken)
