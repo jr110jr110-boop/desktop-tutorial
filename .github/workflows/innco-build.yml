@@ -224,7 +224,7 @@ jobs:
           dotnet publish src/WebApi/WebApi.csproj -c Release -r win-x64 --self-contained false -o package-output/app 2>&1 | tee package-output/publish.log
           mkdir -p package-output/app/wwwroot
           cp -r .github/ci-frontend-dist/. package-output/app/wwwroot/
-          cp deploy/install.ps1 deploy/backup.ps1 package-output/
+          cp deploy/install.ps1 deploy/backup.ps1 deploy/Install-PMIS-Server.ps1 deploy/Install-PMIS-Server.cmd package-output/
           mkdir -p package-output/installers
           cp deploy/installers/README.txt package-output/installers/
           {
@@ -283,7 +283,8 @@ jobs:
         continue-on-error: true
         shell: powershell
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -SkipFirstBackup | Tee-Object -FilePath install-output\2-update-run.txt
+          # the update runs through the company wrapper: backup first, then install with the existing folders
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\Install-PMIS-Server.ps1 -NoPrompt | Tee-Object -FilePath install-output\2-update-run.txt
           "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\2-update-run.txt
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 2-update
 
