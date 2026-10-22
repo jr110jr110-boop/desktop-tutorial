@@ -275,7 +275,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal Credit { get; set; }
     }
 
-    public class OpeningImportDto
+    public class LedgerOpeningImportDto
     {
         public int? FiscalYearId { get; set; }
         public string Description { get; set; }

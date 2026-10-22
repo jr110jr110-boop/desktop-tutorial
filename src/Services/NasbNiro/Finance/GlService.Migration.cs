@@ -218,7 +218,7 @@ namespace Services.NasbNiro.Finance
             if (report.AlreadyHasOpening) report.Errors.Add("برای این سال قبلاً سند افتتاحیه ثبت شده است.");
 
             if (!commit || report.UnknownAccounts.Count > 0 || report.UnknownDetails.Count > 0 || report.Errors.Count > 0) return ResponseDtoHelper.Ok(report);
-            var result = await ImportOpeningCoreAsync(new OpeningImportDto { FiscalYearId = year.Id, Description = dto.Description, Rows = mappedRows }, false, ct);
+            var result = await ImportOpeningCoreAsync(new LedgerOpeningImportDto { FiscalYearId = year.Id, Description = dto.Description, Rows = mappedRows }, false, ct);
             if (!result.Success) { report.Errors.Add(result.Message); return ResponseDtoHelper.Ok(report); }
             report.Committed = true;
             report.VoucherId = result.Data.Id;

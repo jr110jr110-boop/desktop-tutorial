@@ -79,7 +79,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> PostEventsAsync(CancellationToken ct) => Ok(await _gl.PostEventsAsync(ct));
 
         [HttpPost("opening/import")]
-        public async Task<IActionResult> ImportOpeningAsync([FromBody] OpeningImportDto dto, CancellationToken ct) => Ok(await _gl.ImportOpeningAsync(dto, ct));
+        public async Task<IActionResult> ImportOpeningAsync([FromBody] LedgerOpeningImportDto dto, CancellationToken ct) => Ok(await _gl.ImportOpeningAsync(dto, ct));
 
         /// <summary>Lists what is missing before the ledger can be used (fiscal year, chart, role mapping, VAT rate).</summary>
         [HttpGet("setup-check")]

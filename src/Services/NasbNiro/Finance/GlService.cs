@@ -35,7 +35,7 @@ namespace Services.NasbNiro.Finance
         Task<ResponseDto<VoucherDto>> VoucherActionAsync(VoucherActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<FinalizeResultDto>> FinalizeUpToAsync(FinalizeUpToDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PostEventsResultDto>> PostEventsAsync(CancellationToken cancellationToken);
-        Task<ResponseDto<VoucherDto>> ImportOpeningAsync(OpeningImportDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<VoucherDto>> ImportOpeningAsync(LedgerOpeningImportDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<SetupCheckDto>> SetupCheckAsync(CancellationToken cancellationToken);
     }
 
@@ -789,10 +789,10 @@ namespace Services.NasbNiro.Finance
 
         // ================================================================================== opening balance
 
-        public Task<ResponseDto<VoucherDto>> ImportOpeningAsync(OpeningImportDto dto, CancellationToken ct) => ImportOpeningCoreAsync(dto, true, ct);
+        public Task<ResponseDto<VoucherDto>> ImportOpeningAsync(LedgerOpeningImportDto dto, CancellationToken ct) => ImportOpeningCoreAsync(dto, true, ct);
 
         /// <summary>The opening import; the migration wizard calls it with manualRules = false (imported details keep the guessed type).</summary>
-        private async Task<ResponseDto<VoucherDto>> ImportOpeningCoreAsync(OpeningImportDto dto, bool manualRules, CancellationToken ct)
+        private async Task<ResponseDto<VoucherDto>> ImportOpeningCoreAsync(LedgerOpeningImportDto dto, bool manualRules, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<VoucherDto>(NotAllowed);
             List<OpeningRowDto> rows = (dto?.Rows ?? new List<OpeningRowDto>()).Where(r => r != null).ToList();

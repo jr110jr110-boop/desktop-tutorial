@@ -25,6 +25,8 @@ ok()  { echo "PASS $1" | tee -a "$R"; pass=$((pass+1)); }
 bad() { echo "FAIL $1" | tee -a "$R"; { echo "=== $1"; head -c 4000 "$B"; echo; } >> "$F"; fail=$((fail+1)); }
 # check NAME JQ-EXPRESSION : passes when the expression is true for the last response body
 check() { if jq -e "$2" "$B" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+# the API description must be generated (two DTO classes with the same name break it and the installer waits for it)
+curl -s "$BASE/swagger/v1/swagger.json" -o "$B"; check "API description (swagger) is generated without schema name conflicts" '(.paths|length) > 100'
 # call METHOD PATH [JSON] : body to $B, HTTP code to $CODE
 call() {
   if [ $# -ge 3 ]; then
