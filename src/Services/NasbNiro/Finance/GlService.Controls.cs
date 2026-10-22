@@ -132,6 +132,20 @@ namespace Services.NasbNiro.Finance
                 }
             }
 
+            bool fxActive = await _uow.Set<FnVoucherLine>().AnyAsync(l => l.CurrencyCode != null && l.Account.IsMonetaryForeign && l.Voucher.Date <= end && l.Voucher.FiscalYear.LegalEntityId == entityId, ct);
+            bool revalued = await _uow.Set<FnFxRevaluation>().AnyAsync(r => r.PeriodId == p.Id && r.LegalEntityId == entityId, ct);
+            Add("FxRevaluation", "تسعیر ارز پایان دوره", fxActive && !revalued ? 1 : 0, fxActive && !revalued ? "تسعیر ارز این دوره انجام نشده است." : null, fxActive);
+
+            var activeDeferrals = await _uow.Set<FnDeferral>().AsNoTracking().Where(d => d.Status == FnDeferralStatus.Active && d.LegalEntityId == entityId && d.StartDate <= end && d.EndDate >= start).Select(d => d.Id).ToListAsync(ct);
+            int deferralOpen = 0;
+            foreach (int did in activeDeferrals)
+                if (!await _uow.Set<FnDeferralEntry>().AnyAsync(e => e.DeferralId == did && e.PeriodId == p.Id && e.Status == 1, ct)) deferralOpen++;
+            Add("Deferrals", "استهلاک پیش‌پرداخت‌ها و درآمدهای انتقالی تاییدشده", deferralOpen, deferralOpen == 0 ? null : $"{deferralOpen} برنامه استهلاک برای این دوره تایید نشده است.", activeDeferrals.Count > 0);
+
+            bool overheadSetup = await _uow.Set<FnOverheadRate>().AnyAsync(ct) || await _uow.Set<FnAllocationKey>().AnyAsync(ct);
+            bool allocated = await _uow.Set<FnOverheadAllocation>().AnyAsync(a => a.PeriodId == p.Id, ct);
+            Add("OverheadAllocation", "تسهیم و جذب سربار", overheadSetup && !allocated ? 1 : 0, overheadSetup && !allocated ? "تسهیم و جذب سربار این دوره انجام نشده است." : null, overheadSetup);
+
             int icOpen = 0;
             List<FnIntercompanyPost> posts = await _uow.Set<FnIntercompanyPost>().AsNoTracking().Where(x => x.Date >= start && x.Date <= end).ToListAsync(ct);
             foreach (FnIntercompanyPost post in posts)

@@ -41,6 +41,17 @@ namespace DataLayer.Context
             { typeof(FnParallelRun), null },
             { typeof(FnExportLayoutColumn), null },
             { typeof(FnDetailSepidarMap), null },
+            { typeof(FnCurrency), null },
+            { typeof(FnExchangeRate), null },
+            { typeof(FnLetterOfCredit), null },
+            { typeof(FnBudget), null },
+            { typeof(FnBudgetLine), null },
+            { typeof(FnOverheadRate), null },
+            { typeof(FnAllocationKey), null },
+            { typeof(FnStandardCost), null },
+            { typeof(FnContractRevenue), null },
+            { typeof(FnDeferral), null },
+            { typeof(FnProvision), null },
         };
 
         private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban" };

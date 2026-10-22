@@ -300,7 +300,7 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<FnCommitmentCheckDto>> CheckAsync(FnCommitmentCheckRequest request, CancellationToken ct)
         {
-            if (!_user.IsInRole(Services.NasbNiro.Procurement.ProcurementRoles.Readers + ",AUDITOR")) return Bad<FnCommitmentCheckDto>(NotAllowed);
+            if (!_user.IsInRole(global::Services.NasbNiro.Procurement.ProcurementRoles.Readers + ",AUDITOR")) return Bad<FnCommitmentCheckDto>(NotAllowed);
             if (request == null || request.Amount < 0) return Bad<FnCommitmentCheckDto>("مبلغ نامعتبر است.");
             DateTime date = (request.Date ?? DateTime.Today).Date;
             FnFiscalYear year = await _uow.Set<FnFiscalYear>().AsNoTracking().Where(y => y.StartDate <= date && y.EndDate >= date).OrderBy(y => y.LegalEntityId).FirstOrDefaultAsync(ct);
@@ -338,7 +338,7 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<FnCommitmentCheckDto>> CheckPurchaseRequestAsync(int purchaseRequestId, string overrideReason, CancellationToken ct)
         {
-            if (!_user.IsInRole(Services.NasbNiro.Procurement.ProcurementRoles.Readers + ",AUDITOR")) return Bad<FnCommitmentCheckDto>(NotAllowed);
+            if (!_user.IsInRole(global::Services.NasbNiro.Procurement.ProcurementRoles.Readers + ",AUDITOR")) return Bad<FnCommitmentCheckDto>(NotAllowed);
             var pr = await _uow.Set<Entities.Model.NasbNiro.Procurement.PurchaseRequest>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == purchaseRequestId, ct);
             if (pr == null) return ResponseDtoHelper.NotFound<FnCommitmentCheckDto>("درخواست خرید پیدا نشد.");
             return await CheckAsync(new FnCommitmentCheckRequest { CostCenterCode = pr.CostCenter, ContractId = pr.ContractId, Amount = pr.EstimatedAmount, Date = pr.RequestDate, OverrideReason = overrideReason }, ct);

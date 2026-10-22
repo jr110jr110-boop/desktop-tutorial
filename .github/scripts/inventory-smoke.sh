@@ -1924,6 +1924,180 @@ as "$FM_TOKEN" POST $FG/settings '{"key":"Finance:SepidarFullExport","value":"0"
 
 TOKEN=$ADMIN_TOKEN
 
+# ---------------------------------------------------------------- finance completeness (release F3, milestone 2): FX, budget, costing, deferrals
+TOKEN=$ADMIN_TOKEN
+FXA=finance/fx; FBU=finance/budgets; FCO=finance/costing; FDF=finance/deferrals; FRR=finance/receivables/revenue-recognition
+fv() { # a manual voucher through the full cycle (prepared by the accountant, checked by the second accountant, finalised by the finance manager); sets FVID
+  as "$FIN_TOKEN" POST $FG/vouchers "$1"; FVID=$(val .data.id)
+  as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$FVID,\"action\":\"check\"}"
+  as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$FVID,\"action\":\"finalize\"}"
+  if jq -e '.success and .data.status == 2' "$B" >/dev/null 2>&1; then ok "f3 setup: voucher $FVID finalised"; else bad "f3 setup: voucher $FVID finalised ($(jq -r '.message // .errorMessage // empty' "$B" | head -c 200))"; fi
+}
+tbv() { as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y4&Level=2&IncludeDraft=true"; jq -r "[.data.rows[]|select(.code == \"$1\")][0].$2 // 0" "$B"; }
+
+# --- fiscal year 1404 for the exact-amount tests
+as "$FM_TOKEN" POST $FG/years/ensure '{"date":"2025-06-01T00:00:00"}'; check "f3 m2: fiscal year 1404 ensured with 12 periods" '.success and .data.year == 1404 and (.data.periods|length) == 12'
+Y4=$(val .data.id); P1=$(val '.data.periods[0].id'); P2=$(val '.data.periods[1].id'); P3=$(val '.data.periods[2].id'); P4=$(val '.data.periods[3].id'); P5=$(val '.data.periods[4].id')
+
+# --- section 3: foreign currency
+as "$FM_TOKEN" POST $FXA/currencies '{"code":"IRR","title":"ریال","decimals":0,"isBase":true}'; check "f3 fx: base currency IRR" '.success and .data.isBase == true'
+as "$FM_TOKEN" POST $FXA/currencies '{"code":"USD","title":"دلار آمریکا","decimals":2,"isBase":false}'; check "f3 fx: currency USD" '.success and .data.code == "USD"'
+as "$FM_TOKEN" POST $FXA/currencies '{"code":"EUR","title":"یورو","decimals":2,"isBase":true}'; no "f3 fx: only one base currency"
+as "$FIN_TOKEN" POST $FXA/currencies '{"code":"GBP","title":"پوند","decimals":2}'; no "f3 fx: only the finance manager defines currencies"
+as "$FM_TOKEN" POST $FG/details '{"code":"FX-SUP","title":"تامین‌کننده ارزی","type":2}'; check "f3 fx: supplier detail created" '.success'
+as "$FM_TOKEN" POST $FG/details '{"code":"FX-CUS","title":"مشتری آزمون F3","type":3}'; check "f3 fx: customer detail created" '.success'
+fv "{\"date\":\"2025-05-25T00:00:00\",\"description\":\"خرید ارزی\",\"lines\":[{\"accountCode\":\"10501\",\"debit\":600000000},{\"accountCode\":\"30101\",\"credit\":600000000,\"detail1Code\":\"FX-SUP\",\"currencyCode\":\"USD\",\"currencyAmount\":1000,\"rate\":600000}]}"
+fv "{\"date\":\"2025-05-26T00:00:00\",\"description\":\"موجودی ارزی\",\"lines\":[{\"accountCode\":\"10103\",\"debit\":300000000,\"currencyCode\":\"USD\",\"currencyAmount\":500,\"rate\":600000},{\"accountCode\":\"60304\",\"credit\":300000000}]}"
+as "$FM_TOKEN" POST $FXA/revaluation "{\"periodId\":$P3,\"dryRun\":true}"; nomsg "f3 fx: revaluation needs a rate (none entered, nothing is assumed)" "نرخ USD"
+as "$AUD_TOKEN" POST $FXA/rates '{"currencyCode":"USD","date":"2025-06-20T00:00:00","average":650000,"rateType":1,"source":1}'; no "f3 fx: the auditor cannot enter rates"
+as "$FIN_TOKEN" POST $FXA/rates '{"currencyCode":"USD","date":"2025-06-20T00:00:00","rateType":1,"source":1}'; no "f3 fx: a rate needs the average or both buy and sell"
+as "$FIN_TOKEN" POST $FXA/rates '{"currencyCode":"USD","date":"2025-06-20T00:00:00","buy":640000,"sell":660000,"rateType":1,"source":1}'; check "f3 fx: average defaults to the mean of buy and sell" '.success and .data.average == 650000'
+as "$FIN_TOKEN" POST $FXA/rates '{"currencyCode":"USD","date":"2025-07-20T00:00:00","average":640000,"rateType":1,"source":1}'; check "f3 fx: second rate saved" '.success and .data.average == 640000'
+as "$FIN_TOKEN" POST $FXA/rates '{"currencyCode":"USD","date":"2025-06-20T00:00:00","average":900000,"rateType":3,"source":3}'; check "f3 fx: a free-market rate on the same day is a separate row" '.success'
+as "$FM_TOKEN" GET "$FXA/rates?CurrencyCode=USD&RateType=1&PageSize=0"; check "f3 fx: official rates listed" '.success and (.data.data|length) == 2'
+as "$FM_TOKEN" POST $FXA/revaluation "{\"periodId\":$P3,\"dryRun\":true}"; check "f3 fx: dry run: payable loss 50,000,000 and bank gain 25,000,000 at 650,000" '.success and .data.dryRun == true and (.data.lines|length) == 2 and .data.totalGain == 25000000 and .data.totalLoss == 50000000 and ([.data.lines[]|select(.accountCode == "30101")][0].difference) == -50000000 and ([.data.lines[]|select(.accountCode == "10103")][0].difference) == 25000000 and .data.voucherId == null'
+as "$FIN_TOKEN" POST $FXA/revaluation "{\"periodId\":$P3,\"dryRun\":false}"; check "f3 fx: the accountant runs the revaluation" '.success and .data.voucherId > 0 and .data.reversalVoucherId > 0 and .data.totalGain == 25000000 and .data.totalLoss == 50000000'
+RV=$(val .data.voucherId); RVR=$(val .data.reversalVoucherId)
+as "$FM_TOKEN" GET $FG/vouchers/$RV; check "f3 fx: revaluation voucher is automatic, balanced (75,000,000 each side) and dated at period end" '.success and .data.type == 3 and .data.totalAmount == 75000000 and (.data.date|startswith("2025-06-21")) and (.data.lines|length) == 4'
+as "$FM_TOKEN" GET $FG/vouchers/$RVR; check "f3 fx: automatic reversal is dated day 1 of the next period and mirrors the amounts" '.success and .data.type == 5 and .data.totalAmount == 75000000 and (.data.date|startswith("2025-06-22")) and .data.reversesVoucherId == '$RV
+as "$FM_TOKEN" POST $FXA/revaluation "{\"periodId\":$P3,\"dryRun\":false}"; check "f3 fx: a second run is incremental and finds nothing to post" '.success and .data.voucherId == null and ([.data.lines[]|select(.difference != 0)]|length) == 0'
+as "$FM_TOKEN" GET "$FXA/revaluations?periodId=$P3"; check "f3 fx: the run is recorded once" '.success and (.data|length) == 1 and .data[0].totalLoss == 50000000'
+as "$FM_TOKEN" POST $FXA/revaluation "{\"periodId\":$P4,\"dryRun\":false}"; check "f3 fx: next period at 640,000: loss 40,000,000, gain 20,000,000 (the previous one was reversed)" '.success and .data.totalGain == 20000000 and .data.totalLoss == 40000000 and .data.voucherId > 0'
+as "$FM_TOKEN" POST $FXA/settlement '{"date":"2025-07-25T00:00:00","direction":"Payable","currencyCode":"USD","currencyAmount":400,"bookRate":600000,"settleRate":655000,"accountCode":"30101","detailCode":"FX-SUP","counterAccountCode":"10102"}'; check "f3 fx: realised loss at settlement is exact (240,000,000 booked, 262,000,000 paid, loss 22,000,000)" '.success and .data.bookBase == 240000000 and .data.settledBase == 262000000 and .data.difference == -22000000 and .data.voucherId > 0'
+SETV=$(val .data.voucherId)
+as "$FM_TOKEN" GET $FG/vouchers/$SETV; check "f3 fx: settlement voucher is balanced at 262,000,000" '.success and .data.totalAmount == 262000000 and (.data.lines|length) == 3'
+as "$FM_TOKEN" POST $FXA/settlement '{"date":"2025-07-25T00:00:00","direction":"Payable","currencyCode":"USD","currencyAmount":10,"bookRate":600000,"settleRate":655000,"accountCode":"10501","counterAccountCode":"10102"}'; no "f3 fx: settlement needs a foreign-currency monetary account"
+as "$FM_TOKEN" GET "$FXA/exposure?asOf=2025-07-22"; check "f3 fx: exposure USD: assets 500, liabilities 1000, net -500 and the payable at 640,000" '.success and ([.data.rows[]|select(.currencyCode == "USD")][0]|(.receivables == 500 and .payables == 1000 and .net == -500 and .basePayables == 640000000 and .baseReceivables == 320000000))'
+as "$AUD_TOKEN" GET "$FXA/exposure"; check "f3 fx: the auditor can read the exposure" '.success'
+as "$TR_TOKEN" POST $FXA/letters-of-credit "{\"providerId\":$PA,\"bankAccountId\":$BA1,\"currencyCode\":\"USD\",\"amount\":200,\"openDate\":\"2025-06-01T00:00:00\",\"expiryDate\":\"2025-06-30T00:00:00\",\"marginPercent\":20}"; check "f3 lc: letter of credit opened" '.success and .data.status == 1 and .data.amount == 200 and (.data.number|startswith("LC-1404-"))'
+LC1=$(val .data.id)
+as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LC1,\"action\":\"margin\",\"amount\":24000000,\"date\":\"2025-06-02T00:00:00\"}"; check "f3 lc: margin deposit posted" '.success and .data.marginPaid == 24000000 and (.data.postings|length) == 1'
+as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LC1,\"action\":\"fee\",\"amount\":500000,\"date\":\"2025-06-02T00:00:00\"}"; check "f3 lc: bank fee posted" '.success and .data.feesPaid == 500000'
+as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LC1,\"action\":\"pay\",\"rate\":650000,\"date\":\"2025-06-10T00:00:00\"}"; nomsg "f3 lc: payment needs the documents first" "اسناد"
+as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LC1,\"action\":\"documents\",\"foreignInvoiceRef\":\"INV-F3-1\",\"date\":\"2025-06-08T00:00:00\"}"; check "f3 lc: documents received" '.success and .data.status == 2'
+as "$TR_TOKEN" GET "$FXA/exposure?asOf=2025-07-22"; check "f3 lc: the open letter of credit (200 USD) widens the net exposure to -700" '.success and ([.data.rows[]|select(.currencyCode == "USD")][0]|(.openLetterOfCredit == 200 and .netWithLetterOfCredit == -700))'
+as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LC1,\"action\":\"pay\",\"rate\":650000,\"date\":\"2025-06-10T00:00:00\"}"; check "f3 lc: payment at 650,000 = 130,000,000, margin 24,000,000 released, status paid" '.success and .data.status == 3 and .data.settledBase == 130000000 and ([.data.postings[]|select(.kind == 3)][0].amount) == 130000000 and ([.data.postings[]|select(.kind == 4)][0].amount) == 24000000'
+as "$AUD_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LC1,\"action\":\"cancel\"}"; no "f3 lc: the auditor cannot act on a letter of credit"
+as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LC1,\"action\":\"cancel\"}"; no "f3 lc: a paid letter of credit cannot be cancelled"
+
+# --- section 5b: deferrals, accrual reversal, provisions
+as "$FIN_TOKEN" POST $FDF '{"kind":1,"description":"بیمه سالانه پیش‌پرداخت","totalAmount":1000001,"startDate":"2025-03-21T00:00:00","endDate":"2025-08-22T00:00:00","balanceAccountCode":"10601","resultAccountCode":"80108"}'; check "f3 deferral: prepaid expense over 5 Persian months (Farvardin to Mordad)" '.success and .data.months == 5 and .data.remaining == 1000001'
+DF1=$(val .data.id)
+as "$FIN_TOKEN" POST $FDF '{"kind":2,"description":"درآمد انتقالی نگهداری","totalAmount":600000,"startDate":"2025-03-21T00:00:00","endDate":"2025-06-21T00:00:00","balanceAccountCode":"30303","resultAccountCode":"60102"}'; check "f3 deferral: deferred income over 3 months" '.success and .data.months == 3'
+DF2=$(val .data.id)
+as "$FIN_TOKEN" POST $FDF '{"kind":1,"description":"x","totalAmount":1000,"startDate":"2025-03-21T00:00:00","endDate":"2025-04-21T00:00:00","balanceAccountCode":"30303","resultAccountCode":"80108"}'; no "f3 deferral: prepaid expense must use an asset and an expense account"
+as "$FIN_TOKEN" POST $FDF/run/$P1; check "f3 deferral: run for Farvardin drafts one entry per schedule (200,000 and 200,000)" '.success and (.data|length) == 2 and ([.data[]|select(.deferralId == '$DF1')][0].amount) == 200000 and ([.data[]|select(.deferralId == '$DF2')][0].amount) == 200000'
+E1=$(val '.data[]|select(.deferralId == '$DF1')|.id'); E2=$(val '.data[]|select(.deferralId == '$DF2')|.id')
+as "$FIN_TOKEN" POST $FDF/run/$P1; check "f3 deferral: the run is idempotent" '.success and (.data|length) == 0'
+as "$FIN_TOKEN" POST $FDF/entries/$E1/approve; no "f3 deferral: the preparer cannot approve the entry"
+as "$FIN2_TOKEN" POST $FDF/entries/$E1/approve; check "f3 deferral: the second person approves; a voucher is posted" '.success and .data.status == 1 and .data.voucherId > 0'
+as "$FIN2_TOKEN" POST $FDF/entries/$E2/approve; check "f3 deferral: the deferred-income entry is approved" '.success and .data.status == 1'
+as "$FIN_TOKEN" POST $FDF/run/$P3; check "f3 deferral: Khordad is month 3: 200,001 (cumulative rounding lands exactly) and 200,000 for the income schedule" '.success and ([.data[]|select(.deferralId == '$DF1')][0]|(.sequence == 3 and .amount == 200001)) and ([.data[]|select(.deferralId == '$DF2')][0].amount) == 200000'
+E3=$(val '.data[]|select(.deferralId == '$DF1')|.id')
+as "$FIN2_TOKEN" POST $FDF/entries/$E3/approve; check "f3 deferral: Khordad entry approved" '.success and .data.status == 1 and .data.amount == 200001'
+as "$FM_TOKEN" GET $FDF/$DF1; check "f3 deferral: amortised 400,001, remaining 600,000 after two months" '.success and .data.amortised == 400001 and .data.remaining == 600000 and ([.data.entries[]|select(.status == 1)]|length) == 2'
+EXP4=$(val .data.entries[1].voucherId)
+as "$FM_TOKEN" GET $FG/vouchers/$EXP4; check "f3 deferral: the entry voucher debits the expense 80108 and credits the prepaid 10601" '.success and .data.totalAmount == 200001 and ([.data.lines[]|select(.accountCode == "80108" and .debit == 200001)]|length) == 1 and ([.data.lines[]|select(.accountCode == "10601" and .credit == 200001)]|length) == 1'
+fv "{\"date\":\"2025-06-10T00:00:00\",\"description\":\"هزینه تعهدی\",\"reverseNextPeriod\":true,\"lines\":[{\"accountCode\":\"80108\",\"debit\":3000000},{\"accountCode\":\"30208\",\"credit\":3000000}]}"
+ACCV=$FVID
+as "$FIN_TOKEN" POST $FDF/reversing/run/$P3; check "f3 accrual: one reversing voucher drafted" '.success and (.data.createdVoucherIds|length) == 1'
+ACCR=$(val '.data.createdVoucherIds[0]')
+as "$FM_TOKEN" GET $FG/vouchers/$ACCR; check "f3 accrual: the reversal is a draft dated day 1 of the next period with swapped sides" '.success and .data.status == 0 and .data.type == 5 and (.data.date|startswith("2025-06-22")) and .data.totalAmount == 3000000 and .data.reversesVoucherId == '$ACCV
+as "$FM_TOKEN" GET $FG/vouchers/$ACCV; check "f3 accrual: the original points to its automatic reversal" '.success and .data.autoReversalVoucherId == '$ACCR
+as "$FIN_TOKEN" POST $FDF/reversing/run/$P3; check "f3 accrual: running again creates nothing" '.success and (.data.createdVoucherIds|length) == 0'
+as "$FIN_TOKEN" POST $FDF/provisions '{"kind":1,"description":"ذخیره گارانتی","expenseAccountCode":"80303","liabilityAccountCode":"30405","reviewDate":"2025-06-30T00:00:00"}'; check "f3 provision: warranty provision registered" '.success and .data.balance == 0 and (.data.number|startswith("PRV-"))'
+PV1=$(val .data.id)
+as "$FIN_TOKEN" POST $FDF/provisions/movement "{\"provisionId\":$PV1,\"date\":\"2025-06-15T00:00:00\",\"amount\":5000000,\"reason\":\"ذخیره سال\"}"; check "f3 provision: charge of 5,000,000" '.success and .data.balance == 5000000 and (.data.movements|length) == 1'
+as "$FIN_TOKEN" POST $FDF/provisions/movement "{\"provisionId\":$PV1,\"date\":\"2025-06-16T00:00:00\",\"amount\":-1200000,\"reason\":\"مصرف برای تعمیر\",\"counterAccountCode\":\"10102\"}"; check "f3 provision: use of 1,200,000 leaves 3,800,000" '.success and .data.balance == 3800000 and (.data.movements|length) == 2'
+as "$FIN_TOKEN" POST $FDF/provisions/movement "{\"provisionId\":$PV1,\"date\":\"2025-06-17T00:00:00\",\"amount\":-9000000,\"reason\":\"بیش از مانده\"}"; no "f3 provision: use above the balance is refused"
+as "$FM_TOKEN" GET "$FDF/provisions?asOf=2025-07-01"; check "f3 provision: the review date has passed, so a reminder is flagged" '.success and ([.data[]|select(.id == '$PV1' and .reviewDue == true)]|length) == 1'
+as "$AUD_TOKEN" POST $FDF/provisions '{"kind":1,"description":"x","expenseAccountCode":"80303","liabilityAccountCode":"30405"}'; no "f3 provision: the auditor cannot write"
+
+# --- section 5: overhead step-down allocation and absorption (3 cost centres)
+call POST finance/cost-centers '{"code":"CC-IND","title":"مرکز غیرمستقیم آزمون","isProduction":false}'; check "f3 costing: indirect cost centre" '.success'
+CCI=$(val .data.id)
+call POST finance/cost-centers '{"code":"CC-P1","title":"مرکز تولید ۱ آزمون","isProduction":true}'; check "f3 costing: production cost centre 1" '.success'
+CCP1=$(val .data.id)
+call POST finance/cost-centers '{"code":"CC-P2","title":"مرکز تولید ۲ آزمون","isProduction":true}'; check "f3 costing: production cost centre 2" '.success'
+CCP2=$(val .data.id)
+fv "{\"date\":\"2025-05-01T00:00:00\",\"description\":\"هزینه مراکز\",\"lines\":[{\"accountCode\":\"70206\",\"debit\":1000000,\"costCenterId\":$CCI},{\"accountCode\":\"70206\",\"debit\":200000,\"costCenterId\":$CCP1},{\"accountCode\":\"10101\",\"credit\":1200000}]}"
+as "$FM_TOKEN" POST $FCO/allocation-keys '{"fromCostCenterCode":"CC-IND","toCostCenterCode":"CC-P1","basis":"Percent","value":60,"validFrom":"2025-03-21T00:00:00","sequence":1,"source":"آزمون"}'; check "f3 costing: allocation key IND to P1 = 60" '.success'
+as "$FM_TOKEN" POST $FCO/allocation-keys '{"fromCostCenterCode":"CC-IND","toCostCenterCode":"CC-P2","basis":"Percent","value":40,"validFrom":"2025-03-21T00:00:00","sequence":1,"source":"آزمون"}'; check "f3 costing: allocation key IND to P2 = 40" '.success'
+as "$FM_TOKEN" POST $FCO/allocation-keys '{"fromCostCenterCode":"CC-P1","toCostCenterCode":"CC-P1","basis":"Percent","value":1,"validFrom":"2025-03-21T00:00:00","sequence":2}'; no "f3 costing: a key cannot allocate a centre to itself"
+as "$FM_TOKEN" POST $FCO/overhead-rates '{"costCenterCode":"CC-P1","base":1,"rate":5000,"validFrom":"2025-03-21T00:00:00","source":"آزمون","verify":true}'; check "f3 costing: overhead rate P1 = 5,000 per labour hour (input, flagged for verification)" '.success and .data.verify == true'
+as "$FM_TOKEN" POST $FCO/overhead-rates '{"costCenterCode":"CC-P2","base":2,"rate":1500,"validFrom":"2025-03-21T00:00:00","source":"آزمون","verify":true}'; check "f3 costing: overhead rate P2 = 1,500 per machine hour" '.success'
+as "$AUD_TOKEN" POST $FCO/overhead-rates '{"costCenterCode":"CC-P2","base":2,"rate":1,"validFrom":"2025-03-21T00:00:00"}'; no "f3 costing: the auditor cannot change rates"
+as "$FIN_TOKEN" POST $FCO/workorder-bases "{\"workOrderId\":$WO2,\"costCenterCode\":\"CC-P1\",\"periodId\":$P2,\"base\":1,\"quantity\":100}"; check "f3 costing: 100 labour hours of work order 2 in P1" '.success'
+as "$FIN_TOKEN" POST $FCO/workorder-bases "{\"workOrderId\":$WO1,\"costCenterCode\":\"CC-P2\",\"periodId\":$P2,\"base\":2,\"quantity\":200}"; check "f3 costing: 200 machine hours of work order 1 in P2" '.success'
+as "$FM_TOKEN" POST $FCO/allocate/$P2 '{"dryRun":true}'; check "f3 costing: dry run: 1,000,000 allocated 600,000/400,000, 800,000 absorbed, under-absorbed 400,000" '.success and .data.dryRun == true and .data.totalAllocated == 1000000 and .data.totalAbsorbed == 800000 and .data.variance == 400000 and (.data.steps|length) == 2 and ([.data.steps[]|select(.to == "CC-P1")][0].amount) == 600000 and ([.data.steps[]|select(.to == "CC-P2")][0].amount) == 400000 and ([.data.centers[]|select(.costCenterCode == "CC-P1")][0]|(.actual == 800000 and .absorbed == 500000 and .variance == 300000)) and ([.data.centers[]|select(.costCenterCode == "CC-P2")][0]|(.actual == 400000 and .absorbed == 300000 and .variance == 100000))'
+as "$AUD_TOKEN" POST $FCO/allocate/$P2 '{"dryRun":false}'; no "f3 costing: the auditor cannot run the allocation"
+as "$FIN_TOKEN" POST $FCO/allocate/$P2 '{"dryRun":false}'; check "f3 costing: allocation run posts three vouchers" '.success and .data.allocationVoucherId > 0 and .data.absorptionVoucherId > 0 and .data.varianceVoucherId > 0 and .data.variance == 400000'
+as "$FIN_TOKEN" POST $FCO/allocate/$P2 '{"dryRun":false}'; nomsg "f3 costing: a period is allocated only once" "قبلاً"
+[ "$(tbv 70111 closingDebit)" = "400000" ] && ok "f3 costing: the variance account 70111 holds exactly the under-absorbed 400,000" || bad "f3 costing: the variance account 70111 holds exactly the under-absorbed 400,000 (got $(tbv 70111 closingDebit))"
+[ "$(tbv 10520 closingDebit)" = "800000" ] && ok "f3 costing: work in progress 10520 received exactly the absorbed 800,000" || bad "f3 costing: work in progress 10520 received exactly the absorbed 800,000 (got $(tbv 10520 closingDebit))"
+[ "$(tbv 70206 closingDebit)" = "0" ] && [ "$(tbv 70110 closingCredit)" = "0" ] && ok "f3 costing: the overhead pool 70206 and the absorbed account 70110 are cleared" || bad "f3 costing: the overhead pool 70206 and the absorbed account 70110 are cleared"
+as "$FM_TOKEN" GET $FCO/workorders/$WO2/cost-sheet; check "f3 costing: cost sheet of work order 2 shows the absorbed overhead 500,000" '.success and .data.overhead == 500000 and .data.totalCost == 500000 and .data.wipBalance == 500000'
+
+# --- section 5: work-order close-out
+as "$FIN_TOKEN" POST $FCO/workorders/$WO2/close '{}'; nomsg "f3 close-out: only a finished work order is closed" "انجام"
+call PUT WorkOrders/change-condition "{\"workOrderId\":$WO2,\"newCondition\":2}"; check "f3 close-out: work order 2 set to Done" '.success'
+fv "{\"date\":\"2025-05-10T00:00:00\",\"description\":\"مواد و دستمزد دستور کار\",\"lines\":[{\"accountCode\":\"10520\",\"debit\":800000,\"workOrderId\":$WO2},{\"accountCode\":\"70102\",\"debit\":200000,\"workOrderId\":$WO2},{\"accountCode\":\"10101\",\"credit\":1000000}]}"
+as "$FIN_TOKEN" POST $FCO/workorders/$WO2/close '{"quantity":1,"date":"2025-05-30T00:00:00"}'; check "f3 close-out: sheet 500,000 to finished goods, 1,000,000 not on the sheet goes to the variance account" '.success and .data.totalCost == 500000 and .data.toFinishedGoods == 500000 and .data.variance == 1000000 and .data.isOpen == false and .data.voucherId > 0'
+WOC=$(val .data.voucherId)
+as "$FM_TOKEN" GET $FG/vouchers/$WOC; check "f3 close-out: the close voucher moves 1,500,000 (finished goods 500,000 + variance 1,000,000 = WIP 1,300,000 + labour 200,000)" '.success and .data.totalAmount == 1500000 and ([.data.lines[]|select(.accountCode == "10503" and .debit == 500000)]|length) == 1 and ([.data.lines[]|select(.accountCode == "70109" and .debit == 1000000)]|length) == 1 and ([.data.lines[]|select(.accountCode == "10520" and .credit == 1300000)]|length) == 1'
+as "$FM_TOKEN" GET $FCO/workorders/$WO2/cost-sheet; check "f3 close-out: nothing is left in work in progress" '.success and .data.wipBalance == 0 and .data.labourInLedger == 0 and .data.isClosed == true'
+as "$FIN_TOKEN" POST $FCO/workorders/$WO2/close '{}'; no "f3 close-out: a closed order is not closed twice"
+as "$FIN_TOKEN" POST $FCO/workorders/$WO2/reopen '{"reason":"x"}'; no "f3 close-out: only the finance manager reopens"
+as "$FM_TOKEN" POST $FCO/workorders/$WO2/reopen '{}'; no "f3 close-out: reopening needs a reason"
+as "$FM_TOKEN" POST $FCO/workorders/$WO2/reopen '{"reason":"اصلاح هزینه","date":"2025-05-31T00:00:00"}'; check "f3 close-out: reopening by the finance manager with a reason creates the reversal" '.success and .data.isOpen == true and .data.reversalVoucherId > 0'
+as "$FM_TOKEN" GET $FCO/workorders/$WO2/cost-sheet; check "f3 close-out: after the reversal the 1,300,000 work in progress is back" '.success and .data.wipBalance == 1300000 and .data.isClosed == false'
+
+# --- section 5: percentage-of-completion revenue
+as "$FIN_TOKEN" POST $FRR/contracts "{\"contractId\":$QCT,\"method\":1,\"contractPrice\":1000000000,\"progressSource\":\"Manual\",\"progressMeasure\":\"Physical\"}"; no "f3 poc: only the finance manager sets the revenue method"
+as "$FM_TOKEN" POST $FRR/contracts "{\"contractId\":$QCT,\"method\":1,\"contractPrice\":1000000000,\"progressSource\":\"Manual\",\"progressMeasure\":\"Physical\"}"; check "f3 poc: contract set to percentage of completion at 1,000,000,000" '.success and .data.method == 1'
+as "$FIN_TOKEN" POST $FRR/$P3 '{"dryRun":true,"inputs":[]}'; nomsg "f3 poc: manual progress must be entered" "دستی"
+as "$FIN_TOKEN" POST $FRR/$P3 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$QCT,\"progressPercent\":40,\"estimatedCost\":800000000}]}"; check "f3 poc: progress 40% earns 400,000,000 as unbilled receivable, no loss provision" '.success and .data.voucherId > 0 and .data.rows[0].earnedToDate == 400000000 and .data.rows[0].revenueThisRun == 400000000 and .data.rows[0].contractAsset == 400000000 and .data.rows[0].contractLiability == 0 and .data.rows[0].lossProvision == 0'
+as "$FIN_TOKEN" POST $FRR/$P4 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$QCT,\"progressPercent\":40,\"estimatedCost\":800000000}]}"; check "f3 poc: a rerun at the same progress posts nothing (cumulative method)" '.success and .data.voucherId == null and .data.rows[0].revenueThisRun == 0'
+fv "{\"date\":\"2025-07-24T00:00:00\",\"description\":\"صورت‌حساب پیشرفت\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":150000000,\"detail1Code\":\"FX-CUS\"},{\"accountCode\":\"60101\",\"credit\":150000000,\"contractId\":$QCT}]}"
+as "$FIN_TOKEN" POST $FRR/$P5 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$QCT,\"progressPercent\":60,\"estimatedCost\":1200000000}]}"; check "f3 poc: 60% = 600,000,000 earned, 550,000,000 already in revenue, 50,000,000 more; unbilled 450,000,000; expected loss provision 80,000,000" '.success and .data.rows[0].earnedToDate == 600000000 and .data.rows[0].revenueInLedger == 550000000 and .data.rows[0].revenueThisRun == 50000000 and .data.rows[0].contractAsset == 450000000 and .data.rows[0].lossProvision == 80000000 and .data.rows[0].lossProvisionChange == 80000000'
+[ "$(tbv 30404 closingCredit)" = "80000000" ] && ok "f3 poc: the expected-loss provision 30404 is exactly 80,000,000 (EAC 1.2bn - price 1bn = 200m loss, 40% still to come)" || bad "f3 poc: the expected-loss provision 30404 is exactly 80,000,000 (got $(tbv 30404 closingCredit))"
+[ "$(tbv 10308 closingDebit)" = "450000000" ] && ok "f3 poc: unbilled receivable 10308 is exactly earned minus billed (450,000,000)" || bad "f3 poc: unbilled receivable 10308 is exactly earned minus billed (got $(tbv 10308 closingDebit))"
+as "$FM_TOKEN" POST $FRR/contracts "{\"contractId\":$QCT,\"method\":0}"; no "f3 poc: the method cannot go back to invoice once revenue was recognised"
+
+# --- section 4: budget, two-person approval, report, commitment control
+as "$FM_TOKEN" POST $FBU/import "{\"budgetId\":0,\"csv\":\"x\"}"; no "f3 budget: import into a missing budget is refused"
+BL='[{"accountCode":"80108","period":3,"amount":10000000},{"accountCode":"80108","period":4,"amount":5000000},{"costCenterCode":"CC-P1","period":3,"amount":4000000}]'
+as "$FIN_TOKEN" POST $FBU "{\"fiscalYearId\":$Y4,\"title\":\"بودجه ۱۴۰۴\",\"kind\":1,\"commitMode\":2,\"lines\":$BL}"; check "f3 budget: draft budget version 1 saved, 19,000,000" '.success and .data.status == 0 and .data.version == 1 and .data.total == 19000000 and (.data.number|startswith("BUD-1404-"))'
+BD=$(val .data.id)
+as "$FIN_TOKEN" POST $FBU/import "{\"budgetId\":$BD,\"csv\":\"accountCode,costCenterCode,contractId,period,amount,isCapital,note\n80108,,,3,10000000,0,\n80108,,,4,5000000,0,\n,CC-P1,,3,4000000,0,\n20103,,,3,50000000,1,capital\n\"}"; check "f3 budget: CSV import replaces the lines (4 lines, capital line flagged)" '.success and (.data.lines|length) == 4 and .data.total == 69000000 and ([.data.lines[]|select(.isCapital)]|length) == 1'
+as "$FIN_TOKEN" POST $FBU/import "{\"budgetId\":$BD,\"csv\":\"9999999,,,3,10\n\"}"; no "f3 budget: an unknown account in the import is refused"
+as "$FM_TOKEN" GET "$FBU/$BD/export" ; [ "$CODE" = "200" ] && ok "f3 budget: export answers" || bad "f3 budget: export answers ($CODE)"
+as "$FIN_TOKEN" POST $FBU/$BD/approve; no "f3 budget: the accountant cannot approve"
+as "$FM_TOKEN" POST $FBU/$BD/approve; check "f3 budget: finance manager approves first; still a draft" '.success and .data.status == 0 and .data.managerApprovedByUserId > 0 and .data.ceoApprovedByUserId == null'
+as "$FM_TOKEN" POST $FBU/$BD/approve; no "f3 budget: the same person cannot approve twice"
+as "$FM2_TOKEN" POST $FBU/$BD/approve; no "f3 budget: a second finance manager does not replace the CEO"
+as "$CEO_TOKEN" POST $FBU/$BD/approve; check "f3 budget: the CEO's approval makes it Approved" '.success and .data.status == 1 and .data.ceoApprovedByUserId > 0'
+as "$FIN_TOKEN" POST $FBU "{\"id\":$BD,\"fiscalYearId\":$Y4,\"title\":\"x\",\"lines\":$BL}"; no "f3 budget: an approved budget is not edited"
+as "$FM_TOKEN" GET "$FBU/report?BudgetId=$BD&FromPeriod=3&ToPeriod=3&GroupBy=account"; check "f3 budget: period 3 account 80108: budget 10,000,000, actual 3,200,001, variance -6,799,999 (-68%)" '.success and ([.data.rows[]|select(.key == "80108")][0]|(.budget == 10000000 and .actual == 3200001 and .variance == -6799999 and .variancePercent == -68))'
+as "$FM_TOKEN" GET "$FBU/report?BudgetId=$BD&FromPeriod=1&ToPeriod=4&GroupBy=account"; check "f3 budget: year to date (1-4) 80108: budget 15,000,000, actual 3,400,001, forecast = actual plus the budget still to come" '.success and ([.data.rows[]|select(.key == "80108")][0]|(.budget == 15000000 and .actual == 3400001 and .fullYearBudget == 15000000 and .forecast == 3400001))'
+as "$FM_TOKEN" GET "$FBU/report?BudgetId=$BD&FromPeriod=1&ToPeriod=4&GroupBy=account&Forecast=RunRate"; check "f3 budget: run-rate forecast = actual x 12 / 4 = 10,200,003" '.success and ([.data.rows[]|select(.key == "80108")][0].forecast) == 10200003'
+as "$FM_TOKEN" GET "$FBU/report?BudgetId=$BD&FromPeriod=3&ToPeriod=3&GroupBy=costcenter"; check "f3 budget: grouped by cost centre" '.success and ([.data.rows[]|select(.key == "CC-P1")][0].budget) == 4000000'
+as "$AUD_TOKEN" GET "$FBU/report?BudgetId=$BD"; check "f3 budget: the auditor can read the report" '.success'
+as "$FM_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":8000000,"date":"2025-06-15T00:00:00"}'; check "f3 commitment: 8,000,000 fits (15,000,000 - 3,400,001 spent)" '.success and .data.allowed == true and .data.warning == false and .data.remaining == 3599999 and .data.mode == 2'
+as "$FM_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":12000000,"date":"2025-06-15T00:00:00"}'; check "f3 commitment: 12,000,000 is blocked in Block mode (over by 400,001)" '.success and .data.allowed == false and .data.remaining == -400001'
+as "$FM_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":12000000,"date":"2025-06-15T00:00:00","overrideReason":"فوری"}'; check "f3 commitment: only the CEO can override a block" '.success and .data.allowed == false'
+as "$CEO_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":12000000,"date":"2025-06-15T00:00:00","overrideReason":"تصمیم مدیرعامل برای خرید فوری"}'; check "f3 commitment: the CEO overrides with a reason (recorded in the message)" '.success and .data.allowed == true and .data.overridden == true'
+as "$WH_TOKEN" POST procurement/requests "{\"source\":1,\"kind\":1,\"requestDate\":\"2025-06-15T00:00:00\",\"costCenter\":\"CC-P1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":600000}]}"; check "f3 commitment: purchase request for cost centre CC-P1 (6,000,000)" '.success and .data.estimatedAmount == 6000000'
+PRB=$(val .data.id)
+as "$PLAN_TOKEN" GET "$FBU/commitment-check/purchase-request/$PRB"; check "f3 commitment: the purchase request exceeds the cost-centre envelope of 4,000,000 and is blocked with the reason" '.success and .data.allowed == false and .data.remaining == -2000000 and (.data.message|contains("مسدود"))'
+as "$FM_TOKEN" POST $FBU/$BD/revise; check "f3 budget: a revision is a new draft (version 2)" '.success and .data.status == 0 and .data.version == 2 and .data.kind == 2 and (.data.lines|length) == 4'
+BD2=$(val .data.id); BL2=$(jq -c '[.data.lines[]|{accountCode,costCenterCode,contractId,period,amount,isCapital}]' "$B")
+as "$FIN_TOKEN" POST $FBU "{\"id\":$BD2,\"fiscalYearId\":$Y4,\"title\":\"بازنگری ۱\",\"kind\":2,\"commitMode\":1,\"lines\":$BL2}"; check "f3 budget: revision switched to Warn mode" '.success and .data.commitMode == 1'
+as "$FM_TOKEN" POST $FBU/$BD2/approve; as "$CEO_TOKEN" POST $FBU/$BD2/approve; check "f3 budget: revision approved by both" '.success and .data.status == 1'
+as "$FM_TOKEN" GET $FBU/$BD; check "f3 budget: the previous version is superseded" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":12000000,"date":"2025-06-15T00:00:00"}'; check "f3 commitment: in Warn mode the same request passes with a warning" '.success and .data.allowed == true and .data.warning == true and .data.mode == 1'
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'
