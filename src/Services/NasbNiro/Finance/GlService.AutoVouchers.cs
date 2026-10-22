@@ -61,7 +61,7 @@ namespace Services.NasbNiro.Finance
 
         /// <summary>Adds (does not save) an Auto voucher for the entity on a date. The caller saves once.</summary>
         private async Task<(FnVoucher Voucher, string Error)> AddAutoVoucherAsync(int entityId, DateTime date, string description, string sourceType, string sourceNumber,
-            List<AutoLine> lines, FnVoucherType type, FnVoucher reverses, CancellationToken ct)
+            List<AutoLine> lines, FnVoucherType type, FnVoucher reverses, CancellationToken ct, FnVoucherStatus status = FnVoucherStatus.Checked)
         {
             var check = await CheckDateAsync(date.Date, entityId, ct);
             if (check.Error != null) return (null, check.Error);
@@ -71,8 +71,8 @@ namespace Services.NasbNiro.Finance
             if (debit != credit) return (null, $"سند خودکار متوازن نیست: بدهکار {debit:0} و بستانکار {credit:0}.");
             var voucher = new FnVoucher
             {
-                FiscalYearId = check.Year.Id, Date = date.Date, Type = type, Status = FnVoucherStatus.Checked, Description = description.Length > 1000 ? description.Substring(0, 1000) : description,
-                SourceType = sourceType, SourceNumber = sourceNumber, CreatedByUserId = 0, CreatedAt = DateTimeOffset.Now, CheckedByUserId = 0, CheckedAt = DateTimeOffset.Now,
+                FiscalYearId = check.Year.Id, Date = date.Date, Type = type, Status = status, Description = description.Length > 1000 ? description.Substring(0, 1000) : description,
+                SourceType = sourceType, SourceNumber = sourceNumber, CreatedByUserId = status == FnVoucherStatus.Draft ? Me : 0, CreatedAt = DateTimeOffset.Now, CheckedByUserId = status == FnVoucherStatus.Draft ? (int?)null : 0, CheckedAt = status == FnVoucherStatus.Draft ? (DateTimeOffset?)null : DateTimeOffset.Now,
                 TemporaryNumber = await InventoryNumbers.NextAsync(_uow, FinanceNumbers.Voucher, check.Year.Year, ct), TotalAmount = debit, ReversesVoucher = reverses,
                 Lines = new List<FnVoucherLine>(),
             };

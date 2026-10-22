@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -270,5 +271,172 @@ namespace WebApi.Controllers
 
         [HttpPost("letters-of-credit/action")]
         public async Task<IActionResult> LcActionAsync([FromBody] LcActionDto dto, CancellationToken ct) => Ok(await _fx.LetterOfCreditActionAsync(dto, ct));
+    }
+}
+
+namespace WebApi.Controllers
+{
+    // F3 section 4: budgeting and commitment control
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/budgets")]
+    public class BudgetsController : ControllerBase
+    {
+        private readonly IBudgetService _budgets;
+        public BudgetsController(IBudgetService budgets) { _budgets = budgets; }
+
+        [HttpGet]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ListAsync([FromQuery] int? fiscalYearId, CancellationToken ct) => Ok(await _budgets.GetBudgetsAsync(fiscalYearId, ct));
+
+        [HttpGet("{id:int}")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> GetAsync(int id, CancellationToken ct) => Ok(await _budgets.GetBudgetAsync(id, ct));
+
+        [HttpPost]
+        public async Task<IActionResult> SaveAsync([FromBody] FnSaveBudgetDto dto, CancellationToken ct) => Ok(await _budgets.SaveBudgetAsync(dto, ct));
+
+        [HttpPost("import")]
+        public async Task<IActionResult> ImportAsync([FromBody] FnBudgetImportDto dto, CancellationToken ct) => Ok(await _budgets.ImportAsync(dto, ct));
+
+        [HttpGet("{id:int}/export")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ExportAsync(int id, CancellationToken ct)
+        {
+            var r = await _budgets.ExportAsync(id, ct);
+            if (!r.Success) return Ok(r);
+            return File(System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(r.Data)).ToArray(), "text/csv; charset=utf-8", "budget-" + id + ".csv");
+        }
+
+        [HttpPost("{id:int}/approve")]
+        public async Task<IActionResult> ApproveAsync(int id, CancellationToken ct) => Ok(await _budgets.ApproveAsync(id, ct));
+
+        [HttpPost("{id:int}/revise")]
+        public async Task<IActionResult> ReviseAsync(int id, CancellationToken ct) => Ok(await _budgets.ReviseAsync(id, ct));
+
+        [HttpGet("report")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ReportAsync([FromQuery] FnBudgetReportQuery query, CancellationToken ct) => Ok(await _budgets.ReportAsync(query, ct));
+
+        /// <summary>Read-only helper for the procurement gates: the decision stays with the human.</summary>
+        [HttpPost("commitment-check")]
+        public async Task<IActionResult> CheckAsync([FromBody] FnCommitmentCheckRequest request, CancellationToken ct) => Ok(await _budgets.CheckAsync(request, ct));
+
+        [HttpGet("commitment-check/purchase-request/{id:int}")]
+        public async Task<IActionResult> CheckPurchaseRequestAsync(int id, [FromQuery] string overrideReason, CancellationToken ct) => Ok(await _budgets.CheckPurchaseRequestAsync(id, overrideReason, ct));
+    }
+
+    // F3 section 5: costing completeness
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/costing")]
+    public class CostingCompletenessController : ControllerBase
+    {
+        private readonly ICostingCompletenessService _costing;
+        public CostingCompletenessController(ICostingCompletenessService costing) { _costing = costing; }
+
+        [HttpGet("overhead-rates")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> RatesAsync(CancellationToken ct) => Ok(await _costing.GetOverheadRatesAsync(ct));
+
+        [HttpPost("overhead-rates")]
+        public async Task<IActionResult> SaveRateAsync([FromBody] FnOverheadRateDto dto, CancellationToken ct) => Ok(await _costing.SaveOverheadRateAsync(dto, ct));
+
+        [HttpGet("allocation-keys")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> KeysAsync(CancellationToken ct) => Ok(await _costing.GetAllocationKeysAsync(ct));
+
+        [HttpPost("allocation-keys")]
+        public async Task<IActionResult> SaveKeyAsync([FromBody] FnAllocationKeyDto dto, CancellationToken ct) => Ok(await _costing.SaveAllocationKeyAsync(dto, ct));
+
+        [HttpGet("workorder-bases/{periodId:int}")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> BasesAsync(int periodId, CancellationToken ct) => Ok(await _costing.GetWorkOrderBasesAsync(periodId, ct));
+
+        [HttpPost("workorder-bases")]
+        public async Task<IActionResult> SaveBaseAsync([FromBody] FnWorkOrderBaseDto dto, CancellationToken ct) => Ok(await _costing.SaveWorkOrderBaseAsync(dto, ct));
+
+        [HttpPost("allocate/{periodId:int}")]
+        public async Task<IActionResult> AllocateAsync(int periodId, [FromBody] FnAllocateRequest request, CancellationToken ct) => Ok(await _costing.AllocateAsync(periodId, request, ct));
+
+        [HttpGet("workorders/{id:int}/cost-sheet")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> CostSheetAsync(int id, CancellationToken ct) => Ok(await _costing.CostSheetAsync(id, ct));
+
+        [HttpPost("workorders/{id:int}/close")]
+        public async Task<IActionResult> CloseAsync(int id, [FromBody] FnWorkOrderCloseRequest request, CancellationToken ct) => Ok(await _costing.CloseWorkOrderAsync(id, request, ct));
+
+        [HttpPost("workorders/{id:int}/reopen")]
+        public async Task<IActionResult> ReopenAsync(int id, [FromBody] FnWorkOrderCloseRequest request, CancellationToken ct) => Ok(await _costing.ReopenWorkOrderAsync(id, request, ct));
+
+        [HttpGet("standard-costs")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> StandardAsync(CancellationToken ct) => Ok(await _costing.GetStandardCostsAsync(ct));
+
+        [HttpPost("standard-costs")]
+        public async Task<IActionResult> SaveStandardAsync([FromBody] FnStandardCostDto dto, CancellationToken ct) => Ok(await _costing.SaveStandardCostAsync(dto, ct));
+    }
+
+    // F3 section 5: revenue recognition of construction contracts (percentage of completion)
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/receivables/revenue-recognition")]
+    public class RevenueRecognitionController : ControllerBase
+    {
+        private readonly ICostingCompletenessService _costing;
+        public RevenueRecognitionController(ICostingCompletenessService costing) { _costing = costing; }
+
+        [HttpGet("contracts")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ContractsAsync(CancellationToken ct) => Ok(await _costing.GetContractRevenueAsync(ct));
+
+        [HttpPost("contracts")]
+        public async Task<IActionResult> SaveContractAsync([FromBody] FnContractRevenueDto dto, CancellationToken ct) => Ok(await _costing.SaveContractRevenueAsync(dto, ct));
+
+        [HttpPost("{periodId:int}")]
+        public async Task<IActionResult> RunAsync(int periodId, [FromBody] FnRevenueRunRequest request, CancellationToken ct) => Ok(await _costing.RevenueRecognitionAsync(periodId, request, ct));
+    }
+
+    // F3 section 5b: deferrals, accrual reversals and provisions
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/deferrals")]
+    public class DeferralsController : ControllerBase
+    {
+        private readonly IDeferralService _deferrals;
+        public DeferralsController(IDeferralService deferrals) { _deferrals = deferrals; }
+
+        [HttpGet]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ListAsync(CancellationToken ct) => Ok(await _deferrals.GetDeferralsAsync(ct));
+
+        [HttpGet("{id:int}")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> GetAsync(int id, CancellationToken ct) => Ok(await _deferrals.GetDeferralAsync(id, ct));
+
+        [HttpPost]
+        public async Task<IActionResult> SaveAsync([FromBody] FnSaveDeferralDto dto, CancellationToken ct) => Ok(await _deferrals.SaveDeferralAsync(dto, ct));
+
+        [HttpPost("run/{periodId:int}")]
+        public async Task<IActionResult> RunAsync(int periodId, CancellationToken ct) => Ok(await _deferrals.RunAmortisationAsync(periodId, ct));
+
+        [HttpPost("entries/{id:int}/approve")]
+        public async Task<IActionResult> ApproveAsync(int id, CancellationToken ct) => Ok(await _deferrals.ApproveEntryAsync(id, ct));
+
+        [HttpPost("{id:int}/cancel")]
+        public async Task<IActionResult> CancelAsync(int id, CancellationToken ct) => Ok(await _deferrals.CancelDeferralAsync(id, ct));
+
+        [HttpPost("reversing/run/{periodId:int}")]
+        public async Task<IActionResult> ReversingAsync(int periodId, CancellationToken ct) => Ok(await _deferrals.RunReversingAsync(periodId, ct));
+
+        [HttpGet("provisions")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ProvisionsAsync([FromQuery] DateTime? asOf, CancellationToken ct) => Ok(await _deferrals.GetProvisionsAsync(asOf, ct));
+
+        [HttpPost("provisions")]
+        public async Task<IActionResult> SaveProvisionAsync([FromBody] FnSaveProvisionDto dto, CancellationToken ct) => Ok(await _deferrals.SaveProvisionAsync(dto, ct));
+
+        [HttpPost("provisions/movement")]
+        public async Task<IActionResult> MovementAsync([FromBody] FnProvisionMovementDto dto, CancellationToken ct) => Ok(await _deferrals.ProvisionMovementAsync(dto, ct));
     }
 }

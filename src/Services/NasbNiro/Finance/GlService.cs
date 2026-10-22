@@ -424,7 +424,7 @@ namespace Services.NasbNiro.Finance
             {
                 Id = v.Id, FiscalYearId = v.FiscalYearId, FiscalYearTitle = v.FiscalYear?.Title, Number = v.Number, TemporaryNumber = v.TemporaryNumber, Date = v.Date,
                 Type = v.Type, Status = v.Status, Description = v.Description, SourceType = v.SourceType, SourceId = v.SourceId, SourceNumber = v.SourceNumber,
-                AccountingEventId = v.AccountingEventId, ReversesVoucherId = v.ReversesVoucherId, ReversedByVoucherId = reversedBy.TryGetValue(v.Id, out int rb) ? rb : (int?)null,
+                AccountingEventId = v.AccountingEventId, ReversesVoucherId = v.ReversesVoucherId, ReverseNextPeriod = v.ReverseNextPeriod, AutoReversalVoucherId = v.AutoReversalVoucherId, ReversedByVoucherId = reversedBy.TryGetValue(v.Id, out int rb) ? rb : (int?)null,
                 LatePosting = v.LatePosting, TotalAmount = v.TotalAmount, CreatedByUserId = v.CreatedByUserId,
                 LegalEntityId = v.FiscalYear == null ? 0 : v.FiscalYear.LegalEntityId, IsImported = v.IsImported,
                 CeoApprovedByUserId = v.CeoApprovedByUserId, CeoApprovedAt = v.CeoApprovedAt,
@@ -608,6 +608,7 @@ namespace Services.NasbNiro.Finance
             }
             v.Date = dto.Date.Date;
             v.Description = Clean(dto.Description);
+            v.ReverseNextPeriod = dto.ReverseNextPeriod;
             foreach (FnVoucherLine l in built.Lines) v.Lines.Add(l);
             v.TotalAmount = built.Lines.Sum(l => l.Debit);
             try { await _uow.SaveChangesAsync(ct); }

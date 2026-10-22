@@ -174,6 +174,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? ReversesVoucherId { get; set; }
         public int? ReversedByVoucherId { get; set; }
         public bool LatePosting { get; set; }
+        public bool ReverseNextPeriod { get; set; }
+        public int? AutoReversalVoucherId { get; set; }
         public decimal TotalAmount { get; set; }
         public int LegalEntityId { get; set; }
         public bool IsImported { get; set; }
@@ -217,6 +219,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? LegalEntityId { get; set; }
         public DateTime Date { get; set; }
         public string Description { get; set; }
+        /// <summary>Accrual: the system drafts the reversing voucher on the first day of the next period (F3).</summary>
+        public bool ReverseNextPeriod { get; set; }
         public List<SaveVoucherLineDto> Lines { get; set; } = new List<SaveVoucherLineDto>();
     }
 
