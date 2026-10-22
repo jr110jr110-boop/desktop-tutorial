@@ -211,7 +211,8 @@ namespace Services.NasbNiro.Finance
         {
             var rows = await _uow.Set<FnVoucherLine>().AsNoTracking()
                 .Where(l => l.Voucher.FiscalYearId == fiscalYearId && l.Voucher.Status != FnVoucherStatus.Draft
-                    && l.Voucher.Type != FnVoucherType.Opening && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose)
+                    && l.Voucher.Type != FnVoucherType.Opening && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
+                    && (l.Account.Type == FnAccountType.Expense || l.Account.Type == FnAccountType.Revenue || l.Account.Code.StartsWith("20")))
                 .GroupBy(l => new { l.Account.Code, l.Account.Nature, l.CostCenterId, l.ContractId, l.Voucher.Date })
                 .Select(g => new { g.Key.Code, g.Key.Nature, g.Key.CostCenterId, g.Key.ContractId, g.Key.Date, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) }).ToListAsync(ct);
             return rows.Select(r => new ActualRow { Code = r.Code, Nature = r.Nature, CostCenterId = r.CostCenterId, ContractId = r.ContractId, Date = r.Date, Debit = r.Debit, Credit = r.Credit }).ToList();
