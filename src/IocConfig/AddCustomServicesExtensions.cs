@@ -140,6 +140,10 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.IBudgetService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.ICostingCompletenessService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.IDeferralService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.ILoanService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.IStatementsService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.ITaxCompletenessService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.ICollectionsService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.ISepidarFullExportService, Services.NasbNiro.Finance.SepidarFullExportService>();
             services.AddScoped<Services.NasbNiro.Finance.ITreasuryService, Services.NasbNiro.Finance.TreasuryService>();
             services.AddScoped<Services.NasbNiro.Finance.IReceivablesService, Services.NasbNiro.Finance.ReceivablesService>();
