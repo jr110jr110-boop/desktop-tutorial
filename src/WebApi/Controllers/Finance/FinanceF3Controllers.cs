@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -218,5 +219,56 @@ namespace WebApi.Controllers
             if (!result.Success) return Ok(result);
             return File(result.Data, "text/csv; charset=utf-8", $"sepidar-vouchers-{id}.csv");
         }
+    }
+    // F3 section 3: foreign currency
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/fx")]
+    public class FxController : ControllerBase
+    {
+        private readonly IFxService _fx;
+        public FxController(IFxService fx) { _fx = fx; }
+
+        [HttpGet("currencies")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> CurrenciesAsync(CancellationToken ct) => Ok(await _fx.GetCurrenciesAsync(ct));
+
+        [HttpPost("currencies")]
+        public async Task<IActionResult> SaveCurrencyAsync([FromBody] CurrencyDto dto, CancellationToken ct) => Ok(await _fx.SaveCurrencyAsync(dto, ct));
+
+        [HttpGet("rates")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> RatesAsync([FromQuery] FxRateQuery query, CancellationToken ct) => Ok((await _fx.GetRatesAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpPost("rates")]
+        public async Task<IActionResult> SaveRateAsync([FromBody] SaveExchangeRateDto dto, CancellationToken ct) => Ok(await _fx.SaveRateAsync(dto, ct));
+
+        [HttpPost("revaluation")]
+        public async Task<IActionResult> RevaluationAsync([FromBody] FxRevaluationRequestDto dto, CancellationToken ct) => Ok(await _fx.RevaluationAsync(dto, ct));
+
+        [HttpGet("revaluations")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> RevaluationsAsync([FromQuery] int? periodId, CancellationToken ct) => Ok(await _fx.GetRevaluationsAsync(periodId, ct));
+
+        [HttpPost("settlement")]
+        public async Task<IActionResult> SettleAsync([FromBody] FxSettlementRequestDto dto, CancellationToken ct) => Ok(await _fx.SettleAsync(dto, ct));
+
+        [HttpGet("exposure")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ExposureAsync([FromQuery] DateTime? asOf, CancellationToken ct) => Ok(await _fx.ExposureAsync(asOf, ct));
+
+        [HttpGet("letters-of-credit")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> LcsAsync(CancellationToken ct) => Ok(await _fx.GetLettersOfCreditAsync(ct));
+
+        [HttpGet("letters-of-credit/{id:int}")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> LcAsync(int id, CancellationToken ct) => Ok(await _fx.GetLetterOfCreditAsync(id, ct));
+
+        [HttpPost("letters-of-credit")]
+        public async Task<IActionResult> SaveLcAsync([FromBody] SaveLetterOfCreditDto dto, CancellationToken ct) => Ok(await _fx.SaveLetterOfCreditAsync(dto, ct));
+
+        [HttpPost("letters-of-credit/action")]
+        public async Task<IActionResult> LcActionAsync([FromBody] LcActionDto dto, CancellationToken ct) => Ok(await _fx.LetterOfCreditActionAsync(dto, ct));
     }
 }

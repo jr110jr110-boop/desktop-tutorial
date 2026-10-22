@@ -79,6 +79,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Detail2Types { get; set; }
         public bool RequiresDetail { get; set; }
         public bool CurrencyAllowed { get; set; }
+        public bool IsMonetaryForeign { get; set; }
         public string StatementLine { get; set; }
         public bool IsActive { get; set; }
         public string SepidarCode { get; set; }
@@ -97,6 +98,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Detail2Types { get; set; }
         public bool RequiresDetail { get; set; }
         public bool CurrencyAllowed { get; set; }
+        public bool IsMonetaryForeign { get; set; }
         public string StatementLine { get; set; }
         public bool IsActive { get; set; } = true;
         public string SepidarCode { get; set; }

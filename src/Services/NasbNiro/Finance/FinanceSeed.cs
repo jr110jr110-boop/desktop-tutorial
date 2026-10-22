@@ -119,7 +119,7 @@ namespace Services.NasbNiro.Finance
                 case "10103": return ("Bank", "", false, true);
                 case "10104": return ("PettyCash", "", false, false);
                 case "10105": return ("Bank,CashBox,Other", "", false, false);
-                case "10301": return ("Customer", Dx, true, false);
+                case "10301": return ("Customer", Dx, true, true);
                 case "10302": case "10303": case "10304": return ("Customer,Supplier,Person", Dx, false, false);
                 case "10305": case "10306": case "10307": return ("Customer", Dx, false, false);
                 case "10401": return ("Employee", "", false, false);
@@ -127,7 +127,7 @@ namespace Services.NasbNiro.Finance
                 case "10403": return ("Supplier,Other", "", false, false);
                 case "10601": case "10602": case "10603": case "10604": return ("Supplier,Person", Dx, false, false);
                 case "10701": return ("Customer", "Project,WorkOrder", false, false);
-                case "30101": return ("Supplier", Dx, true, false);
+                case "30101": return ("Supplier", Dx, true, true);
                 case "30102": return ("Supplier,Person,Employee,Other", "", false, false);
                 case "30103": return ("Supplier", Dx, false, false);
                 case "30201": return ("Employee,Bank", "", false, false);
@@ -291,7 +291,7 @@ namespace Services.NasbNiro.Finance
                 {
                     Code = code, Title = title, Level = level, Parent = parent, Type = TypeOf(code), Nature = NatureOf(code),
                     Temporary = (code[0] == '6' || code[0] == '7' || code[0] == '8' || code == "50901"),
-                    DetailTypes = detail.Item1, Detail2Types = detail.Item2, RequiresDetail = detail.Item3, CurrencyAllowed = detail.Item4,
+                    DetailTypes = detail.Item1, Detail2Types = detail.Item2, RequiresDetail = detail.Item3, CurrencyAllowed = detail.Item4, IsMonetaryForeign = detail.Item4,
                     StatementLine = StatementOfGeneral.TryGetValue(code.Length >= 3 ? code.Substring(0, 3) : code, out string line) ? line : null,
                     IsActive = true, Jurisdiction = Iran,
                 };

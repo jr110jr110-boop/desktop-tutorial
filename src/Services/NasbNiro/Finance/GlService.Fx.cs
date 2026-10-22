@@ -17,7 +17,7 @@ namespace Services.NasbNiro.Finance
     {
         Task<ResponseDto<List<CurrencyDto>>> GetCurrenciesAsync(CancellationToken cancellationToken);
         Task<ResponseDto<CurrencyDto>> SaveCurrencyAsync(CurrencyDto dto, CancellationToken cancellationToken);
-        Task<ResponseDto<PagedList<ExchangeRateDto>>> GetRatesAsync(RateQuery query, CancellationToken cancellationToken);
+        Task<ResponseDto<PagedList<ExchangeRateDto>>> GetRatesAsync(FxRateQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<ExchangeRateDto>> SaveRateAsync(SaveExchangeRateDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<FxRevaluationDto>> RevaluationAsync(FxRevaluationRequestDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<List<FxRevaluationDto>>> GetRevaluationsAsync(int? periodId, CancellationToken cancellationToken);
@@ -61,10 +61,10 @@ namespace Services.NasbNiro.Finance
             Id = r.Id, CurrencyCode = r.CurrencyCode, Date = r.Date, Buy = r.Buy, Sell = r.Sell, Average = r.Average, Source = r.Source, RateType = r.RateType, Note = r.Note,
         };
 
-        public async Task<ResponseDto<PagedList<ExchangeRateDto>>> GetRatesAsync(RateQuery query, CancellationToken ct)
+        public async Task<ResponseDto<PagedList<ExchangeRateDto>>> GetRatesAsync(FxRateQuery query, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<PagedList<ExchangeRateDto>>(NotAllowed);
-            query ??= new RateQuery();
+            query ??= new FxRateQuery();
             IQueryable<FnExchangeRate> q = _uow.Set<FnExchangeRate>().AsNoTracking();
             string code = Clean(query.CurrencyCode)?.ToUpperInvariant();
             if (code != null) q = q.Where(r => r.CurrencyCode == code);

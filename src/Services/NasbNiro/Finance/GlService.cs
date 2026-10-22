@@ -278,7 +278,7 @@ namespace Services.NasbNiro.Finance
         private static AccountDto ToDto(FnAccount a, string parentCode, bool hasPostings) => new AccountDto
         {
             Id = a.Id, Code = a.Code, Title = a.Title, Level = a.Level, ParentId = a.ParentId, ParentCode = parentCode, Nature = a.Nature, Type = a.Type,
-            Temporary = a.Temporary, DetailTypes = a.DetailTypes, Detail2Types = a.Detail2Types, RequiresDetail = a.RequiresDetail, CurrencyAllowed = a.CurrencyAllowed,
+            Temporary = a.Temporary, DetailTypes = a.DetailTypes, Detail2Types = a.Detail2Types, RequiresDetail = a.RequiresDetail, CurrencyAllowed = a.CurrencyAllowed, IsMonetaryForeign = a.IsMonetaryForeign,
             StatementLine = a.StatementLine, IsActive = a.IsActive, SepidarCode = a.SepidarCode, HasPostings = hasPostings,
         };
 
@@ -295,7 +295,7 @@ namespace Services.NasbNiro.Finance
             IQueryable<AccountDto> projection = q.OrderBy(a => a.Code).Select(a => new AccountDto
             {
                 Id = a.Id, Code = a.Code, Title = a.Title, Level = a.Level, ParentId = a.ParentId, ParentCode = a.Parent.Code, Nature = a.Nature, Type = a.Type,
-                Temporary = a.Temporary, DetailTypes = a.DetailTypes, Detail2Types = a.Detail2Types, RequiresDetail = a.RequiresDetail, CurrencyAllowed = a.CurrencyAllowed,
+                Temporary = a.Temporary, DetailTypes = a.DetailTypes, Detail2Types = a.Detail2Types, RequiresDetail = a.RequiresDetail, CurrencyAllowed = a.CurrencyAllowed, IsMonetaryForeign = a.IsMonetaryForeign,
                 StatementLine = a.StatementLine, IsActive = a.IsActive, SepidarCode = a.SepidarCode,
                 HasPostings = _uow.Set<FnVoucherLine>().Any(l => l.AccountId == a.Id),
             });
@@ -344,6 +344,7 @@ namespace Services.NasbNiro.Finance
             a.Detail2Types = Clean(dto.Detail2Types) ?? "";
             a.RequiresDetail = dto.RequiresDetail;
             a.CurrencyAllowed = dto.CurrencyAllowed;
+            a.IsMonetaryForeign = dto.CurrencyAllowed && dto.IsMonetaryForeign;
             a.StatementLine = Clean(dto.StatementLine);
             a.IsActive = dto.IsActive;
             a.SepidarCode = Clean(dto.SepidarCode);

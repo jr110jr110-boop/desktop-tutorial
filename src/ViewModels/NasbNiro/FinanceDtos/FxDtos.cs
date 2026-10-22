@@ -41,7 +41,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Note { get; set; }
     }
 
-    public class RateQuery : PaginationParams
+    public class FxRateQuery : PaginationParams
     {
         public string CurrencyCode { get; set; }
         public FnRateType? RateType { get; set; }
