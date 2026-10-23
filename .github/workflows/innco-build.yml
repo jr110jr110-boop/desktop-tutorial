@@ -198,6 +198,16 @@ jobs:
           git commit -q -m "Smoke results (SQL Server ${{ matrix.tag }}) for ${{ github.sha }}"
           git push -f origin innco-ci-smoke-${{ matrix.tag }}
 
+      - name: Fail the job unless the warehouse and finance scenario finished with 0 failed
+        if: always()
+        run: |
+          # the scenario step is continue-on-error so that the results are always published; this step makes the job honest
+          line=$(grep -E '^--- inventory: [0-9]+ passed, [0-9]+ failed' smoke-output/7-inventory.txt | tail -n 1 || true)
+          echo "summary: ${line:-<missing>}"
+          if [ -z "$line" ]; then echo "::error::the scenario did not print its summary line (it ended early)"; exit 1; fi
+          failed=$(echo "$line" | sed -E 's/.* ([0-9]+) failed.*/\1/')
+          if [ "$failed" != "0" ]; then echo "::error::$failed smoke checks failed"; grep '^FAIL' smoke-output/7-inventory.txt | head -50; exit 1; fi
+
   package:
     # Publishes the API (Release, framework-dependent, for IIS + .NET 10 Hosting Bundle) with the
     # front-end in wwwroot, and stores it on the innco-package branch.

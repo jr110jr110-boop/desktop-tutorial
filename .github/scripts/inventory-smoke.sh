@@ -3,6 +3,20 @@
 # Starts the API, runs a full scenario through the HTTP API and writes PASS/FAIL lines to
 # smoke-output/7-inventory.txt (response bodies of failed checks go to 7-inventory-fail.txt).
 set -u
+# a script that stops before its summary line (unset variable, killed, syntax error) must not look like a pass
+finished=0; PL=0; CL=0; EXITLINE=0
+trap 'PL=$CL; CL=$LINENO' DEBUG
+on_exit() {
+  local code=${EC:-0}
+  trap - DEBUG
+  if [ "$finished" != 1 ]; then
+    echo "FAIL script ended early (last line $EXITLINE, exit code $code)" | tee -a "${R:-/dev/null}"
+    echo "--- inventory: ${pass:-0} passed, $(( ${fail:-0} + 1 )) failed (script ended early)" | tee -a "${R:-/dev/null}"
+    [ -n "${APP_PID:-}" ] && kill -9 "$APP_PID" 2>/dev/null
+    exit 1
+  fi
+}
+trap 'EC=$?; EXITLINE=$PL; on_exit' EXIT
 OUT="$PWD/smoke-output"
 BASE=http://127.0.0.1:5080
 API=$BASE/api/v1
@@ -2355,7 +2369,8 @@ as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'
 TOKEN=$ADMIN_TOKEN
 
+finished=1
 echo "--- inventory: $pass passed, $fail failed" | tee -a "$R"
 rm -f "$B"
 kill "$APP_PID" 2>/dev/null; sleep 3; kill -9 "$APP_PID" 2>/dev/null || true
-exit 0
+[ "$fail" -eq 0 ] && exit 0 || exit 1
