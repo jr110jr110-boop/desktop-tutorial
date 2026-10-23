@@ -2169,22 +2169,6 @@ as "$FM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: the fund h
 as "$COM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: a commercial user sees no funds that are not his" '.success and (.data.data|length) == 0'
 as "$FM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: the finance manager sees all funds" '.success and (.data.data|length) >= 2'
 
-# --- 3: bank reconciliation with an issued cheque that was not presented
-as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک هـ - آزمون چک","bankName":"ملت","accountNumber":"100324200006","iban":"IR860170000000100324200006"}'; BAR=$(val .data.id)
-as "$TR_TOKEN" POST $FT/cheque-books "{\"bankAccountId\":$BAR,\"series\":\"R\",\"fromSerial\":901,\"toSerial\":905}"; check "r1 bank: cheque book for the new account" '.success and .data.leaves == 5'
-RJB="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"description\":\"دریافت بانک هـ\",\"lines\":[{\"instrument\":2,\"amount\":5000000,\"bankAccountId\":$BAR,\"reference\":\"TRK-BAR\"}]}"
-as "$TR_TOKEN" POST $FT/receipts "$RJB"; RB=$(val .data.id)
-as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"post\"}"; check "r1 bank: receipt of 5,000,000 into the account posted" '.success and .data.status == 2'
-as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":2,\"pettyCashId\":$PCR,\"topUpAmount\":2000000,\"lines\":[{\"instrument\":3,\"amount\":2000000,\"bankAccountId\":$BAR,\"chequeSerial\":901,\"chequeDueDate\":\"${TODAY}T00:00:00\",\"chequeSayadId\":\"7777888899990000\"}]}"; check "r1 bank: top-up by a 2,000,000 cheque drafted" '.success and .data.status == 0'
-PMC=$(val .data.id)
-as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$PMC,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$PMC,\"action\":\"post\"}"; check "r1 bank: cheque issued and not presented" '.success and .data.status == 2'
-as "$FM_TOKEN" POST $FG/post-events
-as "$TR_TOKEN" POST $FT/statements/import "{\"bankAccountId\":$BAR,\"openingBalance\":0,\"closingBalance\":5000000,\"rows\":[{\"date\":\"${TODAY}T00:00:00\",\"description\":\"واریز\",\"deposit\":5000000,\"reference\":\"TRK-BAR\"}]}"; STB=$(val .data.id)
-as "$TR_TOKEN" POST $FT/statements/$STB/auto-match; check "r1 bank: the deposit is matched with the receipt" '.success and .data.matched >= 1'
-as "$TR_TOKEN" POST $FT/reconciliations "{\"statementId\":$STB}"; RCB=$(val .data.id)
-as "$TR_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCB,\"action\":\"refresh\"}"; check "r1 bank: bank 5,000,000, book 5,000,000, cheque of 2,000,000 informational: difference 0" '.success and .data.bankBalance == 5000000 and .data.bookBalance == 5000000 and .data.outstandingCheques == 2000000 and .data.difference == 0'
-as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCB,\"action\":\"approve\"}"; check "r1 bank: the reconciliation with an unpresented cheque is approvable" '.success and .data.status == 1'
-
 # --- 4 and 18: the reconciliation reads real balances; asset offsets
 D0=$(rec inventory)
 as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"آزمون مغایرت موجودی\",\"lines\":[{\"accountCode\":\"10505\",\"debit\":7000000},{\"accountCode\":\"10101\",\"credit\":7000000}]}"; VINV=$(val .data.id)
@@ -2258,6 +2242,12 @@ FY2=$(val .data.id)
 as "$FM_TOKEN" GET $FG/years; for P in $(jq -r --argjson y "$FY2" '.data[]|select(.id == $y)|.periods[].id' "$B"); do as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; done
 as "$FM_TOKEN" POST $FG/years/$FY2/close '{"overrideReconciliation":true,"reason":"آزمون ترتیب"}'; nomsg "r1 year: year 1402 cannot be closed before 1401" "سال مالی قبل (1401)"
 
+# --- 3: bank reconciliation with an issued cheque that was not presented
+as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک هـ - آزمون چک","bankName":"ملت","accountNumber":"100324200006","iban":"IR860170000000100324200006"}'; BAR=$(val .data.id)
+as "$TR_TOKEN" POST $FT/cheque-books "{\"bankAccountId\":$BAR,\"series\":\"R\",\"fromSerial\":901,\"toSerial\":905}"; check "r1 bank: cheque book for the new account" '.success and .data.leaves == 5'
+RJB="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"description\":\"دریافت بانک هـ\",\"lines\":[{\"instrument\":2,\"amount\":5000000,\"bankAccountId\":$BAR,\"reference\":\"TRK-BAR\"}]}"
+as "$TR_TOKEN" POST $FT/receipts "$RJB"; RB=$(val .data.id)
+as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"post\"}"; check "r1 bank: receipt of 5,000,000 into the account posted" '.success and .data.status == 2'
 # --- 2 and 14: supplier advance recovery and late penalty credited to its own account
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"پیش‌پرداخت بازبینی\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":100,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ2=$(val .data.id); RQ2L=$(val '.data.lines[0].id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ2,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ2,\"action\":\"approve-management\"}"; check "r1 advance: purchase request approved" '.success and .data.status == 2'
@@ -2268,7 +2258,7 @@ as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ2,\"quoteId
 as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ2"; check "r1 advance: order draft of 39,000,000" '.success and .data.totalAmount == 39000000'
 PO2=$(val .data.id); POL2=$(val '.data.lines[0].id')
 as "$COM_TOKEN" GET "procurement/orders/$PO2"; PO2SAVE=$(jq -c '.data | {id, kind, orderDate, providerId, inquiryId, vatPercent, advancePercent: 10, advanceGuarantee: "ضمانت‌نامه آزمون", requirements, description, lines: [.lines[] | {requestLineId, itemId, quantity, unitPrice}]}' "$B")
-as "$COM_TOKEN" POST procurement/orders "$PO2SAVE"; check "r1 advance: the order carries a 10% advance" '.success and .data.advancePercent == 10'
+as "$COM_TOKEN" POST procurement/orders "$PO2SAVE"; check "r1 advance: the order carries a 10% advance" '.success and .data.advancePercent == 10'; POL2=$(val '.data.lines[0].id')
 call POST procurement/orders/action "{\"id\":$PO2,\"action\":\"approve\"}"; check "r1 advance: order approved" '.success and .data.status == 1'; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO2,\"action\":\"release\"}"; check "r1 advance: order released" '.success and .data.status == 2'
 as "$COM_TOKEN" POST procurement/payments "{\"type\":1,\"purchaseOrderId\":$PO2,\"amount\":3900000}"; check "r1 advance: advance request of 3,900,000 (10% of 39,000,000)" '.success and .data.amount == 3900000'
 as "$FIN_TOKEN" GET procurement/suppliers/open-advances; check "r1 advance: the open-advance report shows exactly 3,900,000 for the order" '.success and ([.data[]|select(.purchaseOrderId == '$PO2' and .advanced == 3900000 and .recovered == 0 and .open == 3900000)]|length) == 1'
@@ -2281,11 +2271,18 @@ check "r1 advance: the full invoice request gets the 3,900,000 recovery proposed
 PAY3=$(val .data.id)
 as "$FIN_TOKEN" GET procurement/suppliers/open-advances; check "r1 advance: nothing is left open for the order" '([.data[]|select(.purchaseOrderId == '$PO2')]|length) == 0'
 call POST procurement/payments/action "{\"id\":$PAY3,\"action\":\"approve\"}"; check "r1 advance: request approved" '.success and .data.status == 1'
-as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":1,\"paymentRequestIds\":[$PAY3],\"lines\":[{\"instrument\":2,\"amount\":38100000,\"bankAccountId\":$BA1,\"reference\":\"PAYREF-R1\"}]}"; check "r1 advance: treasury payment of the net 38,100,000" '.success and .data.netAmount == 38100000'
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":1,\"paymentRequestIds\":[$PAY3],\"lines\":[{\"instrument\":2,\"amount\":36100000,\"bankAccountId\":$BA1,\"reference\":\"PAYREF-R1\"},{\"instrument\":3,\"amount\":2000000,\"bankAccountId\":$BAR,\"chequeSerial\":901,\"chequeDueDate\":\"${TODAY}T00:00:00\",\"chequeSayadId\":\"7777888899990000\"}]}"; check "r1 advance: treasury payment of the net 38,100,000 (transfer 36,100,000 and a 2,000,000 cheque)" '.success and .data.netAmount == 38100000'
 PMA=$(val .data.id)
 as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$PMA,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$PMA,\"action\":\"post\"}"; PMANO=$(val .data.number); check "r1 advance: payment posted" '.success and .data.status == 2'
 as "$FM_TOKEN" POST $FG/post-events
 evlist; check "r1 advance: the payment event credits the supplier advance 3,900,000 and the penalty income 900,000 (not other payables)" '[.data.data[]|select(.sourceNumber == "'$PMANO'")][0].lines as $l | ([$l[]|select(.accountRole == "SupplierAdvance")|.credit]|add) == 3900000 and ([$l[]|select(.accountRole == "SupplierPenaltyIncome")|.credit]|add) == 900000 and ([$l[]|select(.accountRole == "OtherPayable")]|length) == 0'
+
+as "$FM_TOKEN" POST $FG/post-events
+as "$TR_TOKEN" POST $FT/statements/import "{\"bankAccountId\":$BAR,\"openingBalance\":0,\"closingBalance\":5000000,\"rows\":[{\"date\":\"${TODAY}T00:00:00\",\"description\":\"واریز\",\"deposit\":5000000,\"reference\":\"TRK-BAR\"}]}"; STB=$(val .data.id)
+as "$TR_TOKEN" POST $FT/statements/$STB/auto-match; check "r1 bank: the deposit is matched with the receipt" '.success and .data.matched >= 1'
+as "$TR_TOKEN" POST $FT/reconciliations "{\"statementId\":$STB}"; RCB=$(val .data.id)
+as "$TR_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCB,\"action\":\"refresh\"}"; check "r1 bank: bank 5,000,000, book 5,000,000, cheque of 2,000,000 issued and not presented (informational): difference 0" '.success and .data.bankBalance == 5000000 and .data.bookBalance == 5000000 and .data.outstandingCheques == 2000000 and .data.difference == 0'
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCB,\"action\":\"approve\"}"; check "r1 bank: the reconciliation with an unpresented cheque is approvable" '.success and .data.status == 1'
 
 # --- 9 and 21: retention release and the sales advance cap
 as "$FM_TOKEN" GET "$FR/invoices/$INV1"; HELD=$(val ".data.performanceRetention|round")
