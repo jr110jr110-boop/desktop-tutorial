@@ -27,6 +27,14 @@ export const Roles = {
   AUDITOR: "AUDITOR",
 } as const;
 
+/** Role ids of the finance roles in the API (RoleConstants.cs); the user page picks roles from the API list, these are for reference. */
+export const RoleIds = {
+  FINANCEMANAGER: 17,
+  PAYROLL: 18,
+  TREASURY: 19,
+  AUDITOR: 28,
+} as const;
+
 export const roleTitles: Record<string, string> = {
   PMO: "معاونت PMO",
   COMMERCIAL: "بازرگانی",
@@ -103,6 +111,13 @@ export const FnRoles = {
   outbox: list("FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL,AUDITOR"),
   /** prepares the non-payroll packages */
   outboxPrepare: list("FINANCIAL,FINANCEMANAGER"),
+  // release F3
+  /** the audit trail: AuditReaders in LedgerCommon.cs (the auditor reads, never writes) */
+  auditReaders: list("FINANCEMANAGER,CEO,AUDITOR"),
+  /** the CEO approves vouchers above the threshold and the second signature of a budget */
+  ceo: ["CEO"],
+  /** budget approval: finance manager and CEO each sign once */
+  budgetApprovers: list("FINANCEMANAGER,CEO"),
 };
 
 /** Procurement (ProcurementRoles in the API). */

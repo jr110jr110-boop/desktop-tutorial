@@ -6,7 +6,8 @@ import LookupBox from "@/components/fn/LookupBox.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
 import ContractPick from "@/components/fn/ContractPick.vue";
 import VoucherPrint from "@/components/fn/print/VoucherPrint.vue";
-import { deleteVoucher, getAccounts, getDetailAccounts, getVoucher, saveVoucher, voucherAction } from "@/api/FnAPIs";
+import DocAttach from "@/components/quality/DocAttach.vue";
+import { addVoucherAttachment, copyVoucher, deleteVoucher, getAccounts, getDetailAccounts, getVoucher, getVoucherAttachments, removeVoucherAttachment, saveVoucher, voucherAction } from "@/api/FnAPIs";
 import { getCostCenters } from "@/api/FinanceAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
 import { roleTitle, sourceRoute } from "@/composables/finance";
@@ -17,17 +18,23 @@ import { FnRoles, hasRole } from "@/composables/roles";
 const route = useRoute();
 const router = useRouter();
 const v = ref<any>(null);
-const header = ref<{ date: string | null; description: string }>({ date: today(), description: "" });
+const header = ref<{ date: string | null; description: string; reverseNextPeriod: boolean }>({ date: today(), description: "", reverseNextPeriod: false });
 const lines = ref<any[]>([]);
 const costCenters = ref<any[]>([]);
-const dialog = ref<"" | "reverse" | "delete">("");
+const dialog = ref<"" | "reverse" | "delete" | "copy">("");
+const attachments = ref<any[]>([]);
+const newAttachment = ref<{ documentId: string | null; title: string }>({ documentId: null, title: "" });
 const printing = ref(false);
 const busy = ref(false);
 const canWrite = hasRole(FnRoles.accountants);
 const canFinalize = hasRole(FnRoles.managers);
+const canCeo = hasRole(FnRoles.ceo);
 
 const isNew = computed(() => !v.value || !v.value.id);
 const editable = computed(() => canWrite && (isNew.value || (v.value.status < 2 && ![3, 4, 6].includes(v.value.type) && !v.value.isImported)));
+/** A reversal voucher mirrors its original: only its date can move, the lines are read-only. */
+const isReversal = computed(() => !!v.value && v.value.type === 5);
+const linesEditable = computed(() => editable.value && !isReversal.value);
 const totalDebit = computed(() => lines.value.reduce((s, l) => s + (parseAmount(l.debit) || 0), 0));
 const totalCredit = computed(() => lines.value.reduce((s, l) => s + (parseAmount(l.credit) || 0), 0));
 const diff = computed(() => totalDebit.value - totalCredit.value);
@@ -43,7 +50,7 @@ const accountLabel = (a: any) => `${a.code} - ${a.title}`;
 
 function fill(data: any) {
   v.value = data;
-  header.value = { date: data.date ? String(data.date).slice(0, 10) : today(), description: data.description || "" };
+  header.value = { date: data.date ? String(data.date).slice(0, 10) : today(), description: data.description || "", reverseNextPeriod: !!data.reverseNextPeriod };
   lines.value = (data.lines || []).map((l: any) => ({
     account: { id: l.accountId, code: l.accountCode, title: l.accountTitle },
     detail1: l.detail1Id ? { id: l.detail1Id, code: l.detail1Code, title: l.detail1Title } : null,
@@ -58,13 +65,48 @@ async function load() {
   const id = route.params.id;
   if (id === "new") {
     v.value = null;
-    header.value = { date: today(), description: "" };
+    header.value = { date: today(), description: "", reverseNextPeriod: false };
+    attachments.value = [];
     lines.value = [blankLine(), blankLine()];
     return;
   }
   const [data, error] = await getVoucher(Number(id));
   if (error) return fail(error);
   fill(data);
+  loadAttachments();
+}
+
+async function loadAttachments() {
+  if (!v.value?.id) return;
+  const [d] = await getVoucherAttachments(v.value.id);
+  attachments.value = d || [];
+}
+
+async function addAttachment() {
+  const a = newAttachment.value;
+  if (!a.documentId) return fail("ابتدا فایل را بارگذاری کنید.");
+  const [, error] = await addVoucherAttachment(v.value.id, a.documentId, a.title || "پیوست سند");
+  if (error) return fail(error);
+  ok("پیوست به سند افزوده شد.");
+  newAttachment.value = { documentId: null, title: "" };
+  loadAttachments();
+}
+
+async function removeAttachment(id: number) {
+  const [, error] = await removeVoucherAttachment(id);
+  if (error) return fail(error);
+  ok("پیوست برداشته شد.");
+  loadAttachments();
+}
+
+async function copy(x: any) {
+  dialog.value = "";
+  busy.value = true;
+  const [data, error] = await copyVoucher(v.value.id, x.date);
+  busy.value = false;
+  if (error) return fail(error);
+  ok("کپی سند به صورت پیش‌نویس ساخته شد.");
+  router.push({ name: "FnVoucherEdit", params: { id: data.id } });
 }
 
 /** Puts the difference on the opposite side: into the last line when it is empty, otherwise into a new line. */
@@ -112,7 +154,7 @@ function buildDto() {
     });
   });
   if (out.length < 2) throw new Error("سند حداقل دو ردیف لازم دارد.");
-  return { id: v.value?.id || null, date: header.value.date, description: header.value.description || null, lines: out };
+  return { id: v.value?.id || null, date: header.value.date, description: header.value.description || null, reverseNextPeriod: header.value.reverseNextPeriod, lines: out };
 }
 
 async function save() {
@@ -129,6 +171,7 @@ async function save() {
   if (error) return fail(error);
   ok("سند ذخیره شد.");
   fill(data);
+  loadAttachments();
   if (String(route.params.id) !== String(data.id)) router.replace({ name: "FnVoucherEdit", params: { id: data.id } });
 }
 
@@ -142,7 +185,7 @@ async function act(action: string, extra: any = {}) {
     router.push({ name: "FnVoucherEdit", params: { id: data.id } });
     return;
   }
-  ok(action === "check" ? "سند کنترل شد." : action === "uncheck" ? "سند به پیش‌نویس برگشت." : "سند قطعی شد.");
+  ok(action === "check" ? "سند کنترل شد." : action === "uncheck" ? "سند به پیش‌نویس برگشت." : action === "ceo-approve" ? "تایید مدیرعامل ثبت شد." : "سند قطعی شد.");
   fill(data);
 }
 
@@ -198,35 +241,38 @@ onMounted(async () => {
 
       <div class="row g-2 mb-3">
         <div class="col-md-3"><label class="form-label small mb-0">تاریخ سند *</label><FnDate v-model="header.date" :disabled="!editable" /></div>
-        <div class="col-md-9"><label class="form-label small mb-0">شرح سند</label><input v-model="header.description" :disabled="!editable" class="form-control form-control-sm" /></div>
+        <div class="col-md-6"><label class="form-label small mb-0">شرح سند</label><input v-model="header.description" :disabled="!linesEditable" class="form-control form-control-sm" /></div>
+        <div class="col-md-3 d-flex align-items-end">
+          <label class="form-check small"><input v-model="header.reverseNextPeriod" :disabled="!linesEditable" class="form-check-input" type="checkbox" /> سند تعهدی: برگشت خودکار روز اول دوره بعد</label>
+        </div>
       </div>
 
       <div class="table-responsive">
         <table class="table table-sm fn-lines">
           <thead>
-            <tr><th style="width: 36px">#</th><th style="min-width: 230px">حساب معین *</th><th style="min-width: 170px">تفصیلی اول</th><th style="min-width: 170px">تفصیلی دوم</th><th style="min-width: 160px">شرح</th><th style="width: 130px">بدهکار</th><th style="width: 130px">بستانکار</th><th v-if="editable" style="width: 70px"></th></tr>
+            <tr><th style="width: 36px">#</th><th style="min-width: 230px">حساب معین *</th><th style="min-width: 170px">تفصیلی اول</th><th style="min-width: 170px">تفصیلی دوم</th><th style="min-width: 160px">شرح</th><th style="width: 130px">بدهکار</th><th style="width: 130px">بستانکار</th><th v-if="linesEditable" style="width: 70px"></th></tr>
           </thead>
           <tbody>
             <template v-for="(l, i) in lines" :key="i">
               <tr>
                 <td>{{ i + 1 }}</td>
                 <td>
-                  <LookupBox v-if="editable" v-model="l.account" :fetch="searchAccounts" :label="accountLabel" placeholder="کد یا نام حساب" />
+                  <LookupBox v-if="linesEditable" v-model="l.account" :fetch="searchAccounts" :label="accountLabel" placeholder="کد یا نام حساب" />
                   <span v-else>{{ l.account ? accountLabel(l.account) : "" }}</span>
                   <div v-if="l.sourceRole" class="inv-muted">{{ roleTitle(l.sourceRole) }}</div>
                 </td>
                 <td>
-                  <LookupBox v-if="editable" v-model="l.detail1" :fetch="searchDetails" :label="accountLabel" placeholder="تفصیلی" />
+                  <LookupBox v-if="linesEditable" v-model="l.detail1" :fetch="searchDetails" :label="accountLabel" placeholder="تفصیلی" />
                   <span v-else>{{ l.detail1 ? accountLabel(l.detail1) : "" }}</span>
                 </td>
                 <td>
-                  <LookupBox v-if="editable" v-model="l.detail2" :fetch="searchDetails" :label="accountLabel" placeholder="پروژه / مرکز هزینه" />
+                  <LookupBox v-if="linesEditable" v-model="l.detail2" :fetch="searchDetails" :label="accountLabel" placeholder="پروژه / مرکز هزینه" />
                   <span v-else>{{ l.detail2 ? accountLabel(l.detail2) : "" }}</span>
                 </td>
-                <td><input v-model="l.description" :disabled="!editable" class="form-control form-control-sm" /></td>
-                <td><input v-model="l.debit" :disabled="!editable" class="form-control form-control-sm fn-num" inputmode="numeric" @input="onDebit(l)" /></td>
-                <td><input v-model="l.credit" :disabled="!editable" class="form-control form-control-sm fn-num" inputmode="numeric" @input="onCredit(l)" /></td>
-                <td v-if="editable" class="text-nowrap">
+                <td><input v-model="l.description" :disabled="!linesEditable" class="form-control form-control-sm" /></td>
+                <td><input v-model="l.debit" :disabled="!linesEditable" class="form-control form-control-sm fn-num" inputmode="numeric" @input="onDebit(l)" /></td>
+                <td><input v-model="l.credit" :disabled="!linesEditable" class="form-control form-control-sm fn-num" inputmode="numeric" @input="onCredit(l)" /></td>
+                <td v-if="linesEditable" class="text-nowrap">
                   <button class="btn btn-sm btn-link p-0 me-1" title="پروژه، مرکز هزینه، تعداد، ارز" @click="l.more = !l.more">بیشتر</button>
                   <button class="btn btn-sm btn-link text-danger p-0" @click="removeLine(i)">حذف</button>
                 </td>
@@ -235,14 +281,14 @@ onMounted(async () => {
                 <td></td>
                 <td colspan="7">
                   <div class="row g-2">
-                    <div class="col-md-3"><label class="form-label small mb-0">پروژه / قرارداد</label><ContractPick v-model="l.contractId" :disabled="!editable" /></div>
+                    <div class="col-md-3"><label class="form-label small mb-0">پروژه / قرارداد</label><ContractPick v-model="l.contractId" :disabled="!linesEditable" /></div>
                     <div class="col-md-3"><label class="form-label small mb-0">مرکز هزینه</label>
-                      <select v-model="l.costCenterId" :disabled="!editable" class="form-select form-select-sm"><option :value="null">-</option><option v-for="c in costCenters" :key="c.id" :value="c.id">{{ c.code }} - {{ c.title }}</option></select>
+                      <select v-model="l.costCenterId" :disabled="!linesEditable" class="form-select form-select-sm"><option :value="null">-</option><option v-for="c in costCenters" :key="c.id" :value="c.id">{{ c.code }} - {{ c.title }}</option></select>
                     </div>
-                    <div class="col-md-1"><label class="form-label small mb-0">تعداد</label><input v-model="l.quantity" :disabled="!editable" class="form-control form-control-sm fn-num" /></div>
-                    <div class="col-md-1"><label class="form-label small mb-0">کد ارز</label><input v-model="l.currencyCode" :disabled="!editable" class="form-control form-control-sm inv-ltr" /></div>
-                    <div class="col-md-2"><label class="form-label small mb-0">مبلغ ارزی</label><input v-model="l.currencyAmount" :disabled="!editable" class="form-control form-control-sm fn-num" /></div>
-                    <div class="col-md-2"><label class="form-label small mb-0">نرخ</label><input v-model="l.rate" :disabled="!editable" class="form-control form-control-sm fn-num" /></div>
+                    <div class="col-md-1"><label class="form-label small mb-0">تعداد</label><input v-model="l.quantity" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
+                    <div class="col-md-1"><label class="form-label small mb-0">کد ارز</label><input v-model="l.currencyCode" :disabled="!linesEditable" class="form-control form-control-sm inv-ltr" /></div>
+                    <div class="col-md-2"><label class="form-label small mb-0">مبلغ ارزی</label><input v-model="l.currencyAmount" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
+                    <div class="col-md-2"><label class="form-label small mb-0">نرخ</label><input v-model="l.rate" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
                   </div>
                 </td>
               </tr>
@@ -253,15 +299,16 @@ onMounted(async () => {
               <td colspan="5">جمع</td>
               <td class="fn-num">{{ money(totalDebit) }}</td>
               <td class="fn-num">{{ money(totalCredit) }}</td>
-              <td v-if="editable"></td>
+              <td v-if="linesEditable"></td>
             </tr>
           </tfoot>
         </table>
       </div>
 
+      <div v-if="isReversal" class="alert alert-info py-2">سند برگشتی آینه سند اصلی است؛ ردیف‌ها و شرح تغییر نمی‌کند و فقط تاریخ آن (در همان سال مالی) قابل تغییر است.</div>
       <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
         <span :class="balanced ? 'ok' : 'bad'" class="inv-badge">{{ balanced ? "متوازن" : `اختلاف: ${money(Math.abs(diff))} ریال ${diff > 0 ? "(بدهکار بیشتر)" : diff < 0 ? "(بستانکار بیشتر)" : ""}` }}</span>
-        <template v-if="editable">
+        <template v-if="linesEditable">
           <button class="btn btn-sm btn-outline-secondary" @click="addLine">+ ردیف</button>
           <button :disabled="diff === 0" class="btn btn-sm btn-outline-primary" @click="balance">تراز کردن (ثبت اختلاف در ردیف مقابل)</button>
         </template>
@@ -274,8 +321,27 @@ onMounted(async () => {
           <button v-if="canWrite && v.status === 1 && v.type !== 3" :disabled="busy" class="btn btn-outline-secondary" @click="act('uncheck')">بازگشت به پیش‌نویس</button>
           <button v-if="canFinalize && v.status === 1" :disabled="busy" class="btn btn-success" @click="act('finalize')">قطعی‌کردن سند</button>
           <button v-if="canWrite && v.status === 2 && ![1, 4, 6].includes(v.type) && !v.reversedByVoucherId" :disabled="busy" class="btn btn-outline-danger" @click="dialog = 'reverse'">صدور سند برگشتی</button>
+          <button v-if="canCeo && v.status < 2 && !v.ceoApprovedAt" :disabled="busy" class="btn btn-outline-success" @click="act('ceo-approve')">تایید مدیرعامل (سند بالاتر از حد تایید)</button>
+          <button v-if="canWrite && ![1, 4, 6].includes(v.type) && !v.isImported" :disabled="busy" class="btn btn-outline-secondary" @click="dialog = 'copy'">کپی سند</button>
           <button v-if="canWrite && v.status === 0 && v.type === 2" :disabled="busy" class="btn btn-outline-danger" @click="dialog = 'delete'">حذف پیش‌نویس</button>
         </template>
+      </div>
+
+      <div v-if="v && !isNew" class="mt-3">
+        <div class="fn-section">پیوست‌های سند ({{ attachments.length }})</div>
+        <ul class="list-unstyled">
+          <li v-for="a in attachments" :key="a.id" class="d-flex gap-2 align-items-center">
+            <DocAttach :model-value="a.documentId" :title="a.title" disabled />
+            <span>{{ a.title }}</span><span class="inv-muted">{{ jalali(a.addedAt, true) }}</span>
+            <button v-if="canWrite && v.status < 2" class="btn btn-sm btn-link text-danger p-0" @click="removeAttachment(a.id)">حذف</button>
+          </li>
+          <li v-if="!attachments.length" class="inv-muted">پیوستی نیست. برای سندهای مشمول قاعده پیوست اجباری، پیش از کنترل و قطعی‌سازی فایل ضمیمه کنید.</li>
+        </ul>
+        <div v-if="canWrite && v.status < 2" class="d-flex gap-2 align-items-center flex-wrap">
+          <DocAttach v-model="newAttachment.documentId" title="پیوست سند" />
+          <input v-model="newAttachment.title" class="form-control form-control-sm" placeholder="عنوان پیوست" style="max-width: 220px" />
+          <button class="btn btn-sm btn-outline-primary" @click="addAttachment">افزودن پیوست</button>
+        </div>
       </div>
 
       <div v-if="v && !isNew" class="inv-muted mt-3">
@@ -283,6 +349,7 @@ onMounted(async () => {
         <span v-if="v.checkedByName"> | کنترل: {{ v.checkedByName }} - {{ jalali(v.checkedAt, true) }}</span>
         <span v-if="v.finalizedByName"> | قطعی: {{ v.finalizedByName }} - {{ jalali(v.finalizedAt, true) }}</span>
         <span v-if="v.ceoApprovedAt"> | تایید مدیرعامل: {{ jalali(v.ceoApprovedAt, true) }}</span>
+        <span v-if="v.autoReversalVoucherId"> | <router-link :to="{ name: 'FnVoucherEdit', params: { id: v.autoReversalVoucherId } }">برگشت خودکار دوره بعد</router-link></span>
         | کنترل‌کننده و قطعی‌کننده نمی‌توانند تهیه‌کننده سند باشند.
       </div>
     </div>
@@ -294,6 +361,7 @@ onMounted(async () => {
       title="سند برگشتی"
       @cancel="dialog = ''"
       @confirm="(x: any) => { dialog = ''; act('reverse', { date: x.date, note: x.note }); }" />
+    <PromptModal v-if="dialog === 'copy'" :fields="[{ key: 'date', label: 'تاریخ سند جدید', type: 'date', value: today() }]" confirm-text="ساخت کپی" title="کپی سند به پیش‌نویس جدید" @cancel="dialog = ''" @confirm="copy" />
     <PromptModal v-if="dialog === 'delete'" :fields="[]" confirm-text="حذف" title="پیش‌نویس حذف شود؟" @cancel="dialog = ''" @confirm="remove" />
   </div>
 </template>
