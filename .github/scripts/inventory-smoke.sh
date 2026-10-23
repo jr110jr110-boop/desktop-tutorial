@@ -2169,6 +2169,12 @@ as "$FM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: the fund h
 as "$COM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: a commercial user sees no funds that are not his" '.success and (.data.data|length) == 0'
 as "$FM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: the finance manager sees all funds" '.success and (.data.data|length) >= 2'
 
+# --- 3: bank reconciliation with an issued cheque that was not presented
+as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک هـ - آزمون چک","bankName":"ملت","accountNumber":"100324200006","iban":"IR860170000000100324200006"}'; BAR=$(val .data.id)
+as "$TR_TOKEN" POST $FT/cheque-books "{\"bankAccountId\":$BAR,\"series\":\"R\",\"fromSerial\":901,\"toSerial\":905}"; check "r1 bank: cheque book for the new account" '.success and .data.leaves == 5'
+RJB="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"description\":\"دریافت بانک هـ\",\"lines\":[{\"instrument\":2,\"amount\":5000000,\"bankAccountId\":$BAR,\"reference\":\"TRK-BAR\"}]}"
+as "$TR_TOKEN" POST $FT/receipts "$RJB"; RB=$(val .data.id)
+as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"post\"}"; check "r1 bank: receipt of 5,000,000 into the account posted" '.success and .data.status == 2'
 # --- 4 and 18: the reconciliation reads real balances; asset offsets
 D0=$(rec inventory)
 as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"آزمون مغایرت موجودی\",\"lines\":[{\"accountCode\":\"10505\",\"debit\":7000000},{\"accountCode\":\"10101\",\"credit\":7000000}]}"; VINV=$(val .data.id)
@@ -2242,12 +2248,6 @@ FY2=$(val .data.id)
 as "$FM_TOKEN" GET $FG/years; for P in $(jq -r --argjson y "$FY2" '.data[]|select(.id == $y)|.periods[].id' "$B"); do as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; done
 as "$FM_TOKEN" POST $FG/years/$FY2/close '{"overrideReconciliation":true,"reason":"آزمون ترتیب"}'; nomsg "r1 year: year 1402 cannot be closed before 1401" "سال مالی قبل (1401)"
 
-# --- 3: bank reconciliation with an issued cheque that was not presented
-as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک هـ - آزمون چک","bankName":"ملت","accountNumber":"100324200006","iban":"IR860170000000100324200006"}'; BAR=$(val .data.id)
-as "$TR_TOKEN" POST $FT/cheque-books "{\"bankAccountId\":$BAR,\"series\":\"R\",\"fromSerial\":901,\"toSerial\":905}"; check "r1 bank: cheque book for the new account" '.success and .data.leaves == 5'
-RJB="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"description\":\"دریافت بانک هـ\",\"lines\":[{\"instrument\":2,\"amount\":5000000,\"bankAccountId\":$BAR,\"reference\":\"TRK-BAR\"}]}"
-as "$TR_TOKEN" POST $FT/receipts "$RJB"; RB=$(val .data.id)
-as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$RB,\"action\":\"post\"}"; check "r1 bank: receipt of 5,000,000 into the account posted" '.success and .data.status == 2'
 # --- 2 and 14: supplier advance recovery and late penalty credited to its own account
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"پیش‌پرداخت بازبینی\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":100,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ2=$(val .data.id); RQ2L=$(val '.data.lines[0].id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ2,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ2,\"action\":\"approve-management\"}"; check "r1 advance: purchase request approved" '.success and .data.status == 2'
