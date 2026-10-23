@@ -442,4 +442,157 @@ namespace WebApi.Controllers
         [HttpPost("provisions/movement")]
         public async Task<IActionResult> MovementAsync([FromBody] FnProvisionMovementDto dto, CancellationToken ct) => Ok(await _deferrals.ProvisionMovementAsync(dto, ct));
     }
+
+    // F3 section 6: loans, facilities and guarantees
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/loans")]
+    public class LoansController : ControllerBase
+    {
+        private readonly ILoanService _loans;
+        public LoansController(ILoanService loans) { _loans = loans; }
+
+        [HttpGet]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ListAsync(CancellationToken ct) => Ok(await _loans.GetLoansAsync(ct));
+
+        [HttpGet("{id:int}")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> GetAsync(int id, CancellationToken ct) => Ok(await _loans.GetLoanAsync(id, ct));
+
+        [HttpPost]
+        public async Task<IActionResult> SaveAsync([FromBody] FnSaveLoanDto dto, CancellationToken ct) => Ok(await _loans.SaveLoanAsync(dto, ct));
+
+        [HttpPost("action")]
+        public async Task<IActionResult> ActionAsync([FromBody] FnLoanActionDto dto, CancellationToken ct) => Ok(await _loans.LoanActionAsync(dto, ct));
+
+        [HttpPost("pay")]
+        public async Task<IActionResult> PayAsync([FromBody] FnLoanPayDto dto, CancellationToken ct) => Ok(await _loans.PayInstallmentAsync(dto, ct));
+
+        [HttpPost("accrual/run/{periodId:int}")]
+        public async Task<IActionResult> AccrualAsync(int periodId, CancellationToken ct) => Ok(await _loans.RunAccrualAsync(periodId, ct));
+
+        [HttpPost("accrual/{id:int}/approve")]
+        public async Task<IActionResult> ApproveAccrualAsync(int id, CancellationToken ct) => Ok(await _loans.ApproveAccrualAsync(id, ct));
+
+        [HttpPost("limits")]
+        public async Task<IActionResult> LimitAsync([FromBody] FnFacilityLimitDto dto, CancellationToken ct) => Ok(await _loans.SaveFacilityLimitAsync(dto, ct));
+
+        [HttpGet("utilisation")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> UtilisationAsync(CancellationToken ct) => Ok(await _loans.UtilisationAsync(ct));
+    }
+
+    // F3 section 8: statements and analysis
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/statements")]
+    public class StatementsController : ControllerBase
+    {
+        private readonly IStatementsService _statements;
+        public StatementsController(IStatementsService statements) { _statements = statements; }
+
+        [HttpGet("cash-flow")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> CashFlowAsync([FromQuery] FnStatementQuery q, CancellationToken ct) => Ok(await _statements.CashFlowAsync(q, ct));
+
+        [HttpGet("equity-changes")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> EquityAsync([FromQuery] FnStatementQuery q, CancellationToken ct) => Ok(await _statements.EquityChangesAsync(q, ct));
+
+        [HttpGet("ratios")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> RatiosAsync([FromQuery] FnStatementQuery q, CancellationToken ct) => Ok(await _statements.RatiosAsync(q, ct));
+
+        [HttpGet("drill")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> DrillAsync([FromQuery] string account, [FromQuery] FnStatementQuery q, CancellationToken ct) => Ok(await _statements.DrillDownAsync(account, q, ct));
+
+        [HttpGet("views")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ViewsAsync(CancellationToken ct) => Ok(await _statements.GetViewsAsync(ct));
+
+        [HttpPost("views")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> SaveViewAsync([FromBody] FnSaveViewDto dto, CancellationToken ct) => Ok(await _statements.SaveViewAsync(dto, ct));
+    }
+
+    // F3 section 7: tax books
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/tax")]
+    public class TaxCompletenessController : ControllerBase
+    {
+        private readonly ITaxCompletenessService _tax;
+        public TaxCompletenessController(ITaxCompletenessService tax) { _tax = tax; }
+
+        [HttpGet("vat-season/detail")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> VatDetailAsync([FromQuery] int year, [FromQuery] int season, CancellationToken ct) => Ok(await _tax.VatDetailAsync(year, season, ct));
+
+        [HttpGet("adjustments")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> AdjustmentsAsync([FromQuery] int fiscalYearId, CancellationToken ct) => Ok(await _tax.GetAdjustmentsAsync(fiscalYearId, ct));
+
+        [HttpPost("adjustments")]
+        public async Task<IActionResult> SaveAdjustmentAsync([FromBody] FnSaveTaxAdjustmentDto dto, CancellationToken ct) => Ok(await _tax.SaveAdjustmentAsync(dto, ct));
+
+        [HttpDelete("adjustments/{id:int}")]
+        public async Task<IActionResult> DeleteAdjustmentAsync(int id, CancellationToken ct) => Ok(await _tax.DeleteAdjustmentAsync(id, ct));
+
+        [HttpGet("taxable-profit")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> TaxableProfitAsync([FromQuery] FnTaxableProfitQuery q, CancellationToken ct) => Ok(await _tax.TaxableProfitAsync(q, ct));
+
+        [HttpPost("taxable-profit/provision")]
+        public async Task<IActionResult> ProvisionAsync([FromBody] FnTaxableProfitQuery q, CancellationToken ct) { if (q != null) q.CreateProvision = true; return Ok(await _tax.TaxableProfitAsync(q, ct)); }
+    }
+
+    // F3 section 10: receivables and payables control
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/finance/collections")]
+    public class CollectionsController : ControllerBase
+    {
+        private readonly ICollectionsService _c;
+        public CollectionsController(ICollectionsService c) { _c = c; }
+
+        [HttpGet("bad-debt")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> BadDebtAsync([FromQuery] FnBadDebtQuery q, CancellationToken ct) { if (q != null) q.Post = false; return Ok(await _c.BadDebtAsync(q, ct)); }
+
+        [HttpPost("bad-debt")]
+        public async Task<IActionResult> PostBadDebtAsync([FromBody] FnBadDebtQuery q, CancellationToken ct) { if (q != null) q.Post = true; return Ok(await _c.BadDebtAsync(q, ct)); }
+
+        [HttpGet("holds")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> HoldsAsync(CancellationToken ct) => Ok(await _c.GetCreditHoldsAsync(ct));
+
+        [HttpPost("holds")]
+        public async Task<IActionResult> SetHoldAsync([FromBody] FnSetHoldDto dto, CancellationToken ct) => Ok(await _c.SetCreditHoldAsync(dto, ct));
+
+        [HttpGet("dunning")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> DunningAsync(CancellationToken ct) => Ok(await _c.GetDunningAsync(ct));
+
+        [HttpPost("dunning/run")]
+        public async Task<IActionResult> RunDunningAsync([FromQuery] DateTime? asOf, CancellationToken ct) => Ok(await _c.RunDunningAsync(asOf, ct));
+
+        [HttpPost("dunning/{id:int}/approve")]
+        public async Task<IActionResult> ApproveDunningAsync(int id, CancellationToken ct) => Ok(await _c.ApproveDunningAsync(id, ct));
+
+        [HttpGet("payment-proposals")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ProposalsAsync(CancellationToken ct) => Ok(await _c.GetProposalsAsync(ct));
+
+        [HttpGet("payment-proposals/{id:int}")]
+        [Authorize(Roles = FinanceRoles.Readers)]
+        public async Task<IActionResult> ProposalAsync(int id, CancellationToken ct) => Ok(await _c.GetProposalAsync(id, ct));
+
+        [HttpPost("payment-proposals")]
+        public async Task<IActionResult> CreateProposalAsync([FromBody] FnProposalQuery q, CancellationToken ct) => Ok(await _c.CreateProposalAsync(q, ct));
+
+        [HttpPost("payment-proposals/{id:int}/approve")]
+        public async Task<IActionResult> ApproveProposalAsync(int id, CancellationToken ct) => Ok(await _c.ApproveProposalAsync(id, ct));
+    }
 }

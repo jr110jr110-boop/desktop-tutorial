@@ -18,7 +18,7 @@ namespace Services.NasbNiro.Finance
     // approval thresholds, template vouchers, voucher copy and mass entry.
     public partial class GlService
     {
-        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse };
+        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse, FinanceSeed.SettingPayableTerms };
 
         // ------------------------------------------------------------------------------------------ audit trail
 
