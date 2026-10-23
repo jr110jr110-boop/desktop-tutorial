@@ -138,6 +138,7 @@ namespace Services.NasbNiro.Finance
             }).ToList();
             run.TotalAmount = run.Lines.Sum(l => l.Amount);
             run.AssetCount = run.Lines.Count;
+            run.EditorUserIds = WithEditor(run.EditorUserIds, Me);
             run.PreparedByUserId = Me;
             run.PreparedAt = DateTimeOffset.Now;
             try { await _uow.SaveChangesAsync(ct); }
@@ -164,7 +165,7 @@ namespace Services.NasbNiro.Finance
             }
             if (action != "approve") return Bad<DepreciationRunDto>("عمل نامعتبر است.");
             if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<DepreciationRunDto>(NotAllowed + " (فقط مدیر مالی)");
-            if (run.PreparedByUserId != 0 && run.PreparedByUserId == Me) return Bad<DepreciationRunDto>(SameUser);
+            if (Touched(run.PreparedByUserId, run.EditorUserIds, Me)) return Bad<DepreciationRunDto>(SameUser);
 
             List<int> assetIds = run.Lines.Select(l => l.AssetId).ToList();
             Dictionary<int, FnAsset> assets = await _uow.Set<FnAsset>().Where(a => assetIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);

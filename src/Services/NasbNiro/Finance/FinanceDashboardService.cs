@@ -116,6 +116,7 @@ namespace Services.NasbNiro.Finance
         {
             return await _uow.Set<FnVoucherLine>().AsNoTracking()
                 .Where(l => l.Voucher.Date >= from && l.Voucher.Date <= to && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose &&
+                            l.Voucher.Status == FnVoucherStatus.Final && l.Voucher.FiscalYear.LegalEntityId == FinanceSeed.MainEntityId &&
                             (l.Account.Type == FnAccountType.Revenue || l.Account.Type == FnAccountType.Expense))
                 .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
         }
@@ -149,7 +150,7 @@ namespace Services.NasbNiro.Finance
             dto.PayrollRunsInProgress = await _uow.Set<FnPayrollRun>().AsNoTracking().CountAsync(r => r.Status < FnPayrollStatus.Paid, ct);
 
             // gross margin per contract: invoiced net (credit notes deducted) against the cost entries
-            var revenue = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.ContractId != null)
+            var revenue = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.ContractId != null && i.Type != FnInvoiceType.Advance && i.Type != FnInvoiceType.RetentionRelease)
                 .GroupBy(i => i.ContractId.Value).Select(g => new { g.Key, Net = g.Sum(i => i.Type == FnInvoiceType.CreditNote ? -i.NetAmount : i.NetAmount) }).ToListAsync(ct);
             List<int> ids = revenue.Select(r => r.Key).ToList();
             var costs = await _uow.Set<CostEntry>().AsNoTracking().Where(c => c.ContractId != null && ids.Contains(c.ContractId.Value))

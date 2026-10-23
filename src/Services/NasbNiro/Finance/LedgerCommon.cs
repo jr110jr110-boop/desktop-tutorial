@@ -79,6 +79,10 @@ namespace Services.NasbNiro.Finance
     internal static class LedgerMath
     {
         public static decimal R(decimal value) => Math.Round(value, 0, MidpointRounding.AwayFromZero);
+        /// <summary>Adds a user to the editor list of a draft (",5,7,").</summary>
+        public static string WithEditor(string ids, int user) => ids != null && ids.Contains("," + user + ",") ? ids : (ids ?? ",") + user + ",";
+        /// <summary>The user created or edited the document: he cannot be its checker or approver.</summary>
+        public static bool Touched(int creator, string ids, int user) => (creator != 0 && creator == user) || (ids != null && ids.Contains("," + user + ","));
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
         public static string PersianDate(DateTime date) => Inventory.InventoryText.PersianDate(date);

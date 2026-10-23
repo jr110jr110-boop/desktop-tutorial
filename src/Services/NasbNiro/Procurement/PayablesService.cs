@@ -31,6 +31,8 @@ namespace Services.NasbNiro.Procurement
         Task<ResponseDto<List<SupplierProfileDto>>> GetSuppliersAsync(string contains, CancellationToken cancellationToken);
         Task<ResponseDto<SupplierProfileDto>> SaveSupplierAsync(SaveSupplierProfileDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<List<SupplierEvaluationDto>>> GetEvaluationsAsync(int providerId, CancellationToken cancellationToken);
+        /// <summary>Supplier advances paid or requested and not yet recovered from invoice payments, per supplier and order.</summary>
+        Task<ResponseDto<List<FnOpenAdvanceDto>>> GetOpenAdvancesAsync(CancellationToken cancellationToken);
         Task<ResponseDto<SupplierEvaluationDto>> EvaluateAsync(SaveSupplierEvaluationDto dto, CancellationToken cancellationToken);
 
         /// <summary>A supplier return was confirmed: warning to the supplier; the third one blocks it (WI-PO-003 note 3).</summary>
@@ -324,6 +326,23 @@ namespace Services.NasbNiro.Procurement
                     decimal before = await _uow.Set<PaymentRequest>().Where(p => p.InvoiceId == invoice.Id && p.Status != PaymentRequestStatus.Rejected && !p.Deleted && p.Id != (dto.Id ?? 0))
                         .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
                     if (before + dto.Amount > invoice.TotalAmount) return Bad<PaymentRequestDto>("مبلغ از مانده فاکتور بیشتر است.");
+                    // supplier advances of the order are recovered from the invoice payments: what is still unrecovered is proposed as a deduction the approver sees
+                    decimal advanced = await _uow.Set<PaymentRequest>().Where(p => p.PurchaseOrderId == order.Id && p.Type == PaymentRequestType.Advance && p.Status != PaymentRequestStatus.Rejected && !p.Deleted)
+                        .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
+                    decimal recovered = await _uow.Set<FnPaymentDeduction>().Where(d => d.Kind == FnDeductionKind.AdvanceRecovery && d.PaymentRequest.PurchaseOrderId == order.Id && d.PaymentRequest.Status != PaymentRequestStatus.Rejected &&
+                                                                                       !d.PaymentRequest.Deleted && d.PaymentRequestId != (dto.Id ?? 0)).SumAsync(d => (decimal?)d.Amount, cancellationToken) ?? 0;
+                    decimal unrecovered = Math.Max(0, advanced - recovered);
+                    decimal givenRecovery = typedLines.Where(d => d.Kind == FnDeductionKind.AdvanceRecovery).Sum(d => Math.Round(d.Amount, 0));
+                    if (givenRecovery > unrecovered) return Bad<PaymentRequestDto>($"بازیابی پیش‌پرداخت ({givenRecovery:0}) از پیش‌پرداخت بازیابی‌نشده این سفارش ({unrecovered:0} ریال) بیشتر است.");
+                    if (givenRecovery == 0 && unrecovered > 0)
+                    {
+                        decimal proposal = Math.Min(unrecovered, dto.Amount - totalDeductions);
+                        if (proposal > 0)
+                        {
+                            typedLines.Add(new PaymentDeductionDto { Kind = FnDeductionKind.AdvanceRecovery, Base = unrecovered, RatePercent = 0, Amount = proposal, Note = "بازیابی خودکار پیش‌پرداخت (قابل ویرایش توسط بازرگانی تا حد مانده پیش‌پرداخت)" });
+                            typedSum += proposal; totalDeductions += proposal;
+                        }
+                    }
                     qcApproved = true;
                     break;
                 }
@@ -403,7 +422,7 @@ namespace Services.NasbNiro.Procurement
                     if (!_user.IsInRole(ProcurementRoles.Finance)) return Bad<PaymentRequestDto>(NotAllowed + " (مالی)");
                     if (p.CreatorUserId == Me || p.ApprovedByUserId == Me) return Bad<PaymentRequestDto>(SameUser);
                     if (Clean(dto.Reference) == null) return Bad<PaymentRequestDto>("شماره سند پرداخت در سپیدار یا شماره پیگیری بانک را وارد کنید.");
-                    string legacyError = await _treasury.AddLegacyPaymentAsync(p, dto.Reference, cancellationToken);
+                    string legacyError = await _treasury.AddLegacyPaymentAsync(p, dto.Reference, dto.BankAccountId, cancellationToken);
                     if (legacyError != null) return Bad<PaymentRequestDto>(legacyError);
                     p.Status = PaymentRequestStatus.Paid;
                     p.PaidAt = now;
@@ -494,6 +513,29 @@ namespace Services.NasbNiro.Procurement
             profile.Iban = iban == null ? null : Finance.LedgerMath.Digits(iban);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok((await GetSuppliersAsync(null, cancellationToken)).Data.First(p => p.ProviderId == dto.ProviderId));
+        }
+
+        public async Task<ResponseDto<List<FnOpenAdvanceDto>>> GetOpenAdvancesAsync(CancellationToken cancellationToken)
+        {
+            if (!_user.IsInRole(ProcurementRoles.Finance + ",CEO,AUDITOR")) return Bad<List<FnOpenAdvanceDto>>(NotAllowed);
+            var advances = await _uow.Set<PaymentRequest>().AsNoTracking().Where(p => p.Type == PaymentRequestType.Advance && p.PurchaseOrderId != null && p.Status != PaymentRequestStatus.Rejected && !p.Deleted)
+                .GroupBy(p => new { p.PurchaseOrderId, p.ProviderId }).Select(g => new { Order = g.Key.PurchaseOrderId.Value, Provider = g.Key.ProviderId, Amount = g.Sum(x => x.Amount) }).ToListAsync(cancellationToken);
+            List<int> orderIds = advances.Select(a => a.Order).ToList();
+            var recoveries = await _uow.Set<FnPaymentDeduction>().AsNoTracking().Where(d => d.Kind == FnDeductionKind.AdvanceRecovery && d.PaymentRequest.PurchaseOrderId != null && orderIds.Contains(d.PaymentRequest.PurchaseOrderId.Value) &&
+                d.PaymentRequest.Status != PaymentRequestStatus.Rejected && !d.PaymentRequest.Deleted).GroupBy(d => d.PaymentRequest.PurchaseOrderId.Value).Select(g => new { Order = g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync(cancellationToken);
+            Dictionary<int, string> numbers = await _uow.Set<PurchaseOrder>().AsNoTracking().Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, o => o.Number, cancellationToken);
+            List<int> providerIds = advances.Select(a => a.Provider).Distinct().ToList();
+            Dictionary<int, string> providers = await _uow.Set<Provider>().AsNoTracking().Where(p => providerIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name, cancellationToken);
+            List<FnOpenAdvanceDto> rows = advances.Select(a =>
+            {
+                decimal recovered = recoveries.Where(r => r.Order == a.Order).Sum(r => r.Amount);
+                return new FnOpenAdvanceDto
+                {
+                    ProviderId = a.Provider, ProviderName = providers.TryGetValue(a.Provider, out string n) ? n : null, PurchaseOrderId = a.Order, OrderNumber = numbers.TryGetValue(a.Order, out string on) ? on : null,
+                    Advanced = a.Amount, Recovered = recovered, Open = a.Amount - recovered,
+                };
+            }).Where(r => r.Open > 0).OrderBy(r => r.ProviderId).ThenBy(r => r.PurchaseOrderId).ToList();
+            return ResponseDtoHelper.Ok(rows);
         }
 
         public async Task<ResponseDto<List<SupplierEvaluationDto>>> GetEvaluationsAsync(int providerId, CancellationToken cancellationToken)

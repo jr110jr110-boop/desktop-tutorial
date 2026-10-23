@@ -67,7 +67,7 @@ namespace Services.NasbNiro.Finance
         /// The old "payment request paid" endpoint: records the treasury payment document and the accounting event in the caller's
         /// SaveChanges (no second Bank event). Returns an error text, or null when the request may be marked paid.
         /// </summary>
-        Task<string> AddLegacyPaymentAsync(PaymentRequest request, string reference, CancellationToken cancellationToken);
+        Task<string> AddLegacyPaymentAsync(PaymentRequest request, string reference, int? bankAccountId, CancellationToken cancellationToken);
     }
 
     /// <summary>Treasury: bank accounts, cash boxes, petty cash, payments and receipts, cheques, guarantees, bank statements and reconciliation.</summary>
@@ -200,9 +200,13 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<PagedList<PettyCashDto>>> GetPettyCashesAsync(TreasuryQuery query, CancellationToken ct)
         {
             query ??= new TreasuryQuery();
-            int total = await _uow.Set<FnPettyCash>().CountAsync(ct);
+            // finance and treasury roles see every holder; anyone else sees only the petty cash they hold themselves
+            bool all = _user.IsInRole(FinanceRoles.Readers + "," + FinanceRoles.TreasuryAndAccountants);
+            IQueryable<FnPettyCash> source = _uow.Set<FnPettyCash>().AsNoTracking();
+            if (!all) { int meId = Me; source = source.Where(c => c.HolderUserId == meId); }
+            int total = await source.CountAsync(ct);
             int size = query.PageSize <= 0 ? Math.Max(total, 1) : query.PageSize, number = query.PageNumber <= 0 ? 1 : query.PageNumber;
-            List<FnPettyCash> rows = await _uow.Set<FnPettyCash>().AsNoTracking().OrderBy(c => c.Id).Skip((number - 1) * size).Take(size).ToListAsync(ct);
+            List<FnPettyCash> rows = await source.OrderBy(c => c.Id).Skip((number - 1) * size).Take(size).ToListAsync(ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => (int?)r.HolderUserId), ct);
             return ResponseDtoHelper.Ok(Page(rows.Select(p => new PettyCashDto
             {
@@ -269,7 +273,7 @@ namespace Services.NasbNiro.Finance
             return rows.Select(p => new PaymentDto
             {
                 Id = p.Id, Number = p.Number, Date = p.Date, Status = p.Status, Purpose = p.Purpose, ProviderId = p.ProviderId,
-                ProviderName = p.ProviderId.HasValue && providers.TryGetValue(p.ProviderId.Value, out string pn) ? pn : null, PettyCashId = p.PettyCashId, PayrollRunId = p.PayrollRunId,
+                ProviderName = p.ProviderId.HasValue && providers.TryGetValue(p.ProviderId.Value, out string pn) ? pn : null, PettyCashId = p.PettyCashId, PayrollRunId = p.PayrollRunId, EmployeeLoanId = p.EmployeeLoanId,
                 PayeeName = p.PayeeName, Description = p.Description, GrossAmount = p.GrossAmount, DeductionAmount = p.DeductionAmount, NetAmount = p.NetAmount,
                 CreatorName = names.Name(p.CreatedByUserId), PostedByName = names.Name(p.PostedByUserId), PostedAt = p.PostedAt, IbanApprovedByUserId = p.IbanApprovedByUserId,
                 Lines = p.Lines.OrderBy(l => l.RowNumber).Select(l => new PaymentLineDto
@@ -323,10 +327,11 @@ namespace Services.NasbNiro.Finance
                 payment = await _uow.Set<FnPayment>().Include(p => p.Lines).Include(p => p.Requests).FirstOrDefaultAsync(p => p.Id == dto.Id.Value, ct);
                 if (payment == null) return ResponseDtoHelper.NotFound<PaymentDto>("سند پرداخت پیدا نشد.");
                 if (payment.Status != FnDocStatus.Draft) return Bad<PaymentDto>("فقط پیش‌نویس ویرایش می‌شود.");
+                payment.EditorUserIds = WithEditor(payment.EditorUserIds, Me);
             }
 
             decimal gross, deductions;
-            int? providerId = null, pettyCashId = null, payrollRunId = null;
+            int? providerId = null, pettyCashId = null, payrollRunId = null, employeeLoanId = null;
             string payee;
             List<PaymentRequest> requests = new List<PaymentRequest>();
             string registeredIban = null;
@@ -371,6 +376,18 @@ namespace Services.NasbNiro.Finance
                 payrollRunId = run.Id;
                 gross = run.TotalNet; deductions = 0;
                 payee = $"حقوق و دستمزد {run.Year}/{run.Month:00}";
+            }
+            else if (dto.Purpose == FnPaymentPurpose.EmployeeLoan)
+            {
+                if (!dto.EmployeeLoanId.HasValue) return Bad<PaymentDto>("وام یا مساعده کارمند را مشخص کنید.");
+                FnEmployeeLoan loan = await _uow.Set<FnEmployeeLoan>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == dto.EmployeeLoanId.Value, ct);
+                if (loan == null || !loan.IsActive) return Bad<PaymentDto>("وام یا مساعده پیدا نشد یا غیرفعال است.");
+                int selfLoan = payment?.Id ?? 0;
+                if (loan.DisbursementPaymentId.HasValue || await _uow.Set<FnPayment>().AnyAsync(x => x.EmployeeLoanId == loan.Id && x.Status != FnDocStatus.Cancelled && x.Id != selfLoan, ct))
+                    return Bad<PaymentDto>("این وام یا مساعده قبلاً پرداخت شده یا در سند پرداخت دیگری آمده است.");
+                employeeLoanId = loan.Id;
+                gross = loan.Principal; deductions = 0;
+                payee = loan.Kind == FnLoanKind.Advance ? "مساعده کارمند" : "وام کارمند"; // no name: the payee is visible to treasury, the person stays in payroll
             }
             else return Bad<PaymentDto>("نوع پرداخت نامعتبر است.");
             decimal net = gross - deductions;
@@ -453,7 +470,7 @@ namespace Services.NasbNiro.Finance
                 payment.Lines = new List<FnPaymentLine>();
                 payment.Requests = new List<FnPaymentRequestLink>();
             }
-            payment.Date = date; payment.Purpose = dto.Purpose; payment.ProviderId = providerId; payment.PettyCashId = pettyCashId; payment.PayrollRunId = payrollRunId; payment.PayeeName = payee;
+            payment.Date = date; payment.Purpose = dto.Purpose; payment.ProviderId = providerId; payment.PettyCashId = pettyCashId; payment.PayrollRunId = payrollRunId; payment.EmployeeLoanId = employeeLoanId; payment.PayeeName = payee;
             payment.Description = Clean(dto.Description); payment.GrossAmount = gross; payment.DeductionAmount = deductions; payment.NetAmount = net;
             payment.IbanApprovedByUserId = null;
             foreach (FnPaymentLine l in lines) payment.Lines.Add(l);
@@ -475,7 +492,7 @@ namespace Services.NasbNiro.Finance
                 {
                     if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<PaymentDto>(NotAllowed + " (مدیر مالی)");
                     if (p.Status != FnDocStatus.Draft) return Bad<PaymentDto>("فقط پیش‌نویس تایید می‌شود.");
-                    if (p.CreatedByUserId == Me) return Bad<PaymentDto>(SameUser);
+                    if (Touched(p.CreatedByUserId, p.EditorUserIds, Me)) return Bad<PaymentDto>(SameUser);
                     bool mismatch = await HasIbanMismatchAsync(p, ct);
                     if (mismatch)
                     {
@@ -483,6 +500,7 @@ namespace Services.NasbNiro.Finance
                         p.IbanApprovedByUserId = Me;
                     }
                     p.Status = FnDocStatus.Approved;
+                    p.ApprovedByUserId = Me;
                     break;
                 }
                 case "post":
@@ -534,6 +552,8 @@ namespace Services.NasbNiro.Finance
                 case FnDeductionKind.Withholding: return AccountRoles.WithholdingPayable;
                 case FnDeductionKind.InsuranceRetention: return AccountRoles.InsuranceRetentionPayable;
                 case FnDeductionKind.PerformanceRetention: return AccountRoles.PerformanceRetentionPayable;
+                case FnDeductionKind.LatePenalty: return AccountRoles.SupplierPenalty; // a penalty owed by the supplier is income / a cost reduction, not a liability to anyone
+                case FnDeductionKind.AdvanceRecovery: return AccountRoles.SupplierAdvance; // credits the advance account that the advance request debited
                 default: return AccountRoles.OtherPayable;
             }
         }
@@ -577,6 +597,7 @@ namespace Services.NasbNiro.Finance
             AccountingEventType type;
             var requests = new List<PaymentRequest>();
             FnPayrollRun payrollRun = null;
+            FnEmployeeLoan loanPaid = null;
             if (p.Purpose == FnPaymentPurpose.Supplier)
             {
                 type = AccountingEventType.SupplierPayment;
@@ -597,6 +618,14 @@ namespace Services.NasbNiro.Finance
                 if (payrollRun == null || payrollRun.Status != FnPayrollStatus.Posted) return "دوره حقوق دیگر در وضعیت «ثبت‌شده» نیست.";
                 if (payrollRun.TotalNet != p.NetAmount) return "مبلغ پرداخت با خالص پرداختی دوره حقوق فرق دارد.";
                 eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.PayrollPayable, Debit = p.NetAmount, Description = "پرداخت حقوق " + p.Number });
+            }
+            else if (p.Purpose == FnPaymentPurpose.EmployeeLoan)
+            {
+                type = AccountingEventType.PettyCashTopUp; // booked like any cash advance: Dr employee advances (with the employee detail) / Cr bank
+                loanPaid = await _uow.Set<FnEmployeeLoan>().FirstOrDefaultAsync(x => x.Id == p.EmployeeLoanId, ct);
+                if (loanPaid == null || loanPaid.DisbursementPaymentId.HasValue) return "وام یا مساعده پیدا نشد یا قبلاً پرداخت شده است.";
+                if (loanPaid.Principal != p.NetAmount) return "مبلغ پرداخت با اصل وام فرق دارد.";
+                eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.EmployeeAdvance, Debit = p.NetAmount, PartyType = "Employee", PartyId = loanPaid.EmployeeId, Description = "پرداخت وام/مساعده " + p.Number });
             }
             else
             {
@@ -633,12 +662,17 @@ namespace Services.NasbNiro.Finance
                 r.Status = PaymentRequestStatus.Paid; r.PaidAt = now; r.PaidByUserId = Me; r.PaymentReference = p.Number;
             }
             if (payrollRun != null) { payrollRun.Status = FnPayrollStatus.Paid; payrollRun.PaidAt = now; }
+            if (loanPaid != null) loanPaid.DisbursementPaymentId = p.Id;
             p.Status = FnDocStatus.Posted; p.PostedByUserId = Me; p.PostedAt = now;
             return null;
         }
 
-        public async Task<string> AddLegacyPaymentAsync(PaymentRequest r, string reference, CancellationToken ct)
+        public async Task<string> AddLegacyPaymentAsync(PaymentRequest r, string reference, int? bankAccountId, CancellationToken ct)
         {
+            // the old one-click path keeps the treasury controls: treasury or the finance manager, and the paying bank account is always recorded
+            if (!_user.IsInRole(FinanceRoles.TreasuryUsers)) return NotAllowed + " (خزانه‌دار یا مدیر مالی)";
+            FnBankAccount bank = bankAccountId.HasValue ? await _uow.Set<FnBankAccount>().FirstOrDefaultAsync(b => b.Id == bankAccountId.Value && b.IsActive, ct) : null;
+            if (bank == null) return "حساب بانکی پرداخت‌کننده را مشخص کنید.";
             if (await _uow.Set<FnPaymentRequestLink>().AnyAsync(k => k.PaymentRequestId == r.Id && k.Payment.Status != FnDocStatus.Cancelled, ct))
                 return "این درخواست در یک سند پرداخت خزانه آمده است؛ پرداخت را از خزانه ثبت کنید.";
             await FinanceSeed.EnsureAsync(_uow, ct);
@@ -650,13 +684,13 @@ namespace Services.NasbNiro.Finance
             {
                 Number = await InventoryNumbers.NextNumberAsync(_uow, FinanceNumbers.Payment, "PAYM", today, ct), Date = today, Status = FnDocStatus.Posted,
                 Purpose = FnPaymentPurpose.Supplier, ProviderId = r.ProviderId, PayeeName = payee, Description = $"پرداخت درخواست {r.Number} (ثبت با مسیر قدیمی)",
-                GrossAmount = r.Amount, DeductionAmount = r.Deductions, NetAmount = net, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, PostedByUserId = Me, PostedAt = DateTimeOffset.Now,
-                Lines = new List<FnPaymentLine> { new FnPaymentLine { RowNumber = 1, Instrument = FnInstrument.BankTransfer, Amount = net, Reference = Clean(reference) } },
+                GrossAmount = r.Amount, DeductionAmount = r.Deductions, NetAmount = net, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, PostedByUserId = Me, PostedAt = DateTimeOffset.Now, ApprovedByUserId = r.ApprovedByUserId,
+                Lines = new List<FnPaymentLine> { new FnPaymentLine { RowNumber = 1, Instrument = FnInstrument.BankTransfer, Amount = net, Reference = Clean(reference), BankAccountId = bank.Id } },
                 Requests = new List<FnPaymentRequestLink> { new FnPaymentRequestLink { PaymentRequestId = r.Id, Amount = r.Amount, Deductions = r.Deductions } },
             };
             _uow.Set<FnPayment>().Add(payment);
             var lines = RequestLines(r, typed).ToList();
-            lines.Add(new AccountingEventLine { AccountRole = AccountRoles.Bank, Credit = net, Description = "حواله " + (Clean(reference) ?? r.Number) });
+            lines.Add(BankLine(bank, 0, net, "حواله " + (Clean(reference) ?? r.Number)));
             _costing.AddEvent(AccountingEventType.SupplierPayment, today, "PaymentRequest", r.Id, r.Number, $"پرداخت درخواست {r.Number} - {payee}", lines);
             return null;
         }

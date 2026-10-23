@@ -235,7 +235,9 @@ namespace Services.NasbNiro.Finance
             if (dto?.EventIds == null || dto.EventIds.Count == 0) return ResponseDtoHelper.BadRequest<int>("رویدادی انتخاب نشده است.");
             if (dto.Status != AccountingEventStatus.Sent && dto.Status != AccountingEventStatus.Pending && dto.Status != AccountingEventStatus.Exported)
                 return ResponseDtoHelper.BadRequest<int>("وضعیت نامعتبر است.");
-            List<AccountingEvent> events = await _uow.Set<AccountingEvent>().Where(e => dto.EventIds.Contains(e.Id) && e.Status != AccountingEventStatus.NotRequired)
+            // an event that already has a voucher in the ledger cannot be marked again (it would be posted a second time or leave a cancelled document in the books)
+            List<int> withVoucher = await _uow.Set<FnVoucher>().Where(v => v.AccountingEventId != null && dto.EventIds.Contains(v.AccountingEventId.Value)).Select(v => v.AccountingEventId.Value).ToListAsync(cancellationToken);
+            List<AccountingEvent> events = await _uow.Set<AccountingEvent>().Where(e => dto.EventIds.Contains(e.Id) && e.Status != AccountingEventStatus.NotRequired && !withVoucher.Contains(e.Id))
                 .ToListAsync(cancellationToken);
             foreach (AccountingEvent e in events)
             {

@@ -84,7 +84,7 @@ namespace Services.NasbNiro.Finance
         public static readonly string[] BuiltInNames =
         {
             "DAYS", "DAYS_WORKED", "OT_HOURS", "NIGHT_HOURS", "HOLIDAY_HOURS", "PAID_LEAVE_DAYS", "UNPAID_LEAVE_DAYS", "ABSENCE_DAYS", "MISSION_DAYS", "CHILDREN",
-            "DAILY_WAGE", "HOURLY_WAGE", "SHIFT_PERCENT", "INSURABLE", "INSURABLE_CAPPED", "TAXABLE", "GROSS", "LEAVE_ENTITLEMENT",
+            "DAILY_WAGE", "HOURLY_WAGE", "SHIFT_PERCENT", "INSURABLE", "INSURABLE_CAPPED", "TAXABLE", "GROSS", "LEAVE_ENTITLEMENT", "SEVERANCE_BASE",
         };
 
         public static readonly string[] Conditions = { "Married", "HasChildren", "HardAndHarmful" };
@@ -118,7 +118,9 @@ namespace Services.NasbNiro.Finance
             FnEmployee e = input.Employee;
             FnAttendanceSheet s = input.Sheet;
             var result = new PayrollResult();
-            decimal daysPaid = s.DaysWorked + s.PaidLeaveDays + s.MissionDays;
+            // the payroll month is always 30 days (company decision): a full month pays 30 days in a 29-, 30- or 31-day month; only unpaid leave and absence reduce it
+            decimal daysPaid = Math.Max(0m, Math.Min(30m, 30m - s.UnpaidLeaveDays - s.AbsenceDays));
+            if (s.DaysWorked + s.PaidLeaveDays + s.MissionDays <= 0) daysPaid = 0; // no attendance at all: nothing is paid for days
             result.DaysPaid = daysPaid;
             decimal dailyWage = e.DailyWage;
 
@@ -133,7 +135,8 @@ namespace Services.NasbNiro.Finance
             bool hourlyNeeded = items.Any(i => i.Calculation == FnPayrollCalc.PerHour && ConditionMet(i.Condition, e));
             vars["HOURLY_WAGE"] = hourlyNeeded ? dailyWage / Math.Max(rates.Get("DailyWorkHours"), 0.0001m) : 0m;
 
-            decimal insurableEarnings = 0, taxableEarnings = 0, gross = 0, reducesTaxable = 0;
+            decimal insurableEarnings = 0, taxableEarnings = 0, gross = 0, reducesTaxable = 0, severanceBase = 0;
+            bool severanceFlagged = items.Any(i => i.Kind == FnPayrollItemKind.Earning && i.SeveranceBase);
             int monthIndex = PersianCal.Index(year, month);
 
             decimal Resolve(string name)
@@ -194,6 +197,7 @@ namespace Services.NasbNiro.Finance
                     case FnPayrollCalc.Formula:
                     {
                         vars["GROSS"] = gross; vars["TAXABLE"] = taxableEarnings; vars["INSURABLE"] = insurableEarnings;
+                        vars["SEVERANCE_BASE"] = severanceFlagged ? severanceBase : insurableEarnings;
                         amount = Evaluate(item.Formula, Resolve) * (item.Factor == 0 ? 1 : item.Factor);
                         break;
                     }
@@ -243,6 +247,7 @@ namespace Services.NasbNiro.Finance
                     case FnPayrollItemKind.Earning:
                         gross += amount;
                         if (item.Insurable) insurableEarnings += amount;
+                        if (item.SeveranceBase) severanceBase += amount;
                         if (item.Taxable) taxableEarnings += amount;
                         break;
                     case FnPayrollItemKind.Deduction:

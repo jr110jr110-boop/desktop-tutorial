@@ -494,8 +494,17 @@ as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SINV,\"amo
 PAY=$(val .data.id)
 as "$COM_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"approve\"}"; check "buyer cannot approve the payment" '.success == false'
 call POST procurement/payments/action "{\"id\":$PAY,\"action\":\"approve\"}"; check "payment approved by PMO" '.success and .data.status == 1'
+user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
+user2 fin2.ci 3 'Ci#Fin2-User-2026' 09120000024 0012345624
+user2 fm.ci 17 'Ci#Fm-User-2026' 09120000025 0012345625
+user2 pay.ci 18 'Ci#Pay-User-2026' 09120000026 0012345626
+user2 tr.ci 19 'Ci#Tr-User-2026' 09120000027 0012345627
+FIN2_TOKEN=$(login fin2.ci 'Ci#Fin2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026'); PAYR_TOKEN=$(login pay.ci 'Ci#Pay-User-2026'); TR_TOKEN=$(login tr.ci 'Ci#Tr-User-2026')
 as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\"}"; check "payment needs the bank or Sepidar reference" '.success == false'
-as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\"}"; check "finance records the payment" '.success and .data.status == 2'
+as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":1}"; nomsg "r1: the old pay action is for treasury or the finance manager only" "خزانه"
+as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\"}"; check "r1: the old pay action needs the paying bank account (the bank side of the entry is always linked)" '.success == false and (.message|contains("حساب بانکی"))'
+as "$TR_TOKEN" POST finance/treasury/bank-accounts '{"title":"بانک مسیر قدیمی","bankName":"ملی","accountNumber":"100324200005","iban":"IR160170000000100324200005"}'; BALEG=$(val .data.id)
+as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":$BALEG}"; check "finance records the payment" '.success and .data.status == 2'
 call GET "finance/events?PageSize=0"
 check "invoice event: GRNI cleared, VAT and payable to the supplier" '[.data.data[] | select(.sourceType == "SupplierInvoice")] | length == 1 and (.[0].lines | map(select(.accountRole == "AccountsPayable")) | .[0].credit) == 25740000'
 check "goods received not invoiced is zero for the supplier" "[.data.data[] | select(.status != 9) | .lines[] | select(.accountRole == \"GRNI\" and .providerId == $PA) | (.debit - .credit)] | add == 0"
@@ -1286,12 +1295,6 @@ TOKEN=$ADMIN_TOKEN
 # ---------------------------------------------------------------- finance: general ledger, treasury, receivables, tax (release F1)
 TOKEN=$ADMIN_TOKEN
 FG=finance/gl; FT=finance/treasury; FR=finance/receivables; FX=finance/tax
-user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
-user2 fin2.ci 3 'Ci#Fin2-User-2026' 09120000024 0012345624
-user2 fm.ci 17 'Ci#Fm-User-2026' 09120000025 0012345625
-user2 pay.ci 18 'Ci#Pay-User-2026' 09120000026 0012345626
-user2 tr.ci 19 'Ci#Tr-User-2026' 09120000027 0012345627
-FIN2_TOKEN=$(login fin2.ci 'Ci#Fin2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026'); PAYR_TOKEN=$(login pay.ci 'Ci#Pay-User-2026'); TR_TOKEN=$(login tr.ci 'Ci#Tr-User-2026')
 [ -n "$FIN2_TOKEN" ] && [ -n "$FM_TOKEN" ] && [ -n "$PAYR_TOKEN" ] && [ -n "$TR_TOKEN" ] && ok "finance: login second accountant, finance manager (17), payroll (18) and treasury (19) users" || bad "finance: login second accountant, finance manager (17), payroll (18) and treasury (19) users"
 TODAY=$(date +%Y-%m-%d)
 ADMINID=$(uid "$ADMIN_TOKEN")
@@ -1402,7 +1405,7 @@ as "$FM_TOKEN" GET "$FR/customers?PageSize=0"; check "finance: customer open amo
 
 # --- receipts: transfer + cheque, cash; FIFO allocation
 RJ="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"description\":\"دریافت آزمون\",\"lines\":[{\"instrument\":2,\"amount\":20000000,\"bankAccountId\":$BA1,\"reference\":\"TRK-1\"},{\"instrument\":3,\"amount\":30000000,\"chequeSayadId\":\"1234567890123456\",\"chequeSerial\":\"7788\",\"chequeBank\":\"ملی\",\"chequeDueDate\":\"${TODAY}T00:00:00\"}]}"
-as "$COM_TOKEN" POST $FT/receipts "$RJ"; check "finance: any authenticated user may draft but a commercial receipt is only a draft" '.success == false or .data.status == 0'
+as "$COM_TOKEN" POST $FT/receipts "$RJ"; nomsg "finance: a commercial user cannot draft a receipt (treasury and accountants only)" "مجوز"
 as "$TR_TOKEN" POST $FT/receipts "$(jq -c '.lines[0].amount = 0' <<< "$RJ")"; no "finance: a receipt line needs an amount"
 as "$TR_TOKEN" POST $FT/receipts "$(jq -c '.lines[1].chequeSayadId = "123"' <<< "$RJ")"; no "finance: a cheque needs a 16-digit Sayad id"
 as "$TR_TOKEN" POST $FT/receipts "$RJ"; check "finance: receipt of 50M saved as draft, FIFO allocated to the invoice" '.success and .data.status == 0 and .data.totalAmount == 50000000'
@@ -1445,7 +1448,7 @@ as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$PM0,\"action\":\"approve\"}"; 
 as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$PM0,\"action\":\"cancel\"}"; check "finance: that draft is cancelled" '.success and .data.status == 3'
 as "$TR_TOKEN" POST $FT/payments "$PJ"; check "finance: payment of 16692000 by transfer and cheque drafted" '.success and .data.status == 0 and .data.netAmount == 16692000 and .data.deductionAmount == 468000'
 PM1=$(val .data.id)
-as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY2,\"action\":\"paid\",\"reference\":\"x\"}"; nomsg "finance: the old pay action is refused for a request linked to a treasury payment" "خزانه"
+as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY2,\"action\":\"paid\",\"reference\":\"x\",\"bankAccountId\":$BA1}"; nomsg "finance: the old pay action is refused for a request linked to a treasury payment" "خزانه"
 as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$PM1,\"action\":\"post\"}"; no "finance: an unapproved payment cannot be posted"
 as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$PM1,\"action\":\"approve\"}"; no "finance: treasury cannot approve (finance manager only)"
 as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$PM1,\"action\":\"approve\"}"; check "finance: finance manager approves" '.success and .data.status == 1'
@@ -1470,7 +1473,11 @@ as "$FIN_TOKEN" POST $FT/statements/match "{\"statementId\":$ST1,\"lineId\":$FEE
 as "$FIN_TOKEN" POST $FT/statements/match "{\"statementId\":$ST1,\"lineId\":$INTLINE,\"kind\":\"interest\"}"; check "finance: bank interest matched manually" '.success'
 as "$FM_TOKEN" POST $FG/post-events
 as "$TR_TOKEN" POST $FT/reconciliations/action "{\"id\":$RC_A,\"action\":\"refresh\"}"; check "finance: reconciliation refreshed" '.success'
-as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RC_A,\"action\":\"approve\"}"; check "finance: reconciliation approved by the finance manager (not the preparer) or still has a difference" '.success or (.message|length) > 0'
+RC_A_DIFF=$(val .data.difference)
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RC_A,\"action\":\"approve\"}"
+# the outcome is tied to the refreshed difference: zero means approved by someone other than the preparer, anything else is refused with the reason
+if [ "$RC_A_DIFF" = "0" ]; then check "finance: reconciliation with zero difference is approved by the finance manager, not the preparer" '.success and .data.status == 1 and .data.approvedByName != .data.preparedByName'
+else nomsg "finance: reconciliation with a difference ($RC_A_DIFF) is refused" "مغایرت"; fi
 
 # --- petty cash: top-up from the cash box, settlement by the holder
 as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":2,\"pettyCashId\":$PC1,\"topUpAmount\":2000000,\"lines\":[{\"instrument\":1,\"amount\":2000000,\"cashBoxId\":$CB}]}"; check "finance: petty cash top-up drafted" '.success and .data.purpose == 2 and .data.netAmount == 2000000'
@@ -1518,6 +1525,15 @@ check "finance: vouchers of year 1400 finalized" '.success and .data.status == 2
 as "$FM_TOKEN" GET $FG/years; PIDS=$(jq -r --argjson y "$FY0" '.data[]|select(.id == $y)|.periods[].id' "$B")
 for P in $PIDS; do as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; done
 as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"آزمون بستن سال"}'; check "finance: year 1400 closed with closing vouchers and a 1401 opening voucher" '.success and .data.status == 2 and .data.closingVoucherId != null'
+as "$FM_TOKEN" GET $FG/years; YC=$(jq -r --argjson y "$FY0" '.data[]|select(.id == $y)|.closingVoucherId' "$B"); YNEXT=$(jq -r '.data[]|select(.year == 1401)|.id' "$B"); YOPEN=$(jq -r '.data[]|select(.year == 1401)|.openingVoucherId' "$B")
+# exact consequences of the close: profit 100,000 - 40,000 = 60,000 moves to retained earnings 50301; temporary accounts are zero; the opening voucher repeats the closing balances
+as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$FY0&Level=2&IncludeDraft=true"
+check "finance: after the close the temporary accounts 60102 and 80108 are zero in year 1400" '([.data.rows[]|select(.code == "60102" or .code == "80108")|(.closingDebit + .closingCredit)]|add) == 0'
+check "finance: the profit and loss summary 50901 is cleared and retained earnings 50301 were credited 60000 during the close" '([.data.rows[]|select(.code == "50901")|(.closingDebit + .closingCredit)]|add // 0) == 0 and ([.data.rows[]|select(.code == "50301")|.credit]|add) == 60000'
+as "$FM_TOKEN" GET $FG/vouchers/$YOPEN
+check "finance: the 1401 opening voucher is number 1 with exactly cash 60000 debit and retained earnings 60000 credit" '.success and .data.number == 1 and (.data.lines|length) == 2 and ([.data.lines[]|select(.accountCode == "10101" and .debit == 60000)]|length) == 1 and ([.data.lines[]|select(.accountCode == "50301" and .credit == 60000)]|length) == 1'
+as "$FM_TOKEN" GET $FG/vouchers/$YC
+check "finance: the closing voucher of 1400 mirrors the opening voucher (60000 both sides)" '.success and ([.data.lines[].debit]|add) == 60000 and ([.data.lines[].credit]|add) == 60000'
 as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"دوباره"}'; no "finance: a closed year is not closed twice"
 as "$FIN_TOKEN" POST $FG/vouchers '{"date":"2021-07-01T00:00:00","lines":[{"accountCode":"80108","debit":1},{"accountCode":"10101","credit":1}]}'; no "finance: no voucher can be written into a closed year"
 
@@ -1585,7 +1601,7 @@ CLS2=$(val .data.id)
 as "$COM_TOKEN" POST $FA/classes '{"code":"XXX","title":"x"}'; no "assets: commercial user cannot save classes"
 
 # --- assets: draft, approval by a second person, offset account
-AJ() { echo "{\"title\":\"$1\",\"classId\":$2,\"costCenterId\":$CCF2,\"acquisitionDate\":\"2026-06-22T00:00:00\",\"inUseDate\":\"$3T00:00:00\",\"cost\":$4,\"source\":1,\"offsetAccountCode\":\"${5:-10505}\"}"; }
+AJ() { echo "{\"title\":\"$1\",\"classId\":$2,\"costCenterId\":$CCF2,\"acquisitionDate\":\"2026-06-22T00:00:00\",\"inUseDate\":\"$3T00:00:00\",\"cost\":$4,\"source\":1,\"offsetAccountCode\":\"${5:-20108}\"}"; }
 as "$FIN_TOKEN" POST $FA "$(AJ 'دستگاه آزمون یک' $CLS1 2026-06-25 120000000)"; check "assets: asset saved as a draft with a temporary code" '.success and .data.status == 0 and (.data.code|startswith("TMP-"))'
 AS1=$(val .data.id)
 as "$FIN_TOKEN" POST $FA/action "{\"id\":$AS1,\"action\":\"approve\"}"; nomsg "assets: the creator cannot approve the asset" "شخص دیگری"
@@ -1669,6 +1685,25 @@ as "$FM_TOKEN" POST $FP/runs '{"year":1405,"month":7}'; PRUN7=$(val .data.id)
 as "$FM_TOKEN" POST $FP/runs/$PRUN7/calculate; check "payroll: finance manager calculates the run of Mehr" '.success and .data.run.status == 1'
 as "$FM_TOKEN" POST $FP/runs/$PRUN7/approve; nomsg "payroll: the person who calculated the run cannot approve it" "شخص دیگری"
 as "$FM_TOKEN" DELETE $FP/runs/$PRUN7; check "payroll: an unapproved run can be deleted" '.success'
+
+# --- the payroll month basis is 30 days (company decision): 29-, 30- and 31-day months; only unpaid leave and absence reduce the 30 payable days
+pcalc() { # pcalc YEAR MONTH ATTENDANCE_JSON_FIELDS : saves the attendance, calculates a run, leaves the result in $B (the run is deleted by the caller)
+  as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":$1,\"month\":$2,$3}"
+  as "$PAYR_TOKEN" POST $FP/runs "{\"year\":$1,\"month\":$2}"; PRX=$(val .data.id)
+  as "$PAYR_TOKEN" POST $FP/runs/$PRX/calculate
+}
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":12,\"daysWorked\":30}"; nomsg "payroll: 30 days worked in Esfand 1405 (29 days) is refused" "29 روز"
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":12,\"daysWorked\":29,\"unpaidLeaveDays\":1}"; nomsg "payroll: 29 worked + 1 unpaid in a 29-day month is refused" "29 روز"
+pcalc 1405 12 '"daysWorked":29'
+check "payroll: a full 29-day month (Esfand 1405) pays the 30-day basis: gross 31300000 (base 18000000 + seniority 300000 + housing 9000000 + grocery 4000000)" '.success and .data.run.totalGross == 31300000'
+as "$PAYR_TOKEN" DELETE $FP/runs/$PRX
+pcalc 1405 1 '"daysWorked":31'
+check "payroll: a full 31-day month (Farvardin 1405) pays 30 days, not 31: gross 31300000" '.success and .data.run.totalGross == 31300000'
+as "$PAYR_TOKEN" DELETE $FP/runs/$PRX
+pcalc 1405 7 '"daysWorked":27,"unpaidLeaveDays":3'
+check "payroll: 30-day month with 3 unpaid days pays 27 days: gross 28170000 (base 16200000 + seniority 270000 + housing 8100000 + grocery 3600000)" '.success and .data.run.totalGross == 28170000'
+as "$PAYR_TOKEN" DELETE $FP/runs/$PRX
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":7,\"daysWorked\":30}"
 as "$FM_TOKEN" POST $FP/runs/$PRUN/approve; check "payroll: finance manager approves the run" '.success and .data.status == 2 and (.data.approvedByName|length) > 0'
 as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":6,\"daysWorked\":28}"; no "payroll: attendance of an approved month is locked"
 as "$PAYR_TOKEN" POST $FP/runs/$PRUN/calculate; no "payroll: an approved run is immutable"
@@ -1713,7 +1748,7 @@ OP3=$(val .data.id)
 as "$FIN_TOKEN" POST $FS/action "{\"id\":$OP3,\"action\":\"approve\"}"; no "outbox: only the finance manager approves a VAT package"
 as "$FM_TOKEN" POST $FS/action "{\"id\":$OP3,\"action\":\"approve\"}"; check "outbox: VAT package approved" '.success and .data.status == 1'
 as "$FIN_TOKEN" POST $FS/generate '{"kind":1,"year":1405,"month":1}'; no "outbox: a period without data gives no empty package"
-as "$FM_TOKEN" GET "$FS/packages?PageSize=0"; check "outbox: the finance manager sees the VAT package and no payroll package" '.success and ([.data.data[]|select(.id == '$OP3')]|length) == 1 and ([.data.data[]|select(.kind == 3 or .kind == 4)]|length) >= 0'
+as "$FM_TOKEN" GET "$FS/packages?PageSize=0"; check "outbox: the finance manager sees the VAT package and no payroll package" '.success and ([.data.data[]|select(.id == '$OP3')]|length) == 1 and ([.data.data[]|select(.kind == 3 or .kind == 4)]|length) == 0'
 as "$PAYR_TOKEN" GET $FS/summary; check "outbox: summary counters returned" '.success and (.data.pending|type) == "number" and (.data.readyToSend|type) == "number"'
 as "$WH_TOKEN" GET $FS/summary; [ "$CODE" = "403" ] && ok "outbox: storekeeper has no access (403)" || bad "outbox: storekeeper has no access (403) got $CODE"
 

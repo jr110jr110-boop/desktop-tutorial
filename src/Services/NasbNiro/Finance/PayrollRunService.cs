@@ -302,6 +302,7 @@ namespace Services.NasbNiro.Finance
             run.TotalNet = slips.Sum(s => s.Net);
             run.TotalProvisions = slips.Sum(s => s.Provisions);
             run.Status = FnPayrollStatus.Calculated;
+            run.EditorUserIds = WithEditor(run.EditorUserIds, Me);
             run.PreparedByUserId = Me;
             run.CalculatedAt = DateTimeOffset.Now;
             try { await _uow.SaveChangesAsync(ct); }
@@ -329,7 +330,7 @@ namespace Services.NasbNiro.Finance
             FnPayrollRun run = await _uow.Set<FnPayrollRun>().FirstOrDefaultAsync(r => r.Id == id, ct);
             if (run == null) return ResponseDtoHelper.NotFound<PayrollRunDto>("اجرای حقوق پیدا نشد.");
             if (run.Status != FnPayrollStatus.Calculated) return Bad<PayrollRunDto>("فقط اجرای محاسبه‌شده تایید می‌شود.");
-            if (run.PreparedByUserId != 0 && run.PreparedByUserId == Me) return Bad<PayrollRunDto>(SameUser);
+            if (Touched(run.PreparedByUserId, run.EditorUserIds, Me) || run.CreatedByUserId == Me) return Bad<PayrollRunDto>(SameUser);
             DateTimeOffset calculatedAt = run.CalculatedAt ?? DateTimeOffset.MinValue;
 
             List<FnPayslip> slips = await _uow.Set<FnPayslip>().Include(p => p.Lines).Where(p => p.RunId == run.Id).AsSplitQuery().ToListAsync(ct);
@@ -429,6 +430,7 @@ namespace Services.NasbNiro.Finance
                 else debits[i] = (role, workOrder, center, debits[i].Amount + amount);
             }
             var laborCosts = new Dictionary<int, decimal>();
+            var employeeRecoveries = new List<(int EmployeeId, decimal Amount)>();
             foreach (FnPayslip s in slips)
             {
                 CostCenter cc = s.CostCenterId.HasValue && centers.TryGetValue(s.CostCenterId.Value, out CostCenter c) ? c : null;
@@ -436,25 +438,37 @@ namespace Services.NasbNiro.Finance
                 string center = cc?.Code;
                 string indirect = production ? AccountRoles.PayrollExpenseIndirect : AccountRoles.PayrollExpenseAdmin;
                 string employer = production ? AccountRoles.EmployerInsuranceProduction : AccountRoles.EmployerInsuranceAdmin;
+                // earnings paid from a provision (bonus from 30402 ...) reduce the provision, they are not expensed again
+                decimal fromProvision = 0;
+                foreach (IGrouping<string, FnPayslipLine> g in s.Lines.Where(l => l.Kind == FnPayrollItemKind.Earning && l.AccountRole != null).GroupBy(l => l.AccountRole))
+                {
+                    decimal amount = g.Sum(l => l.Amount);
+                    fromProvision += amount;
+                    Debit(g.Key, null, center, amount);
+                }
+                decimal expensed = s.GrossEarnings - fromProvision;
                 if (s.Allocations.Count > 0)
                 {
                     decimal given = 0;
                     List<FnPayslipAllocation> allocations = s.Allocations.OrderBy(a => a.Id).ToList();
                     for (int i = 0; i < allocations.Count; i++)
                     {
-                        decimal part = i == allocations.Count - 1 ? s.GrossEarnings - given : R(s.GrossEarnings * allocations[i].Share);
+                        decimal part = i == allocations.Count - 1 ? expensed - given : R(expensed * allocations[i].Share);
                         given += part;
                         Debit(AccountRoles.PayrollExpenseDirect, allocations[i].WorkOrderId, null, part);
                         laborCosts[allocations[i].WorkOrderId] = (laborCosts.TryGetValue(allocations[i].WorkOrderId, out decimal cur) ? cur : 0m) + part;
                     }
                 }
-                else Debit(indirect, null, center, s.GrossEarnings);
+                else Debit(indirect, null, center, expensed);
                 foreach (FnPayslipLine l in s.Lines)
                 {
                     switch (l.Kind)
                     {
                         case FnPayrollItemKind.Deduction:
-                            Credit(l.AccountRole ?? AccountRoles.OtherPayable, l.Amount);
+                            // loan/advance recovery clears the receivable of that employee (sub-ledger by employee detail)
+                            if (l.AccountRole == AccountRoles.EmployeeAdvance && l.Amount != 0)
+                                employeeRecoveries.Add((s.EmployeeId, l.Amount));
+                            else Credit(l.AccountRole ?? AccountRoles.OtherPayable, l.Amount);
                             break;
                         case FnPayrollItemKind.EmployerContribution:
                             Debit(employer, null, center, l.Amount);
@@ -473,6 +487,8 @@ namespace Services.NasbNiro.Finance
                 lines.Add(new AccountingEventLine { AccountRole = d.Role, Debit = d.Amount, WorkOrderId = d.WorkOrder, CostCenter = d.Center, Description = $"حقوق و دستمزد {period}" });
             foreach (string role in order)
                 lines.Add(new AccountingEventLine { AccountRole = role, Credit = credits[role], Description = $"حقوق و دستمزد {period}" });
+            foreach (var g in employeeRecoveries.GroupBy(x => x.EmployeeId))
+                lines.Add(new AccountingEventLine { AccountRole = AccountRoles.EmployeeAdvance, Credit = g.Sum(x => x.Amount), PartyType = "Employee", PartyId = g.Key, Description = $"کسر وام/مساعده {period}" });
             if (lines.Sum(l => l.Debit) != lines.Sum(l => l.Credit)) return Bad<PayrollRunDto>("سند حقوق متوازن نیست؛ اجرای حقوق را دوباره محاسبه کنید.");
 
             AccountingEvent e = _costing.AddEvent(AccountingEventType.PayrollRun, date, "FnPayrollRun", run.Id, run.Number, $"حقوق و دستمزد {period}", lines);

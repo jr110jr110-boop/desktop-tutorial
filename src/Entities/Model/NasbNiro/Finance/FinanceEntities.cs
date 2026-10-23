@@ -147,6 +147,9 @@ namespace Entities.Model.NasbNiro.Finance
     /// <summary>A balanced accounting event for Sepidar (one future voucher, سند حسابداری).</summary>
     public class AccountingEvent
     {
+        /// <summary>Concurrency token: the posting job and a person marking or cancelling the same event cannot both win.</summary>
+        [System.ComponentModel.DataAnnotations.Timestamp]
+        public byte[] RowVersion { get; set; }
         public int Id { get; set; }
         public AccountingEventType Type { get; set; }
         public DateTime EventDate { get; set; }

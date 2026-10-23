@@ -92,6 +92,8 @@ namespace Entities.Model.NasbNiro.Finance
     public class FnAsset
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
         public string Code { get; set; }
         public string Title { get; set; }
         public int? ClassId { get; set; }
@@ -154,6 +156,8 @@ namespace Entities.Model.NasbNiro.Finance
     public class FnDepreciationRun
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
         public string Number { get; set; }
         public int PeriodId { get; set; }
         public FnPeriod Period { get; set; }
@@ -300,6 +304,8 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal Principal { get; set; }
         public decimal InstallmentAmount { get; set; }
         public decimal Balance { get; set; }
+        /// <summary>The treasury payment that paid the loan or advance out (null until it is paid).</summary>
+        public int? DisbursementPaymentId { get; set; }
         public int FirstYear { get; set; }
         public int FirstMonth { get; set; }
         public bool IsActive { get; set; } = true;
@@ -342,7 +348,9 @@ namespace Entities.Model.NasbNiro.Finance
         public string Condition { get; set; }
         /// <summary>The amount is deducted from the taxable base (employee social security).</summary>
         public bool ReducesTaxable { get; set; }
-        /// <summary>Deduction / contribution / provision: the liability role credited. Earnings: empty.</summary>
+        /// <summary>Earning: counts toward the severance accrual base (SEVERANCE_BASE). When no item is flagged the whole insurable pay is the base (the old behaviour).</summary>
+        public bool SeveranceBase { get; set; }
+        /// <summary>Deduction / contribution / provision: the liability role credited. Earning: when set (a provision role) the earning is paid from that provision instead of being expensed.</summary>
         public string AccountRole { get; set; }
         public int Order { get; set; }
         public bool IsActive { get; set; } = true;
@@ -432,6 +440,8 @@ namespace Entities.Model.NasbNiro.Finance
     public class FnPayrollRun
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
         public string Number { get; set; }
         public int Year { get; set; }
         public int Month { get; set; }

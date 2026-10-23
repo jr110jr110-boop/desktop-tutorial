@@ -367,6 +367,7 @@ namespace Services.NasbNiro.Finance
             {
                 a = await _uow.Set<FnAsset>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct);
                 if (a == null) return ResponseDtoHelper.NotFound<AssetDto>("دارایی پیدا نشد.");
+                a.EditorUserIds = WithEditor(a.EditorUserIds, Me);
                 if (a.Status != FnAssetStatus.Draft) return Bad<AssetDto>("فقط پیش‌نویس دارایی ویرایش می‌شود؛ تغییرات بعدی با عملیات «انتقال»، «بهبود» و ... ثبت می‌شود.");
             }
             else if (dto.Source == FnAssetSource.SupplierInvoiceLine) return Bad<AssetDto>("دارایی از ردیف فاکتور خرید را سیستم پیش‌نویس می‌کند.");
@@ -437,6 +438,8 @@ namespace Services.NasbNiro.Finance
             _uow.Set<FnAssetHistory>().Add(new FnAssetHistory { Asset = a, Kind = kind, Date = date.Date, Amount = amount, Note = note, UserId = Me, At = DateTimeOffset.Now });
         }
 
+        private static readonly string[] OffsetAccounts = { "20108", "20109", "30103" };
+
         public async Task<ResponseDto<AssetDto>> AssetActionAsync(AssetActionDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<AssetDto>(NotAllowed);
@@ -452,7 +455,7 @@ namespace Services.NasbNiro.Finance
                 case "approve":
                 {
                     if (a.Status != FnAssetStatus.Draft) return Bad<AssetDto>("فقط پیش‌نویس تایید می‌شود.");
-                    if (a.CreatedByUserId > 0 && a.CreatedByUserId == Me) return Bad<AssetDto>(SameUser);
+                    if (Touched(a.CreatedByUserId, a.EditorUserIds, Me)) return Bad<AssetDto>(SameUser);
                     FnAssetClass cls = a.Class;
                     if (cls == null || !cls.IsActive) return Bad<AssetDto>("رده دارایی را مشخص کنید.");
                     if (a.Cost <= 0) return Bad<AssetDto>("بهای تمام‌شده باید بیشتر از صفر باشد.");
@@ -466,6 +469,9 @@ namespace Services.NasbNiro.Finance
                     {
                         if (await SubsidiaryAsync(Clean(a.OffsetAccountCode), ct) == null)
                             return Bad<AssetDto>("حساب طرف بستانکار (جایی که بهای دارایی اکنون در دفاتر نشسته، مثلاً موجودی کالا یا هزینه خدمات خریداری‌شده) را مشخص کنید.");
+                        // the offset must be a clearing account of capital purchases: stock accounts (105xx) would make the ledger fall below the item costs
+                        if (!OffsetAccounts.Contains(Digits(Clean(a.OffsetAccountCode))))
+                            return Bad<AssetDto>("حساب طرف بستانکار فقط یکی از حساب‌های تهاتر سرمایه‌ای (۲۰۱۰۸ دارایی در جریان تکمیل، ۲۰۱۰۹ پیش‌پرداخت سرمایه‌ای، ۳۰۱۰۳ کالای دریافتی فاکتورنشده) است؛ حساب‌های موجودی (۱۰۵) مجاز نیستند.");
                         if (!a.AcquisitionDate.HasValue) a.AcquisitionDate = date;
                     }
                     int sequence = await InventoryNumbers.NextAsync(_uow, FinanceNumbers.AssetCode, cls.Id, ct);

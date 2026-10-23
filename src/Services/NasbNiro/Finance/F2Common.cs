@@ -17,6 +17,8 @@ namespace Services.NasbNiro.Finance
 
         public static int Year(DateTime d) => Cal.GetYear(d);
         public static int Month(DateTime d) => Cal.GetMonth(d);
+        /// <summary>Days of a Persian month: 31 for the first six, 30 for the next five, 29 or 30 for Esfand by leap year.</summary>
+        public static int DaysIn(int year, int month) => Cal.GetDaysInMonth(year, month);
         public static DateTime Start(int year, int month) => Cal.ToDateTime(year, month, 1, 0, 0, 0, 0);
         public static DateTime End(int year, int month) =>
             month >= 12 ? Cal.ToDateTime(year + 1, 1, 1, 0, 0, 0, 0).AddDays(-1) : Cal.ToDateTime(year, month + 1, 1, 0, 0, 0, 0).AddDays(-1);

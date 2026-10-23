@@ -652,6 +652,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string ProviderName { get; set; }
         public int? PettyCashId { get; set; }
         public int? PayrollRunId { get; set; }
+        public int? EmployeeLoanId { get; set; }
         public string PayeeName { get; set; }
         public string Description { get; set; }
         public decimal GrossAmount { get; set; }
@@ -675,6 +676,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? PettyCashId { get; set; }
         /// <summary>Payroll purpose: the Posted payroll run that is paid (the amount is the run's net total).</summary>
         public int? PayrollRunId { get; set; }
+        public int? EmployeeLoanId { get; set; }
         /// <summary>Amount of a petty-cash top-up.</summary>
         public decimal? TopUpAmount { get; set; }
         public string Description { get; set; }

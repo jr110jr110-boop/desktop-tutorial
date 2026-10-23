@@ -179,6 +179,9 @@ namespace Services.NasbNiro.Finance
             FnLegalEntity yearEntity = await _uow.Set<FnLegalEntity>().FirstOrDefaultAsync(x => x.Id == year.LegalEntityId, ct);
             FnFiscalYear next = await FinanceSeed.EnsureEntityYearAsync(_uow, yearEntity, year.EndDate.AddDays(1), ct);
             if (next.Status != FnYearStatus.Open) return Bad<FiscalYearDto>("سال مالی بعد بسته است.");
+            // years close in order: the previous year of the same entity must be closed first (so a later year is never closed before an earlier one)
+            FnFiscalYear previous = await _uow.Set<FnFiscalYear>().Where(y => y.LegalEntityId == year.LegalEntityId && y.EndDate < year.StartDate).OrderByDescending(y => y.EndDate).FirstOrDefaultAsync(ct);
+            if (previous != null && previous.Status != FnYearStatus.Closed) return Bad<FiscalYearDto>($"ابتدا سال مالی قبل ({previous.Year}) را ببندید؛ سال‌ها به ترتیب بسته می‌شوند.");
 
             // balances of the year per account and detail
             var rows = await _uow.Set<FnVoucherLine>().Where(l => l.Voucher.FiscalYearId == year.Id && l.Voucher.Status == FnVoucherStatus.Final)
@@ -252,10 +255,16 @@ namespace Services.NasbNiro.Finance
             // numbers: gapless after the existing final vouchers of each year
             int numberInYear = await _uow.Set<FnVoucher>().Where(v => v.FiscalYearId == year.Id && v.Number != null).MaxAsync(v => (int?)v.Number, ct) ?? 0;
             int numberInNext = await _uow.Set<FnVoucher>().Where(v => v.FiscalYearId == next.Id && v.Number != null).MaxAsync(v => (int?)v.Number, ct) ?? 0;
+            // the opening voucher of the new year is always number 1: vouchers already finalised in that year move up by one
+            if (numberInNext > 0 && created.Any(v => v.FiscalYearId == next.Id && v.Type == FnVoucherType.Opening))
+            {
+                _uow.ExecuteSqlCommand("UPDATE FnVouchers SET Number = Number + 1 WHERE FiscalYearId = {0} AND Number IS NOT NULL", next.Id);
+                numberInNext++;
+            }
             foreach (FnVoucher v in created)
             {
                 v.TemporaryNumber = await InventoryNumbers.NextAsync(_uow, FinanceNumbers.Voucher, v.FiscalYear.Year, ct);
-                v.Number = v.FiscalYearId == year.Id ? ++numberInYear : ++numberInNext;
+                v.Number = v.FiscalYearId == year.Id ? ++numberInYear : v.Type == FnVoucherType.Opening ? 1 : ++numberInNext;
                 v.TotalAmount = v.Lines.Sum(l => l.Debit);
                 _uow.Set<FnVoucher>().Add(v);
             }
@@ -381,6 +390,8 @@ namespace Services.NasbNiro.Finance
             return ResponseDtoHelper.Ok(await PagedList<DetailAccountDto>.CreateAsync(projection, query.PageNumber, query.PageSize, ct));
         }
 
+        private static readonly string[] ReservedDetailPrefixes = { "SUP-", "CUS-", "EMP-", "BNK-", "CSH-", "PTY-", "PRJ-", "WO-", "CC-", "AST-", "DT-" };
+
         public async Task<ResponseDto<DetailAccountDto>> SaveDetailAsync(SaveDetailAccountDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<DetailAccountDto>(NotAllowed);
@@ -397,6 +408,8 @@ namespace Services.NasbNiro.Finance
                 if (dto.Type != FnDetailType.Person && dto.Type != FnDetailType.Other) return Bad<DetailAccountDto>("فقط تفصیلی «شخص» و «سایر» دستی ساخته می‌شود؛ بقیه را سیستم می‌سازد.");
                 string code = Clean(dto.Code);
                 if (code == null) return Bad<DetailAccountDto>("کد تفصیلی را وارد کنید.");
+                // the system makes details like SUP-12 itself: a manual code with such a prefix would collide later and stop the posting job
+                if (ReservedDetailPrefixes.Any(x => code.StartsWith(x, StringComparison.OrdinalIgnoreCase))) return Bad<DetailAccountDto>("پیشوندهای SUP-، CUS-، EMP-، BNK-، CSH-، PTY-، PRJ-، WO-، CC-، AST- و DT- برای تفصیلی‌های خودکار سیستم رزرو است.");
                 if (await _uow.Set<FnDetailAccount>().AnyAsync(x => x.Code == code, ct)) return Bad<DetailAccountDto>("این کد قبلاً ثبت شده است: " + code);
                 d = new FnDetailAccount { Code = code, Type = dto.Type };
                 _uow.Set<FnDetailAccount>().Add(d);
@@ -586,8 +599,19 @@ namespace Services.NasbNiro.Finance
                 if (v.IsImported) return Bad<VoucherDto>("سند واردشده از سپیدار فقط خواندنی است.");
                 if (v.Type == FnVoucherType.Auto || v.Type == FnVoucherType.Closing || v.Type == FnVoucherType.YearEndTemporaryClose)
                     return Bad<VoucherDto>("سند خودکار یا پایان سال ویرایش نمی‌شود.");
+                if (v.Type == FnVoucherType.Reversal)
+                {
+                    // a reversal mirrors its original: only the date may move (inside an open period of the same year); the lines never change
+                    if (date.Year.Id != v.FiscalYearId) return Bad<VoucherDto>("تاریخ سند برگشتی باید در همان سال مالی بماند.");
+                    v.Date = dto.Date.Date;
+                    v.EditorUserIds = WithEditor(v.EditorUserIds, Me);
+                    v.Status = FnVoucherStatus.Draft; v.CheckedByUserId = null; v.CheckedAt = null;
+                    await _uow.SaveChangesAsync(ct);
+                    return await GetVoucherAsync(v.Id, ct);
+                }
                 _uow.Set<FnVoucherLine>().RemoveRange(v.Lines);
                 v.Lines = new List<FnVoucherLine>();
+                v.EditorUserIds = WithEditor(v.EditorUserIds, Me);
                 v.Status = FnVoucherStatus.Draft;
                 v.CheckedByUserId = null;
                 v.CheckedAt = null;
@@ -640,7 +664,7 @@ namespace Services.NasbNiro.Finance
             {
                 case "check":
                     if (v.Status != FnVoucherStatus.Draft) return Bad<VoucherDto>("فقط پیش‌نویس کنترل می‌شود.");
-                    if (v.Type != FnVoucherType.Auto && v.CreatedByUserId == Me) return Bad<VoucherDto>(SameUser);
+                    if (v.Type != FnVoucherType.Auto && Touched(v.CreatedByUserId, v.EditorUserIds, Me)) return Bad<VoucherDto>(SameUser);
                     string checkGate = (await VoucherGateAsync(new List<int> { v.Id }, false, ct)).GetValueOrDefault(v.Id);
                     if (checkGate != null) return Bad<VoucherDto>(checkGate);
                     v.Status = FnVoucherStatus.Checked;
@@ -707,7 +731,7 @@ namespace Services.NasbNiro.Finance
                 FnVoucher v = await _uow.Set<FnVoucher>().FirstOrDefaultAsync(x => x.Id == id, ct);
                 if (v == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
                 if (v.Status != FnVoucherStatus.Checked) return Bad<VoucherDto>("فقط سند کنترل‌شده قطعی می‌شود.");
-                if (v.Type != FnVoucherType.Auto && v.CreatedByUserId == Me) return Bad<VoucherDto>(SameUser);
+                if (v.Type != FnVoucherType.Auto && Touched(v.CreatedByUserId, v.EditorUserIds, Me)) return Bad<VoucherDto>(SameUser);
                 string finGate = (await VoucherGateAsync(new List<int> { v.Id }, true, ct)).GetValueOrDefault(v.Id);
                 if (finGate != null) return Bad<VoucherDto>(finGate);
                 var period = await _uow.Set<FnPeriod>().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.FiscalYearId == v.FiscalYearId && p.StartDate <= v.Date && p.EndDate >= v.Date, ct);
@@ -757,7 +781,7 @@ namespace Services.NasbNiro.Finance
                     {
                         FnPeriod p = year.Periods.FirstOrDefault(x => x.StartDate <= v.Date && x.EndDate >= v.Date);
                         if (year.Status != FnYearStatus.Open || p == null || p.Status == FnPeriodStatus.Closed) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: دوره بسته است."); continue; }
-                        if (v.Type != FnVoucherType.Auto && v.CreatedByUserId == Me) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: تهیه‌کننده نمی‌تواند قطعی کند."); continue; }
+                        if (v.Type != FnVoucherType.Auto && Touched(v.CreatedByUserId, v.EditorUserIds, Me)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: تهیه‌کننده نمی‌تواند قطعی کند."); continue; }
                         if (gates.TryGetValue(v.Id, out string gateMessage)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: {gateMessage}"); continue; }
                         v.Number = ++max;
                         v.Status = FnVoucherStatus.Final;

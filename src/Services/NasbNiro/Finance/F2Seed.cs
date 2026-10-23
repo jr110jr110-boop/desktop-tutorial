@@ -58,28 +58,28 @@ namespace Services.NasbNiro.Finance
         {
             FnPayrollItem I(int order, string code, string title, FnPayrollItemKind kind, FnPayrollCalc calc, bool insurable, bool taxable, string source,
                 string rateKey = null, string variant = null, string itemCodes = null, string formula = null, decimal factor = 1, bool proRata = false,
-                string condition = null, bool reduces = false, string role = null) => new FnPayrollItem
+                string condition = null, bool reduces = false, string role = null, bool severanceBase = false) => new FnPayrollItem
             {
                 Order = order, Code = code, Title = title, Kind = kind, Calculation = calc, Insurable = insurable, Taxable = taxable, RateKey = rateKey, Variant = variant,
-                ItemCodes = itemCodes, Formula = formula, Factor = factor, ProRata = proRata, Condition = condition, ReducesTaxable = reduces, AccountRole = role,
+                ItemCodes = itemCodes, Formula = formula, Factor = factor, ProRata = proRata, Condition = condition, ReducesTaxable = reduces, SeveranceBase = severanceBase, AccountRole = role,
                 IsActive = true, Jurisdiction = FinanceSeed.Iran, Source = source, Verify = true,
             };
             const string insurance = "قانون تامین اجتماعی ماده ۲۸ — توسط مالی تایید شود";
             const string notSeeded = "مبلغ از جدول نرخ‌ها خوانده می‌شود";
-            yield return I(10, "BASE_WAGE", "مزد مبنا", FnPayrollItemKind.Earning, FnPayrollCalc.PerDayWorked, true, true, "مزد روزانه قرارداد کارمند × روزهای کارکرد");
-            yield return I(20, "SENIORITY", "پایه سنوات", FnPayrollItemKind.Earning, FnPayrollCalc.PerDayWorked, true, true, notSeeded, rateKey: "SeniorityDaily");
-            yield return I(30, "HOUSING", "حق مسکن", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "HousingAllowance", proRata: true);
-            yield return I(40, "GROCERY", "بن خواربار", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "GroceryAllowance", proRata: true);
-            yield return I(50, "MARITAL", "حق تاهل", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "MaritalAllowance", proRata: true, condition: "Married");
+            yield return I(10, "BASE_WAGE", "مزد مبنا", FnPayrollItemKind.Earning, FnPayrollCalc.PerDayWorked, true, true, "مزد روزانه قرارداد کارمند × روزهای کارکرد", severanceBase: true);
+            yield return I(20, "SENIORITY", "پایه سنوات", FnPayrollItemKind.Earning, FnPayrollCalc.PerDayWorked, true, true, notSeeded, rateKey: "SeniorityDaily", severanceBase: true);
+            yield return I(30, "HOUSING", "حق مسکن", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "HousingAllowance", proRata: true, severanceBase: true);
+            yield return I(40, "GROCERY", "بن خواربار", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "GroceryAllowance", proRata: true, severanceBase: true);
+            yield return I(50, "MARITAL", "حق تاهل", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "MaritalAllowance", proRata: true, condition: "Married", severanceBase: true);
             yield return I(60, "CHILD", "حق اولاد", FnPayrollItemKind.Earning, FnPayrollCalc.Formula, true, true, "تعداد فرزند × ۳ × حداقل مزد روزانه ★ — توسط مالی تایید شود",
-                formula: "CHILDREN * 3 * RATE_MinimumDailyWage", condition: "HasChildren");
+                formula: "CHILDREN * 3 * RATE_MinimumDailyWage", condition: "HasChildren", severanceBase: true);
             yield return I(70, "OVERTIME", "اضافه‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.PerHour, true, true, "قانون کار ماده ۵۹ — ۱٫۴ برابر ★ — توسط مالی تایید شود", variant: "OVERTIME", factor: 1.4m);
             yield return I(80, "NIGHT", "شب‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.PerHour, true, true, "قانون کار ماده ۵۸ — ۳۵٪ ★ — توسط مالی تایید شود", variant: "NIGHT", factor: 0.35m);
             yield return I(90, "HOLIDAY", "تعطیل‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.PerHour, true, true, "قانون کار ماده ۶۲ — ۴۰٪ ★ — توسط مالی تایید شود", variant: "HOLIDAY", factor: 0.4m);
             yield return I(100, "SHIFT", "حق نوبت‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.Formula, true, true, "قانون کار ماده ۵۵ — ۱۰ / ۱۵ / ۲۲٫۵٪ بر حسب نوع نوبت ★ — توسط مالی تایید شود",
                 formula: "BASE_WAGE * SHIFT_PERCENT / 100");
             yield return I(110, "MISSION", "ماموریت", FnPayrollItemKind.Earning, FnPayrollCalc.Input, false, true, "مبلغ هر ماه وارد می‌شود — مشمول بیمه و مالیات توسط مالی تایید شود");
-            yield return I(120, "BONUS", "پاداش", FnPayrollItemKind.Earning, FnPayrollCalc.Input, true, true, "مبلغ هر ماه وارد می‌شود");
+            yield return I(120, "BONUS", "پاداش", FnPayrollItemKind.Earning, FnPayrollCalc.Input, true, true, "مبلغ هر ماه وارد می‌شود — از محل ذخیره عیدی و پاداش پرداخت می‌شود (قابل ویرایش)", role: AccountRoles.BonusProvision);
 
             yield return I(200, "SS_EMPLOYEE", "بیمه سهم کارگر", FnPayrollItemKind.Deduction, FnPayrollCalc.PercentOfItems, false, false, insurance + " — ۷٪ تا سقف ★",
                 itemCodes: "@INSURABLE", factor: 7, reduces: true, role: AccountRoles.InsurancePayable);
@@ -97,7 +97,7 @@ namespace Services.NasbNiro.Finance
                 "قانون تامین اجتماعی — ۴٪ تا سقف ★ — توسط مالی تایید شود", itemCodes: "@INSURABLE", factor: 4, condition: "HardAndHarmful", role: AccountRoles.InsurancePayable);
 
             yield return I(400, "SEVERANCE", "ذخیره سنوات (پایان خدمت)", FnPayrollItemKind.Provision, FnPayrollCalc.Formula, false, false,
-                "قانون کار ماده ۲۴ — یک ماه آخرین حقوق به ازای هر سال، ماهانه یک‌دوازدهم ★ — توسط مالی تایید شود", formula: "INSURABLE / 12", role: AccountRoles.SeveranceProvision);
+                "قانون کار ماده ۲۴ — یک ماه آخرین حقوق به ازای هر سال، ماهانه یک‌دوازدهم؛ مبنا فقط اقلام دارای نشان «مبنای سنوات» (پایه حقوق، سنوات، مسکن، خواربار، تاهل، اولاد) نه اضافه‌کاری و پاداش ★ — توسط مالی تایید شود", formula: "SEVERANCE_BASE / 12", role: AccountRoles.SeveranceProvision);
             yield return I(410, "BONUS_PROV", "ذخیره عیدی و پاداش", FnPayrollItemKind.Provision, FnPayrollCalc.Formula, false, false,
                 "عیدی ۶۰ روز مزد با سقف ۹۰ روز حداقل مزد در سال، ماهانه یک‌دوازدهم ★ — توسط مالی تایید شود",
                 formula: "min(60 * DAILY_WAGE, 90 * RATE_MinimumDailyWage) / 12", role: AccountRoles.BonusProvision);
@@ -126,6 +126,17 @@ namespace Services.NasbNiro.Finance
                     if (items.Add(i.Code)) { uow.Set<FnPayrollItem>().Add(i); changed = true; }
                 foreach (FnPayrollRateTable r in RateSeeds())
                     if (rates.Add(r.Key)) { r.CreatedAt = DateTimeOffset.Now; uow.Set<FnPayrollRateTable>().Add(r); changed = true; }
+                // upgrade of installs made before the review fixes: items finance has not reviewed yet (Verify) get the new defaults
+                List<FnPayrollItem> existing = await uow.Set<FnPayrollItem>().ToListAsync(ct);
+                FnPayrollItem bonus = existing.FirstOrDefault(i => i.Code == "BONUS");
+                if (bonus != null && bonus.Verify && bonus.AccountRole == null) { bonus.AccountRole = AccountRoles.BonusProvision; changed = true; }
+                if (!existing.Any(i => i.SeveranceBase))
+                {
+                    string[] baseItems = { "BASE_WAGE", "SENIORITY", "HOUSING", "GROCERY", "MARITAL", "CHILD" };
+                    foreach (FnPayrollItem i in existing.Where(i => baseItems.Contains(i.Code))) { i.SeveranceBase = true; changed = true; }
+                    FnPayrollItem sev = existing.FirstOrDefault(i => i.Code == "SEVERANCE");
+                    if (sev != null && sev.Verify && sev.Formula == "INSURABLE / 12") { sev.Formula = "SEVERANCE_BASE / 12"; changed = true; }
+                }
                 if (changed) await uow.SaveChangesAsync(ct);
                 _done = true;
             }

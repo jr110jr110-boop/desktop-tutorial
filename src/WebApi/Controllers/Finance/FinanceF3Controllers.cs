@@ -436,6 +436,9 @@ namespace WebApi.Controllers
         [HttpPost("provisions")]
         public async Task<IActionResult> SaveProvisionAsync([FromBody] FnSaveProvisionDto dto, CancellationToken ct) => Ok(await _deferrals.SaveProvisionAsync(dto, ct));
 
+        [HttpPost("provisions/true-up")]
+        public async Task<IActionResult> TrueUpAsync([FromBody] FnTrueUpDto dto, CancellationToken ct) => Ok(await _deferrals.PayrollProvisionTrueUpAsync(dto, ct));
+
         [HttpPost("provisions/movement")]
         public async Task<IActionResult> MovementAsync([FromBody] FnProvisionMovementDto dto, CancellationToken ct) => Ok(await _deferrals.ProvisionMovementAsync(dto, ct));
     }

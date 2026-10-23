@@ -137,6 +137,8 @@ namespace Entities.Model.NasbNiro.Finance
     public class FnVoucher
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
         public int FiscalYearId { get; set; }
         public FnFiscalYear FiscalYear { get; set; }
         /// <summary>Final number: gapless inside the year, assigned at finalisation.</summary>
@@ -223,7 +225,7 @@ namespace Entities.Model.NasbNiro.Finance
         public int CreatedByUserId { get; set; }
     }
 
-    public enum FnDeductionKind { Withholding = 1, InsuranceRetention = 2, PerformanceRetention = 3, LatePenalty = 4, Other = 9 }
+    public enum FnDeductionKind { Withholding = 1, InsuranceRetention = 2, PerformanceRetention = 3, LatePenalty = 4, AdvanceRecovery = 5, Other = 9 }
 
     /// <summary>A typed deduction of a supplier payment request (the old single Deductions number stays as the sum).</summary>
     public class FnPaymentDeduction
@@ -307,6 +309,8 @@ namespace Entities.Model.NasbNiro.Finance
     public class FnReceipt
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
         public string Number { get; set; }
         public DateTime Date { get; set; }
         public FnDocStatus Status { get; set; }
@@ -359,11 +363,14 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal Amount { get; set; }
     }
 
-    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2, Payroll = 3 }
+    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2, Payroll = 3, EmployeeLoan = 4 }
 
     public class FnPayment
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
+        public int? ApprovedByUserId { get; set; }
         public string Number { get; set; }
         public DateTime Date { get; set; }
         public FnDocStatus Status { get; set; }
@@ -372,6 +379,8 @@ namespace Entities.Model.NasbNiro.Finance
         public int? PettyCashId { get; set; }
         /// <summary>Payroll payment: the posted payroll run (totals only; person level stays in payroll).</summary>
         public int? PayrollRunId { get; set; }
+        /// <summary>Employee loan or advance paid out (Dr 10401 with the employee detail / Cr bank).</summary>
+        public int? EmployeeLoanId { get; set; }
         public string PayeeName { get; set; }
         public string Description { get; set; }
         /// <summary>Total of the payment requests (before deductions) or the top-up.</summary>
@@ -529,6 +538,8 @@ namespace Entities.Model.NasbNiro.Finance
     public class FnPettyCashSettlement
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
         public string Number { get; set; }
         public int PettyCashId { get; set; }
         public FnPettyCash PettyCash { get; set; }
@@ -624,11 +635,13 @@ namespace Entities.Model.NasbNiro.Finance
 
     // ------------------------------------------------------------------------------------------ sales invoices
 
-    public enum FnInvoiceType { Advance = 1, Progress = 2, Final = 3, Goods = 4, Service = 5, CreditNote = 6 }
+    public enum FnInvoiceType { Advance = 1, Progress = 2, Final = 3, Goods = 4, Service = 5, CreditNote = 6, RetentionRelease = 7 }
 
     public class FnSalesInvoice
     {
         public int Id { get; set; }
+        /// <summary>Everyone who edited the draft (",5,7,"): the checker or approver must be neither the creator nor any editor.</summary>
+        public string EditorUserIds { get; set; }
         public string Number { get; set; }
         public DateTime Date { get; set; }
         public DateTime? DueDate { get; set; }

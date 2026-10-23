@@ -196,7 +196,8 @@ namespace Services.NasbNiro.Finance
                 if (discount > gross) { c.Error = $"ردیف {row}: تخفیف از مبلغ ردیف بیشتر است."; return c; }
                 decimal amount = gross - discount;
                 decimal rate = 0;
-                if (!l.VatExempt)
+                // releasing a retention is not a sale: no revenue and no VAT again (the VAT was charged on the original invoice)
+                if (!l.VatExempt && dto.Type != FnInvoiceType.RetentionRelease)
                 {
                     if (!vatLooked) { vatRate = await TaxRates.RateAtAsync(_uow, FnTaxKind.Vat, date, ct); vatLooked = true; }
                     if (vatRate == null) { c.Error = "نرخ مالیات بر ارزش افزوده برای این تاریخ در جدول نرخ‌ها ثبت نشده است؛ ابتدا نرخ را ثبت کنید."; return c; }
@@ -210,7 +211,7 @@ namespace Services.NasbNiro.Finance
                 });
             }
             c.Net = c.Lines.Sum(l => l.Amount); c.Discount = c.Lines.Sum(l => l.Discount); c.Vat = c.Lines.Sum(l => l.VatAmount); c.Gross = c.Net + c.Vat;
-            if (dto.Type == FnInvoiceType.CreditNote)
+            if (dto.Type == FnInvoiceType.CreditNote || dto.Type == FnInvoiceType.RetentionRelease)
             {
                 c.Receivable = c.Gross;
                 return c;
@@ -243,6 +244,25 @@ namespace Services.NasbNiro.Finance
             if (dto.AdvanceRecovery < 0) return Bad<SalesInvoiceDto>("کسر پیش‌پرداخت نمی‌تواند منفی باشد.");
             if (dto.AdvanceRecovery > 0 && (dto.Type == FnInvoiceType.Advance || dto.Type == FnInvoiceType.CreditNote)) return Bad<SalesInvoiceDto>("کسر پیش‌پرداخت برای این نوع فاکتور مجاز نیست.");
 
+            int selfId = dto.Id ?? 0;
+            IQueryable<FnSalesInvoice> ofCustomer = _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.CustomerId == customer.Id && i.Status != FnDocStatus.Cancelled && i.Id != selfId && (!dto.ContractId.HasValue || i.ContractId == dto.ContractId));
+            if (dto.AdvanceRecovery > 0)
+            {
+                // the recovery cannot exceed the advance the customer actually paid and that is not recovered yet
+                decimal advanceReceived = await ofCustomer.Where(i => i.Type == FnInvoiceType.Advance && i.Status == FnDocStatus.Posted).SumAsync(i => (decimal?)i.NetAmount, ct) ?? 0;
+                decimal recovered = await ofCustomer.Where(i => i.Type != FnInvoiceType.Advance && i.Type != FnInvoiceType.CreditNote).SumAsync(i => (decimal?)i.AdvanceRecovery, ct) ?? 0;
+                if (R(dto.AdvanceRecovery) > advanceReceived - recovered) return Bad<SalesInvoiceDto>($"کسر پیش‌دریافت ({R(dto.AdvanceRecovery):0}) از پیش‌دریافت بازیابی‌نشده این مشتری ({advanceReceived - recovered:0} ریال) بیشتر است.");
+            }
+            if (dto.Type == FnInvoiceType.RetentionRelease)
+            {
+                if (dto.AdvanceRecovery > 0 || dto.PerformanceRetentionPercent.GetValueOrDefault() > 0 || dto.InsuranceRetentionPercent.GetValueOrDefault() > 0 || dto.WithholdingPercent.GetValueOrDefault() > 0 || dto.UseDefaultDeductionRates)
+                    return Bad<SalesInvoiceDto>("آزادسازی حسن انجام کار کسورات ندارد.");
+                decimal held = await ofCustomer.Where(i => i.Status == FnDocStatus.Posted && i.Type != FnInvoiceType.CreditNote && i.Type != FnInvoiceType.RetentionRelease).SumAsync(i => (decimal?)i.PerformanceRetention, ct) ?? 0;
+                decimal released = await ofCustomer.Where(i => i.Type == FnInvoiceType.RetentionRelease).SumAsync(i => (decimal?)i.NetAmount, ct) ?? 0;
+                decimal requested = (dto.Lines ?? new List<InvoiceLineDto>()).Where(l => l != null).Sum(l => Math.Max(0, R(l.Quantity * l.UnitPrice - l.Discount)));
+                if (requested > held - released) return Bad<SalesInvoiceDto>($"مبلغ آزادسازی از حسن انجام کار نگهداری‌شده ({held - released:0} ریال) بیشتر است.");
+            }
+
             FnSalesInvoice credited = null;
             if (dto.Type == FnInvoiceType.CreditNote)
             {
@@ -268,6 +288,7 @@ namespace Services.NasbNiro.Finance
                 inv = await _uow.Set<FnSalesInvoice>().Include(i => i.Lines).FirstOrDefaultAsync(i => i.Id == dto.Id.Value, ct);
                 if (inv == null) return ResponseDtoHelper.NotFound<SalesInvoiceDto>("فاکتور پیدا نشد.");
                 if (inv.Status != FnDocStatus.Draft) return Bad<SalesInvoiceDto>("فقط پیش‌نویس ویرایش می‌شود.");
+                inv.EditorUserIds = WithEditor(inv.EditorUserIds, Me);
             }
             if (dto.MilestoneId.HasValue)
             {
@@ -329,7 +350,7 @@ namespace Services.NasbNiro.Finance
                 case "approve":
                 {
                     if (inv.Status != FnDocStatus.Draft) return Bad<SalesInvoiceDto>("فقط پیش‌نویس تایید می‌شود.");
-                    if (inv.CreatedByUserId == Me) return Bad<SalesInvoiceDto>("تاییدکننده فاکتور باید غیر از ثبت‌کننده آن باشد.");
+                    if (Touched(inv.CreatedByUserId, inv.EditorUserIds, Me)) return Bad<SalesInvoiceDto>("تاییدکننده فاکتور باید غیر از ثبت‌کننده آن باشد.");
                     if (!inv.Customer.IsActive) return Bad<SalesInvoiceDto>("مشتری غیرفعال است.");
                     PcPaymentMilestone milestone = null;
                     if (inv.MilestoneId.HasValue) milestone = await _uow.Set<PcPaymentMilestone>().FirstOrDefaultAsync(m => m.Id == inv.MilestoneId.Value, ct);
@@ -375,6 +396,13 @@ namespace Services.NasbNiro.Finance
             if (inv.PerformanceRetention > 0) lines.Add(Customer(AccountRoles.RetentionReceivable, inv.PerformanceRetention, 0, "حسن انجام کار " + inv.Number));
             if (inv.InsuranceRetention > 0) lines.Add(Customer(AccountRoles.InsuranceRetentionReceivable, inv.InsuranceRetention, 0, "سپرده بیمه " + inv.Number));
             if (inv.Withholding > 0) lines.Add(Customer(AccountRoles.WithholdingReceivable, inv.Withholding, 0, "مالیات تکلیفی " + inv.Number));
+            if (inv.Type == FnInvoiceType.RetentionRelease)
+            {
+                // Dr receivable / Cr retention receivable: the money held back becomes collectable, nothing is earned again
+                lines.Add(new AccountingEventLine { AccountRole = AccountRoles.AccountsReceivable, Debit = inv.ReceivableAmount, PartyType = "Customer", PartyId = inv.CustomerId, ContractId = inv.ContractId, Description = "آزادسازی حسن انجام کار " + inv.Number });
+                lines.Add(new AccountingEventLine { AccountRole = AccountRoles.RetentionReceivable, Credit = inv.ReceivableAmount, PartyType = "Customer", PartyId = inv.CustomerId, ContractId = inv.ContractId, Description = "آزادسازی حسن انجام کار " + inv.Number });
+                return lines;
+            }
             string revenue = inv.Type == FnInvoiceType.Advance ? AccountRoles.CustomerAdvance : inv.Type == FnInvoiceType.Goods || inv.Type == FnInvoiceType.Service ? AccountRoles.RevenueSales : AccountRoles.RevenueContracts;
             if (inv.Type == FnInvoiceType.Advance) lines.Add(Customer(revenue, 0, inv.NetAmount, "پیش‌دریافت " + inv.Number));
             else lines.Add(new AccountingEventLine { AccountRole = revenue, Credit = inv.NetAmount, ContractId = inv.ContractId, Description = "درآمد " + inv.Number });
@@ -416,16 +444,18 @@ namespace Services.NasbNiro.Finance
                     customers[employer] = customer;
                 }
                 decimal net = R(m.Amount);
-                decimal vatAmount = R(net * vat.Value / 100m);
+                FnInvoiceType invoiceType = MilestoneType(m.Kind);
+                decimal vatRate = invoiceType == FnInvoiceType.RetentionRelease ? 0m : vat.Value;
+                decimal vatAmount = R(net * vatRate / 100m);
                 var inv = new FnSalesInvoice
                 {
                     Number = await InventoryNumbers.NextNumberAsync(_uow, FinanceNumbers.SalesInvoice, "SI", today, ct), Date = today, Customer = customer, ContractId = m.ContractId,
                     MilestoneId = m.Id, ProvisionalStatementId = m.ProvisionalStatementId, Status = FnDocStatus.Draft, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now,
-                    Type = MilestoneType(m.Kind), Description = "پیش‌نویس خودکار از مرحله پرداخت: " + m.Title,
+                    Type = invoiceType, Description = "پیش‌نویس خودکار از مرحله پرداخت: " + m.Title,
                     NetAmount = net, VatAmount = vatAmount, GrossAmount = net + vatAmount, ReceivableAmount = net + vatAmount,
                     Lines = new List<FnSalesInvoiceLine>
                     {
-                        new FnSalesInvoiceLine { RowNumber = 1, Description = m.Title, Quantity = 1, UnitPrice = net, Amount = net, VatRatePercent = vat.Value, VatAmount = vatAmount, Total = net + vatAmount },
+                        new FnSalesInvoiceLine { RowNumber = 1, Description = m.Title, Quantity = 1, UnitPrice = net, Amount = net, VatRatePercent = vatRate, VatAmount = vatAmount, Total = net + vatAmount },
                     },
                 };
                 _uow.Set<FnSalesInvoice>().Add(inv);
@@ -441,7 +471,7 @@ namespace Services.NasbNiro.Finance
             switch (kind)
             {
                 case PcMilestoneKind.Advance: return FnInvoiceType.Advance;
-                case PcMilestoneKind.Retention: return FnInvoiceType.Final;
+                case PcMilestoneKind.Retention: return FnInvoiceType.RetentionRelease;
                 case PcMilestoneKind.Delivery: return FnInvoiceType.Goods;
                 default: return FnInvoiceType.Progress;
             }

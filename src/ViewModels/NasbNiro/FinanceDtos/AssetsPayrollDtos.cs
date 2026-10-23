@@ -515,6 +515,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
 
     public class PayrollItemDto
     {
+        public bool SeveranceBase { get; set; }
         public int Id { get; set; }
         public string Code { get; set; }
         public string Title { get; set; }
@@ -540,6 +541,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
 
     public class SavePayrollItemDto
     {
+        public bool SeveranceBase { get; set; }
         public int? Id { get; set; }
         public string Code { get; set; }
         public string Title { get; set; }

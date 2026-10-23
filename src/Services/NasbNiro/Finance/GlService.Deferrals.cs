@@ -24,6 +24,7 @@ namespace Services.NasbNiro.Finance
         Task<ResponseDto<List<FnProvisionDto>>> GetProvisionsAsync(DateTime? reviewDueAsOf, CancellationToken cancellationToken);
         Task<ResponseDto<FnProvisionDto>> SaveProvisionAsync(FnSaveProvisionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<FnProvisionDto>> ProvisionMovementAsync(FnProvisionMovementDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<FnTrueUpDto>> PayrollProvisionTrueUpAsync(FnTrueUpDto dto, CancellationToken cancellationToken);
     }
 
     // Prepaid expenses, deferred income, accrual reversals and the provisions register (F3 section 5b).
@@ -267,6 +268,44 @@ namespace Services.NasbNiro.Finance
             _uow.Set<FnProvisionMovement>().Add(new FnProvisionMovement { ProvisionId = p.Id, Date = dto.Date.Date, Amount = amount, Reason = dto.Reason.Trim(), VoucherId = v.Voucher.Id, UserId = Me });
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(await ProvisionDtoAsync(p, DateTime.Today, ct));
+        }
+
+        /// <summary>
+        /// Year-end / period-close true-up of a payroll provision (bonus 30402, leave 30403, severance 40201) to the amount the accountant computed:
+        /// a DRAFT voucher for the difference, which a second person checks and the finance manager finalises like any manual voucher.
+        /// </summary>
+        public async Task<ResponseDto<FnTrueUpDto>> PayrollProvisionTrueUpAsync(FnTrueUpDto dto, CancellationToken ct)
+        {
+            if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<FnTrueUpDto>(NotAllowed);
+            if (dto == null || dto.RequiredBalance < 0 || dto.Date == default) return Bad<FnTrueUpDto>("تاریخ و مانده لازم ذخیره را وارد کنید.");
+            if (Clean(dto.Reason) == null) return Bad<FnTrueUpDto>("توضیح محاسبه را بنویسید.");
+            string kind = (Clean(dto.Kind) ?? "").ToLowerInvariant();
+            string provisionRole, expenseRole, fallbackProvision, fallbackExpense;
+            switch (kind)
+            {
+                case "bonus": provisionRole = AccountRoles.BonusProvision; expenseRole = AccountRoles.PayrollExpenseAdmin; fallbackProvision = "30402"; fallbackExpense = "80101"; break;
+                case "leave": provisionRole = AccountRoles.LeaveProvision; expenseRole = AccountRoles.PayrollExpenseAdmin; fallbackProvision = "30403"; fallbackExpense = "80101"; break;
+                case "severance": provisionRole = AccountRoles.SeveranceProvision; expenseRole = AccountRoles.SeveranceExpense; fallbackProvision = "40201"; fallbackExpense = "80103"; break;
+                default: return Bad<FnTrueUpDto>("نوع ذخیره باید bonus، leave یا severance باشد.");
+            }
+            FnAccount provision = await RoleAccountAsync(provisionRole, fallbackProvision, ct), expense = await RoleAccountAsync(expenseRole, fallbackExpense, ct);
+            if (provision == null || expense == null) return Bad<FnTrueUpDto>("حساب ذخیره یا هزینه پیدا نشد.");
+            int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
+            decimal balance = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == provision.Id && l.Voucher.Date <= dto.Date.Date && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose)
+                .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
+            decimal diff = R(dto.RequiredBalance) - balance;
+            var result = new FnTrueUpDto { Kind = kind, Date = dto.Date.Date, RequiredBalance = R(dto.RequiredBalance), CurrentBalance = balance, Difference = diff, Reason = dto.Reason };
+            if (diff == 0) return Bad<FnTrueUpDto>("مانده ذخیره با مقدار لازم برابر است؛ سندی لازم نیست.");
+            string text = $"تعدیل ذخیره {provision.Code} به {R(dto.RequiredBalance):N0}: {dto.Reason.Trim()}";
+            decimal abs = Math.Abs(diff);
+            var lines = diff > 0
+                ? new List<AutoLine> { new AutoLine { Account = expense, Debit = abs, Description = text }, new AutoLine { Account = provision, Credit = abs, Description = text } }
+                : new List<AutoLine> { new AutoLine { Account = provision, Debit = abs, Description = text }, new AutoLine { Account = expense, Credit = abs, Description = text } };
+            var v = await AddAutoVoucherAsync(entityId, dto.Date.Date, text, "ProvisionTrueUp", provision.Code, lines, FnVoucherType.Normal, null, ct, FnVoucherStatus.Draft);
+            if (v.Error != null) return Bad<FnTrueUpDto>(v.Error);
+            await _uow.SaveChangesAsync(ct);
+            result.VoucherId = v.Voucher.Id;
+            return ResponseDtoHelper.Ok(result);
         }
     }
 }

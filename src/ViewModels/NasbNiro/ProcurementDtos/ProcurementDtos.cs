@@ -39,6 +39,8 @@ namespace ViewModels.NasbNiro.ProcurementDtos
     public class ProcurementActionDto
     {
         public int Id { get; set; }
+        /// <summary>Payment "paid" action: the bank account the money leaves from (required).</summary>
+        public int? BankAccountId { get; set; }
 
         /// <summary>
         /// Request: submit, approve-planning, approve-management, reject, close.
@@ -534,6 +536,17 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string Question { get; set; }
         public decimal Weight { get; set; }
         public decimal? Score { get; set; }
+    }
+
+    public class FnOpenAdvanceDto
+    {
+        public int ProviderId { get; set; }
+        public string ProviderName { get; set; }
+        public int PurchaseOrderId { get; set; }
+        public string OrderNumber { get; set; }
+        public decimal Advanced { get; set; }
+        public decimal Recovered { get; set; }
+        public decimal Open { get; set; }
     }
 
     public class SupplierEvaluationDto

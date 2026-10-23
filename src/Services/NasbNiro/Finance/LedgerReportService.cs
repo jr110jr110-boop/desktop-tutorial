@@ -421,19 +421,20 @@ namespace Services.NasbNiro.Finance
                 dto.Rows.Add(new ReconRowDto { Key = key, Title = title, Ledger = ledger, SubLedger = sub, Difference = ledger - sub, Ok = ledger == sub, Note = note });
             }
 
-            // inventory ledger against the cost sub-ledger (ItemCost)
-            decimal inventoryLedger = await all.Where(l => l.SourceRole == AccountRoles.Inventory || l.SourceRole.StartsWith(AccountRoles.Inventory + "."))
+            // inventory ledger (the real 105xx account balances, so manual vouchers and opening imports show up) against the cost sub-ledger (ItemCost);
+            // work in progress (10520) and goods in transit (10530) are not stock items
+            decimal inventoryLedger = await all.Where(l => l.Account.Code.StartsWith("105") && l.Account.Code != "10520" && l.Account.Code != "10530")
                 .SumAsync(l => (decimal?)(l.Debit - l.Credit), ct) ?? 0;
             decimal itemCost = await _uow.Set<ItemCost>().AsNoTracking().SumAsync(c => (decimal?)c.Value, ct) ?? 0;
             Row("inventory", "موجودی کالا: دفتر کل و بهای تمام‌شده کالا", inventoryLedger, itemCost);
 
-            // goods received not invoiced
-            decimal grniLedger = await all.Where(l => l.SourceRole == AccountRoles.Grni).SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
+            // goods received not invoiced: the 30103 account balance against the posted receipt events
+            decimal grniLedger = await all.Where(l => l.Account.Code == "30103").SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             decimal grniEvents = await postedLines.Where(l => l.AccountRole == AccountRoles.Grni).SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             Row("grni", "کالای دریافتی فاکتورنشده: دفتر کل و رسیدهای باز", grniLedger, grniEvents);
 
             // accounts payable per supplier against approved invoices minus paid payment requests
-            var apLedger = await all.Where(l => l.SourceRole == AccountRoles.AccountsPayable && l.Detail1Id != null)
+            var apLedger = await all.Where(l => l.Account.Code == "30101" && l.Detail1Id != null)
                 .GroupBy(l => l.Detail1.LinkedEntityId).Select(g => new { Provider = g.Key, Amount = g.Sum(x => x.Credit) - g.Sum(x => x.Debit) }).ToListAsync(ct);
             var invoiced = await _uow.Set<SupplierInvoice>().AsNoTracking().Where(i => !i.Deleted && i.Status == SupplierInvoiceStatus.Approved)
                 .GroupBy(i => i.ProviderId).Select(g => new { Provider = g.Key, Amount = g.Sum(i => i.TotalAmount) }).ToListAsync(ct);
@@ -455,11 +456,19 @@ namespace Services.NasbNiro.Finance
                 Note = bad.Count == 0 ? null : string.Join(" | ", bad.Take(10)),
             });
 
-            // bank ledger against the treasury balances
-            decimal bankLedger = await all.Where(l => (l.Account.Code == "10102" || l.Account.Code == "10103") && l.Detail1Id != null)
-                .SumAsync(l => (decimal?)(l.Debit - l.Credit), ct) ?? 0;
-            decimal bankEvents = await postedLines.Where(l => l.PartyType == "BankAccount").SumAsync(l => (decimal?)(l.Debit - l.Credit), ct) ?? 0;
-            Row("bank", "بانک: دفتر کل و خزانه", bankLedger, bankEvents);
+            // bank ledger per bank account detail against the treasury balances (the sum of the absolute differences)
+            var bankLedger = await all.Where(l => (l.Account.Code == "10102" || l.Account.Code == "10103") && l.Detail1Id != null)
+                .GroupBy(l => l.Detail1.LinkedEntityId).Select(g => new { Bank = g.Key, Amount = g.Sum(x => x.Debit) - g.Sum(x => x.Credit) }).ToListAsync(ct);
+            var bankEvents = await postedLines.Where(l => l.PartyType == "BankAccount").GroupBy(l => l.PartyId).Select(g => new { Bank = g.Key, Amount = g.Sum(x => x.Debit) - g.Sum(x => x.Credit) }).ToListAsync(ct);
+            decimal bankL = 0, bankS = 0, bankAbs = 0;
+            var bankBad = new List<string>();
+            foreach (int bid in bankLedger.Where(x => x.Bank.HasValue).Select(x => x.Bank.Value).Concat(bankEvents.Where(x => x.Bank.HasValue).Select(x => x.Bank.Value)).Distinct())
+            {
+                decimal l = bankLedger.Where(x => x.Bank == bid).Sum(x => x.Amount), s = bankEvents.Where(x => x.Bank == bid).Sum(x => x.Amount);
+                bankL += l; bankS += s;
+                if (l != s) { bankAbs += Math.Abs(l - s); bankBad.Add($"حساب بانکی {bid}: دفتر {l:0} و خزانه {s:0}"); }
+            }
+            dto.Rows.Add(new ReconRowDto { Key = "bank", Title = "بانک به تفکیک حساب: دفتر کل و خزانه", Ledger = bankL, SubLedger = bankS, Difference = bankAbs, Ok = bankAbs == 0, Note = bankBad.Count == 0 ? null : string.Join(" | ", bankBad.Take(10)) });
 
             // the ledger as a whole
             decimal totalDebit = await all.SumAsync(l => (decimal?)l.Debit, ct) ?? 0, totalCredit = await all.SumAsync(l => (decimal?)l.Credit, ct) ?? 0;

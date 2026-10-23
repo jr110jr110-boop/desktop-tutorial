@@ -32,6 +32,7 @@ namespace Services.NasbNiro.Finance
         public const string Vat = "VAT";                        // مالیات و عوارض ارزش افزوده خرید
         public const string SupplierAdvance = "SupplierAdvance"; // پیش‌پرداخت به تامین‌کننده
         public const string PurchasedServices = "PurchasedServices"; // خدمات و پیمانکاری خریداری‌شده
+        public const string SupplierPenalty = "SupplierPenaltyIncome"; // جرائم دیرکرد کسرشده از تامین‌کننده (کاهش بها / درآمد)
 
         // ---- general ledger, treasury, receivables (release F1)
         public const string Cash = "Cash";                                // صندوق
@@ -119,6 +120,7 @@ namespace Services.NasbNiro.Finance
             yield return (Vat, "مالیات بر ارزش افزوده خرید");
             yield return (SupplierAdvance, "پیش‌پرداخت خرید");
             yield return (PurchasedServices, "خدمات و پیمانکاری خریداری‌شده");
+            yield return (SupplierPenalty, "جرائم دیرکرد کسرشده از تامین‌کنندگان");
             yield return (Cash, "صندوق");
             yield return (BankForeign, "بانک - ارزی");
             yield return (PettyCash, "تنخواه‌گردان");
@@ -472,9 +474,12 @@ namespace Services.NasbNiro.Finance
             List<AccountingEvent> events = await _uow.Set<AccountingEvent>().Include(e => e.Lines)
                 .Where(e => e.SourceType == InventoryDocumentSource && e.SourceId == document.Id && e.Type != AccountingEventType.Reversal)
                 .ToListAsync(cancellationToken);
+            List<int> eventIds = events.Select(x => x.Id).ToList();
+            List<int> voucherEvents = await _uow.Set<FnVoucher>().Where(v => v.AccountingEventId != null && eventIds.Contains(v.AccountingEventId.Value)).Select(v => v.AccountingEventId.Value).ToListAsync(cancellationToken);
             foreach (AccountingEvent e in events)
             {
-                if (e.Status == AccountingEventStatus.Pending || e.Status == AccountingEventStatus.Failed)
+                // an event that has a voucher is reversed even when its status was edited back to Pending
+                if ((e.Status == AccountingEventStatus.Pending || e.Status == AccountingEventStatus.Failed) && !voucherEvents.Contains(e.Id))
                 {
                     e.Status = AccountingEventStatus.NotRequired; // never sent: nothing to reverse in Sepidar
                     e.Error = "سند مبدا باطل شد پیش از ارسال.";

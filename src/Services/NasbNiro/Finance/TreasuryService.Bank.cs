@@ -71,6 +71,7 @@ namespace Services.NasbNiro.Finance
                 if (s == null) return ResponseDtoHelper.NotFound<SettlementDto>("تسویه پیدا نشد.");
                 if (s.Status != FnDocStatus.Draft) return Bad<SettlementDto>("فقط پیش‌نویس ویرایش می‌شود.");
                 if (s.PettyCashId != petty.Id) return Bad<SettlementDto>("تنخواه تسویه قابل تغییر نیست.");
+                s.EditorUserIds = WithEditor(s.EditorUserIds, Me);
             }
 
             List<int> accountIds = input.Where(l => l.AccountId.HasValue).Select(l => l.AccountId.Value).ToList();
@@ -80,18 +81,27 @@ namespace Services.NasbNiro.Finance
             int row = 1;
             foreach (SettlementLineDto l in input)
             {
-                FnAccount account = l.AccountId.HasValue ? accounts.FirstOrDefault(a => a.Id == l.AccountId.Value) : accounts.FirstOrDefault(a => a.Code == Digits(Clean(l.AccountCode) ?? ""));
-                if (account == null || !account.IsActive || account.Level != FnAccountLevel.Subsidiary || account.Type != FnAccountType.Expense)
-                    return Bad<SettlementDto>($"ردیف {row}: حساب هزینه (معین) پیدا نشد یا مجاز نیست.");
+                FnAccount account;
                 decimal amount = R(l.Amount), vat = R(l.VatAmount);
                 if (amount <= 0 || vat < 0) return Bad<SettlementDto>($"ردیف {row}: مبلغ هزینه باید بیشتر از صفر و مالیات نامنفی باشد.");
                 if (l.InventoryDocumentId.HasValue)
                 {
+                    // a petty-cash purchase receipt was already costed (Dr inventory / Cr GRNI): the settlement clears the GRNI, it is not a second expense
                     int self = s?.Id ?? 0;
-                    InventoryDocument doc = await _uow.Set<InventoryDocument>().AsNoTracking().FirstOrDefaultAsync(d => d.Id == l.InventoryDocumentId.Value && !d.Deleted, ct);
+                    InventoryDocument doc = await _uow.Set<InventoryDocument>().AsNoTracking().Include(d => d.Lines).FirstOrDefaultAsync(d => d.Id == l.InventoryDocumentId.Value && !d.Deleted, ct);
                     if (doc == null || doc.Type != InventoryDocumentType.PurchaseReceipt || doc.PurchaseOrderId.HasValue) return Bad<SettlementDto>($"ردیف {row}: رسید خرید تنخواهی پیدا نشد.");
                     if (await _uow.Set<FnPettyCashSettlementLine>().AnyAsync(x => x.InventoryDocumentId == doc.Id && x.Settlement.Status != FnDocStatus.Cancelled && x.SettlementId != self, ct))
                         return Bad<SettlementDto>($"ردیف {row}: این رسید قبلاً تسویه شده است.");
+                    decimal receiptValue = R(doc.Lines.Sum(x => x.Quantity * (x.UnitPrice ?? 0)));
+                    if (amount != receiptValue) return Bad<SettlementDto>($"ردیف {row}: مبلغ باید برابر ارزش رسید ({receiptValue:0} ریال) باشد؛ اختلاف قیمت را با اصلاح رسید رفع کنید.");
+                    account = await _uow.Set<FnAccount>().AsNoTracking().FirstOrDefaultAsync(a => a.Code == "30103" && a.IsActive, ct);
+                    if (account == null) return Bad<SettlementDto>($"ردیف {row}: حساب کالای دریافتی فاکتورنشده (۳۰۱۰۳) پیدا نشد.");
+                }
+                else
+                {
+                    account = l.AccountId.HasValue ? accounts.FirstOrDefault(a => a.Id == l.AccountId.Value) : accounts.FirstOrDefault(a => a.Code == Digits(Clean(l.AccountCode) ?? ""));
+                    if (account == null || !account.IsActive || account.Level != FnAccountLevel.Subsidiary || account.Type != FnAccountType.Expense)
+                        return Bad<SettlementDto>($"ردیف {row}: حساب هزینه (معین) پیدا نشد یا مجاز نیست.");
                 }
                 lines.Add(new FnPettyCashSettlementLine
                 {
@@ -131,7 +141,7 @@ namespace Services.NasbNiro.Finance
                 {
                     if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<SettlementDto>(NotAllowed + " (مالی)");
                     if (s.Status != FnDocStatus.Draft) return Bad<SettlementDto>("فقط پیش‌نویس تایید می‌شود.");
-                    if (s.PettyCash.HolderUserId == Me || s.CreatedByUserId == Me) return Bad<SettlementDto>("تسویه تنخواه را دارنده تنخواه یا ثبت‌کننده آن نمی‌تواند تایید کند.");
+                    if (s.PettyCash.HolderUserId == Me || Touched(s.CreatedByUserId, s.EditorUserIds, Me)) return Bad<SettlementDto>("تسویه تنخواه را دارنده تنخواه یا ثبت‌کننده آن نمی‌تواند تایید کند.");
                     if (s.TotalAmount > s.PettyCash.Balance) return Bad<SettlementDto>($"مانده تنخواه ({s.PettyCash.Balance:0} ریال) برای این تسویه کافی نیست.");
                     Dictionary<int, FnAccount> accounts = await _uow.Set<FnAccount>().Where(a => s.Lines.Select(l => l.AccountId).Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
                     List<int> ccIds = s.Lines.Where(l => l.CostCenterId.HasValue).Select(l => l.CostCenterId.Value).Distinct().ToList();
@@ -461,7 +471,8 @@ namespace Services.NasbNiro.Finance
             DateTimeOffset limit = new DateTimeOffset(asOf.Date.AddDays(1));
             f.OutstandingCheques = await _uow.Set<FnIssuedCheque>().AsNoTracking()
                 .Where(c => c.Status == FnIssuedChequeStatus.Issued && c.ChequeBook.BankAccountId == bankId && c.IssuedAt != null && c.IssuedAt < limit).SumAsync(c => (decimal?)c.Amount, ct) ?? 0;
-            f.Difference = f.Bank + f.DepositsInTransit - f.OutstandingPayments - f.OutstandingCheques - f.Book;
+            // issued cheques are informational: issuing one credits 30102 (payable notes), not the bank account, so it is in neither the bank nor the book balance
+            f.Difference = f.Bank + f.DepositsInTransit - f.OutstandingPayments - f.Book;
             f.Unmatched = await _uow.Set<FnBankStatementLine>().CountAsync(l => l.StatementId == st.Id && l.MatchKind == FnStatementMatch.None, ct);
             return f;
         }

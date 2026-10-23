@@ -302,11 +302,13 @@ namespace Services.NasbNiro.Finance
 
         // ================================================================================== payroll items
 
+        private static readonly string[] ProvisionRoles = { AccountRoles.BonusProvision, AccountRoles.LeaveProvision, AccountRoles.SeveranceProvision };
+
         private static PayrollItemDto ToDto(FnPayrollItem i) => new PayrollItemDto
         {
             Id = i.Id, Code = i.Code, Title = i.Title, Kind = i.Kind, Insurable = i.Insurable, Taxable = i.Taxable, Calculation = i.Calculation, RateKey = i.RateKey,
             Variant = i.Variant, ItemCodes = i.ItemCodes, Formula = i.Formula, Factor = i.Factor, Factor2 = i.Factor2, ProRata = i.ProRata, Condition = i.Condition,
-            ReducesTaxable = i.ReducesTaxable, AccountRole = i.AccountRole, Order = i.Order, IsActive = i.IsActive, Source = i.Source, Verify = i.Verify,
+            ReducesTaxable = i.ReducesTaxable, SeveranceBase = i.SeveranceBase, AccountRole = i.AccountRole, Order = i.Order, IsActive = i.IsActive, Source = i.Source, Verify = i.Verify,
         };
 
         public async Task<ResponseDto<List<PayrollItemDto>>> GetItemsAsync(CancellationToken ct)
@@ -336,6 +338,8 @@ namespace Services.NasbNiro.Finance
                 string role = Clean(dto.AccountRole);
                 if (role == null || !AccountRoles.Standard().Any(r => r.Role == role)) return Bad<PayrollItemDto>("نقش حساب بستانکار قلم نامعتبر است.");
             }
+            if (dto.Kind == FnPayrollItemKind.Earning && Clean(dto.AccountRole) != null && !ProvisionRoles.Contains(Clean(dto.AccountRole)))
+                return Bad<PayrollItemDto>("برای قلم حقوقی، نقش حساب فقط ذخیره عیدی/مرخصی/پایان خدمت است (پرداخت از محل ذخیره).");
             string variant = Clean(dto.Variant);
             switch (dto.Calculation)
             {
@@ -381,7 +385,7 @@ namespace Services.NasbNiro.Finance
             }
             item.Title = Clean(dto.Title); item.Kind = dto.Kind; item.Insurable = dto.Insurable; item.Taxable = dto.Taxable; item.Calculation = dto.Calculation;
             item.RateKey = Clean(dto.RateKey); item.Variant = variant; item.ItemCodes = Clean(dto.ItemCodes); item.Formula = Clean(dto.Formula); item.Factor = dto.Factor;
-            item.Factor2 = dto.Factor2; item.ProRata = dto.ProRata; item.Condition = condition; item.ReducesTaxable = dto.ReducesTaxable; item.AccountRole = Clean(dto.AccountRole);
+            item.Factor2 = dto.Factor2; item.ProRata = dto.ProRata; item.Condition = condition; item.ReducesTaxable = dto.ReducesTaxable; item.SeveranceBase = dto.SeveranceBase; item.AccountRole = Clean(dto.AccountRole);
             item.Order = dto.Order; item.IsActive = dto.IsActive; item.Source = Clean(dto.Source); item.Verify = dto.Verify;
             await ReopenCalculatedRunsAsync(null, ct);
             await _uow.SaveChangesAsync(ct);
@@ -512,6 +516,9 @@ namespace Services.NasbNiro.Finance
             if (dto.DaysWorked < 0 || dto.DaysWorked > 31 || dto.PaidLeaveDays < 0 || dto.MissionDays < 0 || dto.UnpaidLeaveDays < 0 || dto.AbsenceDays < 0
                 || dto.DaysWorked + dto.PaidLeaveDays + dto.MissionDays > 31)
                 return ("روزهای کارکرد نامعتبر است (حداکثر ۳۱ روز).", null, null);
+            int monthDays = PersianCal.DaysIn(dto.Year, dto.Month);
+            if (dto.DaysWorked + dto.UnpaidLeaveDays + dto.AbsenceDays > monthDays)
+                return ($"روزهای کارکرد و غیبت از تعداد روزهای این ماه ({monthDays} روز) بیشتر است.", null, null);
             if (dto.OvertimeHours < 0 || dto.NightHours < 0 || dto.HolidayHours < 0 || dto.OvertimeHours > 400 || dto.NightHours > 400 || dto.HolidayHours > 400) return ("ساعات کارکرد نامعتبر است.", null, null);
             if (dto.ShiftType < 0 || dto.ShiftType > 3) return ("نوع نوبت‌کاری نامعتبر است.", null, null);
 

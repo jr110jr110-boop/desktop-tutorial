@@ -125,6 +125,10 @@ namespace WebApi.Controllers
         [HttpPost("suppliers")]
         public async Task<IActionResult> SaveSupplierAsync([FromBody] SaveSupplierProfileDto dto, CancellationToken ct) => Ok(await _payables.SaveSupplierAsync(dto, ct));
 
+        [HttpGet("suppliers/open-advances")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> OpenAdvancesAsync(CancellationToken ct) => Ok(await _payables.GetOpenAdvancesAsync(ct));
+
         [HttpGet("suppliers/{providerId:int}/evaluations")]
         [Authorize(Roles = Readers)]
         public async Task<IActionResult> EvaluationsAsync(int providerId, CancellationToken ct) => Ok(await _payables.GetEvaluationsAsync(providerId, ct));

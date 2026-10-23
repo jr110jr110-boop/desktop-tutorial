@@ -63,7 +63,7 @@ namespace Services.NasbNiro.Finance
             ("50101", "سرمایه"), ("50201", "اندوخته قانونی"), ("50301", "سود (زیان) انباشته"), ("50401", "تعدیلات سنواتی"), ("50901", "خلاصه سود و زیان"),
             ("60101", "درآمد قراردادهای ساخت"), ("60102", "فروش قطعات و خدمات"), ("60103", "برگشت از فروش و تخفیفات"),
             ("60201", "فروش ضایعات"),
-            ("60301", "سود سپرده"), ("60302", "سود فروش دارایی"), ("60303", "سود تسعیر ارز"), ("60304", "سایر"),
+            ("60301", "سود سپرده"), ("60302", "سود فروش دارایی"), ("60303", "سود تسعیر ارز"), ("60304", "سایر"), ("60305", "جرائم دیرکرد کسرشده از تامین‌کنندگان"),
             ("70101", "مواد مستقیم"), ("70102", "دستمزد مستقیم"), ("70103", "سربار ساخت"), ("70104", "پیمانکاری و خدمات خریداری‌شده"),
             ("70105", "بهای تمام‌شده ضایعات فروخته‌شده"), ("70106", "اضافات و کسورات انبار"), ("70107", "تعدیل ارزش موجودی"), ("70108", "اختلاف قیمت خرید"), ("70109", "انحراف بهای تمام‌شده"), ("70110", "سربار جذب‌شده"), ("70111", "انحراف جذب سربار"), ("70112", "هزینه زیان مورد انتظار قراردادها"),
             ("70201", "حقوق و دستمزد غیرمستقیم"), ("70202", "مواد غیرمستقیم و مصرفی"), ("70203", "استهلاک"), ("70204", "تعمیر و نگهداری"), ("70205", "انرژی"), ("70206", "سایر"),
@@ -183,7 +183,7 @@ namespace Services.NasbNiro.Finance
             { AccountRoles.OpeningBalance, "50301" }, { AccountRoles.ScrapRecovery, "10505" }, { AccountRoles.ScrapCost, "70105" }, { AccountRoles.ScrapRevenue, "60201" },
             { AccountRoles.Bank, "10102" }, { AccountRoles.Revaluation, "70107" }, { AccountRoles.AccountsPayable, "30101" },
             { AccountRoles.PurchasePriceVariance, "70108" }, { AccountRoles.Vat, "10403" }, { AccountRoles.SupplierAdvance, "10601" },
-            { AccountRoles.PurchasedServices, "70104" },
+            { AccountRoles.PurchasedServices, "70104" }, { AccountRoles.SupplierPenalty, "60305" },
             // release F1
             { AccountRoles.Cash, "10101" }, { AccountRoles.BankForeign, "10103" }, { AccountRoles.PettyCash, "10104" }, { AccountRoles.FundsInTransit, "10105" },
             { AccountRoles.AccountsReceivable, "10301" }, { AccountRoles.ChequesReceivable, "10302" }, { AccountRoles.ChequesInCollection, "10303" },

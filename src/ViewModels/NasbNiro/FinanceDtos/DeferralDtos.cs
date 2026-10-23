@@ -94,4 +94,17 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public List<int> CreatedVoucherIds { get; set; } = new List<int>();
         public List<string> Skipped { get; set; } = new List<string>();
     }
+
+    public class FnTrueUpDto
+    {
+        /// <summary>bonus, leave or severance.</summary>
+        public string Kind { get; set; }
+        public DateTime Date { get; set; }
+        /// <summary>The credit balance the provision must have on the date.</summary>
+        public decimal RequiredBalance { get; set; }
+        public string Reason { get; set; }
+        public decimal CurrentBalance { get; set; }
+        public decimal Difference { get; set; }
+        public int? VoucherId { get; set; }
+    }
 }

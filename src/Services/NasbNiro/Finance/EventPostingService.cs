@@ -70,6 +70,13 @@ namespace Services.NasbNiro.Finance
             var voucherOfEvent = new Dictionary<int, FnVoucher>();
             int lastId = 0;
 
+            void DetachNew()
+            {
+                foreach (FnVoucherLine l in _uow.Set<FnVoucherLine>().Local.ToList()) if (_uow.Entry(l).State == EntityState.Added) _uow.Entry(l).State = EntityState.Detached;
+                foreach (FnVoucher v in _uow.Set<FnVoucher>().Local.ToList()) if (_uow.Entry(v).State == EntityState.Added) _uow.Entry(v).State = EntityState.Detached;
+                foreach (FnDetailAccount d in _uow.Set<FnDetailAccount>().Local.ToList()) if (_uow.Entry(d).State == EntityState.Added) _uow.Entry(d).State = EntityState.Detached;
+            }
+
             while (true)
             {
                 List<AccountingEvent> batch = await _uow.Set<AccountingEvent>().Include(e => e.Lines)
@@ -84,15 +91,18 @@ namespace Services.NasbNiro.Finance
                 Dictionary<int, int> originalVoucher = reverses.Count == 0 ? new Dictionary<int, int>()
                     : await _uow.Set<FnVoucher>().Where(v => v.AccountingEventId != null && reverses.Contains(v.AccountingEventId.Value))
                         .ToDictionaryAsync(v => v.AccountingEventId.Value, v => v.Id, ct);
+                List<int> originalIds = originalVoucher.Values.ToList();
+                List<int> alreadyReversed = originalIds.Count == 0 ? new List<int>()
+                    : await _uow.Set<FnVoucher>().Where(v => v.ReversesVoucherId != null && originalIds.Contains(v.ReversesVoucherId.Value)).Select(v => v.ReversesVoucherId.Value).ToListAsync(ct);
                 List<int> workOrderIds = batch.SelectMany(e => e.Lines).Where(l => l.WorkOrderId.HasValue).Select(l => l.WorkOrderId.Value).Distinct().ToList();
                 Dictionary<int, int> workOrderContract = workOrderIds.Count == 0 ? new Dictionary<int, int>()
                     : await _uow.Set<WorkOrder>().Where(w => workOrderIds.Contains(w.Id)).ToDictionaryAsync(w => w.Id, w => w.ContractId, ct);
 
-                foreach (AccountingEvent e in batch)
+                async Task ProcessEventAsync(AccountingEvent e)
                 {
-                    if (already.Contains(e.Id)) { e.Status = AccountingEventStatus.Posted; continue; }
+                    if (already.Contains(e.Id)) { e.Status = AccountingEventStatus.Posted; return; }
                     List<AccountingEventLine> lines = e.Lines.OrderBy(l => l.RowNumber).Where(l => R(l.Debit) != 0 || R(l.Credit) != 0).ToList();
-                    if (lines.Count == 0) { e.Status = AccountingEventStatus.NotRequired; result.NotRequired++; continue; }
+                    if (lines.Count == 0) { e.Status = AccountingEventStatus.NotRequired; result.NotRequired++; return; }
 
                     string error = null;
                     int entityId = e.LegalEntityId <= 0 ? FinanceSeed.MainEntityId : e.LegalEntityId;
@@ -132,7 +142,7 @@ namespace Services.NasbNiro.Finance
                         e.Attempts++;
                         result.Failed++;
                         if (result.Errors.Count < 20) result.Errors.Add($"رویداد {e.Id} ({e.SourceNumber}): {error}");
-                        continue;
+                        return;
                     }
 
                     FnFiscalYear year = resolved.Year;
@@ -146,6 +156,13 @@ namespace Services.NasbNiro.Finance
                         AccountingEventId = e.Id, LatePosting = resolved.Late, CreatedByUserId = 0, CreatedAt = DateTimeOffset.Now,
                         CheckedByUserId = 0, CheckedAt = DateTimeOffset.Now, Lines = new List<FnVoucherLine>(),
                     };
+                    if (e.ReversesEventId.HasValue && originalVoucher.TryGetValue(e.ReversesEventId.Value, out int origId) && alreadyReversed.Contains(origId))
+                    {
+                        // the voucher of the source document was reversed by hand: a second reversal would break the one-reversal rule and block posting
+                        e.Status = AccountingEventStatus.Posted;
+                        e.Error = "سند اصلی قبلاً برگشت خورده است؛ برگشت دوم ثبت نشد.";
+                        return;
+                    }
                     if (e.ReversesEventId.HasValue)
                     {
                         if (voucherOfEvent.TryGetValue(e.ReversesEventId.Value, out FnVoucher original)) { voucher.Type = FnVoucherType.Reversal; voucher.ReversesVoucher = original; }
@@ -204,12 +221,45 @@ namespace Services.NasbNiro.Finance
                     if (resolved.Late) result.LatePosted++;
                 }
 
+                var originalState = batch.ToDictionary(e => e.Id, e => (e.Status, e.Error, e.Attempts));
+                int postedBefore = result.Posted, lateBefore = result.LatePosted, notRequiredBefore = result.NotRequired, failedBefore = result.Failed, errorsBefore = result.Errors.Count;
+                foreach (AccountingEvent e in batch) await ProcessEventAsync(e);
                 try { await _uow.SaveChangesAsync(ct); }
-                catch (DbUpdateException ex)
+                catch (DbUpdateException)
                 {
-                    result.Errors.Add("ثبت اسناد ناموفق بود: " + (ex.InnerException?.Message ?? ex.Message));
-                    result.Failed += batch.Count;
-                    return result;
+                    // one bad event must not stop the others: undo the batch and post the events one by one; the culprit is marked Failed with its error
+                    DetachNew();
+                    details = new DetailResolver(_uow);
+                    foreach (AccountingEvent e in batch) { var o = originalState[e.Id]; e.Status = o.Status; e.Error = o.Error; e.Attempts = o.Attempts; voucherOfEvent.Remove(e.Id); }
+                    result.Posted = postedBefore; result.LatePosted = lateBefore; result.NotRequired = notRequiredBefore; result.Failed = failedBefore;
+                    while (result.Errors.Count > errorsBefore) result.Errors.RemoveAt(result.Errors.Count - 1);
+                    foreach (AccountingEvent e in batch)
+                    {
+                        if (e.Status == AccountingEventStatus.Posted) continue;
+                        var before = originalState[e.Id];
+                        await ProcessEventAsync(e);
+                        try { await _uow.SaveChangesAsync(ct); }
+                        catch (DbUpdateConcurrencyException)
+                        {
+                            // somebody changed the event meanwhile (cancelled, marked): leave it for the next run
+                            DetachNew();
+                            details = new DetailResolver(_uow);
+                            voucherOfEvent.Remove(e.Id);
+                            result.Posted = Math.Max(0, result.Posted - 1);
+                            _uow.Entry(e).State = EntityState.Detached;
+                        }
+                        catch (DbUpdateException ex)
+                        {
+                            DetachNew();
+                            details = new DetailResolver(_uow);
+                            voucherOfEvent.Remove(e.Id);
+                            result.Posted = Math.Max(0, result.Posted - 1);
+                            e.Status = AccountingEventStatus.Failed; e.Error = Trunc("ثبت سند ناموفق بود: " + (ex.InnerException?.Message ?? ex.Message), 2000); e.Attempts = before.Attempts + 1;
+                            result.Failed++;
+                            if (result.Errors.Count < 20) result.Errors.Add($"رویداد {e.Id} ({e.SourceNumber}): {e.Error}");
+                            await _uow.SaveChangesAsync(ct);
+                        }
+                    }
                 }
             }
             return result;

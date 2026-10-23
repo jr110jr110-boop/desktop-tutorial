@@ -78,6 +78,7 @@ namespace Services.NasbNiro.Finance
                 receipt = await _uow.Set<FnReceipt>().Include(r => r.Lines).Include(r => r.Allocations).FirstOrDefaultAsync(r => r.Id == dto.Id.Value, ct);
                 if (receipt == null) return ResponseDtoHelper.NotFound<ReceiptDto>("سند دریافت پیدا نشد.");
                 if (receipt.Status != FnDocStatus.Draft) return Bad<ReceiptDto>("فقط پیش‌نویس ویرایش می‌شود.");
+                receipt.EditorUserIds = WithEditor(receipt.EditorUserIds, Me);
             }
 
             List<int> bankIds = input.Where(l => l.BankAccountId.HasValue).Select(l => l.BankAccountId.Value).Distinct().ToList();
@@ -182,7 +183,7 @@ namespace Services.NasbNiro.Finance
             {
                 case "approve":
                     if (r.Status != FnDocStatus.Draft) return Bad<ReceiptDto>("فقط پیش‌نویس تایید می‌شود.");
-                    if (r.CreatedByUserId == Me) return Bad<ReceiptDto>(SameUser);
+                    if (Touched(r.CreatedByUserId, r.EditorUserIds, Me)) return Bad<ReceiptDto>(SameUser);
                     r.Status = FnDocStatus.Approved;
                     break;
                 case "post":

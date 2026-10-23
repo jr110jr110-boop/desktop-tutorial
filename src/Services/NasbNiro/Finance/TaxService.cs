@@ -121,7 +121,7 @@ namespace Services.NasbNiro.Finance
             var dto = new VatSeasonDto { Year = year, Season = season, From = from, To = to };
 
             var sales = await uow.Set<FnSalesInvoice>().AsNoTracking()
-                .Where(i => i.Status == FnDocStatus.Posted && i.Date >= from && i.Date <= to)
+                .Where(i => i.Status == FnDocStatus.Posted && i.Type != FnInvoiceType.RetentionRelease && i.Date >= from && i.Date <= to)
                 .Select(i => new { i.CustomerId, CustomerName = i.Customer.Name, i.Customer.EconomicCode, i.Type, i.NetAmount, i.VatAmount }).ToListAsync(ct);
             foreach (var g in sales.GroupBy(s => s.CustomerId))
             {
@@ -160,7 +160,7 @@ namespace Services.NasbNiro.Finance
         {
             query ??= new TreasuryQuery();
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<PagedList<TaxpayerSaleDto>>("شما مجوز این کار را ندارید");
-            IQueryable<FnSalesInvoice> q = _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted);
+            IQueryable<FnSalesInvoice> q = _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Type != FnInvoiceType.RetentionRelease);
             if (query.From.HasValue) q = q.Where(i => i.Date >= query.From.Value);
             if (query.To.HasValue) q = q.Where(i => i.Date <= query.To.Value);
             IQueryable<TaxpayerSaleDto> rows = q.OrderBy(i => i.Date).ThenBy(i => i.Id).Select(i => new TaxpayerSaleDto
