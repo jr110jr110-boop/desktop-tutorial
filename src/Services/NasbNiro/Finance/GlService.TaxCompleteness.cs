@@ -32,7 +32,7 @@ namespace Services.NasbNiro.Finance
             var dto = new FnVatDetailDto { Year = year, Season = season, From = t.From, To = t.To, SalesNet = t.SalesNet, SalesVat = t.SalesVat, PurchasesNet = t.PurchasesNet, PurchasesVat = t.PurchasesVat, VatPayable = t.VatPayable };
 
             // same filters as the season report, one row per document
-            foreach (var i in await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Date >= t.From && i.Date <= t.To)
+            foreach (var i in await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Type != FnInvoiceType.RetentionRelease && i.Date >= t.From && i.Date <= t.To)
                          .OrderBy(i => i.Date).ThenBy(i => i.Id).Select(i => new { i.Number, i.Date, i.Type, i.NetAmount, i.VatAmount, Name = i.Customer.Name, i.Customer.EconomicCode }).ToListAsync(ct))
             {
                 int sign = i.Type == FnInvoiceType.CreditNote ? -1 : 1;
