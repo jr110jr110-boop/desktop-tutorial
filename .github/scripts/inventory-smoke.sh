@@ -2385,10 +2385,10 @@ fv "{\"date\":\"2024-08-10T00:00:00\",\"description\":\"هزینه اداری\",
 as "$FM_TOKEN" POST $FLN/limits '{"bankName":"بانک آزمون F3","limitAmount":2000000000,"validFrom":"2025-03-21T00:00:00","validTo":"2026-03-20T00:00:00","note":"سقف آزمون"}'; check "f3 loan: facility limit defined" '.success and .data.limitAmount == 2000000000'
 LIM=$(val .data.id)
 as "$FIN_TOKEN" POST $FLN/limits '{"bankName":"x","limitAmount":1,"validFrom":"2025-03-21T00:00:00"}'; no "f3 loan: only the finance manager defines limits"
-as "$TR_TOKEN" POST $FLN "{\"bankName\":\"بانک آزمون F3\",\"contractNo\":\"LN-F3-1\",\"amount\":1200000000,\"startDate\":\"2025-06-22T00:00:00\",\"ratePercent\":24,\"scheduleKind\":1,\"installmentCount\":12,\"feeAmount\":1000000,\"facilityLimitId\":$LIM,\"bankAccountId\":$BA1}"; check "f3 loan: annuity schedule 1,200,000,000 at 24% over 12 months" '.success and .data.status == 0 and (.data.installments|length) == 12 and .data.installments[0].principal == 89471516 and .data.installments[0].interest == 24000000 and .data.installments[1].principal == 91260946 and .data.installments[1].interest == 22210570 and .data.installments[2].principal == 93086165 and .data.installments[2].interest == 20385351 and .data.installments[11].principal == 111246584 and .data.installments[11].interest == 2224932 and ([.data.installments[].principal]|add) == 1200000000 and .data.totalInterest == 161658192'
+as "$TR_TOKEN" POST $FLN "{\"bankName\":\"بانک آزمون F3\",\"contractNo\":\"LN-F3-1\",\"amount\":1200000000,\"startDate\":\"2025-06-22T00:00:00\",\"ratePercent\":24,\"scheduleKind\":2,\"installmentCount\":12,\"feeAmount\":1000000,\"facilityLimitId\":$LIM,\"bankAccountId\":$BA1}"; check "f3 loan: annuity schedule 1,200,000,000 at 24% over 12 months" '.success and .data.status == 0 and (.data.installments|length) == 12 and .data.installments[0].principal == 89471516 and .data.installments[0].interest == 24000000 and .data.installments[1].principal == 91260946 and .data.installments[1].interest == 22210570 and .data.installments[2].principal == 93086165 and .data.installments[2].interest == 20385351 and .data.installments[11].principal == 111246584 and .data.installments[11].interest == 2224932 and ([.data.installments[].principal]|add) == 1200000000 and .data.totalInterest == 161658192'
 LN1=$(val .data.id)
 as "$TR_TOKEN" GET $FLN/$LN1; check "f3 loan: instalment dates follow the Persian months (1 Mordad 1404 = 2025-07-23)" '.success and (.data.installments[0].dueDate|startswith("2025-07-23")) and (.data.installments[1].dueDate|startswith("2025-08-23"))'
-as "$TR_TOKEN" POST $FLN "{\"bankName\":\"بانک\",\"amount\":300000000,\"startDate\":\"2025-06-22T00:00:00\",\"ratePercent\":12,\"scheduleKind\":2,\"installmentCount\":3}"; check "f3 loan: equal-principal schedule has falling interest 3,000,000 / 2,000,000 / 1,000,000" '.success and ([.data.installments[].principal]|all(. == 100000000)) and ([.data.installments[].interest] == [3000000,2000000,1000000])'
+as "$TR_TOKEN" POST $FLN "{\"bankName\":\"بانک\",\"amount\":300000000,\"startDate\":\"2025-06-22T00:00:00\",\"ratePercent\":12,\"scheduleKind\":1,\"installmentCount\":3}"; check "f3 loan: equal-principal schedule has falling interest 3,000,000 / 2,000,000 / 1,000,000" '.success and ([.data.installments[].principal]|all(. == 100000000)) and ([.data.installments[].interest] == [3000000,2000000,1000000])'
 LN2=$(val .data.id)
 as "$TR_TOKEN" POST $FLN '{"bankName":"x","amount":0,"startDate":"2025-06-22T00:00:00","ratePercent":10,"installmentCount":3}'; no "f3 loan: amount must be positive"
 as "$AUD_TOKEN" POST $FLN/action "{\"id\":$LN1,\"action\":\"disburse\",\"date\":\"2025-06-22T00:00:00\",\"bankAccountId\":$BA1}"; no "f3 loan: the auditor cannot disburse"
@@ -2435,7 +2435,7 @@ as "$FM_TOKEN" GET "$FST/ratios?FiscalYearId=$Y3"; check "f3 stmt: ratios curren
 as "$FM_TOKEN" GET "$FST/ratios?FiscalYearId=$Y3"; check "f3 stmt: DSO 274.5 and DPO 366 days over a 366-day year" '.success and .data.days == 366 and ([.data.ratios[]|select(.key == "DSO")][0].value) == 274.5 and ([.data.ratios[]|select(.key == "DPO")][0].value) == 366'
 as "$FM_TOKEN" GET "$FST/drill?account=601&FiscalYearId=$Y3"; check "f3 stmt: drill-down on revenue lists the voucher and the total equals the statement" '.success and (.data.rows|length) == 1 and .data.totalCredit == 400000000 and .data.rows[0].voucherId > 0'
 as "$AUD_TOKEN" GET "$FST/cash-flow?FiscalYearId=$Y3"; check "f3 stmt: the auditor can read the statements" '.success and .data.ties == true'
-as "$PAYR_TOKEN" GET "$FST/cash-flow?FiscalYearId=$Y3"; no "f3 stmt: payroll staff are not finance readers"
+as "$PAYR_TOKEN" GET "$FST/cash-flow?FiscalYearId=$Y3"; [ "$CODE" = "403" ] && ok "f3 stmt: payroll staff are not finance readers (403)" || bad "f3 stmt: payroll staff are not finance readers (403) got $CODE"
 as "$FM_TOKEN" GET "$FST/cash-flow?FiscalYearId=999999"; no "f3 stmt: unknown fiscal year"
 as "$FIN_TOKEN" POST $FST/views '{"reportKey":"cash-flow","title":"نمای آزمون","filtersJson":"{\"q\":1}","shared":false}'; check "f3 stmt: a saved view" '.success and .data.id > 0'
 VW=$(val .data.id)
@@ -2444,12 +2444,13 @@ as "$FIN_TOKEN" GET $FST/views; check "f3 stmt: the owner sees the view" '.succe
 
 # --- section 10: receivables and payables control
 as "$FIN_TOKEN" GET "$FCL/bad-debt?AsOf=2025-08-01"; no "f3 debt: the rates are inputs; none entered, nothing assumed"
-as "$FIN_TOKEN" GET "$FCL/bad-debt?AsOf=2025-08-01&CurrentRate=1&Days31To60Rate=5&Days61To90Rate=20&Over90Rate=50"; check "f3 debt: preview of the provision by ageing bucket" '.success and (.data.buckets|length) == 4 and .data.voucherId == null and .data.required == ([.data.buckets[].required]|add) and .data.change == (.data.required - .data.previousBalance)'
-BDREQ=$(jq -r .data.required "$B")
-as "$AUD_TOKEN" POST $FCL/bad-debt '{"asOf":"2025-08-01T00:00:00","currentRate":1,"days31To60Rate":5,"days61To90Rate":20,"over90Rate":50}'; no "f3 debt: the auditor cannot post the provision"
+as "$FIN_TOKEN" GET "$FCL/bad-debt?AsOf=$TODAY&CurrentRate=1&Days31To60Rate=5&Days61To90Rate=20&Over90Rate=50"; check "f3 debt: preview of the provision by ageing bucket" '.success and (.data.buckets|length) == 4 and .data.voucherId == null and .data.required == ([.data.buckets[].required]|add) and .data.change == (.data.required - .data.previousBalance)'
+BDREQ=$(jq -r '.data.required|round' "$B")
+BDJ="{\"asOf\":\"${TODAY}T00:00:00\",\"currentRate\":1,\"days31To60Rate\":5,\"days61To90Rate\":20,\"over90Rate\":50}"
+as "$AUD_TOKEN" POST $FCL/bad-debt "$BDJ"; no "f3 debt: the auditor cannot post the provision"
 if [ "$BDREQ" != "0" ]; then
-  as "$FIN_TOKEN" POST $FCL/bad-debt '{"asOf":"2025-08-01T00:00:00","currentRate":1,"days31To60Rate":5,"days61To90Rate":20,"over90Rate":50}'; check "f3 debt: the provision voucher is posted" '.success and .data.voucherId > 0 and (.data.number|startswith("BD-"))'
-  as "$FIN_TOKEN" POST $FCL/bad-debt '{"asOf":"2025-08-01T00:00:00","currentRate":1,"days31To60Rate":5,"days61To90Rate":20,"over90Rate":50}'; no "f3 debt: a second run with unchanged balances posts nothing"
+  as "$FIN_TOKEN" POST $FCL/bad-debt "$BDJ"; check "f3 debt: the provision voucher is posted" '.success and .data.voucherId > 0 and (.data.number|startswith("BD-"))'
+  as "$FIN_TOKEN" POST $FCL/bad-debt "$BDJ"; no "f3 debt: a second run with unchanged balances posts nothing"
 else
   ok "f3 debt: no receivables, nothing to post"
 fi
@@ -2460,8 +2461,20 @@ as "$FM_TOKEN" GET $FCL/holds; check "f3 hold: the hold is listed" '.success and
 as "$FIN_TOKEN" POST $FCL/holds "{\"customerId\":$HC,\"active\":false}"; check "f3 hold: the hold is lifted" '.success and .data.active == false'
 as "$FIN_TOKEN" POST "$FCL/dunning/run?asOf=2027-01-01"; check "f3 dunning: drafts are created for overdue customers (or none when nothing is overdue)" '.success and (.data|type) == "array"'
 as "$FM_TOKEN" GET $FCL/dunning; check "f3 dunning: the list is readable" '.success'
+# an approved supplier invoice that no payment request covers yet (10 bolts x 390,000 + 10% VAT = 4,290,000)
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"پیشنهاد پرداخت\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ3=$(val .data.id); RQ3L=$(val '.data.lines[0].id')
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ3,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ3,\"action\":\"approve-management\"}"
+QA3="{\"providerId\":$PA,\"quoteNumber\":\"P-A\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ3L,\"quantity\":10,\"unitPrice\":390000}]}"
+QB3="{\"providerId\":$PB,\"quoteNumber\":\"P-B\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ3L,\"quantity\":10,\"unitPrice\":380000}]}"
+as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ3,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA3,$QB3]}"; IQ3=$(val .data.id); QA3ID=$(val ".data.quotes[]|select(.providerId == $PA)|.id")
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ3,\"quoteId\":$QA3ID,\"reason\":\"گرید A\"}"
+as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ3"; PO3=$(val .data.id); POL3=$(val '.data.lines[0].id')
+call POST procurement/orders/action "{\"id\":$PO3,\"action\":\"approve\"}"; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO3,\"action\":\"release\"}"; check "f3 proposal setup: order released" '.success and .data.status == 2'
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO3,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"locationId\":$L2,\"purchaseOrderLineId\":$POL3}]}"; DR3=$(val .data.id); call POST "inventory/documents/$DR3/confirm"; check "f3 proposal setup: 10 bolts received" '.success'
+as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$PO3,\"invoiceNumber\":\"F-3001\",\"invoiceDate\":\"2026-10-24T00:00:00\",\"isOfficial\":true,\"lines\":[{\"orderLineId\":$POL3,\"quantity\":10,\"unitPrice\":390000}]}"; SI3=$(val .data.id)
+as "$FIN_TOKEN" POST procurement/invoices/action "{\"id\":$SI3,\"action\":\"approve\"}"; check "f3 proposal setup: invoice F-3001 of 4,290,000 approved" '.success and .data.status == 3 and .data.totalAmount == 4290000'
 as "$FIN_TOKEN" POST "$FCL/payment-proposals" '{"asOf":"2020-01-01T00:00:00"}'; no "f3 proposal: nothing is due that early"
-as "$FIN_TOKEN" POST "$FCL/payment-proposals" '{"asOf":"2027-12-31T00:00:00","cashLimit":0}'; check "f3 proposal: approved unpaid supplier invoices by due date, no limit" '.success and (.data.lines|length) >= 1 and .data.total == ([.data.lines[]|select(.included)|.amount]|add) and ([.data.lines[].dueDate]|. == sort)'
+as "$FIN_TOKEN" POST "$FCL/payment-proposals" '{"asOf":"2027-12-31T00:00:00","cashLimit":0}'; check "f3 proposal: the approved unpaid invoice F-3001 (4,290,000) is proposed, by due date, no limit" '.success and ([.data.lines[]|select(.amount == 4290000)]|length) == 1 and (.data.lines|length) >= 1 and .data.total == ([.data.lines[]|select(.included)|.amount]|add) and ([.data.lines[].dueDate]|. == sort)'
 PP1=$(val .data.id)
 as "$FIN_TOKEN" POST "$FCL/payment-proposals" '{"asOf":"2027-12-31T00:00:00","cashLimit":1}'; check "f3 proposal: a cash limit of 1 rial includes nothing" '.success and .data.total == 0 and ([.data.lines[]|select(.included)]|length) == 0'
 as "$FIN_TOKEN" POST $FCL/payment-proposals/$PP1/approve; no "f3 proposal: only the finance manager approves"
