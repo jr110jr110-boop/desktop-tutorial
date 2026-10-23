@@ -2817,6 +2817,11 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ReversesEventId")
                         .HasColumnType("int");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<DateTimeOffset?>("SentAt")
                         .HasColumnType("datetimeoffset");
 
@@ -3236,6 +3241,9 @@ namespace DataLayer.Migrations
 
                     b.Property<DateTime?>("DisposedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("InUseDate")
                         .HasColumnType("datetime2");
@@ -4420,6 +4428,9 @@ namespace DataLayer.Migrations
                     b.Property<int>("AssetCount")
                         .HasColumnType("int");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("FiscalYearId")
                         .HasColumnType("int");
 
@@ -4669,6 +4680,9 @@ namespace DataLayer.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DisbursementPaymentId")
                         .HasColumnType("int");
 
                     b.Property<int>("EmployeeId")
@@ -5879,6 +5893,9 @@ namespace DataLayer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -5895,6 +5912,12 @@ namespace DataLayer.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("EmployeeLoanId")
+                        .HasColumnType("int");
 
                     b.Property<decimal>("GrossAmount")
                         .HasPrecision(18)
@@ -6139,6 +6162,9 @@ namespace DataLayer.Migrations
                     b.Property<bool>("ReducesTaxable")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("SeveranceBase")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Source")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -6236,6 +6262,9 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("CreatedByUserId")
                         .HasColumnType("int");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("EmployeeCount")
                         .HasColumnType("int");
@@ -6609,6 +6638,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Number")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -6810,6 +6842,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Number")
                         .IsRequired()
@@ -7178,6 +7213,9 @@ namespace DataLayer.Migrations
 
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("GrossAmount")
                         .HasPrecision(18)
@@ -7555,6 +7593,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset?>("FinalizedAt")
                         .HasColumnType("datetimeoffset");
