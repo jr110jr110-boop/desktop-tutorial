@@ -399,6 +399,7 @@ namespace Services.NasbNiro.Finance
             if (inv.Type == FnInvoiceType.RetentionRelease)
             {
                 // Dr receivable / Cr retention receivable: the money held back becomes collectable, nothing is earned again
+                lines.Clear();
                 lines.Add(new AccountingEventLine { AccountRole = AccountRoles.AccountsReceivable, Debit = inv.ReceivableAmount, PartyType = "Customer", PartyId = inv.CustomerId, ContractId = inv.ContractId, Description = "آزادسازی حسن انجام کار " + inv.Number });
                 lines.Add(new AccountingEventLine { AccountRole = AccountRoles.RetentionReceivable, Credit = inv.ReceivableAmount, PartyType = "Customer", PartyId = inv.CustomerId, ContractId = inv.ContractId, Description = "آزادسازی حسن انجام کار " + inv.Number });
                 return lines;

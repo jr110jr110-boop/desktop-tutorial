@@ -497,9 +497,10 @@ call POST procurement/payments/action "{\"id\":$PAY,\"action\":\"approve\"}"; ch
 user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
 user2 fin2.ci 3 'Ci#Fin2-User-2026' 09120000024 0012345624
 user2 fm.ci 17 'Ci#Fm-User-2026' 09120000025 0012345625
+user2 fm2.ci 17 'Ci#Fm2-User-2026' 09120000031 0012345631
 user2 pay.ci 18 'Ci#Pay-User-2026' 09120000026 0012345626
 user2 tr.ci 19 'Ci#Tr-User-2026' 09120000027 0012345627
-FIN2_TOKEN=$(login fin2.ci 'Ci#Fin2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026'); PAYR_TOKEN=$(login pay.ci 'Ci#Pay-User-2026'); TR_TOKEN=$(login tr.ci 'Ci#Tr-User-2026')
+FIN2_TOKEN=$(login fin2.ci 'Ci#Fin2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026'); FM2_TOKEN=$(login fm2.ci 'Ci#Fm2-User-2026'); PAYR_TOKEN=$(login pay.ci 'Ci#Pay-User-2026'); TR_TOKEN=$(login tr.ci 'Ci#Tr-User-2026')
 as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\"}"; check "payment needs the bank or Sepidar reference" '.success == false'
 as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":1}"; nomsg "r1: the old pay action is for treasury or the finance manager only" "خزانه"
 as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\"}"; check "r1: the old pay action needs the paying bank account (the bank side of the entry is always linked)" '.success == false and (.message|contains("حساب بانکی"))'
@@ -1473,11 +1474,12 @@ as "$FIN_TOKEN" POST $FT/statements/match "{\"statementId\":$ST1,\"lineId\":$FEE
 as "$FIN_TOKEN" POST $FT/statements/match "{\"statementId\":$ST1,\"lineId\":$INTLINE,\"kind\":\"interest\"}"; check "finance: bank interest matched manually" '.success'
 as "$FM_TOKEN" POST $FG/post-events
 as "$TR_TOKEN" POST $FT/reconciliations/action "{\"id\":$RC_A,\"action\":\"refresh\"}"; check "finance: reconciliation refreshed" '.success'
-RC_A_DIFF=$(val .data.difference)
+RC_A_DIFF=$(val '.data.difference|round'); RC_A_UNM=$(val '.data.unmatchedLines')
 as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RC_A,\"action\":\"approve\"}"
 # the outcome is tied to the refreshed difference: zero means approved by someone other than the preparer, anything else is refused with the reason
-if [ "$RC_A_DIFF" = "0" ]; then check "finance: reconciliation with zero difference is approved by the finance manager, not the preparer" '.success and .data.status == 1 and .data.approvedByName != .data.preparedByName'
-else nomsg "finance: reconciliation with a difference ($RC_A_DIFF) is refused" "مغایرت"; fi
+if [ "$RC_A_DIFF" != "0" ]; then nomsg "finance: reconciliation with a difference ($RC_A_DIFF) is refused" "مغایرت"
+elif [ "$RC_A_UNM" != "0" ]; then nomsg "finance: reconciliation with zero difference but $RC_A_UNM unmatched statement lines is refused" "تطبیق نخورده"
+else check "finance: reconciliation with zero difference is approved by the finance manager, not the preparer" '.success and .data.status == 1 and .data.approvedByName != .data.preparedByName'; fi
 
 # --- petty cash: top-up from the cash box, settlement by the holder
 as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":2,\"pettyCashId\":$PC1,\"topUpAmount\":2000000,\"lines\":[{\"instrument\":1,\"amount\":2000000,\"cashBoxId\":$CB}]}"; check "finance: petty cash top-up drafted" '.success and .data.purpose == 2 and .data.netAmount == 2000000'
@@ -1622,7 +1624,7 @@ DRN=$(val .data.id)
 as "$FM_TOKEN" POST $FA/depreciation/action "{\"id\":$DRN,\"action\":\"approve\"}"; nomsg "assets: the preparer of the depreciation cannot approve it" "شخص دیگری"
 as "$FIN_TOKEN" POST $FA/depreciation/prepare/$PTIR; check "assets: depreciation prepared again by the accountant" '.success and .data.totalAmount == 1480000'
 as "$FIN_TOKEN" POST $FA/depreciation/action "{\"id\":$DRN,\"action\":\"approve\"}"; no "assets: only the finance manager approves depreciation"
-as "$FM_TOKEN" POST $FA/depreciation/action "{\"id\":$DRN,\"action\":\"approve\"}"; check "assets: depreciation approved" '.success and .data.status == 1'
+as "$FM2_TOKEN" POST $FA/depreciation/action "{\"id\":$DRN,\"action\":\"approve\"}"; check "assets: depreciation approved by a manager who prepared nothing (the first preparer stays excluded)" '.success and .data.status == 1'
 as "$FIN_TOKEN" POST $FA/depreciation/prepare/$PTIR; no "assets: an approved depreciation run is final"
 as "$FM_TOKEN" GET "$FA/$AS1"; check "assets: accumulated depreciation 1200000, book value 118800000" '.success and .data.accumulatedDepreciation == 1200000 and .data.bookValue == 118800000'
 as "$FM_TOKEN" GET "$FA/$AS2"; check "assets: idle asset depreciated at 30% of the rate: 180000" '.success and .data.accumulatedDepreciation == 180000'
@@ -1748,7 +1750,7 @@ OP3=$(val .data.id)
 as "$FIN_TOKEN" POST $FS/action "{\"id\":$OP3,\"action\":\"approve\"}"; no "outbox: only the finance manager approves a VAT package"
 as "$FM_TOKEN" POST $FS/action "{\"id\":$OP3,\"action\":\"approve\"}"; check "outbox: VAT package approved" '.success and .data.status == 1'
 as "$FIN_TOKEN" POST $FS/generate '{"kind":1,"year":1405,"month":1}'; no "outbox: a period without data gives no empty package"
-as "$FM_TOKEN" GET "$FS/packages?PageSize=0"; check "outbox: the finance manager sees the VAT package and no payroll package" '.success and ([.data.data[]|select(.id == '$OP3')]|length) == 1 and ([.data.data[]|select(.kind == 3 or .kind == 4)]|length) == 0'
+as "$FIN_TOKEN" GET "$FS/packages?PageSize=0"; check "outbox: the accountant sees the VAT package and no payroll package" '.success and ([.data.data[]|select(.id == '$OP3')]|length) == 1 and ([.data.data[]|select(.kind == 3 or .kind == 4)]|length) == 0'
 as "$PAYR_TOKEN" GET $FS/summary; check "outbox: summary counters returned" '.success and (.data.pending|type) == "number" and (.data.readyToSend|type) == "number"'
 as "$WH_TOKEN" GET $FS/summary; [ "$CODE" = "403" ] && ok "outbox: storekeeper has no access (403)" || bad "outbox: storekeeper has no access (403) got $CODE"
 
@@ -1762,9 +1764,8 @@ TOKEN=$ADMIN_TOKEN
 # ---------------------------------------------------------------- finance completeness (release F3, milestone 1)
 TOKEN=$ADMIN_TOKEN
 FE=finance/entities; FM2=finance/migration; FAU=finance/audit; FSX=finance/sepidar-export
-user2 fm2.ci 17 'Ci#Fm2-User-2026' 09120000031 0012345631
 user2 aud.ci 28 'Ci#Aud-User-2026' 09120000032 0012345632
-FM2_TOKEN=$(login fm2.ci 'Ci#Fm2-User-2026'); AUD_TOKEN=$(login aud.ci 'Ci#Aud-User-2026')
+AUD_TOKEN=$(login aud.ci 'Ci#Aud-User-2026')
 [ -n "$FM2_TOKEN" ] && [ -n "$AUD_TOKEN" ] && ok "f3: login second finance manager and the auditor (role 28)" || bad "f3: login second finance manager and the auditor (role 28)"
 
 # --- Sepidar migration: chart of accounts (preview, then commit)
@@ -2147,18 +2148,18 @@ evlist() { as "$FM_TOKEN" GET "finance/events?PageSize=0"; }
 as "$FM_TOKEN" POST $FG/post-events
 
 # --- 1: petty-cash purchase is not costed twice (GRNI clears)
-as "$TR_TOKEN" POST $FT/petty-cash "{\"holderUserId\":$ADMINID,\"holderTitle\":\"تنخواه خرید - بازبینی\",\"ceiling\":100000000}"; PCR=$(val .data.id)
+as "$TR_TOKEN" POST $FT/petty-cash "{\"holderUserId\":$WHID,\"holderTitle\":\"تنخواه خرید - بازبینی\",\"ceiling\":100000000}"; PCR=$(val .data.id)
 as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":2,\"pettyCashId\":$PCR,\"topUpAmount\":45000000,\"lines\":[{\"instrument\":1,\"amount\":45000000,\"cashBoxId\":$CB}]}"; PMR=$(val .data.id)
 as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$PMR,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$PMR,\"action\":\"post\"}"; check "r1 petty cash: fund of 45,000,000 topped up" '.success and .data.status == 2'
 G0=$(tbc 30103); X0=$(tbc 70202)
 rcpt 100 400000; RCP1=$RCPID; RCP1NO=$RCPNO
 as "$FM_TOKEN" POST $FG/post-events
 [ "$(( $(tbc 30103) - G0 ))" = "-40000000" ] && ok "r1 petty cash: the receipt of 40,000,000 credits GRNI 30103 by exactly 40,000,000" || bad "r1 petty cash: the receipt credits GRNI by 40,000,000 (delta $(( $(tbc 30103) - G0 )))"
-as "$ADMIN_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"خرید پیچ\",\"amount\":39000000,\"inventoryDocumentId\":$RCP1}]}"; nomsg "r1 petty cash: a settlement of a receipt must equal its value (40,000,000)" "برابر ارزش رسید"
-as "$ADMIN_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"خرید پیچ\",\"accountCode\":\"70202\",\"amount\":40000000,\"inventoryDocumentId\":$RCP1}]}"; check "r1 petty cash: settlement of the receipt saved" '.success and .data.totalAmount == 40000000'
+as "$WH_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"خرید پیچ\",\"amount\":39000000,\"inventoryDocumentId\":$RCP1}]}"; nomsg "r1 petty cash: a settlement of a receipt must equal its value (40,000,000)" "برابر ارزش رسید"
+as "$WH_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"خرید پیچ\",\"accountCode\":\"70202\",\"amount\":40000000,\"inventoryDocumentId\":$RCP1}]}"; check "r1 petty cash: settlement of the receipt saved" '.success and .data.totalAmount == 40000000'
 SER=$(val .data.id)
 as "$FIN_TOKEN" POST $FT/settlements/action "{\"id\":$SER,\"action\":\"approve\"}"; check "r1 petty cash: settlement approved" '.success and .data.status == 2'
-as "$ADMIN_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"دوباره\",\"amount\":40000000,\"inventoryDocumentId\":$RCP1}]}"; nomsg "r1 petty cash: a receipt is settled only once" "قبلاً تسویه"
+as "$WH_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"دوباره\",\"amount\":40000000,\"inventoryDocumentId\":$RCP1}]}"; nomsg "r1 petty cash: a receipt is settled only once" "قبلاً تسویه"
 as "$FM_TOKEN" POST $FG/post-events
 [ "$(( $(tbc 30103) - G0 ))" = "0" ] && ok "r1 petty cash: GRNI 30103 is back to its starting balance after the settlement" || bad "r1 petty cash: GRNI back to the start (delta $(( $(tbc 30103) - G0 )))"
 [ "$(( $(tbc 70202) - X0 ))" = "0" ] && ok "r1 petty cash: no expense was booked on 70202 (no second costing)" || bad "r1 petty cash: no expense booked (delta $(( $(tbc 70202) - X0 )))"
@@ -2169,7 +2170,7 @@ as "$COM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: a commerc
 as "$FM_TOKEN" GET "$FT/petty-cash?PageSize=0"; check "r1 petty cash: the finance manager sees all funds" '.success and (.data.data|length) >= 2'
 
 # --- 3: bank reconciliation with an issued cheque that was not presented
-as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک هـ - آزمون چک","bankName":"ملت","accountNumber":"100324200006","iban":"IR220170000000100324200006"}'; BAR=$(val .data.id)
+as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک هـ - آزمون چک","bankName":"ملت","accountNumber":"100324200006","iban":"IR860170000000100324200006"}'; BAR=$(val .data.id)
 as "$TR_TOKEN" POST $FT/cheque-books "{\"bankAccountId\":$BAR,\"series\":\"R\",\"fromSerial\":901,\"toSerial\":905}"; check "r1 bank: cheque book for the new account" '.success and .data.leaves == 5'
 RJB="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"description\":\"دریافت بانک هـ\",\"lines\":[{\"instrument\":2,\"amount\":5000000,\"bankAccountId\":$BAR,\"reference\":\"TRK-BAR\"}]}"
 as "$TR_TOKEN" POST $FT/receipts "$RJB"; RB=$(val .data.id)
@@ -2213,7 +2214,7 @@ as "$TR_TOKEN" POST $FT/receipts "$RJB"; REE=$(val .data.id)
 as "$FM2_TOKEN" POST $FT/receipts "$(jq -c ". + {id:$REE}" <<< "$RJB")"
 as "$FM2_TOKEN" POST $FT/receipts/action "{\"id\":$REE,\"action\":\"approve\"}"; nomsg "r1 maker-checker: the editor of a receipt cannot approve it" "ثبت‌کننده یا تاییدکننده قبلی"
 as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$REE,\"action\":\"cancel\"}"
-as "$ADMIN_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"هزینه\",\"accountCode\":\"70202\",\"amount\":1000000}]}"; SEE=$(val .data.id)
+as "$WH_TOKEN" POST $FT/settlements "{\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"هزینه\",\"accountCode\":\"70202\",\"amount\":1000000}]}"; SEE=$(val .data.id)
 as "$FIN_TOKEN" POST $FT/settlements "{\"id\":$SEE,\"pettyCashId\":$PCR,\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"description\":\"هزینه\",\"accountCode\":\"70202\",\"amount\":1000000}]}"
 as "$FIN_TOKEN" POST $FT/settlements/action "{\"id\":$SEE,\"action\":\"approve\"}"; nomsg "r1 maker-checker: the editor of a settlement cannot approve it" "ثبت‌کننده"
 as "$FIN2_TOKEN" POST $FT/settlements/action "{\"id\":$SEE,\"action\":\"approve\"}"; check "r1 maker-checker: another accountant approves the settlement" '.success and .data.status == 2'
@@ -2266,9 +2267,9 @@ as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ2,\"inquir
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ2,\"quoteId\":$QA2ID,\"reason\":\"گرید A\"}"
 as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ2"; check "r1 advance: order draft of 39,000,000" '.success and .data.totalAmount == 39000000'
 PO2=$(val .data.id); POL2=$(val '.data.lines[0].id')
-as "$COM_TOKEN" GET "procurement/orders/$PO2"; PO2SAVE=$(jq -c '.data | {id, kind, orderDate, providerId, inquiryId, vatPercent, advancePercent: 10, advanceGuarantee: "ضمانت‌نامه آزمون", lines: [.lines[] | {requestLineId, itemId, quantity, unitPrice}]}' "$B")
+as "$COM_TOKEN" GET "procurement/orders/$PO2"; PO2SAVE=$(jq -c '.data | {id, kind, orderDate, providerId, inquiryId, vatPercent, advancePercent: 10, advanceGuarantee: "ضمانت‌نامه آزمون", requirements, description, lines: [.lines[] | {requestLineId, itemId, quantity, unitPrice}]}' "$B")
 as "$COM_TOKEN" POST procurement/orders "$PO2SAVE"; check "r1 advance: the order carries a 10% advance" '.success and .data.advancePercent == 10'
-call POST procurement/orders/action "{\"id\":$PO2,\"action\":\"approve\"}"; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO2,\"action\":\"release\"}"; check "r1 advance: order released" '.success and .data.status == 2'
+call POST procurement/orders/action "{\"id\":$PO2,\"action\":\"approve\"}"; check "r1 advance: order approved" '.success and .data.status == 1'; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO2,\"action\":\"release\"}"; check "r1 advance: order released" '.success and .data.status == 2'
 as "$COM_TOKEN" POST procurement/payments "{\"type\":1,\"purchaseOrderId\":$PO2,\"amount\":3900000}"; check "r1 advance: advance request of 3,900,000 (10% of 39,000,000)" '.success and .data.amount == 3900000'
 as "$FIN_TOKEN" GET procurement/suppliers/open-advances; check "r1 advance: the open-advance report shows exactly 3,900,000 for the order" '.success and ([.data[]|select(.purchaseOrderId == '$PO2' and .advanced == 3900000 and .recovered == 0 and .open == 3900000)]|length) == 1'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO2,\"lines\":[{\"itemId\":$BOLT,\"quantity\":100,\"locationId\":$L2,\"purchaseOrderLineId\":$POL2}]}"; DR2=$(val .data.id); call POST "inventory/documents/$DR2/confirm"; check "r1 advance: 100 bolts received against the order" '.success'
@@ -2287,7 +2288,7 @@ as "$FM_TOKEN" POST $FG/post-events
 evlist; check "r1 advance: the payment event credits the supplier advance 3,900,000 and the penalty income 900,000 (not other payables)" '[.data.data[]|select(.sourceNumber == "'$PMANO'")][0].lines as $l | ([$l[]|select(.accountRole == "SupplierAdvance")|.credit]|add) == 3900000 and ([$l[]|select(.accountRole == "SupplierPenaltyIncome")|.credit]|add) == 900000 and ([$l[]|select(.accountRole == "OtherPayable")]|length) == 0'
 
 # --- 9 and 21: retention release and the sales advance cap
-as "$FM_TOKEN" GET "$FR/invoices/$INV1"; HELD=$(val .data.performanceRetention)
+as "$FM_TOKEN" GET "$FR/invoices/$INV1"; HELD=$(val ".data.performanceRetention|round")
 [ -n "$HELD" ] && [ "$HELD" != "null" ] && [ "$HELD" -gt 0 ] && ok "r1 retention: the posted invoice holds a performance retention ($HELD)" || bad "r1 retention: the posted invoice holds a performance retention ($HELD)"
 RELJ="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"type\":7,\"description\":\"آزادسازی حسن انجام کار\",\"lines\":[{\"description\":\"آزادسازی\",\"quantity\":1,\"unitPrice\":$HELD}]}"
 as "$FIN_TOKEN" POST $FR/invoices "$(jq -c '.lines[0].unitPrice += 1' <<< "$RELJ")"; nomsg "r1 retention: a release above the retention held is refused" "حسن انجام کار نگهداری"
@@ -2308,7 +2309,7 @@ as "$FM_TOKEN" GET "$FG/reports/income-statement?FiscalYearId=$FYC&From=2026-03-
 [ "$IS" = "$N0" ] && ok "r1 dashboard: the net profit equals the income statement of the year to date ($IS)" || bad "r1 dashboard: net profit equals the income statement (dashboard $N0, statement $IS)"
 
 # --- 8, 15 and 17: bonus paid from the provision, severance base, employee loan, payroll rows
-as "$PAYR_TOKEN" POST $FP/loans "{\"employeeId\":$PE1,\"kind\":1,\"title\":\"وام آزمون\",\"principal\":12000000,\"installmentAmount\":2000000,\"firstYear\":1405,\"firstMonth\":12}"; check "r1 loan: loan of 12,000,000 in instalments of 2,000,000 saved" '.success and .data.balance == 12000000'
+as "$PAYR_TOKEN" POST $FP/loans "{\"employeeId\":$PE1,\"kind\":1,\"title\":\"وام آزمون\",\"principal\":12000000,\"installmentAmount\":2000000,\"firstYear\":1405,\"firstMonth\":9}"; check "r1 loan: loan of 12,000,000 in instalments of 2,000,000 saved" '.success and .data.balance == 12000000'
 LN=$(val .data.id)
 E0=$(tbc 10401)
 as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":4,\"employeeLoanId\":$LN,\"lines\":[{\"instrument\":2,\"amount\":12000000,\"bankAccountId\":$BA1,\"reference\":\"LOAN-1\"}]}"; check "r1 loan: disbursement drafted for the principal" '.success and .data.purpose == 4 and .data.netAmount == 12000000'
@@ -2318,16 +2319,36 @@ as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$PML,\"action\":\"approve\"}"; 
 as "$FM_TOKEN" POST $FG/post-events
 [ "$(( $(tbc 10401) - E0 ))" = "12000000" ] && ok "r1 loan: employee advances 10401 rose by exactly 12,000,000" || bad "r1 loan: 10401 rose by 12,000,000 (delta $(( $(tbc 10401) - E0 )))"
 as "$FM_TOKEN" GET "$FG/details?Type=4&PageSize=0"; check "r1 loan: the receivable is kept per employee (an EMP- detail exists)" '([.data.data[]|select(.code|startswith("EMP-"))]|length) >= 1'
-as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":12,\"daysWorked\":29,\"inputs\":{\"BONUS\":5000000}}"
-as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":12}'; PR12=$(val .data.id)
-as "$PAYR_TOKEN" POST $FP/runs/$PR12/calculate; check "r1 payroll: Esfand with a bonus of 5,000,000: gross 36,300,000" '.success and .data.run.totalGross == 36300000'
-as "$PAYR_TOKEN" GET "$FP/payslips?RunId=$PR12"; check "r1 payroll: severance accrues on base pay items only (31,300,000 / 12 = 2,608,333), not on the bonus; the loan instalment is 2,000,000" '([.data.data[0].lines[]|select(.itemCode == "SEVERANCE")][0].amount) == 2608333 and ([.data.data[0].lines[]|select(.itemCode == "LOAN")][0].amount) == 2000000'
-as "$FM_TOKEN" POST $FP/runs/$PR12/approve; check "r1 payroll: Esfand run approved" '.success and .data.status == 2'
+# --- part months: the engine derives the days before the hire date and after the end date itself (30-day basis)
+EJD() { EJ "$1" "$2" "$3" "$4" IR270170000000100324200001 | jq -c --arg h "$5" --arg e "$6" '.hireDate = $h | if $e != "" then .endDate = $e else . end'; }
+as "$PAYR_TOKEN" POST $FP/employees "$(EJD T101 آزمون ورود 1234567806 2026-05-01T00:00:00 '')"; PEH=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/employees "$(EJD T102 آزمون خروج 2345678909 2020-01-01T00:00:00 2026-11-11T00:00:00)"; PEX=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/employees "$(EJD T103 آزمون اسفند 3456789017 2027-03-07T00:00:00 '')"; PE29=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PEH,\"year\":1405,\"month\":2,\"daysWorked\":21}"
+as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":2}'; PRX=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/runs/$PRX/calculate
+as "$PAYR_TOKEN" GET "$FP/payslips?RunId=$PRX"; check "payroll: hired on day 11 of 31-day Ordibehesht: 20 payable days, base wage 12000000" '.success and (.data.data|length) == 1 and .data.data[0].daysPaid == 20 and ([.data.data[0].lines[]|select(.itemCode == "BASE_WAGE" and .amount == 12000000)]|length) == 1'
+as "$PAYR_TOKEN" DELETE $FP/runs/$PRX
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PEX,\"year\":1405,\"month\":8,\"daysWorked\":20}"
+as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":8}'; PRX=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/runs/$PRX/calculate
+as "$PAYR_TOKEN" GET "$FP/payslips?RunId=$PRX"; check "payroll: terminated on day 20 of 30-day Aban: 20 payable days, base wage 12000000" '.success and (.data.data|length) == 1 and .data.data[0].daysPaid == 20 and ([.data.data[0].lines[]|select(.itemCode == "BASE_WAGE" and .amount == 12000000)]|length) == 1'
+as "$PAYR_TOKEN" DELETE $FP/runs/$PRX
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE29,\"year\":1405,\"month\":12,\"daysWorked\":14}"
+as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":12}'; PRX=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/runs/$PRX/calculate
+as "$PAYR_TOKEN" GET "$FP/payslips?RunId=$PRX"; check "payroll: hired on day 16 of the 29-day Esfand: 15 payable days, base wage 9000000; the full-month employee has 30" '.success and ([.data.data[]|select(.daysPaid == 15 and ([.lines[]|select(.itemCode == "BASE_WAGE" and .amount == 9000000)]|length) == 1)]|length) == 1 and ([.data.data[]|select(.daysPaid == 30)]|length) == 1'
+as "$PAYR_TOKEN" DELETE $FP/runs/$PRX
+as "$PAYR_TOKEN" POST $FP/attendance "{\"employeeId\":$PE1,\"year\":1405,\"month\":9,\"daysWorked\":30,\"inputs\":{\"BONUS\":5000000}}"
+as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":9}'; PR12=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/runs/$PR12/calculate; check "r1 payroll: Azar with a bonus of 5,000,000: gross 36,300,000" '.success and .data.run.totalGross == 36300000'
+as "$PAYR_TOKEN" GET "$FP/payslips?RunId=$PR12"; check "r1 payroll: severance accrues on base pay items only (31,300,000 / 12 = 2,608,333), not on the bonus; the loan instalment is 2,000,000" '([.data.data[].lines[]|select(.itemCode == "SEVERANCE" and .amount == 2608333)]|length) == 1 and ([.data.data[].lines[]|select(.itemCode == "LOAN" and .amount == 2000000)]|length) == 1'
+as "$FM_TOKEN" POST $FP/runs/$PR12/approve; check "r1 payroll: Azar run approved" '.success and .data.status == 2'
 B0=$(tbc 30402)
-as "$PAYR_TOKEN" POST $FP/runs/$PR12/post; PR12EV=$(val .data.accountingEventId); check "r1 payroll: Esfand run posted" '.success and .data.status == 3'
+as "$PAYR_TOKEN" POST $FP/runs/$PR12/post; PR12EV=$(val .data.accountingEventId); check "r1 payroll: Azar run posted" '.success and .data.status == 3'
 as "$FM_TOKEN" POST $FG/post-events
-evlist; check "r1 payroll: the bonus debits the provision 5,000,000 and the payroll expense is only 31,300,000 (no second expense)" '[.data.data[]|select(.id == '$PR12EV')][0].lines as $l | ([$l[]|select(.accountRole == "BonusProvision")|.debit]|add) == 5000000 and ([$l[]|select((.accountRole|startswith("PayrollExpense")))|.debit]|add) == 31300000'
-[ "$(( $(tbc 30402) - B0 ))" = "5000000" ] && ok "r1 payroll: provision account 30402 moved by the bonus paid (5,000,000 debit)" || bad "r1 payroll: 30402 moved by 5,000,000 (delta $(( $(tbc 30402) - B0 )))"
+evlist; check "r1 payroll: the bonus debits the provision 5,000,000 and the payroll expense is 35,800,000 = 31,300,000 pay (the bonus came from the provision) + 3,000,000 bonus accrual + 1,500,000 leave accrual" '[.data.data[]|select(.id == '$PR12EV')][0].lines as $l | ([$l[]|select(.accountRole == "BonusProvision")|.debit]|add) == 5000000 and ([$l[]|select((.accountRole|startswith("PayrollExpense")))|.debit]|add) == 35800000'
+[ "$(( $(tbc 30402) - B0 ))" = "2000000" ] && ok "r1 payroll: provision 30402 net movement +2,000,000 (bonus paid 5,000,000 debit, monthly accrual 3,000,000 credit)" || bad "r1 payroll: 30402 net movement +2,000,000 (delta $(( $(tbc 30402) - B0 )))"
 [ "$(( $(tbc 10401) - E0 ))" = "10000000" ] && ok "r1 loan: after the instalment 10401 holds 10,000,000 (12,000,000 - 2,000,000)" || bad "r1 loan: 10401 holds 10,000,000 after the instalment (delta $(( $(tbc 10401) - E0 )))"
 TOKEN=$ADMIN_TOKEN
 

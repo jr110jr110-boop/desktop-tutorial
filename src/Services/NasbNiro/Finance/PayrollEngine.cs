@@ -119,7 +119,14 @@ namespace Services.NasbNiro.Finance
             FnAttendanceSheet s = input.Sheet;
             var result = new PayrollResult();
             // the payroll month is always 30 days (company decision): a full month pays 30 days in a 29-, 30- or 31-day month; only unpaid leave and absence reduce it
-            decimal daysPaid = Math.Max(0m, Math.Min(30m, 30m - s.UnpaidLeaveDays - s.AbsenceDays));
+            // days of the Persian month before the hire date or after the end date are not employed days (same 30-day basis)
+            int monthDays = PersianCal.DaysIn(year, month);
+            DateTime monthStart = PersianCal.Start(year, month).Date, monthEnd = monthStart.AddDays(monthDays - 1);
+            int notEmployed = 0;
+            if (e.HireDate.Date > monthStart) notEmployed += (int)Math.Min(monthDays, (e.HireDate.Date - monthStart).TotalDays);
+            if (e.EndDate.HasValue && e.EndDate.Value.Date < monthEnd) notEmployed += (int)Math.Min(monthDays, (monthEnd - e.EndDate.Value.Date).TotalDays);
+            notEmployed = Math.Min(notEmployed, monthDays);
+            decimal daysPaid = Math.Max(0m, Math.Min(30m, 30m - s.UnpaidLeaveDays - s.AbsenceDays - notEmployed));
             if (s.DaysWorked + s.PaidLeaveDays + s.MissionDays <= 0) daysPaid = 0; // no attendance at all: nothing is paid for days
             result.DaysPaid = daysPaid;
             decimal dailyWage = e.DailyWage;
