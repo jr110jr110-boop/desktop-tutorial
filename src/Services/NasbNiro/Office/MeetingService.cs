@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -91,11 +91,19 @@ namespace Services.NasbNiro.Office
 
         // -------------------------------------------------------------------------------- reading
 
-        private DecisionDto ToDto(OfDecision d, OfMeeting m, Dictionary<int, string> positions, Dictionary<int, string> users, Dictionary<int, int> agendaSeq)
+        private DecisionDto ToDto(OfDecision d, OfMeeting m, Dictionary<int, string> positions, Dictionary<int, string> users, Dictionary<int, int> agendaSeq, Ctx c)
         {
             DateTime today = DateTime.Today;
+            // what the caller may do now (the same checks as DecisionActionAsync): done by the owner position or its deputy; cancel by the chair, the creator or the CEO
+            var actions = new List<string>();
+            if (d.Status == OfDecisionStatus.Open && m != null && m.Status == OfMeetingStatus.MinutesApproved)
+            {
+                if (c.Pos.Contains(d.OwnerPositionId)) actions.Add("done");
+                if (c.IsCeo || m.CreatorUserId == Me || (m.ChairPositionId.HasValue && c.Pos.Contains(m.ChairPositionId.Value))) actions.Add("cancel");
+            }
             return new DecisionDto
             {
+                AllowedActions = actions,
                 Id = d.Id, MeetingId = d.MeetingId, MeetingNumber = m?.Number, MeetingTitle = m?.Title, AgendaId = d.AgendaId, AgendaSeq = d.AgendaId.HasValue && agendaSeq.TryGetValue(d.AgendaId.Value, out int s) ? s : (int?)null,
                 Seq = d.Seq, Text = d.Text, OwnerPositionId = d.OwnerPositionId, OwnerPositionTitle = positions.Title(d.OwnerPositionId), DueDate = d.DueDate, DueDateText = OfficeText.Date(d.DueDate),
                 Status = d.Status, Overdue = d.Status == OfDecisionStatus.Open && d.DueDate.HasValue && d.DueDate.Value.Date < today, DoneNote = d.DoneNote, DoneAt = d.DoneAt,
@@ -151,7 +159,7 @@ namespace Services.NasbNiro.Office
                 Id = a.Id, PositionId = a.PositionId, PositionTitle = positions.Title(a.PositionId), UserId = a.UserId, UserName = users.Name(a.UserId), ExternalName = a.ExternalName,
                 Present = a.Present, SignedAt = a.SignedAt, SignedAtText = OfficeText.Stamp(a.SignedAt),
             }).ToList();
-            res.Decisions = m.Decisions.OrderBy(x => x.Seq).Select(x => ToDto(x, m, positions, users, agendaSeq)).ToList();
+            res.Decisions = m.Decisions.OrderBy(x => x.Seq).Select(x => ToDto(x, m, positions, users, agendaSeq, c)).ToList();
             res.Links = m.Links.Select(k => new RecordLinkDto { Kind = k.Kind, RecordId = k.RecordId, Text = k.Text }).ToList();
             return res;
         }
@@ -409,7 +417,7 @@ namespace Services.NasbNiro.Office
             Dictionary<int, string> positions = await OfficeActors.PositionTitlesAsync(_uow, rows.Select(r => (int?)r.d.OwnerPositionId), ct);
             Dictionary<int, string> users = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => r.d.DoneByUserId), ct);
             var none = new Dictionary<int, int>();
-            return ResponseDtoHelper.Ok(F2Page.Make(rows.Select(r => ToDto(r.d, r.m, positions, users, none)).ToList(), total, number, size));
+            return ResponseDtoHelper.Ok(F2Page.Make(rows.Select(r => ToDto(r.d, r.m, positions, users, none, c)).ToList(), total, number, size));
         }
 
         public async Task<ResponseDto<DecisionDto>> DecisionActionAsync(DecisionActionDto dto, CancellationToken ct)
@@ -448,7 +456,7 @@ namespace Services.NasbNiro.Office
             catch (DbUpdateConcurrencyException) { return Bad<DecisionDto>(OfficeText.Concurrency); }
             Dictionary<int, string> positions = await OfficeActors.PositionTitlesAsync(_uow, new int?[] { d.OwnerPositionId }, ct);
             Dictionary<int, string> users = await InventoryUsers.GetNamesAsync(_uow, new int?[] { d.DoneByUserId }, ct);
-            return ResponseDtoHelper.Ok(ToDto(d, m, positions, users, new Dictionary<int, int>()));
+            return ResponseDtoHelper.Ok(ToDto(d, m, positions, users, new Dictionary<int, int>(), c));
         }
 
         public async Task<ResponseDto<OverdueCheckResultDto>> CheckOverdueAsync(CancellationToken ct)

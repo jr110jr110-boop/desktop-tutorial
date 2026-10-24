@@ -2920,6 +2920,8 @@ ORC=$(jq -r ".data.referrals[]|select(.id == $ORA)|.children[0].id" "$B")
 as "$QC_TOKEN" POST $OF/letters/refer "{\"letterId\":$OI1,\"toPositionIds\":[$OP_CHK],\"instruction\":\"x\",\"action\":2}"; no "office: somebody who does not hold the letter cannot refer it"
 ibx "$OCHK_TOKEN" "referral:$ORB"; check "office: the information referral is in the inbox of the checker" '.success and (.data.data|length) == 1 and .data.data[0].kind == 2'
 ibx "$OCHK_TOKEN" "referral:$ORC"; check "office: the child referral is in the inbox of the checker" '.success and (.data.data|length) == 1'
+as "$OMGR_TOKEN" GET $OF/letters/$OI1; check "office: the maker of a pending referral may cancel it (canCancel)" ".success and ([.data.referrals[]|select(.id == $ORB)][0].canCancel == true)"
+as "$OCHK_TOKEN" GET $OF/letters/$OI1; check "office: its receiver may not cancel it (canCancel false)" ".success and ([.data.referrals[]|select(.id == $ORB)][0].canCancel == false)"
 as "$OEMP_TOKEN" POST $OF/letters/referral-action "{\"id\":$ORA,\"action\":\"close\"}"; nomsg "office: a referral for action needs a note to close" "شرح اقدام"
 as "$OMGR_TOKEN" POST $OF/letters/referral-action "{\"id\":$ORC,\"action\":\"close\"}"; nomsg "office: only the receiver closes a referral" "فقط گیرنده"
 as "$OEMP_TOKEN" POST $OF/letters/referral-action "{\"id\":$ORA,\"action\":\"comment\",\"text\":\"گزارش تهیه شد\"}"; check "office: the receiver records an action entry" ".success and ([.data.referrals[]|select(.id == $ORA)][0].entries|length) == 1"
@@ -2950,6 +2952,9 @@ as "$OHR_TOKEN" POST $OF/delegations "{\"positionId\":$OP_EMP,\"deputyUserId\":$
 ODEL2=$(val .data.id)
 as "$OCHK_TOKEN" GET $OF/me; check "office r1 H4: while pending the deputy does not act for that position" ".success and ([.data.positions[]|select(.positionId == $OP_EMP)]|length) == 0"
 ibx "$OEMP_TOKEN" "delegation:$ODEL2"; check "office r1 H4: the holder of the position has the pending delegation in his inbox" '.success and (.data.data|length) == 1 and .data.data[0].kind == 5'
+as "$OHR_TOKEN" GET "$OF/delegations?MineOnly=true&PageSize=100"; check "office: HR (who registered it) sees the pending delegation with cancel only, no approve or reject" ".success and ([.data.data[]|select(.id == $ODEL2)][0].allowedActions == [\"cancel\"])"
+as "$OEMP_TOKEN" GET "$OF/delegations?MineOnly=true&PageSize=100"; check "office: the holder sees it with approve, reject and cancel" ".success and ([.data.data[]|select(.id == $ODEL2)][0].allowedActions == [\"approve\",\"reject\",\"cancel\"])"
+as "$QC_TOKEN" GET "$OF/delegations?MineOnly=true&PageSize=100"; check "office: a stranger's own list does not hold it" ".success and ([.data.data[]|select(.id == $ODEL2)]|length) == 0"
 as "$OHR_TOKEN" POST $OF/delegations/$ODEL2/approve; nomsg "office r1 H4: the one who registered the delegation cannot approve it" "نمی‌تواند تایید کند"
 call POST $OF/delegations/$ODEL2/approve; nomsg "office r1 H4: an administrator who does not hold the position cannot approve it" "فقط دارنده سمت"
 as "$OEMP_TOKEN" POST $OF/delegations/$ODEL2/approve; check "office r1 H4: the holder approves it" '.success and .data.status == 0 and .data.current == true and (.data.decidedByName|length) > 0'
@@ -3088,6 +3093,8 @@ call POST $OF/decisions/check-overdue; check "office: running the check again cr
 ibx "$OMGR_TOKEN" "decision-overdue:$OD1"; check "office: the chair is alerted about the overdue decision" '.success and (.data.data|length) == 1 and .data.data[0].kind == 5 and .data.data[0].priority == 1'
 as "$OMGR_TOKEN" GET "$OF/decisions?OverdueOnly=true"; check "office: the overdue list holds the decision with the overdue flag" ".success and (.data.data|length) == 1 and .data.data[0].id == $OD1 and .data.data[0].overdue == true"
 as "$CEO_TOKEN" GET finance/ceo-dashboard; check "office: the CEO dashboard counts the overdue decision and raises an alert" '.success and .data.overdueDecisions == 1 and (.data.alerts|tostring|contains("از موعد گذشته"))'
+as "$OEMP_TOKEN" GET "$OF/decisions?MeetingId=$OM1"; check "office: the owner of decision 1 may mark it done and not cancel it" ".success and ([.data.data[]|select(.id == $OD1)][0].allowedActions == [\"done\"])"
+as "$OMGR_TOKEN" GET "$OF/decisions?MeetingId=$OM1"; check "office: the chair (creator) may cancel decision 1 but not mark it done" ".success and ([.data.data[]|select(.id == $OD1)][0].allowedActions == [\"cancel\"])"
 as "$OMGR_TOKEN" POST $OF/decisions/action "{\"id\":$OD1,\"action\":\"done\",\"note\":\"x\"}"; nomsg "office: only the owner position marks a decision done" "فقط مسئول مصوبه"
 as "$OEMP_TOKEN" POST $OF/decisions/action "{\"id\":$OD1,\"action\":\"done\"}"; no "office: a decision is not done without a note"
 as "$OEMP_TOKEN" POST $OF/decisions/action "{\"id\":$OD1,\"action\":\"done\",\"note\":\"گزارش نهایی تحویل شد\"}"; check "office: the owner marks the decision done" '.success and .data.status == 1'

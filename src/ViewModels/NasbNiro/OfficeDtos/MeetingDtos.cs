@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Office;
 
@@ -69,6 +69,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public DateTimeOffset? DoneAt { get; set; }
         public string DoneByName { get; set; }
         public Guid? EvidenceDocumentId { get; set; }
+
+        /// <summary>What the caller may do now: done (owner position or its deputy), cancel (chair, creator, CEO). Only on open decisions of approved minutes.</summary>
+        public List<string> AllowedActions { get; set; } = new List<string>();
     }
 
     public class MeetingDto : MeetingListDto

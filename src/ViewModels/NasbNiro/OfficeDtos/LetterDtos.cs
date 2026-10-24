@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Office;
 
@@ -87,6 +87,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public DateTimeOffset? DoneAt { get; set; }
         public string DoneByName { get; set; }
         public string DoneNote { get; set; }
+
+        /// <summary>The caller may cancel this referral (still pending; the user who made it, or the secretariat).</summary>
+        public bool CanCancel { get; set; }
         public List<ReferralEntryDto> Entries { get; set; } = new List<ReferralEntryDto>();
         public List<ReferralDto> Children { get; set; } = new List<ReferralDto>();
     }

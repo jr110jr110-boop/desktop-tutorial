@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -321,6 +321,7 @@ namespace Services.NasbNiro.Office
             ToPositionTitle = positions.Title(r.ToPositionId), Instruction = r.Instruction, Action = r.Action, DueDate = r.DueDate, DueDateText = OfficeText.Date(r.DueDate), Status = r.Status,
             CreatedByName = users.Name(r.CreatedByUserId), OnBehalf = r.OnBehalf, CreatedAt = r.CreatedAt, CreatedAtText = OfficeText.Stamp(r.CreatedAt), DoneAt = r.DoneAt,
             DoneByName = users.Name(r.DoneByUserId), DoneNote = r.DoneNote,
+            CanCancel = r.Status == OfReferralStatus.Pending && (r.CreatedByUserId == Me || _user.IsInRole(OfficeRoles.Secretariat)),
             Entries = (r.Entries ?? new List<OfReferralEntry>()).OrderBy(e => e.At).Select(e => new ReferralEntryDto { UserName = users.Name(e.UserId), OnBehalf = e.OnBehalf, Text = e.Text, At = e.At, AtText = OfficeText.Stamp(e.At) }).ToList(),
         };
 

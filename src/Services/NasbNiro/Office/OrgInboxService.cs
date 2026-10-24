@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -253,8 +253,19 @@ namespace Services.NasbNiro.Office
             Dictionary<int, string> titles = await OfficeActors.PositionTitlesAsync(_uow, rows.Select(d => (int?)d.PositionId), ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(d => new int?[] { d.DeputyUserId, d.CreatorUserId, d.DecidedByUserId }), ct);
             DateTime today = DateTime.Today;
+            List<int> positionIds = rows.Select(d => d.PositionId).Distinct().ToList();
+            HashSet<int> held = (await _uow.Set<OfPosition>().AsNoTracking().Where(p => positionIds.Contains(p.Id) && p.UserId == Me).Select(p => p.Id).ToListAsync(ct)).ToHashSet();
+            bool ceo = _user.IsInRole(OfficeRoles.Ceo), orgAdmin = _user.IsInRole(OfficeRoles.OrgAdmins);
+            List<string> Actions(OfDelegation d)
+            {
+                var a = new List<string>();
+                if (d.Status == OfDelegationStatus.Pending && d.CreatorUserId != Me && (held.Contains(d.PositionId) || ceo)) { a.Add("approve"); a.Add("reject"); }
+                if (d.IsActive && (held.Contains(d.PositionId) || d.CreatorUserId == Me || orgAdmin)) a.Add("cancel");
+                return a;
+            }
             return rows.Select(d => new DelegationDto
             {
+                AllowedActions = Actions(d),
                 Id = d.Id, PositionId = d.PositionId, PositionTitle = titles.Title(d.PositionId), DeputyUserId = d.DeputyUserId, DeputyName = names.Name(d.DeputyUserId),
                 FromDate = d.FromDate, ToDate = d.ToDate, FromDateText = OfficeText.Date(d.FromDate), ToDateText = OfficeText.Date(d.ToDate), IsActive = d.IsActive,
                 Current = d.IsActive && d.Status == OfDelegationStatus.Approved && d.FromDate <= today && d.ToDate >= today, Reason = d.Reason,
@@ -268,6 +279,12 @@ namespace Services.NasbNiro.Office
             IQueryable<OfDelegation> q = _uow.Set<OfDelegation>().AsNoTracking().Where(d => !d.Deleted);
             if (query.PositionId.HasValue) q = q.Where(d => d.PositionId == query.PositionId.Value);
             if (query.DeputyUserId.HasValue) q = q.Where(d => d.DeputyUserId == query.DeputyUserId.Value);
+            if (query.MineOnly == true)
+            {
+                int me = Me;
+                IQueryable<int> mine = _uow.Set<OfPosition>().Where(p => !p.Deleted && p.UserId == me).Select(p => p.Id);
+                q = q.Where(d => mine.Contains(d.PositionId) || d.DeputyUserId == me || d.CreatorUserId == me);
+            }
             if (query.CurrentOnly == true)
             {
                 DateTime today = DateTime.Today;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Office;
 
@@ -75,6 +75,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int? PositionId { get; set; }
         public int? DeputyUserId { get; set; }
         public bool? CurrentOnly { get; set; }
+
+        /// <summary>Only the delegations of the positions the caller holds, plus those where the caller is the deputy or the one who registered it.</summary>
+        public bool? MineOnly { get; set; }
     }
 
     public class DelegationDto
@@ -97,6 +100,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string CreatedByName { get; set; }
         public string DecidedByName { get; set; }
         public string DecidedAtText { get; set; }
+
+        /// <summary>What the caller may do now: approve, reject (pending; the holder or the CEO, never the one who registered it), cancel (active; holder, registrar, HR, PMO, CEO).</summary>
+        public List<string> AllowedActions { get; set; } = new List<string>();
     }
 
     public class SaveDelegationDto
