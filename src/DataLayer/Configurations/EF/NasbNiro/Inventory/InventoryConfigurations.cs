@@ -1,4 +1,5 @@
 using DataLayer.Configurations.EF.NasbNiro.Finance;
+using DataLayer.Configurations.EF.NasbNiro.Office;
 using DataLayer.Configurations.EF.NasbNiro.ProjectControl;
 using DataLayer.Configurations.EF.NasbNiro.Quality;
 using Entities.Model.NasbNiro.Inventory;
@@ -24,6 +25,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddProcurementConfigurations();
             builder.AddQualityConfigurations();
             builder.AddProjectControlConfigurations();
+            builder.AddOfficeConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());

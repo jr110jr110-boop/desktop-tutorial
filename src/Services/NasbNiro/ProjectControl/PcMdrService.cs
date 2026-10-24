@@ -51,8 +51,11 @@ namespace Services.NasbNiro.ProjectControl
         private readonly IInventoryUserContext _user;
         private readonly IReleaseService _release;
 
-        public PcMdrService(IUnitOfWork uow, IInventoryUserContext user, IReleaseService release)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public PcMdrService(IUnitOfWork uow, IInventoryUserContext user, IReleaseService release, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _release = release ?? throw new ArgumentNullException(nameof(release));
@@ -425,6 +428,7 @@ namespace Services.NasbNiro.ProjectControl
             }
             _uow.Set<PcTransmittal>().Add(t);
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncTransmittalGateAsync(t, cancellationToken);
             return ResponseDtoHelper.Ok(await TransmittalDtoAsync(t, cancellationToken));
         }
 
@@ -451,8 +455,16 @@ namespace Services.NasbNiro.ProjectControl
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcTransmittalDto>(PcText.Concurrency); }
             PcTransmittal t = await _uow.Set<PcTransmittal>().AsNoTracking().Include(x => x.Lines).AsSplitQuery().FirstAsync(x => x.Id == line.TransmittalId, cancellationToken);
+            await SyncTransmittalGateAsync(t, cancellationToken);
             return ResponseDtoHelper.Ok(await TransmittalDtoAsync(t, cancellationToken));
         }
+
+        /// <summary>Office inbox: an outgoing transmittal waits for the client's response until every line sent for approval has one; the DCC follows it up by the due date.</summary>
+        private Task SyncTransmittalGateAsync(PcTransmittal t, CancellationToken cancellationToken) =>
+            global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "trn:" + t.Id,
+                t.Direction == PcTransmittalDirection.Outgoing && t.ResponseDue.HasValue && t.Lines.Any(l => l.Purpose == PcTransmittalPurpose.ForApproval && l.ResponseCode == null),
+                "project-control", "transmittal", t.Id, "پاسخ کارفرما به ترنسمیتال " + t.Number, "/project-control/transmittals/" + t.Id, ProjectControlRoles.DccOnly, cancellationToken, t.ResponseDue,
+                global::Entities.Model.NasbNiro.Office.OfInboxKind.Task);
 
         public async Task<int> OverdueResponsesAsync(int? contractId, CancellationToken cancellationToken)
         {

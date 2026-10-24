@@ -101,8 +101,11 @@ namespace Services.NasbNiro.Finance
         private readonly IInventoryUserContext _user;
         private readonly ICostingService _costing;
 
-        public PayrollRunService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public PayrollRunService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
@@ -307,6 +310,8 @@ namespace Services.NasbNiro.Finance
             run.CalculatedAt = DateTimeOffset.Now;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<PayrollCalcResultDto>(Conflict); }
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payroll:" + run.Id, run.Status == FnPayrollStatus.Calculated, "finance", "payroll-run", run.Id,
+                $"تایید حقوق {run.Year}/{run.Month:00}" + (string.IsNullOrEmpty(run.Number) ? "" : " (" + run.Number + ")"), "/finance/payroll/runs/" + run.Id, FinanceRoles.Managers, ct);
             return ResponseDtoHelper.Ok(new PayrollCalcResultDto { Run = (await RunDtoAsync(run.Id, ct)).Data, Warnings = warnings });
         }
 
@@ -395,6 +400,7 @@ namespace Services.NasbNiro.Finance
             run.ApprovedAt = DateTimeOffset.Now;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<PayrollRunDto>(Conflict); }
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payroll:" + run.Id, false, "finance", "payroll-run", run.Id, "تایید حقوق", "/finance/payroll/runs/" + run.Id, FinanceRoles.Managers, ct);
             return await RunDtoAsync(run.Id, ct);
         }
 

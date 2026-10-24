@@ -47,8 +47,11 @@ namespace Services.NasbNiro.ProjectControl
         private readonly IPcScheduleService _schedule;
         private readonly IPcProjectService _project;
 
-        public PcBaselineService(IUnitOfWork uow, IInventoryUserContext user, IPcScheduleService schedule, IPcProjectService project)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public PcBaselineService(IUnitOfWork uow, IInventoryUserContext user, IPcScheduleService schedule, IPcProjectService project, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _schedule = schedule ?? throw new ArgumentNullException(nameof(schedule));
@@ -170,6 +173,8 @@ namespace Services.NasbNiro.ProjectControl
             b.ModifyDate = now; b.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcBaselineDto>(PcText.Concurrency); }
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "baseline:" + b.Id, b.Status == PcBaselineStatus.ManagersSigned, "project-control", "baseline", b.Id,
+                "تایید خط مبنا (شماره " + b.Number + ")", "/project-control/baselines/" + b.Id, ProjectControlRoles.Pmo, cancellationToken);
             return ResponseDtoHelper.Ok(await ToDtoAsync(b, cancellationToken));
         }
 
@@ -405,6 +410,14 @@ namespace Services.NasbNiro.ProjectControl
             c.ModifyDate = now; c.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcChangeDto>(PcText.Concurrency); }
+            {
+                // office inbox: the request waits for the analysis, then for the votes of the board, then for the decision
+                bool open = c.Status == PcChangeStatus.Registered || c.Status == PcChangeStatus.InAnalysis;
+                string waitingRoles = c.Status == PcChangeStatus.Registered ? ProjectControlRoles.PlanningOrPm
+                    : c.Board.Any(m => m.Vote == PcVote.None) ? string.Join(",", c.Board.Where(m => m.Vote == PcVote.None).Select(m => m.Role).Distinct()) : ProjectControlRoles.Pmo + ",CEO";
+                await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "cr:" + c.Id, open, "project-control", "change-request", c.Id, "درخواست تغییر " + c.Number,
+                    "/project-control/changes/" + c.Id, waitingRoles, cancellationToken, c.DueDate);
+            }
             return ResponseDtoHelper.Ok(await ToDtoAsync(c, cancellationToken));
         }
 

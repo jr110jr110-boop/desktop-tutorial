@@ -56,6 +56,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int PcOverdueClientResponses { get; set; }
         public decimal PcPenaltyExposure { get; set; }
 
+        // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
+        public int OverdueDecisions { get; set; }
+
         // Sepidar link
         public int EventsPending { get; set; }
         public int EventsFailed { get; set; }

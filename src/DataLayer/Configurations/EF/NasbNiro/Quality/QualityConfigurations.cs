@@ -444,6 +444,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
             {
                 b.ToTable("QaManagementReviews");
                 b.Property(x => x.Attendees).HasMaxLength(LongText);
+                b.HasIndex(x => x.OfMeetingId);
+                b.HasOne<Entities.Model.NasbNiro.Office.OfMeeting>().WithMany().HasForeignKey(x => x.OfMeetingId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<ManagementReviewInput>(b =>
             {

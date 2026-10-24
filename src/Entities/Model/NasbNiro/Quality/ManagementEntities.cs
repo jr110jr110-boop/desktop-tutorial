@@ -250,6 +250,9 @@ namespace Entities.Model.NasbNiro.Quality
         /// <summary>Minutes (FO-QA-022).</summary>
         public Guid? MinutesDocumentId { get; set; }
 
+        /// <summary>The office automation meeting (OfMeeting) whose minutes and decisions belong to this review; new reviews link here instead of keeping their own decision list.</summary>
+        public int? OfMeetingId { get; set; }
+
         public ICollection<ManagementReviewInput> Inputs { get; set; }
         public ICollection<ManagementReviewDecision> Decisions { get; set; }
     }

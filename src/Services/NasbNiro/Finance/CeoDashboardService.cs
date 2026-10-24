@@ -8,6 +8,7 @@ using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
+using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.Procurement;
 using Microsoft.EntityFrameworkCore;
 using ViewModels.NasbNiro.FinanceDtos;
@@ -164,6 +165,12 @@ namespace Services.NasbNiro.Finance
             Alert(pc.OverdueMilestones > 0, "info", $"{pc.OverdueMilestones} مرحله پرداخت از موعد گذشته است", "/project-control/milestones");
             Alert(pc.OverdueClientResponses > 0, "info", $"{pc.OverdueClientResponses} پاسخ کارفرما به مدارک ارسالی عقب افتاده است", "/project-control/transmittals");
             Alert(pc.PenaltyExposure > 0, "warning", "جریمه تاخیر محاسبه‌شده وجود دارد", "/project-control/penalties");
+            // office automation: open decisions of approved minutes past their due date (read directly, so the constructor stays as it is)
+            d.OverdueDecisions = await (from dec in _uow.Set<OfDecision>().AsNoTracking()
+                                        join meeting in _uow.Set<OfMeeting>().AsNoTracking() on dec.MeetingId equals meeting.Id
+                                        where dec.Status == OfDecisionStatus.Open && dec.DueDate != null && dec.DueDate < today && meeting.Status == OfMeetingStatus.MinutesApproved && !meeting.Deleted
+                                        select dec.Id).CountAsync(ct);
+            Alert(d.OverdueDecisions > 0, "warning", $"{d.OverdueDecisions} مصوبه جلسه از موعد گذشته است", "/office/decisions");
             // finance module: cash, receivables, cheques, profit, margins
             d.Finance = await _finance.GetCeoFinanceAsync(ct);
             d.Alerts.AddRange(d.Finance.Alerts);

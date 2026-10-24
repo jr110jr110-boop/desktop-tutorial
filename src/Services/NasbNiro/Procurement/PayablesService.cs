@@ -52,8 +52,12 @@ namespace Services.NasbNiro.Procurement
         private readonly ITreasuryService _treasury;
         private readonly IProcurementService _procurement;
 
-        public PayablesService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, IProcurementService procurement, ITreasuryService treasury)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public PayablesService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, IProcurementService procurement, ITreasuryService treasury,
+            global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
@@ -426,6 +430,8 @@ namespace Services.NasbNiro.Procurement
             payment.ModifyDate = DateTimeOffset.Now;
             payment.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payreq:" + payment.Id, payment.Status == PaymentRequestStatus.Draft, "procurement", "payment-request", payment.Id,
+                "تایید درخواست پرداخت " + payment.Number, "/procurement/payments/" + payment.Id, ProcurementRoles.OrderApproval, cancellationToken);
             return ResponseDtoHelper.Ok((await LoadPaymentsAsync(_uow.Set<PaymentRequest>().Where(p => p.Id == payment.Id), cancellationToken))[0]);
         }
 
@@ -478,6 +484,8 @@ namespace Services.NasbNiro.Procurement
                     return Bad<PaymentRequestDto>("عمل نامعتبر است.");
             }
             await _uow.SaveChangesAsync(cancellationToken);
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payreq:" + p.Id, p.Status == PaymentRequestStatus.Draft, "procurement", "payment-request", p.Id,
+                "تایید درخواست پرداخت " + p.Number, "/procurement/payments/" + p.Id, ProcurementRoles.OrderApproval, cancellationToken);
             return ResponseDtoHelper.Ok((await LoadPaymentsAsync(_uow.Set<PaymentRequest>().Where(x => x.Id == p.Id), cancellationToken))[0]);
         }
 

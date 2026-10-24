@@ -182,6 +182,17 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcReportService, Services.NasbNiro.ProjectControl.PcReportService>();
             services.AddHostedService<Services.NasbNiro.ProjectControl.PcSnapshotHostedService>();
 
+            // office automation (release O1): organisation, inbox, letters, meetings, attendance, leave and general requests
+            services.AddScoped<Services.NasbNiro.Office.INotificationService, Services.NasbNiro.Office.NotificationService>();
+            services.AddScoped<Services.NasbNiro.Office.IOrgService, Services.NasbNiro.Office.OrgService>();
+            services.AddScoped<Services.NasbNiro.Office.IInboxService, Services.NasbNiro.Office.InboxService>();
+            services.AddScoped<Services.NasbNiro.Office.ILetterService, Services.NasbNiro.Office.LetterService>();
+            services.AddScoped<Services.NasbNiro.Office.IMeetingService, Services.NasbNiro.Office.MeetingService>();
+            services.AddScoped<Services.NasbNiro.Office.IAttendanceService, Services.NasbNiro.Office.AttendanceService>();
+            services.AddScoped<Services.NasbNiro.Office.ILeaveService, Services.NasbNiro.Office.LeaveService>();
+            services.AddScoped<Services.NasbNiro.Office.IRequestService, Services.NasbNiro.Office.RequestService>();
+            services.AddHostedService<Services.NasbNiro.Office.OfficeHostedService>();
+
             services.AddScoped<IInventoryQualityService, InventoryQualityService>();
             services.AddScoped<IInventoryWorkflowService, InventoryWorkflowService>();
             return services;

@@ -129,6 +129,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public ReviewStatus Status { get; set; }
         public int DecisionCount { get; set; }
         public Guid? MinutesDocumentId { get; set; }
+
+        /// <summary>The linked office meeting (minutes and decisions live there).</summary>
+        public int? OfMeetingId { get; set; }
     }
 
     public class ReviewDto : ReviewListDto
@@ -147,6 +150,9 @@ namespace ViewModels.NasbNiro.QualityDtos
     {
         public DateTime? ReviewDate { get; set; }
         public string Attendees { get; set; }
+
+        /// <summary>Optional: the office automation meeting that holds this review's minutes and decisions.</summary>
+        public int? OfMeetingId { get; set; }
     }
 
     public class SaveReviewInputDto

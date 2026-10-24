@@ -52,8 +52,12 @@ namespace Services.NasbNiro.Finance
         private readonly ILedgerReportService _reports;
         private readonly IReceivablesService _receivables;
 
-        public GlService(IUnitOfWork uow, IInventoryUserContext user, IEventPostingService posting, ILedgerReportService reports, IReceivablesService receivables)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public GlService(IUnitOfWork uow, IInventoryUserContext user, IEventPostingService posting, ILedgerReportService reports, IReceivablesService receivables,
+            global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _posting = posting ?? throw new ArgumentNullException(nameof(posting));
@@ -695,6 +699,7 @@ namespace Services.NasbNiro.Finance
             }
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<VoucherDto>("همزمان توسط کاربر دیگری تغییر کرد؛ دوباره تلاش کنید."); }
+            await global::Services.NasbNiro.Office.OfficeGates.SweepVouchersAsync(_uow, _notify, ct);
             return await GetVoucherAsync(v.Id, ct);
         }
 
@@ -754,6 +759,7 @@ namespace Services.NasbNiro.Finance
                 try
                 {
                     await _uow.SaveChangesAsync(ct);
+                    await global::Services.NasbNiro.Office.OfficeGates.SweepVouchersAsync(_uow, _notify, ct);
                     var done = await GetVoucherAsync(v.Id, ct);
                     if (done.Success && done.Data != null && await _uow.Set<FnVoucher>().AsNoTracking().AnyAsync(x => x.FiscalYearId == v.FiscalYearId && x.Number != null && x.Number < v.Number && x.Date > v.Date, ct))
                         done.Data.Warning = "تاریخ این سند از تاریخ سند قطعی با شماره کمتر عقب‌تر است؛ شماره قطعی به ترتیب قطعی شدن داده می‌شود نه به ترتیب تاریخ.";
@@ -810,6 +816,7 @@ namespace Services.NasbNiro.Finance
                 try
                 {
                     await _uow.SaveChangesAsync(ct);
+                    await global::Services.NasbNiro.Office.OfficeGates.SweepVouchersAsync(_uow, _notify, ct);
                     return ResponseDtoHelper.Ok(result);
                 }
                 catch (DbUpdateException)

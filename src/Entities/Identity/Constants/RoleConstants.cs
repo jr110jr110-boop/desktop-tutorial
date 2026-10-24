@@ -171,6 +171,23 @@ namespace Entities.Identity.Constants
             Description = "حسابرس"
         };
 
+        // Office automation release O1: the secretariat registers incoming letters and dispatches outgoing ones; HR keeps the organisation chart, attendance and leave.
+        public const string Secretariat = "SECRETARIAT";
+        public static readonly ResponseRole SecretariatResponseRole = new ResponseRole()
+        {
+            Id = 26,
+            Name = Secretariat,
+            Description = "دبیرخانه"
+        };
+
+        public const string Hr = "HR";
+        public static readonly ResponseRole HrResponseRole = new ResponseRole()
+        {
+            Id = 27,
+            Name = Hr,
+            Description = "اداری و منابع انسانی"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -193,6 +210,8 @@ namespace Entities.Identity.Constants
             yield return PayrollResponseRole;
             yield return TreasuryResponseRole;
             yield return AuditorResponseRole;
+            yield return SecretariatResponseRole;
+            yield return HrResponseRole;
         }
 
         // IdentityRole creates a new random ConcurrencyStamp for every instance, so the seed data (HasData)

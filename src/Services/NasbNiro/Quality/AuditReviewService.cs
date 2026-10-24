@@ -310,7 +310,7 @@ namespace Services.NasbNiro.Quality
             Dictionary<int, string> capas = await _uow.Set<Capa>().Where(c => capaIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Number, cancellationToken);
             return new ReviewDto
             {
-                Id = r.Id, ReviewDate = r.ReviewDate, Status = r.Status, DecisionCount = r.Decisions.Count, MinutesDocumentId = r.MinutesDocumentId, Attendees = r.Attendees,
+                Id = r.Id, ReviewDate = r.ReviewDate, Status = r.Status, DecisionCount = r.Decisions.Count, MinutesDocumentId = r.MinutesDocumentId, OfMeetingId = r.OfMeetingId, Attendees = r.Attendees,
                 Inputs = r.Inputs.OrderBy(i => i.Category).Select(i => new ReviewInputDto { Id = i.Id, Category = i.Category, CategoryName = CategoryNames[i.Category], Text = i.Text, AutoDrafted = i.AutoDrafted }).ToList(),
                 Decisions = r.Decisions.OrderBy(d => d.Id).Select(d => new ReviewDecisionDto
                 {
@@ -330,7 +330,7 @@ namespace Services.NasbNiro.Quality
             if (query.Status.HasValue) rows = rows.Where(r => r.Status == query.Status.Value);
             IQueryable<ReviewListDto> projection = rows.OrderByDescending(r => r.ReviewDate).ThenByDescending(r => r.Id).Select(r => new ReviewListDto
             {
-                Id = r.Id, ReviewDate = r.ReviewDate, Status = r.Status, DecisionCount = r.Decisions.Count, MinutesDocumentId = r.MinutesDocumentId,
+                Id = r.Id, ReviewDate = r.ReviewDate, Status = r.Status, DecisionCount = r.Decisions.Count, MinutesDocumentId = r.MinutesDocumentId, OfMeetingId = r.OfMeetingId,
             });
             return ResponseDtoHelper.Ok(await PagedList<ReviewListDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
         }
@@ -344,11 +344,13 @@ namespace Services.NasbNiro.Quality
         public async Task<ResponseDto<ReviewDto>> CreateReviewAsync(CreateReviewDto dto, CancellationToken cancellationToken)
         {
             if (!_user.IsInRole(ReviewRoles)) return Bad<ReviewDto>(QualityText.NotAllowed);
+            if (dto?.OfMeetingId != null && !await _uow.Set<Entities.Model.NasbNiro.Office.OfMeeting>().AnyAsync(m => m.Id == dto.OfMeetingId.Value && !m.Deleted, cancellationToken))
+                return Bad<ReviewDto>("جلسه مرتبط در دفتر اتوماسیون اداری پیدا نشد.");
             Dictionary<ReviewInputCategory, string> drafts = await DraftInputsAsync(cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
             var review = new ManagementReview
             {
-                ReviewDate = (dto?.ReviewDate ?? DateTime.Today).Date, Attendees = Clean(dto?.Attendees), Status = ReviewStatus.Draft,
+                ReviewDate = (dto?.ReviewDate ?? DateTime.Today).Date, Attendees = Clean(dto?.Attendees), Status = ReviewStatus.Draft, OfMeetingId = dto?.OfMeetingId,
                 Inputs = new List<ManagementReviewInput>(), Decisions = new List<ManagementReviewDecision>(), CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             foreach (ReviewInputCategory category in Enum.GetValues(typeof(ReviewInputCategory)))

@@ -47,8 +47,11 @@ namespace Services.NasbNiro.Quality
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
 
-        public ItpService(IUnitOfWork uow, IInventoryUserContext user)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public ItpService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
         }
@@ -538,8 +541,15 @@ namespace Services.NasbNiro.Quality
                 default:
                     return Bad<ItpDto>("عملیات نامعتبر است.");
             }
-            return await SaveAsync(itp, cancellationToken);
+            ResponseDto<ItpDto> savedActivity = await SaveAsync(itp, cancellationToken);
+            if (savedActivity.Success) await SyncHoldPointAsync(itp, activity, cancellationToken);
+            return savedActivity;
         }
+
+        /// <summary>Office inbox: an activity with a hold point (H) that was notified waits for the QC inspector until it is done, waived or not applicable.</summary>
+        private Task SyncHoldPointAsync(Itp itp, ItpActivity activity, CancellationToken cancellationToken) =>
+            global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "itp-h:" + activity.Id, activity.Status == ItpActivityStatus.Notified && HasPoint(activity, ItpPoint.H), "quality", "itp-hold-point", activity.Id,
+                "نقطه توقف (H) آماده بازرسی: " + (activity.Activity ?? activity.ItemNo), "/quality/itps/" + itp.Id, QualityRoles.Inspectors, cancellationToken, activity.PlannedDate);
 
         /// <summary>Applies Done to the activity (adds the waived-by-notice rows). Returns an error response, or null when done.</summary>
         private async Task<ResponseDto<ItpDto>> MarkDoneAsync(Itp itp, ItpActivity activity, CancellationToken cancellationToken)
@@ -588,6 +598,7 @@ namespace Services.NasbNiro.Quality
             });
             ResponseDto<ItpDto> saved = await SaveAsync(itp, cancellationToken);
             if (saved.Success && activity.RequiredReportType.HasValue) await TryCompleteActivityAsync(activity.Id, cancellationToken);
+            if (saved.Success) await SyncHoldPointAsync(itp, activity, cancellationToken);
             return saved.Success ? await GetItpAsync(itp.Id, cancellationToken) : saved;
         }
 

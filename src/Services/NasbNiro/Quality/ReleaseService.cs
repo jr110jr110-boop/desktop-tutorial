@@ -35,8 +35,11 @@ namespace Services.NasbNiro.Quality
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
 
-        public ReleaseService(IUnitOfWork uow, IInventoryUserContext user)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public ReleaseService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
         }
@@ -373,6 +376,8 @@ namespace Services.NasbNiro.Quality
             }
             r.ItemsText = Clean(dto.ItemsText); r.Note = Clean(dto.Note); r.ModifyDate = now; r.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "release:" + r.Id, r.Status == ReleaseNoteStatus.Draft, "quality", "release-note", r.Id,
+                "صدور برگه ترخیص " + r.Number, "/quality/release-notes/" + r.Id, QualityRoles.Inspectors, cancellationToken);
             return ResponseDtoHelper.Ok(await ToDtoAsync(r, cancellationToken));
         }
 
@@ -407,6 +412,8 @@ namespace Services.NasbNiro.Quality
             r.ModifyDate = now; r.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<ReleaseNoteDto>(QualityText.Concurrency); }
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "release:" + r.Id, r.Status == ReleaseNoteStatus.Draft, "quality", "release-note", r.Id,
+                "صدور برگه ترخیص " + r.Number, "/quality/release-notes/" + r.Id, QualityRoles.Inspectors, cancellationToken);
             return ResponseDtoHelper.Ok(await ToDtoAsync(r, cancellationToken));
         }
     }

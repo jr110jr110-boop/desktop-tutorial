@@ -54,8 +54,10 @@ namespace Services.NasbNiro.Procurement
         private readonly IInventoryUserContext _user;
         private readonly ICostingService _costing;
 
-        public ProcurementService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, global::Services.NasbNiro.Finance.IBudgetService budget)
+        public ProcurementService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, global::Services.NasbNiro.Finance.IBudgetService budget,
+            global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _budget = budget ?? throw new ArgumentNullException(nameof(budget));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
@@ -63,6 +65,7 @@ namespace Services.NasbNiro.Procurement
         }
 
         private readonly global::Services.NasbNiro.Finance.IBudgetService _budget;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
         private int Me => _user.UserId;
         private static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
@@ -248,6 +251,15 @@ namespace Services.NasbNiro.Procurement
             request.ModifyDate = DateTimeOffset.Now;
             request.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            if (dto.Submit)
+            {
+                // office inbox: a request submitted at once waits for planning (and management for medium and major purchases)
+                Dictionary<string, decimal> gateSettings = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
+                var waitingRoles = new List<string> { ProcurementRoles.Planning };
+                if (request.EstimatedAmount >= gateSettings[ProcurementSettingKeys.MediumFrom]) waitingRoles.Add(ProcurementRoles.Management);
+                await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "pr:" + request.Id, true, "procurement", "purchase-request", request.Id,
+                    "تایید درخواست خرید " + request.Number, "/procurement/requests/" + request.Id, string.Join(",", waitingRoles), cancellationToken);
+            }
             return await GetRequestAsync(request.Id, cancellationToken);
         }
 
@@ -316,6 +328,14 @@ namespace Services.NasbNiro.Procurement
             r.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PurchaseRequestDto>("اطلاعات هم‌زمان تغییر کرد؛ دوباره تلاش کنید."); }
+            {
+                // office inbox: the request waits for planning and, for medium and major purchases, for management; the items close when the gate is passed
+                var waiting = new List<string>();
+                if (!r.PlanningApprovedAt.HasValue) waiting.Add(ProcurementRoles.Planning);
+                if (!r.ManagementApprovedAt.HasValue && r.EstimatedAmount >= s[ProcurementSettingKeys.MediumFrom]) waiting.Add(ProcurementRoles.Management);
+                await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "pr:" + r.Id, r.Status == PurchaseRequestStatus.Submitted && waiting.Count > 0, "procurement", "purchase-request", r.Id,
+                    "تایید درخواست خرید " + r.Number, "/procurement/requests/" + r.Id, string.Join(",", waiting), cancellationToken);
+            }
             if (budgetNote != null) { var withNote = await GetRequestAsync(r.Id, cancellationToken); return withNote.Success ? ResponseDtoHelper.Ok(withNote.Data, budgetNote) : withNote; }
             return await GetRequestAsync(r.Id, cancellationToken);
         }

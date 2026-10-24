@@ -41,8 +41,11 @@ namespace Services.NasbNiro.Quality
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
 
-        public CapaService(IUnitOfWork uow, IInventoryUserContext user)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+
+        public CapaService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
         }
@@ -266,6 +269,9 @@ namespace Services.NasbNiro.Quality
             capa.ModifyDate = now; capa.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<CapaDto>(QualityText.Concurrency); }
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "capa:" + capa.Id, capa.Status == CapaStatus.Implemented || capa.Status == CapaStatus.EffectivenessCheck, "quality", "capa", capa.Id,
+                (capa.Status == CapaStatus.Implemented ? "بررسی اثربخشی CAPA " : "بستن CAPA ") + capa.Number, "/quality/capas/" + capa.Id, QualityRoles.CapaClosers, cancellationToken,
+                capa.Status == CapaStatus.Implemented ? capa.EffectivenessDueDate : (DateTime?)null);
             return await GetCapaAsync(capa.Id, cancellationToken);
         }
 
