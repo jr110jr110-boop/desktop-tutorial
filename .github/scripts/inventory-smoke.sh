@@ -2521,8 +2521,11 @@ cfrow() { as "$FM_TOKEN" GET "$FCM/cash-flow-direct?FiscalYearId=$FYC&IncludeDra
 # the balance the true-up must use, read independently from the trial balance WITHOUT drafts (credit balance of 30402); the draft-inclusive figure differs by the drafts
 TU_ALL=$(( -$(cb 30402) ))
 as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$FYC&Level=2&IncludeDraft=false"; TU_FIN=$(jq -r '([.data.rows[]|select(.code == "30402")][0] | ((.closingCredit // 0) - (.closingDebit // 0))) // 0 | round' "$B")
-as "$FM_TOKEN" GET "$FG/vouchers?FiscalYearId=$FYC&Status=0&WithLines=true&PageSize=0"; TU_DRAFT=$(jq -r '[.data.data[]?.lines[]?|select(.accountCode == "30402")|(.credit - .debit)]|add // 0|round' "$B")
-TU_CUR=$(( TU_ALL - TU_DRAFT ))
+# independent figure: every voucher of every fiscal year of the entity that is not a draft, of type normal, auto or reversal, summed on 30402 (closing vouchers and the opening vouchers they feed are not in the books)
+as "$FM_TOKEN" GET "$FG/vouchers?WithLines=true&PageSize=0"
+jq -r '.data.data[]? | select(any(.lines[]?; .accountCode == "30402")) | "voucher \(.id) type \(.type) status \(.status) date \(.date[0:10]) 30402 " + (([.lines[]|select(.accountCode == "30402")|(.credit - .debit)]|add)|tostring)' "$B" >> "$R"
+TU_CUR=$(jq -r '[.data.data[]? | select(.status != 0 and (.type == 2 or .type == 3 or .type == 5)) | .lines[]? | select(.accountCode == "30402") | (.credit - .debit)] | add // 0 | round' "$B")
+TU_DRAFT=$(jq -r '[.data.data[]? | select(.status == 0) | .lines[]? | select(.accountCode == "30402") | (.credit - .debit)] | add // 0 | round' "$B")
 TU_REQ=$(( TU_CUR + 7000000 ))
 echo "true-up balances: with drafts $TU_ALL, drafts $TU_DRAFT, final only $TU_FIN, checked+final $TU_CUR" >> "$R"
 as "$FIN_TOKEN" POST $FDF/provisions/true-up "{\"kind\":\"bonus\",\"date\":\"${TODAY}T00:00:00\",\"requiredBalance\":$TU_REQ,\"reason\":\"آزمون تعدیل ذخیره\"}"; check "r3 true-up: the bonus provision balance is checked+final without drafts ($TU_CUR = $TU_ALL with drafts - $TU_DRAFT in draft vouchers) and the draft raises it by exactly 7,000,000" '.success and .data.currentBalance == '$TU_CUR' and .data.difference == 7000000 and .data.voucherId > 0'
