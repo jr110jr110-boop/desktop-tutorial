@@ -3385,10 +3385,10 @@ MFRDN=$(val .data.id)
 call POST $MF/reason-codes '{"code":"MF-SCRAP-1","title":"تکراری","kind":1}'; nomsg "mes: a duplicate reason code is refused" "قبلاً ثبت شده"
 
 # --- items, steps (operation templates) and standards
-item MFPA "{\"code\":\"MF.10.00.001.1\",\"title\":\"قطعه ساخت الف\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item A (lot)"
-item MFPB "{\"code\":\"MF.10.00.002.1\",\"title\":\"قطعه ساخت ب\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item B (lot)"
-item MFPC "{\"code\":\"MF.10.00.003.1\",\"title\":\"قطعه ساخت ج\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item C (lot)"
-item MFCMP "{\"code\":\"MF.20.00.001.1\",\"title\":\"ماده مصرفی ج\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes: component of item C (no stock)"
+item MFPA "{\"code\":\"77.10.00.001.1\",\"title\":\"قطعه ساخت الف\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item A (lot)"
+item MFPB "{\"code\":\"77.10.00.002.1\",\"title\":\"قطعه ساخت ب\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item B (lot)"
+item MFPC "{\"code\":\"77.10.00.003.1\",\"title\":\"قطعه ساخت ج\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item C (lot)"
+item MFCMP "{\"code\":\"77.20.00.001.1\",\"title\":\"ماده مصرفی ج\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes: component of item C (no stock)"
 call POST inventory/trace/templates "{\"itemId\":$MFPA,\"sequence\":10,\"title\":\"تراشکاری\"}"; MFT10=$(val .data.id)
 call POST inventory/trace/templates "{\"itemId\":$MFPA,\"sequence\":20,\"title\":\"بازرسی ابعادی\",\"requiresQc\":true}"; MFT20=$(val .data.id)
 call POST inventory/trace/templates "{\"itemId\":$MFPA,\"sequence\":30,\"title\":\"عملیات حرارتی بیرونی\"}"; MFT30=$(val .data.id)
@@ -3445,10 +3445,10 @@ mfbom() { # mfbom POSITION COUNT TITLE : echoes nothing, sets MFBOM
 mfproc() { # mfproc BOMID EXITCODE ENTERCODE TITLE
   call POST Processes "{\"exitCommodityCode\":\"$2\",\"enterCommodityCode\":\"$3\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":5,\"sort\":1,\"programPrice\":0,\"title\":\"$4\",\"bomId\":$1}"
 }
-mfbom 1 5 "قطعه الف"; mfproc "$MFBOM" "MF.10.00.001.1" "MF-NO-STOCK-CODE" "ساخت قطعه الف"; check "mes: make process of item A (5 units)" '.success and .data.id > 0'
+mfbom 1 5 "قطعه الف"; mfproc "$MFBOM" "77.10.00.001.1" "MF-NO-STOCK-CODE" "ساخت قطعه الف"; check "mes: make process of item A (5 units)" '.success and .data.id > 0'
 MFPRA=$(val .data.id)
-mfbom 2 1 "قطعه ب"; mfproc "$MFBOM" "MF.10.00.002.1" "MF-NO-STOCK-CODE" "ساخت قطعه ب"; check "mes: make process of item B (1 unit)" '.success and .data.id > 0'
-mfbom 3 2 "قطعه ج"; mfproc "$MFBOM" "MF.10.00.003.1" "MF.20.00.001.1" "ساخت قطعه ج"; check "mes: make process of item C (2 units, consumes the component)" '.success and .data.id > 0'
+mfbom 2 1 "قطعه ب"; mfproc "$MFBOM" "77.10.00.002.1" "MF-NO-STOCK-CODE" "ساخت قطعه ب"; check "mes: make process of item B (1 unit)" '.success and .data.id > 0'
+mfbom 3 2 "قطعه ج"; mfproc "$MFBOM" "77.10.00.003.1" "77.20.00.001.1" "ساخت قطعه ج"; check "mes: make process of item C (2 units, consumes the component)" '.success and .data.id > 0'
 MFPRC=$(val .data.id)
 
 # --- the work breakdown generation drafts a production order for every make process (hook), once
@@ -3632,8 +3632,8 @@ call POST $MF/work-centers "{\"code\":\"MF-FC\",\"title\":\"فرز تکمیلی\
 MBWF=$(val .data.id)
 call POST Machine '{"title":"ماشین فرز سی‌ان‌سی آزمون"}'; MBM=$(val .data)
 call POST $MF/machines/info "{\"machineId\":$MBM,\"workCenterId\":$MBWC,\"status\":1}"; check "mes B: the CNC machine belongs to the CNC work centre" '.success and .data.status == 1'
-item MBPD "{\"code\":\"MF.10.00.004.1\",\"title\":\"قطعه ماشینکاری د\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item D (no tracking)"
-item MBPF "{\"code\":\"MF.10.00.006.1\",\"title\":\"قطعه ماشینکاری ف\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item F (no tracking)"
+item MBPD "{\"code\":\"77.10.00.004.1\",\"title\":\"قطعه ماشینکاری د\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item D (no tracking)"
+item MBPF "{\"code\":\"77.10.00.006.1\",\"title\":\"قطعه ماشینکاری ف\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item F (no tracking)"
 call POST inventory/trace/templates "{\"itemId\":$MBPD,\"sequence\":10,\"title\":\"فرزکاری د\"}"; MBTD=$(val .data.id)
 call POST inventory/trace/templates "{\"itemId\":$MBPF,\"sequence\":10,\"title\":\"فرزکاری ف\"}"; MBTF=$(val .data.id)
 call POST $MF/operation-standards "{\"operationTemplateId\":$MBTD,\"workCenterId\":$MBWC,\"setupHours\":2,\"runHoursPerUnit\":1}"; check "mes B: standard of item D (setup 2 h, 1 h per piece, CNC centre)" '.success and .data.setupHours == 2 and .data.runHoursPerUnit == 1'
@@ -3643,7 +3643,7 @@ mfroute "$MBPF" "item F"
 
 # item D: three BOM lines of the first work order (4, 3 and 49 pieces); the processes are made after the WBS generation, so their orders are drafted by hand and have no project activity
 mbdraft() { # mbdraft BOMPOSITION COUNT LABEL : BOM line + make process + draft order; sets MBO (order id) and MBN (order number)
-  mfbom "$1" "$2" "قطعه د $3"; mfproc "$MFBOM" "MF.10.00.004.1" "MF-NO-STOCK-CODE" "ساخت قطعه د $3"; check "mes B: make process of order D$3 ($2 pieces)" '.success and .data.id > 0'
+  mfbom "$1" "$2" "قطعه د $3"; mfproc "$MFBOM" "77.10.00.004.1" "MF-NO-STOCK-CODE" "ساخت قطعه د $3"; check "mes B: make process of order D$3 ($2 pieces)" '.success and .data.id > 0'
   call POST $MF/orders/draft "{\"processId\":$(val .data.id)}"; check "mes B: order D$3 is drafted for its process" '.success and .data.drafted == 1 and (.data.orderIds|length) == 1'
   MBO=$(val '.data.orderIds[0]')
   call GET "$MF/orders/$MBO"; check "mes B: order D$3 is a draft with one operation from the approved routing" ".success and .data.status == 0 and .data.quantity == $2 and (.data.operations|length) == 1 and .data.operations[0].setupHoursPlanned == 2 and .data.operations[0].runHoursPlanned == $2"
@@ -3669,7 +3669,7 @@ as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$MBCT2,\"currencyCode\":\"IRR\"
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$MBWO2,\"contractId\":$MBCT2,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"26\"}"; check "mes B: second equipment project code" '.success and (.data.equipmentProjectCode|startswith("PU10026"))'
 call POST Assemblies "{\"title\":\"Fan casing\",\"code\":\"MF-ASM-2\",\"workOrderId\":$MBWO2,\"assemblerDuration\":1}"; MBASM2=$(val .data.id)
 MBASM_KEEP=$MFASM; MFASM=$MBASM2
-mfbom 1 1 "قطعه ف"; mfproc "$MFBOM" "MF.10.00.006.1" "MF-NO-STOCK-CODE" "ساخت قطعه ف"; check "mes B: make process of item F (1 piece)" '.success and .data.id > 0'
+mfbom 1 1 "قطعه ف"; mfproc "$MFBOM" "77.10.00.006.1" "MF-NO-STOCK-CODE" "ساخت قطعه ف"; check "mes B: make process of item F (1 piece)" '.success and .data.id > 0'
 MFASM=$MBASM_KEEP
 as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$MBCT2,\"workOrderIds\":[$MBWO2]}"; check "mes B: WBS generation for the second work order succeeds" '.success'
 as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MBWO2&PageSize=0"
@@ -3855,12 +3855,12 @@ as "$MPM_TOKEN" GET "$MF/load?From=2026-08-10&Weeks=4&Threshold=110&WorkCenterId
 # a work centre with two parallel resources at 85 % utilisation (8 h x 2 x 0.85 = 13.6 h a day) and an order of 34 h on it (setup 1 h + 33 pieces x 1 h)
 call POST $MF/work-centers "{\"code\":\"MF-PAR\",\"title\":\"فرز موازی\",\"kind\":1,\"calendarId\":$PCCAL,\"shiftsPerDay\":1,\"hoursPerShift\":8,\"efficiencyPercent\":100,\"utilisationPercent\":85,\"parallelResources\":2}"; check "mes B: work centre with two parallel resources at 85 % utilisation is saved" '.success and .data.id > 0 and .data.utilisationPercent == 85 and .data.parallelResources == 2'
 MBWP=$(val .data.id)
-item MBPG "{\"code\":\"MF.10.00.008.1\",\"title\":\"قطعه ماشینکاری گ\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item G (no tracking)"
+item MBPG "{\"code\":\"77.10.00.008.1\",\"title\":\"قطعه ماشینکاری گ\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item G (no tracking)"
 call POST inventory/trace/templates "{\"itemId\":$MBPG,\"sequence\":10,\"title\":\"فرزکاری گ\"}"; MBTG=$(val .data.id)
 call POST $MF/operation-standards "{\"operationTemplateId\":$MBTG,\"workCenterId\":$MBWP,\"setupHours\":1,\"runHoursPerUnit\":1}"; check "mes B: standard of item G (setup 1 h, 1 h per piece, the 85 % centre)" '.success and .data.setupHours == 1 and .data.runHoursPerUnit == 1'
 mfroute "$MBPG" "item G"
 MBASM_KEEP=$MFASM; MFASM=$MBASM2
-mfbom 2 33 "قطعه گ"; mfproc "$MFBOM" "MF.10.00.008.1" "MF-NO-STOCK-CODE" "ساخت قطعه گ"; check "mes B: make process of item G (33 pieces, in the second work order which has no need date)" '.success and .data.id > 0'
+mfbom 2 33 "قطعه گ"; mfproc "$MFBOM" "77.10.00.008.1" "MF-NO-STOCK-CODE" "ساخت قطعه گ"; check "mes B: make process of item G (33 pieces, in the second work order which has no need date)" '.success and .data.id > 0'
 MFASM=$MBASM_KEEP
 call POST $MF/orders/draft "{\"processId\":$(val .data.id)}"; check "mes B: order G is drafted for its process" '.success and .data.drafted == 1 and (.data.orderIds|length) == 1'
 MBOG=$(val '.data.orderIds[0]')
