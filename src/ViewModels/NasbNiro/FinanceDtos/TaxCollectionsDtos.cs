@@ -26,6 +26,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal SalesVat { get; set; }
         public decimal PurchasesNet { get; set; }
         public decimal PurchasesVat { get; set; }
+        public decimal NonRecoverableVat { get; set; }
         /// <summary>Sales VAT minus purchase VAT of the season (equals vat-season).</summary>
         public decimal VatPayable { get; set; }
         /// <summary>Credit carried in from earlier seasons of the same Persian year.</summary>

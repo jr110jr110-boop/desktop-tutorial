@@ -372,6 +372,8 @@ namespace Entities.Model.NasbNiro.Procurement
         public decimal NetAmount { get; set; }
         public decimal VatAmount { get; set; }
         public decimal TotalAmount { get; set; }
+        /// <summary>Part of the VAT that is not deductible (lines flagged non-recoverable): it is cost, not input VAT (F3b).</summary>
+        public decimal NonRecoverableVatAmount { get; set; }
 
         /// <summary>Difference against the order prices (rial).</summary>
         public decimal PriceVariance { get; set; }
@@ -402,6 +404,8 @@ namespace Entities.Model.NasbNiro.Procurement
 
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
+        /// <summary>The VAT of this line cannot be deducted (F3b): it becomes part of the cost and stays out of the VAT return.</summary>
+        public bool NonRecoverableVat { get; set; }
     }
 
     public enum PaymentRequestType

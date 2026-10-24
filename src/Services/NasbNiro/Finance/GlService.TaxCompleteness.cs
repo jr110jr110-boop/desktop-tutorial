@@ -29,7 +29,7 @@ namespace Services.NasbNiro.Finance
             var total = await TaxService.BuildVatSeasonAsync(_uow, year, season, ct);
             if (!total.Success) return Bad<FnVatDetailDto>(total.Message);
             VatSeasonDto t = total.Data;
-            var dto = new FnVatDetailDto { Year = year, Season = season, From = t.From, To = t.To, SalesNet = t.SalesNet, SalesVat = t.SalesVat, PurchasesNet = t.PurchasesNet, PurchasesVat = t.PurchasesVat, VatPayable = t.VatPayable };
+            var dto = new FnVatDetailDto { Year = year, Season = season, From = t.From, To = t.To, SalesNet = t.SalesNet, SalesVat = t.SalesVat, PurchasesNet = t.PurchasesNet, PurchasesVat = t.PurchasesVat, NonRecoverableVat = t.NonRecoverableVat, VatPayable = t.VatPayable };
 
             // same filters as the season report, one row per document
             foreach (var i in await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Type != FnInvoiceType.RetentionRelease && i.Date >= t.From && i.Date <= t.To)
@@ -41,13 +41,23 @@ namespace Services.NasbNiro.Finance
             var purchaseCodes = await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierProfile>().AsNoTracking().Select(p => new { p.ProviderId, p.EconomicCode, p.NationalId }).ToListAsync(ct);
             foreach (var i in await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking()
                          .Where(i => !i.Deleted && i.Status == Entities.Model.NasbNiro.Procurement.SupplierInvoiceStatus.Approved && i.InvoiceDate >= t.From && i.InvoiceDate <= t.To)
-                         .OrderBy(i => i.InvoiceDate).ThenBy(i => i.Id).Select(i => new { i.InvoiceNumber, i.Number, i.InvoiceDate, i.NetAmount, i.VatAmount, i.ProviderId, Name = i.Provider.Name }).ToListAsync(ct))
+                         .OrderBy(i => i.InvoiceDate).ThenBy(i => i.Id).Select(i => new { i.InvoiceNumber, i.Number, i.InvoiceDate, i.NetAmount, VatAmount = i.VatAmount - i.NonRecoverableVatAmount, i.ProviderId, Name = i.Provider.Name }).ToListAsync(ct))
                 dto.Rows.Add(new FnVatDetailRowDto { Side = "Purchases", Date = i.InvoiceDate, DocumentNumber = i.InvoiceNumber ?? i.Number, PartyName = i.Name, EconomicCode = purchaseCodes.FirstOrDefault(c => c.ProviderId == i.ProviderId)?.EconomicCode, NationalId = purchaseCodes.FirstOrDefault(c => c.ProviderId == i.ProviderId)?.NationalId, NetAmount = i.NetAmount, VatAmount = i.VatAmount, SourceType = "SupplierInvoice" });
             foreach (var o in await _uow.Set<AccountingEventLine>().AsNoTracking()
                          .Where(l => l.AccountRole == AccountRoles.Vat && l.Event.Status != AccountingEventStatus.NotRequired && l.Event.SourceType != "SupplierInvoice" && l.Event.EventDate >= t.From && l.Event.EventDate <= t.To)
                          .GroupBy(l => new { l.EventId, l.Event.Description, l.Event.SourceNumber, l.Event.EventDate, l.Event.SourceType })
                          .Select(g => new { g.Key.Description, g.Key.SourceNumber, g.Key.EventDate, g.Key.SourceType, Vat = g.Sum(x => x.Debit - x.Credit) }).Take(5000).ToListAsync(ct))
                 if (o.Vat != 0) dto.Rows.Add(new FnVatDetailRowDto { Side = "Purchases", Date = o.EventDate, DocumentNumber = o.SourceNumber, PartyName = o.Description ?? o.SourceNumber, VatAmount = o.Vat, SourceType = o.SourceType });
+
+            foreach (var n in await _uow.Set<FnSupplierNote>().AsNoTracking().Where(n => n.Status == FnSettlementStatus.Posted && n.Date >= t.From && n.Date <= t.To).OrderBy(n => n.Date).ThenBy(n => n.Id)
+                         .Select(n => new { n.Number, n.NoteNumber, n.Date, n.Kind, n.NetAmount, n.VatAmount, n.ProviderId, Name = _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().Where(p => p.Id == n.ProviderId).Select(p => p.Name).FirstOrDefault() }).ToListAsync(ct))
+            {
+                int sign = n.Kind == FnSupplierNoteKind.Credit ? -1 : 1;
+                dto.Rows.Add(new FnVatDetailRowDto { Side = "Purchases", Date = n.Date, DocumentNumber = n.NoteNumber ?? n.Number, PartyName = n.Name, EconomicCode = purchaseCodes.FirstOrDefault(c => c.ProviderId == n.ProviderId)?.EconomicCode, NationalId = purchaseCodes.FirstOrDefault(c => c.ProviderId == n.ProviderId)?.NationalId, NetAmount = sign * n.NetAmount, VatAmount = sign * n.VatAmount, SourceType = "FnSupplierNote" });
+            }
+            foreach (var x in await _uow.Set<FnAssetDisposal>().AsNoTracking().Where(d => d.Status == FnDocStatus.Posted && d.Kind == FnDisposalKind.Sale && d.VatAmount > 0 && d.Date >= t.From && d.Date <= t.To)
+                         .OrderBy(d => d.Date).Select(d => new { d.Number, d.Date, d.ProceedsAmount, d.VatAmount, AssetCode = d.Asset.Code }).ToListAsync(ct))
+                dto.Rows.Add(new FnVatDetailRowDto { Side = "Sales", Date = x.Date, DocumentNumber = x.Number, PartyName = "فروش دارایی " + x.AssetCode, NetAmount = x.ProceedsAmount, VatAmount = x.VatAmount, SourceType = "FnAssetDisposal" });
 
             // carry-forward of a credit position from the first season that has any VAT document, across Persian years (★ confirm with the accountant: carry versus refund)
             decimal carry = 0;

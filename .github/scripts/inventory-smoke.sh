@@ -2529,6 +2529,158 @@ check "r2 f18: finalised after later-dated vouchers, the finalise answer carries
 
 TOKEN=$ADMIN_TOKEN
 
+# =============================================================================================== F3b completeness (migration FinanceCompleteness4)
+FCM=finance/completeness; FPS=finance/payroll-settlements
+cb() { local v; v=$(tbc "$1"); echo "${v:-0}"; } # closing balance (debit minus credit) of an account in the current fiscal year
+# --- non-recoverable VAT per purchase line (a second order of 10 bolts at 390,000; the whole VAT of 390,000 is cost)
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"مالیات غیرقابل استرداد\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ4=$(val .data.id); RQ4L=$(val '.data.lines[0].id')
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ4,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ4,\"action\":\"approve-management\"}"
+QA4="{\"providerId\":$PA,\"quoteNumber\":\"P-A4\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ4L,\"quantity\":10,\"unitPrice\":390000}]}"
+QB4="{\"providerId\":$PB,\"quoteNumber\":\"P-B4\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ4L,\"quantity\":10,\"unitPrice\":380000}]}"
+as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ4,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA4,$QB4]}"; IQ4=$(val .data.id); QA4ID=$(val ".data.quotes[]|select(.providerId == $PA)|.id")
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ4,\"quoteId\":$QA4ID,\"reason\":\"گرید A\"}"
+as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ4"; PO4=$(val .data.id); POL4=$(val '.data.lines[0].id')
+call POST procurement/orders/action "{\"id\":$PO4,\"action\":\"approve\"}"; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO4,\"action\":\"release\"}"
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO4,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"locationId\":$L2,\"purchaseOrderLineId\":$POL4}]}"; DR4=$(val .data.id); call POST "inventory/documents/$DR4/confirm"
+as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=3"; NV_VAT0=$(val .data.purchasesVat); NV_NR0=$(val .data.nonRecoverableVat); NV_NET0=$(val .data.purchasesNet)
+NV_PPV0=$(cb 70108); NV_VATA0=$(cb 10403); NV_AP0=$(cb 30101)
+as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$PO4,\"invoiceNumber\":\"F-3002\",\"invoiceDate\":\"2026-10-24T00:00:00\",\"isOfficial\":true,\"lines\":[{\"orderLineId\":$POL4,\"quantity\":10,\"unitPrice\":390000,\"nonRecoverableVat\":true}]}"; SI4=$(val .data.id)
+check "f3b vat: the invoice shows a non-recoverable VAT of 390,000 and a total of 4,290,000" '.success and .data.nonRecoverableVatAmount == 390000 and .data.totalAmount == 4290000'
+as "$FIN_TOKEN" POST procurement/invoices/action "{\"id\":$SI4,\"action\":\"approve\"}"; check "f3b vat: the invoice is approved" '.success and .data.status == 3'
+as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=3"
+check "f3b vat: the deductible purchases VAT is unchanged, the non-recoverable VAT is +390,000, purchases net +3,900,000" '.success and .data.purchasesVat == '$NV_VAT0' and .data.nonRecoverableVat == '$((NV_NR0 + 390000))' and .data.purchasesNet == '$((NV_NET0 + 3900000))
+[ "$(cb 70108)" = "$((NV_PPV0 + 390000))" ] && ok "f3b vat: the non-recoverable 390,000 is cost (price-variance account +390,000)" || bad "f3b vat: the non-recoverable 390,000 is cost (got $(( $(cb 70108) - NV_PPV0 )))"
+[ "$(cb 10403)" = "$NV_VATA0" ] && ok "f3b vat: the deductible VAT account does not move" || bad "f3b vat: the deductible VAT account does not move (got $(( $(cb 10403) - NV_VATA0 )))"
+[ "$(cb 30101)" = "$((NV_AP0 - 4290000))" ] && ok "f3b vat: the payable grows by the invoice total 4,290,000" || bad "f3b vat: the payable grows by 4,290,000 (got $(( NV_AP0 - $(cb 30101) )))"
+
+# --- VAT on an asset disposal
+as "$FIN_TOKEN" POST $FA "$(AJ 'دستگاه فروش با مالیات' $CLS1 2026-06-25 20000000)"; ASV=$(val .data.id)
+as "$FM_TOKEN" POST $FA/action "{\"id\":$ASV,\"action\":\"approve\"}"; check "f3b disposal: asset for the VAT sale approved" '.success'
+DV_VAT0=$(cb 30205)
+as "$FIN_TOKEN" POST $FA/disposals "{\"assetId\":$ASV,\"date\":\"2026-10-24T00:00:00\",\"kind\":1,\"proceedsAmount\":10000000,\"proceedsMethod\":1,\"cashBoxId\":$CB,\"vatPercent\":10}"; check "f3b disposal: the preview shows a VAT of 1,000,000 on proceeds of 10,000,000" '.success and .data.vatPercent == 10 and .data.vatAmount == 1000000'
+DSV=$(val .data.id)
+as "$FM_TOKEN" POST $FA/disposals/action "{\"id\":$DSV,\"action\":\"approve\"}"; check "f3b disposal: the sale with VAT is approved" '.success'
+[ "$(cb 30205)" = "$((DV_VAT0 - 1000000))" ] && ok "f3b disposal: the sales-VAT account is credited exactly 1,000,000" || bad "f3b disposal: the sales-VAT account is credited exactly 1,000,000 (got $(( DV_VAT0 - $(cb 30205) )))"
+
+# --- bank guarantees
+GBK=$(cb 90101); GBK2=$(cb 90201); GPP=$(cb 10604)
+as "$FIN_TOKEN" POST $FCM/guarantees/limits '{"bankName":"ملت","limit":8000000000}'; no "f3b guarantee: only the finance manager sets a bank limit"
+as "$FM_TOKEN" POST $FCM/guarantees/limits '{"bankName":"ملت","limit":8000000000,"note":"آزمون"}'; check "f3b guarantee: the finance manager sets the bank limit" '.success'
+as "$FIN_TOKEN" POST $FCM/guarantees "{\"direction\":1,\"kind\":1,\"bankName\":\"ملت\",\"bankAccountId\":$BAR,\"guaranteeNo\":\"G-1\",\"partyName\":\"کارفرمای آزمون\",\"amount\":5000000000,\"issueDate\":\"2026-10-24T00:00:00\",\"expiryDate\":\"2027-10-23T00:00:00\",\"feeAmount\":1200000}"
+check "f3b guarantee: an issued guarantee of 5,000,000,000 is registered with a fee of 1,200,000 and a prepaid balance of 1,200,000" '.success and .data.status == 1 and .data.amount == 5000000000 and .data.feeRemaining == 1200000 and (.data.number|length) > 0'
+GID=$(val .data.id)
+[ "$(cb 90101)" = "$((GBK + 5000000000))" ] && [ "$(cb 90201)" = "$((GBK2 - 5000000000))" ] && ok "f3b guarantee: the memorandum accounts carry exactly 5,000,000,000" || bad "f3b guarantee: the memorandum accounts carry exactly 5,000,000,000"
+[ "$(cb 10604)" = "$((GPP + 1200000))" ] && ok "f3b guarantee: the fee is deferred (prepaid +1,200,000)" || bad "f3b guarantee: the fee is deferred (got $(( $(cb 10604) - GPP )))"
+as "$FIN_TOKEN" POST $FCM/guarantees "{\"direction\":1,\"kind\":1,\"bankName\":\"ملت\",\"bankAccountId\":$BAR,\"guaranteeNo\":\"G-1\",\"partyName\":\"کارفرمای آزمون\",\"amount\":1000,\"issueDate\":\"2026-10-24T00:00:00\",\"expiryDate\":\"2027-10-23T00:00:00\"}"; no "f3b guarantee: the same bank and guarantee number cannot be registered twice"
+as "$FIN_TOKEN" POST $FCM/guarantees "{\"direction\":1,\"kind\":1,\"bankName\":\"ملت\",\"partyName\":\"x\",\"amount\":1000,\"issueDate\":\"2026-10-24T00:00:00\",\"expiryDate\":\"2026-10-01T00:00:00\"}"; no "f3b guarantee: an expiry before the issue date is refused"
+as "$FM_TOKEN" GET "$FCM/guarantees/exposure"; check "f3b guarantee: exposure at the bank is 5,000,000,000 of a limit of 8,000,000,000 (3,000,000,000 available)" '.success and ([.data.banks[]|select(.bankName == "ملت" and .exposure == 5000000000 and .limit == 8000000000 and .available == 3000000000 and .activeCount == 1)]|length) == 1 and .data.totalIssued == 5000000000'
+as "$FIN_TOKEN" POST $FCM/guarantees/action "{\"id\":$GID,\"action\":\"extend\",\"newExpiry\":\"2028-01-20T00:00:00\",\"feeAmount\":300000}"; check "f3b guarantee: an extension with a fee of 300,000 moves the expiry and defers the extra fee" '.success and (.data.expiryDate|tostring|test("2028-01-20|1406/10/30"))'
+[ "$(cb 10604)" = "$((GPP + 1500000))" ] && ok "f3b guarantee: prepaid fee is 1,500,000 after the extension" || bad "f3b guarantee: prepaid fee is 1,500,000 after the extension (got $(( $(cb 10604) - GPP )))"
+as "$FM_TOKEN" GET "$FCM/guarantees?direction=1"; check "f3b guarantee: the register lists the extension event" '.success and ([.data[]|select(.id == '$GID')|.events[]|select(.kind == 1)]|length) == 1'
+as "$FIN_TOKEN" POST $FCM/guarantees/action "{\"id\":$GID,\"action\":\"release\",\"date\":\"2026-10-24T00:00:00\"}"; check "f3b guarantee: release closes the guarantee" '.success and .data.status == 2'
+[ "$(cb 90101)" = "$GBK" ] && [ "$(cb 90201)" = "$GBK2" ] && ok "f3b guarantee: release reverses the memorandum exactly" || bad "f3b guarantee: release reverses the memorandum exactly"
+[ "$(cb 10604)" = "$GPP" ] && ok "f3b guarantee: release expenses the whole unamortised fee (prepaid back to its start)" || bad "f3b guarantee: release expenses the whole unamortised fee (got $(( $(cb 10604) - GPP )))"
+as "$FM_TOKEN" GET "$FCM/guarantees/exposure"; check "f3b guarantee: after the release the exposure is zero" '.success and .data.totalIssued == 0'
+as "$FIN_TOKEN" POST $FCM/guarantees/action "{\"id\":$GID,\"action\":\"release\"}"; no "f3b guarantee: a released guarantee cannot be released again"
+as "$FIN_TOKEN" POST $FCM/guarantees "{\"direction\":2,\"kind\":2,\"bankName\":\"ملی\",\"guaranteeNo\":\"R-1\",\"partyName\":\"پیمانکار آزمون\",\"providerId\":$PA,\"amount\":700000000,\"issueDate\":\"2026-10-01T00:00:00\",\"expiryDate\":\"2026-11-05T00:00:00\"}"; check "f3b guarantee: a received guarantee is register-only" '.success and .data.direction == 2 and .data.status == 1'
+as "$FM_TOKEN" GET "$FCM/guarantees/exposure"; check "f3b guarantee: the received guarantee appears in the totals and in the 30-day expiry list" '.success and .data.totalReceived == 700000000 and ([.data.expiringWithin30Days[]|select(.guaranteeNo == "R-1")]|length) == 1'
+[ "$(cb 90101)" = "$GBK" ] && ok "f3b guarantee: a received guarantee posts nothing" || bad "f3b guarantee: a received guarantee posts nothing"
+
+# --- insurance clearance gates the release of the performance retention
+RTH=$(cb 30206)
+as "$FM_TOKEN" GET "$FG/details?Type=2&PageSize=0"; SUPA=$(jq -r '[.data.data[]|select(.code == "SUP-'$PA'")][0].code // "SUP-'$PA'"' "$B")
+fv "{\"date\":\"2026-10-20T00:00:00\",\"description\":\"کسور حسن انجام کار آزمون\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":5000000},{\"accountCode\":\"30206\",\"credit\":5000000,\"detail1Code\":\"$SUPA\"}]}"
+as "$FM_TOKEN" GET "$FCM/retention/status?providerId=$PA&asOf=2026-10-24"; check "f3b retention: 5,000,000 held, nothing released, no valid clearance, release not allowed" '.success and .data.held == 5000000 and .data.released == 0 and .data.releasable == 5000000 and .data.canRelease == false and .data.validClearanceId == null'
+as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; nomsg "f3b retention: the release is refused without an insurance clearance" "مفاصاحساب"
+as "$FIN_TOKEN" POST $FCM/clearances "{\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\"}"; check "f3b retention: a clearance without the scanned letter is saved but not valid" '.success and .data.isValid == false and .data.hasDocument == false'
+CLR=$(val .data.id)
+as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; no "f3b retention: a clearance without a document does not release the retention"
+as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-10-10T00:00:00\",\"documentId\":\"4b0d7a52-1d19-4c6f-9a11-0a3e5b6c7d80\"}"; check "f3b retention: an expired clearance with a document is not valid" '.success and .data.isValid == false and .data.hasDocument == true'
+as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; no "f3b retention: an expired clearance does not release the retention"
+as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"4b0d7a52-1d19-4c6f-9a11-0a3e5b6c7d80\",\"isRevoked\":true}"; check "f3b retention: a revoked clearance is not valid" '.success and .data.isValid == false'
+as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; no "f3b retention: a revoked clearance does not release the retention"
+as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"4b0d7a52-1d19-4c6f-9a11-0a3e5b6c7d80\"}"; check "f3b retention: a clearance with the document, not revoked, covering the date is valid" '.success and .data.isValid == true'
+as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":6000000}"; no "f3b retention: more than the retention held is refused"
+AP_B=$(cb 30101)
+as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":3000000}"; check "f3b retention: 3,000,000 released with a valid clearance" '.success and .data.amount == 3000000 and .data.voucherId > 0'
+[ "$(cb 30206)" = "$((RTH - 5000000 + 3000000))" ] && [ "$(cb 30101)" = "$((AP_B - 3000000))" ] && ok "f3b retention: the retention account falls 3,000,000 and the payable rises 3,000,000" || bad "f3b retention: the retention account falls 3,000,000 and the payable rises 3,000,000"
+as "$FM_TOKEN" GET "$FCM/retention/status?providerId=$PA&asOf=2026-10-24"; check "f3b retention: 2,000,000 remain releasable" '.success and .data.held == 5000000 and .data.released == 3000000 and .data.releasable == 2000000 and .data.canRelease == true'
+
+# --- planned versus actual per work order
+as "$FM_TOKEN" GET $FCO/workorders/$WO2/cost-sheet; ACT_TOT=$(val .data.totalCost)
+as "$FIN_TOKEN" POST $FCM/estimates "{\"workOrderId\":$WO2,\"material\":900000,\"labour\":300000,\"overhead\":500000,\"subcontract\":0,\"quantity\":2}"; check "f3b cost: the estimate is saved" '.success'
+as "$FM_TOKEN" GET "$FCM/work-orders/$WO2/planned-vs-actual"; check "f3b cost: planned 1,700,000 (unit 850,000), actual equals the cost sheet, variance is the difference" '.success and .data.hasEstimate == true and .data.plannedTotal == 1700000 and .data.plannedUnitCost == 850000 and .data.actualTotal == '$ACT_TOT' and .data.variance == '$((ACT_TOT - 1700000))' and ([.data.rows[]|select(.element == "Overhead")|.planned] == [500000])'
+as "$FIN_TOKEN" POST $FCM/estimates "{\"workOrderId\":$WO2,\"material\":1000000,\"labour\":300000,\"overhead\":500000,\"subcontract\":0,\"quantity\":2}"; as "$FM_TOKEN" GET "$FCM/work-orders/$WO2/planned-vs-actual"; check "f3b cost: a new estimate replaces the old one" '.success and .data.plannedTotal == 1800000'
+
+# --- supplier credit and debit notes
+AP_N0=$(cb 30101); PPV_N0=$(cb 70108); VAT_N0=$(cb 10403)
+as "$FIN_TOKEN" POST $FCM/supplier-notes "{\"kind\":1,\"providerId\":$PA,\"supplierInvoiceId\":$SI3,\"noteNumber\":\"CN-1\",\"date\":\"2026-10-24T00:00:00\",\"netAmount\":100000,\"reason\":\"تخفیف قیمت\"}"; check "f3b note: a credit note of 100,000 gets the default VAT 10,000 (total 110,000)" '.success and .data.vatAmount == 10000 and .data.totalAmount == 110000 and .data.status == 0'
+CN=$(val .data.id)
+as "$FIN_TOKEN" POST $FCM/supplier-notes "{\"kind\":1,\"providerId\":$PA,\"supplierInvoiceId\":$SI3,\"date\":\"2026-10-24T00:00:00\",\"netAmount\":5000000,\"reason\":\"بیش از فاکتور\"}"; no "f3b note: a credit note above the invoice total is refused"
+as "$FIN_TOKEN" POST $FCM/supplier-notes/action "{\"id\":$CN,\"action\":\"approve\"}"; nomsg "f3b note: the preparer cannot approve" "شخص دیگری"
+as "$FIN2_TOKEN" POST $FCM/supplier-notes/action "{\"id\":$CN,\"action\":\"approve\"}"; check "f3b note: the second accountant approves and posts" '.success and .data.status == 1 and .data.voucherId > 0'
+[ "$(cb 30101)" = "$((AP_N0 + 110000))" ] && [ "$(cb 70108)" = "$((PPV_N0 - 100000))" ] && [ "$(cb 10403)" = "$((VAT_N0 - 10000))" ] && ok "f3b note: credit note debits the payable 110,000, credits price variance 100,000 and VAT 10,000" || bad "f3b note: credit note debits the payable 110,000, credits price variance 100,000 and VAT 10,000"
+as "$FIN_TOKEN" POST $FCM/supplier-notes "{\"kind\":2,\"providerId\":$PA,\"noteNumber\":\"DN-1\",\"date\":\"2026-10-24T00:00:00\",\"netAmount\":200000,\"vatAmount\":0,\"reason\":\"هزینه حمل\"}"; check "f3b note: a debit note with VAT 0 totals 200,000" '.success and .data.totalAmount == 200000'
+DN=$(val .data.id); as "$FIN2_TOKEN" POST $FCM/supplier-notes/action "{\"id\":$DN,\"action\":\"approve\"}"; check "f3b note: the debit note is posted" '.success and .data.status == 1'
+[ "$(cb 30101)" = "$((AP_N0 + 110000 - 200000))" ] && ok "f3b note: the debit note credits the payable 200,000" || bad "f3b note: the debit note credits the payable 200,000"
+
+# --- supplier statement reconciliation
+as "$FIN_TOKEN" POST $FCM/supplier-statements "{\"providerId\":$PA,\"asOf\":\"2026-10-24T00:00:00\",\"theirBalance\":0,\"lines\":[{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"F-3001\",\"credit\":4290000},{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"X-999\",\"credit\":777000}]}"
+check "f3b statement: the invoice line matches, the unknown 777,000 line stays unmatched, the difference is their balance minus ours" '.success and .data.difference == (.data.theirBalance - .data.ourBalance) and ([.data.lines[]|select(.documentNumber == "F-3001" and .matchedKind != null)]|length) == 1 and ([.data.unmatchedTheirs[]|select(.documentNumber == "X-999" and .credit == 777000)]|length) == 1 and .data.reconciled == false'
+STM=$(val .data.id)
+as "$FM_TOKEN" GET "$FCM/supplier-statements/$STM"; check "f3b statement: the stored statement is readable with the same result" '.success and ([.data.unmatchedTheirs[]|select(.documentNumber == "X-999")]|length) == 1'
+
+# --- customer confirmation letter
+as "$FIN_TOKEN" POST $FCM/confirmations "{\"customerId\":$HC,\"asOf\":\"2026-10-24T00:00:00\"}"; check "f3b confirmation: letter data for a customer without movement: ledger 0, statement 0, agrees, no open documents" '.success and .data.ledgerBalance == 0 and .data.statementBalance == 0 and .data.agrees == true and .data.openDocuments == 0 and .data.status == 1 and (.data.customerName|length) > 0'
+CF=$(val .data.id)
+as "$FIN_TOKEN" POST $FCM/confirmations/respond "{\"id\":$CF,\"action\":\"confirm\",\"amount\":5}"; no "f3b confirmation: a confirmed amount different from the ledger is refused"
+as "$FIN_TOKEN" POST $FCM/confirmations/respond "{\"id\":$CF,\"action\":\"confirm\",\"amount\":0}"; check "f3b confirmation: the matching confirmation is recorded" '.success and .data.status == 2'
+as "$FIN_TOKEN" POST $FCM/confirmations/respond "{\"id\":$CF,\"action\":\"dispute\",\"note\":\"x\"}"; no "f3b confirmation: an answered letter cannot be answered again"
+
+# --- annual bonus (عیدی) and termination settlement
+EBJ() { EJ "$1" "$2" "$3" "$4" IR270170000000100324200001 | jq -c --arg h "$5" --argjson w "$6" '.hireDate = $h | .dailyWage = $w'; }
+as "$PAYR_TOKEN" POST $FP/employees "$(EBJ T901 آزمون عیدی 0013542419 2026-03-21T00:00:00 1100000)"; check "f3b bonus: employee with a daily wage of 1,100,000 hired on the first day of 1405 saved" '.success and .data.id > 0'
+PE2=$(val .data.id)
+as "$PAYR_TOKEN" POST $FPS/bonus-runs "{\"year\":1404,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1,$PE2]}"; no "f3b bonus: a year without the rate inputs is refused"
+fv "{\"date\":\"2026-10-20T00:00:00\",\"description\":\"ذخیره عیدی آزمون\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":1000000000},{\"accountCode\":\"30402\",\"credit\":1000000000}]}"
+as "$FIN_TOKEN" POST $FPS/bonus-runs "{\"year\":1405,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1,$PE2]}"; [ "$CODE" = "403" ] && ok "f3b bonus: the accountant cannot prepare a bonus run (403)" || bad "f3b bonus: the accountant cannot prepare a bonus run (403) got $CODE"
+as "$PAYR_TOKEN" POST $FPS/bonus-runs "{\"year\":1405,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1,$PE2]}"
+check "f3b bonus: gross 36,000,000 and 66,000,000, tax 0 and 100,000 (the part above 45,000,000 is taxed), totals 102,000,000 / 100,000 / 101,900,000" '.success and .data.totalGross == 102000000 and .data.totalTax == 100000 and .data.totalNet == 101900000 and ([.data.lines[]|select(.employeeId == '$PE1' and .gross == 36000000 and .tax == 0 and .net == 36000000)]|length) == 1 and ([.data.lines[]|select(.employeeId == '$PE2' and .gross == 66000000 and .tax == 100000 and .net == 65900000 and .employedDays == 365 and .yearDays == 365)]|length) == 1 and .data.status == 0'
+BR=$(val .data.id)
+BN_P0=$(cb 30402); BN_T0=$(cb 30203); BN_W0=$(cb 30201); BN_E0=$(cb 80101)
+as "$PAYR_TOKEN" POST $FPS/bonus-runs/action "{\"id\":$BR,\"action\":\"approve\"}"; nomsg "f3b bonus: the preparer cannot approve" "شخص دیگری"
+as "$FM_TOKEN" POST $FPS/bonus-runs/action "{\"id\":$BR,\"action\":\"approve\"}"; check "f3b bonus: approved, 102,000,000 drawn from the provision and nothing expensed now" '.success and .data.status == 1 and .data.fromProvision == 102000000 and .data.expensedNow == 0 and .data.voucherId > 0'
+[ "$(cb 30402)" = "$((BN_P0 + 102000000))" ] && [ "$(cb 30203)" = "$((BN_T0 - 100000))" ] && [ "$(cb 30201)" = "$((BN_W0 - 101900000))" ] && [ "$(cb 80101)" = "$BN_E0" ] && ok "f3b bonus: provision debited 102,000,000, tax payable +100,000, payroll payable +101,900,000, no expense" || bad "f3b bonus: ledger effect of the bonus run"
+as "$PAYR_TOKEN" POST $FPS/bonus-runs "{\"year\":1405,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1]}"; no "f3b bonus: a second run for the same year is refused"
+as "$PAYR_TOKEN" GET "$FPS/tax-reconciliation?year=1405"; check "f3b tax: the annual reconciliation lists the bonus tax of 100,000 for the new employee and the totals add up" '.success and ([.data.rows[]|select(.employeeId == '$PE2')|.taxWithheld] == [100000]) and .data.totalWithheld == ([.data.rows[].taxWithheld]|add) and .data.totalRecomputed == ([.data.rows[].taxRecomputed]|add) and ([.data.rows[]|select(.employeeId == '$PE1')|.taxWithheld] | .[0] >= 1046000)'
+as "$AUD_TOKEN" GET "$FPS/tax-reconciliation?year=1405"; [ "$CODE" = "403" ] && ok "f3b payroll: the auditor gets 403 on the reconciliation" || bad "f3b payroll: the auditor gets 403 on the reconciliation got $CODE"
+as "$AUD_TOKEN" GET "$FPS/terminations"; [ "$CODE" = "403" ] && ok "f3b payroll: the auditor gets 403 on terminations" || bad "f3b payroll: the auditor gets 403 on terminations got $CODE"
+as "$FIN_TOKEN" GET "$FPS/bonus-runs"; [ "$CODE" = "403" ] && ok "f3b payroll: the accountant gets 403 on bonus runs" || bad "f3b payroll: the accountant gets 403 on bonus runs got $CODE"
+as "$CEO_TOKEN" GET "$FPS/bonus-runs"; check "f3b payroll: the CEO may read bonus runs" '.success and (.data|length) >= 1'
+# termination: hired 1401/01/01, ended 1405/06/31 = 4 years and 6 months = 54 full months; base 30 x 600,000 = 18,000,000
+as "$PAYR_TOKEN" POST $FP/employees "$(EBJ T902 آزمون پایان 1234567891 2022-03-21T00:00:00 600000)"; PE3=$(val .data.id)
+fv "{\"date\":\"2026-10-20T00:00:00\",\"description\":\"ذخیره سنوات آزمون\",\"lines\":[{\"accountCode\":\"80103\",\"debit\":1000000000},{\"accountCode\":\"40201\",\"credit\":1000000000}]}"
+LVB=$(( -$(cb 30403) )); [ "$LVB" -lt 0 ] && LVB=0; LVEXP=$(( LVB < 6000000 ? LVB : 6000000 ))
+as "$PAYR_TOKEN" POST $FPS/terminations "{\"employeeId\":$PE3,\"terminationDate\":\"2026-09-22T00:00:00\",\"unusedLeaveDays\":10,\"noticeDays\":0}"
+check "f3b termination: 54 months, severance 81,000,000, leave 6,000,000, notice 0, total 87,000,000 (30 days per year from the rate table)" '.success and .data.yearsOfService == 4.5 and .data.monthlyBase == 18000000 and .data.dailyWage == 600000 and .data.severancePay == 81000000 and .data.leavePay == 6000000 and .data.noticePay == 0 and .data.total == 87000000 and .data.status == 0 and (.data.sources|length) >= 1'
+TM=$(val .data.id)
+as "$PAYR_TOKEN" POST $FPS/terminations/action "{\"id\":$TM,\"action\":\"approve\"}"; nomsg "f3b termination: the preparer cannot approve" "شخص دیگری"
+TS_S0=$(cb 40201); TS_L0=$(cb 30403)
+as "$FM_TOKEN" POST $FPS/terminations/action "{\"id\":$TM,\"action\":\"approve\"}"; check "f3b termination: approved; severance 81,000,000 covered by the provision, leave covered up to the provision balance" '.success and .data.status == 1 and .data.fromSeveranceProvision == 81000000 and .data.fromLeaveProvision == '$LVEXP' and .data.voucherId > 0'
+[ "$(cb 40201)" = "$((TS_S0 + 81000000))" ] && ok "f3b termination: the severance provision is debited exactly 81,000,000" || bad "f3b termination: the severance provision is debited exactly 81,000,000 (got $(( $(cb 40201) - TS_S0 )))"
+as "$PAYR_TOKEN" GET "$FP/employees/$PE3"; check "f3b termination: the employee end date is set to the termination date" '.success and (.data.endDate|tostring|test("2026-09-22|1405/06/31"))'
+as "$PAYR_TOKEN" POST $FPS/terminations "{\"employeeId\":$PE3,\"terminationDate\":\"2026-09-22T00:00:00\",\"unusedLeaveDays\":0,\"noticeDays\":0}"; no "f3b termination: an employee already settled cannot be settled again"
+
+# --- direct-method cash flow, comparatives and notes
+as "$FM_TOKEN" GET "$FCM/cash-flow-direct?FiscalYearId=$FYC&IncludeDraft=true"
+check "f3b cashflow: the direct method nets to the change in cash and to the indirect method" '.success and .data.netChange == (.data.closingCash - .data.openingCash) and .data.netChange == .data.indirectNetChange and .data.netChange == (.data.operating + .data.investing + .data.financing) and ([.data.rows[].net]|add) == .data.netChange and .data.ties == true'
+as "$FM_TOKEN" GET "$FCM/comparative?kind=BalanceSheet&fiscalYearId=$FYC&includeDraft=true"; check "f3b comparative: the balance sheet carries the prior year 1404 and every change is current minus prior" '.success and .data.priorYear == 1404 and (.data.rows|length) > 5 and ([.data.rows[]|select(.change != (.current - .prior))]|length) == 0'
+as "$FM_TOKEN" GET "$FCM/comparative?kind=IncomeStatement&fiscalYearId=$FYC&includeDraft=true"; check "f3b comparative: the income statement carries the prior year too" '.success and .data.priorYear == 1404 and (.data.rows|length) > 3'
+as "$FM_TOKEN" GET "$FCM/comparative?kind=Other&fiscalYearId=$FYC"; no "f3b comparative: an unknown statement kind is refused"
+as "$FM_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"; check "f3b notes: the schedules add up (payables, inventory by group) and the loans are split into current and long-term" '.success and .data.payablesTotal == ([.data.payables[].total]|add // 0) and .data.inventoryTotal == ([.data.inventory[].balance]|add // 0) and ([.data.loans[]|select(.outstanding != (.currentPortion + .longTerm))]|length) == 0 and (.data.receivablesAgeing != null)'
+as "$AUD_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"; check "f3b notes: the auditor can read the notes" '.success'
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'

@@ -232,7 +232,7 @@ namespace Services.NasbNiro.Finance
             {
                 Id = d.Id, Number = d.Number, AssetId = d.AssetId, AssetCode = d.Asset?.Code, AssetTitle = d.Asset?.Title, Date = d.Date, Kind = d.Kind, Status = d.Status,
                 Cost = d.Asset?.Cost ?? 0, ProceedsAmount = d.ProceedsAmount, ProceedsMethod = d.ProceedsMethod, CatchUpDepreciation = d.CatchUpDepreciation,
-                AccumulatedAtDisposal = d.AccumulatedAtDisposal, BookValue = d.BookValue, GainLoss = d.GainLoss, Note = d.Note,
+                AccumulatedAtDisposal = d.AccumulatedAtDisposal, BookValue = d.BookValue, GainLoss = d.GainLoss, VatPercent = d.VatPercent, VatAmount = d.VatAmount, Note = d.Note,
                 PreparedByName = names.Name(d.PreparedByUserId), ApprovedByName = names.Name(d.ApprovedByUserId),
             }).ToList();
         }
@@ -285,6 +285,12 @@ namespace Services.NasbNiro.Finance
             if (date < since.Date) return Bad<DisposalDto>("تاریخ واگذاری پیش از تاریخ تحصیل یا بهره‌برداری است.");
             decimal proceeds = R(dto.ProceedsAmount);
             if (proceeds < 0) return Bad<DisposalDto>("مبلغ دریافتی نمی‌تواند منفی باشد.");
+            decimal vatPercent = 0;
+            if (dto.Kind == FnDisposalKind.Sale && proceeds > 0)
+            {
+                vatPercent = dto.VatPercent ?? (dto.ApplyStandardVat ? await TaxRates.RateAtAsync(_uow, FnTaxKind.Vat, date, ct) ?? 0 : 0);
+                if (vatPercent < 0 || vatPercent > 100) return Bad<DisposalDto>("درصد مالیات بر ارزش افزوده باید بین ۰ و ۱۰۰ باشد.");
+            }
             FnProceedsMethod method = proceeds == 0 ? FnProceedsMethod.None : dto.ProceedsMethod;
             if (proceeds > 0 && method == FnProceedsMethod.None) return Bad<DisposalDto>("روش دریافت وجه را مشخص کنید.");
             if (method == FnProceedsMethod.Cash && !(dto.CashBoxId.HasValue && await _uow.Set<FnCashBox>().AnyAsync(x => x.Id == dto.CashBoxId.Value && x.IsActive, ct))) return Bad<DisposalDto>("صندوق پیدا نشد.");
@@ -311,7 +317,7 @@ namespace Services.NasbNiro.Finance
             }
             var preview = await PreviewAsync(a, date, ct);
             if (preview.Error != null) return Bad<DisposalDto>(preview.Error);
-            d.Date = date; d.Kind = dto.Kind; d.ProceedsAmount = proceeds; d.ProceedsMethod = method;
+            d.Date = date; d.Kind = dto.Kind; d.ProceedsAmount = proceeds; d.ProceedsMethod = method; d.VatPercent = vatPercent; d.VatAmount = R(proceeds * vatPercent / 100m);
             d.CashBoxId = method == FnProceedsMethod.Cash ? dto.CashBoxId : null;
             d.BankAccountId = method == FnProceedsMethod.Bank ? dto.BankAccountId : null;
             d.CustomerId = method == FnProceedsMethod.Receivable ? dto.CustomerId : null;
@@ -364,18 +370,19 @@ namespace Services.NasbNiro.Finance
                 switch (d.ProceedsMethod)
                 {
                     case FnProceedsMethod.Cash:
-                        lines.Add(new AccountingEventLine { AccountRole = AccountRoles.Cash, Debit = d.ProceedsAmount, PartyType = "CashBox", PartyId = d.CashBoxId, Description = $"دریافت بهای واگذاری {a.Code}" });
+                        lines.Add(new AccountingEventLine { AccountRole = AccountRoles.Cash, Debit = d.ProceedsAmount + d.VatAmount, PartyType = "CashBox", PartyId = d.CashBoxId, Description = $"دریافت بهای واگذاری {a.Code}" });
                         break;
                     case FnProceedsMethod.Bank:
                     {
                         FnBankAccount bank = await _uow.Set<FnBankAccount>().AsNoTracking().Include(b => b.Account).FirstAsync(b => b.Id == d.BankAccountId.Value, ct);
-                        lines.Add(new AccountingEventLine { AccountRole = AccountRole(bank.Account.Code), Debit = d.ProceedsAmount, PartyType = "BankAccount", PartyId = bank.Id, Description = $"دریافت بهای واگذاری {a.Code}" });
+                        lines.Add(new AccountingEventLine { AccountRole = AccountRole(bank.Account.Code), Debit = d.ProceedsAmount + d.VatAmount, PartyType = "BankAccount", PartyId = bank.Id, Description = $"دریافت بهای واگذاری {a.Code}" });
                         break;
                     }
                     default:
-                        lines.Add(new AccountingEventLine { AccountRole = AccountRoles.AccountsReceivable, Debit = d.ProceedsAmount, PartyType = "Customer", PartyId = d.CustomerId, Description = $"بهای واگذاری {a.Code}" });
+                        lines.Add(new AccountingEventLine { AccountRole = AccountRoles.AccountsReceivable, Debit = d.ProceedsAmount + d.VatAmount, PartyType = "Customer", PartyId = d.CustomerId, Description = $"بهای واگذاری {a.Code}" });
                         break;
                 }
+                if (d.VatAmount > 0) lines.Add(new AccountingEventLine { AccountRole = AccountRoles.VatSales, Credit = d.VatAmount, Description = $"مالیات ارزش افزوده فروش دارایی {a.Code}" });
             }
             if (d.GainLoss < 0) lines.Add(new AccountingEventLine { AccountRole = AccountRoles.AssetLossOnDisposal, Debit = -d.GainLoss, Description = $"زیان واگذاری {a.Code}" });
             if (d.GainLoss > 0) lines.Add(new AccountingEventLine { AccountRole = AccountRoles.AssetGainOnDisposal, Credit = d.GainLoss, Description = $"سود واگذاری {a.Code}" });

@@ -50,13 +50,15 @@ namespace Services.NasbNiro.Finance
         private readonly IInventoryUserContext _user;
         private readonly IEventPostingService _posting;
         private readonly ILedgerReportService _reports;
+        private readonly IReceivablesService _receivables;
 
-        public GlService(IUnitOfWork uow, IInventoryUserContext user, IEventPostingService posting, ILedgerReportService reports)
+        public GlService(IUnitOfWork uow, IInventoryUserContext user, IEventPostingService posting, ILedgerReportService reports, IReceivablesService receivables)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _posting = posting ?? throw new ArgumentNullException(nameof(posting));
             _reports = reports ?? throw new ArgumentNullException(nameof(reports));
+            _receivables = receivables ?? throw new ArgumentNullException(nameof(receivables));
         }
 
         private int Me => _user.UserId;

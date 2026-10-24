@@ -20,6 +20,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddCompletenessConfigurations();
             builder.AddCompletenessM2Configurations();
             builder.AddCompletenessM3Configurations();
+            builder.AddCompletenessM4Configurations();
             builder.AddProcurementConfigurations();
             builder.AddQualityConfigurations();
             builder.AddProjectControlConfigurations();

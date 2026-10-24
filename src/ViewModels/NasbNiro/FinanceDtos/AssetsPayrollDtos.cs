@@ -288,6 +288,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTime Date { get; set; }
         public FnDisposalKind Kind { get; set; }
         public decimal ProceedsAmount { get; set; }
+        /// <summary>VAT percent on a sale (price is without VAT). Empty = none; ApplyStandardVat takes the VAT rate of the date from the tax rates.</summary>
+        public decimal? VatPercent { get; set; }
+        public bool ApplyStandardVat { get; set; }
         public FnProceedsMethod ProceedsMethod { get; set; }
         public int? CashBoxId { get; set; }
         public int? BankAccountId { get; set; }
@@ -307,6 +310,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public FnDocStatus Status { get; set; }
         public decimal Cost { get; set; }
         public decimal ProceedsAmount { get; set; }
+        public decimal VatPercent { get; set; }
+        public decimal VatAmount { get; set; }
         public FnProceedsMethod ProceedsMethod { get; set; }
         public decimal CatchUpDepreciation { get; set; }
         public decimal AccumulatedAtDisposal { get; set; }

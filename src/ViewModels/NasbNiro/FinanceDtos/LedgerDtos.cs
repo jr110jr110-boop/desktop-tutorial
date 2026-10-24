@@ -519,6 +519,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal SalesVat { get; set; }
         public decimal PurchasesNet { get; set; }
         public decimal PurchasesVat { get; set; }
+        /// <summary>VAT of the season's purchases that is NOT deductible (cost); it is not in PurchasesVat.</summary>
+        public decimal NonRecoverableVat { get; set; }
         public decimal VatPayable { get; set; }
         public List<VatSeasonRowDto> Rows { get; set; } = new List<VatSeasonRowDto>();
     }

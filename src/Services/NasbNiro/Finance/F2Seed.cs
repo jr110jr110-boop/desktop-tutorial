@@ -52,6 +52,10 @@ namespace Services.NasbNiro.Finance
             yield return R("ShiftPercent3", 22.5m, "قانون کار ماده ۵۵ — شب‌کاری مداوم ★ — توسط مالی تایید شود");
             yield return R("LeaveEntitlementMonthly", 2.5m, "قانون کار ماده ۶۴ — ۳۰ روز در سال ★ — توسط مالی تایید شود");
             yield return R("LeaveCarryForwardMax", 9m, "قانون کار ماده ۶۵ — حداکثر انتقال ★ — توسط مالی تایید شود");
+            // release F3b: termination settlement and the yearly bonus (values are finance's to confirm)
+            yield return R("TerminationSeveranceDaysPerYear", 30m, "قانون کار ماده ۲۴ — حق سنوات: یک ماه (۳۰ روز) آخرین حقوق به ازای هر سال ★ — توسط مالی تایید شود");
+            yield return R("BonusDaysPerYear", 60m, "قانون کار و مصوبه عیدی و پاداش — ۶۰ روز مزد ★ — توسط مالی تایید شود");
+            yield return R("BonusCapDaysOfMinimumWage", 90m, "سقف معافیت عیدی — ۹۰ روز حداقل مزد روزانه (مبلغ حداقل مزد هر سال در جدول نرخ‌ها وارد می‌شود) ★ — توسط مالی تایید شود");
         }
 
         public static IEnumerable<FnPayrollItem> PayrollItemSeeds()

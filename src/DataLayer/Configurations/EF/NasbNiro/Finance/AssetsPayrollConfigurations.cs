@@ -95,6 +95,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.ToTable("FnAssetDisposals");
                 b.Property(x => x.Number).HasMaxLength(50).IsRequired();
                 b.Property(x => x.ProceedsAmount).HasPrecision(18, 0);
+                b.Property(x => x.VatPercent).HasPrecision(9, 4);
+                b.Property(x => x.VatAmount).HasPrecision(18, 0);
                 b.Property(x => x.CatchUpDepreciation).HasPrecision(18, 0);
                 b.Property(x => x.AccumulatedAtDisposal).HasPrecision(18, 0);
                 b.Property(x => x.BookValue).HasPrecision(18, 0);

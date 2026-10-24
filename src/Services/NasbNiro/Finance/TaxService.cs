@@ -134,15 +134,33 @@ namespace Services.NasbNiro.Finance
             // purchases: the approved supplier invoices of the season (net and VAT from the invoice itself, one row per supplier)
             var invoices = await uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking()
                 .Where(i => !i.Deleted && i.Status == Entities.Model.NasbNiro.Procurement.SupplierInvoiceStatus.Approved && i.InvoiceDate >= from && i.InvoiceDate <= to)
-                .Select(i => new { i.ProviderId, ProviderName = i.Provider.Name, i.NetAmount, i.VatAmount }).ToListAsync(ct);
+                .Select(i => new { i.ProviderId, ProviderName = i.Provider.Name, i.NetAmount, i.VatAmount, i.NonRecoverableVatAmount }).ToListAsync(ct);
             List<int> providerIds = invoices.Select(i => i.ProviderId).Distinct().ToList();
             var idCodes = await uow.Set<Entities.Model.NasbNiro.Procurement.SupplierProfile>().AsNoTracking().Where(p => providerIds.Contains(p.ProviderId)).Select(p => new { p.ProviderId, p.EconomicCode, p.NationalId }).ToListAsync(ct);
             foreach (var g in invoices.GroupBy(i => i.ProviderId))
             {
-                decimal net = g.Sum(x => x.NetAmount), vat = g.Sum(x => x.VatAmount);
+                // only the deductible VAT goes to the return; the rest is cost (F3b)
+                decimal net = g.Sum(x => x.NetAmount), vat = g.Sum(x => x.VatAmount - x.NonRecoverableVatAmount);
+                dto.NonRecoverableVat += g.Sum(x => x.NonRecoverableVatAmount);
                 var codes = idCodes.FirstOrDefault(c => c.ProviderId == g.Key);
                 dto.Rows.Add(new VatSeasonRowDto { Side = "Purchases", PartyName = g.First().ProviderName, EconomicCode = codes?.EconomicCode, NationalId = codes?.NationalId, NetAmount = net, VatAmount = vat, Documents = g.Count() });
                 dto.PurchasesNet += net; dto.PurchasesVat += vat;
+            }
+            // supplier credit / debit notes of the season change the input VAT and the purchases (F3b)
+            var notes = await uow.Set<FnSupplierNote>().AsNoTracking().Where(n => n.Status == FnSettlementStatus.Posted && n.Date >= from && n.Date <= to)
+                .Select(n => new { n.ProviderId, ProviderName = uow.Set<Entities.Model.NasbNiro.Providers.Provider>().Where(p => p.Id == n.ProviderId).Select(p => p.Name).FirstOrDefault(), n.Kind, n.NetAmount, n.VatAmount }).ToListAsync(ct);
+            foreach (var g in notes.GroupBy(n => n.ProviderId))
+            {
+                decimal net = g.Sum(n => n.Kind == FnSupplierNoteKind.Credit ? -n.NetAmount : n.NetAmount), vat = g.Sum(n => n.Kind == FnSupplierNoteKind.Credit ? -n.VatAmount : n.VatAmount);
+                dto.Rows.Add(new VatSeasonRowDto { Side = "Purchases", PartyName = (g.First().ProviderName ?? "") + " (یادداشت بدهکار/بستانکار)", NetAmount = net, VatAmount = vat, Documents = g.Count() });
+                dto.PurchasesNet += net; dto.PurchasesVat += vat;
+            }
+            // sale of fixed assets with VAT is a sale of the season (F3b)
+            foreach (var x in await uow.Set<FnAssetDisposal>().AsNoTracking().Where(d => d.Status == FnDocStatus.Posted && d.Kind == FnDisposalKind.Sale && d.VatAmount > 0 && d.Date >= from && d.Date <= to)
+                         .Select(d => new { d.Number, d.ProceedsAmount, d.VatAmount, AssetCode = d.Asset.Code }).ToListAsync(ct))
+            {
+                dto.Rows.Add(new VatSeasonRowDto { Side = "Sales", PartyName = "فروش دارایی " + x.AssetCode, NetAmount = x.ProceedsAmount, VatAmount = x.VatAmount, Documents = 1 });
+                dto.SalesNet += x.ProceedsAmount; dto.SalesVat += x.VatAmount;
             }
             // other documents that carry purchase VAT (not supplier invoices): VAT only, one row per document
             var others = await uow.Set<AccountingEventLine>().AsNoTracking()

@@ -77,6 +77,15 @@ namespace Services.NasbNiro.Finance
         public const int BadDebt = 577;
         public const int TaxProvision = 578;
         public const int CurrentPortion = 579;
+        // release F3b
+        public const int BankGuarantee = 580;
+        public const int InsuranceClearance = 581;
+        public const int RetentionRelease = 582;
+        public const int Termination = 583;
+        public const int BonusRun = 584;
+        public const int SupplierNote = 585;
+        public const int SupplierStatement = 586;
+        public const int ConfirmationLetter = 587;
     }
 
     internal static class LedgerMath

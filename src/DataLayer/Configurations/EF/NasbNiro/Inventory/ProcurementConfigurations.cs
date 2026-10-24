@@ -135,6 +135,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.Property(x => x.VatAmount).HasPrecision(22, 2);
                 b.Property(x => x.TotalAmount).HasPrecision(22, 2);
                 b.Property(x => x.PriceVariance).HasPrecision(22, 2);
+                b.Property(x => x.NonRecoverableVatAmount).HasPrecision(22, 2);
                 b.Property(x => x.MatchNote).HasMaxLength(LongText);
                 b.Property(x => x.CancelReason).HasMaxLength(Text);
                 b.HasOne(x => x.Provider).WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Restrict);

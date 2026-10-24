@@ -375,6 +375,8 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public int OrderLineId { get; set; }
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
+        /// <summary>VAT of this line is not deductible (becomes cost).</summary>
+        public bool NonRecoverableVat { get; set; }
     }
 
     public class SupplierInvoiceDto
@@ -393,6 +395,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public decimal VatAmount { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal PriceVariance { get; set; }
+        public decimal NonRecoverableVatAmount { get; set; }
         public string MatchNote { get; set; }
         public Guid? DocumentId { get; set; }
         public DateTimeOffset CreateDate { get; set; }
@@ -413,6 +416,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public decimal UnitPrice { get; set; }
         public decimal OrderUnitPrice { get; set; }
         public decimal Amount { get; set; }
+        public bool NonRecoverableVat { get; set; }
     }
 
     public class SavePaymentRequestDto

@@ -211,7 +211,11 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTime Date { get; set; }
         public FnDisposalKind Kind { get; set; }
         public FnDocStatus Status { get; set; }
+        /// <summary>The sale price without VAT.</summary>
         public decimal ProceedsAmount { get; set; }
+        /// <summary>VAT on the sale (F3b): output VAT, received from the buyer together with the price.</summary>
+        public decimal VatPercent { get; set; }
+        public decimal VatAmount { get; set; }
         public FnProceedsMethod ProceedsMethod { get; set; }
         public int? CashBoxId { get; set; }
         public int? BankAccountId { get; set; }

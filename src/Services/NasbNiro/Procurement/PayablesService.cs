@@ -85,13 +85,13 @@ namespace Services.NasbNiro.Procurement
             {
                 Id = i.Id, Number = i.Number, Status = i.Status, ProviderId = i.ProviderId, ProviderName = i.Provider?.Name, PurchaseOrderId = i.PurchaseOrderId,
                 PurchaseOrderNumber = i.PurchaseOrder?.Number, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, IsOfficial = i.IsOfficial,
-                NetAmount = i.NetAmount, VatAmount = i.VatAmount, TotalAmount = i.TotalAmount, PriceVariance = i.PriceVariance, MatchNote = i.MatchNote,
+                NetAmount = i.NetAmount, VatAmount = i.VatAmount, TotalAmount = i.TotalAmount, PriceVariance = i.PriceVariance, NonRecoverableVatAmount = i.NonRecoverableVatAmount, MatchNote = i.MatchNote,
                 DocumentId = i.DocumentId, CreateDate = i.CreateDate, CreatorName = names.Name(i.CreatorUserId), ApprovedAt = i.ApprovedAt,
                 ApprovedByName = names.Name(i.ApprovedByUserId), CancelReason = i.CancelReason,
                 Lines = i.Lines.Select(l => new SupplierInvoiceLineDto
                 {
                     Id = l.Id, OrderLineId = l.OrderLineId, ItemCode = l.OrderLine?.Item?.Code, Description = l.OrderLine?.Description, Quantity = l.Quantity,
-                    UnitPrice = l.UnitPrice, OrderUnitPrice = l.OrderLine?.UnitPrice ?? 0, Amount = Math.Round(l.Quantity * l.UnitPrice, 0),
+                    UnitPrice = l.UnitPrice, OrderUnitPrice = l.OrderLine?.UnitPrice ?? 0, Amount = Math.Round(l.Quantity * l.UnitPrice, 0), NonRecoverableVat = l.NonRecoverableVat,
                 }).ToList(),
             }).ToList();
         }
@@ -189,10 +189,16 @@ namespace Services.NasbNiro.Procurement
             invoice.IsOfficial = dto.IsOfficial;
             invoice.DocumentId = dto.DocumentId;
             foreach (SaveSupplierInvoiceLineDto l in lines)
-                invoice.Lines.Add(new SupplierInvoiceLine { OrderLineId = l.OrderLineId, Quantity = l.Quantity, UnitPrice = l.UnitPrice });
+                invoice.Lines.Add(new SupplierInvoiceLine { OrderLineId = l.OrderLineId, Quantity = l.Quantity, UnitPrice = l.UnitPrice, NonRecoverableVat = l.NonRecoverableVat });
             invoice.NetAmount = Math.Round(lines.Sum(l => l.Quantity * l.UnitPrice), 0);
             invoice.VatAmount = Math.Round(dto.VatAmount ?? invoice.NetAmount * (order.VatPercent ?? 0) / 100m, 0);
             invoice.TotalAmount = invoice.NetAmount + invoice.VatAmount;
+            {
+                // F3b: the VAT of a line flagged non-recoverable is shared out by the line's net amount; the last flagged line takes the rounding
+                var flagged = invoice.Lines.Where(x => x.NonRecoverableVat).ToList();
+                decimal flaggedNet = Math.Round(flagged.Sum(x => x.Quantity * x.UnitPrice), 0);
+                invoice.NonRecoverableVatAmount = invoice.NetAmount == 0 ? 0 : Math.Round(invoice.VatAmount * flaggedNet / invoice.NetAmount, 0);
+            }
             invoice.PriceVariance = Math.Round(variance, 0);
             invoice.MatchNote = notes.Count == 0 ? "مطابق سفارش و رسید تاییدشده" : string.Join(" | ", notes);
             invoice.Status = outOfTolerance ? SupplierInvoiceStatus.NeedsApproval : SupplierInvoiceStatus.Matched;
@@ -233,7 +239,13 @@ namespace Services.NasbNiro.Procurement
                                 AccountRole = AccountRoles.PurchasePriceVariance, Debit = ppv > 0 ? ppv : 0, Credit = ppv < 0 ? -ppv : 0,
                                 WorkOrderId = invoice.PurchaseOrder.WorkOrderId, ContractId = invoice.PurchaseOrder.ContractId,
                             },
-                            new AccountingEventLine { AccountRole = AccountRoles.Vat, Debit = invoice.VatAmount },
+                            new AccountingEventLine { AccountRole = AccountRoles.Vat, Debit = invoice.VatAmount - invoice.NonRecoverableVatAmount },
+                            // F3b: VAT that cannot be deducted is cost (it follows the order's work order / contract like the price variance)
+                            new AccountingEventLine
+                            {
+                                AccountRole = AccountRoles.PurchasePriceVariance, Debit = invoice.NonRecoverableVatAmount, WorkOrderId = invoice.PurchaseOrder.WorkOrderId, ContractId = invoice.PurchaseOrder.ContractId,
+                                Description = "مالیات ارزش افزوده غیرقابل استرداد",
+                            },
                             new AccountingEventLine { AccountRole = AccountRoles.AccountsPayable, Credit = invoice.TotalAmount, ProviderId = invoice.ProviderId, Description = invoice.InvoiceNumber },
                         });
 
