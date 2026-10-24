@@ -5,6 +5,7 @@ using System.Text.Json;
 using Common.IdentityToolkit;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
+using Entities.Model.NasbNiro.Production;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -77,6 +78,16 @@ namespace DataLayer.Context
             { typeof(OfNumberingRule), null },
             { typeof(OfAttendancePolicy), null },
             { typeof(OfClockEvent), new[] { "EmployeeId", "Timestamp", "Direction", "Source", "Reason", "DeviceCode" } },
+            // production / shop floor (release P1): master data, routing approvals, the release gate, status changes and edits of time bookings
+            { typeof(MfWorkCenter), null },
+            { typeof(MfMachineInfo), null },
+            { typeof(MfOperationStandard), null },
+            { typeof(MfRoutingRevision), null },
+            { typeof(MfReasonCode), null },
+            { typeof(MfProductionOrder), new[] { "Status", "Quantity", "RoutingRevisionId", "ReleasedByUserId", "ReleaseOverride", "ReleaseOverrideReason", "KitOverrideReason", "CancelReason" } },
+            { typeof(MfOperation), new[] { "Status", "SkipReason", "WorkCenterId", "QcAccepted" } },
+            { typeof(MfTimeBooking), new[] { "OperationId", "EmployeeId", "MachineId", "Kind", "StartAt", "EndAt", "Minutes", "Hours", "GoodQty", "ScrapQty", "ReworkQty", "SupervisorReason", "EditReason", "Source" } },
+            { typeof(MfMaintenanceRequest), new[] { "MachineId", "Status", "Description" } },
             { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays" } },
         };
 
@@ -120,7 +131,13 @@ namespace DataLayer.Context
                     if (entry.Entity is FnDetailAccount d && d.LinkedEntityId.HasValue) continue;
                     // the punches of the devices are too many to list; manual and imported events are the ones that need a trail
                     if (entry.Entity is OfClockEvent ce && ce.Source == OfClockSource.Device) continue;
+                    // operations and terminal bookings are made by the system or by the floor in bulk; their changes and supervisor edits are the trail
+                    if (entry.Entity is MfOperation) continue;
+                    if (entry.Entity is MfTimeBooking tb && tb.Source == MfBookingSource.Terminal) continue;
                 }
+
+                // a terminal start or stop changes a booking all the time; only a correction (with its reason) is written
+                if (entry.State == EntityState.Modified && entry.Entity is MfTimeBooking && !(entry.Properties.FirstOrDefault(x => x.Metadata.Name == "EditReason")?.IsModified ?? false)) continue;
 
                 var before = new Dictionary<string, object>();
                 var after = new Dictionary<string, object>();
@@ -213,6 +230,8 @@ namespace DataLayer.Context
                 if (!string.IsNullOrWhiteSpace(t)) { text = name == "TemporaryNumber" ? "موقت " + t : t; break; }
             }
             if (entry.Entity is FnEmployee) text = "کارمند (شماره حساب)";
+            if (entry.Entity is MfTimeBooking) text = "ثبت زمان کار";
+            if (entry.Entity is MfOperation) text = "عملیات دستور تولید";
             if (entry.Entity is OfClockEvent) text = "تردد " + (entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Source")?.CurrentValue?.ToString() == "Manual" ? "دستی" : "واردشده");
             if (entry.Entity is FnAttendanceSheet) text = "برگه حضور ماهانه";
             if (entry.Entity is OfAttendancePolicy) text = "سیاست حضور و غیاب";

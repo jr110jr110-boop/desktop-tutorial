@@ -226,7 +226,7 @@ namespace Services.NasbNiro.Office
 
         public async Task<ResponseDto<List<WorkedHoursDto>>> GetWorkedHoursAsync(WorkedHoursQuery query, CancellationToken ct)
         {
-            if (!_user.IsInRole("HR,CEO,PMO,PROJECTMANAGER,PLANNING,CONSTRUCTION,FINANCEMANAGER")) return Bad<List<WorkedHoursDto>>(OfficeText.NotAllowed);
+            if (!_user.IsInRole("HR,CEO,PMO,PROJECTMANAGER,PLANNING,CONSTRUCTION,FINANCEMANAGER,PRODUCTIONMANAGER,SHOPSUPERVISOR")) return Bad<List<WorkedHoursDto>>(OfficeText.NotAllowed);
             if (query == null || query.EmployeeIds == null || query.EmployeeIds.Count == 0) return Bad<List<WorkedHoursDto>>(OfficeText.InvalidData);
             if (query.EmployeeIds.Count > 500 || query.To.Date < query.From.Date || (query.To.Date - query.From.Date).TotalDays > 93) return Bad<List<WorkedHoursDto>>("بازه یا تعداد پرسنل بیش از حد مجاز است.");
             List<int> ids = query.EmployeeIds.Distinct().ToList();

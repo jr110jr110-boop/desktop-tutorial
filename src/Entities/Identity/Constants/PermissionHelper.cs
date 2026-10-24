@@ -330,6 +330,12 @@ namespace Entities.Identity.Constants
             yield return new RoleClaim() { Id = 1701, ClaimType = Type, ClaimValue = SepidarLink, RoleId = RoleConstants.FinanceManagerResponseRole.Id };
             yield return new RoleClaim() { Id = 1800, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.PayrollResponseRole.Id };
             yield return new RoleClaim() { Id = 1900, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.TreasuryResponseRole.Id };
+            yield return new RoleClaim() { Id = 2000, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.ProductionManagerResponseRole.Id };
+            yield return new RoleClaim() { Id = 2001, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.ProductionManagerResponseRole.Id };
+            yield return new RoleClaim() { Id = 2100, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.ShopSupervisorResponseRole.Id };
+            yield return new RoleClaim() { Id = 2101, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.ShopSupervisorResponseRole.Id };
+            yield return new RoleClaim() { Id = 2200, ClaimType = Type, ClaimValue = Traceability, RoleId = RoleConstants.OperatorResponseRole.Id };
+            yield return new RoleClaim() { Id = 2300, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.MaintenanceResponseRole.Id };
             yield return new RoleClaim() { Id = 2600, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.SecretariatResponseRole.Id };
             yield return new RoleClaim() { Id = 2700, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.HrResponseRole.Id };
             yield return new RoleClaim() { Id = 2800, ClaimType = Type, ClaimValue = Warehouse, RoleId = RoleConstants.AuditorResponseRole.Id };

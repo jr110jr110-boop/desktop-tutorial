@@ -51,10 +51,10 @@ namespace Services.NasbNiro.Inventory
         public const string Finance = "PMO,FINANCIAL,FINANCEMANAGER";
 
         /// <summary>Who may write a material request: production and planning.</summary>
-        public const string MaterialRequest = "PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR";
+        public const string MaterialRequest = "PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR,PRODUCTIONMANAGER,SHOPSUPERVISOR";
 
         /// <summary>Approvals of material requests (planning or manufacturing) and of NCRs (quality, engineering, manufacturing).</summary>
-        public const string Approvers = "PMO,PLANNING,WHSUPERVISOR,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE,FINANCIAL";
+        public const string Approvers = "PMO,PLANNING,WHSUPERVISOR,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE,FINANCIAL,PRODUCTIONMANAGER";
 
         /// <summary>Exit check of goods leaving the premises (guard).</summary>
         public const string ExitCheck = "PMO,WAREHOUSE,WHSUPERVISOR,SECURITY";
@@ -71,7 +71,7 @@ namespace Services.NasbNiro.Inventory
         public const string RolePlanning = "PLANNING,PMO";
         public const string RoleWarehouse = "WAREHOUSE,WHSUPERVISOR";
         public const string RoleWarehouseSupervisor = "WHSUPERVISOR";
-        public const string RoleManufacturing = "CONSTRUCTION";
+        public const string RoleManufacturing = "CONSTRUCTION,PRODUCTIONMANAGER";
         public const string RoleQuality = "QC";
         public const string RoleEngineering = "ENGINEERING";
     }

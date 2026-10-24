@@ -3339,6 +3339,260 @@ as "$OEMP_TOKEN" POST $OF/inbox/act "{\"id\":$OIN_ONE,\"action\":\"read\"}"; che
 as "$OEMP_TOKEN" GET $OF/inbox/counts; check "office r1: the unread count fell by exactly one and the open count did not change" ".success and .data.open == $OIN_OPEN and .data.unread == $((OIN_UNREAD - 1))"
 TOKEN=$ADMIN_TOKEN
 
+# =================================================================== PRODUCTION / SHOP FLOOR (MES), release P1 part A
+# self-contained: its own users, items, work centres, routings and a legacy chain (contract, work order, assembly, three BOM lines with a make process each)
+TOKEN=$ADMIN_TOKEN
+MF=production
+mfuser() { # mfuser NAME ROLEID PASSWORD N
+  call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"091200000$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"00123456$4\"}"
+}
+mfuser mf.pm.ci 20 'Ci#Mfpm-User-2026' 51
+mfuser mf.sv.ci 21 'Ci#Mfsv-User-2026' 52
+mfuser mf.op.ci 22 'Ci#Mfop-User-2026' 53
+mfuser mf.mt.ci 23 'Ci#Mfmt-User-2026' 54
+MPM_TOKEN=$(login mf.pm.ci 'Ci#Mfpm-User-2026'); MSV_TOKEN=$(login mf.sv.ci 'Ci#Mfsv-User-2026')
+MOP_TOKEN=$(login mf.op.ci 'Ci#Mfop-User-2026'); MMT_TOKEN=$(login mf.mt.ci 'Ci#Mfmt-User-2026')
+[ -n "$MPM_TOKEN" ] && [ -n "$MSV_TOKEN" ] && [ -n "$MOP_TOKEN" ] && [ -n "$MMT_TOKEN" ] && ok "mes: login production manager (20), shop supervisor (21), operator (22), maintenance (23)" || bad "mes: login production manager (20), shop supervisor (21), operator (22), maintenance (23)"
+MOPID=$(uid "$MOP_TOKEN")
+as "$PAYR_TOKEN" POST $FP/employees "$(EJ MF01 اپراتور آزمون 0084575948 IR270170000000100324200001 | jq -c --argjson u "$MOPID" '. + {userId:$u}')"; check "mes: personnel record of the operator is linked to the operator user" ".success and .data.id > 0 and .data.userId == $MOPID"
+MFEMP=$(val .data.id)
+
+# --- work centres, rates (finance only), machines, reason codes
+call POST $MF/work-centers '{"code":"MF-LATHE","title":"تراشکاری","kind":1}'; check "mes: work centre saved with the defaults (1 shift, 8 h, efficiency 100, utilisation 85) and no invented rate" '.success and .data.id > 0 and .data.shiftsPerDay == 1 and .data.hoursPerShift == 8 and .data.efficiencyPercent == 100 and .data.utilisationPercent == 85 and .data.machineRateRial == null and .data.labourRateRial == null'
+MFWC1=$(val .data.id)
+call POST $MF/work-centers '{"code":"MF-QCB","title":"میز بازرسی","kind":2}'; check "mes: second work centre saved" '.success and .data.id > 0 and .data.kind == 2'
+MFWC2=$(val .data.id)
+call POST $MF/work-centers '{"code":"MF-LATHE","title":"تکراری","kind":1}'; nomsg "mes: a duplicate work centre code is refused" "قبلاً ثبت شده"
+call POST $MF/work-centers '{"code":"MF-BAD","title":"شیفت نامعتبر","kind":1,"shiftsPerDay":4}'; nomsg "mes: more than three shifts a day is refused" "بین ۱ تا ۳"
+as "$MOP_TOKEN" POST $MF/work-centers '{"code":"MF-OP","title":"x","kind":1}'; nomsg "mes: the operator cannot write master data" "مجوز"
+call POST $MF/work-centers/rates "{\"id\":$MFWC1,\"machineRateRial\":1000,\"labourRateRial\":500}"; nomsg "mes: the hourly rates are set by finance only (not by the PMO)" "مالی"
+as "$FM_TOKEN" POST $MF/work-centers/rates "{\"id\":$MFWC1,\"machineRateRial\":1000,\"labourRateRial\":500}"; check "mes: finance sets the hourly rates" '.success and .data.machineRateRial == 1000 and .data.labourRateRial == 500'
+as "$MSV_TOKEN" GET "$MF/work-centers/$MFWC1"; check "mes: the shop supervisor reads the work centre without the rates" '.success and .data.code == "MF-LATHE" and .data.machineRateRial == null and .data.labourRateRial == null'
+as "$MMT_TOKEN" GET "$MF/work-centers?PageSize=1"; check "mes: work centre list is paged" '.success and (.data.data|length) == 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfWorkCenter&EntityId=$MFWC1&PageSize=0"; check "mes: the rate change is in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) >= 1'
+
+call POST Machine '{"title":"ماشین تراش آزمون ۱"}'; MFM1=$(val .data)
+call POST Machine '{"title":"ماشین تراش آزمون ۲"}'; MFM3=$(val .data)
+call POST Machine '{"title":"ماشین بازرسی آزمون"}'; MFM2=$(val .data)
+call POST $MF/machines/info "{\"machineId\":$MFM1,\"workCenterId\":$MFWC1,\"maker\":\"سازنده آزمون\",\"model\":\"M1\",\"serialNumber\":\"MF-SN-1\",\"status\":1}"; check "mes: machine 1 belongs to the lathe work centre" '.success and .data.machineId > 0 and .data.status == 1'
+call POST $MF/machines/info "{\"machineId\":$MFM3,\"workCenterId\":$MFWC1,\"status\":1}"; check "mes: machine 3 belongs to the lathe work centre" '.success and .data.status == 1'
+call POST $MF/machines/info "{\"machineId\":$MFM2,\"workCenterId\":$MFWC2,\"status\":1}"; check "mes: machine 2 belongs to the inspection work centre" '.success and .data.status == 1'
+as "$MOP_TOKEN" GET "$MF/machines?WorkCenterId=$MFWC1"; check "mes: the operator lists the machines of a work centre" ".success and ([.data.data[]|select(.machineId == $MFM1 or .machineId == $MFM3)]|length) == 2"
+call POST $MF/reason-codes '{"code":"MF-SCRAP-1","title":"ابعاد خارج از تلرانس","kind":1}'; check "mes: scrap reason code saved" '.success and .data.kind == 1 and .data.isActive == true'
+MFRSC=$(val .data.id)
+call POST $MF/reason-codes '{"code":"MF-DOWN-1","title":"خرابی ماشین","kind":2}'; check "mes: downtime reason code saved" '.success and .data.kind == 2'
+MFRDN=$(val .data.id)
+call POST $MF/reason-codes '{"code":"MF-SCRAP-1","title":"تکراری","kind":1}'; nomsg "mes: a duplicate reason code is refused" "قبلاً ثبت شده"
+
+# --- items, steps (operation templates) and standards
+item MFPA "{\"code\":\"MF.10.00.001.1\",\"title\":\"قطعه ساخت الف\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item A (lot)"
+item MFPB "{\"code\":\"MF.10.00.002.1\",\"title\":\"قطعه ساخت ب\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item B (lot)"
+item MFPC "{\"code\":\"MF.10.00.003.1\",\"title\":\"قطعه ساخت ج\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "mes: finished item C (lot)"
+item MFCMP "{\"code\":\"MF.20.00.001.1\",\"title\":\"ماده مصرفی ج\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes: component of item C (no stock)"
+call POST inventory/trace/templates "{\"itemId\":$MFPA,\"sequence\":10,\"title\":\"تراشکاری\"}"; MFT10=$(val .data.id)
+call POST inventory/trace/templates "{\"itemId\":$MFPA,\"sequence\":20,\"title\":\"بازرسی ابعادی\",\"requiresQc\":true}"; MFT20=$(val .data.id)
+call POST inventory/trace/templates "{\"itemId\":$MFPA,\"sequence\":30,\"title\":\"عملیات حرارتی بیرونی\"}"; MFT30=$(val .data.id)
+call POST inventory/trace/templates "{\"itemId\":$MFPB,\"sequence\":10,\"title\":\"تراشکاری ب\"}"; MFTB=$(val .data.id)
+call POST inventory/trace/templates "{\"itemId\":$MFPC,\"sequence\":10,\"title\":\"تراشکاری ج\"}"; MFTC=$(val .data.id)
+[ "$MFT10" -gt 0 ] && [ "$MFT20" -gt 0 ] && [ "$MFT30" -gt 0 ] && [ "$MFTB" -gt 0 ] && [ "$MFTC" -gt 0 ] && ok "mes: five routing steps created" || bad "mes: five routing steps created"
+call POST $MF/routings "{\"itemId\":$MFPA}"; nomsg "mes: a routing revision needs a standard (work centre, times) for every step" "استاندارد"
+as "$WH_TOKEN" POST $MF/operation-standards "{\"operationTemplateId\":$MFT10,\"workCenterId\":$MFWC1,\"setupHours\":1,\"runHoursPerUnit\":0.5}"; nomsg "mes: the warehouse cannot write standards" "مجوز"
+call POST $MF/operation-standards "{\"operationTemplateId\":$MFT10,\"setupHours\":1,\"runHoursPerUnit\":0.5}"; nomsg "mes: an inside step needs a work centre" "مرکز کار"
+call POST $MF/operation-standards "{\"operationTemplateId\":$MFT10,\"workCenterId\":$MFWC1,\"setupHours\":-1,\"runHoursPerUnit\":0.5}"; nomsg "mes: negative times are refused" "منفی"
+call POST $MF/operation-standards "{\"operationTemplateId\":$MFT10,\"workCenterId\":$MFWC1,\"setupHours\":1,\"runHoursPerUnit\":0.5,\"queueDays\":1,\"moveDays\":0.5}"; check "mes: standard of step 10 (setup 1 h, 0.5 h per unit)" '.success and .data.setupHours == 1 and .data.runHoursPerUnit == 0.5 and .data.inspectionRequirement == 0'
+call POST $MF/operation-standards "{\"operationTemplateId\":$MFT20,\"workCenterId\":$MFWC2,\"setupHours\":0,\"runHoursPerUnit\":0.1,\"inspectionRequirement\":2}"; check "mes: standard of step 20 asks for QC" '.success and .data.inspectionRequirement == 2'
+call POST $MF/operation-standards "{\"operationTemplateId\":$MFT30,\"isOutside\":true,\"defaultSupplierId\":${PRV:-0},\"outsideLeadDays\":7}"; check "mes: standard of step 30 is outside work at a contractor with a 7 day lead time" '.success and .data.isOutside == true and .data.outsideLeadDays == 7 and .data.workCenterId == null'
+call POST $MF/operation-standards "{\"operationTemplateId\":$MFTB,\"workCenterId\":$MFWC1,\"setupHours\":0.5,\"runHoursPerUnit\":0.2,\"drawingReferenceRule\":\"ZZ-NO-SUCH-DRAWING\"}"; check "mes: standard of item B needs a drawing that does not exist" '.success and .data.drawingReferenceRule == "ZZ-NO-SUCH-DRAWING"'
+call POST $MF/operation-standards "{\"operationTemplateId\":$MFTC,\"workCenterId\":$MFWC1,\"setupHours\":0.5,\"runHoursPerUnit\":0.25}"; check "mes: standard of item C" '.success'
+call GET "$MF/operation-standards?ItemId=$MFPA"; check "mes: standards of item A list its three steps in order" '.success and (.data.data|length) == 3 and .data.data[0].sequence == 10 and .data.data[2].isOutside == true'
+
+# --- routing revisions: two-person approval
+mfroute() { # mfroute ITEMID LABEL : the PMO opens the revision, the production manager and engineering approve it
+  call POST $MF/routings "{\"itemId\":$1}"; check "mes: routing revision of $2 opened as a draft" '.success and .data.revision == 1 and .data.status == 0 and (.data.steps|length) >= 1'
+  MFREV=$(val .data.id)
+  ibx "$MPM_TOKEN" "mf:routing:$MFREV"; check "mes: the production manager has the revision of $2 in the inbox" '.success and (.data.data|length) == 1'
+  call POST $MF/routings/action "{\"id\":$MFREV,\"action\":\"approve-production\"}"; nomsg "mes: the PMO who opened the revision of $2 cannot approve it (production manager only)" "مدیر تولید"
+  as "$ENG_TOKEN" POST $MF/routings/action "{\"id\":$MFREV,\"action\":\"approve-production\"}"; nomsg "mes: the production approval of $2 is the production manager's" "مدیر تولید"
+  as "$MPM_TOKEN" POST $MF/routings/action "{\"id\":$MFREV,\"action\":\"approve-production\"}"; check "mes: production approves the revision of $2 (still a draft)" '.success and .data.status == 0 and .data.productionApprovedByName != null and .data.engineeringApprovedByName == null'
+  as "$MPM_TOKEN" POST $MF/routings/action "{\"id\":$MFREV,\"action\":\"approve-engineering\"}"; nomsg "mes: the production manager cannot give the engineering approval of $2" "مهندسی"
+  as "$ENG_TOKEN" POST $MF/routings/action "{\"id\":$MFREV,\"action\":\"approve-engineering\"}"; check "mes: engineering approves the revision of $2: approved, content matches" '.success and .data.status == 1 and .data.contentMatches == true and .data.approvedAtText != null'
+  ibx "$MPM_TOKEN" "mf:routing:$MFREV"; check "mes: and the routing gate of $2 is closed" '.success and (.data.data|length) == 0'
+}
+mfroute "$MFPA" "item A"; MFREVA=$MFREV
+call GET "$MF/routings/$MFREVA"; check "mes: routing revision A carries its three steps and the Persian approval date" '.success and (.data.steps|length) == 3 and (.data.approvedAtText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
+mfroute "$MFPB" "item B"
+mfroute "$MFPC" "item C"
+as "$MPM_TOKEN" POST $MF/routings "{\"itemId\":$MFPA}"; check "mes: a second revision of item A is revision 2" '.success and .data.revision == 2 and .data.status == 0'
+MFREVA2=$(val .data.id)
+as "$MPM_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA2,\"action\":\"approve-production\"}"; nomsg "mes: the production manager cannot approve the revision he opened himself (maker-checker)" "تفکیک وظایف"
+as "$MPM_TOKEN" POST $MF/routings "{\"itemId\":$MFPA}"; nomsg "mes: only one open draft revision per item" "ابتدا آن را تأیید یا حذف کنید"
+as "$MPM_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA2,\"action\":\"delete\"}"; check "mes: the unused draft revision is deleted" '.success'
+call GET "$MF/routings?ItemId=$MFPA&Status=1"; check "mes: item A has one approved revision" '.success and (.data.data|length) == 1 and .data.data[0].id == '"$MFREVA"
+
+# --- legacy chain: contract, equipment, work order, assembly, three BOM lines, each with a make process whose exit code is the item
+call POST Contracts '{"code":"MF-CT-01","title":"قرارداد آزمون تولید","status":1,"employer":"کارفرمای آزمون"}'; MFCT=$(val .data.id)
+call POST Equipments '{"code":"MF-EQ-PUMP","title":"Process Pump API 610 (production test)"}'; MFEQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$MFCT,\"equipmentId\":$MFEQ,\"count\":1}"
+call POST WorkOrders "{\"contractId\":$MFCT,\"equipmentId\":$MFEQ,\"code\":\"MF-WO-1\",\"title\":\"Pump production\",\"description\":\"x\",\"count\":1}"; check "mes: work order created" '.success and .data.id > 0'
+MFWO=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$MFCT,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "mes: contract terms" '.success'
+as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$MFWO,\"contractId\":$MFCT,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"26\"}"; check "mes: equipment project code is built from the type, size and option" '.success and (.data.equipmentProjectCode|startswith("PU15026"))'
+call POST Assemblies "{\"title\":\"Pump casing\",\"code\":\"MF-ASM-1\",\"workOrderId\":$MFWO,\"assemblerDuration\":1}"; MFASM=$(val .data.id)
+mfbom() { # mfbom POSITION COUNT TITLE : echoes nothing, sets MFBOM
+  call POST Boms "{\"positionNumber\":$1,\"title\":\"$3\",\"count\":$2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"assemblyId\":$MFASM}"
+  MFBOM=$(val .data.id)
+}
+mfproc() { # mfproc BOMID EXITCODE ENTERCODE TITLE
+  call POST Processes "{\"exitCommodityCode\":\"$2\",\"enterCommodityCode\":\"$3\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":5,\"sort\":1,\"programPrice\":0,\"title\":\"$4\",\"bomId\":$1}"
+}
+mfbom 1 5 "قطعه الف"; mfproc "$MFBOM" "MF.10.00.001.1" "MF-NO-STOCK-CODE" "ساخت قطعه الف"; check "mes: make process of item A (5 units)" '.success and .data.id > 0'
+MFPRA=$(val .data.id)
+mfbom 2 1 "قطعه ب"; mfproc "$MFBOM" "MF.10.00.002.1" "MF-NO-STOCK-CODE" "ساخت قطعه ب"; check "mes: make process of item B (1 unit)" '.success and .data.id > 0'
+mfbom 3 2 "قطعه ج"; mfproc "$MFBOM" "MF.10.00.003.1" "MF.20.00.001.1" "ساخت قطعه ج"; check "mes: make process of item C (2 units, consumes the component)" '.success and .data.id > 0'
+MFPRC=$(val .data.id)
+
+# --- the work breakdown generation drafts a production order for every make process (hook), once
+as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$MFCT,\"workOrderIds\":[$MFWO]}"; check "mes: WBS generation for the work order succeeds" '.success'
+as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MFWO&PageSize=0"; check "mes: the WBS hook drafted three production orders (one per make process, automatically)" '.success and (.data.data|length) == 3 and ([.data.data[]|select(.autoDrafted == true and .status == 0)]|length) == 3'
+# a failed hook must not hide the rest of the section: draft by hand then (the check above has already failed)
+if [ "$(val '.data.data|length')" != "3" ]; then call POST $MF/orders/draft "{\"workOrderId\":$MFWO}"; as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MFWO&PageSize=0"; fi
+MFORDA=$(jq -r ".data.data[]|select(.itemId == $MFPA)|.id" "$B"); MFORDB=$(jq -r ".data.data[]|select(.itemId == $MFPB)|.id" "$B"); MFORDC=$(jq -r ".data.data[]|select(.itemId == $MFPC)|.id" "$B")
+[ "$(jq -r ".data.data[]|select(.itemId == $MFPA)|.quantity" "$B")" = "5" ] && ok "mes: order A is for the 5 units of the BOM line" || bad "mes: order A is for the 5 units of the BOM line"
+call POST $MF/orders/draft "{\"processId\":$MFPRA}"; check "mes: drafting again for the same process drafts nothing (idempotent)" '.success and .data.drafted == 0 and .data.skipped == 1 and (.data.notes|length) == 1'
+call POST $MF/orders/draft "{\"workOrderId\":$MFWO}"; check "mes: drafting the whole work order again drafts nothing" '.success and .data.drafted == 0 and .data.skipped == 3'
+as "$MOP_TOKEN" POST $MF/orders/draft "{\"workOrderId\":$MFWO}"; no "mes: the operator cannot draft orders"
+call GET "$MF/orders/$MFORDA"; check "mes: order A has numbers, three operations in sequence, the routing revision and no components" ".success and (.data.number|startswith(\"PO-MF\")) and (.data.operations|length) == 3 and ([.data.operations[].sequence]) == [10,20,30] and .data.routingRevisionId == $MFREVA and (.data.components|length) == 0 and ([.data.operations[].status]|unique) == [0]"
+MFNOA=$(val .data.number)
+check "mes: operations carry the job card number/sequence and the planned hours from the standard (setup 1, run 0.5 x 5 = 2.5)" ".data.operations[0].jobCard == \"$MFNOA/10\" and .data.operations[0].setupHoursPlanned == 1 and .data.operations[0].runHoursPlanned == 2.5 and .data.operations[1].inspectionRequirement == 2 and .data.operations[2].isOutside == true"
+MFOPA10=$(val '.data.operations[0].id'); MFOPA20=$(val '.data.operations[1].id'); MFOPA30=$(val '.data.operations[2].id')
+call GET "$MF/orders/$MFORDC"; check "mes: order C consumes 2 of the component" '.success and (.data.components|length) == 1 and .data.components[0].quantity == 2 and (.data.operations|length) == 1'
+call GET "$MF/orders/$MFORDB"; check "mes: order B has one operation" '.success and (.data.operations|length) == 1'
+ibx "$MSV_TOKEN" "mf:order:$MFORDA"; check "mes: the shop supervisor has the draft order A waiting for release in the inbox" '.success and (.data.data|length) == 1'
+as "$SEC_TOKEN" GET "$MF/orders?PageSize=5"; no "mes: the security user cannot read production orders"
+
+# --- release gate: computed checks
+call GET "$MF/orders/$MFORDA/release-check"; check "mes: release check of A: routing, work centres, drawings, ITP and materials all pass" '.success and .data.canRelease == true and (.data.checks|length) == 5 and ([.data.checks[]|select(.passed)]|length) == 5 and (.data.shortages|length) == 0'
+call GET "$MF/orders/$MFORDB/release-check"; check "mes: release check of B fails on the missing approved drawing and cannot be overridden" '.success and .data.canRelease == false and .data.canReleaseWithOverride == false and ([.data.checks[]|select(.code == "drawings")][0].passed == false)'
+call GET "$MF/orders/$MFORDC/release-check"; check "mes: release check of C fails only on the materials (short by 2) and can be overridden by the manager" '.success and .data.canRelease == false and .data.canReleaseWithOverride == true and (.data.shortages|length) == 1 and .data.shortages[0].required == 2 and .data.shortages[0].onHand == 0 and .data.shortages[0].short == 2'
+call POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: the PMO cannot release an order (shop supervisor or production manager only)" "سرپرست کارگاه"
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDB}"; nomsg "mes: order B cannot be released without its approved drawing" "صدور ممکن نیست"
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC}"; nomsg "mes: a shortage is not released by the shop supervisor" "فقط با مدیر تولید"
+as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC}"; nomsg "mes: a shortage needs a written reason even for the production manager" "دلیل را بنویسید"
+as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$MFORDC,\"components\":[{\"itemId\":$MFCMP,\"quantity\":2}]}"; check "mes: the production manager edits the components of order C" '.success and (.data.components|length) == 1'
+as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"ماده مصرفی در مسیر تأمین است\"}"; nomsg "mes: whoever edited the components cannot release the order (maker-checker)" "تفکیک وظایف"
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"x\"}"; nomsg "mes: the shop supervisor still cannot release with a shortage" "فقط با مدیر تولید"
+
+# --- cancel of a draft
+as "$PLAN_TOKEN" POST $MF/orders/action "{\"id\":$MFORDB,\"action\":\"cancel\"}"; nomsg "mes: cancelling needs a reason" "دلیل لغو"
+as "$PLAN_TOKEN" POST $MF/orders/action "{\"id\":$MFORDB,\"action\":\"cancel\",\"reason\":\"نقشه تأییدنشده\"}"; check "mes: order B is cancelled with a reason" '.success and .data.status == 5 and .data.cancelReason == "نقشه تأییدنشده"'
+ibx "$MSV_TOKEN" "mf:order:$MFORDB"; check "mes: and its release gate is closed" '.success and (.data.data|length) == 0'
+
+# --- release of A
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; check "mes: the shop supervisor releases order A: first operation ready, the others wait, no kit, no override" '.success and .data.status == 1 and .data.releaseOverride == false and .data.kitRequestId == null and ([.data.operations[].status]) == [1,0,0] and (.data.releasedAtText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
+ibx "$MSV_TOKEN" "mf:order:$MFORDA"; check "mes: and the release gate of A is closed" '.success and (.data.data|length) == 0'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDA&PageSize=0"; check "mes: the release is in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) >= 1'
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: an order is released once" "صادر می‌شود"
+
+# --- release of C by the manager with a shortage: kit is a draft material request
+as "$MSV_TOKEN" POST $MF/orders/components "{\"orderId\":$MFORDC,\"components\":[{\"itemId\":$MFCMP,\"quantity\":2}]}"; check "mes: the supervisor edits the components (same list) of order C" '.success'
+as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"ماده مصرفی در مسیر تأمین است\"}"; check "mes: the production manager releases C with the shortage and a reason: override recorded, kit drafted, operation waits for the kit" '.success and .data.status == 1 and .data.releaseOverride == true and .data.releaseOverrideReason == "ماده مصرفی در مسیر تأمین است" and (.data.shortageText|length) > 0 and .data.kitRequestId > 0 and (.data.kitNumber|startswith("MR")) and .data.kitIssued == false and ([.data.operations[].status]) == [0]'
+as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDC,\"action\":\"kit-override\"}"; nomsg "mes: starting without the complete kit needs a reason" "دلیل"
+as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDC,\"action\":\"kit-override\",\"reason\":\"شروع با تأیید سرپرست\"}"; check "mes: the supervisor lets C start without the issued kit (reason kept), the operation is ready" '.success and .data.kitOverrideReason == "شروع با تأیید سرپرست" and ([.data.operations[].status]) == [1]'
+MFOPC10=$(val '.data.operations[0].id')
+
+# --- terminal: scan, start, one running booking per person
+as "$MOP_TOKEN" GET "$MF/terminal/my-operations?PageSize=0"; check "mes: the operator terminal lists the ready operations of A and C" ".success and ([.data.data[]|select(.id == $MFOPA10 or .id == $MFOPC10)]|length) == 2 and ([.data.data[]|select(.id == $MFOPA20)]|length) == 0"
+as "$MOP_TOKEN" GET "$MF/terminal/scan?Code=$MFNOA/10"; check "mes: scanning the job card finds the operation" ".success and (.data.data|length) == 1 and .data.data[0].id == $MFOPA10"
+as "$MOP_TOKEN" GET "$MF/terminal/scan?Code=NO-SUCH-CARD"; nomsg "mes: an unknown job card is refused" "پیدا نشد"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA20}"; nomsg "mes: step 20 is not ready while step 10 is open" "هنوز آماده نیست"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"machineId\":$MFM2}"; nomsg "mes: a machine of another work centre is refused" "متعلق به مرکز کار"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"machineId\":$MFM1,\"kind\":2}"; check "mes: the operator starts step 10 on machine 1 (in progress, running booking)" '.success and .data.status == 2 and .data.myRunning == true and .data.runningBookings == 1'
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"kind\":2}"; nomsg "mes: the same job cannot be started twice" "در حال اجراست"
+as "$MOP_TOKEN" POST $MF/terminal/report-quantity "{\"operationId\":$MFOPA10,\"goodQty\":3}"; check "mes: 3 good pieces reported" '.success and .data.goodQty == 3'
+as "$MOP_TOKEN" POST $MF/terminal/report-quantity "{\"operationId\":$MFOPA10,\"scrapQty\":1}"; nomsg "mes: scrap needs a reason code" "دلیل ضایعات"
+as "$MOP_TOKEN" POST $MF/terminal/report-quantity "{\"operationId\":$MFOPA10,\"goodQty\":3}"; nomsg "mes: good plus scrap cannot exceed the order quantity (3 + 3 > 5)" "از تعداد این عملیات"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPC10,\"machineId\":$MFM1}"; check "mes: starting a second job stops the running booking of the person: C in progress" '.success and .data.status == 2 and .data.myRunning == true'
+as "$MOP_TOKEN" GET "$MF/bookings?EmployeeId=$MFEMP&RunningOnly=true"; check "mes: the person has exactly one running booking" ".success and (.data.data|length) == 1 and .data.data[0].operationId == $MFOPC10 and .data.data[0].source == 1 and .data.data[0].running == true"
+call GET "$MF/orders/$MFORDA"; check "mes: step 10 of A went to paused with 3 good pieces booked" '.success and .data.operations[0].status == 3 and .data.operations[0].goodQty == 3 and .data.operations[0].runningBookings == 0'
+as "$MOP_TOKEN" POST $MF/terminal/machine-down "{\"machineId\":$MFM3,\"operationId\":$MFOPC10,\"reasonCodeId\":$MFRSC,\"description\":\"صدای غیرعادی یاتاقان\"}"; nomsg "mes: a scrap reason is not a downtime reason" "معتبر نیست"
+as "$MOP_TOKEN" POST $MF/terminal/machine-down "{\"machineId\":$MFM3,\"operationId\":$MFOPC10,\"reasonCodeId\":$MFRDN}"; nomsg "mes: a breakdown report needs a description" "شرح خرابی"
+as "$MOP_TOKEN" POST $MF/terminal/machine-down "{\"machineId\":$MFM3,\"operationId\":$MFOPC10,\"reasonCodeId\":$MFRDN,\"description\":\"صدای غیرعادی یاتاقان\"}"; check "mes: machine down raises a maintenance request (open) with a number" '.success and (.data.number|startswith("MNT")) and .data.status == 0 and .data.machineId > 0 and (.data.reportedAtText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
+MFMNT=$(val .data.id)
+as "$MMT_TOKEN" GET "$MF/maintenance-requests?MachineId=$MFM3"; check "mes: maintenance sees the request" ".success and (.data.data|length) == 1 and .data.data[0].id == $MFMNT"
+ibx "$MMT_TOKEN" "mf:maint:$MFMNT"; check "mes: and has it in the inbox" '.success and (.data.data|length) == 1'
+as "$MOP_TOKEN" GET "$MF/machines?WorkCenterId=$MFWC1&Status=2"; check "mes: machine 3 is now down" ".success and (.data.data|length) == 1 and .data.data[0].machineId == $MFM3"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"machineId\":$MFM3,\"kind\":2}"; nomsg "mes: a machine that is down cannot be used" "در دسترس نیست"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"machineId\":$MFM1,\"kind\":2}"; check "mes: back on step 10 of A: it is in progress again and C is paused" '.success and .data.status == 2 and .data.myRunning == true'
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA10,\"goodQty\":1}"; nomsg "mes: finishing needs the whole quantity (3 + 1 is not 5)" "برابر نیست"
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA10,\"goodQty\":2}"; check "mes: step 10 of A is finished with 5 good pieces" '.success and .data.status == 4 and .data.goodQty == 5 and .data.finishedAtText != null'
+call GET "$MF/orders/$MFORDA"; check "mes: finishing step 10 made step 20 ready; the order is in progress" '.success and .data.status == 2 and ([.data.operations[].status]) == [4,1,0]'
+
+# --- supervisor bookings for another person, the attendance difference list
+call POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T08:00:00\",\"endAt\":\"2026-06-27T12:00:00\",\"reason\":\"ثبت از روی برگه دستی\"}"; nomsg "mes: the PMO cannot book time for somebody else" "مجوز"
+as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T08:00:00\",\"endAt\":\"2026-06-27T12:00:00\"}"; nomsg "mes: booking for somebody else needs a reason" "دلیل"
+as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T12:00:00\",\"endAt\":\"2026-06-27T08:00:00\",\"reason\":\"x\"}"; nomsg "mes: the end must be after the start" "بعد از شروع"
+as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T08:00:00\",\"endAt\":\"2026-06-27T12:00:00\",\"reason\":\"ثبت از روی برگه دستی\"}"; check "mes: the supervisor books 4 hours (240 minutes) for the personnel record with a reason" '.success and .data.minutes == 240 and .data.hours == 4 and .data.source == 2 and .data.supervisorReason == "ثبت از روی برگه دستی" and .data.dayClosed == true and (.data.startAtText|test("^1405/04/06"))'
+MFBK=$(val .data.id)
+as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T11:00:00\",\"endAt\":\"2026-06-27T13:00:00\",\"reason\":\"x\"}"; nomsg "mes: two bookings of one person cannot overlap" "همپوشانی"
+as "$MPM_TOKEN" POST $MF/bookings/edit "{\"id\":$MFBK,\"endAt\":\"2026-06-27T13:00:00\",\"reason\":\"اصلاح ساعت پایان\"}"; nomsg "mes: the day of a booking is closed: only the shop supervisor corrects it" "روز این ثبت زمان بسته شده است"
+as "$MSV_TOKEN" POST $MF/bookings/edit "{\"id\":$MFBK,\"endAt\":\"2026-06-27T13:00:00\"}"; nomsg "mes: a correction needs a reason" "دلیل"
+as "$MSV_TOKEN" POST $MF/bookings/edit "{\"id\":$MFBK,\"endAt\":\"2026-06-27T13:00:00\",\"reason\":\"اصلاح ساعت پایان\"}"; check "mes: the shop supervisor corrects the closed day with a reason (300 minutes, 5 hours)" '.success and .data.minutes == 300 and .data.hours == 5 and .data.editReason == "اصلاح ساعت پایان"'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfTimeBooking&EntityId=$MFBK&PageSize=0"; check "mes: the correction is in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) >= 1'
+as "$MSV_TOKEN" GET "$MF/attendance-differences?From=2026-06-27&To=2026-06-27&EmployeeId=$OAEMP"; check "mes: attendance 8.33 h (500 min) against 5 h booked: 3.33 h unbooked" '.success and (.data.data|length) == 1 and .data.data[0].attendanceHours == 8.33 and .data.data[0].bookedHours == 5 and .data.data[0].differenceHours == 3.33 and .data.data[0].kind == "Unbooked" and (.data.data[0].dateText|test("^1405/04/06"))'
+as "$MSV_TOKEN" GET "$MF/attendance-differences?From=2026-06-27&To=2026-06-27&EmployeeId=$OAEMP&ToleranceMinutes=300"; check "mes: a wide tolerance hides the difference" '.success and (.data.data|length) == 0'
+as "$MOP_TOKEN" GET "$MF/attendance-differences?From=2026-06-27&To=2026-06-27"; no "mes: the operator cannot read the attendance difference list"
+as "$MSV_TOKEN" GET "$MF/attendance-differences?From=2026-01-01&To=2026-12-31"; nomsg "mes: the range is at most 93 days" "۹۳ روز"
+as "$MSV_TOKEN" GET "$MF/bookings?OrderId=$MFORDC&PageSize=0"; check "mes: bookings of order C: the operator's terminal booking (ended when A was resumed) and the supervisor's" '.success and (.data.data|length) == 2 and ([.data.data[]|select(.source == 1 and .running == false and .endAt != null)]|length) == 1'
+
+# --- QC hold, decision, rework
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA20,\"kind\":2}"; check "mes: the operator starts the inspection step 20" '.success and .data.status == 2'
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20,\"goodQty\":5}"; check "mes: finishing a QC step puts it on QC hold, not done" '.success and .data.status == 5 and .data.qcRequestedAtText != null and .data.qcAccepted == false'
+ibx "$QC_TOKEN" "mf:qc:$MFOPA20"; check "mes: the quality control role has the inspection request in the inbox" '.success and (.data.data|length) == 1'
+as "$MOP_TOKEN" POST $MF/operations/qc-decision "{\"operationId\":$MFOPA20,\"result\":1}"; nomsg "mes: the operator cannot decide an inspection" "بازرس کنترل کیفیت"
+as "$QC_TOKEN" POST $MF/operations/qc-decision "{\"operationId\":$MFOPA20,\"result\":3}"; nomsg "mes: a result other than accept needs a note" "توضیح"
+as "$QC_TOKEN" POST $MF/operations/qc-decision "{\"operationId\":$MFOPA20,\"result\":3,\"note\":\"قطر خارجی بالاتر از تلرانس\"}"; check "mes: QC sends the part to rework: step 20 rejected, inspection record and NCR created" '.success and .data.status == 6 and .data.ncrId > 0 and (.data.qcRecordNumber|startswith("QIR")) and .data.reworkQty == 5'
+MFNCR=$(val .data.ncrId)
+ibx "$QC_TOKEN" "mf:qc:$MFOPA20"; check "mes: the QC request is closed" '.success and (.data.data|length) == 0'
+call GET "$MF/orders/$MFORDA"; check "mes: a rework operation (sequence 20, -R) follows the rejected step, ready, linked to the NCR; step 30 waits" ".success and (.data.operations|length) == 4 and ([.data.operations[]|select(.isRework)][0] | .sequence == 20 and .status == 1 and .reworkOfOperationId == $MFOPA20 and .ncrId == $MFNCR and .jobCard == \"$MFNOA/20-R\") and ([.data.operations[]|select(.id == $MFOPA30)][0].status == 0)"
+MFOPA20R=$(jq -r '[.data.operations[]|select(.isRework)][0].id' "$B")
+call POST $MF/operations/rework "{\"operationId\":$MFOPA20,\"ncrId\":$MFNCR}"; nomsg "mes: one rework operation per rejected step" "قبلاً عملیات"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA20R,\"kind\":3}"; check "mes: the operator starts the rework operation (rework booking)" '.success and .data.status == 2'
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20R,\"goodQty\":4}"; nomsg "mes: the rework covers the 5 rejected pieces, not fewer" "برابر نیست"
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20R,\"goodQty\":1}"; check "mes: rework finished with 5 good pieces: QC hold again" '.success and .data.status == 5 and .data.goodQty == 5'
+as "$QC_TOKEN" POST $MF/operations/qc-decision "{\"operationId\":$MFOPA20R,\"result\":1}"; check "mes: QC accepts the rework" '.success and .data.status == 4 and .data.qcAccepted == true'
+
+# --- outside work drafts, completion, receipt
+call GET "$MF/orders/$MFORDA"; check "mes: the outside step is ready and drafted a subcontract purchase request line and a subcontract issue draft" ".success and ([.data.operations[]|select(.id == $MFOPA30)][0] | .status == 1 and .isOutside == true and .purchaseRequestId > 0 and .purchaseRequestLineId > 0 and (.purchaseRequestNumber|startswith(\"PRQ\")) and .subcontractIssueId > 0 and .outsideSupplierId == ${PRV:-0})"
+MFSI=$(jq -r ".data.operations[]|select(.id == $MFOPA30)|.subcontractIssueId" "$B")
+call GET "inventory/documents/$MFSI"; check "mes: the issue to the contractor is a draft document of the inventory module for item A, linked to the work order" ".success and .data.status == 0 and .data.type == 9 and .data.workOrderId == $MFWO and .data.lines[0].itemId == $MFPA and .data.lines[0].quantity == 5"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA30}"; nomsg "mes: outside work is not started on the shop terminal" "بیرونی"
+as "$MOP_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"complete-outside\",\"documentId\":$MFSI}"; nomsg "mes: the operator cannot complete outside work" "مجوز"
+as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"complete-outside\",\"documentId\":$MFSI}"; nomsg "mes: outside work completes only with a confirmed return document from the contractor" "برگشت از پیمانکار"
+as "$MPM_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\",\"reason\":\"x\"}"; nomsg "mes: skipping a step is the shop supervisor's alone" "سرپرست کارگاه"
+as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\"}"; nomsg "mes: skipping needs a reason" "دلیل"
+as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\",\"reason\":\"عملیات حرارتی در این آزمون انجام نمی‌شود\"}"; check "mes: the supervisor skips the outside step with a reason: every step is finished, the order is completed and a production receipt draft is made" '.success and .data.status == 7 and .data.skipReason != null'
+call GET "$MF/orders/$MFORDA"; check "mes: order A is completed with a receipt draft number and the actual finish in Persian" '.success and .data.status == 3 and .data.productionReceiptId > 0 and .data.productionReceiptNumber != null and (.data.actualFinishText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
+MFRCT=$(val .data.productionReceiptId)
+call GET "inventory/documents/$MFRCT"; check "mes: the receipt is a draft production receipt of 5 units of item A for the work order" ".success and .data.status == 0 and .data.type == 2 and .data.workOrderId == $MFWO and .data.lines[0].itemId == $MFPA and .data.lines[0].quantity == 5"
+as "$MOP_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"close\"}"; nomsg "mes: the operator cannot close an order" "مجوز"
+as "$MPM_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"close\"}"; check "mes: the production manager closes the completed order A" '.success and .data.status == 4'
+as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDB,\"action\":\"close\"}"; nomsg "mes: only a completed order is closed" "بسته می‌شود"
+
+# --- order C to completion by the operator
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPC10,\"machineId\":$MFM1}"; check "mes: the operator resumes C (paused by the supervisor booking and the other job)" '.success and .data.status == 2'
+as "$MOP_TOKEN" POST $MF/terminal/pause "{\"operationId\":$MFOPC10,\"reasonCodeId\":$MFRDN,\"note\":\"استراحت\"}"; check "mes: pause with a downtime reason" '.success and .data.status == 3 and .data.myRunning == false'
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPC10,\"machineId\":$MFM1}"; check "mes: start again" '.success and .data.status == 2'
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPC10,\"goodQty\":1,\"scrapQty\":1,\"scrapReasonCodeId\":$MFRSC}"; check "mes: C finished with 1 good and 1 scrapped piece (scrap reason kept)" '.success and .data.status == 4 and .data.goodQty == 1 and .data.scrapQty == 1'
+call GET "$MF/orders/$MFORDC"; check "mes: C is completed; the receipt draft covers the 1 good piece" '.success and .data.status == 3 and .data.productionReceiptId > 0'
+as "$MSV_TOKEN" GET "$MF/bookings?OperationId=$MFOPC10&PageSize=0"; check "mes: all booked minutes of C are whole minutes and the hours are their rounded 2-decimal share" '.success and (.data.data|length) >= 3 and ([.data.data[]|select(.running == true)]|length) == 0 and ([.data.data[]|select(.minutes != (.minutes|floor))]|length) == 0 and ([.data.data[]|select(.hours != ((.minutes / 60 * 100 | round) / 100))]|length) == 0'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDC&PageSize=0"; check "mes: the override release of C is audited with its reason" '.success and ([.data.data[]|select(.action == "Modified" and (.afterJson|tostring|contains("ReleaseOverrideReason")))]|length) >= 1'
+
+# --- reading roles
+as "$MMT_TOKEN" GET "$MF/orders?OpenOnly=true&PageSize=5"; check "mes: maintenance reads the open orders (none of the three is open any more)" ".success and ([.data.data[]|select(.id == $MFORDA or .id == $MFORDB or .id == $MFORDC)]|length) == 0"
+as "$MMT_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: maintenance cannot release orders" "سرپرست کارگاه"
+as "$MOP_TOKEN" GET "$MF/routings?PageSize=5"; no "mes: the operator cannot read routing revisions"
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'

@@ -172,6 +172,11 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Quality.IDocumentControlService, Services.NasbNiro.Quality.DocumentControlService>();
             services.AddScoped<Services.NasbNiro.Quality.IAuditReviewService, Services.NasbNiro.Quality.AuditReviewService>();
             services.AddScoped<Services.NasbNiro.Quality.IQualityDashboardService, Services.NasbNiro.Quality.QualityDashboardService>();
+            // production / shop floor (MES), release P1
+            services.AddScoped<Services.NasbNiro.Production.IMfMasterService, Services.NasbNiro.Production.MfMasterService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfDraftingService, Services.NasbNiro.Production.MfDraftingService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfProductionService, Services.NasbNiro.Production.MfProductionService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfShopFloorService, Services.NasbNiro.Production.MfShopFloorService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();

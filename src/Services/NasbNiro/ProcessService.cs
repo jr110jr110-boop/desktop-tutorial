@@ -43,6 +43,7 @@ namespace Services.NasbNiro
         private readonly DbSet<ProcessEntity> _processs;
         private readonly DbSet<ProcessFile> _processFiles;
         private readonly IDateTimeService _dateTimeService;
+        private readonly global::Services.NasbNiro.Production.IMfDraftingService _productionDrafting;
 
         private IQueryable<ProcessEntity> _processsQueryable
             => _processs.AsNoTracking().AsQueryable();
@@ -55,8 +56,10 @@ namespace Services.NasbNiro
                             IApplicationUserManager userManager,
                             IWorkOrderService workOrderService,
                             IWorkflowStationService workflowStationService,
-                            IDateTimeService dateTimeService)
+                            IDateTimeService dateTimeService,
+                            global::Services.NasbNiro.Production.IMfDraftingService productionDrafting = null)
         {
+            _productionDrafting = productionDrafting;
             _unitOfWork = unitOfWork.ThrowIfNull(nameof(unitOfWork));
             _bomService = bomService.ThrowIfNull(nameof(bomService));
             _processs = _unitOfWork.Set<ProcessEntity>().ThrowIfNull(nameof(_processs));
@@ -389,6 +392,7 @@ namespace Services.NasbNiro
 
             if (await this.SaveChangesAsync(cancellationToken))
             {
+                await DraftProductionOrderAsync(entityEntry.Entity, cancellationToken);
                 return await GetResponseProcessDtoAsync(entityEntry.Entity, cancellationToken);
 
             }
@@ -453,7 +457,10 @@ namespace Services.NasbNiro
             EntityEntry<ProcessEntity> entityEntry = _processs.Update(processToUpdate);
 
             if (await this.SaveChangesAsync(cancellationToken))
+            {
+                await DraftProductionOrderAsync(entityEntry.Entity, cancellationToken);
                 return await GetResponseProcessDtoAsync(entityEntry.Entity, cancellationToken);
+            }
 
             return ResponseDtoHelper
                 .BadRequest<ResponseProcessDto>(NasbNiroMessages.ProcessNotUpdated);
@@ -837,6 +844,13 @@ namespace Services.NasbNiro
             bool result = await _processs.AnyAsync(e => e.Id == processId, cancellationToken);
 
             return result;
+        }
+
+        /// <summary>A make process that is ready to go gets its production order drafted (people release it). Never fails the caller.</summary>
+        private async Task DraftProductionOrderAsync(ProcessEntity process, CancellationToken cancellationToken)
+        {
+            if (_productionDrafting == null || process == null || process.ProcessStatus != ProcessStatus.ReadyToGo) return;
+            await _productionDrafting.DraftForProcessAsync(process.Id, cancellationToken);
         }
 
         public async ValueTask<bool> SaveChangesAsync(CancellationToken cancellationToken)

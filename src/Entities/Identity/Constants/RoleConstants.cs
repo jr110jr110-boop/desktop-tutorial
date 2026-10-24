@@ -162,6 +162,39 @@ namespace Entities.Identity.Constants
             Description = "خزانه‌داری"
         };
 
+        // Production / shop floor release P1: production manager, shop supervisor, operator (shop-floor terminal) and maintenance. Existing ASSEMBLER and CONSTRUCTION keep working as operators of their areas.
+        public const string ProductionManager = "PRODUCTIONMANAGER";
+        public static readonly ResponseRole ProductionManagerResponseRole = new ResponseRole()
+        {
+            Id = 20,
+            Name = ProductionManager,
+            Description = "مدیر تولید"
+        };
+
+        public const string ShopSupervisor = "SHOPSUPERVISOR";
+        public static readonly ResponseRole ShopSupervisorResponseRole = new ResponseRole()
+        {
+            Id = 21,
+            Name = ShopSupervisor,
+            Description = "سرپرست کارگاه"
+        };
+
+        public const string Operator = "OPERATOR";
+        public static readonly ResponseRole OperatorResponseRole = new ResponseRole()
+        {
+            Id = 22,
+            Name = Operator,
+            Description = "اپراتور"
+        };
+
+        public const string Maintenance = "MAINTENANCE";
+        public static readonly ResponseRole MaintenanceResponseRole = new ResponseRole()
+        {
+            Id = 23,
+            Name = Maintenance,
+            Description = "نگهداری و تعمیرات"
+        };
+
         // Finance release F3: the auditor (حسابرس) reads all finance data, including the audit trail, and writes nothing.
         public const string Auditor = "AUDITOR";
         public static readonly ResponseRole AuditorResponseRole = new ResponseRole()
@@ -209,6 +242,10 @@ namespace Entities.Identity.Constants
             yield return FinanceManagerResponseRole;
             yield return PayrollResponseRole;
             yield return TreasuryResponseRole;
+            yield return ProductionManagerResponseRole;
+            yield return ShopSupervisorResponseRole;
+            yield return OperatorResponseRole;
+            yield return MaintenanceResponseRole;
             yield return AuditorResponseRole;
             yield return SecretariatResponseRole;
             yield return HrResponseRole;

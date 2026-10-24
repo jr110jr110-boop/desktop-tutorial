@@ -68,9 +68,12 @@ namespace Services.NasbNiro.ProjectControl
         private readonly IPcProgressService _progress;
         private readonly IPcProjectService _project;
         private readonly IPcMdrService _mdr;
+        private readonly global::Services.NasbNiro.Production.IMfDraftingService _productionDrafting;
 
-        public PcScheduleService(IUnitOfWork uow, IInventoryUserContext user, IPcProgressService progress, IPcProjectService project, IPcMdrService mdr)
+        public PcScheduleService(IUnitOfWork uow, IInventoryUserContext user, IPcProgressService progress, IPcProjectService project, IPcMdrService mdr,
+            global::Services.NasbNiro.Production.IMfDraftingService productionDrafting = null)
         {
+            _productionDrafting = productionDrafting;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _progress = progress ?? throw new ArgumentNullException(nameof(progress));
@@ -521,6 +524,9 @@ namespace Services.NasbNiro.ProjectControl
             if (stepError != null) return Bad<PcWbsGenerateResultDto>(stepError);
             await _uow.SaveChangesAsync(cancellationToken);
             result.NodesCreated = g.Nodes.Count; result.ActivitiesCreated = g.Activities.Count; result.DependenciesCreated = g.Dependencies.Count;
+            // the system drafts the production orders of the make processes (people release them); a problem there never fails the WBS
+            if (_productionDrafting != null)
+                foreach (WorkOrder drafted in orders) await _productionDrafting.DraftForWorkOrderAsync(drafted.Id, cancellationToken);
             return ResponseDtoHelper.Ok(result);
         }
 
