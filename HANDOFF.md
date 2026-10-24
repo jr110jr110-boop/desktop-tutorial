@@ -17,7 +17,7 @@ All in the user's private GitHub repo `jr110jr110-boop/desktop-tutorial`:
 | `innco-package` | Last built server package (`package-output/`). |
 | `innco-nuget-cache` / `innco-nuget-pkgs` | Workflow + split tarball of the NuGet cache for offline local builds (see 4). |
 
-Claude Project "INN ORCHESTRA" (old account) also has docs under `claude/*.md` (strategy, warehouse, procurement, quality, project-control specs, finance spec, remaining-phases plan, .NET 10 upgrade guide, codebase overview). **Copy them to the new project** (download from the project knowledge of the old account) — they are the user-facing specs; `docs/` here holds the developer briefs and reviews.
+The user-facing specs that lived in the old Claude Project (`claude/*.md`) are copied into `project-docs/` in this branch (strategy, warehouse, procurement, processes/data review, quality spec + status, project-control spec, finance spec, remaining-phases plan, .NET 10 upgrade guide). The old "codebase overview" is not copied — the repo itself and `project-docs/upgrade-net10.md` replace it. `docs/` holds the developer briefs, reviews and reports.
 
 ## 2. State at handoff
 
