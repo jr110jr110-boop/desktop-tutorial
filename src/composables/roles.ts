@@ -128,10 +128,10 @@ export const ProcurementRoles = {
   commercial: list("COMMERCIAL,PMO"),
   technical: list("ENGINEERING,QC,CONSTRUCTION,PMO"),
   orderApproval: list("PMO,CEO"),
-  finance: list("FINANCIAL,PMO"),
+  finance: list("FINANCIAL,FINANCEMANAGER,TREASURY,PMO"),
   serviceAcceptance: list("QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO"),
   // the controller adds ASSEMBLER and ENGINEER to the readers of the services
-  readers: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER"),
+  readers: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER"),
   // the financial committee approval is by the PMO deputy only (see ProcurementService.InquiryActionAsync)
   committeeFinancial: ["PMO"],
 };

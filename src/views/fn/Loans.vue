@@ -176,8 +176,8 @@ onMounted(async () => {
           <table class="table table-sm">
             <thead><tr><th>بانک</th><th>سقف</th><th>استفاده‌شده</th><th>قابل استفاده</th><th>از تاریخ</th><th>تا تاریخ</th><th>توضیح</th><th v-if="canManage"></th></tr></thead>
             <tbody>
-              <tr v-if="!limits.facilities.length"><td colspan="8" class="text-center inv-muted">سقفی ثبت نشده است.</td></tr>
-              <tr v-for="f in limits.facilities" :key="f.id"><td>{{ f.bankName }}</td><td class="fn-num">{{ money(f.limitAmount) }}</td><td class="fn-num">{{ money(f.utilised) }}</td><td class="fn-num">{{ money(f.available) }}</td><td>{{ jalali(f.validFrom) }}</td><td>{{ jalali(f.validTo) }}</td><td>{{ f.note }}</td><td v-if="canManage"><button class="btn btn-sm btn-outline-secondary" @click="limitForm = { ...f, limitAmount: String(f.limitAmount), validTo: f.validTo || null }">ویرایش</button></td></tr>
+              <tr v-if="!(limits.facilities || []).length"><td colspan="8" class="text-center inv-muted">سقفی ثبت نشده است.</td></tr>
+              <tr v-for="f in limits.facilities || []" :key="f.id"><td>{{ f.bankName }}</td><td class="fn-num">{{ money(f.limitAmount) }}</td><td class="fn-num">{{ money(f.utilised) }}</td><td class="fn-num">{{ money(f.available) }}</td><td>{{ jalali(f.validFrom) }}</td><td>{{ jalali(f.validTo) }}</td><td>{{ f.note }}</td><td v-if="canManage"><button class="btn btn-sm btn-outline-secondary" @click="limitForm = { ...f, limitAmount: String(f.limitAmount), validTo: f.validTo || null }">ویرایش</button></td></tr>
             </tbody>
           </table>
         </template>

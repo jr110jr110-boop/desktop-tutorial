@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import PrintForm from "@/components/print/PrintForm.vue";
+import { getBankAccounts } from "@/api/FnAPIs";
+import { deductionKinds, parseAmount } from "@/composables/fn";
 import { getPaymentRequests, getPurchaseOrders, getSupplierInvoices, paymentAction, savePaymentRequest } from "@/api/ProcurementAPIs";
 import { fail, jalali, ok, printPage, rial, today } from "@/composables/inventory";
 import { paymentStatuses, paymentTypes } from "@/composables/procurement";
@@ -24,7 +26,16 @@ const canCreate = hasRole(ProcurementRoles.commercial);
 const canApprove = hasRole(ProcurementRoles.orderApproval);
 const canPay = hasRole(ProcurementRoles.finance);
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
-const net = computed(() => (form.value ? (Number(form.value.amount) || 0) - (Number(form.value.deductions) || 0) : 0));
+const banks = ref<any[]>([]);
+const bankAccountId = ref<number | null>(null);
+// typed deductions (withholding, retentions, late penalty, advance recovery); without lines the single total below is used
+const lineTotal = computed(() => (form.value ? form.value.deductionLines.reduce((s: number, l: any) => s + (parseAmount(l.amount) || 0), 0) : 0));
+const totalDeductions = computed(() => (form.value?.deductionLines.length ? lineTotal.value : Number(form.value?.deductions) || 0));
+const net = computed(() => (form.value ? (Number(form.value.amount) || 0) - totalDeductions.value : 0));
+function setLineAmount(l: any) {
+  const b = parseAmount(l.base), r = parseAmount(l.ratePercent);
+  if (b && r) l.amount = String(Math.round((b * r) / 100));
+}
 
 async function load() {
   const [data, error] = await getPaymentRequests({ ...filters.value, PageNumber: page.value, PageSize: pageSize });
@@ -43,7 +54,7 @@ async function create() {
   orders.value = (o?.data || []).filter((x: any) => x.status >= 2 && x.status <= 5);
   const [i] = await getSupplierInvoices({ Status: 3, PageSize: 200 });
   invoices.value = i?.data || [];
-  form.value = { id: null, type: 3, requestDate: today(), purchaseOrderId: null, invoiceId: null, amount: null, deductions: 0, deductionNote: "", description: "" };
+  form.value = { id: null, type: 3, requestDate: today(), purchaseOrderId: null, invoiceId: null, amount: null, deductions: 0, deductionNote: "", description: "", deductionLines: [] };
 }
 
 function pickInvoice() {
@@ -55,8 +66,11 @@ function pickInvoice() {
 }
 
 async function save() {
+  const f = form.value;
+  const deductionLines = f.deductionLines.map((l: any) => ({ kind: Number(l.kind), base: parseAmount(l.base) || 0, ratePercent: parseAmount(l.ratePercent) || 0, amount: parseAmount(l.amount) || 0, note: l.note || null }));
+  if (deductionLines.some((l: any) => l.amount <= 0)) return fail("مبلغ هر ردیف کسورات را وارد کنید.");
   busy.value = true;
-  const [data, error] = await savePaymentRequest(form.value);
+  const [data, error] = await savePaymentRequest({ ...f, deductions: deductionLines.length ? 0 : f.deductions, deductionLines });
   busy.value = false;
   if (error) return fail(error);
   form.value = null;
@@ -65,7 +79,12 @@ async function save() {
   load();
 }
 
-function ask(action: string) {
+async function ask(action: string) {
+  if (action === "paid") {
+    const [b] = await getBankAccounts({ PageSize: 200 });
+    banks.value = (b?.data || []).filter((x: any) => x.isActive);
+    bankAccountId.value = null;
+  }
   if (action === "paid") dialog.value = { action, title: "ثبت پرداخت", label: "شماره سند پرداخت در سپیدار یا شماره پیگیری بانک *", value: "" };
   else if (action === "reject") dialog.value = { action, title: "رد درخواست پرداخت", label: "علت رد *", value: "" };
   else act(action);
@@ -73,7 +92,7 @@ function ask(action: string) {
 
 async function act(action: string, value?: string) {
   busy.value = true;
-  const [data, error] = await paymentAction(detail.value.id, action, action === "reject" ? value : undefined, action === "paid" ? value : undefined);
+  const [data, error] = await paymentAction(detail.value.id, action, action === "reject" ? value : undefined, action === "paid" ? value : undefined, action === "paid" ? bankAccountId.value : null);
   busy.value = false;
   if (error) return fail(error);
   detail.value = data;
@@ -85,6 +104,7 @@ async function act(action: string, value?: string) {
 async function confirmDialog() {
   const d = dialog.value!;
   if (!d.value.trim()) return fail(d.label.replace(" *", "") + " را بنویسید.");
+  if (d.action === "paid" && !bankAccountId.value) return fail("حساب بانکی پرداخت را انتخاب کنید.");
   await act(d.action, d.value);
 }
 
@@ -171,7 +191,7 @@ onMounted(async () => {
         <table class="table table-sm table-bordered">
           <tbody>
             <tr><td>مبلغ</td><td class="num">{{ rial(detail.amount) }}</td></tr>
-            <tr><td>کسورات</td><td class="num">{{ rial(detail.deductions) }} <span class="inv-muted">{{ detail.deductionNote }}</span></td></tr>
+            <tr><td>کسورات</td><td class="num">{{ rial(detail.deductions) }} <span class="inv-muted">{{ detail.deductionNote }}</span><div v-for="(l, i) in detail.deductionLines || []" :key="i" class="small">{{ deductionKinds[l.kind] }}: {{ rial(l.amount) }} <span v-if="l.ratePercent" class="inv-muted">({{ l.ratePercent }}% از {{ rial(l.base) }})</span> {{ l.note }}</div></td></tr>
             <tr><td>خالص قابل پرداخت</td><td class="num fw-bold">{{ rial(detail.netAmount) }}</td></tr>
             <tr><td>سفارش / فاکتور</td><td class="inv-ltr">{{ detail.purchaseOrderNumber }} {{ detail.invoiceNumber }}</td></tr>
             <tr v-if="detail.approvedByName"><td>تایید</td><td>{{ detail.approvedByName }} {{ jalali(detail.approvedAt, true) }}</td></tr>
@@ -217,8 +237,25 @@ onMounted(async () => {
             <p class="inv-muted small mb-0">پیش‌پرداخت تا درصد مجاز سفارش و با ضمانت‌نامه؛ صورت‌وضعیت تا سقف کار تاییدشده کیفی.</p>
           </div>
           <div class="col-6"><label class="form-label small mb-0">مبلغ (ریال) *</label><input v-model.number="form.amount" class="form-control form-control-sm" type="number" /></div>
-          <div class="col-6"><label class="form-label small mb-0">کسورات (ریال)</label><input v-model.number="form.deductions" class="form-control form-control-sm" type="number" /></div>
-          <div class="col-12"><label class="form-label small mb-0">شرح کسورات (جریمه، حسن انجام کار...)</label><input v-model="form.deductionNote" class="form-control form-control-sm" /></div>
+          <div v-if="!form.deductionLines.length" class="col-6"><label class="form-label small mb-0">کسورات (ریال)</label><input v-model.number="form.deductions" class="form-control form-control-sm" type="number" /></div>
+          <div v-if="!form.deductionLines.length" class="col-12"><label class="form-label small mb-0">شرح کسورات (جریمه، حسن انجام کار...)</label><input v-model="form.deductionNote" class="form-control form-control-sm" /></div>
+          <div class="col-12">
+            <table v-if="form.deductionLines.length" class="table table-sm">
+              <thead><tr><th>نوع کسر</th><th>مبنا (ریال)</th><th>درصد</th><th>مبلغ (ریال)</th><th>توضیح</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="(l, i) in form.deductionLines" :key="i">
+                  <td><select v-model="l.kind" class="form-select form-select-sm"><option v-for="(t, k) in deductionKinds" :key="k" :value="Number(k)">{{ t }}</option></select></td>
+                  <td><input v-model="l.base" class="form-control form-control-sm" @input="setLineAmount(l)" /></td>
+                  <td><input v-model="l.ratePercent" class="form-control form-control-sm" style="width: 5rem" @input="setLineAmount(l)" /></td>
+                  <td><input v-model="l.amount" class="form-control form-control-sm" /></td>
+                  <td><input v-model="l.note" class="form-control form-control-sm" /></td>
+                  <td><button class="btn btn-sm btn-link text-danger p-0" @click="form.deductionLines.splice(i, 1)">حذف</button></td>
+                </tr>
+              </tbody>
+            </table>
+            <button class="btn btn-sm btn-outline-secondary" @click="form.deductionLines.push({ kind: 1, base: '', ratePercent: '', amount: '', note: '' })">+ ردیف کسورات</button>
+            <span class="inv-muted small ms-2">کسر «بازیابی پیش‌پرداخت» فقط تا مانده پیش‌پرداخت باز همین سفارش مجاز است.</span>
+          </div>
           <div class="col-12"><label class="form-label small mb-0">توضیح</label><input v-model="form.description" class="form-control form-control-sm" /></div>
           <div class="col-12 small">خالص قابل پرداخت: <b>{{ rial(net) }}</b> ریال</div>
         </div>
@@ -234,6 +271,10 @@ onMounted(async () => {
         <h2 class="inv-title mb-2">{{ dialog.title }}</h2>
         <label class="form-label small mb-0">{{ dialog.label }}</label>
         <input v-model="dialog.value" class="form-control form-control-sm" />
+        <template v-if="dialog.action === 'paid'">
+          <label class="form-label small mb-0 mt-2">حساب بانکی پرداخت *</label>
+          <select v-model="bankAccountId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="b in banks" :key="b.id" :value="b.id">{{ b.title }}</option></select>
+        </template>
         <div class="d-flex gap-2 justify-content-end mt-3">
           <button class="btn btn-sm btn-outline-secondary" @click="dialog = null">انصراف</button>
           <button :disabled="busy" class="btn btn-sm btn-primary" @click="confirmDialog">ثبت</button>

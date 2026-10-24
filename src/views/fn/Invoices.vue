@@ -56,13 +56,14 @@ async function save() {
   const lines = f.lines.filter((l: any) => String(l.description).trim() || parseAmount(l.unitPrice));
   if (!lines.length) return fail("حداقل یک ردیف لازم است.");
   if (lines.some((l: any) => !String(l.description).trim())) return fail("شرح همه ردیف‌ها را وارد کنید.");
+  const release = Number(f.type) === 7; // a retention release has no deductions and no VAT
   const pct = (v: string) => (String(v).trim() === "" ? null : parseAmount(v));
   busy.value = true;
   const [, error] = await saveSalesInvoice({
     id: f.id, date: f.date, dueDate: f.dueDate, customerId: f.customerId, contractId: f.contractId, milestoneId: f.milestoneId || null, type: Number(f.type), creditedInvoiceId: f.type === 6 ? f.creditedInvoiceId : null,
-    description: f.description || null, advanceRecovery: parseAmount(f.advanceRecovery) || 0, useDefaultDeductionRates: f.useDefaultDeductionRates,
-    performanceRetentionPercent: f.useDefaultDeductionRates ? null : pct(f.performanceRetentionPercent), insuranceRetentionPercent: f.useDefaultDeductionRates ? null : pct(f.insuranceRetentionPercent), withholdingPercent: f.useDefaultDeductionRates ? null : pct(f.withholdingPercent),
-    lines: lines.map((l: any, i: number) => ({ rowNumber: i + 1, description: l.description, itemCode: l.itemCode || null, quantity: parseAmount(l.quantity) || 0, unit: l.unit || null, unitPrice: parseAmount(l.unitPrice) || 0, discount: parseAmount(l.discount) || 0, vatExempt: !!l.vatExempt })),
+    description: f.description || null, advanceRecovery: release ? 0 : parseAmount(f.advanceRecovery) || 0, useDefaultDeductionRates: release ? false : f.useDefaultDeductionRates,
+    performanceRetentionPercent: release || f.useDefaultDeductionRates ? null : pct(f.performanceRetentionPercent), insuranceRetentionPercent: release || f.useDefaultDeductionRates ? null : pct(f.insuranceRetentionPercent), withholdingPercent: release || f.useDefaultDeductionRates ? null : pct(f.withholdingPercent),
+    lines: lines.map((l: any, i: number) => ({ rowNumber: i + 1, description: l.description, itemCode: l.itemCode || null, quantity: parseAmount(l.quantity) || 0, unit: l.unit || null, unitPrice: parseAmount(l.unitPrice) || 0, discount: parseAmount(l.discount) || 0, vatExempt: release ? true : !!l.vatExempt })),
   });
   busy.value = false;
   if (error) return fail(error);
@@ -191,6 +192,7 @@ onMounted(async () => {
           </template>
           <div class="col-md-3"><label class="form-label small mb-0">کسر پیش‌دریافت (ریال)</label><input v-model="form.advanceRecovery" class="form-control form-control-sm fn-num" /></div>
         </div>
+        <p v-if="form.type === 7" class="inv-muted small mt-2">آزادسازی حسن انجام کار: فروش جدید نیست؛ کسورات و مالیات ارزش افزوده ندارد (مالیات در فاکتور اصلی محاسبه شده) و مبلغ آن نباید از حسن انجام کار نگهداری‌شده این مشتری بیشتر باشد.</p>
         <p class="inv-muted small mt-2 mb-0">مالیات ارزش افزوده و کسورات هنگام ذخیره از جدول نرخ‌ها محاسبه می‌شود. تایید فاکتور باید توسط شخصی غیر از ثبت‌کننده انجام شود.</p>
         <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره پیش‌نویس</button></div>
       </div>

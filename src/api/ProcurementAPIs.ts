@@ -42,8 +42,8 @@ export const invoiceAction = (id: number, action: string, note?: string) => call
 export const getPaymentRequests = (params: any) => call("get", base + "payments", undefined, clean(params));
 export const savePaymentRequest = (dto: any) => call("post", base + "payments", dto);
 /** action: approve, paid (reference = payment reference), reject (note). */
-export const paymentAction = (id: number, action: string, note?: string, reference?: string) =>
-  call("post", base + "payments/action", { id, action, note: note || null, reference: reference || null });
+export const paymentAction = (id: number, action: string, note?: string, reference?: string, bankAccountId?: number | null) =>
+  call("post", base + "payments/action", { id, action, note: note || null, reference: reference || null, bankAccountId: bankAccountId || null });
 
 // approved vendor list
 export const getSuppliers = (contains?: string) => call("get", base + "suppliers", undefined, clean({ contains }));

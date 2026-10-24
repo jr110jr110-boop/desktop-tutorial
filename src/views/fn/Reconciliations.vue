@@ -64,15 +64,16 @@ onMounted(async () => {
       <div class="inv-filters mb-3">
         <select v-model="filters.BankAccountId" class="form-select form-select-sm" @change="list.search"><option :value="null">همه حساب‌ها</option><option v-for="b in banks" :key="b.id" :value="b.id">{{ b.title }}</option></select>
       </div>
+      <p class="inv-muted small">اختلاف = مانده بانک + واریز در راه - پرداخت معوق - مانده دفتر. چک‌های صادرشده معوق فقط اطلاعاتی است و در این فرمول نمی‌آید (صدور چک بدهکاری اسناد پرداختنی را بالا می‌برد، نه حساب بانک را).</p>
       <div class="table-responsive">
         <table class="table table-sm table-hover">
-          <thead><tr><th>حساب</th><th>تا تاریخ</th><th>مانده دفتر</th><th>مانده بانک</th><th>واریز در راه</th><th>پرداخت معوق</th><th>چک معوق</th><th>اختلاف</th><th>ردیف تطبیق‌نشده</th><th>تهیه‌کننده</th><th>وضعیت</th><th></th></tr></thead>
+          <thead><tr><th>حساب</th><th>تا تاریخ</th><th>مانده دفتر</th><th>مانده بانک</th><th>واریز در راه</th><th>پرداخت معوق</th><th>چک معوق (اطلاعاتی)</th><th>اختلاف</th><th>ردیف تطبیق‌نشده</th><th>تهیه‌کننده</th><th>وضعیت</th><th></th></tr></thead>
           <tbody>
             <tr v-if="!list.rows.value.length"><td colspan="12" class="text-center inv-muted">مغایرت‌گیری نیست.</td></tr>
             <tr v-for="r in list.rows.value" :key="r.id">
               <td>{{ r.bankAccountTitle }}</td><td>{{ jalali(r.asOfDate) }}</td><td class="fn-num">{{ money(r.bookBalance) }}</td><td class="fn-num">{{ money(r.bankBalance) }}</td>
               <td class="fn-num">{{ money(r.depositsInTransit) }}</td><td class="fn-num">{{ money(r.outstandingPayments) }}</td><td class="fn-num">{{ money(r.outstandingCheques) }}</td>
-              <td class="fn-num"><span :class="r.difference ? 'bad' : 'ok'" class="inv-badge">{{ money(r.difference) }}</span></td>
+              <td class="fn-num"><span :class="r.difference ? 'bad' : 'ok'" :title="`${money(r.bankBalance)} + ${money(r.depositsInTransit)} - ${money(r.outstandingPayments)} - ${money(r.bookBalance)}`" class="inv-badge">{{ money(r.difference) }}</span></td>
               <td>{{ r.unmatchedLines }}</td><td>{{ r.preparedByName }}</td>
               <td><span :class="r.status === 1 ? 'ok' : 'warn'" class="inv-badge">{{ reconciliationStatuses[r.status] }}</span><span v-if="r.approvedByName" class="inv-muted me-1">{{ r.approvedByName }}</span></td>
               <td class="text-nowrap">

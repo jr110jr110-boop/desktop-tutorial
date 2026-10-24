@@ -200,10 +200,11 @@ onMounted(async () => {
 
         <div class="table-responsive">
           <table class="table table-sm fn-lines">
-            <thead><tr><th>شرح</th><th style="min-width: 220px">حساب هزینه *</th><th>تامین‌کننده</th><th>مرکز هزینه</th><th>مبلغ *</th><th>مالیات</th><th v-if="form.status === 0"></th></tr></thead>
+            <thead><tr><th>شرح</th><th>رسید خرید انبار</th><th style="min-width: 220px">حساب هزینه *</th><th>تامین‌کننده</th><th>مرکز هزینه</th><th>مبلغ *</th><th>مالیات</th><th v-if="form.status === 0"></th></tr></thead>
             <tbody>
               <tr v-for="(l, i) in form.lines" :key="i">
                 <td><input v-model="l.description" :disabled="form.status !== 0" class="form-control form-control-sm" /></td>
+                <td><span v-if="l.inventoryDocumentId" class="inv-badge ok">رسید {{ l.inventoryDocumentId }}</span><span v-else class="inv-muted">-</span></td>
                 <td>
                   <LookupBox v-if="form.status === 0" v-model="l.account" :fetch="searchExpense" :label="accountLabel" placeholder="حساب هزینه" />
                   <span v-else class="inv-ltr">{{ l.account?.code }}</span>
