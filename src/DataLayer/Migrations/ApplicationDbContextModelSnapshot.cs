@@ -6850,6 +6850,10 @@ namespace DataLayer.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
 
+                    b.Property<decimal?>("CurrencyAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<int>("Instrument")
                         .HasColumnType("int");
 
@@ -6862,6 +6866,10 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("PaymentId")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("Rate")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<string>("Reference")
                         .HasMaxLength(100)
@@ -7852,8 +7860,16 @@ namespace DataLayer.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<decimal?>("CurrencyAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<int>("Instrument")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("Rate")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<int>("ReceiptId")
                         .HasColumnType("int");
