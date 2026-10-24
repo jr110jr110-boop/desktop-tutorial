@@ -1,0 +1,27 @@
+startup_ok=1 swagger_http=200
+ui_page / http=200 body=index.html
+ui_page /login http=200 body=index.html
+ui_page /contract/list http=200 body=index.html
+ui_page /contract/update/12 http=200 body=index.html
+ui_page /workflowGroup/list http=200 body=index.html
+ui_page /inventory/documents/new http=200 body=index.html
+ui_page /inventory/trace http=200 body=index.html
+ui_page /inventory/ncr/new http=200 body=index.html
+ui_page /inventory/material-requests/new http=200 body=index.html
+ui_page /inventory/counts http=200 body=index.html
+ui_page /inventory/inspections http=200 body=index.html
+ui_page /inventory/item-requests http=200 body=index.html
+ui_page /inventory/coding http=200 body=index.html
+ui_asset /assets/index.90fb1446.js http=200 type=text/javascript
+ui_favicon http=200
+api_unknown_path http=404 (expect 404)
+ui_post_to_page http=404 (expect 404)
+swagger_ui http=200
+login_http=200
+access_token_length=821 refresh_token_length=409
+refresh_http=200
+refreshed_access_token_length=821
+logout_http=200
+--- status codes:
+     60 200
+      2 400
