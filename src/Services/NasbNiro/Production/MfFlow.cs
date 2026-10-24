@@ -13,6 +13,7 @@ using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.Providers;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
+using Services.NasbNiro.Office;
 using Services.NasbNiro.Procurement;
 using ViewModels.NasbNiro.InventoryDtos;
 
@@ -20,19 +21,26 @@ namespace Services.NasbNiro.Production
 {
     /// <summary>
     /// The rules that move the operations of a released order: which operation is ready, the outside work drafts and the completion with the production receipt draft.
-    /// It changes tracked entities; the caller validates first and saves. The two document drafts go through the existing services, which save by themselves.
+    /// It changes tracked entities and never saves: the caller validates first and saves. The two document drafts (the issue to the contractor and the production receipt) go through the
+    /// inventory service, which saves by itself, so they are made by <see cref="AfterSaveAsync"/> after the caller's guarded save.
     /// </summary>
     internal class MfFlow
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IInventoryDocumentService _documents;
+        private readonly INotificationService _notify;
 
-        public MfFlow(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents)
+        /// <summary>Outside-work drafts and receipts that need a document of the inventory module; they are made by <see cref="AfterSaveAsync"/> once the caller's own save went through.</summary>
+        private readonly List<(MfProductionOrder Order, MfOperation Op, PurchaseRequest Request)> _pendingIssues = new List<(MfProductionOrder, MfOperation, PurchaseRequest)>();
+        private readonly List<(MfProductionOrder Order, List<MfOperation> Chain)> _pendingReceipts = new List<(MfProductionOrder, List<MfOperation>)>();
+
+        public MfFlow(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, INotificationService notify = null)
         {
             _uow = uow;
             _user = user;
             _documents = documents;
+            _notify = notify;
         }
 
         public static List<MfOperation> Chain(IEnumerable<MfOperation> ops) =>
@@ -92,7 +100,7 @@ namespace Services.NasbNiro.Production
                         op.ModifyDate = now;
                         op.ModifierUserId = _user.UserId;
                     }
-                    if (ok && op.IsOutside && !op.OutsideDrafted) await DraftOutsideAsync(order, op, notes, ct);
+                    if (ok && op.IsOutside && !op.OutsideDrafted) await DraftOutsideAsync(order, op, ct);
                 }
                 previous = op;
             }
@@ -106,7 +114,7 @@ namespace Services.NasbNiro.Production
             {
                 order.Status = MfOrderStatus.Completed;
                 order.ActualFinish = now;
-                await DraftReceiptAsync(order, chain, notes, ct);
+                if (!order.ProductionReceiptId.HasValue && !_pendingReceipts.Any(r => r.Order == order)) _pendingReceipts.Add((order, chain));
             }
             order.ModifyDate = now;
             order.ModifierUserId = _user.UserId;
@@ -151,19 +159,19 @@ namespace Services.NasbNiro.Production
 
         // ================================================================================== outside work
 
-        private async Task DraftOutsideAsync(MfProductionOrder order, MfOperation op, List<string> notes, CancellationToken ct)
+        private async Task DraftOutsideAsync(MfProductionOrder order, MfOperation op, CancellationToken ct)
         {
             DateTimeOffset now = DateTimeOffset.Now;
             string job = MfNames.Operation(order.Number, op.Sequence);
-            string problem = null;
 
-            // purchase request: a subcontract line, drafted for procurement (existing approvals apply)
+            // purchase request: a subcontract line, drafted for procurement (existing approvals apply). It is only added to the context here; the caller's save stores it with the operation.
+            Provider supplier = op.OutsideSupplierId.HasValue ? await _uow.Set<Provider>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == op.OutsideSupplierId.Value, ct) : null;
             var request = new PurchaseRequest
             {
                 Number = await InventoryNumbers.NextNumberAsync(_uow, ProcurementNumbers.PurchaseRequest, "PRQ", DateTime.Today, ct),
                 Source = PurchaseRequestSource.AdHoc, Kind = PurchaseKind.Subcontract, Status = PurchaseRequestStatus.Draft, RequestDate = DateTime.Today,
                 WorkOrderId = order.WorkOrderId, ContractId = order.ContractId,
-                Description = $"کار بیرونی عملیات {job} ({op.Title})",
+                Description = $"کار بیرونی عملیات {job} ({op.Title})" + (supplier?.Name == null ? string.Empty : $" - پیمانکار پیشنهادی: {supplier.Name}"),
                 CreateDate = now, ModifyDate = now, CreatorUserId = _user.UserId, ModifierUserId = _user.UserId,
                 Lines = new List<PurchaseRequestLine>(),
             };
@@ -171,59 +179,101 @@ namespace Services.NasbNiro.Production
             {
                 RowNumber = 1, Description = $"{op.Title} - دستور تولید {order.Number}", Unit = string.IsNullOrWhiteSpace(order.Unit) ? "عدد" : order.Unit, Quantity = order.Quantity,
                 NeededBy = DateTime.Today.AddDays(Math.Max(op.OutsideLeadDays, 0)),
+                TechnicalRequirements = supplier?.Name == null ? null : $"پیمانکار پیشنهادی طبق استاندارد عملیات: {supplier.Name}",
             });
             _uow.Set<PurchaseRequest>().Add(request);
-            await _uow.SaveChangesAsync(ct);
-            op.PurchaseRequestId = request.Id;
-            op.PurchaseRequestLineId = request.Lines.First().Id;
+            op.PurchaseRequest = request;
+            op.PurchaseRequestLine = request.Lines.First();
+            _pendingIssues.Add((order, op, request));
+            op.OutsideDrafted = true;
+        }
 
-            // issue to the contractor: a draft document of the existing inventory module
-            if (!order.ItemId.HasValue) problem = "کالای دستور تولید مشخص نیست.";
-            else if (!op.OutsideSupplierId.HasValue) problem = "پیمانکار مرحله بیرونی تعیین نشده است.";
-            else
+        /// <summary>
+        /// Call after the caller's save went through: makes the issue-to-contractor draft of the outside work that became ready, raises the procurement inbox item of its purchase
+        /// request and drafts the production receipt of an order that completed. A problem never fails the operation: it is written on the operation and returned as a note.
+        /// </summary>
+        public async Task<List<string>> AfterSaveAsync(CancellationToken ct)
+        {
+            var notes = new List<string>();
+            bool changed = false;
+            foreach (var pending in _pendingIssues.ToList())
             {
-                Provider provider = await _uow.Set<Provider>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == op.OutsideSupplierId.Value, ct);
-                List<Warehouse> warehouses = await _uow.Set<Warehouse>().AsNoTracking().Where(w => w.IsActive && !w.Deleted).OrderBy(w => w.Id).ToListAsync(ct);
-                List<Warehouse> contractors = warehouses.Where(w => w.Kind == WarehouseKind.Subcontractor).ToList();
-                Warehouse destination = contractors.Count == 1 ? contractors[0]
-                    : contractors.FirstOrDefault(w => provider != null && provider.Name != null && ((w.Title ?? string.Empty).Contains(provider.Name) || (w.Code ?? string.Empty).Contains(provider.Name)));
-                Warehouse source = warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.WorkInProgress) ?? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.Parts)
-                    ?? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.General);
-                if (destination == null) problem = "انبار مجازی پیمانکار پیدا نشد.";
-                else if (source == null) problem = "انبار مبدا ارسال پیدا نشد.";
+                MfProductionOrder order = pending.Order;
+                MfOperation op = pending.Op;
+                string job = MfNames.Operation(order.Number, op.Sequence);
+                string problem = null;
+                if (pending.Request.Id > 0)
+                    await OfficeGates.SyncAsync(_notify, "pr:" + pending.Request.Id, true, "procurement", "purchase-request", pending.Request.Id,
+                        $"درخواست خرید پیش‌نویس کار بیرونی {job} منتظر بررسی و ارسال است", "/procurement/requests/" + pending.Request.Id, ProcurementRoles.Commercial, ct);
+
+                // issue to the contractor: a draft document of the existing inventory module
+                if (!order.ItemId.HasValue) problem = "کالای دستور تولید مشخص نیست.";
+                else if (!op.OutsideSupplierId.HasValue) problem = "پیمانکار مرحله بیرونی تعیین نشده است.";
                 else
                 {
-                    ResponseDto<DocumentDto> saved = await _documents.SaveDraftAsync(new SaveDocumentDto
+                    Provider provider = await _uow.Set<Provider>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == op.OutsideSupplierId.Value, ct);
+                    List<Warehouse> warehouses = await _uow.Set<Warehouse>().AsNoTracking().Where(w => w.IsActive && !w.Deleted).OrderBy(w => w.Id).ToListAsync(ct);
+                    List<Warehouse> contractors = warehouses.Where(w => w.Kind == WarehouseKind.Subcontractor).ToList();
+                    Warehouse destination = contractors.Count == 1 ? contractors[0]
+                        : contractors.FirstOrDefault(w => provider != null && provider.Name != null && ((w.Title ?? string.Empty).Contains(provider.Name) || (w.Code ?? string.Empty).Contains(provider.Name)));
+                    Warehouse source = warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.WorkInProgress) ?? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.Parts)
+                        ?? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.General);
+                    if (destination == null) problem = "انبار مجازی پیمانکار پیدا نشد.";
+                    else if (source == null) problem = "انبار مبدا ارسال پیدا نشد.";
+                    else
                     {
-                        Type = InventoryDocumentType.SubcontractIssue, DocumentDate = DateTime.Today, WarehouseId = source.Id, DestinationWarehouseId = destination.Id,
-                        ProviderId = op.OutsideSupplierId, WorkOrderId = order.WorkOrderId, ContractId = order.ContractId, ReferenceNumber = job,
-                        Description = $"ارسال به پیمانکار برای عملیات {job} ({op.Title})",
-                        Lines = new List<SaveDocumentLineDto> { new SaveDocumentLineDto { ItemId = order.ItemId.Value, Quantity = order.Quantity, Description = op.Title } },
-                    }, ct);
-                    if (saved != null && saved.Success && saved.Data != null) op.SubcontractIssueId = saved.Data.Id;
-                    else problem = saved?.Message ?? "پیش‌نویس حواله ارسال ساخته نشد.";
+                        ResponseDto<DocumentDto> saved = await _documents.SaveDraftAsync(new SaveDocumentDto
+                        {
+                            Type = InventoryDocumentType.SubcontractIssue, DocumentDate = DateTime.Today, WarehouseId = source.Id, DestinationWarehouseId = destination.Id,
+                            ProviderId = op.OutsideSupplierId, WorkOrderId = order.WorkOrderId, ContractId = order.ContractId, ReferenceNumber = job,
+                            Description = $"ارسال به پیمانکار برای عملیات {job} ({op.Title})",
+                            Lines = new List<SaveDocumentLineDto> { new SaveDocumentLineDto { ItemId = order.ItemId.Value, Quantity = order.Quantity, Description = op.Title } },
+                        }, ct);
+                        if (saved != null && saved.Success && saved.Data != null) { op.SubcontractIssueId = saved.Data.Id; changed = true; }
+                        else problem = saved?.Message ?? "پیش‌نویس حواله ارسال ساخته نشد.";
+                    }
+                }
+                if (problem != null)
+                {
+                    string note = $"پیش‌نویس حواله ارسال به پیمانکار ساخته نشد: {problem}";
+                    op.Note = string.IsNullOrWhiteSpace(op.Note) ? note : op.Note + " | " + note;
+                    notes.Add($"عملیات {job}: {note}");
+                    changed = true;
                 }
             }
-            op.OutsideDrafted = true;
-            if (problem != null)
+            _pendingIssues.Clear();
+
+            foreach (var pending in _pendingReceipts.ToList())
             {
-                string note = $"پیش‌نویس حواله ارسال به پیمانکار ساخته نشد: {problem}";
-                op.Note = string.IsNullOrWhiteSpace(op.Note) ? note : op.Note + " | " + note;
-                notes.Add($"عملیات {job}: {note}");
+                if (await DraftReceiptAsync(pending.Order, pending.Chain, notes, ct)) changed = true;
             }
+            _pendingReceipts.Clear();
+
+            if (changed)
+            {
+                try
+                {
+                    await _uow.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateException)
+                {
+                    notes.Add("پیوند حواله یا رسید ساخته‌شده به عملیات ثبت نشد؛ دوباره «به‌روزرسانی آمادگی» را بزنید.");
+                }
+            }
+            return notes;
         }
 
         // ================================================================================== completion
 
-        private async Task DraftReceiptAsync(MfProductionOrder order, List<MfOperation> chain, List<string> notes, CancellationToken ct)
+        private async Task<bool> DraftReceiptAsync(MfProductionOrder order, List<MfOperation> chain, List<string> notes, CancellationToken ct)
         {
-            if (order.ProductionReceiptId.HasValue) return;
-            if (!order.ItemId.HasValue) { notes.Add("رسید ساخت ساخته نشد: کالای دستور تولید مشخص نیست."); return; }
+            if (order.ProductionReceiptId.HasValue) return false;
+            if (!order.ItemId.HasValue) { notes.Add("رسید ساخت ساخته نشد: کالای دستور تولید مشخص نیست."); return false; }
             MfOperation last = chain.LastOrDefault(o => o.Status == MfOperationStatus.Done);
             decimal quantity = last?.GoodQty ?? 0;
-            if (quantity <= 0) { notes.Add("رسید ساخت ساخته نشد: تعداد سالم گزارش‌شده در آخرین عملیات صفر است."); return; }
+            if (quantity <= 0) { notes.Add("رسید ساخت ساخته نشد: تعداد سالم گزارش‌شده در آخرین عملیات صفر است."); return false; }
             InventoryItem item = await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == order.ItemId.Value, ct);
-            if (item == null) { notes.Add("رسید ساخت ساخته نشد: کالا پیدا نشد."); return; }
+            if (item == null) { notes.Add("رسید ساخت ساخته نشد: کالا پیدا نشد."); return false; }
 
             ProcessType? type = order.ProcessId.HasValue
                 ? await _uow.Set<ProcessEntity>().AsNoTracking().Where(p => p.Id == order.ProcessId.Value).Select(p => (ProcessType?)p.Type).FirstOrDefaultAsync(ct)
@@ -234,14 +284,14 @@ namespace Services.NasbNiro.Production
                 ? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.FinishedGoods) ?? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.WorkInProgress)
                 : warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.WorkInProgress) ?? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.FinishedGoods);
             target ??= warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.Parts) ?? warehouses.FirstOrDefault(w => w.Kind == WarehouseKind.General);
-            if (target == null) { notes.Add("رسید ساخت ساخته نشد: انبار مقصد (کار در جریان یا کالای ساخته‌شده) پیدا نشد."); return; }
+            if (target == null) { notes.Add("رسید ساخت ساخته نشد: انبار مقصد (کار در جریان یا کالای ساخته‌شده) پیدا نشد."); return false; }
 
             var line = new SaveDocumentLineDto { ItemId = item.Id, Quantity = quantity, Description = $"دستور تولید {order.Number}" };
             if (item.TrackingMode == ItemTrackingMode.Lot) line.LotNumber = order.Number;
             else if (item.TrackingMode == ItemTrackingMode.Serial)
             {
                 List<string> serials = (order.SerialsPlanned ?? string.Empty).Split(new[] { '\n', '\r', ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToList();
-                if (serials.Count != (int)quantity) { notes.Add("رسید ساخت ساخته نشد: تعداد سریال‌های برنامه‌ریزی‌شده با تعداد سالم برابر نیست."); return; }
+                if (serials.Count != (int)quantity) { notes.Add("رسید ساخت ساخته نشد: تعداد سریال‌های برنامه‌ریزی‌شده با تعداد سالم برابر نیست."); return false; }
                 line.SerialNumbers = serials;
             }
             ResponseDto<DocumentDto> saved = await _documents.SaveDraftAsync(new SaveDocumentDto
@@ -249,8 +299,13 @@ namespace Services.NasbNiro.Production
                 Type = InventoryDocumentType.ProductionReceipt, DocumentDate = DateTime.Today, WarehouseId = target.Id, WorkOrderId = order.WorkOrderId, ContractId = order.ContractId,
                 ReferenceNumber = order.Number, Description = $"رسید ساخت دستور تولید {order.Number}", Lines = new List<SaveDocumentLineDto> { line },
             }, ct);
-            if (saved != null && saved.Success && saved.Data != null) order.ProductionReceiptId = saved.Data.Id;
-            else notes.Add("رسید ساخت ساخته نشد: " + (saved?.Message ?? "خطای نامشخص"));
+            if (saved != null && saved.Success && saved.Data != null)
+            {
+                order.ProductionReceiptId = saved.Data.Id;
+                return true;
+            }
+            notes.Add("رسید ساخت ساخته نشد: " + (saved?.Message ?? "خطای نامشخص"));
+            return false;
         }
 
         // ================================================================================== need date and priority

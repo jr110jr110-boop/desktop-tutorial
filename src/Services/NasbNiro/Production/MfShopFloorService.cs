@@ -51,7 +51,7 @@ namespace Services.NasbNiro.Production
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _attendance = attendance ?? throw new ArgumentNullException(nameof(attendance));
             _notify = notify;
-            _flow = new MfFlow(uow, user, documents);
+            _flow = new MfFlow(uow, user, documents, notify);
         }
 
         private int Me => _user.UserId;
@@ -238,7 +238,7 @@ namespace Services.NasbNiro.Production
             if (l.Op.Status == MfOperationStatus.Waiting)
                 return Bad<TerminalOperationDto>("این مرحله هنوز آماده نیست: مرحله قبل تمام نشده، بازرسی آن پذیرفته نشده یا کیت مواد تحویل نشده است.");
             if (l.Op.Status == MfOperationStatus.QcHold) return Bad<TerminalOperationDto>("این مرحله در انتظار بازرسی کنترل کیفیت است.");
-            if (!Workable.Contains(l.Op.Status)) return Bad<TerminalOperationDto>("این مرحله قابل شروع نیست (وضعیت: " + l.Op.Status + ").");
+            if (!Workable.Contains(l.Op.Status)) return Bad<TerminalOperationDto>("این مرحله قابل شروع نیست (وضعیت: " + MfText.OperationStatus(l.Op.Status) + ").");
 
             if (dto.MachineId.HasValue)
             {
@@ -258,7 +258,14 @@ namespace Services.NasbNiro.Production
                     previous.Status = MfOperationStatus.Paused;
                     previous.ModifyDate = DateTimeOffset.Now;
                 }
-                await _uow.SaveChangesAsync(ct);
+                try
+                {
+                    await _uow.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    return Bad<TerminalOperationDto>(MfText.Concurrency);
+                }
             }
 
             DateTimeOffset stamp = DateTimeOffset.Now;
@@ -277,10 +284,15 @@ namespace Services.NasbNiro.Production
             {
                 await _uow.SaveChangesAsync(ct);
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Bad<TerminalOperationDto>(MfText.Concurrency);
+            }
             catch (DbUpdateException)
             {
                 return Bad<TerminalOperationDto>("برای شما ثبت زمانِ در حال اجرای دیگری وجود دارد؛ آن را پایان دهید.");
             }
+            await _flow.AfterSaveAsync(ct);
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
         }
 
@@ -317,7 +329,14 @@ namespace Services.NasbNiro.Production
             l.Op.ModifyDate = DateTimeOffset.Now;
             l.Op.ModifierUserId = Me;
             await _flow.PartSyncAsync(l.Op, ct);
-            await _uow.SaveChangesAsync(ct);
+            try
+            {
+                await _uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Bad<TerminalOperationDto>(MfText.Concurrency);
+            }
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
         }
 
@@ -367,7 +386,14 @@ namespace Services.NasbNiro.Production
             l.Op.ModifyDate = DateTimeOffset.Now;
             l.Op.ModifierUserId = Me;
             booking.ModifyDate = DateTimeOffset.Now;
-            await _uow.SaveChangesAsync(ct);
+            try
+            {
+                await _uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Bad<TerminalOperationDto>(MfText.Concurrency);
+            }
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
         }
 
@@ -402,7 +428,15 @@ namespace Services.NasbNiro.Production
             l.Op.ModifierUserId = Me;
             List<string> notes = await _flow.ApplyAsync(l.Order, l.All, ct);
             await _flow.PartSyncAsync(l.Op, ct);
-            await _uow.SaveChangesAsync(ct);
+            try
+            {
+                await _uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Bad<TerminalOperationDto>(MfText.Concurrency);
+            }
+            notes.AddRange(await _flow.AfterSaveAsync(ct));
             await MfGates.QcAsync(_notify, l.Op, l.Order.Number, ct);
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct), notes.Count == 0 ? null : Join(notes));
         }
@@ -425,7 +459,14 @@ namespace Services.NasbNiro.Production
             l.Op.ModifyDate = stamp;
             l.Op.ModifierUserId = Me;
             await _flow.PartSyncAsync(l.Op, ct);
-            await _uow.SaveChangesAsync(ct);
+            try
+            {
+                await _uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Bad<TerminalOperationDto>(MfText.Concurrency);
+            }
             await MfGates.QcAsync(_notify, l.Op, l.Order.Number, ct);
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
         }
@@ -603,10 +644,15 @@ namespace Services.NasbNiro.Production
             {
                 await _uow.SaveChangesAsync(ct);
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Bad<BookingDto>(MfText.Concurrency);
+            }
             catch (DbUpdateException)
             {
                 return Bad<BookingDto>("ثبت زمان ممکن نشد؛ دوباره تلاش کنید.");
             }
+            await _flow.AfterSaveAsync(ct);
             return ResponseDtoHelper.Ok((await BookingDtosAsync(new List<MfTimeBooking> { booking }, ct))[0]);
         }
 
@@ -654,6 +700,8 @@ namespace Services.NasbNiro.Production
             b.GoodQty = good; b.ScrapQty = scrap; b.ReworkQty = rework; b.ScrapReasonCodeId = scrapReason;
             if (Clean(dto.Note) != null) b.Note = Clean(dto.Note);
             b.EditReason = reason;
+            // every supervisor correction is audited, also when it repeats the reason of the previous one (the audit trail writes a booking only when EditReason is marked modified)
+            _uow.Entry(b).Property(x => x.EditReason).IsModified = true;
             b.ModifyDate = DateTimeOffset.Now;
             b.ModifierUserId = Me;
             op.ModifyDate = DateTimeOffset.Now;

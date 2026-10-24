@@ -185,6 +185,7 @@ namespace Services.NasbNiro.Production
                 Unit = MfText.Clean(bom.Unit) ?? item.Unit, Status = MfOrderStatus.Draft, AutoDrafted = true,
                 CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
+            _uow.Set<MfProductionOrder>().Add(order);   // the components and operations come with the graph
             added.Add(order);
 
             // the input commodity of the process is the component the order consumes

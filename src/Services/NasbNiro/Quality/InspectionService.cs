@@ -161,10 +161,12 @@ namespace Services.NasbNiro.Quality
             if (equipmentProblem != null) return Bad<QcRecordDto>(equipmentProblem);
             if (dto.Result == QcResult.Accept && measurements.Any(m => !m.Pass))
                 return Bad<QcRecordDto>("اندازه‌گیری خارج از تلرانس ثبت شده است؛ نتیجه «قبول» مجاز نیست.");
-            if (dto.Result == QcResult.Reject && !dto.ItemId.HasValue)
-                return Bad<QcRecordDto>("برای نتیجه «رد»، کالا یا قطعه را مشخص کنید تا گزارش عدم انطباق ساخته شود.");
-            if (dto.Result == QcResult.Reject && Clean(dto.Note) == null && measurements.All(m => m.Pass))
-                return Bad<QcRecordDto>("دلیل رد را در توضیحات بنویسید.");
+            // a reject and a rework both open a non-conformance report (the rework is decided on it)
+            bool opensNcr = dto.Result == QcResult.Reject || dto.Result == QcResult.Rework;
+            if (opensNcr && !dto.ItemId.HasValue)
+                return Bad<QcRecordDto>("برای نتیجه «رد» یا «دوباره‌کاری»، کالا یا قطعه را مشخص کنید تا گزارش عدم انطباق ساخته شود.");
+            if (opensNcr && Clean(dto.Note) == null && measurements.All(m => m.Pass))
+                return Bad<QcRecordDto>("دلیل رد یا دوباره‌کاری را در توضیحات بنویسید.");
 
             if (dto.WorkOrderId.HasValue) await _itp.EnsureItpForWorkOrderAsync(dto.WorkOrderId.Value, cancellationToken);
 
@@ -180,13 +182,13 @@ namespace Services.NasbNiro.Quality
                 CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             _uow.Set<QcRecord>().Add(record);
-            if (dto.Result == QcResult.Reject)
+            if (opensNcr)
             {
                 string failed = string.Join("، ", measurements.Where(m => !m.Pass).Select(m => $"{m.Characteristic}: {m.Measured}"));
                 NonConformance ncr = await QualityNcrFactory.DraftAsync(_uow, Me, dto.Type == QcRecordType.Final ? NcrSource.Final : NcrSource.InProcess,
                     dto.ItemId.Value, dto.LotId, record.Quantity, dto.SerialNumber, dto.WorkOrderId,
                     dto.DrawingNumber == null ? null : $"نقشه {dto.DrawingNumber}" + (dto.DrawingRevision == null ? string.Empty : $" بازنگری {dto.DrawingRevision}"),
-                    $"رد در بازرسی {record.Number}: {Clean(dto.Note) ?? failed}" + (failed.Length > 0 && Clean(dto.Note) != null ? $" ({failed})" : string.Empty),
+                    $"{(dto.Result == QcResult.Rework ? "دوباره‌کاری" : "رد")} در بازرسی {record.Number}: {Clean(dto.Note) ?? failed}" + (failed.Length > 0 && Clean(dto.Note) != null ? $" ({failed})" : string.Empty),
                     record.Number, measurements.FirstOrDefault(m => !m.Pass && m.EquipmentId.HasValue)?.EquipmentId, cancellationToken);
                 record.Ncr = ncr;
             }

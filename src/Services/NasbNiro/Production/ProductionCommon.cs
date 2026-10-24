@@ -71,6 +71,20 @@ namespace Services.NasbNiro.Production
         public const string Concurrency = "اطلاعات هم‌زمان توسط کاربر دیگری تغییر کرد. صفحه را دوباره باز کنید و دوباره تلاش کنید.";
         public const string SameUser = "این کار باید توسط شخص دیگری انجام شود (تفکیک وظایف).";
 
+        /// <summary>Persian name of an operation status for messages.</summary>
+        public static string OperationStatus(MfOperationStatus status) => status switch
+        {
+            MfOperationStatus.Waiting => "در انتظار مرحله قبل",
+            MfOperationStatus.Ready => "آماده",
+            MfOperationStatus.InProgress => "در حال انجام",
+            MfOperationStatus.Paused => "متوقف",
+            MfOperationStatus.Done => "انجام شده",
+            MfOperationStatus.QcHold => "در انتظار بازرسی",
+            MfOperationStatus.Rejected => "ردشده در بازرسی",
+            MfOperationStatus.Skipped => "رد شده از مسیر",
+            _ => status.ToString(),
+        };
+
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
         public static ResponseDto<T> Bad<T>(string message) => ResponseDtoHelper.BadRequest<T>(message);
         public static ResponseDto<T> NotFound<T>(string message) => ResponseDtoHelper.NotFound<T>(message);

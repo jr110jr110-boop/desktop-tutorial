@@ -245,6 +245,11 @@ namespace Entities.Model.NasbNiro.Production
         public int? PurchaseRequestId { get; set; }
         public int? PurchaseRequestLineId { get; set; }
 
+        /// <summary>Navigations so the purchase request and the operation are stored by one save (the keys are filled by the save).</summary>
+        public Entities.Model.NasbNiro.Procurement.PurchaseRequest PurchaseRequest { get; set; }
+
+        public Entities.Model.NasbNiro.Procurement.PurchaseRequestLine PurchaseRequestLine { get; set; }
+
         /// <summary>The purchase order line that buys the outside work (set when procurement has ordered it).</summary>
         public int? PurchaseOrderLineId { get; set; }
 

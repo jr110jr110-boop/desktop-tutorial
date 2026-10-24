@@ -143,8 +143,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne(x => x.QcRecord).WithMany().HasForeignKey(x => x.QcRecordId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Ncr).WithMany().HasForeignKey(x => x.NcrId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ItpActivity>().WithMany().HasForeignKey(x => x.ItpActivityId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<Entities.Model.NasbNiro.Procurement.PurchaseRequest>().WithMany().HasForeignKey(x => x.PurchaseRequestId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<Entities.Model.NasbNiro.Procurement.PurchaseRequestLine>().WithMany().HasForeignKey(x => x.PurchaseRequestLineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.PurchaseRequest).WithMany().HasForeignKey(x => x.PurchaseRequestId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.PurchaseRequestLine).WithMany().HasForeignKey(x => x.PurchaseRequestLineId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<Entities.Model.NasbNiro.Procurement.PurchaseOrderLine>().WithMany().HasForeignKey(x => x.PurchaseOrderLineId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<InventoryDocument>().WithMany().HasForeignKey(x => x.SubcontractIssueId).OnDelete(DeleteBehavior.Restrict);
             });

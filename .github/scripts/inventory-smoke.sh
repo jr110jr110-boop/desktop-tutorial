@@ -3457,7 +3457,7 @@ as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MFWO&PageSize=0"; check "mes: the W
 # a failed hook must not hide the rest of the section: draft by hand then (the check above has already failed)
 if [ "$(val '.data.data|length')" != "3" ]; then call POST $MF/orders/draft "{\"workOrderId\":$MFWO}"; as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MFWO&PageSize=0"; fi
 MFORDA=$(jq -r ".data.data[]|select(.itemId == $MFPA)|.id" "$B"); MFORDB=$(jq -r ".data.data[]|select(.itemId == $MFPB)|.id" "$B"); MFORDC=$(jq -r ".data.data[]|select(.itemId == $MFPC)|.id" "$B")
-[ "$(jq -r ".data.data[]|select(.itemId == $MFPA)|.quantity" "$B")" = "5" ] && ok "mes: order A is for the 5 units of the BOM line" || bad "mes: order A is for the 5 units of the BOM line"
+check "mes: order A is for the 5 units of the BOM line (a decimal compared as a number, not as text)" ".success and ([.data.data[]|select(.itemId == $MFPA)][0].quantity) == 5"
 call POST $MF/orders/draft "{\"processId\":$MFPRA}"; check "mes: drafting again for the same process drafts nothing (idempotent)" '.success and .data.drafted == 0 and .data.skipped == 1 and (.data.notes|length) == 1'
 call POST $MF/orders/draft "{\"workOrderId\":$MFWO}"; check "mes: drafting the whole work order again drafts nothing" '.success and .data.drafted == 0 and .data.skipped == 3'
 as "$MOP_TOKEN" POST $MF/orders/draft "{\"workOrderId\":$MFWO}"; no "mes: the operator cannot draft orders"
@@ -3487,9 +3487,21 @@ as "$PLAN_TOKEN" POST $MF/orders/action "{\"id\":$MFORDB,\"action\":\"cancel\"}"
 as "$PLAN_TOKEN" POST $MF/orders/action "{\"id\":$MFORDB,\"action\":\"cancel\",\"reason\":\"نقشه تأییدنشده\"}"; check "mes: order B is cancelled with a reason" '.success and .data.status == 5 and .data.cancelReason == "نقشه تأییدنشده"'
 ibx "$MSV_TOKEN" "mf:order:$MFORDB"; check "mes: and its release gate is closed" '.success and (.data.data|length) == 0'
 
+# --- a newer approved routing revision (same content): the draft order must follow it before it is released
+call POST $MF/routings "{\"itemId\":$MFPA}"; check "mes: a new revision of item A is opened as a draft" '.success and .data.status == 0'
+MFREVA3=$(val .data.id)
+as "$MPM_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA3,\"action\":\"approve-production\"}"; check "mes: production approves the new revision of item A" '.success and .data.status == 0'
+as "$ENG_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA3,\"action\":\"approve-engineering\"}"; check "mes: engineering approves the new revision of item A: approved, content matches" '.success and .data.status == 1 and .data.contentMatches == true'
+call GET "$MF/orders/$MFORDA/release-check"; check "mes: release check of A: only the routing check fails (the operations come from the old revision) and it cannot be overridden" ".success and .data.canRelease == false and .data.canReleaseWithOverride == false and ([.data.checks[]|select(.passed == false)]|length) == 1 and ([.data.checks[]|select(.code == \"routing\")][0] | .passed == false and (.message|contains(\"refresh-routing\")))"
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: order A cannot be released while it follows a superseded routing revision" "به‌روزرسانی مسیر"
+as "$PLAN_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"refresh-routing\"}"; check "mes: refreshing the routing moves draft order A to the new revision with three fresh operations" ".success and .data.status == 0 and .data.routingRevisionId == $MFREVA3 and (.data.operations|length) == 3 and ([.data.operations[].sequence]) == [10,20,30]"
+MFOPA10=$(val '.data.operations[0].id'); MFOPA20=$(val '.data.operations[1].id'); MFOPA30=$(val '.data.operations[2].id')
+call GET "$MF/orders/$MFORDA/release-check"; check "mes: after the refresh all five checks of A pass again" '.success and .data.canRelease == true and ([.data.checks[]|select(.passed)]|length) == 5'
+
 # --- release of A
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; check "mes: the shop supervisor releases order A: first operation ready, the others wait, no kit, no override" '.success and .data.status == 1 and .data.releaseOverride == false and .data.kitRequestId == null and ([.data.operations[].status]) == [1,0,0] and (.data.releasedAtText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
 ibx "$MSV_TOKEN" "mf:order:$MFORDA"; check "mes: and the release gate of A is closed" '.success and (.data.data|length) == 0'
+call GET "inventory/trace/operations?WorkOrderId=$MFWO&PageSize=50"; check "mes: item A is lot tracked: release made one traceability row per operation (3) on the lot named like the order, pending, QC pending only on the inspection step" ".success and (.data.data|length) == 3 and ([.data.data[]|select(.lotNumber == \"$MFNOA\" and .serialNumber == null and .status == 0)]|length) == 3 and ([.data.data|sort_by(.sequence)[]|.sequence]) == [10,20,30] and ([.data.data|sort_by(.sequence)[]|.qcStatus]) == [0,1,0]"
 as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDA&PageSize=0"; check "mes: the release is in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) >= 1'
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: an order is released once" "صادر می‌شود"
 
@@ -3525,6 +3537,7 @@ as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"machineId\"
 as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"machineId\":$MFM1,\"kind\":2}"; check "mes: back on step 10 of A: it is in progress again and C is paused" '.success and .data.status == 2 and .data.myRunning == true'
 as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA10,\"goodQty\":1}"; nomsg "mes: finishing needs the whole quantity (3 + 1 is not 5)" "برابر نیست"
 as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA10,\"goodQty\":2}"; check "mes: step 10 of A is finished with 5 good pieces" '.success and .data.status == 4 and .data.goodQty == 5 and .data.finishedAtText != null'
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA10,\"kind\":2}"; nomsg "mes: a finished step cannot be started again and the message names its status in Persian (not the enum name)" "وضعیت: انجام شده"
 call GET "$MF/orders/$MFORDA"; check "mes: finishing step 10 made step 20 ready; the order is in progress" '.success and .data.status == 2 and ([.data.operations[].status]) == [4,1,0]'
 
 # --- supervisor bookings for another person, the attendance difference list
@@ -3537,11 +3550,13 @@ as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAE
 as "$MPM_TOKEN" POST $MF/bookings/edit "{\"id\":$MFBK,\"endAt\":\"2026-06-27T13:00:00\",\"reason\":\"اصلاح ساعت پایان\"}"; nomsg "mes: the day of a booking is closed: only the shop supervisor corrects it" "روز این ثبت زمان بسته شده است"
 as "$MSV_TOKEN" POST $MF/bookings/edit "{\"id\":$MFBK,\"endAt\":\"2026-06-27T13:00:00\"}"; nomsg "mes: a correction needs a reason" "دلیل"
 as "$MSV_TOKEN" POST $MF/bookings/edit "{\"id\":$MFBK,\"endAt\":\"2026-06-27T13:00:00\",\"reason\":\"اصلاح ساعت پایان\"}"; check "mes: the shop supervisor corrects the closed day with a reason (300 minutes, 5 hours)" '.success and .data.minutes == 300 and .data.hours == 5 and .data.editReason == "اصلاح ساعت پایان"'
-as "$FM_TOKEN" GET "$FAU?EntityType=MfTimeBooking&EntityId=$MFBK&PageSize=0"; check "mes: the correction is in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) >= 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfTimeBooking&EntityId=$MFBK&PageSize=0"; check "mes: the first correction is in the audit trail: exactly one Modified row of the booking" '.success and ([.data.data[]|select(.action == "Modified")]|length) == 1'
 as "$MSV_TOKEN" GET "$MF/attendance-differences?From=2026-06-27&To=2026-06-27&EmployeeId=$OAEMP"; check "mes: attendance 8.33 h (500 min) against 5 h booked: 3.33 h unbooked" '.success and (.data.data|length) == 1 and .data.data[0].attendanceHours == 8.33 and .data.data[0].bookedHours == 5 and .data.data[0].differenceHours == 3.33 and .data.data[0].kind == "Unbooked" and (.data.data[0].dateText|test("^1405/04/06"))'
 as "$MSV_TOKEN" GET "$MF/attendance-differences?From=2026-06-27&To=2026-06-27&EmployeeId=$OAEMP&ToleranceMinutes=300"; check "mes: a wide tolerance hides the difference" '.success and (.data.data|length) == 0'
 as "$MOP_TOKEN" GET "$MF/attendance-differences?From=2026-06-27&To=2026-06-27"; no "mes: the operator cannot read the attendance difference list"
 as "$MSV_TOKEN" GET "$MF/attendance-differences?From=2026-01-01&To=2026-12-31"; nomsg "mes: the range is at most 93 days" "۹۳ روز"
+as "$MSV_TOKEN" POST $MF/bookings/edit "{\"id\":$MFBK,\"endAt\":\"2026-06-27T13:30:00\",\"reason\":\"اصلاح ساعت پایان\"}"; check "mes: a second correction with the very same reason (330 minutes, 5.5 hours)" '.success and .data.minutes == 330 and .data.hours == 5.5 and .data.editReason == "اصلاح ساعت پایان"'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfTimeBooking&EntityId=$MFBK&PageSize=0"; check "mes: two corrections with the very same reason give exactly 2 Modified audit rows of the booking" '.success and ([.data.data[]|select(.action == "Modified")]|length) == 2'
 as "$MSV_TOKEN" GET "$MF/bookings?OrderId=$MFORDC&PageSize=0"; check "mes: bookings of order C: the operator's terminal booking (ended when A was resumed) and the supervisor's" '.success and (.data.data|length) == 2 and ([.data.data[]|select(.source == 1 and .running == false and .endAt != null)]|length) == 1'
 
 # --- QC hold, decision, rework
@@ -3555,7 +3570,8 @@ MFNCR=$(val .data.ncrId)
 ibx "$QC_TOKEN" "mf:qc:$MFOPA20"; check "mes: the QC request is closed" '.success and (.data.data|length) == 0'
 call GET "$MF/orders/$MFORDA"; check "mes: a rework operation (sequence 20, -R) follows the rejected step, ready, linked to the NCR; step 30 waits" ".success and (.data.operations|length) == 4 and ([.data.operations[]|select(.isRework)][0] | .sequence == 20 and .status == 1 and .reworkOfOperationId == $MFOPA20 and .ncrId == $MFNCR and .jobCard == \"$MFNOA/20-R\") and ([.data.operations[]|select(.id == $MFOPA30)][0].status == 0)"
 MFOPA20R=$(jq -r '[.data.operations[]|select(.isRework)][0].id' "$B")
-call POST $MF/operations/rework "{\"operationId\":$MFOPA20,\"ncrId\":$MFNCR}"; nomsg "mes: one rework operation per rejected step" "قبلاً عملیات"
+as "$MSV_TOKEN" POST $MF/operations/rework "{\"operationId\":$MFOPA20,\"ncrId\":$MFNCR}"; nomsg "mes: one rework operation per rejected step (the shop supervisor asks for a second one)" "قبلاً عملیات"
+call POST $MF/operations/rework "{\"operationId\":$MFOPA20,\"ncrId\":$MFNCR}"; nomsg "mes: the PMO cannot create rework operations (shop supervisor or production manager only)" "مجوز"
 as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA20R,\"kind\":3}"; check "mes: the operator starts the rework operation (rework booking)" '.success and .data.status == 2'
 as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20R,\"goodQty\":4}"; nomsg "mes: the rework covers the 5 rejected pieces, not fewer" "برابر نیست"
 as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20R,\"goodQty\":1}"; check "mes: rework finished with 5 good pieces: QC hold again" '.success and .data.status == 5 and .data.goodQty == 5'
@@ -3563,11 +3579,17 @@ as "$QC_TOKEN" POST $MF/operations/qc-decision "{\"operationId\":$MFOPA20R,\"res
 
 # --- outside work drafts, completion, receipt
 call GET "$MF/orders/$MFORDA"; check "mes: the outside step is ready and drafted a subcontract purchase request line and a subcontract issue draft" ".success and ([.data.operations[]|select(.id == $MFOPA30)][0] | .status == 1 and .isOutside == true and .purchaseRequestId > 0 and .purchaseRequestLineId > 0 and (.purchaseRequestNumber|startswith(\"PRQ\")) and .subcontractIssueId > 0 and .outsideSupplierId == ${PRV:-0})"
-MFSI=$(jq -r ".data.operations[]|select(.id == $MFOPA30)|.subcontractIssueId" "$B")
+MFSI=$(jq -r ".data.operations[]|select(.id == $MFOPA30)|.subcontractIssueId" "$B"); MFPR=$(jq -r ".data.operations[]|select(.id == $MFOPA30)|.purchaseRequestId" "$B")
+call GET "procurement/requests/$MFPR"; check "mes: the purchase request is a draft subcontract request for the work order, 5 units, and names the default contractor of the operation standard" ".success and .data.status == 0 and .data.kind == 3 and .data.workOrderId == $MFWO and (.data.lines|length) == 1 and .data.lines[0].quantity == 5 and (.data.description|contains(\"کارگاه ماشینکاری آزمون\")) and (.data.lines[0].technicalRequirements|contains(\"کارگاه ماشینکاری آزمون\"))"
+ibx "$COM_TOKEN" "pr:$MFPR"; check "mes: the commercial role has the draft subcontract request in its procurement inbox" '.success and (.data.data|length) == 1 and .data.data[0].sourceModule == "procurement" and .data.data[0].recipientRole == "COMMERCIAL"'
+ibx "$PLAN_TOKEN" "pr:$MFPR"; check "mes: the planning role does not get that draft-request item" '.success and (.data.data|length) == 0'
 call GET "inventory/documents/$MFSI"; check "mes: the issue to the contractor is a draft document of the inventory module for item A, linked to the work order" ".success and .data.status == 0 and .data.type == 9 and .data.workOrderId == $MFWO and .data.lines[0].itemId == $MFPA and .data.lines[0].quantity == 5"
 as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA30}"; nomsg "mes: outside work is not started on the shop terminal" "بیرونی"
 as "$MOP_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"complete-outside\",\"documentId\":$MFSI}"; nomsg "mes: the operator cannot complete outside work" "مجوز"
 as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"complete-outside\",\"documentId\":$MFSI}"; nomsg "mes: outside work completes only with a confirmed return document from the contractor" "برگشت از پیمانکار"
+call POST inventory/documents "{\"type\":10,\"documentDate\":\"2026-10-19T00:00:00\",\"warehouseId\":$WK,\"destinationWarehouseId\":$W1,\"providerId\":${PRV:-0},\"workOrderId\":$MFWO,\"referenceNumber\":\"OTHER-JOB\",\"lines\":[{\"itemId\":$MFCMP,\"quantity\":1}]}"; check "mes: setup: a draft return from the contractor of the same work order that quotes another job" '.success and .data.id > 0 and .data.type == 10'
+MFSB=$(val .data.id)
+as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"complete-outside\",\"documentId\":$MFSB}"; nomsg "mes: a return document that does not quote this operation's job (or its issue) is refused as not belonging to the issue" "مربوط به حواله ارسال این عملیات نیست"
 as "$MPM_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\",\"reason\":\"x\"}"; nomsg "mes: skipping a step is the shop supervisor's alone" "سرپرست کارگاه"
 as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\"}"; nomsg "mes: skipping needs a reason" "دلیل"
 as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\",\"reason\":\"عملیات حرارتی در این آزمون انجام نمی‌شود\"}"; check "mes: the supervisor skips the outside step with a reason: every step is finished, the order is completed and a production receipt draft is made" '.success and .data.status == 7 and .data.skipReason != null'
@@ -3584,13 +3606,18 @@ as "$MOP_TOKEN" POST $MF/terminal/pause "{\"operationId\":$MFOPC10,\"reasonCodeI
 as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPC10,\"machineId\":$MFM1}"; check "mes: start again" '.success and .data.status == 2'
 as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPC10,\"goodQty\":1,\"scrapQty\":1,\"scrapReasonCodeId\":$MFRSC}"; check "mes: C finished with 1 good and 1 scrapped piece (scrap reason kept)" '.success and .data.status == 4 and .data.goodQty == 1 and .data.scrapQty == 1'
 call GET "$MF/orders/$MFORDC"; check "mes: C is completed; the receipt draft covers the 1 good piece" '.success and .data.status == 3 and .data.productionReceiptId > 0'
-as "$MSV_TOKEN" GET "$MF/bookings?OperationId=$MFOPC10&PageSize=0"; check "mes: all booked minutes of C are whole minutes and the hours are their rounded 2-decimal share" '.success and (.data.data|length) >= 3 and ([.data.data[]|select(.running == true)]|length) == 0 and ([.data.data[]|select(.minutes != (.minutes|floor))]|length) == 0 and ([.data.data[]|select(.hours != ((.minutes / 60 * 100 | round) / 100))]|length) == 0'
+as "$MSV_TOKEN" GET "$MF/bookings?OperationId=$MFOPC10&PageSize=0"; check "mes: C has 4 bookings (3 terminal, 1 supervisor), none running; the supervisor booking is exactly 330 minutes = 5.5 hours; every hours value is its minutes / 60 rounded to 2 decimals" '.success and (.data.data|length) == 4 and ([.data.data[]|select(.source == 1)]|length) == 3 and ([.data.data[]|select(.running == true)]|length) == 0 and ([.data.data[]|select(.source == 2)]|length) == 1 and ([.data.data[]|select(.source == 2)][0] | .minutes == 330 and .hours == 5.5) and ([.data.data[]|select(.hours != ((.minutes / 60 * 100 | round) / 100))]|length) == 0'
 as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDC&PageSize=0"; check "mes: the override release of C is audited with its reason" '.success and ([.data.data[]|select(.action == "Modified" and (.afterJson|tostring|contains("ReleaseOverrideReason")))]|length) >= 1'
 
 # --- reading roles
 as "$MMT_TOKEN" GET "$MF/orders?OpenOnly=true&PageSize=5"; check "mes: maintenance reads the open orders (none of the three is open any more)" ".success and ([.data.data[]|select(.id == $MFORDA or .id == $MFORDB or .id == $MFORDC)]|length) == 0"
 as "$MMT_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: maintenance cannot release orders" "سرپرست کارگاه"
 as "$MOP_TOKEN" GET "$MF/routings?PageSize=5"; no "mes: the operator cannot read routing revisions"
+as "$MOP_TOKEN" GET $FP/employees; [ "$CODE" = "403" ] && ok "mes: the operator cannot read the payroll employees (403)" || bad "mes: the operator cannot read the payroll employees (403) got $CODE"
+as "$MOP_TOKEN" GET "$FP/employees/$MFEMP"; [ "$CODE" = "403" ] && ok "mes: the operator cannot read his own payroll record either (403)" || bad "mes: the operator cannot read his own payroll record either (403) got $CODE"
+as "$MOP_TOKEN" GET "$FG/years"; [ "$CODE" = "403" ] && ok "mes: the operator cannot read the general ledger (403)" || bad "mes: the operator cannot read the general ledger (403) got $CODE"
+as "$MOP_TOKEN" GET "$MF/work-centers/$MFWC1"; check "mes: the operator reads the work centre but the hourly rates are not shown to him" '.success and .data.code == "MF-LATHE" and .data.machineRateRial == null and .data.labourRateRial == null'
+as "$MOP_TOKEN" GET "$MF/bookings?PageSize=0"; check "mes: the operator's booking list carries no payroll or rate field (names, personnel codes and hours only)" '.success and (.data.data|length) >= 1 and ([.. | objects | keys[] | select(test("Rial$|[Rr]ate$|[Ww]age|[Ss]alary|[Ii]ban|[Nn]ationalCode|[Cc]ost"))]|length) == 0'
 TOKEN=$ADMIN_TOKEN
 
 # ---------------------------------------------------------------- roles of the new users
