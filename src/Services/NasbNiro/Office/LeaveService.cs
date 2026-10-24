@@ -57,7 +57,6 @@ namespace Services.NasbNiro.Office
 
         private static bool UsesBalance(OfLeaveKind k) => k == OfLeaveKind.DailyLeave || k == OfLeaveKind.HourlyLeave;
 
-        private static bool Counts(OfLeaveKind k) => k == OfLeaveKind.DailyLeave || k == OfLeaveKind.HourlyLeave || k == OfLeaveKind.SickLeave;
 
         private static string KindText(OfLeaveKind k)
         {

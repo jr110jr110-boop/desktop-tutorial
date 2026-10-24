@@ -74,18 +74,18 @@ namespace Services.Services
 
         public async Task<Guid> UploadDocumentAsync(UploadFileDto uploadFileDto)
         {
-            Guid documentId = GenerateDocumentId();
-
-            string uniqeFilename = CreateUniqueFileName(uploadFileDto.File.FileName, documentId);
-
-            string savedPath = await SaveDocumentAsync(uniqeFilename, uploadFileDto.File);
-
-            var documentModel = new Document(path: savedPath, mimType: Path.GetExtension(uploadFileDto.File.FileName))
+            // the file on disk is named after the document's own id (as change-file already does), so a file can always be found from its id
+            var documentModel = new Document(path: string.Empty, mimType: Path.GetExtension(uploadFileDto.File.FileName))
                 .SetCode(uploadFileDto.Code)
                 .SetDescription(uploadFileDto.Description)
                 .SetName(uploadFileDto.Name);
 
-            EntityEntry<Document> entityEntry = await _documents.AddAsync(documentModel);
+            EntityEntry<Document> entityEntry = await _documents.AddAsync(documentModel); // the Guid key is generated here, before the save
+
+            string uniqeFilename = CreateUniqueFileName(uploadFileDto.File.FileName, documentModel.Id);
+            string savedPath = await SaveDocumentAsync(uniqeFilename, uploadFileDto.File);
+            documentModel.SetPath(savedPath);
+
             await this._uow.SaveChangesAsync();
             return documentModel.Id;
         }

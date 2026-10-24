@@ -3297,7 +3297,14 @@ ibx "$FM_TOKEN" "payroll:$PRM"; check "office r1 M5: and the item is closed" '.s
 as "$OHR_TOKEN" GET "$OF/leaves/balance?employeeId=$OAEMP2&year=1405&month=6"; check "office r1 H8: after payroll booked Mordad the sick leave of ATT02 used none of the annual leave" '.success and .data.lastMonth == 5 and .data.used == 0'
 
 # M5a: posting accounting events (the posting job) raises the voucher gate for the finance manager
-as "$FM_TOKEN" POST $FG/vouchers/finalize-up-to "{\"fiscalYearId\":$FY,\"upTo\":\"$(dd 400)T00:00:00\"}"; check "office r1 M5: all checked vouchers finalised" '.success'
+# the gate counts every checked voucher of every year, so the ledger is cleared first: both finance managers finalise what each may (maker-checker),
+# manual vouchers that still cannot be finalised go back to draft; the bodies are kept in smoke-output for diagnosis
+as "$FM_TOKEN" POST $FG/vouchers/finalize-up-to "{\"upTo\":\"$(dd 400)T00:00:00\"}"; cp "$B" "$OUT/m5-finalise-fm.json"; check "office r1 M5: the finance manager finalises the checked vouchers of every year he may" '.success'
+as "$FM2_TOKEN" POST $FG/vouchers/finalize-up-to "{\"upTo\":\"$(dd 400)T00:00:00\"}"; cp "$B" "$OUT/m5-finalise-fm2.json"; check "office r1 M5: the second finance manager finalises those the first one touched" '.success'
+as "$FM_TOKEN" GET "$FG/vouchers?Status=1&PageSize=0"; cp "$B" "$OUT/m5-checked-left.json"
+for OV in $(jq -r '.data.data[]|select(.type != 3)|.id' "$B"); do as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$OV,\"action\":\"uncheck\"}"; done
+as "$FM_TOKEN" GET "$FG/vouchers?Status=1&PageSize=0"; check "office r1 M5: no checked voucher is left in the ledger (precondition of the gate check)" '.success and (.data.data|length) == 0'
+as "$FM_TOKEN" POST $FG/vouchers/finalize-up-to "{\"upTo\":\"$(dd 400)T00:00:00\"}"; check "office r1 M5: a bulk finalise with nothing left finalises nothing" '.success and .data.finalized == 0 and (.data.skipped|length) == 0'
 ibx "$FM_TOKEN" "vouchers:finalise"; check "office r1 M5: so the voucher gate is closed" '.success and (.data.data|length) == 0'
 as "$PAYR_TOKEN" POST $FP/runs/$PRM/post; check "office r1 M5: the Mordad payroll is posted as an accounting event" '.success and .data.status == 3'
 as "$FM_TOKEN" POST $FG/post-events; check "office r1 M5: the posting job turned the event into a voucher" '.success and .data.posted >= 1'
