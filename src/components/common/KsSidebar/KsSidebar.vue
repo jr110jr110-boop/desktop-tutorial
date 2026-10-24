@@ -214,6 +214,7 @@
 </template>
 
 <script lang="ts" setup>
+import { Features } from "@/utils/features";
 import { FinanceRoles, FnRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
@@ -447,10 +448,10 @@ const links = {
     { title: "سپیدار: مهاجرت اطلاعات", routeName: "FnMigration", disabled: !hasRole(FnRoles.readers) },
     { title: "سپیدار: دوره موازی و مقایسه تراز", routeName: "FnParallelRun", disabled: !hasRole(FnRoles.readers) },
     { title: "سپیدار: خروجی کامل اسناد", routeName: "FnSepidarExport", disabled: !hasRole(FnRoles.readers) },
-    { title: "شرکت‌ها: اشخاص حقوقی و معاملات درون‌گروهی", routeName: "FnEntities", disabled: !hasRole(FnRoles.readers) },
-    { title: "شرکت‌ها: صورت‌های تلفیقی", routeName: "FnConsolidation", disabled: !hasRole(FnRoles.readers) },
-    { title: "ارز: نرخ، تسعیر و ریسک ارزی", routeName: "FnFx", disabled: !hasRole(FnRoles.readers) },
-    { title: "ارز: اعتبار اسنادی", routeName: "FnLettersOfCredit", disabled: !hasRole(FnRoles.readers) },
+    { title: "شرکت‌ها: اشخاص حقوقی و معاملات درون‌گروهی", routeName: "FnEntities", disabled: !hasRole(FnRoles.readers), hidden: !Features.multiEntity },
+    { title: "شرکت‌ها: صورت‌های تلفیقی", routeName: "FnConsolidation", disabled: !hasRole(FnRoles.readers), hidden: !Features.multiEntity },
+    { title: "ارز: نرخ، تسعیر و ریسک ارزی", routeName: "FnFx", disabled: !hasRole(FnRoles.readers), hidden: !Features.foreignCurrency },
+    { title: "ارز: اعتبار اسنادی", routeName: "FnLettersOfCredit", disabled: !hasRole(FnRoles.readers), hidden: !Features.foreignCurrency },
     { title: "بودجه: نسخه‌ها، عملکرد و کنترل تعهد", routeName: "FnBudgets", disabled: !hasRole(FnRoles.readers) },
     { title: "بها: سربار، دستور ساخت و درآمد پروژه", routeName: "FnCosting", disabled: !hasRole(FnRoles.readers) },
     { title: "انتقالی‌ها، تعهدی‌ها و ذخایر", routeName: "FnDeferrals", disabled: !hasRole(FnRoles.readers) },

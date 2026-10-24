@@ -55,7 +55,7 @@
       <div :id="tag" :class="isRouteActive && 'show'" class="collapse">
         <ul class="btn-toggle-nav list-unstyled fw-normal pb-1 small">
           <li
-            v-for="(sub, index) in subs"
+            v-for="(sub, index) in subs.filter((x) => !x.hidden)"
             :key="index"
             :class="[
               { active: currentRouteName === sub.routeName },

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Features } from "@/utils/features";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import FnDate from "@/components/fn/FnDate.vue";
@@ -286,9 +287,9 @@ onMounted(async () => {
                       <select v-model="l.costCenterId" :disabled="!linesEditable" class="form-select form-select-sm"><option :value="null">-</option><option v-for="c in costCenters" :key="c.id" :value="c.id">{{ c.code }} - {{ c.title }}</option></select>
                     </div>
                     <div class="col-md-1"><label class="form-label small mb-0">تعداد</label><input v-model="l.quantity" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
-                    <div class="col-md-1"><label class="form-label small mb-0">کد ارز</label><input v-model="l.currencyCode" :disabled="!linesEditable" class="form-control form-control-sm inv-ltr" /></div>
-                    <div class="col-md-2"><label class="form-label small mb-0">مبلغ ارزی</label><input v-model="l.currencyAmount" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
-                    <div class="col-md-2"><label class="form-label small mb-0">نرخ</label><input v-model="l.rate" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
+                    <div v-if="Features.foreignCurrency" class="col-md-1"><label class="form-label small mb-0">کد ارز</label><input v-model="l.currencyCode" :disabled="!linesEditable" class="form-control form-control-sm inv-ltr" /></div>
+                    <div v-if="Features.foreignCurrency" class="col-md-2"><label class="form-label small mb-0">مبلغ ارزی</label><input v-model="l.currencyAmount" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
+                    <div v-if="Features.foreignCurrency" class="col-md-2"><label class="form-label small mb-0">نرخ</label><input v-model="l.rate" :disabled="!linesEditable" class="form-control form-control-sm fn-num" /></div>
                   </div>
                 </td>
               </tr>

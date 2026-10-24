@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Features } from "@/utils/features";
 import { onMounted, ref } from "vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import QPager from "@/components/quality/QPager.vue";
@@ -172,7 +173,7 @@ onMounted(() => {
           <div class="col-md-6 d-flex align-items-end gap-3 flex-wrap">
             <label class="form-check small"><input v-model="form.temporary" class="form-check-input" type="checkbox" /> حساب موقت (بسته می‌شود)</label>
             <label class="form-check small"><input v-model="form.requiresDetail" class="form-check-input" type="checkbox" /> تفصیلی اجباری</label>
-            <label class="form-check small"><input v-model="form.currencyAllowed" class="form-check-input" type="checkbox" /> ارزی</label>
+            <label v-if="Features.foreignCurrency" class="form-check small"><input v-model="form.currencyAllowed" class="form-check-input" type="checkbox" /> ارزی</label>
             <label class="form-check small"><input v-model="form.isActive" class="form-check-input" type="checkbox" /> فعال</label>
           </div>
         </div>

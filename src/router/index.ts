@@ -1,6 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
+import { Features } from "@/utils/features";
 import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
@@ -485,10 +486,10 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/fn/migration", name: "FnMigration", component: () => import("@/views/fn/Migration.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/parallel-run", name: "FnParallelRun", component: () => import("@/views/fn/ParallelRun.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/sepidar-export", name: "FnSepidarExport", component: () => import("@/views/fn/SepidarExport.vue"), meta: { roles: FnRoles.readers } },
-  { path: "/fn/entities", name: "FnEntities", component: () => import("@/views/fn/LegalEntities.vue"), meta: { roles: FnRoles.readers } },
-  { path: "/fn/consolidation", name: "FnConsolidation", component: () => import("@/views/fn/Consolidation.vue"), meta: { roles: FnRoles.readers } },
-  { path: "/fn/fx", name: "FnFx", component: () => import("@/views/fn/Fx.vue"), meta: { roles: FnRoles.readers } },
-  { path: "/fn/letters-of-credit", name: "FnLettersOfCredit", component: () => import("@/views/fn/LettersOfCredit.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/entities", name: "FnEntities", component: () => import("@/views/fn/LegalEntities.vue"), meta: { feature: "multiEntity", roles: FnRoles.readers } },
+  { path: "/fn/consolidation", name: "FnConsolidation", component: () => import("@/views/fn/Consolidation.vue"), meta: { feature: "multiEntity", roles: FnRoles.readers } },
+  { path: "/fn/fx", name: "FnFx", component: () => import("@/views/fn/Fx.vue"), meta: { feature: "foreignCurrency", roles: FnRoles.readers } },
+  { path: "/fn/letters-of-credit", name: "FnLettersOfCredit", component: () => import("@/views/fn/LettersOfCredit.vue"), meta: { feature: "foreignCurrency", roles: FnRoles.readers } },
   { path: "/fn/budgets", name: "FnBudgets", component: () => import("@/views/fn/Budgets.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/costing", name: "FnCosting", component: () => import("@/views/fn/Costing.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/deferrals", name: "FnDeferrals", component: () => import("@/views/fn/Deferrals.vue"), meta: { roles: FnRoles.readers } },
@@ -593,6 +594,9 @@ router.beforeEach((to, from, next) => {
   if (to.name === "Dashboard" && currentRole() === Roles.CEO) return next({ name: "FinanceCeoDashboard" });
   const claim = typeof to.meta.access === "string" ? claims[to.meta.access] : undefined;
   if (claim && !accessList.includes(claim)) return handleHasNoAccess(next);
+  // features switched off by company decision (one company, rial only)
+  const feature = to.meta.feature as keyof typeof Features | undefined;
+  if (feature && !Features[feature]) return handleHasNoAccess(next);
   const roles = to.meta.roles as string[] | undefined;
   if (roles && !hasRole(roles)) return handleHasNoAccess(next);
   next();
