@@ -590,7 +590,7 @@ namespace Services.NasbNiro.Procurement
             if (grade == SupplierGrade.D)
             {
                 profile.Blocked = true;
-                profile.BlockReason = $"گرید D در ارزیابی {Services.NasbNiro.Finance.FiscalCalendars.Text(date)} (امتیاز {score})";
+                profile.BlockReason = $"گرید D در ارزیابی {global::Services.NasbNiro.Finance.FiscalCalendars.Text(date)} (امتیاز {score})";
             }
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok((await GetEvaluationsAsync(dto.ProviderId, cancellationToken)).Data.First(e => e.Id == evaluation.Id));

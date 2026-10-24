@@ -1178,7 +1178,7 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     ItpId = i.ItpId, ItpNumber = i.Number, ItpActivityId = i.Id, ActivityId = a.Id, WorkOrderId = a.WorkOrderId ?? 0, Stage = i.Stage, Activity = i.Activity, Party = party, PlannedDate = a.Start,
                     NoticeDeadline = deadline, NoticeLate = deadline < today,
-                    Text = $"به {party}: بازرسی «{i.Activity}» ({i.Stage}) طبق برنامه بازرسی و آزمون {i.Number} در تاریخ {Services.NasbNiro.Finance.FiscalCalendars.Text(a.Start.Value)} انجام می‌شود. لطفاً حداقل {i.NoticeDays} روز قبل برای حضور اعلام نظر کنید. (پیش‌نویس سیستم؛ ارسال با کنترل کیفی)",
+                    Text = $"به {party}: بازرسی «{i.Activity}» ({i.Stage}) طبق برنامه بازرسی و آزمون {i.Number} در تاریخ {global::Services.NasbNiro.Finance.FiscalCalendars.Text(a.Start.Value)} انجام می‌شود. لطفاً حداقل {i.NoticeDays} روز قبل برای حضور اعلام نظر کنید. (پیش‌نویس سیستم؛ ارسال با کنترل کیفی)",
                 });
             }
             drafts = drafts.OrderBy(d => d.NoticeDeadline).ThenBy(d => d.ItpActivityId).ToList();

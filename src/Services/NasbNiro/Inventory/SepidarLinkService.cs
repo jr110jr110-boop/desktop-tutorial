@@ -179,7 +179,7 @@ namespace Services.NasbNiro.Inventory
 
             byte[] bom = Encoding.UTF8.GetPreamble(); // Excel needs the BOM to read Persian text
             byte[] body = Encoding.UTF8.GetBytes(csv.ToString());
-            string fileName = $"sepidar-export-{Services.NasbNiro.Finance.FiscalCalendars.Current.Stamp(DateTime.Now)}-{DateTime.Now:HHmm}.csv";
+            string fileName = $"sepidar-export-{global::Services.NasbNiro.Finance.FiscalCalendars.Current.Stamp(DateTime.Now)}-{DateTime.Now:HHmm}.csv";
             return (bom.Concat(body).ToArray(), fileName, null);
         }
 
