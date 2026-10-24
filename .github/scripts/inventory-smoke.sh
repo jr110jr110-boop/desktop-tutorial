@@ -2543,10 +2543,12 @@ as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ4"; PO4=$(val .data.id)
 call POST procurement/orders/action "{\"id\":$PO4,\"action\":\"approve\"}"; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO4,\"action\":\"release\"}"
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO4,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"locationId\":$L2,\"purchaseOrderLineId\":$POL4}]}"; DR4=$(val .data.id); call POST "inventory/documents/$DR4/confirm"
 as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=3"; NV_VAT0=$(val .data.purchasesVat); NV_NR0=$(val .data.nonRecoverableVat); NV_NET0=$(val .data.purchasesNet)
+as "$FM_TOKEN" POST $FG/post-events
 NV_PPV0=$(cb 70108); NV_VATA0=$(cb 10403); NV_AP0=$(cb 30101)
 as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$PO4,\"invoiceNumber\":\"F-3002\",\"invoiceDate\":\"2026-10-24T00:00:00\",\"isOfficial\":true,\"lines\":[{\"orderLineId\":$POL4,\"quantity\":10,\"unitPrice\":390000,\"nonRecoverableVat\":true}]}"; SI4=$(val .data.id)
 check "f3b vat: the invoice shows a non-recoverable VAT of 390,000 and a total of 4,290,000" '.success and .data.nonRecoverableVatAmount == 390000 and .data.totalAmount == 4290000'
 as "$FIN_TOKEN" POST procurement/invoices/action "{\"id\":$SI4,\"action\":\"approve\"}"; check "f3b vat: the invoice is approved" '.success and .data.status == 3'
+as "$FM_TOKEN" POST $FG/post-events
 as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=3"
 check "f3b vat: the deductible purchases VAT is unchanged, the non-recoverable VAT is +390,000, purchases net +3,900,000" '.success and .data.purchasesVat == '$NV_VAT0' and .data.nonRecoverableVat == '$((NV_NR0 + 390000))' and .data.purchasesNet == '$((NV_NET0 + 3900000))
 [ "$(cb 70108)" = "$((NV_PPV0 + 390000))" ] && ok "f3b vat: the non-recoverable 390,000 is cost (price-variance account +390,000)" || bad "f3b vat: the non-recoverable 390,000 is cost (got $(( $(cb 70108) - NV_PPV0 )))"
@@ -2556,10 +2558,12 @@ check "f3b vat: the deductible purchases VAT is unchanged, the non-recoverable V
 # --- VAT on an asset disposal
 as "$FIN_TOKEN" POST $FA "$(AJ 'دستگاه فروش با مالیات' $CLS1 2026-06-25 20000000)"; ASV=$(val .data.id)
 as "$FM_TOKEN" POST $FA/action "{\"id\":$ASV,\"action\":\"approve\"}"; check "f3b disposal: asset for the VAT sale approved" '.success'
+as "$FM_TOKEN" POST $FG/post-events
 DV_VAT0=$(cb 30205)
 as "$FIN_TOKEN" POST $FA/disposals "{\"assetId\":$ASV,\"date\":\"2026-10-24T00:00:00\",\"kind\":1,\"proceedsAmount\":10000000,\"proceedsMethod\":1,\"cashBoxId\":$CB,\"vatPercent\":10}"; check "f3b disposal: the preview shows a VAT of 1,000,000 on proceeds of 10,000,000" '.success and .data.vatPercent == 10 and .data.vatAmount == 1000000'
 DSV=$(val .data.id)
 as "$FM_TOKEN" POST $FA/disposals/action "{\"id\":$DSV,\"action\":\"approve\"}"; check "f3b disposal: the sale with VAT is approved" '.success'
+as "$FM_TOKEN" POST $FG/post-events
 [ "$(cb 30205)" = "$((DV_VAT0 - 1000000))" ] && ok "f3b disposal: the sales-VAT account is credited exactly 1,000,000" || bad "f3b disposal: the sales-VAT account is credited exactly 1,000,000 (got $(( DV_VAT0 - $(cb 30205) )))"
 
 # --- bank guarantees
@@ -2625,8 +2629,9 @@ DN=$(val .data.id); as "$FIN2_TOKEN" POST $FCM/supplier-notes/action "{\"id\":$D
 [ "$(cb 30101)" = "$((AP_N0 + 110000 - 200000))" ] && ok "f3b note: the debit note credits the payable 200,000" || bad "f3b note: the debit note credits the payable 200,000"
 
 # --- supplier statement reconciliation
-as "$FIN_TOKEN" POST $FCM/supplier-statements "{\"providerId\":$PA,\"asOf\":\"2026-10-24T00:00:00\",\"theirBalance\":0,\"lines\":[{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"F-3001\",\"credit\":4290000},{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"X-999\",\"credit\":777000}]}"
-check "f3b statement: the invoice line matches, the unknown 777,000 line stays unmatched, the difference is their balance minus ours" '.success and .data.difference == (.data.theirBalance - .data.ourBalance) and ([.data.lines[]|select(.documentNumber == "F-3001" and .matchedKind != null)]|length) == 1 and ([.data.unmatchedTheirs[]|select(.documentNumber == "X-999" and .credit == 777000)]|length) == 1 and .data.reconciled == false'
+as "$FM_TOKEN" POST $FG/post-events; as "$COM_TOKEN" GET procurement/invoices/$SI3; SI3NO=$(val .data.number)
+as "$FIN_TOKEN" POST $FCM/supplier-statements "{\"providerId\":$PA,\"asOf\":\"2026-10-24T00:00:00\",\"theirBalance\":0,\"lines\":[{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"$SI3NO\",\"credit\":4290000},{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"X-999\",\"credit\":777000}]}"
+check "f3b statement: the invoice line matches, the unknown 777,000 line stays unmatched, the difference is their balance minus ours" '.success and .data.difference == (.data.theirBalance - .data.ourBalance) and ([.data.lines[]|select(.documentNumber == "'$SI3NO'" and .matchedKind != null)]|length) == 1 and ([.data.unmatchedTheirs[]|select(.documentNumber == "X-999" and .credit == 777000)]|length) == 1 and .data.reconciled == false'
 STM=$(val .data.id)
 as "$FM_TOKEN" GET "$FCM/supplier-statements/$STM"; check "f3b statement: the stored statement is readable with the same result" '.success and ([.data.unmatchedTheirs[]|select(.documentNumber == "X-999")]|length) == 1'
 
@@ -2659,8 +2664,8 @@ as "$FIN_TOKEN" GET "$FPS/bonus-runs"; [ "$CODE" = "403" ] && ok "f3b payroll: t
 as "$CEO_TOKEN" GET "$FPS/bonus-runs"; check "f3b payroll: the CEO may read bonus runs" '.success and (.data|length) >= 1'
 # termination: hired 1401/01/01, ended 1405/06/31 = 4 years and 6 months = 54 full months; base 30 x 600,000 = 18,000,000
 as "$PAYR_TOKEN" POST $FP/employees "$(EBJ T902 آزمون پایان 1234567891 2022-03-21T00:00:00 600000)"; PE3=$(val .data.id)
-fv "{\"date\":\"2026-10-20T00:00:00\",\"description\":\"ذخیره سنوات آزمون\",\"lines\":[{\"accountCode\":\"80103\",\"debit\":1000000000},{\"accountCode\":\"40201\",\"credit\":1000000000}]}"
-LVB=$(( -$(cb 30403) )); [ "$LVB" -lt 0 ] && LVB=0; LVEXP=$(( LVB < 6000000 ? LVB : 6000000 ))
+fv "{\"date\":\"2026-09-01T00:00:00\",\"description\":\"ذخیره سنوات آزمون\",\"lines\":[{\"accountCode\":\"80103\",\"debit\":1000000000},{\"accountCode\":\"40201\",\"credit\":1000000000}]}"
+LVEXP=1500000 # the leave provision on the termination date (earlier payroll accrual), below the leave pay of 6,000,000: only the covered part is drawn
 as "$PAYR_TOKEN" POST $FPS/terminations "{\"employeeId\":$PE3,\"terminationDate\":\"2026-09-22T00:00:00\",\"unusedLeaveDays\":10,\"noticeDays\":0}"
 check "f3b termination: 54 months, severance 81,000,000, leave 6,000,000, notice 0, total 87,000,000 (30 days per year from the rate table)" '.success and .data.yearsOfService == 4.5 and .data.monthlyBase == 18000000 and .data.dailyWage == 600000 and .data.severancePay == 81000000 and .data.leavePay == 6000000 and .data.noticePay == 0 and .data.total == 87000000 and .data.status == 0 and (.data.sources|length) >= 1'
 TM=$(val .data.id)
