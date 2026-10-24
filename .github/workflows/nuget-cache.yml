@@ -1,0 +1,29 @@
+name: NuGet package cache for offline builds
+on:
+  push:
+    branches: [ innco-nuget-cache ]
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore Base.sln
+      - name: Store packages on innco-nuget-pkgs
+        run: |
+          set -e
+          mkdir -p out
+          tar -C "$HOME/.nuget/packages" -czf - . | split -b 90m - out/nuget-packages.tgz.part-
+          ls -la out
+          cd out
+          git init -q
+          git config user.name "innco-ci"; git config user.email "innco-ci@users.noreply.github.com"
+          git checkout -q -b innco-nuget-pkgs
+          git add . && git commit -q -m "NuGet packages for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" innco-nuget-pkgs
+permissions:
+  contents: write
