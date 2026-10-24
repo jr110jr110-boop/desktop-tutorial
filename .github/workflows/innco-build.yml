@@ -165,6 +165,7 @@ jobs:
         continue-on-error: true
         env:
           ASPNETCORE_ENVIRONMENT: Development
+          AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/smoke.sh
@@ -173,6 +174,7 @@ jobs:
         continue-on-error: true
         env:
           ASPNETCORE_ENVIRONMENT: Development
+          AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/inventory-smoke.sh
@@ -182,6 +184,7 @@ jobs:
         working-directory: src/WebApi
         env:
           ASPNETCORE_ENVIRONMENT: Development
+          AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: |
           set -o pipefail
@@ -234,6 +237,9 @@ jobs:
           dotnet publish src/WebApi/WebApi.csproj -c Release -r win-x64 --self-contained false -o package-output/app 2>&1 | tee package-output/publish.log
           mkdir -p package-output/app/wwwroot
           cp -r .github/ci-frontend-dist/. package-output/app/wwwroot/
+          # a delivered package never carries a password: install.ps1 sets the real one
+          grep -q '"Password": "SET-BY-INSTALL-ps1"' package-output/app/appsettings.json || { echo "::error::package appsettings.json must carry the admin password placeholder"; exit 1; }
+          if grep -rqF 'Ci#Adm1n-Build-2026' package-output/app; then echo "::error::the CI test password is in the package"; exit 1; fi
           cp deploy/install.ps1 deploy/backup.ps1 deploy/Install-PMIS-Server.ps1 deploy/Install-PMIS-Server.cmd package-output/
           mkdir -p package-output/installers
           cp deploy/installers/README.txt package-output/installers/
