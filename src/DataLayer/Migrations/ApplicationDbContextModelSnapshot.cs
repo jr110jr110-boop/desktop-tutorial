@@ -407,6 +407,38 @@ namespace DataLayer.Migrations
                         },
                         new
                         {
+                            Id = 20,
+                            ConcurrencyStamp = "00000020-0000-0000-0000-000000000000",
+                            Description = "مدیر تولید",
+                            Name = "PRODUCTIONMANAGER",
+                            NormalizedName = "PRODUCTIONMANAGER"
+                        },
+                        new
+                        {
+                            Id = 21,
+                            ConcurrencyStamp = "00000021-0000-0000-0000-000000000000",
+                            Description = "سرپرست کارگاه",
+                            Name = "SHOPSUPERVISOR",
+                            NormalizedName = "SHOPSUPERVISOR"
+                        },
+                        new
+                        {
+                            Id = 22,
+                            ConcurrencyStamp = "00000022-0000-0000-0000-000000000000",
+                            Description = "اپراتور",
+                            Name = "OPERATOR",
+                            NormalizedName = "OPERATOR"
+                        },
+                        new
+                        {
+                            Id = 23,
+                            ConcurrencyStamp = "00000023-0000-0000-0000-000000000000",
+                            Description = "نگهداری و تعمیرات",
+                            Name = "MAINTENANCE",
+                            NormalizedName = "MAINTENANCE"
+                        },
+                        new
+                        {
                             Id = 28,
                             ConcurrencyStamp = "00000028-0000-0000-0000-000000000000",
                             Description = "حسابرس",
@@ -923,6 +955,48 @@ namespace DataLayer.Migrations
                             ClaimType = "permission",
                             ClaimValue = "Warehouse",
                             RoleId = 19
+                        },
+                        new
+                        {
+                            Id = 2000,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 20
+                        },
+                        new
+                        {
+                            Id = 2001,
+                            ClaimType = "permission",
+                            ClaimValue = "Traceability",
+                            RoleId = 20
+                        },
+                        new
+                        {
+                            Id = 2100,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 21
+                        },
+                        new
+                        {
+                            Id = 2101,
+                            ClaimType = "permission",
+                            ClaimValue = "Traceability",
+                            RoleId = 21
+                        },
+                        new
+                        {
+                            Id = 2200,
+                            ClaimType = "permission",
+                            ClaimValue = "Traceability",
+                            RoleId = 22
+                        },
+                        new
+                        {
+                            Id = 2300,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 23
                         },
                         new
                         {
@@ -9762,6 +9836,10 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ContractId")
                         .HasColumnType("int");
 
+                    b.Property<string>("CostCenter")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<DateTimeOffset>("CreateDate")
                         .HasColumnType("datetimeoffset");
 
@@ -14359,6 +14437,1422 @@ namespace DataLayer.Migrations
                     b.HasIndex("RequestLineId");
 
                     b.ToTable("ProcQuoteLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCostPosting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BookingCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EmployeeCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("LabourAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("LabourHours")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<decimal>("MachineHours")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<decimal>("OverheadAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("PayrollEmployeeCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("PostingDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("RunId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WbsNodeId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("WorkCenterId");
+
+                    b.HasIndex("WorkOrderId", "PostingDate");
+
+                    b.ToTable("MfCostPostings", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCostRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AccountingEventId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("BookingCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EmployeeCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("LabourAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("LabourHours")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<bool>("LabourProtected")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("MachineHours")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal>("OverheadAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("PayrollEmployeeCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("PostingDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTimeOffset>("RunAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("RunByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountingEventId");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("PostingDate");
+
+                    b.ToTable("MfCostRuns", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineInfo", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AssetId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Capabilities")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Maker")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SerialNumber")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssetId");
+
+                    b.HasIndex("MachineId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("WorkCenterId");
+
+                    b.ToTable("MfMachineInfos", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenanceLabour", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Hours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("WorkDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("MfMaintenanceLabours", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenanceOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ActionTaken")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Cause")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Checklist")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("CostCenter")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("DoneAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DoneByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("DowntimeEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DowntimeStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("EstimatedHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int?>("IssueDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaterialRequestId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("PlanId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RequestId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("StartedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Task")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IssueDocumentId");
+
+                    b.HasIndex("MaterialRequestId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("PlanId");
+
+                    b.HasIndex("RequestId");
+
+                    b.HasIndex("WorkCenterId");
+
+                    b.HasIndex("MachineId", "Status");
+
+                    b.ToTable("MfMaintenanceOrders", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenancePart", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("MfMaintenanceParts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenancePlan", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Checklist")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("EstimatedHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("IntervalKind")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("IntervalValue")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastDoneAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime?>("NextDueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Task")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MachineId");
+
+                    b.ToTable("MfMaintenancePlans", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenanceRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("OperationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ReasonCodeId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ReportedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReportedAtText")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("ReportedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("ReasonCodeId");
+
+                    b.HasIndex("WorkCenterId");
+
+                    b.HasIndex("MachineId", "Status");
+
+                    b.ToTable("MfMaintenanceRequests", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOperation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("GoodQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("InspectionRequirement")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsOutside")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsRework")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ItpActivityId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ItpTestType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("NcrId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("OperationTemplateId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("OutsideDrafted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("OutsideLeadDays")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OutsideSupplierId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("PlannedFinish")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PlannedStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("PurchaseOrderLineId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PurchaseRequestId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PurchaseRequestLineId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("QcAccepted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("QcRecordId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("QcRequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ReworkOfOperationId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ReworkQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal>("RunHoursPlanned")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("decimal(12,4)");
+
+                    b.Property<decimal>("ScrapQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("SetupHoursPlanned")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<string>("SkipReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SubcontractIssueId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItpActivityId");
+
+                    b.HasIndex("NcrId");
+
+                    b.HasIndex("OperationTemplateId");
+
+                    b.HasIndex("OutsideSupplierId");
+
+                    b.HasIndex("PurchaseOrderLineId");
+
+                    b.HasIndex("PurchaseRequestId");
+
+                    b.HasIndex("PurchaseRequestLineId");
+
+                    b.HasIndex("QcRecordId");
+
+                    b.HasIndex("ReworkOfOperationId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("SubcontractIssueId");
+
+                    b.HasIndex("WorkCenterId");
+
+                    b.HasIndex("OrderId", "Sequence");
+
+                    b.ToTable("MfOperations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOperationPart", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("OperationId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PartOperationId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("PartOperationId");
+
+                    b.ToTable("MfOperationParts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOperationStandard", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DefaultSupplierId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("DrawingReferenceRule")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("FirstArticleRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("InspectionRequirement")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsOutside")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ItpTestType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("MoveDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("OperationTemplateId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OutsideLeadDays")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("QueueDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<string>("RequiredQualificationKind")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("RequiredQualificationProcess")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal>("RunHoursPerUnit")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal>("SetupHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WorkInstructionDocumentId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefaultSupplierId");
+
+                    b.HasIndex("OperationTemplateId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("WorkCenterId");
+
+                    b.HasIndex("WorkInstructionDocumentId");
+
+                    b.ToTable("MfOperationStandards", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOrderComponent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("MfOrderComponents", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfProductionOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ActivityId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ActualFinish")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("ActualStart")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("AutoDrafted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("BomId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DaysLate")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("EditedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsLate")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("KitOverrideByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("KitOverrideReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("KitReadyDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("KitRequestId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("KitShortage")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime?>("NeedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("PlannedFinish")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PlannedStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ProcessId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ProductionReceiptId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("ReleaseOverride")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ReleaseOverrideReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ReleasedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RoutingRevisionId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("ScheduleNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ScheduledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SerialsPlanned")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("ShortageText")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActivityId");
+
+                    b.HasIndex("BomId");
+
+                    b.HasIndex("ContractId");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("KitRequestId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("ProcessId");
+
+                    b.HasIndex("ProductionReceiptId");
+
+                    b.HasIndex("RoutingRevisionId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.ToTable("MfProductionOrders", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfReasonCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Code")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("MfReasonCodes", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfRoutingRevision", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("EngineeringApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("EngineeringApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ItemGroupId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ProductionApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ProductionApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemGroupId", "Revision")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [ItemGroupId] IS NOT NULL");
+
+                    b.HasIndex("ItemId", "Revision")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [ItemId] IS NOT NULL");
+
+                    b.ToTable("MfRoutingRevisions", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfScheduleRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("AsOfDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("LateOrders")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Operations")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Orders")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("RunAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("RunByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Unscheduled")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AsOfDate");
+
+                    b.ToTable("MfScheduleRuns", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfTimeBooking", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("CostPostedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CostRunId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("EndAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("GoodQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("Hours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Minutes")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("OperationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ReasonCodeId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ReworkQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal>("ScrapQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int?>("ScrapReasonCodeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SupervisorReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CostRunId");
+
+                    b.HasIndex("EmployeeId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MfTimeBookings_OneRunning")
+                        .HasFilter("[Deleted] = 0 AND [EndAt] IS NULL");
+
+                    b.HasIndex("MachineId");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("ReasonCodeId");
+
+                    b.HasIndex("ScrapReasonCodeId");
+
+                    b.HasIndex("EmployeeId", "StartAt");
+
+                    b.ToTable("MfTimeBookings", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfWorkCenter", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CalendarId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("CostCenter")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("EfficiencyPercent")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<decimal>("HoursPerShift")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("LabourRateRial")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("MachineRateRial")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ParallelResources")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("QueueDaysDefault")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("ShiftsPerDay")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal>("UtilisationPercent")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CalendarId");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("MfWorkCenters", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcActivity", b =>
@@ -22904,6 +24398,392 @@ namespace DataLayer.Migrations
                     b.Navigation("RequestLine");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCostPosting", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfCostRun", "Run")
+                        .WithMany()
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
+                        .WithMany()
+                        .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCostRun", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.AccountingEvent", "AccountingEvent")
+                        .WithMany()
+                        .HasForeignKey("AccountingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingEvent");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineInfo", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAsset", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
+                        .WithMany()
+                        .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenanceLabour", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfMaintenanceOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenanceOrder", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryDocument", null)
+                        .WithMany()
+                        .HasForeignKey("IssueDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.MaterialRequest", null)
+                        .WithMany()
+                        .HasForeignKey("MaterialRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfMaintenancePlan", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfMaintenanceRequest", null)
+                        .WithMany()
+                        .HasForeignKey("RequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
+                        .WithMany()
+                        .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenancePart", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfMaintenanceOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenancePlan", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMaintenanceRequest", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfReasonCode", null)
+                        .WithMany()
+                        .HasForeignKey("ReasonCodeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
+                        .WithMany()
+                        .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOperation", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Quality.ItpActivity", null)
+                        .WithMany()
+                        .HasForeignKey("ItpActivityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.NonConformance", "Ncr")
+                        .WithMany()
+                        .HasForeignKey("NcrId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.OperationTemplate", null)
+                        .WithMany()
+                        .HasForeignKey("OperationTemplateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfProductionOrder", null)
+                        .WithMany("Operations")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Providers.Provider", null)
+                        .WithMany()
+                        .HasForeignKey("OutsideSupplierId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Procurement.PurchaseOrderLine", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Procurement.PurchaseRequest", "PurchaseRequest")
+                        .WithMany()
+                        .HasForeignKey("PurchaseRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Procurement.PurchaseRequestLine", "PurchaseRequestLine")
+                        .WithMany()
+                        .HasForeignKey("PurchaseRequestLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Quality.QcRecord", "QcRecord")
+                        .WithMany()
+                        .HasForeignKey("QcRecordId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany()
+                        .HasForeignKey("ReworkOfOperationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryDocument", null)
+                        .WithMany()
+                        .HasForeignKey("SubcontractIssueId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
+                        .WithMany()
+                        .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Ncr");
+
+                    b.Navigation("PurchaseRequest");
+
+                    b.Navigation("PurchaseRequestLine");
+
+                    b.Navigation("QcRecord");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOperationPart", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.PartOperation", "PartOperation")
+                        .WithMany()
+                        .HasForeignKey("PartOperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("PartOperation");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOperationStandard", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Providers.Provider", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultSupplierId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.OperationTemplate", null)
+                        .WithMany()
+                        .HasForeignKey("OperationTemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
+                        .WithMany()
+                        .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Quality.ControlledDocument", null)
+                        .WithMany()
+                        .HasForeignKey("WorkInstructionDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOrderComponent", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfProductionOrder", null)
+                        .WithMany("Components")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfProductionOrder", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcActivity", null)
+                        .WithMany()
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.Bom", null)
+                        .WithMany()
+                        .HasForeignKey("BomId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.MaterialRequest", "KitRequest")
+                        .WithMany()
+                        .HasForeignKey("KitRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ProcessEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ProcessId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryDocument", null)
+                        .WithMany()
+                        .HasForeignKey("ProductionReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfRoutingRevision", null)
+                        .WithMany()
+                        .HasForeignKey("RoutingRevisionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("KitRequest");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfRoutingRevision", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.ItemGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ItemGroupId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfTimeBooking", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfCostRun", "CostRun")
+                        .WithMany()
+                        .HasForeignKey("CostRunId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfReasonCode", null)
+                        .WithMany()
+                        .HasForeignKey("ReasonCodeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfReasonCode", null)
+                        .WithMany()
+                        .HasForeignKey("ScrapReasonCodeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CostRun");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfWorkCenter", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcCalendar", null)
+                        .WithMany()
+                        .HasForeignKey("CalendarId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcActivity", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", "Contract")
@@ -24341,6 +26221,13 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Procurement.SupplierQuote", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfProductionOrder", b =>
+                {
+                    b.Navigation("Components");
+
+                    b.Navigation("Operations");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcBaseline", b =>
