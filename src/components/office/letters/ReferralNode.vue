@@ -7,7 +7,6 @@ import type { MyPosition } from "./letterKit";
 const props = defineProps<{ node: any; myPositions: MyPosition[]; canRefer: boolean; isSecretariat: boolean; depth: number }>();
 const emit = defineEmits<{ (e: "act", node: any, action: "comment" | "close" | "cancel"): void; (e: "refer", node: any): void }>();
 const mine = computed(() => props.myPositions.some((p) => p.positionId === props.node.toPositionId));
-const sentByMe = computed(() => props.myPositions.some((p) => p.positionId === props.node.fromPositionId));
 const pending = computed(() => props.node.status === 0);
 </script>
 
@@ -31,7 +30,7 @@ const pending = computed(() => props.node.status === 0);
         <button v-if="mine" class="btn btn-sm btn-outline-secondary" @click="emit('act', node, 'comment')">اظهارنظر</button>
         <button v-if="mine" class="btn btn-sm btn-outline-success" @click="emit('act', node, 'close')">بستن ارجاع</button>
         <button v-if="canRefer && mine" class="btn btn-sm btn-outline-primary" @click="emit('refer', node)">ارجاع مجدد</button>
-        <button v-if="sentByMe || isSecretariat" class="btn btn-sm btn-outline-danger" @click="emit('act', node, 'cancel')">لغو ارجاع</button>
+        <button v-if="node.canCancel" class="btn btn-sm btn-outline-danger" @click="emit('act', node, 'cancel')">لغو ارجاع</button>
       </div>
     </div>
     <ReferralNode v-for="c in node.children" :key="c.id" :can-refer="canRefer" :depth="depth + 1" :is-secretariat="isSecretariat" :my-positions="myPositions" :node="c" @act="(n, a) => emit('act', n, a)" @refer="(n) => emit('refer', n)" />

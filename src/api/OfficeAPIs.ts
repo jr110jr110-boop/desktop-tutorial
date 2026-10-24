@@ -158,6 +158,38 @@ export async function openLetterFile(letterId: number, documentId: string): Prom
   }
 }
 
+/** Authenticated download of a stored document (sick-leave certificate, decision evidence). Returns an error text or null. */
+export async function downloadDocument(documentId: string, fileName?: string): Promise<string | null> {
+  try {
+    const response = await http.get("Documents", { params: { DocumentId: documentId }, responseType: "blob" });
+    const type = response.headers["content-type"] || "";
+    if (type.includes("application/json")) {
+      const json = JSON.parse(await (response.data as Blob).text());
+      return json.message || "خطا";
+    }
+    saveBlob(response.data, fileName || "file");
+    return null;
+  } catch (error: any) {
+    if (error?.response?.status === 404) return "فایل پیدا نشد یا اجازه دسترسی به آن را ندارید.";
+    return error?.message || "خطا";
+  }
+}
+
+/** A stored document as an object URL for a preview (the caller revokes it). Returns [url, null] or [null, message]. */
+export async function openDocument(documentId: string): Promise<[string, null] | [null, string]> {
+  try {
+    const response = await http.get("Documents", { params: { DocumentId: documentId }, responseType: "blob" });
+    const type = response.headers["content-type"] || "";
+    if (type.includes("application/json")) {
+      const json = JSON.parse(await (response.data as Blob).text());
+      return [null, json.message || "خطا"];
+    }
+    return [URL.createObjectURL(response.data as Blob), null];
+  } catch (error: any) {
+    return [null, error?.message || "خطا"];
+  }
+}
+
 /** ExternalPartyDto { id, name, kind 1 customer / 2 supplier / 3 organisation, providerId, customerId, address, phone, email, isActive } + paging (Contains). Who: everyone. */
 export const getParties = (params?: OfficePageParams) => get(of + "parties", params);
 /** SaveExternalPartyDto { id?, name, kind, providerId?, customerId?, address, phone, email, isActive }. Who: everyone (no role check in the service). */

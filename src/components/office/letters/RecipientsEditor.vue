@@ -1,15 +1,18 @@
 <script setup lang="ts">
 // Recipients of a letter: positions of the organisation or external parties, "to" or "cc". An external party can be added on the spot.
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import PickSelect from "./PickSelect.vue";
 import { saveParty } from "@/api/OfficeAPIs";
 import { partyKinds, recipientTypes } from "@/composables/office";
 import { fail, ok } from "@/composables/inventory";
 import { positionText } from "./letterKit";
 
-const props = defineProps<{ modelValue: any[]; positions: any[]; parties: any[]; disabled?: boolean }>();
+const props = defineProps<{ modelValue: any[]; positions: any[]; parties: any[]; disabled?: boolean; kind?: number }>();
 const emit = defineEmits(["update:modelValue", "party-created"]);
 const draft = ref<{ type: number; target: "position" | "party"; id: number | null }>({ type: 1, target: "position", id: null });
+// an incoming (1) or internal (3) letter has no external-party recipients
+const noParty = computed(() => props.kind === 1 || props.kind === 3);
+watch(noParty, (v) => { if (v) draft.value = { ...draft.value, target: "position", id: null }; }, { immediate: true });
 const newParty = ref<{ name: string; kind: number } | null>(null);
 
 const positionOptions = computed(() => props.positions.map((p) => ({ value: p.id, text: positionText(p) })));
@@ -54,7 +57,7 @@ async function createParty() {
 
     <div v-if="!disabled" class="d-flex gap-2 flex-wrap align-items-start">
       <select v-model.number="draft.type" class="form-select form-select-sm" style="width: 8rem"><option v-for="(t, k) in recipientTypes" :key="k" :value="Number(k)">{{ t }}</option></select>
-      <select v-model="draft.target" class="form-select form-select-sm" style="width: 11rem" @change="draft.id = null"><option value="position">سمت سازمانی</option><option value="party">طرف خارجی</option></select>
+      <select v-model="draft.target" class="form-select form-select-sm" style="width: 11rem" @change="draft.id = null"><option value="position">سمت سازمانی</option><option v-if="!noParty" value="party">طرف خارجی</option></select>
       <div style="min-width: 16rem; flex: 1">
         <PickSelect v-model="draft.id" :options="draft.target === 'position' ? positionOptions : partyOptions" placeholder="انتخاب گیرنده" />
       </div>

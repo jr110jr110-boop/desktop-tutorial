@@ -18,13 +18,21 @@ function actingFor(node: any, action: string): number | null {
   const want = action === "cancel" ? node.fromPositionId : node.toPositionId;
   return props.myPositions.some((p) => p.positionId === want) ? want : null;
 }
-async function run(values: Record<string, any>) {
+async function run(values: Record<string, any> | null) {
   const { node, action } = act.value!;
   act.value = null;
-  const [, error] = await referralAction(node.id, action, values.text, actingFor(node, action));
+  const [, error] = await referralAction(node.id, action, action === "cancel" ? undefined : values?.text, actingFor(node, action));
   if (error) return fail(error);
   ok("انجام شد.");
   emit("changed");
+}
+// cancel needs no reason (the server does not store it): confirm directly
+function ask(node: any, action: "comment" | "close" | "cancel") {
+  act.value = { node, action };
+  if (action === "cancel") {
+    if (!confirm("ارجاع لغو شود؟")) return void (act.value = null);
+    run(null);
+  }
 }
 </script>
 
@@ -37,11 +45,11 @@ async function run(values: Record<string, any>) {
     <p v-if="!letter.referrals || !letter.referrals.length" class="inv-muted">ارجاعی ثبت نشده است.</p>
     <ReferralNode
       v-for="r in letter.referrals" :key="r.id" :can-refer="canRefer" :depth="0" :is-secretariat="isSecretariat" :my-positions="myPositions" :node="r"
-      @act="(n, a) => (act = { node: n, action: a })" @refer="(n) => (referTo = { parentId: n.id, acting: n.toPositionId })" />
+      @act="ask" @refer="(n) => (referTo = { parentId: n.id, acting: n.toPositionId })" />
 
     <ReferDialog v-if="referTo" :acting-default="referTo.acting" :letter-id="letter.id" :my-positions="myPositions" :parent-id="referTo.parentId" :positions="positions" @cancel="referTo = null" @done="referTo = null; emit('changed')" />
     <PromptModal
-      v-if="act" :confirm-text="titles[act.action]" :fields="[{ key: 'text', label: act.action === 'cancel' ? 'دلیل لغو' : 'توضیح', type: 'textarea', required: act.action !== 'close' }]"
+      v-if="act && act.action !== 'cancel'" :confirm-text="titles[act.action]" :fields="[{ key: 'text', label: 'توضیح', type: 'textarea', required: act.action !== 'close' }]"
       :title="titles[act.action]" @cancel="act = null" @confirm="run" />
   </div>
 </template>

@@ -81,7 +81,7 @@ const templateOptions = computed(() => props.templates.filter((t) => t.isActive 
 
     <div class="col-12">
       <label class="form-label small mb-1">گیرندگان</label>
-      <RecipientsEditor v-model="form.recipients" :parties="parties" :positions="positions" @party-created="emit('party-created', $event)" />
+      <RecipientsEditor v-model="form.recipients" :kind="form.kind" :parties="parties" :positions="positions" @party-created="emit('party-created', $event)" />
     </div>
 
     <div class="col-12">

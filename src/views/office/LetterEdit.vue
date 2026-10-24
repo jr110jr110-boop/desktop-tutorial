@@ -196,7 +196,7 @@ onBeforeUnmount(() => { if (signatureUrl.value) URL.revokeObjectURL(signatureUrl
         <div class="d-flex gap-2 flex-wrap">
           <button class="btn btn-sm btn-outline-secondary" @click="router.push({ name: 'OfLetters' })">بازگشت به فهرست</button>
           <button v-if="letter && !meta" class="btn btn-sm btn-outline-secondary" @click="printLetter">چاپ نامه</button>
-          <button v-if="letter && !meta && letter.status >= 3" class="btn btn-sm btn-outline-secondary" @click="reply">پاسخ به نامه</button>
+          <button v-if="letter && !meta && letter.status >= 3 && letter.status !== 7" class="btn btn-sm btn-outline-secondary" @click="reply">پاسخ به نامه</button>
           <button v-if="editable" :disabled="busy" class="btn btn-sm btn-primary" @click="saveDraft()">ذخیره</button>
           <button v-for="a in actions" :key="a" :class="a === 'cancel' ? 'btn-outline-danger' : 'btn-success'" :disabled="busy" class="btn btn-sm" @click="openAction(a)">{{ actionTitles[a] }}</button>
         </div>

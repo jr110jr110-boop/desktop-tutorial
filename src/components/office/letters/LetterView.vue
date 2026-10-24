@@ -16,6 +16,10 @@ async function download(a: any) {
   const error = await downloadLetterFile(props.letter.id, a.documentId, a.fileName);
   if (error) fail(error);
 }
+async function downloadReceipt() {
+  const error = await downloadLetterFile(props.letter.id, props.letter.deliveryReceiptDocumentId, "رسید نامه");
+  if (error) fail(error);
+}
 </script>
 
 <template>
@@ -34,7 +38,10 @@ async function download(a: any) {
       <div class="col-md-3"><b>گیرندگان:</b> {{ letter.recipientNames }}</div>
       <div v-if="letter.incomingNumber || letter.incomingDateText" class="col-md-6"><b>شماره و تاریخ نامه فرستنده:</b> <span class="inv-ltr">{{ letter.incomingNumber }}</span> {{ letter.incomingDateText }}</div>
       <div v-if="letter.deliveryMethod" class="col-md-6"><b>نحوه تحویل:</b> {{ deliveryMethods[letter.deliveryMethod] }} - {{ letter.sentDateText }}</div>
-      <div v-if="letter.deliveryReceipt" class="col-md-6"><b>رسید:</b> {{ letter.deliveryReceipt }}</div>
+      <div v-if="letter.deliveryReceipt || (!meta && letter.deliveryReceiptDocumentId)" class="col-md-6">
+        <b>رسید:</b> {{ letter.deliveryReceipt }}
+        <button v-if="!meta && letter.deliveryReceiptDocumentId" class="btn btn-sm btn-link p-0 me-2" @click="downloadReceipt">دریافت فایل رسید</button>
+      </div>
       <div v-if="letter.paperCopy" class="col-md-3"><span class="inv-badge info">نسخه کاغذی دارد</span></div>
       <div v-if="letter.cancelReason" class="col-12 text-danger"><b>دلیل ابطال:</b> {{ letter.cancelReason }}</div>
     </div>

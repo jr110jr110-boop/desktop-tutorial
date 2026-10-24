@@ -16,10 +16,10 @@ const needsActing = computed(() => ["approve", "return", "sign"].includes(props.
 const pendingPosition = (): number | null => {
   const mine = new Set(props.myPositions.map((p) => p.positionId));
   const approvals: any[] = props.letter.approvals || [];
-  const round = Math.max(0, ...approvals.map((a) => a.round));
+  const round = props.letter.approvalRound ?? 0;
   const next = approvals.filter((a) => a.round === round && a.status === 0).sort((a, b) => a.seq - b.seq)[0];
   if (props.action !== "sign" && next && mine.has(next.positionId)) return next.positionId;
-  if (props.action === "sign" && props.letter.signerPositionId && mine.has(props.letter.signerPositionId)) return props.letter.signerPositionId;
+  if ((props.action === "sign" || props.action === "return") && props.letter.signerPositionId && mine.has(props.letter.signerPositionId)) return props.letter.signerPositionId;
   return props.myPositions[0]?.positionId ?? null;
 };
 const acting = ref<number | null>(needsActing.value ? pendingPosition() : null);
@@ -28,10 +28,12 @@ const chain = ref<number[]>([...(props.templateChain || [])]);
 const pick = ref<number | null>(null);
 const method = ref<number | null>(null);
 const date = ref<string | null>(today());
-const receipt = ref("");
+const receipt = ref(""); // receipt action only
 const receiptDoc = ref<{ id: string; name: string } | null>(null);
 const busy = ref(false);
 
+// the reason of a cancel is required only for a letter that already has a number
+const cancelNeedsReason = computed(() => !!props.letter.number);
 const options = computed(() => props.positions.filter((p) => !chain.value.includes(p.id)).map((p) => ({ value: p.id, text: positionText(p) })));
 const titleOf = (id: number) => positionText(props.positions.find((p) => p.id === id)) || String(id);
 const hints: Record<string, string> = {
@@ -63,7 +65,8 @@ async function onReceiptFile(event: any) {
 function confirm() {
   const a = props.action;
   if (needsActing.value && !acting.value) return fail("سمتی را که از طرف آن اقدام می‌کنید انتخاب کنید.");
-  if ((a === "return" || a === "cancel") && !comment.value.trim()) return fail(a === "cancel" ? "دلیل ابطال را بنویسید." : "دلیل برگشت را بنویسید.");
+  if (a === "return" && !comment.value.trim()) return fail("دلیل برگشت را بنویسید.");
+  if (a === "cancel" && cancelNeedsReason.value && !comment.value.trim()) return fail("دلیل ابطال را بنویسید.");
   if (a === "send" && !method.value) return fail("نحوه ارسال را انتخاب کنید.");
   if (a === "send" && !date.value) return fail("تاریخ ارسال را وارد کنید.");
   emit("confirm", {
@@ -72,7 +75,7 @@ function confirm() {
     comment: comment.value.trim() || null,
     deliveryMethod: a === "send" ? method.value : null,
     date: a === "send" || a === "receipt" ? date.value : null,
-    receipt: a === "receipt" ? receipt.value.trim() || null : a === "send" ? receipt.value.trim() || null : null,
+    receipt: a === "receipt" ? receipt.value.trim() || null : null,
     receiptDocumentId: a === "receipt" ? receiptDoc.value?.id || null : null,
   });
 }
@@ -109,8 +112,6 @@ function confirm() {
           <div class="col-md-6"><label class="form-label small mb-0">نحوه ارسال *</label><select v-model.number="method" class="form-select form-select-sm"><option :value="null">انتخاب</option><option v-for="(t, k) in deliveryMethods" :key="k" :value="Number(k)">{{ t }}</option></select></div>
           <div class="col-md-6"><label class="form-label small mb-0">تاریخ ارسال *</label><FnDate v-model="date" /></div>
         </div>
-        <label class="form-label small mb-0">شماره رسید یا پیگیری</label>
-        <input v-model="receipt" class="form-control form-control-sm" />
       </template>
 
       <template v-if="action === 'receipt'">
@@ -121,8 +122,8 @@ function confirm() {
         <span v-if="receiptDoc" class="small me-2">{{ receiptDoc.name }}</span>
       </template>
 
-      <template v-if="['approve', 'return', 'cancel', 'register', 'submit'].includes(action)">
-        <label class="form-label small mb-0 mt-2">{{ action === "cancel" ? "دلیل ابطال *" : action === "return" ? "دلیل برگشت *" : "توضیح" }}</label>
+      <template v-if="['approve', 'return', 'cancel'].includes(action)">
+        <label class="form-label small mb-0 mt-2">{{ action === "cancel" ? (cancelNeedsReason ? "دلیل ابطال *" : "دلیل ابطال") : action === "return" ? "دلیل برگشت *" : "توضیح" }}</label>
         <textarea v-model="comment" class="form-control form-control-sm" rows="2"></textarea>
       </template>
 

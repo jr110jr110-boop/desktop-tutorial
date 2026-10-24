@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // A4 RTL print of a letter (B Zar): letterhead area, number / date / attachment line at the top left, subject, body, signature block, recipients.
 // Shown only while printing (print-only); the page puts it directly inside .inv-page and calls printSheet().
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
+import { getLetterTemplates } from "@/api/OfficeAPIs";
 import Logo from "@/assets/img/logo.png";
 import { classifications, letterKinds, recipientTypes } from "@/composables/office";
 import { fa, sanitizeHtml } from "./letterKit";
@@ -11,6 +12,18 @@ const body = computed(() => sanitizeHtml(props.letter.bodyHtml));
 const to = computed(() => (props.letter.recipients || []).filter((r: any) => r.type !== 2));
 const cc = computed(() => (props.letter.recipients || []).filter((r: any) => r.type === 2));
 const nameOf = (r: any) => r.positionTitle || r.partyName || "";
+// letterhead / footer come from the letter template
+const header = ref("");
+const footer = ref("");
+watch(() => props.letter.templateId, async (id) => {
+  header.value = "";
+  footer.value = "";
+  if (!id) return;
+  const [d] = await getLetterTemplates({ PageNumber: 1, PageSize: 200 });
+  const t = (d?.data || []).find((x: any) => x.id === id);
+  header.value = sanitizeHtml(t?.headerHtml);
+  footer.value = sanitizeHtml(t?.footerHtml);
+}, { immediate: true });
 const attachCount = computed(() => (props.letter.attachments || []).length);
 </script>
 
@@ -18,7 +31,7 @@ const attachCount = computed(() => (props.letter.attachments || []).length);
   <div class="print-only print-form ks-report q-form letter-sheet">
     <div class="ls-head">
       <img :src="Logo" alt="" class="ls-logo" />
-      <div class="ls-letterhead"></div>
+      <div class="ls-letterhead" v-html="header"></div>
       <div class="ls-meta">
         <div><b>شماره:</b> <span class="ls-num">{{ letter.number ? fa(letter.number) : "ثبت‌نشده" }}</span></div>
         <div><b>تاریخ:</b> {{ fa(letter.dateText) }}</div>
@@ -45,6 +58,7 @@ const attachCount = computed(() => (props.letter.attachments || []).length);
     <div v-if="cc.length" class="ls-cc">
       <b>{{ recipientTypes[2] }}:</b> <span v-for="(r, i) in cc" :key="i">{{ nameOf(r) }}<template v-if="i < cc.length - 1">، </template></span>
     </div>
+    <div v-if="footer" class="ls-footer" v-html="footer"></div>
     <div v-if="letter.contentHash" class="ls-foot">شناسه اصالت: <span class="inv-ltr">{{ letter.contentHash.slice(0, 16) }}</span></div>
   </div>
 </template>
@@ -69,6 +83,7 @@ const attachCount = computed(() => (props.letter.attachments || []).length);
   .ls-sign-title { font-weight: bold; }
   .ls-sign-img { max-height: 25mm; max-width: 55mm; display: block; margin: 0.2rem auto; }
   .ls-cc { margin-top: 1rem; font-size: 14px; }
+  .ls-footer { margin-top: 1rem; border-top: 1px solid #1f3a5f; padding-top: 0.3rem; font-size: 12px; text-align: center; }
   .ls-foot { margin-top: 1rem; font-size: 11px; color: #555; border-top: 1px solid #ccc; padding-top: 0.3rem; }
 }
 </style>
