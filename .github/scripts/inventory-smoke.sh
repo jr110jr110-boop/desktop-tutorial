@@ -3574,7 +3574,7 @@ as "$MSV_TOKEN" POST $MF/operations/rework "{\"operationId\":$MFOPA20,\"ncrId\":
 call POST $MF/operations/rework "{\"operationId\":$MFOPA20,\"ncrId\":$MFNCR}"; nomsg "mes: the PMO cannot create rework operations (shop supervisor or production manager only)" "مجوز"
 as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$MFOPA20R,\"kind\":3}"; check "mes: the operator starts the rework operation (rework booking)" '.success and .data.status == 2'
 as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20R,\"goodQty\":4}"; nomsg "mes: the rework covers the 5 rejected pieces, not fewer" "برابر نیست"
-as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20R,\"goodQty\":1}"; check "mes: rework finished with 5 good pieces: QC hold again" '.success and .data.status == 5 and .data.goodQty == 5'
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$MFOPA20R,\"goodQty\":5}"; check "mes: rework finished with 5 good pieces: QC hold again" '.success and .data.status == 5 and .data.goodQty == 5'
 as "$QC_TOKEN" POST $MF/operations/qc-decision "{\"operationId\":$MFOPA20R,\"result\":1}"; check "mes: QC accepts the rework" '.success and .data.status == 4 and .data.qcAccepted == true'
 
 # --- outside work drafts, completion, receipt
@@ -3593,7 +3593,7 @@ as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"comple
 as "$MPM_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\",\"reason\":\"x\"}"; nomsg "mes: skipping a step is the shop supervisor's alone" "سرپرست کارگاه"
 as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\"}"; nomsg "mes: skipping needs a reason" "دلیل"
 as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\",\"reason\":\"عملیات حرارتی در این آزمون انجام نمی‌شود\"}"; check "mes: the supervisor skips the outside step with a reason: every step is finished, the order is completed and a production receipt draft is made" '.success and .data.status == 7 and .data.skipReason != null'
-call GET "$MF/orders/$MFORDA"; check "mes: order A is completed with a receipt draft number and the actual finish in Persian" '.success and .data.status == 3 and .data.productionReceiptId > 0 and .data.productionReceiptNumber != null and (.data.actualFinishText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
+call GET "$MF/orders/$MFORDA"; check "mes: order A is completed with a receipt draft (a draft inventory document has no number until it is confirmed) and the actual finish in Persian" '.success and .data.status == 3 and .data.productionReceiptId > 0 and .data.productionReceiptNumber == null and (.data.actualFinishText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
 MFRCT=$(val .data.productionReceiptId)
 call GET "inventory/documents/$MFRCT"; check "mes: the receipt is a draft production receipt of 5 units of item A for the work order" ".success and .data.status == 0 and .data.type == 2 and .data.workOrderId == $MFWO and .data.lines[0].itemId == $MFPA and .data.lines[0].quantity == 5"
 as "$MOP_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"close\"}"; nomsg "mes: the operator cannot close an order" "مجوز"
@@ -3655,6 +3655,11 @@ mbrelease() { # mbrelease ORDERID LABEL
 mbdraft 4 4 1; MBO1=$MBO; MBN1=$MBN
 mbdraft 5 3 2; MBO2=$MBO; MBN2=$MBN
 mbdraft 6 49 3; MBO3=$MBO; MBN3=$MBN
+# the QC decision of order A went through the quality module, which drafted the ITP of the work order (MF-WO-1); orders D1-D3 are on the same work order, so the release gate wants that ITP approved by the client: the same two steps as in the quality section (submit, client approval with the letter reference)
+as "$QC_TOKEN" GET "quality/itps/by-work-order/$MFWO"; check "mes B: the work order of the item D orders has the ITP the QC decision of order A drafted (a draft, by the system)" '.success and .data.autoDrafted == true and .data.status == 0 and (.data.activities|length) > 0'
+MBITP=$(val .data.id)
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$MBITP,\"action\":\"submit\"}"; check "mes B: the ITP of the work order is submitted" '.success and .data.status == 1'
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$MBITP,\"action\":\"client-approve\",\"reference\":\"CL-MF-1\"}"; check "mes B: the ITP of the work order is approved by the client (letter reference kept), so the release gate passes" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-MF-1"'
 mbrelease "$MBO1" D1; mbrelease "$MBO2" D2; mbrelease "$MBO3" D3
 call GET "$MF/orders/$MBO1"; MBOP1=$(val '.data.operations[0].id')
 call GET "$MF/orders/$MBO2"; MBOP2=$(val '.data.operations[0].id')
@@ -3758,7 +3763,7 @@ as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"
 call POST inventory/material-requests/action "{\"id\":$MBMR,\"action\":\"submit\"}"; check "mes B: the request is submitted" '.success and .data.status == 1'
 call POST inventory/material-requests/action "{\"id\":$MBMR,\"action\":\"approve-planning\"}"; check "mes B: planning approves the request" '.success and .data.planningApproved'
 as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$MBMR,\"action\":\"approve-manufacturing\"}"; check "mes B: production approves the request: approved" '.success and .data.status == 2'
-as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"draft-issue\"}"; check "mes B: the issue of the spare parts is drafted" '.success and .data.issueDocumentId > 0 and .data.issueDocumentNumber != null'
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"draft-issue\"}"; check "mes B: the issue of the spare parts is drafted (a draft inventory document has no number until it is confirmed)" '.success and .data.issueDocumentId > 0 and .data.issueDocumentNumber == null'
 MBISS=$(val .data.issueDocumentId)
 call GET "inventory/documents/$MBISS"; check "mes B: the issue is a draft against the request, carries the maintenance cost centre and the 2 spare parts (confirming it is a stock step for the warehouse)" ".success and .data.status == 0 and .data.type == 4 and .data.costCenter == \"CC-MNT\" and .data.materialRequestId == $MBMR and .data.lines[0].itemId == $MFCMP and .data.lines[0].quantity == 2"
 as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"draft-issue\"}"; nomsg "mes B: the issue is drafted once" "قبلا پیش‌نویس"
