@@ -1873,12 +1873,16 @@ as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y2"; check "f3 entit
 as "$FM_TOKEN" GET "$FG/years?legalEntityId=1"; check "f3 entities: the main company's years do not include the second entity's" '.success and ([.data[]|select(.id == '$Y2')]|length) == 0'
 as "$FM_TOKEN" POST $FE/pairs "{\"title\":\"بین شرکتی\",\"entityAId\":1,\"entityBId\":$E2,\"accountACode\":\"1019901\",\"accountBCode\":\"5039901\"}"; check "f3 entities: intercompany pair saved" '.success and .data.accountACode == "1019901"'
 PAIR=$(val .data.id)
-as "$FIN_TOKEN" POST $FE/intercompany/post "{\"pairId\":$PAIR,\"date\":\"${TODAY}T00:00:00\",\"amount\":4000000,\"chargerEntityId\":1,\"counterAccountACode\":\"60102\",\"counterAccountBCode\":\"80108\",\"description\":\"خدمات بین شرکتی\"}"; check "f3 entities: intercompany posting creates a voucher on each side" '.success and .data.voucherAId > 0 and .data.voucherBId > 0 and (.data.number|startswith("IC-"))'
+as "$FIN_TOKEN" POST $FE/intercompany/post "{\"pairId\":$PAIR,\"date\":\"${TODAY}T00:00:00\",\"amount\":4000000,\"chargerEntityId\":1,\"counterAccountACode\":\"60102\",\"counterAccountBCode\":\"80108\",\"description\":\"بدون نرخ\"}"; nomsg "r2 f2: entities with different currencies need a conversion rate" "نرخ تبدیل"
+as "$FIN_TOKEN" POST $FE/intercompany/post "{\"pairId\":$PAIR,\"date\":\"${TODAY}T00:00:00\",\"amount\":4000000,\"rate\":1,\"chargerEntityId\":1,\"counterAccountACode\":\"60102\",\"counterAccountBCode\":\"80108\",\"description\":\"خدمات بین شرکتی\"}"; check "f3 entities: intercompany posting creates a voucher on each side" '.success and .data.voucherAId > 0 and .data.voucherBId > 0 and (.data.number|startswith("IC-"))'
 ICA=$(val .data.voucherAId); ICB=$(val .data.voucherBId)
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$ICA,\"action\":\"finalize\"}"; check "f3 entities: side A final" '.success and .data.status == 2 and .data.legalEntityId == 1'
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$ICB,\"action\":\"finalize\"}"; check "f3 entities: side B final in the second entity" '.success and .data.status == 2 and .data.legalEntityId == '$E2
 as "$FM_TOKEN" GET "$FE/consolidation?From=${TODAY}&To=${TODAY}&Rates=$E2=1"; check "f3 entities: the two sides mirror (+4,000,000 / -4,000,000) and the consolidation balances" '.success and .data.pairs[0].matched == true and .data.pairs[0].balanceA == 4000000 and .data.pairs[0].balanceB == -4000000 and .data.balanced == true and ([.data.rows[]|select(.accountCode == "1019901")][0].consolidated) == 0 and ([.data.rows[]|select(.accountCode == "5039901")][0].consolidated) == 0'
 as "$FM_TOKEN" GET "$FE/consolidation?From=${TODAY}&To=${TODAY}"; no "f3 entities: consolidation of another currency needs a rate input"
+as "$FIN_TOKEN" POST $FE/intercompany/post "{\"pairId\":$PAIR,\"date\":\"${TODAY}T00:00:00\",\"amount\":1000,\"rate\":2,\"chargerEntityId\":1,\"counterAccountACode\":\"60102\",\"counterAccountBCode\":\"80108\",\"description\":\"نرخ تبدیل ۲\"}"; check "r2 f2: a post across currencies converts the other side at the rate: 1,000 on side A is 2,000 on side B" '.success and .data.amountA == 1000 and .data.amountB == 2000 and .data.rate == 2'
+IC2A=$(val .data.voucherAId); IC2B=$(val .data.voucherBId)
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$IC2A,\"action\":\"finalize\"}"; as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$IC2B,\"action\":\"finalize\"}"; check "r2 f2: both converted vouchers are finalised" '.success and .data.status == 2'
 
 # --- audit trail
 as "$FM_TOKEN" GET "$FAU?EntityType=FnLegalEntity&PageSize=0"; check "f3 audit: the creation of the second entity is in the trail" '.success and ([.data.data[]|select(.action == "Added")]|length) >= 1'
@@ -2145,15 +2149,15 @@ as "$CEO_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":1200
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2025-06-15T00:00:00\",\"description\":\"خرید مرکز هزینه\",\"submit\":true,\"costCenter\":\"CC-P1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":600000}]}"; check "f3 commitment: purchase request for cost centre CC-P1 (6,000,000)" '.success and .data.estimatedAmount == 6000000'
 PRB=$(val .data.id)
 as "$PLAN_TOKEN" GET "$FBU/commitment-check/purchase-request/$PRB"; check "f3 commitment: the purchase request exceeds the cost-centre envelope of 4,000,000 and is blocked with the reason (4,000,000 - 300,000 variance already charged - 6,000,000)" '.success and .data.allowed == false and .data.remaining == -2300000 and (.data.message|contains("مسدود"))'
-as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-planning\"}"
-as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-management\"}"; nomsg "r2 f10: in Block mode the purchase request over the cost-centre envelope cannot become approved" "مسدود"
+as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-management\"}"
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-planning\"}"; nomsg "r2 f10: in Block mode the purchase request over the cost-centre envelope cannot become approved" "مسدود"
 as "$FM_TOKEN" POST $FBU/$BD/revise; check "f3 budget: a revision is a new draft (version 2)" '.success and .data.status == 0 and .data.version == 2 and .data.kind == 2 and (.data.lines|length) == 4'
 BD2=$(val .data.id); BL2=$(jq -c '[.data.lines[]|{accountCode,costCenterCode,contractId,period,amount,isCapital}]' "$B")
 as "$FIN_TOKEN" POST $FBU "{\"id\":$BD2,\"fiscalYearId\":$Y4,\"title\":\"بازنگری ۱\",\"kind\":2,\"commitMode\":1,\"lines\":$BL2}"; check "f3 budget: revision switched to Warn mode" '.success and .data.commitMode == 1'
 as "$FM_TOKEN" POST $FBU/$BD2/approve; as "$CEO_TOKEN" POST $FBU/$BD2/approve; check "f3 budget: revision approved by both" '.success and .data.status == 1'
 as "$FM_TOKEN" GET $FBU/$BD; check "f3 budget: the previous version is superseded" '.success and .data.status == 2'
 as "$FM_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":12000000,"date":"2025-06-15T00:00:00"}'; check "f3 commitment: in Warn mode the same request passes with a warning" '.success and .data.allowed == true and .data.warning == true and .data.mode == 1'
-as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-management\"}"; check "r2 f10: in Warn mode the same request is approved and the answer carries the warning" '.success and .data.status == 2 and (.message // "" | length) > 0'
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-planning\"}"; check "r2 f10: in Warn mode the same request is approved and the answer carries the warning" '.success and .data.status == 2 and (.message // "" | length) > 0'
 TOKEN=$ADMIN_TOKEN
 
 # =============================================================================================== review fixes R1
@@ -2372,8 +2376,8 @@ as "$FM_TOKEN" POST $FP/runs/$PR12/approve; check "r1 payroll: Azar run approved
 B0=$(tbc 30402)
 as "$PAYR_TOKEN" POST $FP/runs/$PR12/post; PR12EV=$(val .data.accountingEventId); check "r1 payroll: Azar run posted" '.success and .data.status == 3'
 as "$FM_TOKEN" POST $FG/post-events
-evlist; check "r1 payroll: the bonus debits the provision 5,000,000 and the payroll expense is 35,800,000 = 31,300,000 pay (the bonus came from the provision) + 3,000,000 bonus accrual + 1,500,000 leave accrual" '[.data.data[]|select(.id == '$PR12EV')][0].lines as $l | ([$l[]|select(.accountRole == "BonusProvision")|.debit]|add) == 5000000 and ([$l[]|select((.accountRole|startswith("PayrollExpense")))|.debit]|add) == 35800000'
-[ "$(( $(tbc 30402) - B0 ))" = "2000000" ] && ok "r1 payroll: provision 30402 net movement +2,000,000 (bonus paid 5,000,000 debit, monthly accrual 3,000,000 credit)" || bad "r1 payroll: 30402 net movement +2,000,000 (delta $(( $(tbc 30402) - B0 )))"
+evlist; check "r2 f23: the monthly BONUS is an expense and does not touch the provision: payroll expense 40,800,000 = 31,300,000 pay + 5,000,000 bonus + 3,000,000 bonus accrual + 1,500,000 leave accrual" '[.data.data[]|select(.id == '$PR12EV')][0].lines as $l | ([$l[]|select(.accountRole == "BonusProvision")|.debit]|add // 0) == 0 and ([$l[]|select((.accountRole|startswith("PayrollExpense")))|.debit]|add) == 40800000'
+[ "$(( $(tbc 30402) - B0 ))" = "3000000" ] && ok "r2 f23: provision 30402 net movement +3,000,000 (only the monthly accrual; the monthly bonus no longer drains it)" || bad "r2 f23: 30402 net movement +3,000,000 (delta $(( $(tbc 30402) - B0 )))"
 [ "$(( $(tbc 10401) - E0 ))" = "10000000" ] && ok "r1 loan: after the instalment 10401 holds 10,000,000 (12,000,000 - 2,000,000)" || bad "r1 loan: 10401 holds 10,000,000 after the instalment (delta $(( $(tbc 10401) - E0 )))"
 TOKEN=$ADMIN_TOKEN
 
