@@ -54,18 +54,31 @@ namespace Services.NasbNiro.Production
         public const string PostRoles = "FINANCEMANAGER,FINANCIAL,PRODUCTIONMANAGER";
         public const string ReadRoles = "FINANCEMANAGER,FINANCIAL,PRODUCTIONMANAGER,CEO,AUDITOR,PMO";
 
+        /// <summary>The only roles that see a labour amount that would reveal one person's payroll cost (the payroll readers of finance).</summary>
+        public const string PayrollRoles = "PAYROLL,FINANCEMANAGER,CEO";
+
+        private bool SeesPayroll => _user.IsInRole(PayrollRoles);
+
         public async Task<ResponseDto<CostRunResultDto>> RunAsync(RunCostDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(PostRoles)) return MfText.Bad<CostRunResultDto>(MfText.NotAllowed);
             DateTime? day = dto?.Date?.Date;
             if (day.HasValue && day.Value >= DateTime.Today) return MfText.Bad<CostRunResultDto>("هزینه فقط برای روزهایی که تمام شده‌اند ثبت می‌شود؛ تاریخ باید قبل از امروز باشد.");
-            CostRunResultDto result = await new MfCostEngine(_uow, _costing, _user.UserId).RunAsync(day, ct);
+            CostRunResultDto result;
+            try
+            {
+                result = await new MfCostEngine(_uow, _costing, _user.UserId, SeesPayroll).RunAsync(day, ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return MfText.Bad<CostRunResultDto>(MfText.Concurrency);
+            }
             // nothing could be posted because a rate is missing: a refusal that names what finance has to enter
             if (result.BookingsPosted == 0 && result.BookingsSkipped > 0) return MfText.Bad<CostRunResultDto>(result.Message);
             return ResponseDtoHelper.Ok(result, result.Message);
         }
 
-        public Task<CostRunResultDto> RunNightlyAsync(CancellationToken ct) => new MfCostEngine(_uow, _costing, 0).RunAsync(null, ct);
+        public Task<CostRunResultDto> RunNightlyAsync(CancellationToken ct) => new MfCostEngine(_uow, _costing, 0, false).RunAsync(null, ct);
 
         public async Task<ResponseDto<PagedList<CostRunDto>>> GetRunsAsync(CostRunQuery query, CancellationToken ct)
         {
@@ -78,7 +91,7 @@ namespace Services.NasbNiro.Production
             if (text != null) q = q.Where(r => r.Number.Contains(text));
             var rows = q.OrderByDescending(r => r.PostingDate).ThenByDescending(r => r.Id);
             PagedList<MfCostRun> page = await MfText.PageAsync(rows, query.PageNumber <= 0 ? 1 : query.PageNumber, query.PageSize, ct);
-            return ResponseDtoHelper.Ok(await Map(page, page.Select(MfCostEngine.RunDto).ToList(), ct));
+            return ResponseDtoHelper.Ok(await Map(page, page.Select(r => MfCostEngine.RunDto(r, SeesPayroll)).ToList(), ct));
         }
 
         public async Task<ResponseDto<PagedList<CostPostingDto>>> GetPostingsAsync(CostPostingQuery query, CancellationToken ct)
@@ -99,17 +112,32 @@ namespace Services.NasbNiro.Production
             Dictionary<int, string> wbs = wbsIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<PcWbsNode>().AsNoTracking().Where(n => wbsIds.Contains(n.Id)).ToDictionaryAsync(n => n.Id, n => n.Code, ct);
             List<int> wcIds = page.Where(p => p.WorkCenterId.HasValue).Select(p => p.WorkCenterId.Value).Distinct().ToList();
             Dictionary<int, string> wcs = wcIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<MfWorkCenter>().AsNoTracking().Where(c => wcIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Code, ct);
+            bool seesPayroll = SeesPayroll;
             var dtos = page.Select(p => new CostPostingDto
             {
                 Id = p.Id, RunId = p.RunId, RunNumber = runs.GetValueOrDefault(p.RunId), PostingDate = p.PostingDate, PostingDateText = MfText.Date(p.PostingDate), WorkOrderId = p.WorkOrderId,
                 WorkOrderCode = wos.GetValueOrDefault(p.WorkOrderId), ContractId = p.ContractId, WbsNodeId = p.WbsNodeId, WbsCode = p.WbsNodeId.HasValue ? wbs.GetValueOrDefault(p.WbsNodeId.Value) : null,
                 WorkCenterId = p.WorkCenterId, WorkCenterCode = p.WorkCenterId.HasValue ? wcs.GetValueOrDefault(p.WorkCenterId.Value) : null, BookingCount = p.BookingCount,
-                LabourHours = p.LabourHours, MachineHours = p.MachineHours, LabourAmount = p.LabourAmount, OverheadAmount = p.OverheadAmount,
+                LabourHours = p.LabourHours, MachineHours = p.MachineHours, OverheadAmount = p.OverheadAmount,
+                LabourAmount = MfCostMask.Labour(p.LabourAmount, MfCostMask.IsProtected(p.EmployeeCount, p.PayrollEmployeeCount), seesPayroll), LabourHidden = !seesPayroll && MfCostMask.IsProtected(p.EmployeeCount, p.PayrollEmployeeCount),
             }).ToList();
             return ResponseDtoHelper.Ok(await Map(page, dtos, ct));
         }
 
         internal static Task<PagedList<TOut>> Map<TIn, TOut>(PagedList<TIn> page, List<TOut> items, CancellationToken ct) => MfPaging.OfAsync(items, page.TotalCount, page.CurrentPage, page.PageSize, ct);
+    }
+
+    /// <summary>
+    /// Privacy of the labour amount. A posting (or a run) with fewer than three distinct employees whose rate came from payroll would show one person's hourly payroll cost
+    /// (amount / hours); that amount is hidden from every role except PAYROLL, FINANCEMANAGER and CEO.
+    /// </summary>
+    internal static class MfCostMask
+    {
+        public const int MinEmployees = 3;
+
+        public static bool IsProtected(int employees, int payrollEmployees) => payrollEmployees > 0 && Math.Min(employees, payrollEmployees) < MinEmployees;
+
+        public static decimal? Labour(decimal amount, bool isProtected, bool seesPayroll) => isProtected && !seesPayroll ? (decimal?)null : amount;
     }
 
     internal static class MfPaging
@@ -133,17 +161,21 @@ namespace Services.NasbNiro.Production
         private readonly ICostingService _costing;
         private readonly int _userId;
 
-        public MfCostEngine(IUnitOfWork uow, ICostingService costing, int userId)
+        private readonly bool _seesPayroll;
+
+        public MfCostEngine(IUnitOfWork uow, ICostingService costing, int userId, bool seesPayroll)
         {
             _uow = uow;
             _costing = costing;
             _userId = userId;
+            _seesPayroll = seesPayroll;
         }
 
-        internal static CostRunDto RunDto(MfCostRun r) => new CostRunDto
+        internal static CostRunDto RunDto(MfCostRun r, bool seesPayroll) => new CostRunDto
         {
             Id = r.Id, Number = r.Number, PostingDate = r.PostingDate, PostingDateText = MfText.Date(r.PostingDate), RunAtText = MfText.Stamp(r.RunAt), BookingCount = r.BookingCount,
-            LabourHours = r.LabourHours, MachineHours = r.MachineHours, LabourAmount = r.LabourAmount, OverheadAmount = r.OverheadAmount, AccountingEventId = r.AccountingEventId,
+            LabourHours = r.LabourHours, MachineHours = r.MachineHours, LabourAmount = MfCostMask.Labour(r.LabourAmount, r.LabourProtected, seesPayroll), LabourHidden = r.LabourProtected && !seesPayroll,
+            OverheadAmount = r.OverheadAmount, AccountingEventId = r.AccountingEventId,
         };
 
         private sealed class Rate
@@ -164,6 +196,8 @@ namespace Services.NasbNiro.Production
             public decimal MachineHours;
             public decimal Labour;
             public decimal Overhead;
+            public readonly HashSet<int> Employees = new HashSet<int>();
+            public readonly HashSet<int> PayrollEmployees = new HashSet<int>();
         }
 
         private static decimal R(decimal v) => Math.Round(v, 0, MidpointRounding.AwayFromZero);
@@ -227,6 +261,8 @@ namespace Services.NasbNiro.Production
                 var key = (order.WorkOrderId, wbs, op.WorkCenterId);
                 if (!groups.TryGetValue(key, out Group g)) { g = new Group { WorkOrderId = order.WorkOrderId, ContractId = order.ContractId, WbsNodeId = wbs, WorkCenterId = op.WorkCenterId }; groups[key] = g; }
                 g.Bookings++;
+                g.Employees.Add(b.EmployeeId);
+                if (rate.FromPayroll) g.PayrollEmployees.Add(b.EmployeeId);
                 g.LabourHours += b.Hours;
                 g.Labour += b.Hours * rate.PerHour;
                 if (usesMachine) { g.MachineHours += b.Hours; g.Overhead += b.Hours * machineRate; }
@@ -252,6 +288,8 @@ namespace Services.NasbNiro.Production
                 {
                     Number = await InventoryNumbers.NextNumberAsync(_uow, MfNumbers.CostRun, "MCR", day, ct), PostingDate = day, RunAt = stamp, RunByUserId = _userId, BookingCount = posted[day].Count,
                     LabourHours = list.Sum(g => g.LabourHours), MachineHours = list.Sum(g => g.MachineHours), LabourAmount = list.Sum(g => g.Labour), OverheadAmount = list.Sum(g => g.Overhead),
+                    EmployeeCount = list.SelectMany(g => g.Employees).Distinct().Count(), PayrollEmployeeCount = list.SelectMany(g => g.PayrollEmployees).Distinct().Count(),
+                    LabourProtected = list.Any(g => MfCostMask.IsProtected(g.Employees.Count, g.PayrollEmployees.Count)),
                 };
                 _uow.Set<MfCostRun>().Add(run);
                 foreach (Group g in list)
@@ -259,14 +297,14 @@ namespace Services.NasbNiro.Production
                     _uow.Set<MfCostPosting>().Add(new MfCostPosting
                     {
                         Run = run, PostingDate = day, WorkOrderId = g.WorkOrderId, ContractId = g.ContractId, WbsNodeId = g.WbsNodeId, WorkCenterId = g.WorkCenterId, BookingCount = g.Bookings,
-                        LabourHours = g.LabourHours, MachineHours = g.MachineHours, LabourAmount = g.Labour, OverheadAmount = g.Overhead,
+                        LabourHours = g.LabourHours, MachineHours = g.MachineHours, LabourAmount = g.Labour, OverheadAmount = g.Overhead, EmployeeCount = g.Employees.Count, PayrollEmployeeCount = g.PayrollEmployees.Count,
                     });
                     string wcCode = g.WorkCenterId.HasValue ? centers.GetValueOrDefault(g.WorkCenterId.Value)?.Code : null;
                     string text = $"{run.Number} - {MfText.Date(day)}" + (wcCode != null ? " - " + wcCode : string.Empty);
                     if (g.Labour != 0)
                         _uow.Set<CostEntry>().Add(new CostEntry
                         {
-                            EntryDate = day, Kind = CostKind.Labour, WorkOrderId = g.WorkOrderId, ContractId = g.ContractId, WbsNodeId = g.WbsNodeId, Quantity = g.LabourHours, Amount = g.Labour,
+                            EntryDate = day, Kind = CostKind.Labour, WorkOrderId = g.WorkOrderId, ContractId = g.ContractId, WbsNodeId = g.WbsNodeId, Quantity = 0, Amount = g.Labour,
                             SourceType = MfCostService.RunSource, SourceId = DayKey(day), SourceNumber = run.Number, Description = "دستمزد مستقیم ساخت - " + text, CreatedAt = stamp, CreatedByUserId = _userId,
                         });
                     if (g.Overhead != 0)
@@ -288,6 +326,7 @@ namespace Services.NasbNiro.Production
                 if (labourTotal != 0) lines.Add(new AccountingEventLine { AccountRole = AccountRoles.LabourAbsorbed, Credit = labourTotal, Description = "دستمزد مستقیم جذب‌شده" });
                 if (overheadTotal != 0) lines.Add(new AccountingEventLine { AccountRole = AccountRoles.OverheadAbsorbed, Credit = overheadTotal, Description = "سربار ماشین جذب‌شده" });
                 AccountingEvent ev = _costing.AddEvent(AccountingEventType.LabourAbsorbed, day, MfCostService.RunSource, DayKey(day), run.Number, $"دستمزد و سربار جذب‌شده {MfText.Date(day)}", lines);
+                run.AccountingEvent = ev;
                 events.Add((run, ev));
 
                 foreach (MfTimeBooking b in posted[day])
@@ -300,15 +339,11 @@ namespace Services.NasbNiro.Production
 
             await _uow.SaveChangesAsync(ct);
 
-            if (events.Count > 0)
-            {
-                foreach (var (run, ev) in events) run.AccountingEventId = ev.Id;
-                await _uow.SaveChangesAsync(ct);
-            }
-
-            foreach (var (run, _) in events) result.Runs.Add(RunDto(run));
+            foreach (var (run, _) in events) result.Runs.Add(RunDto(run, _seesPayroll));
             result.BookingsPosted = events.Sum(e => e.Run.BookingCount);
-            result.LabourAmount = events.Sum(e => e.Run.LabourAmount);
+            bool hidden = !_seesPayroll && events.Any(e => e.Run.LabourProtected);
+            result.LabourHidden = hidden;
+            result.LabourAmount = hidden ? (decimal?)null : events.Sum(e => e.Run.LabourAmount);
             result.OverheadAmount = events.Sum(e => e.Run.OverheadAmount);
             foreach (var kv in errors.OrderBy(k => k.Key, StringComparer.Ordinal)) result.Errors.Add(kv.Value > 1 ? $"{kv.Key} ({kv.Value} رزرو)" : kv.Key);
             result.Message = result.BookingsPosted > 0
@@ -348,11 +383,19 @@ namespace Services.NasbNiro.Production
                 .OrderByDescending(t => t.Year).Select(t => (decimal?)t.Value).FirstOrDefaultAsync(ct);
             if (!hoursPerDay.HasValue || hoursPerDay.Value <= 0)
                 return new Rate { Error = $"ساعت کار روزانه (DailyWorkHours) در جدول نرخ‌های حقوق ثبت نشده است؛ نرخ ساعتی پرسنل {code} محاسبه نشد و هزینه ثبت نشد." };
-            decimal paidHours = slip.DaysPaid * hoursPerDay.Value;
+            var sheet = await _uow.Set<FnAttendanceSheet>().AsNoTracking().Where(a => a.EmployeeId == employeeId && a.Year == slip.Year && a.Month == slip.Month)
+                .Select(a => new { a.OvertimeHours, a.HolidayHours }).FirstOrDefaultAsync(ct);
+            decimal paidHours = PaidHours(slip.DaysPaid, hoursPerDay.Value, sheet?.OvertimeHours ?? 0, sheet?.HolidayHours ?? 0);
             if (paidHours <= 0) return new Rate { Error = $"ساعت پرداخت‌شده آخرین فیش حقوقی پرسنل {code} صفر است؛ نرخ ساعتی محاسبه نشد و هزینه ثبت نشد." };
             decimal cost = slip.GrossEarnings + slip.EmployerInsurance + slip.Provisions;
             if (cost <= 0) return new Rate { Error = $"هزینه کارفرمای آخرین فیش حقوقی پرسنل {code} صفر است؛ نرخ ساعتی محاسبه نشد و هزینه ثبت نشد." };
-            return new Rate { PerHour = cost / paidHours, FromPayroll = true };
+            return new Rate { PerHour = HourlyRate(cost, paidHours), FromPayroll = true };
         }
+
+        /// <summary>The hours the employer cost of a payroll month paid for: paid days x daily work hours + overtime hours + holiday hours of the month's attendance sheet.</summary>
+        internal static decimal PaidHours(decimal daysPaid, decimal dailyWorkHours, decimal overtimeHours, decimal holidayHours) => daysPaid * dailyWorkHours + overtimeHours + holidayHours;
+
+        /// <summary>Total employer cost of the month (earnings + employer insurance + provisions) divided by the paid hours.</summary>
+        internal static decimal HourlyRate(decimal employerCost, decimal paidHours) => employerCost / paidHours;
     }
 }

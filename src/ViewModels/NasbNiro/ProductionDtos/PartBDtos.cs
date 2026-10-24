@@ -25,7 +25,10 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int BookingCount { get; set; }
         public decimal LabourHours { get; set; }
         public decimal MachineHours { get; set; }
-        public decimal LabourAmount { get; set; }
+
+        /// <summary>Null (with <see cref="LabourHidden"/>) when the amount would reveal one person's payroll cost to a role that may not see it.</summary>
+        public decimal? LabourAmount { get; set; }
+        public bool LabourHidden { get; set; }
         public decimal OverheadAmount { get; set; }
         public int? AccountingEventId { get; set; }
     }
@@ -47,7 +50,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
         /// <summary>Bookings whose labour rate came from the standard labour rate of the work centre (no payroll exists for the employee yet).</summary>
         public int LabourRateFromWorkCenter { get; set; }
 
-        public decimal LabourAmount { get; set; }
+        /// <summary>Null (with <see cref="LabourHidden"/>) when a posting is too small to show without revealing one person's payroll cost to this role.</summary>
+        public decimal? LabourAmount { get; set; }
+        public bool LabourHidden { get; set; }
         public decimal OverheadAmount { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
         public string Message { get; set; }
@@ -84,7 +89,10 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int BookingCount { get; set; }
         public decimal LabourHours { get; set; }
         public decimal MachineHours { get; set; }
-        public decimal LabourAmount { get; set; }
+
+        /// <summary>Null (with <see cref="LabourHidden"/>) when fewer than three employees paid by payroll are in the row and the caller is not PAYROLL, FINANCEMANAGER or CEO.</summary>
+        public decimal? LabourAmount { get; set; }
+        public bool LabourHidden { get; set; }
         public decimal OverheadAmount { get; set; }
     }
 

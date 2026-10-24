@@ -8,6 +8,7 @@ using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Production;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.FinanceDtos;
@@ -502,7 +503,13 @@ namespace Services.NasbNiro.Finance
             if (lines.Sum(l => l.Debit) != lines.Sum(l => l.Credit)) return Bad<PayrollRunDto>("سند حقوق متوازن نیست؛ اجرای حقوق را دوباره محاسبه کنید.");
 
             AccountingEvent e = _costing.AddEvent(AccountingEventType.PayrollRun, date, "FnPayrollRun", run.Id, run.Number, $"حقوق و دستمزد {period}", lines);
-            foreach (var kv in laborCosts.Where(x => x.Value != 0))
+            // a work order whose labour production already absorbed in that payroll month (MfCostPosting) gets no second Labour CostEntry: the absorbed cost is the project cost,
+            // finance reconciles absorbed against actual in the ledger. The payroll accounting entries above are not touched.
+            List<int> costedIds = laborCosts.Where(x => x.Value != 0).Select(x => x.Key).ToList();
+            DateTime monthFirst = PersianCal.Start(run.Year, run.Month), monthNext = PersianCal.End(run.Year, run.Month).Date.AddDays(1);
+            HashSet<int> absorbedInProduction = costedIds.Count == 0 ? new HashSet<int>()
+                : (await _uow.Set<MfCostPosting>().AsNoTracking().Where(p => costedIds.Contains(p.WorkOrderId) && p.PostingDate >= monthFirst && p.PostingDate < monthNext).Select(p => p.WorkOrderId).Distinct().ToListAsync(ct)).ToHashSet();
+            foreach (var kv in LabourEntriesToPost(laborCosts, absorbedInProduction))
                 _uow.Set<CostEntry>().Add(new CostEntry
                 {
                     EntryDate = date, Kind = CostKind.Labour, WorkOrderId = kv.Key, ContractId = contractOf.TryGetValue(kv.Key, out int contract) && contract > 0 ? contract : (int?)null,
@@ -518,6 +525,10 @@ namespace Services.NasbNiro.Finance
             try { await _uow.SaveChangesAsync(ct); } catch (DbUpdateException) { /* the link is informative only */ }
             return await RunDtoAsync(run.Id, ct);
         }
+
+        /// <summary>The payroll Labour cost entries to write: the work orders with a non-zero cost that production did not already absorb in the month.</summary>
+        internal static List<KeyValuePair<int, decimal>> LabourEntriesToPost(IDictionary<int, decimal> laborCosts, ISet<int> absorbedInProduction)
+            => laborCosts.Where(x => x.Value != 0 && !absorbedInProduction.Contains(x.Key)).OrderBy(x => x.Key).ToList();
 
         // ================================================================================== payslips
 

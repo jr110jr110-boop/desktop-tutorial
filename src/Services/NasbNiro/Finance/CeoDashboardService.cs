@@ -17,7 +17,8 @@ namespace Services.NasbNiro.Finance
 {
     public interface ICeoDashboardService
     {
-        Task<ResponseDto<CeoDashboardDto>> GetAsync(CancellationToken cancellationToken);
+        /// <param name="productionAsOf">The day the production figures (overdue maintenance, the next four weeks of load) are counted for; the server date when empty (tests and what-if views).</param>
+        Task<ResponseDto<CeoDashboardDto>> GetAsync(CancellationToken cancellationToken, DateTime? productionAsOf = null);
     }
 
     /// <summary>
@@ -41,7 +42,7 @@ namespace Services.NasbNiro.Finance
             _quality = quality ?? throw new ArgumentNullException(nameof(quality));
         }
 
-        public async Task<ResponseDto<CeoDashboardDto>> GetAsync(CancellationToken ct)
+        public async Task<ResponseDto<CeoDashboardDto>> GetAsync(CancellationToken ct, DateTime? productionAsOf = null)
         {
             DateTime today = DateTime.Today;
             DateTime monthStart = new DateTime(today.Year, today.Month, 1);
@@ -172,7 +173,7 @@ namespace Services.NasbNiro.Finance
                                         select dec.Id).CountAsync(ct);
             Alert(d.OverdueDecisions > 0, "warning", $"{d.OverdueDecisions} مصوبه جلسه از موعد گذشته است", "/office/decisions");
             // production: late orders, machines down, overload of the next four weeks, overdue maintenance (read directly, so the constructor stays as it is)
-            var production = await Production.MfDashboardService.CeoCountsAsync(_uow, today, ct);
+            var production = await Production.MfDashboardService.CeoCountsAsync(_uow, productionAsOf?.Date ?? today, ct);
             d.ProductionLateOrders = production.LateOrders;
             d.ProductionMachinesDown = production.MachinesDown;
             d.ProductionOverloadWeeks = production.OverloadWeeks;

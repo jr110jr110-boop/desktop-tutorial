@@ -206,7 +206,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.MachineHours).HasPrecision(12, 2);
                 b.Property(x => x.LabourAmount).HasPrecision(18, 2);
                 b.Property(x => x.OverheadAmount).HasPrecision(18, 2);
-                b.HasOne<AccountingEvent>().WithMany().HasForeignKey(x => x.AccountingEventId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.AccountingEvent).WithMany().HasForeignKey(x => x.AccountingEventId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<MfCostPosting>(b =>
             {

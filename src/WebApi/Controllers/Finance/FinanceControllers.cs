@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -68,6 +69,6 @@ namespace WebApi.Controllers
         /// <summary>CEO dashboard: stock, projects (price, cost, commitments), procurement, payables, quality, Sepidar link.</summary>
         [HttpGet("ceo-dashboard")]
         [Authorize(Roles = "CEO,PMO")]
-        public async Task<IActionResult> CeoDashboardAsync([FromServices] ICeoDashboardService dashboard, CancellationToken ct) => Ok(await dashboard.GetAsync(ct));
+        public async Task<IActionResult> CeoDashboardAsync([FromServices] ICeoDashboardService dashboard, [FromQuery] DateTime? asOf, CancellationToken ct) => Ok(await dashboard.GetAsync(ct, asOf));
     }
 }

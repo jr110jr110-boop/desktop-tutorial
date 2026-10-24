@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Quality;
 
@@ -380,7 +381,18 @@ namespace Entities.Model.NasbNiro.Production
         public decimal MachineHours { get; set; }
         public decimal LabourAmount { get; set; }
         public decimal OverheadAmount { get; set; }
+
+        /// <summary>Distinct employees whose bookings are in the run.</summary>
+        public int EmployeeCount { get; set; }
+
+        /// <summary>Distinct employees among them whose labour rate came from payroll.</summary>
+        public int PayrollEmployeeCount { get; set; }
+
+        /// <summary>True when one of the postings of the run is too small to show its labour amount without revealing a person's pay (see <c>MfCostMask</c>); the run total is then hidden too.</summary>
+        public bool LabourProtected { get; set; }
+
         public int? AccountingEventId { get; set; }
+        public AccountingEvent AccountingEvent { get; set; }
     }
 
     /// <summary>
@@ -401,6 +413,12 @@ namespace Entities.Model.NasbNiro.Production
         public decimal MachineHours { get; set; }
         public decimal LabourAmount { get; set; }
         public decimal OverheadAmount { get; set; }
+
+        /// <summary>Distinct employees in the row.</summary>
+        public int EmployeeCount { get; set; }
+
+        /// <summary>Distinct employees in the row whose labour rate came from payroll.</summary>
+        public int PayrollEmployeeCount { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ scheduling (part B)

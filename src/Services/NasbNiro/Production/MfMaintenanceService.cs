@@ -666,7 +666,7 @@ namespace Services.NasbNiro.Production
             return hours;
         }
 
-        /// <summary>Hours a downtime interval takes from the working time of the period: per working day the overlap with that calendar day, at most one shift.</summary>
+        /// <summary>Hours a downtime interval takes from the working time of the period: per working day the overlap with the shift window of that day, at most one shift.</summary>
         public static decimal DowntimeHours(MfCenter c, DateTime start, DateTime? end, DateTime from, DateTime to)
         {
             DateTime stop = end ?? to.Date.AddDays(1);
@@ -674,9 +674,7 @@ namespace Services.NasbNiro.Production
             for (DateTime d = (start.Date < from.Date ? from.Date : start.Date); d <= to.Date && d <= stop.Date; d = d.AddDays(1))
             {
                 if (!c.Calendar.IsWorking(d)) continue;
-                DateTime a = start > d ? start : d, b = stop < d.AddDays(1) ? stop : d.AddDays(1);
-                if (b <= a) continue;
-                hours += Math.Min(c.ShiftHours, (decimal)(b - a).TotalHours);
+                hours += Math.Min(c.ShiftHours, c.ShiftOverlapHours(d, start, stop));
             }
             return Math.Round(hours, 2, MidpointRounding.AwayFromZero);
         }

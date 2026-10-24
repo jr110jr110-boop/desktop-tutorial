@@ -32,13 +32,38 @@ namespace Services.NasbNiro.Production
         /// <summary>Hours of downtime per day (maintenance, breakdowns, machines that are down), summed over the machines of the work centre.</summary>
         public Dictionary<DateTime, decimal> Down = new Dictionary<DateTime, decimal>();
 
-        /// <summary>Available hours of a day: (shifts x hours x resources - downtime) x efficiency x utilisation, on working days only.</summary>
+        /// <summary>The first shift of a day starts at this hour (★ assumption: the work centre has no shift start time); the shifts follow each other without a gap.</summary>
+        public const decimal FirstShiftStartHour = 8m;
+
+        /// <summary>Hours of a day the work centre could produce when nothing is down: shifts x hours x parallel resources x efficiency x utilisation, on working days only.</summary>
+        public decimal FullCapacity(DateTime day) => Calendar.IsWorking(day.Date) ? Gross * Factor : 0;
+
+        /// <summary>
+        /// Available hours of a day, as the brief states it: shifts x hours x parallel resources x efficiency x utilisation - downtime hours (the downtime as clock hours inside the
+        /// shifts), on working days only; never below zero.
+        /// </summary>
         public decimal Capacity(DateTime day)
         {
             day = day.Date;
             if (!Calendar.IsWorking(day)) return 0;
             Down.TryGetValue(day, out decimal down);
-            return Math.Max(0, Gross - down) * Factor;
+            return Math.Max(0, Gross * Factor - down);
+        }
+
+        /// <summary>The time of a calendar day the shifts of one resource cover (one block from the first shift start; moved earlier when the shifts would run past midnight).</summary>
+        public (DateTime From, DateTime To) ShiftWindow(DateTime day)
+        {
+            decimal total = Math.Min(Math.Max(ShiftHours, 0), 24m);
+            decimal start = Math.Min(FirstShiftStartHour, 24m - total);
+            return (day.Date.AddHours((double)start), day.Date.AddHours((double)(start + total)));
+        }
+
+        /// <summary>Hours of the interval [from, to) that lie inside the shift window of a day.</summary>
+        public decimal ShiftOverlapHours(DateTime day, DateTime from, DateTime to)
+        {
+            var (a, b) = ShiftWindow(day);
+            DateTime x = from > a ? from : a, y = to < b ? to : b;
+            return y > x ? (decimal)(y - x).TotalHours : 0;
         }
     }
 
@@ -259,7 +284,8 @@ namespace Services.NasbNiro.Production
             bool started = false;
             for (int i = 0; i < HorizonDays; i++, d = d.AddDays(1))
             {
-                decimal free = c.Capacity(d);
+                // finite: what is left of the day after downtime and the hours already given; infinite (the demand): the full capacity, a machine that is down still has its load
+                decimal free = finite ? c.Capacity(d) : c.FullCapacity(d);
                 used.TryGetValue((c.Wc.Id, d), out decimal taken);
                 if (finite) free -= taken;
                 if (free <= MinFree) continue;
@@ -290,14 +316,14 @@ namespace Services.NasbNiro.Production
                 decimal share = MachineShare(c.Wc.ParallelResources, infos.Count(i => i.WorkCenterId == info.WorkCenterId));
                 var perDay = new Dictionary<DateTime, decimal>();
                 void Add(DateTime day, decimal hours) => perDay[day] = Math.Min(c.ShiftHours, (perDay.TryGetValue(day, out decimal h) ? h : 0) + hours);
-                // a stop from start to end (an open end runs to the end of the horizon): per day the overlap with that calendar day, at most one shift of the machine
+                // a stop from start to end (an open end runs to the end of the horizon): per day the overlap with the shift window of that day, at most one shift of the machine
                 void Stop(DateTime start, DateTime? end)
                 {
                     DateTime stop = end ?? to.AddDays(1);
                     for (DateTime d = start.Date < from ? from : start.Date; d <= to && d <= stop.Date; d = d.AddDays(1))
                     {
-                        DateTime a = start > d ? start : d, b = stop < d.AddDays(1) ? stop : d.AddDays(1);
-                        if (b > a) Add(d, Math.Min(c.ShiftHours, (decimal)(b - a).TotalHours));
+                        decimal hours = c.ShiftOverlapHours(d, start, stop);
+                        if (hours > 0) Add(d, hours);
                     }
                 }
                 void Full(DateTime s, DateTime e) { for (DateTime d = s.Date < from ? from : s.Date; d <= e.Date && d <= to; d = d.AddDays(1)) Add(d, c.ShiftHours); }
