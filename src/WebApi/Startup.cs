@@ -38,6 +38,7 @@ namespace WebApi
         // so the logger is now taken as a parameter of Configure().
         public Startup(IConfiguration configuration)
         {
+            Services.NasbNiro.Finance.FinanceFeatures.Configure(configuration);
             Configuration = configuration;
         }
 

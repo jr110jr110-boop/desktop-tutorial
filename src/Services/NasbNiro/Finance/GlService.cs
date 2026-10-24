@@ -554,6 +554,7 @@ namespace Services.NasbNiro.Finance
                 if (manual && account.RequiresDetail && d1 == null) return (null, $"ردیف {row}: حساب {account.Code} ({account.Title}) تفصیلی اجباری دارد.");
 
                 bool anyCurrency = Clean(l.CurrencyCode) != null || l.CurrencyAmount.HasValue || l.Rate.HasValue;
+                if (anyCurrency && !FinanceFeatures.ForeignCurrency) return (null, FinanceFeatures.OnlyRial);
                 if (anyCurrency)
                 {
                     if (Clean(l.CurrencyCode) == null || !l.CurrencyAmount.HasValue || !l.Rate.HasValue || l.Rate.Value <= 0 || l.CurrencyAmount.Value < 0)

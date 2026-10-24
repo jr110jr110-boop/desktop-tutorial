@@ -45,6 +45,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<CurrencyDto>> SaveCurrencyAsync(CurrencyDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<CurrencyDto>(NotAllowed + " (مدیر مالی)");
+            if (!FinanceFeatures.ForeignCurrency && !FinanceFeatures.IsRial(dto?.Code)) return Bad<CurrencyDto>(FinanceFeatures.OnlyRial);
             string code = Clean(dto?.Code)?.ToUpperInvariant();
             if (code == null || code.Length > 10 || Clean(dto.Title) == null) return Bad<CurrencyDto>("کد و عنوان ارز را وارد کنید.");
             if (dto.Decimals < 0 || dto.Decimals > 6) return Bad<CurrencyDto>("تعداد اعشار باید بین ۰ و ۶ باشد.");
@@ -80,6 +81,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<ExchangeRateDto>> SaveRateAsync(SaveExchangeRateDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.TreasuryAndAccountants)) return Bad<ExchangeRateDto>(NotAllowed);
+            if (!FinanceFeatures.ForeignCurrency) return Bad<ExchangeRateDto>(FinanceFeatures.OnlyRial);
             string code = Clean(dto?.CurrencyCode)?.ToUpperInvariant();
             if (code == null || dto.Date == default) return Bad<ExchangeRateDto>("ارز و تاریخ نرخ را وارد کنید.");
             if (await _uow.Set<FnCurrency>().AnyAsync(c => c.IsBase && c.Code == code, ct)) return Bad<ExchangeRateDto>("برای ارز پایه نرخ ثبت نمی‌شود.");
@@ -123,6 +125,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<FxRevaluationDto>> RevaluationAsync(FxRevaluationRequestDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<FxRevaluationDto>(NotAllowed);
+            if (!FinanceFeatures.ForeignCurrency) return Bad<FxRevaluationDto>(FinanceFeatures.OnlyRial);
             if (dto == null) return Bad<FxRevaluationDto>("اطلاعات ارسال‌شده کامل نیست.");
             await FinanceSeed.EnsureAsync(_uow, ct);
             FnPeriod period = await _uow.Set<FnPeriod>().AsNoTracking().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.Id == dto.PeriodId, ct);
@@ -248,6 +251,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<FxSettlementDto>> SettleAsync(FxSettlementRequestDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<FxSettlementDto>(NotAllowed);
+            if (!FinanceFeatures.ForeignCurrency) return Bad<FxSettlementDto>(FinanceFeatures.OnlyRial);
             if (dto == null || dto.Date == default) return Bad<FxSettlementDto>("اطلاعات ارسال‌شده کامل نیست.");
             string direction = Clean(dto.Direction);
             if (direction != "Receivable" && direction != "Payable") return Bad<FxSettlementDto>("نوع تسویه باید Receivable یا Payable باشد.");
@@ -375,6 +379,7 @@ namespace Services.NasbNiro.Finance
             if (dto == null) return Bad<LetterOfCreditDto>("اطلاعات ارسال‌شده کامل نیست.");
             string currency = Clean(dto.CurrencyCode)?.ToUpperInvariant();
             if (currency == null) return Bad<LetterOfCreditDto>("کد ارز را وارد کنید.");
+            if (!FinanceFeatures.ForeignCurrency && !FinanceFeatures.IsRial(currency)) return Bad<LetterOfCreditDto>(FinanceFeatures.OnlyRial);
             if (dto.Amount <= 0) return Bad<LetterOfCreditDto>("مبلغ اعتبار باید بیشتر از صفر باشد.");
             if (dto.MarginPercent < 0 || dto.MarginPercent > 100) return Bad<LetterOfCreditDto>("درصد سپرده باید بین ۰ و ۱۰۰ باشد.");
             if (dto.OpenDate == default || dto.ExpiryDate.Date <= dto.OpenDate.Date) return Bad<LetterOfCreditDto>("تاریخ سررسید باید بعد از تاریخ گشایش باشد.");
@@ -467,7 +472,7 @@ namespace Services.NasbNiro.Finance
                     decimal lcDiff = settled - carryBase;   // positive: paid more rials than carried = loss
                     var lines = new List<AutoLine>
                     {
-                        new AutoLine { Account = payable, Detail1 = supplier, Debit = carryBase, Description = text, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.Amount, Rate = l.Amount == 0 ? dto.Rate : R(carryBase / l.Amount) },
+                        new AutoLine { Account = payable, Detail1 = supplier, Debit = carryBase, Description = text, CurrencyCode = FinanceFeatures.IsRial(l.CurrencyCode) ? null : l.CurrencyCode, CurrencyAmount = FinanceFeatures.IsRial(l.CurrencyCode) ? (decimal?)null : l.Amount, Rate = FinanceFeatures.IsRial(l.CurrencyCode) ? (decimal?)null : (l.Amount == 0 ? dto.Rate : R(carryBase / l.Amount)) },
                     };
                     if (lcDiff != 0)
                     {

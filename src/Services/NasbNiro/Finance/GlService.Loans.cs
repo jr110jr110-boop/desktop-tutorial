@@ -94,6 +94,7 @@ namespace Services.NasbNiro.Finance
             if (dto == null || Clean(dto.BankName) == null) return Bad<FnLoanDto>("نام بانک را وارد کنید.");
             if (dto.Amount <= 0) return Bad<FnLoanDto>("مبلغ تسهیلات باید بیشتر از صفر باشد.");
             if (dto.RatePercent < 0 || dto.RatePercent > 100) return Bad<FnLoanDto>("نرخ سود باید بین ۰ و ۱۰۰ درصد باشد.");
+            if (!FinanceFeatures.ForeignCurrency && !FinanceFeatures.IsRial(dto.CurrencyCode)) return Bad<FnLoanDto>(FinanceFeatures.OnlyRial);
             if (dto.StartDate == default) return Bad<FnLoanDto>("تاریخ شروع را وارد کنید.");
             if (dto.FeeAmount < 0) return Bad<FnLoanDto>("کارمزد منفی مجاز نیست.");
             if (!Enum.IsDefined(typeof(FnFacilityType), dto.FacilityType) || !Enum.IsDefined(typeof(FnScheduleKind), dto.ScheduleKind)) return Bad<FnLoanDto>("نوع تسهیلات یا روش بازپرداخت نامعتبر است.");

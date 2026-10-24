@@ -139,6 +139,7 @@ namespace Services.NasbNiro.Finance
             if (await _uow.Set<FnBankAccount>().AnyAsync(b => b.Iban == iban && b.Id != (dto.Id ?? 0), ct)) return Bad<BankAccountDto>("این شماره شبا قبلاً ثبت شده است.");
             await FinanceSeed.EnsureAsync(_uow, ct);
             string currency = (Clean(dto.CurrencyCode) ?? "IRR").ToUpperInvariant();
+            if (!FinanceFeatures.ForeignCurrency && !FinanceFeatures.IsRial(currency)) return Bad<BankAccountDto>(FinanceFeatures.OnlyRial);
             string accountCode = currency == "IRR" ? "10102" : "10103";
             int accountId = await _uow.Set<FnAccount>().Where(a => a.Code == accountCode).Select(a => a.Id).FirstAsync(ct);
             FnBankAccount b;
@@ -537,6 +538,7 @@ namespace Services.NasbNiro.Finance
         /// <summary>A line on a foreign-currency bank account carries the amount in that currency and the rate; the rial amount is their rounded product. Rial accounts carry neither.</summary>
         private static string ForeignLineError(FnBankAccount bank, decimal amount, decimal? currencyAmount, decimal? rate, int row)
         {
+            if (!FinanceFeatures.ForeignCurrency && (currencyAmount.HasValue || rate.HasValue)) return $"ردیف {row}: " + FinanceFeatures.OnlyRial;
             if (!IsForeignBank(bank)) return currencyAmount.HasValue || rate.HasValue ? $"ردیف {row}: مبلغ ارزی و نرخ فقط برای حساب بانکی ارزی وارد می‌شود." : null;
             if (!currencyAmount.HasValue || currencyAmount.Value <= 0 || !rate.HasValue || rate.Value <= 0) return $"ردیف {row}: حساب بانکی ارزی ({bank.CurrencyCode}) است؛ مبلغ ارزی و نرخ تبدیل به ریال را وارد کنید.";
             decimal expected = R(currencyAmount.Value * rate.Value);

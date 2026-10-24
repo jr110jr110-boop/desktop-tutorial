@@ -12,6 +12,25 @@ using ViewModels.NasbNiro.Pagination;
 
 namespace Services.NasbNiro.Finance
 {
+    /// <summary>
+    /// Scope switches, read once from the configuration (Finance:MultiEntity and Finance:ForeignCurrency, both false by default). While they are off the system works in rials with one legal entity:
+    /// intercompany, a second legal entity, foreign-currency documents, FX settlement and revaluation are refused. The tables and columns stay (unused, nullable) so the features can be switched on later.
+    /// </summary>
+    public static class FinanceFeatures
+    {
+        public const string OnlyRial = "در این نسخه فقط ریال و یک شرکت فعال است.";
+        public static bool MultiEntity { get; private set; }
+        public static bool ForeignCurrency { get; private set; }
+
+        public static void Configure(Microsoft.Extensions.Configuration.IConfiguration configuration)
+        {
+            MultiEntity = string.Equals(configuration?["Finance:MultiEntity"], "true", StringComparison.OrdinalIgnoreCase);
+            ForeignCurrency = string.Equals(configuration?["Finance:ForeignCurrency"], "true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsRial(string currencyCode) => string.IsNullOrWhiteSpace(currencyCode) || string.Equals(currencyCode.Trim(), "IRR", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Which legal entity a request works on: the one asked for, else the user's default, else the main company.</summary>
     internal static class EntityScope
     {

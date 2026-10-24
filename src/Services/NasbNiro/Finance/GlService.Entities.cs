@@ -33,6 +33,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<LegalEntityDto>> SaveEntityAsync(SaveLegalEntityDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<LegalEntityDto>(NotAllowed + " (مدیر مالی)");
+            if (!FinanceFeatures.MultiEntity && (dto == null || dto.Id != FinanceSeed.MainEntityId)) return Bad<LegalEntityDto>(FinanceFeatures.OnlyRial);
             if (dto == null || Clean(dto.Name) == null) return Bad<LegalEntityDto>("نام واحد حقوقی را وارد کنید.");
             string code = Clean(dto.Code)?.ToUpperInvariant();
             string jurisdiction = Clean(dto.Jurisdiction)?.ToUpperInvariant();
@@ -95,6 +96,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<IntercompanyPairDto>> SavePairAsync(SaveIntercompanyPairDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<IntercompanyPairDto>(NotAllowed + " (مدیر مالی)");
+            if (!FinanceFeatures.MultiEntity) return Bad<IntercompanyPairDto>(FinanceFeatures.OnlyRial);
             if (dto == null) return Bad<IntercompanyPairDto>("اطلاعات ارسال‌شده کامل نیست.");
             if (dto.EntityAId == dto.EntityBId) return Bad<IntercompanyPairDto>("دو واحد حقوقی باید متفاوت باشند.");
             int found = await _uow.Set<FnLegalEntity>().CountAsync(x => x.IsActive && (x.Id == dto.EntityAId || x.Id == dto.EntityBId), ct);
@@ -143,6 +145,7 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<IntercompanyResultDto>> PostIntercompanyAsync(IntercompanyPostDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<IntercompanyResultDto>(NotAllowed);
+            if (!FinanceFeatures.MultiEntity) return Bad<IntercompanyResultDto>(FinanceFeatures.OnlyRial);
             if (dto == null || dto.Date == default) return Bad<IntercompanyResultDto>("اطلاعات ارسال‌شده کامل نیست.");
             decimal amount = R(dto.Amount);
             if (amount <= 0) return Bad<IntercompanyResultDto>("مبلغ باید بیشتر از صفر باشد.");
