@@ -3642,6 +3642,10 @@ namespace DataLayer.Migrations
                     b.Property<int>("ShiftType")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("SickLeaveDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
                     b.Property<decimal>("UnpaidLeaveDays")
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
@@ -11621,6 +11625,10 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ShiftId")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("SickLeaveDays")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -11821,6 +11829,12 @@ namespace DataLayer.Migrations
                     b.Property<int>("CreatorUserId")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
@@ -11845,6 +11859,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("Reason")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("ToDate")
                         .HasColumnType("datetime2");
@@ -12278,6 +12295,10 @@ namespace DataLayer.Migrations
                     b.Property<Guid?>("SignatureDocumentId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("SignatureFileHash")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<DateTimeOffset?>("SignedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -12386,6 +12407,10 @@ namespace DataLayer.Migrations
 
                     b.Property<Guid>("DocumentId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileHash")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("FileName")
                         .HasMaxLength(300)
