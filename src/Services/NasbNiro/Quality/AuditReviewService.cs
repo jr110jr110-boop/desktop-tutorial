@@ -386,7 +386,7 @@ namespace Services.NasbNiro.Quality
             if (d == null) { d = new ManagementReviewDecision(); r.Decisions.Add(d); }
             d.Text = Clean(dto.Text); d.ResponsibleUserId = dto.ResponsibleUserId; d.DueDate = dto.DueDate?.Date;
             if (dto.CreateCapa && !d.CapaId.HasValue && d.Capa == null)
-                d.Capa = await _capa.DraftAsync(CapaSource.ManagementReview, r.Id, $"تصمیم بازنگری مدیریت {global::Services.NasbNiro.Finance.FiscalCalendars.Text(r.ReviewDate)}: {d.Text}", true, cancellationToken);
+                d.Capa = await _capa.DraftAsync(CapaSource.ManagementReview, r.Id, $"تصمیم بازنگری مدیریت {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(r.ReviewDate))}: {d.Text}", true, cancellationToken);
             r.ModifyDate = DateTimeOffset.Now; r.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(await BuildReviewAsync(r, cancellationToken));

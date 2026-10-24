@@ -352,7 +352,7 @@ namespace Services.NasbNiro.ProjectControl
             }
             PcContractTerms t = await PcContext.TermsAsync(_uow, c.Id, false, cancellationToken);
             dto.UnitsNoticeDraft = t?.ProjectCode == null ? null :
-                $"فرم FO-PL-001 (پیش‌نویس سیستم): قرارداد {c.Code} - {c.Title} با کد پروژه {t.ProjectCode} ابلاغ شد. واحدهای مهندسی، تولید، کنترل کیفیت، بازرگانی و انبار برای شروع برنامه‌ریزی مطلع شوند. تاریخ: {global::Services.NasbNiro.Finance.FiscalCalendars.Text(DateTime.Today)}";
+                $"فرم FO-PL-001 (پیش‌نویس سیستم): قرارداد {c.Code} - {c.Title} با کد پروژه {t.ProjectCode} ابلاغ شد. واحدهای مهندسی، تولید، کنترل کیفیت، بازرگانی و انبار برای شروع برنامه‌ریزی مطلع شوند. تاریخ: {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(DateTime.Today))}";
             return dto;
         }
 

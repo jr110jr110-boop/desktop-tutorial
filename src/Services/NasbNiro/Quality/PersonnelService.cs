@@ -481,7 +481,7 @@ namespace Services.NasbNiro.Quality
             var (months, warn) = await ContinuityAsync(cancellationToken);
             List<UseKey> uses = await LastUsesAsync(date, cancellationToken);
             QualificationState state = QualificationRules.State(q, date, LastUse(uses, q), months, warn);
-            if (!QualificationRules.Usable(state)) return Bad<WeldLogDto>($"گواهی جوشکار در تاریخ {global::Services.NasbNiro.Finance.FiscalCalendars.Text(date)} قابل استفاده نیست: {QualificationRules.StateText(state)}.");
+            if (!QualificationRules.Usable(state)) return Bad<WeldLogDto>($"گواهی جوشکار در تاریخ {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(date))} قابل استفاده نیست: {QualificationRules.StateText(state)}.");
             if (dto.PreheatC.HasValue && wps.PreheatMinC.HasValue && dto.PreheatC.Value < wps.PreheatMinC.Value) return Bad<WeldLogDto>($"دمای پیش‌گرم ({dto.PreheatC}) کمتر از حداقل WPS ({wps.PreheatMinC}) است.");
             if (dto.InterpassC.HasValue && wps.InterpassMaxC.HasValue && dto.InterpassC.Value > wps.InterpassMaxC.Value) return Bad<WeldLogDto>($"دمای بین‌پاسی ({dto.InterpassC}) بیشتر از حداکثر WPS ({wps.InterpassMaxC}) است.");
             List<int> reportIds = (dto.ReportIds ?? new List<int>()).Distinct().ToList();

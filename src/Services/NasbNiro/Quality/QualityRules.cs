@@ -24,7 +24,7 @@ namespace Services.NasbNiro.Quality
                     return $"تجهیز اندازه‌گیری {e.Code} از رده خارج است{(string.IsNullOrWhiteSpace(e.OutOfServiceReason) ? string.Empty : " (" + e.OutOfServiceReason + ")")}.";
                 case EquipmentStatus.Overdue:
                     return e.NextDue.HasValue
-                        ? $"کالیبراسیون تجهیز {e.Code} در {global::Services.NasbNiro.Finance.FiscalCalendars.Text(e.NextDue.Value)} منقضی شده است؛ استفاده از آن مجاز نیست."
+                        ? $"کالیبراسیون تجهیز {e.Code} در {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(e.NextDue.Value))} منقضی شده است؛ استفاده از آن مجاز نیست."
                         : $"تجهیز {e.Code} هنوز کالیبره نشده است؛ استفاده از آن مجاز نیست.";
                 default:
                     return null;

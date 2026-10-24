@@ -168,7 +168,7 @@ namespace Services.NasbNiro.Quality
                     DateTime? deadline = a.NotificationSentAt?.Date.AddDays(itp.NoticeDays);
                     if (deadline.HasValue && deadline.Value <= today) waiveParties.Add(party);
                     else if (!a.NotificationSentAt.HasValue) blockers.Add($"نقطه شاهد (W): اعلام زمان آزمون به {PartyName(party)} ثبت نشده است.");
-                    else blockers.Add($"نقطه شاهد (W): مهلت اعلام {PartyName(party)} تا {global::Services.NasbNiro.Finance.FiscalCalendars.Text(deadline.Value)} است.");
+                    else blockers.Add($"نقطه شاهد (W): مهلت اعلام {PartyName(party)} تا {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(deadline.Value))} است.");
                 }
             }
             return blockers;
