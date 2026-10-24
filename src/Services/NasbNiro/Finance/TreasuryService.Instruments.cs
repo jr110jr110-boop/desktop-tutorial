@@ -32,7 +32,7 @@ namespace Services.NasbNiro.Finance
                 {
                     RowNumber = l.RowNumber, Instrument = l.Instrument, Amount = l.Amount, BankAccountId = l.BankAccountId, CashBoxId = l.CashBoxId, Reference = l.Reference,
                     ReceivedChequeId = l.ReceivedChequeId, ChequeSayadId = l.ChequeSayadId, ChequeSerial = l.ChequeSerial, ChequeBank = l.ChequeBank, ChequeBranch = l.ChequeBranch,
-                    ChequeHolder = l.ChequeHolder, ChequeDueDate = l.ChequeDueDate,
+                    ChequeHolder = l.ChequeHolder, ChequeDueDate = l.ChequeDueDate, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate,
                 }).ToList(),
                 Allocations = r.Allocations.Select(a => new ReceiptAllocationDto { InvoiceId = a.InvoiceId, InvoiceNumber = a.Invoice?.Number, Amount = a.Amount }).ToList(),
             }).ToList();
@@ -104,6 +104,9 @@ namespace Services.NasbNiro.Finance
                     {
                         if (!l.BankAccountId.HasValue || !banks.TryGetValue(l.BankAccountId.Value, out FnBankAccount bank) || !bank.IsActive) return Bad<ReceiptDto>($"ردیف {row}: حساب بانکی پیدا نشد یا غیرفعال است.");
                         line.BankAccountId = bank.Id;
+                        string fxError = ForeignLineError(bank, amount, l.CurrencyAmount, l.Rate, row);
+                        if (fxError != null) return Bad<ReceiptDto>(fxError);
+                        if (IsForeignBank(bank)) { line.CurrencyAmount = l.CurrencyAmount; line.Rate = l.Rate; }
                         break;
                     }
                     case FnInstrument.Cheque:
@@ -256,8 +259,12 @@ namespace Services.NasbNiro.Finance
                     case FnInstrument.BankTransfer:
                     case FnInstrument.Card:
                         if (!banks.TryGetValue(l.BankAccountId.Value, out FnBankAccount bank) || !bank.IsActive) return "حساب بانکی یکی از ردیف‌ها غیرفعال شده است.";
-                        eventLines.Add(BankLine(bank, l.Amount, 0, r.Number + (l.Reference != null ? " - " + l.Reference : "")));
+                    {
+                        AccountingEventLine inLine = BankLine(bank, l.Amount, 0, r.Number + (l.Reference != null ? " - " + l.Reference : ""));
+                        if (IsForeignBank(bank) && l.CurrencyAmount.HasValue) { inLine.CurrencyCode = bank.CurrencyCode; inLine.CurrencyAmount = l.CurrencyAmount; inLine.Rate = l.Rate; }
+                        eventLines.Add(inLine);
                         break;
+                    }
                     case FnInstrument.Cheque:
                     {
                         if (await _uow.Set<FnReceivedCheque>().AnyAsync(c => c.SayadId == l.ChequeSayadId, ct)) return $"چک {l.ChequeSayadId} قبلاً ثبت شده است.";

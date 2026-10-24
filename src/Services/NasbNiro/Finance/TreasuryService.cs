@@ -274,7 +274,7 @@ namespace Services.NasbNiro.Finance
                 Lines = p.Lines.OrderBy(l => l.RowNumber).Select(l => new PaymentLineDto
                 {
                     RowNumber = l.RowNumber, Instrument = l.Instrument, Amount = l.Amount, BankAccountId = l.BankAccountId, CashBoxId = l.CashBoxId, Reference = l.Reference,
-                    PayeeIban = l.PayeeIban, IssuedChequeId = l.IssuedChequeId, ChequeSerial = l.IssuedChequeId.HasValue && serials.TryGetValue(l.IssuedChequeId.Value, out long sr) ? sr : (long?)null,
+                    PayeeIban = l.PayeeIban, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, IssuedChequeId = l.IssuedChequeId, ChequeSerial = l.IssuedChequeId.HasValue && serials.TryGetValue(l.IssuedChequeId.Value, out long sr) ? sr : (long?)null,
                     ChequeDueDate = l.ChequeDueDate, ChequeSayadId = l.ChequeSayadId,
                 }).ToList(),
                 Requests = p.Requests.Select(k => new PaymentRequestLinkDto
@@ -412,6 +412,9 @@ namespace Services.NasbNiro.Finance
                     {
                         if (!l.BankAccountId.HasValue || !banks.TryGetValue(l.BankAccountId.Value, out FnBankAccount bank) || !bank.IsActive) return Bad<PaymentDto>($"ردیف {row}: حساب بانکی پیدا نشد یا غیرفعال است.");
                         line.BankAccountId = bank.Id;
+                        string fxError = ForeignLineError(bank, amount, l.CurrencyAmount, l.Rate, row);
+                        if (fxError != null) return Bad<PaymentDto>(fxError);
+                        if (IsForeignBank(bank)) { line.CurrencyAmount = l.CurrencyAmount; line.Rate = l.Rate; }
                         if (l.Instrument == FnInstrument.BankTransfer && dto.Purpose == FnPaymentPurpose.Supplier)
                         {
                             string iban = NormalizeIban(l.PayeeIban) ?? registeredIban;
@@ -425,6 +428,7 @@ namespace Services.NasbNiro.Finance
                     {
                         if (dto.Purpose != FnPaymentPurpose.Supplier) return Bad<PaymentDto>($"ردیف {row}: این نوع پرداخت (تنخواه یا حقوق) با چک انجام نمی‌شود.");
                         if (!l.BankAccountId.HasValue || !banks.TryGetValue(l.BankAccountId.Value, out FnBankAccount bank) || !bank.IsActive) return Bad<PaymentDto>($"ردیف {row}: حساب بانکی چک پیدا نشد یا غیرفعال است.");
+                        if (IsForeignBank(bank)) return Bad<PaymentDto>($"ردیف {row}: چک روی حساب بانکی ارزی پشتیبانی نمی‌شود؛ انتقال بانکی را به کار ببرید.");
                         IQueryable<FnIssuedCheque> leaves = _uow.Set<FnIssuedCheque>().Include(x => x.ChequeBook);
                         FnIssuedCheque leaf = l.IssuedChequeId.HasValue
                             ? await leaves.FirstOrDefaultAsync(x => x.Id == l.IssuedChequeId.Value, ct)
@@ -527,6 +531,38 @@ namespace Services.NasbNiro.Finance
         }
 
         // ---- shared posting pieces ------------------------------------------------------------------------
+
+        private static bool IsForeignBank(FnBankAccount b) => b.CurrencyCode != null && !string.Equals(b.CurrencyCode, "IRR", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>A line on a foreign-currency bank account carries the amount in that currency and the rate; the rial amount is their rounded product. Rial accounts carry neither.</summary>
+        private static string ForeignLineError(FnBankAccount bank, decimal amount, decimal? currencyAmount, decimal? rate, int row)
+        {
+            if (!IsForeignBank(bank)) return currencyAmount.HasValue || rate.HasValue ? $"ردیف {row}: مبلغ ارزی و نرخ فقط برای حساب بانکی ارزی وارد می‌شود." : null;
+            if (!currencyAmount.HasValue || currencyAmount.Value <= 0 || !rate.HasValue || rate.Value <= 0) return $"ردیف {row}: حساب بانکی ارزی ({bank.CurrencyCode}) است؛ مبلغ ارزی و نرخ تبدیل به ریال را وارد کنید.";
+            decimal expected = R(currencyAmount.Value * rate.Value);
+            if (expected != amount) return $"ردیف {row}: مبلغ ریالی باید برابر مبلغ ارزی ضرب در نرخ ({expected:0}) باشد.";
+            return null;
+        }
+
+        /// <summary>Money leaving a foreign-currency account: the bank leaves the books at its average carrying rate (the currency-tagged lines of that account), the debit side is at the payment rate, and the difference is the realised exchange gain or loss, computed here and not by hand.</summary>
+        private async Task<List<AccountingEventLine>> BankOutLinesAsync(FnBankAccount b, FnPaymentLine l, string text, CancellationToken ct)
+        {
+            var result = new List<AccountingEventLine>();
+            if (!IsForeignBank(b) || !l.CurrencyAmount.HasValue) { result.Add(BankLine(b, 0, l.Amount, text)); return result; }
+            decimal outCur = l.CurrencyAmount.Value;
+            decimal carry = l.Amount;
+            var tagged = await _uow.Set<FnVoucherLine>().AsNoTracking()
+                .Where(x => x.Detail1.Type == FnDetailType.Bank && x.Detail1.LinkedEntityId == b.Id && x.CurrencyCode == b.CurrencyCode && x.CurrencyAmount != null && x.Voucher.Status != FnVoucherStatus.Draft)
+                .GroupBy(x => 1).Select(g => new { Base = g.Sum(x => x.Debit - x.Credit), Cur = g.Sum(x => x.Debit > 0 ? x.CurrencyAmount.Value : -x.CurrencyAmount.Value) }).FirstOrDefaultAsync(ct);
+            if (tagged != null && tagged.Cur >= outCur && tagged.Cur > 0) carry = R(tagged.Base * outCur / tagged.Cur);
+            AccountingEventLine bank = BankLine(b, 0, carry, text);
+            bank.CurrencyCode = b.CurrencyCode; bank.CurrencyAmount = outCur; bank.Rate = Math.Round(carry / outCur, 6);
+            result.Add(bank);
+            decimal diff = l.Amount - carry;   // paid at the payment rate, left the books at the carrying rate: positive = gain
+            if (diff > 0) result.Add(new AccountingEventLine { AccountRole = AccountRoles.FxGain, Credit = diff, Description = "سود تسعیر ارز محقق‌شده " + text });
+            else if (diff < 0) result.Add(new AccountingEventLine { AccountRole = AccountRoles.FxLoss, Debit = -diff, Description = "زیان تسعیر ارز محقق‌شده " + text });
+            return result;
+        }
 
         private static string BankRole(FnBankAccount b) => b.CurrencyCode == null || b.CurrencyCode == "IRR" ? AccountRoles.Bank : AccountRoles.BankForeign;
 
@@ -638,7 +674,7 @@ namespace Services.NasbNiro.Finance
                 {
                     case FnInstrument.Cash: eventLines.Add(CashLine(l.CashBoxId.Value, 0, l.Amount, p.Number)); break;
                     case FnInstrument.BankTransfer:
-                    case FnInstrument.Card: eventLines.Add(BankLine(banks[l.BankAccountId.Value], 0, l.Amount, p.Number + (l.Reference != null ? " - " + l.Reference : ""))); break;
+                    case FnInstrument.Card: eventLines.AddRange(await BankOutLinesAsync(banks[l.BankAccountId.Value], l, p.Number + (l.Reference != null ? " - " + l.Reference : ""), ct)); break;
                     case FnInstrument.Cheque:
                     {
                         FnIssuedCheque leaf = await _uow.Set<FnIssuedCheque>().FirstOrDefaultAsync(c => c.Id == l.IssuedChequeId.Value, ct);

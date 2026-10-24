@@ -636,6 +636,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public long? ChequeSerial { get; set; }
         public DateTime? ChequeDueDate { get; set; }
         public string ChequeSayadId { get; set; }
+        /// <summary>A line on a foreign-currency bank account: the amount in that currency and the rate to rials (Amount must equal the rounded product).</summary>
+        public decimal? CurrencyAmount { get; set; }
+        public decimal? Rate { get; set; }
     }
 
     public class PaymentRequestLinkDto
@@ -727,6 +730,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? ReceivedChequeId { get; set; }
         public string ChequeSayadId { get; set; }
         public string ChequeSerial { get; set; }
+        /// <summary>A line on a foreign-currency bank account: the amount in that currency and the rate to rials (Amount must equal the rounded product).</summary>
+        public decimal? CurrencyAmount { get; set; }
+        public decimal? Rate { get; set; }
         public string ChequeBank { get; set; }
         public string ChequeBranch { get; set; }
         public string ChequeHolder { get; set; }

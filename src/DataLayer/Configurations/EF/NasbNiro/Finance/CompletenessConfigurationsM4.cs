@@ -8,6 +8,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
     {
         public static void AddCompletenessM4Configurations(this ModelBuilder builder)
         {
+            builder.Entity<FnPaymentLine>(b => { b.Property(x => x.CurrencyAmount).HasPrecision(18, 4); b.Property(x => x.Rate).HasPrecision(18, 6); });
+            builder.Entity<FnReceiptLine>(b => { b.Property(x => x.CurrencyAmount).HasPrecision(18, 4); b.Property(x => x.Rate).HasPrecision(18, 6); });
             builder.Entity<FnBankGuarantee>(b =>
             {
                 b.ToTable("FnBankGuarantees");

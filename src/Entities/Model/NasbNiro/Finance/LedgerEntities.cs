@@ -347,6 +347,9 @@ namespace Entities.Model.NasbNiro.Finance
         public FnReceivedCheque ReceivedCheque { get; set; }
         public string ChequeSayadId { get; set; }
         public string ChequeSerial { get; set; }
+        /// <summary>Line on a foreign-currency bank account: the amount in that currency and the rate to rials at the receipt date (Amount = round(CurrencyAmount x Rate)).</summary>
+        public decimal? CurrencyAmount { get; set; }
+        public decimal? Rate { get; set; }
         public string ChequeBank { get; set; }
         public string ChequeBranch { get; set; }
         public string ChequeHolder { get; set; }
@@ -416,6 +419,9 @@ namespace Entities.Model.NasbNiro.Finance
         /// <summary>Cheque lines: the due date and Sayad id written on the leaf when the payment is posted.</summary>
         public DateTime? ChequeDueDate { get; set; }
         public string ChequeSayadId { get; set; }
+        /// <summary>Line on a foreign-currency bank account: the amount in that currency and the rate to rials at the payment date (Amount = round(CurrencyAmount x Rate)).</summary>
+        public decimal? CurrencyAmount { get; set; }
+        public decimal? Rate { get; set; }
     }
 
     public class FnPaymentRequestLink

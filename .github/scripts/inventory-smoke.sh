@@ -2414,8 +2414,10 @@ as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":1,\"bankAccountId\":
 as "$TR_TOKEN" POST $FLN/action "{\"id\":$LN1,\"action\":\"disburse\",\"date\":\"2025-06-22T00:00:00\",\"bankAccountId\":$BA1}"; check "f3 loan: disbursement posts a voucher and activates the loan" '.success and .data.status == 1 and .data.disbursementVoucherId > 0 and .data.outstandingPrincipal == 1200000000'
 as "$TR_TOKEN" POST $FLN/action "{\"id\":$LN1,\"action\":\"disburse\",\"date\":\"2025-06-22T00:00:00\",\"bankAccountId\":$BA1}"; no "f3 loan: no second disbursement"
 as "$FM_TOKEN" GET $FLN/utilisation; check "f3 loan: the limit shows 1,200,000,000 used and 800,000,000 available" '.success and ([.data.facilities[]|select(.id == '$LIM')][0]|(.utilised == 1200000000 and .available == 800000000))'
-as "$FIN_TOKEN" POST $FLN/accrual/run/$P4; check "f3 loan: accrual for Tir drafts one row (9 days of the first instalment period)" '.success and (.data|length) == 1 and .data[0].amount > 0 and .data[0].status == 0'
-AC1=$(val '.data[0].id')
+as "$FIN_TOKEN" POST $FLN/accrual/run/$P4; check "f3 loan: accrual for Tir drafts one row" '.success and (.data|length) == 1 and .data[0].status == 0'
+AC1=$(val '.data[0].id'); LNACC=$(val '.data[0].amount')
+as "$TR_TOKEN" GET $FLN/$LN1; LNI1=$(val '.data.installments[0].interest')
+[ "$LNACC" = "$LNI1" ] && [ "$LNI1" != "null" ] && [ "${LNI1%.*}" -gt 0 ] && ok "r2 f22: the Tir accrual equals the whole first-instalment interest ($LNI1): the period covers the 31 days from disbursement to the day before the first due date" || bad "r2 f22: the Tir accrual ($LNACC) equals the first-instalment interest ($LNI1)"
 as "$FIN_TOKEN" POST $FLN/accrual/$AC1/approve; no "f3 loan: the preparer cannot approve the accrual"
 as "$FIN2_TOKEN" POST $FLN/accrual/$AC1/approve; check "f3 loan: the second person approves the accrual; a voucher is posted" '.success and .data.status == 1 and .data.voucherId > 0'
 as "$FIN_TOKEN" POST $FLN/accrual/run/$P4; check "f3 loan: the accrual run is idempotent" '.success and (.data|length) == 0'
@@ -2430,6 +2432,10 @@ as "$AUD_TOKEN" GET $FLN; check "f3 loan: the auditor can read loans" '.success 
 # --- section 7: tax books
 as "$FM_TOKEN" GET "$FTX/vat-season?year=1405&season=3"; VATT=$(mktemp); cp "$B" "$VATT"
 as "$FM_TOKEN" GET "$FTX/vat-season/detail?year=1405&season=3"; check "f3 tax: the document list adds up to the season report" '.success and (.data.salesVat == '$(jq .data.salesVat $VATT)') and (.data.purchasesVat == '$(jq .data.purchasesVat $VATT)') and (.data.vatPayable == '$(jq .data.vatPayable $VATT)') and ([.data.rows[]|select(.side == "Sales")|.vatAmount]|add // 0) == .data.salesVat and ([.data.rows[]|select(.side == "Purchases")|.vatAmount]|add // 0) == .data.purchasesVat'
+for SN in 1 2 3; do as "$FM_TOKEN" GET "$FTX/vat-season/detail?year=1405&season=$SN"; cp "$B" "$VATT.s$SN"; done
+check_carry() { jq -e -s 'def mx(x): if x > 0 then x else 0 end; .[0].data as $a | .[1].data as $b | .[2].data as $c
+  | ($c.vatPayable == $c.salesVat - $c.purchasesVat) and ($b.carryIn == mx(-($a.vatPayable - $a.carryIn))) and ($c.carryIn == mx(-($b.vatPayable - $b.carryIn))) and ($c.carryOut == mx(-($c.vatPayable - $c.carryIn))) and ($c.netPayable == mx($c.vatPayable - $c.carryIn))' "$VATT.s1" "$VATT.s2" "$VATT.s3" >/dev/null; }
+if check_carry; then ok "r2 f22: VAT carry chain is exact (payable = sales - purchases VAT; each season's carry-in = the previous season's credit position; carry-out and net payable follow)"; else bad "r2 f22: VAT carry chain is exact"; fi
 as "$FM_TOKEN" GET "$FTX/vat-season/detail?year=1405&season=3"; check "f3 tax: carry-forward arithmetic (net payable - carry out = payable - carry in)" '.success and (.data.netPayable - .data.carryOut) == (.data.vatPayable - .data.carryIn)'
 as "$FM_TOKEN" GET "$FTX/vat-season/detail?year=1405&season=5"; no "f3 tax: season out of range"
 as "$AUD_TOKEN" GET "$FTX/vat-season/detail?year=1405&season=3"; check "f3 tax: the auditor can read the document list" '.success'
@@ -2447,6 +2453,7 @@ as "$FM_TOKEN" GET "$FTX/taxable-profit?FiscalYearId=$Y3&RatePercent=25"; check 
 
 # --- section 8: statements on fiscal year 1403 (366 days, a leap year)
 as "$FM_TOKEN" GET "$FST/cash-flow?FiscalYearId=$Y3"; check "f3 stmt: cash flow ties to the cash accounts (opening 0, closing 950,000,000)" '.success and .data.openingCash == 0 and .data.closingCash == 950000000 and .data.ties == true'
+as "$FM_TOKEN" GET "$FST/cash-flow?FiscalYearId=$Y3"; check "r2 f22: the catch-all Other line is absent (every account is classified), and the lines add up to the three sections exactly" '.success and ([.data.lines[]|select(.key == "Other")]|length) == 0 and (([.data.lines[]|select(.section == "Investing")|.amount]|add // 0) == -300000000) and (([.data.lines[]|select(.section == "Financing")|.amount]|add // 0) == 1200000000)'
 as "$FM_TOKEN" GET "$FST/cash-flow?FiscalYearId=$Y3"; check "f3 stmt: operating 50M, investing -300M, financing 1,200M, net profit 170M" '.success and .data.operating == 50000000 and .data.investing == -300000000 and .data.financing == 1200000000 and .data.netProfit == 170000000 and .data.netChange == 950000000'
 as "$FM_TOKEN" GET "$FST/equity-changes?FiscalYearId=$Y3"; check "f3 stmt: equity 1,170,000,000 and ties to assets minus liabilities" '.success and .data.closingEquity == 1170000000 and .data.balanceSheetEquity == 1170000000 and .data.ties == true and .data.netProfit == 170000000'
 as "$FM_TOKEN" GET "$FST/ratios?FiscalYearId=$Y3"; check "f3 stmt: ratios current 3.5714, debt 0.2303, gross margin 0.625, net margin 0.425" '.success and ([.data.ratios[]|select(.key == "CurrentRatio")][0].value) == 3.5714 and ([.data.ratios[]|select(.key == "DebtRatio")][0].value) == 0.2303 and ([.data.ratios[]|select(.key == "GrossMargin")][0].value) == 0.625 and ([.data.ratios[]|select(.key == "NetMargin")][0].value) == 0.425'
@@ -2668,7 +2675,7 @@ as "$CEO_TOKEN" GET "$FPS/bonus-runs"; check "f3b payroll: the CEO may read bonu
 as "$PAYR_TOKEN" POST $FP/employees "$(EBJ T902 آزمون پایان 1234567891 2022-03-21T00:00:00 600000)"; PE3=$(val .data.id)
 fv "{\"date\":\"2026-09-01T00:00:00\",\"description\":\"ذخیره سنوات آزمون\",\"lines\":[{\"accountCode\":\"80103\",\"debit\":1000000000},{\"accountCode\":\"40201\",\"credit\":1000000000}]}"
 # the leave provision (30403) on the termination date, read from the ledger as of 2026-09-22 (not the current balance); it is below the leave pay of 6,000,000, so only the covered part is drawn
-as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$FYC&Level=2&IncludeDraft=false&To=2026-09-22"; LVB=$(jq -r '([.data.rows[]|select(.code == "30403")][0] | ((.closingCredit // 0) - (.closingDebit // 0))) // 0 | round' "$B"); [ "${LVB:-0}" -lt 0 ] && LVB=0
+as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$FYC&Level=2&IncludeDraft=true&To=2026-09-22"; LVB=$(jq -r '([.data.rows[]|select(.code == "30403")][0] | ((.closingCredit // 0) - (.closingDebit // 0))) // 0 | round' "$B"); [ "${LVB:-0}" -lt 0 ] && LVB=0
 LVEXP=$(( ${LVB:-0} < 6000000 ? ${LVB:-0} : 6000000 ))
 [ "$LVB" -lt 6000000 ] && ok "f3b termination: the leave provision on the termination date ($LVB) is below the leave pay, so the partial-cover path is tested" || bad "f3b termination: the leave provision on the termination date ($LVB) is below the leave pay of 6,000,000"
 as "$PAYR_TOKEN" POST $FPS/terminations "{\"employeeId\":$PE3,\"terminationDate\":\"2026-09-22T00:00:00\",\"unusedLeaveDays\":10,\"noticeDays\":0}"
@@ -2689,6 +2696,85 @@ as "$FM_TOKEN" GET "$FCM/comparative?kind=IncomeStatement&fiscalYearId=$FYC&incl
 as "$FM_TOKEN" GET "$FCM/comparative?kind=Other&fiscalYearId=$FYC"; no "f3b comparative: an unknown statement kind is refused"
 as "$FM_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"; check "f3b notes: the schedules add up (payables, inventory by group) and the loans are split into current and long-term" '.success and .data.payablesTotal == ([.data.payables[].total]|add // 0) and .data.inventoryTotal == ([.data.inventory[].balance]|add // 0) and ([.data.loans[]|select(.outstanding != (.currentPortion + .longTerm))]|length) == 0 and (.data.receivablesAgeing != null)'
 as "$AUD_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"; check "f3b notes: the auditor can read the notes" '.success'
+TOKEN=$ADMIN_TOKEN
+
+# =============================================================================================== R2 finding 7: currency on treasury lines, realised difference computed automatically
+as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک ارزی - آزمون","bankName":"ملت","accountNumber":"100324200007","iban":"IR590170000000100324200007","currencyCode":"USD"}'; check "r2 f7: a USD bank account is saved" '.success and .data.currencyCode == "USD"'
+BUSD=$(val .data.id)
+as "$TR_TOKEN" POST $FT/petty-cash "{\"holderUserId\":$ADMINID,\"holderTitle\":\"تنخواه ارزی آزمون\",\"ceiling\":50000000}"; PC2=$(val .data.id)
+FXR="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$HC,\"description\":\"دریافت ارزی\",\"lines\":[{\"instrument\":2,\"amount\":65000000,\"bankAccountId\":$BUSD,\"reference\":\"USD-IN\",\"currencyAmount\":100,\"rate\":650000}]}"
+as "$TR_TOKEN" POST $FT/receipts "$(jq -c 'del(.lines[0].currencyAmount, .lines[0].rate)' <<< "$FXR")"; nomsg "r2 f7: a receipt on a USD account without the currency amount and rate is refused" "ارزی"
+as "$TR_TOKEN" POST $FT/receipts "$(jq -c '.lines[0].amount = 64999999' <<< "$FXR")"; nomsg "r2 f7: the rial amount must equal the currency amount times the rate" "ضرب در نرخ"
+as "$TR_TOKEN" POST $FT/receipts "{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$HC,\"lines\":[{\"instrument\":2,\"amount\":65000000,\"bankAccountId\":$BA1,\"currencyAmount\":100,\"rate\":650000}]}"; nomsg "r2 f7: a currency amount on a rial account is refused" "فقط برای حساب بانکی ارزی"
+as "$FM_TOKEN" POST $FG/post-events
+FX_B0=$(cb 10103); FX_G0=$(cb 60303); FX_L0=$(cb 80302); FX_P0=$(cb 10104)
+as "$TR_TOKEN" POST $FT/receipts "$FXR"; check "r2 f7: the receipt of 100 USD at 650,000 is drafted" '.success and .data.totalAmount == 65000000 and .data.lines[0].currencyAmount == 100 and .data.lines[0].rate == 650000'
+FXRC=$(val .data.id); FXRN=$(val .data.number)
+as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$FXRC,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$FXRC,\"action\":\"post\"}"; check "r2 f7: the USD receipt is posted" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FG/post-events
+[ "$(cb 10103)" = "$((FX_B0 + 65000000))" ] && ok "r2 f7: the foreign bank account (10103) is debited exactly 65,000,000" || bad "r2 f7: the foreign bank account is debited 65,000,000 (got $(( $(cb 10103) - FX_B0 )))"
+as "$FM_TOKEN" GET "$FG/vouchers?FiscalYearId=$FYC&PageSize=0"; FXV=$(jq -r '[.data.data[]|select(.sourceNumber == "'$FXRN'")]|max_by(.id)|.id' "$B")
+as "$FM_TOKEN" GET "$FG/vouchers/$FXV"; check "r2 f7: the voucher line of the bank carries USD 100 at the rate 650,000" '.success and ([.data.lines[]|select(.accountCode == "10103" and .currencyCode == "USD" and .currencyAmount == 100 and .rate == 650000 and .debit == 65000000)]|length) == 1'
+PUSD="{\"date\":\"${TODAY}T00:00:00\",\"purpose\":2,\"pettyCashId\":$PC2,\"topUpAmount\":7000000,\"lines\":[{\"instrument\":2,\"amount\":7000000,\"bankAccountId\":$BUSD,\"reference\":\"USD-OUT\",\"currencyAmount\":10,\"rate\":700000}]}"
+as "$TR_TOKEN" POST $FT/payments "$(jq -c '.lines[0].rate = 690000' <<< "$PUSD")"; nomsg "r2 f7: a payment whose rial amount is not the currency amount times the rate is refused" "ضرب در نرخ"
+as "$TR_TOKEN" POST $FT/payments "$PUSD"; check "r2 f7: the payment of 10 USD at the payment rate 700,000 (7,000,000) is drafted" '.success and .data.netAmount == 7000000 and .data.lines[0].currencyAmount == 10'
+FXP=$(val .data.id)
+as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$FXP,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$FXP,\"action\":\"post\"}"; check "r2 f7: the USD payment is posted" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FG/post-events
+# the 10 USD left the books at the average carrying rate 650,000 (6,500,000); paid at 700,000 (7,000,000): a realised gain of exactly 500,000
+[ "$(cb 10103)" = "$((FX_B0 + 65000000 - 6500000))" ] && ok "r2 f7: the bank leaves at the carrying rate: 10103 falls exactly 6,500,000" || bad "r2 f7: 10103 falls 6,500,000 (got $(( FX_B0 + 65000000 - $(cb 10103) )))"
+[ "$(cb 60303)" = "$((FX_G0 - 500000))" ] && [ "$(cb 80302)" = "$FX_L0" ] && ok "r2 f7: the realised exchange gain of exactly 500,000 is booked automatically (60303 credit +500,000, no loss)" || bad "r2 f7: realised gain 500,000 (gain account moved $(( FX_G0 - $(cb 60303) )), loss account moved $(( $(cb 80302) - FX_L0 )))"
+[ "$(cb 10104)" = "$((FX_P0 + 7000000))" ] && ok "r2 f7: the petty-cash fund is charged the full 7,000,000" || bad "r2 f7: the petty-cash fund is charged 7,000,000"
+as "$FM_TOKEN" GET "$FG/reports/reconciliation"; check "r2 f7: ledgers still agree with the sub-ledgers after the foreign-currency documents" '.success and .data.clean == true'
+TOKEN=$ADMIN_TOKEN
+
+# --- R2 finding 7 (loans): a 1,000 USD loan at 600,000 posts rials with currency lines; an instalment of 100 USD at 650,000 leaves the books at the carrying rate and the realised loss is exact
+TOKEN=$ADMIN_TOKEN
+LNROWS=$(jq -nc '[range(1;11) | {dueDate: ((("2026-10-01T00:00:00Z"|fromdateiso8601) + (. * 2592000)) | todateiso8601 | sub("Z$";"")), principal: 100, interest: 0}]')
+as "$TR_TOKEN" POST $FLN "$(jq -nc --argjson rows "$LNROWS" '{bankName:"بانک ارزی آزمون",amount:1000,currencyCode:"USD",startDate:"2026-10-01T00:00:00",ratePercent:0,scheduleKind:3,installmentCount:10,customRows:$rows}')"; check "r2 f7: a USD loan of 1,000 with ten instalments of 100 USD is saved" '.success and .data.status == 0 and (.data.installments|length) == 10 and .data.currencyCode == "USD"'
+LNU=$(val .data.id)
+as "$TR_TOKEN" POST $FLN/action "{\"id\":$LNU,\"action\":\"disburse\",\"date\":\"2026-10-01T00:00:00\",\"bankAccountId\":$BA1}"; nomsg "r2 f7: disbursing a USD loan without the rate is refused" "نرخ"
+as "$FM_TOKEN" POST $FG/post-events
+LU_L0=$(cb 30501); LU_B0=$(cb 10102); LU_X0=$(cb 80302); LU_G0=$(cb 60303)
+as "$TR_TOKEN" POST $FLN/action "{\"id\":$LNU,\"action\":\"disburse\",\"date\":\"2026-10-01T00:00:00\",\"bankAccountId\":$BA1,\"rate\":600000}"; check "r2 f7: the USD loan is disbursed" '.success and .data.status == 1'
+[ "$(cb 30501)" = "$((LU_L0 - 600000000))" ] && [ "$(cb 10102)" = "$((LU_B0 + 600000000))" ] && ok "r2 f7: 1,000 USD at 600,000 posts 600,000,000 rials (liability credited, bank debited), not 1,000" || bad "r2 f7: the USD loan posts 600,000,000 rials (liability moved $(( LU_L0 - $(cb 30501) )), bank moved $(( $(cb 10102) - LU_B0 )))"
+as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LNU,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2026-10-24T00:00:00\"}"; nomsg "r2 f7: paying a USD instalment without the rate is refused" "نرخ"
+as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LNU,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2026-10-24T00:00:00\",\"rate\":650000}"; check "r2 f7: the instalment of 100 USD at 650,000 is paid" '.success'
+[ "$(cb 30501)" = "$((LU_L0 - 600000000 + 60000000))" ] && ok "r2 f7: the liability falls exactly 60,000,000 (100 of 1,000 USD at the carrying rate 600,000)" || bad "r2 f7: the liability falls 60,000,000 (got $(( $(cb 30501) - LU_L0 + 600000000 )))"
+[ "$(cb 80302)" = "$((LU_X0 + 5000000))" ] && [ "$(cb 60303)" = "$LU_G0" ] && ok "r2 f7: the realised exchange loss is exactly 5,000,000 (65,000,000 paid - 60,000,000 carried), no gain" || bad "r2 f7: realised loss 5,000,000 (loss moved $(( $(cb 80302) - LU_X0 )), gain moved $(( LU_G0 - $(cb 60303) )))"
+[ "$(cb 10102)" = "$((LU_B0 + 600000000 - 65000000))" ] && ok "r2 f7: the bank pays 65,000,000" || bad "r2 f7: the bank pays 65,000,000"
+
+# --- R2 finding 7 (revaluation): the currency-tagged treasury lines are revalued
+as "$FM_TOKEN" POST $FG/years/ensure "{\"date\":\"${TODAY}T00:00:00\"}"; PTD=$(jq -r --arg d "${TODAY}T00:00:00" '[.data.periods[]|select(.startDate <= $d and .endDate >= $d)][0].id' "$B")
+as "$FM_TOKEN" POST $FXA/revaluation "{\"periodId\":$PTD,\"dryRun\":true}"; check "r2 f7: revaluation (dry run) includes the USD bank account fed by the receipt and payment: 90 USD with a book value of 58,500,000" '.success and ([.data.lines[]|select(.accountCode == "10103" and ((.detailCode // "")|startswith("BNK-")) and .currencyCode == "USD" and .currencyBalance == 90 and .bookBalance == 58500000)]|length) == 1'
+as "$FM_TOKEN" POST $FXA/revaluation "{\"periodId\":$PTD,\"dryRun\":true}"; check "r2 f7: revaluation also includes the USD loan: 900 USD outstanding with a book value of 540,000,000" '.success and ([.data.lines[]|select(.accountCode == "30501" and .currencyCode == "USD" and (.currencyBalance|fabs) == 900 and (.bookBalance|fabs) == 540000000)]|length) == 1'
+
+# --- R2 findings 3 and 5: job close-out with a material return, then the cost of sales on delivery
+call PUT WorkOrders/change-condition "{\"workOrderId\":$WO1,\"newCondition\":2}"; check "r2 f3: work order 1 set to Done" '.success'
+as "$FM_TOKEN" POST $FG/post-events
+as "$FM_TOKEN" GET $FCO/workorders/$WO1/cost-sheet; JM0=$(val .data.material | cut -d. -f1); JS0=$(val .data.totalCost | cut -d. -f1)
+bv() { as "$FM_TOKEN" GET "finance/valuation?contains=$C_BOLT"; jq -r '([.data.items[]|select(.itemCode == "'$C_BOLT'")][0].value // 0) | round' "$B"; }
+BV0=$(bv)
+call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"مواد دستور کار برای بستن\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":10}]}"; MRJ=$(val .data.id)
+call POST inventory/material-requests/action "{\"id\":$MRJ,\"action\":\"submit\"}"; call POST inventory/material-requests/action "{\"id\":$MRJ,\"action\":\"approve-planning\"}"
+as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$MRJ,\"action\":\"approve-manufacturing\"}"; check "r2 f3: the material request for the job is approved" '.success and .data.status == 2'
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$MRJ,\"workOrderId\":$WO1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10}]}"; ISJ=$(val .data.id); call POST "inventory/documents/$ISJ/confirm"; check "r2 f3: 10 bolts issued to the work order" '.success'
+BV1=$(bv); ISSV=$((BV0 - BV1))
+as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET $FCO/workorders/$WO1/cost-sheet; JM1=$(val .data.material | cut -d. -f1)
+[ "$ISSV" -gt 0 ] && [ "$JM1" = "$((JM0 + ISSV))" ] && ok "r2 f3: the cost sheet material rose by exactly the value issued ($ISSV) per the issue document" || bad "r2 f3: the cost sheet material rose by the issued value $ISSV (got $((JM1 - JM0)))"
+call POST inventory/documents "{\"type\":3,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"workOrderId\":$WO1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":4,\"locationId\":$L2}]}"; RTJ=$(val .data.id); call POST "inventory/documents/$RTJ/confirm"; check "r2 f3: 4 of the bolts returned from the work order" '.success'
+BV2=$(bv); RETV=$((BV2 - BV1))
+as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET $FCO/workorders/$WO1/cost-sheet; JM2=$(val .data.material | cut -d. -f1); JS2=$(val .data.totalCost | cut -d. -f1)
+[ "$RETV" -gt 0 ] && [ "$JM2" = "$((JM0 + ISSV - RETV))" ] && ok "r2 f3: the close-out cost sheet material equals the value issued ($ISSV) minus the value returned ($RETV): returns are subtracted once" || bad "r2 f3: cost sheet material $((JM2 - JM0)) should be issued $ISSV - returned $RETV = $((ISSV - RETV))"
+FG_PRE=$(cb 10503)
+as "$FIN_TOKEN" POST $FCO/workorders/$WO1/close "{\"quantity\":1,\"date\":\"${TODAY}T00:00:00\"}"; check "r2 f3: the close-out moves exactly the cost sheet ($JS2) to finished goods with NO variance (the return is not subtracted twice)" '.success and .data.totalCost == '$JS2' and .data.toFinishedGoods == '$JS2' and .data.variance == 0 and .data.isOpen == false'
+[ "$(cb 10503)" = "$((FG_PRE + JS2))" ] && ok "r2 f3: finished goods 10503 rise exactly $JS2" || bad "r2 f3: finished goods 10503 rise $JS2 (got $(( $(cb 10503) - FG_PRE )))"
+CG0=$(cb 70101); BV3=$(bv)
+mkdelivery $WO1; DLJ=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DLJ/approve" '{"kind":4}'; call POST "inventory/documents/$DLJ/confirm"; check "r2 f5: the delivery of the closed job is confirmed" '.success and .data.status == 1'
+as "$FM_TOKEN" POST $FG/post-events
+BOLTV=$((BV3 - $(bv)))
+[ "$(cb 10503)" = "$FG_PRE" ] && ok "r2 f5: the delivery relieves finished goods 10503 by exactly the closed cost ($JS2)" || bad "r2 f5: the delivery relieves 10503 by $JS2 (got $(( $(cb 10503) - FG_PRE - JS2 )) left over)"
+[ "$BOLTV" -gt 0 ] && [ "$(( $(cb 70101) - CG0 ))" = "$((JS2 + BOLTV))" ] && ok "r2 f5: cost of sales (70101) rose by exactly the closed job cost $JS2 plus the delivered bolt $BOLTV" || bad "r2 f5: cost of sales rose by $JS2 + $BOLTV = $((JS2 + BOLTV)) (got $(( $(cb 70101) - CG0 )))"
 TOKEN=$ADMIN_TOKEN
 
 # ---------------------------------------------------------------- roles of the new users
