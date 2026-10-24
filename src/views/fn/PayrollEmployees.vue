@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserPick from "@/components/office/wf/UserPick.vue";
 import { onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import LookupBox from "@/components/fn/LookupBox.vue";
@@ -27,7 +28,7 @@ const rowsOf = (d: any): any[] => (Array.isArray(d) ? d : d?.data || []);
 const searchEmployees = async (t: string) => rowsOf(camelize((await getPayrollEmployees({ Contains: t, PageSize: 15, IsActive: true }))[0]));
 const employeeLabel = (e: any) => `${e.personnelCode} - ${e.firstName} ${e.lastName}`;
 
-const blankEmployee = () => ({ id: null, personnelCode: "", firstName: "", lastName: "", fatherName: "", nationalCode: "", birthDate: null, birthPlace: "", gender: 1, maritalStatus: 1, childrenCount: 0, insuranceNumber: "", insuranceJobCode: "", workshopId: null, hireDate: today(), endDate: null, employmentType: 1, jobTitle: "", unit: "", costCenterId: null, bankIban: "", dailyWage: "", exemptionFlags: "", hardAndHarmful: false, isActive: true });
+const blankEmployee = () => ({ id: null, personnelCode: "", firstName: "", lastName: "", fatherName: "", nationalCode: "", birthDate: null, birthPlace: "", gender: 1, maritalStatus: 1, childrenCount: 0, insuranceNumber: "", insuranceJobCode: "", workshopId: null, hireDate: today(), endDate: null, employmentType: 1, jobTitle: "", unit: "", costCenterId: null, bankIban: "", dailyWage: "", exemptionFlags: "", hardAndHarmful: false, userId: null, isActive: true });
 
 async function edit(row: any) {
   const [d, error] = await getPayrollEmployee(row.id);
@@ -163,6 +164,7 @@ onMounted(async () => {
             <div class="col-md-4"><label class="form-label small mb-0">مزد روزانه (ریال) *</label><input v-model="form.dailyWage" class="form-control form-control-sm fn-num" autocomplete="off" /></div>
             <div class="col-md-5"><label class="form-label small mb-0">شماره شبا</label><input v-model="form.bankIban" class="form-control form-control-sm inv-ltr" autocomplete="off" /></div>
             <div class="col-md-3"><label class="form-label small mb-0">پرچم‌های معافیت</label><input v-model="form.exemptionFlags" class="form-control form-control-sm inv-ltr" /></div>
+            <div class="col-12 col-md-6"><label class="form-label small mb-0">کاربر سامانه (برای مرخصی، کارکرد و ثبت زمان خود فرد)</label><UserPick v-model="form.userId" :fallback-text="form.userId ? 'کاربر شماره ' + form.userId : ''" /></div>
             <div class="col-12 d-flex gap-3"><label class="form-check small"><input v-model="form.hardAndHarmful" class="form-check-input" type="checkbox" /> مشاغل سخت و زیان‌آور</label><label class="form-check small"><input v-model="form.isActive" class="form-check-input" type="checkbox" /> فعال</label></div>
           </div>
         </fieldset>

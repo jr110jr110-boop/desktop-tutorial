@@ -510,15 +510,15 @@ const officeLinks = computed<Links[]>(() => [
   { title: "نامه‌ها", routeName: "OfLetters" },
   { title: "مدیریت نامه‌ها (قالب، شماره‌گذاری، آرشیو)", routeName: "OfLetterAdmin", disabled: !hasRole(OfficeRoles.letterAdmins) },
   { title: "جلسات", routeName: "OfMeetings" },
-  { title: "مصوبات", routeName: "OfDecisions" },
-  { title: "درخواست‌ها", routeName: "OfRequests" },
-  { title: "مرخصی و ماموریت", routeName: "OfLeaves" },
+  { title: "پیگیری مصوبات", routeName: "OfDecisions" },
+  { title: "درخواست‌های عمومی", routeName: "OfRequests" },
+  { title: "مرخصی، ماموریت و اضافه‌کار", routeName: "OfLeaves" },
   { title: "حضور و غیاب", routeName: "OfAttendance" },
   { title: "تنظیمات حضور و غیاب", routeName: "OfAttendanceSetup", disabled: !hasRole(OfficeRoles.attendanceAdmins) },
   { title: "بستن ماه حضور و غیاب", routeName: "OfMonthClose", disabled: !hasRole(OfficeRoles.monthReaders) },
-  { title: "چارت سازمانی و نیابت", routeName: "OfOrg" },
-  { title: "سمت‌ها و امضای من", routeName: "OfMe" },
-  { title: "انواع درخواست", routeName: "OfRequestTypes", disabled: !hasRole(OfficeRoles.orgAdmins) },
+  { title: "ساختار سازمانی و نیابت", routeName: "OfOrg" },
+  { title: "دفتر کار من (سمت‌ها و امضا)", routeName: "OfMe" },
+  { title: "انواع درخواست عمومی", routeName: "OfRequestTypes", disabled: !hasRole(OfficeRoles.orgAdmins) },
 ]);
 
 const userRole = localStorage.getItem("userRole");
