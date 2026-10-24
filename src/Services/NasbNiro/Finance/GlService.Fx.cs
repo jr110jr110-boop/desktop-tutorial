@@ -182,9 +182,24 @@ namespace Services.NasbNiro.Finance
             if (gain == null || loss == null) return Bad<FxRevaluationDto>("حساب سود و زیان تسعیر ارز در کدینگ نیست.");
             string number = await NextNumberAsync("FXR", FinanceNumbers.FxRevaluation, end, ct);
             string text = $"تسعیر ارز پایان دوره {period.Title} ({number})";
+            decimal gainSum = moving.Where(i => i.Diff > 0).Sum(i => i.Diff), lossSum = -moving.Where(i => i.Diff < 0).Sum(i => i.Diff);
+
+            // the run record is saved FIRST with the next sequence number of the period: the unique index (entity, period, sequence) stops two concurrent runs from posting the same differences twice
+            int sequence = await _uow.Set<FnFxRevaluation>().CountAsync(r => r.LegalEntityId == entityId && r.PeriodId == period.Id, ct) + 1;
+            var run = new FnFxRevaluation
+            {
+                Number = number, LegalEntityId = entityId, PeriodId = period.Id, Sequence = sequence, RateType = rateType, Reverse = reverse, TotalGain = gainSum, TotalLoss = lossSum,
+                VoucherId = 0, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, Lines = new List<FnFxRevaluationLine>(),
+            };
+            foreach (RevalItem i in moving)
+                run.Lines.Add(new FnFxRevaluationLine { AccountId = i.AccountId, Detail1Id = i.Detail1Id, CurrencyCode = i.Currency, CurrencyBalance = i.CurrencyBalance, BookBalance = i.Book, Rate = i.Rate, NewBalance = i.NewBase, Difference = i.Diff });
+            _uow.Set<FnFxRevaluation>().Add(run);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { return Bad<FxRevaluationDto>("تسعیر ارز این دوره همزمان توسط کاربر دیگری انجام شد؛ دوباره بررسی کنید."); }
 
             // account entities must be tracked by this context
-            Dictionary<int, FnAccount> tracked = await _uow.Set<FnAccount>().Where(a => moving.Select(m => m.AccountId).Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
+            List<int> movingIds = moving.Select(m => m.AccountId).ToList();
+            Dictionary<int, FnAccount> tracked = await _uow.Set<FnAccount>().Where(a => movingIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
             var mainLines = new List<AutoLine>();
             var reverseLines = new List<AutoLine>();
             foreach (RevalItem i in moving)
@@ -192,14 +207,13 @@ namespace Services.NasbNiro.Finance
                 mainLines.Add(new AutoLine { Account = tracked[i.AccountId], Detail1Id = i.Detail1Id, Debit = i.Diff > 0 ? i.Diff : 0, Credit = i.Diff < 0 ? -i.Diff : 0, Description = text });
                 reverseLines.Add(new AutoLine { Account = tracked[i.AccountId], Detail1Id = i.Detail1Id, Debit = i.Diff < 0 ? -i.Diff : 0, Credit = i.Diff > 0 ? i.Diff : 0, Description = "برگشت " + text });
             }
-            decimal gainSum = moving.Where(i => i.Diff > 0).Sum(i => i.Diff), lossSum = -moving.Where(i => i.Diff < 0).Sum(i => i.Diff);
             mainLines.Add(new AutoLine { Account = gain, Credit = gainSum, Description = text });
             mainLines.Add(new AutoLine { Account = loss, Debit = lossSum, Description = text });
             reverseLines.Add(new AutoLine { Account = gain, Debit = gainSum, Description = "برگشت " + text });
             reverseLines.Add(new AutoLine { Account = loss, Credit = lossSum, Description = "برگشت " + text });
 
             var main = await AddAutoVoucherAsync(entityId, end, text, "FxRevaluation", number, mainLines, FnVoucherType.Auto, null, ct);
-            if (main.Error != null) return Bad<FxRevaluationDto>(main.Error);
+            if (main.Error != null) { await _uow.Set<FnFxRevaluation>().Where(x => x.Id == run.Id).ExecuteDeleteAsync(ct); return Bad<FxRevaluationDto>(main.Error); }
             string warning = null;
             FnVoucher reversal = null;
             if (reverse)
@@ -209,15 +223,7 @@ namespace Services.NasbNiro.Finance
                 else reversal = rev.Voucher;
             }
             await _uow.SaveChangesAsync(ct);
-
-            var run = new FnFxRevaluation
-            {
-                Number = number, LegalEntityId = entityId, PeriodId = period.Id, RateType = rateType, Reverse = reverse, TotalGain = gainSum, TotalLoss = lossSum,
-                VoucherId = main.Voucher.Id, ReversalVoucherId = reversal?.Id, Warning = warning, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, Lines = new List<FnFxRevaluationLine>(),
-            };
-            foreach (RevalItem i in moving)
-                run.Lines.Add(new FnFxRevaluationLine { AccountId = i.AccountId, Detail1Id = i.Detail1Id, CurrencyCode = i.Currency, CurrencyBalance = i.CurrencyBalance, BookBalance = i.Book, Rate = i.Rate, NewBalance = i.NewBase, Difference = i.Diff });
-            _uow.Set<FnFxRevaluation>().Add(run);
+            run.VoucherId = main.Voucher.Id; run.ReversalVoucherId = reversal?.Id; run.Warning = warning;
             await _uow.SaveChangesAsync(ct);
             result.Id = run.Id; result.Number = number; result.VoucherId = run.VoucherId; result.ReversalVoucherId = run.ReversalVoucherId; result.Warning = warning; result.CreatedAt = run.CreatedAt;
             result.TotalGain = gainSum; result.TotalLoss = lossSum;
@@ -283,7 +289,7 @@ namespace Services.NasbNiro.Finance
             }
             if (diff > 0) lines.Add(new AutoLine { Account = gain, Credit = diff, Description = text });
             else if (diff < 0) lines.Add(new AutoLine { Account = loss, Debit = -diff, Description = text });
-            var v = await AddAutoVoucherAsync(entityId, dto.Date.Date, text, "FxSettlement", number, lines, FnVoucherType.Auto, null, ct);
+            var v = await AddAutoVoucherAsync(entityId, dto.Date.Date, text, "FxSettlement", number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FxSettlementDto>(v.Error);
             await _uow.SaveChangesAsync(ct);
             var rec = new FnFxSettlement
@@ -427,7 +433,7 @@ namespace Services.NasbNiro.Finance
                         new AutoLine { Account = debitAccount, Debit = amount, Description = text },
                         new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = amount, Description = text },
                     };
-                    var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct);
+                    var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
                     if (v.Error != null) return Bad<LetterOfCreditDto>(v.Error);
                     await _uow.SaveChangesAsync(ct);
                     if (action == "margin") l.MarginPaid += amount; else l.FeesPaid += amount;
@@ -450,13 +456,29 @@ namespace Services.NasbNiro.Finance
                     decimal release = Math.Min(l.MarginPaid, settled), cash = settled - release;
                     FnDetailAccount supplier = await details.GetAsync(FnDetailType.Supplier, l.ProviderId, ct);
                     text = "تسویه اعتبار اسنادی " + l.Number;
+                    // the payable leaves the books at its carrying rate (the currency-tagged lines of the supplier in this currency) and the difference to the payment rate is the realised gain or loss
+                    decimal carryBase = settled;
+                    if (supplier.Id > 0)
+                    {
+                        var tagged = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(x => x.AccountId == payable.Id && x.Detail1Id == supplier.Id && x.CurrencyCode == l.CurrencyCode && x.CurrencyAmount != null && x.Voucher.Status != FnVoucherStatus.Draft)
+                            .GroupBy(x => 1).Select(g => new { Base = g.Sum(x => x.Credit - x.Debit), Cur = g.Sum(x => x.Credit > 0 ? x.CurrencyAmount.Value : -x.CurrencyAmount.Value) }).FirstOrDefaultAsync(ct);
+                        if (tagged != null && tagged.Cur >= l.Amount && tagged.Cur > 0) carryBase = R(tagged.Base * l.Amount / tagged.Cur);
+                    }
+                    decimal lcDiff = settled - carryBase;   // positive: paid more rials than carried = loss
                     var lines = new List<AutoLine>
                     {
-                        new AutoLine { Account = payable, Detail1 = supplier, Debit = settled, Description = text, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.Amount, Rate = dto.Rate },
+                        new AutoLine { Account = payable, Detail1 = supplier, Debit = carryBase, Description = text, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.Amount, Rate = l.Amount == 0 ? dto.Rate : R(carryBase / l.Amount) },
                     };
+                    if (lcDiff != 0)
+                    {
+                        FnAccount lcGain = await RoleAccountAsync(AccountRoles.FxGain, "60303", ct), lcLoss = await RoleAccountAsync(AccountRoles.FxLoss, "80302", ct);
+                        if (lcGain == null || lcLoss == null) return Bad<LetterOfCreditDto>("حساب سود و زیان تسعیر ارز در کدینگ نیست.");
+                        if (lcDiff > 0) lines.Add(new AutoLine { Account = lcLoss, Debit = lcDiff, Description = "زیان تسعیر در تسویه " + text });
+                        else lines.Add(new AutoLine { Account = lcGain, Credit = -lcDiff, Description = "سود تسعیر در تسویه " + text });
+                    }
                     if (release > 0) lines.Add(new AutoLine { Account = deposit, Credit = release, Description = text });
                     if (cash > 0) lines.Add(new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = cash, Description = text });
-                    var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct);
+                    var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
                     if (v.Error != null) return Bad<LetterOfCreditDto>(v.Error);
                     await _uow.SaveChangesAsync(ct);
                     if (release > 0) _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = FnLcPostingKind.MarginRelease, Date = date, Amount = release, VoucherId = v.Voucher.Id, CreatedByUserId = Me });
@@ -480,7 +502,7 @@ namespace Services.NasbNiro.Finance
                             new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Debit = l.MarginPaid, Description = text },
                             new AutoLine { Account = deposit, Credit = l.MarginPaid, Description = text },
                         };
-                        var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct);
+                        var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
                         if (v.Error != null) return Bad<LetterOfCreditDto>(v.Error);
                         await _uow.SaveChangesAsync(ct);
                         _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = FnLcPostingKind.MarginRelease, Date = date, Amount = l.MarginPaid, VoucherId = v.Voucher.Id, CreatedByUserId = Me });

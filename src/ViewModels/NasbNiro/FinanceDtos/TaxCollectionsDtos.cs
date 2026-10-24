@@ -10,6 +10,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string DocumentNumber { get; set; }
         public string PartyName { get; set; }
         public string EconomicCode { get; set; }
+        public string NationalId { get; set; }
         public decimal NetAmount { get; set; }
         public decimal VatAmount { get; set; }
         public string SourceType { get; set; }

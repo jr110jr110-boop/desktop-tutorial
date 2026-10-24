@@ -12,6 +12,7 @@ using Entities.Model.NasbNiro.Providers;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Finance;
 using Services.NasbNiro.Inventory;
+using ViewModels.NasbNiro.FinanceDtos;
 using ViewModels.NasbNiro.Pagination;
 using ViewModels.NasbNiro.ProcurementDtos;
 
@@ -327,7 +328,7 @@ namespace Services.NasbNiro.Procurement
                         .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
                     if (before + dto.Amount > invoice.TotalAmount) return Bad<PaymentRequestDto>("مبلغ از مانده فاکتور بیشتر است.");
                     // supplier advances of the order are recovered from the invoice payments: what is still unrecovered is proposed as a deduction the approver sees
-                    decimal advanced = await _uow.Set<PaymentRequest>().Where(p => p.PurchaseOrderId == order.Id && p.Type == PaymentRequestType.Advance && p.Status != PaymentRequestStatus.Rejected && !p.Deleted)
+                    decimal advanced = await _uow.Set<PaymentRequest>().Where(p => p.PurchaseOrderId == order.Id && p.Type == PaymentRequestType.Advance && p.Status == PaymentRequestStatus.Paid && !p.Deleted)   // only advances really paid (review 2, finding 12)
                         .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
                     decimal recovered = await _uow.Set<FnPaymentDeduction>().Where(d => d.Kind == FnDeductionKind.AdvanceRecovery && d.PaymentRequest.PurchaseOrderId == order.Id && d.PaymentRequest.Status != PaymentRequestStatus.Rejected &&
                                                                                        !d.PaymentRequest.Deleted && d.PaymentRequestId != (dto.Id ?? 0)).SumAsync(d => (decimal?)d.Amount, cancellationToken) ?? 0;
@@ -422,13 +423,23 @@ namespace Services.NasbNiro.Procurement
                     if (!_user.IsInRole(ProcurementRoles.Finance)) return Bad<PaymentRequestDto>(NotAllowed + " (مالی)");
                     if (p.CreatorUserId == Me || p.ApprovedByUserId == Me) return Bad<PaymentRequestDto>(SameUser);
                     if (Clean(dto.Reference) == null) return Bad<PaymentRequestDto>("شماره سند پرداخت در سپیدار یا شماره پیگیری بانک را وارد کنید.");
-                    string legacyError = await _treasury.AddLegacyPaymentAsync(p, dto.Reference, dto.BankAccountId, cancellationToken);
-                    if (legacyError != null) return Bad<PaymentRequestDto>(legacyError);
-                    p.Status = PaymentRequestStatus.Paid;
-                    p.PaidAt = now;
-                    p.PaidByUserId = Me;
-                    p.PaymentReference = Clean(dto.Reference);
-                    break;
+                    {
+                        // review 2, finding 23: the old one-click path no longer posts. It creates the DRAFT treasury payment (same IBAN and
+                        // supplier checks as the treasury screen); a different person approves it there and posts it, which marks this request Paid.
+                        if (!dto.BankAccountId.HasValue) return Bad<PaymentRequestDto>("حساب بانکی پرداخت‌کننده را مشخص کنید.");
+                        decimal net = p.Amount - p.Deductions;
+                        var save = new SavePaymentDto
+                        {
+                            Date = DateTime.Today, Purpose = FnPaymentPurpose.Supplier, PaymentRequestIds = new List<int> { p.Id },
+                            Description = $"پرداخت درخواست {p.Number} (مسیر قدیمی؛ پیش‌نویس خزانه)",
+                            Lines = new List<PaymentLineDto> { new PaymentLineDto { Instrument = FnInstrument.BankTransfer, Amount = net, Reference = Clean(dto.Reference), BankAccountId = dto.BankAccountId } },
+                        };
+                        ResponseDto<PaymentDto> draft = await _treasury.SavePaymentAsync(save, cancellationToken);
+                        if (draft?.Data == null) return Bad<PaymentRequestDto>(draft?.Message ?? "ایجاد سند پرداخت خزانه ممکن نشد.");
+                        PaymentRequestDto shown = (await LoadPaymentsAsync(_uow.Set<PaymentRequest>().Where(x => x.Id == p.Id), cancellationToken))[0];
+                        shown.TreasuryPaymentId = draft.Data.Id; shown.TreasuryPaymentNumber = draft.Data.Number;
+                        return ResponseDtoHelper.Ok(shown, $"سند پرداخت پیش‌نویس {draft.Data.Number} در خزانه ساخته شد؛ تایید مدیر مالی و ثبت از خزانه انجام می‌شود.");
+                    }
                 case "reject":
                     if (p.Status == PaymentRequestStatus.Paid) return Bad<PaymentRequestDto>("پرداخت انجام شده است.");
                     if (!_user.IsInRole(ProcurementRoles.OrderApproval) && !_user.IsInRole(ProcurementRoles.Finance)) return Bad<PaymentRequestDto>(NotAllowed);
@@ -518,7 +529,7 @@ namespace Services.NasbNiro.Procurement
         public async Task<ResponseDto<List<FnOpenAdvanceDto>>> GetOpenAdvancesAsync(CancellationToken cancellationToken)
         {
             if (!_user.IsInRole(ProcurementRoles.Finance + ",CEO,AUDITOR")) return Bad<List<FnOpenAdvanceDto>>(NotAllowed);
-            var advances = await _uow.Set<PaymentRequest>().AsNoTracking().Where(p => p.Type == PaymentRequestType.Advance && p.PurchaseOrderId != null && p.Status != PaymentRequestStatus.Rejected && !p.Deleted)
+            var advances = await _uow.Set<PaymentRequest>().AsNoTracking().Where(p => p.Type == PaymentRequestType.Advance && p.PurchaseOrderId != null && p.Status == PaymentRequestStatus.Paid && !p.Deleted)
                 .GroupBy(p => new { p.PurchaseOrderId, p.ProviderId }).Select(g => new { Order = g.Key.PurchaseOrderId.Value, Provider = g.Key.ProviderId, Amount = g.Sum(x => x.Amount) }).ToListAsync(cancellationToken);
             List<int> orderIds = advances.Select(a => a.Order).ToList();
             var recoveries = await _uow.Set<FnPaymentDeduction>().AsNoTracking().Where(d => d.Kind == FnDeductionKind.AdvanceRecovery && d.PaymentRequest.PurchaseOrderId != null && orderIds.Contains(d.PaymentRequest.PurchaseOrderId.Value) &&
@@ -579,7 +590,7 @@ namespace Services.NasbNiro.Procurement
             if (grade == SupplierGrade.D)
             {
                 profile.Blocked = true;
-                profile.BlockReason = $"گرید D در ارزیابی {date:yyyy-MM-dd} (امتیاز {score})";
+                profile.BlockReason = $"گرید D در ارزیابی {Services.NasbNiro.Finance.FiscalCalendars.Text(date)} (امتیاز {score})";
             }
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok((await GetEvaluationsAsync(dto.ProviderId, cancellationToken)).Data.First(e => e.Id == evaluation.Id));

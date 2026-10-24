@@ -45,6 +45,8 @@ namespace Entities.Model.NasbNiro.Finance
         public string Number { get; set; }
         public int LegalEntityId { get; set; }
         public int PeriodId { get; set; }
+        /// <summary>1, 2 ... within the entity and period (later runs post only the new differences); unique, so two concurrent runs cannot both post.</summary>
+        public int Sequence { get; set; } = 1;
         public FnRateType RateType { get; set; }
         public bool Reverse { get; set; }
         public decimal TotalGain { get; set; }
@@ -266,6 +268,10 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal Variance { get; set; }
         public int Quantity { get; set; }
         public decimal UnitCost { get; set; }
+        /// <summary>The part of the cost debited to finished goods (10503) by the close-out itself (the rest went through production receipts and ItemCost); relieved to cost of sales per delivered unit.</summary>
+        public decimal FgAmount { get; set; }
+        public int DeliveredQuantity { get; set; }
+        public decimal RelievedAmount { get; set; }
         public bool IsOpen { get; set; }
         public int VoucherId { get; set; }
         public int? ReversalVoucherId { get; set; }
@@ -307,6 +313,7 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal BilledToDate { get; set; }
         public decimal ContractAsset { get; set; }
         public decimal ContractLiability { get; set; }
+        public decimal CostOfSales { get; set; }
         public decimal LossProvision { get; set; }
         public int VoucherId { get; set; }
         public int CreatedByUserId { get; set; }

@@ -413,7 +413,7 @@ namespace Services.NasbNiro.Finance
             await FinanceSeed.EnsureAsync(_uow, ct);
             if (oldVoucherDays <= 0) oldVoucherDays = 7;
             var dto = new LedgerReconciliationDto { OldVoucherDays = oldVoucherDays };
-            IQueryable<FnVoucherLine> all = _uow.Set<FnVoucherLine>().AsNoTracking();
+            IQueryable<FnVoucherLine> all = _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.Voucher.Status != FnVoucherStatus.Draft);   // drafts are not in the books yet
             IQueryable<AccountingEventLine> postedLines = _uow.Set<AccountingEventLine>().AsNoTracking().Where(l => l.Event.Status == AccountingEventStatus.Posted);
 
             void Row(string key, string title, decimal ledger, decimal sub, string note = null)
@@ -426,7 +426,10 @@ namespace Services.NasbNiro.Finance
             decimal inventoryLedger = await all.Where(l => l.Account.Code.StartsWith("105") && l.Account.Code != "10520" && l.Account.Code != "10530")
                 .SumAsync(l => (decimal?)(l.Debit - l.Credit), ct) ?? 0;
             decimal itemCost = await _uow.Set<ItemCost>().AsNoTracking().SumAsync(c => (decimal?)c.Value, ct) ?? 0;
-            Row("inventory", "موجودی کالا: دفتر کل و بهای تمام‌شده کالا", inventoryLedger, itemCost);
+            // finished goods debited by a work-order close-out sit in 10503 outside ItemCost until they are delivered: shown as an explicit reconciling item
+            decimal closeOutHeld = await _uow.Set<FnWorkOrderClose>().AsNoTracking().Where(c => !c.IsOpen).SumAsync(c => (decimal?)(c.FgAmount - c.RelievedAmount), ct) ?? 0;
+            Row("inventory", "موجودی کالا: دفتر کل و بهای تمام‌شده کالا (به‌علاوه محصول ساخته‌شده بستن دستور کار که هنوز تحویل نشده)", inventoryLedger, itemCost + closeOutHeld,
+                closeOutHeld == 0 ? null : $"محصول بستن دستور کار تحویل‌نشده: {closeOutHeld:0}");
 
             // goods received not invoiced: the 30103 account balance against the posted receipt events
             decimal grniLedger = await all.Where(l => l.Account.Code == "30103").SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
@@ -498,7 +501,7 @@ namespace Services.NasbNiro.Finance
                     var flat = new List<Dictionary<string, object>>();
                     foreach (JournalDayDto day in res.Data)
                         foreach (JournalAccountDto a in day.Accounts)
-                            flat.Add(new Dictionary<string, object> { { "date", day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) }, { "accountCode", a.Code }, { "accountTitle", a.Title }, { "debit", a.Debit }, { "credit", a.Credit } });
+                            flat.Add(new Dictionary<string, object> { { "date", FiscalCalendars.Current.Text(day.Date) }, { "accountCode", a.Code }, { "accountTitle", a.Title }, { "debit", a.Debit }, { "credit", a.Credit } });
                     data = flat;
                     break;
                 }
@@ -511,7 +514,7 @@ namespace Services.NasbNiro.Finance
                 case "reconciliation": { var res = await ReconcileAsync(7, ct); if (!res.Success) return (null, null, res.Message); data = res.Data.Rows; break; }
                 default: return (null, null, "گزارش نامعتبر است.");
             }
-            return (CsvWriter.ToCsv(data), $"{name}-{DateTime.Today:yyyyMMdd}.csv", null);
+            return (CsvWriter.ToCsv(data), $"{name}-{FiscalCalendars.Current.Stamp(DateTime.Today)}.csv", null);
         }
     }
 
@@ -553,7 +556,7 @@ namespace Services.NasbNiro.Finance
                 case JsonValueKind.Number: return v.GetRawText();
                 case JsonValueKind.True: return "true";
                 case JsonValueKind.False: return "false";
-                default: return Quote(v.GetString());
+                default: return Quote(FiscalCalendars.Current.IsoToText(v.GetString()));
             }
         }
 

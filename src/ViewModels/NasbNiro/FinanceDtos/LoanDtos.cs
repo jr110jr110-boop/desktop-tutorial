@@ -90,6 +90,25 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Action { get; set; }
         public DateTime? Date { get; set; }
         public int? BankAccountId { get; set; }
+        /// <summary>Foreign-currency loan: rials per one unit of the loan currency on the disbursement date (required).</summary>
+        public decimal? Rate { get; set; }
+    }
+
+    public class FnCurrentPortionRowDto
+    {
+        public int LoanId { get; set; }
+        public string LoanNumber { get; set; }
+        public decimal CurrentPortion { get; set; }
+        public decimal AlreadyReclassified { get; set; }
+        public decimal Change { get; set; }
+    }
+
+    public class FnCurrentPortionDto
+    {
+        public int PeriodId { get; set; }
+        public decimal Total { get; set; }
+        public int? VoucherId { get; set; }
+        public List<FnCurrentPortionRowDto> Rows { get; set; } = new List<FnCurrentPortionRowDto>();
     }
 
     public class FnLoanPayDto
@@ -99,6 +118,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTime? Date { get; set; }
         public int? BankAccountId { get; set; }
         public decimal Penalty { get; set; }
+        /// <summary>Foreign-currency loan: rials per one unit of the loan currency on the payment date (required); the realised difference is booked automatically.</summary>
+        public decimal? Rate { get; set; }
     }
 
     public class FnLoanAccrualDto

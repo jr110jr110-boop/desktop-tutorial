@@ -160,6 +160,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
     public class FnRevenueRowDto
     {
         public int ContractId { get; set; }
+        public decimal CostOfSalesThisRun { get; set; }
         public decimal ProgressPercent { get; set; }
         public decimal ContractPrice { get; set; }
         public decimal EstimatedCost { get; set; }
@@ -179,6 +180,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Number { get; set; }
         public int? VoucherId { get; set; }
         public decimal TotalRevenue { get; set; }
+        public decimal TotalCostOfSales { get; set; }
         public List<FnRevenueRowDto> Rows { get; set; } = new List<FnRevenueRowDto>();
     }
 }

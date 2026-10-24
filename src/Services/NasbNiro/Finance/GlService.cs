@@ -255,16 +255,12 @@ namespace Services.NasbNiro.Finance
             // numbers: gapless after the existing final vouchers of each year
             int numberInYear = await _uow.Set<FnVoucher>().Where(v => v.FiscalYearId == year.Id && v.Number != null).MaxAsync(v => (int?)v.Number, ct) ?? 0;
             int numberInNext = await _uow.Set<FnVoucher>().Where(v => v.FiscalYearId == next.Id && v.Number != null).MaxAsync(v => (int?)v.Number, ct) ?? 0;
-            // the opening voucher of the new year is always number 1: vouchers already finalised in that year move up by one
-            if (numberInNext > 0 && created.Any(v => v.FiscalYearId == next.Id && v.Type == FnVoucherType.Opening))
-            {
-                _uow.ExecuteSqlCommand("UPDATE FnVouchers SET Number = Number + 1 WHERE FiscalYearId = {0} AND Number IS NOT NULL", next.Id);
-                numberInNext++;
-            }
+            // the opening voucher of the new year is number 1 when the year has no final voucher yet; otherwise it takes the next number and
+            // NOTHING already numbered is touched (numbers that were printed or exported never change; review 2, finding 8)
             foreach (FnVoucher v in created)
             {
                 v.TemporaryNumber = await InventoryNumbers.NextAsync(_uow, FinanceNumbers.Voucher, v.FiscalYear.Year, ct);
-                v.Number = v.FiscalYearId == year.Id ? ++numberInYear : v.Type == FnVoucherType.Opening ? 1 : ++numberInNext;
+                v.Number = v.FiscalYearId == year.Id ? ++numberInYear : ++numberInNext;
                 v.TotalAmount = v.Lines.Sum(l => l.Debit);
                 _uow.Set<FnVoucher>().Add(v);
             }
@@ -277,6 +273,7 @@ namespace Services.NasbNiro.Finance
             {
                 if (p.Status != FnPeriodStatus.Closed) { p.Status = FnPeriodStatus.Closed; p.LockedAt ??= DateTimeOffset.Now; }
             }
+            _uow.Set<FnAuditLog>().Add(new FnAuditLog { EntityType = "FnFiscalYear", EntityId = year.Id, Action = "YearClose", Summary = $"بستن سال مالی {year.Title}: {created.Count} سند، شماره سند افتتاحیه سال بعد {(created.FirstOrDefault(x => x.Type == FnVoucherType.Opening)?.Number.ToString() ?? "-")}", UserId = Me, At = DateTimeOffset.Now });
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException ex) { return Bad<FiscalYearDto>("بستن سال انجام نشد: " + (ex.InnerException?.Message ?? ex.Message)); }
             return ResponseDtoHelper.Ok((await LoadYearsAsync(year.Id, null, ct)).First());
@@ -731,7 +728,7 @@ namespace Services.NasbNiro.Finance
                 FnVoucher v = await _uow.Set<FnVoucher>().FirstOrDefaultAsync(x => x.Id == id, ct);
                 if (v == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
                 if (v.Status != FnVoucherStatus.Checked) return Bad<VoucherDto>("فقط سند کنترل‌شده قطعی می‌شود.");
-                if (v.Type != FnVoucherType.Auto && Touched(v.CreatedByUserId, v.EditorUserIds, Me)) return Bad<VoucherDto>(SameUser);
+                if (Touched(v.CreatedByUserId, v.EditorUserIds, Me)) return Bad<VoucherDto>(SameUser);
                 string finGate = (await VoucherGateAsync(new List<int> { v.Id }, true, ct)).GetValueOrDefault(v.Id);
                 if (finGate != null) return Bad<VoucherDto>(finGate);
                 var period = await _uow.Set<FnPeriod>().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.FiscalYearId == v.FiscalYearId && p.StartDate <= v.Date && p.EndDate >= v.Date, ct);
@@ -744,7 +741,10 @@ namespace Services.NasbNiro.Finance
                 try
                 {
                     await _uow.SaveChangesAsync(ct);
-                    return await GetVoucherAsync(v.Id, ct);
+                    var done = await GetVoucherAsync(v.Id, ct);
+                    if (done.Success && done.Data != null && await _uow.Set<FnVoucher>().AsNoTracking().AnyAsync(x => x.FiscalYearId == v.FiscalYearId && x.Number != null && x.Number < v.Number && x.Date > v.Date, ct))
+                        done.Data.Warning = "تاریخ این سند از تاریخ سند قطعی با شماره کمتر عقب‌تر است؛ شماره قطعی به ترتیب قطعی شدن داده می‌شود نه به ترتیب تاریخ.";
+                    return done;
                 }
                 catch (DbUpdateException)
                 {
@@ -781,7 +781,7 @@ namespace Services.NasbNiro.Finance
                     {
                         FnPeriod p = year.Periods.FirstOrDefault(x => x.StartDate <= v.Date && x.EndDate >= v.Date);
                         if (year.Status != FnYearStatus.Open || p == null || p.Status == FnPeriodStatus.Closed) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: دوره بسته است."); continue; }
-                        if (v.Type != FnVoucherType.Auto && Touched(v.CreatedByUserId, v.EditorUserIds, Me)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: تهیه‌کننده نمی‌تواند قطعی کند."); continue; }
+                        if (Touched(v.CreatedByUserId, v.EditorUserIds, Me)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: تهیه‌کننده نمی‌تواند قطعی کند."); continue; }
                         if (gates.TryGetValue(v.Id, out string gateMessage)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: {gateMessage}"); continue; }
                         v.Number = ++max;
                         v.Status = FnVoucherStatus.Final;

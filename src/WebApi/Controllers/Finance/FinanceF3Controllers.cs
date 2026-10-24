@@ -137,6 +137,9 @@ namespace WebApi.Controllers
         [HttpPost("details")]
         public async Task<IActionResult> DetailsAsync([FromBody] SepidarDetailImportDto dto, [FromQuery] bool commit, CancellationToken ct) => Ok(await _migration.ImportDetailsAsync(dto, commit, ct));
 
+        [HttpPost("link-details")]
+        public async Task<IActionResult> LinkDetailsAsync([FromBody] FnDetailLinkDto dto, [FromQuery] bool commit, CancellationToken ct) => Ok(await _migration.LinkDetailsAsync(dto, commit, ct));
+
         [HttpPost("opening")]
         public async Task<IActionResult> OpeningAsync([FromBody] SepidarOpeningImportDto dto, [FromQuery] bool commit, CancellationToken ct) => Ok(await _migration.ImportOpeningBalancesAsync(dto, commit, ct));
 
@@ -474,6 +477,9 @@ namespace WebApi.Controllers
 
         [HttpPost("accrual/{id:int}/approve")]
         public async Task<IActionResult> ApproveAccrualAsync(int id, CancellationToken ct) => Ok(await _loans.ApproveAccrualAsync(id, ct));
+
+        [HttpPost("current-portion/{periodId:int}")]
+        public async Task<IActionResult> CurrentPortionAsync(int periodId, CancellationToken ct) => Ok(await _loans.CurrentPortionAsync(periodId, ct));
 
         [HttpPost("limits")]
         public async Task<IActionResult> LimitAsync([FromBody] FnFacilityLimitDto dto, CancellationToken ct) => Ok(await _loans.SaveFacilityLimitAsync(dto, ct));

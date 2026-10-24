@@ -152,7 +152,7 @@ namespace Services.NasbNiro.Finance
                         if (!accounts.TryGetValue(l.AccountId, out FnAccount a) || !a.IsActive) return Bad<SettlementDto>($"ردیف {l.RowNumber}: حساب هزینه غیرفعال شده است.");
                         lines.Add(new AccountingEventLine
                         {
-                            AccountRole = EventPostingService.DirectRolePrefix + a.Code, Debit = l.Amount, WorkOrderId = l.WorkOrderId,
+                            AccountRole = l.InventoryDocumentId.HasValue ? AccountRoles.Grni : EventPostingService.DirectRolePrefix + a.Code, Debit = l.Amount, WorkOrderId = l.WorkOrderId,   // a settled receipt clears GRNI through the GRNI role (review 2, finding 13)
                             CostCenter = l.CostCenterId.HasValue && ccCodes.TryGetValue(l.CostCenterId.Value, out string cc) ? cc : null,
                             Description = Clean(l.Description) ?? l.SupplierName ?? "هزینه تنخواه",
                         });

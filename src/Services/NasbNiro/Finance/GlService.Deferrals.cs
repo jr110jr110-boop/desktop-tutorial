@@ -174,7 +174,11 @@ namespace Services.NasbNiro.Finance
             int entityId = period.FiscalYear.LegalEntityId;
             var result = new FnReversingRunDto { PeriodId = periodId };
             var vouchers = await _uow.Set<FnVoucher>().Include(v => v.Lines).ThenInclude(l => l.Account)
-                .Where(v => v.ReverseNextPeriod && v.AutoReversalVoucherId == null && v.Date >= period.StartDate && v.Date <= period.EndDate && v.Status != FnVoucherStatus.Draft && v.FiscalYear.LegalEntityId == entityId).ToListAsync(ct);
+                .Where(v => v.ReverseNextPeriod && v.AutoReversalVoucherId == null && v.Date >= period.StartDate && v.Date <= period.EndDate && v.Status == FnVoucherStatus.Final && v.FiscalYear.LegalEntityId == entityId).ToListAsync(ct);   // only FINAL originals are reversed (a Checked voucher can still change)
+            int notFinal = await _uow.Set<FnVoucher>().CountAsync(v => v.ReverseNextPeriod && v.AutoReversalVoucherId == null && v.Date >= period.StartDate && v.Date <= period.EndDate && v.Status != FnVoucherStatus.Final && v.FiscalYear.LegalEntityId == entityId, ct);
+            if (notFinal > 0) result.Skipped.Add($"{notFinal} سند تعهدی هنوز قطعی نشده است؛ پس از قطعی شدن اجرا را تکرار کنید.");
+            List<int> alreadyReversed = await _uow.Set<FnVoucher>().Where(x => x.ReversesVoucherId != null).Select(x => x.ReversesVoucherId.Value).ToListAsync(ct);
+            vouchers = vouchers.Where(v => !alreadyReversed.Contains(v.Id)).ToList();
             var made = new List<(FnVoucher Original, FnVoucher Reversal)>();
             foreach (FnVoucher o in vouchers)
             {
@@ -261,7 +265,7 @@ namespace Services.NasbNiro.Finance
                 ? new List<AutoLine> { new AutoLine { Account = expense, Debit = abs, Description = text }, new AutoLine { Account = liability, Credit = abs, Description = text } }
                 : new List<AutoLine> { new AutoLine { Account = liability, Debit = abs, Description = text }, new AutoLine { Account = counter, Credit = abs, Description = text } };
             int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
-            var v = await AddAutoVoucherAsync(entityId, dto.Date.Date, text, "Provision", p.Number, lines, FnVoucherType.Auto, null, ct);
+            var v = await AddAutoVoucherAsync(entityId, dto.Date.Date, text, "Provision", p.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FnProvisionDto>(v.Error);
             await _uow.SaveChangesAsync(ct);
             p.Balance += amount;
@@ -291,7 +295,7 @@ namespace Services.NasbNiro.Finance
             FnAccount provision = await RoleAccountAsync(provisionRole, fallbackProvision, ct), expense = await RoleAccountAsync(expenseRole, fallbackExpense, ct);
             if (provision == null || expense == null) return Bad<FnTrueUpDto>("حساب ذخیره یا هزینه پیدا نشد.");
             int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
-            decimal balance = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == provision.Id && l.Voucher.Date <= dto.Date.Date && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose)
+            decimal balance = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == provision.Id && l.Voucher.Date <= dto.Date.Date && l.Voucher.FiscalYear.LegalEntityId == entityId)
                 .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             decimal diff = R(dto.RequiredBalance) - balance;
             var result = new FnTrueUpDto { Kind = kind, Date = dto.Date.Date, RequiredBalance = R(dto.RequiredBalance), CurrentBalance = balance, Difference = diff, Reason = dto.Reason };

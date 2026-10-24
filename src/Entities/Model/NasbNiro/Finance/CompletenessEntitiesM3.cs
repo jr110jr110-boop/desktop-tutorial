@@ -50,6 +50,8 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal InterestExpensed { get; set; }
         public decimal InterestPaid { get; set; }
         public decimal PrincipalPaid { get; set; }
+        /// <summary>The part of the long-term loan already reclassified to the current portion (short-term) by the period-close runs.</summary>
+        public decimal CurrentPortionReclassified { get; set; }
         public int CreatedByUserId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public ICollection<FnLoanInstallment> Installments { get; set; }

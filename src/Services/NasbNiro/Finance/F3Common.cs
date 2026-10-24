@@ -61,6 +61,7 @@ namespace Services.NasbNiro.Finance
     {
         Task<ResponseDto<ImportReportDto>> ImportAccountsAsync(SepidarAccountImportDto dto, bool commit, CancellationToken cancellationToken);
         Task<ResponseDto<ImportReportDto>> ImportDetailsAsync(SepidarDetailImportDto dto, bool commit, CancellationToken cancellationToken);
+        Task<ResponseDto<FnDetailLinkReportDto>> LinkDetailsAsync(FnDetailLinkDto dto, bool commit, CancellationToken cancellationToken);
         Task<ResponseDto<OpeningReportDto>> ImportOpeningBalancesAsync(SepidarOpeningImportDto dto, bool commit, CancellationToken cancellationToken);
         Task<ResponseDto<FiscalYearDto>> CreateImportedYearAsync(CreateImportedYearDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<HistoricalReportDto>> ImportHistoricalAsync(HistoricalImportDto dto, CancellationToken cancellationToken);

@@ -33,7 +33,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.TotalLoss).HasPrecision(18, 0);
                 b.Property(x => x.Warning).HasMaxLength(500);
                 b.HasIndex(x => x.Number).IsUnique();
-                b.HasIndex(x => new { x.LegalEntityId, x.PeriodId });
+                b.HasIndex(x => new { x.LegalEntityId, x.PeriodId, x.Sequence }).IsUnique();
             });
             builder.Entity<FnFxRevaluationLine>(b =>
             {
@@ -133,7 +133,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.TotalAbsorbed).HasPrecision(18, 0);
                 b.Property(x => x.Variance).HasPrecision(18, 0);
                 b.HasIndex(x => x.Number).IsUnique();
-                b.HasIndex(x => new { x.LegalEntityId, x.PeriodId });
+                b.HasIndex(x => new { x.LegalEntityId, x.PeriodId }).IsUnique();
             });
             builder.Entity<FnStandardCost>(b =>
             {
@@ -153,9 +153,12 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.TotalCost).HasPrecision(18, 0);
                 b.Property(x => x.Variance).HasPrecision(18, 0);
                 b.Property(x => x.UnitCost).HasPrecision(18, 4);
+                b.Property(x => x.FgAmount).HasPrecision(18, 0);
+                b.Property(x => x.RelievedAmount).HasPrecision(18, 0);
                 b.Property(x => x.ReopenReason).HasMaxLength(1000);
                 b.HasIndex(x => x.Number).IsUnique();
                 b.HasIndex(x => x.WorkOrderId);
+                b.HasIndex(x => x.WorkOrderId).IsUnique().HasFilter("[IsOpen] = 0").HasDatabaseName("IX_FnWorkOrderCloses_ActiveClose");
             });
             builder.Entity<FnContractRevenue>(b =>
             {
@@ -179,6 +182,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.ContractAsset).HasPrecision(18, 0);
                 b.Property(x => x.ContractLiability).HasPrecision(18, 0);
                 b.Property(x => x.LossProvision).HasPrecision(18, 0);
+                b.Property(x => x.CostOfSales).HasPrecision(18, 0);
                 b.HasIndex(x => new { x.ContractId, x.PeriodId });
             });
 

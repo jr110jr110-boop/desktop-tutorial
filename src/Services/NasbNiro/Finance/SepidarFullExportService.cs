@@ -191,7 +191,7 @@ namespace Services.NasbNiro.Finance
             FnPeriod period = await _uow.Set<FnPeriod>().AsNoTracking().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.Id == periodId, ct);
             if (period == null) { pv.Errors.Add("دوره پیدا نشد."); return built; }
             built.Period = period;
-            if (period.Status == FnPeriodStatus.Open) pv.Errors.Add("دوره باز است؛ خروجی فقط برای دوره قفل یا بسته‌شده گرفته می‌شود.");
+            if (period.Status != FnPeriodStatus.Closed) pv.Errors.Add("دوره بسته نشده است؛ خروجی فقط برای دوره بسته‌شده گرفته می‌شود (در دوره باز یا قفل‌شده هنوز ثبت سند ممکن است و خروجی کهنه می‌شود).");
             pv.AlreadyExported = await _uow.Set<FnVoucherExport>().AnyAsync(e => e.PeriodId == periodId && e.Status == FnExportStatus.Active, ct);
 
             int nonFinal = await _uow.Set<FnVoucher>().CountAsync(v => v.FiscalYearId == period.FiscalYearId && v.Date >= period.StartDate && v.Date <= period.EndDate && v.Status != FnVoucherStatus.Final, ct);
@@ -203,7 +203,7 @@ namespace Services.NasbNiro.Finance
                 .Select(l => new
                 {
                     VoucherId = l.VoucherId, l.Voucher.Number, l.Voucher.Date, VoucherDescription = l.Voucher.Description, l.Description, l.RowNumber,
-                    AccountCode = l.Account.Code, AccountSepidar = l.Account.SepidarCode, l.Detail1Id, l.Detail2Id, l.Debit, l.Credit,
+                    AccountCode = l.Account.Code, AccountSepidar = l.Account.SepidarCode, l.Detail1Id, l.Detail2Id, l.Debit, l.Credit, l.CostCenterId, l.WorkOrderId, l.ContractId,
                 }).ToListAsync(ct);
             pv.Vouchers = lines.Select(l => l.VoucherId).Distinct().Count();
             pv.Rows = lines.Count;
@@ -213,6 +213,24 @@ namespace Services.NasbNiro.Finance
             List<int> detailIds = lines.SelectMany(l => new int?[] { l.Detail1Id, l.Detail2Id }).Where(x => x.HasValue).Select(x => x.Value).Distinct().ToList();
             var details = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => detailIds.Contains(d.Id)).Select(d => new { d.Id, d.Code, d.Type }).ToDictionaryAsync(d => d.Id, ct);
             Dictionary<int, string> detailMap = await _uow.Set<FnDetailSepidarMap>().AsNoTracking().Where(m => detailIds.Contains(m.DetailAccountId)).ToDictionaryAsync(m => m.DetailAccountId, m => m.SepidarCode, ct);
+
+            // dimension columns come from the line's own fields (cost centre, work order, contract) as well as from Detail2: each resolves to the matching detail and its Sepidar code
+            var dimIds = new Dictionary<(FnDetailType, int), FnDetailAccount>();
+            foreach (var l in lines)
+            {
+                if (l.CostCenterId.HasValue) dimIds[(FnDetailType.CostCenter, l.CostCenterId.Value)] = null;
+                if (l.WorkOrderId.HasValue) dimIds[(FnDetailType.WorkOrder, l.WorkOrderId.Value)] = null;
+                if (l.ContractId.HasValue) dimIds[(FnDetailType.Project, l.ContractId.Value)] = null;
+            }
+            var dimTypes = dimIds.Keys.Select(k => k.Item1).Distinct().ToList();
+            var dimLinked = dimIds.Keys.Select(k => (int?)k.Item2).Distinct().ToList();
+            var dimDetails = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => dimTypes.Contains(d.Type) && d.LinkedEntityId != null && dimLinked.Contains(d.LinkedEntityId)).ToListAsync(ct);
+            foreach (FnDetailAccount d in dimDetails) dimIds[(d.Type, d.LinkedEntityId.Value)] = d;
+            List<int> dimDetailIds = dimDetails.Select(x => x.Id).ToList();
+            Dictionary<int, string> dimMap = await _uow.Set<FnDetailSepidarMap>().AsNoTracking().Where(m => dimDetailIds.Contains(m.DetailAccountId)).ToDictionaryAsync(m => m.DetailAccountId, m => m.SepidarCode, ct);
+            string DimCode(FnDetailType t, int? id) => id.HasValue && dimIds.TryGetValue((t, id.Value), out FnDetailAccount d) && d != null && dimMap.TryGetValue(d.Id, out string c) ? c : "";
+            foreach (var kv in dimIds.Where(k => k.Value == null || !dimMap.ContainsKey(k.Value.Id)).OrderBy(k => k.Key.Item1).ThenBy(k => k.Key.Item2))
+                pv.Errors.Add($"بعد {kv.Key.Item1} شماره {kv.Key.Item2} تفصیلی با کد سپیدار ندارد.");
 
             foreach (string code in lines.Where(l => Clean(l.AccountSepidar) == null).Select(l => l.AccountCode).Distinct().OrderBy(c => c, StringComparer.Ordinal)) pv.UnmappedAccounts.Add(code);
             foreach (int id in detailIds.Where(i => !detailMap.ContainsKey(i)).OrderBy(i => i)) pv.UnmappedDetails.Add(details[id].Code);
@@ -231,8 +249,8 @@ namespace Services.NasbNiro.Finance
                 foreach (var l in lines)
                 {
                     string DetailOf(int? id) => id.HasValue ? detailMap[id.Value] : "";
-                    string CostCentre() => FindDetail(l.Detail2Id, FnDetailType.CostCenter);
-                    string Project() => FindDetail(l.Detail2Id, FnDetailType.Project, FnDetailType.WorkOrder);
+                    string CostCentre() { string c = FindDetail(l.Detail2Id, FnDetailType.CostCenter); return c != "" ? c : DimCode(FnDetailType.CostCenter, l.CostCenterId); }
+                    string Project() { string c = FindDetail(l.Detail2Id, FnDetailType.Project, FnDetailType.WorkOrder); if (c != "") return c; c = DimCode(FnDetailType.WorkOrder, l.WorkOrderId); return c != "" ? c : DimCode(FnDetailType.Project, l.ContractId); }
                     string FindDetail(int? id, params FnDetailType[] types) => id.HasValue && types.Contains(details[id.Value].Type) ? detailMap[id.Value] : "";
                     var cells = new List<string>();
                     foreach (FnExportLayoutColumn c in cols)

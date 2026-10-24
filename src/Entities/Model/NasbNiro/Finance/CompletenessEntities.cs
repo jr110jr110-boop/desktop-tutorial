@@ -58,6 +58,10 @@ namespace Entities.Model.NasbNiro.Finance
         public FnIntercompanyPair Pair { get; set; }
         public DateTime Date { get; set; }
         public decimal Amount { get; set; }
+        /// <summary>The amount in the currency of entity A / entity B (equal to Amount when the currencies are equal); Rate = units of the other currency per one unit of the charger's.</summary>
+        public decimal AmountA { get; set; }
+        public decimal AmountB { get; set; }
+        public decimal Rate { get; set; } = 1m;
         /// <summary>The entity that charges the other (revenue side).</summary>
         public int ChargerEntityId { get; set; }
         public int CounterAccountAId { get; set; }

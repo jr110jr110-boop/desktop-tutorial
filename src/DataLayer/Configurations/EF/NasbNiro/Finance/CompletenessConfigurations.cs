@@ -38,6 +38,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.ToTable("FnIntercompanyPosts");
                 b.Property(x => x.Number).HasMaxLength(30).IsRequired();
                 b.Property(x => x.Amount).HasPrecision(18, 0);
+                b.Property(x => x.AmountA).HasPrecision(18, 0);
+                b.Property(x => x.AmountB).HasPrecision(18, 0);
+                b.Property(x => x.Rate).HasPrecision(18, 6);
                 b.Property(x => x.Description).HasMaxLength(500);
                 b.HasIndex(x => x.Number).IsUnique();
                 b.HasOne(x => x.Pair).WithMany().HasForeignKey(x => x.PairId).OnDelete(DeleteBehavior.Restrict);

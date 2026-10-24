@@ -76,6 +76,7 @@ namespace Services.NasbNiro.Finance
         public const int TaxAdjustment = 576;
         public const int BadDebt = 577;
         public const int TaxProvision = 578;
+        public const int CurrentPortion = 579;
     }
 
     internal static class LedgerMath

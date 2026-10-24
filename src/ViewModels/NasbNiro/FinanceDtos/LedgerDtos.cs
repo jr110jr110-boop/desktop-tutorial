@@ -159,6 +159,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
     public class VoucherDto
     {
         public int Id { get; set; }
+        /// <summary>Set when the voucher was finalised with a date earlier than an already final voucher with a lower number (final numbers follow the order of finalising).</summary>
+        public string Warning { get; set; }
         public int FiscalYearId { get; set; }
         public string FiscalYearTitle { get; set; }
         public int? Number { get; set; }
@@ -501,6 +503,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Side { get; set; }
         public string PartyName { get; set; }
         public string EconomicCode { get; set; }
+        public string NationalId { get; set; }
         public decimal NetAmount { get; set; }
         public decimal VatAmount { get; set; }
         public int Documents { get; set; }

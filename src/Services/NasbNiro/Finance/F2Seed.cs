@@ -79,7 +79,8 @@ namespace Services.NasbNiro.Finance
             yield return I(100, "SHIFT", "حق نوبت‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.Formula, true, true, "قانون کار ماده ۵۵ — ۱۰ / ۱۵ / ۲۲٫۵٪ بر حسب نوع نوبت ★ — توسط مالی تایید شود",
                 formula: "BASE_WAGE * SHIFT_PERCENT / 100");
             yield return I(110, "MISSION", "ماموریت", FnPayrollItemKind.Earning, FnPayrollCalc.Input, false, true, "مبلغ هر ماه وارد می‌شود — مشمول بیمه و مالیات توسط مالی تایید شود");
-            yield return I(120, "BONUS", "پاداش", FnPayrollItemKind.Earning, FnPayrollCalc.Input, true, true, "مبلغ هر ماه وارد می‌شود — از محل ذخیره عیدی و پاداش پرداخت می‌شود (قابل ویرایش)", role: AccountRoles.BonusProvision);
+            yield return I(120, "BONUS", "پاداش (ماهانه)", FnPayrollItemKind.Earning, FnPayrollCalc.Input, true, true, "مبلغ هر ماه وارد می‌شود — هزینه همان ماه است و از ذخیره عیدی پرداخت نمی‌شود (قابل ویرایش)");
+            yield return I(125, "ANNUAL_BONUS", "عیدی و پاداش سالانه", FnPayrollItemKind.Earning, FnPayrollCalc.Input, false, true, "مبلغ عیدی هنگام پرداخت وارد می‌شود — از محل ذخیره عیدی و پاداش (۳۰۴۰۲) پرداخت می‌شود؛ مشمول بیمه و مالیات توسط مالی تایید شود", role: AccountRoles.BonusProvision);
 
             yield return I(200, "SS_EMPLOYEE", "بیمه سهم کارگر", FnPayrollItemKind.Deduction, FnPayrollCalc.PercentOfItems, false, false, insurance + " — ۷٪ تا سقف ★",
                 itemCodes: "@INSURABLE", factor: 7, reduces: true, role: AccountRoles.InsurancePayable);
@@ -129,7 +130,8 @@ namespace Services.NasbNiro.Finance
                 // upgrade of installs made before the review fixes: items finance has not reviewed yet (Verify) get the new defaults
                 List<FnPayrollItem> existing = await uow.Set<FnPayrollItem>().ToListAsync(ct);
                 FnPayrollItem bonus = existing.FirstOrDefault(i => i.Code == "BONUS");
-                if (bonus != null && bonus.Verify && bonus.AccountRole == null) { bonus.AccountRole = AccountRoles.BonusProvision; changed = true; }
+                // review 2, finding 23: the monthly bonus is an expense of its month; only ANNUAL_BONUS is paid from the provision
+                if (bonus != null && bonus.Verify && bonus.AccountRole == AccountRoles.BonusProvision) { bonus.AccountRole = null; changed = true; }
                 if (!existing.Any(i => i.SeveranceBase))
                 {
                     string[] baseItems = { "BASE_WAGE", "SENIORITY", "HOUSING", "GROCERY", "MARITAL", "CHILD" };

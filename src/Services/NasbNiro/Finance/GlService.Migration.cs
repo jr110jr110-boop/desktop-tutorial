@@ -175,6 +175,99 @@ namespace Services.NasbNiro.Finance
             return ResponseDtoHelper.Ok(report);
         }
 
+        // ------------------------------------------------------------------------------------------ linking imported details to parties
+
+        private static string NormName(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            var sb = new System.Text.StringBuilder();
+            foreach (char ch in Digits(s.Trim()).Replace('ي', 'ی').Replace('ك', 'ک'))
+                if (char.IsLetterOrDigit(ch)) sb.Append(char.ToLowerInvariant(ch));
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Links imported Sepidar details (supplier, customer, bank; employees are payroll personal data and are not matched here) to the PMIS party: the party's postings then use the imported detail, so the opening balance
+        /// and the new documents sit on ONE detail. Automatic match by name, economic code / national id / IBAN found in the detail title or code; the manual list wins.
+        /// </summary>
+        public async Task<ResponseDto<FnDetailLinkReportDto>> LinkDetailsAsync(FnDetailLinkDto dto, bool commit, CancellationToken ct)
+        {
+            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<FnDetailLinkReportDto>(NotAllowed + " (مدیر مالی)");
+            if (dto == null || (!dto.Auto && (dto.Rows == null || dto.Rows.Count == 0))) return Bad<FnDetailLinkReportDto>("فهرست پیوند یا حالت خودکار را مشخص کنید.");
+            var report = new FnDetailLinkReportDto { DryRun = !commit };
+            Dictionary<string, FnDetailAccount> byCode = await _uow.Set<FnDetailAccount>().Where(d => d.IsActive).ToDictionaryAsync(d => d.Code, ct);
+            var providers = await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AsNoTracking().Select(p => new { p.Id, p.Name }).ToListAsync(ct);
+            var customers = await _uow.Set<FnCustomer>().AsNoTracking().Select(c => new { c.Id, c.Name, c.EconomicCode, c.NationalId }).ToListAsync(ct);
+            var banks = await _uow.Set<FnBankAccount>().AsNoTracking().Select(b => new { b.Id, b.Title, b.Iban }).ToListAsync(ct);
+
+            string NameOf(FnDetailType t, int id) => t == FnDetailType.Supplier ? providers.FirstOrDefault(x => x.Id == id)?.Name
+                : t == FnDetailType.Customer ? customers.FirstOrDefault(x => x.Id == id)?.Name
+                : banks.FirstOrDefault(x => x.Id == id)?.Title;
+            bool Exists(FnDetailType t, int id) => NameOf(t, id) != null;
+            FnDetailType? TypeOf(string party) => party == "Supplier" ? FnDetailType.Supplier : party == "Customer" ? FnDetailType.Customer : party == "BankAccount" ? FnDetailType.Bank : (FnDetailType?)null;
+
+            var plan = new List<(FnDetailAccount Detail, FnDetailType Type, int PartyId)>();
+            var manualCodes = new HashSet<string>();
+            foreach (FnDetailLinkRowDto r in dto.Rows ?? new List<FnDetailLinkRowDto>())
+            {
+                var line = new FnDetailLinkResultRowDto { DetailCode = Clean(r?.DetailCode), PartyType = r?.PartyType, PartyId = r?.PartyId };
+                report.Rows.Add(line);
+                FnDetailType? t = TypeOf(r?.PartyType);
+                if (line.DetailCode == null || !t.HasValue || !byCode.TryGetValue(line.DetailCode, out FnDetailAccount d)) { line.Status = "Error"; line.Message = "تفصیلی یا نوع طرف حساب نامعتبر است."; report.Errors++; continue; }
+                if (!Exists(t.Value, r.PartyId)) { line.Status = "Error"; line.Message = "طرف حساب پیدا نشد."; report.Errors++; continue; }
+                line.Title = d.Title; line.PartyName = NameOf(t.Value, r.PartyId);
+                if (d.LinkedEntityId.HasValue && !(d.Type == t.Value && d.LinkedEntityId.Value == r.PartyId)) { line.Status = "Error"; line.Message = "این تفصیلی قبلاً به طرف حساب دیگری وصل است."; report.Errors++; continue; }
+                manualCodes.Add(d.Code);
+                plan.Add((d, t.Value, r.PartyId)); line.Status = "Linked";
+            }
+            if (dto.Auto)
+            {
+                foreach (FnDetailAccount d in byCode.Values.Where(x => !x.LinkedEntityId.HasValue && !manualCodes.Contains(x.Code) && (x.Type == FnDetailType.Supplier || x.Type == FnDetailType.Customer || x.Type == FnDetailType.Bank)).OrderBy(x => x.Code))
+                {
+                    string title = NormName(d.Title), digits = new string(Digits((d.Title ?? "") + " " + d.Code).Where(char.IsDigit).ToArray());
+                    var hits = new List<int>();
+                    if (d.Type == FnDetailType.Supplier) hits = providers.Where(p => NormName(p.Name) == title).Select(p => p.Id).ToList();
+                    else if (d.Type == FnDetailType.Customer) hits = customers.Where(c => NormName(c.Name) == title || (!string.IsNullOrEmpty(c.EconomicCode) && digits.Contains(c.EconomicCode)) || (!string.IsNullOrEmpty(c.NationalId) && digits.Contains(c.NationalId))).Select(c => c.Id).Distinct().ToList();
+                    else hits = banks.Where(b => NormName(b.Title) == title || (!string.IsNullOrEmpty(b.Iban) && (d.Title ?? "").Replace(" ", "").ToUpperInvariant().Contains(b.Iban.Replace(" ", "").ToUpperInvariant()))).Select(b => b.Id).ToList();
+                    var line = new FnDetailLinkResultRowDto { DetailCode = d.Code, Title = d.Title, PartyType = d.Type == FnDetailType.Bank ? "BankAccount" : d.Type.ToString() };
+                    if (hits.Count == 1)
+                    {
+                        line.PartyId = hits[0]; line.PartyName = NameOf(d.Type, hits[0]); line.Status = "Linked"; plan.Add((d, d.Type, hits[0]));
+                    }
+                    else if (hits.Count > 1) { line.Status = "Ambiguous"; line.Message = "چند طرف حساب با این تفصیلی مطابقت دارند؛ در فهرست دستی مشخص کنید."; report.Ambiguous++; }
+                    else { line.Status = "Unmatched"; line.Message = "طرف حسابی پیدا نشد؛ در فهرست دستی مشخص کنید."; report.Unmatched++; }
+                    report.Rows.Add(line);
+                }
+            }
+            // one party, one detail: two imported details cannot point at the same party, and a party's own auto-created detail with postings blocks the link
+            foreach (var group in plan.GroupBy(p => (p.Type, p.PartyId)).Where(g => g.Select(x => x.Detail.Id).Distinct().Count() > 1))
+            {
+                foreach (var x in group) { var row = report.Rows.First(rw => rw.DetailCode == x.Detail.Code); row.Status = "Error"; row.Message = "دو تفصیلی به یک طرف حساب وصل شده‌اند."; report.Errors++; }
+                plan.RemoveAll(p => p.Type == group.Key.Type && p.PartyId == group.Key.PartyId);
+            }
+            var toRetire = new List<FnDetailAccount>();
+            foreach (var p in plan.ToList())
+            {
+                FnDetailAccount own = await _uow.Set<FnDetailAccount>().FirstOrDefaultAsync(x => x.Type == p.Type && x.LinkedEntityId == p.PartyId && x.Id != p.Detail.Id, ct);
+                if (own == null) continue;
+                if (await _uow.Set<FnVoucherLine>().AnyAsync(l => l.Detail1Id == own.Id || l.Detail2Id == own.Id, ct))
+                {
+                    var row = report.Rows.First(rw => rw.DetailCode == p.Detail.Code);
+                    row.Status = "Error"; row.Message = $"طرف حساب از قبل تفصیلی {own.Code} با گردش دارد؛ ابتدا با سند اصلاحی منتقل کنید."; report.Errors++;
+                    plan.Remove(p);
+                }
+                else toRetire.Add(own);
+            }
+            report.Linked = plan.Count;
+            if (!commit || report.Errors > 0) return ResponseDtoHelper.Ok(report);
+            foreach (FnDetailAccount own in toRetire.Distinct()) { own.LinkedEntityId = null; own.IsActive = false; }
+            await _uow.SaveChangesAsync(ct);
+            foreach (var p in plan) { p.Detail.Type = p.Type; p.Detail.LinkedEntityId = p.PartyId; }
+            await _uow.SaveChangesAsync(ct);
+            report.Committed = true;
+            return ResponseDtoHelper.Ok(report);
+        }
+
         // ------------------------------------------------------------------------------------------ opening balances
 
         public async Task<ResponseDto<OpeningReportDto>> ImportOpeningBalancesAsync(SepidarOpeningImportDto dto, bool commit, CancellationToken ct)
@@ -359,6 +452,9 @@ namespace Services.NasbNiro.Finance
             Dictionary<int, FnAccount> accounts = await _uow.Set<FnAccount>().AsNoTracking().ToDictionaryAsync(a => a.Id, ct);
             List<int> detailIds = pmisRows.Where(r => r.Detail1Id.HasValue).Select(r => r.Detail1Id.Value).Distinct().ToList();
             Dictionary<int, string> detailCodes = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => detailIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, d => d.Code, ct);
+            // a PMIS detail that is mapped to a Sepidar detail is compared under the Sepidar code
+            Dictionary<int, string> sepidarOf = await _uow.Set<FnDetailSepidarMap>().AsNoTracking().Where(x => detailIds.Contains(x.DetailAccountId)).ToDictionaryAsync(x => x.DetailAccountId, x => x.SepidarCode, ct);
+            foreach (var kv in sepidarOf) if (Clean(kv.Value) != null) detailCodes[kv.Key] = kv.Value.Trim();
 
             var pmis = new Dictionary<(string, string), (decimal Debit, decimal Credit, string Title)>();
             foreach (var r in pmisRows)

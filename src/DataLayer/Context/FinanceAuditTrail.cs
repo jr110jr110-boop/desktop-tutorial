@@ -52,9 +52,18 @@ namespace DataLayer.Context
             { typeof(FnContractRevenue), null },
             { typeof(FnDeferral), null },
             { typeof(FnProvision), null },
+            // review 2, finding 21: voucher lines (manual vouchers), pay structure, payments, loans and supplier IBANs
+            { typeof(FnVoucherLine), null },
+            { typeof(FnPayrollItem), null },
+            { typeof(FnPayrollRateTable), null },
+            { typeof(FnTaxBracket), null },
+            { typeof(FnPayment), null },
+            { typeof(FnReceipt), null },
+            { typeof(FnLoan), null },
+            { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Iban" } },
         };
 
-        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban" };
+        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban" };
         private static readonly HashSet<string> Skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RowVersion" };
 
         public static void Capture(DbContext context, IHttpContextAccessor accessor)
@@ -90,6 +99,7 @@ namespace DataLayer.Context
                 if (entry.State == EntityState.Added)
                 {
                     if (entry.Entity is FnVoucher v && (v.Type == FnVoucherType.Auto || v.IsImported)) continue;
+                    if (entry.Entity is FnVoucherLine vl && vl.Voucher != null && (vl.Voucher.Type != FnVoucherType.Normal || vl.Voucher.IsImported)) continue;   // only the lines of manual vouchers
                     if (entry.Entity is FnDetailAccount d && d.LinkedEntityId.HasValue) continue;
                 }
 
@@ -103,16 +113,20 @@ namespace DataLayer.Context
                     if (entry.State == EntityState.Added)
                     {
                         after[name] = Shape(name, p.CurrentValue);
+                        if (Masked.Contains(name) && p.CurrentValue is string added) after[name + "Hash"] = Hash(added);
                     }
                     else if (entry.State == EntityState.Deleted)
                     {
                         before[name] = Shape(name, p.OriginalValue);
+                        if (Masked.Contains(name) && p.OriginalValue is string removed) before[name + "Hash"] = Hash(removed);
                     }
                     else
                     {
                         if (!p.IsModified || Equals(p.OriginalValue, p.CurrentValue)) continue;
                         before[name] = Shape(name, p.OriginalValue);
                         after[name] = Shape(name, p.CurrentValue);
+                        // a one-way hash of the full value: a change that keeps the visible last digits is still detectable
+                        if (Masked.Contains(name)) { before[name + "Hash"] = p.OriginalValue is string o ? Hash(o) : null; after[name + "Hash"] = p.CurrentValue is string c ? Hash(c) : null; }
                     }
                 }
                 if (entry.State == EntityState.Modified && after.Count == 0) continue;
@@ -140,13 +154,29 @@ namespace DataLayer.Context
             }
         }
 
+        private static readonly System.Globalization.PersianCalendar Persian = new System.Globalization.PersianCalendar();
+
+        /// <summary>The company works in the Persian calendar: nothing the user reads shows a Gregorian date (storage stays DateTime).</summary>
+        internal static string PersianText(DateTime dt)
+        {
+            if (dt.Year < 1000 || dt.Year > 9000) return "-";
+            string date = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0000}/{1:00}/{2:00}", Persian.GetYear(dt), Persian.GetMonth(dt), Persian.GetDayOfMonth(dt));
+            return dt.TimeOfDay == TimeSpan.Zero ? date : date + " " + dt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static string Hash(string value)
+        {
+            string normalised = new string(value.Where(ch => !char.IsWhiteSpace(ch)).ToArray()).ToUpperInvariant();
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalised))).Substring(0, 16).ToLowerInvariant();
+        }
+
         private static object Shape(string name, object value)
         {
             if (value == null) return null;
             if (Masked.Contains(name) && value is string s) return s.Length <= 4 ? "****" : "****" + s.Substring(s.Length - 4);
             if (value is Enum) return value.ToString();
-            if (value is DateTime dt) return dt.ToString("yyyy-MM-dd'T'HH:mm:ss");
-            if (value is DateTimeOffset dto) return dto.ToString("yyyy-MM-dd'T'HH:mm:ssK");
+            if (value is DateTime dt) return PersianText(dt);
+            if (value is DateTimeOffset dto) return PersianText(dto.DateTime);
             if (value is decimal || value is int || value is long || value is bool || value is string) return value;
             return value.ToString();
         }

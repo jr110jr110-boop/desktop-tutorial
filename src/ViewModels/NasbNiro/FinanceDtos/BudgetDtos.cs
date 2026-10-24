@@ -99,6 +99,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal Amount { get; set; }
         public DateTime? Date { get; set; }
         public string OverrideReason { get; set; }
+        /// <summary>The document being approved is not counted among the open commitments.</summary>
+        public int? ExcludePurchaseRequestId { get; set; }
+        public int? ExcludePurchaseOrderId { get; set; }
     }
 
     public class FnCommitmentCheckDto
@@ -110,6 +113,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public bool Overridden { get; set; }
         public decimal BudgetToDate { get; set; }
         public decimal ActualToDate { get; set; }
+        /// <summary>Approved purchase requests not yet ordered plus the not-yet-invoiced part of open purchase orders on the same cost centre / contract.</summary>
+        public decimal OpenCommitments { get; set; }
         public decimal Remaining { get; set; }
         public decimal Amount { get; set; }
         public string Message { get; set; }

@@ -210,6 +210,20 @@ namespace Services.NasbNiro.Finance
             FnAccount pooled = await AccountByCodeAsync(OverheadPoolCode, ct), absorbedAcc = await AccountByCodeAsync(AbsorbedCode, ct), varianceAcc = await AccountByCodeAsync(OverheadVarianceCode, ct), wip = await RoleAccountAsync(AccountRoles.Wip, "10520", ct);
             if (pooled == null || absorbedAcc == null || varianceAcc == null || wip == null) return Bad<FnAllocationResultDto>("حساب‌های سربار (70206، 70110، 70111، 10520) در کدینگ نیست.");
             string number = await NextNumberAsync("OVH", FinanceNumbers.OverheadAllocation, end, ct);
+            // the run record is saved FIRST: the unique index (one run per entity and period) stops a concurrent second run before any voucher exists
+            var rec = new FnOverheadAllocation
+            {
+                Number = number, LegalEntityId = entityId, PeriodId = periodId, TotalAllocated = result.TotalAllocated, TotalAbsorbed = result.TotalAbsorbed, Variance = variance,
+                CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now,
+            };
+            _uow.Set<FnOverheadAllocation>().Add(rec);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { return Bad<FnAllocationResultDto>("تسهیم و جذب سربار این دوره همزمان توسط کاربر دیگری انجام شد."); }
+            async Task<ResponseDto<FnAllocationResultDto>> FailAsync(string message)
+            {
+                await _uow.Set<FnOverheadAllocation>().Where(x => x.Id == rec.Id).ExecuteDeleteAsync(ct);
+                return Bad<FnAllocationResultDto>(message);
+            }
             FnVoucher v1 = null, v2 = null, v3 = null;
             if (stepLines.Count > 0)
             {
@@ -220,7 +234,7 @@ namespace Services.NasbNiro.Finance
                     lines.Add(new AutoLine { Account = pooled, CostCenterId = s.From, Credit = s.Amount, Description = $"تسهیم سربار {centers[s.From].Code} به {centers[s.To].Code}" });
                 }
                 var r1 = await AddAutoVoucherAsync(entityId, end, $"تسهیم گام‌به‌گام سربار {period.Title} ({number})", "OverheadAllocation", number, lines, FnVoucherType.Auto, null, ct);
-                if (r1.Error != null) return Bad<FnAllocationResultDto>(r1.Error);
+                if (r1.Error != null) return await FailAsync(r1.Error);
                 v1 = r1.Voucher;
             }
             if (absorptions.Count > 0)
@@ -233,7 +247,7 @@ namespace Services.NasbNiro.Finance
                     lines.Add(new AutoLine { Account = absorbedAcc, CostCenterId = b.CostCenterId, WorkOrderId = b.WorkOrderId, Credit = a.Amount, Description = $"جذب سربار دستور کار {b.WorkOrderId}" });
                 }
                 var r2 = await AddAutoVoucherAsync(entityId, end, $"جذب سربار در دستورکارها {period.Title} ({number})", "OverheadAbsorption", number, lines, FnVoucherType.Auto, null, ct);
-                if (r2.Error != null) return Bad<FnAllocationResultDto>(r2.Error);
+                if (r2.Error != null) return await FailAsync(r2.Error);
                 v2 = r2.Voucher;
             }
             if (varianceRows.Count > 0)
@@ -248,7 +262,7 @@ namespace Services.NasbNiro.Finance
                     else if (vr < 0) lines.Add(new AutoLine { Account = varianceAcc, CostCenterId = row.Cc, Credit = -vr, Description = "سربار مازاد جذب‌شده" });
                 }
                 var r3 = await AddAutoVoucherAsync(entityId, end, $"انحراف جذب سربار {period.Title} ({number})", "OverheadVariance", number, lines, FnVoucherType.Auto, null, ct);
-                if (r3.Error != null) return Bad<FnAllocationResultDto>(r3.Error);
+                if (r3.Error != null) return await FailAsync(r3.Error);
                 v3 = r3.Voucher;
             }
             foreach (FnWorkOrderBase b in bases)
@@ -261,12 +275,7 @@ namespace Services.NasbNiro.Finance
                 });
             }
             await _uow.SaveChangesAsync(ct);
-            var rec = new FnOverheadAllocation
-            {
-                Number = number, LegalEntityId = entityId, PeriodId = periodId, TotalAllocated = result.TotalAllocated, TotalAbsorbed = result.TotalAbsorbed, Variance = variance,
-                AllocationVoucherId = v1?.Id, AbsorptionVoucherId = v2?.Id, VarianceVoucherId = v3?.Id, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now,
-            };
-            _uow.Set<FnOverheadAllocation>().Add(rec);
+            rec.AllocationVoucherId = v1?.Id; rec.AbsorptionVoucherId = v2?.Id; rec.VarianceVoucherId = v3?.Id;
             await _uow.SaveChangesAsync(ct);
             result.Id = rec.Id; result.Number = number; result.AllocationVoucherId = rec.AllocationVoucherId; result.AbsorptionVoucherId = rec.AbsorptionVoucherId; result.VarianceVoucherId = rec.VarianceVoucherId;
             return ResponseDtoHelper.Ok(result);
@@ -280,12 +289,17 @@ namespace Services.NasbNiro.Finance
             decimal K(params CostKind[] k) => kinds.Where(x => k.Contains(x.Kind)).Sum(x => x.Amount);
             var wipLines = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.WorkOrderId == wo.Id && l.Account.Code == "10520" && l.Voucher.Status != FnVoucherStatus.Draft)
                 .GroupBy(l => 1).Select(g => new { Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) }).FirstOrDefaultAsync(ct);
+            // what has left WIP as finished goods: production receipts and earlier close-outs (net of their reopenings); returns of material are NOT a transfer, the sheet material is already net of them
+            List<int> receiptEvents = await _uow.Set<AccountingEvent>().AsNoTracking().Where(e => e.Type == AccountingEventType.ProductionReceipt).Select(e => e.Id).ToListAsync(ct);
+            decimal transferred = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.WorkOrderId == wo.Id && l.Account.Code == "10520" && l.Voucher.Status != FnVoucherStatus.Draft
+                    && ((l.Voucher.AccountingEventId != null && receiptEvents.Contains(l.Voucher.AccountingEventId.Value)) || l.Voucher.SourceType == "WorkOrderClose"))
+                .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             decimal labourLedger = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.WorkOrderId == wo.Id && l.Account.Code == "70102" && l.Voucher.Status != FnVoucherStatus.Draft).SumAsync(l => (decimal?)(l.Debit - l.Credit), ct) ?? 0;
             bool closed = await _uow.Set<FnWorkOrderClose>().AnyAsync(c => c.WorkOrderId == wo.Id && c.IsOpen == false, ct);
             var dto = new FnWorkOrderCostDto
             {
                 WorkOrderId = wo.Id, Code = wo.Code, Quantity = wo.Count, Material = K(CostKind.Material), Labour = K(CostKind.Labour), Overhead = K(CostKind.Overhead), Subcontract = K(CostKind.Subcontract, CostKind.PurchasedService),
-                WipBalance = (wipLines?.Debit ?? 0) - (wipLines?.Credit ?? 0), TransferredOut = wipLines?.Credit ?? 0, LabourInLedger = labourLedger, IsClosed = closed,
+                WipBalance = (wipLines?.Debit ?? 0) - (wipLines?.Credit ?? 0), TransferredOut = transferred, LabourInLedger = labourLedger, IsClosed = closed,
             };
             dto.TotalCost = dto.Material + dto.Labour + dto.Overhead + dto.Subcontract;
             dto.UnitCost = dto.Quantity > 0 ? R(dto.TotalCost / dto.Quantity) : dto.TotalCost;
@@ -334,15 +348,19 @@ namespace Services.NasbNiro.Finance
             if (diff != 0) lines.Add(new AutoLine { Account = variance, WorkOrderId = wo.Id, ContractId = wo.ContractId, Debit = diff > 0 ? diff : 0, Credit = diff < 0 ? -diff : 0, Description = "انحراف بهای تمام‌شده " + text });
             int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
             string number = await NextNumberAsync("WOC", FinanceNumbers.WorkOrderClose, date, ct);
-            var v = await AddAutoVoucherAsync(entityId, date, $"{text} ({number})", "WorkOrderClose", number, lines, FnVoucherType.Auto, null, ct);
-            if (v.Error != null) return Bad<FnWorkOrderCloseDto>(v.Error);
-            await _uow.SaveChangesAsync(ct);
+            // the close record is saved FIRST: the unique index (one active close per work order) stops a concurrent second close before any voucher exists
             var rec = new FnWorkOrderClose
             {
                 Number = number, WorkOrderId = wo.Id, Material = cost.Material, Labour = cost.Labour, Overhead = cost.Overhead, Subcontract = cost.Subcontract, TotalCost = cost.TotalCost, Variance = diff,
-                Quantity = quantity, UnitCost = R(cost.TotalCost / quantity), IsOpen = false, VoucherId = v.Voucher.Id, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now,
+                Quantity = quantity, UnitCost = R(cost.TotalCost / quantity), FgAmount = remainingSheet, IsOpen = false, VoucherId = 0, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now,
             };
             _uow.Set<FnWorkOrderClose>().Add(rec);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { return Bad<FnWorkOrderCloseDto>("این دستور کار همزمان توسط کاربر دیگری بسته شد."); }
+            var v = await AddAutoVoucherAsync(entityId, date, $"{text} ({number})", "WorkOrderClose", number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
+            if (v.Error != null) { await _uow.Set<FnWorkOrderClose>().Where(x => x.Id == rec.Id).ExecuteDeleteAsync(ct); return Bad<FnWorkOrderCloseDto>(v.Error); }
+            await _uow.SaveChangesAsync(ct);
+            rec.VoucherId = v.Voucher.Id;
             await _uow.SaveChangesAsync(ct);
             FnWorkOrderCloseDto dto = ToDto(rec);
             dto.ToFinishedGoods = remainingSheet;
@@ -355,6 +373,7 @@ namespace Services.NasbNiro.Finance
             if (Clean(request?.Reason) == null) return Bad<FnWorkOrderCloseDto>("دلیل بازگشایی را وارد کنید.");
             FnWorkOrderClose c = await _uow.Set<FnWorkOrderClose>().FirstOrDefaultAsync(x => x.WorkOrderId == workOrderId && !x.IsOpen, ct);
             if (c == null) return ResponseDtoHelper.NotFound<FnWorkOrderCloseDto>("بستن فعالی برای این دستور کار نیست.");
+            if (c.DeliveredQuantity > 0) return Bad<FnWorkOrderCloseDto>("از این دستور کار کالا تحویل مشتری شده و بهای آن به بهای تمام‌شده منتقل شده است؛ بازگشایی ممکن نیست.");
             FnVoucher original = await _uow.Set<FnVoucher>().Include(v => v.Lines).ThenInclude(l => l.Account).Include(v => v.FiscalYear).FirstOrDefaultAsync(v => v.Id == c.VoucherId, ct);
             if (original == null) return Bad<FnWorkOrderCloseDto>("سند بستن پیدا نشد.");
             DateTime date = (request.Date ?? DateTime.Today).Date;
@@ -430,6 +449,8 @@ namespace Services.NasbNiro.Finance
             var settings = await _uow.Set<FnContractRevenue>().AsNoTracking().Where(r => r.Method == FnRevenueMethod.PercentOfCompletion).ToListAsync(ct);
             FnAccount revenue = await RoleAccountAsync(AccountRoles.RevenueContracts, "60101", ct), asset = await AccountByCodeAsync("10308", ct), liability = await AccountByCodeAsync("30303", ct);
             FnAccount lossExpense = await AccountByCodeAsync("70112", ct), lossProvision = await AccountByCodeAsync("30404", ct);
+            FnAccount wipAccount = await RoleAccountAsync(AccountRoles.Wip, "10520", ct), cogsAccount = await RoleAccountAsync(AccountRoles.Cogs, "70101", ct);
+            if (wipAccount == null || cogsAccount == null) return Bad<FnRevenueRunDto>("حساب کالای در جریان یا بهای تمام‌شده فروش در کدینگ نیست.");
             if (revenue == null || asset == null || liability == null || lossExpense == null || lossProvision == null) return Bad<FnRevenueRunDto>("حساب‌های درآمد قرارداد، مطالبات تکمیل‌نشده (10308)، صورت‌حساب مازاد (30303) یا ذخیره زیان در کدینگ نیست.");
             var run = new FnRevenueRunDto { PeriodId = periodId, DryRun = dry };
             var lines = new List<AutoLine>();
@@ -457,9 +478,11 @@ namespace Services.NasbNiro.Finance
                 if (progress < 0 || progress > 100) return Bad<FnRevenueRunDto>($"درصد پیشرفت قرارداد {s.ContractId} باید بین ۰ و ۱۰۰ باشد.");
                 decimal earned = R(price * progress / 100m);
                 var ledger = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.ContractId == s.ContractId && l.Voucher.Date <= end && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.FiscalYear.LegalEntityId == entityId
-                        && (l.Account.Code == revenue.Code || l.Account.Code == "10308" || l.Account.Code == "30303" || l.Account.Code == "30404"))
+                        && (l.Account.Code == revenue.Code || l.Account.Code == "10308" || l.Account.Code == "30303" || l.Account.Code == "30404" || l.Account.Code == wipAccount.Code))
                     .GroupBy(l => l.Account.Code).Select(g => new { Code = g.Key, Net = g.Sum(x => x.Debit - x.Credit) }).ToListAsync(ct);
                 decimal Net(string code) => ledger.Where(x => x.Code == code).Sum(x => x.Net);
+                // the cost incurred on the contract (still in work in progress) is expensed with the revenue, so the margin follows the progress
+                decimal costThisRun = Net(wipAccount.Code);
                 decimal revenueLedger = -Net(revenue.Code), oldAsset = Net("10308"), oldLiability = -Net("30303"), oldProvision = -Net("30404");
                 decimal adjust = earned - revenueLedger;
                 decimal position = (oldAsset - oldLiability) + adjust;
@@ -470,15 +493,20 @@ namespace Services.NasbNiro.Finance
                 var row = new FnRevenueRowDto
                 {
                     ContractId = s.ContractId, ProgressPercent = progress, ContractPrice = price, EstimatedCost = eac, EarnedToDate = earned, RevenueInLedger = revenueLedger, RevenueThisRun = adjust,
-                    ContractAsset = newAsset, ContractLiability = newLiability, LossProvision = provision, LossProvisionChange = provisionChange,
+                    ContractAsset = newAsset, ContractLiability = newLiability, LossProvision = provision, LossProvisionChange = provisionChange, CostOfSalesThisRun = costThisRun,
                 };
                 run.Rows.Add(row);
-                run.TotalRevenue += adjust;
+                run.TotalRevenue += adjust; run.TotalCostOfSales += costThisRun;
                 string text = $"شناسایی درآمد قرارداد {s.ContractId} به روش درصد پیشرفت ({progress:0.##}٪)";
                 if (adjust != 0) lines.Add(new AutoLine { Account = revenue, ContractId = s.ContractId, Debit = adjust < 0 ? -adjust : 0, Credit = adjust > 0 ? adjust : 0, Description = text });
                 decimal dAsset = newAsset - oldAsset, dLiab = newLiability - oldLiability;
                 if (dAsset != 0) lines.Add(new AutoLine { Account = asset, ContractId = s.ContractId, Debit = dAsset > 0 ? dAsset : 0, Credit = dAsset < 0 ? -dAsset : 0, Description = text });
                 if (dLiab != 0) lines.Add(new AutoLine { Account = liability, ContractId = s.ContractId, Credit = dLiab > 0 ? dLiab : 0, Debit = dLiab < 0 ? -dLiab : 0, Description = text });
+                if (costThisRun != 0)
+                {
+                    lines.Add(new AutoLine { Account = cogsAccount, ContractId = s.ContractId, Debit = costThisRun > 0 ? costThisRun : 0, Credit = costThisRun < 0 ? -costThisRun : 0, Description = $"بهای تمام‌شده شناسایی‌شده قرارداد {s.ContractId} ({progress:0.##}٪)" });
+                    lines.Add(new AutoLine { Account = wipAccount, ContractId = s.ContractId, Credit = costThisRun > 0 ? costThisRun : 0, Debit = costThisRun < 0 ? -costThisRun : 0, Description = $"انتقال هزینه انجام‌شده قرارداد {s.ContractId} از کالای در جریان" });
+                }
                 if (provisionChange != 0)
                 {
                     lines.Add(new AutoLine { Account = lossExpense, ContractId = s.ContractId, Debit = provisionChange > 0 ? provisionChange : 0, Credit = provisionChange < 0 ? -provisionChange : 0, Description = "ذخیره زیان مورد انتظار قرارداد " + s.ContractId });
@@ -487,13 +515,13 @@ namespace Services.NasbNiro.Finance
                 recs.Add(new FnRevenueRecognition
                 {
                     Number = number, LegalEntityId = entityId, PeriodId = periodId, ContractId = s.ContractId, ProgressPercent = progress, ContractPrice = price, EstimatedCost = eac, EarnedToDate = earned,
-                    RecognisedBefore = revenueLedger, RevenueThisRun = adjust, BilledToDate = revenueLedger - 0, ContractAsset = newAsset, ContractLiability = newLiability, LossProvision = provision,
+                    RecognisedBefore = revenueLedger, RevenueThisRun = adjust, BilledToDate = revenueLedger - 0, ContractAsset = newAsset, ContractLiability = newLiability, LossProvision = provision, CostOfSales = costThisRun,
                     CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now,
                 });
             }
             if (dry) return ResponseDtoHelper.Ok(run);
             if (lines.Count == 0) { run.Number = null; return ResponseDtoHelper.Ok(run); }
-            var v = await AddAutoVoucherAsync(entityId, end, $"شناسایی درآمد قراردادها به روش درصد پیشرفت {period.Title} ({number})", "RevenueRecognition", number, lines, FnVoucherType.Auto, null, ct);
+            var v = await AddAutoVoucherAsync(entityId, end, $"شناسایی درآمد قراردادها به روش درصد پیشرفت {period.Title} ({number})", "RevenueRecognition", number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FnRevenueRunDto>(v.Error);
             await _uow.SaveChangesAsync(ct);
             foreach (FnRevenueRecognition r in recs) { r.VoucherId = v.Voucher.Id; _uow.Set<FnRevenueRecognition>().Add(r); }

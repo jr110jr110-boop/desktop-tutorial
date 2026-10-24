@@ -21,6 +21,7 @@ namespace Services.NasbNiro.Finance
         Task<ResponseDto<FnLoanDto>> PayInstallmentAsync(FnLoanPayDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<List<FnLoanAccrualDto>>> RunAccrualAsync(int periodId, CancellationToken cancellationToken);
         Task<ResponseDto<FnLoanAccrualDto>> ApproveAccrualAsync(int id, CancellationToken cancellationToken);
+        Task<ResponseDto<FnCurrentPortionDto>> CurrentPortionAsync(int periodId, CancellationToken cancellationToken);
         Task<ResponseDto<FnFacilityLimitDto>> SaveFacilityLimitAsync(FnFacilityLimitDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<FnUtilisationDto>> UtilisationAsync(CancellationToken cancellationToken);
     }
@@ -136,6 +137,21 @@ namespace Services.NasbNiro.Finance
             return ResponseDtoHelper.Ok(await LoanDtoAsync(loan, ct));
         }
 
+        private async Task<bool> IsForeignLoanAsync(FnLoan l, CancellationToken ct)
+        {
+            string baseCurrency = await _uow.Set<FnLegalEntity>().AsNoTracking().Where(e => e.Id == l.LegalEntityId).Select(e => e.BaseCurrency).FirstOrDefaultAsync(ct) ?? "IRR";
+            return !string.Equals(l.CurrencyCode ?? baseCurrency, baseCurrency, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>The detail that isolates a foreign loan on the liability account (its currency balance is revalued on its own).</summary>
+        private async Task<FnDetailAccount> LoanDetailAsync(FnLoan l, CancellationToken ct)
+        {
+            string code = "LN-" + l.Number;
+            FnDetailAccount d = _uow.Set<FnDetailAccount>().Local.FirstOrDefault(x => x.Code == code) ?? await _uow.Set<FnDetailAccount>().FirstOrDefaultAsync(x => x.Code == code, ct);
+            if (d == null) { d = new FnDetailAccount { Code = code, Title = "تسهیلات ارزی " + l.Number, Type = FnDetailType.Other, IsActive = true }; _uow.Set<FnDetailAccount>().Add(d); }
+            return d;
+        }
+
         private async Task<FnAccount> LoanAccountAsync(FnLoan l, CancellationToken ct) =>
             await AccountByCodeAsync(l.FacilityType == FnFacilityType.Overdraft || l.InstallmentCount <= 12 ? "30501" : "40101", ct);
 
@@ -164,13 +180,33 @@ namespace Services.NasbNiro.Finance
             if (liability == null || feeAccount == null) return Bad<FnLoanDto>("حساب تسهیلات یا کارمزد در کدینگ نیست.");
             DateTime date = (dto.Date ?? l.StartDate).Date;
             string text = $"دریافت تسهیلات {l.Number} از {l.BankName}";
-            var lines = new List<AutoLine>
+            bool foreign = await IsForeignLoanAsync(l, ct);
+            decimal rate = 1m;
+            List<AutoLine> lines;
+            if (foreign)
             {
-                new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Debit = l.Amount - l.FeeAmount, Description = text },
-                new AutoLine { Account = liability, Credit = l.Amount, Description = text },
-            };
-            if (l.FeeAmount > 0) lines.Add(new AutoLine { Account = feeAccount, Debit = l.FeeAmount, Description = "کارمزد " + text });
-            var v = await AddAutoVoucherAsync(l.LegalEntityId, date, text, "Loan", l.Number, lines, FnVoucherType.Auto, null, ct);
+                if (!dto.Rate.HasValue || dto.Rate.Value <= 0) return Bad<FnLoanDto>($"تسهیلات ارزی ({l.CurrencyCode}) است؛ نرخ تبدیل به ریال در تاریخ دریافت را وارد کنید.");
+                rate = dto.Rate.Value;
+                liability.CurrencyAllowed = true; liability.IsMonetaryForeign = true;
+                FnDetailAccount loanDetail = await LoanDetailAsync(l, ct);
+                decimal baseAmount = R(l.Amount * rate), baseFee = R(l.FeeAmount * rate);
+                lines = new List<AutoLine>
+                {
+                    new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Debit = baseAmount - baseFee, Description = text },
+                    new AutoLine { Account = liability, Detail1 = loanDetail, Credit = baseAmount, Description = text, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.Amount, Rate = rate },
+                };
+                if (baseFee > 0) lines.Add(new AutoLine { Account = feeAccount, Debit = baseFee, Description = "کارمزد " + text });
+            }
+            else
+            {
+                lines = new List<AutoLine>
+                {
+                    new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Debit = l.Amount - l.FeeAmount, Description = text },
+                    new AutoLine { Account = liability, Credit = l.Amount, Description = text },
+                };
+                if (l.FeeAmount > 0) lines.Add(new AutoLine { Account = feeAccount, Debit = l.FeeAmount, Description = "کارمزد " + text });
+            }
+            var v = await AddAutoVoucherAsync(l.LegalEntityId, date, text, "Loan", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FnLoanDto>(v.Error);
             await _uow.SaveChangesAsync(ct);
             l.Status = FnLoanStatus.Active; l.BankAccountId = bank.Bank.Id; l.DisbursementVoucherId = v.Voucher.Id; l.DisbursedDate = date;
@@ -200,12 +236,41 @@ namespace Services.NasbNiro.Finance
             decimal expenseNeeded = Math.Max(0, sumInterestUpTo - l.InterestExpensed), fromAccrual = inst.Interest - expenseNeeded;
             decimal penalty = R(dto.Penalty);
             string text = $"قسط {inst.Sequence} تسهیلات {l.Number}";
-            var lines = new List<AutoLine> { new AutoLine { Account = liability, Debit = inst.Principal, Description = text } };
-            if (fromAccrual > 0) lines.Add(new AutoLine { Account = accrued, Debit = fromAccrual, Description = "سود تعهدی " + text });
-            if (expenseNeeded > 0) lines.Add(new AutoLine { Account = expense, Debit = expenseNeeded, Description = "سود " + text });
-            if (penalty > 0) lines.Add(new AutoLine { Account = penaltyAccount, Debit = penalty, Description = "جریمه " + text });
-            lines.Add(new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = inst.Principal + inst.Interest + penalty, Description = text });
-            var v = await AddAutoVoucherAsync(l.LegalEntityId, date, text, "Loan", l.Number, lines, FnVoucherType.Auto, null, ct);
+            bool foreign = await IsForeignLoanAsync(l, ct);
+            List<AutoLine> lines;
+            if (foreign)
+            {
+                // foreign-currency loan: everything is converted at the payment rate; the liability leaves the books at its carrying rate and the difference is the realised FX gain or loss
+                if (!dto.Rate.HasValue || dto.Rate.Value <= 0) return Bad<FnLoanDto>($"تسهیلات ارزی ({l.CurrencyCode}) است؛ نرخ تبدیل به ریال در تاریخ پرداخت را وارد کنید.");
+                decimal payRate = dto.Rate.Value;
+                FnDetailAccount loanDetail = await LoanDetailAsync(l, ct);
+                var carry = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(x => x.AccountId == liability.Id && x.Detail1.Code == loanDetail.Code && x.Voucher.Status != FnVoucherStatus.Draft)
+                    .GroupBy(x => 1).Select(g => new { Base = g.Sum(x => x.Credit - x.Debit), Cur = g.Sum(x => x.CurrencyAmount == null ? 0 : (x.Credit > 0 ? x.CurrencyAmount.Value : -x.CurrencyAmount.Value)) }).FirstOrDefaultAsync(ct);
+                decimal principalBase = R(inst.Principal * payRate), interestBase = R(inst.Interest * payRate), penaltyBase = R(penalty * payRate);
+                decimal carryBase = carry != null && carry.Cur > 0 ? R(carry.Base * inst.Principal / carry.Cur) : principalBase;
+                decimal fxDiff = principalBase - carryBase;   // positive: more rials paid than carried = loss
+                FnAccount fxGain = await RoleAccountAsync(AccountRoles.FxGain, "60303", ct), fxLoss = await RoleAccountAsync(AccountRoles.FxLoss, "80302", ct);
+                if (fxGain == null || fxLoss == null) return Bad<FnLoanDto>("حساب سود و زیان تسعیر ارز در کدینگ نیست.");
+                lines = new List<AutoLine> { new AutoLine { Account = liability, Detail1 = loanDetail, Debit = carryBase, Description = text, CurrencyCode = l.CurrencyCode, CurrencyAmount = inst.Principal, Rate = inst.Principal == 0 ? payRate : R(carryBase / inst.Principal) } };
+                lines.Add(new AutoLine { Account = expense, Debit = interestBase, Description = "سود " + text });
+                if (penaltyBase > 0) lines.Add(new AutoLine { Account = penaltyAccount, Debit = penaltyBase, Description = "جریمه " + text });
+                if (fxDiff > 0) lines.Add(new AutoLine { Account = fxLoss, Debit = fxDiff, Description = "زیان تسعیر در تسویه " + text });
+                else if (fxDiff < 0) lines.Add(new AutoLine { Account = fxGain, Credit = -fxDiff, Description = "سود تسعیر در تسویه " + text });
+                lines.Add(new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = principalBase + interestBase + penaltyBase, Description = text });
+                expenseNeeded = inst.Interest; fromAccrual = 0;
+            }
+            else
+            {
+                lines = new List<AutoLine> { new AutoLine { Account = liability, Debit = inst.Principal, Description = text } };
+                if (fromAccrual > 0) lines.Add(new AutoLine { Account = accrued, Debit = fromAccrual, Description = "سود تعهدی " + text });
+                if (expenseNeeded > 0) lines.Add(new AutoLine { Account = expense, Debit = expenseNeeded, Description = "سود " + text });
+                if (penalty > 0) lines.Add(new AutoLine { Account = penaltyAccount, Debit = penalty, Description = "جریمه " + text });
+                lines.Add(new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = inst.Principal + inst.Interest + penalty, Description = text });
+            }
+            // a pending (not yet approved) accrual for interest that this payment expenses now would be expensed twice: it is superseded
+            if (expenseNeeded > 0)
+                foreach (FnLoanAccrual pend in await _uow.Set<FnLoanAccrual>().Where(a => a.LoanId == l.Id && a.Status == 0).ToListAsync(ct)) pend.Status = 2;
+            var v = await AddAutoVoucherAsync(l.LegalEntityId, date, text, "Loan", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FnLoanDto>(v.Error);
             await _uow.SaveChangesAsync(ct);
             inst.Status = 1; inst.PaidDate = date; inst.PenaltyPaid = penalty; inst.VoucherId = v.Voucher.Id;
@@ -243,6 +308,7 @@ namespace Services.NasbNiro.Finance
             foreach (FnLoan l in loans)
             {
                 if (await _uow.Set<FnLoanAccrual>().AnyAsync(a => a.LoanId == l.Id && a.PeriodId == periodId, ct)) continue;
+                if (await IsForeignLoanAsync(l, ct)) continue;   // foreign-currency interest is expensed at the payment rate when the instalment is paid
                 var inst = await _uow.Set<FnLoanInstallment>().AsNoTracking().Where(i => i.LoanId == l.Id).ToListAsync(ct);
                 decimal pending = await _uow.Set<FnLoanAccrual>().Where(a => a.LoanId == l.Id && a.Status == 0).SumAsync(a => (decimal?)a.Amount, ct) ?? 0;
                 decimal amount = TheoreticalAccrued(l, inst, end) - l.InterestExpensed - pending;
@@ -267,6 +333,11 @@ namespace Services.NasbNiro.Finance
             FnPeriod period = await _uow.Set<FnPeriod>().AsNoTracking().FirstAsync(p => p.Id == a.PeriodId, ct);
             FnAccount expense = await AccountByCodeAsync("80202", ct), accrued = await RoleAccountAsync(AccountRoles.OtherPayable, "30208", ct);
             if (expense == null || accrued == null) return Bad<FnLoanAccrualDto>("حساب سود تسهیلات یا پرداختنی در کدینگ نیست.");
+            // the amount cannot exceed what is still unexpensed at approval time (an instalment paid in between may have expensed it)
+            var allInst = await _uow.Set<FnLoanInstallment>().AsNoTracking().Where(i => i.LoanId == l.Id).ToListAsync(ct);
+            decimal cap = TheoreticalAccrued(l, allInst, period.EndDate.Date) - l.InterestExpensed;
+            if (cap < a.Amount) a.Amount = cap > 0 ? cap : 0;
+            if (a.Amount <= 0) { a.Status = 2; await _uow.SaveChangesAsync(ct); return Bad<FnLoanAccrualDto>("سود این ردیف تعهدی در قسط پرداخت‌شده قبلاً هزینه شده است؛ ردیف ابطال شد."); }
             string text = $"سود تعهدی تسهیلات {l.Number} تا پایان {period.Title}";
             var lines = new List<AutoLine> { new AutoLine { Account = expense, Debit = a.Amount, Description = text }, new AutoLine { Account = accrued, Credit = a.Amount, Description = text } };
             var v = await AddAutoVoucherAsync(l.LegalEntityId, period.EndDate.Date, text, "LoanAccrual", l.Number, lines, FnVoucherType.Auto, null, ct);
@@ -275,6 +346,41 @@ namespace Services.NasbNiro.Finance
             a.Status = 1; a.ApprovedByUserId = Me; a.VoucherId = v.Voucher.Id; l.InterestExpensed += a.Amount;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(new FnLoanAccrualDto { Id = a.Id, LoanId = a.LoanId, LoanNumber = l.Number, PeriodId = a.PeriodId, Amount = a.Amount, Status = a.Status, PreparedByUserId = a.PreparedByUserId, ApprovedByUserId = a.ApprovedByUserId, VoucherId = a.VoucherId });
+        }
+
+        /// <summary>
+        /// Period-close run: the principal of long-term loans (40101) due within 12 months after the period end moves to short-term facilities (30501) as a DRAFT voucher
+        /// (reviewed by a second person like any manual voucher). Each run posts only the change since the previous one.
+        /// </summary>
+        public async Task<ResponseDto<FnCurrentPortionDto>> CurrentPortionAsync(int periodId, CancellationToken ct)
+        {
+            if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<FnCurrentPortionDto>(NotAllowed);
+            FnPeriod period = await _uow.Set<FnPeriod>().AsNoTracking().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.Id == periodId, ct);
+            if (period == null) return ResponseDtoHelper.NotFound<FnCurrentPortionDto>("دوره پیدا نشد.");
+            DateTime end = period.EndDate.Date, horizon = LoanCal.AddMonths(end, 12);
+            FnAccount longTerm = await AccountByCodeAsync("40101", ct), shortTerm = await AccountByCodeAsync("30501", ct);
+            if (longTerm == null || shortTerm == null) return Bad<FnCurrentPortionDto>("حساب تسهیلات کوتاه‌مدت (30501) یا بلندمدت (40101) در کدینگ نیست.");
+            var loans = await _uow.Set<FnLoan>().Where(l => l.Status == FnLoanStatus.Active && l.LegalEntityId == period.FiscalYear.LegalEntityId && l.FacilityType != FnFacilityType.Overdraft && l.InstallmentCount > 12 && l.DisbursedDate <= end).OrderBy(l => l.Id).ToListAsync(ct);
+            var result = new FnCurrentPortionDto { PeriodId = periodId };
+            var lines = new List<AutoLine>();
+            foreach (FnLoan l in loans)
+            {
+                decimal due = await _uow.Set<FnLoanInstallment>().Where(i => i.LoanId == l.Id && i.Status == 0 && i.DueDate > end && i.DueDate <= horizon).SumAsync(i => (decimal?)i.Principal, ct) ?? 0;
+                decimal delta = due - l.CurrentPortionReclassified;
+                result.Rows.Add(new FnCurrentPortionRowDto { LoanId = l.Id, LoanNumber = l.Number, CurrentPortion = due, AlreadyReclassified = l.CurrentPortionReclassified, Change = delta });
+                if (delta == 0) continue;
+                lines.Add(new AutoLine { Account = longTerm, Debit = delta > 0 ? delta : 0, Credit = delta < 0 ? -delta : 0, Description = $"حصه جاری تسهیلات {l.Number}" });
+                lines.Add(new AutoLine { Account = shortTerm, Credit = delta > 0 ? delta : 0, Debit = delta < 0 ? -delta : 0, Description = $"حصه جاری تسهیلات {l.Number}" });
+                l.CurrentPortionReclassified = due;
+            }
+            result.Total = result.Rows.Sum(r => r.Change);
+            if (lines.Count == 0) return ResponseDtoHelper.Ok(result);
+            string number = await NextNumberAsync("CPL", FinanceNumbers.CurrentPortion, end, ct);
+            var v = await AddAutoVoucherAsync(period.FiscalYear.LegalEntityId, end, $"انتقال حصه جاری تسهیلات بلندمدت {period.Title} ({number})", "LoanCurrentPortion", number, lines, FnVoucherType.Normal, null, ct, FnVoucherStatus.Draft);
+            if (v.Error != null) return Bad<FnCurrentPortionDto>(v.Error);
+            await _uow.SaveChangesAsync(ct);
+            result.VoucherId = v.Voucher.Id;
+            return ResponseDtoHelper.Ok(result);
         }
 
         public async Task<ResponseDto<FnFacilityLimitDto>> SaveFacilityLimitAsync(FnFacilityLimitDto dto, CancellationToken ct)

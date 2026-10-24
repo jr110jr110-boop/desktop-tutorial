@@ -227,7 +227,7 @@ namespace Services.NasbNiro.Finance
                 await _uow.SaveChangesAsync(cancellationToken);
             }
             byte[] bom = Encoding.UTF8.GetPreamble();
-            return (bom.Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray(), $"sepidar-vouchers-{DateTime.Now:yyyyMMdd-HHmm}.csv", null);
+            return (bom.Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray(), $"sepidar-vouchers-{FiscalCalendars.Current.Stamp(DateTime.Now)}-{DateTime.Now:HHmm}.csv", null);
         }
 
         public async Task<ResponseDto<int>> MarkEventsAsync(MarkEventsDto dto, CancellationToken cancellationToken)

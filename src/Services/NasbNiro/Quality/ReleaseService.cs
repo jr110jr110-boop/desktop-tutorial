@@ -124,7 +124,7 @@ namespace Services.NasbNiro.Quality
             foreach (WeldLog l in logs)
                 s3.Entries.Add(new DataBookEntryDto
                 {
-                    SourceKind = "WeldLog", SourceId = l.Id, Number = l.JointNo, Title = $"{l.WeldDate:yyyy-MM-dd} — {l.Qualification.Person.Name} ({l.Qualification.Method}) — WPS {l.Wps.Number}/{l.Wps.Revision}",
+                    SourceKind = "WeldLog", SourceId = l.Id, Number = l.JointNo, Title = $"{Services.NasbNiro.Finance.FiscalCalendars.Text(l.WeldDate)} — {l.Qualification.Person.Name} ({l.Qualification.Method}) — WPS {l.Wps.Number}/{l.Wps.Revision}",
                     Status = "VT: " + l.Vt, Mandatory = true, Missing = l.Vt != VtResult.Accept,
                 });
             foreach (Wps w in logs.Select(l => l.Wps).GroupBy(w => w.Id).Select(g => g.First()))
@@ -143,12 +143,12 @@ namespace Services.NasbNiro.Quality
                 DataBookSectionDto target = SectionOf(r.Type) == "NDT" ? s4 : SectionOf(r.Type) == "Dimensional" ? s5 : SectionOf(r.Type) == "Painting" ? s7 : s6;
                 target.Entries.Add(new DataBookEntryDto
                 {
-                    SourceKind = "TestReport", SourceId = r.Id, Number = r.Number, Title = $"{r.Type} — {r.ReportDate:yyyy-MM-dd}", Status = $"{r.Status} / {r.Result}",
+                    SourceKind = "TestReport", SourceId = r.Id, Number = r.Number, Title = $"{r.Type} — {Services.NasbNiro.Finance.FiscalCalendars.Text(r.ReportDate)}", Status = $"{r.Status} / {r.Result}",
                     DocumentId = r.DocumentId, Mandatory = true, Missing = r.Status != TestReportStatus.Approved,
                 });
             }
             foreach (QcRecord r in await _uow.Set<QcRecord>().Where(r => r.WorkOrderId == wo.Id && !r.Deleted).OrderBy(r => r.Id).ToListAsync(cancellationToken))
-                s5.Entries.Add(new DataBookEntryDto { SourceKind = "QcRecord", SourceId = r.Id, Number = r.Number, Title = $"{r.Type} — {r.RecordDate:yyyy-MM-dd}", Status = r.Result.ToString(), DocumentId = r.AttachmentDocumentId });
+                s5.Entries.Add(new DataBookEntryDto { SourceKind = "QcRecord", SourceId = r.Id, Number = r.Number, Title = $"{r.Type} — {Services.NasbNiro.Finance.FiscalCalendars.Text(r.RecordDate)}", Status = r.Result.ToString(), DocumentId = r.AttachmentDocumentId });
             if (itp != null)
                 foreach (ItpActivity a in itp.Activities.Where(a => a.RequiredReportType.HasValue && a.Status != ItpActivityStatus.NotApplicable).OrderBy(a => a.Seq))
                 {
@@ -177,7 +177,7 @@ namespace Services.NasbNiro.Quality
                 CalibrationEvent last = await _uow.Set<CalibrationEvent>().Where(c => c.EquipmentId == e.Id && !c.Deleted).OrderByDescending(c => c.EventDate).ThenByDescending(c => c.Id).FirstOrDefaultAsync(cancellationToken);
                 s9.Entries.Add(new DataBookEntryDto
                 {
-                    SourceKind = "Equipment", SourceId = e.Id, Number = last?.CertificateNumber, Title = $"{e.Code} — {e.Name}", Status = last == null ? "-" : $"{last.EventDate:yyyy-MM-dd}",
+                    SourceKind = "Equipment", SourceId = e.Id, Number = last?.CertificateNumber, Title = $"{e.Code} — {e.Name}", Status = last == null ? "-" : $"{Services.NasbNiro.Finance.FiscalCalendars.Text(last.EventDate)}",
                     DocumentId = last?.CertificateDocumentId, Mandatory = e.RequiresCalibration, Missing = e.RequiresCalibration && (last == null || last.CertificateDocumentId == null),
                 });
             }

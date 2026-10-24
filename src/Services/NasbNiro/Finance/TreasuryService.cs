@@ -63,11 +63,6 @@ namespace Services.NasbNiro.Finance
 
         Task<ResponseDto<CashPositionDto>> GetCashPositionAsync(CancellationToken cancellationToken);
 
-        /// <summary>
-        /// The old "payment request paid" endpoint: records the treasury payment document and the accounting event in the caller's
-        /// SaveChanges (no second Bank event). Returns an error text, or null when the request may be marked paid.
-        /// </summary>
-        Task<string> AddLegacyPaymentAsync(PaymentRequest request, string reference, int? bankAccountId, CancellationToken cancellationToken);
     }
 
     /// <summary>Treasury: bank accounts, cash boxes, petty cash, payments and receipts, cheques, guarantees, bank statements and reconciliation.</summary>
@@ -345,7 +340,7 @@ namespace Services.NasbNiro.Finance
                 if (requests.Select(r => r.ProviderId).Distinct().Count() > 1) return Bad<PaymentDto>("درخواست‌های یک سند پرداخت باید برای یک تامین‌کننده باشند.");
                 int self = payment?.Id ?? 0;
                 if (await _uow.Set<FnPaymentRequestLink>().AnyAsync(k => ids.Contains(k.PaymentRequestId) && k.Payment.Status != FnDocStatus.Cancelled && k.PaymentId != self, ct))
-                    return Bad<PaymentDto>("یکی از درخواست‌ها قبلاً در سند پرداخت دیگری آمده است.");
+                    return Bad<PaymentDto>("یکی از درخواست‌ها قبلاً در سند پرداخت خزانه دیگری آمده است.");
                 providerId = requests[0].ProviderId;
                 gross = requests.Sum(r => r.Amount);
                 deductions = requests.Sum(r => r.Deductions);
@@ -664,34 +659,6 @@ namespace Services.NasbNiro.Finance
             if (payrollRun != null) { payrollRun.Status = FnPayrollStatus.Paid; payrollRun.PaidAt = now; }
             if (loanPaid != null) loanPaid.DisbursementPaymentId = p.Id;
             p.Status = FnDocStatus.Posted; p.PostedByUserId = Me; p.PostedAt = now;
-            return null;
-        }
-
-        public async Task<string> AddLegacyPaymentAsync(PaymentRequest r, string reference, int? bankAccountId, CancellationToken ct)
-        {
-            // the old one-click path keeps the treasury controls: treasury or the finance manager, and the paying bank account is always recorded
-            if (!_user.IsInRole(FinanceRoles.TreasuryUsers)) return NotAllowed + " (خزانه‌دار یا مدیر مالی)";
-            FnBankAccount bank = bankAccountId.HasValue ? await _uow.Set<FnBankAccount>().FirstOrDefaultAsync(b => b.Id == bankAccountId.Value && b.IsActive, ct) : null;
-            if (bank == null) return "حساب بانکی پرداخت‌کننده را مشخص کنید.";
-            if (await _uow.Set<FnPaymentRequestLink>().AnyAsync(k => k.PaymentRequestId == r.Id && k.Payment.Status != FnDocStatus.Cancelled, ct))
-                return "این درخواست در یک سند پرداخت خزانه آمده است؛ پرداخت را از خزانه ثبت کنید.";
-            await FinanceSeed.EnsureAsync(_uow, ct);
-            List<FnPaymentDeduction> typed = await _uow.Set<FnPaymentDeduction>().Where(d => d.PaymentRequestId == r.Id).ToListAsync(ct);
-            string payee = await _uow.Set<Provider>().Where(p => p.Id == r.ProviderId).Select(p => p.Name).FirstOrDefaultAsync(ct);
-            DateTime today = DateTime.Today;
-            decimal net = r.Amount - r.Deductions;
-            var payment = new FnPayment
-            {
-                Number = await InventoryNumbers.NextNumberAsync(_uow, FinanceNumbers.Payment, "PAYM", today, ct), Date = today, Status = FnDocStatus.Posted,
-                Purpose = FnPaymentPurpose.Supplier, ProviderId = r.ProviderId, PayeeName = payee, Description = $"پرداخت درخواست {r.Number} (ثبت با مسیر قدیمی)",
-                GrossAmount = r.Amount, DeductionAmount = r.Deductions, NetAmount = net, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, PostedByUserId = Me, PostedAt = DateTimeOffset.Now, ApprovedByUserId = r.ApprovedByUserId,
-                Lines = new List<FnPaymentLine> { new FnPaymentLine { RowNumber = 1, Instrument = FnInstrument.BankTransfer, Amount = net, Reference = Clean(reference), BankAccountId = bank.Id } },
-                Requests = new List<FnPaymentRequestLink> { new FnPaymentRequestLink { PaymentRequestId = r.Id, Amount = r.Amount, Deductions = r.Deductions } },
-            };
-            _uow.Set<FnPayment>().Add(payment);
-            var lines = RequestLines(r, typed).ToList();
-            lines.Add(BankLine(bank, 0, net, "حواله " + (Clean(reference) ?? r.Number)));
-            _costing.AddEvent(AccountingEventType.SupplierPayment, today, "PaymentRequest", r.Id, r.Number, $"پرداخت درخواست {r.Number} - {payee}", lines);
             return null;
         }
     }

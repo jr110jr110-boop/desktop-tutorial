@@ -25,6 +25,7 @@ namespace Services.NasbNiro.Finance
         Task<ResponseDto<FnBudgetReportDto>> ReportAsync(FnBudgetReportQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<FnCommitmentCheckDto>> CheckAsync(FnCommitmentCheckRequest request, CancellationToken cancellationToken);
         Task<ResponseDto<FnCommitmentCheckDto>> CheckPurchaseRequestAsync(int purchaseRequestId, string overrideReason, CancellationToken cancellationToken);
+        Task<(bool Allowed, string Message)> GateAsync(string costCenterCode, int? contractId, decimal amount, DateTime date, int? excludeRequestId, int? excludeOrderId, string overrideReason, CancellationToken cancellationToken);
     }
 
     // Budgeting and commitment control (F3 section 4). Commitment = the full-year budget of the most specific matching line minus the year-to-date actual.
@@ -328,13 +329,39 @@ namespace Services.NasbNiro.Finance
                 BudgetKey owner = allKeys.Where(k => k.Matches(a.Code, a.CostCenterId, a.ContractId)).OrderByDescending(k => k.Score).FirstOrDefault();
                 if (owner != null && owner.Id == best.Id) result.ActualToDate += a.Value;
             }
-            result.Remaining = result.BudgetToDate - result.ActualToDate - request.Amount;
+            // open commitments on the same cost centre / contract (only when the check names one of them)
+            string ccCode = Clean(request.CostCenterCode);
+            if (ccCode != null || request.ContractId.HasValue)
+            {
+                var prs = await _uow.Set<Entities.Model.NasbNiro.Procurement.PurchaseRequest>().AsNoTracking()
+                    .Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Procurement.PurchaseRequestStatus.Approved && x.Id != (request.ExcludePurchaseRequestId ?? 0)
+                        && ((ccCode != null && x.CostCenter == ccCode) || (request.ContractId.HasValue && x.ContractId == request.ContractId))).Select(x => x.EstimatedAmount).ToListAsync(ct);
+                var openStatuses = new[] { Entities.Model.NasbNiro.Procurement.PurchaseOrderStatus.Approved, Entities.Model.NasbNiro.Procurement.PurchaseOrderStatus.Released, Entities.Model.NasbNiro.Procurement.PurchaseOrderStatus.PartlyReceived, Entities.Model.NasbNiro.Procurement.PurchaseOrderStatus.Received };
+                var pos = await _uow.Set<Entities.Model.NasbNiro.Procurement.PurchaseOrder>().AsNoTracking()
+                    .Where(o => !o.Deleted && openStatuses.Contains(o.Status) && o.Id != (request.ExcludePurchaseOrderId ?? 0)
+                        && ((request.ContractId.HasValue && o.ContractId == request.ContractId) || (ccCode != null && o.Lines.Any(l => l.RequestLine != null && l.RequestLine.PurchaseRequest.CostCenter == ccCode))))
+                    .Select(o => new { o.Id, o.TotalAmount }).ToListAsync(ct);
+                var poIds = pos.Select(o => o.Id).ToList();
+                var invoiced = await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking()
+                    .Where(i => !i.Deleted && poIds.Contains(i.PurchaseOrderId) && i.Status == Entities.Model.NasbNiro.Procurement.SupplierInvoiceStatus.Approved)
+                    .GroupBy(i => i.PurchaseOrderId).Select(g => new { Id = g.Key, Amount = g.Sum(x => x.NetAmount) }).ToListAsync(ct);
+                result.OpenCommitments = R(prs.Sum() + pos.Sum(o => Math.Max(0, o.TotalAmount - invoiced.Where(i => i.Id == o.Id).Sum(i => i.Amount))));
+            }
+            result.Remaining = result.BudgetToDate - result.ActualToDate - result.OpenCommitments - request.Amount;
             if (result.Remaining >= 0 || b.CommitMode == FnCommitMode.Off) { result.Message = result.Remaining >= 0 ? "در حدود بودجه است." : "کنترل بودجه خاموش است."; return ResponseDtoHelper.Ok(result); }
-            string over = $"از بودجه باقی‌مانده {R(-result.Remaining):N0} ریال بیشتر است (بودجه {R(result.BudgetToDate):N0}، هزینه تاکنون {R(result.ActualToDate):N0}).";
+            string over = $"از بودجه باقی‌مانده {R(-result.Remaining):N0} ریال بیشتر است (بودجه {R(result.BudgetToDate):N0}، هزینه تاکنون {R(result.ActualToDate):N0}، تعهدات باز {R(result.OpenCommitments):N0}).";
             if (b.CommitMode == FnCommitMode.Warn) { result.Warning = true; result.Message = "هشدار: " + over; return ResponseDtoHelper.Ok(result); }
             if (_user.IsInRole(FinanceRoles.Ceo) && Clean(request.OverrideReason) != null) { result.Warning = true; result.Overridden = true; result.Message = "عبور با تصمیم مدیرعامل: " + request.OverrideReason.Trim() + " | " + over; return ResponseDtoHelper.Ok(result); }
             result.Allowed = false; result.Message = "مسدود: " + over + " عبور فقط با دلیل مدیرعامل ممکن است.";
             return ResponseDtoHelper.Ok(result);
+        }
+
+        /// <summary>The gate the procurement approvals call: Warn returns the message, Block refuses unless the CEO gave a reason; null when the document may proceed.</summary>
+        public async Task<(bool Allowed, string Message)> GateAsync(string costCenterCode, int? contractId, decimal amount, DateTime date, int? excludeRequestId, int? excludeOrderId, string overrideReason, CancellationToken ct)
+        {
+            var r = await CheckAsync(new FnCommitmentCheckRequest { CostCenterCode = costCenterCode, ContractId = contractId, Amount = amount, Date = date, OverrideReason = overrideReason, ExcludePurchaseRequestId = excludeRequestId, ExcludePurchaseOrderId = excludeOrderId }, ct);
+            if (!r.Success || r.Data == null) return (true, null);
+            return (r.Data.Allowed, r.Data.Allowed && !r.Data.Warning ? null : r.Data.Message);
         }
 
         public async Task<ResponseDto<FnCommitmentCheckDto>> CheckPurchaseRequestAsync(int purchaseRequestId, string overrideReason, CancellationToken ct)
@@ -342,7 +369,7 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(global::Services.NasbNiro.Procurement.ProcurementRoles.Readers + ",AUDITOR")) return Bad<FnCommitmentCheckDto>(NotAllowed);
             var pr = await _uow.Set<Entities.Model.NasbNiro.Procurement.PurchaseRequest>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == purchaseRequestId, ct);
             if (pr == null) return ResponseDtoHelper.NotFound<FnCommitmentCheckDto>("درخواست خرید پیدا نشد.");
-            return await CheckAsync(new FnCommitmentCheckRequest { CostCenterCode = pr.CostCenter, ContractId = pr.ContractId, Amount = pr.EstimatedAmount, Date = pr.RequestDate, OverrideReason = overrideReason }, ct);
+            return await CheckAsync(new FnCommitmentCheckRequest { CostCenterCode = pr.CostCenter, ContractId = pr.ContractId, Amount = pr.EstimatedAmount, Date = pr.RequestDate, OverrideReason = overrideReason, ExcludePurchaseRequestId = pr.Id }, ct);
         }
     }
 }

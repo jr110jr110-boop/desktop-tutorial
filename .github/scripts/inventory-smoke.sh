@@ -519,7 +519,12 @@ as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid
 as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":1}"; nomsg "r1: the old pay action is for treasury or the finance manager only" "خزانه"
 as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\"}"; check "r1: the old pay action needs the paying bank account (the bank side of the entry is always linked)" '.success == false and (.message|contains("حساب بانکی"))'
 as "$TR_TOKEN" POST finance/treasury/bank-accounts '{"title":"بانک مسیر قدیمی","bankName":"ملی","accountNumber":"100324200005","iban":"IR160170000000100324200005"}'; BALEG=$(val .data.id)
-as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":$BALEG}"; check "finance records the payment" '.success and .data.status == 2'
+call POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR970170000000100324200002\"}"
+as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":$BALEG}"; check "r2 f23: the old pay action creates a DRAFT treasury payment (request stays approved, not paid)" '.success and .data.status == 1 and (.data.treasuryPaymentId // 0) > 0'
+OLDPM=$(val .data.treasuryPaymentId)
+as "$TR_TOKEN" POST finance/treasury/payments/action "{\"id\":$OLDPM,\"action\":\"post\"}"; no "r2 f23: the draft from the old path cannot be posted without the finance manager's approval"
+as "$FM_TOKEN" POST finance/treasury/payments/action "{\"id\":$OLDPM,\"action\":\"approve\"}"; check "r2 f23: finance manager approves the draft (IBAN equals the registered one)" '.success and .data.status == 1'
+as "$TR_TOKEN" POST finance/treasury/payments/action "{\"id\":$OLDPM,\"action\":\"post\"}"; check "finance records the payment" '.success and .data.status == 2 and .data.netAmount == 25740000'
 call GET "finance/events?PageSize=0"
 check "invoice event: GRNI cleared, VAT and payable to the supplier" '[.data.data[] | select(.sourceType == "SupplierInvoice")] | length == 1 and (.[0].lines | map(select(.accountRole == "AccountsPayable")) | .[0].credit) == 25740000'
 check "goods received not invoiced is zero for the supplier" "[.data.data[] | select(.status != 9) | .lines[] | select(.accountRole == \"GRNI\" and .providerId == $PA) | (.debit - .credit)] | add == 0"
@@ -2140,12 +2145,15 @@ as "$CEO_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":1200
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2025-06-15T00:00:00\",\"description\":\"خرید مرکز هزینه\",\"submit\":true,\"costCenter\":\"CC-P1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":600000}]}"; check "f3 commitment: purchase request for cost centre CC-P1 (6,000,000)" '.success and .data.estimatedAmount == 6000000'
 PRB=$(val .data.id)
 as "$PLAN_TOKEN" GET "$FBU/commitment-check/purchase-request/$PRB"; check "f3 commitment: the purchase request exceeds the cost-centre envelope of 4,000,000 and is blocked with the reason (4,000,000 - 300,000 variance already charged - 6,000,000)" '.success and .data.allowed == false and .data.remaining == -2300000 and (.data.message|contains("مسدود"))'
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-planning\"}"
+as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-management\"}"; nomsg "r2 f10: in Block mode the purchase request over the cost-centre envelope cannot become approved" "مسدود"
 as "$FM_TOKEN" POST $FBU/$BD/revise; check "f3 budget: a revision is a new draft (version 2)" '.success and .data.status == 0 and .data.version == 2 and .data.kind == 2 and (.data.lines|length) == 4'
 BD2=$(val .data.id); BL2=$(jq -c '[.data.lines[]|{accountCode,costCenterCode,contractId,period,amount,isCapital}]' "$B")
 as "$FIN_TOKEN" POST $FBU "{\"id\":$BD2,\"fiscalYearId\":$Y4,\"title\":\"بازنگری ۱\",\"kind\":2,\"commitMode\":1,\"lines\":$BL2}"; check "f3 budget: revision switched to Warn mode" '.success and .data.commitMode == 1'
 as "$FM_TOKEN" POST $FBU/$BD2/approve; as "$CEO_TOKEN" POST $FBU/$BD2/approve; check "f3 budget: revision approved by both" '.success and .data.status == 1'
 as "$FM_TOKEN" GET $FBU/$BD; check "f3 budget: the previous version is superseded" '.success and .data.status == 2'
 as "$FM_TOKEN" POST $FBU/commitment-check '{"accountCode":"80108","amount":12000000,"date":"2025-06-15T00:00:00"}'; check "f3 commitment: in Warn mode the same request passes with a warning" '.success and .data.allowed == true and .data.warning == true and .data.mode == 1'
+as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PRB,\"action\":\"approve-management\"}"; check "r2 f10: in Warn mode the same request is approved and the answer carries the warning" '.success and .data.status == 2 and (.message // "" | length) > 0'
 TOKEN=$ADMIN_TOKEN
 
 # =============================================================================================== review fixes R1
@@ -2275,6 +2283,12 @@ as "$COM_TOKEN" GET "procurement/orders/$PO2"; PO2SAVE=$(jq -c '.data | {id, kin
 as "$COM_TOKEN" POST procurement/orders "$PO2SAVE"; check "r1 advance: the order carries a 10% advance" '.success and .data.advancePercent == 10'; POL2=$(val '.data.lines[0].id')
 call POST procurement/orders/action "{\"id\":$PO2,\"action\":\"approve\"}"; check "r1 advance: order approved" '.success and .data.status == 1'; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO2,\"action\":\"release\"}"; check "r1 advance: order released" '.success and .data.status == 2'
 as "$COM_TOKEN" POST procurement/payments "{\"type\":1,\"purchaseOrderId\":$PO2,\"amount\":3900000}"; check "r1 advance: advance request of 3,900,000 (10% of 39,000,000)" '.success and .data.amount == 3900000'
+ADVID=$(val .data.id)
+as "$FIN_TOKEN" GET procurement/suppliers/open-advances; check "r2 f12: an advance that is only requested (not paid) is not in the open-advance report" '.success and ([.data[]|select(.purchaseOrderId == '$PO2')]|length) == 0'
+call POST procurement/payments/action "{\"id\":$ADVID,\"action\":\"approve\"}"; check "r2 f12: advance request approved" '.success and .data.status == 1'
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":1,\"paymentRequestIds\":[$ADVID],\"lines\":[{\"instrument\":2,\"amount\":3900000,\"bankAccountId\":$BA1,\"reference\":\"ADV-R2\"}]}"; check "r2 f12: advance paid through treasury (drafted)" '.success and .data.netAmount == 3900000'
+ADVPM=$(val .data.id)
+as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$ADVPM,\"action\":\"approve\"}"; as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$ADVPM,\"action\":\"post\"}"; check "r2 f12: advance payment posted" '.success and .data.status == 2'
 as "$FIN_TOKEN" GET procurement/suppliers/open-advances; check "r1 advance: the open-advance report shows exactly 3,900,000 for the order" '.success and ([.data[]|select(.purchaseOrderId == '$PO2' and .advanced == 3900000 and .recovered == 0 and .open == 3900000)]|length) == 1'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO2,\"lines\":[{\"itemId\":$BOLT,\"quantity\":100,\"locationId\":$L2,\"purchaseOrderLineId\":$POL2}]}"; DR2=$(val .data.id); call POST "inventory/documents/$DR2/confirm"; check "r1 advance: 100 bolts received against the order" '.success'
 as "$COM_TOKEN" POST procurement/invoices "{\"purchaseOrderId\":$PO2,\"invoiceNumber\":\"F-2001\",\"invoiceDate\":\"2026-10-24T00:00:00\",\"isOfficial\":true,\"lines\":[{\"orderLineId\":$POL2,\"quantity\":100,\"unitPrice\":390000}]}"; check "r1 advance: invoice of 42,900,000" '.success and .data.totalAmount == 42900000'
@@ -2483,6 +2497,31 @@ as "$FM_TOKEN" POST $FCL/payment-proposals/$PP1/approve; no "f3 proposal: approv
 
 TOKEN=$ADMIN_TOKEN
 
+
+TOKEN=$ADMIN_TOKEN
+
+# =============================================================================================== review fixes R2
+# --- finding 20: Persian dates in everything the user reads (storage and API JSON stay ISO)
+for RPT in journal general-ledger; do
+  RX="$B.$RPT.csv"; curl -s -D "$B.hdr" -o "$RX" -H "Authorization: Bearer $FM_TOKEN" "$API/$FG/reports/export/$RPT?FiscalYearId=$Y4&IncludeDraft=true&AccountCode=10101"
+  if grep -qi "filename=.*$RPT-14[0-9]\{6\}\.csv" "$B.hdr"; then ok "r2 f20: the $RPT file name carries a Persian date stamp (14yymmdd)"; else bad "r2 f20: the $RPT file name carries a Persian date stamp ($(grep -i content-disposition "$B.hdr" | head -c 160))"; fi
+  [ "$(grep -Ec '(^|,)"?14[0-9]{2}/[0-9]{2}/[0-9]{2}' "$RX")" -ge 1 ] && ok "r2 f20: the $RPT rows show Persian dates (yyyy/MM/dd)" || bad "r2 f20: the $RPT rows show Persian dates"
+  [ "$(grep -Ec '(^|[,"T ])20[0-9]{2}[-/][0-9]{2}[-/][0-9]{2}' "$RX")" = "0" ] && ok "r2 f20: no 20xx Gregorian date pattern in the $RPT file" || bad "r2 f20: no 20xx Gregorian date pattern in the $RPT file ($(grep -Ec '20[0-9]{2}[-/][0-9]{2}' "$RX") lines)"
+  rm -f "$RX" "$B.hdr"
+done
+as "$FM_TOKEN" GET "$FAU?EntityType=FnPeriod&PageSize=0"; check "r2 f20: audit values show Persian dates and no Gregorian date" '.success and ([.data.data[]|(.beforeJson|tostring),(.afterJson|tostring)]|map(select(test("20[0-9]{2}-[0-9]{2}-[0-9]{2}")))|length) == 0 and ([.data.data[]|(.afterJson|tostring)|select(test("14[0-9]{2}/[0-9]{2}/[0-9]{2}"))]|length) >= 1'
+# --- finding 21: audit gaps (manual voucher lines, supplier IBAN with a one-way hash of the full value)
+as "$FM_TOKEN" GET "$FAU?EntityType=FnVoucherLine&PageSize=0"; check "r2 f21: the lines of manual vouchers are in the audit trail" '.success and (.data.data|length) >= 1'
+call POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR950190000000200000000003\"}"; check "r2 f21: supplier IBAN changed" '.success'
+as "$FM_TOKEN" GET "$FAU?EntityType=SupplierProfile&PageSize=0"; check "r2 f21: the supplier IBAN change is audited masked with a hash and never in full" '.success and ([.data.data[]|select((.afterJson|tostring|contains("IbanHash")) and (.afterJson|tostring|contains("****0003")) and ((.afterJson|tostring|contains("IR950190000000200000000003"))|not) and ((.beforeJson|tostring|contains("IR970170000000100324200002"))|not))]|length) >= 1'
+# --- finding 6: a person who initiated a flow cannot finalise its voucher (system events have creator 0, so they stay unaffected)
+as "$FM_TOKEN" POST $FDF/provisions/movement "{\"provisionId\":$PV1,\"date\":\"2025-06-18T00:00:00\",\"amount\":100000,\"reason\":\"آزمون ایجادکننده\"}"; check "r2 f6: finance manager charges the provision by 100,000" '.success and .data.balance == 3900000'
+as "$FM_TOKEN" GET "$FG/vouchers?FiscalYearId=$Y4&Type=3&PageSize=0"; PVV=$(jq -r '[.data.data[]|select(.sourceType == "Provision")]|max_by(.id)|.id' "$B")
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$PVV,\"action\":\"finalize\"}"; no "r2 f6: the finance manager cannot finalise the automatic voucher of his own provision movement"
+as "$FM2_TOKEN" POST $FG/vouchers/action "{\"id\":$PVV,\"action\":\"finalize\"}"; check "r2 f6: the second finance manager finalises it" '.success and .data.status == 2'
+# --- finding 18: a final voucher numbered after one with a later date carries a warning
+fv "{\"date\":\"2025-05-02T00:00:00\",\"description\":\"سند با تاریخ قبل از اسناد نهایی\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":1000},{\"accountCode\":\"30208\",\"credit\":1000}]}"
+check "r2 f18: finalised after later-dated vouchers, the finalise answer carries the date-order warning" '.success and (.data.warning // "" | length) > 0'
 
 TOKEN=$ADMIN_TOKEN
 

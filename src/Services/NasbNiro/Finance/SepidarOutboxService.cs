@@ -137,8 +137,8 @@ namespace Services.NasbNiro.Finance
                 {
                     ResponseDto<VatSeasonDto> vat = await TaxService.BuildVatSeasonAsync(_uow, year, season ?? 0, ct);
                     VatSeasonDto v = vat.Data;
-                    OutboxTable rows = Table("Parties", "Side", "PartyName", "EconomicCode", "NetAmount", "VatAmount", "Documents");
-                    foreach (VatSeasonRowDto r in v.Rows) Add(rows, r.Side, r.PartyName, r.EconomicCode, r.NetAmount, r.VatAmount, r.Documents);
+                    OutboxTable rows = Table("Parties", "Side", "PartyName", "EconomicCode", "NationalId", "NetAmount", "VatAmount", "Documents");
+                    foreach (VatSeasonRowDto r in v.Rows) Add(rows, r.Side, r.PartyName, r.EconomicCode, r.NationalId, r.NetAmount, r.VatAmount, r.Documents);
                     OutboxTable summary = Table("Summary", "Year", "Season", "SalesNet", "SalesVat", "PurchasesNet", "PurchasesVat", "VatPayable");
                     Add(summary, v.Year, v.Season, v.SalesNet, v.SalesVat, v.PurchasesNet, v.PurchasesVat, v.VatPayable);
                     tables.Add(summary);

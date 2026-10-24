@@ -29,6 +29,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.InterestExpensed).HasPrecision(18, 0);
                 b.Property(x => x.InterestPaid).HasPrecision(18, 0);
                 b.Property(x => x.PrincipalPaid).HasPrecision(18, 0);
+                b.Property(x => x.CurrentPortionReclassified).HasPrecision(18, 0);
                 b.HasIndex(x => x.Number).IsUnique();
             });
             builder.Entity<FnLoanInstallment>(b =>

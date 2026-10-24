@@ -54,12 +54,15 @@ namespace Services.NasbNiro.Procurement
         private readonly IInventoryUserContext _user;
         private readonly ICostingService _costing;
 
-        public ProcurementService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing)
+        public ProcurementService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, global::Services.NasbNiro.Finance.IBudgetService budget)
         {
+            _budget = budget ?? throw new ArgumentNullException(nameof(budget));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
         }
+
+        private readonly global::Services.NasbNiro.Finance.IBudgetService _budget;
 
         private int Me => _user.UserId;
         private static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
@@ -299,13 +302,21 @@ namespace Services.NasbNiro.Procurement
                     return Bad<PurchaseRequestDto>("عمل نامعتبر است.");
             }
             // approved when planning has approved and, for medium and major purchases, management too (BL-006)
+            string budgetNote = null;
             if (r.Status == PurchaseRequestStatus.Submitted && r.PlanningApprovedAt.HasValue &&
                 (r.EstimatedAmount < s[ProcurementSettingKeys.MediumFrom] || r.ManagementApprovedAt.HasValue))
+            {
+                // budget commitment control (F3 section 4): Warn shows the message, Block refuses unless the CEO gives a reason
+                var gate = await _budget.GateAsync(r.CostCenter, r.ContractId, r.EstimatedAmount, r.RequestDate, r.Id, null, dto.Note, cancellationToken);
+                if (!gate.Allowed) return Bad<PurchaseRequestDto>(gate.Message);
+                budgetNote = gate.Message;
                 r.Status = PurchaseRequestStatus.Approved;
+            }
             r.ModifyDate = now;
             r.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PurchaseRequestDto>("اطلاعات هم‌زمان تغییر کرد؛ دوباره تلاش کنید."); }
+            if (budgetNote != null) { var withNote = await GetRequestAsync(r.Id, cancellationToken); return withNote.Success ? ResponseDtoHelper.Ok(withNote.Data, budgetNote) : withNote; }
             return await GetRequestAsync(r.Id, cancellationToken);
         }
 
@@ -803,6 +814,7 @@ namespace Services.NasbNiro.Procurement
             if (o == null) return ResponseDtoHelper.NotFound<PurchaseOrderDto>("سفارش خرید پیدا نشد.");
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
+            string orderBudgetNote = null;
             switch (dto.Action?.Trim().ToLowerInvariant())
             {
                 case "approve":
@@ -820,6 +832,14 @@ namespace Services.NasbNiro.Procurement
                     if (o.Kind != PurchaseKind.Service && o.Requirements == null)
                         return Bad<PurchaseOrderDto>("الزامات فنی و کیفی سفارش (مشخصات، گواهی مواد، بازرسی) را بنویسید (ISO 9001 8.4.3).");
                     if (o.Currency != null && !_user.IsInRole("CEO")) return Bad<PurchaseOrderDto>("سفارش خارجی تایید مدیرعامل لازم دارد (PR-IP-005 بخش 7).");
+                    {
+                        // budget commitment control: the order against the budget of its request's cost centre / its contract, net of the other open commitments
+                        string orderCenter = await _uow.Set<PurchaseOrderLine>().Where(l => l.PurchaseOrderId == o.Id && l.RequestLine != null).Select(l => l.RequestLine.PurchaseRequest.CostCenter).FirstOrDefaultAsync(cancellationToken);
+                        int? orderRequestId = await _uow.Set<PurchaseOrderLine>().Where(l => l.PurchaseOrderId == o.Id && l.RequestLine != null).Select(l => (int?)l.RequestLine.PurchaseRequestId).FirstOrDefaultAsync(cancellationToken);
+                        var gate = await _budget.GateAsync(orderCenter, o.ContractId, o.TotalAmount, o.OrderDate, orderRequestId, o.Id, dto.Note, cancellationToken);
+                        if (!gate.Allowed) return Bad<PurchaseOrderDto>(gate.Message);
+                        orderBudgetNote = gate.Message;
+                    }
                     o.Status = PurchaseOrderStatus.Approved;
                     o.ApprovedAt = now;
                     o.ApprovedByUserId = Me;
@@ -861,6 +881,7 @@ namespace Services.NasbNiro.Procurement
             o.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PurchaseOrderDto>("اطلاعات هم‌زمان تغییر کرد؛ دوباره تلاش کنید."); }
+            if (orderBudgetNote != null) { var withNote = await GetOrderAsync(o.Id, cancellationToken); return withNote.Success ? ResponseDtoHelper.Ok(withNote.Data, orderBudgetNote) : withNote; }
             return await GetOrderAsync(o.Id, cancellationToken);
         }
 

@@ -65,6 +65,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int PairId { get; set; }
         public DateTime Date { get; set; }
         public decimal Amount { get; set; }
+        /// <summary>Required when the two entities have different currencies: units of the other entity's currency per one unit of the charger's currency.</summary>
+        public decimal? Rate { get; set; }
         /// <summary>The entity that charges the other (revenue side); must be one of the pair's entities.</summary>
         public int ChargerEntityId { get; set; }
         /// <summary>Revenue (or other credit) account of the charging entity.</summary>
@@ -81,6 +83,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int PairId { get; set; }
         public DateTime Date { get; set; }
         public decimal Amount { get; set; }
+        public decimal AmountA { get; set; }
+        public decimal AmountB { get; set; }
+        public decimal Rate { get; set; }
         public int ChargerEntityId { get; set; }
         public string Description { get; set; }
         public int EventAId { get; set; }
@@ -406,6 +411,45 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Title { get; set; }
         /// <summary>Manual correction of the guessed type (Person, Supplier, Customer, Employee, Bank, CashBox, PettyCash, Project, WorkOrder, CostCenter, Asset, Other).</summary>
         public string Type { get; set; }
+    }
+
+    /// <summary>Links imported Sepidar detail accounts to the PMIS parties so that opening balances and new postings share one detail (review 2, finding 9).</summary>
+    public class FnDetailLinkRowDto
+    {
+        public string DetailCode { get; set; }
+        /// <summary>Supplier, Customer or BankAccount (employees are payroll data and are not linked here).</summary>
+        public string PartyType { get; set; }
+        public int PartyId { get; set; }
+    }
+
+    public class FnDetailLinkDto
+    {
+        /// <summary>Match unlinked details by name, economic code, national id or IBAN as well.</summary>
+        public bool Auto { get; set; }
+        /// <summary>The manual correction list; it wins over the automatic match.</summary>
+        public List<FnDetailLinkRowDto> Rows { get; set; } = new List<FnDetailLinkRowDto>();
+    }
+
+    public class FnDetailLinkResultRowDto
+    {
+        public string DetailCode { get; set; }
+        public string Title { get; set; }
+        public string PartyType { get; set; }
+        public int? PartyId { get; set; }
+        public string PartyName { get; set; }
+        public string Status { get; set; }
+        public string Message { get; set; }
+    }
+
+    public class FnDetailLinkReportDto
+    {
+        public bool DryRun { get; set; }
+        public bool Committed { get; set; }
+        public int Linked { get; set; }
+        public int Ambiguous { get; set; }
+        public int Unmatched { get; set; }
+        public int Errors { get; set; }
+        public List<FnDetailLinkResultRowDto> Rows { get; set; } = new List<FnDetailLinkResultRowDto>();
     }
 
     public class SepidarDetailImportDto

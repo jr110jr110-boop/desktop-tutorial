@@ -441,6 +441,9 @@ namespace ViewModels.NasbNiro.ProcurementDtos
 
     public class PaymentRequestDto
     {
+        /// <summary>Set when the old one-click "paid" action created a draft treasury payment (review 2, finding 23).</summary>
+        public int? TreasuryPaymentId { get; set; }
+        public string TreasuryPaymentNumber { get; set; }
         public int Id { get; set; }
         public string Number { get; set; }
         public PaymentRequestType Type { get; set; }

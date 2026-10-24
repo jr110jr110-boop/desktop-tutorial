@@ -78,8 +78,8 @@ namespace Services.NasbNiro.Finance
             FnAccount allowance = await AccountByCodeAsync("10309", ct), expense = await AccountByCodeAsync("80304", ct);
             if (allowance == null || expense == null) return Bad<FnBadDebtDto>("حساب‌های ۱۰۳۰۹ و ۸۰۳۰۴ پیدا نشد.");
             int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
-            // the balance of the allowance account (credit) up to the date, all vouchers except drafts
-            decimal credit = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == allowance.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Date <= day && l.Voucher.Type != FnVoucherType.Closing)
+            // the balance of the allowance account (credit) up to the date: every year of the entity, all vouchers except drafts; the closing voucher of a year and the opening voucher of the next cancel, so the balance is counted once (review 2, finding 1)
+            decimal credit = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == allowance.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Date <= day && l.Voucher.FiscalYear.LegalEntityId == entityId)
                 .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             dto.PreviousBalance = credit;
             dto.Change = dto.Required - credit;
@@ -91,7 +91,7 @@ namespace Services.NasbNiro.Finance
             var lines = dto.Change > 0
                 ? new List<AutoLine> { new AutoLine { Account = expense, Debit = abs, Description = text }, new AutoLine { Account = allowance, Credit = abs, Description = text } }
                 : new List<AutoLine> { new AutoLine { Account = allowance, Debit = abs, Description = text }, new AutoLine { Account = expense, Credit = abs, Description = text } };
-            var v = await AddAutoVoucherAsync(entityId, day, text, "BadDebt", number, lines, FnVoucherType.Auto, null, ct);
+            var v = await AddAutoVoucherAsync(entityId, day, text, "BadDebt", number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FnBadDebtDto>(v.Error);
             await _uow.SaveChangesAsync(ct);
             var run = new FnBadDebtRun { Number = number, LegalEntityId = entityId, AsOf = day, Required = dto.Required, PreviousBalance = credit, Change = dto.Change, RatesJson = JsonConvert.SerializeObject(new { rates }), VoucherId = v.Voucher.Id, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now };

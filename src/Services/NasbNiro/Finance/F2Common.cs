@@ -367,7 +367,7 @@ namespace Services.NasbNiro.Finance
                 case int i: return $"<c r=\"{r}\"><v>{i.ToString(CultureInfo.InvariantCulture)}</v></c>";
                 case long l: return $"<c r=\"{r}\"><v>{l.ToString(CultureInfo.InvariantCulture)}</v></c>";
                 case double db: return $"<c r=\"{r}\"><v>{db.ToString("R", CultureInfo.InvariantCulture)}</v></c>";
-                case DateTime dt: return $"<c r=\"{r}\" t=\"inlineStr\"><is><t>{dt:yyyy-MM-dd}</t></is></c>";
+                case DateTime dt: return $"<c r=\"{r}\" t=\"inlineStr\"><is><t>{(dt.TimeOfDay == TimeSpan.Zero ? FiscalCalendars.Current.Text(dt) : FiscalCalendars.Current.TextTime(dt))}</t></is></c>";
                 default: return $"<c r=\"{r}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{Escape(Convert.ToString(value, CultureInfo.InvariantCulture))}</t></is></c>";
             }
         }

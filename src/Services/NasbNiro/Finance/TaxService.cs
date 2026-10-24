@@ -122,12 +122,12 @@ namespace Services.NasbNiro.Finance
 
             var sales = await uow.Set<FnSalesInvoice>().AsNoTracking()
                 .Where(i => i.Status == FnDocStatus.Posted && i.Type != FnInvoiceType.RetentionRelease && i.Date >= from && i.Date <= to)
-                .Select(i => new { i.CustomerId, CustomerName = i.Customer.Name, i.Customer.EconomicCode, i.Type, i.NetAmount, i.VatAmount }).ToListAsync(ct);
+                .Select(i => new { i.CustomerId, CustomerName = i.Customer.Name, i.Customer.EconomicCode, i.Customer.NationalId, i.Type, i.NetAmount, i.VatAmount }).ToListAsync(ct);
             foreach (var g in sales.GroupBy(s => s.CustomerId))
             {
                 decimal net = g.Sum(s => s.Type == FnInvoiceType.CreditNote ? -s.NetAmount : s.NetAmount);
                 decimal vat = g.Sum(s => s.Type == FnInvoiceType.CreditNote ? -s.VatAmount : s.VatAmount);
-                dto.Rows.Add(new VatSeasonRowDto { Side = "Sales", PartyName = g.First().CustomerName, EconomicCode = g.First().EconomicCode, NetAmount = net, VatAmount = vat, Documents = g.Count() });
+                dto.Rows.Add(new VatSeasonRowDto { Side = "Sales", PartyName = g.First().CustomerName, EconomicCode = g.First().EconomicCode, NationalId = g.First().NationalId, NetAmount = net, VatAmount = vat, Documents = g.Count() });
                 dto.SalesNet += net; dto.SalesVat += vat;
             }
 
@@ -135,16 +135,19 @@ namespace Services.NasbNiro.Finance
             var invoices = await uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking()
                 .Where(i => !i.Deleted && i.Status == Entities.Model.NasbNiro.Procurement.SupplierInvoiceStatus.Approved && i.InvoiceDate >= from && i.InvoiceDate <= to)
                 .Select(i => new { i.ProviderId, ProviderName = i.Provider.Name, i.NetAmount, i.VatAmount }).ToListAsync(ct);
+            List<int> providerIds = invoices.Select(i => i.ProviderId).Distinct().ToList();
+            var idCodes = await uow.Set<Entities.Model.NasbNiro.Procurement.SupplierProfile>().AsNoTracking().Where(p => providerIds.Contains(p.ProviderId)).Select(p => new { p.ProviderId, p.EconomicCode, p.NationalId }).ToListAsync(ct);
             foreach (var g in invoices.GroupBy(i => i.ProviderId))
             {
                 decimal net = g.Sum(x => x.NetAmount), vat = g.Sum(x => x.VatAmount);
-                dto.Rows.Add(new VatSeasonRowDto { Side = "Purchases", PartyName = g.First().ProviderName, NetAmount = net, VatAmount = vat, Documents = g.Count() });
+                var codes = idCodes.FirstOrDefault(c => c.ProviderId == g.Key);
+                dto.Rows.Add(new VatSeasonRowDto { Side = "Purchases", PartyName = g.First().ProviderName, EconomicCode = codes?.EconomicCode, NationalId = codes?.NationalId, NetAmount = net, VatAmount = vat, Documents = g.Count() });
                 dto.PurchasesNet += net; dto.PurchasesVat += vat;
             }
             // other documents that carry purchase VAT (not supplier invoices): VAT only, one row per document
             var others = await uow.Set<AccountingEventLine>().AsNoTracking()
                 .Where(l => l.AccountRole == AccountRoles.Vat && l.Event.Status != AccountingEventStatus.NotRequired && l.Event.SourceType != "SupplierInvoice"
-                            && l.Event.EventDate >= from && l.Event.EventDate <= to)
+                            && l.Event.EventDate >= from && l.Event.EventDate <= to && (l.Event.LegalEntityId == FinanceSeed.MainEntityId || l.Event.LegalEntityId == 0))   // the VAT return is the main company's: other entities file their own
                 .GroupBy(l => new { l.EventId, l.Event.Description, l.Event.SourceNumber })
                 .Select(g => new { g.Key.Description, g.Key.SourceNumber, Vat = g.Sum(x => x.Debit - x.Credit) }).Take(5000).ToListAsync(ct);
             foreach (var p in others.Where(p => p.Vat != 0))

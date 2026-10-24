@@ -33,26 +33,32 @@ namespace Services.NasbNiro.Finance
 
             // same filters as the season report, one row per document
             foreach (var i in await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Type != FnInvoiceType.RetentionRelease && i.Date >= t.From && i.Date <= t.To)
-                         .OrderBy(i => i.Date).ThenBy(i => i.Id).Select(i => new { i.Number, i.Date, i.Type, i.NetAmount, i.VatAmount, Name = i.Customer.Name, i.Customer.EconomicCode }).ToListAsync(ct))
+                         .OrderBy(i => i.Date).ThenBy(i => i.Id).Select(i => new { i.Number, i.Date, i.Type, i.NetAmount, i.VatAmount, Name = i.Customer.Name, i.Customer.EconomicCode, i.Customer.NationalId }).ToListAsync(ct))
             {
                 int sign = i.Type == FnInvoiceType.CreditNote ? -1 : 1;
-                dto.Rows.Add(new FnVatDetailRowDto { Side = "Sales", Date = i.Date, DocumentNumber = i.Number, PartyName = i.Name, EconomicCode = i.EconomicCode, NetAmount = sign * i.NetAmount, VatAmount = sign * i.VatAmount, SourceType = i.Type == FnInvoiceType.CreditNote ? "CreditNote" : "SalesInvoice" });
+                dto.Rows.Add(new FnVatDetailRowDto { Side = "Sales", Date = i.Date, DocumentNumber = i.Number, PartyName = i.Name, EconomicCode = i.EconomicCode, NationalId = i.NationalId, NetAmount = sign * i.NetAmount, VatAmount = sign * i.VatAmount, SourceType = i.Type == FnInvoiceType.CreditNote ? "CreditNote" : "SalesInvoice" });
             }
+            var purchaseCodes = await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierProfile>().AsNoTracking().Select(p => new { p.ProviderId, p.EconomicCode, p.NationalId }).ToListAsync(ct);
             foreach (var i in await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking()
                          .Where(i => !i.Deleted && i.Status == Entities.Model.NasbNiro.Procurement.SupplierInvoiceStatus.Approved && i.InvoiceDate >= t.From && i.InvoiceDate <= t.To)
-                         .OrderBy(i => i.InvoiceDate).ThenBy(i => i.Id).Select(i => new { i.InvoiceNumber, i.Number, i.InvoiceDate, i.NetAmount, i.VatAmount, Name = i.Provider.Name }).ToListAsync(ct))
-                dto.Rows.Add(new FnVatDetailRowDto { Side = "Purchases", Date = i.InvoiceDate, DocumentNumber = i.InvoiceNumber ?? i.Number, PartyName = i.Name, NetAmount = i.NetAmount, VatAmount = i.VatAmount, SourceType = "SupplierInvoice" });
+                         .OrderBy(i => i.InvoiceDate).ThenBy(i => i.Id).Select(i => new { i.InvoiceNumber, i.Number, i.InvoiceDate, i.NetAmount, i.VatAmount, i.ProviderId, Name = i.Provider.Name }).ToListAsync(ct))
+                dto.Rows.Add(new FnVatDetailRowDto { Side = "Purchases", Date = i.InvoiceDate, DocumentNumber = i.InvoiceNumber ?? i.Number, PartyName = i.Name, EconomicCode = purchaseCodes.FirstOrDefault(c => c.ProviderId == i.ProviderId)?.EconomicCode, NationalId = purchaseCodes.FirstOrDefault(c => c.ProviderId == i.ProviderId)?.NationalId, NetAmount = i.NetAmount, VatAmount = i.VatAmount, SourceType = "SupplierInvoice" });
             foreach (var o in await _uow.Set<AccountingEventLine>().AsNoTracking()
                          .Where(l => l.AccountRole == AccountRoles.Vat && l.Event.Status != AccountingEventStatus.NotRequired && l.Event.SourceType != "SupplierInvoice" && l.Event.EventDate >= t.From && l.Event.EventDate <= t.To)
                          .GroupBy(l => new { l.EventId, l.Event.Description, l.Event.SourceNumber, l.Event.EventDate, l.Event.SourceType })
                          .Select(g => new { g.Key.Description, g.Key.SourceNumber, g.Key.EventDate, g.Key.SourceType, Vat = g.Sum(x => x.Debit - x.Credit) }).Take(5000).ToListAsync(ct))
                 if (o.Vat != 0) dto.Rows.Add(new FnVatDetailRowDto { Side = "Purchases", Date = o.EventDate, DocumentNumber = o.SourceNumber, PartyName = o.Description ?? o.SourceNumber, VatAmount = o.Vat, SourceType = o.SourceType });
 
-            // carry-forward of a credit position inside the Persian year
+            // carry-forward of a credit position from the first season that has any VAT document, across Persian years (★ confirm with the accountant: carry versus refund)
             decimal carry = 0;
-            for (int s = 1; s < season; s++)
+            DateTime? firstSale = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted).MinAsync(i => (DateTime?)i.Date, ct);
+            DateTime? firstPurchase = await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking().Where(i => !i.Deleted && i.Status == Entities.Model.NasbNiro.Procurement.SupplierInvoiceStatus.Approved).MinAsync(i => (DateTime?)i.InvoiceDate, ct);
+            DateTime? first = firstSale.HasValue && firstPurchase.HasValue ? (firstSale < firstPurchase ? firstSale : firstPurchase) : (firstSale ?? firstPurchase);
+            int startIndex = first.HasValue ? PersianCal.Year(first.Value) * 4 + (PersianCal.Season(PersianCal.Month(first.Value)) - 1) : year * 4 + season - 1;
+            for (int idx = Math.Max(startIndex, year * 4 + season - 1 - 40); idx < year * 4 + season - 1; idx++)
             {
-                var prev = await TaxService.BuildVatSeasonAsync(_uow, year, s, ct);
+                var prev = await TaxService.BuildVatSeasonAsync(_uow, idx / 4, idx % 4 + 1, ct);
+                if (!prev.Success) continue;
                 decimal net = prev.Data.VatPayable - carry;
                 carry = net < 0 ? -net : 0;
             }
@@ -78,6 +84,9 @@ namespace Services.NasbNiro.Finance
             if (dto == null || Clean(dto.Description) == null) return Bad<FnTaxAdjustmentDto>("شرح تعدیل را وارد کنید.");
             if (!Enum.IsDefined(typeof(FnTaxAdjustmentKind), dto.Kind)) return Bad<FnTaxAdjustmentDto>("نوع تعدیل نامعتبر است.");
             if (dto.Amount == 0) return Bad<FnTaxAdjustmentDto>("مبلغ تعدیل صفر است.");
+            // a positive amount raises the taxable profit, a negative one reduces it: the sign must fit the kind
+            if ((FnTaxAdjustmentKind)dto.Kind == FnTaxAdjustmentKind.NonDeductibleExpense && dto.Amount < 0) return Bad<FnTaxAdjustmentDto>("هزینه غیرقابل قبول مالیاتی سود مشمول را زیاد می‌کند؛ مبلغ باید مثبت باشد.");
+            if (((FnTaxAdjustmentKind)dto.Kind == FnTaxAdjustmentKind.Exemption || (FnTaxAdjustmentKind)dto.Kind == FnTaxAdjustmentKind.LossCarriedForward) && dto.Amount > 0) return Bad<FnTaxAdjustmentDto>("معافیت یا زیان انتقالی سود مشمول را کم می‌کند؛ مبلغ باید منفی باشد.");
             if (Clean(dto.Source) == null && !dto.Verify) return Bad<FnTaxAdjustmentDto>("برای تعدیل بدون «نیاز به تایید»، مرجع (ماده قانون یا نظر مشاور) را بنویسید.");
             if (!await _uow.Set<FnFiscalYear>().AnyAsync(y => y.Id == dto.FiscalYearId, ct)) return ResponseDtoHelper.NotFound<FnTaxAdjustmentDto>("سال مالی پیدا نشد.");
             FnTaxAdjustment a = dto.Id.HasValue ? await _uow.Set<FnTaxAdjustment>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct) : null;

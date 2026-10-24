@@ -149,6 +149,19 @@ namespace Services.NasbNiro.Finance
             FnIntercompanyPair pair = await _uow.Set<FnIntercompanyPair>().Include(p => p.AccountA).Include(p => p.AccountB).FirstOrDefaultAsync(p => p.Id == dto.PairId, ct);
             if (pair == null || !pair.IsActive) return Bad<IntercompanyResultDto>("جفت حساب بین‌شرکتی پیدا نشد یا غیرفعال است.");
             if (dto.ChargerEntityId != pair.EntityAId && dto.ChargerEntityId != pair.EntityBId) return Bad<IntercompanyResultDto>("واحد صادرکننده باید یکی از دو واحد جفت حساب باشد.");
+            // each entity books the amount in its own currency; when the currencies differ the exchange rate (units of the other currency per one unit of the charger's) is mandatory
+            FnLegalEntity entA = await _uow.Set<FnLegalEntity>().AsNoTracking().FirstAsync(x => x.Id == pair.EntityAId, ct), entB = await _uow.Set<FnLegalEntity>().AsNoTracking().FirstAsync(x => x.Id == pair.EntityBId, ct);
+            bool chargerIsA = dto.ChargerEntityId == pair.EntityAId;
+            string chargerCurrency = chargerIsA ? entA.BaseCurrency : entB.BaseCurrency, otherCurrency = chargerIsA ? entB.BaseCurrency : entA.BaseCurrency;
+            decimal otherAmount = amount, rateUsed = 1m;
+            if (!string.Equals(chargerCurrency, otherCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!dto.Rate.HasValue || dto.Rate.Value <= 0) return Bad<IntercompanyResultDto>($"ارز دو واحد متفاوت است ({chargerCurrency} و {otherCurrency}); نرخ تبدیل را وارد کنید.");
+                rateUsed = dto.Rate.Value;
+                otherAmount = R(amount * rateUsed);
+                if (otherAmount <= 0) return Bad<IntercompanyResultDto>("مبلغ تبدیل‌شده باید بیشتر از صفر باشد.");
+            }
+            decimal amountA = chargerIsA ? amount : otherAmount, amountB = chargerIsA ? otherAmount : amount;
             FnAccount counterA = await _uow.Set<FnAccount>().FirstOrDefaultAsync(x => x.Code == Digits(Clean(dto.CounterAccountACode) ?? ""), ct);
             FnAccount counterB = await _uow.Set<FnAccount>().FirstOrDefaultAsync(x => x.Code == Digits(Clean(dto.CounterAccountBCode) ?? ""), ct);
             if (counterA == null || counterB == null || !counterA.IsActive || !counterB.IsActive || counterA.Level != FnAccountLevel.Subsidiary || counterB.Level != FnAccountLevel.Subsidiary)
@@ -166,13 +179,13 @@ namespace Services.NasbNiro.Finance
             AccountingEvent eventA, eventB;
             if (dto.ChargerEntityId == pair.EntityAId)
             {
-                eventA = IcEvent(pair.EntityAId, dto.Date.Date, number, text, pair.AccountA.Code, counterA.Code, amount, Me);
-                eventB = IcEvent(pair.EntityBId, dto.Date.Date, number, text, counterB.Code, pair.AccountB.Code, amount, Me);
+                eventA = IcEvent(pair.EntityAId, dto.Date.Date, number, text, pair.AccountA.Code, counterA.Code, amountA, Me);
+                eventB = IcEvent(pair.EntityBId, dto.Date.Date, number, text, counterB.Code, pair.AccountB.Code, amountB, Me);
             }
             else
             {
-                eventB = IcEvent(pair.EntityBId, dto.Date.Date, number, text, pair.AccountB.Code, counterB.Code, amount, Me);
-                eventA = IcEvent(pair.EntityAId, dto.Date.Date, number, text, counterA.Code, pair.AccountA.Code, amount, Me);
+                eventB = IcEvent(pair.EntityBId, dto.Date.Date, number, text, pair.AccountB.Code, counterB.Code, amountB, Me);
+                eventA = IcEvent(pair.EntityAId, dto.Date.Date, number, text, counterA.Code, pair.AccountA.Code, amountA, Me);
             }
             _uow.Set<AccountingEvent>().Add(eventA);
             _uow.Set<AccountingEvent>().Add(eventB);
@@ -180,7 +193,7 @@ namespace Services.NasbNiro.Finance
 
             var post = new FnIntercompanyPost
             {
-                Number = number, PairId = pair.Id, Date = dto.Date.Date, Amount = amount, ChargerEntityId = dto.ChargerEntityId,
+                Number = number, PairId = pair.Id, Date = dto.Date.Date, Amount = amount, AmountA = amountA, AmountB = amountB, Rate = rateUsed, ChargerEntityId = dto.ChargerEntityId,
                 CounterAccountAId = counterA.Id, CounterAccountBId = counterB.Id, Description = text,
                 EventAId = eventA.Id, EventBId = eventB.Id, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now,
             };
@@ -193,7 +206,7 @@ namespace Services.NasbNiro.Finance
                 .Select(v => new { v.Id, v.AccountingEventId }).ToListAsync(ct);
             return ResponseDtoHelper.Ok(new IntercompanyResultDto
             {
-                Id = post.Id, Number = number, PairId = pair.Id, Date = post.Date, Amount = amount, ChargerEntityId = post.ChargerEntityId, Description = text,
+                Id = post.Id, Number = number, PairId = pair.Id, Date = post.Date, Amount = amount, AmountA = amountA, AmountB = amountB, Rate = rateUsed, ChargerEntityId = post.ChargerEntityId, Description = text,
                 EventAId = eventA.Id, EventBId = eventB.Id,
                 VoucherAId = vouchers.Where(v => v.AccountingEventId == eventA.Id).Select(v => (int?)v.Id).FirstOrDefault(),
                 VoucherBId = vouchers.Where(v => v.AccountingEventId == eventB.Id).Select(v => (int?)v.Id).FirstOrDefault(),
@@ -282,7 +295,7 @@ namespace Services.NasbNiro.Finance
                 {
                     int posted = await _uow.Set<FnVoucher>().CountAsync(v => (v.AccountingEventId == post.EventAId || v.AccountingEventId == post.EventBId) && (query.IncludeDraft || v.Status == FnVoucherStatus.Final), ct);
                     if (posted != 2) continue;
-                    decimal amountA = R(post.Amount * rateOf[p.EntityAId]), amountB = R(post.Amount * rateOf[p.EntityBId]);
+                    decimal amountA = R((post.AmountA != 0 ? post.AmountA : post.Amount) * rateOf[p.EntityAId]), amountB = R((post.AmountB != 0 ? post.AmountB : post.Amount) * rateOf[p.EntityBId]);
                     FnAccount ca = accounts[post.CounterAccountAId], cb = accounts[post.CounterAccountBId];
                     if (post.ChargerEntityId == p.EntityAId) { RowFor(ca).Elimination += amountA; RowFor(cb).Elimination -= amountB; }
                     else { RowFor(cb).Elimination += amountB; RowFor(ca).Elimination -= amountA; }

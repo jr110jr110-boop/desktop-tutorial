@@ -359,6 +359,29 @@ namespace Services.NasbNiro.Finance
                 });
             }
 
+            // cost of sales of finished goods that were costed by a work-order close-out (their value sits in 10503 outside ItemCost): relieve it per delivered unit
+            if (type == InventoryDocumentType.CustomerDelivery && document.WorkOrderId.HasValue)
+            {
+                FnWorkOrderClose closeRec = await _uow.Set<FnWorkOrderClose>().FirstOrDefaultAsync(x => x.WorkOrderId == document.WorkOrderId.Value && !x.IsOpen, cancellationToken);
+                if (closeRec != null && closeRec.Quantity > 0 && closeRec.FgAmount != 0)
+                {
+                    decimal deliveredNow = transactions.Where(t => t.Quantity < 0 && Valued(t)).Sum(t => -t.Quantity);
+                    int remainingQty = closeRec.Quantity - closeRec.DeliveredQuantity;
+                    decimal take = Math.Min(deliveredNow, remainingQty);
+                    if (take > 0)
+                    {
+                        decimal relief = take == remainingQty ? closeRec.FgAmount - closeRec.RelievedAmount : R(closeRec.FgAmount * take / closeRec.Quantity);
+                        if (relief != 0)
+                        {
+                            eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.Cogs, Debit = relief > 0 ? relief : 0, Credit = relief < 0 ? -relief : 0, WorkOrderId = document.WorkOrderId, ContractId = contractId, Description = "بهای تمام‌شده کالای تحویلی (بستن دستور کار " + closeRec.Number + ")" });
+                            eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.Inventory + ".03", Debit = relief < 0 ? -relief : 0, Credit = relief > 0 ? relief : 0, Description = "خروج محصول ساخته‌شده (بستن دستور کار " + closeRec.Number + ")" });
+                        }
+                        closeRec.DeliveredQuantity += (int)take;
+                        closeRec.RelievedAmount += relief;
+                    }
+                }
+            }
+
             // scrap sale: the money (deposited into the company account) against the revenue
             if (type == InventoryDocumentType.ScrapSale)
             {

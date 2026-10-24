@@ -488,7 +488,7 @@ namespace Services.NasbNiro.Finance
             foreach (var group in rows.GroupBy(r => (Clean(r.Group) ?? "") + "|" + (r.Date.Date == default ? "" : r.Date.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))))
             {
                 MassVoucherRowDto first = group.First();
-                string label = Clean(first.Group) ?? first.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                string label = Clean(first.Group) ?? FiscalCalendars.Text(first.Date);
                 if (first.Date == default) { result.Errors.Add($"گروه {label}: تاریخ خالی است."); continue; }
                 var check = await CheckDateAsync(first.Date.Date, entityId, ct);
                 if (check.Error != null) { result.Errors.Add($"گروه {label}: {check.Error}"); continue; }
