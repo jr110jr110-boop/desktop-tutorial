@@ -376,3 +376,6 @@ export const getPaymentProposals = () => get(cl + "payment-proposals");
 export const getPaymentProposal = (id: number) => get(cl + "payment-proposals/" + id);
 export const createPaymentProposal = (asOf: string | null, cashLimit: number | null) => post(cl + "payment-proposals", { asOf, cashLimit });
 export const approvePaymentProposal = (id: number) => post(cl + `payment-proposals/${id}/approve`);
+
+/** Supplier advances not yet recovered (procurement controller; the finance roles that read procurement can open it). */
+export const getOpenSupplierAdvances = () => get("procurement/suppliers/open-advances");

@@ -6,6 +6,10 @@ import { jalali } from "@/composables/inventory";
 import { money, moneyOrDash } from "@/composables/fn";
 
 const props = defineProps<{ kind: string; data: any; columns?: number }>();
+/** Clicking an account code of a statement asks the page to show the ledger entries behind it. */
+const emit = defineEmits<{ (e: "drill", code: string): void }>();
+const sectionNames: Record<string, string> = { Operating: "فعالیت‌های عملیاتی", Investing: "فعالیت‌های سرمایه‌گذاری", Financing: "فعالیت‌های تامین مالی" };
+const pct = (v: any) => (v === null || v === undefined ? "-" : Number(v).toFixed(2));
 
 /** Statement lines grouped by their section (the API orders them). */
 const sections = computed(() => {
@@ -113,7 +117,7 @@ const cols = computed(() => props.columns || 4);
           <template v-for="s in sections" :key="s.name">
             <tr v-if="s.name"><td colspan="3"><b>{{ s.name }}</b></td></tr>
             <tr v-for="l in s.lines" :key="s.name + l.code + l.title" :class="{ 'fn-total': l.isTotal }">
-              <td class="inv-ltr">{{ l.code }}</td><td>{{ l.title }}</td><td class="fn-num">{{ money(l.amount) }}</td>
+              <td class="inv-ltr"><a v-if="l.code && !l.isTotal" class="screen-only" href="#" @click.prevent="emit('drill', l.code)">{{ l.code }}</a><span :class="{ 'print-only': l.code && !l.isTotal }">{{ l.code }}</span></td><td>{{ l.title }}</td><td class="fn-num">{{ money(l.amount) }}</td>
             </tr>
           </template>
         </tbody>
@@ -132,6 +136,65 @@ const cols = computed(() => props.columns || 4);
           <tr><td>سود عملیاتی</td><td class="fn-num">{{ money(data.operatingProfit) }}</td></tr>
           <tr><td>سود قبل از مالیات</td><td class="fn-num">{{ money(data.profitBeforeTax) }}</td></tr>
           <tr class="fn-total"><td>سود خالص</td><td class="fn-num">{{ money(data.netProfit) }}</td></tr>
+        </tbody>
+      </table>
+    </template>
+
+    <!-- cash-flow statement (indirect method) -->
+    <template v-else-if="kind === 'cash-flow'">
+      <table class="table table-sm">
+        <thead><tr><th>بخش</th><th>شرح</th><th style="width: 200px">مبلغ (ریال)</th><th>حساب‌های مرتبط</th></tr></thead>
+        <tbody>
+          <tr><td></td><td>سود خالص دوره</td><td class="fn-num">{{ money(data.netProfit) }}</td><td></td></tr>
+          <tr v-for="l in data.lines" :key="l.key">
+            <td>{{ sectionNames[l.section] || l.section }}</td><td>{{ l.title }}</td><td class="fn-num">{{ money(l.amount) }}</td>
+            <td class="inv-ltr"><template v-for="(a, i) in l.accounts" :key="a"><a class="screen-only" href="#" @click.prevent="emit('drill', a)">{{ a }}</a><span class="print-only">{{ a }}</span><span v-if="i < l.accounts.length - 1">، </span></template></td>
+          </tr>
+          <tr class="fn-total"><td colspan="2">جریان نقد عملیاتی</td><td class="fn-num">{{ money(data.operating) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="2">جریان نقد سرمایه‌گذاری</td><td class="fn-num">{{ money(data.investing) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="2">جریان نقد تامین مالی</td><td class="fn-num">{{ money(data.financing) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="2">خالص تغییر در وجه نقد</td><td class="fn-num">{{ money(data.netChange) }}</td><td></td></tr>
+          <tr><td colspan="2">وجه نقد ابتدای دوره</td><td class="fn-num">{{ money(data.openingCash) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="2">وجه نقد پایان دوره</td><td class="fn-num">{{ money(data.closingCash) }}</td><td></td></tr>
+        </tbody>
+      </table>
+      <p :class="data.ties ? '' : 'text-danger'">{{ data.ties ? "مانده نقد صورت جریان با ترازنامه مطابقت دارد." : "مانده نقد صورت جریان با ترازنامه مطابقت ندارد؛ مغایرت را بررسی کنید." }}</p>
+    </template>
+
+    <!-- changes in equity -->
+    <template v-else-if="kind === 'equity'">
+      <table class="table table-sm">
+        <thead><tr><th>شرح</th><th>مانده ابتدای دوره</th><th>تغییرات</th><th>مانده پایان دوره</th></tr></thead>
+        <tbody>
+          <tr v-for="r in data.rows" :key="r.key"><td>{{ r.title }}</td><td class="fn-num">{{ money(r.opening) }}</td><td class="fn-num">{{ money(r.movement) }}</td><td class="fn-num">{{ money(r.closing) }}</td></tr>
+          <tr class="fn-total"><td>جمع حقوق صاحبان سرمایه</td><td class="fn-num">{{ money(data.openingEquity) }}</td><td class="fn-num">{{ money(Number(data.closingEquity) - Number(data.openingEquity)) }}</td><td class="fn-num">{{ money(data.closingEquity) }}</td></tr>
+          <tr><td>سود خالص دوره</td><td colspan="3" class="fn-num">{{ money(data.netProfit) }}</td></tr>
+          <tr><td>حقوق صاحبان سرمایه در ترازنامه</td><td colspan="3" class="fn-num">{{ money(data.balanceSheetEquity) }}</td></tr>
+        </tbody>
+      </table>
+      <p :class="data.ties ? '' : 'text-danger'">{{ data.ties ? "جمع صورت تغییرات با ترازنامه مطابقت دارد." : "جمع صورت تغییرات با ترازنامه مطابقت ندارد." }}</p>
+    </template>
+
+    <!-- financial ratios -->
+    <template v-else-if="kind === 'ratios'">
+      <p class="mb-1">درآمد: <b>{{ money(data.revenue) }}</b> - بهای تمام‌شده فروش: <b>{{ money(data.costOfSales) }}</b> - سود خالص: <b>{{ money(data.netProfit) }}</b> - تعداد روز دوره: <b>{{ data.days }}</b></p>
+      <table class="table table-sm">
+        <thead><tr><th>نسبت</th><th style="width: 140px">مقدار</th><th>فرمول</th></tr></thead>
+        <tbody><tr v-for="r in data.ratios" :key="r.key"><td>{{ r.title }}</td><td class="fn-num">{{ pct(r.value) }}</td><td>{{ r.formula }}</td></tr></tbody>
+      </table>
+    </template>
+
+    <!-- comparative statement: two fiscal years side by side -->
+    <template v-else-if="kind === 'comparative'">
+      <table class="table table-sm">
+        <thead><tr><th style="width: 110px">کد</th><th>شرح</th><th style="width: 170px">{{ data.labelA }}</th><th style="width: 170px">{{ data.labelB }}</th><th style="width: 170px">تغییر</th><th style="width: 90px">درصد تغییر</th></tr></thead>
+        <tbody>
+          <template v-for="s in data.sections" :key="s.name">
+            <tr v-if="s.name"><td colspan="6"><b>{{ s.name }}</b></td></tr>
+            <tr v-for="r in s.rows" :key="s.name + r.code + r.title" :class="{ 'fn-total': r.isTotal }">
+              <td class="inv-ltr">{{ r.code }}</td><td>{{ r.title }}</td><td class="fn-num">{{ money(r.a) }}</td><td class="fn-num">{{ money(r.b) }}</td><td class="fn-num">{{ money(r.b - r.a) }}</td><td class="fn-num">{{ r.a ? ((((r.b - r.a) / Math.abs(r.a)) * 100).toFixed(1) + "%") : "-" }}</td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </template>

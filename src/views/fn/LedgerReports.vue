@@ -5,6 +5,7 @@ import LookupBox from "@/components/fn/LookupBox.vue";
 import QPager from "@/components/quality/QPager.vue";
 import ReportTables from "@/components/fn/ReportTables.vue";
 import ReportPrint from "@/components/fn/print/ReportPrint.vue";
+import DrillModal from "@/components/fn/DrillModal.vue";
 import { exportLedgerReport, getAccounts, getDetailAccounts, getFiscalYears, getLedgerReconciliation, getLedgerReport, type LedgerReport } from "@/api/FnAPIs";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { printSheet } from "@/composables/fn";
@@ -33,6 +34,7 @@ const page = ref(1);
 const total = ref(0);
 const loading = ref(false);
 const printing = ref(false);
+const drill = ref<string | null>(null);
 const pageSize = 100;
 
 const paged = computed(() => ["journal", "general-ledger", "account-review", "project-profitability"].includes(props.kind));
@@ -173,7 +175,8 @@ onMounted(async () => {
       </div>
 
       <p v-if="needsAccount && !data" class="inv-muted">حساب{{ kind === "account-review" ? " یا تفصیلی" : "" }} را انتخاب و «نمایش گزارش» را بزنید.</p>
-      <div class="table-responsive"><ReportTables :columns="Number(filters.Columns)" :data="data" :kind="kind" /></div>
+      <div class="table-responsive"><ReportTables :columns="Number(filters.Columns)" :data="data" :kind="kind" @drill="drill = $event" /></div>
+      <DrillModal v-if="drill" :account="drill" :params="{ FiscalYearId: filters.FiscalYearId, From: filters.From, To: filters.To, IncludeDraft: filters.IncludeDraft }" @close="drill = null" />
       <QPager v-if="paged && data" :page="page" :page-size="pageSize" :total="total" @go="go" />
     </div>
   </div>
