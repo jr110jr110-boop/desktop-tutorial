@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -156,6 +157,13 @@ namespace DataLayer.Context
             Set<TEntity>().RemoveRange(entities);
         }
 
+        // The parameterless overloads of DbContext call the bool overloads virtually, so the triggers (validation, shadow properties, Ye/Ke,
+        // audit trail) run only in the bool overloads; running them in both wrote every audit row twice.
+        public override int SaveChanges() => SaveChanges(acceptAllChangesOnSuccess: true);
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken()) =>
+            SaveChangesAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
             ChangeTracker.DetectChanges();
@@ -163,45 +171,48 @@ namespace DataLayer.Context
             beforeSaveTriggers();
 
             ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
-            var result = base.SaveChanges(acceptAllChangesOnSuccess);
-            ChangeTracker.AutoDetectChangesEnabled = true;
-            return result;
+            try
+            {
+                return base.SaveChanges(acceptAllChangesOnSuccess);
+            }
+            catch
+            {
+                detachUnsavedAuditRows();
+                throw;
+            }
+            finally
+            {
+                ChangeTracker.AutoDetectChangesEnabled = true;
+            }
         }
 
-        public override int SaveChanges()
+        public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = new CancellationToken())
         {
             ChangeTracker.DetectChanges();
 
             beforeSaveTriggers();
 
             ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
-            var result = base.SaveChanges();
-            ChangeTracker.AutoDetectChangesEnabled = true;
-            return result;
+            try
+            {
+                return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            }
+            catch
+            {
+                detachUnsavedAuditRows();
+                throw;
+            }
+            finally
+            {
+                ChangeTracker.AutoDetectChangesEnabled = true;
+            }
         }
 
-        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
+        /// <summary>A failed save (a concurrency or unique-key conflict that the caller retries) must not leave its audit rows behind: the retry captures them again.</summary>
+        private void detachUnsavedAuditRows()
         {
-            ChangeTracker.DetectChanges();
-
-            beforeSaveTriggers();
-
-            ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
-            var result = base.SaveChangesAsync(cancellationToken);
-            ChangeTracker.AutoDetectChangesEnabled = true;
-            return result;
-        }
-
-        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = new CancellationToken())
-        {
-            ChangeTracker.DetectChanges();
-
-            beforeSaveTriggers();
-
-            ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
-            var result = base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-            ChangeTracker.AutoDetectChangesEnabled = true;
-            return result;
+            foreach (var entry in ChangeTracker.Entries<Entities.Model.NasbNiro.Finance.FnAuditLog>().Where(e => e.State == EntityState.Added).ToList())
+                entry.State = EntityState.Detached;
         }
 
         private void beforeSaveTriggers()

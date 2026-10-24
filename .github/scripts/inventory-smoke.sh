@@ -1875,6 +1875,7 @@ as "$FM_TOKEN" POST $FE "$(jq -c '.baseCurrency = "EUR"' <<< "$ENT")"; nomsg "r3
 
 # --- audit trail
 as "$FM_TOKEN" GET "$FAU?EntityType=FnVoucher&EntityId=$V1&PageSize=0"; check "f3 audit: finalizing the first manual voucher left before and after values and the user" '.success and ([.data.data[]|select(.action == "Modified" and (.beforeJson|tostring|contains("Checked")) and (.afterJson|tostring|contains("Final")) and (.userName|length) > 0)]|length) >= 1'
+check "f3 audit: the finalisation of the first manual voucher is in the trail exactly once (a save wrote every audit row twice)" '.success and ([.data.data[]|select(.action == "Modified" and (.beforeJson|tostring|contains("Checked")) and (.afterJson|tostring|contains("Final")))]|length) == 1'
 JE=$(EJ T001 آزمون یک 0499370899 IR950190000000200000000003)
 as "$PAYR_TOKEN" POST $FP/employees "$(jq -c ". + {id:$PE1}" <<< "$JE")"; check "f3 audit: the employee's bank account is changed" '.success'
 as "$FM_TOKEN" GET "$FAU?EntityType=FnEmployee&EntityId=$PE1&PageSize=0"; check "f3 audit: the IBAN change is recorded masked (last four digits only)" '.success and ([.data.data[]|select((.beforeJson|tostring|contains("****0001")) and (.afterJson|tostring|contains("****0003")) and ((.afterJson|tostring|contains("IR9501900")|not)))]|length) >= 1'
@@ -3041,7 +3042,8 @@ oint "نامه شماره سه"; check "office r1 H5: the next letter uses the r
 call POST $OF/numbering-rules "{\"id\":$ORULE1,\"kind\":3,\"unitId\":$OU1,\"pattern\":\"INT-{yy}-{seq:3}\",\"isActive\":false}"; check "office r1 H5: the rule is switched off" '.success and .data.isActive == false'
 call POST $OF/numbering-rules "{\"kind\":3,\"unitId\":$OU1,\"pattern\":\"INT-{yy}-{seq:3}\"}"; check "office r1 H5: a new rule with the same pattern is accepted once the old one is off (its counter starts again)" '.success and .data.isActive == true'
 oint "نامه شماره چهار"; check "office r1 H5: the number INT-001 exists already: the counter skips forward to 002 inside the same signature instead of failing" ".success and .data.status == 4 and .data.number == \"INT-$OPY2-002\""
-as "$FM_TOKEN" GET "$FAU?EntityType=OfNumberingRule&Action=Added&PageSize=0"; check "office r1 M7: the numbering rules are audited with the pattern and the user" '.success and ([.data.data[]|select((.afterJson|tostring|contains("INT-{yy}-{seq:3}")) and (.userName|length) > 0)]|length) >= 2'
+as "$FM_TOKEN" GET "$FAU?EntityType=OfNumberingRule&Action=Added&PageSize=0"; check "office r1 M7: the two rules with the pattern INT-{yy}-{seq:3} are audited exactly once each, with the user (a save wrote every audit row twice)" '.success and ([.data.data[]|select((.afterJson|tostring|contains("INT-{yy}-{seq:3}")) and (.userName|length) > 0)]|length) == 2'
+check "office r1 M7: the three default rules are audited exactly once each" '.success and ([.data.data[]|select(.afterJson|tostring|contains("{yy}/{kind}/{unit}/{seq:5}"))]|length) == 3'
 
 # H2/H1/M6: a Secret outgoing letter: signed, then the secretariat numbers/registers and sends it without ever reading it
 as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":2,\"subject\":\"نامه سری آزمون\",\"classification\":2,\"bodyHtml\":\"<p>RAREWORD123</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"partyId\":$OPARTY}],\"attachments\":[{\"documentId\":\"$OATT2\",\"fileName\":\"secret.txt\"}]}"; check "office r1 H2: secret outgoing draft saved" '.success and .data.classification == 2'
