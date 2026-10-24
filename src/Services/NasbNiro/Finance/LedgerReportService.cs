@@ -443,13 +443,20 @@ namespace Services.NasbNiro.Finance
                 .GroupBy(i => i.ProviderId).Select(g => new { Provider = g.Key, Amount = g.Sum(i => i.TotalAmount) }).ToListAsync(ct);
             var paid = await _uow.Set<PaymentRequest>().AsNoTracking().Where(p => !p.Deleted && p.Status == PaymentRequestStatus.Paid && p.InvoiceId != null)
                 .GroupBy(p => p.ProviderId).Select(g => new { Provider = g.Key, Amount = g.Sum(p => p.Amount) }).ToListAsync(ct);
-            var providerIds = apLedger.Where(x => x.Provider.HasValue).Select(x => x.Provider.Value).Concat(invoiced.Select(x => x.Provider)).Concat(paid.Select(x => x.Provider)).Distinct().ToList();
+            // what the payables sub-ledger also holds (review 3, H2): posted supplier credit notes (less) and debit notes (more), released retention (more), settled letters of credit (less)
+            var noteRows = await _uow.Set<FnSupplierNote>().AsNoTracking().Where(n => n.Status == FnSettlementStatus.Posted).GroupBy(n => n.ProviderId)
+                .Select(g => new { Provider = g.Key, Amount = g.Sum(n => n.Kind == FnSupplierNoteKind.Debit ? n.TotalAmount : -n.TotalAmount) }).ToListAsync(ct);
+            var retentionRows = await _uow.Set<FnRetentionRelease>().AsNoTracking().GroupBy(r => r.ProviderId).Select(g => new { Provider = g.Key, Amount = g.Sum(r => r.Amount) }).ToListAsync(ct);
+            var lcRows = await _uow.Set<FnLcPosting>().AsNoTracking().Where(p => p.Kind == FnLcPostingKind.Settlement).Join(_uow.Set<FnLetterOfCredit>().AsNoTracking(), p => p.LcId, c => c.Id, (p, c) => new { c.ProviderId, p.Amount })
+                .GroupBy(x => x.ProviderId).Select(g => new { Provider = g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync(ct);
+            var providerIds = apLedger.Where(x => x.Provider.HasValue).Select(x => x.Provider.Value).Concat(invoiced.Select(x => x.Provider)).Concat(paid.Select(x => x.Provider)).Concat(noteRows.Select(x => x.Provider)).Concat(retentionRows.Select(x => x.Provider)).Concat(lcRows.Select(x => x.Provider)).Distinct().ToList();
             decimal apL = 0, apS = 0, apAbs = 0;
             var bad = new List<string>();
             foreach (int pid in providerIds)
             {
                 decimal l = apLedger.Where(x => x.Provider == pid).Sum(x => x.Amount);
-                decimal s = (invoiced.FirstOrDefault(x => x.Provider == pid)?.Amount ?? 0) - (paid.FirstOrDefault(x => x.Provider == pid)?.Amount ?? 0);
+                decimal s = (invoiced.FirstOrDefault(x => x.Provider == pid)?.Amount ?? 0) - (paid.FirstOrDefault(x => x.Provider == pid)?.Amount ?? 0)
+                    + (noteRows.FirstOrDefault(x => x.Provider == pid)?.Amount ?? 0) + (retentionRows.FirstOrDefault(x => x.Provider == pid)?.Amount ?? 0) - (lcRows.FirstOrDefault(x => x.Provider == pid)?.Amount ?? 0);
                 apL += l; apS += s;
                 if (l != s) { apAbs += Math.Abs(l - s); bad.Add($"تامین‌کننده {pid}: دفتر {l:0} و پرداختنی {s:0}"); }
             }
@@ -463,6 +470,10 @@ namespace Services.NasbNiro.Finance
             var bankLedger = await all.Where(l => (l.Account.Code == "10102" || l.Account.Code == "10103") && l.Detail1Id != null)
                 .GroupBy(l => l.Detail1.LinkedEntityId).Select(g => new { Bank = g.Key, Amount = g.Sum(x => x.Debit) - g.Sum(x => x.Credit) }).ToListAsync(ct);
             var bankEvents = await postedLines.Where(l => l.PartyType == "BankAccount").GroupBy(l => l.PartyId).Select(g => new { Bank = g.Key, Amount = g.Sum(x => x.Debit) - g.Sum(x => x.Credit) }).ToListAsync(ct);
+            // bank lines of the documents the finance side posts straight to the bank (loans, letters of credit, guarantee fees) are treasury movements too
+            var directBank = await all.Where(l => (l.Account.Code == "10102" || l.Account.Code == "10103") && l.Detail1Id != null && (l.Voucher.SourceType == "Loan" || l.Voucher.SourceType == "LetterOfCredit" || l.Voucher.SourceType == "BankGuarantee"))
+                .GroupBy(l => l.Detail1.LinkedEntityId).Select(g => new { Bank = g.Key, Amount = g.Sum(x => x.Debit) - g.Sum(x => x.Credit) }).ToListAsync(ct);
+            bankEvents = bankEvents.Concat(directBank).GroupBy(x => x.Bank).Select(g => new { Bank = g.Key, Amount = g.Sum(x => x.Amount) }).ToList();
             decimal bankL = 0, bankS = 0, bankAbs = 0;
             var bankBad = new List<string>();
             foreach (int bid in bankLedger.Where(x => x.Bank.HasValue).Select(x => x.Bank.Value).Concat(bankEvents.Where(x => x.Bank.HasValue).Select(x => x.Bank.Value)).Distinct())

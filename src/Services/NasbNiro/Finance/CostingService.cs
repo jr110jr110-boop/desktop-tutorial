@@ -373,7 +373,7 @@ namespace Services.NasbNiro.Finance
                         decimal relief = take == remainingQty ? closeRec.FgAmount - closeRec.RelievedAmount : R(closeRec.FgAmount * take / closeRec.Quantity);
                         if (relief != 0)
                         {
-                            eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.Cogs, Debit = relief > 0 ? relief : 0, Credit = relief < 0 ? -relief : 0, WorkOrderId = document.WorkOrderId, ContractId = contractId, Description = "بهای تمام‌شده کالای تحویلی (بستن دستور کار " + closeRec.Number + ")" });
+                            eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.Cogs, Debit = relief > 0 ? relief : 0, Credit = relief < 0 ? -relief : 0, WorkOrderId = document.WorkOrderId, ContractId = contractId, Quantity = take, Description = ReliefMarker + closeRec.Number + ")" });
                             eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.Inventory + ".03", Debit = relief < 0 ? -relief : 0, Credit = relief > 0 ? relief : 0, Description = "خروج محصول ساخته‌شده (بستن دستور کار " + closeRec.Number + ")" });
                         }
                         closeRec.DeliveredQuantity += (int)take;
@@ -465,6 +465,21 @@ namespace Services.NasbNiro.Finance
             return e;
         }
 
+        /// <summary>Marks the cost-of-sales line of a delivery that relieved finished goods costed by a work-order close-out; its Quantity is the relieved quantity.</summary>
+        private const string ReliefMarker = "بهای تمام‌شده کالای تحویلی (بستن دستور کار ";
+
+        /// <summary>A delivery is cancelled: the quantity and amount it relieved from the close-out go back, so a later delivery relieves them again.</summary>
+        private async Task UndoReliefAsync(AccountingEvent e, CancellationToken cancellationToken)
+        {
+            foreach (AccountingEventLine l in e.Lines.Where(x => x.Description != null && x.Description.StartsWith(ReliefMarker, StringComparison.Ordinal) && x.WorkOrderId.HasValue && x.Quantity.HasValue))
+            {
+                FnWorkOrderClose rec = await _uow.Set<FnWorkOrderClose>().FirstOrDefaultAsync(x => x.WorkOrderId == l.WorkOrderId.Value && !x.IsOpen, cancellationToken);
+                if (rec == null) continue;
+                rec.DeliveredQuantity = Math.Max(0, rec.DeliveredQuantity - (int)l.Quantity.Value);
+                rec.RelievedAmount -= l.Debit - l.Credit;
+            }
+        }
+
         public async Task ReverseDocumentAsync(InventoryDocument document, IReadOnlyList<StockTransaction> original, IReadOnlyList<StockTransaction> reversals,
             CancellationToken cancellationToken)
         {
@@ -506,6 +521,7 @@ namespace Services.NasbNiro.Finance
                 {
                     e.Status = AccountingEventStatus.NotRequired; // never sent: nothing to reverse in Sepidar
                     e.Error = "سند مبدا باطل شد پیش از ارسال.";
+                    await UndoReliefAsync(e, cancellationToken);
                     continue;
                 }
                 if (e.Status == AccountingEventStatus.NotRequired) continue;
@@ -516,6 +532,7 @@ namespace Services.NasbNiro.Finance
                         ContractId = l.ContractId, CostCenter = l.CostCenter, ItemId = l.ItemId, Quantity = l.Quantity, Description = l.Description,
                     }).ToList());
                 reversal.ReversesEventId = e.Id;
+                await UndoReliefAsync(e, cancellationToken);
             }
             if (R(residuals) != 0)
             {

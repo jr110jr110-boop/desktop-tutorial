@@ -360,7 +360,12 @@ namespace Services.NasbNiro.Finance
         public async Task<(bool Allowed, string Message)> GateAsync(string costCenterCode, int? contractId, decimal amount, DateTime date, int? excludeRequestId, int? excludeOrderId, string overrideReason, CancellationToken ct)
         {
             var r = await CheckAsync(new FnCommitmentCheckRequest { CostCenterCode = costCenterCode, ContractId = contractId, Amount = amount, Date = date, OverrideReason = overrideReason, ExcludePurchaseRequestId = excludeRequestId, ExcludePurchaseOrderId = excludeOrderId }, ct);
-            if (!r.Success || r.Data == null) return (true, null);
+            if (!r.Success || r.Data == null)
+            {
+                // a check that could not run does not let a document through when the approved budget blocks (review 3, M11)
+                bool blocking = await _uow.Set<FnBudget>().AsNoTracking().AnyAsync(x => x.Status == FnBudgetStatus.Approved && x.CommitMode == FnCommitMode.Block, ct);
+                return blocking ? (false, "کنترل تعهد بودجه انجام نشد و بودجه در حالت مسدودسازی است: " + (r?.Message ?? "")) : (true, null);
+            }
             return (r.Data.Allowed, r.Data.Allowed && !r.Data.Warning ? null : r.Data.Message);
         }
 

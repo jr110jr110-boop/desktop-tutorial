@@ -79,8 +79,8 @@ namespace Services.NasbNiro.Finance
             var list = new List<FnNoteAgeingDto>();
             FnFiscalYear year = await LedgerYearAsync(asOf, ct);
             if (payable == null || year == null) return list;
-            var rows = await _uow.Set<FnVoucherLine>().AsNoTracking()
-                .Where(l => l.AccountId == payable.Id && l.Voucher.FiscalYearId == year.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Date <= asOf && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
+            var rows = await (await BookLinesAsync(asOf, false, ct))
+                .Where(l => l.AccountId == payable.Id
                     && l.Detail1 != null && l.Detail1.Type == FnDetailType.Supplier)
                 .Select(l => new { Supplier = l.Detail1.LinkedEntityId, Title = l.Detail1.Title, l.Voucher.Date, l.Voucher.Id, l.RowNumber, l.Debit, l.Credit }).ToListAsync(ct);
             foreach (var g in rows.GroupBy(r => r.Supplier))
@@ -106,8 +106,8 @@ namespace Services.NasbNiro.Finance
         {
             FnFiscalYear year = await LedgerYearAsync(asOf, ct);
             if (year == null) return new Dictionary<string, (string Title, decimal Balance)>();
-            var rows = await _uow.Set<FnVoucherLine>().AsNoTracking()
-                .Where(l => l.Account.Code.StartsWith("105") && l.Voucher.FiscalYearId == year.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Date <= asOf)
+            var rows = await (await BookLinesAsync(asOf, false, ct))
+                .Where(l => l.Account.Code.StartsWith("105"))
                 .GroupBy(l => new { l.Account.Code, l.Account.Title }).Select(g => new { g.Key.Code, g.Key.Title, Balance = g.Sum(x => x.Debit - x.Credit) }).ToListAsync(ct);
             return rows.ToDictionary(r => r.Code, r => (r.Title, r.Balance));
         }
@@ -155,11 +155,16 @@ namespace Services.NasbNiro.Finance
                 dto.Loans.Add(new FnNoteLoanDto { Number = l.Number, BankName = l.BankName, Original = l.Amount, Outstanding = now.Outstanding, CurrentPortion = now.Current, LongTerm = now.Outstanding - now.Current, PriorOutstanding = before });
             }
 
-            foreach (FnProvision p in await _uow.Set<FnProvision>().AsNoTracking().Include(x => x.Movements).OrderBy(x => x.Id).AsSplitQuery().ToListAsync(ct))
+            // the provisions note is built from the ledger accounts (review 3, M6), not from the provision register: bonus, leave, severance, doubtful debts and warranty
+            string[] provisionCodes = { "30402", "30403", "40201", "10309", "30404" };
+            foreach (string pc in provisionCodes)
             {
-                decimal cur = p.Movements.Where(m => m.Date.Date <= asOf).Sum(m => m.Amount), before = priorAsOf.HasValue ? p.Movements.Where(m => m.Date.Date <= priorAsOf.Value).Sum(m => m.Amount) : 0;
+                FnAccount pa = await AccountByCodeAsync(pc, ct);
+                if (pa == null) continue;
+                decimal cur = await (await BookLinesAsync(asOf, false, ct)).Where(l => l.AccountId == pa.Id).SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
+                decimal before = priorAsOf.HasValue ? await (await BookLinesAsync(priorAsOf.Value, false, ct)).Where(l => l.AccountId == pa.Id).SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0 : 0;
                 if (cur == 0 && before == 0) continue;
-                dto.Provisions.Add(new FnNoteProvisionDto { Number = p.Number, Description = p.Description, Balance = cur, PriorBalance = before });
+                dto.Provisions.Add(new FnNoteProvisionDto { Number = pc, Description = pa.Title, Balance = cur, PriorBalance = before });
             }
 
             var inventory = await InventoryByGroupAsync(asOf, ct);

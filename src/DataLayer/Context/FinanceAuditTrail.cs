@@ -60,10 +60,19 @@ namespace DataLayer.Context
             { typeof(FnPayment), null },
             { typeof(FnReceipt), null },
             { typeof(FnLoan), null },
+            // review 3 (finding 21): payment lines (payee IBAN masked), loan instalments and the F3b records; settlements and bonus runs record status and totals only, never a person's pay
+            { typeof(FnPaymentLine), new[] { "PayeeIban", "Amount", "Instrument", "BankAccountId" } },
+            { typeof(FnLoanInstallment), null },
+            { typeof(FnInsuranceClearance), null },
+            { typeof(FnBankGuarantee), null },
+            { typeof(FnSupplierNote), null },
+            { typeof(FnRetentionRelease), null },
+            { typeof(FnTermination), new[] { "Status", "VoucherId", "TerminationDate" } },
+            { typeof(FnBonusRun), new[] { "Status", "Year", "TotalGross", "TotalNet", "VoucherId" } },
             { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Iban" } },
         };
 
-        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban" };
+        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban" };
         private static readonly HashSet<string> Skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RowVersion" };
 
         public static void Capture(DbContext context, IHttpContextAccessor accessor)

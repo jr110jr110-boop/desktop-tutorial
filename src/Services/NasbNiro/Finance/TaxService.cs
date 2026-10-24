@@ -148,10 +148,10 @@ namespace Services.NasbNiro.Finance
             }
             // supplier credit / debit notes of the season change the input VAT and the purchases (F3b)
             var notes = await uow.Set<FnSupplierNote>().AsNoTracking().Where(n => n.Status == FnSettlementStatus.Posted && n.Date >= from && n.Date <= to)
-                .Select(n => new { n.ProviderId, ProviderName = uow.Set<Entities.Model.NasbNiro.Providers.Provider>().Where(p => p.Id == n.ProviderId).Select(p => p.Name).FirstOrDefault(), n.Kind, n.NetAmount, n.VatAmount }).ToListAsync(ct);
+                .Select(n => new { n.ProviderId, ProviderName = uow.Set<Entities.Model.NasbNiro.Providers.Provider>().Where(p => p.Id == n.ProviderId).Select(p => p.Name).FirstOrDefault(), n.Kind, n.NetAmount, n.VatAmount, n.NonRecoverableVatAmount }).ToListAsync(ct);
             foreach (var g in notes.GroupBy(n => n.ProviderId))
             {
-                decimal net = g.Sum(n => n.Kind == FnSupplierNoteKind.Credit ? -n.NetAmount : n.NetAmount), vat = g.Sum(n => n.Kind == FnSupplierNoteKind.Credit ? -n.VatAmount : n.VatAmount);
+                decimal net = g.Sum(n => n.Kind == FnSupplierNoteKind.Credit ? -n.NetAmount : n.NetAmount), vat = g.Sum(n => n.Kind == FnSupplierNoteKind.Credit ? -(n.VatAmount - n.NonRecoverableVatAmount) : n.VatAmount - n.NonRecoverableVatAmount);
                 dto.Rows.Add(new VatSeasonRowDto { Side = "Purchases", PartyName = (g.First().ProviderName ?? "") + " (یادداشت بدهکار/بستانکار)", NetAmount = net, VatAmount = vat, Documents = g.Count() });
                 dto.PurchasesNet += net; dto.PurchasesVat += vat;
             }

@@ -77,8 +77,12 @@ namespace Services.NasbNiro.Finance
                 Lines = new List<FnVoucherLine>(),
             };
             int row = 1;
+            // a line of a work order always carries the contract of that work order (so contract-based reports and the percentage-of-completion run see it)
+            List<int> woIds = lines.Where(l => l.WorkOrderId.HasValue && !l.ContractId.HasValue).Select(l => l.WorkOrderId.Value).Distinct().ToList();
+            Dictionary<int, int> woContract = woIds.Count == 0 ? new Dictionary<int, int>() : await _uow.Set<Entities.Model.NasbNiro.Contracts.WorkOrder>().AsNoTracking().Where(w => woIds.Contains(w.Id)).ToDictionaryAsync(w => w.Id, w => w.ContractId, ct);
             foreach (AutoLine l in lines)
             {
+                if (l.WorkOrderId.HasValue && !l.ContractId.HasValue && woContract.TryGetValue(l.WorkOrderId.Value, out int derivedContract) && derivedContract > 0) l.ContractId = derivedContract;
                 voucher.Lines.Add(new FnVoucherLine
                 {
                     RowNumber = row++, Account = l.Account, Detail1 = l.Detail1, Detail1Id = l.Detail1 == null ? l.Detail1Id : null, Detail2 = l.Detail2, Detail2Id = l.Detail2 == null ? l.Detail2Id : null,

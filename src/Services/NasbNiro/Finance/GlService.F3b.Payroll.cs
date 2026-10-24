@@ -34,10 +34,25 @@ namespace Services.NasbNiro.Finance
             FnAccount a = await RoleAccountAsync(role, fallbackCode, ct);
             FnFiscalYear year = await LedgerYearAsync(date, ct);
             if (a == null || year == null) return 0;
-            var s = await _uow.Set<FnVoucherLine>().AsNoTracking()
-                .Where(l => l.AccountId == a.Id && l.Voucher.FiscalYearId == year.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Date <= date && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose)
+            var s = await (await BookLinesAsync(date, false, ct)).Where(l => l.AccountId == a.Id)
                 .GroupBy(l => 1).Select(g => new { C = g.Sum(x => x.Credit), D = g.Sum(x => x.Debit) }).FirstOrDefaultAsync(ct);
             return s == null ? 0 : Math.Max(0, s.C - s.D);
+        }
+
+        /// <summary>
+        /// The lines of the books of the entity up to a date, across ALL its fiscal years (review 3, H5): the previous year is usually still open months after its end, so a balance is the sum of every year,
+        /// not of the year of the date. Drafts are left out. The closing vouchers are left out, and so are the opening vouchers they fed, so a closed year is not counted twice and an old invoice keeps its own date;
+        /// an opening voucher with no closed year before it (the first opening import) is kept.
+        /// </summary>
+        private async Task<IQueryable<FnVoucherLine>> BookLinesAsync(DateTime day, bool finalOnly, CancellationToken ct)
+        {
+            int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
+            List<DateTime> closedEnds = await _uow.Set<FnVoucher>().AsNoTracking().Where(v => v.Type == FnVoucherType.Closing && v.Status != FnVoucherStatus.Draft && v.FiscalYear.LegalEntityId == entityId).Select(v => v.FiscalYear.EndDate).Distinct().ToListAsync(ct);
+            List<DateTime> openedStarts = closedEnds.Select(e => e.Date.AddDays(1)).ToList();
+            return _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.Voucher.FiscalYear.LegalEntityId == entityId && l.Voucher.Date <= day
+                && (finalOnly ? l.Voucher.Status == FnVoucherStatus.Final : l.Voucher.Status != FnVoucherStatus.Draft)
+                && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
+                && !(l.Voucher.Type == FnVoucherType.Opening && openedStarts.Contains(l.Voucher.FiscalYear.StartDate)));
         }
 
         /// <summary>The fiscal year that holds a date: the ledger balances of F3b reports are read inside it (the opening voucher of a year carries the earlier years).</summary>
@@ -53,7 +68,7 @@ namespace Services.NasbNiro.Finance
 
         private sealed class TermCalc
         {
-            public int Months; public decimal Years, MonthlyBase, Daily, DaysPerYear, LeaveDays, NoticeDays, Severance, Leave, Notice, Total;
+            public int Months; public decimal Years, MonthlyBase, Daily, DaysPerYear, LeaveDays, NoticeDays, Severance, Leave, Notice, Total, Tax, Insurance;
             public List<string> Sources = new List<string>();
             public string Error;
         }
@@ -106,7 +121,24 @@ namespace Services.NasbNiro.Finance
             c.Leave = R(c.MonthlyBase * c.LeaveDays / 30m);
             c.Notice = R(c.MonthlyBase * c.NoticeDays / 30m);
             c.Total = c.Severance + c.Leave + c.Notice;
-            c.Sources.Add("مالیات و بیمه مبالغ مرخصی و اخطار در این محاسبه نیامده است؛ حسابدار حقوق آن را جداگانه تعیین می‌کند.");
+            // the leave and notice pay are earnings: employee insurance (the percentage of the seeded SS_EMPLOYEE item) and income tax at the margin of the last payslip month; the severance is exempt (review 3, M4)
+            decimal lnGross = c.Leave + c.Notice;
+            if (lnGross > 0)
+            {
+                FnPayrollItem ssItem = await _uow.Set<FnPayrollItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Code == "SS_EMPLOYEE", ct);
+                c.Insurance = ssItem == null ? 0 : R(lnGross * ssItem.Factor / 100m);
+                List<FnTaxBracket> brackets = await _uow.Set<FnTaxBracket>().AsNoTracking().Where(b => b.Year == year).OrderBy(b => b.FromAmount).ToListAsync(ct);
+                if (brackets.Count > 0)
+                {
+                    decimal monthlyTaxable = await _uow.Set<FnPayslip>().AsNoTracking().Where(p => p.EmployeeId == e.Id && p.Run.Year == year && (p.Run.Status == FnPayrollStatus.Posted || p.Run.Status == FnPayrollStatus.Paid))
+                        .OrderByDescending(p => p.Run.Month).Select(p => (decimal?)p.TaxableTotal).FirstOrDefaultAsync(ct) ?? 0;
+                    decimal taxablePart = Math.Max(0, lnGross - c.Insurance);
+                    c.Tax = R(PayrollEngine.BracketTax((monthlyTaxable + taxablePart) * 12m, brackets) / 12m - PayrollEngine.BracketTax(monthlyTaxable * 12m, brackets) / 12m);
+                    c.Sources.Add($"مالیات مرخصی و اخطار: تفاوت مالیات ماهانه (جدول پلکان سال {year}) با و بدون این مبالغ، بر پایه مشمول مالیات آخرین فیش حقوقی ثبت‌شده؛ حق سنوات معاف است.");
+                }
+                else c.Sources.Add($"جدول پلکان مالیات سال {year} وارد نشده است؛ مالیات مرخصی و اخطار صفر محاسبه شد.");
+                c.Sources.Add(ssItem == null ? "بیمه سهم کارگر بر مرخصی و اخطار: قلم SS_EMPLOYEE در جدول اقلام نیست (صفر)." : $"بیمه سهم کارگر بر مرخصی و اخطار: {ssItem.Factor:0.##}٪ (قلم SS_EMPLOYEE؛ سقف بیمه لحاظ نشده، تایید مالی لازم است); بیمه سهم کارفرما محاسبه نشده است.");
+            }
             return c;
         }
 
@@ -114,7 +146,7 @@ namespace Services.NasbNiro.Finance
         {
             Id = t.Id, Number = t.Number, EmployeeId = t.EmployeeId, EmployeeName = EmployeeName(e), PersonnelCode = e.PersonnelCode, HireDate = t.HireDate, TerminationDate = t.TerminationDate,
             YearsOfService = t.YearsOfService, MonthlyBase = t.MonthlyBase, DailyWage = t.DailyWage, SeveranceDaysPerYear = t.SeveranceDaysPerYear, UnusedLeaveDays = t.UnusedLeaveDays, NoticeDays = t.NoticeDays,
-            SeverancePay = t.SeverancePay, LeavePay = t.LeavePay, NoticePay = t.NoticePay, Total = t.Total, FromSeveranceProvision = t.FromSeveranceProvision, FromLeaveProvision = t.FromLeaveProvision,
+            SeverancePay = t.SeverancePay, LeavePay = t.LeavePay, NoticePay = t.NoticePay, Total = t.Total, TaxAmount = t.TaxAmount, InsuranceAmount = t.InsuranceAmount, NetPayable = t.NetPayable, FromSeveranceProvision = t.FromSeveranceProvision, FromLeaveProvision = t.FromLeaveProvision,
             Status = t.Status, VoucherId = t.VoucherId, Note = t.Note, Sources = sources ?? new List<string>(),
         };
 
@@ -158,6 +190,7 @@ namespace Services.NasbNiro.Finance
         {
             t.HireDate = e.HireDate.Date; t.TerminationDate = termination.Date; t.YearsOfService = c.Years; t.MonthlyBase = c.MonthlyBase; t.DailyWage = c.Daily; t.SeveranceDaysPerYear = c.DaysPerYear;
             t.UnusedLeaveDays = c.LeaveDays; t.NoticeDays = c.NoticeDays; t.SeverancePay = c.Severance; t.LeavePay = c.Leave; t.NoticePay = c.Notice; t.Total = c.Total; t.Note = note;
+            t.TaxAmount = c.Tax; t.InsuranceAmount = c.Insurance; t.NetPayable = c.Total - c.Tax - c.Insurance;
         }
 
         public async Task<ResponseDto<FnTerminationDto>> TerminationActionAsync(DocActionDto dto, CancellationToken ct)
@@ -174,7 +207,7 @@ namespace Services.NasbNiro.Finance
             // recomputed now: payslips, leave and the rate table may have changed since the draft
             TermCalc c = await TerminationCalcAsync(t.Employee, t.TerminationDate, t.UnusedLeaveDays, t.NoticeDays, t.MonthlyBase, ct);
             if (c.Error != null) return Bad<FnTerminationDto>(c.Error);
-            if (c.Total != t.Total) return Bad<FnTerminationDto>("مبالغ پس از تهیه پیش‌نویس تغییر کرده است؛ پیش‌نویس را دوباره ذخیره کنید.");
+            if (c.Total != t.Total || c.Tax != t.TaxAmount || c.Insurance != t.InsuranceAmount) return Bad<FnTerminationDto>("مبالغ پس از تهیه پیش‌نویس تغییر کرده است؛ پیش‌نویس را دوباره ذخیره کنید.");
             DateTime date = (dto.Date ?? t.TerminationDate).Date;
             decimal severanceBalance = await ProvisionBalanceAsync(AccountRoles.SeveranceProvision, "40201", date, ct), leaveBalance = await ProvisionBalanceAsync(AccountRoles.LeaveProvision, "30403", date, ct);
             decimal fromSeverance = Math.Min(t.SeverancePay, severanceBalance), fromLeave = Math.Min(t.LeavePay, leaveBalance);
@@ -189,8 +222,20 @@ namespace Services.NasbNiro.Finance
                 new AutoLine { Account = sevExp, Debit = t.SeverancePay - fromSeverance, Description = text + " - هزینه سنوات" },
                 new AutoLine { Account = leaveProv, Debit = fromLeave, Description = text + " - از محل ذخیره مرخصی" },
                 new AutoLine { Account = admin, Debit = t.LeavePay - fromLeave + t.NoticePay, Description = text + " - مرخصی و اخطار" },
-                new AutoLine { Account = payable, Credit = t.Total, Description = text },
+                new AutoLine { Account = payable, Credit = t.Total - t.TaxAmount - t.InsuranceAmount, Description = text },
             };
+            if (t.TaxAmount > 0)
+            {
+                FnAccount taxAcc = await RoleAccountAsync(AccountRoles.PayrollTaxPayable, "30203", ct);
+                if (taxAcc == null) return Bad<FnTerminationDto>("حساب مالیات حقوق پرداختنی پیدا نشد.");
+                lines.Add(new AutoLine { Account = taxAcc, Credit = t.TaxAmount, Description = text + " - مالیات مرخصی و اخطار" });
+            }
+            if (t.InsuranceAmount > 0)
+            {
+                FnAccount insAcc = await RoleAccountAsync(AccountRoles.InsurancePayable, "30202", ct);
+                if (insAcc == null) return Bad<FnTerminationDto>("حساب بیمه پرداختنی پیدا نشد.");
+                lines.Add(new AutoLine { Account = insAcc, Credit = t.InsuranceAmount, Description = text + " - بیمه سهم کارگر مرخصی و اخطار" });
+            }
             int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
             var v = await AddAutoVoucherAsync(entityId, date, text, "Termination", t.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FnTerminationDto>(v.Error);
@@ -204,7 +249,7 @@ namespace Services.NasbNiro.Finance
 
         private sealed class BonusCalc
         {
-            public decimal BonusDays, CapDays, MinimumDailyWage, Cap;
+            public decimal BonusDays, CapDays, MinimumDailyWage, Cap, GrossCapDays;
             public List<FnBonusLine> Lines = new List<FnBonusLine>();
             public List<string> Sources = new List<string>();
             public string Error;
@@ -221,6 +266,10 @@ namespace Services.NasbNiro.Finance
             if (brackets.Count == 0) { c.Error = $"جدول پلکان مالیات حقوق سال {year} وارد نشده است."; return c; }
             c.BonusDays = rates.Get("BonusDaysPerYear"); c.CapDays = rates.Get("BonusCapDaysOfMinimumWage"); c.MinimumDailyWage = rates.Get("MinimumDailyWage"); c.Cap = R(c.CapDays * c.MinimumDailyWage);
             foreach (string key in new[] { "BonusDaysPerYear", "BonusCapDaysOfMinimumWage", "MinimumDailyWage" }) c.Sources.Add(RateText(rateRows, key, year));
+            // the labour-law ceiling of the bonus itself (default 90 days of the minimum wage, to be confirmed by finance) is a separate figure from the tax exemption (review 3, H8)
+            c.GrossCapDays = rates.Has("BonusGrossCapDaysOfMinimumWage") ? rates.Get("BonusGrossCapDaysOfMinimumWage") : 90m;
+            c.Sources.Add(rates.Has("BonusGrossCapDaysOfMinimumWage") ? RateText(rateRows, "BonusGrossCapDaysOfMinimumWage", year) : "BonusGrossCapDaysOfMinimumWage = 90 (پیش‌فرض بر پایه قانون کار؛ تایید مالی لازم است)");
+            c.Sources.Add("سقف عیدی و معافیت مالیاتی عیدی هر دو به نسبت روزهای اشتغال در سال محاسبه می‌شوند.");
             c.Sources.Add("مالیات: تفاوت مالیات حقوق ماهانه (پلکان سال) با و بدون بخش مشمول عیدی در ماه آخرین فیش حقوقی؛ حق بیمه بر عیدی محاسبه نشده است.");
 
             DateTime yStart = FiscalCalendars.Current.YearStart(year).Date, yEnd = FiscalCalendars.Current.YearEnd(year).Date;
@@ -229,6 +278,10 @@ namespace Services.NasbNiro.Finance
             if (employeeIds != null && employeeIds.Count > 0) q = q.Where(e => employeeIds.Contains(e.Id));
             List<FnEmployee> employees = await q.OrderBy(e => e.PersonnelCode).ThenBy(e => e.Id).ToListAsync(ct);
             List<int> ids = employees.Select(e => e.Id).ToList();
+            // the same year's bonus may be paid once: an employee who already has an ANNUAL_BONUS line in a posted payroll run of the year is refused
+            List<int> alreadyPaid = await _uow.Set<FnPayslipLine>().AsNoTracking().Where(l => l.ItemCode == "ANNUAL_BONUS" && l.Amount > 0 && ids.Contains(l.Payslip.EmployeeId) && l.Payslip.Run.Year == year && (l.Payslip.Run.Status == FnPayrollStatus.Posted || l.Payslip.Run.Status == FnPayrollStatus.Paid))
+                .Select(l => l.Payslip.EmployeeId).Distinct().ToListAsync(ct);
+            if (alreadyPaid.Count > 0) { c.Error = $"عیدی سال {year} برای {alreadyPaid.Count} کارمند قبلاً با قلم ANNUAL_BONUS در یک اجرای حقوق ثبت‌شده پرداخت شده است؛ پرداخت دوباره مجاز نیست."; return c; }
             var slips = await _uow.Set<FnPayslip>().AsNoTracking().Where(p => ids.Contains(p.EmployeeId) && p.Run.Year == year && (p.Run.Status == FnPayrollStatus.Posted || p.Run.Status == FnPayrollStatus.Paid))
                 .Select(p => new { p.EmployeeId, p.Run.Month, p.TaxableTotal }).ToListAsync(ct);
             foreach (FnEmployee e in employees)
@@ -236,10 +289,11 @@ namespace Services.NasbNiro.Finance
                 DateTime from = e.HireDate.Date > yStart ? e.HireDate.Date : yStart, to = e.EndDate.HasValue && e.EndDate.Value.Date < yEnd ? e.EndDate.Value.Date : yEnd;
                 int employed = (int)(to - from).TotalDays + 1;
                 if (employed <= 0 || e.DailyWage <= 0) continue;
-                decimal gross = R(e.DailyWage * c.BonusDays * employed / yearDays);
+                decimal share = (decimal)employed / yearDays;
+                decimal gross = Math.Min(R(e.DailyWage * c.BonusDays * employed / yearDays), R(c.GrossCapDays * c.MinimumDailyWage * share));
                 var last = slips.Where(s => s.EmployeeId == e.Id).OrderByDescending(s => s.Month).FirstOrDefault();
                 decimal monthly = last?.TaxableTotal ?? 0;
-                decimal taxableBonus = Math.Max(0, gross - c.Cap);
+                decimal taxableBonus = Math.Max(0, gross - R(c.Cap * share));
                 decimal tax = R(PayrollEngine.BracketTax((monthly + taxableBonus) * 12m, brackets) / 12m - PayrollEngine.BracketTax(monthly * 12m, brackets) / 12m);
                 c.Lines.Add(new FnBonusLine { EmployeeId = e.Id, DailyWage = e.DailyWage, EmployedDays = employed, YearDays = yearDays, Gross = gross, MonthlyTaxable = monthly, Tax = tax, Net = gross - tax });
             }
@@ -357,15 +411,20 @@ namespace Services.NasbNiro.Finance
             var slips = await _uow.Set<FnPayslip>().AsNoTracking().Where(p => p.Run.Year == year && (p.Run.Status == FnPayrollStatus.Posted || p.Run.Status == FnPayrollStatus.Paid))
                 .GroupBy(p => p.EmployeeId).Select(g => new { EmployeeId = g.Key, Count = g.Count(), Taxable = g.Sum(p => p.TaxableTotal), Tax = g.Sum(p => p.Tax) }).ToListAsync(ct);
             var bonus = await _uow.Set<FnBonusLine>().AsNoTracking().Where(l => l.Run.Year == year && l.Run.Status == FnSettlementStatus.Posted)
-                .Select(l => new { l.EmployeeId, l.Gross, l.Tax, Cap = l.Run.CapDays * l.Run.MinimumDailyWage }).ToListAsync(ct);
-            List<int> ids = slips.Select(s => s.EmployeeId).Union(bonus.Select(b => b.EmployeeId)).Distinct().ToList();
+                .Select(l => new { l.EmployeeId, l.Gross, l.Tax, Cap = l.Run.CapDays * l.Run.MinimumDailyWage, l.EmployedDays, l.YearDays }).ToListAsync(ct);
+            DateTime from = FiscalCalendars.Current.YearStart(year).Date, to = FiscalCalendars.Current.YearEnd(year).Date;
+            // the tax withheld on the leave and notice pay of an end-of-service settlement of the year is part of the year too
+            var terminations = await _uow.Set<FnTermination>().AsNoTracking().Where(t => t.Status == FnSettlementStatus.Posted && t.TerminationDate >= from && t.TerminationDate <= to)
+                .Select(t => new { t.EmployeeId, Taxable = t.LeavePay + t.NoticePay - t.InsuranceAmount, t.TaxAmount }).ToListAsync(ct);
+            List<int> ids = slips.Select(s => s.EmployeeId).Union(bonus.Select(b => b.EmployeeId)).Union(terminations.Select(t => t.EmployeeId)).Distinct().ToList();
             Dictionary<int, FnEmployee> emp = await _uow.Set<FnEmployee>().AsNoTracking().Where(e => ids.Contains(e.Id)).ToDictionaryAsync(e => e.Id, ct);
             var dto = new FnTaxReconciliationDto { Year = year };
             foreach (int id in ids)
             {
                 var s = slips.FirstOrDefault(x => x.EmployeeId == id);
                 decimal taxable = s?.Taxable ?? 0, withheld = s?.Tax ?? 0;
-                foreach (var b in bonus.Where(x => x.EmployeeId == id)) { taxable += Math.Max(0, b.Gross - R(b.Cap)); withheld += b.Tax; }
+                foreach (var b in bonus.Where(x => x.EmployeeId == id)) { taxable += Math.Max(0, b.Gross - R(b.Cap * b.EmployedDays / (b.YearDays > 0 ? b.YearDays : 1))); withheld += b.Tax; }
+                foreach (var t in terminations.Where(x => x.EmployeeId == id)) { taxable += Math.Max(0, t.Taxable); withheld += t.TaxAmount; }
                 decimal recomputed = R(PayrollEngine.BracketTax(taxable, brackets));
                 emp.TryGetValue(id, out FnEmployee e);
                 dto.Rows.Add(new FnTaxReconRowDto
@@ -377,10 +436,13 @@ namespace Services.NasbNiro.Finance
             dto.Rows = dto.Rows.OrderBy(r => r.PersonnelCode, StringComparer.Ordinal).ThenBy(r => r.EmployeeId).ToList();
             dto.TotalTaxable = dto.Rows.Sum(r => r.Taxable); dto.TotalWithheld = dto.Rows.Sum(r => r.TaxWithheld); dto.TotalRecomputed = dto.Rows.Sum(r => r.TaxRecomputed); dto.TotalDifference = dto.Rows.Sum(r => r.Difference);
             FnAccount taxAccount = await RoleAccountAsync(AccountRoles.PayrollTaxPayable, "30203", ct);
-            DateTime from = FiscalCalendars.Current.YearStart(year).Date, to = FiscalCalendars.Current.YearEnd(year).Date;
-            dto.LedgerWithheld = taxAccount == null ? 0 : await _uow.Set<FnVoucherLine>().AsNoTracking()
-                .Where(l => l.AccountId == taxAccount.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.Opening && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
-                    && l.Voucher.Type != FnVoucherType.Reversal && l.Voucher.Date >= from && l.Voucher.Date <= to).SumAsync(l => (decimal?)l.Credit, ct) ?? 0;
+            // credits of the year's vouchers less the debits of reversal vouchers: a reversed payroll run no longer counts as withheld (review 3, M10)
+            int taxAccountId = taxAccount?.Id ?? -1;
+            IQueryable<FnVoucherLine> taxLines = _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == taxAccountId && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.Opening
+                    && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose && l.Voucher.Date >= from && l.Voucher.Date <= to);
+            decimal ledgerCredits = await taxLines.Where(l => l.Voucher.Type != FnVoucherType.Reversal).SumAsync(l => (decimal?)l.Credit, ct) ?? 0;
+            decimal reversedDebits = await taxLines.Where(l => l.Voucher.Type == FnVoucherType.Reversal).SumAsync(l => (decimal?)l.Debit, ct) ?? 0;
+            dto.LedgerWithheld = ledgerCredits - reversedDebits;
             dto.TiesToLedger = dto.LedgerWithheld == dto.TotalWithheld;
             dto.Note = "مالیات بازمحاسبه‌شده = پلکان سال روی جمع حقوق مشمول مالیات (و بخش مشمول عیدی) کل سال هر کارمند. تفاوت مثبت: مالیات بیشتری باید پرداخت شود؛ منفی: بیش‌کسر شده است. جمع کسرشده باید با اعتبار حساب مالیات حقوق پرداختنی دفتر کل در همان سال برابر باشد.";
             return ResponseDtoHelper.Ok(dto);

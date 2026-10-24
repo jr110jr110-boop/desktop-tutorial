@@ -75,11 +75,14 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.LeavePay).HasPrecision(18, 0);
                 b.Property(x => x.NoticePay).HasPrecision(18, 0);
                 b.Property(x => x.Total).HasPrecision(18, 0);
+                b.Property(x => x.TaxAmount).HasPrecision(18, 0);
+                b.Property(x => x.InsuranceAmount).HasPrecision(18, 0);
+                b.Property(x => x.NetPayable).HasPrecision(18, 0);
+                b.HasIndex(x => x.EmployeeId).IsUnique().HasFilter("[Status] <> 2").HasDatabaseName("IX_FnTerminations_Employee_Active");
                 b.Property(x => x.FromSeveranceProvision).HasPrecision(18, 0);
                 b.Property(x => x.FromLeaveProvision).HasPrecision(18, 0);
                 b.Property(x => x.Note).HasMaxLength(500);
                 b.HasIndex(x => x.Number).IsUnique();
-                b.HasIndex(x => x.EmployeeId);
                 b.HasOne(x => x.Voucher).WithMany().HasForeignKey(x => x.VoucherId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -98,7 +101,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.ExpensedNow).HasPrecision(18, 0);
                 b.Property(x => x.Note).HasMaxLength(500);
                 b.HasIndex(x => x.Number).IsUnique();
-                b.HasIndex(x => x.Year);
+                b.HasIndex(x => x.Year).IsUnique().HasFilter("[Status] <> 2").HasDatabaseName("IX_FnBonusRuns_Year_Active");
                 b.HasOne(x => x.Voucher).WithMany().HasForeignKey(x => x.VoucherId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<FnBonusLine>(b =>

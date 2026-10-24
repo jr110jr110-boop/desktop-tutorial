@@ -41,6 +41,9 @@ namespace Services.NasbNiro.Finance
             if (code == null || code.Length > 20) return Bad<LegalEntityDto>("کد واحد حقوقی را وارد کنید.");
             if (jurisdiction != "IR" && jurisdiction != "DE") return Bad<LegalEntityDto>("حوزه قضایی باید IR یا DE باشد.");
             if (currency == null || currency.Length > 10) return Bad<LegalEntityDto>("ارز پایه را وارد کنید.");
+            // while the scope switches are off the company works in rials in Iran: the base currency and the jurisdiction cannot be changed (review 3, M2)
+            if (!FinanceFeatures.ForeignCurrency && currency != "IRR") return Bad<LegalEntityDto>(FinanceFeatures.OnlyRial);
+            if (!FinanceFeatures.MultiEntity && jurisdiction != "IR") return Bad<LegalEntityDto>(FinanceFeatures.OnlyRial);
             await FinanceSeed.EnsureAsync(_uow, ct);
             FnLegalEntity e;
             if (dto.Id.HasValue)

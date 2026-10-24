@@ -55,6 +55,7 @@ namespace Services.NasbNiro.Finance
             // release F3b: termination settlement and the yearly bonus (values are finance's to confirm)
             yield return R("TerminationSeveranceDaysPerYear", 30m, "قانون کار ماده ۲۴ — حق سنوات: یک ماه (۳۰ روز) آخرین حقوق به ازای هر سال ★ — توسط مالی تایید شود");
             yield return R("BonusDaysPerYear", 60m, "قانون کار و مصوبه عیدی و پاداش — ۶۰ روز مزد ★ — توسط مالی تایید شود");
+            yield return R("BonusGrossCapDaysOfMinimumWage", 90m, "سقف مبلغ عیدی — ۹۰ روز حداقل مزد روزانه (به نسبت روزهای اشتغال) ★ — توسط مالی تایید شود");
             yield return R("BonusCapDaysOfMinimumWage", 90m, "سقف معافیت عیدی — ۹۰ روز حداقل مزد روزانه (مبلغ حداقل مزد هر سال در جدول نرخ‌ها وارد می‌شود) ★ — توسط مالی تایید شود");
         }
 

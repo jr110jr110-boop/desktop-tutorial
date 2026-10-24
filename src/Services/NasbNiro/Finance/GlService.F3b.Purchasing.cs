@@ -133,6 +133,7 @@ namespace Services.NasbNiro.Finance
             n.EditorUserIds = WithEditor(n.EditorUserIds, Me); n.PreparedByUserId = Me; n.PreparedAt = DateTimeOffset.Now;
             n.Kind = dto.Kind; n.ProviderId = dto.ProviderId; n.SupplierInvoiceId = dto.SupplierInvoiceId; n.NoteNumber = Clean(dto.NoteNumber); n.Date = dto.Date.Date;
             n.NetAmount = net; n.VatAmount = vat; n.TotalAmount = total; n.Reason = Clean(dto.Reason);
+            n.NonRecoverableVatAmount = inv != null && inv.VatAmount > 0 ? Math.Min(vat, R(vat * inv.NonRecoverableVatAmount / inv.VatAmount)) : 0;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(NoteDto(n, provider.Name));
         }
@@ -159,8 +160,8 @@ namespace Services.NasbNiro.Finance
             var lines = new List<AutoLine>
             {
                 new AutoLine { Account = payable, Detail1 = supplier, Debit = credit ? n.TotalAmount : 0, Credit = credit ? 0 : n.TotalAmount, Description = text },
-                new AutoLine { Account = ppv, Debit = credit ? 0 : n.NetAmount, Credit = credit ? n.NetAmount : 0, Description = text },
-                new AutoLine { Account = vatAccount, Debit = credit ? 0 : n.VatAmount, Credit = credit ? n.VatAmount : 0, Description = text },
+                new AutoLine { Account = ppv, Debit = credit ? 0 : n.NetAmount + n.NonRecoverableVatAmount, Credit = credit ? n.NetAmount + n.NonRecoverableVatAmount : 0, Description = text },
+                new AutoLine { Account = vatAccount, Debit = credit ? 0 : n.VatAmount - n.NonRecoverableVatAmount, Credit = credit ? n.VatAmount - n.NonRecoverableVatAmount : 0, Description = text },
             };
             var v = await AddAutoVoucherAsync(entityId, n.Date, text, "SupplierNote", n.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
             if (v.Error != null) return Bad<FnSupplierNoteDto>(v.Error);
@@ -195,8 +196,8 @@ namespace Services.NasbNiro.Finance
             if (payable == null) { core.Error = "حساب پرداختنی تجاری پیدا نشد."; return core; }
             FnFiscalYear year = await LedgerYearAsync(asOf, ct);
             if (year == null) { core.Error = "سال مالی این تاریخ تعریف نشده است."; return core; }
-            var rows = await _uow.Set<FnVoucherLine>().AsNoTracking()
-                .Where(l => l.AccountId == payable.Id && l.Voucher.FiscalYearId == year.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Date <= asOf && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
+            var rows = await (await BookLinesAsync(asOf, false, ct))
+                .Where(l => l.AccountId == payable.Id
                     && ((l.Detail1 != null && l.Detail1.Type == FnDetailType.Supplier && l.Detail1.LinkedEntityId == providerId) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Supplier && l.Detail2.LinkedEntityId == providerId)))
                 .OrderBy(l => l.Voucher.Date).ThenBy(l => l.VoucherId).ThenBy(l => l.RowNumber)
                 .Select(l => new { l.Voucher.Date, l.Voucher.Type, l.Voucher.SourceType, l.Voucher.SourceNumber, l.Voucher.Number, l.Voucher.TemporaryNumber, l.Debit, l.Credit }).ToListAsync(ct);
@@ -328,8 +329,8 @@ namespace Services.NasbNiro.Finance
             if (receivable == null) return Bad<FnConfirmationDto>("حساب دریافتنی تجاری پیدا نشد.");
             FnFiscalYear year = await LedgerYearAsync(asOf, ct);
             if (year == null) return Bad<FnConfirmationDto>("سال مالی این تاریخ تعریف نشده است.");
-            var sums = await _uow.Set<FnVoucherLine>().AsNoTracking()
-                .Where(l => l.AccountId == receivable.Id && l.Voucher.FiscalYearId == year.Id && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.Date <= asOf && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
+            var sums = await (await BookLinesAsync(asOf, false, ct))
+                .Where(l => l.AccountId == receivable.Id
                     && ((l.Detail1 != null && l.Detail1.Type == FnDetailType.Customer && l.Detail1.LinkedEntityId == dto.CustomerId) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Customer && l.Detail2.LinkedEntityId == dto.CustomerId)))
                 .GroupBy(l => 1).Select(g => new { D = g.Sum(x => x.Debit), C = g.Sum(x => x.Credit) }).FirstOrDefaultAsync(ct);
             decimal ledger = sums == null ? 0 : sums.D - sums.C;

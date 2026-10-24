@@ -140,6 +140,7 @@ namespace Services.NasbNiro.Finance
 
         private async Task<bool> IsForeignLoanAsync(FnLoan l, CancellationToken ct)
         {
+            if (!FinanceFeatures.ForeignCurrency) return false;
             string baseCurrency = await _uow.Set<FnLegalEntity>().AsNoTracking().Where(e => e.Id == l.LegalEntityId).Select(e => e.BaseCurrency).FirstOrDefaultAsync(ct) ?? "IRR";
             return !string.Equals(l.CurrencyCode ?? baseCurrency, baseCurrency, StringComparison.OrdinalIgnoreCase);
         }
@@ -367,8 +368,11 @@ namespace Services.NasbNiro.Finance
             foreach (FnLoan l in loans)
             {
                 decimal due = await _uow.Set<FnLoanInstallment>().Where(i => i.LoanId == l.Id && i.Status == 0 && i.DueDate > end && i.DueDate <= horizon).SumAsync(i => (decimal?)i.Principal, ct) ?? 0;
-                decimal delta = due - l.CurrentPortionReclassified;
-                result.Rows.Add(new FnCurrentPortionRowDto { LoanId = l.Id, LoanNumber = l.Number, CurrentPortion = due, AlreadyReclassified = l.CurrentPortionReclassified, Change = delta });
+                // what is already reclassified is read from the vouchers themselves (a deleted draft leaves nothing behind), not from a counter that outlives them (review 3, M1)
+                string tag = "حصه جاری تسهیلات " + l.Number;
+                decimal already = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(x => x.Voucher.SourceType == "LoanCurrentPortion" && x.Account.Code == "30501" && x.Description == tag).SumAsync(x => (decimal?)(x.Credit - x.Debit), ct) ?? 0;
+                decimal delta = due - already;
+                result.Rows.Add(new FnCurrentPortionRowDto { LoanId = l.Id, LoanNumber = l.Number, CurrentPortion = due, AlreadyReclassified = already, Change = delta });
                 if (delta == 0) continue;
                 lines.Add(new AutoLine { Account = longTerm, Debit = delta > 0 ? delta : 0, Credit = delta < 0 ? -delta : 0, Description = $"حصه جاری تسهیلات {l.Number}" });
                 lines.Add(new AutoLine { Account = shortTerm, Credit = delta > 0 ? delta : 0, Debit = delta < 0 ? -delta : 0, Description = $"حصه جاری تسهیلات {l.Number}" });

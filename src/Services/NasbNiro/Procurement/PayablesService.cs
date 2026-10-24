@@ -230,6 +230,11 @@ namespace Services.NasbNiro.Procurement
                     // accounting: goods/services received not invoiced are cleared; the difference is a price variance; payable to the supplier
                     decimal grni = Math.Round(invoice.Lines.Sum(l => l.Quantity * l.OrderLine.UnitPrice), 0);
                     decimal ppv = invoice.NetAmount - grni;
+                    // non-deductible VAT of a capital line is part of the asset's cost (held in assets under construction until the asset is completed), not a price variance (review 3, M5)
+                    decimal capitalNonRecoverable = 0;
+                    if (invoice.NetAmount > 0)
+                        foreach (SupplierInvoiceLine cl in invoice.Lines.Where(x => x.NonRecoverableVat && x.OrderLine.IsCapital)) capitalNonRecoverable += CapitalVatShare(invoice, cl);
+                    capitalNonRecoverable = Math.Min(capitalNonRecoverable, invoice.NonRecoverableVatAmount);
                     _costing.AddEvent(AccountingEventType.SupplierInvoice, invoice.InvoiceDate, "SupplierInvoice", invoice.Id, invoice.Number,
                         $"فاکتور {invoice.InvoiceNumber} - سفارش {invoice.PurchaseOrder.Number}", new[]
                         {
@@ -243,15 +248,16 @@ namespace Services.NasbNiro.Procurement
                             // F3b: VAT that cannot be deducted is cost (it follows the order's work order / contract like the price variance)
                             new AccountingEventLine
                             {
-                                AccountRole = AccountRoles.PurchasePriceVariance, Debit = invoice.NonRecoverableVatAmount, WorkOrderId = invoice.PurchaseOrder.WorkOrderId, ContractId = invoice.PurchaseOrder.ContractId,
+                                AccountRole = AccountRoles.PurchasePriceVariance, Debit = invoice.NonRecoverableVatAmount - capitalNonRecoverable, WorkOrderId = invoice.PurchaseOrder.WorkOrderId, ContractId = invoice.PurchaseOrder.ContractId,
                                 Description = "مالیات ارزش افزوده غیرقابل استرداد",
                             },
+                            new AccountingEventLine { AccountRole = AccountRoles.AssetUnderConstruction, Debit = capitalNonRecoverable, Description = "مالیات ارزش افزوده غیرقابل استرداد دارایی سرمایه‌ای" },
                             new AccountingEventLine { AccountRole = AccountRoles.AccountsPayable, Credit = invoice.TotalAmount, ProviderId = invoice.ProviderId, Description = invoice.InvoiceNumber },
                         });
 
                     // capital lines: a draft fixed asset is opened for finance to complete (class, cost centre, in-use date); the invoice event above is unchanged
                     foreach (SupplierInvoiceLine l in invoice.Lines.Where(x => x.OrderLine.IsCapital))
-                        await AssetDrafts.AddFromInvoiceLineAsync(_uow, invoice, l, Me, cancellationToken);
+                        await AssetDrafts.AddFromInvoiceLineAsync(_uow, invoice, l, Me, cancellationToken, l.NonRecoverableVat ? CapitalVatShare(invoice, l) : 0);
                     break;
                 }
                 case "cancel":
@@ -267,6 +273,10 @@ namespace Services.NasbNiro.Procurement
             await _uow.SaveChangesAsync(cancellationToken);
             return await GetInvoiceAsync(invoice.Id, cancellationToken);
         }
+
+        /// <summary>The VAT of an invoice line that is flagged non-deductible, shared by the line's net amount.</summary>
+        private static decimal CapitalVatShare(SupplierInvoice invoice, SupplierInvoiceLine line) =>
+            invoice.NetAmount == 0 ? 0 : Math.Round(invoice.VatAmount * Math.Round(line.Quantity * line.UnitPrice, 0) / invoice.NetAmount, 0);
 
         // -------------------------------------------------------------------------------- payments
 
@@ -338,7 +348,11 @@ namespace Services.NasbNiro.Procurement
                     if (invoice == null || invoice.Status != SupplierInvoiceStatus.Approved) return Bad<PaymentRequestDto>("پرداخت فقط برای فاکتور تاییدشده (تطبیق با سفارش و رسید تاییدشده کیفی) است.");
                     decimal before = await _uow.Set<PaymentRequest>().Where(p => p.InvoiceId == invoice.Id && p.Status != PaymentRequestStatus.Rejected && !p.Deleted && p.Id != (dto.Id ?? 0))
                         .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
-                    if (before + dto.Amount > invoice.TotalAmount) return Bad<PaymentRequestDto>("مبلغ از مانده فاکتور بیشتر است.");
+                    // posted supplier credit notes lower what is owed on the invoice and debit notes raise it
+                    decimal noteCredits = await _uow.Set<FnSupplierNote>().Where(n => n.SupplierInvoiceId == invoice.Id && n.Kind == FnSupplierNoteKind.Credit && n.Status == FnSettlementStatus.Posted).SumAsync(n => (decimal?)n.TotalAmount, cancellationToken) ?? 0;
+                    decimal noteDebits = await _uow.Set<FnSupplierNote>().Where(n => n.SupplierInvoiceId == invoice.Id && n.Kind == FnSupplierNoteKind.Debit && n.Status == FnSettlementStatus.Posted).SumAsync(n => (decimal?)n.TotalAmount, cancellationToken) ?? 0;
+                    decimal payableLimit = invoice.TotalAmount - noteCredits + noteDebits;
+                    if (before + dto.Amount > payableLimit) return Bad<PaymentRequestDto>($"مبلغ از مانده فاکتور بیشتر است؛ مانده قابل پرداخت پس از یادداشت‌های بستانکار و بدهکار {Math.Max(0, payableLimit - before):0} ریال است.");
                     // supplier advances of the order are recovered from the invoice payments: what is still unrecovered is proposed as a deduction the approver sees
                     decimal advanced = await _uow.Set<PaymentRequest>().Where(p => p.PurchaseOrderId == order.Id && p.Type == PaymentRequestType.Advance && p.Status == PaymentRequestStatus.Paid && !p.Deleted)   // only advances really paid (review 2, finding 12)
                         .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;

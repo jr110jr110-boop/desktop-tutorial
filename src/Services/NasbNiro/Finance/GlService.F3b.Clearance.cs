@@ -43,11 +43,14 @@ namespace Services.NasbNiro.Finance
             if (dto.IssueDate == default || dto.ValidUntil.Date < dto.IssueDate.Date) return Bad<FnClearanceDto>("تاریخ اعتبار نمی‌تواند قبل از تاریخ صدور باشد.");
             var provider = await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AsNoTracking().Where(p => p.Id == dto.ProviderId).Select(p => new { p.Id, p.Name }).FirstOrDefaultAsync(ct);
             if (provider == null) return Bad<FnClearanceDto>("تامین‌کننده یا پیمانکار پیدا نشد.");
+            // the scanned letter must really be in the document store: any other identifier is refused (review 3, M3)
+            if (dto.DocumentId != Guid.Empty && !await _uow.Set<Entities.Model.Document>().AsNoTracking().AnyAsync(d => d.Id == dto.DocumentId, ct)) return Bad<FnClearanceDto>("فایل مفاصاحساب در مخزن اسناد پیدا نشد؛ ابتدا فایل را بارگذاری کنید.");
             FnInsuranceClearance c = null;
             if (dto.Id.HasValue)
             {
                 c = await _uow.Set<FnInsuranceClearance>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct);
                 if (c == null) return ResponseDtoHelper.NotFound<FnClearanceDto>("مفاصاحساب پیدا نشد.");
+                if (await _uow.Set<FnRetentionRelease>().AnyAsync(r => r.ClearanceId == c.Id, ct)) return Bad<FnClearanceDto>("این مفاصاحساب در آزادسازی کسور به کار رفته است و ویرایش یا ابطال نمی‌شود.");
                 if (c.ProviderId != dto.ProviderId) return Bad<FnClearanceDto>("پیمانکار مفاصاحساب تغییر نمی‌کند.");
             }
             else
@@ -70,15 +73,14 @@ namespace Services.NasbNiro.Finance
             FnFiscalYear year = await LedgerYearAsync(day, ct);
             if (retention != null && year != null)
             {
-                IQueryable<FnVoucherLine> lines = _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == retention.Id && l.Voucher.FiscalYearId == year.Id && l.Voucher.Status == FnVoucherStatus.Final && l.Voucher.Date <= day
+                IQueryable<FnVoucherLine> lines = (await BookLinesAsync(day, true, ct)).Where(l => l.AccountId == retention.Id
                     && ((l.Detail1 != null && l.Detail1.Type == FnDetailType.Supplier && l.Detail1.LinkedEntityId == providerId) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Supplier && l.Detail2.LinkedEntityId == providerId)));
                 if (contractId.HasValue) lines = lines.Where(l => l.ContractId == contractId.Value);
                 decimal credit = await lines.SumAsync(l => (decimal?)l.Credit, ct) ?? 0;
                 decimal debit = await lines.Where(l => l.Voucher.SourceType != "RetentionRelease").SumAsync(l => (decimal?)l.Debit, ct) ?? 0;
                 held = credit - debit;
             }
-            DateTime yearStart = year?.StartDate ?? DateTime.MinValue;
-            IQueryable<FnRetentionRelease> rel = _uow.Set<FnRetentionRelease>().AsNoTracking().Where(r => r.ProviderId == providerId && r.Date <= day && r.Date >= yearStart);
+            IQueryable<FnRetentionRelease> rel = _uow.Set<FnRetentionRelease>().AsNoTracking().Where(r => r.ProviderId == providerId && r.Date <= day);
             if (contractId.HasValue) rel = rel.Where(r => r.ContractId == contractId.Value);
             decimal released = await rel.SumAsync(r => (decimal?)r.Amount, ct) ?? 0;
             var clearances = await _uow.Set<FnInsuranceClearance>().AsNoTracking().Where(c => c.ProviderId == providerId && (c.ContractId == null || c.ContractId == contractId)).OrderByDescending(c => c.ValidUntil).ThenByDescending(c => c.Id).ToListAsync(ct);
@@ -94,6 +96,13 @@ namespace Services.NasbNiro.Finance
                     : "مفاصاحساب بیمه معتبر (با فایل پیوست، ابطال‌نشده و در مهلت اعتبار) وجود ندارد؛ آزادسازی کسور ممکن نیست.")
                 : "آزادسازی ممکن است.";
             return dto;
+        }
+
+        /// <summary>True when the supplier has an insurance clearance that is valid on the day (file attached, not revoked, in its period).</summary>
+        private async Task<bool> HasValidClearanceAsync(int providerId, DateTime day, CancellationToken ct)
+        {
+            var list = await _uow.Set<FnInsuranceClearance>().AsNoTracking().Where(c => c.ProviderId == providerId).ToListAsync(ct);
+            return list.Any(c => IsClearanceValid(c, day));
         }
 
         public async Task<ResponseDto<FnRetentionStatusDto>> RetentionStatusAsync(int providerId, int? contractId, DateTime? asOf, CancellationToken ct)

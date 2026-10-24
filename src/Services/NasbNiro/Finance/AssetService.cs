@@ -160,7 +160,7 @@ namespace Services.NasbNiro.Finance
     /// <summary>A supplier invoice line flagged as capital drafts a fixed asset for finance to complete (class, cost centre, in-use date).</summary>
     internal static class AssetDrafts
     {
-        public static async Task AddFromInvoiceLineAsync(IUnitOfWork uow, SupplierInvoice invoice, SupplierInvoiceLine line, int userId, CancellationToken ct)
+        public static async Task AddFromInvoiceLineAsync(IUnitOfWork uow, SupplierInvoice invoice, SupplierInvoiceLine line, int userId, CancellationToken ct, decimal extraCost = 0)
         {
             string title = Clean(line.OrderLine.Description);
             if (title == null && line.OrderLine.ItemId.HasValue)
@@ -170,7 +170,7 @@ namespace Services.NasbNiro.Finance
             uow.Set<FnAsset>().Add(new FnAsset
             {
                 Code = "TMP-" + number.ToString("00000"), Title = title.Length > 300 ? title.Substring(0, 300) : title, Status = FnAssetStatus.Draft,
-                AcquisitionDate = invoice.InvoiceDate.Date, Cost = R(line.Quantity * line.UnitPrice), Source = FnAssetSource.SupplierInvoiceLine, SourceId = invoice.Id,
+                AcquisitionDate = invoice.InvoiceDate.Date, Cost = R(line.Quantity * line.UnitPrice) + R(extraCost), Source = FnAssetSource.SupplierInvoiceLine, SourceId = invoice.Id,
                 SourceNumber = invoice.Number, CreatedByUserId = userId, CreatedAt = DateTimeOffset.Now,
             });
         }

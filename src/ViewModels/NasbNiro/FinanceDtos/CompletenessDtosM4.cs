@@ -250,6 +250,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal LeavePay { get; set; }
         public decimal NoticePay { get; set; }
         public decimal Total { get; set; }
+        public decimal TaxAmount { get; set; }
+        public decimal InsuranceAmount { get; set; }
+        public decimal NetPayable { get; set; }
         public decimal FromSeveranceProvision { get; set; }
         public decimal FromLeaveProvision { get; set; }
         public FnSettlementStatus Status { get; set; }

@@ -335,6 +335,10 @@ namespace Services.NasbNiro.Finance
 
             List<FnPayslip> slips = await _uow.Set<FnPayslip>().Include(p => p.Lines).Where(p => p.RunId == run.Id).AsSplitQuery().ToListAsync(ct);
             List<int> employeeIds = slips.Select(s => s.EmployeeId).ToList();
+            // the yearly bonus is paid either by a bonus run or by an ANNUAL_BONUS line, not both (review 3, H8)
+            List<int> bonusEmployees = slips.Where(s => s.Lines.Any(l => l.ItemCode == "ANNUAL_BONUS" && l.Amount > 0)).Select(s => s.EmployeeId).ToList();
+            if (bonusEmployees.Count > 0 && await _uow.Set<FnBonusLine>().AnyAsync(b => bonusEmployees.Contains(b.EmployeeId) && b.Run.Year == run.Year && b.Run.Status == FnSettlementStatus.Posted, ct))
+                return Bad<PayrollRunDto>("عیدی سال این اجرا برای یکی از کارکنان با «محاسبه عیدی» ثبت شده است؛ قلم ANNUAL_BONUS را حذف کنید تا دوبار پرداخت نشود.");
             if (await _uow.Set<FnAttendanceSheet>().AnyAsync(s => s.Year == run.Year && s.Month == run.Month && employeeIds.Contains(s.EmployeeId) && s.UpdatedAt > calculatedAt, ct))
                 return Bad<PayrollRunDto>("کارکرد یا ورودی‌های ماه پس از محاسبه تغییر کرده است؛ حقوق را دوباره محاسبه کنید.");
             if (await _uow.Set<FnPayrollRateTable>().AnyAsync(r => (r.Year == 0 || r.Year == run.Year) && r.CreatedAt > calculatedAt, ct))

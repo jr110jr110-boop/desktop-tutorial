@@ -295,7 +295,11 @@ namespace Services.NasbNiro.Finance
             FnAccount provision = await RoleAccountAsync(provisionRole, fallbackProvision, ct), expense = await RoleAccountAsync(expenseRole, fallbackExpense, ct);
             if (provision == null || expense == null) return Bad<FnTrueUpDto>("حساب ذخیره یا هزینه پیدا نشد.");
             int entityId = await EntityScope.ResolveAsync(_uow, null, Me, ct);
-            decimal balance = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == provision.Id && l.Voucher.Date <= dto.Date.Date && l.Voucher.FiscalYear.LegalEntityId == entityId)
+            // drafts are not counted (aligned with the bad-debt rule, review 3 finding 1) and every year of the entity is read; a true-up still waiting as a draft must be posted or deleted first
+            string pendingKey = provision.Code;
+            if (await _uow.Set<FnVoucher>().AsNoTracking().AnyAsync(v => v.SourceType == "ProvisionTrueUp" && v.SourceNumber == pendingKey && v.Status == FnVoucherStatus.Draft && v.FiscalYear.LegalEntityId == entityId, ct))
+                return Bad<FnTrueUpDto>("یک سند تعدیل پیش‌نویس برای این ذخیره وجود دارد؛ ابتدا آن را ثبت یا حذف کنید.");
+            decimal balance = await (await BookLinesAsync(dto.Date.Date, false, ct)).Where(l => l.AccountId == provision.Id)
                 .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             decimal diff = R(dto.RequiredBalance) - balance;
             var result = new FnTrueUpDto { Kind = kind, Date = dto.Date.Date, RequiredBalance = R(dto.RequiredBalance), CurrentBalance = balance, Difference = diff, Reason = dto.Reason };

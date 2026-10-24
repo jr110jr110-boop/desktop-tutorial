@@ -137,13 +137,22 @@ namespace Services.NasbNiro.Finance
             if (query.CreateProvision)
             {
                 if (!query.RatePercent.HasValue) return Bad<FnTaxableProfitDto>("برای سند ذخیره مالیات، نرخ مالیات را وارد کنید.");
-                if (dto.TaxAmount <= 0) return Bad<FnTaxableProfitDto>("سود مشمول مالیات صفر یا منفی است؛ ذخیره‌ای ثبت نمی‌شود.");
                 int entityId = await EntityScope.ResolveAsync(_uow, year.LegalEntityId, Me, ct);
                 FnAccount expense = await AccountByCodeAsync("80401", ct), liability = await AccountByCodeAsync("30401", ct);
                 if (expense == null || liability == null) return Bad<FnTaxableProfitDto>("حساب‌های ۸۰۴۰۱ و ۳۰۴۰۱ پیدا نشد.");
+                // the provision is the difference to what earlier runs of the year already booked (review 3, M8); a draft of the year that is still open blocks a new one
+                if (await _uow.Set<FnVoucher>().AnyAsync(v => v.SourceType == "TaxProvision" && v.FiscalYearId == year.Id && v.Status == FnVoucherStatus.Draft, ct))
+                    return Bad<FnTaxableProfitDto>("برای این سال مالی سند ذخیره مالیات پیش‌نویس وجود دارد؛ آن را تایید یا حذف کنید.");
+                decimal booked = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == liability.Id && l.Voucher.SourceType == "TaxProvision" && l.Voucher.FiscalYearId == year.Id && l.Voucher.Status != FnVoucherStatus.Draft)
+                    .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
+                decimal change = dto.TaxAmount - booked;
+                if (change == 0) return Bad<FnTaxableProfitDto>(dto.TaxAmount <= 0 ? "سود مشمول مالیات صفر یا منفی است؛ ذخیره‌ای ثبت نمی‌شود." : "ذخیره مالیات ثبت‌شده با مقدار لازم برابر است؛ سندی لازم نیست.");
                 string number = await NextNumberAsync("TP", FinanceNumbers.TaxProvision, year.EndDate, ct);
                 string text = $"ذخیره مالیات بر درآمد سال مالی {year.Title ?? year.Id.ToString()} ({number})";
-                var lines = new List<AutoLine> { new AutoLine { Account = expense, Debit = dto.TaxAmount, Description = text }, new AutoLine { Account = liability, Credit = dto.TaxAmount, Description = text } };
+                decimal abs = Math.Abs(change);
+                var lines = change > 0
+                    ? new List<AutoLine> { new AutoLine { Account = expense, Debit = abs, Description = text }, new AutoLine { Account = liability, Credit = abs, Description = text } }
+                    : new List<AutoLine> { new AutoLine { Account = liability, Debit = abs, Description = text + " - کاهش ذخیره" }, new AutoLine { Account = expense, Credit = abs, Description = text + " - کاهش ذخیره" } };
                 // a draft: the finance manager reviews it like any manual voucher
                 var v = await AddAutoVoucherAsync(entityId, year.EndDate.Date, text, "TaxProvision", number, lines, FnVoucherType.Normal, null, ct, FnVoucherStatus.Draft);
                 if (v.Error != null) return Bad<FnTaxableProfitDto>(v.Error);

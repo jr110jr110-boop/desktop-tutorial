@@ -366,7 +366,7 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal Amount { get; set; }
     }
 
-    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2, Payroll = 3, EmployeeLoan = 4 }
+    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2, Payroll = 3, EmployeeLoan = 4, BonusRun = 5, Termination = 6 }
 
     public class FnPayment
     {
@@ -382,6 +382,10 @@ namespace Entities.Model.NasbNiro.Finance
         public int? PettyCashId { get; set; }
         /// <summary>Payroll payment: the posted payroll run (totals only; person level stays in payroll).</summary>
         public int? PayrollRunId { get; set; }
+        /// <summary>The posted yearly bonus run that is paid (review 3, H6).</summary>
+        public int? BonusRunId { get; set; }
+        /// <summary>The posted end-of-service settlement that is paid (its net after tax and insurance).</summary>
+        public int? TerminationId { get; set; }
         /// <summary>Employee loan or advance paid out (Dr 10401 with the employee detail / Cr bank).</summary>
         public int? EmployeeLoanId { get; set; }
         public string PayeeName { get; set; }

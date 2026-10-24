@@ -99,10 +99,19 @@ namespace Services.NasbNiro.Finance
             var byKey = new Dictionary<string, FnDirectRowDto>();
             foreach (var voucher in rows.GroupBy(r => r.VoucherId))
             {
-                // each non-cash line of a voucher that touches cash is the other side of the cash movement: its opposite amount is what moved in or out
-                foreach (var counter in voucher.Where(r => !r.Code.StartsWith("101", StringComparison.Ordinal)))
+                // the net cash of the voucher is shared out only among the lines on the OTHER side of the cash movement, in proportion to their amounts (review 3, M7):
+                // in "Dr expense 1,000 / Cr tax 200 / Cr bank 800" the 800 paid is all expense; the tax line is on the same side as the bank and gets nothing
+                decimal cashNet = voucher.Where(r => r.Code.StartsWith("101", StringComparison.Ordinal)).Sum(r => r.Debit - r.Credit);
+                if (cashNet == 0) continue;
+                var others = voucher.Where(r => !r.Code.StartsWith("101", StringComparison.Ordinal)).Select(r => new { r.Code, Weight = Math.Abs(r.Credit - r.Debit), Opposite = cashNet > 0 ? r.Credit - r.Debit > 0 : r.Debit - r.Credit > 0 }).Where(r => r.Weight > 0).ToList();
+                var counters = others.Where(r => r.Opposite).ToList();
+                if (counters.Count == 0) counters = others;
+                decimal weightTotal = counters.Sum(r => r.Weight), allocated = 0;
+                for (int ci = 0; ci < counters.Count; ci++)
                 {
-                    decimal cash = counter.Credit - counter.Debit;   // credit on the other side = cash came in
+                    var counter = counters[ci];
+                    decimal cash = ci == counters.Count - 1 ? cashNet - allocated : Math.Round(cashNet * counter.Weight / weightTotal, 0, MidpointRounding.AwayFromZero);
+                    allocated += cash;
                     if (cash == 0) continue;
                     CashClass cls = ClassifyCash(counter.Code);
                     if (!byKey.TryGetValue(cls.Key, out FnDirectRowDto row))

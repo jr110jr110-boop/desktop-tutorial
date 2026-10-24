@@ -454,6 +454,10 @@ namespace Services.NasbNiro.Finance
                 case "pay":
                 {
                     if (l.Status != FnLcStatus.DocumentsReceived) return Bad<LetterOfCreditDto>("پرداخت فقط پس از دریافت اسناد انجام می‌شود.");
+                    bool rialLc = FinanceFeatures.IsRial(l.CurrencyCode);
+                    // a rial letter of credit settles at exactly its amount: a typed rate other than 1 would pay more or less than the debt (review 3, H7)
+                    if (rialLc && dto.Rate.HasValue && dto.Rate.Value != 1m) return Bad<LetterOfCreditDto>("اعتبار اسنادی ریالی با نرخ ۱ تسویه می‌شود؛ نرخ دیگری پذیرفته نمی‌شود.");
+                    if (rialLc) dto.Rate = 1m;
                     if (!dto.Rate.HasValue || dto.Rate.Value <= 0) return Bad<LetterOfCreditDto>("نرخ تسویه را وارد کنید.");
                     FnAccount payable = await RoleAccountAsync(AccountRoles.AccountsPayable, "30101", ct);
                     if (payable == null || deposit == null) return Bad<LetterOfCreditDto>("حساب پرداختنی یا سپرده در کدینگ نیست.");

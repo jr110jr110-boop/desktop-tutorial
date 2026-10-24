@@ -141,6 +141,10 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal LeavePay { get; set; }
         public decimal NoticePay { get; set; }
         public decimal Total { get; set; }
+        /// <summary>Income tax and employee insurance on the leave and notice pay (severance is exempt); the net is what is paid.</summary>
+        public decimal TaxAmount { get; set; }
+        public decimal InsuranceAmount { get; set; }
+        public decimal NetPayable { get; set; }
         /// <summary>Covered by the provisions already booked; the rest is expensed now.</summary>
         public decimal FromSeveranceProvision { get; set; }
         public decimal FromLeaveProvision { get; set; }
@@ -238,6 +242,8 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTime Date { get; set; }
         public decimal NetAmount { get; set; }
         public decimal VatAmount { get; set; }
+        /// <summary>The part of the VAT that follows the original invoice's non-deductible share (it was cost, so the note reverses cost, not input VAT).</summary>
+        public decimal NonRecoverableVatAmount { get; set; }
         public decimal TotalAmount { get; set; }
         public string Reason { get; set; }
         public FnSettlementStatus Status { get; set; }

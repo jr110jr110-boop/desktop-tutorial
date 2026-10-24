@@ -291,6 +291,9 @@ namespace Services.NasbNiro.Finance
                 .GroupBy(l => 1).Select(g => new { Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) }).FirstOrDefaultAsync(ct);
             // what has left WIP as finished goods: production receipts and earlier close-outs (net of their reopenings); returns of material are NOT a transfer, the sheet material is already net of them
             List<int> receiptEvents = await _uow.Set<AccountingEvent>().AsNoTracking().Where(e => e.Type == AccountingEventType.ProductionReceipt).Select(e => e.Id).ToListAsync(ct);
+            // a cancelled receipt is a reversal event of a receipt event: it takes the amount back out of "transferred"
+            List<int> receiptReversals = await _uow.Set<AccountingEvent>().AsNoTracking().Where(e => e.ReversesEventId != null && receiptEvents.Contains(e.ReversesEventId.Value)).Select(e => e.Id).ToListAsync(ct);
+            receiptEvents.AddRange(receiptReversals);
             decimal transferred = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.WorkOrderId == wo.Id && l.Account.Code == "10520" && l.Voucher.Status != FnVoucherStatus.Draft
                     && ((l.Voucher.AccountingEventId != null && receiptEvents.Contains(l.Voucher.AccountingEventId.Value)) || l.Voucher.SourceType == "WorkOrderClose"))
                 .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
@@ -325,6 +328,8 @@ namespace Services.NasbNiro.Finance
             WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == workOrderId, ct);
             if (wo == null) return ResponseDtoHelper.NotFound<FnWorkOrderCloseDto>("دستور کار پیدا نشد.");
             if (wo.Condition != WorkOrderCondition.Done) return Bad<FnWorkOrderCloseDto>("فقط دستور کار انجام‌شده بسته می‌شود.");
+            if (await _uow.Set<FnContractRevenue>().AnyAsync(r => r.ContractId == wo.ContractId && r.Method == FnRevenueMethod.PercentOfCompletion, ct))
+                return Bad<FnWorkOrderCloseDto>("قرارداد این دستور کار به روش درصد پیشرفت شناسایی می‌شود؛ بهای آن با اجرای شناسایی درآمد به بهای تمام‌شده منتقل می‌شود و دستور کار به محصول ساخته‌شده بسته نمی‌شود."); 
             if (await _uow.Set<FnWorkOrderClose>().AnyAsync(c => c.WorkOrderId == workOrderId && !c.IsOpen, ct)) return Bad<FnWorkOrderCloseDto>("این دستور کار قبلاً بسته شده است؛ برای تغییر باید توسط مدیر مالی بازگشایی شود.");
             await FinanceSeed.EnsureAsync(_uow, ct);
             FnWorkOrderCostDto cost = await BuildCostAsync(wo, ct);
@@ -482,7 +487,11 @@ namespace Services.NasbNiro.Finance
                     .GroupBy(l => l.Account.Code).Select(g => new { Code = g.Key, Net = g.Sum(x => x.Debit - x.Credit) }).ToListAsync(ct);
                 decimal Net(string code) => ledger.Where(x => x.Code == code).Sum(x => x.Net);
                 // the cost incurred on the contract (still in work in progress) is expensed with the revenue, so the margin follows the progress
-                decimal costThisRun = Net(wipAccount.Code);
+                List<int> contractWos = await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.ContractId == s.ContractId).Select(w => w.Id).ToListAsync(ct);
+                var wipByWo = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.Account.Code == wipAccount.Code && l.Voucher.Date <= end && l.Voucher.Status != FnVoucherStatus.Draft && l.Voucher.FiscalYear.LegalEntityId == entityId
+                        && (l.ContractId == s.ContractId || (l.WorkOrderId != null && contractWos.Contains(l.WorkOrderId.Value))))
+                    .GroupBy(l => l.WorkOrderId).Select(g => new { Wo = g.Key, Net = g.Sum(x => x.Debit - x.Credit) }).ToListAsync(ct);
+                decimal costThisRun = wipByWo.Sum(x => x.Net);
                 decimal revenueLedger = -Net(revenue.Code), oldAsset = Net("10308"), oldLiability = -Net("30303"), oldProvision = -Net("30404");
                 decimal adjust = earned - revenueLedger;
                 decimal position = (oldAsset - oldLiability) + adjust;
@@ -505,7 +514,9 @@ namespace Services.NasbNiro.Finance
                 if (costThisRun != 0)
                 {
                     lines.Add(new AutoLine { Account = cogsAccount, ContractId = s.ContractId, Debit = costThisRun > 0 ? costThisRun : 0, Credit = costThisRun < 0 ? -costThisRun : 0, Description = $"بهای تمام‌شده شناسایی‌شده قرارداد {s.ContractId} ({progress:0.##}٪)" });
-                    lines.Add(new AutoLine { Account = wipAccount, ContractId = s.ContractId, Credit = costThisRun > 0 ? costThisRun : 0, Debit = costThisRun < 0 ? -costThisRun : 0, Description = $"انتقال هزینه انجام‌شده قرارداد {s.ContractId} از کالای در جریان" });
+                    // the work in progress leaves per work order, so the balance of every work order of the contract is zero afterwards (nothing is left to be closed out and expensed a second time)
+                    foreach (var w in wipByWo.Where(x => x.Net != 0))
+                        lines.Add(new AutoLine { Account = wipAccount, WorkOrderId = w.Wo, ContractId = s.ContractId, Credit = w.Net > 0 ? w.Net : 0, Debit = w.Net < 0 ? -w.Net : 0, Description = $"انتقال هزینه انجام‌شده قرارداد {s.ContractId} از کالای در جریان" });
                 }
                 if (provisionChange != 0)
                 {

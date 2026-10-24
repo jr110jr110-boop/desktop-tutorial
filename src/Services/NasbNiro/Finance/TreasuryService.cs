@@ -269,7 +269,7 @@ namespace Services.NasbNiro.Finance
             return rows.Select(p => new PaymentDto
             {
                 Id = p.Id, Number = p.Number, Date = p.Date, Status = p.Status, Purpose = p.Purpose, ProviderId = p.ProviderId,
-                ProviderName = p.ProviderId.HasValue && providers.TryGetValue(p.ProviderId.Value, out string pn) ? pn : null, PettyCashId = p.PettyCashId, PayrollRunId = p.PayrollRunId, EmployeeLoanId = p.EmployeeLoanId,
+                ProviderName = p.ProviderId.HasValue && providers.TryGetValue(p.ProviderId.Value, out string pn) ? pn : null, PettyCashId = p.PettyCashId, PayrollRunId = p.PayrollRunId, BonusRunId = p.BonusRunId, TerminationId = p.TerminationId, EmployeeLoanId = p.EmployeeLoanId,
                 PayeeName = p.PayeeName, Description = p.Description, GrossAmount = p.GrossAmount, DeductionAmount = p.DeductionAmount, NetAmount = p.NetAmount,
                 CreatorName = names.Name(p.CreatedByUserId), PostedByName = names.Name(p.PostedByUserId), PostedAt = p.PostedAt, IbanApprovedByUserId = p.IbanApprovedByUserId,
                 Lines = p.Lines.OrderBy(l => l.RowNumber).Select(l => new PaymentLineDto
@@ -327,7 +327,7 @@ namespace Services.NasbNiro.Finance
             }
 
             decimal gross, deductions;
-            int? providerId = null, pettyCashId = null, payrollRunId = null, employeeLoanId = null;
+            int? providerId = null, pettyCashId = null, payrollRunId = null, employeeLoanId = null, bonusRunId = null, terminationId = null;
             string payee;
             List<PaymentRequest> requests = new List<PaymentRequest>();
             string registeredIban = null;
@@ -372,6 +372,32 @@ namespace Services.NasbNiro.Finance
                 payrollRunId = run.Id;
                 gross = run.TotalNet; deductions = 0;
                 payee = $"حقوق و دستمزد {run.Year}/{run.Month:00}";
+            }
+            else if (dto.Purpose == FnPaymentPurpose.BonusRun)
+            {
+                if (!dto.BonusRunId.HasValue) return Bad<PaymentDto>("محاسبه عیدی (ثبت‌شده) را مشخص کنید.");
+                FnBonusRun bonus = await _uow.Set<FnBonusRun>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == dto.BonusRunId.Value, ct);
+                if (bonus == null) return Bad<PaymentDto>("محاسبه عیدی پیدا نشد.");
+                if (bonus.Status != FnSettlementStatus.Posted) return Bad<PaymentDto>("فقط عیدی تاییدشده‌ای که سند حسابداری آن ثبت شده پرداخت می‌شود.");
+                int selfBonus = payment?.Id ?? 0;
+                if (await _uow.Set<FnPayment>().AnyAsync(x => x.BonusRunId == bonus.Id && x.Status != FnDocStatus.Cancelled && x.Id != selfBonus, ct))
+                    return Bad<PaymentDto>("برای این محاسبه عیدی قبلاً سند پرداخت صادر شده است.");
+                bonusRunId = bonus.Id;
+                gross = bonus.TotalNet; deductions = 0;
+                payee = $"عیدی سال {bonus.Year}";
+            }
+            else if (dto.Purpose == FnPaymentPurpose.Termination)
+            {
+                if (!dto.TerminationId.HasValue) return Bad<PaymentDto>("تسویه‌حساب پایان خدمت (ثبت‌شده) را مشخص کنید.");
+                FnTermination term = await _uow.Set<FnTermination>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == dto.TerminationId.Value, ct);
+                if (term == null) return Bad<PaymentDto>("تسویه‌حساب پیدا نشد.");
+                if (term.Status != FnSettlementStatus.Posted) return Bad<PaymentDto>("فقط تسویه‌حساب تاییدشده‌ای که سند حسابداری آن ثبت شده پرداخت می‌شود.");
+                int selfTerm = payment?.Id ?? 0;
+                if (await _uow.Set<FnPayment>().AnyAsync(x => x.TerminationId == term.Id && x.Status != FnDocStatus.Cancelled && x.Id != selfTerm, ct))
+                    return Bad<PaymentDto>("برای این تسویه‌حساب قبلاً سند پرداخت صادر شده است.");
+                terminationId = term.Id;
+                gross = term.NetPayable; deductions = 0;
+                payee = "تسویه‌حساب پایان خدمت " + term.Number;   // no name: the payee is visible to treasury, the person stays in payroll
             }
             else if (dto.Purpose == FnPaymentPurpose.EmployeeLoan)
             {
@@ -470,7 +496,7 @@ namespace Services.NasbNiro.Finance
                 payment.Lines = new List<FnPaymentLine>();
                 payment.Requests = new List<FnPaymentRequestLink>();
             }
-            payment.Date = date; payment.Purpose = dto.Purpose; payment.ProviderId = providerId; payment.PettyCashId = pettyCashId; payment.PayrollRunId = payrollRunId; payment.EmployeeLoanId = employeeLoanId; payment.PayeeName = payee;
+            payment.Date = date; payment.Purpose = dto.Purpose; payment.ProviderId = providerId; payment.PettyCashId = pettyCashId; payment.PayrollRunId = payrollRunId; payment.BonusRunId = bonusRunId; payment.TerminationId = terminationId; payment.EmployeeLoanId = employeeLoanId; payment.PayeeName = payee;
             payment.Description = Clean(dto.Description); payment.GrossAmount = gross; payment.DeductionAmount = deductions; payment.NetAmount = net;
             payment.IbanApprovedByUserId = null;
             foreach (FnPaymentLine l in lines) payment.Lines.Add(l);
@@ -592,7 +618,7 @@ namespace Services.NasbNiro.Finance
         }
 
         /// <summary>Debit of the supplier account (payable, or advance when there is no invoice) and the credits of the deductions of one payment request.</summary>
-        private static IEnumerable<AccountingEventLine> RequestLines(PaymentRequest r, IEnumerable<FnPaymentDeduction> typed)
+        private static IEnumerable<AccountingEventLine> RequestLines(PaymentRequest r, IEnumerable<FnPaymentDeduction> typed, int? contractId = null)
         {
             yield return new AccountingEventLine
             {
@@ -604,7 +630,8 @@ namespace Services.NasbNiro.Finance
             {
                 decimal amount = g.Sum(d => d.Amount);
                 typedSum += amount;
-                yield return new AccountingEventLine { AccountRole = DeductionRole(g.Key), Credit = amount, ProviderId = r.ProviderId, Description = "کسور " + g.Key + " - " + r.Number };
+                yield return new AccountingEventLine { AccountRole = DeductionRole(g.Key), Credit = amount, ProviderId = r.ProviderId, Description = "کسور " + g.Key + " - " + r.Number,
+                    ContractId = g.Key == FnDeductionKind.PerformanceRetention || g.Key == FnDeductionKind.InsuranceRetention ? contractId : null };   // the retention is held per contract (review 3, M3)
             }
             if (r.Deductions - typedSum > 0)
                 yield return new AccountingEventLine { AccountRole = AccountRoles.OtherPayable, Credit = r.Deductions - typedSum, ProviderId = r.ProviderId, Description = "سایر کسور - " + r.Number };
@@ -642,7 +669,9 @@ namespace Services.NasbNiro.Finance
                     if (r.CreatorUserId == Me || r.ApprovedByUserId == Me) return SameUser;
                 }
                 List<FnPaymentDeduction> typed = await _uow.Set<FnPaymentDeduction>().Where(d => ids.Contains(d.PaymentRequestId)).ToListAsync(ct);
-                foreach (PaymentRequest r in requests) eventLines.AddRange(RequestLines(r, typed.Where(d => d.PaymentRequestId == r.Id)));
+                List<int> orderIds = requests.Where(r => r.PurchaseOrderId.HasValue).Select(r => r.PurchaseOrderId.Value).Distinct().ToList();
+                Dictionary<int, int?> orderContract = await _uow.Set<PurchaseOrder>().AsNoTracking().Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, o => o.ContractId, ct);
+                foreach (PaymentRequest r in requests) eventLines.AddRange(RequestLines(r, typed.Where(d => d.PaymentRequestId == r.Id), r.PurchaseOrderId.HasValue && orderContract.TryGetValue(r.PurchaseOrderId.Value, out int? oc) ? oc : null));
             }
             else if (p.Purpose == FnPaymentPurpose.Payroll)
             {
@@ -651,6 +680,22 @@ namespace Services.NasbNiro.Finance
                 if (payrollRun == null || payrollRun.Status != FnPayrollStatus.Posted) return "دوره حقوق دیگر در وضعیت «ثبت‌شده» نیست.";
                 if (payrollRun.TotalNet != p.NetAmount) return "مبلغ پرداخت با خالص پرداختی دوره حقوق فرق دارد.";
                 eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.PayrollPayable, Debit = p.NetAmount, Description = "پرداخت حقوق " + p.Number });
+            }
+            else if (p.Purpose == FnPaymentPurpose.BonusRun)
+            {
+                type = AccountingEventType.PayrollPayment;
+                FnBonusRun bonusRun = await _uow.Set<FnBonusRun>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == p.BonusRunId, ct);
+                if (bonusRun == null || bonusRun.Status != FnSettlementStatus.Posted) return "محاسبه عیدی دیگر در وضعیت «ثبت‌شده» نیست.";
+                if (bonusRun.TotalNet != p.NetAmount) return "مبلغ پرداخت با خالص عیدی فرق دارد.";
+                eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.PayrollPayable, Debit = p.NetAmount, Description = "پرداخت عیدی " + p.Number });
+            }
+            else if (p.Purpose == FnPaymentPurpose.Termination)
+            {
+                type = AccountingEventType.PayrollPayment;
+                FnTermination term = await _uow.Set<FnTermination>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == p.TerminationId, ct);
+                if (term == null || term.Status != FnSettlementStatus.Posted) return "تسویه‌حساب دیگر در وضعیت «ثبت‌شده» نیست.";
+                if (term.NetPayable != p.NetAmount) return "مبلغ پرداخت با خالص تسویه‌حساب فرق دارد.";
+                eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.PayrollPayable, Debit = p.NetAmount, Description = "پرداخت تسویه‌حساب پایان خدمت " + p.Number });
             }
             else if (p.Purpose == FnPaymentPurpose.EmployeeLoan)
             {

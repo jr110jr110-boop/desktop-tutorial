@@ -274,6 +274,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
             builder.Entity<FnPayment>(b =>
             {
                 b.HasIndex(x => x.PayrollRunId).HasFilter("[PayrollRunId] IS NOT NULL");
+                b.HasIndex(x => x.BonusRunId).HasFilter("[BonusRunId] IS NOT NULL");
+                b.HasIndex(x => x.TerminationId).HasFilter("[TerminationId] IS NOT NULL");
             });
         }
     }

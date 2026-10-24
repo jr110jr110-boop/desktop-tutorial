@@ -589,6 +589,15 @@ namespace Services.NasbNiro.Finance
             if (date.Error != null) return Bad<VoucherDto>(date.Error);
             var built = await BuildLinesAsync(dto.Lines, true, ct);
             if (built.Error != null) return Bad<VoucherDto>(built.Error);
+            // the 5% insurance retention of a contractor is released only against a valid insurance clearance, not by any manual voucher (review 3, M3)
+            FnAccount insuranceRetention = await RoleAccountAsync(AccountRoles.InsuranceRetentionPayable, "30207", ct);
+            if (insuranceRetention != null)
+                foreach (FnVoucherLine il in built.Lines.Where(x => x.Debit > 0 && x.Account != null && x.Account.Id == insuranceRetention.Id))
+                {
+                    FnDetailAccount holder = il.Detail1 != null && il.Detail1.Type == FnDetailType.Supplier ? il.Detail1 : (il.Detail2 != null && il.Detail2.Type == FnDetailType.Supplier ? il.Detail2 : null);
+                    if (holder == null || !holder.LinkedEntityId.HasValue) return Bad<VoucherDto>("آزادسازی سپرده بیمه پیمانکار باید با تفصیلی پیمانکار ثبت شود.");
+                    if (!await HasValidClearanceAsync(holder.LinkedEntityId.Value, dto.Date.Date, ct)) return Bad<VoucherDto>("آزادسازی سپرده بیمه بدون مفاصاحساب بیمه معتبر (با فایل پیوست، ابطال‌نشده و در مهلت اعتبار) ممکن نیست.");
+                }
 
             FnVoucher v;
             if (dto.Id.HasValue)
