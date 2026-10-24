@@ -2518,8 +2518,12 @@ FCM=finance/completeness; FPS=finance/payroll-settlements
 cb() { local v; v=$(tbc "$1"); echo "${v:-0}"; } # closing balance (debit minus credit) of an account in the current fiscal year
 cfrow() { as "$FM_TOKEN" GET "$FCM/cash-flow-direct?FiscalYearId=$FYC&IncludeDraft=true"; jq -r "([.data.rows[]|select(.key == \"$1\")][0].net // 0) | round" "$B"; } # net cash of a direct-method row
 # --- review 3 (review-2 finding 1): the provision true-up leaves drafts out, and a draft still waiting blocks a second one
-TU_REQ=$(( 7000000 - $(cb 30402) ))
-as "$FIN_TOKEN" POST $FDF/provisions/true-up "{\"kind\":\"bonus\",\"date\":\"${TODAY}T00:00:00\",\"requiredBalance\":$TU_REQ,\"reason\":\"آزمون تعدیل ذخیره\"}"; check "r3 true-up: the bonus provision is raised to the required balance (difference = required - the balance without drafts, a draft voucher)" '.success and .data.difference > 0 and .data.difference == (.data.requiredBalance - .data.currentBalance) and .data.voucherId > 0'
+# the balance the true-up must use, read independently from the trial balance WITHOUT drafts (credit balance of 30402); the draft-inclusive figure differs by the drafts
+as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$FYC&Level=2&IncludeDraft=false"; TU_CUR=$(jq -r '([.data.rows[]|select(.code == "30402")][0] | ((.closingCredit // 0) - (.closingDebit // 0))) // 0 | round' "$B")
+TU_ALL=$(( -$(cb 30402) ))
+TU_REQ=$(( TU_CUR + 7000000 ))
+echo "true-up balances: without drafts $TU_CUR, with drafts $TU_ALL" >> "$R"
+as "$FIN_TOKEN" POST $FDF/provisions/true-up "{\"kind\":\"bonus\",\"date\":\"${TODAY}T00:00:00\",\"requiredBalance\":$TU_REQ,\"reason\":\"آزمون تعدیل ذخیره\"}"; check "r3 true-up: the bonus provision balance is the one without drafts ($TU_CUR, the figure with drafts is $TU_ALL) and the draft raises it by exactly 7,000,000" '.success and .data.currentBalance == '$TU_CUR' and .data.difference == 7000000 and .data.voucherId > 0'
 as "$FIN_TOKEN" POST $FDF/provisions/true-up "{\"kind\":\"bonus\",\"date\":\"${TODAY}T00:00:00\",\"requiredBalance\":$((TU_REQ + 1000000)),\"reason\":\"آزمون تعدیل دوم\"}"; nomsg "r3 true-up: a second true-up is refused while the first is still a draft (drafts are not counted in the balance)" "پیش‌نویس"
 RA_AP0=$(rec ap); RA_BK0=$(rec bank)
 # --- non-recoverable VAT per purchase line (a second order of 10 bolts at 390,000; the whole VAT of 390,000 is cost)
