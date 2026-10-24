@@ -5076,6 +5076,9 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Reverse")
                         .HasColumnType("bit");
 
+                    b.Property<int>("Sequence")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("TotalGain")
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
@@ -5096,7 +5099,8 @@ namespace DataLayer.Migrations
                     b.HasIndex("Number")
                         .IsUnique();
 
-                    b.HasIndex("LegalEntityId", "PeriodId");
+                    b.HasIndex("LegalEntityId", "PeriodId", "Sequence")
+                        .IsUnique();
 
                     b.ToTable("FnFxRevaluations", (string)null);
                 });
@@ -5384,6 +5388,14 @@ namespace DataLayer.Migrations
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
 
+                    b.Property<decimal>("AmountA")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("AmountB")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
                     b.Property<int>("ChargerEntityId")
                         .HasColumnType("int");
 
@@ -5419,6 +5431,10 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("PairId")
                         .HasColumnType("int");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
 
                     b.HasKey("Id");
 
@@ -5739,6 +5755,10 @@ namespace DataLayer.Migrations
                     b.Property<string>("CurrencyCode")
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
+
+                    b.Property<decimal>("CurrentPortionReclassified")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
 
                     b.Property<DateTime?>("DisbursedDate")
                         .HasColumnType("datetime2");
@@ -6073,7 +6093,8 @@ namespace DataLayer.Migrations
                     b.HasIndex("Number")
                         .IsUnique();
 
-                    b.HasIndex("LegalEntityId", "PeriodId");
+                    b.HasIndex("LegalEntityId", "PeriodId")
+                        .IsUnique();
 
                     b.ToTable("FnOverheadAllocations", (string)null);
                 });
@@ -7598,6 +7619,10 @@ namespace DataLayer.Migrations
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
 
+                    b.Property<decimal>("CostOfSales")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -8500,6 +8525,13 @@ namespace DataLayer.Migrations
                     b.Property<int>("CreatedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<int>("DeliveredQuantity")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("FgAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
                     b.Property<bool>("IsOpen")
                         .HasColumnType("bit");
 
@@ -8522,6 +8554,10 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
+
+                    b.Property<decimal>("RelievedAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
 
                     b.Property<string>("ReopenReason")
                         .HasMaxLength(1000)
@@ -8557,7 +8593,10 @@ namespace DataLayer.Migrations
                     b.HasIndex("Number")
                         .IsUnique();
 
-                    b.HasIndex("WorkOrderId");
+                    b.HasIndex("WorkOrderId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_FnWorkOrderCloses_ActiveClose")
+                        .HasFilter("[IsOpen] = 0");
 
                     b.ToTable("FnWorkOrderCloses", (string)null);
                 });
