@@ -44,7 +44,7 @@ namespace Services.NasbNiro.Finance
             var provider = await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AsNoTracking().Where(p => p.Id == dto.ProviderId).Select(p => new { p.Id, p.Name }).FirstOrDefaultAsync(ct);
             if (provider == null) return Bad<FnClearanceDto>("تامین‌کننده یا پیمانکار پیدا نشد.");
             // the scanned letter must really be in the document store: any other identifier is refused (review 3, M3)
-            if (dto.DocumentId != Guid.Empty && !await _uow.Set<Entities.Model.Document>().AsNoTracking().AnyAsync(d => d.Id == dto.DocumentId, ct)) return Bad<FnClearanceDto>("فایل مفاصاحساب در مخزن اسناد پیدا نشد؛ ابتدا فایل را بارگذاری کنید.");
+            if (dto.DocumentId.HasValue && dto.DocumentId.Value != Guid.Empty && !await _uow.Set<Entities.Model.Document>().AsNoTracking().AnyAsync(d => d.Id == dto.DocumentId.Value, ct)) return Bad<FnClearanceDto>("فایل مفاصاحساب در مخزن اسناد پیدا نشد؛ ابتدا فایل را بارگذاری کنید.");
             FnInsuranceClearance c = null;
             if (dto.Id.HasValue)
             {

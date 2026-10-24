@@ -592,9 +592,10 @@ namespace Services.NasbNiro.Finance
             // the 5% insurance retention of a contractor is released only against a valid insurance clearance, not by any manual voucher (review 3, M3)
             FnAccount insuranceRetention = await RoleAccountAsync(AccountRoles.InsuranceRetentionPayable, "30207", ct);
             if (insuranceRetention != null)
-                foreach (FnVoucherLine il in built.Lines.Where(x => x.Debit > 0 && x.Account != null && x.Account.Id == insuranceRetention.Id))
+                foreach (FnVoucherLine il in built.Lines.Where(x => x.Debit > 0 && x.AccountId == insuranceRetention.Id))
                 {
-                    FnDetailAccount holder = il.Detail1 != null && il.Detail1.Type == FnDetailType.Supplier ? il.Detail1 : (il.Detail2 != null && il.Detail2.Type == FnDetailType.Supplier ? il.Detail2 : null);
+                    List<int> detailIds = new List<int>(); if (il.Detail1Id.HasValue) detailIds.Add(il.Detail1Id.Value); if (il.Detail2Id.HasValue) detailIds.Add(il.Detail2Id.Value);
+                    FnDetailAccount holder = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => detailIds.Contains(d.Id) && d.Type == FnDetailType.Supplier).FirstOrDefaultAsync(ct);
                     if (holder == null || !holder.LinkedEntityId.HasValue) return Bad<VoucherDto>("آزادسازی سپرده بیمه پیمانکار باید با تفصیلی پیمانکار ثبت شود.");
                     if (!await HasValidClearanceAsync(holder.LinkedEntityId.Value, dto.Date.Date, ct)) return Bad<VoucherDto>("آزادسازی سپرده بیمه بدون مفاصاحساب بیمه معتبر (با فایل پیوست، ابطال‌نشده و در مهلت اعتبار) ممکن نیست.");
                 }
