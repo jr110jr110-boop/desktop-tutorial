@@ -1,0 +1,79 @@
+﻿This computer is 'runnervmdaln5', not 'PMIS'.
+User: runnervmdaln5\runneradmin (must be the user that installed SQL Server)
+PMIS is already installed. Taking a backup before the update...
+Backup finished. If the update must be undone, the backup is in the backup folder (database\*.bak).
+Existing installation: folder D:\INNCO, backups D:\INNCO\Backup, database IRNNCO
+INNCO PMIS installer 1.0
+    Windows:        Microsoft Windows Server 2025 Datacenter (10.0.26100)
+    Computer:       runnervmdaln5
+    Program folder: D:\INNCO\app
+    Backup folder:  D:\INNCO\Backup
+    Package:        source_sha=7865e2deca8daa36d1e754c8f87e9ac5d60f2322
+    Package:        built_utc=2026-10-24T09:35:18Z
+    Package:        sdk=10.0.402
+    Package:        aspnetcore_runtime=Microsoft.AspNetCore.App 10.0.13 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+    WARNING: The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+==> IIS (web server)
+    OK: IIS is installed.
+
+==> .NET 10 Hosting Bundle
+    OK: Already installed.
+
+==> SQL Server
+    Instance: .\SQLEXPRESS
+    Version:  Microsoft SQL Server 2022 (RTM) - 16.0.1000.6 (X64)
+    Edition:  Express Edition (64-bit)
+    OK: Connected (SQL Server service account: NT Service\MSSQL$SQLEXPRESS).
+
+==> Folders and permissions
+    OK: D:\INNCO and D:\INNCO\Backup are limited to Administrators, SYSTEM and the services that need them.
+
+==> IIS application pool
+    Stopped application pool 'INNCO'.
+    OK: No managed code, always running, restarts daily at 03:00, runs as 'IIS AppPool\INNCO'.
+
+==> Program files
+    OK: Program copied to D:\INNCO\app
+
+==> Database 'IRNNCO'
+    OK: The existing database is kept.
+    OK: 'IIS AppPool\INNCO' can use the database (no password needed); the backup task can back it up.
+
+==> Settings (appsettings.Production.json)
+    OK: Database connection uses Windows authentication; sign-in key kept or created.
+
+==> IIS site 'INNCO' on port 80
+    OK: Site configured.
+
+==> Daily backup (scheduled task, 01:30)
+    OK: Task 'INNCO daily backup': database to D:\INNCO\Backup\database (kept 14 days), uploaded files to D:\INNCO\Backup\files.
+
+==> Start and check
+    Waiting for the program to start (the first start can take a few minutes)...
+    OK: API answers (200).
+    OK: User interface answers.
+    OK: Database structure is up to date (101 updates applied, last: 20261024075717_FinanceReviewFixes4).
+
+==> First backup (runs the scheduled task once)
+    2026-10-24 09:43:37  Database backup OK: D:\INNCO\Backup\database\IRNNCO_20261024_0943.bak (8.0 MB)
+    2026-10-24 09:43:37  Uploaded files OK: D:\INNCO\Backup\files (2 files)
+    2026-10-24 09:44:09  Database backup OK: D:\INNCO\Backup\database\IRNNCO_20261024_0944.bak (8.5 MB)
+    2026-10-24 09:44:09  Uploaded files OK: D:\INNCO\Backup\files (2 files)
+    OK: Backup works.
+
+Warnings:
+  - The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+Log file (send this one if something went wrong): D:\INNCO\logs\install-20261024-094342.log
+
+INSTALLATION FINISHED
+Open the program in a browser on any computer of the network:
+    http://runnervmdaln5/
+    http://172.26.144.1/
+    http://10.1.0.15/
+
+PMIS is ready. Open in Chrome or Edge from any computer in the network:
+   http://192.168.3.17/
+   http://pmis/
+exit=0

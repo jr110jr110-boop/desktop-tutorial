@@ -1,0 +1,236 @@
+[0E34:1CF8][2026-10-24T09:42:18]i001: Burn x86 v6.0.3-dotnet.6, Windows v10.0 x64 (Build 26100: Service Pack 0), path: C:\Users\RUNNER~1\AppData\Local\Temp\dotnet-hosting-10-win.exe
+[0E34:1CF8][2026-10-24T09:42:18]i000: Initializing formatted variable 'BundleNameShort' to value 'Microsoft .NET 10.0.13'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Initializing formatted variable 'BundleNameSub' to value 'Windows Server Hosting'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Initializing numeric variable 'IISEnabled' to value '0'
+[0E34:1CF8][2026-10-24T09:42:18]i009: Command Line: '/install /quiet /norestart /log D:\INNCO\logs\hosting-bundle.log'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleSourceProcessPath' to value 'C:\Users\RUNNER~1\AppData\Local\Temp\dotnet-hosting-10-win.exe'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleSourceProcessFolder' to value 'C:\Users\RUNNER~1\AppData\Local\Temp\'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleOriginalSource' to value 'C:\Users\RUNNER~1\AppData\Local\Temp\dotnet-hosting-10-win.exe'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleOriginalSourceFolder' to value 'C:\Users\RUNNER~1\AppData\Local\Temp\'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleLog' to value 'D:\INNCO\logs\hosting-bundle.log'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleInProgressName' to value ''
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleName' to value 'Microsoft .NET 10.0.13 - Windows Server Hosting'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleManufacturer' to value 'Microsoft Corporation'
+[0E34:1CBC][2026-10-24T09:42:18]i000: Ignoring unknown argument: /install
+[0E34:1CBC][2026-10-24T09:42:18]i000: Setting version variable 'WixBundleFileVersion' to value '6.0.3.6'
+[0E34:1CBC][2026-10-24T09:42:18]i000: Setting numeric variable 'WixStdBASuppressOptionsUI' to value 1
+[0E34:1CBC][2026-10-24T09:42:18]i000: Setting numeric variable 'WixStdBALanguageId' to value 1033
+[0E34:1CF8][2026-10-24T09:42:18]i100: Detect begin, 16 packages
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'IISCoreWebEngineInstalled_x86' to value '1'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'IISW3SVCInstalled_x86' to value '1'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'IISCoreWebEngineInstalled_x64' to value '1'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'IISW3SVCInstalled_x64' to value '1'
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '((IISCoreWebEngineInstalled_x86=1) AND (IISW3SVCInstalled_x86=1)) OR ((IISCoreWebEngineInstalled_x64=1) AND (IISW3SVCInstalled_x64=1))' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'IISEnabled' to value '1'
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'NOT (OPT_NO_ANCM OR OPT_NO_ANCM=0 OR OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX=0 OR OPT_NO_RUNTIME OR OPT_NO_RUNTIME=0 OR OPT_NO_X86 OR OPT_NO_X86=0 OR OPT_NO_SHARED_CONFIG_CHECK OR OPT_NO_SHARED_CONFIG_CHECK=0)' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i000: Registry key not found. Key = 'Software\Microsoft\dotnet\host\options\10.0'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting numeric variable 'OPT_NO_ANCM_Exists' to value 0
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'NOT (OPT_NO_ANCM OR OPT_NO_ANCM=0 OR OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX=0 OR OPT_NO_RUNTIME OR OPT_NO_RUNTIME=0 OR OPT_NO_X86 OR OPT_NO_X86=0 OR OPT_NO_SHARED_CONFIG_CHECK OR OPT_NO_SHARED_CONFIG_CHECK=0)' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i000: Registry key not found. Key = 'Software\Microsoft\dotnet\host\options\10.0'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting numeric variable 'OPT_NO_RUNTIME_Exists' to value 0
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'NOT (OPT_NO_ANCM OR OPT_NO_ANCM=0 OR OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX=0 OR OPT_NO_RUNTIME OR OPT_NO_RUNTIME=0 OR OPT_NO_X86 OR OPT_NO_X86=0 OR OPT_NO_SHARED_CONFIG_CHECK OR OPT_NO_SHARED_CONFIG_CHECK=0)' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i000: Registry key not found. Key = 'Software\Microsoft\dotnet\host\options\10.0'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting numeric variable 'OPT_NO_SHARED_CONFIG_CHECK_Exists' to value 0
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'NOT (OPT_NO_ANCM OR OPT_NO_ANCM=0 OR OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX=0 OR OPT_NO_RUNTIME OR OPT_NO_RUNTIME=0 OR OPT_NO_X86 OR OPT_NO_X86=0 OR OPT_NO_SHARED_CONFIG_CHECK OR OPT_NO_SHARED_CONFIG_CHECK=0)' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i000: Registry key not found. Key = 'Software\Microsoft\dotnet\host\options\10.0'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting numeric variable 'OPT_NO_SHAREDFX_Exists' to value 0
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'NOT (OPT_NO_ANCM OR OPT_NO_ANCM=0 OR OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX=0 OR OPT_NO_RUNTIME OR OPT_NO_RUNTIME=0 OR OPT_NO_X86 OR OPT_NO_X86=0 OR OPT_NO_SHARED_CONFIG_CHECK OR OPT_NO_SHARED_CONFIG_CHECK=0)' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i000: Registry key not found. Key = 'Software\Microsoft\dotnet\host\options\10.0'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting numeric variable 'OPT_NO_X86_Exists' to value 0
+[0E34:1CF8][2026-10-24T09:42:18]i000: Registry key not found. Key = 'SOFTWARE\Microsoft\.NET'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Registry key not found. Key = 'SOFTWARE\Microsoft\.NET\10.0'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting numeric variable 'RemoveSpecificPreviousVersionRegistryKeyExists' to value 0
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'RemoveSpecificPreviousVersionRegistryKeyExists=1' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'OPT_NO_RUNTIME_Exists' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'OPT_NO_SHAREDFX_Exists' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'OPT_NO_ANCM_Exists' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'OPT_NO_X86_Exists' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'OPT_NO_SHARED_CONFIG_CHECK_Exists' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: dotnet_hosting_options_10.0.13_win.msi, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: AspNetCoreModuleV2_x86, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: AspNetCoreModuleV2_x64, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: AspNetCoreModuleV2_arm64, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistLts_arm64, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistLts_x64, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistLts_x86, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistHost_arm64, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistHost_x64, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistHost_x86, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistHostfxr_arm64, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistHostfxr_x64, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: DotNetRedistHostfxr_x86, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: SharedFxRedist_arm64, state: Absent, cached: No, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: SharedFxRedist_x64, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i101: Detected package: SharedFxRedist_x86, state: Present, cached: No, install registration state: Ignored, cache registration state: Absent
+[0E34:1CBC][2026-10-24T09:42:18]i000: Setting string variable 'RemoveUpgradeRelatedBundle' to value 'always'
+[0E34:1CF8][2026-10-24T09:42:18]i199: Detect complete, result: 0x0, registration state: None, cached: No, eligible for cleanup: No
+[0E34:1CF8][2026-10-24T09:42:18]i200: Plan begin, 16 packages, action: Install
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'NOT VersionNT64 AND (VersionNT >= v6.1) AND (IISCoreWebEngineInstalled_x86=1) AND (IISW3SVCInstalled_x86=1) AND (NOT OPT_NO_ANCM OR OPT_NO_ANCM="0")' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'VersionNT64 AND (VersionNT64 >= v6.1) AND NOT (NativeMachine="43620") AND (IISCoreWebEngineInstalled_x64=1) AND (IISW3SVCInstalled_x64=1) AND (NOT OPT_NO_ANCM OR OPT_NO_ANCM="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NativeMachine="43620") AND (IISCoreWebEngineInstalled_x64=1) AND (IISW3SVCInstalled_x64=1) AND (NOT OPT_NO_ANCM OR OPT_NO_ANCM="0")' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NativeMachine="43620") AND (NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0")' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'VersionNT64 AND NOT (NativeMachine="43620") AND (NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0") AND (NOT OPT_NO_X86 OR OPT_NO_X86="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NativeMachine="43620") AND (NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0")' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'VersionNT64 AND NOT (NativeMachine="43620") AND (NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0") AND (NOT OPT_NO_X86 OR OPT_NO_X86="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NativeMachine="43620") AND (NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0")' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'VersionNT64 AND NOT (NativeMachine="43620") AND (NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NOT OPT_NO_RUNTIME OR OPT_NO_RUNTIME="0") AND (NOT OPT_NO_X86 OR OPT_NO_X86="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NativeMachine="43620") AND (NOT OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX="0")' evaluates to false.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition 'VersionNT64 AND NOT (NativeMachine="43620") AND (NOT OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i052: Condition '(NOT OPT_NO_SHAREDFX OR OPT_NO_SHAREDFX="0") AND (NOT OPT_NO_X86 OR OPT_NO_X86="0")' evaluates to true.
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleRollbackLog_dotnet_hosting_options_10.0.13_win.msi' to value 'D:\INNCO\logs\hosting-bundle_000_dotnet_hosting_options_10.0.13_win.msi_rollback.log'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleLog_dotnet_hosting_options_10.0.13_win.msi' to value 'D:\INNCO\logs\hosting-bundle_000_dotnet_hosting_options_10.0.13_win.msi.log'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleRollbackLog_AspNetCoreModuleV2_x64' to value 'D:\INNCO\logs\hosting-bundle_001_AspNetCoreModuleV2_x64_rollback.log'
+[0E34:1CF8][2026-10-24T09:42:18]i000: Setting string variable 'WixBundleLog_AspNetCoreModuleV2_x64' to value 'D:\INNCO\logs\hosting-bundle_001_AspNetCoreModuleV2_x64.log'
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: DotNetRedistLts_x64, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: DotNetRedistLts_x86, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: DotNetRedistHost_x64, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: DotNetRedistHost_x86, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: DotNetRedistHostfxr_x64, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: DotNetRedistHostfxr_x86, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: SharedFxRedist_x64, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]w327: Will not uninstall package: SharedFxRedist_x86, found dependents:
+[0E34:1CF8][2026-10-24T09:42:18]w328: Found dependent: VS.{AEF703B8-D2CC-4343-915C-F54A30B90937}, name: Unknown
+[0E34:1CF8][2026-10-24T09:42:18]i222: Planned rollback boundary: 'WixDefaultBoundary', vital: Yes, transaction: No (default: No)
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: dotnet_hosting_options_10.0.13_win.msi, state: Absent, default requested: Present, ba requested: Present, execute: Install, rollback: Uninstall, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i222: Planned rollback boundary: 'RB_ANCM', vital: Yes, transaction: No (default: No)
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: AspNetCoreModuleV2_x86, state: Absent, default requested: Absent, ba requested: Absent, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: No, uncache: Yes, dependency: None, expected install registration state: Absent, expected cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: AspNetCoreModuleV2_x64, state: Absent, default requested: Present, ba requested: Present, execute: Install, rollback: Uninstall, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: AspNetCoreModuleV2_arm64, state: Absent, default requested: Absent, ba requested: Absent, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: No, uncache: Yes, dependency: None, expected install registration state: Absent, expected cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i222: Planned rollback boundary: 'RB_DOTNET_REDIST_LTS_BUNDLE', vital: Yes, transaction: No (default: No)
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistLts_arm64, state: Absent, default requested: Absent, ba requested: Absent, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: No, uncache: Yes, dependency: None, expected install registration state: Absent, expected cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistLts_x64, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistLts_x86, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistHost_arm64, state: Absent, default requested: Absent, ba requested: Absent, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: No, uncache: Yes, dependency: None, expected install registration state: Absent, expected cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistHost_x64, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistHost_x86, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistHostfxr_arm64, state: Absent, default requested: Absent, ba requested: Absent, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: No, uncache: Yes, dependency: None, expected install registration state: Absent, expected cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistHostfxr_x64, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: DotNetRedistHostfxr_x86, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i222: Planned rollback boundary: 'RB_SHAREDFX_REDIST_BUNDLE', vital: Yes, transaction: No (default: No)
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: SharedFxRedist_arm64, state: Absent, default requested: Absent, ba requested: Absent, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: No, uncache: Yes, dependency: None, expected install registration state: Absent, expected cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: SharedFxRedist_x64, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i201: Planned package: SharedFxRedist_x86, state: Present, default requested: Present, ba requested: Present, execute: None, rollback: None, default cache strategy: Keep, ba requested strategy: Keep, cache: Vital, uncache: No, dependency: Register, expected install registration state: Present, expected cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:18]i299: Plan complete, result: 0x0
+[0E34:1CF8][2026-10-24T09:42:18]i300: Apply begin
+[0E34:1CF8][2026-10-24T09:42:18]i010: Launching elevated engine process.
+[0E34:1CF8][2026-10-24T09:42:19]i011: Launched elevated engine process.
+[0E34:1CF8][2026-10-24T09:42:19]i012: Connected to elevated engine.
+[1378:17B8][2026-10-24T09:42:19]i358: Pausing automatic updates.
+[1378:17B8][2026-10-24T09:42:19]i359: Paused automatic updates.
+[1378:17B8][2026-10-24T09:42:19]i360: Creating a system restore point.
+[1378:17B8][2026-10-24T09:42:19]i362: System restore disabled, system restore point not created.
+[1378:17B8][2026-10-24T09:42:19]i370: Session begin, registration key: SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{235AA5E0-ECDD-424F-A5F9-39E696F70832}, scope: PerMachine, options: 0x3, disable resume: No
+[1378:17B8][2026-10-24T09:42:19]i000: Caching bundle from: 'C:\Windows\TEMP\{31DCF6AC-1955-4752-ADF2-4A3D463A3EB5}\.be\dotnet-hosting-10.0.13-win.exe' to: 'C:\ProgramData\Package Cache\{235AA5E0-ECDD-424F-A5F9-39E696F70832}\dotnet-hosting-10.0.13-win.exe'
+[1378:17B8][2026-10-24T09:42:19]i320: Registering bundle dependency provider: {235AA5E0-ECDD-424F-A5F9-39E696F70832}, version: 10.0.13.26504
+[1378:17B8][2026-10-24T09:42:19]i371: Updating session, registration key: SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{235AA5E0-ECDD-424F-A5F9-39E696F70832}, scope: PerMachine, resume: Active, restart initiated: No, disable resume: No
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: dotnet_hosting_options_10.0.13_win.msi at path: C:\ProgramData\Package Cache\.unverified\dotnet_hosting_options_10.0.13_win.msi, moving to: C:\ProgramData\Package Cache\{89FDA7CF-B56C-3022-9087-8E5E040CBD5F}v10.0.13.26504\dotnet-hosting-options-10.0.13-win.msi.
+[1378:17B8][2026-10-24T09:42:20]i323: Registering package dependency provider: {89FDA7CF-B56C-3022-9087-8E5E040CBD5F}_v10.0.13.26504, version: 10.0.13.26504, package: dotnet_hosting_options_10.0.13_win.msi
+[1378:17B8][2026-10-24T09:42:20]i301: Applying execute package: dotnet_hosting_options_10.0.13_win.msi, action: Install, path: C:\ProgramData\Package Cache\{89FDA7CF-B56C-3022-9087-8E5E040CBD5F}v10.0.13.26504\dotnet-hosting-options-10.0.13-win.msi, arguments: ' OPT_NO_ANCM="" OPT_NO_SHAREDFX="" OPT_NO_RUNTIME="" OPT_NO_X86="" OPT_NO_SHARED_CONFIG_CHECK="" ARPSYSTEMCOMPONENT="1" MSIFASTINSTALL="7" BURNMSIINSTALL=1 REINSTALLMODE="muso" REBOOT=ReallySuppress'
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: AspNetCoreModuleV2_x64 at path: C:\ProgramData\Package Cache\.unverified\AspNetCoreModuleV2_x64, moving to: C:\ProgramData\Package Cache\{A19FBDCB-1BDA-4B95-9980-3BC35A51F172}v110.0.26278.0\aspnetcoremodule_x64_en_v2_10.0.13.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: DotNetRedistLts_x64 at path: C:\ProgramData\Package Cache\.unverified\DotNetRedistLts_x64, moving to: C:\ProgramData\Package Cache\{8BAD77EC-3BDB-4F74-B5E9-F8C9CF2E5044}v80.52.61384\dotnet-runtime-10.0.13-win-x64.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: DotNetRedistLts_x86 at path: C:\ProgramData\Package Cache\.unverified\DotNetRedistLts_x86, moving to: C:\ProgramData\Package Cache\{B0C238ED-4E5D-42E0-AC8B-2A4FC493C4F6}v80.52.61384\dotnet-runtime-10.0.13-win-x86.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: DotNetRedistHost_x64 at path: C:\ProgramData\Package Cache\.unverified\DotNetRedistHost_x64, moving to: C:\ProgramData\Package Cache\{C7176B71-AE94-4DD0-BDAE-1BB274CAE6A9}v80.52.61384\dotnet-host-10.0.13-win-x64.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: DotNetRedistHost_x86 at path: C:\ProgramData\Package Cache\.unverified\DotNetRedistHost_x86, moving to: C:\ProgramData\Package Cache\{E9DB0815-5B52-48C2-BD1F-A1575BA0A9E9}v80.52.61384\dotnet-host-10.0.13-win-x86.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: DotNetRedistHostfxr_x64 at path: C:\ProgramData\Package Cache\.unverified\DotNetRedistHostfxr_x64, moving to: C:\ProgramData\Package Cache\{D03467F7-2366-46E4-A6CB-66FD9BA9B91F}v80.52.61384\dotnet-hostfxr-10.0.13-win-x64.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: DotNetRedistHostfxr_x86 at path: C:\ProgramData\Package Cache\.unverified\DotNetRedistHostfxr_x86, moving to: C:\ProgramData\Package Cache\{3371CE4D-455B-4275-85D6-17F4885AC34F}v80.52.61384\dotnet-hostfxr-10.0.13-win-x86.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: SharedFxRedist_x64 at path: C:\ProgramData\Package Cache\.unverified\SharedFxRedist_x64, moving to: C:\ProgramData\Package Cache\{9F9AFF00-F166-4D3C-94AA-E57B64055B61}v80.52.61384\aspnetcore-runtime-10.0.13-win-x64.msi.
+[1378:22E0][2026-10-24T09:42:20]i305: Verified acquired payload: SharedFxRedist_x86 at path: C:\ProgramData\Package Cache\.unverified\SharedFxRedist_x86, moving to: C:\ProgramData\Package Cache\{3764EC1E-F7EC-4EE7-B5E7-08CBF9011506}v80.52.61384\aspnetcore-runtime-10.0.13-win-x86.msi.
+[0E34:1CF8][2026-10-24T09:42:21]i319: Applied execute package: dotnet_hosting_options_10.0.13_win.msi, result: 0x0, restart: None
+[1378:17B8][2026-10-24T09:42:21]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: {89FDA7CF-B56C-3022-9087-8E5E040CBD5F}_v10.0.13.26504, package: dotnet_hosting_options_10.0.13_win.msi
+[1378:17B8][2026-10-24T09:42:21]i301: Applying execute package: AspNetCoreModuleV2_x64, action: Install, path: C:\ProgramData\Package Cache\{A19FBDCB-1BDA-4B95-9980-3BC35A51F172}v110.0.26278.0\aspnetcoremodule_x64_en_v2_10.0.13.msi, arguments: ' OPT_NO_SHARED_CONFIG_CHECK="" ARPSYSTEMCOMPONENT="1" MSIFASTINSTALL="7" BURNMSIINSTALL=1 REINSTALLMODE="muso" REBOOT=ReallySuppress'
+[0E34:1CF8][2026-10-24T09:42:22]i319: Applied execute package: AspNetCoreModuleV2_x64, result: 0x0, restart: None
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: IIS_AspNetCore_Module_V2,x64, package: AspNetCoreModuleV2_x64
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: dotnet_runtime_80.52.61384_x64, package: DotNetRedistLts_x64
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: dotnet_runtime_80.52.61384_x86, package: DotNetRedistLts_x86
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: Dotnet_CLI_SharedHost_10.0_x64, package: DotNetRedistHost_x64
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: Dotnet_CLI_SharedHost_10.0_x86, package: DotNetRedistHost_x86
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: Dotnet_CLI_HostFxr_80.52.61384_x64, package: DotNetRedistHostfxr_x64
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: Dotnet_CLI_HostFxr_80.52.61384_x86, package: DotNetRedistHostfxr_x86
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: aspnetcore_runtime_80.52.61384_x64, package: SharedFxRedist_x64
+[1378:17B8][2026-10-24T09:42:22]i325: Registering dependency: {235AA5E0-ECDD-424F-A5F9-39E696F70832} on package provider: aspnetcore_runtime_80.52.61384_x86, package: SharedFxRedist_x86
+[1378:17B8][2026-10-24T09:42:22]i351: Removing cached package: AspNetCoreModuleV2_x86, from path: C:\ProgramData\Package Cache\{BD2D6D0E-5DC8-4A38-A649-B88312B6F2A1}v110.0.26278.0\
+[1378:17B8][2026-10-24T09:42:22]i351: Removing cached package: AspNetCoreModuleV2_arm64, from path: C:\ProgramData\Package Cache\{882AE162-F584-479C-987A-3CE666EEE7BD}v110.0.26278.0\
+[1378:17B8][2026-10-24T09:42:22]i351: Removing cached package: DotNetRedistLts_arm64, from path: C:\ProgramData\Package Cache\{1A2A898B-D167-440A-BDE6-F949A4475A33}v80.52.61384\
+[1378:17B8][2026-10-24T09:42:22]i351: Removing cached package: DotNetRedistHost_arm64, from path: C:\ProgramData\Package Cache\{2F6CAA93-A7DD-46DD-B5BF-90A1D85FD2C4}v80.52.61384\
+[1378:17B8][2026-10-24T09:42:22]i351: Removing cached package: DotNetRedistHostfxr_arm64, from path: C:\ProgramData\Package Cache\{686355AD-62FE-477B-BF4A-B90F36CED9F5}v80.52.61384\
+[1378:17B8][2026-10-24T09:42:22]i351: Removing cached package: SharedFxRedist_arm64, from path: C:\ProgramData\Package Cache\{BBE20045-2CFF-4039-9310-82A2DB419E52}v80.52.61384\
+[0E34:1CF8][2026-10-24T09:42:22]i373: Calculating whether to keep registration
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: dotnet_hosting_options_10.0.13_win.msi, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: AspNetCoreModuleV2_x86, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: AspNetCoreModuleV2_x64, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: AspNetCoreModuleV2_arm64, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistLts_arm64, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistLts_x64, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistLts_x86, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistHost_arm64, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistHost_x64, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistHost_x86, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistHostfxr_arm64, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistHostfxr_x64, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: DotNetRedistHostfxr_x86, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: SharedFxRedist_arm64, install registration state: Absent, cache registration state: Absent
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: SharedFxRedist_x64, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i374:   package: SharedFxRedist_x86, install registration state: Present, cache registration state: Present
+[0E34:1CF8][2026-10-24T09:42:22]i372: Session end, registration key: SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{235AA5E0-ECDD-424F-A5F9-39E696F70832}, scope: PerMachine, resume: ARP, restart: None, disable resume: No, default registration: Full, ba requested registration: Full
+[1378:17B8][2026-10-24T09:42:22]i371: Updating session, registration key: SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{235AA5E0-ECDD-424F-A5F9-39E696F70832}, scope: PerMachine, resume: ARP, restart initiated: No, disable resume: No
+[1378:17B8][2026-10-24T09:42:22]i420: Resuming automatic updates.
+[1378:17B8][2026-10-24T09:42:22]i421: Resumed automatic updates.
+[0E34:1CBC][2026-10-24T09:42:22]i000: Setting string variable 'WixStdBARestartRequired' to value ''
+[0E34:1CF8][2026-10-24T09:42:22]i399: Apply complete, result: 0x0, restart: None, ba requested restart:  No
+[0E34:1CF8][2026-10-24T09:42:22]i500: Shutting down, exit code: 0x0
+[0E34:1CF8][2026-10-24T09:42:22]i502: Cleanup begin.
+[0E34:1CF8][2026-10-24T09:42:22]i503: Cleanup not required due to running Apply.
+[0E34:1CF8][2026-10-24T09:42:22]i599: Cleanup complete, result: 0x0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: BundleNameShort = Microsoft .NET 10.0.13
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: BundleNameSub = Windows Server Hosting
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: IISCoreWebEngineInstalled_x64 = 1
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: IISCoreWebEngineInstalled_x86 = 1
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: IISEnabled = 1
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: IISW3SVCInstalled_x64 = 1
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: IISW3SVCInstalled_x86 = 1
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: NativeMachine = 34404
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: OPT_NO_ANCM_Exists = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: OPT_NO_RUNTIME_Exists = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: OPT_NO_SHARED_CONFIG_CHECK_Exists = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: OPT_NO_SHAREDFX_Exists = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: OPT_NO_X86_Exists = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: RebootPending = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: RemoveSpecificPreviousVersionRegistryKeyExists = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: RemoveUpgradeRelatedBundle = always
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: VersionNT = 10.0.0.0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: VersionNT64 = 10.0.0.0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleAction = 6
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleCommandLineAction = 6
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleElevated = 1
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleFileVersion = 6.0.3.6
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleInProgressName = 
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleInstalled = 0
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleLog = D:\INNCO\logs\hosting-bundle.log
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleLog_AspNetCoreModuleV2_x64 = D:\INNCO\logs\hosting-bundle_001_AspNetCoreModuleV2_x64.log
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleLog_dotnet_hosting_options_10.0.13_win.msi = D:\INNCO\logs\hosting-bundle_000_dotnet_hosting_options_10.0.13_win.msi.log
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleManufacturer = Microsoft Corporation
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleName = Microsoft .NET 10.0.13 - Windows Server Hosting
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleOriginalSource = C:\Users\RUNNER~1\AppData\Local\Temp\dotnet-hosting-10-win.exe
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleOriginalSourceFolder = C:\Users\RUNNER~1\AppData\Local\Temp\
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleProviderKey = {235AA5E0-ECDD-424F-A5F9-39E696F70832}
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleRollbackLog_AspNetCoreModuleV2_x64 = D:\INNCO\logs\hosting-bundle_001_AspNetCoreModuleV2_x64_rollback.log
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleRollbackLog_dotnet_hosting_options_10.0.13_win.msi = D:\INNCO\logs\hosting-bundle_000_dotnet_hosting_options_10.0.13_win.msi_rollback.log
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleSourceProcessFolder = C:\Users\RUNNER~1\AppData\Local\Temp\
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleSourceProcessPath = C:\Users\RUNNER~1\AppData\Local\Temp\dotnet-hosting-10-win.exe
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleTag = 
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleUILevel = 2
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixBundleVersion = 10.0.13.26504
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixStdBALanguageId = 1033
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixStdBARestartRequired = 
+[0E34:1CF8][2026-10-24T09:42:22]i410: Variable: WixStdBASuppressOptionsUI = 1
+[0E34:1CF8][2026-10-24T09:42:22]i007: Exit code: 0x0, restarting: No

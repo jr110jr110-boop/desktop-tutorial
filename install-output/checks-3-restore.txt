@@ -1,0 +1,14 @@
+PASS  home page shows the user interface  http=200
+PASS  page address inside the program  http=200
+PASS  javascript asset  /assets/index.90fb1446.js http=200 type=text/javascript
+PASS  unknown API address answers 404  http=404
+PASS  sign in as Admin  token length=824
+PASS  contracts list (database query)  http=200 bytes=133
+PASS  download the uploaded document  http=200
+PASS  uploaded files on disk  2 files in UploadedDocuments
+PASS  backup task exists  state=Ready lastResult=0
+PASS  database backup files  IRNNCO_20261024_0943.bak=8380416 IRNNCO_before-restore_20261024_0944.bak=8904704 IRNNCO_20261024_0944.bak=8904704
+PASS  file backup copy  4 files
+PASS  old program files were brought over  old-upload.txt and old-doc.txt present
+PASS  old document served as a static file  http=200
+PASS  safety backup made before the restore  IRNNCO_before-restore_20261024_0944.bak

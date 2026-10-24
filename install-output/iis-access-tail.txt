@@ -1,0 +1,28 @@
+#Software: Microsoft Internet Information Services 10.0
+#Version: 1.0
+#Date: 2026-10-24 09:43:25
+#Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) cs(Referer) sc-status sc-substatus sc-win32-status sc-bytes cs-bytes time-taken
+2026-10-24 09:43:25 ::1 GET /swagger/v1/swagger.json - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 1473614 178 32181
+2026-10-24 09:43:25 ::1 GET / - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 131 79
+2026-10-24 09:43:25 ::1 GET /contract/list - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 144 2
+2026-10-24 09:43:25 ::1 POST /api/v1/Accounts/login - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 2246 278 572
+2026-10-24 09:43:33 ::1 GET / - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 155 3
+2026-10-24 09:43:33 ::1 GET /contract/update/5 - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 148 1
+2026-10-24 09:43:33 ::1 GET / - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 131 0
+2026-10-24 09:43:33 ::1 GET /assets/index.90fb1446.js - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 348645 155 25
+2026-10-24 09:43:33 ::1 GET /api/v1/NoSuchThing/x - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 404 0 0 707 151 7
+2026-10-24 09:43:33 ::1 POST /api/v1/Accounts/login - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 2246 278 133
+2026-10-24 09:43:34 ::1 GET /api/v1/Contracts PageNumber=1&PageSize=10 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 308 1020 942
+2026-10-24 09:43:34 ::1 POST /api/v1/Documents Description=ci&Name=ci-upload&Code=ci1 80 - ::1 curl/8.21.0 - 200 0 0 212 1318 64
+2026-10-24 09:43:34 ::1 GET /api/v1/Documents DocumentId=330b4094-520d-4f73-3598-08df31b34582 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 279 1043 34
+2026-10-24 09:44:08 ::1 GET /swagger/v1/swagger.json - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 1473614 178 9664
+2026-10-24 09:44:08 ::1 GET / - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 131 72
+2026-10-24 09:44:08 ::1 GET /contract/list - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 144 3
+2026-10-24 09:44:15 ::1 GET / - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 155 5
+2026-10-24 09:44:15 ::1 GET /contract/update/5 - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 148 1
+2026-10-24 09:44:15 ::1 GET / - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 131 0
+2026-10-24 09:44:15 ::1 GET /assets/index.90fb1446.js - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 348645 155 20
+2026-10-24 09:44:15 ::1 GET /api/v1/NoSuchThing/x - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 404 0 0 707 151 5
+2026-10-24 09:44:15 ::1 POST /api/v1/Accounts/login - 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 2246 278 743
+2026-10-24 09:44:16 ::1 GET /api/v1/Contracts PageNumber=1&PageSize=10 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 308 1020 269
+2026-10-24 09:44:16 ::1 GET /api/v1/Documents DocumentId=330b4094-520d-4f73-3598-08df31b34582 80 - ::1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 279 1043 60
