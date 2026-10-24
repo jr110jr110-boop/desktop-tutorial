@@ -173,7 +173,7 @@ namespace Services.NasbNiro.Finance
 
         private sealed class OurItem
         {
-            public DateTime Date; public string Kind; public string Number; public decimal Credit, Debit; public HashSet<string> Aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase); public bool Used;
+            public DateTime Date; public string Kind; public string Number; public decimal Credit, Debit; public HashSet<string> External = new HashSet<string>(StringComparer.OrdinalIgnoreCase); public bool Used;
         }
 
         private sealed class StatementCore
@@ -200,14 +200,17 @@ namespace Services.NasbNiro.Finance
                     && ((l.Detail1 != null && l.Detail1.Type == FnDetailType.Supplier && l.Detail1.LinkedEntityId == providerId) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Supplier && l.Detail2.LinkedEntityId == providerId)))
                 .OrderBy(l => l.Voucher.Date).ThenBy(l => l.VoucherId).ThenBy(l => l.RowNumber)
                 .Select(l => new { l.Voucher.Date, l.Voucher.Type, l.Voucher.SourceType, l.Voucher.SourceNumber, l.Voucher.Number, l.Voucher.TemporaryNumber, l.Debit, l.Credit }).ToListAsync(ct);
-            Dictionary<string, string> invoiceNumbers = await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking().Where(i => i.ProviderId == providerId && !i.Deleted && i.InvoiceNumber != null)
-                .ToDictionaryAsync(i => i.Number, i => i.InvoiceNumber, ct);
+            // the supplier's own references: the invoice number written on our purchase invoice, the supplier's number on credit/debit notes, the payment references (bank reference, cheque Sayad id)
+            var external = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            void AddExternal(string ours, string theirsNumber) { if (ours == null || string.IsNullOrWhiteSpace(theirsNumber)) return; if (!external.TryGetValue(ours, out var list)) external[ours] = list = new List<string>(); list.Add(theirsNumber.Trim()); }
+            foreach (var si in await _uow.Set<Entities.Model.NasbNiro.Procurement.SupplierInvoice>().AsNoTracking().Where(x => x.ProviderId == providerId && !x.Deleted && x.InvoiceNumber != null).Select(x => new { x.Number, x.InvoiceNumber }).ToListAsync(ct)) AddExternal(si.Number, si.InvoiceNumber);
+            foreach (var sn in await _uow.Set<FnSupplierNote>().AsNoTracking().Where(x => x.ProviderId == providerId && x.NoteNumber != null).Select(x => new { x.Number, x.NoteNumber }).ToListAsync(ct)) AddExternal(sn.Number, sn.NoteNumber);
+            foreach (var pl in await _uow.Set<FnPaymentLine>().AsNoTracking().Where(x => x.Payment.ProviderId == providerId).Select(x => new { x.Payment.Number, x.Reference, x.ChequeSayadId }).ToListAsync(ct)) { AddExternal(pl.Number, pl.Reference); AddExternal(pl.Number, pl.ChequeSayadId); }
             foreach (var r in rows)
             {
                 string number = r.SourceNumber ?? (r.Number.HasValue ? r.Number.Value.ToString(CultureInfo.InvariantCulture) : "T" + r.TemporaryNumber.ToString(CultureInfo.InvariantCulture));
                 var item = new OurItem { Date = r.Date, Kind = r.Type == FnVoucherType.Opening ? "Opening" : r.SourceType ?? "Voucher", Number = number, Credit = r.Credit, Debit = r.Debit };
-                item.Aliases.Add(number);
-                if (r.SourceNumber != null && invoiceNumbers.TryGetValue(r.SourceNumber, out string theirNumber)) item.Aliases.Add(theirNumber);
+                if (r.SourceNumber != null && external.TryGetValue(r.SourceNumber, out List<string> mine)) foreach (string t in mine) item.External.Add(t);
                 core.Ours.Add(item);
             }
             core.OurBalance = core.Ours.Sum(i => i.Credit - i.Debit);
@@ -218,7 +221,18 @@ namespace Services.NasbNiro.Finance
                 var line = new FnStatementLineDto { RowNumber = n, Date = l.Date.Date, DocumentNumber = Clean(l.DocumentNumber), Description = Clean(l.Description), Credit = R(l.Credit), Debit = R(l.Debit) };
                 OurItem hit = null;
                 bool Same(OurItem i) => !i.Used && i.Credit == line.Credit && i.Debit == line.Debit;
-                if (line.DocumentNumber != null) hit = core.Ours.FirstOrDefault(i => Same(i) && i.Aliases.Contains(line.DocumentNumber));
+                if (line.DocumentNumber != null)
+                {
+                    // order: the supplier's own number (exact amount) -> our internal number (exact amount) -> a number match with another amount, reported as an amount difference
+                    List<OurItem> byTheirs = core.Ours.Where(i => !i.Used && i.External.Contains(line.DocumentNumber)).ToList();
+                    List<OurItem> byOurs = core.Ours.Where(i => !i.Used && string.Equals(i.Number, line.DocumentNumber, StringComparison.OrdinalIgnoreCase)).ToList();
+                    hit = byTheirs.FirstOrDefault(Same) ?? byOurs.FirstOrDefault(Same);
+                    if (hit == null)
+                    {
+                        hit = byTheirs.FirstOrDefault() ?? byOurs.FirstOrDefault();
+                        if (hit != null) line.AmountDifference = (line.Credit - line.Debit) - (hit.Credit - hit.Debit);
+                    }
+                }
                 if (hit == null) hit = core.Ours.Where(Same).OrderBy(i => Math.Abs((i.Date - line.Date).TotalDays)).FirstOrDefault();
                 if (hit != null) { hit.Used = true; line.MatchedKind = hit.Kind; line.MatchedNumber = hit.Number; }
                 core.Lines.Add(line);
@@ -234,7 +248,7 @@ namespace Services.NasbNiro.Finance
                 Lines = core.Lines, UnmatchedTheirs = core.Lines.Where(l => l.MatchedKind == null).ToList(),
                 UnmatchedOurs = core.Ours.Where(i => !i.Used).Select(i => new FnOurItemDto { Date = i.Date, Kind = i.Kind, Number = i.Number, Credit = i.Credit, Debit = i.Debit }).ToList(),
             };
-            dto.Explained = dto.UnmatchedTheirs.Sum(l => l.Credit - l.Debit) - dto.UnmatchedOurs.Sum(i => i.Credit - i.Debit);
+            dto.Explained = dto.UnmatchedTheirs.Sum(l => l.Credit - l.Debit) - dto.UnmatchedOurs.Sum(i => i.Credit - i.Debit) + core.Lines.Where(l => l.MatchedKind != null).Sum(l => l.AmountDifference ?? 0);
             dto.Unexplained = dto.Difference - dto.Explained;
             dto.Reconciled = dto.Unexplained == 0;
             return dto;

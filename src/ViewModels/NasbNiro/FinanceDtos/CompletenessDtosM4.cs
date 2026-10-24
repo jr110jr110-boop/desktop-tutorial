@@ -432,6 +432,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal Debit { get; set; }
         public string MatchedKind { get; set; }
         public string MatchedNumber { get; set; }
+        /// <summary>Set when the document number matched but the amount did not: their net (credit minus debit) minus ours.</summary>
+        public decimal? AmountDifference { get; set; }
     }
 
     public class FnOurItemDto
