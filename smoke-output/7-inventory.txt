@@ -1,0 +1,1534 @@
+PASS API description (swagger) is generated without schema name conflicts
+PASS login admin (PMO)
+PASS login commercial and CEO users
+PASS login warehouse supervisor and planning users
+PASS login warehouse, production, QC, engineering, security users
+PASS group create
+PASS sub-group create
+PASS group cycle rejected
+PASS item material (lot)
+PASS item part (serial)
+PASS item MESC standard part (none)
+PASS item product (serial)
+PASS duplicate item code rejected
+PASS item by code
+PASS warehouse 1
+PASS warehouse 2
+PASS location A-01
+PASS location A-02
+PASS location M-01
+PASS procurement settings seeded from the procedures
+PASS purchase order rule switched off for go-live
+PASS receipt draft saved
+PASS draft with serial count != quantity is saved (checked at confirm)
+PASS confirm rejects serial count mismatch
+PASS draft delete
+PASS receipt confirmed + numbered
+PASS second confirm rejected
+PASS stock RM-001 = 500.5
+PASS stock SH-100 = 2 at A-01
+PASS serial S-1 in stock
+PASS lot H-7781 created with heat and certificate
+PASS receipt of an existing serial rejected
+PASS transfer beyond stock rejected
+PASS transfer confirmed
+PASS S-1 now in WH-WIP / M-01
+PASS bolts split 60 / 40
+PASS issue without a material request rejected
+PASS material request draft
+PASS material request submitted + numbered
+PASS issue against a request not yet approved rejected
+PASS request approved by planning
+PASS planning user cannot also approve for manufacturing
+PASS request approved by manufacturing -> approved
+PASS request shows availability
+PASS issue above the requested quantity rejected
+PASS issue of an item not in the request rejected
+PASS issue confirmed
+PASS request fully issued -> closed
+PASS stock RM-001 = 400.5
+PASS S-2 in production
+PASS kardex RM-001: 2 rows, closing 400.5
+PASS low-stock list has the bolt (100 < 500)
+PASS template 10
+PASS template 20 (QC)
+PASS group template
+PASS routing applied: item templates win over group
+PASS routing applied twice: no duplicates
+PASS op start
+PASS op finish
+PASS QC before finish rejected
+PASS op2 finished, waits for QC
+PASS QC reject without note rejected
+PASS QC accept
+PASS file link to unknown upload rejected
+PASS file upload (Documents)
+PASS operation file link
+PASS QC queue filter
+PASS rotor serial created (label number YYDDDNNNN)
+PASS install of a serial still in stock rejected
+PASS S-2 installed in rotor
+PASS assembly cycle rejected
+PASS lot material installed in rotor
+PASS rotor trace: child S-2 + lot H-7781
+PASS S-2 trace: parent rotor, 2 operations, receipt + issue moves
+PASS lot trace: used in rotor (where-used)
+PASS scan label S/<code>/S-2
+PASS scan label L/<code>/H-7781
+PASS scan label LOC/WH-RM/A-01
+PASS cancel without reason rejected
+PASS cancel of issue blocked (S-2 installed)
+PASS transfer cancelled
+PASS S-1 back in WH-RM
+PASS bolt kardex shows reversal, closing 100
+PASS S-2 removed from rotor
+PASS S-2 back to in-production
+PASS item with transactions cannot be deleted
+PASS tracking mode locked after movements
+PASS import: 1 new, 1 updated, 1 group; non-standard code listed as warning
+PASS sepidar check: RC and IS pending (transfer cancelled before export)
+PASS sepidar outbox
+PASS sepidar CSV export (UTF-8 BOM)
+PASS exported documents marked
+PASS exported issue cancelled -> pending for Sepidar again
+PASS cancelled exported issue goes to Sepidar as reversal
+PASS stock RM-001 back to 500.5
+PASS S-2 back in stock
+PASS mapping to missing work order rejected
+PASS login financial user
+PASS financial user cannot write documents (403)
+PASS financial user can use Sepidar page
+PASS financial user can read stock
+PASS login second planning user
+PASS coding tables seeded: 42 part statuses, 5 stockable (★)
+PASS part code check: assembly Rotor, final part
+PASS assembly 600 outside every range rejected
+PASS milling status (14) is not a stockable stage
+PASS MESC code -> group 08
+PASS short code rejected
+PASS warehouse user cannot create a new code
+PASS item with a non-stockable stage rejected (★)
+PASS item request by engineering
+PASS engineering cannot approve its own request (403)
+PASS planning approves -> item created
+PASS item rough-machined stage of the casing
+PASS other stages of the same part are listed
+PASS item SS304 plate (lot, needs inspection)
+PASS quarantine, scrap and contractor warehouses
+PASS receipt of an item that needs inspection outside quarantine rejected
+PASS receipt into quarantine confirmed
+PASS lot gets the label number YYDDDNNNN
+PASS transfer out of quarantine without QC rejected
+PASS two inspections waiting
+PASS QC by planning user: reject reason is required
+PASS warehouse user cannot record inspection (403)
+PASS plate inspection: 45 released, 5 to NCR
+PASS casting inspection: C-3 rejected
+PASS plate: 45 in main warehouse, 5 in quarantine
+PASS receipt with finished inspections cannot be cancelled
+PASS NCR1 classified: minor, scrap
+PASS NCR1 signed by QC
+PASS QC cannot sign for engineering
+PASS NCR1 signed by engineering
+PASS NCR1 signed by manufacturing -> approved
+PASS scrap disposition needs the scrap warehouse
+PASS NCR1 executed: moved to scrap
+PASS plate: 5 in scrap
+PASS close without corrective action rejected
+PASS NCR1 closed
+PASS major NCR: the system drafts the CAPA and the decision due date is set (14 days, company setting)
+PASS major NCR without committee minutes rejected
+PASS major NCR with fewer than three committee members rejected
+PASS concession still needs its permit
+PASS concession without customer approval rejected (contract requires it)
+PASS signatures kept when only the customer reference is added
+PASS concession issued -> approved
+PASS NCR2 executed: C-3 released with concession
+PASS C-3 in the main warehouse
+PASS transfer to scrap without NCR rejected
+PASS conversion without source row rejected
+PASS stage conversion confirmed
+PASS new label linked to the casting label C-1
+PASS C-1 marked converted
+PASS subcontractor created
+PASS subcontract issue without contractor rejected
+PASS subcontract issue needs driver, plate, receiver
+PASS subcontract issue confirmed: C-2 at the contractor
+PASS guard records the exit
+PASS second exit check rejected
+PASS document that left the premises cannot be cancelled
+PASS plain transfer out of the contractor warehouse rejected
+PASS return from contractor into quarantine
+PASS return from contractor waits for inspection
+PASS customer delivery without contract rejected
+PASS adjustment without approvals rejected
+PASS planning user cannot approve as warehouse
+PASS creator cannot approve
+PASS storekeeper cannot approve an adjustment (segregation)
+PASS warehouse supervisor approves
+PASS supervisor cannot also approve for planning
+PASS planning manager approves
+PASS approved adjustment confirmed
+PASS scrap receipt outside the scrap warehouse rejected
+PASS scrap sale without buyer, minutes, weighbridge, deposit rejected
+PASS scrap sale with two quotes rejected
+PASS scrap sale without finance approval rejected
+PASS creator cannot approve the scrap sale for finance
+PASS finance approves price and deposit
+PASS scrap sale confirmed
+PASS cycle count started with a snapshot
+PASS second open count of the same warehouse rejected
+PASS submit before every line is counted rejected
+PASS counts saved: one difference of -3
+PASS count submitted
+PASS post before approvals rejected
+PASS storekeeper cannot approve the count
+PASS count approved by warehouse supervisor
+PASS count approved by planning
+PASS count posted: decrease adjustment made
+PASS bolt stock lowered by 3
+PASS warehouse frozen during the annual count
+PASS after the count is cancelled the transfer is confirmed
+PASS opening import with an unknown item creates nothing
+PASS opening import of the valid rows: one draft, location created
+PASS opening balance needs the two approvals
+PASS approved opening balance confirmed
+PASS accounting events written for confirmed documents
+PASS every accounting event is balanced
+PASS stock value equals the inventory balance of the events
+PASS account roles seeded for Sepidar mapping
+PASS Sepidar account code saved
+PASS Sepidar readiness check lists unmapped roles
+PASS voucher file for Sepidar
+PASS cost report of work orders
+PASS two suppliers created
+PASS only planning writes a BOM purchase request
+PASS purchase request submitted (40M rial)
+PASS requester cannot approve own request
+PASS planning approved; medium purchase still waits for the CEO
+PASS CEO approval completes the request
+PASS supplier evaluation: weighted score and grade A
+PASS only commercial takes quotes
+PASS inquiry needs two quotes for 40M rial
+PASS one quote is not enough
+PASS second quote added
+PASS choosing a dearer quote needs a reason
+PASS quote selected, inquiry approved
+PASS purchase order draft from the inquiry
+PASS buyer cannot approve the order
+PASS order approved by PMO
+PASS order released to the supplier
+PASS request marked ordered
+PASS receipt against the order: supplier and order price taken
+PASS order partly received (60 of 100)
+PASS receipt above the open order quantity rejected
+PASS invoice above the received quantity rejected (three-way match)
+PASS invoice matched with order and receipt
+PASS invoice creator cannot approve it
+PASS finance approves the invoice
+PASS same supplier invoice number cannot be registered twice
+PASS payment above the invoice rejected
+PASS payment request for the approved invoice
+PASS buyer cannot approve the payment
+PASS payment approved by PMO
+PASS payment needs the bank or Sepidar reference
+PASS r1: the old pay action needs the paying bank account (the bank side of the entry is always linked)
+PASS r2 f23: the old pay action creates a DRAFT treasury payment (request stays approved, not paid)
+PASS r2 f23: finance manager approves the draft (IBAN equals the registered one)
+PASS finance records the payment
+PASS invoice event: GRNI cleared, VAT and payable to the supplier
+PASS goods received not invoiced is zero for the supplier
+PASS every accounting event is balanced (with procurement)
+PASS stock value still equals the events after procurement
+PASS supplier list shows grade and on-time delivery
+PASS CEO dashboard: stock value, payables and projects
+PASS storekeeper cannot open the CEO dashboard (403)
+PASS purchase order rule switched on
+PASS receipt without order and price rejected
+PASS receipt without order above petty cash rejected
+PASS petty-cash receipt without order accepted
+PASS quality: login QA (role 14) and second QC user
+PASS quality: user ids resolved
+PASS quality: contract created
+PASS quality: pump equipment created
+PASS quality: contract equipment
+PASS quality: work order 1
+PASS quality: work order 2
+PASS ITP templates seeded: steam turbine 37 rows, pump, condenser, lube oil
+PASS pump template: hydro test has H/H/W and no invented test pressure
+PASS warehouse user cannot create an ITP
+PASS ITP drafted from the pump template
+PASS second ensure returns the same ITP
+PASS activity with an H point cannot be done before the client approved the ITP
+PASS client approval before submission rejected
+PASS ITP submitted
+PASS client approval needs the client letter reference
+PASS engineering cannot record the client approval
+PASS ITP approved by the client (letter reference kept)
+PASS H point: done refused without the vendor release
+PASS only QC records a point release
+PASS H point cannot be waived
+PASS vendor H release recorded
+PASS H point released -> activity done, ITP in use
+PASS production cannot mark an activity not applicable
+PASS not applicable needs a reason
+PASS run test marked not applicable with a reason
+PASS performance test marked not applicable
+PASS first record of work order 2 saved (PMO may write non-ITP records)
+PASS ITP of work order 2 was drafted by the system when the first record was saved
+PASS default calibration intervals seeded with their source
+PASS warehouse user cannot register measuring equipment
+PASS equipment registered with an INN-IST code and the default interval
+PASS never calibrated instrument is overdue (computed, not stored)
+PASS record with an uncalibrated instrument rejected
+PASS calibration without a traceability statement rejected (ISO 7.1.5.1)
+PASS only QC registers a calibration
+PASS calibration registered: valid for the interval
+PASS expired certificate -> overdue
+PASS overdue instrument cannot be used
+PASS calibration failed as-left -> out of service
+PASS out-of-service instrument cannot be used
+PASS return to service needs a valid calibration first
+PASS due list holds the instrument due within 30 days and the overdue ones
+PASS pressure gauge calibrated
+PASS dimensional record with a calibrated instrument
+PASS accepting an out-of-tolerance measurement rejected
+PASS ITP inspections are QC only (operator refused)
+PASS operator self-inspection allowed outside the ITP and marked as such
+PASS second record with the same instrument (item known)
+PASS reject without an item (no NCR possible) rejected
+PASS reject drafts an NCR automatically (with source record, due date, not classified)
+PASS auto NCR: not classified, decision deadline set, source record linked, work order 2
+PASS release note drafted while points are still open (cannot be released yet)
+PASS release refused while H/W points and reports are open (computed checks named in the answer)
+PASS release checks computed: ITP approved, points still open
+PASS test report made with instrument G1 (before its failed calibration)
+PASS calibration with a failed as-found: instrument usable again, impact case opened
+PASS case lists every document made with the instrument since the previous good calibration
+PASS the case lists the affected test report and the affected inspection records
+PASS release gate: out-of-tolerance impact of work order 1 not assessed
+PASS case cannot be closed while documents are not assessed
+PASS assessment needs a written note
+PASS every item assessed; the one with an item got its NCR drafted
+PASS case closed after the assessments
+PASS release gate: OOT check passes after the assessments
+PASS PT standard rows: dwell time maximum 10 min as printed, no invented minimum
+PASS hydro standard rows have no limits (engineering sets them)
+PASS run test overspeed trip limits 107.8 - 112.2
+PASS NDT person registered
+PASS warehouse cannot register qualified persons
+PASS NDT qualification PT level II registered
+PASS expired certificate is stored as expired (computed)
+PASS NDT certificate needs ASNT SNT-TC-1A or ISO 9712 scheme
+PASS PT report saved as draft (level I examiner)
+PASS PT report by a level I examiner cannot be submitted
+PASS PT report with an expired certificate cannot be submitted
+PASS PT report with an MT certificate cannot be submitted (method mismatch)
+PASS PT report with a valid level II examiner has no problems; pass computed by the server
+PASS only QC submits a report
+PASS PT report submitted; result Pass
+PASS the examiner cannot approve his own report (segregation of duties)
+PASS second QC approves the PT report
+PASS an approved report cannot be edited
+PASS dwell time 11 min computes Fail
+PASS failed report without an item (no NCR possible) cannot be submitted
+PASS failed report submitted: NCR drafted automatically
+PASS run test without the mandatory rows cannot be submitted
+PASS overspeed 113 % is outside 107.8 - 112.2 -> Fail
+PASS report type must match the ITP activity (hydro activity needs a hydro report)
+PASS report with an overdue instrument rejected
+PASS hydro report: test pressure has no limit yet (unknown, not invented)
+PASS hydro report cannot be submitted without engineering limits
+PASS QC cannot set acceptance limits (engineering decides)
+PASS engineering sets the limit on the ITP
+PASS inverted limits rejected
+PASS report re-evaluated against the engineering limit: Pass
+PASS activity 2: done refused (vendor H, TPI W notice and report missing)
+PASS activity 2 vendor H release
+PASS activity 2: W point needs the witness notice; the report is still missing
+PASS witness notice sent 12 days ago (notice period 10 days)
+PASS report still required for activity 2
+PASS dimensional report submitted
+PASS approved by the second QC
+PASS approved passing report completes activity 2; the TPI witness was waived by notice (W only)
+PASS hydro report submitted
+PASS hydro report approved
+PASS approved report alone does not finish the activity: H points of vendor and TPI are open
+PASS vendor H release on the hydro test
+PASS TPI H release completes the hydro activity (client W waived by notice)
+PASS pending points list holds the packing H point only
+PASS PQR drafted by planning/PMO
+PASS PQR approved by engineering (not its creator)
+PASS engineer cannot approve a PQR he created
+PASS WPS without an approved PQR cannot be approved
+PASS WPS drafted
+PASS engineering cannot give the QC approval
+PASS QC cannot give the engineering approval
+PASS QC approval recorded; WPS still not approved
+PASS weld log against a WPS with only one approval rejected
+PASS WPS approved after the second, different approver
+PASS creator of a WPS cannot approve it (segregation of duties)
+PASS welder without welding for more than six months is lapsed (computed)
+PASS weld log by a qualified welder on an approved WPS
+PASS welder certified for SMAW cannot weld a GTAW WPS
+PASS lapsed welder cannot weld (continuity broken)
+PASS preheat below the WPS minimum rejected
+PASS interpass above the WPS maximum rejected
+PASS weld log against a WPS that is not approved rejected
+PASS only QC writes weld logs
+PASS chain: weld 250 days ago within the first six months
+PASS chain: weld today, last weld 250 days ago -> lapsed
+PASS chain: weld 150 days ago still inside six months of the previous weld
+PASS chain: weld today is inside six months of the weld 150 days ago
+PASS re-test registered as renewal
+PASS renewed qualification can weld
+PASS old certificate is superseded and cannot be used
+PASS revoking needs a reason
+PASS qualification revoked
+PASS revoked qualification cannot be used
+PASS continuity list shows the welder whose six months end within 30 days
+PASS weld logs of work order 2: 5 accepted
+PASS warehouse registers the certificate of the lot (pending)
+PASS warehouse cannot verify a certificate (QC only)
+PASS rejection needs a reason
+PASS QC verifies the certificate
+PASS the person who registered a certificate cannot verify it
+PASS certificate rejected with a reason
+PASS traceability by lot: heat number, certificates and receipts
+PASS traceability without a serial or lot rejected
+PASS item plate that needs an EN 10204 3.1 certificate
+PASS required certificate type saved on the item
+PASS receipt of the 3.1 plate into quarantine
+PASS incoming acceptance refused: no verified certificate
+PASS a 2.2 certificate does not satisfy a 3.1 requirement
+PASS with a verified 3.1 certificate the lot is accepted
+PASS major NCR from the NCR section has its CAPA drafted by the system
+PASS QA completes the CAPA: owner, root cause, action, effectiveness criteria -> actions defined
+PASS implemented refused while an action is not done
+PASS completing an action needs evidence or a note
+PASS owner completes the action
+PASS CAPA implemented: effectiveness review date set automatically
+PASS the owner cannot verify effectiveness (role and segregation)
+PASS closing before the effectiveness check rejected
+PASS effectiveness result needs a written note against the criteria
+PASS effectiveness verified by QC
+PASS only QA/QC close a CAPA
+PASS CAPA closed by QA
+PASS manual CAPA with owner QA
+PASS the owner (QA) cannot verify the effectiveness of his own CAPA
+PASS the owner (QA) cannot close his own CAPA
+PASS another quality person closes it
+PASS overdue CAPA listed (computed from the due date)
+PASS commercial registers a complaint; response was due 5 days ago -> overdue
+PASS cannot respond before the review
+PASS complaint under review
+PASS response text is required
+PASS responded
+PASS major complaint cannot be closed without an NCR or CAPA link
+PASS CAPA drafted from the complaint
+PASS complaint closed
+PASS warehouse cannot create controlled documents
+PASS controlled document coded TYPE-DEPT-NNN
+PASS code check reports an existing code and the next free one
+PASS revision 00 drafted (no file yet)
+PASS preparer cannot review his own revision
+PASS reviewed by engineering
+PASS approval needs the file attached
+PASS duplicate revision number rejected
+PASS reviewer cannot approve (and engineering is not an approver role)
+PASS preparer cannot approve
+PASS QA approves the third-person revision -> effective
+PASS effective revision distributed
+PASS a recipient cannot acknowledge for someone else
+PASS recipient acknowledges receipt
+PASS new revision effective; the previous one becomes obsolete
+PASS master list holds only effective documents
+PASS retention rules seeded with a source
+PASS retention rule saved by QA
+PASS annual audit program
+PASS auditor cannot audit his own unit (independence, ISO 9.2)
+PASS audit planned by an auditor from another unit
+PASS warehouse cannot add findings
+PASS audit cannot be marked done without its report
+PASS minor nonconformance finding drafts a CAPA automatically
+PASS observation does not create a CAPA
+PASS audit done with its report
+PASS audit cannot be closed while the finding CAPA is open
+PASS audit closed once the CAPA is closed
+PASS management review drafted with the 12 inputs of clause 9.3.2
+PASS inputs for CAPA/NCR, audits, objectives are computed by the system
+PASS review cannot be held while inputs are empty
+PASS review held after the inputs are complete
+PASS decision with an action creates a CAPA
+PASS review cannot be closed without the minutes (FO-QA-022)
+PASS management review closed with the minutes
+PASS packing activity planned
+PASS all release checks of work order 1 pass (computed)
+PASS final data book: 10 sections, nothing mandatory missing
+PASS the same release note can now be released (computed checks all pass)
+PASS the release note is signed by QC (QA refused)
+PASS second active release note for the same work order rejected
+PASS work order 2 cannot be released: ITP not approved, open NCRs, reports missing
+PASS work order 2 checks fail for the ITP and the open NCR
+PASS customer delivery of a work order without a release note refused
+PASS customer delivery without a work order refused (release cannot be checked)
+PASS data book default variant is company (every entry)
+PASS client data book: only entries the client receives (ITP, reports with a client point, release note), fewer than the company book
+PASS unknown data book variant rejected
+PASS release note signed by QC: certificate of conformity numbered
+PASS release note cannot be released twice
+PASS a released note cannot be edited
+PASS data book: release note section now complete
+PASS customer delivery of the released work order is confirmed
+PASS ITP 2 approved
+PASS changing an approved ITP needs a written reason
+PASS approved ITP edited with a reason: revision 1 (first issue is 0), back to draft, old revision kept
+PASS quality settings: defaults with their source, major NCR committee minimum 3
+PASS warehouse cannot change quality settings
+PASS unknown setting rejected
+PASS setting changed by QA
+PASS quality dashboard: overdue CAPA, calibration, pending H points, lapsing qualifications, overdue complaints
+PASS quality dashboard: alerts and lists are computed
+PASS CEO dashboard carries the quality counts and alerts
+PASS QA user cannot write warehouse documents (403)
+PASS pc: login project manager (role 15) and DCC (role 16)
+PASS pc: user ids resolved
+PASS pc: working calendar saved (Mon-Fri)
+PASS pc: project manager cannot write calendars
+PASS pc: calendar without any working day rejected
+PASS pc: contract created
+PASS pc: contract equipment
+PASS pc: work order created
+PASS pc: warehouse cannot write contract terms
+PASS pc: contract terms saved (value, penalty, calendar, start)
+PASS pc: percentage above 100 rejected
+PASS pc: initiation started: 10 steps
+PASS pc: project code generated (9 characters, MA)
+PASS pc: project code is issued once
+PASS pc: units notified step done
+PASS pc: planning cannot select the project manager
+PASS pc: CEO selects the project manager
+PASS pc: terms show the manager and the code
+PASS pc: claims file opened with the initiation (read)
+PASS pc: equipment project code PU1002501
+PASS pc: QC cannot draft the MDR
+PASS pc: MDR drafted from the pump template
+PASS pc: the MDR is drafted once per work order
+PASS pc: MDR has 12 lines, 11 on the client list (MDL subset), each with a standard source
+PASS pc: template standard sources are marked to be verified
+PASS pc: purchase request with two lines submitted (40M rial)
+PASS pc: purchase request approved
+PASS pc: inquiry with two quotes
+PASS pc: quote selected
+PASS pc: purchase order draft with two lines
+PASS pc: purchase order released
+PASS pc: activity A (engineering issue, 3 days)
+PASS pc: activity B (supply receipt, 60 plates)
+PASS pc: activity C (manual progress)
+PASS pc: activity D (supply receipt, 40 plates)
+PASS pc: supply activity without an order line rejected
+PASS pc: warehouse cannot write activities
+PASS pc: dependency A to B
+PASS pc: dependency B to D
+PASS pc: dependency C to D
+PASS pc: cycle D to A rejected on save
+PASS pc: self dependency rejected
+PASS pc: duplicate dependency rejected
+PASS pc: CPM finishes on 2026-11-11 after 8 working days, no cycle
+PASS pc: CPM early dates of A, C and D
+PASS pc: activity B has total float 2 (2026-11-05..06)
+PASS pc: critical path is A, C, D
+PASS pc: critical activity filter
+PASS pc: executive plan (look-ahead) lists the activities
+PASS pc: baseline 0 drafted: 4 activities, BAC 1,000,000,000, 3 unit signatures
+PASS pc: baseline cannot be approved before the managers sign
+PASS pc: project manager is not a signing unit
+PASS pc: construction manager signs
+PASS pc: engineering manager signs
+PASS pc: planning manager signs -> managers signed
+PASS pc: only the PMO deputy approves a baseline
+PASS pc: baseline 0 approved and current
+PASS pc: terms point to the current baseline
+PASS pc: internal document first issue = 60 percent
+PASS pc: DCC cannot approve internally (engineering manager only)
+PASS pc: engineering manager approves the internal document = 100 percent
+PASS pc: outgoing transmittal with an internal-only document rejected
+PASS pc: transmittal T1 of the 11 client documents, response due 14 days later
+PASS pc: unanswered transmittal past its due date is overdue
+PASS pc: unknown response code rejected
+PASS pc: client code A approves the document
+PASS pc: client code B (approved with comments) also approves
+PASS pc: client code C leaves the document unapproved
+PASS pc: second transmittal re-sends four documents
+PASS pc: MDR states: 3+1 approved, 4 at second issue, 4 at first issue
+PASS pc: engineering activity A is exactly 80 percent (average over 12 documents)
+PASS pc: plate receipt against the order drafted
+PASS pc: plate receipt into quarantine confirmed
+PASS pc: received plates in quarantine = temporary receipt = 70 percent for B and D
+PASS pc: cost entry 400M recorded against the contract
+PASS pc: cost entry 200M recorded
+PASS pc: planning cannot post costs (finance only)
+PASS pc: manual progress proposed (pending)
+PASS pc: manual progress on a system-measured activity rejected
+PASS pc: EVM stage 1: PV 700M, EV 450M (A 80%, B 70%, D 70%, C unapproved excluded), AC 600M
+PASS pc: EVM stage 1 indices: CPI 0.75, SPI 0.6429, both red, corrective action required
+PASS pc: the proposer cannot approve their own manual progress
+PASS pc: project manager is not the approver of manual progress
+PASS pc: manual progress approved by a different person
+PASS pc: EVM after approving C at 50 percent: EV 650M
+PASS pc: weekly snapshot taken with 4 lines, BAC and hash
+PASS pc: second snapshot for the same data date rejected
+PASS pc: snapshot with a future data date rejected
+PASS pc: snapshot unchanged after later progress (hash identical)
+PASS pc: scheduled snapshot run takes the Wednesday snapshot
+PASS pc: second run takes nothing (one per data date)
+PASS pc: project manager cannot take snapshots (planning)
+PASS pc: two incoming inspections waiting for the receipt
+PASS pc: plate A accepted (60)
+PASS pc: plate B rejected (40) -> NCR
+PASS pc: B is 100 after QC accept; D with an unclassified NCR stays at 70
+PASS pc: NCR classified: minor, rework (still open)
+PASS pc: D is capped at 80 percent while the rework NCR is open
+PASS pc: EVM stage 2 exact: PV 700M, EV 720M, AC 600M, CV 120M, SV 20M
+PASS pc: EVM stage 2 indices: CPI 1.2, SPI 1.0286, EAC 833,333,333.33
+PASS pc: physical progress is the average of the four activities
+PASS pc: cash flow curve (S curve) is returned
+PASS pc: security user is not a requester of changes
+PASS pc: internal request needs the requester manager's agreement
+PASS pc: change request drafted with its scenario
+PASS pc: registered; board = project manager, planning, construction, commercial; due date set
+PASS pc: decision before the impact analysis rejected
+PASS pc: impact analysis: +2 days, +100M, on the critical path, C and D move
+PASS pc: planning cannot give the project manager's recommendation
+PASS pc: project manager recommends
+PASS pc: decision before the board has voted rejected
+PASS pc: project manager votes
+PASS pc: all four board members voted
+PASS pc: project manager recommends only, cannot decide (authority table)
+PASS pc: PMO deputy approves within authority -> implementing, baseline attached
+PASS pc: baseline 1 approved and current (BAC 1.1bn); baseline 0 superseded
+PASS pc: plan re-run: C now 6 days ends 2026-11-12, D 2026-11-13, budget of C 500M
+PASS pc: only planning closes a change
+PASS pc: change closed
+PASS pc: change list is paged
+PASS pc: approval authority table seeded (PMO up to 5bn rial and 30 days; PM recommends only)
+PASS pc: the CEO also reads the table
+PASS pc: payment milestone on the release note trigger
+PASS pc: payment milestone on a date
+PASS pc: released note and a past date make two milestones due; progress one stays planned
+PASS pc: QC cannot define payment milestones
+PASS pc: a milestone that is only due cannot be marked paid
+PASS pc: legacy contract guaranty created (text amount)
+PASS pc: legacy guarantees parsed into typed side data
+PASS pc: guarantee amount parsed to 500,000,000, expiry in 10 days
+PASS pc: guarantee alert listed at the 14-day level
+PASS pc: QC cannot parse guarantees
+PASS pc: penalty contract terms saved
+PASS pc: late penalty 14 days x 1 percent per week of 1bn = 20,000,000
+PASS pc: only the CEO waives a penalty
+PASS pc: CEO waives the penalty -> amount 0
+PASS pc: a decided penalty is not recomputed
+PASS pc: shipment planned for the unreleased work order
+PASS pc: packing without a released release note is blocked
+PASS pc: packing needs the verification result
+PASS pc: released work order packed; release note linked
+PASS pc: shipping release belongs to planning
+PASS pc: planning releases the shipment
+PASS pc: shipped
+PASS pc: delivered
+PASS pc: handover minutes recorded
+PASS pc: client monthly report carries progress but no SPI/CPI
+PASS pc: project manager releases the client report
+PASS pc: contract allows indices in the client report
+PASS pc: client report shows SPI/CPI only when the contract allows it
+PASS pc: internal weekly report generated
+PASS pc: CEO monthly report generated
+PASS pc: reports are listed (paged)
+PASS pc: final book is not a periodic report
+PASS pc: MS Project XML export is well-formed with 5 tasks (project + 4)
+PASS pc: final book of an incomplete data book is refused
+PASS pc: incomplete final book by DCC refused (PMO only)
+PASS pc: final book (client variant) issued as controlled document R01 with a hash
+PASS pc: re-issue makes revision R02
+PASS pc: final books listed
+PASS pc: second contract terms
+PASS pc: second equipment code PU1502501 (unique across contracts)
+PASS pc: WBS generated from the work order: 4 nodes, 6 activities, 5 dependencies, 12 MDR lines
+PASS pc: generating again creates nothing twice
+PASS pc: generated WBS nodes are listed
+PASS pc: generated plan: MDR 10 + MDL 10 + packing 2 = 22 working days, ends 2026-12-01
+PASS pc: cycle delivered -> MDR rejected
+PASS pc: need-by dates listing
+PASS pc: inspection notice listing
+PASS pc: two legacy assemblies created
+PASS pc: legacy assembly predecessor 1 -> 2 accepted
+PASS pc: legacy assembly loop 2 -> 1 rejected
+PASS pc: legacy assembly self link rejected
+PASS pc: PMO dashboard: active projects, red projects, late activities, guarantee alerts, exposure
+PASS pc: portfolio has one row for the main contract
+PASS pc: CEO dashboard carries the project control counts
+PASS pc: security user cannot open the PMO dashboard (403)
+PASS finance: login second accountant, finance manager (17), payroll (18) and treasury (19) users
+PASS finance: fiscal year 1405 has 12 periods
+PASS finance: 1405-01-01 is 2026-03-21, 1405-07-01 is 2026-09-23 and the year ends 2027-03-20
+PASS finance: first six periods have 31 days, the next five 30 days
+PASS finance: the year of today exists
+PASS finance: payroll user cannot manage fiscal years
+PASS finance: commercial user cannot read the ledger (403)
+PASS finance: payroll user has no finance dashboard yet (403)
+PASS finance: chart of accounts seeded with groups, general and subsidiary levels
+PASS finance: set-up check lists only the missing VAT rate
+PASS finance: seeded ratios are flagged for verification
+PASS finance: tax table has no VAT row and the seeded ratios carry source and verify flag
+PASS finance: unbalanced voucher rejected
+PASS finance: vouchers post to subsidiary accounts only
+PASS finance: account with a mandatory detail needs it in a manual voucher
+PASS finance: a line has either debit or credit
+PASS finance: commercial user cannot write vouchers
+PASS finance: manual voucher saved as draft
+PASS finance: preparer cannot check own voucher
+PASS finance: second accountant checks the voucher
+PASS finance: only the finance manager finalizes
+PASS finance: finance manager finalizes: number 1
+PASS finance: a final voucher cannot be edited
+PASS finance: a final voucher cannot be deleted
+PASS finance: the preparer cannot finalize his own voucher
+PASS finance: a checked voucher goes back to draft
+PASS finance: a draft voucher is deleted
+PASS finance: reversal of a final voucher is a new draft with swapped lines
+PASS finance: a voucher is reversed only once
+PASS finance: reversal voucher finalized: number 2
+PASS finance: period of 2026-10-15 locked
+PASS finance: a voucher in a locked period is rejected
+PASS finance: reopening a period needs a reason
+PASS finance: pending events turned into auto vouchers (some late: their period is locked)
+PASS finance: posting events is idempotent
+PASS finance: every event is posted (or not required)
+PASS finance: auto vouchers are checked and flagged as late posting where needed
+PASS finance: period reopened with a reason
+PASS finance: bulk finalize numbers the auto vouchers one after the other
+PASS finance: final voucher numbers are gapless
+PASS finance: trial balance of final vouchers balances
+PASS finance: ledger equals the item cost sub-ledger
+PASS finance: goods received not invoiced equals the open receipts
+PASS finance: payables per supplier equal approved invoices minus paid requests
+PASS finance: no unposted events remain
+PASS finance: balance sheet balances
+PASS finance: income statement returned
+PASS finance: journal is paged by day
+PASS finance: trial balance exports as UTF-8 CSV with BOM
+PASS finance: only treasury creates bank accounts
+PASS finance: IBAN with a wrong check digit rejected
+PASS finance: bank account saved on account 10102
+PASS finance: the same IBAN cannot be registered twice
+PASS finance: cash box saved
+PASS finance: cheque book with 10 blank leaves
+PASS finance: overlapping cheque book rejected
+PASS finance: petty cash fund saved
+PASS finance: economic code must have 12 or 14 digits
+PASS finance: customer saved
+PASS finance: invoice refused while the VAT rate table has no row for the date
+PASS finance: a commercial user cannot save tax rates
+PASS finance: a tax rate needs its source
+PASS finance: a tax rate above 100 is rejected
+PASS finance: VAT rate entered as data by the finance manager
+PASS finance: set-up check is clean once the VAT rate exists
+PASS finance: sales invoice draft: net 100M, VAT 10M, receivable 92M
+PASS finance: the creator cannot approve his own sales invoice
+PASS finance: sales invoice approved and numbered
+PASS finance: an approved sales invoice cannot be edited
+PASS finance: customer open amount is the receivable
+PASS finance: a commercial user cannot draft a receipt (treasury and accountants only)
+PASS finance: a receipt line needs an amount
+PASS finance: a cheque needs a 16-digit Sayad id
+PASS finance: receipt of 50M saved as draft, FIFO allocated to the invoice
+PASS finance: a receipt must be approved before it is posted
+PASS finance: receipt approved
+PASS finance: receipt posted
+PASS finance: the cheque entered the box
+PASS finance: cheque deposited into the bank account
+PASS finance: cheque cleared
+PASS finance: invoice paid 50M, open 42M
+PASS finance: cash receipt posted into the cash box
+PASS finance: credit note of 1M + 10% VAT
+PASS finance: credit note approved
+PASS finance: ageing puts the old invoice in the 31-60 day bucket
+PASS finance: customer statement ends with the open balance
+PASS finance: sales invoices are paged
+PASS finance: 40 more bolts received against the order
+PASS finance: payment request with a typed withholding line: deductions 468000
+PASS finance: payment request approved by PMO
+PASS finance: treasury sees the approved request with net 16692000
+PASS finance: supplier IBAN with a wrong check digit rejected
+PASS finance: supplier IBAN registered
+PASS finance: payment lines must add up to the net of the requests
+PASS finance: payment to another IBAN is drafted
+PASS finance: IBAN differing from the registered one needs a written reason
+PASS finance: that draft is cancelled
+PASS finance: payment of 16692000 by transfer and cheque drafted
+PASS finance: the old pay action is refused for a request linked to a treasury payment
+PASS finance: an unapproved payment cannot be posted
+PASS finance: treasury cannot approve (finance manager only)
+PASS finance: finance manager approves
+PASS finance: payment posted
+PASS finance: cheque leaf 501 is issued
+PASS finance: bank account balance moved by the receipts and payments
+PASS finance: ledgers still agree with sub-ledgers after receipts and payments
+PASS finance: a statement whose closing balance does not follow from its rows is refused
+PASS finance: bank statement imported with 6 lines
+PASS finance: the same statement cannot be imported twice
+PASS finance: auto-match pairs transfers and cheques with their documents
+PASS finance: statement view shows matched and unmatched counts
+PASS finance: reconciliation is created from the statement
+PASS finance: a reconciliation with a difference or unmatched lines is not approved
+PASS finance: bank fee matched manually
+PASS finance: bank interest matched manually
+PASS finance: reconciliation refreshed
+PASS finance: reconciliation with zero difference but 1 unmatched statement lines is refused
+PASS finance: petty cash top-up drafted
+PASS finance: top-up posted
+PASS finance: petty cash balance is 2M
+PASS finance: petty cash settlement to a non-expense account is refused
+PASS finance: a settlement above the fund balance is refused
+PASS finance: holder saves a settlement of 800000
+PASS finance: the holder cannot approve his own settlement
+PASS finance: accountant approves the settlement
+PASS finance: petty cash balance is 1.2M after settlement
+PASS finance: guarantee saved
+PASS finance: guarantee returned
+PASS finance: cash position totals and an eight-week forecast
+PASS finance: commercial user cannot read the cash position (403)
+PASS finance: VAT rate table has one row, the old row closed or open-ended
+PASS finance: VAT season report returned
+PASS finance: taxpayer sales list shows the approved invoice
+PASS finance: due milestones become draft sales invoices
+PASS finance: a second run drafts nothing new
+PASS finance: dashboard returned for the finance manager
+PASS finance: CEO dashboard carries the finance block
+PASS finance: storekeeper has no finance dashboard (403)
+PASS finance: fiscal year 1400 created
+PASS finance: vouchers of year 1400 finalized
+PASS finance: year 1400 closed with closing vouchers and a 1401 opening voucher
+PASS finance: after the close the temporary accounts 60102 and 80108 are zero in year 1400
+PASS finance: the profit and loss summary 50901 is cleared and retained earnings 50301 were credited 60000 during the close
+PASS finance: the 1401 opening voucher is number 1 with exactly cash 60000 debit and retained earnings 60000 credit
+PASS finance: the closing voucher of 1400 mirrors the opening voucher (60000 both sides)
+PASS finance: a closed year is not closed twice
+PASS finance: no voucher can be written into a closed year
+PASS finance: VAT season 3 of 1405 takes purchases from the posted supplier invoices (net 39000000, VAT 3900000)
+PASS finance: the supplier purchase row shows net 39000000, VAT 3900000 and 2 documents
+PASS finance: two more bank accounts for the reconciliation rules
+PASS finance: statement of account C imported
+PASS finance: reconciliation of account C created by treasury
+PASS finance: a reconciliation with a difference is refused
+PASS finance: the interest line is matched
+PASS finance: reconciliation of account C refreshed with zero difference
+PASS finance: zero difference is approved by a user other than the preparer
+PASS finance: the preparer of a reconciliation cannot approve it
+PASS f2: capital purchase request submitted
+PASS f2: capital purchase request approved by planning
+PASS f2: capital purchase order saved (9000000 plus 900000 VAT)
+PASS f2: capital purchase order released
+PASS f2: capital purchase received
+PASS f2: capital invoice approved by finance
+PASS f2: the approved capital invoice line drafted a fixed asset of 9000000 (source: supplier invoice line)
+PASS f2: payment request approved
+PASS f2: payment by a single cheque drafted
+PASS f2: payment posted
+PASS f2: the cheque is cancelled
+PASS finance: cancelling the only cheque cancels the payment
+PASS finance: the payment request is Approved again and payable (net 9900000)
+PASS finance: ledgers agree with sub-ledgers after the cheque cancellation
+PASS assets: classes are seeded with a source, flagged for verification and without invented rates
+PASS assets: set-up check lists the missing rates in the modules list, apart from the ledger problems
+PASS assets: payroll user cannot read fixed assets (403)
+PASS assets: production cost centre saved
+PASS assets: test class with a rate saved
+PASS assets: class without a rate saved
+PASS assets: commercial user cannot save classes
+PASS assets: asset saved as a draft with a temporary code
+PASS assets: the creator cannot approve the asset
+PASS assets: approval needs the account the cost sits in now
+PASS assets: finance manager approves: final code and acquisition posted
+PASS assets: asset put idle
+PASS assets: asset of the class without a rate approved
+PASS assets: period Tir 1405 found
+PASS assets: depreciation is refused while a class has no rate or useful life (names the class)
+PASS assets: rate entered for the class
+PASS assets: depreciation of Tir 1405 prepared: 1200000 + 180000 (idle 30%) + 100000
+PASS assets: the preparer of the depreciation cannot approve it
+PASS assets: depreciation prepared again by the accountant
+PASS assets: only the finance manager approves depreciation
+PASS assets: depreciation approved by a manager who prepared nothing (the first preparer stays excluded)
+PASS assets: an approved depreciation run is final
+PASS assets: accumulated depreciation 1200000, book value 118800000
+PASS assets: idle asset depreciated at 30% of the rate: 180000
+PASS assets: depreciation schedule of 1405 totals 1480000 in Tir
+PASS assets: movement report returned
+PASS assets: handover report returned
+PASS assets: disposal previews catch-up depreciation 1200000, book value 117600000 and a loss of 17600000
+PASS assets: the accountant cannot approve a disposal
+PASS assets: finance manager approves the disposal
+PASS assets: the sold asset is disposed
+PASS assets: ledgers agree with sub-ledgers after assets
+PASS assets: depreciation runs listed
+PASS payroll: accountant cannot read employees (403)
+PASS payroll: PMO cannot read payslips (403)
+PASS payroll: treasury cannot read payroll runs (403)
+PASS payroll: payroll user still has no finance dashboard (403)
+PASS payroll: set-up lists the missing rate keys and the tax brackets
+PASS payroll: only the long-standing ratios are seeded, with source and verify flag
+PASS payroll: payroll items are seeded
+PASS payroll: insurance workshop saved
+PASS payroll: an invalid national code is refused
+PASS payroll: an IBAN with a wrong check digit is refused
+PASS payroll: employee saved
+PASS payroll: the same national code cannot be used twice
+PASS payroll: accountant cannot save employees (403)
+PASS payroll: the CEO may read employee data
+PASS payroll: the CEO cannot change payroll data
+PASS payroll: the directory shows name, title and unit only
+PASS payroll: attendance of Shahrivar 1405 saved
+PASS payroll: run of Shahrivar 1405 created
+PASS payroll: calculation without the statutory values fails and lists the missing keys
+PASS payroll: statutory rates entered by payroll with a source
+PASS payroll: a rate without a source is refused
+PASS payroll: calculation without tax brackets fails
+PASS payroll: tax brackets saved
+PASS payroll: tax brackets must be contiguous
+PASS payroll: calculated: gross 32350000, insurance 1890000 (7% up to the ceiling), employer 6210000 (20% + 3%), tax 1046000, net 29414000
+PASS payroll: payslip shows base wage 18000000 and overtime 1050000 (1.4 x hourly wage x 10 hours)
+PASS payroll: the payroll clerk cannot approve (finance manager only)
+PASS payroll: accountant cannot approve the run (403)
+PASS payroll: a run that is not approved cannot be posted
+PASS payroll: finance manager saves attendance of Mehr
+PASS payroll: finance manager calculates the run of Mehr
+PASS payroll: the person who calculated the run cannot approve it
+PASS payroll: an unapproved run can be deleted
+PASS payroll: 30 days worked in Esfand 1405 (29 days) is refused
+PASS payroll: 29 worked + 1 unpaid in a 29-day month is refused
+PASS payroll: a full 29-day month (Esfand 1405) pays the 30-day basis: gross 31300000 (base 18000000 + seniority 300000 + housing 9000000 + grocery 4000000)
+PASS payroll: a full 31-day month (Farvardin 1405) pays 30 days, not 31: gross 31300000
+PASS payroll: 30-day month with 3 unpaid days pays 27 days: gross 28170000 (base 16200000 + seniority 270000 + housing 8100000 + grocery 3600000)
+PASS payroll: finance manager approves the run
+PASS payroll: attendance of an approved month is locked
+PASS payroll: an approved run is immutable
+PASS payroll: an approved run cannot be deleted
+PASS payroll: tax brackets of a year with an approved run are frozen
+PASS payroll: insurance list of the approved run: one worker, capped base 27000000
+PASS payroll: tax list of the approved run: tax 1046000
+PASS payroll: posted to the ledger as totals
+PASS payroll: ledgers agree with sub-ledgers after the payroll voucher
+PASS payroll: bank transfer list shows the employee IBAN and the net
+PASS payroll: payment of the run drafted by treasury for the net total
+PASS payroll: payment of the run posted
+PASS payroll: the run is Paid
+PASS payroll: a run cannot be paid twice
+PASS payroll: leave balances returned
+PASS payroll: employee year summary returned
+PASS payroll: set-up is complete for 1405
+PASS outbox: insurance list package generated by payroll
+PASS outbox: the preparer cannot approve the package
+PASS outbox: finance manager approves the package
+PASS outbox: export is an Excel workbook
+PASS outbox: sending without a configured exchange folder says so
+PASS outbox: marking as sent needs a reference
+PASS outbox: marked as sent with a reference
+PASS outbox: a rejection needs a reason
+PASS outbox: accepted
+PASS outbox: a new package for the same period is version 2
+PASS outbox: the earlier package is superseded
+PASS outbox: payroll packages are hidden from the accountants
+PASS outbox: the accountant cannot prepare a payroll package
+PASS outbox: payroll cannot prepare a VAT package
+PASS outbox: VAT season package generated with Summary and Parties tables
+PASS outbox: only the finance manager approves a VAT package
+PASS outbox: VAT package approved
+PASS outbox: a period without data gives no empty package
+PASS outbox: the accountant sees the VAT package and no payroll package
+PASS outbox: summary counters returned
+PASS outbox: storekeeper has no access (403)
+PASS dashboard: CEO finance block carries the Sepidar, assets and payroll counters
+PASS dashboard: two assets are on the books (one sold, one draft excluded)
+PASS set-up check: the payroll module is complete for the year and the assets module still lists the unrated classes
+PASS f3: login second finance manager and the auditor (role 28)
+PASS f3 migration: the accountant cannot import the chart
+PASS f3 migration: account preview counts 3 new, 1 existing, 1 error and writes nothing
+PASS f3 migration: commit with an error row is not applied
+PASS f3 migration: nothing was created by the failed commit
+PASS f3 migration: chart committed (3 new, 1 existing)
+PASS f3 migration: a second preview reports the codes as mapped
+PASS f3 migration: new accounts exist with the Sepidar code kept
+PASS f3 migration: detail preview guesses Bank, flags one for review, keeps the given type
+PASS f3 migration: details committed
+PASS f3 migration: a second detail preview shows all three as existing
+PASS f3 migration: fiscal year 1399 ensured
+PASS f3 migration: opening preview lists the unknown account and the imbalance
+PASS f3 migration: opening with unknown account is not committed
+PASS f3 migration: balanced opening committed as one voucher
+PASS f3 migration: a year takes only one opening
+PASS f3 migration: the importer cannot finalize its own opening voucher
+PASS f3 migration: the second finance manager finalizes it
+PASS f3 migration: the trial balance of 1399 equals the imported opening
+PASS f3 migration: only the finance manager creates an imported year
+PASS f3 migration: imported year 1398 has 12 closed periods
+PASS f3 migration: historical preview 2 vouchers, 4 lines, 3500
+PASS f3 migration: a voucher dated outside the year is an error
+PASS f3 migration: historical vouchers committed
+PASS f3 migration: the same numbers cannot be imported twice
+PASS f3 migration: imported vouchers are final, imported and keep their numbers
+PASS f3 migration: an imported voucher cannot be reversed or edited
+PASS f3 migration: the imported year's trial balance is exactly the import
+PASS f3 parallel run: nothing signed off yet
+PASS f3 parallel run: period 1 matches both rows exactly
+PASS f3 parallel run: only the finance manager signs off
+PASS f3 parallel run: period 1 signed off
+PASS f3 parallel run: one clean period is not enough
+PASS f3 parallel run: period 2 gives one match, one amount difference and one Sepidar-only row
+PASS f3 parallel run: explaining one difference leaves one unexplained
+PASS f3 parallel run: all explained
+PASS f3 parallel run: period 2 signed off
+PASS f3 parallel run: an empty upload for an empty period is clean
+PASS f3 parallel run: period 3 signed off
+PASS f3 parallel run: three consecutive clean periods make the go-live ready
+PASS f3 parallel run: required months is a setting
+PASS f3 parallel run: four months are now required
+PASS f3 settings: only the finance manager changes settings
+PASS f3 settings: unknown keys are refused
+PASS scope: a second legal entity is refused while Finance:MultiEntity is off
+PASS scope: an intercompany pair is refused
+PASS scope: an intercompany posting is refused
+PASS scope: a foreign currency cannot be defined while Finance:ForeignCurrency is off
+PASS scope: an exchange rate is refused
+PASS scope: the foreign-currency revaluation is refused
+PASS scope: a foreign-currency settlement is refused
+PASS scope: a foreign-currency bank account is refused
+PASS scope: a foreign-currency loan is refused
+PASS scope: a foreign-currency letter of credit is refused
+PASS scope: a voucher line with a currency is refused
+PASS scope: the main company is the only legal entity
+PASS r3 m2: the base currency of the main company cannot be changed to EUR while Finance:ForeignCurrency is off
+PASS f3 audit: finalizing the first manual voucher left before and after values and the user
+PASS f3 audit: the employee's bank account is changed
+PASS f3 audit: the IBAN change is recorded masked (last four digits only)
+PASS f3 audit: the auditor reads the trail
+PASS f3 audit: the auditor reads vouchers
+PASS f3 audit: the auditor reads reports
+PASS f3 audit: the auditor cannot write vouchers
+PASS f3 audit: the auditor cannot read payroll employees (403)
+PASS f3 audit: the auditor cannot read payslips (403)
+PASS f3 audit: the auditor cannot read payroll runs (403)
+PASS f3 audit: the accountant has no access to the trail (403)
+PASS f3 close: a sandbox fiscal year (1396) of the main company with 12 periods
+PASS f3 close: a voucher in the sandbox period
+PASS f3 close: the sandbox voucher is final
+PASS f3 close: an open draft makes the item red, the lock is still free while the checklist is not enforced
+PASS f3 close: enforcement switched on
+PASS f3 close: enforced, the period cannot be locked
+PASS f3 close: the lock is refused while items are red
+PASS f3 close: only the finance manager overrides
+PASS f3 close: an override needs a reason
+PASS f3 close: override with a reason
+PASS f3 close: the period locks after the override
+PASS f3 close: enforcement switched off again
+PASS f3 controls: only the finance manager sets thresholds
+PASS f3 controls: threshold of 1,500,000 saved
+PASS f3 controls: a voucher above the threshold needs the CEO first
+PASS f3 controls: the finance manager cannot give the CEO approval
+PASS f3 controls: CEO approval recorded
+PASS f3 controls: the voucher finalizes after the CEO approval
+PASS f3 controls: threshold deactivated
+PASS f3 controls: attachment rule on account 1019901
+PASS f3 controls: a voucher without the required attachment cannot be checked
+PASS f3 controls: attachment added
+PASS f3 controls: checked once the attachment exists
+PASS f3 controls: the voucher shows its attachment count
+PASS f3 controls: rule deactivated
+PASS f3 controls: copy of a final voucher is a new draft with the same amounts
+PASS f3 controls: voucher template saved
+PASS f3 controls: the template is drafted once for the period
+PASS f3 controls: generating again drafts nothing
+PASS f3 controls: the drafted voucher is a draft dated on day 5 of the Persian month
+PASS f3 controls: mass entry preview counts 2 good vouchers and 1 error and creates nothing
+PASS f3 controls: mass entry creates 2 drafts
+PASS f3 export: the full export is off by default
+PASS f3 export: exporting while the switch is off is refused
+PASS f3 export: default layout has the 9 standard columns active
+PASS f3 export: mapping screen lists the accounts without a Sepidar code
+PASS f3 export: switched on
+PASS f3 export: unmapped accounts of the locked sandbox period are listed as errors
+PASS f3 export: a period with unmapped accounts is not exported
+PASS f3 export: account mapped
+PASS f3 export: preview of imported period 1 is clean, 1 voucher and 2 rows
+PASS f3 export: only the finance manager exports
+PASS f3 export: period 1 exported with a hash
+PASS f3 export: a second export of the same period is refused
+PASS f3 export: the column layout is configurable
+PASS f3 export: only the finance manager changes the layout
+PASS f3 export: superseding with a reason creates a second export
+PASS f3 export: the first export is kept as superseded, the new one is active
+PASS f3 export: period 2 exported
+PASS f3 export: the file is UTF-8 with BOM
+PASS f3 export: the file's SHA-256 equals the recorded hash
+PASS f3 export: the file has the configured header and exactly the two ledger rows
+PASS f3 export: debit and credit per account match the ledger
+PASS f3 export: dates are Persian (no Gregorian date in the file)
+PASS f3 export: the auditor sees the export records
+PASS f3 export: the auditor cannot export
+PASS f3 export: detail mapped to a Sepidar code
+PASS f3 export: unmapped details exclude it
+PASS f3 export: switched off again
+PASS f3 m2: fiscal year 1404 ensured with 12 periods
+PASS f3 fx: base currency IRR
+PASS f3 fx: only the finance manager defines currencies
+PASS f3 fx: a supplier detail exists (SUP-2)
+PASS f3 fx: a customer detail exists (CUS-1)
+PASS f3 deferral: prepaid expense over 5 Persian months (Farvardin to Mordad)
+PASS f3 deferral: deferred income over 3 months
+PASS f3 deferral: prepaid expense must use an asset and an expense account
+PASS f3 deferral: run for Farvardin drafts one entry per schedule (200,000 and 200,000)
+PASS f3 deferral: the run is idempotent
+PASS f3 deferral: the preparer cannot approve the entry
+PASS f3 deferral: the second person approves; a voucher is posted
+PASS f3 deferral: the deferred-income entry is approved
+PASS f3 deferral: Khordad is month 3: 200,001 (cumulative rounding lands exactly) and 200,000 for the income schedule
+PASS f3 deferral: Khordad entry approved
+PASS f3 deferral: amortised 400,001, remaining 600,000 after two months
+PASS f3 deferral: the entry voucher debits the expense 80108 and credits the prepaid 10601
+PASS f3 setup: voucher 64 finalised
+PASS f3 accrual: one reversing voucher drafted
+PASS f3 accrual: the reversal is a draft dated day 1 of the next period with swapped sides
+PASS f3 accrual: the original points to its automatic reversal
+PASS f3 accrual: running again creates nothing
+PASS f3 provision: warranty provision registered
+PASS f3 provision: charge of 5,000,000
+PASS f3 provision: use of 1,200,000 leaves 3,800,000
+PASS f3 provision: use above the balance is refused
+PASS f3 provision: the review date has passed, so a reminder is flagged
+PASS f3 provision: the auditor cannot write
+PASS f3 costing: indirect cost centre
+PASS f3 costing: production cost centre 1
+PASS f3 costing: production cost centre 2
+PASS f3 setup: voucher 68 finalised
+PASS f3 costing: allocation key IND to P1 = 60
+PASS f3 costing: allocation key IND to P2 = 40
+PASS f3 costing: a key cannot allocate a centre to itself
+PASS f3 costing: overhead rate P1 = 5,000 per labour hour (input, flagged for verification)
+PASS f3 costing: overhead rate P2 = 1,500 per machine hour
+PASS f3 costing: the auditor cannot change rates
+PASS f3 costing: 100 labour hours of work order 2 in P1
+PASS f3 costing: 200 machine hours of work order 1 in P2
+PASS f3 costing: dry run: 1,000,000 allocated 600,000/400,000, 800,000 absorbed, under-absorbed 400,000
+PASS f3 costing: the auditor cannot run the allocation
+PASS f3 costing: allocation run posts three vouchers
+PASS f3 costing: a period is allocated only once
+PASS f3 costing: the variance account 70111 holds exactly the under-absorbed 400,000
+PASS f3 costing: work in progress 10520 received exactly the absorbed 800,000
+PASS f3 costing: the overhead pool 70206 and the absorbed account 70110 are cleared
+PASS f3 costing: cost sheet of work order 2 shows the absorbed overhead 500,000
+PASS f3 close-out: only a finished work order is closed
+PASS f3 close-out: work order 2 set to Done
+PASS f3 setup: voucher 72 finalised
+PASS f3 close-out: sheet 500,000 to finished goods, 1,000,000 not on the sheet goes to the variance account
+PASS f3 close-out: the close voucher moves 1,500,000 (finished goods 500,000 + variance 1,000,000 = WIP 1,300,000 + labour 200,000)
+PASS f3 close-out: nothing is left in work in progress
+PASS f3 close-out: a closed order is not closed twice
+PASS f3 close-out: only the finance manager reopens
+PASS f3 close-out: reopening needs a reason
+PASS f3 close-out: reopening by the finance manager with a reason creates the reversal
+PASS f3 close-out: after the reversal the 1,300,000 work in progress is back
+PASS f3 poc: the percentage-of-completion contract is created
+PASS f3 poc: contract equipment
+PASS f3 poc: the work order of the contract is created
+PASS f3 poc: only the finance manager sets the revenue method
+PASS f3 poc: contract set to percentage of completion at 1,000,000,000
+PASS f3 poc: manual progress must be entered
+PASS f3 poc: progress 40% earns 400,000,000 as unbilled receivable, no loss provision
+PASS f3 poc: a rerun at the same progress posts nothing (cumulative method)
+PASS f3 setup: voucher 76 finalised
+PASS f3 poc: 60% = 600,000,000 earned, 550,000,000 already in revenue, 50,000,000 more; unbilled 450,000,000; expected loss provision 80,000,000
+PASS f3 poc: the expected-loss provision 30404 is exactly 80,000,000 (EAC 1.2bn - price 1bn = 200m loss, 40% still to come)
+PASS f3 poc: unbilled receivable 10308 is exactly earned minus billed (450,000,000)
+PASS f3 poc: the method cannot go back to invoice once revenue was recognised
+PASS f3 setup: voucher 78 finalised
+PASS f3 setup: voucher 79 finalised
+PASS r3 c1: before the revenue run the work order holds 130 in work in progress
+PASS r3 c1: the revenue run recognises the cost of 130 (100 material + 30 overhead) and no further revenue
+PASS r3 c1: cost of sales 70101 rose by exactly 130
+PASS r3 c1: nothing is left in work in progress for the work order (the absorbed 30 left too)
+PASS r3 c1: the work order is set to Done
+PASS r3 c1: the close-out of a work order of a percentage-of-completion contract is refused (it would expense the cost a second time)
+PASS f3 budget: import into a missing budget is refused
+PASS f3 budget: draft budget version 1 saved, 19,000,000
+PASS f3 budget: CSV import replaces the lines (4 lines, capital line flagged)
+PASS f3 budget: an unknown account in the import is refused
+PASS f3 budget: export answers
+PASS f3 budget: the accountant cannot approve
+PASS f3 budget: finance manager approves first; still a draft
+PASS f3 budget: the same person cannot approve twice
+PASS f3 budget: a second finance manager does not replace the CEO
+PASS f3 budget: the CEO's approval makes it Approved
+PASS f3 budget: an approved budget is not edited
+PASS f3 budget: period 3 account 80108: budget 10,000,000, actual 3,200,001, variance -6,799,999 (-68%)
+PASS f3 budget: year to date (1-4) 80108: budget 15,000,000, actual 3,400,001, forecast = actual plus the budget still to come
+PASS f3 budget: run-rate forecast = actual x 12 / 4 = 10,200,003
+PASS f3 budget: grouped by cost centre
+PASS f3 budget: the auditor can read the report
+PASS f3 commitment: 8,000,000 fits (15,000,000 - 3,400,001 spent)
+PASS f3 commitment: 12,000,000 is blocked in Block mode (over by 400,001)
+PASS f3 commitment: only the CEO can override a block
+PASS f3 commitment: the CEO overrides with a reason (recorded in the message)
+PASS f3 commitment: purchase request for cost centre CC-P1 (6,000,000)
+PASS f3 commitment: the purchase request exceeds the cost-centre envelope of 4,000,000 and is blocked with the reason (4,000,000 - 300,000 variance already charged - 6,000,000)
+PASS r2 f10: in Block mode the purchase request over the cost-centre envelope cannot become approved
+PASS f3 budget: a revision is a new draft (version 2)
+PASS f3 budget: revision switched to Warn mode
+PASS f3 budget: revision approved by both
+PASS f3 budget: the previous version is superseded
+PASS f3 commitment: in Warn mode the same request passes with a warning
+PASS r2 f10: in Warn mode the same request is approved and the answer carries the warning
+PASS r1 petty cash: fund of 45,000,000 topped up
+PASS r1 setup: receipt RC-1405-00009 (100 x 400000) confirmed
+PASS r1 petty cash: the receipt of 40,000,000 credits GRNI 30103 by exactly 40,000,000
+PASS r1 petty cash: a settlement of a receipt must equal its value (40,000,000)
+PASS r1 petty cash: settlement of the receipt saved
+PASS r1 petty cash: settlement approved
+PASS r1 petty cash: a receipt is settled only once
+PASS r1 petty cash: GRNI 30103 is back to its starting balance after the settlement
+PASS r1 petty cash: no expense was booked on 70202 (no second costing)
+PASS r1 petty cash: the fund holds 5,000,000 after settling 40,000,000
+PASS r1 petty cash: a commercial user sees no funds that are not his
+PASS r1 petty cash: the finance manager sees all funds
+PASS r1 bank: cheque book for the new account
+PASS r1 bank: receipt of 5,000,000 into the account posted
+PASS r1 reconciliation: the difference is gone when the voucher is removed
+PASS r1 assets: a stock account 10505 cannot be the offset of an asset
+PASS r1 maker-checker: a second accountant edits the draft
+PASS r1 maker-checker: the editor of a voucher cannot check it
+PASS r1 maker-checker: another person checks it
+PASS r1 maker-checker: a person who touched nothing finalizes it
+PASS r1 maker-checker: the editor of a sales invoice cannot approve it
+PASS r1 maker-checker: a finance manager edits the treasury draft
+PASS r1 maker-checker: the editor of a payment cannot approve it
+PASS r1 maker-checker: another finance manager approves it; the approver is stored
+PASS r1 maker-checker: the editor of a receipt cannot approve it
+PASS r1 maker-checker: the editor of a settlement cannot approve it
+PASS r1 maker-checker: another accountant approves the settlement
+PASS r1 posting: a manual detail code with the reserved prefix SUP- is refused
+PASS r1 setup: receipt RC-1405-00010 (10 x 10000) confirmed
+PASS r1 posting: the receipt has its automatic voucher
+PASS r1 posting: the automatic voucher is finalised
+PASS r1 posting: the voucher is reversed by hand
+PASS r1 posting: the receipt is cancelled after the hand reversal
+PASS r1 setup: receipt RC-1405-00011 (5 x 10000) confirmed
+PASS r1 posting: the reversal of an already reversed voucher is settled and the next receipt still posts
+PASS r1 posting: no event is left unposted
+PASS r1 setup: receipt RC-1405-00012 (10 x 10000) confirmed
+PASS r1 events: a posted event cannot be marked pending again (0 changed)
+PASS r1 events: the cancelled receipt has an original and a posted reversal event
+PASS r1 events: the stock ledger difference is unchanged after the cancelled receipt
+PASS r1 reversal: the finalised reversal voucher mirrors its original (1,000,000 on 10101)
+PASS r1 reversal: a final reversal voucher cannot be edited
+PASS r1 reversal: editing a draft reversal with doubled amounts leaves the mirrored lines (2,000 each side)
+PASS r1 year: fiscal year 1402 ensured
+PASS r1 year: year 1402 cannot be closed before 1401
+PASS r1 advance: purchase request approved
+PASS r1 advance: order draft of 39,000,000
+PASS r1 advance: the order carries a 10% advance
+PASS r1 advance: order approved
+PASS r1 advance: order released
+PASS r1 advance: advance request of 3,900,000 (10% of 39,000,000)
+PASS r2 f12: an advance that is only requested (not paid) is not in the open-advance report
+PASS r2 f12: advance request approved
+PASS r2 f12: advance paid through treasury (drafted)
+PASS r2 f12: advance payment posted
+PASS r1 advance: the open-advance report shows exactly 3,900,000 for the order
+PASS r1 advance: 100 bolts received against the order
+PASS r1 advance: invoice of 42,900,000
+PASS r1 advance: recovering more than the unrecovered advance (5,000,000 > 3,900,000) is refused
+PASS r1 advance: the full invoice request gets the 3,900,000 recovery proposed next to the 900,000 penalty: deductions 4,800,000
+PASS r1 advance: nothing is left open for the order
+PASS r1 advance: request approved
+PASS r1 advance: treasury payment of the net 38,100,000 (transfer 36,100,000 and a 2,000,000 cheque)
+PASS r1 advance: payment posted
+PASS r1 advance: the payment event credits the supplier advance 3,900,000 and the penalty income 900,000 (not other payables)
+PASS r1 bank: the deposit is matched with the receipt
+PASS r1 bank: bank 5,000,000, book 5,000,000, cheque of 2,000,000 issued and not presented (informational): difference 0
+PASS r1 bank: the reconciliation with an unpresented cheque is approvable
+PASS r1 retention: the posted invoice holds a performance retention (10000000)
+PASS r1 retention: a release above the retention held is refused
+PASS r1 retention: the release has no VAT and a receivable equal to the retention
+PASS r1 retention: the release is approved
+PASS r1 retention: the event is Dr receivable / Cr retention receivable for the retention, with no revenue and no VAT
+PASS r1 sales advance: recovery above the advance received (none) is refused
+PASS r1 dashboard: a draft voucher of 777,000 does not change the net profit
+PASS r1 dashboard: the net profit equals the income statement of the year to date (-14636708.0)
+PASS r1 loan: loan of 12,000,000 in instalments of 2,000,000 saved
+PASS r1 loan: disbursement drafted for the principal
+PASS r1 loan: the same loan cannot be paid in two documents
+PASS r1 loan: disbursement posted
+PASS r1 loan: employee advances 10401 rose by exactly 12,000,000
+PASS r1 loan: the receivable is kept per employee (an EMP- detail exists)
+PASS payroll: hired on day 11 of 31-day Ordibehesht: 20 payable days, base wage 12000000
+PASS payroll: terminated on day 20 of 30-day Aban: 20 payable days, base wage 12000000
+PASS payroll: hired on day 16 of the 29-day Esfand: 15 payable days, base wage 9000000; the full-month employee has 30
+PASS r1 payroll: Azar with a bonus of 5,000,000: gross 36,300,000
+PASS r1 payroll: severance accrues on base pay items only (31,300,000 / 12 = 2,608,333), not on the bonus; the loan instalment is 2,000,000
+PASS r1 payroll: Azar run approved
+PASS r1 payroll: Azar run posted
+PASS r2 f23: the monthly BONUS is an expense and does not touch the provision: payroll expense 40,800,000 = 31,300,000 pay + 5,000,000 bonus + 3,000,000 bonus accrual + 1,500,000 leave accrual
+PASS r2 f23: provision 30402 closing-debit movement -3,000,000 i.e. credit +3,000,000 (only the monthly accrual; the monthly bonus no longer drains it)
+PASS r1 loan: after the instalment 10401 holds 10,000,000 (12,000,000 - 2,000,000)
+PASS f3 m3: fiscal year 1403 ensured (a leap year)
+PASS f3 setup: voucher 103 finalised
+PASS f3 setup: voucher 104 finalised
+PASS f3 setup: voucher 105 finalised
+PASS f3 setup: voucher 106 finalised
+PASS f3 setup: voucher 107 finalised
+PASS f3 setup: voucher 108 finalised
+PASS f3 setup: voucher 109 finalised
+PASS f3 setup: voucher 110 finalised
+PASS f3 loan: facility limit defined
+PASS f3 loan: only the finance manager defines limits
+PASS f3 loan: annuity schedule 1,200,000,000 at 24% over 12 months
+PASS f3 loan: instalment dates follow the Persian months (1 Mordad 1404 = 2025-07-23)
+PASS f3 loan: equal-principal schedule has falling interest 3,000,000 / 2,000,000 / 1,000,000
+PASS f3 loan: amount must be positive
+PASS f3 loan: the auditor cannot disburse
+PASS f3 loan: an instalment cannot be paid before the loan is disbursed
+PASS f3 loan: disbursement posts a voucher and activates the loan
+PASS f3 loan: no second disbursement
+PASS f3 loan: the limit shows 1,200,000,000 used and 800,000,000 available
+PASS f3 loan: accrual for Tir drafts one row
+PASS r2 f22: the Tir accrual equals the whole first-instalment interest (24000000.0): the period covers the 31 days from disbursement to the day before the first due date
+PASS f3 loan: the preparer cannot approve the accrual
+PASS f3 loan: the second person approves the accrual; a voucher is posted
+PASS f3 loan: the accrual run is idempotent
+PASS f3 loan: instalments are paid in order
+PASS f3 loan: instalment 1 paid (113,471,516) with a voucher
+PASS f3 loan: an instalment is paid once
+PASS f3 loan: instalment 2 with a late penalty of 500,000
+PASS f3 loan: after three payments the outstanding principal is 926,181,373
+PASS f3 loan: a draft loan can be cancelled
+PASS f3 loan: the auditor can read loans
+PASS f3 tax: the document list adds up to the season report
+PASS r2 f22: VAT carry chain is exact (payable = sales - purchases VAT; each season's carry-in = the previous season's credit position; carry-out and net payable follow)
+PASS f3 tax: carry-forward arithmetic (net payable - carry out = payable - carry in)
+PASS f3 tax: season out of range
+PASS f3 tax: the auditor can read the document list
+PASS f3 tax: non-deductible expense (+10,000,000) recorded
+PASS f3 tax: exemption (-20,000,000) recorded
+PASS f3 tax: loss carried forward (-5,000,000) recorded
+PASS f3 tax: an adjustment of zero is refused
+PASS f3 tax: taxable profit 170M + 10M - 20M - 5M = 155M and tax at 25% = 38,750,000
+PASS f3 tax: the auditor cannot create the provision voucher
+PASS f3 tax: the provision needs a rate (none is assumed)
+PASS f3 tax: a draft provision voucher for 38,750,000 is created
+PASS f3 tax: the provision voucher is a draft (status 0), balanced
+PASS r3 m8: a second provision run is refused while the first is still a draft (it used to create a second draft of 38,750,000)
+PASS f3 tax: the draft provision does not change the taxable profit
+PASS f3 stmt: cash flow ties to the cash accounts (opening 0, closing 950,000,000)
+PASS r2 f22: the catch-all Other line is absent (every account is classified), and the lines add up to the three sections exactly
+PASS f3 stmt: operating 50M, investing -300M, financing 1,200M, net profit 170M
+PASS f3 stmt: equity 1,170,000,000 and ties to assets minus liabilities
+PASS f3 stmt: ratios current 3.5714, debt 0.2303, gross margin 0.625, net margin 0.425
+PASS f3 stmt: DSO 274.5 and DPO 366 days over a 366-day year
+PASS f3 stmt: drill-down on revenue lists the voucher and the total equals the statement
+PASS f3 stmt: the auditor can read the statements
+PASS f3 stmt: payroll staff are not finance readers (403)
+PASS f3 stmt: unknown fiscal year
+PASS f3 stmt: a saved view
+PASS f3 stmt: a private view is hidden from other users
+PASS f3 stmt: the owner sees the view
+PASS f3 debt: the rates are inputs; none entered, nothing assumed
+PASS f3 debt: preview of the provision by ageing bucket
+PASS f3 debt: the auditor cannot post the provision
+PASS f3 debt: the provision voucher is posted
+PASS f3 debt: a second run with unchanged balances posts nothing
+PASS f3 hold: a reason is required
+PASS f3 hold: customer put on credit hold
+PASS f3 hold: the hold is listed
+PASS f3 hold: the hold is lifted
+PASS f3 dunning: drafts are created for overdue customers (or none when nothing is overdue)
+PASS f3 dunning: the list is readable
+PASS f3 proposal setup: order released
+PASS f3 proposal setup: 10 bolts received
+PASS f3 proposal setup: invoice F-3001 of 4,290,000 approved
+PASS f3 proposal: nothing is due that early
+PASS f3 proposal: the approved unpaid invoice F-3001 (4,290,000) is proposed, by due date, no limit
+PASS f3 proposal: a cash limit of 1 rial includes nothing
+PASS f3 proposal: only the finance manager approves
+PASS f3 proposal: the finance manager approves
+PASS f3 proposal: approved once
+PASS r2 f20: the journal file name carries a Persian date stamp (14yymmdd)
+PASS r2 f20: the journal rows show Persian dates (yyyy/MM/dd)
+PASS r2 f20: no 20xx Gregorian date pattern in the journal file
+PASS r2 f20: the general-ledger file name carries a Persian date stamp (14yymmdd)
+PASS r2 f20: the general-ledger rows show Persian dates (yyyy/MM/dd)
+PASS r2 f20: no 20xx Gregorian date pattern in the general-ledger file
+PASS r2 f20: audit values show Persian dates and no Gregorian date
+PASS r2 f21: the lines of manual vouchers are in the audit trail
+PASS r2 f21: supplier IBAN changed
+PASS r2 f21: the supplier IBAN change is audited masked with a hash and never in full
+PASS r2 f6: finance manager charges the provision by 100,000
+PASS r2 f6: the finance manager cannot finalise the automatic voucher of his own provision movement
+PASS r2 f6: the second finance manager finalises it
+PASS f3 setup: voucher 119 finalised
+PASS r2 f18: finalised after later-dated vouchers, the finalise answer carries the date-order warning
+voucher 102 type 3 status 1 date 2026-12-21 30402 3000000
+voucher 49 type 3 status 1 date 2026-09-22 30402 3000000
+true-up balances: with drafts 6000000, drafts 0, final only 0, checked+final 3000000
+PASS r3 true-up: the bonus provision balance is checked+final without drafts (3000000 = 6000000 with drafts - 0 in draft vouchers) and the draft raises it by exactly 7,000,000
+PASS r3 true-up: a second true-up is refused while the first is still a draft (drafts are not counted in the balance)
+PASS f3b vat: the invoice shows a non-recoverable VAT of 390,000 and a total of 4,290,000
+PASS f3b vat: the invoice is approved
+PASS f3b vat: the non-recoverable 390,000 is cost (price-variance account +390,000)
+PASS f3b vat: the deductible VAT account does not move
+PASS f3b vat: the payable grows by the invoice total 4,290,000
+PASS f3b disposal: asset for the VAT sale approved
+PASS f3b disposal: the preview shows a VAT of 1,000,000 on proceeds of 10,000,000
+PASS f3b disposal: the sale with VAT is approved
+PASS f3b disposal: the sales-VAT account is credited exactly 1,000,000
+PASS f3b guarantee: only the finance manager sets a bank limit
+PASS f3b guarantee: the finance manager sets the bank limit
+PASS f3b guarantee: an issued guarantee of 5,000,000,000 is registered with a fee of 1,200,000 and a prepaid balance of 1,200,000
+PASS f3b guarantee: the memorandum accounts carry exactly 5,000,000,000
+PASS f3b guarantee: the fee is deferred (prepaid +1,200,000)
+PASS f3b guarantee: the same bank and guarantee number cannot be registered twice
+PASS f3b guarantee: an expiry before the issue date is refused
+PASS f3b guarantee: exposure at the bank is 5,000,000,000 of a limit of 8,000,000,000 (3,000,000,000 available)
+PASS f3b guarantee: an extension with a fee of 300,000 moves the expiry and defers the extra fee
+PASS f3b guarantee: prepaid fee is 1,500,000 after the extension
+PASS f3b guarantee: the register lists the extension event
+PASS f3b guarantee: release closes the guarantee
+PASS f3b guarantee: release reverses the memorandum exactly
+PASS f3b guarantee: release expenses the whole unamortised fee (prepaid back to its start)
+PASS f3b guarantee: after the release the exposure is zero
+PASS f3b guarantee: a released guarantee cannot be released again
+PASS f3b guarantee: a received guarantee is register-only
+PASS f3b guarantee: the received guarantee appears in the totals and in the 30-day expiry list
+PASS f3b guarantee: a received guarantee posts nothing
+PASS f3 setup: voucher 130 finalised
+PASS f3b retention: 5,000,000 held, nothing released, no valid clearance, release not allowed
+PASS f3b retention: the release is refused without an insurance clearance
+PASS r3 m3: a clearance whose file is not in the document store is refused
+PASS r3 m3: the insurance retention 30207 cannot be released by a manual voucher without a valid clearance
+PASS f3b retention: a clearance without the scanned letter is saved but not valid
+PASS f3b retention: a clearance without a document does not release the retention
+PASS f3b retention: an expired clearance with a document is not valid
+PASS f3b retention: an expired clearance does not release the retention
+PASS f3b retention: a revoked clearance is not valid
+PASS f3b retention: a revoked clearance does not release the retention
+PASS f3b retention: a clearance with the document, not revoked, covering the date is valid
+PASS f3b retention: more than the retention held is refused
+PASS f3b retention: 3,000,000 released with a valid clearance
+PASS f3b retention: the retention account falls 3,000,000 and the payable rises 3,000,000
+PASS f3b retention: 2,000,000 remain releasable
+PASS r3 m3: a clearance that was used for a release can no longer be edited
+PASS f3 setup: voucher 132 finalised
+PASS r3 h5: the retention held counts the unclosed previous year: 7,000,000 held, 3,000,000 released, 4,000,000 releasable
+PASS f3b cost: the estimate is saved
+PASS f3b cost: a new estimate replaces the old one
+PASS f3b note: a credit note of 100,000 gets the default VAT 10,000 (total 110,000)
+PASS f3b note: a credit note above the invoice total is refused
+PASS f3b note: the preparer cannot approve
+PASS f3b note: the second accountant approves and posts
+PASS f3b note: credit note debits the payable 110,000, credits price variance 100,000 and VAT 10,000
+PASS f3b note: a debit note with VAT 0 totals 200,000
+PASS f3b note: the debit note is posted
+PASS f3b note: the debit note credits the payable 200,000
+PASS f3b statement: the supplier's own invoice number F-3001 and the supplier's credit-note number CN-1 match exactly, the unknown 777,000 line stays unmatched, difference = their balance minus ours
+PASS f3b statement: the stored statement is readable with the same result
+PASS f3b statement: our internal number still matches by the fallback
+PASS f3b statement: F-3001 with 4,290,001 is matched by number and shows an amount difference of exactly 1, which is part of the explained difference
+PASS r3 m5: a credit note of 200,000 on the invoice F-3002 gets VAT 20,000 (total 220,000)
+PASS r3 m5: the credit note is posted
+PASS r3 m5: payable -220,000, price variance -220,000 (net 200,000 + non-recoverable VAT 20,000) and the input VAT account does not move
+PASS r3 m5: the deductible purchases VAT of the return is unchanged by the credit note
+PASS r3 h1: a payment request for the whole invoice 4,290,000 is refused after a credit note of 220,000
+PASS r3 h1: 4,070,000 (4,290,000 - 220,000) is accepted
+PASS f3b confirmation: letter data for a customer without movement: ledger 0, statement 0, agrees, no open documents
+PASS f3b confirmation: a confirmed amount different from the ledger is refused
+PASS f3b confirmation: the matching confirmation is recorded
+PASS f3b confirmation: an answered letter cannot be answered again
+PASS f3b bonus: employee with a daily wage of 1,100,000 hired on the first day of 1405 saved
+PASS f3b bonus: a year without the rate inputs is refused
+PASS f3 setup: voucher 136 finalised
+PASS f3b bonus: the accountant cannot prepare a bonus run (403)
+PASS r3 h8: the gross cap of the bonus is entered as 60 days
+PASS r3 h8: with the cap at 60 days both gross amounts are exactly 30,000,000 (36,000,000 and 66,000,000 before), total 60,000,000, tax 0
+PASS r3 h8: the capped draft is cancelled
+PASS r3 h8: the gross cap is set to 150 days (75,000,000) for the main scenario
+PASS f3b bonus: gross 36,000,000 and 66,000,000, tax 0 and 100,000 (the part above 45,000,000 is taxed), totals 102,000,000 / 100,000 / 101,900,000
+PASS f3b bonus: the preparer cannot approve
+PASS f3b bonus: approved, 102,000,000 drawn from the provision and nothing expensed now
+PASS f3b bonus: provision debited 102,000,000, tax payable +100,000, payroll payable +101,900,000, no expense
+PASS r3 h6: the bonus run is drafted for payment by treasury for the net 101,900,000
+PASS r3 h6: the bonus payment is posted
+PASS r3 h6: the payroll payable is back to its start after the bonus payment (101,900,000 paid)
+PASS r3 h6: a bonus run cannot be paid twice
+PASS f3b bonus: a second run for the same year is refused
+PASS f3b tax: the annual reconciliation lists the bonus tax of 100,000 for the new employee and the totals add up
+PASS f3b payroll: the auditor gets 403 on the reconciliation
+PASS f3b payroll: the auditor gets 403 on terminations
+PASS f3b payroll: the accountant gets 403 on bonus runs
+PASS f3b payroll: the CEO may read bonus runs
+PASS f3 setup: voucher 139 finalised
+PASS f3b termination: the leave provision on the termination date (1500000) is below the leave pay, so the partial-cover path is tested
+PASS f3b termination: 54 months, severance 81,000,000, leave 6,000,000, notice 0, total 87,000,000 (30 days per year from the rate table)
+PASS f3b termination: the preparer cannot approve
+PASS f3b termination: approved; severance 81,000,000 covered by the provision, leave covered up to the provision balance
+PASS f3b termination: the severance provision is debited exactly 81,000,000
+PASS r3 m4: the termination books insurance 420,000 and a net payable of 86,580,000 (tax 0 in the exempt band)
+PASS r3 h6: the termination is drafted for payment by treasury for the net 86,580,000
+PASS r3 h6: the termination payment is posted
+PASS r3 h6: the payroll payable is back to its start after the termination payment
+PASS r3 m4: a leave pay of 180,000,000 carries insurance 12,600,000 and income tax 14,740,000, net payable 233,660,000
+PASS r3 m4: the example draft is cancelled
+PASS f3b termination: the employee end date is set to the termination date
+PASS f3b termination: an employee already settled cannot be settled again
+PASS f3 setup: voucher 142 finalised
+PASS r3 m7: the cash flow books operating costs -800 and taxes 0 for the mixed voucher
+PASS f3b cashflow: the direct method nets to the change in cash and to the indirect method
+PASS f3b comparative: the balance sheet carries the prior year 1404 and every change is current minus prior
+PASS f3b comparative: the income statement carries the prior year too
+PASS f3b comparative: an unknown statement kind is refused
+PASS f3b notes: the schedules add up (payables, inventory by group) and the loans are split into current and long-term
+PASS f3b notes: the auditor can read the notes
+PASS scope: a rial loan of 3,000,000 with three instalments is saved
+PASS scope: the rial loan is disbursed without any rate
+PASS scope: the rial loan posts exactly 3,000,000 (liability credited, bank debited)
+PASS scope: the first rial instalment is paid without any rate
+PASS scope: the rial instalment falls exactly 1,000,000 on the liability and the bank, with no exchange difference
+PASS r3 v: the cash flow row Loans is exactly +3,000,000 received - 1,000,000 repaid
+PASS scope: a rial letter of credit is opened
+PASS scope: rial letter of credit: margin 40,000,000 posted
+PASS scope: rial letter of credit: fee 500,000 posted
+PASS scope: rial letter of credit: documents received
+PASS r3 h7: a rial letter of credit cannot be paid at a typed rate of 1.1 (it would overpay 20,000,000)
+PASS scope: rial letter of credit: payment at rate 1 = 200,000,000, margin 40,000,000 released, status paid
+PASS scope: rial letter of credit: the margin deposit account is back to its start (40,000,000 in, 40,000,000 released)
+PASS scope: rial letter of credit: the bank paid exactly 200,500,000 (200,000,000 + 500,000 fee)
+PASS scope: rial letter of credit: the supplier payable is debited 200,000,000 and the fee expense 500,000
+PASS scope: rial letter of credit: no exchange gain or loss is booked
+PASS r2 f3: work order 1 set to Done
+PASS r2 f3: the material request for the job is approved
+PASS r2 f3: 10 bolts issued to the work order
+PASS r2 f3: the cost sheet material rose by exactly the value issued (3120420) per the issue document
+PASS r2 f3: 4 of the bolts returned from the work order
+PASS r2 f3: the close-out cost sheet material equals the value issued (3120420) minus the value returned (1248168): returns are subtracted once
+PASS r2 f3: the close-out (2 units) moves exactly the cost sheet (2172252) to finished goods with NO variance (the return is not subtracted twice)
+PASS r2 f3: finished goods 10503 rise exactly 2172252
+PASS r2 f5: the delivery of the closed job is drafted
+PASS r2 f5: the delivery of the closed job is confirmed
+PASS r2 f5: delivering 1 of the 2 closed units relieves finished goods 10503 by exactly half of the closed cost (1086126 of 2172252)
+PASS r2 f5: cost of sales (70101) rose by exactly half of the closed job cost 1086126 plus the delivered bolt 312042
+PASS r3 h3: the delivery of the closed job is cancelled
+PASS r3 h3: after the cancellation finished goods 10503 hold the whole closed cost again and cost of sales is back to its start
+PASS r3 h3: a delivery of both units is drafted
+PASS r3 h3: the delivery of both units is confirmed
+PASS r3 h3: delivering both units relieves finished goods 10503 back to its start (nothing is left behind)
+PASS r3 h3: cost of sales rose by exactly the closed job cost 2172252 plus the delivered bolts 624084
+PASS security user cannot write documents (403)
+PASS production user writes a material request
+--- inventory: 1530 passed, 0 failed
