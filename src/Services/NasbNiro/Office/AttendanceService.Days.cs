@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -243,11 +243,22 @@ namespace Services.NasbNiro.Office
             if (!_user.IsInRole("HR,CEO,PAYROLL,FINANCEMANAGER")) return Bad<MonthStatusDto>(OfficeText.NotAllowed);
             if (year < 1300 || year > 1600 || month < 1 || month > 12) return Bad<MonthStatusDto>(OfficeText.InvalidData);
             OfAttendanceMonth closed = await _uow.Set<OfAttendanceMonth>().AsNoTracking().FirstOrDefaultAsync(m => m.Year == year && m.Month == month, ct);
-            return ResponseDtoHelper.Ok(new MonthStatusDto
+            var status = new MonthStatusDto
             {
                 Year = year, Month = month, Closed = closed != null, ClosedAt = closed?.ClosedAt, ClosedAtText = OfficeText.Stamp(closed?.ClosedAt), Sheets = closed?.SheetCount ?? 0,
                 LockedByPayroll = await _uow.Set<FnPayrollRun>().AnyAsync(r => r.Year == year && r.Month == month && r.Status >= FnPayrollStatus.Approved, ct),
-            });
+            };
+            if (closed != null)
+            {
+                List<FnAttendanceSheet> sheets = await _uow.Set<FnAttendanceSheet>().AsNoTracking().Include(x => x.Employee).Where(x => x.Year == year && x.Month == month).ToListAsync(ct);
+                status.Rows = sheets.OrderBy(x => x.Employee.PersonnelCode).Select(x => new SheetRowDto
+                {
+                    EmployeeId = x.EmployeeId, EmployeeName = EmployeeName(x.Employee), PersonnelCode = x.Employee.PersonnelCode,
+                    DaysWorked = x.DaysWorked, OvertimeHours = x.OvertimeHours, NightHours = x.NightHours, HolidayHours = x.HolidayHours, PaidLeaveDays = x.PaidLeaveDays,
+                    SickLeaveDays = x.SickLeaveDays, UnpaidLeaveDays = x.UnpaidLeaveDays, AbsenceDays = x.AbsenceDays, MissionDays = x.MissionDays,
+                }).ToList();
+            }
+            return ResponseDtoHelper.Ok(status);
         }
 
         public async Task<ResponseDto<CloseMonthResultDto>> CloseMonthAsync(CloseMonthDto dto, CancellationToken ct)

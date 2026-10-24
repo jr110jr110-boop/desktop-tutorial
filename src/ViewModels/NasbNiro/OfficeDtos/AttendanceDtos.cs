@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Office;
 
@@ -294,6 +294,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
 
         /// <summary>A payroll run of the month is approved: the month is locked here too.</summary>
         public bool LockedByPayroll { get; set; }
+
+        /// <summary>The saved attendance sheet of the month (one row per employee), so a closed month can be read and printed again.</summary>
+        public List<SheetRowDto> Rows { get; set; } = new List<SheetRowDto>();
     }
 
     /// <summary>Net hours present per person and day, for the production module's time-booking check.</summary>
