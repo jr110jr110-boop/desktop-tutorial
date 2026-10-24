@@ -2701,7 +2701,7 @@ TOKEN=$ADMIN_TOKEN
 # =============================================================================================== R2 finding 7: currency on treasury lines, realised difference computed automatically
 as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک ارزی - آزمون","bankName":"ملت","accountNumber":"100324200007","iban":"IR590170000000100324200007","currencyCode":"USD"}'; check "r2 f7: a USD bank account is saved" '.success and .data.currencyCode == "USD"'
 BUSD=$(val .data.id)
-as "$TR_TOKEN" POST $FT/petty-cash "{\"holderUserId\":$ADMINID,\"holderTitle\":\"تنخواه ارزی آزمون\",\"ceiling\":50000000}"; PC2=$(val .data.id)
+as "$TR_TOKEN" POST $FT/petty-cash "{\"holderUserId\":$(uid "$FIN_TOKEN"),\"holderTitle\":\"تنخواه ارزی آزمون\",\"ceiling\":50000000}"; check "r2 f7: a petty-cash fund for the currency top-up is saved" '.success and .data.id > 0'; PC2=$(val .data.id)
 FXR="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$HC,\"description\":\"دریافت ارزی\",\"lines\":[{\"instrument\":2,\"amount\":65000000,\"bankAccountId\":$BUSD,\"reference\":\"USD-IN\",\"currencyAmount\":100,\"rate\":650000}]}"
 as "$TR_TOKEN" POST $FT/receipts "$(jq -c 'del(.lines[0].currencyAmount, .lines[0].rate)' <<< "$FXR")"; nomsg "r2 f7: a receipt on a USD account without the currency amount and rate is refused" "ارزی"
 as "$TR_TOKEN" POST $FT/receipts "$(jq -c '.lines[0].amount = 64999999' <<< "$FXR")"; nomsg "r2 f7: the rial amount must equal the currency amount times the rate" "ضرب در نرخ"
@@ -2755,7 +2755,7 @@ as "$FM_TOKEN" POST $FG/post-events
 as "$FM_TOKEN" GET $FCO/workorders/$WO1/cost-sheet; JM0=$(val .data.material | cut -d. -f1); JS0=$(val .data.totalCost | cut -d. -f1)
 bv() { as "$FM_TOKEN" GET "finance/valuation?contains=$C_BOLT"; jq -r '([.data.items[]|select(.itemCode == "'$C_BOLT'")][0].value // 0) | round' "$B"; }
 BV0=$(bv)
-call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"مواد دستور کار برای بستن\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":10}]}"; MRJ=$(val .data.id)
+call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"workOrderId\":$WO1,\"warehouseId\":$W1,\"purpose\":\"مواد دستور کار برای بستن\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":10}]}"; MRJ=$(val .data.id)
 call POST inventory/material-requests/action "{\"id\":$MRJ,\"action\":\"submit\"}"; call POST inventory/material-requests/action "{\"id\":$MRJ,\"action\":\"approve-planning\"}"
 as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$MRJ,\"action\":\"approve-manufacturing\"}"; check "r2 f3: the material request for the job is approved" '.success and .data.status == 2'
 call POST inventory/documents "{\"type\":4,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$MRJ,\"workOrderId\":$WO1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10}]}"; ISJ=$(val .data.id); call POST "inventory/documents/$ISJ/confirm"; check "r2 f3: 10 bolts issued to the work order" '.success'
@@ -2770,7 +2770,7 @@ FG_PRE=$(cb 10503)
 as "$FIN_TOKEN" POST $FCO/workorders/$WO1/close "{\"quantity\":1,\"date\":\"${TODAY}T00:00:00\"}"; check "r2 f3: the close-out moves exactly the cost sheet ($JS2) to finished goods with NO variance (the return is not subtracted twice)" '.success and .data.totalCost == '$JS2' and .data.toFinishedGoods == '$JS2' and .data.variance == 0 and .data.isOpen == false'
 [ "$(cb 10503)" = "$((FG_PRE + JS2))" ] && ok "r2 f3: finished goods 10503 rise exactly $JS2" || bad "r2 f3: finished goods 10503 rise $JS2 (got $(( $(cb 10503) - FG_PRE )))"
 CG0=$(cb 70101); BV3=$(bv)
-mkdelivery $WO1; DLJ=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DLJ/approve" '{"kind":4}'; call POST "inventory/documents/$DLJ/confirm"; check "r2 f5: the delivery of the closed job is confirmed" '.success and .data.status == 1'
+mkdelivery $WO1; check "r2 f5: the delivery of the closed job is drafted" '.success and .data.id > 0'; DLJ=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DLJ/approve" '{"kind":4}'; call POST "inventory/documents/$DLJ/confirm"; check "r2 f5: the delivery of the closed job is confirmed" '.success and .data.status == 1'
 as "$FM_TOKEN" POST $FG/post-events
 BOLTV=$((BV3 - $(bv)))
 [ "$(cb 10503)" = "$FG_PRE" ] && ok "r2 f5: the delivery relieves finished goods 10503 by exactly the closed cost ($JS2)" || bad "r2 f5: the delivery relieves 10503 by $JS2 (got $(( $(cb 10503) - FG_PRE - JS2 )) left over)"
