@@ -169,3 +169,9 @@ The secretariat does not read Confidential or Secret letters. It gets register d
 - CI on ae0ebcc not read: both smoke summaries and install must be checked (branches `innco-ci-smoke-2022`, `innco-ci-smoke-2025-express`, `innco-ci-install`). If a check still fails it is in `.github/scripts/inventory-smoke.sh` (office R1 blocks, from the line "R1: confidential letters" to the end of the office section).
 - Unused private helper `Counts` in `src/Services/NasbNiro/Office/LeaveService.cs` can be removed.
 - Possible duplicate audit rows: `src/DataLayer/Context/ApplicationDbContext.cs` / `FinanceAuditTrail.cs`.
+
+### R1 CI result on ae0ebcc (read afterwards; both SQL 2022 and 2025 Express failed, install-test and package passed)
+1863 passed, 3 failed, all in new R1 checks:
+- "C1: the stored bytes of the attachment are unchanged ..." and "C1: after the bytes ... are swapped on disk verify fails": the smoke still does not find the file on disk (`ls src/WebApi/UploadedDocuments/<id>*` returned nothing; the app's content root is probably elsewhere). The service-side behaviour is not shown to be wrong; the file lookup in `.github/scripts/inventory-smoke.sh` (variable `OATTF`) needs the real path (find it with `find / -name "<documentId>*"` in the smoke).
+- "M5: so the voucher gate is closed": `vouchers:finalise` is still open after `finalize-up-to`; the sweep added in `src/Services/NasbNiro/Finance/GlService.cs` did not close it (check whether a Checked voucher still exists, e.g. the Tir/Mordad payroll vouchers, so the gate is correctly still open and the precondition is wrong).
+Everything else in the R1 blocks passed. Nothing further was pushed.
