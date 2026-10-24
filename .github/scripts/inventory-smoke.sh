@@ -1857,6 +1857,7 @@ as "$FIN_TOKEN" POST $FG/settings '{"key":"ParallelRun.RequiredMonths","value":"
 as "$FM_TOKEN" POST $FG/settings '{"key":"Nonexistent.Key","value":"1"}'; no "f3 settings: unknown keys are refused"
 
 # --- scope: one legal entity, rials only (Finance:MultiEntity and Finance:ForeignCurrency are off by default)
+FXA=finance/fx; FLN=finance/loans
 as "$FM_TOKEN" POST $FE '{"code":"DE1","name":"شرکت دوم","jurisdiction":"DE","baseCurrency":"EUR"}'; nomsg "scope: a second legal entity is refused while Finance:MultiEntity is off" "فقط ریال"
 as "$FM_TOKEN" POST $FE/pairs '{"title":"بین شرکتی","entityAId":1,"entityBId":2,"accountACode":"1019901","accountBCode":"5039901"}'; nomsg "scope: an intercompany pair is refused" "فقط ریال"
 as "$FIN_TOKEN" POST $FE/intercompany/post "{\"pairId\":1,\"date\":\"${TODAY}T00:00:00\",\"amount\":4000000,\"rate\":1,\"chargerEntityId\":1,\"counterAccountACode\":\"60102\",\"counterAccountBCode\":\"80108\"}"; nomsg "scope: an intercompany posting is refused" "فقط ریال"
