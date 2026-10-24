@@ -59,6 +59,17 @@ namespace ViewModels.NasbNiro.FinanceDtos
         // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
         public int OverdueDecisions { get; set; }
 
+        // production (shop floor): computed from the scheduler, the machines and the maintenance orders
+        /// <summary>Open production orders whose forecast finish (last scheduler run) is after the need date.</summary>
+        public int ProductionLateOrders { get; set; }
+
+        public int ProductionMachinesDown { get; set; }
+
+        /// <summary>Work-centre weeks above 110 % of capacity in the next four weeks.</summary>
+        public int ProductionOverloadWeeks { get; set; }
+
+        public int ProductionMaintenanceOverdue { get; set; }
+
         // Sepidar link
         public int EventsPending { get; set; }
         public int EventsFailed { get; set; }

@@ -3618,6 +3618,227 @@ as "$MOP_TOKEN" GET "$FP/employees/$MFEMP"; [ "$CODE" = "403" ] && ok "mes: the 
 as "$MOP_TOKEN" GET "$FG/years"; [ "$CODE" = "403" ] && ok "mes: the operator cannot read the general ledger (403)" || bad "mes: the operator cannot read the general ledger (403) got $CODE"
 as "$MOP_TOKEN" GET "$MF/work-centers/$MFWC1"; check "mes: the operator reads the work centre but the hourly rates are not shown to him" '.success and .data.code == "MF-LATHE" and .data.machineRateRial == null and .data.labourRateRial == null'
 as "$MOP_TOKEN" GET "$MF/bookings?PageSize=0"; check "mes: the operator's booking list carries no payroll or rate field (names, personnel codes and hours only)" '.success and (.data.data|length) >= 1 and ([.. | objects | keys[] | select(test("Rial$|[Rr]ate$|[Ww]age|[Ss]alary|[Ii]ban|[Nn]ationalCode|[Cc]ost"))]|length) == 0'
+
+# =================================================================== PRODUCTION / SHOP FLOOR (MES), release P1 part B
+# daily cost posting, finite-capacity scheduler with load report and dispatch list, maintenance with KPIs, dashboards.
+# Everything is dated in one fixed past week (Mon 2026-08-03 .. Fri 2026-08-07 on the Mon-Fri calendar PCCAL) and the scheduler runs with an explicit asOf,
+# so every figure is exact on every run. People are only the test users and the personnel record of the operator (no names are invented).
+TOKEN=$ADMIN_TOKEN
+
+# --- work centres without rates, the CNC machine, item D (three orders on the CNC centre) and item F (one order on its own centre, linked to a project activity)
+call POST $MF/work-centers "{\"code\":\"MF-CNC\",\"title\":\"فرز سی‌ان‌سی\",\"kind\":1,\"calendarId\":$PCCAL,\"shiftsPerDay\":1,\"hoursPerShift\":8,\"efficiencyPercent\":100,\"utilisationPercent\":100,\"parallelResources\":1}"; check "mes B: CNC work centre (8 h a day, efficiency 100, utilisation 100, Mon-Fri calendar) is saved without rates" '.success and .data.id > 0 and .data.machineRateRial == null and .data.labourRateRial == null'
+MBWC=$(val .data.id)
+call POST $MF/work-centers "{\"code\":\"MF-FC\",\"title\":\"فرز تکمیلی\",\"kind\":1,\"calendarId\":$PCCAL,\"shiftsPerDay\":1,\"hoursPerShift\":8,\"efficiencyPercent\":100,\"utilisationPercent\":100,\"parallelResources\":1}"; check "mes B: second work centre (own queue for the project-linked order)" '.success and .data.id > 0'
+MBWF=$(val .data.id)
+call POST Machine '{"title":"ماشین فرز سی‌ان‌سی آزمون"}'; MBM=$(val .data)
+call POST $MF/machines/info "{\"machineId\":$MBM,\"workCenterId\":$MBWC,\"status\":1}"; check "mes B: the CNC machine belongs to the CNC work centre" '.success and .data.status == 1'
+item MBPD "{\"code\":\"MF.10.00.004.1\",\"title\":\"قطعه ماشینکاری د\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item D (no tracking)"
+item MBPF "{\"code\":\"MF.10.00.006.1\",\"title\":\"قطعه ماشینکاری ف\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "mes B: item F (no tracking)"
+call POST inventory/trace/templates "{\"itemId\":$MBPD,\"sequence\":10,\"title\":\"فرزکاری د\"}"; MBTD=$(val .data.id)
+call POST inventory/trace/templates "{\"itemId\":$MBPF,\"sequence\":10,\"title\":\"فرزکاری ف\"}"; MBTF=$(val .data.id)
+call POST $MF/operation-standards "{\"operationTemplateId\":$MBTD,\"workCenterId\":$MBWC,\"setupHours\":2,\"runHoursPerUnit\":1}"; check "mes B: standard of item D (setup 2 h, 1 h per piece, CNC centre)" '.success and .data.setupHours == 2 and .data.runHoursPerUnit == 1'
+call POST $MF/operation-standards "{\"operationTemplateId\":$MBTF,\"workCenterId\":$MBWF,\"setupHours\":1,\"runHoursPerUnit\":1}"; check "mes B: standard of item F (setup 1 h, 1 h per piece)" '.success and .data.setupHours == 1'
+mfroute "$MBPD" "item D"
+mfroute "$MBPF" "item F"
+
+# item D: three BOM lines of the first work order (4, 3 and 49 pieces); the processes are made after the WBS generation, so their orders are drafted by hand and have no project activity
+mbdraft() { # mbdraft BOMPOSITION COUNT LABEL : BOM line + make process + draft order; sets MBO (order id) and MBN (order number)
+  mfbom "$1" "$2" "قطعه د $3"; mfproc "$MFBOM" "MF.10.00.004.1" "MF-NO-STOCK-CODE" "ساخت قطعه د $3"; check "mes B: make process of order D$3 ($2 pieces)" '.success and .data.id > 0'
+  call POST $MF/orders/draft "{\"processId\":$(val .data.id)}"; check "mes B: order D$3 is drafted for its process" '.success and .data.drafted == 1 and (.data.orderIds|length) == 1'
+  MBO=$(val '.data.orderIds[0]')
+  call GET "$MF/orders/$MBO"; check "mes B: order D$3 is a draft with one operation from the approved routing" ".success and .data.status == 0 and .data.quantity == $2 and (.data.operations|length) == 1 and .data.operations[0].setupHoursPlanned == 2 and .data.operations[0].runHoursPlanned == $2"
+  MBN=$(val .data.number)
+}
+mbrelease() { # mbrelease ORDERID LABEL
+  as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$1}"; check "mes B: the shop supervisor releases order $2: its operation is ready" '.success and .data.status == 1 and ([.data.operations[].status]) == [1]'
+}
+mbdraft 4 4 1; MBO1=$MBO; MBN1=$MBN
+mbdraft 5 3 2; MBO2=$MBO; MBN2=$MBN
+mbdraft 6 49 3; MBO3=$MBO; MBN3=$MBN
+mbrelease "$MBO1" D1; mbrelease "$MBO2" D2; mbrelease "$MBO3" D3
+call GET "$MF/orders/$MBO1"; MBOP1=$(val '.data.operations[0].id')
+call GET "$MF/orders/$MBO2"; MBOP2=$(val '.data.operations[0].id')
+
+# item F: its own contract and work order, so the WBS generation gives its process a project activity and the order is linked to it
+call POST Contracts '{"code":"MF-CT-02","title":"قرارداد دوم آزمون تولید","status":1,"employer":"کارفرمای آزمون"}'; MBCT2=$(val .data.id)
+call POST Equipments '{"code":"MF-EQ-FAN","title":"Process Fan API 673 (production test)"}'; MBEQ2=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$MBCT2,\"equipmentId\":$MBEQ2,\"count\":1}"
+call POST WorkOrders "{\"contractId\":$MBCT2,\"equipmentId\":$MBEQ2,\"code\":\"MF-WO-2\",\"title\":\"Fan production\",\"description\":\"x\",\"count\":1}"; check "mes B: second work order created" '.success and .data.id > 0'
+MBWO2=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$MBCT2,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "mes B: second contract terms" '.success'
+as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$MBWO2,\"contractId\":$MBCT2,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"26\"}"; check "mes B: second equipment project code" '.success and (.data.equipmentProjectCode|startswith("PU10026"))'
+call POST Assemblies "{\"title\":\"Fan casing\",\"code\":\"MF-ASM-2\",\"workOrderId\":$MBWO2,\"assemblerDuration\":1}"; MBASM2=$(val .data.id)
+MBASM_KEEP=$MFASM; MFASM=$MBASM2
+mfbom 1 1 "قطعه ف"; mfproc "$MFBOM" "MF.10.00.006.1" "MF-NO-STOCK-CODE" "ساخت قطعه ف"; check "mes B: make process of item F (1 piece)" '.success and .data.id > 0'
+MFASM=$MBASM_KEEP
+as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$MBCT2,\"workOrderIds\":[$MBWO2]}"; check "mes B: WBS generation for the second work order succeeds" '.success'
+as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MBWO2&PageSize=0"
+if [ "$(val '.data.data|length')" != "1" ]; then call POST $MF/orders/draft "{\"workOrderId\":$MBWO2}"; as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MBWO2&PageSize=0"; fi
+check "mes B: the WBS hook drafted exactly one production order for item F" '.success and (.data.data|length) == 1 and .data.data[0].status == 0'
+MBOF=$(val '.data.data[0].id'); MBNF=$(val '.data.data[0].number')
+call GET "$MF/orders/$MBOF"; check "mes B: order F is linked to the project activity of its process" '.success and .data.activityId > 0'
+MBACT=$(val .data.activityId)
+mbrelease "$MBOF" F
+
+# the need date of the item D orders is the start date of their work order (no activity); the date is in the past, so the lateness is the same on every run
+call PUT WorkOrders/set-start-date '{"workOrderId":'"$MFWO"',"startDate":"2026-08-04T00:00:00Z"}'; check "mes B: the start date (need date) of the first work order is set to 2026-08-04" '.success'
+
+# --- the finite-capacity scheduler, asOf Monday 2026-08-03
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$MBCT2&PageSize=0"; MBACTB=$(jq -c "[.data.data[]|select(.id == $MBACT)|{es:.earlyStart,ef:.earlyFinish,ls:.lateStart,lf:.lateFinish,tf:.totalFloat}][0]" "$B")
+[ -n "$MBACTB" ] && [ "$MBACTB" != "null" ] && ok "mes B: the schedule of the project activity of order F is read before the scheduler runs" || bad "mes B: the schedule of the project activity of order F is read before the scheduler runs"
+as "$MOP_TOKEN" POST $MF/schedule/run '{"asOf":"2026-08-03T00:00:00"}'; nomsg "mes B: the operator cannot run the scheduler" "مجوز"
+as "$MMT_TOKEN" POST $MF/schedule/run '{"asOf":"2026-08-03T00:00:00"}'; nomsg "mes B: maintenance cannot run the scheduler" "مجوز"
+as "$MPM_TOKEN" POST $MF/schedule/run '{"asOf":"2026-08-03T00:00:00"}'; cp "$B" "$OUT/mb-schedule-1.json"
+check "mes B: scheduler run: 4 open orders with 4 operations, 1 late (D3), none unscheduled, 1 activity forecast pushed" '.success and .data.id > 0 and .data.asOfText == "1405/05/12" and .data.orders == 4 and .data.operations == 4 and .data.lateOrders == 1 and .data.unscheduled == 0 and .data.forecastsPushed == 1'
+check "mes B: D1 (6 h) is planned Monday 08-03 to Monday 08-03 and is not late" "([.data.items[]|select(.number == \"$MBN1\")][0]) | (.plannedStart|startswith(\"2026-08-03\")) and (.plannedFinish|startswith(\"2026-08-03\")) and .isLate == false and .daysLate == 0 and .plannedFinishText == \"1405/05/12\""
+check "mes B: D2 (5 h, queued behind D1) is planned 08-03 to Tuesday 08-04 and is not late" "([.data.items[]|select(.number == \"$MBN2\")][0]) | (.plannedStart|startswith(\"2026-08-03\")) and (.plannedFinish|startswith(\"2026-08-04\")) and .isLate == false"
+check "mes B: D3 (51 h) runs from 08-04 over the weekend gap to Wednesday 08-12 (1405/05/21), 8 days after its need date" "([.data.items[]|select(.number == \"$MBN3\")][0]) | (.plannedStart|startswith(\"2026-08-04\")) and (.plannedFinish|startswith(\"2026-08-12\")) and .plannedFinishText == \"1405/05/21\" and .isLate == true and .daysLate == 8 and (.needDate|startswith(\"2026-08-04\")) and .operations[0].hours == 51"
+check "mes B: order F (2 h on its own centre) is planned on 08-03 only" "([.data.items[]|select(.number == \"$MBNF\")][0]) | (.plannedStart|startswith(\"2026-08-03\")) and (.plannedFinish|startswith(\"2026-08-03\")) and .operations[0].workCenterCode == \"MF-FC\""
+as "$MPM_TOKEN" POST $MF/schedule/run '{"asOf":"2026-08-03T00:00:00"}'
+[ "$(jq -S 'del(.data.id)' "$OUT/mb-schedule-1.json")" = "$(jq -S 'del(.data.id)' "$B")" ] && ok "mes B: the scheduler is deterministic: a second run with the same asOf gives the very same plan" || bad "mes B: the scheduler is deterministic: a second run with the same asOf gives the very same plan"
+as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MFWO&PageSize=0"; check "mes B: the plan is kept on the orders: D3 is late by 8 days, D1 and D2 are not, all have the run time" ".success and ([.data.data[]|select(.id == $MBO3)][0] | .isLate == true and .daysLate == 8 and .scheduledAtText != null and (.plannedFinish|startswith(\"2026-08-12\"))) and ([.data.data[]|select(.id == $MBO1 or .id == $MBO2)|select(.isLate)]|length) == 0"
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$MBCT2&PageSize=0"; MBACTA=$(jq -c "[.data.data[]|select(.id == $MBACT)|{es:.earlyStart,ef:.earlyFinish,ls:.lateStart,lf:.lateFinish,tf:.totalFloat}][0]" "$B")
+check "mes B: the forecast of the project activity of order F is pushed by the scheduler (08-03)" "([.data.data[]|select(.id == $MBACT)][0]) | (.forecastStart|startswith(\"2026-08-03\")) and (.forecastFinish|startswith(\"2026-08-03\"))"
+[ "$MBACTA" = "$MBACTB" ] && ok "mes B: the current schedule of the activity (early, late, float; the baseline side) is untouched by the scheduler" || bad "mes B: the current schedule of the activity (early, late, float; the baseline side) is untouched by the scheduler: $MBACTB against $MBACTA"
+
+# --- load report (12 weeks, Saturday weeks) and the dispatch list
+as "$MPM_TOKEN" GET "$MF/load?From=2026-08-03&WorkCenterId=$MBWC"; check "mes B: load report: 12 weeks, week 1 (from Saturday 08-01) has 40 h capacity, 51 h load (127.5 %), 40 h scheduled and is overloaded" '.success and .data.weeks == 12 and (.data.rows|length) == 1 and .data.rows[0].code == "MF-CNC" and (.data.rows[0].cells|length) == 12 and (.data.rows[0].cells[0] | (.weekStart|startswith("2026-08-01")) and .weekStartText == "1405/05/10" and .capacityHours == 40 and .loadHours == 51 and .scheduledHours == 40 and .loadPercent == 127.5 and .overloaded == true)'
+check "mes B: load report: week 2 has 11 h load against 40 h (27.5 %), 22 h scheduled; the other weeks are empty; exactly one overload" '.success and (.data.rows[0].cells[1] | .capacityHours == 40 and .loadHours == 11 and .scheduledHours == 22 and .loadPercent == 27.5 and .overloaded == false) and ([.data.rows[0].cells[2:][]|select(.loadHours != 0)]|length) == 0 and (.data.overloads|length) == 1 and .data.overloads[0].loadPercent == 127.5'
+as "$MPM_TOKEN" GET "$MF/load?From=2026-08-03&WorkCenterId=$MBWC&Threshold=130"; check "mes B: with a threshold of 130 % there is no overload" '.success and .data.threshold == 130 and (.data.overloads|length) == 0'
+as "$MPM_TOKEN" GET "$MF/load?From=2026-08-03&WorkCenterId=$MBWC&Weeks=4"; check "mes B: the number of weeks is a parameter" '.success and (.data.rows[0].cells|length) == 4'
+as "$MOP_TOKEN" GET "$MF/load?From=2026-08-03"; nomsg "mes B: the operator cannot read the load report" "مجوز"
+as "$MMT_TOKEN" GET "$MF/dispatch?WorkCenterId=$MBWC&PageSize=0"; check "mes B: dispatch list of the CNC centre: D1, D2, D3 in priority order, all ready, with the planned dates" ".success and (.data.data|length) == 3 and ([.data.data[].orderNumber]) == [\"$MBN1\",\"$MBN2\",\"$MBN3\"] and ([.data.data[].stage]|unique) == [\"Ready\"] and .data.data[0].jobCard == \"$MBN1/10\" and .data.data[2].quantity == 49 and .data.data[2].plannedFinishText == \"1405/05/21\" and .data.data[2].orderLate == true and .data.data[0].orderLate == false and ([.data.data[].priority]|map(. != null)|all)"
+as "$MMT_TOKEN" GET "$MF/dispatch"; nomsg "mes B: the dispatch list needs a work centre" "مرکز کار"
+as "$SEC_TOKEN" GET "$MF/dispatch?WorkCenterId=$MBWC"; nomsg "mes B: the security user cannot read the dispatch list" "مجوز"
+as "$MOP_TOKEN" GET "$MF/dispatch?WorkCenterId=$MBWC&PageSize=0"; check "mes B: the operator reads the dispatch list, and it carries no cost, rate or wage field" '.success and (.data.data|length) == 3 and ([.. | objects | keys[] | select(test("Rial$|[Rr]ate$|[Ww]age|[Ss]alary|[Ii]ban|[Nn]ationalCode|[Cc]ost"))]|length) == 0'
+
+# --- a breakdown: the machine is Down while the order is open and the scheduler leaves it out; maintenance does the work, production sees everything
+as "$MOP_TOKEN" POST $MF/maintenance/orders "{\"machineId\":$MBM,\"kind\":2,\"task\":\"x\"}"; nomsg "mes B: the operator cannot create maintenance orders" "مجوز"
+as "$MSV_TOKEN" POST $MF/maintenance/orders "{\"machineId\":$MBM,\"kind\":2,\"task\":\"x\"}"; nomsg "mes B: the shop supervisor cannot create maintenance orders either (maintenance and the production manager do)" "مجوز"
+as "$MMT_TOKEN" POST $MF/maintenance/orders "{\"machineId\":$MBM,\"kind\":2,\"task\":\"x\",\"costCenter\":\"CC-NO-SUCH\"}"; nomsg "mes B: an unknown cost centre is refused" "مرکز هزینه"
+as "$MMT_TOKEN" POST $MF/maintenance/orders "{\"machineId\":$MBM,\"kind\":2,\"task\":\"توقف اسپیندل ماشین فرز\",\"downtimeStart\":\"2026-08-05T10:00:00\",\"estimatedHours\":4}"; check "mes B: maintenance opens a breakdown order for the CNC machine (stopped Wednesday 08-05 10:00)" '.success and (.data.number|startswith("MWO")) and .data.kind == 2 and .data.status == 0 and (.data.downtimeStart|startswith("2026-08-05T10:00")) and .data.downtimeEnd == null and .data.dueDateText == "1405/05/14"'
+MBMW=$(val .data.id)
+ibx "$MMT_TOKEN" "mf:mwo:$MBMW"; check "mes B: the maintenance role has the order in its inbox" '.success and (.data.data|length) == 1'
+as "$MOP_TOKEN" GET "$MF/machines?WorkCenterId=$MBWC&Status=2"; check "mes B: the machine is Down while its breakdown order is open" ".success and (.data.data|length) == 1 and .data.data[0].machineId == $MBM"
+as "$MPM_TOKEN" POST $MF/schedule/run '{"asOf":"2026-08-03T00:00:00"}'
+check "mes B: with the machine down from 08-05 10:00 the scheduler cannot finish D3 (no finish date, late, one operation unscheduled); D1 and D2 are unchanged" "(.data.unscheduled == 1) and ([.data.items[]|select(.number == \"$MBN3\")][0] | .plannedFinish == null and .isLate == true) and ([.data.items[]|select(.number == \"$MBN1\")][0].plannedFinish|startswith(\"2026-08-03\")) and ([.data.items[]|select(.number == \"$MBN2\")][0].plannedFinish|startswith(\"2026-08-04\"))"
+as "$MPM_TOKEN" GET "$MF/maintenance/orders?MachineId=$MBM&PageSize=0"; check "mes B: the production manager sees the maintenance orders of the machine" ".success and (.data.data|length) == 1 and .data.data[0].id == $MBMW"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW,\"action\":\"start\"}"; check "mes B: maintenance starts the work" '.success and .data.status == 1'
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW,\"action\":\"complete\"}"; nomsg "mes B: a breakdown order cannot be closed without the cause" "علت خرابی"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/save "{\"id\":$MBMW,\"cause\":\"سایش یاتاقان اسپیندل\"}"; check "mes B: the cause is saved" '.success and .data.cause == "سایش یاتاقان اسپیندل"'
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW,\"action\":\"complete\"}"; nomsg "mes B: and not without the action taken" "اقدام انجام"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/save "{\"id\":$MBMW,\"actionTaken\":\"یاتاقان تعویض و اسپیندل تراز شد\"}"; check "mes B: the action taken is saved" '.success and .data.actionTaken != null'
+as "$MMT_TOKEN" POST $MF/maintenance/labour "{\"orderId\":$MBMW,\"employeeId\":$MFEMP,\"workDate\":\"2026-08-05\",\"hours\":3,\"note\":\"تعویض یاتاقان\"}"; check "mes B: labour of 3 hours is booked on the order" '.success and .data.labourHours == 3 and (.data.labour|length) == 1 and .data.labour[0].workDateText == "1405/05/14"'
+as "$MMT_TOKEN" POST $MF/maintenance/labour "{\"orderId\":$MBMW,\"employeeId\":$MFEMP,\"workDate\":\"2026-08-05\",\"hours\":25}"; nomsg "mes B: labour of more than 24 hours is refused" "۲۴"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW,\"action\":\"complete\",\"downtimeEnd\":\"2026-08-04T10:00:00\"}"; nomsg "mes B: the end of the stop cannot be before its start" "پایان توقف"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW,\"action\":\"complete\",\"downtimeEnd\":\"2026-08-05T14:00:00\"}"; check "mes B: the order is completed: 4 hours of downtime, labour 3 h" '.success and .data.status == 2 and .data.downtimeHours == 4 and .data.labourHours == 3 and (.data.downtimeEndText|startswith("1405/05/14"))'
+ibx "$MMT_TOKEN" "mf:mwo:$MBMW"; check "mes B: the inbox item of the order is closed" '.success and (.data.data|length) == 0'
+as "$MOP_TOKEN" GET "$MF/machines?WorkCenterId=$MBWC&Status=1"; check "mes B: the machine is available again" ".success and ([.data.data[]|select(.machineId == $MBM)]|length) == 1"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/save "{\"id\":$MBMW,\"cause\":\"x\"}"; nomsg "mes B: a completed order is not edited" "بسته شده"
+as "$MPM_TOKEN" POST $MF/schedule/run '{"asOf":"2026-08-03T00:00:00"}'
+check "mes B: after the 4 hours of downtime (08-05 10:00 to 14:00) D3 finishes on Thursday 08-13 (1405/05/22), 9 days late; D1 and D2 are unchanged" "(.data.unscheduled == 0) and (.data.lateOrders == 1) and ([.data.items[]|select(.number == \"$MBN3\")][0] | (.plannedFinish|startswith(\"2026-08-13\")) and .plannedFinishText == \"1405/05/22\" and .daysLate == 9) and ([.data.items[]|select(.number == \"$MBN2\")][0].plannedFinish|startswith(\"2026-08-04\"))"
+as "$MPM_TOKEN" GET "$MF/maintenance/kpis?From=2026-08-03&To=2026-08-07&MachineId=$MBM"; check "mes B: machine KPIs of the week: planned 40 h, downtime 4 h, availability 90 %, 1 breakdown, MTBF 36 h, MTTR 4 h" '.success and (.data.data|length) == 1 and (.data.data[0] | .plannedHours == 40 and .downtimeHours == 4 and .availabilityPercent == 90 and .breakdowns == 1 and .mtbfHours == 36 and .mttrHours == 4 and .workCenterCode == "MF-CNC")'
+as "$MOP_TOKEN" GET "$MF/maintenance/kpis?From=2026-08-03&To=2026-08-07"; nomsg "mes B: the operator cannot read the KPIs" "مجوز"
+as "$FM_TOKEN" GET "$FAU?EntityType=MfMaintenanceOrder&EntityId=$MBMW&PageSize=0"; check "mes B: the maintenance order is in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) >= 1'
+
+# --- the breakdown order the machine-down report of part A has already drafted: one order per report, spare parts through a material request, the issue draft carries the cost centre
+as "$MMT_TOKEN" GET "$MF/maintenance/orders?MachineId=$MFM3&Kind=2&PageSize=0"; check "mes B: the machine-down report of the lathe has drafted its breakdown order by itself (one per report), open" ".success and (.data.data|length) == 1 and .data.data[0].requestId == $MFMNT and .data.data[0].status == 0 and .data.data[0].kind == 2 and (.data.data[0].number|startswith(\"MWO\"))"
+MBMW3=$(val '.data.data[0].id')
+ibx "$MMT_TOKEN" "mf:mwo:$MBMW3"; check "mes B: maintenance has that order in its inbox" '.success and (.data.data|length) == 1'
+as "$MMT_TOKEN" POST $MF/maintenance/orders "{\"machineId\":$MFM3,\"kind\":2,\"task\":\"x\",\"requestId\":$MFMNT}"; nomsg "mes B: a second order for the same report is refused" "دستور نگهداری ساخته شده"
+as "$MMT_TOKEN" POST $MF/maintenance/orders "{\"machineId\":$MBM,\"kind\":2,\"task\":\"x\",\"requestId\":$MFMNT}"; nomsg "mes B: a report of another machine is refused" "ماشین دیگری"
+call POST finance/cost-centers '{"code":"CC-MNT","title":"مرکز هزینه نگهداری آزمون","isProduction":false}'; check "mes B: maintenance cost centre saved" '.success'
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"request-parts\"}"; nomsg "mes B: the material request of the spare parts needs the parts list" "فهرست قطعات"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/save "{\"id\":$MBMW3,\"costCenter\":\"CC-MNT\",\"cause\":\"سایش یاتاقان\",\"actionTaken\":\"تعویض یاتاقان\",\"parts\":[{\"itemId\":$MFCMP,\"quantity\":2,\"note\":\"یاتاقان یدکی\"}]}"; check "mes B: cost centre, cause, action and one spare part (2 pieces) are saved" '.success and .data.costCenter == "CC-MNT" and (.data.parts|length) == 1 and .data.parts[0].quantity == 2'
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"draft-issue\"}"; nomsg "mes B: the issue cannot be drafted before the material request exists" "درخواست کالای قطعات را بسازید"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"request-parts\"}"; check "mes B: the draft material request of the spare parts is made" '.success and .data.materialRequestId > 0 and .data.materialRequestNumber != null'
+MBMR=$(val .data.materialRequestId)
+as "$MMT_TOKEN" POST $MF/maintenance/orders/save "{\"id\":$MBMW3,\"parts\":[{\"itemId\":$MFCMP,\"quantity\":3}]}"; nomsg "mes B: the parts list is frozen once the request exists" "فهرست قطعات"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"draft-issue\"}"; nomsg "mes B: the issue waits for the final approval of the request (planning and production)" "تایید نهایی"
+call POST inventory/material-requests/action "{\"id\":$MBMR,\"action\":\"submit\"}"; check "mes B: the request is submitted" '.success and .data.status == 1'
+call POST inventory/material-requests/action "{\"id\":$MBMR,\"action\":\"approve-planning\"}"; check "mes B: planning approves the request" '.success and .data.planningApproved'
+as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$MBMR,\"action\":\"approve-manufacturing\"}"; check "mes B: production approves the request: approved" '.success and .data.status == 2'
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"draft-issue\"}"; check "mes B: the issue of the spare parts is drafted" '.success and .data.issueDocumentId > 0 and .data.issueDocumentNumber != null'
+MBISS=$(val .data.issueDocumentId)
+call GET "inventory/documents/$MBISS"; check "mes B: the issue is a draft against the request, carries the maintenance cost centre and the 2 spare parts (confirming it is a stock step for the warehouse)" ".success and .data.status == 0 and .data.type == 4 and .data.costCenter == \"CC-MNT\" and .data.materialRequestId == $MBMR and .data.lines[0].itemId == $MFCMP and .data.lines[0].quantity == 2"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"draft-issue\"}"; nomsg "mes B: the issue is drafted once" "قبلا پیش‌نویس"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW3,\"action\":\"complete\"}"; check "mes B: the lathe breakdown order is completed: its request is done and the lathe is available again" '.success and .data.status == 2'
+as "$MMT_TOKEN" GET "$MF/maintenance-requests?MachineId=$MFM3"; check "mes B: the report of part A is done with its order" ".success and .data.data[0].id == $MFMNT and .data.data[0].status == 2"
+as "$MOP_TOKEN" GET "$MF/machines?WorkCenterId=$MFWC1&Status=1"; check "mes B: machine 3 is available again" ".success and ([.data.data[]|select(.machineId == $MFM3)]|length) == 1"
+
+# --- time bookings of the week (the supervisor books for the personnel record of the operator, on the CNC machine)
+as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MBOP1,\"employeeId\":$MFEMP,\"kind\":2,\"machineId\":$MBM,\"startAt\":\"2026-08-03T08:00:00\",\"endAt\":\"2026-08-03T12:00:00\",\"goodQty\":3,\"scrapQty\":1,\"scrapReasonCodeId\":$MFRSC,\"reason\":\"ثبت از روی برگه دستی\"}"; check "mes B: booking 1 on D1: 4 h on the CNC machine, 3 good and 1 scrapped piece" '.success and .data.hours == 4 and .data.minutes == 240 and .data.goodQty == 3 and .data.scrapQty == 1'
+MBB1=$(val .data.id)
+as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MBOP2,\"employeeId\":$MFEMP,\"kind\":2,\"machineId\":$MBM,\"startAt\":\"2026-08-04T08:00:00\",\"endAt\":\"2026-08-04T14:00:00\",\"goodQty\":3,\"reason\":\"ثبت از روی برگه دستی\"}"; check "mes B: booking 2 on D2: 6 h on the CNC machine, 3 good pieces" '.success and .data.hours == 6 and .data.goodQty == 3'
+as "$MPM_TOKEN" GET "$MF/oee?From=2026-08-03&To=2026-08-07&WorkCenterId=$MBWC"; check "mes B: OEE of the CNC centre for the week: availability 90.0, performance 70.0 (7 standard of 10 booked hours), quality 85.7 (6 of 7 pieces), OEE 54.0" '.success and (.data|length) == 1 and (.data[0] | .plannedHours == 40 and .downtimeHours == 4 and .bookedRunHours == 10 and .standardHours == 7 and .goodQty == 6 and .scrapQty == 1 and .availabilityPercent == 90 and .performancePercent == 70 and .qualityPercent == 85.7 and .oeePercent == 54)'
+as "$MOP_TOKEN" GET "$MF/oee?From=2026-08-03&To=2026-08-07"; nomsg "mes B: the operator cannot read the OEE" "مجوز"
+
+# --- daily cost posting: a missing rate is refused in clear Persian (nothing is posted at zero), then finance enters the rates
+as "$MOP_TOKEN" POST $MF/cost/run '{"date":"2026-08-03T00:00:00"}'; nomsg "mes B: the operator cannot run the cost posting" "مجوز"
+as "$MSV_TOKEN" POST $MF/cost/run '{"date":"2026-08-03T00:00:00"}'; nomsg "mes B: the shop supervisor cannot run the cost posting" "مجوز"
+as "$MSV_TOKEN" GET "$MF/cost/runs"; nomsg "mes B: the shop supervisor cannot read the cost runs" "مجوز"
+as "$FM_TOKEN" POST $MF/cost/run "{\"date\":\"$(dd 0)T00:00:00\"}"; nomsg "mes B: today is refused (only finished days are posted)" "قبل از امروز"
+as "$FM_TOKEN" POST $MF/cost/run '{"date":"2026-08-03T00:00:00"}'; nomsg "mes B: no labour rate: refused with the work centre named and the finance action (no zero-cost posting)" "نرخ ساعتی دستمزد"
+check "mes B: the refusal names the CNC work centre" '.message | contains("MF-CNC")'
+as "$FM_TOKEN" GET "finance/costs?contractId=$MFCT"; check "mes B: nothing was posted to the work order" "(.success) and ([.data[]|select(.workOrderId == $MFWO)|.labour + .overhead]|add // 0) == 0"
+as "$FM_TOKEN" POST $MF/work-centers/rates "{\"id\":$MBWC,\"labourRateRial\":600}"; check "mes B: finance enters only the standard labour rate (600 a hour)" '.success and .data.labourRateRial == 600'
+as "$FM_TOKEN" POST $MF/cost/run '{"date":"2026-08-03T00:00:00"}'; nomsg "mes B: no machine rate: refused with a clear message" "نرخ ساعتی ماشین"
+as "$FM_TOKEN" POST $MF/work-centers/rates "{\"id\":$MBWC,\"machineRateRial\":2000,\"labourRateRial\":600}"; check "mes B: finance enters the machine rate (2000 a hour) and the labour rate (600 a hour)" '.success and .data.machineRateRial == 2000 and .data.labourRateRial == 600'
+as "$FM_TOKEN" POST $MF/cost/run '{"date":"2026-08-03T00:00:00"}'; check "mes B: cost run for Monday 08-03: 1 booking, labour 4 h x 600 = 2400, machine 4 h x 2000 = 8000, rate from the work centre (no payroll exists)" '.success and .data.bookingsPosted == 1 and .data.bookingsSkipped == 0 and .data.labourAmount == 2400 and .data.overheadAmount == 8000 and .data.labourRateFromWorkCenter == 1 and .data.labourRateFromPayroll == 0 and (.data.runs|length) == 1 and .data.runs[0].postingDateText == "1405/05/12" and (.data.runs[0].number|startswith("MCR")) and .data.runs[0].labourHours == 4 and .data.runs[0].machineHours == 4 and .data.runs[0].accountingEventId > 0'
+MBCR1=$(val '.data.runs[0].id'); MBCRN1=$(val '.data.runs[0].number')
+as "$FM_TOKEN" POST $MF/cost/run '{"date":"2026-08-03T00:00:00"}'; check "mes B: the same day again posts nothing (idempotent per booking)" '.success and .data.bookingsPosted == 0 and (.data.runs|length) == 0 and .data.labourAmount == 0'
+as "$MPM_TOKEN" POST $MF/cost/run '{"date":"2026-08-04T00:00:00"}'; check "mes B: the production manager may run it too: Tuesday 08-04 posts labour 6 h x 600 = 3600 and machine 6 h x 2000 = 12000" '.success and .data.bookingsPosted == 1 and .data.labourAmount == 3600 and .data.overheadAmount == 12000 and (.data.runs|length) == 1'
+MBCR2=$(val '.data.runs[0].id')
+as "$FM_TOKEN" GET "finance/costs?contractId=$MFCT"; check "mes B: the work order cost report shows labour 6000 and overhead 20000 (CostEntry rows)" ".success and ([.data[]|select(.workOrderId == $MFWO)|.labour]|add) == 6000 and ([.data[]|select(.workOrderId == $MFWO)|.overhead]|add) == 20000"
+as "$FM_TOKEN" GET "finance/events?Contains=$MBCRN1&IncludeNotRequired=true&PageSize=10"; check "mes B: the accounting event of the day: type labour absorbed, Dr work in progress 10400 against Cr absorbed labour 2400 and absorbed overhead 8000" '.success and (.data.data|length) == 1 and (.data.data[0] | .type == 13 and .sourceType == "MfCostRun" and .amount == 10400 and ([.lines[]|select(.accountRole == "WIP")|.debit]|add) == 10400 and ([.lines[]|select(.accountRole == "LabourAbsorbed")|.credit]|add) == 2400 and ([.lines[]|select(.accountRole == "OverheadAbsorbed")|.credit]|add) == 8000 and ([.lines[]|.debit]|add) == ([.lines[]|.credit]|add) and ([.lines[]|select(.accountRole == "WIP")|.workOrderId]|unique) != [null])'
+as "$FM_TOKEN" GET $FG/setup-check; check "mes B: the account roles of absorbed labour and overhead are mapped (no unmapped role problem)" '.success and ([.data.problems[]|select(.code|test("LabourAbsorbed|OverheadAbsorbed"))]|length) == 0'
+as "$FM_TOKEN" GET "$MF/cost/postings?RunId=$MBCR1&PageSize=0"; check "mes B: the posting is one row per work order, work centre and day (never per person)" ".success and (.data.data|length) == 1 and (.data.data[0] | .workOrderId == $MFWO and .workCenterCode == \"MF-CNC\" and .bookingCount == 1 and .labourHours == 4 and .machineHours == 4 and .labourAmount == 2400 and .overheadAmount == 8000 and .postingDateText == \"1405/05/12\") and ([.. | objects | keys[] | select(test(\"[Ee]mployee|[Pp]erson|[Nn]ame\$\"))]|length) == 0"
+as "$MPM_TOKEN" GET "$MF/cost/runs?PageSize=0"; check "mes B: the production manager reads the cost runs of both days" ".success and ([.data.data[]|select(.id == $MBCR1 or .id == $MBCR2)]|length) == 2"
+as "$MSV_TOKEN" POST $MF/bookings/edit "{\"id\":$MBB1,\"endAt\":\"2026-08-03T13:00:00\",\"reason\":\"اصلاح ساعت پایان\"}"; nomsg "mes B: a booking whose cost is posted cannot be corrected any more" "در حسابداری ثبت شده"
+as "$FM_TOKEN" GET "$FAU?EntityType=MfCostRun&EntityId=$MBCR1&PageSize=0"; check "mes B: the cost run is in the audit trail" '.success and (.data.data|length) >= 1'
+as "$MOP_TOKEN" GET "$MF/work-centers/$MBWC"; check "mes B: the operator still sees no rate on the work centre" '.success and .data.machineRateRial == null and .data.labourRateRial == null'
+as "$MOP_TOKEN" GET "$MF/terminal/my-operations?PageSize=0"; check "mes B: the operator terminal carries no cost, rate or wage field" '.success and ([.. | objects | keys[] | select(test("Rial$|[Rr]ate$|[Ww]age|[Ss]alary|[Ii]ban|[Nn]ationalCode|[Cc]ost"))]|length) == 0'
+
+# --- maintenance plans: by calendar days and by running hours, drafted when due (7 days ahead), once
+as "$MOP_TOKEN" POST $MF/maintenance/plans "{\"machineId\":$MBM,\"task\":\"x\",\"intervalKind\":1,\"intervalValue\":30}"; nomsg "mes B: the operator cannot write maintenance plans" "مجوز"
+as "$MMT_TOKEN" POST $MF/maintenance/plans "{\"machineId\":$MBM,\"task\":\"x\",\"intervalKind\":1,\"intervalValue\":0}"; nomsg "mes B: a plan needs an interval above zero" "بیشتر از صفر"
+as "$MPM_TOKEN" POST $MF/maintenance/plans "{\"machineId\":$MBM,\"task\":\"روغن‌کاری و بازرسی ماهانه\",\"intervalKind\":1,\"intervalValue\":30,\"startDate\":\"2026-07-10\",\"estimatedHours\":2,\"checklist\":\"سطح روغن، تسمه‌ها، فیلتر\"}"; check "mes B: the production manager saves a 30-day plan counted from 2026-07-10: next due 2026-08-09 (1405/05/18)" '.success and .data.id > 0 and .data.isActive == true and (.data.nextDueDate|startswith("2026-08-09")) and .data.nextDueDateText == "1405/05/18" and .data.openOrderId == null'
+as "$MMT_TOKEN" POST $MF/maintenance/plans/draft-due '{"asOf":"2026-07-20T00:00:00"}'; check "mes B: on 07-20 the plan is not due yet (the lead is 7 days): nothing drafted" '.success and .data.plansChecked >= 1 and .data.drafted == 0'
+as "$MMT_TOKEN" POST $MF/maintenance/plans/draft-due '{"asOf":"2026-08-03T00:00:00"}'; check "mes B: on 08-03 (6 days before the due date) the plan drafts its planned order, due 08-09" '.success and .data.drafted == 1 and .data.orders[0].kind == 1 and .data.orders[0].status == 0 and .data.orders[0].planId > 0 and (.data.orders[0].dueDate|startswith("2026-08-09")) and (.data.orders[0].number|startswith("MWO")) and .data.orders[0].estimatedHours == 2'
+MBMW1=$(val '.data.orders[0].id')
+as "$MMT_TOKEN" POST $MF/maintenance/plans/draft-due '{"asOf":"2026-08-03T00:00:00"}'; check "mes B: drafting again drafts nothing while the order is open" '.success and .data.drafted == 0'
+ibx "$MMT_TOKEN" "mf:mwo:$MBMW1"; check "mes B: the planned order is in the inbox of maintenance" '.success and (.data.data|length) == 1'
+as "$MMT_TOKEN" GET "$MF/maintenance/plans?MachineId=$MBM"; check "mes B: the plan shows its open order" ".success and (.data.data|length) == 1 and .data.data[0].openOrderId == $MBMW1"
+as "$MMT_TOKEN" POST $MF/maintenance/plans "{\"machineId\":$MBM,\"task\":\"سرویس هر ۸ ساعت کار\",\"intervalKind\":2,\"intervalValue\":8,\"startDate\":\"2026-08-01\",\"estimatedHours\":1}"; check "mes B: a running-hours plan (every 8 h) counted from 08-01: the 10 booked hours of the machine are counted" '.success and .data.intervalKind == 2 and .data.runningHoursSince == 10'
+MBPLAN2=$(val .data.id)
+as "$MMT_TOKEN" POST $MF/maintenance/plans/draft-due '{}'; check "mes B: the running-hours plan is due (10 h against 8 h) and drafts its order; the day plan is not drafted twice" '.success and .data.drafted == 1 and .data.orders[0].planId == '"$MBPLAN2"
+MBMW2=$(val '.data.orders[0].id')
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW2,\"action\":\"complete\"}"; nomsg "mes B: a planned order is closed only with the action taken" "اقدام انجام"
+as "$MMT_TOKEN" POST $MF/maintenance/orders/save "{\"id\":$MBMW2,\"actionTaken\":\"سرویس انجام شد\"}"; check "mes B: the action taken is saved" '.success'
+as "$MMT_TOKEN" POST $MF/maintenance/orders/action "{\"id\":$MBMW2,\"action\":\"complete\"}"; check "mes B: the planned order is completed (no cause is needed)" '.success and .data.status == 2'
+as "$MMT_TOKEN" GET "$MF/maintenance/plans?MachineId=$MBM"; check "mes B: completing the order restarts the running-hours plan: 0 h since the service, last done today" ".success and ([.data.data[]|select(.id == $MBPLAN2)][0] | .runningHoursSince == 0 and .lastDoneAtText != null and .openOrderId == null)"
+as "$MMT_TOKEN" GET "$MF/maintenance/orders?Kind=1&OpenOnly=true&PageSize=0"; check "mes B: the day-plan order is still open and overdue (due 08-09, long ago)" ".success and ([.data.data[]|select(.id == $MBMW1)][0] | .overdue == true and .status == 0)"
+
+# --- dashboards: the production manager's dashboard on a chosen day (2026-08-07), then the CEO's with the real day
+as "$MPM_TOKEN" GET "$MF/dashboard?AsOf=2026-08-07"; check "mes B: production dashboard on 08-07: 1 late order (D3, 9 days), no inspection waiting, no kit short, no machine down, no overdue maintenance" ".success and .data.asOfText == \"1405/05/16\" and .data.lateOrders == 1 and .data.lateOrderList[0].number == \"$MBN3\" and .data.lateOrderList[0].daysLate == 9 and .data.qcHoldOverTwoDays == 0 and .data.kitShortages == 0 and .data.machinesDown == 0 and .data.maintenanceOverdue == 0 and .data.lastScheduleRunText != null"
+check "mes B: production dashboard: the month so far (from 1405/05/01) has 6 good and 1 scrapped piece (14.3 % scrap) and the CNC centre's OEE rows" '.data.monthGoodQty == 6 and .data.monthScrapQty == 1 and .data.scrapRatePercent == 14.3 and ([.data.oee[]|select(.workCenterCode == "MF-CNC")][0] | .plannedHours == 96 and .downtimeHours == 4 and .bookedRunHours == 10 and .goodQty == 6 and .availabilityPercent == 95.8 and .performancePercent == 70 and .qualityPercent == 85.7 and .oeePercent == 57.5)'
+as "$MPM_TOKEN" GET "$MF/load?From=2026-08-07&Weeks=12"; MBOVL=$(val '.data.overloads|length')
+as "$MPM_TOKEN" GET "$MF/dashboard?AsOf=2026-08-07"; check "mes B: production dashboard: the overload weeks equal the overloads of the load report of the same day" ".success and .data.overloadWeeks == $MBOVL and (.data.overloadList|length) == ($MBOVL | if . > 10 then 10 else . end)"
+as "$MOP_TOKEN" GET "$MF/dashboard"; nomsg "mes B: the operator cannot open the production dashboard" "مجوز"
+as "$MPM_TOKEN" GET "$MF/dashboard"; check "mes B: with the real day the day-plan order is overdue: 1 overdue maintenance order" '.success and .data.maintenanceOverdue == 1'
+
+# a fourth order on the CNC centre (40 pieces, nobody has booked on it) and a final run on the real day, so the CEO figures are exact against the reports
+mbdraft 7 40 4; MBO4=$MBO
+mbrelease "$MBO4" D4
+as "$MPM_TOKEN" POST $MF/schedule/run '{}'; check "mes B: scheduler run on the real day" '.success and .data.orders >= 5 and .data.unscheduled == 0'
+MBLATE=$(val .data.lateOrders)
+as "$MMT_TOKEN" POST $MF/maintenance/orders "{\"machineId\":$MBM,\"kind\":2,\"task\":\"توقف مجدد ماشین فرز\"}"; check "mes B: the CNC machine stops again (breakdown order without a given start: now)" '.success and .data.kind == 2 and .data.downtimeStart != null'
+as "$MPM_TOKEN" GET "$MF/load?Weeks=4&Threshold=110"; MBOVL4=$(val '.data.overloads|length')
+check "mes B: the load report of the next 4 weeks above 110 % has overloads (D3 and D4 stack up)" ".success and $MBOVL4 >= 1"
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "mes B: CEO dashboard: late production orders as of the scheduler run, 1 machine down, overload weeks equal the load report, 1 overdue maintenance order" ".success and .data.productionLateOrders == $MBLATE and $MBLATE >= 1 and .data.productionMachinesDown == 1 and .data.productionOverloadWeeks == $MBOVL4 and .data.productionMaintenanceOverdue == 1"
+check "mes B: CEO dashboard alerts: late orders, machine down (danger), overload above 110 %, overdue maintenance" '(.data.alerts|map(select(.link == "/production/orders" and .level == "warning"))|length) == 1 and (.data.alerts|map(select(.link == "/production/machines" and .level == "danger"))|length) == 1 and (.data.alerts|map(select(.link == "/production/load" and .level == "warning"))|length) == 1 and (.data.alerts|map(select(.link == "/production/maintenance-orders" and .level == "info"))|length) == 1'
+as "$MPM_TOKEN" GET "$MF/dashboard"; check "mes B: production dashboard of the real day agrees with the CEO figures: 1 machine down (listed with its work centre)" ".success and .data.machinesDown == 1 and .data.machinesDownList[0].workCenterCode == \"MF-CNC\" and .data.lateOrders == $MBLATE"
+TOKEN=$ADMIN_TOKEN
 TOKEN=$ADMIN_TOKEN
 
 # ---------------------------------------------------------------- roles of the new users

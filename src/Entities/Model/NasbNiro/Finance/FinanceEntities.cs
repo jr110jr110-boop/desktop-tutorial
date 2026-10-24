@@ -94,6 +94,8 @@ namespace Entities.Model.NasbNiro.Finance
         ScrapReceipt = 10,
         ScrapSale = 11,
         StageConversion = 12,
+        /// <summary>Production: direct labour and machine overhead absorbed into work in progress from the time bookings (release P1).</summary>
+        LabourAbsorbed = 13,
         SupplierInvoice = 20,
         SupplierAdvance = 21,
         PaymentRequest = 22,

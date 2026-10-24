@@ -19,5 +19,9 @@ namespace Services.NasbNiro.Production
         public static Task MaintenanceAsync(INotificationService notify, MfMaintenanceRequest request, string machineTitle, CancellationToken ct) =>
             OfficeGates.SyncAsync(notify, "mf:maint:" + request.Id, request.Status == MfMaintenanceRequestStatus.Open && !request.Deleted, "production", "maintenance-request", request.Id,
                 $"خرابی ماشین {machineTitle} گزارش شد ({request.Number})", "/production/maintenance-requests/" + request.Id, ProductionRoles.Maintenance, ct);
+
+        public static Task MaintenanceOrderAsync(INotificationService notify, MfMaintenanceOrder order, string machineTitle, CancellationToken ct) =>
+            OfficeGates.SyncAsync(notify, "mf:mwo:" + order.Id, (order.Status == MfMaintenanceOrderStatus.Open || order.Status == MfMaintenanceOrderStatus.InProgress) && !order.Deleted, "production", "maintenance-order", order.Id,
+                $"دستور نگهداری {order.Number} ({machineTitle}) منتظر انجام است", "/production/maintenance-orders/" + order.Id, ProductionRoles.Maintenance, ct);
     }
 }

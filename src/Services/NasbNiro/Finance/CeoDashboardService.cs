@@ -171,6 +171,16 @@ namespace Services.NasbNiro.Finance
                                         where dec.Status == OfDecisionStatus.Open && dec.DueDate != null && dec.DueDate < today && meeting.Status == OfMeetingStatus.MinutesApproved && !meeting.Deleted
                                         select dec.Id).CountAsync(ct);
             Alert(d.OverdueDecisions > 0, "warning", $"{d.OverdueDecisions} مصوبه جلسه از موعد گذشته است", "/office/decisions");
+            // production: late orders, machines down, overload of the next four weeks, overdue maintenance (read directly, so the constructor stays as it is)
+            var production = await Production.MfDashboardService.CeoCountsAsync(_uow, today, ct);
+            d.ProductionLateOrders = production.LateOrders;
+            d.ProductionMachinesDown = production.MachinesDown;
+            d.ProductionOverloadWeeks = production.OverloadWeeks;
+            d.ProductionMaintenanceOverdue = production.MaintenanceOverdue;
+            Alert(production.LateOrders > 0, "warning", $"{production.LateOrders} دستور تولید از تاریخ نیاز عقب است", "/production/orders");
+            Alert(production.MachinesDown > 0, "danger", $"{production.MachinesDown} ماشین خراب است", "/production/machines");
+            Alert(production.OverloadWeeks > 0, "warning", $"بار {production.OverloadWeeks} هفته مرکز کار در چهار هفته آینده بیش از ۱۱۰٪ ظرفیت است", "/production/load");
+            Alert(production.MaintenanceOverdue > 0, "info", $"{production.MaintenanceOverdue} دستور نگهداری از موعد گذشته است", "/production/maintenance-orders");
             // finance module: cash, receivables, cheques, profit, margins
             d.Finance = await _finance.GetCeoFinanceAsync(ct);
             d.Alerts.AddRange(d.Finance.Alerts);

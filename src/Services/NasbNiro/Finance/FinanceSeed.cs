@@ -204,6 +204,8 @@ namespace Services.NasbNiro.Finance
             { AccountRoles.DepreciationProduction, "70203" }, { AccountRoles.DepreciationAdmin, "80104" },
             { AccountRoles.AssetGainOnDisposal, "60302" }, { AccountRoles.AssetLossOnDisposal, "80301" },
             { AccountRoles.AssetUnderConstruction, "20108" }, { AccountRoles.CapitalAdvance, "20109" },
+            // release P1 (production): absorbed direct labour (70102) and machine overhead (70103) against work in progress (10520); finance reconciles absorbed against actual each month
+            { AccountRoles.LabourAbsorbed, "70102" }, { AccountRoles.OverheadAbsorbed, "70103" },
         };
 
         /// <summary>The few long-standing statutory ratios that are seeded (each with its source and Verify = true).</summary>

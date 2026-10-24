@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 // General Information about an assembly is controlled through the following
@@ -16,3 +17,6 @@ using System.Runtime.InteropServices;
 
 // The following GUID is for the ID of the typelib if this project is exposed to COM
 [assembly: Guid("0904d5bd-39f3-456d-9aa6-df8c9f91ed4b")]
+
+// the unit tests of the scheduler and the KPI formulas use the internal helpers
+[assembly: InternalsVisibleTo("MsTests")]

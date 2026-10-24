@@ -177,6 +177,11 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Production.IMfDraftingService, Services.NasbNiro.Production.MfDraftingService>();
             services.AddScoped<Services.NasbNiro.Production.IMfProductionService, Services.NasbNiro.Production.MfProductionService>();
             services.AddScoped<Services.NasbNiro.Production.IMfShopFloorService, Services.NasbNiro.Production.MfShopFloorService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfCostService, Services.NasbNiro.Production.MfCostService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfScheduleService, Services.NasbNiro.Production.MfScheduleService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfMaintenanceService, Services.NasbNiro.Production.MfMaintenanceService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfDashboardService, Services.NasbNiro.Production.MfDashboardService>();
+            services.AddHostedService<Services.NasbNiro.Production.ProductionHostedService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();

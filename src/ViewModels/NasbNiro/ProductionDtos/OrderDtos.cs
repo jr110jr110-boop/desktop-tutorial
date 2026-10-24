@@ -59,6 +59,15 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int OperationCount { get; set; }
         public int OperationsDone { get; set; }
         public bool AutoDrafted { get; set; }
+
+        /// <summary>Result of the last scheduler run: the forecast finish is after the need date.</summary>
+        public bool IsLate { get; set; }
+
+        public int DaysLate { get; set; }
+        public string KitReadyDateText { get; set; }
+        public bool KitShortage { get; set; }
+        public string ScheduleNote { get; set; }
+        public string ScheduledAtText { get; set; }
     }
 
     public class OrderDto : OrderListDto

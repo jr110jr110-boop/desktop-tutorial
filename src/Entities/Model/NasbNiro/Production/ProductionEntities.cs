@@ -160,6 +160,21 @@ namespace Entities.Model.NasbNiro.Production
         public DateTime? PlannedStart { get; set; }
         public DateTime? PlannedFinish { get; set; }
 
+        /// <summary>Result of the last scheduler run: the need date it compared with, the late flag and the days late (calendar days).</summary>
+        public DateTime? NeedDate { get; set; }
+
+        public bool IsLate { get; set; }
+        public int DaysLate { get; set; }
+        public DateTimeOffset? ScheduledAt { get; set; }
+
+        /// <summary>The date the kit is expected (open purchase orders), null when it is complete or cannot be told.</summary>
+        public DateTime? KitReadyDate { get; set; }
+
+        /// <summary>The kit is not issued and the stock does not cover what is left to issue.</summary>
+        public bool KitShortage { get; set; }
+
+        public string ScheduleNote { get; set; }
+
         public DateTimeOffset? ActualStart { get; set; }
         public DateTimeOffset? ActualFinish { get; set; }
 
@@ -314,6 +329,14 @@ namespace Entities.Model.NasbNiro.Production
         /// <summary>Why the booking was changed after it was made (after the day closes only the shop supervisor may, with a reason).</summary>
         public string EditReason { get; set; }
 
+        /// <summary>The daily cost posting (part B) that absorbed this booking; null while it is not posted or when it has no hours to cost.</summary>
+        public int? CostRunId { get; set; }
+
+        public MfCostRun CostRun { get; set; }
+
+        /// <summary>Set when the cost posting has handled the booking (a posted booking is final: a correction goes through finance).</summary>
+        public DateTimeOffset? CostPostedAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -337,5 +360,145 @@ namespace Entities.Model.NasbNiro.Production
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ daily cost posting (part B)
+
+    /// <summary>One run of the daily cost posting for one booking day. It owns the accounting event "labour absorbed".</summary>
+    public class MfCostRun
+    {
+        public int Id { get; set; }
+        public string Number { get; set; }
+        public DateTime PostingDate { get; set; }
+        public DateTimeOffset RunAt { get; set; }
+
+        /// <summary>0 = the nightly job.</summary>
+        public int RunByUserId { get; set; }
+
+        public int BookingCount { get; set; }
+        public decimal LabourHours { get; set; }
+        public decimal MachineHours { get; set; }
+        public decimal LabourAmount { get; set; }
+        public decimal OverheadAmount { get; set; }
+        public int? AccountingEventId { get; set; }
+    }
+
+    /// <summary>
+    /// Cost absorbed for one work order, WBS node and work centre on one day. Never one row per person, so no individual pay rate can be read from cost data.
+    /// </summary>
+    public class MfCostPosting
+    {
+        public int Id { get; set; }
+        public int RunId { get; set; }
+        public MfCostRun Run { get; set; }
+        public DateTime PostingDate { get; set; }
+        public int WorkOrderId { get; set; }
+        public int? ContractId { get; set; }
+        public int? WbsNodeId { get; set; }
+        public int? WorkCenterId { get; set; }
+        public int BookingCount { get; set; }
+        public decimal LabourHours { get; set; }
+        public decimal MachineHours { get; set; }
+        public decimal LabourAmount { get; set; }
+        public decimal OverheadAmount { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ scheduling (part B)
+
+    public class MfScheduleRun
+    {
+        public int Id { get; set; }
+        public DateTime AsOfDate { get; set; }
+        public DateTimeOffset RunAt { get; set; }
+
+        /// <summary>0 = the nightly job.</summary>
+        public int RunByUserId { get; set; }
+
+        public int Orders { get; set; }
+        public int Operations { get; set; }
+        public int LateOrders { get; set; }
+        public int Unscheduled { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ maintenance (part B)
+
+    public class MfMaintenancePlan : BaseEntity
+    {
+        public int MachineId { get; set; }
+        public string Task { get; set; }
+        public MfMaintenanceIntervalKind IntervalKind { get; set; }
+
+        /// <summary>Days or running hours between two services.</summary>
+        public decimal IntervalValue { get; set; }
+
+        /// <summary>The day the plan counts from until the first service is done.</summary>
+        public DateTime StartDate { get; set; }
+
+        public DateTime? LastDoneAt { get; set; }
+
+        /// <summary>Next due date of a day-based plan (kept by the service).</summary>
+        public DateTime? NextDueDate { get; set; }
+
+        public string Checklist { get; set; }
+        public decimal EstimatedHours { get; set; }
+        public bool IsActive { get; set; } = true;
+
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>A planned or breakdown maintenance job. A breakdown order is drafted from the machine-down report; a planned one by the job that watches the plans.</summary>
+    public class MfMaintenanceOrder : BaseEntity
+    {
+        public string Number { get; set; }
+        public int MachineId { get; set; }
+        public int? WorkCenterId { get; set; }
+        public MfMaintenanceKind Kind { get; set; }
+        public MfMaintenanceOrderStatus Status { get; set; }
+        public int? PlanId { get; set; }
+        public int? RequestId { get; set; }
+        public string Task { get; set; }
+        public string Checklist { get; set; }
+        public DateTime? DueDate { get; set; }
+        public decimal EstimatedHours { get; set; }
+
+        /// <summary>The machine is out of production from the start to the end (an open end means it is still down).</summary>
+        public DateTime? DowntimeStart { get; set; }
+
+        public DateTime? DowntimeEnd { get; set; }
+        public string Cause { get; set; }
+        public string ActionTaken { get; set; }
+
+        /// <summary>The maintenance cost centre the spare parts are charged to.</summary>
+        public string CostCenter { get; set; }
+
+        public int? MaterialRequestId { get; set; }
+        public int? IssueDocumentId { get; set; }
+        public DateTimeOffset? StartedAt { get; set; }
+        public int? StartedByUserId { get; set; }
+        public DateTimeOffset? DoneAt { get; set; }
+        public int? DoneByUserId { get; set; }
+        public string CancelReason { get; set; }
+
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+    }
+
+    public class MfMaintenanceLabour : BaseEntity
+    {
+        public int OrderId { get; set; }
+        public int EmployeeId { get; set; }
+        public DateTime WorkDate { get; set; }
+        public decimal Hours { get; set; }
+        public string Note { get; set; }
+    }
+
+    public class MfMaintenancePart
+    {
+        public int Id { get; set; }
+        public int OrderId { get; set; }
+        public int ItemId { get; set; }
+        public decimal Quantity { get; set; }
+        public string Note { get; set; }
     }
 }

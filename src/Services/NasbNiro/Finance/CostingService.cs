@@ -86,6 +86,10 @@ namespace Services.NasbNiro.Finance
         public const string AssetUnderConstruction = "AssetUnderConstruction";
         public const string CapitalAdvance = "CapitalAdvance";
 
+        // ---- production (release P1): direct labour and machine overhead absorbed into work in progress from the time bookings
+        public const string LabourAbsorbed = "LabourAbsorbed";            // دستمزد مستقیم جذب‌شده (مقابل کالای در جریان ساخت)
+        public const string OverheadAbsorbed = "OverheadAbsorbed";        // سربار ساخت جذب‌شده (هزینه ساعت ماشین)
+
         public static string InventoryOf(string itemCode)
         {
             string prefix = itemCode != null && itemCode.Length >= 2 && char.IsDigit(itemCode[0]) && char.IsDigit(itemCode[1]) ? itemCode.Substring(0, 2) : null;
@@ -169,6 +173,8 @@ namespace Services.NasbNiro.Finance
             yield return (AssetLossOnDisposal, "زیان فروش دارایی");
             yield return (AssetUnderConstruction, "دارایی در جریان تکمیل");
             yield return (CapitalAdvance, "پیش‌پرداخت سرمایه‌ای");
+            yield return (LabourAbsorbed, "دستمزد مستقیم جذب‌شده");
+            yield return (OverheadAbsorbed, "سربار ساخت جذب‌شده");
         }
     }
 
@@ -326,6 +332,7 @@ namespace Services.NasbNiro.Finance
                     _uow.Set<CostEntry>().Add(new CostEntry
                     {
                         EntryDate = document.DocumentDate, Kind = CostKind.Material, WorkOrderId = document.WorkOrderId, ContractId = contractId,
+                        CostCenter = document.WorkOrderId.HasValue || contractId.HasValue ? null : document.CostCenter,
                         ItemId = g.Key, Quantity = -g.Sum(t => t.Quantity), Amount = amount,
                         SourceType = InventoryDocumentSource, SourceId = document.Id, SourceNumber = document.Number,
                         Description = type == InventoryDocumentType.Issue ? "حواله مواد" : "برگشت از تولید",
@@ -356,6 +363,7 @@ namespace Services.NasbNiro.Finance
                     ProviderId = counter == AccountRoles.Grni ? document.ProviderId : null,
                     WorkOrderId = counter == AccountRoles.Wip || counter == AccountRoles.Cogs ? document.WorkOrderId : null,
                     ContractId = counter == AccountRoles.Wip || counter == AccountRoles.Cogs ? contractId : null,
+                    CostCenter = counter == AccountRoles.MaterialExpense ? document.CostCenter : null,
                 });
             }
 

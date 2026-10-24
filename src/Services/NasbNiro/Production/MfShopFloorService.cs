@@ -514,6 +514,8 @@ namespace Services.NasbNiro.Production
             _uow.Set<MfMaintenanceRequest>().Add(request);
             await _uow.SaveChangesAsync(ct);
             await MfGates.MaintenanceAsync(_notify, request, machine.Title, ct);
+            // the breakdown order of the maintenance module is drafted at once (the machine stays down while it is open)
+            await MfMaintenanceService.DraftBreakdownAsync(_uow, Me, request, machine.Title, _notify, ct);
             return ResponseDtoHelper.Ok(await RequestDtoAsync(request, ct));
         }
 
@@ -666,6 +668,7 @@ namespace Services.NasbNiro.Production
             if (b == null) return MfText.NotFound<BookingDto>("ثبت زمان پیدا نشد.");
             if (!MfConcurrency.Apply(_uow, b, dto.RowVersion)) return Bad<BookingDto>(MfText.InvalidData);
             if (b.EndAt == null) return Bad<BookingDto>("ثبت زمانِ در حال اجرا ویرایش نمی‌شود؛ ابتدا آن را پایان دهید.");
+            if (b.CostPostedAt != null) return Bad<BookingDto>("هزینه این ثبت زمان در حسابداری ثبت شده است و ویرایش نمی‌شود؛ اصلاح از طریق امور مالی انجام می‌شود.");
             if (DayClosed(b) && !_user.IsInRole(ProductionRoles.Supervisor)) return Bad<BookingDto>("روز این ثبت زمان بسته شده است؛ فقط سرپرست کارگاه با ذکر دلیل می‌تواند آن را تغییر دهد.");
             MfOperation op = await _uow.Set<MfOperation>().FirstAsync(o => o.Id == b.OperationId, ct);
             MfProductionOrder order = await _uow.Set<MfProductionOrder>().FirstAsync(o => o.Id == op.OrderId, ct);

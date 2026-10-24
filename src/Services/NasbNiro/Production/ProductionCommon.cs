@@ -62,6 +62,8 @@ namespace Services.NasbNiro.Production
     {
         public const int ProductionOrder = 481;
         public const int MaintenanceRequest = 482;
+        public const int CostRun = 483;
+        public const int MaintenanceOrder = 484;
     }
 
     internal static class MfText

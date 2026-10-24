@@ -100,6 +100,7 @@ namespace Services.NasbNiro.Production
                     NeedDateText = MfText.Date(u?.NeedDate), PlannedStart = o.PlannedStart, PlannedStartText = MfText.Date(o.PlannedStart), PlannedFinish = o.PlannedFinish,
                     PlannedFinishText = MfText.Date(o.PlannedFinish), ActualStartText = MfText.Date(o.ActualStart), ActualFinishText = MfText.Date(o.ActualFinish),
                     OperationCount = c?.Total ?? 0, OperationsDone = c?.Done ?? 0, AutoDrafted = o.AutoDrafted,
+                    IsLate = o.IsLate, DaysLate = o.DaysLate, KitReadyDateText = MfText.Date(o.KitReadyDate), KitShortage = o.KitShortage, ScheduleNote = o.ScheduleNote, ScheduledAtText = MfText.Stamp(o.ScheduledAt),
                 };
             }).ToList();
         }
@@ -114,7 +115,8 @@ namespace Services.NasbNiro.Production
                 RoutingRevisionId = head.RoutingRevisionId, Priority = head.Priority, TotalFloatDays = head.TotalFloatDays, NeedDate = head.NeedDate, NeedDateText = head.NeedDateText,
                 PlannedStart = head.PlannedStart, PlannedStartText = head.PlannedStartText, PlannedFinish = head.PlannedFinish, PlannedFinishText = head.PlannedFinishText,
                 ActualStartText = head.ActualStartText, ActualFinishText = head.ActualFinishText, OperationCount = head.OperationCount, OperationsDone = head.OperationsDone,
-                AutoDrafted = head.AutoDrafted, BomId = o.BomId, ActivityId = o.ActivityId, SerialsPlanned = o.SerialsPlanned, KitRequestId = o.KitRequestId,
+                AutoDrafted = head.AutoDrafted, IsLate = head.IsLate, DaysLate = head.DaysLate, KitReadyDateText = head.KitReadyDateText, KitShortage = head.KitShortage,
+                ScheduleNote = head.ScheduleNote, ScheduledAtText = head.ScheduledAtText, BomId = o.BomId, ActivityId = o.ActivityId, SerialsPlanned = o.SerialsPlanned, KitRequestId = o.KitRequestId,
                 KitOverrideReason = o.KitOverrideReason, ReleaseOverride = o.ReleaseOverride, ReleaseOverrideReason = o.ReleaseOverrideReason, ShortageText = o.ShortageText,
                 ReleasedAtText = MfText.Stamp(o.ReleasedAt), ProductionReceiptId = o.ProductionReceiptId, CancelReason = o.CancelReason, Note = o.Note, RowVersion = MfConcurrency.Text(o.RowVersion),
             };

@@ -102,6 +102,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.KitOverrideReason).HasMaxLength(Text);
                 b.Property(x => x.CancelReason).HasMaxLength(Text);
                 b.Property(x => x.Note).HasMaxLength(Text);
+                b.Property(x => x.ScheduleNote).HasMaxLength(Text);
                 b.HasOne<WorkOrder>().WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ProcessEntity>().WithMany().HasForeignKey(x => x.ProcessId).OnDelete(DeleteBehavior.Restrict);
@@ -172,6 +173,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.Note).HasMaxLength(Text);
                 b.Property(x => x.SupervisorReason).HasMaxLength(Text);
                 b.Property(x => x.EditReason).HasMaxLength(Text);
+                b.HasIndex(x => x.CostRunId);
+                b.HasOne(x => x.CostRun).WithMany().HasForeignKey(x => x.CostRunId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
@@ -190,6 +193,91 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne<MfWorkCenter>().WithMany().HasForeignKey(x => x.WorkCenterId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfReasonCode>().WithMany().HasForeignKey(x => x.ReasonCodeId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // ------------------------------------------------------------------ daily cost posting (part B)
+            builder.Entity<MfCostRun>(b =>
+            {
+                b.ToTable("MfCostRuns");
+                b.Property(x => x.Number).HasMaxLength(Name).IsRequired();
+                b.HasIndex(x => x.Number).IsUnique();
+                b.HasIndex(x => x.PostingDate);
+                b.Property(x => x.LabourHours).HasPrecision(12, 2);
+                b.Property(x => x.MachineHours).HasPrecision(12, 2);
+                b.Property(x => x.LabourAmount).HasPrecision(18, 2);
+                b.Property(x => x.OverheadAmount).HasPrecision(18, 2);
+                b.HasOne<AccountingEvent>().WithMany().HasForeignKey(x => x.AccountingEventId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfCostPosting>(b =>
+            {
+                b.ToTable("MfCostPostings");
+                b.HasIndex(x => x.RunId);
+                b.HasIndex(x => new { x.WorkOrderId, x.PostingDate });
+                b.Property(x => x.LabourHours).HasPrecision(12, 2);
+                b.Property(x => x.MachineHours).HasPrecision(12, 2);
+                b.Property(x => x.LabourAmount).HasPrecision(18, 2);
+                b.Property(x => x.OverheadAmount).HasPrecision(18, 2);
+                b.HasOne(x => x.Run).WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<WorkOrder>().WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfWorkCenter>().WithMany().HasForeignKey(x => x.WorkCenterId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // ------------------------------------------------------------------ scheduling (part B)
+            builder.Entity<MfScheduleRun>(b =>
+            {
+                b.ToTable("MfScheduleRuns");
+                b.HasIndex(x => x.AsOfDate);
+            });
+
+            // ------------------------------------------------------------------ maintenance (part B)
+            builder.Entity<MfMaintenancePlan>(b =>
+            {
+                b.ToTable("MfMaintenancePlans");
+                b.HasIndex(x => x.MachineId);
+                b.Property(x => x.Task).HasMaxLength(Title).IsRequired();
+                b.Property(x => x.IntervalValue).HasPrecision(12, 2);
+                b.Property(x => x.EstimatedHours).HasPrecision(9, 2);
+                b.Property(x => x.Checklist).HasMaxLength(LongText);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfMaintenanceOrder>(b =>
+            {
+                b.ToTable("MfMaintenanceOrders");
+                b.Property(x => x.Number).HasMaxLength(Name).IsRequired();
+                b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => new { x.MachineId, x.Status });
+                b.HasIndex(x => x.PlanId);
+                b.Property(x => x.Task).HasMaxLength(Title);
+                b.Property(x => x.Checklist).HasMaxLength(LongText);
+                b.Property(x => x.EstimatedHours).HasPrecision(9, 2);
+                b.Property(x => x.Cause).HasMaxLength(Text);
+                b.Property(x => x.ActionTaken).HasMaxLength(Text);
+                b.Property(x => x.CostCenter).HasMaxLength(Code);
+                b.Property(x => x.CancelReason).HasMaxLength(Text);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfWorkCenter>().WithMany().HasForeignKey(x => x.WorkCenterId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfMaintenancePlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfMaintenanceRequest>().WithMany().HasForeignKey(x => x.RequestId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MaterialRequest>().WithMany().HasForeignKey(x => x.MaterialRequestId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<InventoryDocument>().WithMany().HasForeignKey(x => x.IssueDocumentId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfMaintenanceLabour>(b =>
+            {
+                b.ToTable("MfMaintenanceLabours");
+                b.HasIndex(x => x.OrderId);
+                b.Property(x => x.Hours).HasPrecision(9, 2);
+                b.Property(x => x.Note).HasMaxLength(Text);
+                b.HasOne<MfMaintenanceOrder>().WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfMaintenancePart>(b =>
+            {
+                b.ToTable("MfMaintenanceParts");
+                b.HasIndex(x => x.OrderId);
+                b.Property(x => x.Quantity).HasPrecision(18, 4);
+                b.Property(x => x.Note).HasMaxLength(Text);
+                b.HasOne<MfMaintenanceOrder>().WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<InventoryItem>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
             });
         }
     }

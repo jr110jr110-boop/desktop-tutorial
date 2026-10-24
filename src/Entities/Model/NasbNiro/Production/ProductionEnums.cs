@@ -22,4 +22,13 @@ namespace Entities.Model.NasbNiro.Production
     public enum MfReasonKind { Scrap = 1, Downtime = 2, Waiting = 3 }
 
     public enum MfMaintenanceRequestStatus { Open = 0, InProgress = 1, Done = 2, Cancelled = 3 }
+
+    // release P1 part B: cost posting, scheduling, maintenance
+
+    public enum MfMaintenanceKind { Planned = 1, Breakdown = 2 }
+
+    public enum MfMaintenanceOrderStatus { Open = 0, InProgress = 1, Done = 2, Cancelled = 3 }
+
+    /// <summary>A maintenance plan repeats by calendar days or by the running hours booked on the machine.</summary>
+    public enum MfMaintenanceIntervalKind { Days = 1, RunningHours = 2 }
 }

@@ -166,6 +166,7 @@ namespace Services.NasbNiro.Inventory
                     MinutesNumber = d.MinutesNumber,
                     WeighbridgeDocumentId = d.WeighbridgeDocumentId,
                     DepositReference = d.DepositReference,
+                    CostCenter = d.CostCenter,
                     PriceQuotes = d.PriceQuotes,
                     FinanceApprovedAt = d.FinanceApprovedAt,
                     WarehouseApprovedAt = d.WarehouseApprovedAt,
@@ -452,6 +453,7 @@ namespace Services.NasbNiro.Inventory
             document.WeighbridgeDocumentId = dto.WeighbridgeDocumentId;
             document.DepositReference = InventoryText.Clean(dto.DepositReference);
             document.PriceQuotes = InventoryText.Clean(dto.PriceQuotes);
+            document.CostCenter = dto.Type == InventoryDocumentType.Issue ? InventoryText.Clean(dto.CostCenter) : null;
         }
 
         /// <summary>Number of offers in the price inquiry text (one per line or separated by "|").</summary>
@@ -573,6 +575,10 @@ namespace Services.NasbNiro.Inventory
                 return "دستور ساخت پیدا نشد.";
             if (dto.ContractId.HasValue && !await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == dto.ContractId.Value && !c.Deleted, cancellationToken))
                 return "قرارداد پیدا نشد.";
+            string costCenter = InventoryText.Clean(dto.CostCenter);
+            if (costCenter != null && dto.Type == InventoryDocumentType.Issue
+                && !await _uow.Set<Entities.Model.NasbNiro.Finance.CostCenter>().AnyAsync(c => c.Code == costCenter && c.IsActive, cancellationToken))
+                return "مرکز هزینه پیدا نشد یا غیرفعال است.";
             return null;
         }
 

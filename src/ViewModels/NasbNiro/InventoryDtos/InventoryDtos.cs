@@ -205,6 +205,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>Scrap sale: the offers of at least three buyers, for example "بازیافت الف: 120,000,000 | ...".</summary>
         public string PriceQuotes { get; set; }
+
+        /// <summary>Cost centre code (an issue without a work order, for example spare parts of the maintenance cost centre).</summary>
+        public string CostCenter { get; set; }
         public List<SaveDocumentLineDto> Lines { get; set; } = new List<SaveDocumentLineDto>();
     }
 
@@ -325,6 +328,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string MinutesNumber { get; set; }
         public Guid? WeighbridgeDocumentId { get; set; }
         public string DepositReference { get; set; }
+        public string CostCenter { get; set; }
         public DateTimeOffset? WarehouseApprovedAt { get; set; }
         public string WarehouseApprovedByName { get; set; }
         public DateTimeOffset? PlanningApprovedAt { get; set; }

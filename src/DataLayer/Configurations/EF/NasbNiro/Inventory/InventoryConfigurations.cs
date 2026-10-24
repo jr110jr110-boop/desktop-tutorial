@@ -203,6 +203,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Property(x => x.MinutesNumber).HasMaxLength(100);
             builder.Property(x => x.DepositReference).HasMaxLength(100);
             builder.Property(x => x.PriceQuotes).HasMaxLength(1000);
+            builder.Property(x => x.CostCenter).HasMaxLength(50);
             builder.HasIndex(x => x.Number).IsUnique().HasFilter("[Number] IS NOT NULL");
             builder.HasIndex(x => x.MaterialRequestId);
             builder.HasIndex(x => x.NcrId);

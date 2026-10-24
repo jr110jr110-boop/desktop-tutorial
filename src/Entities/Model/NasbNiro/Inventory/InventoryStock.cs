@@ -165,6 +165,9 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>Price inquiry of a scrap sale: at least three buyers and their offers (rial).</summary>
         public string PriceQuotes { get; set; }
 
+        /// <summary>Cost centre code an issue without a work order is charged to (for example the maintenance cost centre of a spare-part issue).</summary>
+        public string CostCenter { get; set; }
+
         /// <summary>Finance checked the price and the deposit into the company account (a different person from the storekeeper).</summary>
         public DateTimeOffset? FinanceApprovedAt { get; set; }
         public int? FinanceApprovedByUserId { get; set; }
