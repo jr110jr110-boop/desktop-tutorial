@@ -15,6 +15,7 @@ All in the user's private GitHub repo `jr110jr110-boop/desktop-tutorial`:
 | `innco-ci-install` | Windows IIS + SQL Express install test results (`install-output/checks-1-first.txt`, `checks-2-update.txt`, `checks-3-restore.txt`). |
 | `innco-ci-results` | Generated EF migrations (`ci-output/migration/*`). |
 | `innco-package` | Last built server package (`package-output/`). |
+| `innco-p1-production` | Production P1 work in progress (backend parts A+B), rebased on `innco-net10-build`; merged into it once the migration `ProductionMes` is generated. Not built by CI. |
 | `innco-nuget-cache` / `innco-nuget-pkgs` | Workflow + split tarball of the NuGet cache for offline local builds (see 4). |
 
 The user-facing specs that lived in the old Claude Project (`claude/*.md`) are copied into `project-docs/` in this branch (strategy, warehouse, procurement, processes/data review, quality spec + status, project-control spec, finance spec, remaining-phases plan, .NET 10 upgrade guide). The old "codebase overview" is not copied — the repo itself and `project-docs/upgrade-net10.md` replace it. `docs/` holds the developer briefs, reviews and reports.
@@ -29,8 +30,9 @@ The user-facing specs that lived in the old Claude Project (`claude/*.md`) are c
 | 3 Project control | done | done | |
 | 4 Quality QC/QA | done | done | |
 | Finance F1, F2, F3, F3b + reviews R1, R2, R3 | **done, green** at 7865e2d (1530/0 both SQL, install 0 FAIL x3) | done (f3e664c) | test kit delivered to user (PMIS_Finance_Test.zip). **One company, rial only** (see 5). |
-| Office automation O1 | **done, green** at f581787 (O1-R1 complete: 1869/0 both SQL, install 0 FAIL x3) | **not started** | next: office front pages |
-| Production P1, Sales & Service S1, Local AI A1 | briefs ready (`docs/*-backend-brief.md`) | — | not started |
+| Office automation O1 | **done, green** (R1 at f581787; review of the front: allowedActions on decisions/delegations, referral canCancel, MineOnly, closed-month sheet) | **done** (front f24a643 + 950d477, packaged at 58f4599: 1880/0 both SQL, install 0 FAIL x3) | test kit delivered (PMIS_Office_Test.zip, 106 tests) |
+| Production P1 | part A done + independent review fixed; part B in progress (branch `innco-p1-production`) | — | migration `ProductionMes` not generated yet |
+| Sales & Service S1, Local AI A1 | briefs ready (`docs/*-backend-brief.md`) | — | not started |
 | Engineering module | waits for the user's Claude-team organisation | — | |
 | Final: server hardware BOM | — | — | after all phases (PMIS + local AI + voice + backup, UPS) |
 
@@ -50,6 +52,9 @@ The user-facing specs that lived in the old Claude Project (`claude/*.md`) are c
 - Build: `dotnet build Base.sln --source ~/.nuget/emptysrc -v q -nologo` → must print "Build succeeded". If packages change, push to `innco-nuget-cache` to regenerate (does not run the main CI).
 - No SQL Server locally (Docker/Microsoft repos blocked): smoke and migrations only in CI.
 - Network (new account, 1405/08/02): with the user's claude.ai setting Capabilities > Domain allowlist = All domains, `apt-get`, NuGet, npm and pip work. apt sources must be https (`sed -i 's#http://#https://#' /etc/apt/sources.list.d/ubuntu.sources`; disable docker.list). npm and pip need the proxy env not bypassed: `export npm_config_noproxy=localhost NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1`. `apt-get install -y dotnet-sdk-10.0 shellcheck`.
+- shellcheck runs out of memory (7 GB) on the whole smoke script now: check a temp file of lines 1-95 + the changed section with `-e SC2154,SC2034` and look for variables used before assignment separately.
+- Package build of the front: `.env.production.local` with `VITE_API_URL=/` (git-ignored) before `npx vite build`, then copy `dist` to the backend `.github/ci-frontend-dist`.
+- Admin password: the repo `src/WebApi/appsettings.json` and every package carry `SET-BY-INSTALL-ps1`; CI injects its test password by the env var `AdminUserSeed__Password`; the package job fails if a password slips in (commit bc79b58).
 - Front: `npm`/`npx vite build` work locally; `npx vue-tsc --noEmit` has 5 legacy errors elsewhere — check only your files.
 
 ## 5. Binding user decisions (do not change without asking)
@@ -73,16 +78,17 @@ PMO 1, COMMERCIAL 2, FINANCIAL 3, ENGINEERING 4, QC 5, WAREHOUSE 6, ASSEMBLER 7,
 
 ## 7. Next steps, in order
 
-1. **Office R1: DONE** at f581787 (verified by the orchestrator: `--- inventory: 1869 passed, 0 failed` on SQL 2022 and 2025 Express, 0 `^FAIL` in the three install files). Fixes: (a) C1 — uploaded files were named with a random Guid unrelated to `Document.Id`; `DocumentService.UploadDocumentAsync` now names the file after the entity id (no migration); the C1 smoke now finds the file and proves the attachment lock and tamper detection. (b) M5 — the server was right; the smoke precondition was wrong (2 checked vouchers touched by the finance manager were skipped, and only one fiscal year was finalised). The smoke now finalises all years with both finance managers, unchecks leftover manual vouchers, asserts 0 checked vouchers, 0 finalised on a repeat, then the gate closed (diagnostics kept in `smoke-output/m5-*.json`). (c) unused `LeaveService.Counts` removed. Still open (minor): possible duplicate "Added" audit rows for numbering rules (`ApplicationDbContext.cs` / `FinanceAuditTrail.cs`), not investigated.
-2. Office front pages (endpoint list in `docs/office-o1-report.md`), then a Persian test kit (install package + guide + feedback workbook, same style as the finance kit; build scripts in `tools/finbuild`).
-3. Production P1 → Sales & Service S1 → Local AI A1 (mock LLM in CI) per the briefs in `docs/`, each: backend → independent Opus review → fixes → front → test kit.
+1. **Office O1: DONE** (backend R1 + front + test kit). Also fixed on the way: every audit row was written twice (e219bf6, triggers ran in both SaveChanges overloads); uploaded files named after the document id (C1). Front tools: `tools/mc3o` (jsdom click-through of all office routes per role with mocks generated from the C# DTOs; build the bundle with `npx vite build --config tools/mc3o/vite.chk.config.mjs` from the front folder) and `tools/officebuild` (office test kit: guide PDF, data, feedback workbook).
+2. **Production P1** (branch `innco-p1-production`): part A (master data, routings with two-person approval, production orders, release gate, operations, terminal, time booking, attendance difference) built, independently reviewed (Opus, 13 findings incl. one critical: orders were never added to the context) and fixed; part B (cost posting aggregated per work order/WBS/work centre/day, scheduler, load/dispatch, maintenance + OEE, dashboards) in progress. Then: merge into `innco-net10-build` with `.github/migration-name.txt` = `ProductionMes`, copy the generated migration, set the name back, push, verify green; independent review of part B; front pages; test kit.
+3. Sales & Service S1 → Local AI A1 (mock LLM in CI) per the briefs in `docs/`.
 4. Engineering module after the user's Claude-team organisation.
 5. Server hardware BOM.
 
-Last fully green commits: **f581787** (office O1 incl. R1), 7865e2d (finance complete). A package may now be built from f581787 (check `app/appsettings.json` line 10 placeholder before delivery).
+Last fully green commit: **58f4599** (office complete; package carries the password placeholder).
 
 ## 8. Waiting on the user / company
 
+Office kit (PMIS_Office_Test.zip, 1405/08/03): feedback workbook and the 10 company questions in it. 
 Finance: 16 accountant questions (`docs/finance-r3-report.md` §2; also in the test kit workbook), feedback on the finance test kit, which system prints the legal books. Office: real letter-number format (default `{yy}/{kind}/{unit}/{seq:5}`, kind letters و/ص/د), attendance device model/format (an earlier note says US10C by Donyaye Pardazesh, TCP/IP + RS485 — confirm), Rahkaran archive export format, attendance policy values. Earlier phases: warehouse list and 85 data decisions, procurement form codes, quality/ITP limits, project-control open questions (`claude/project-control-spec.md` §7). Hardware for local AI/voice (to be settled by the BOM).
 
 ## 9. Files in this branch
