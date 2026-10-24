@@ -2377,7 +2377,7 @@ B0=$(tbc 30402)
 as "$PAYR_TOKEN" POST $FP/runs/$PR12/post; PR12EV=$(val .data.accountingEventId); check "r1 payroll: Azar run posted" '.success and .data.status == 3'
 as "$FM_TOKEN" POST $FG/post-events
 evlist; check "r2 f23: the monthly BONUS is an expense and does not touch the provision: payroll expense 40,800,000 = 31,300,000 pay + 5,000,000 bonus + 3,000,000 bonus accrual + 1,500,000 leave accrual" '[.data.data[]|select(.id == '$PR12EV')][0].lines as $l | ([$l[]|select(.accountRole == "BonusProvision")|.debit]|add // 0) == 0 and ([$l[]|select((.accountRole|startswith("PayrollExpense")))|.debit]|add) == 40800000'
-[ "$(( $(tbc 30402) - B0 ))" = "3000000" ] && ok "r2 f23: provision 30402 net movement +3,000,000 (only the monthly accrual; the monthly bonus no longer drains it)" || bad "r2 f23: 30402 net movement +3,000,000 (delta $(( $(tbc 30402) - B0 )))"
+[ "$(( $(tbc 30402) - B0 ))" = "-3000000" ] && ok "r2 f23: provision 30402 closing-debit movement -3,000,000 i.e. credit +3,000,000 (only the monthly accrual; the monthly bonus no longer drains it)" || bad "r2 f23: 30402 net movement +3,000,000 (delta $(( $(tbc 30402) - B0 )))"
 [ "$(( $(tbc 10401) - E0 ))" = "10000000" ] && ok "r1 loan: after the instalment 10401 holds 10,000,000 (12,000,000 - 2,000,000)" || bad "r1 loan: 10401 holds 10,000,000 after the instalment (delta $(( $(tbc 10401) - E0 )))"
 TOKEN=$ADMIN_TOKEN
 
