@@ -2,7 +2,7 @@ import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
-import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
+import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -555,6 +555,25 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/claims", name: "ProjectControlClaims", component: () => import("@/views/projectControl/Claims.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/shipments", name: "ProjectControlShipments", component: () => import("@/views/projectControl/Shipments.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/reports", name: "ProjectControlReports", component: () => import("@/views/projectControl/Reports.vue"), meta: { roles: ProjectControlRoles.readers } },
+  // Office automation (اتوماسیون اداری). Open pages have no meta.roles (every signed-in user); the paths /office/letters/:id, /office/leaves/:id, /office/meetings/:id, /office/requests/:id,
+  // /office/delegations and /office/me are the links written into inbox items by the API.
+  { path: "/office/inbox", name: "OfInbox", component: () => import("@/views/office/Inbox.vue") },
+  { path: "/office/letters", name: "OfLetters", component: () => import("@/views/office/Letters.vue") },
+  { path: "/office/letters/:id", name: "OfLetter", component: () => import("@/views/office/LetterEdit.vue") },
+  { path: "/office/letter-admin", name: "OfLetterAdmin", component: () => import("@/views/office/LetterAdmin.vue"), meta: { roles: OfficeRoles.letterAdmins } },
+  { path: "/office/org", name: "OfOrg", alias: "/office/delegations", component: () => import("@/views/office/Org.vue") },
+  { path: "/office/me", name: "OfMe", component: () => import("@/views/office/MyOffice.vue") },
+  { path: "/office/meetings", name: "OfMeetings", component: () => import("@/views/office/Meetings.vue") },
+  { path: "/office/meetings/:id", name: "OfMeeting", component: () => import("@/views/office/MeetingEdit.vue") },
+  { path: "/office/decisions", name: "OfDecisions", component: () => import("@/views/office/Decisions.vue") },
+  { path: "/office/attendance", name: "OfAttendance", component: () => import("@/views/office/Attendance.vue") },
+  { path: "/office/attendance-setup", name: "OfAttendanceSetup", component: () => import("@/views/office/AttendanceSetup.vue"), meta: { roles: OfficeRoles.attendanceAdmins } },
+  { path: "/office/month-close", name: "OfMonthClose", component: () => import("@/views/office/MonthClose.vue"), meta: { roles: OfficeRoles.monthReaders } },
+  { path: "/office/leaves", name: "OfLeaves", component: () => import("@/views/office/Leaves.vue") },
+  { path: "/office/leaves/:id", name: "OfLeave", component: () => import("@/views/office/Leaves.vue") },
+  { path: "/office/requests", name: "OfRequests", component: () => import("@/views/office/Requests.vue") },
+  { path: "/office/requests/:id", name: "OfRequest", component: () => import("@/views/office/Requests.vue") },
+  { path: "/office/request-types", name: "OfRequestTypes", component: () => import("@/views/office/RequestTypes.vue"), meta: { roles: OfficeRoles.orgAdmins } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

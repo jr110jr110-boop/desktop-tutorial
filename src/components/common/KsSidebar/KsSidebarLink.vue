@@ -75,6 +75,7 @@
                 }"
                 class="IRANYekan text-small link-text">
                 {{ sub.title }}
+                <span v-if="sub.badge" class="badge rounded-pill bg-danger me-1">{{ sub.badge }}</span>
               </span>
               <circle-icon
                 :fill="

@@ -187,6 +187,19 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="officeLinks"
+        has-sub
+        route-name="Of"
+        tag="office-collapse"
+        title="اتوماسیون اداری">
+        <BriefcaseIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Of') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.providers"
         has-sub
         route-name="Providers"
@@ -215,7 +228,9 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { FinanceRoles, FnRoles, hasRole, InventoryRoles, ProcurementRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
+import { FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -476,6 +491,35 @@ const links = {
     },
   ] as Links[],
 };
+
+// Office automation: open items of the inbox are counted beside the inbox link (GET office/inbox/counts, refreshed every minute; a failure just hides the number).
+const inboxOpen = ref(0);
+let inboxTimer: ReturnType<typeof setInterval> | undefined;
+async function loadInboxCount() {
+  if (!localStorage.getItem("token")) return;
+  const [data, error] = await getInboxCounts();
+  if (!error) inboxOpen.value = Number(data?.open) || 0;
+}
+onMounted(() => {
+  loadInboxCount();
+  inboxTimer = setInterval(loadInboxCount, 60000);
+});
+onBeforeUnmount(() => inboxTimer && clearInterval(inboxTimer));
+const officeLinks = computed<Links[]>(() => [
+  { title: "کارتابل اداری", routeName: "OfInbox", badge: inboxOpen.value },
+  { title: "نامه‌ها", routeName: "OfLetters" },
+  { title: "مدیریت نامه‌ها (قالب، شماره‌گذاری، آرشیو)", routeName: "OfLetterAdmin", disabled: !hasRole(OfficeRoles.letterAdmins) },
+  { title: "جلسات", routeName: "OfMeetings" },
+  { title: "مصوبات", routeName: "OfDecisions" },
+  { title: "درخواست‌ها", routeName: "OfRequests" },
+  { title: "مرخصی و ماموریت", routeName: "OfLeaves" },
+  { title: "حضور و غیاب", routeName: "OfAttendance" },
+  { title: "تنظیمات حضور و غیاب", routeName: "OfAttendanceSetup", disabled: !hasRole(OfficeRoles.attendanceAdmins) },
+  { title: "بستن ماه حضور و غیاب", routeName: "OfMonthClose", disabled: !hasRole(OfficeRoles.monthReaders) },
+  { title: "چارت سازمانی و نیابت", routeName: "OfOrg" },
+  { title: "سمت‌ها و امضای من", routeName: "OfMe" },
+  { title: "انواع درخواست", routeName: "OfRequestTypes", disabled: !hasRole(OfficeRoles.orgAdmins) },
+]);
 
 const userRole = localStorage.getItem("userRole");
 </script>

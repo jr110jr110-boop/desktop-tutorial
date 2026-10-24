@@ -25,6 +25,8 @@ export const Roles = {
   PAYROLL: "PAYROLL",
   TREASURY: "TREASURY",
   AUDITOR: "AUDITOR",
+  SECRETARIAT: "SECRETARIAT",
+  HR: "HR",
 } as const;
 
 /** Role ids of the finance roles in the API (RoleConstants.cs); the user page picks roles from the API list, these are for reference. */
@@ -33,6 +35,8 @@ export const RoleIds = {
   PAYROLL: 18,
   TREASURY: 19,
   AUDITOR: 28,
+  SECRETARIAT: 26,
+  HR: 27,
 } as const;
 
 export const roleTitles: Record<string, string> = {
@@ -56,6 +60,8 @@ export const roleTitles: Record<string, string> = {
   PAYROLL: "حقوق و دستمزد",
   TREASURY: "خزانه‌داری",
   AUDITOR: "حسابرس",
+  SECRETARIAT: "دبیرخانه",
+  HR: "اداری و منابع انسانی",
 };
 
 const list = (csv: string) => csv.split(",");
@@ -79,6 +85,39 @@ export const InventoryRoles = {
   approvePlanning: ["PLANNING", "PMO"],
   approveQuality: ["QC"],
   executeNcr: list("PMO,QC,WAREHOUSE"),
+};
+
+/**
+ * Office automation (OfficeRoles in Services/NasbNiro/Office/OfficeCommon.cs). The office controllers only require a signed-in user;
+ * the roles are checked inside the services. Every signed-in user can draft letters and requests, read their own inbox, days and leave,
+ * so "everyone" is an empty list (hasRole() lets an empty list pass). The lists only decide which pages and buttons are shown.
+ */
+export const OfficeRoles = {
+  /** every signed-in user (empty list = no role check) */
+  everyone: [] as string[],
+  /** organisation chart, positions, shifts, shift assignments, devices, attendance policy, request types, delegation of somebody else's position */
+  orgAdmins: list("HR,PMO,CEO"),
+  /** numbering rules and letter templates (writes) */
+  letterAdmins: list("SECRETARIAT,PMO,CEO"),
+  /** register / number / send / receipt / archive letters, import the legacy archive, incoming letters */
+  secretariat: ["SECRETARIAT"],
+  /** manual clock events, clock import, month close, leave recording, completing requests, assigning holders */
+  hr: ["HR"],
+  /** shifts, assignments, devices and policy (writes and the admin reads): same as orgAdmins */
+  attendanceAdmins: list("HR,PMO,CEO"),
+  /** attendance of everybody (days, clock events, compute); everyone else sees only their own rows */
+  attendanceReaders: list("HR,CEO"),
+  /** GET attendance/month/{year}/{month} */
+  monthReaders: list("HR,CEO,PAYROLL,FINANCEMANAGER"),
+  /** close-month */
+  monthClose: ["HR"],
+  /** POST attendance/worked-hours (production time-booking check) */
+  workedHours: list("HR,CEO,PMO,PROJECTMANAGER,PLANNING,CONSTRUCTION,FINANCEMANAGER"),
+  /** POST decisions/check-overdue */
+  overdueCheck: list("SECRETARIAT,PMO,CEO,HR"),
+  /** the CEO decides on delegations of a vacant position or of somebody else (with the holder) */
+  ceo: ["CEO"],
+  /** the unit manager approves leave and requests through the position chain, not by role: no role list, use allowedActions */
 };
 
 /** Finance controller. */
