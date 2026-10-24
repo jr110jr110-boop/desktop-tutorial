@@ -497,6 +497,11 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/fn/financial-statements", name: "FnFinancialStatements", component: () => import("@/views/fn/FinStatements.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/tax-books", name: "FnTaxBooks", component: () => import("@/views/fn/TaxBooks.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/collections", name: "FnCollections", component: () => import("@/views/fn/Collections.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/bank-guarantees", name: "FnBankGuarantees", component: () => import("@/views/fn/BankGuarantees.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/contractors", name: "FnContractors", component: () => import("@/views/fn/Contractors.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/supplier-controls", name: "FnSupplierControls", component: () => import("@/views/fn/SupplierControls.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/confirmation-letters", name: "FnConfirmationLetters", component: () => import("@/views/fn/ConfirmationLetters.vue"), meta: { roles: FnRoles.readers } },
+  { path: "/fn/settlements", name: "FnSettlements", component: () => import("@/views/fn/Settlements.vue"), meta: { roles: FnRoles.payrollReaders } },
   // Quality (QC + QA): the paths of the alert links of the API (/quality/capa, /quality/calibration, /quality/itp, ...) are kept
   { path: "/quality/dashboard", name: "QualityDashboard", component: () => import("@/views/quality/Dashboard.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/itp", name: "QualityItps", component: () => import("@/views/quality/ItpList.vue"), meta: { roles: QualityRoles.readers } },

@@ -379,3 +379,41 @@ export const approvePaymentProposal = (id: number) => post(cl + `payment-proposa
 
 /** Supplier advances not yet recovered (procurement controller; the finance roles that read procurement can open it). */
 export const getOpenSupplierAdvances = () => get("procurement/suppliers/open-advances");
+
+// ---------------------------------------------------------------- F3b: completeness and payroll settlements
+const cm = "finance/completeness/";
+const ps = "finance/payroll-settlements/";
+export const getDirectCashFlow = (params: any) => get(cm + "cash-flow-direct", params);
+/** kind: BalanceSheet | IncomeStatement */
+export const getComparative = (kind: string, fiscalYearId: number | null, includeDraft: boolean) => get(cm + "comparative", { kind, fiscalYearId, includeDraft });
+export const getNotes = (fiscalYearId?: number | null) => get(cm + "notes", { fiscalYearId });
+export const getBankGuarantees = (direction?: number | null) => get(cm + "guarantees", { direction });
+export const saveBankGuarantee = (dto: any) => post(cm + "guarantees", dto);
+/** action: extend, reduce, release, expire, claim */
+export const bankGuaranteeAction = (dto: any) => post(cm + "guarantees/action", dto);
+export const saveGuaranteeLimit = (dto: any) => post(cm + "guarantees/limits", dto);
+export const getGuaranteeExposure = (asOf?: string | null) => get(cm + "guarantees/exposure", { asOf });
+export const getClearances = (providerId?: number | null, asOf?: string | null) => get(cm + "clearances", { providerId, asOf });
+export const saveClearance = (dto: any) => post(cm + "clearances", dto);
+export const getRetentionStatus = (providerId: number, contractId?: number | null, asOf?: string | null) => get(cm + "retention/status", { providerId, contractId, asOf });
+export const releaseRetention = (dto: any) => post(cm + "retention/release", dto);
+export const saveEstimate = (dto: any) => post(cm + "estimates", dto);
+export const getPlannedVsActual = (workOrderId: number) => get(cm + `work-orders/${workOrderId}/planned-vs-actual`);
+export const getSupplierNotes = (providerId?: number | null) => get(cm + "supplier-notes", { providerId });
+export const saveSupplierNote = (dto: any) => post(cm + "supplier-notes", dto);
+/** action: approve, cancel */
+export const supplierNoteAction = (id: number, action: string, note?: string) => post(cm + "supplier-notes/action", { id, action, note: note || null });
+export const reconcileSupplierStatement = (dto: any) => post(cm + "supplier-statements", dto);
+export const getSupplierStatement = (id: number) => get(cm + "supplier-statements/" + id);
+export const getConfirmations = (customerId?: number | null) => get(cm + "confirmations", { customerId });
+export const issueConfirmation = (customerId: number, asOf: string) => post(cm + "confirmations", { customerId, asOf });
+/** action: confirm, dispute */
+export const respondConfirmation = (dto: any) => post(cm + "confirmations/respond", dto);
+
+export const getTerminations = () => get(ps + "terminations");
+export const saveTermination = (dto: any) => post(ps + "terminations", dto);
+export const terminationAction = (id: number, action: string, note?: string) => post(ps + "terminations/action", { id, action, note: note || null });
+export const getBonusRuns = () => get(ps + "bonus-runs");
+export const saveBonusRun = (dto: any) => post(ps + "bonus-runs", dto);
+export const bonusRunAction = (id: number, action: string, note?: string) => post(ps + "bonus-runs/action", { id, action, note: note || null });
+export const getPayrollTaxReconciliation = (year: number) => get(ps + "tax-reconciliation", { year });

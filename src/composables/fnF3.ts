@@ -69,3 +69,14 @@ export function jalaliInText(text: string | null | undefined): string {
   if (!text) return "";
   return String(text).replace(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ][0-9:.]+(?:Z|[+-]\d{2}:\d{2})?)?/g, (m) => jalali(m.slice(0, 10)) || m);
 }
+
+// ---- F3b
+export const guaranteeDirections: Record<number, string> = { 1: "صادرشده (ما به دیگران)", 2: "دریافتی (از دیگران به ما)" };
+export const guaranteeKinds: Record<number, string> = { 1: "حسن انجام کار", 2: "پیش‌پرداخت", 3: "شرکت در مناقصه", 9: "سایر" };
+export const guaranteeStatuses: Record<number, string> = { 1: "فعال", 2: "آزادشده", 3: "منقضی", 4: "مطالبه‌شده" };
+export const guaranteeEvents: Record<number, string> = { 1: "تمدید", 2: "آزادسازی", 3: "مطالبه", 4: "کاهش", 5: "انقضا" };
+export const settlementStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "تاییدشده", 2: "باطل" };
+export const supplierNoteKinds: Record<number, string> = { 1: "یادداشت بستانکار خرید", 2: "یادداشت بدهکار خرید" };
+export const confirmationStatuses: Record<number, string> = { 1: "صادرشده، منتظر پاسخ", 2: "تاییدشده", 3: "مغایرت اعلام‌شده" };
+export const matchKinds: Record<string, string> = { Matched: "مطابق", AmountDifference: "اختلاف مبلغ", Unmatched: "بدون تطبیق", Invoice: "فاکتور", Payment: "پرداخت", Note: "یادداشت", Cheque: "چک" };
+export const cashSections: Record<string, string> = { Operating: "عملیاتی", Investing: "سرمایه‌گذاری", Financing: "تامین مالی" };

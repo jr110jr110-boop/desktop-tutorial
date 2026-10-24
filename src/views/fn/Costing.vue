@@ -5,7 +5,7 @@ import ContractPick from "@/components/fn/ContractPick.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import CostSheetPrint from "@/components/fn/print/CostSheetPrint.vue";
-import { closeWorkOrder, getAllocationKeys, getContractRevenue, getOverheadRates, getStandardCosts, getWorkOrderBases, getWorkOrderCostSheet, reopenWorkOrder, runAllocation, runRevenueRecognition, saveAllocationKey, saveContractRevenue, saveOverheadRate, saveStandardCost, saveWorkOrderBase } from "@/api/FnAPIs";
+import { closeWorkOrder, getAllocationKeys, getContractRevenue, getOverheadRates, getStandardCosts, getWorkOrderBases, getPlannedVsActual, getWorkOrderCostSheet, reopenWorkOrder, runAllocation, runRevenueRecognition, saveAllocationKey, saveContractRevenue, saveEstimate, saveOverheadRate, saveStandardCost, saveWorkOrderBase } from "@/api/FnAPIs";
 import { fail, jalali, num, ok, today } from "@/composables/inventory";
 import { money, parseAmount, printSheet, yesNo } from "@/composables/fn";
 import { overheadBases, revenueMethods, usePeriods } from "@/composables/fnF3";
@@ -97,9 +97,23 @@ async function allocate(dryRun: boolean) {
 const woId = ref("");
 const sheet = ref<any>(null);
 const dialog = ref<null | "close" | "reopen">(null);
+const pva = ref<any>(null);
+const est = ref<any>(null);
+async function saveEst() {
+  const f = est.value;
+  busy.value = true;
+  const [d, error] = await saveEstimate({ workOrderId: sheet.value.workOrderId, material: parseAmount(f.material) || 0, labour: parseAmount(f.labour) || 0, overhead: parseAmount(f.overhead) || 0, subcontract: parseAmount(f.subcontract) || 0, quantity: parseAmount(f.quantity) || 0, note: f.note || null });
+  busy.value = false;
+  if (error) return fail(error);
+  ok("برآورد بها ذخیره شد.");
+  est.value = null;
+  pva.value = d;
+}
 async function loadSheet() {
   const id = parseAmount(woId.value);
   if (!id) return fail("شناسه دستور ساخت را وارد کنید.");
+  pva.value = null;
+  getPlannedVsActual(id).then(([d]) => { pva.value = d; });
   const [d, error] = await getWorkOrderCostSheet(id);
   if (error) return fail(error);
   sheet.value = d;
@@ -284,6 +298,21 @@ onMounted(() => {
             <button v-if="canWrite && !sheet.isClosed" :disabled="busy" class="btn btn-sm btn-primary" @click="dialog = 'close'">بستن دستور ساخت</button>
             <button v-if="canManage && sheet.isClosed" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="dialog = 'reopen'">بازگشایی (مدیر مالی)</button>
           </div>
+          <h2 class="inv-subtitle mt-3">برآورد در برابر واقعی
+            <button v-if="canWrite && !sheet.isClosed" class="btn btn-sm btn-outline-primary ms-2" @click="est = { material: '', labour: '', overhead: '', subcontract: '', quantity: String(sheet.quantity || ''), note: '' }">ثبت / ویرایش برآورد</button>
+          </h2>
+          <template v-if="pva">
+            <p v-if="!pva.hasEstimate" class="inv-muted">برای این دستور ساخت برآوردی ثبت نشده است.</p>
+            <table v-else class="table table-sm" style="max-width: 760px">
+              <thead><tr><th>جزء بها</th><th>برآورد</th><th>واقعی</th><th>انحراف</th><th>درصد انحراف</th></tr></thead>
+              <tbody>
+                <tr v-for="r in pva.rows" :key="r.element"><td>{{ r.element }}</td><td class="fn-num">{{ money(r.planned) }}</td><td class="fn-num">{{ money(r.actual) }}</td><td class="fn-num" :class="r.variance > 0 ? 'text-danger' : ''">{{ money(r.variance) }}</td><td class="fn-num">{{ r.variancePercent === null || r.variancePercent === undefined ? "-" : Number(r.variancePercent).toFixed(1) + "%" }}</td></tr>
+                <tr class="fn-total"><td>جمع</td><td class="fn-num">{{ money(pva.plannedTotal) }}</td><td class="fn-num">{{ money(pva.actualTotal) }}</td><td class="fn-num">{{ money(pva.variance) }}</td><td class="fn-num">{{ pva.variancePercent === null || pva.variancePercent === undefined ? "-" : Number(pva.variancePercent).toFixed(1) + "%" }}</td></tr>
+                <tr><td>تعداد</td><td class="fn-num">{{ pva.plannedQuantity }}</td><td class="fn-num">{{ pva.actualQuantity }}</td><td colspan="2"></td></tr>
+                <tr><td>بهای واحد</td><td class="fn-num">{{ money(pva.plannedUnitCost) }}</td><td class="fn-num">{{ money(pva.actualUnitCost) }}</td><td colspan="2"></td></tr>
+              </tbody>
+            </table>
+          </template>
           <p v-if="closeDoc" class="mt-2">سند بستن {{ closeDoc.number }}: به انبار محصول {{ money(closeDoc.toFinishedGoods) }} - انحراف {{ money(closeDoc.variance) }} - بهای واحد {{ money(closeDoc.unitCost) }} ریال - شماره سند حسابداری {{ closeDoc.voucherId }}</p>
         </template>
       </template>
@@ -339,6 +368,21 @@ onMounted(() => {
       :fields="[{ key: 'quantity', label: 'تعداد تولیدشده (خالی = تعداد دستور)', type: 'number' }, { key: 'date', label: 'تاریخ', type: 'date', value: today() }, { key: 'reason', label: 'علت', type: 'textarea', required: dialog === 'reopen' }]"
       @confirm="confirmWo"
       @cancel="dialog = null" />
+
+    <div v-if="est" class="inv-modal-backdrop screen-only" @click.self="est = null">
+      <div class="inv-modal">
+        <h2 class="inv-title mb-2">برآورد بهای دستور ساخت</h2>
+        <div class="row g-2">
+          <div class="col-md-6"><label class="form-label small mb-0">مواد (ریال)</label><input v-model="est.material" class="form-control form-control-sm fn-num" /></div>
+          <div class="col-md-6"><label class="form-label small mb-0">دستمزد (ریال)</label><input v-model="est.labour" class="form-control form-control-sm fn-num" /></div>
+          <div class="col-md-6"><label class="form-label small mb-0">سربار (ریال)</label><input v-model="est.overhead" class="form-control form-control-sm fn-num" /></div>
+          <div class="col-md-6"><label class="form-label small mb-0">پیمانکاری (ریال)</label><input v-model="est.subcontract" class="form-control form-control-sm fn-num" /></div>
+          <div class="col-md-4"><label class="form-label small mb-0">تعداد برآوردی</label><input v-model="est.quantity" class="form-control form-control-sm" /></div>
+          <div class="col-md-8"><label class="form-label small mb-0">توضیح</label><input v-model="est.note" class="form-control form-control-sm" /></div>
+        </div>
+        <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="est = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="saveEst">ذخیره</button></div>
+      </div>
+    </div>
 
     <div v-if="rForm" class="inv-modal-backdrop screen-only" @click.self="rForm = null">
       <div class="inv-modal">

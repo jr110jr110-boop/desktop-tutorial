@@ -459,6 +459,11 @@ const links = {
     { title: "گزارش: جریان نقد، حقوق صاحبان سرمایه و نسبت‌ها", routeName: "FnFinancialStatements", disabled: !hasRole(FnRoles.readers) },
     { title: "مالیات: دفاتر مالیاتی و سود مشمول", routeName: "FnTaxBooks", disabled: !hasRole(FnRoles.readers) },
     { title: "مطالبات: کنترل وصول و پیشنهاد پرداخت", routeName: "FnCollections", disabled: !hasRole(FnRoles.readers) },
+    { title: "ضمانت‌نامه‌های بانکی: دفتر، تمدید و تعهدات", routeName: "FnBankGuarantees", disabled: !hasRole(FnRoles.readers) },
+    { title: "پیمانکاران: مفاصاحساب بیمه و حسن انجام کار", routeName: "FnContractors", disabled: !hasRole(FnRoles.readers) },
+    { title: "تامین‌کنندگان: یادداشت‌ها و مغایرت‌گیری صورت‌حساب", routeName: "FnSupplierControls", disabled: !hasRole(FnRoles.readers) },
+    { title: "مطالبات: نامه تایید مانده مشتریان", routeName: "FnConfirmationLetters", disabled: !hasRole(FnRoles.readers) },
+    { title: "حقوق: پایان خدمت، عیدی و مالیات سالانه", routeName: "FnSettlements", disabled: !hasRole(FnRoles.payrollReaders) },
   ] as Links[],
   holidays: [
     {

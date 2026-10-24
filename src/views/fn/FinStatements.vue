@@ -6,18 +6,18 @@ import ReportTables from "@/components/fn/ReportTables.vue";
 import ReportPrint from "@/components/fn/print/ReportPrint.vue";
 import DrillModal from "@/components/fn/DrillModal.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
-import { getCashFlow, getEquityChanges, getFiscalYears, getLedgerReport, getRatios, getStatementViews, saveStatementView } from "@/api/FnAPIs";
+import { getCashFlow, getComparative, getDirectCashFlow, getEquityChanges, getFiscalYears, getNotes, getRatios, getStatementViews, saveStatementView } from "@/api/FnAPIs";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { printSheet } from "@/composables/fn";
 
 // Financial statements beyond the balance sheet and the income statement: cash flow (indirect), changes in equity, ratios, and the
-// comparative statement of two fiscal years (the server has no comparative endpoint: the two statements are fetched and lined up here).
-const titles: Record<string, string> = { "cash-flow": "صورت جریان وجوه نقد", equity: "صورت تغییرات حقوق صاحبان سرمایه", ratios: "نسبت‌های مالی", comparative: "صورت‌های مالی تطبیقی" };
+// comparative statement of two fiscal years (comparative and notes come from the completeness endpoints).
+const titles: Record<string, string> = { "cash-flow": "صورت جریان وجوه نقد (غیرمستقیم)", "cash-flow-direct": "صورت جریان وجوه نقد (مستقیم)", equity: "صورت تغییرات حقوق صاحبان سرمایه", ratios: "نسبت‌های مالی", comparative: "صورت‌های مالی تطبیقی", notes: "یادداشت‌های توضیحی" };
 const tab = ref("cash-flow");
 const tabs = Object.entries(titles).map(([key, title]) => ({ key, title }));
 const years = ref<any[]>([]);
 const filters = ref<any>({ FiscalYearId: null, From: null, To: null, IncludeDraft: false });
-const cmp = ref<any>({ statement: "balance-sheet", yearA: null as number | null, yearB: null as number | null });
+const cmp = ref<any>({ statement: "BalanceSheet" });
 const data = ref<any>(null);
 const loading = ref(false);
 const printing = ref(false);
@@ -28,43 +28,24 @@ const saving = ref(false);
 const yearTitle = (id: number | null) => years.value.find((y) => y.id === id)?.title || "سال مالی جاری";
 const params = () => ({ FiscalYearId: filters.value.FiscalYearId, From: filters.value.From, To: filters.value.To, IncludeDraft: filters.value.IncludeDraft });
 
-function lineRows(report: any) {
-  return (report?.lines || []).map((l: any) => ({ code: l.code, title: l.title, section: l.section || "", isTotal: !!l.isTotal, amount: Number(l.amount) || 0 }));
-}
-/** Lines of the two statements matched by section, code and title; a line missing in one year counts as zero. */
-function joinStatements(a: any, b: any, labelA: string, labelB: string) {
-  const rowsA = lineRows(a), rowsB = lineRows(b);
-  const sections: { name: string; rows: any[] }[] = [];
-  const put = (l: any, side: "a" | "b") => {
-    let s = sections.find((x) => x.name === l.section);
-    if (!s) sections.push((s = { name: l.section, rows: [] }));
-    let r = s.rows.find((x) => x.code === l.code && x.title === l.title);
-    if (!r) s.rows.push((r = { code: l.code, title: l.title, isTotal: l.isTotal, a: 0, b: 0 }));
-    r[side] = l.amount;
-  };
-  rowsA.forEach((l: any) => put(l, "a"));
-  rowsB.forEach((l: any) => put(l, "b"));
-  return { labelA, labelB, sections };
-}
-
 async function load() {
   loading.value = true;
   data.value = null;
   if (tab.value === "comparative") {
-    if (!cmp.value.yearA || !cmp.value.yearB || cmp.value.yearA === cmp.value.yearB) {
-      loading.value = false;
-      return fail("دو سال مالی متفاوت را انتخاب کنید.");
-    }
-    const [[a, ea], [b, eb]] = await Promise.all([
-      getLedgerReport(cmp.value.statement, { FiscalYearId: cmp.value.yearA, IncludeDraft: filters.value.IncludeDraft }),
-      getLedgerReport(cmp.value.statement, { FiscalYearId: cmp.value.yearB, IncludeDraft: filters.value.IncludeDraft }),
-    ]);
+    const [d, error] = await getComparative(cmp.value.statement, filters.value.FiscalYearId, filters.value.IncludeDraft);
     loading.value = false;
-    if (ea || eb) return fail(ea || eb);
-    data.value = joinStatements(a, b, yearTitle(cmp.value.yearA), yearTitle(cmp.value.yearB));
+    if (error) return fail(error);
+    data.value = d;
     return;
   }
-  const fn = tab.value === "cash-flow" ? getCashFlow : tab.value === "equity" ? getEquityChanges : getRatios;
+  if (tab.value === "notes") {
+    const [d, error] = await getNotes(filters.value.FiscalYearId);
+    loading.value = false;
+    if (error) return fail(error);
+    data.value = d;
+    return;
+  }
+  const fn = tab.value === "cash-flow" ? getCashFlow : tab.value === "cash-flow-direct" ? getDirectCashFlow : tab.value === "equity" ? getEquityChanges : getRatios;
   const [d, error] = await fn(params());
   loading.value = false;
   if (error) return fail(error);
@@ -77,7 +58,7 @@ function switchTab() {
 }
 
 const printFields = computed(() => {
-  if (tab.value === "comparative") return [{ label: "صورت", value: cmp.value.statement === "balance-sheet" ? "ترازنامه" : "صورت سود و زیان" }, { label: "سال اول", value: yearTitle(cmp.value.yearA) }, { label: "سال دوم", value: yearTitle(cmp.value.yearB) }, { label: "اسناد", value: filters.value.IncludeDraft ? "قطعی و غیرقطعی" : "فقط قطعی" }];
+  if (tab.value === "comparative") return [{ label: "صورت", value: cmp.value.statement === "BalanceSheet" ? "ترازنامه" : "صورت سود و زیان" }, { label: "سال", value: data.value?.year }, { label: "سال قبل", value: data.value?.priorYear ?? "-" }, { label: "اسناد", value: filters.value.IncludeDraft ? "قطعی و غیرقطعی" : "فقط قطعی" }];
   const f = filters.value;
   return [
     { label: "سال مالی", value: yearTitle(f.FiscalYearId) },
@@ -142,15 +123,13 @@ onMounted(async () => {
       <PcTabs v-model="tab" :tabs="tabs" @update:model-value="switchTab" />
 
       <div class="inv-filters mb-3">
-        <template v-if="tab !== 'comparative'">
-          <select v-model="filters.FiscalYearId" class="form-select form-select-sm"><option :value="null">سال مالی جاری</option><option v-for="y in years" :key="y.id" :value="y.id">{{ y.title }}</option></select>
+        <select v-model="filters.FiscalYearId" class="form-select form-select-sm"><option :value="null">سال مالی جاری</option><option v-for="y in years" :key="y.id" :value="y.id">{{ y.title }}</option></select>
+        <template v-if="tab === 'comparative'">
+          <select v-model="cmp.statement" class="form-select form-select-sm"><option value="BalanceSheet">ترازنامه</option><option value="IncomeStatement">صورت سود و زیان</option></select>
+        </template>
+        <template v-else-if="tab !== 'notes'">
           <div><label class="form-label small mb-0">از تاریخ</label><FnDate v-model="filters.From" /></div>
           <div><label class="form-label small mb-0">تا تاریخ</label><FnDate v-model="filters.To" /></div>
-        </template>
-        <template v-else>
-          <select v-model="cmp.statement" class="form-select form-select-sm"><option value="balance-sheet">ترازنامه</option><option value="income-statement">صورت سود و زیان</option></select>
-          <select v-model="cmp.yearA" class="form-select form-select-sm"><option :value="null">سال اول...</option><option v-for="y in years" :key="y.id" :value="y.id">{{ y.title }}</option></select>
-          <select v-model="cmp.yearB" class="form-select form-select-sm"><option :value="null">سال دوم...</option><option v-for="y in years" :key="y.id" :value="y.id">{{ y.title }}</option></select>
         </template>
         <label class="form-check small"><input v-model="filters.IncludeDraft" class="form-check-input" type="checkbox" /> با اسناد غیرقطعی</label>
         <button :disabled="loading" class="btn btn-sm btn-primary" @click="load">{{ loading ? "..." : "نمایش گزارش" }}</button>

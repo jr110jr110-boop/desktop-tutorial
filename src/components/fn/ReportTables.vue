@@ -26,6 +26,15 @@ const sections = computed(() => {
   return out;
 });
 const cols = computed(() => props.columns || 4);
+const comparativeSections = computed(() => {
+  const out: { name: string; lines: any[] }[] = [];
+  for (const l of props.data?.rows || []) {
+    let s = out.find((x) => x.name === (l.section || ""));
+    if (!s) out.push((s = { name: l.section || "", lines: [] }));
+    s.lines.push(l);
+  }
+  return out;
+});
 </script>
 
 <template>
@@ -184,18 +193,74 @@ const cols = computed(() => props.columns || 4);
       </table>
     </template>
 
-    <!-- comparative statement: two fiscal years side by side -->
+    <!-- direct-method cash flow with the tie to the indirect statement -->
+    <template v-else-if="kind === 'cash-flow-direct'">
+      <table class="table table-sm">
+        <thead><tr><th>بخش</th><th>شرح</th><th>دریافت‌ها</th><th>پرداخت‌ها</th><th>خالص</th><th>حساب‌ها</th></tr></thead>
+        <tbody>
+          <tr v-for="r in data.rows" :key="r.key">
+            <td>{{ sectionNames[r.section] || r.section }}</td><td>{{ r.title }}</td><td class="fn-num">{{ money(r.receipts) }}</td><td class="fn-num">{{ money(r.payments) }}</td><td class="fn-num">{{ money(r.net) }}</td>
+            <td class="inv-ltr"><template v-for="(a, i) in r.accounts" :key="a"><a class="screen-only" href="#" @click.prevent="emit('drill', a)">{{ a }}</a><span class="print-only">{{ a }}</span><span v-if="i < r.accounts.length - 1">، </span></template></td>
+          </tr>
+          <tr class="fn-total"><td colspan="4">جریان نقد عملیاتی</td><td class="fn-num">{{ money(data.operating) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="4">جریان نقد سرمایه‌گذاری</td><td class="fn-num">{{ money(data.investing) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="4">جریان نقد تامین مالی</td><td class="fn-num">{{ money(data.financing) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="4">خالص تغییر در وجه نقد</td><td class="fn-num">{{ money(data.netChange) }}</td><td></td></tr>
+          <tr><td colspan="4">وجه نقد ابتدای دوره</td><td class="fn-num">{{ money(data.openingCash) }}</td><td></td></tr>
+          <tr class="fn-total"><td colspan="4">وجه نقد پایان دوره</td><td class="fn-num">{{ money(data.closingCash) }}</td><td></td></tr>
+        </tbody>
+      </table>
+      <h4 class="h6 mt-3">تطبیق با روش غیرمستقیم <span :class="data.ties ? 'ok' : 'bad'" class="inv-badge">{{ data.ties ? "همخوان" : "ناهمخوان" }}</span></h4>
+      <table class="table table-sm">
+        <thead><tr><th>بخش</th><th>روش مستقیم</th><th>روش غیرمستقیم</th><th>اختلاف</th></tr></thead>
+        <tbody><tr v-for="r in data.reconciliation" :key="r.section" :class="r.difference ? 'table-warning' : ''"><td>{{ sectionNames[r.section] || r.section }}</td><td class="fn-num">{{ money(r.direct) }}</td><td class="fn-num">{{ money(r.indirect) }}</td><td class="fn-num">{{ money(r.difference) }}</td></tr>
+          <tr class="fn-total"><td>خالص تغییر</td><td class="fn-num">{{ money(data.netChange) }}</td><td class="fn-num">{{ money(data.indirectNetChange) }}</td><td class="fn-num">{{ money(Number(data.netChange) - Number(data.indirectNetChange)) }}</td></tr></tbody>
+      </table>
+      <p v-if="data.note" class="inv-muted">{{ data.note }}</p>
+    </template>
+
+    <!-- comparative statement: the current year against the prior year (server side) -->
     <template v-else-if="kind === 'comparative'">
       <table class="table table-sm">
-        <thead><tr><th style="width: 110px">کد</th><th>شرح</th><th style="width: 170px">{{ data.labelA }}</th><th style="width: 170px">{{ data.labelB }}</th><th style="width: 170px">تغییر</th><th style="width: 90px">درصد تغییر</th></tr></thead>
+        <thead><tr><th style="width: 110px">کد</th><th>شرح</th><th style="width: 170px">سال {{ data.year }}</th><th style="width: 170px">{{ data.priorYear ? "سال " + data.priorYear : "سال قبل" }}</th><th style="width: 170px">تغییر</th><th style="width: 90px">درصد تغییر</th></tr></thead>
         <tbody>
-          <template v-for="s in data.sections" :key="s.name">
+          <template v-for="s in comparativeSections" :key="s.name">
             <tr v-if="s.name"><td colspan="6"><b>{{ s.name }}</b></td></tr>
-            <tr v-for="r in s.rows" :key="s.name + r.code + r.title" :class="{ 'fn-total': r.isTotal }">
-              <td class="inv-ltr">{{ r.code }}</td><td>{{ r.title }}</td><td class="fn-num">{{ money(r.a) }}</td><td class="fn-num">{{ money(r.b) }}</td><td class="fn-num">{{ money(r.b - r.a) }}</td><td class="fn-num">{{ r.a ? ((((r.b - r.a) / Math.abs(r.a)) * 100).toFixed(1) + "%") : "-" }}</td>
+            <tr v-for="r in s.lines" :key="s.name + r.code + r.title" :class="{ 'fn-total': r.isTotal }">
+              <td class="inv-ltr">{{ r.code }}</td><td>{{ r.title }}</td><td class="fn-num">{{ money(r.current) }}</td><td class="fn-num">{{ money(r.prior) }}</td><td class="fn-num">{{ money(r.change) }}</td><td class="fn-num">{{ r.changePercent === null || r.changePercent === undefined ? "-" : Number(r.changePercent).toFixed(1) + "%" }}</td>
             </tr>
           </template>
         </tbody>
+      </table>
+      <p v-if="data.note" class="inv-muted">{{ data.note }}</p>
+    </template>
+
+    <!-- notes schedules -->
+    <template v-else-if="kind === 'notes'">
+      <h4 class="h6">ریز مطالبات (سنی)</h4>
+      <table v-if="data.receivablesAgeing" class="table table-sm">
+        <thead><tr><th>شرح</th><th>جاری</th><th>۳۱ تا ۶۰</th><th>۶۱ تا ۹۰</th><th>بیش از ۹۰</th><th>جمع</th></tr></thead>
+        <tbody><tr v-for="r in data.receivablesAgeing.rows || []" :key="r.customerId"><td>{{ r.customerName }}</td><td class="fn-num">{{ money(r.current) }}</td><td class="fn-num">{{ money(r.days31To60) }}</td><td class="fn-num">{{ money(r.days61To90) }}</td><td class="fn-num">{{ money(r.over90) }}</td><td class="fn-num">{{ money(r.total) }}</td></tr><tr class="fn-total"><td>جمع (سال قبل: {{ money(data.priorReceivablesAgeing?.total) }})</td><td class="fn-num">{{ money(data.receivablesAgeing.current) }}</td><td class="fn-num">{{ money(data.receivablesAgeing.days31To60) }}</td><td class="fn-num">{{ money(data.receivablesAgeing.days61To90) }}</td><td class="fn-num">{{ money(data.receivablesAgeing.over90) }}</td><td class="fn-num">{{ money(data.receivablesAgeing.total) }}</td></tr></tbody>
+      </table>
+      <h4 class="h6">ریز بدهی‌های تجاری (سنی) - جمع {{ money(data.payablesTotal) }} (سال قبل {{ money(data.priorPayablesTotal) }})</h4>
+      <table class="table table-sm">
+        <thead><tr><th>تامین‌کننده</th><th>جاری</th><th>۳۱ تا ۶۰</th><th>۶۱ تا ۹۰</th><th>بیش از ۹۰</th><th>جمع</th></tr></thead>
+        <tbody><tr v-for="r in data.payables" :key="r.name"><td>{{ r.name }}</td><td class="fn-num">{{ money(r.current) }}</td><td class="fn-num">{{ money(r.days31To60) }}</td><td class="fn-num">{{ money(r.days61To90) }}</td><td class="fn-num">{{ money(r.over90) }}</td><td class="fn-num">{{ money(r.total) }}</td></tr></tbody>
+      </table>
+      <h4 class="h6">تسهیلات بانکی</h4>
+      <table class="table table-sm">
+        <thead><tr><th>شماره</th><th>بانک</th><th>مبلغ اولیه</th><th>مانده</th><th>حصه جاری</th><th>بلندمدت</th><th>مانده سال قبل</th></tr></thead>
+        <tbody><tr v-for="r in data.loans" :key="r.number"><td class="inv-ltr">{{ r.number }}</td><td>{{ r.bankName }}</td><td class="fn-num">{{ money(r.original) }}</td><td class="fn-num">{{ money(r.outstanding) }}</td><td class="fn-num">{{ money(r.currentPortion) }}</td><td class="fn-num">{{ money(r.longTerm) }}</td><td class="fn-num">{{ money(r.priorOutstanding) }}</td></tr></tbody>
+      </table>
+      <h4 class="h6">ذخایر</h4>
+      <table class="table table-sm">
+        <thead><tr><th>شماره</th><th>شرح</th><th>مانده</th><th>مانده سال قبل</th></tr></thead>
+        <tbody><tr v-for="r in data.provisions" :key="r.number"><td class="inv-ltr">{{ r.number }}</td><td>{{ r.description }}</td><td class="fn-num">{{ money(r.balance) }}</td><td class="fn-num">{{ money(r.priorBalance) }}</td></tr></tbody>
+      </table>
+      <h4 class="h6">موجودی‌ها - جمع {{ money(data.inventoryTotal) }} (سال قبل {{ money(data.priorInventoryTotal) }})</h4>
+      <table class="table table-sm">
+        <thead><tr><th>حساب</th><th>عنوان</th><th>مانده</th><th>مانده سال قبل</th></tr></thead>
+        <tbody><tr v-for="r in data.inventory" :key="r.accountCode"><td class="inv-ltr">{{ r.accountCode }}</td><td>{{ r.title }}</td><td class="fn-num">{{ money(r.balance) }}</td><td class="fn-num">{{ money(r.priorBalance) }}</td></tr></tbody>
       </table>
     </template>
 

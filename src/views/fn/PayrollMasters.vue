@@ -257,7 +257,7 @@ onMounted(openTab);
         <h2 class="inv-title mb-2">نرخ</h2>
         <div class="row g-2">
           <div class="col-4"><label class="form-label small mb-0">سال (۰ = بلندمدت)</label><input v-model="rForm.year" class="form-control form-control-sm fn-num" /></div>
-          <div class="col-8"><label class="form-label small mb-0">کلید *</label><input v-model="rForm.key" class="form-control form-control-sm inv-ltr" /></div>
+          <div class="col-8"><label class="form-label small mb-0">کلید *</label><input v-model="rForm.key" class="form-control form-control-sm inv-ltr" /><div v-if="rForm.key === 'BonusGrossCapDaysOfMinimumWage'" class="inv-muted small">سقف ناخالص عیدی برحسب روز حداقل مزد روزانه؛ مبنای محاسبه سقف در اجرای عیدی (مقدار باید راستی‌آزمایی شود).</div></div>
           <div class="col-12"><label class="form-label small mb-0">مقدار *</label><input v-model="rForm.value" class="form-control form-control-sm fn-num" /></div>
           <div class="col-12"><label class="form-label small mb-0">منبع قانونی *</label><input v-model="rForm.source" class="form-control form-control-sm" /></div>
           <div class="col-12"><label class="form-label small mb-0">توضیح</label><input v-model="rForm.note" class="form-control form-control-sm" /></div>

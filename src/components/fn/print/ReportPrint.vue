@@ -15,7 +15,7 @@ const statementSignatures = [{ title: "تهیه‌کننده (حسابداری)"
     class="q-form"
     :distribution="distributionFinance"
     :fields="fields"
-    :signatures="['balance-sheet', 'income-statement', 'cash-flow', 'equity', 'ratios', 'comparative'].includes(kind) ? statementSignatures : signatures"
+    :signatures="['balance-sheet', 'income-statement', 'cash-flow', 'equity', 'ratios', 'comparative', 'cash-flow-direct', 'notes'].includes(kind) ? statementSignatures : signatures"
     :title="title">
     <ReportTables :columns="columns" :data="data" :kind="kind" />
   </PrintForm>

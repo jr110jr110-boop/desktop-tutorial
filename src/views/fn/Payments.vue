@@ -6,7 +6,7 @@ import PaymentPrint from "@/components/fn/print/PaymentPrint.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import QPager from "@/components/quality/QPager.vue";
 import {
-  getBankAccounts, getCashBoxes, getIssuedCheques, getLoans, getPayableRequests, getPayment, getPayments, getPayrollRuns, getPettyCashes, paymentAction, savePayment,
+  getBankAccounts, getCashBoxes, getIssuedCheques, getBonusRuns, getLoans, getPayableRequests, getPayment, getPayments, getPayrollRuns, getPettyCashes, getTerminations, paymentAction, savePayment,
 } from "@/api/FnAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
 import { badgeOfDoc, docStatuses, instruments, money, parseAmount, paymentPurposes, printSheet, usePagedList } from "@/composables/fn";
@@ -39,7 +39,7 @@ const formNet = computed(() => {
   if (!f) return 0;
   if (f.purpose === 1) return selectedRequests.value.reduce((s, r) => s + (r.netAmount || 0), 0);
   if (f.purpose === 2) return parseAmount(f.topUpAmount) || 0;
-  if (f.purpose === 4) return f.loanNet || 0;
+  if (f.purpose >= 4) return f.loanNet || 0;
   return f.runNet || 0;
 });
 const linesTotal = computed(() => (form.value ? form.value.lines.reduce((s: number, l: any) => s + (parseAmount(l.amount) || 0), 0) : 0));
@@ -58,7 +58,7 @@ async function loadRefs() {
 
 async function newPayment(requestIds: number[] = []) {
   await requests.load();
-  form.value = { id: null, date: today(), purpose: 1, requestIds, pettyCashId: null, topUpAmount: "", payrollRunId: null, runNet: 0, employeeLoanId: null, loanNet: 0, description: "", lines: [blankLine()] };
+  form.value = { id: null, date: today(), purpose: 1, requestIds, pettyCashId: null, topUpAmount: "", payrollRunId: null, runNet: 0, employeeLoanId: null, bonusRunId: null, terminationId: null, loanNet: 0, description: "", lines: [blankLine()] };
   runs.value = [];
   tab.value = "payments";
 }
@@ -74,6 +74,9 @@ function onPurpose() {
   f.lines = [blankLine()];
   if (f.purpose === 3) loadRuns();
   if (f.purpose === 4) loadLoans();
+  if (f.purpose === 5) loadBonus();
+  if (f.purpose === 6) loadTerms();
+  f.loanNet = 0;
 }
 
 // the personal-data screens belong to the payroll roles; treasury types the number of the loan or advance (the amount is the principal)
@@ -83,6 +86,27 @@ async function loadLoans() {
   if (!canReadLoans) return;
   const [data] = await getLoans({ PageSize: 100 });
   loansOpen.value = (data?.data || []).filter((l: any) => l.isActive);
+}
+const bonusOpen = ref<any[]>([]);
+const termsOpen = ref<any[]>([]);
+async function loadBonus() {
+  if (!canReadLoans) return;
+  const [data] = await getBonusRuns();
+  bonusOpen.value = (data || []).filter((r: any) => r.status === 1);
+}
+async function loadTerms() {
+  if (!canReadLoans) return;
+  const [data] = await getTerminations();
+  termsOpen.value = (data || []).filter((r: any) => r.status === 1);
+}
+// the amount comes from the posted run or settlement and cannot be typed
+function pickBonus() {
+  const r = bonusOpen.value.find((x) => x.id === form.value.bonusRunId);
+  form.value.loanNet = r ? r.totalNet : 0;
+}
+function pickTerm() {
+  const r = termsOpen.value.find((x) => x.id === form.value.terminationId);
+  form.value.loanNet = r ? r.netPayable : 0;
 }
 function pickLoan() {
   const l = loansOpen.value.find((x) => x.id === form.value.employeeLoanId);
@@ -130,7 +154,7 @@ async function edit() {
   await requests.load();
   form.value = {
     id: d.id, date: String(d.date).slice(0, 10), purpose: d.purpose, requestIds: (d.requests || []).map((r: any) => r.paymentRequestId), pettyCashId: d.pettyCashId, topUpAmount: d.purpose === 2 ? String(d.netAmount) : "",
-    payrollRunId: d.payrollRunId, runNet: d.purpose === 3 ? d.netAmount : 0, employeeLoanId: d.employeeLoanId, loanNet: d.purpose === 4 ? d.netAmount : 0, description: d.description || "",
+    payrollRunId: d.payrollRunId, runNet: d.purpose === 3 ? d.netAmount : 0, employeeLoanId: d.employeeLoanId, bonusRunId: d.bonusRunId, terminationId: d.terminationId, loanNet: d.purpose >= 4 ? d.netAmount : 0, description: d.description || "",
     lines: d.lines.map((l: any) => ({
       instrument: l.instrument, amount: String(l.amount), bankAccountId: l.bankAccountId, cashBoxId: l.cashBoxId, reference: l.reference || "", payeeIban: l.payeeIban || "",
       issuedChequeId: l.issuedChequeId, chequeDueDate: l.chequeDueDate ? String(l.chequeDueDate).slice(0, 10) : null, chequeSayadId: l.chequeSayadId || "",
@@ -155,7 +179,7 @@ async function save() {
   busy.value = true;
   const [data, error] = await savePayment({
     id: f.id, date: f.date, purpose: Number(f.purpose), paymentRequestIds: f.purpose === 1 ? f.requestIds : [], pettyCashId: f.purpose === 2 ? f.pettyCashId : null,
-    payrollRunId: f.purpose === 3 ? f.payrollRunId : null, employeeLoanId: f.purpose === 4 ? f.employeeLoanId : null, topUpAmount: f.purpose === 2 ? parseAmount(f.topUpAmount) : null, description: f.description || null, lines,
+    payrollRunId: f.purpose === 3 ? f.payrollRunId : null, employeeLoanId: f.purpose === 4 ? f.employeeLoanId : null, bonusRunId: f.purpose === 5 ? f.bonusRunId : null, terminationId: f.purpose === 6 ? f.terminationId : null, topUpAmount: f.purpose === 2 ? parseAmount(f.topUpAmount) : null, description: f.description || null, lines,
   });
   busy.value = false;
   if (error) return fail(error);
@@ -324,7 +348,23 @@ onMounted(() => {
             <select v-if="canReadLoans" v-model="form.employeeLoanId" class="form-select form-select-sm" @change="pickLoan"><option :value="null">-</option><option v-for="l in loansOpen" :key="l.id" :value="l.id">{{ l.id }} - {{ l.title }} ({{ money(l.principal) }} ریال)</option></select>
             <input v-else v-model.number="form.employeeLoanId" class="form-control form-control-sm" placeholder="شناسه وام یا مساعده" type="number" />
           </div>
+          <div v-if="!canReadLoans" class="col-md-6"><label class="form-label small mb-0">مبلغ سند (ریال؛ باید برابر مبلغ ثبت‌شده باشد) *</label><input :value="form.loanNet || ''" class="form-control form-control-sm fn-num" @input="form.loanNet = parseAmount(($event.target as HTMLInputElement).value) || 0" /></div>
           <div class="col-md-6 d-flex align-items-end"><span class="inv-muted">مبلغ پرداخت برابر اصل وام یا مساعده است؛ نام کارمند در سند خزانه نمایش داده نمی‌شود.</span></div>
+        </div>
+        <div v-else-if="form.purpose === 5 || form.purpose === 6" class="row g-2 mb-2">
+          <div class="col-md-6">
+            <label class="form-label small mb-0">{{ form.purpose === 5 ? "اجرای عیدی تاییدشده *" : "تسویه پایان خدمت تاییدشده *" }}</label>
+            <template v-if="form.purpose === 5">
+              <select v-if="canReadLoans" v-model="form.bonusRunId" class="form-select form-select-sm" @change="pickBonus"><option :value="null">-</option><option v-for="r in bonusOpen" :key="r.id" :value="r.id">{{ r.number }} - عیدی {{ r.year }}</option></select>
+              <input v-else v-model.number="form.bonusRunId" class="form-control form-control-sm" placeholder="شناسه اجرای عیدی" type="number" />
+            </template>
+            <template v-else>
+              <select v-if="canReadLoans" v-model="form.terminationId" class="form-select form-select-sm" @change="pickTerm"><option :value="null">-</option><option v-for="r in termsOpen" :key="r.id" :value="r.id">{{ r.number }}</option></select>
+              <input v-else v-model.number="form.terminationId" class="form-control form-control-sm" placeholder="شناسه تسویه" type="number" />
+            </template>
+          </div>
+          <div v-if="!canReadLoans" class="col-md-6"><label class="form-label small mb-0">مبلغ سند (ریال؛ باید برابر مبلغ ثبت‌شده باشد) *</label><input :value="form.loanNet || ''" class="form-control form-control-sm fn-num" @input="form.loanNet = parseAmount(($event.target as HTMLInputElement).value) || 0" /></div>
+          <div class="col-md-6 d-flex align-items-end"><span class="inv-muted">مبلغ پرداخت برابر {{ form.purpose === 5 ? "خالص اجرای عیدی" : "خالص قابل پرداخت تسویه" }} است و قابل تغییر نیست: <b>{{ money(form.loanNet) }}</b> ریال. نام کارمند در سند خزانه نمایش داده نمی‌شود.</span></div>
         </div>
         <div v-else class="row g-2 mb-2">
           <div class="col-md-6">
