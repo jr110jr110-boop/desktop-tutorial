@@ -333,7 +333,7 @@ namespace Services.NasbNiro.Office
             }
             OfRequestType type = await _uow.Set<OfRequestType>().AsNoTracking().FirstOrDefaultAsync(t => t.Id == dto.TypeId && !t.Deleted && t.IsActive, ct);
             if (type == null) return OfficeText.NotFound<RequestDto>("نوع درخواست پیدا نشد.");
-            var (values, error) = CheckValues(ParseFields(type.FieldsJson), dto.Values, false);
+            var (values, error) = CheckValues(ParseFields(type.FieldsJson), dto.Values, dto.Submit);
             if (error != null) return Bad<RequestDto>(error);
             r.ValuesJson = JsonSerializer.Serialize(values, Json);
             r.ModifyDate = now; r.ModifierUserId = Me;

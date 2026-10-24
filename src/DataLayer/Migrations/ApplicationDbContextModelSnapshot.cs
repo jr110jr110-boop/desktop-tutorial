@@ -12310,10 +12310,6 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("FollowUpLetterId");
 
-                    b.HasIndex("Number")
-                        .IsUnique()
-                        .HasFilter("[Deleted] = 0 AND [Number] IS NOT NULL AND [Imported] = 0");
-
                     b.HasIndex("NumberRuleId");
 
                     b.HasIndex("ReplyToLetterId");
@@ -12325,6 +12321,10 @@ namespace DataLayer.Migrations
                     b.HasIndex("SignerPositionId");
 
                     b.HasIndex("TemplateId");
+
+                    b.HasIndex("Kind", "Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [Number] IS NOT NULL AND [Imported] = 0");
 
                     b.HasIndex("Kind", "Status");
 

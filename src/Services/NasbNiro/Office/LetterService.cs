@@ -334,7 +334,7 @@ namespace Services.NasbNiro.Office
 
         // -------------------------------------------------------------------------------- numbering
 
-        private static string KindCode(OfLetterKind k) => k == OfLetterKind.Incoming ? "IN" : k == OfLetterKind.Outgoing ? "OUT" : "INT";
+        private static string KindCode(OfLetterKind k) => k == OfLetterKind.Incoming ? "و" : k == OfLetterKind.Outgoing ? "ص" : "د";
 
         internal static string FormatNumber(string pattern, int year, int sequence, string unitCode, OfLetterKind kind)
         {
@@ -355,7 +355,7 @@ namespace Services.NasbNiro.Office
             if (await _uow.Set<OfNumberingRule>().AnyAsync(r => !r.Deleted, ct)) return;
             DateTimeOffset now = DateTimeOffset.Now;
             foreach (OfLetterKind k in new[] { OfLetterKind.Incoming, OfLetterKind.Outgoing, OfLetterKind.Internal })
-                _uow.Set<OfNumberingRule>().Add(new OfNumberingRule { Kind = k, UnitId = null, Pattern = "{yy}/{unit}/{seq:5}", IsActive = true, CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me });
+                _uow.Set<OfNumberingRule>().Add(new OfNumberingRule { Kind = k, UnitId = null, Pattern = "{yy}/{kind}/{unit}/{seq:5}", IsActive = true, CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me });
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException)
             {

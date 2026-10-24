@@ -409,6 +409,14 @@ namespace Services.NasbNiro.Office
             string clash = await ConflictAsync(r, ct);
             if (clash != null) return Bad<LeaveDto>(clash);
 
+            if (dto.Submit)
+            {
+                // a request that is saved and submitted in one call is checked as a whole first: a refused call saves nothing and takes no number
+                if (r.Kind == OfLeaveKind.SickLeave && !r.AttachmentDocumentId.HasValue) return Bad<LeaveDto>("برای مرخصی استعلاجی باید گواهی پزشکی پیوست شود.");
+                string submitProblem = await BalanceProblemAsync(r, ct);
+                if (submitProblem != null) return Bad<LeaveDto>(submitProblem);
+                if (!(await FindApproverAsync(emp, ct)).HasValue) return Bad<LeaveDto>("مدیر واحد شما در چارت سازمانی مشخص نیست؛ با واحد اداری تماس بگیرید.");
+            }
             if (r.Id == 0)
             {
                 r.Number = await InventoryNumbers.NextNumberAsync(_uow, OfficeNumbers.LeaveRequest, "LV", DateTime.Today, ct);

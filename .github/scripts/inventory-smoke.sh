@@ -2859,8 +2859,8 @@ call GET "$OF/units?Contains=OPS"; check "office: the manager position of the un
 call GET $OF/org/tree; check "office: the chart tree shows the unit with its three positions" '.success and ([.data.children[]|select(.code == "OPS")][0].positions|length) == 3'
 as "$OMGR_TOKEN" GET $OF/me; check "office: a user sees the positions he holds" ".success and (.data.positions|length) == 1 and .data.positions[0].positionId == $OP_MGR and .data.positions[0].onBehalf == false"
 
-# --- numbering rules (default {yy}/{unit}/{seq:5}; a rule of a unit overrides it)
-call GET $OF/numbering-rules; check "office: three default numbering rules (incoming, outgoing, internal) with the pattern {yy}/{unit}/{seq:5}" '.success and ([.data.data[]|select(.pattern == "{yy}/{unit}/{seq:5}" and .unitId == null)]|length) == 3'
+# --- numbering rules (default {yy}/{kind}/{unit}/{seq:5}; a rule of a unit overrides it)
+call GET $OF/numbering-rules; check "office: three default numbering rules (incoming, outgoing, internal) with the pattern {yy}/{kind}/{unit}/{seq:5}" '.success and ([.data.data[]|select(.pattern == "{yy}/{kind}/{unit}/{seq:5}" and .unitId == null)]|length) == 3'
 as "$OEMP_TOKEN" POST $OF/numbering-rules "{\"kind\":2,\"unitId\":$OU1,\"pattern\":\"X-{seq:4}\"}"; no "office: an ordinary user cannot change numbering rules"
 call POST $OF/numbering-rules "{\"kind\":2,\"unitId\":$OU1,\"pattern\":\"OUT-{yyyy}-{unit}\"}"; no "office: a pattern without {seq} is refused"
 call POST $OF/numbering-rules "{\"kind\":2,\"unitId\":$OU1,\"pattern\":\"OUT-{yyyy}-{unit}-{seq:4}\"}"; check "office: the rule of the unit previews the next number exactly" ".success and .data.preview == \"OUT-$OPY-OPS-0001\""
@@ -2897,7 +2897,7 @@ as "$OSEC_TOKEN" GET "$OF/letters?Number=OUT-$OPY-OPS-0001"; check "office: sear
 # --- incoming letter: numbered at registration by the secretariat
 as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"وارده\",\"senderPartyId\":$OPARTY,\"incomingNumber\":\"EXT-1\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"register\":true}"; nomsg "office: only the secretariat registers incoming letters" "فقط توسط دبیرخانه"
 as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"نامه وارده آزمون\",\"senderPartyId\":$OPARTY,\"incomingNumber\":\"EXT-77\",\"incomingDate\":\"2026-10-01T00:00:00\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"register\":true}"
-check "office: incoming letter numbered by the default rule (exact) and received" ".success and .data.status == 5 and .data.number == \"$OPY2/OPS/00001\" and .data.incomingNumber == \"EXT-77\""
+check "office: incoming letter numbered by the default rule (exact) and received" ".success and .data.status == 5 and .data.number == \"$OPY2/و/OPS/00001\" and .data.incomingNumber == \"EXT-77\""
 OI1=$(val .data.id)
 ibx "$OMGR_TOKEN" "letter:$OI1:delivery"; check "office: the incoming letter is in the inbox of the recipient position" '.success and (.data.data|length) == 1 and .data.data[0].kind == 1'
 ibx "$OEMP_TOKEN" "letter:$OI1:delivery"; check "office: and not in the inbox of anybody else" '.success and (.data.data|length) == 0'
@@ -2937,7 +2937,7 @@ ODEL=$(val .data.id)
 call POST $OF/delegations "{\"positionId\":$OP_MGR,\"deputyUserId\":$OMGRID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\"}"; no "office: the holder cannot be his own deputy"
 as "$OCHK_TOKEN" GET $OF/me; check "office: the deputy sees the position on behalf of the holder" ".success and ([.data.positions[]|select(.positionId == $OP_MGR and .onBehalf == true)]|length) == 1"
 as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"نامه وارده دوم\",\"senderPartyId\":$OPARTY,\"incomingNumber\":\"EXT-78\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"register\":true}"
-check "office: the second incoming letter gets the next number: the legacy import did not consume the sequence" ".success and .data.number == \"$OPY2/OPS/00002\""
+check "office: the second incoming letter gets the next number: the legacy import did not consume the sequence" ".success and .data.number == \"$OPY2/و/OPS/00002\""
 OI2=$(val .data.id)
 ibx "$OCHK_TOKEN" "letter:$OI2:delivery"; check "office: the deputy finds the letter of the position in his inbox" '.success and (.data.data|length) == 1'
 ibx "$OEMP_TOKEN" "letter:$OI2:delivery"; check "office: an unrelated user does not" '.success and (.data.data|length) == 0'
@@ -2947,7 +2947,7 @@ as "$OCHK_TOKEN" POST $OF/me/signature "{\"documentId\":\"$DOCID\"}"; check "off
 as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه داخلی محرمانه\",\"classification\":1,\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CEO}]}"; check "office: confidential internal draft saved" '.success and .data.classification == 1'
 OL2=$(val .data.id)
 as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL2,\"action\":\"submit\"}"; check "office: submitted without approvers: waits for the signature" '.success and .data.status == 1 and (.data.approvals|length) == 0'
-as "$OCHK_TOKEN" POST $OF/letters/action "{\"id\":$OL2,\"action\":\"sign\"}"; check "office: the deputy signs on behalf; internal letter is numbered by the default rule and delivered" ".success and .data.status == 4 and .data.number == \"$OPY2/OPS/00001\" and (.data.signedOnBehalfOfPosition|length) > 0"
+as "$OCHK_TOKEN" POST $OF/letters/action "{\"id\":$OL2,\"action\":\"sign\"}"; check "office: the deputy signs on behalf; internal letter is numbered by the default rule and delivered" ".success and .data.status == 4 and .data.number == \"$OPY2/د/OPS/00001\" and (.data.signedOnBehalfOfPosition|length) > 0"
 as "$QC_TOKEN" GET $OF/letters/$OL2; no "office: a confidential letter is invisible to a non-party"
 as "$QC_TOKEN" GET "$OF/letters?PageSize=100"; check "office: and absent from his letter list" ".success and ([.data.data[]|select(.id == $OL2)]|length) == 0"
 as "$OEMP_TOKEN" GET $OF/letters/$OL2; check "office: the writer sees it" '.success and .data.classification == 1'
@@ -3001,7 +3001,7 @@ ibx "$PLAN_TOKEN" "pr:$OPR" "IncludeClosed=true"; check "office gate: and stays 
 as "$OEMP_TOKEN" GET $OF/request-types; check "office: three seed request types without company data" '.success and (.data|length) == 3 and ([.data[].title]|index("درخواست خودرو")) != null and ([.data[].title]|index("درخواست پشتیبانی فناوری اطلاعات")) != null and ([.data[].title]|index("درخواست آموزش")) != null'
 OVT=$(jq -r '.data[]|select(.title == "درخواست خودرو")|.id' "$B")
 as "$OEMP_TOKEN" POST $OF/requests "{\"typeId\":$OVT,\"values\":{\"destination\":\"سایت پروژه\"},\"submit\":true}"; nomsg "office: required fields are checked at submit" "را پر کنید"
-as "$OEMP_TOKEN" POST $OF/requests "{\"typeId\":$OVT,\"values\":{\"destination\":\"سایت پروژه\",\"date\":\"1405/08/10\",\"purpose\":\"بازدید\",\"passengers\":\"۳\"},\"submit\":true}"; check "office: vehicle request submitted: waits for the manager of the unit" ".success and .data.status == 1 and (.data.number|test(\"^RQ-[0-9]{4}-0*2\$\")) and (.data.approvals|length) == 1 and .data.approvals[0].positionId == $OP_MGR and .data.values.passengers == \"3\""
+as "$OEMP_TOKEN" POST $OF/requests "{\"typeId\":$OVT,\"values\":{\"destination\":\"سایت پروژه\",\"date\":\"1405/08/10\",\"purpose\":\"بازدید\",\"passengers\":\"۳\"},\"submit\":true}"; check "office: vehicle request submitted: waits for the manager of the unit" ".success and .data.status == 1 and (.data.number|test(\"^RQ-[0-9]{4}-0*1\$\")) and (.data.approvals|length) == 1 and .data.approvals[0].positionId == $OP_MGR and .data.values.passengers == \"3\""
 ORQ=$(val .data.id)
 as "$OEMP_TOKEN" POST $OF/requests/action "{\"id\":$ORQ,\"action\":\"approve\"}"; no "office: the requester cannot approve his own request"
 as "$OMGR_TOKEN" POST $OF/requests/action "{\"id\":$ORQ,\"action\":\"approve\"}"; check "office: the unit manager approves" '.success and .data.status == 2'
@@ -3024,7 +3024,7 @@ OLX=$(val .data.id)
 as "$OEMP_TOKEN" POST $OF/leaves/action "{\"id\":$OLX,\"action\":\"submit\"}"; nomsg "office: a leave above the balance cannot be submitted" "مانده مرخصی کافی نیست"
 as "$OEMP_TOKEN" POST $OF/leaves/action "{\"id\":$OLX,\"action\":\"cancel\"}"; check "office: the draft is cancelled" '.success and .data.status == 5'
 as "$OEMP_TOKEN" POST $OF/leaves '{"kind":3,"fromDate":"2026-07-14T00:00:00","reason":"بیماری","submit":true}'; no "office: sick leave without an attachment cannot be submitted"
-as "$OEMP_TOKEN" POST $OF/leaves '{"kind":1,"fromDate":"2026-07-07T00:00:00","toDate":"2026-07-08T00:00:00","reason":"مرخصی استحقاقی","submit":true}'; check "office: daily leave of two working days submitted to the manager of the unit" ".success and .data.status == 1 and .data.days == 2 and .data.approverPositionId == $OP_MGR and (.data.fromDateText|test(\"^14[0-9]{2}/[0-9]{2}/[0-9]{2}\$\"))"
+as "$OEMP_TOKEN" POST $OF/leaves '{"kind":1,"fromDate":"2026-07-07T00:00:00","toDate":"2026-07-08T00:00:00","reason":"مرخصی استحقاقی","submit":true}'; check "office: daily leave of two working days submitted to the manager of the unit; the refused sick leave before it took no number (LV 1 was the cancelled draft, this is 2)" ".success and (.data.number|test(\"^LV-[0-9]{4}-0*2\$\")) and .data.status == 1 and .data.days == 2 and .data.approverPositionId == $OP_MGR and (.data.fromDateText|test(\"^14[0-9]{2}/[0-9]{2}/[0-9]{2}\$\"))"
 OLV1=$(val .data.id)
 as "$OEMP_TOKEN" POST $OF/leaves '{"kind":1,"fromDate":"2026-07-08T00:00:00","reason":"هم‌پوشان","submit":true}'; no "office: an overlapping leave is refused"
 ibx "$OMGR_TOKEN" "leave:$OLV1"; check "office: the manager has the leave to approve" '.success and (.data.data|length) == 1'

@@ -98,7 +98,7 @@ namespace Services.NasbNiro.Office
             if (!_user.IsInRole(OfficeRoles.LetterAdmins)) return Bad<NumberingRuleDto>(OfficeText.NotAllowed);
             if (dto == null || Clean(dto.Pattern) == null || !Enum.IsDefined(typeof(OfLetterKind), dto.Kind)) return Bad<NumberingRuleDto>(OfficeText.InvalidData);
             string pattern = Clean(dto.Pattern);
-            if (!Regex.IsMatch(pattern, @"\{seq(:\d{1,9})?\}")) return Bad<NumberingRuleDto>("الگوی شماره باید شامل {seq:n} (شماره ترتیبی) باشد؛ مثلا {yy}/{unit}/{seq:5}.");
+            if (!Regex.IsMatch(pattern, @"\{seq(:\d{1,9})?\}")) return Bad<NumberingRuleDto>("الگوی شماره باید شامل {seq:n} (شماره ترتیبی) باشد؛ مثلا {yy}/{kind}/{unit}/{seq:5}.");
             string leftover = Regex.Replace(pattern, @"\{(yyyy|yy|unit|kind|seq(:\d{1,9})?)\}", "");
             if (leftover.Contains("{") || leftover.Contains("}")) return Bad<NumberingRuleDto>("الگوی شماره نشانه ناشناخته دارد. نشانه‌های مجاز: {yyyy} {yy} {seq:n} {unit} {kind}.");
             if (pattern.Length > 200) return Bad<NumberingRuleDto>(OfficeText.InvalidData);
