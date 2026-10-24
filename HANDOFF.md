@@ -29,7 +29,7 @@ The user-facing specs that lived in the old Claude Project (`claude/*.md`) are c
 | 3 Project control | done | done | |
 | 4 Quality QC/QA | done | done | |
 | Finance F1, F2, F3, F3b + reviews R1, R2, R3 | **done, green** at 7865e2d (1530/0 both SQL, install 0 FAIL x3) | done (f3e664c) | test kit delivered to user (PMIS_Finance_Test.zip). **One company, rial only** (see 5). |
-| Office automation O1 | built; review-1 fixes pushed as ae0ebcc | **not started** | last verified green: 97f4c54 (1725/0). ae0ebcc result: see section 7 (fill in). |
+| Office automation O1 | **done, green** at f581787 (O1-R1 complete: 1869/0 both SQL, install 0 FAIL x3) | **not started** | next: office front pages |
 | Production P1, Sales & Service S1, Local AI A1 | briefs ready (`docs/*-backend-brief.md`) | — | not started |
 | Engineering module | waits for the user's Claude-team organisation | — | |
 | Final: server hardware BOM | — | — | after all phases (PMIS + local AI + voice + backup, UPS) |
@@ -49,6 +49,7 @@ The user-facing specs that lived in the old Claude Project (`claude/*.md`) are c
 - NuGet is blocked; restore from the cache branch: `git clone --depth 1 --branch innco-nuget-pkgs <repo> p && mkdir -p ~/.nuget/packages ~/.nuget/emptysrc && cat p/nuget-packages.tgz.part-* | tar -xzf - -C ~/.nuget/packages`
 - Build: `dotnet build Base.sln --source ~/.nuget/emptysrc -v q -nologo` → must print "Build succeeded". If packages change, push to `innco-nuget-cache` to regenerate (does not run the main CI).
 - No SQL Server locally (Docker/Microsoft repos blocked): smoke and migrations only in CI.
+- Network (new account, 1405/08/02): with the user's claude.ai setting Capabilities > Domain allowlist = All domains, `apt-get`, NuGet, npm and pip work. apt sources must be https (`sed -i 's#http://#https://#' /etc/apt/sources.list.d/ubuntu.sources`; disable docker.list). npm and pip need the proxy env not bypassed: `export npm_config_noproxy=localhost NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1`. `apt-get install -y dotnet-sdk-10.0 shellcheck`.
 - Front: `npm`/`npx vite build` work locally; `npx vue-tsc --noEmit` has 5 legacy errors elsewhere — check only your files.
 
 ## 5. Binding user decisions (do not change without asking)
@@ -72,16 +73,13 @@ PMO 1, COMMERCIAL 2, FINANCIAL 3, ENGINEERING 4, QC 5, WAREHOUSE 6, ASSEMBLER 7,
 
 ## 7. Next steps, in order
 
-1. **Office R1**: read the CI result of ae0ebcc (see table below). If not green, fix from `7-inventory-fail.txt`. Open items: remove unused `Counts` helper in `LeaveService.cs`; check possible duplicate audit rows for numbering rules (`docs/office-o1-report.md`, section "R1 status").
+1. **Office R1: DONE** at f581787 (verified by the orchestrator: `--- inventory: 1869 passed, 0 failed` on SQL 2022 and 2025 Express, 0 `^FAIL` in the three install files). Fixes: (a) C1 — uploaded files were named with a random Guid unrelated to `Document.Id`; `DocumentService.UploadDocumentAsync` now names the file after the entity id (no migration); the C1 smoke now finds the file and proves the attachment lock and tamper detection. (b) M5 — the server was right; the smoke precondition was wrong (2 checked vouchers touched by the finance manager were skipped, and only one fiscal year was finalised). The smoke now finalises all years with both finance managers, unchecks leftover manual vouchers, asserts 0 checked vouchers, 0 finalised on a repeat, then the gate closed (diagnostics kept in `smoke-output/m5-*.json`). (c) unused `LeaveService.Counts` removed. Still open (minor): possible duplicate "Added" audit rows for numbering rules (`ApplicationDbContext.cs` / `FinanceAuditTrail.cs`), not investigated.
 2. Office front pages (endpoint list in `docs/office-o1-report.md`), then a Persian test kit (install package + guide + feedback workbook, same style as the finance kit; build scripts in `tools/finbuild`).
 3. Production P1 → Sales & Service S1 → Local AI A1 (mock LLM in CI) per the briefs in `docs/`, each: backend → independent Opus review → fixes → front → test kit.
 4. Engineering module after the user's Claude-team organisation.
 5. Server hardware BOM.
 
-ae0ebcc CI result at handoff (read by the orchestrator, run 40118232662): **NOT green — 1863 passed, 3 failed on both SQL versions; install 0 FAIL x3.** The working tree is clean and equals origin (nothing half-committed). Failures (bodies in `smoke-output/7-inventory-fail.txt` on the smoke branches):
-- `office r1 C1: the stored bytes of the attachment are unchanged after the attempts (file '')` and `... after the bytes of the attachment are swapped on disk verify fails and names the file` — the smoke script cannot find the uploaded file on the CI disk (`file ''`; path lookup `src/WebApi/UploadedDocuments/<id>*` still wrong — check where `DocumentService` writes on the CI runner, e.g. the published content root). The C1 server fix itself (auth on download, owner check on change-file, SHA-256 of attachment bytes in the letter hash) is therefore **not yet proven** — prove it before any office test kit.
-- `office r1 M5: so the voucher gate is closed` — the "finalise vouchers" inbox gate item is still not closed when nothing is left to finalise; read the body and the sweep added in ae0ebcc (finance `EventPostingService.cs` / `GlService` + `OrgInboxService.cs`).
-Last fully green commits: **7865e2d** (finance complete) and **97f4c54** (office O1 before review fixes). Do not deliver a package built from ae0ebcc.
+Last fully green commits: **f581787** (office O1 incl. R1), 7865e2d (finance complete). A package may now be built from f581787 (check `app/appsettings.json` line 10 placeholder before delivery).
 
 ## 8. Waiting on the user / company
 
