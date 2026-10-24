@@ -4286,7 +4286,10 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("VoucherId");
 
-                    b.HasIndex("Year");
+                    b.HasIndex("Year")
+                        .IsUnique()
+                        .HasDatabaseName("IX_FnBonusRuns_Year_Active")
+                        .HasFilter("[Status] <> 2");
 
                     b.ToTable("FnBonusRuns", (string)null);
                 });
@@ -6708,6 +6711,9 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ApprovedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("BonusRunId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -6777,13 +6783,22 @@ namespace DataLayer.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
+                    b.Property<int?>("TerminationId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("BonusRunId")
+                        .HasFilter("[BonusRunId] IS NOT NULL");
 
                     b.HasIndex("Number")
                         .IsUnique();
 
                     b.HasIndex("PayrollRunId")
                         .HasFilter("[PayrollRunId] IS NOT NULL");
+
+                    b.HasIndex("TerminationId")
+                        .HasFilter("[TerminationId] IS NOT NULL");
 
                     b.ToTable("FnPayments", (string)null);
                 });
@@ -8465,6 +8480,9 @@ namespace DataLayer.Migrations
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
 
+                    b.Property<decimal>("NonRecoverableVatAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("NoteNumber")
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
@@ -8802,11 +8820,19 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("HireDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<decimal>("InsuranceAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
                     b.Property<decimal>("LeavePay")
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
 
                     b.Property<decimal>("MonthlyBase")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<decimal>("NetPayable")
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
 
@@ -8844,6 +8870,10 @@ namespace DataLayer.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("TaxAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
                     b.Property<DateTime>("TerminationDate")
                         .HasColumnType("datetime2");
 
@@ -8864,7 +8894,10 @@ namespace DataLayer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmployeeId");
+                    b.HasIndex("EmployeeId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_FnTerminations_Employee_Active")
+                        .HasFilter("[Status] <> 2");
 
                     b.HasIndex("Number")
                         .IsUnique();

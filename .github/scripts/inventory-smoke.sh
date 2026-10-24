@@ -958,9 +958,9 @@ as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO2,\"itemsText\":\
 as "$QC_TOKEN" POST quality/release-notes/action "{\"id\":$RN2,\"action\":\"release\"}"; check "work order 2 cannot be released: ITP not approved, open NCRs, reports missing" '.success == false and (.message|contains("ترخیص"))'
 as "$QC_TOKEN" GET "quality/work-orders/$WO2/release-checks"; check "work order 2 checks fail for the ITP and the open NCR" '.data.canRelease == false and ([.data.checks[]|select(.code=="ITP_APPROVED")|.passed][0] == false) and ([.data.checks[]|select(.code=="NO_OPEN_NCR")|.passed][0] == false)'
 # delivery gate: no release -> no customer delivery
-mkdelivery() { # mkdelivery WORKORDER (empty = none)
-  local wo=""; [ -n "$1" ] && wo=",\"workOrderId\":$1"
-  call POST inventory/documents "{\"type\":11,\"documentDate\":\"$D0\",\"warehouseId\":$W1,\"contractId\":$QCT$wo,\"driverName\":\"Driver\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"Client rep\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"
+mkdelivery() { # mkdelivery WORKORDER [QUANTITY of bolts, default 1] (empty work order = none)
+  local wo="" q=${2:-1}; [ -n "$1" ] && wo=",\"workOrderId\":$1"
+  call POST inventory/documents "{\"type\":11,\"documentDate\":\"$D0\",\"warehouseId\":$W1,\"contractId\":$QCT$wo,\"driverName\":\"Driver\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"Client rep\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":$q}]}"
 }
 mkdelivery $WO2; DL2=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL2/approve" '{"kind":4}'
 call POST "inventory/documents/$DL2/confirm"; check "customer delivery of a work order without a release note refused" '.success == false and (.message|contains("ترخیص"))'
@@ -1870,6 +1870,8 @@ as "$TR_TOKEN" POST $FLN '{"bankName":"بانک","amount":1000,"currencyCode":"U
 as "$TR_TOKEN" POST $FXA/letters-of-credit "{\"providerId\":$PA,\"bankAccountId\":$BA1,\"currencyCode\":\"USD\",\"amount\":200,\"openDate\":\"2025-06-01T00:00:00\",\"expiryDate\":\"2025-06-30T00:00:00\",\"marginPercent\":20}"; nomsg "scope: a foreign-currency letter of credit is refused" "فقط ریال"
 as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"lines\":[{\"accountCode\":\"10101\",\"debit\":600000,\"currencyCode\":\"USD\",\"currencyAmount\":1,\"rate\":600000},{\"accountCode\":\"10102\",\"credit\":600000}]}"; nomsg "scope: a voucher line with a currency is refused" "فقط ریال"
 as "$FM_TOKEN" GET "$FE"; check "scope: the main company is the only legal entity" '.success and (.data|length) == 1 and .data[0].id == 1'
+ENT=$(jq -c '.data[0] | {id: .id, code: .code, name: .name, jurisdiction: .jurisdiction, baseCurrency: .baseCurrency}' "$B")
+as "$FM_TOKEN" POST $FE "$(jq -c '.baseCurrency = "EUR"' <<< "$ENT")"; nomsg "r3 m2: the base currency of the main company cannot be changed to EUR while Finance:ForeignCurrency is off" "فقط ریال"
 
 # --- audit trail
 as "$FM_TOKEN" GET "$FAU?EntityType=FnVoucher&EntityId=$V1&PageSize=0"; check "f3 audit: finalizing the first manual voucher left before and after values and the user" '.success and ([.data.data[]|select(.action == "Modified" and (.beforeJson|tostring|contains("Checked")) and (.afterJson|tostring|contains("Final")) and (.userName|length) > 0)]|length) >= 1'
@@ -1989,7 +1991,7 @@ tbv() { as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y4&Level=2&I
 
 # --- fiscal year 1404 for the exact-amount tests
 as "$FM_TOKEN" POST $FG/years/ensure '{"date":"2025-06-01T00:00:00"}'; check "f3 m2: fiscal year 1404 ensured with 12 periods" '.success and .data.year == 1404 and (.data.periods|length) == 12'
-Y4=$(val .data.id); P1=$(val '.data.periods[0].id'); P2=$(val '.data.periods[1].id'); P3=$(val '.data.periods[2].id'); P4=$(val '.data.periods[3].id'); P5=$(val '.data.periods[4].id')
+Y4=$(val .data.id); P1=$(val '.data.periods[0].id'); P2=$(val '.data.periods[1].id'); P3=$(val '.data.periods[2].id'); P4=$(val '.data.periods[3].id'); P5=$(val '.data.periods[4].id'); P6=$(val '.data.periods[5].id')
 
 # --- section 3: foreign currency
 as "$FM_TOKEN" POST $FXA/currencies '{"code":"IRR","title":"ریال","decimals":0,"isBase":true}'; check "f3 fx: base currency IRR" '.success and .data.isBase == true'
@@ -2069,17 +2071,33 @@ as "$FM_TOKEN" POST $FCO/workorders/$WO2/reopen '{}'; no "f3 close-out: reopenin
 as "$FM_TOKEN" POST $FCO/workorders/$WO2/reopen '{"reason":"اصلاح هزینه","date":"2025-05-31T00:00:00"}'; check "f3 close-out: reopening by the finance manager with a reason creates the reversal" '.success and .data.isOpen == true and .data.reversalVoucherId > 0'
 as "$FM_TOKEN" GET $FCO/workorders/$WO2/cost-sheet; check "f3 close-out: after the reversal the 1,300,000 work in progress is back" '.success and .data.wipBalance == 1300000 and .data.isClosed == false'
 
-# --- section 5: percentage-of-completion revenue
-as "$FIN_TOKEN" POST $FRR/contracts "{\"contractId\":$QCT,\"method\":1,\"contractPrice\":1000000000,\"progressSource\":\"Manual\",\"progressMeasure\":\"Physical\"}"; no "f3 poc: only the finance manager sets the revenue method"
-as "$FM_TOKEN" POST $FRR/contracts "{\"contractId\":$QCT,\"method\":1,\"contractPrice\":1000000000,\"progressSource\":\"Manual\",\"progressMeasure\":\"Physical\"}"; check "f3 poc: contract set to percentage of completion at 1,000,000,000" '.success and .data.method == 1'
+# --- section 5: percentage-of-completion revenue (its own contract with one work order, so the job close-out of work order 1 below stays a normal job)
+call POST Contracts '{"code":"R3-CT-POC","title":"قرارداد درصد پیشرفت آزمون","status":1,"employer":"کارفرمای آزمون"}'; check "f3 poc: the percentage-of-completion contract is created" '.success and .data.id > 0'
+PQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PQ,\"equipmentId\":$QEQ,\"count\":1}"; check "f3 poc: contract equipment" '.success'
+call POST WorkOrders "{\"contractId\":$PQ,\"equipmentId\":$QEQ,\"code\":\"R3-WO-1\",\"title\":\"Pump R3\",\"description\":\"x\",\"count\":1}"; check "f3 poc: the work order of the contract is created" '.success and .data.id > 0'
+WO3=$(val .data.id)
+as "$FIN_TOKEN" POST $FRR/contracts "{\"contractId\":$PQ,\"method\":1,\"contractPrice\":1000000000,\"progressSource\":\"Manual\",\"progressMeasure\":\"Physical\"}"; no "f3 poc: only the finance manager sets the revenue method"
+as "$FM_TOKEN" POST $FRR/contracts "{\"contractId\":$PQ,\"method\":1,\"contractPrice\":1000000000,\"progressSource\":\"Manual\",\"progressMeasure\":\"Physical\"}"; check "f3 poc: contract set to percentage of completion at 1,000,000,000" '.success and .data.method == 1'
 as "$FIN_TOKEN" POST $FRR/$P3 '{"dryRun":true,"inputs":[]}'; nomsg "f3 poc: manual progress must be entered" "دستی"
-as "$FIN_TOKEN" POST $FRR/$P3 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$QCT,\"progressPercent\":40,\"estimatedCost\":800000000}]}"; check "f3 poc: progress 40% earns 400,000,000 as unbilled receivable, no loss provision" '.success and .data.voucherId > 0 and .data.rows[0].earnedToDate == 400000000 and .data.rows[0].revenueThisRun == 400000000 and .data.rows[0].contractAsset == 400000000 and .data.rows[0].contractLiability == 0 and .data.rows[0].lossProvision == 0'
-as "$FIN_TOKEN" POST $FRR/$P4 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$QCT,\"progressPercent\":40,\"estimatedCost\":800000000}]}"; check "f3 poc: a rerun at the same progress posts nothing (cumulative method)" '.success and .data.voucherId == null and .data.rows[0].revenueThisRun == 0'
-fv "{\"date\":\"2025-07-24T00:00:00\",\"description\":\"صورت‌حساب پیشرفت\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":150000000,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60101\",\"credit\":150000000,\"contractId\":$QCT}]}"
-as "$FIN_TOKEN" POST $FRR/$P5 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$QCT,\"progressPercent\":60,\"estimatedCost\":1200000000}]}"; check "f3 poc: 60% = 600,000,000 earned, 550,000,000 already in revenue, 50,000,000 more; unbilled 450,000,000; expected loss provision 80,000,000" '.success and .data.rows[0].earnedToDate == 600000000 and .data.rows[0].revenueInLedger == 550000000 and .data.rows[0].revenueThisRun == 50000000 and .data.rows[0].contractAsset == 450000000 and .data.rows[0].lossProvision == 80000000 and .data.rows[0].lossProvisionChange == 80000000'
+as "$FIN_TOKEN" POST $FRR/$P3 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$PQ,\"progressPercent\":40,\"estimatedCost\":800000000}]}"; check "f3 poc: progress 40% earns 400,000,000 as unbilled receivable, no loss provision" '.success and .data.voucherId > 0 and .data.rows[0].earnedToDate == 400000000 and .data.rows[0].revenueThisRun == 400000000 and .data.rows[0].contractAsset == 400000000 and .data.rows[0].contractLiability == 0 and .data.rows[0].lossProvision == 0'
+as "$FIN_TOKEN" POST $FRR/$P4 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$PQ,\"progressPercent\":40,\"estimatedCost\":800000000}]}"; check "f3 poc: a rerun at the same progress posts nothing (cumulative method)" '.success and .data.voucherId == null and .data.rows[0].revenueThisRun == 0'
+fv "{\"date\":\"2025-07-24T00:00:00\",\"description\":\"صورت‌حساب پیشرفت\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":150000000,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60101\",\"credit\":150000000,\"contractId\":$PQ}]}"
+as "$FIN_TOKEN" POST $FRR/$P5 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$PQ,\"progressPercent\":60,\"estimatedCost\":1200000000}]}"; check "f3 poc: 60% = 600,000,000 earned, 550,000,000 already in revenue, 50,000,000 more; unbilled 450,000,000; expected loss provision 80,000,000" '.success and .data.rows[0].earnedToDate == 600000000 and .data.rows[0].revenueInLedger == 550000000 and .data.rows[0].revenueThisRun == 50000000 and .data.rows[0].contractAsset == 450000000 and .data.rows[0].lossProvision == 80000000 and .data.rows[0].lossProvisionChange == 80000000'
 [ "$(tbv 30404 closingCredit)" = "80000000" ] && ok "f3 poc: the expected-loss provision 30404 is exactly 80,000,000 (EAC 1.2bn - price 1bn = 200m loss, 40% still to come)" || bad "f3 poc: the expected-loss provision 30404 is exactly 80,000,000 (got $(tbv 30404 closingCredit))"
 [ "$(tbv 10308 closingDebit)" = "450000000" ] && ok "f3 poc: unbilled receivable 10308 is exactly earned minus billed (450,000,000)" || bad "f3 poc: unbilled receivable 10308 is exactly earned minus billed (got $(tbv 10308 closingDebit))"
-as "$FM_TOKEN" POST $FRR/contracts "{\"contractId\":$QCT,\"method\":0}"; no "f3 poc: the method cannot go back to invoice once revenue was recognised"
+as "$FM_TOKEN" POST $FRR/contracts "{\"contractId\":$PQ,\"method\":0}"; no "f3 poc: the method cannot go back to invoice once revenue was recognised"
+
+# --- review 3, C1: a work order of a percentage-of-completion contract is expensed once (material 100 and absorbed overhead 30 leave work in progress with the revenue run)
+CG_C0=$(tbv 70101 closingDebit)
+fv "{\"date\":\"2025-08-25T00:00:00\",\"description\":\"مواد دستور کار قرارداد درصد پیشرفت\",\"lines\":[{\"accountCode\":\"10520\",\"debit\":100,\"workOrderId\":$WO3,\"contractId\":$PQ},{\"accountCode\":\"10101\",\"credit\":100}]}"
+fv "{\"date\":\"2025-08-25T00:00:00\",\"description\":\"سربار جذب‌شده دستور کار\",\"lines\":[{\"accountCode\":\"10520\",\"debit\":30,\"workOrderId\":$WO3},{\"accountCode\":\"70110\",\"credit\":30}]}"
+as "$FM_TOKEN" GET $FCO/workorders/$WO3/cost-sheet; check "r3 c1: before the revenue run the work order holds 130 in work in progress" '.success and .data.wipBalance == 130'
+as "$FIN_TOKEN" POST $FRR/$P6 "{\"dryRun\":false,\"inputs\":[{\"contractId\":$PQ,\"progressPercent\":60,\"estimatedCost\":1200000000}]}"; check "r3 c1: the revenue run recognises the cost of 130 (100 material + 30 overhead) and no further revenue" '.success and .data.rows[0].revenueThisRun == 0 and .data.rows[0].costOfSalesThisRun == 130'
+[ "$(( $(tbv 70101 closingDebit) - CG_C0 ))" = "130" ] && ok "r3 c1: cost of sales 70101 rose by exactly 130" || bad "r3 c1: cost of sales 70101 rose by exactly 130 (got $(( $(tbv 70101 closingDebit) - CG_C0 )))"
+as "$FM_TOKEN" GET $FCO/workorders/$WO3/cost-sheet; check "r3 c1: nothing is left in work in progress for the work order (the absorbed 30 left too)" '.success and .data.wipBalance == 0'
+call PUT WorkOrders/change-condition "{\"workOrderId\":$WO3,\"newCondition\":2}"; check "r3 c1: the work order is set to Done" '.success'
+as "$FIN_TOKEN" POST $FCO/workorders/$WO3/close '{"quantity":1}'; no "r3 c1: the close-out of a work order of a percentage-of-completion contract is refused (it would expense the cost a second time)"
 
 # --- section 4: budget, two-person approval, report, commitment control
 as "$FM_TOKEN" POST $FBU/import "{\"budgetId\":0,\"csv\":\"x\"}"; no "f3 budget: import into a missing budget is refused"
@@ -2407,6 +2425,7 @@ as "$FIN_TOKEN" POST $FTX/taxable-profit/provision "{\"fiscalYearId\":$Y3}"; no 
 as "$FIN_TOKEN" POST $FTX/taxable-profit/provision "{\"fiscalYearId\":$Y3,\"ratePercent\":25}"; check "f3 tax: a draft provision voucher for 38,750,000 is created" '.success and .data.provisionVoucherId > 0 and .data.taxAmount == 38750000'
 TPV=$(val .data.provisionVoucherId)
 as "$FM_TOKEN" GET $FG/vouchers/$TPV; check "f3 tax: the provision voucher is a draft (status 0), balanced" '.success and .data.status == 0 and .data.totalAmount == 38750000'
+as "$FIN_TOKEN" POST $FTX/taxable-profit/provision "{\"fiscalYearId\":$Y3,\"ratePercent\":25}"; nomsg "r3 m8: a second provision run is refused while the first is still a draft (it used to create a second draft of 38,750,000)" "پیش‌نویس"
 as "$FM_TOKEN" GET "$FTX/taxable-profit?FiscalYearId=$Y3&RatePercent=25"; check "f3 tax: the draft provision does not change the taxable profit" '.success and .data.taxableProfit == 155000000'
 
 # --- section 8: statements on fiscal year 1403 (366 days, a leap year)
@@ -2497,6 +2516,12 @@ TOKEN=$ADMIN_TOKEN
 # =============================================================================================== F3b completeness (migration FinanceCompleteness4)
 FCM=finance/completeness; FPS=finance/payroll-settlements
 cb() { local v; v=$(tbc "$1"); echo "${v:-0}"; } # closing balance (debit minus credit) of an account in the current fiscal year
+cfrow() { as "$FM_TOKEN" GET "$FCM/cash-flow-direct?FiscalYearId=$FYC&IncludeDraft=true"; jq -r "([.data.rows[]|select(.key == \"$1\")][0].net // 0) | round" "$B"; } # net cash of a direct-method row
+# --- review 3 (review-2 finding 1): the provision true-up leaves drafts out, and a draft still waiting blocks a second one
+TU_REQ=$(( 7000000 - $(cb 30402) ))
+as "$FIN_TOKEN" POST $FDF/provisions/true-up "{\"kind\":\"bonus\",\"date\":\"${TODAY}T00:00:00\",\"requiredBalance\":$TU_REQ,\"reason\":\"آزمون تعدیل ذخیره\"}"; check "r3 true-up: the bonus provision is raised by exactly 7,000,000 (a draft voucher)" '.success and .data.difference == 7000000 and .data.voucherId > 0'
+as "$FIN_TOKEN" POST $FDF/provisions/true-up "{\"kind\":\"bonus\",\"date\":\"${TODAY}T00:00:00\",\"requiredBalance\":$((TU_REQ + 1000000)),\"reason\":\"آزمون تعدیل دوم\"}"; nomsg "r3 true-up: a second true-up is refused while the first is still a draft (drafts are not counted in the balance)" "پیش‌نویس"
+RA_AP0=$(rec ap); RA_BK0=$(rec bank)
 # --- non-recoverable VAT per purchase line (a second order of 10 bolts at 390,000; the whole VAT of 390,000 is cost)
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"مالیات غیرقابل استرداد\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ4=$(val .data.id); RQ4L=$(val '.data.lines[0].id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ4,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ4,\"action\":\"approve-management\"}"
@@ -2561,19 +2586,25 @@ as "$FM_TOKEN" GET "$FG/details?Type=2&PageSize=0"; SUPA=$(jq -r '[.data.data[]|
 fv "{\"date\":\"2026-10-20T00:00:00\",\"description\":\"کسور حسن انجام کار آزمون\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":5000000},{\"accountCode\":\"30206\",\"credit\":5000000,\"detail1Code\":\"$SUPA\"}]}"
 as "$FM_TOKEN" GET "$FCM/retention/status?providerId=$PA&asOf=2026-10-24"; check "f3b retention: 5,000,000 held, nothing released, no valid clearance, release not allowed" '.success and .data.held == 5000000 and .data.released == 0 and .data.releasable == 5000000 and .data.canRelease == false and .data.validClearanceId == null'
 as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; nomsg "f3b retention: the release is refused without an insurance clearance" "مفاصاحساب"
+as "$FIN_TOKEN" POST $FCM/clearances "{\"providerId\":$PA,\"letterNo\":\"M-FAKE\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"4b0d7a52-1d19-4c6f-9a11-0a3e5b6c7d80\"}"; nomsg "r3 m3: a clearance whose file is not in the document store is refused" "مخزن اسناد"
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"آزادسازی سپرده بیمه بدون مفاصاحساب\",\"lines\":[{\"accountCode\":\"30207\",\"debit\":1000,\"detail1Code\":\"$SUPA\"},{\"accountCode\":\"10101\",\"credit\":1000}]}"; nomsg "r3 m3: the insurance retention 30207 cannot be released by a manual voucher without a valid clearance" "مفاصاحساب"
 as "$FIN_TOKEN" POST $FCM/clearances "{\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\"}"; check "f3b retention: a clearance without the scanned letter is saved but not valid" '.success and .data.isValid == false and .data.hasDocument == false'
 CLR=$(val .data.id)
 as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; no "f3b retention: a clearance without a document does not release the retention"
-as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-10-10T00:00:00\",\"documentId\":\"4b0d7a52-1d19-4c6f-9a11-0a3e5b6c7d80\"}"; check "f3b retention: an expired clearance with a document is not valid" '.success and .data.isValid == false and .data.hasDocument == true'
+as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-10-10T00:00:00\",\"documentId\":\"$DOCID\"}"; check "f3b retention: an expired clearance with a document is not valid" '.success and .data.isValid == false and .data.hasDocument == true'
 as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; no "f3b retention: an expired clearance does not release the retention"
-as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"4b0d7a52-1d19-4c6f-9a11-0a3e5b6c7d80\",\"isRevoked\":true}"; check "f3b retention: a revoked clearance is not valid" '.success and .data.isValid == false'
+as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"$DOCID\",\"isRevoked\":true}"; check "f3b retention: a revoked clearance is not valid" '.success and .data.isValid == false'
 as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":5000000}"; no "f3b retention: a revoked clearance does not release the retention"
-as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"4b0d7a52-1d19-4c6f-9a11-0a3e5b6c7d80\"}"; check "f3b retention: a clearance with the document, not revoked, covering the date is valid" '.success and .data.isValid == true'
+as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"$DOCID\"}"; check "f3b retention: a clearance with the document, not revoked, covering the date is valid" '.success and .data.isValid == true'
 as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":6000000}"; no "f3b retention: more than the retention held is refused"
 AP_B=$(cb 30101)
 as "$FIN_TOKEN" POST $FCM/retention/release "{\"providerId\":$PA,\"date\":\"2026-10-24T00:00:00\",\"amount\":3000000}"; check "f3b retention: 3,000,000 released with a valid clearance" '.success and .data.amount == 3000000 and .data.voucherId > 0'
 [ "$(cb 30206)" = "$((RTH - 5000000 + 3000000))" ] && [ "$(cb 30101)" = "$((AP_B - 3000000))" ] && ok "f3b retention: the retention account falls 3,000,000 and the payable rises 3,000,000" || bad "f3b retention: the retention account falls 3,000,000 and the payable rises 3,000,000"
 as "$FM_TOKEN" GET "$FCM/retention/status?providerId=$PA&asOf=2026-10-24"; check "f3b retention: 2,000,000 remain releasable" '.success and .data.held == 5000000 and .data.released == 3000000 and .data.releasable == 2000000 and .data.canRelease == true'
+as "$FIN_TOKEN" POST $FCM/clearances "{\"id\":$CLR,\"providerId\":$PA,\"letterNo\":\"M-1-edited\",\"issueDate\":\"2026-09-01T00:00:00\",\"validUntil\":\"2026-12-01T00:00:00\",\"documentId\":\"$DOCID\"}"; nomsg "r3 m3: a clearance that was used for a release can no longer be edited" "به کار رفته"
+# review 3, H5: 2,000,000 withheld in the previous fiscal year (1404, not closed) is part of the cumulative retention held in 1405
+fv "{\"date\":\"2025-06-25T00:00:00\",\"description\":\"کسور حسن انجام کار سال قبل\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":2000000},{\"accountCode\":\"30206\",\"credit\":2000000,\"detail1Code\":\"$SUPA\"}]}"
+as "$FM_TOKEN" GET "$FCM/retention/status?providerId=$PA&asOf=2026-10-24"; check "r3 h5: the retention held counts the unclosed previous year: 7,000,000 held, 3,000,000 released, 4,000,000 releasable" '.success and .data.held == 7000000 and .data.released == 3000000 and .data.releasable == 4000000'
 
 # --- planned versus actual per work order
 as "$FM_TOKEN" GET $FCO/workorders/$WO2/cost-sheet; ACT_TOT=$(val .data.totalCost)
@@ -2602,6 +2633,19 @@ as "$FM_TOKEN" GET "$FCM/supplier-statements/$STM"; check "f3b statement: the st
 as "$FIN_TOKEN" POST $FCM/supplier-statements "{\"providerId\":$PA,\"asOf\":\"2026-10-24T00:00:00\",\"theirBalance\":0,\"lines\":[{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"$SI3NO\",\"credit\":4290000}]}"; check "f3b statement: our internal number still matches by the fallback" '.success and ([.data.lines[]|select(.matchedNumber == "'$SI3NO'" and .amountDifference == null)]|length) == 1 and (.data.unmatchedTheirs|length) == 0'
 as "$FIN_TOKEN" POST $FCM/supplier-statements "{\"providerId\":$PA,\"asOf\":\"2026-10-24T00:00:00\",\"theirBalance\":0,\"lines\":[{\"date\":\"2026-10-24T00:00:00\",\"documentNumber\":\"F-3001\",\"credit\":4290001}]}"; check "f3b statement: F-3001 with 4,290,001 is matched by number and shows an amount difference of exactly 1, which is part of the explained difference" '.success and ([.data.lines[]|select(.documentNumber == "F-3001" and .matchedNumber == "'$SI3NO'" and .amountDifference == 1)]|length) == 1 and (.data.unmatchedTheirs|length) == 0 and .data.explained == (1 - ([.data.unmatchedOurs[]|(.credit - .debit)]|add // 0))'
 
+# --- review 3, H1 and M5: a credit note lowers what may be paid; on an invoice whose VAT is all non-recoverable it does not credit the input VAT
+AP_R0=$(cb 30101); PPV_R0=$(cb 70108); VAT_R0=$(cb 10403)
+as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=3"; VS_R0=$(val .data.purchasesVat)
+as "$FIN_TOKEN" POST $FCM/supplier-notes "{\"kind\":1,\"providerId\":$PA,\"supplierInvoiceId\":$SI4,\"noteNumber\":\"CN-2\",\"date\":\"${TODAY}T00:00:00\",\"netAmount\":200000,\"reason\":\"تخفیف فاکتور با مالیات غیرقابل استرداد\"}"; check "r3 m5: a credit note of 200,000 on the invoice F-3002 gets VAT 20,000 (total 220,000)" '.success and .data.vatAmount == 20000 and .data.totalAmount == 220000'
+CN2=$(val .data.id)
+as "$FIN2_TOKEN" POST $FCM/supplier-notes/action "{\"id\":$CN2,\"action\":\"approve\"}"; check "r3 m5: the credit note is posted" '.success and .data.status == 1'
+[ "$(cb 30101)" = "$((AP_R0 + 220000))" ] && [ "$(cb 70108)" = "$((PPV_R0 - 220000))" ] && [ "$(cb 10403)" = "$VAT_R0" ] && ok "r3 m5: payable -220,000, price variance -220,000 (net 200,000 + non-recoverable VAT 20,000) and the input VAT account does not move" || bad "r3 m5: payable moved $(( $(cb 30101) - AP_R0 )), price variance $(( $(cb 70108) - PPV_R0 )), input VAT $(( $(cb 10403) - VAT_R0 ))"
+as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=3"; check "r3 m5: the deductible purchases VAT of the return is unchanged by the credit note" '.success and .data.purchasesVat == '$VS_R0
+as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SI4,\"amount\":4290000}"; nomsg "r3 h1: a payment request for the whole invoice 4,290,000 is refused after a credit note of 220,000" "مانده فاکتور"
+as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SI4,\"amount\":4070000}"; check "r3 h1: 4,070,000 (4,290,000 - 220,000) is accepted" '.success and .data.amount == 4070000'
+R3PAY=$(val .data.id)
+call POST procurement/payments/action "{\"id\":$R3PAY,\"action\":\"reject\",\"note\":\"آزمون پایان\"}"
+
 # --- customer confirmation letter
 as "$FIN_TOKEN" POST $FCM/confirmations "{\"customerId\":$HC,\"asOf\":\"2026-10-24T00:00:00\"}"; check "f3b confirmation: letter data for a customer without movement: ledger 0, statement 0, agrees, no open documents" '.success and .data.ledgerBalance == 0 and .data.statementBalance == 0 and .data.agrees == true and .data.openDocuments == 0 and .data.status == 1 and (.data.customerName|length) > 0'
 CF=$(val .data.id)
@@ -2616,6 +2660,12 @@ PE2=$(val .data.id)
 as "$PAYR_TOKEN" POST $FPS/bonus-runs "{\"year\":1404,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1,$PE2]}"; no "f3b bonus: a year without the rate inputs is refused"
 fv "{\"date\":\"2026-10-20T00:00:00\",\"description\":\"ذخیره عیدی آزمون\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":1000000000},{\"accountCode\":\"30402\",\"credit\":1000000000}]}"
 as "$FIN_TOKEN" POST $FPS/bonus-runs "{\"year\":1405,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1,$PE2]}"; [ "$CODE" = "403" ] && ok "f3b bonus: the accountant cannot prepare a bonus run (403)" || bad "f3b bonus: the accountant cannot prepare a bonus run (403) got $CODE"
+# review 3, H8: the gross of the bonus is capped at 60 days of the minimum wage (500,000) = 30,000,000 per full year; the cap is a rate-table key
+as "$PAYR_TOKEN" POST $FP/rates "{\"year\":1405,\"key\":\"BonusGrossCapDaysOfMinimumWage\",\"value\":60,\"source\":\"$SRC\",\"verify\":true}"; check "r3 h8: the gross cap of the bonus is entered as 60 days" '.success and .data.key == "BonusGrossCapDaysOfMinimumWage"'
+as "$PAYR_TOKEN" POST $FPS/bonus-runs "{\"year\":1405,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1,$PE2]}"; check "r3 h8: with the cap at 60 days both gross amounts are exactly 30,000,000 (36,000,000 and 66,000,000 before), total 60,000,000, tax 0" '.success and .data.totalGross == 60000000 and .data.totalTax == 0 and ([.data.lines[]|select(.gross == 30000000)]|length) == 2'
+BRX=$(val .data.id)
+as "$PAYR_TOKEN" POST $FPS/bonus-runs/action "{\"id\":$BRX,\"action\":\"cancel\"}"; check "r3 h8: the capped draft is cancelled" '.success and .data.status == 2'
+as "$PAYR_TOKEN" POST $FP/rates "{\"year\":1405,\"key\":\"BonusGrossCapDaysOfMinimumWage\",\"value\":150,\"source\":\"$SRC\",\"verify\":true}"; check "r3 h8: the gross cap is set to 150 days (75,000,000) for the main scenario" '.success'
 as "$PAYR_TOKEN" POST $FPS/bonus-runs "{\"year\":1405,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1,$PE2]}"
 check "f3b bonus: gross 36,000,000 and 66,000,000, tax 0 and 100,000 (the part above 45,000,000 is taxed), totals 102,000,000 / 100,000 / 101,900,000" '.success and .data.totalGross == 102000000 and .data.totalTax == 100000 and .data.totalNet == 101900000 and ([.data.lines[]|select(.employeeId == '$PE1' and .gross == 36000000 and .tax == 0 and .net == 36000000)]|length) == 1 and ([.data.lines[]|select(.employeeId == '$PE2' and .gross == 66000000 and .tax == 100000 and .net == 65900000 and .employedDays == 365 and .yearDays == 365)]|length) == 1 and .data.status == 0'
 BR=$(val .data.id)
@@ -2623,8 +2673,16 @@ BN_P0=$(cb 30402); BN_T0=$(cb 30203); BN_W0=$(cb 30201); BN_E0=$(cb 80101)
 as "$PAYR_TOKEN" POST $FPS/bonus-runs/action "{\"id\":$BR,\"action\":\"approve\"}"; nomsg "f3b bonus: the preparer cannot approve" "شخص دیگری"
 as "$FM_TOKEN" POST $FPS/bonus-runs/action "{\"id\":$BR,\"action\":\"approve\"}"; check "f3b bonus: approved, 102,000,000 drawn from the provision and nothing expensed now" '.success and .data.status == 1 and .data.fromProvision == 102000000 and .data.expensedNow == 0 and .data.voucherId > 0'
 [ "$(cb 30402)" = "$((BN_P0 + 102000000))" ] && [ "$(cb 30203)" = "$((BN_T0 - 100000))" ] && [ "$(cb 30201)" = "$((BN_W0 - 101900000))" ] && [ "$(cb 80101)" = "$BN_E0" ] && ok "f3b bonus: provision debited 102,000,000, tax payable +100,000, payroll payable +101,900,000, no expense" || bad "f3b bonus: ledger effect of the bonus run"
+# review 3, H6: the net bonus is paid through treasury (draft, approval, posting) and clears the payroll payable
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":5,\"bonusRunId\":$BR,\"lines\":[{\"instrument\":2,\"amount\":101900000,\"bankAccountId\":$BA1,\"reference\":\"BONUS-1405\"}]}"; check "r3 h6: the bonus run is drafted for payment by treasury for the net 101,900,000" '.success and .data.status == 0 and .data.netAmount == 101900000'
+BRPM=$(val .data.id)
+as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$BRPM,\"action\":\"approve\"}"
+as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$BRPM,\"action\":\"post\"}"; check "r3 h6: the bonus payment is posted" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FG/post-events
+[ "$(cb 30201)" = "$BN_W0" ] && ok "r3 h6: the payroll payable is back to its start after the bonus payment (101,900,000 paid)" || bad "r3 h6: the payroll payable is back to its start (off by $(( $(cb 30201) - BN_W0 )))"
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":5,\"bonusRunId\":$BR,\"lines\":[{\"instrument\":2,\"amount\":101900000,\"bankAccountId\":$BA1}]}"; no "r3 h6: a bonus run cannot be paid twice"
 as "$PAYR_TOKEN" POST $FPS/bonus-runs "{\"year\":1405,\"payDate\":\"2026-10-24T00:00:00\",\"employeeIds\":[$PE1]}"; no "f3b bonus: a second run for the same year is refused"
-as "$PAYR_TOKEN" GET "$FPS/tax-reconciliation?year=1405"; check "f3b tax: the annual reconciliation lists the bonus tax of 100,000 for the new employee and the totals add up" '.success and ([.data.rows[]|select(.employeeId == '$PE2')|.taxWithheld] == [100000]) and .data.totalWithheld == ([.data.rows[].taxWithheld]|add) and .data.totalRecomputed == ([.data.rows[].taxRecomputed]|add) and ([.data.rows[]|select(.employeeId == '$PE1')|.taxWithheld] | .[0] >= 1046000)'
+as "$PAYR_TOKEN" GET "$FPS/tax-reconciliation?year=1405"; check "f3b tax: the annual reconciliation lists the bonus tax of 100,000 for the new employee and the totals add up" '.success and ([.data.rows[]|select(.employeeId == '$PE2')|.taxWithheld] == [100000]) and .data.totalWithheld == ([.data.rows[].taxWithheld]|add) and .data.totalRecomputed == ([.data.rows[].taxRecomputed]|add) and ([.data.rows[]|select(.employeeId == '$PE1')|[.taxWithheld,.taxRecomputed,.difference]] == [[1046000,0,-1046000]]) and ([.data.rows[]|select(.employeeId == '$PE2')|[.taxWithheld,.taxRecomputed,.difference]] == [[100000,0,-100000]]) and .data.totalDifference == (.data.totalRecomputed - .data.totalWithheld)'
 as "$AUD_TOKEN" GET "$FPS/tax-reconciliation?year=1405"; [ "$CODE" = "403" ] && ok "f3b payroll: the auditor gets 403 on the reconciliation" || bad "f3b payroll: the auditor gets 403 on the reconciliation got $CODE"
 as "$AUD_TOKEN" GET "$FPS/terminations"; [ "$CODE" = "403" ] && ok "f3b payroll: the auditor gets 403 on terminations" || bad "f3b payroll: the auditor gets 403 on terminations got $CODE"
 as "$FIN_TOKEN" GET "$FPS/bonus-runs"; [ "$CODE" = "403" ] && ok "f3b payroll: the accountant gets 403 on bonus runs" || bad "f3b payroll: the accountant gets 403 on bonus runs got $CODE"
@@ -2640,12 +2698,30 @@ as "$PAYR_TOKEN" POST $FPS/terminations "{\"employeeId\":$PE3,\"terminationDate\
 check "f3b termination: 54 months, severance 81,000,000, leave 6,000,000, notice 0, total 87,000,000 (30 days per year from the rate table)" '.success and .data.yearsOfService == 4.5 and .data.monthlyBase == 18000000 and .data.dailyWage == 600000 and .data.severancePay == 81000000 and .data.leavePay == 6000000 and .data.noticePay == 0 and .data.total == 87000000 and .data.status == 0 and (.data.sources|length) >= 1'
 TM=$(val .data.id)
 as "$PAYR_TOKEN" POST $FPS/terminations/action "{\"id\":$TM,\"action\":\"approve\"}"; nomsg "f3b termination: the preparer cannot approve" "شخص دیگری"
-TS_S0=$(cb 40201); TS_L0=$(cb 30403)
-as "$FM_TOKEN" POST $FPS/terminations/action "{\"id\":$TM,\"action\":\"approve\"}"; check "f3b termination: approved; severance 81,000,000 covered by the provision, leave covered up to the provision balance" '.success and .data.status == 1 and .data.fromSeveranceProvision == 81000000 and .data.fromLeaveProvision == '$LVEXP' and .data.voucherId > 0'
+TS_S0=$(cb 40201); TS_L0=$(cb 30403); TS_W0=$(cb 30201); TS_I0=$(cb 30202); TS_X0=$(cb 30203)
+as "$FM_TOKEN" POST $FPS/terminations/action "{\"id\":$TM,\"action\":\"approve\"}"; check "f3b termination: approved; severance 81,000,000 covered by the provision, leave covered up to the provision balance" '.success and .data.status == 1 and .data.fromSeveranceProvision == 81000000 and .data.fromLeaveProvision == '$LVEXP' and .data.voucherId > 0 and .data.taxAmount == 0 and .data.insuranceAmount == 420000 and .data.netPayable == 86580000'
 [ "$(cb 40201)" = "$((TS_S0 + 81000000))" ] && ok "f3b termination: the severance provision is debited exactly 81,000,000" || bad "f3b termination: the severance provision is debited exactly 81,000,000 (got $(( $(cb 40201) - TS_S0 )))"
+# review 3, M4: the employee insurance on the leave pay of 6,000,000 (7%) is booked, so the net payable is 87,000,000 - 420,000
+[ "$(cb 30202)" = "$((TS_I0 - 420000))" ] && [ "$(cb 30203)" = "$TS_X0" ] && [ "$(cb 30201)" = "$((TS_W0 - 86580000))" ] && ok "r3 m4: the termination books insurance 420,000 and a net payable of 86,580,000 (tax 0 in the exempt band)" || bad "r3 m4: insurance moved $(( TS_I0 - $(cb 30202) )), net payable moved $(( TS_W0 - $(cb 30201) ))"
+# review 3, H6: the net is paid through treasury and clears the payroll payable
+as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":6,\"terminationId\":$TM,\"lines\":[{\"instrument\":2,\"amount\":86580000,\"bankAccountId\":$BA1,\"reference\":\"TERM-1405\"}]}"; check "r3 h6: the termination is drafted for payment by treasury for the net 86,580,000" '.success and .data.status == 0 and .data.netAmount == 86580000'
+TMPM=$(val .data.id)
+as "$FM_TOKEN" POST $FT/payments/action "{\"id\":$TMPM,\"action\":\"approve\"}"
+as "$TR_TOKEN" POST $FT/payments/action "{\"id\":$TMPM,\"action\":\"post\"}"; check "r3 h6: the termination payment is posted" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FG/post-events
+[ "$(cb 30201)" = "$TS_W0" ] && ok "r3 h6: the payroll payable is back to its start after the termination payment" || bad "r3 h6: the payroll payable after the termination payment is off by $(( $(cb 30201) - TS_W0 ))"
+# a draft with a large leave pay shows an exact tax line: leave 18,000,000 x 300 / 30 = 180,000,000; insurance 7% = 12,600,000; tax (167,400,000 x 12 - 240,000,000) x 10% / 12 = 14,740,000
+as "$PAYR_TOKEN" POST $FP/employees "$(EBJ T903 آزمون مرخصی 0013542427 2022-03-21T00:00:00 600000)"; PE4=$(val .data.id)
+as "$PAYR_TOKEN" POST $FPS/terminations "{\"employeeId\":$PE4,\"terminationDate\":\"2026-09-22T00:00:00\",\"unusedLeaveDays\":300,\"noticeDays\":0,\"monthlyBase\":18000000}"; check "r3 m4: a leave pay of 180,000,000 carries insurance 12,600,000 and income tax 14,740,000, net payable 233,660,000" '.success and .data.leavePay == 180000000 and .data.insuranceAmount == 12600000 and .data.taxAmount == 14740000 and .data.netPayable == 233660000'
+TM4=$(val .data.id)
+as "$PAYR_TOKEN" POST $FPS/terminations/action "{\"id\":$TM4,\"action\":\"cancel\"}"; check "r3 m4: the example draft is cancelled" '.success and .data.status == 2'
 as "$PAYR_TOKEN" GET "$FP/employees/$PE3"; check "f3b termination: the employee end date is set to the termination date" '.success and (.data.endDate|tostring|test("2026-09-22|1405/06/31"))'
 as "$PAYR_TOKEN" POST $FPS/terminations "{\"employeeId\":$PE3,\"terminationDate\":\"2026-09-22T00:00:00\",\"unusedLeaveDays\":0,\"noticeDays\":0}"; no "f3b termination: an employee already settled cannot be settled again"
 
+# --- review 3, M7: a mixed voucher (Dr expense 1,000 / Cr tax 200 / Cr cash 800) is 800 of operating costs and nothing of taxes
+CF_O0=$(cfrow OperatingCosts); CF_T0=$(cfrow Taxes)
+fv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند آمیخته نقدی\",\"lines\":[{\"accountCode\":\"80101\",\"debit\":1000},{\"accountCode\":\"30203\",\"credit\":200},{\"accountCode\":\"10101\",\"credit\":800}]}"
+[ "$(cfrow OperatingCosts)" = "$((CF_O0 - 800))" ] && [ "$(cfrow Taxes)" = "$CF_T0" ] && ok "r3 m7: the cash flow books operating costs -800 and taxes 0 for the mixed voucher" || bad "r3 m7: operating costs moved $(( $(cfrow OperatingCosts) - CF_O0 )), taxes $(( $(cfrow Taxes) - CF_T0 ))"
 # --- direct-method cash flow, comparatives and notes
 as "$FM_TOKEN" GET "$FCM/cash-flow-direct?FiscalYearId=$FYC&IncludeDraft=true"
 check "f3b cashflow: the direct method nets to the change in cash and to the indirect method" '.success and .data.netChange == (.data.closingCash - .data.openingCash) and .data.netChange == .data.indirectNetChange and .data.netChange == (.data.operating + .data.investing + .data.financing) and ([.data.rows[].net]|add) == .data.netChange and .data.ties == true'
@@ -2664,20 +2740,25 @@ as "$TR_TOKEN" POST $FLN "$(jq -nc --argjson rows "$LRROWS" '{bankName:"بانک
 LNR=$(val .data.id)
 as "$FM_TOKEN" POST $FG/post-events
 LS_L0=$(cb 30501); LS_B0=$(cb 10102); LS_X0=$(cb 80302); LS_G0=$(cb 60303)
+CF_L0=$(cfrow Loans)
 as "$TR_TOKEN" POST $FLN/action "{\"id\":$LNR,\"action\":\"disburse\",\"date\":\"2026-10-01T00:00:00\",\"bankAccountId\":$BA1}"; check "scope: the rial loan is disbursed without any rate" '.success and .data.status == 1'
 [ "$(cb 30501)" = "$((LS_L0 - 3000000))" ] && [ "$(cb 10102)" = "$((LS_B0 + 3000000))" ] && ok "scope: the rial loan posts exactly 3,000,000 (liability credited, bank debited)" || bad "scope: the rial loan posts 3,000,000 (liability moved $(( LS_L0 - $(cb 30501) )), bank moved $(( $(cb 10102) - LS_B0 )))"
 as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LNR,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2026-10-24T00:00:00\"}"; check "scope: the first rial instalment is paid without any rate" '.success'
 [ "$(cb 30501)" = "$((LS_L0 - 3000000 + 1000000))" ] && [ "$(cb 10102)" = "$((LS_B0 + 3000000 - 1000000))" ] && [ "$(cb 80302)" = "$LS_X0" ] && [ "$(cb 60303)" = "$LS_G0" ] && ok "scope: the rial instalment falls exactly 1,000,000 on the liability and the bank, with no exchange difference" || bad "scope: the rial instalment (liability $(( $(cb 30501) - LS_L0 )), bank $(( $(cb 10102) - LS_B0 )))"
+[ "$(cfrow Loans)" = "$((CF_L0 + 2000000))" ] && ok "r3 v: the cash flow row Loans is exactly +3,000,000 received - 1,000,000 repaid" || bad "r3 v: the cash flow row Loans moved $(( $(cfrow Loans) - CF_L0 )), expected 2,000,000"
 as "$TR_TOKEN" POST $FXA/letters-of-credit "{\"providerId\":$PA,\"bankAccountId\":$BA1,\"currencyCode\":\"IRR\",\"amount\":200000000,\"openDate\":\"${TODAY}T00:00:00\",\"expiryDate\":\"2030-01-01T00:00:00\",\"marginPercent\":20}"; check "scope: a rial letter of credit is opened" '.success and .data.status == 1 and .data.amount == 200000000 and .data.currencyCode == "IRR"'
 LCR=$(val .data.id)
 LR_B0=$(cb 10102); LR_D0=$(cb 10402); LR_P0=$(cb 30101); LR_F0=$(cb 80201); LR_G0=$(cb 60303); LR_L0=$(cb 80302)
 as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"margin\",\"amount\":40000000,\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: margin 40,000,000 posted" '.success and .data.marginPaid == 40000000'
 as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"fee\",\"amount\":500000,\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: fee 500,000 posted" '.success and .data.feesPaid == 500000'
 as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"documents\",\"foreignInvoiceRef\":\"INV-RIAL-1\",\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: documents received" '.success and .data.status == 2'
+as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"pay\",\"rate\":1.1,\"date\":\"${TODAY}T00:00:00\"}"; nomsg "r3 h7: a rial letter of credit cannot be paid at a typed rate of 1.1 (it would overpay 20,000,000)" "نرخ ۱"
 as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"pay\",\"rate\":1,\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: payment at rate 1 = 200,000,000, margin 40,000,000 released, status paid" '.success and .data.status == 3 and .data.settledBase == 200000000 and ([.data.postings[]|select(.kind == 3)][0].amount) == 200000000 and ([.data.postings[]|select(.kind == 4)][0].amount) == 40000000'
 [ "$(cb 10402)" = "$LR_D0" ] && ok "scope: rial letter of credit: the margin deposit account is back to its start (40,000,000 in, 40,000,000 released)" || bad "scope: rial letter of credit: the deposit account moved $(( $(cb 10402) - LR_D0 ))"
 [ "$(cb 10102)" = "$((LR_B0 - 200500000))" ] && ok "scope: rial letter of credit: the bank paid exactly 200,500,000 (200,000,000 + 500,000 fee)" || bad "scope: rial letter of credit: the bank paid 200,500,000 (got $(( LR_B0 - $(cb 10102) )))"
 [ "$(cb 30101)" = "$((LR_P0 + 200000000))" ] && [ "$(cb 80201)" = "$((LR_F0 + 500000))" ] && ok "scope: rial letter of credit: the supplier payable is debited 200,000,000 and the fee expense 500,000" || bad "scope: rial letter of credit: payable moved $(( $(cb 30101) - LR_P0 )), fee moved $(( $(cb 80201) - LR_F0 ))"
+as "$FM_TOKEN" POST $FG/post-events
+[ "$(rec ap)" = "$RA_AP0" ] && [ "$(rec bank)" = "$RA_BK0" ] && ok "r3 h2: after the loan, letter of credit, guarantee, credit and debit notes and the retention release the AP and bank reconciliation differences are unchanged" || bad "r3 h2: reconciliation differences moved: ap $(( $(rec ap) - RA_AP0 )), bank $(( $(rec bank) - RA_BK0 ))"
 [ "$(cb 60303)" = "$LR_G0" ] && [ "$(cb 80302)" = "$LR_L0" ] && ok "scope: rial letter of credit: no exchange gain or loss is booked" || bad "scope: rial letter of credit: an exchange difference was booked"
 TOKEN=$ADMIN_TOKEN
 
@@ -2699,15 +2780,26 @@ BV2=$(bv); RETV=$((BV2 - BV1))
 as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET $FCO/workorders/$WO1/cost-sheet; JM2=$(val .data.material | cut -d. -f1); JS2=$(val .data.totalCost | cut -d. -f1)
 [ "$RETV" -gt 0 ] && [ "$JM2" = "$((JM0 + ISSV - RETV))" ] && ok "r2 f3: the close-out cost sheet material equals the value issued ($ISSV) minus the value returned ($RETV): returns are subtracted once" || bad "r2 f3: cost sheet material $((JM2 - JM0)) should be issued $ISSV - returned $RETV = $((ISSV - RETV))"
 FG_PRE=$(cb 10503)
-as "$FIN_TOKEN" POST $FCO/workorders/$WO1/close "{\"quantity\":1,\"date\":\"${TODAY}T00:00:00\"}"; check "r2 f3: the close-out moves exactly the cost sheet ($JS2) to finished goods with NO variance (the return is not subtracted twice)" '.success and .data.totalCost == '$JS2' and .data.toFinishedGoods == '$JS2' and .data.variance == 0 and .data.isOpen == false'
+as "$FIN_TOKEN" POST $FCO/workorders/$WO1/close "{\"quantity\":2,\"date\":\"${TODAY}T00:00:00\"}"; check "r2 f3: the close-out (2 units) moves exactly the cost sheet ($JS2) to finished goods with NO variance (the return is not subtracted twice)" '.success and .data.totalCost == '$JS2' and .data.toFinishedGoods == '$JS2' and .data.variance == 0 and .data.isOpen == false'
 [ "$(cb 10503)" = "$((FG_PRE + JS2))" ] && ok "r2 f3: finished goods 10503 rise exactly $JS2" || bad "r2 f3: finished goods 10503 rise $JS2 (got $(( $(cb 10503) - FG_PRE )))"
 CG0=$(cb 70101); BV3=$(bv)
 D0=$(dd 0)
 mkdelivery $WO1; check "r2 f5: the delivery of the closed job is drafted" '.success and .data.id > 0'; DLJ=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DLJ/approve" '{"kind":4}'; call POST "inventory/documents/$DLJ/confirm"; check "r2 f5: the delivery of the closed job is confirmed" '.success and .data.status == 1'
 as "$FM_TOKEN" POST $FG/post-events
 BOLTV=$((BV3 - $(bv)))
-[ "$(cb 10503)" = "$FG_PRE" ] && ok "r2 f5: the delivery relieves finished goods 10503 by exactly the closed cost ($JS2)" || bad "r2 f5: the delivery relieves 10503 by $JS2 (got $(( $(cb 10503) - FG_PRE - JS2 )) left over)"
-[ "$BOLTV" -gt 0 ] && [ "$(( $(cb 70101) - CG0 ))" = "$((JS2 + BOLTV))" ] && ok "r2 f5: cost of sales (70101) rose by exactly the closed job cost $JS2 plus the delivered bolt $BOLTV" || bad "r2 f5: cost of sales rose by $JS2 + $BOLTV = $((JS2 + BOLTV)) (got $(( $(cb 70101) - CG0 )))"
+HALF=$(( (JS2 + 1) / 2 ))
+[ "$(cb 10503)" = "$((FG_PRE + JS2 - HALF))" ] && ok "r2 f5: delivering 1 of the 2 closed units relieves finished goods 10503 by exactly half of the closed cost ($HALF of $JS2)" || bad "r2 f5: delivering 1 of 2 units relieves 10503 by $HALF (got $(( $(cb 10503) - FG_PRE - JS2 + HALF )) left over)"
+[ "$BOLTV" -gt 0 ] && [ "$(( $(cb 70101) - CG0 ))" = "$((HALF + BOLTV))" ] && ok "r2 f5: cost of sales (70101) rose by exactly half of the closed job cost $HALF plus the delivered bolt $BOLTV" || bad "r2 f5: cost of sales rose by $HALF + $BOLTV = $((HALF + BOLTV)) (got $(( $(cb 70101) - CG0 )))"
+# review 3, H3: cancelling that delivery gives the relief back, so a later delivery of both units relieves the full cost once
+call POST "inventory/documents/$DLJ/cancel" '{"reason":"آزمون ابطال تحویل"}'; check "r3 h3: the delivery of the closed job is cancelled" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FG/post-events
+[ "$(cb 10503)" = "$((FG_PRE + JS2))" ] && [ "$(cb 70101)" = "$CG0" ] && ok "r3 h3: after the cancellation finished goods 10503 hold the whole closed cost again and cost of sales is back to its start" || bad "r3 h3: after the cancellation 10503 is off by $(( $(cb 10503) - FG_PRE - JS2 )) and cost of sales by $(( $(cb 70101) - CG0 ))"
+BV4=$(bv)
+mkdelivery $WO1 2; check "r3 h3: a delivery of both units is drafted" '.success and .data.id > 0'; DLJ2=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DLJ2/approve" '{"kind":4}'; call POST "inventory/documents/$DLJ2/confirm"; check "r3 h3: the delivery of both units is confirmed" '.success and .data.status == 1'
+as "$FM_TOKEN" POST $FG/post-events
+BOLTV2=$((BV4 - $(bv)))
+[ "$(cb 10503)" = "$FG_PRE" ] && ok "r3 h3: delivering both units relieves finished goods 10503 back to its start (nothing is left behind)" || bad "r3 h3: delivering both units leaves $(( $(cb 10503) - FG_PRE )) in finished goods"
+[ "$BOLTV2" -gt 0 ] && [ "$(( $(cb 70101) - CG0 ))" = "$((JS2 + BOLTV2))" ] && ok "r3 h3: cost of sales rose by exactly the closed job cost $JS2 plus the delivered bolts $BOLTV2" || bad "r3 h3: cost of sales rose by $JS2 + $BOLTV2 = $((JS2 + BOLTV2)) (got $(( $(cb 70101) - CG0 )))"
 TOKEN=$ADMIN_TOKEN
 
 # ---------------------------------------------------------------- roles of the new users
