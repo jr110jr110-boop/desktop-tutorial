@@ -403,6 +403,8 @@ namespace Entities.Model.NasbNiro.Finance
         /// <summary>0 = none, 1 = two-shift, 2 = three-shift, 3 = night shift.</summary>
         public int ShiftType { get; set; }
         public decimal PaidLeaveDays { get; set; }
+        /// <summary>Approved sick leave days (insurance pays them); not taken from the annual leave balance.</summary>
+        public decimal SickLeaveDays { get; set; }
         public decimal UnpaidLeaveDays { get; set; }
         public decimal AbsenceDays { get; set; }
         public decimal MissionDays { get; set; }

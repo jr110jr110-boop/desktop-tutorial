@@ -384,20 +384,29 @@ namespace Services.NasbNiro.Office
         }
 
         /// <summary>Adds the events that are not yet stored (same employee and minute) and tells how many were duplicates or unknown codes.</summary>
-        private async Task<(int Added, int Duplicates, int Unknown)> StoreAsync(List<RawClock> rows, OfClockSource source, string defaultDevice, List<string> errors, CancellationToken ct)
+        private async Task<(int Added, int Duplicates, int Unknown, int Rejected)> StoreAsync(List<RawClock> rows, OfClockSource source, string defaultDevice, List<string> errors, CancellationToken ct)
         {
-            if (rows.Count == 0) return (0, 0, 0);
+            if (rows.Count == 0) return (0, 0, 0, 0);
             List<string> codes = rows.Select(r => r.Code).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
             Dictionary<string, int> byCode = new Dictionary<string, int>();
-            foreach (var e in await _uow.Set<FnEmployee>().AsNoTracking().Where(x => codes.Contains(x.PersonnelCode)).Select(x => new { x.Id, x.PersonnelCode }).ToListAsync(ct))
+            var workshopOf = new Dictionary<int, int?>();
+            foreach (var e in await _uow.Set<FnEmployee>().AsNoTracking().Where(x => codes.Contains(x.PersonnelCode)).Select(x => new { x.Id, x.PersonnelCode, x.WorkshopId }).ToListAsync(ct))
+            {
                 byCode[e.PersonnelCode] = e.Id;
+                workshopOf[e.Id] = e.WorkshopId;
+            }
+            // months whose payroll is approved take no new clock events (the days are not recomputed there, so the clock would no longer match the payroll)
+            int firstYear = PersianCal.Year(rows.Min(r => r.Timestamp)), lastYear = PersianCal.Year(rows.Max(r => r.Timestamp));
+            List<PayrollLock> locks = (await _uow.Set<FnPayrollRun>().AsNoTracking().Where(r => r.Status >= FnPayrollStatus.Approved && r.Year >= firstYear && r.Year <= lastYear)
+                .Select(r => new { r.Year, r.Month, r.WorkshopId }).ToListAsync(ct)).Select(r => new PayrollLock { Year = r.Year, Month = r.Month, WorkshopId = r.WorkshopId }).ToList();
+            DateTime latest = DateTime.Now.AddMinutes(5);
             DateTime min = rows.Min(r => r.Timestamp).Date;
             DateTime max = rows.Max(r => r.Timestamp).Date.AddDays(1);
             List<int> ids = byCode.Values.Distinct().ToList();
             var existing = new HashSet<(int, DateTime)>();
             foreach (var e in await _uow.Set<OfClockEvent>().AsNoTracking().Where(x => ids.Contains(x.EmployeeId) && x.Timestamp >= min && x.Timestamp < max).Select(x => new { x.EmployeeId, x.Timestamp }).ToListAsync(ct))
                 existing.Add((e.EmployeeId, Minute(e.Timestamp)));
-            int added = 0, duplicates = 0, unknown = 0;
+            int added = 0, duplicates = 0, unknown = 0, rejected = 0;
             DateTimeOffset now = DateTimeOffset.Now;
             int? by = Me > 0 ? Me : (int?)null;
             foreach (RawClock r in rows)
@@ -409,11 +418,23 @@ namespace Services.NasbNiro.Office
                     continue;
                 }
                 DateTime ts = Minute(r.Timestamp);
+                if (ts > latest)
+                {
+                    rejected++;
+                    if (errors.Count < 50) errors.Add($"{r.Line}: زمان تردد در آینده است.");
+                    continue;
+                }
+                if (Locked(locks, ts, workshopOf[employeeId]))
+                {
+                    rejected++;
+                    if (errors.Count < 50) errors.Add($"{r.Line}: حقوق این ماه تایید شده و ترددها قابل تغییر نیست.");
+                    continue;
+                }
                 if (!existing.Add((employeeId, ts))) { duplicates++; continue; }
                 _uow.Set<OfClockEvent>().Add(new OfClockEvent { EmployeeId = employeeId, Timestamp = ts, DeviceCode = Cut(r.Device ?? defaultDevice, 40), Direction = r.Direction, Source = source, CreatedByUserId = by, CreatedAt = now });
                 added++;
             }
-            return (added, duplicates, unknown);
+            return (added, duplicates, unknown, rejected);
         }
 
         private static string Cut(string s, int n) => s == null ? null : (s.Length <= n ? s : s.Substring(0, n));
@@ -425,11 +446,12 @@ namespace Services.NasbNiro.Office
             var result = new ClockImportResultDto();
             List<RawClock> rows = ParseRows(dto, result.Errors);
             if (rows.Count > 20000) return Bad<ClockImportResultDto>("حداکثر ۲۰٬۰۰۰ تردد در هر بار بارگذاری مجاز است.");
-            var (added, duplicates, unknown) = await StoreAsync(rows, OfClockSource.Import, Clean(dto.DeviceCode) ?? "IMPORT", result.Errors, ct);
+            var (added, duplicates, unknown, rejected) = await StoreAsync(rows, OfClockSource.Import, Clean(dto.DeviceCode) ?? "IMPORT", result.Errors, ct);
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Bad<ClockImportResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
             result.Imported = added;
             result.Duplicates = duplicates;
+            result.Rejected = rejected;
             if (result.Errors.Count > 50) result.Errors = result.Errors.Take(50).ToList();
             if (added > 0)
             {
@@ -463,13 +485,13 @@ namespace Services.NasbNiro.Office
                 if (string.IsNullOrWhiteSpace(e.EmployeeCode) || e.Timestamp == default) { result.Rejected++; errors.Add($"رویداد {n}: کد یا زمان نامعتبر است."); continue; }
                 rows.Add(new RawClock { Code = OfficeText.Digits(e.EmployeeCode.Trim()), Timestamp = e.Timestamp, Device = device.Code, Direction = e.Direction, Line = "رویداد " + n });
             }
-            var (added, duplicates, unknown) = await StoreAsync(rows, OfClockSource.Device, device.Code, errors, ct);
+            var (added, duplicates, unknown, rejectedRows) = await StoreAsync(rows, OfClockSource.Device, device.Code, errors, ct);
             device.LastPushAt = DateTimeOffset.Now;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Bad<DevicePushResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
             result.Accepted = added;
             result.Duplicates = duplicates;
-            result.Rejected += unknown;
+            result.Rejected += unknown + rejectedRows;
             result.Errors = errors.Take(50).ToList();
             return ResponseDtoHelper.Ok(result);
         }

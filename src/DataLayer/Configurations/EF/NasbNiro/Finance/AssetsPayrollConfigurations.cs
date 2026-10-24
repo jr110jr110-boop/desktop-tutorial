@@ -194,6 +194,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.NightHours).HasPrecision(9, 2);
                 b.Property(x => x.HolidayHours).HasPrecision(9, 2);
                 b.Property(x => x.PaidLeaveDays).HasPrecision(9, 2);
+                b.Property(x => x.SickLeaveDays).HasPrecision(9, 2);
                 b.Property(x => x.UnpaidLeaveDays).HasPrecision(9, 2);
                 b.Property(x => x.AbsenceDays).HasPrecision(9, 2);
                 b.Property(x => x.MissionDays).HasPrecision(9, 2);

@@ -40,10 +40,12 @@ namespace Services.NasbNiro.Inventory
         private readonly IInventoryDocumentService _documents;
         private readonly Quality.ICapaService _capa;
         private readonly Quality.IMaterialService _material;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
         public InventoryQualityService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents,
-            Quality.ICapaService capa, Quality.IMaterialService material)
+            Quality.ICapaService capa, Quality.IMaterialService material, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _documents = documents ?? throw new ArgumentNullException(nameof(documents));
@@ -515,7 +517,26 @@ namespace Services.NasbNiro.Inventory
             {
                 return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.ConcurrencyConflict);
             }
+            await _capa.SyncAssignGateAsync(ncr.Capa, cancellationToken);
+            await SyncNcrGateAsync(ncr, cancellationToken);
             return await GetNcrAsync(ncr.Id, cancellationToken);
+        }
+
+        /// <summary>
+        /// The decision of a classified NCR waits for the QC, engineering and manufacturing managers (and the concession permit): one inbox item per NCR for the roles that have not signed yet.
+        /// Call after the save. It never blocks the NCR.
+        /// </summary>
+        private async Task SyncNcrGateAsync(NonConformance ncr, CancellationToken cancellationToken)
+        {
+            var roles = new List<string>();
+            if (ncr.Status == NcrStatus.Open && ncr.Severity != NcrSeverity.NotClassified && ncr.Disposition != NcrDisposition.None)
+            {
+                if (!ncr.QualityApprovedAt.HasValue) roles.Add(InventoryRoles.RoleQuality);
+                if (!ncr.EngineeringApprovedAt.HasValue || (NeedsConcession(ncr.Disposition) && !ncr.ConcessionApprovedAt.HasValue)) roles.Add(InventoryRoles.RoleEngineering);
+                if (!ncr.ManufacturingApprovedAt.HasValue) roles.Add(InventoryRoles.RoleManufacturing);
+            }
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "ncr:" + ncr.Id, roles.Count > 0, "quality", "ncr", ncr.Id,
+                (ncr.Severity == NcrSeverity.Major ? "تصمیم کمیته فنی برای عدم انطباق عمده " : "تایید تصمیم عدم انطباق ") + ncr.Number, "/quality/ncrs/" + ncr.Id, string.Join(",", roles), cancellationToken, ncr.DueDate);
         }
 
         private static bool NeedsConcession(NcrDisposition disposition) =>
@@ -576,6 +597,7 @@ namespace Services.NasbNiro.Inventory
             ncr.ModifyDate = now;
             ncr.ModifierUserId = me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncNcrGateAsync(ncr, cancellationToken);
             return await GetNcrAsync(ncr.Id, cancellationToken);
         }
 
@@ -706,6 +728,7 @@ namespace Services.NasbNiro.Inventory
             ncr.ModifyDate = now;
             ncr.ModifierUserId = _user.UserId;
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncNcrGateAsync(ncr, cancellationToken);
             return await GetNcrAsync(ncr.Id, cancellationToken);
         }
 

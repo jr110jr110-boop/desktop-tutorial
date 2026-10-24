@@ -216,10 +216,15 @@ namespace Services.NasbNiro.Office
                     try { values = JsonSerializer.Deserialize<Dictionary<string, string>>(r.ValuesJson, Json) ?? values; }
                     catch (JsonException) { /* an unreadable value is shown empty */ }
                 }
+                List<RequestFieldDto> typeFields = t == null ? new List<RequestFieldDto>() : ParseFields(t.FieldsJson);
+                // dates are stored as ISO text but always shown in the Persian calendar
+                foreach (RequestFieldDto f in typeFields.Where(x => x.Type == "date"))
+                    if (values.TryGetValue(f.Name, out string stored) && DateTime.TryParseExact(stored, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime iso))
+                        values[f.Name] = OfficeText.Date(iso);
                 return new RequestDto
                 {
                     Id = r.Id, Number = r.Number, TypeId = r.TypeId, TypeTitle = t?.Title, TargetNote = t?.TargetNote, RequesterUserId = r.RequesterUserId, RequesterName = users.Name(r.RequesterUserId),
-                    Values = values, Fields = t == null ? new List<RequestFieldDto>() : ParseFields(t.FieldsJson), Status = r.Status, SubmittedAt = r.SubmittedAt, SubmittedAtText = OfficeText.Stamp(r.SubmittedAt),
+                    Values = values, Fields = typeFields, Status = r.Status, SubmittedAt = r.SubmittedAt, SubmittedAtText = OfficeText.Stamp(r.SubmittedAt),
                     CompletedAt = r.CompletedAt, CompletedAtText = OfficeText.Stamp(r.CompletedAt), Note = r.Note,
                     Approvals = (r.Approvals ?? new List<OfRequestApproval>()).OrderBy(a => a.Step).Select(a => new RequestApprovalDto
                     {

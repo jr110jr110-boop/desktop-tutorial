@@ -15,6 +15,8 @@ namespace Entities.Model.NasbNiro.Office
 
     public enum OfClassification { Normal = 0, Confidential = 1, Secret = 2 }
 
+    public enum OfDelegationStatus { Approved = 0, Pending = 1, Rejected = 2 }
+
     public enum OfRecipientType { To = 1, Cc = 2 }
 
     public enum OfDelivery { Hand = 1, Post = 2, Courier = 3, Email = 4, Fax = 5 }

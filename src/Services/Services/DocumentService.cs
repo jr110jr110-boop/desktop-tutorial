@@ -6,6 +6,7 @@ using Common.GuardToolkit;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model;
+using Entities.Model.NasbNiro.Office;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -56,6 +57,9 @@ namespace Services.Services
             if (document is null)
                 throw new FileNotFoundException("چنین فایلی یافت نشد.");
 
+            string locked = await ImmutableReasonAsync(document.Id);
+            if (locked != null) throw new DomainInvalidException(locked);
+
             document
                 .SetDescription(updateDocumentDto.Description)
                 .SetName(updateDocumentDto.Name)
@@ -94,6 +98,9 @@ namespace Services.Services
             {
                 return ResponseDtoHelper.NotFound<string>("فایل یافت نشد.");
             }
+
+            string locked = await ImmutableReasonAsync(doc.Id);
+            if (locked != null) return ResponseDtoHelper.BadRequest<string>(locked);
 
             string path = GetRelativePath(doc.Path);
             string fileName = CreateUniqueFileName(dto.File.FileName, doc.Id);
@@ -193,6 +200,8 @@ namespace Services.Services
         public async Task<bool> DeleteDocumentAsync(Guid documentId)
         {
             var document = await this._documents.FindAsync(documentId);
+            string locked = await ImmutableReasonAsync(documentId);
+            if (locked != null) throw new DomainInvalidException(locked);
             string relativePath = GetRelativePath(document.Path); ;
             try
             {
@@ -206,6 +215,33 @@ namespace Services.Services
                 _logger.LogError(ex, ex.Message);
                 throw new DomainInvalidException(Messages.DocumentNotFound);
             }
+        }
+
+        /// <summary>
+        /// A file that is part of a signed letter (attachment of a letter that left the draft state, signature image of a letter, delivery receipt)
+        /// or the stored signature image of a user must never change: the letter hash covers the bytes of these files.
+        /// </summary>
+        private async Task<string> ImmutableReasonAsync(Guid documentId)
+        {
+            bool locked = await _uow.Set<OfLetterAttachment>().AnyAsync(a => a.DocumentId == documentId && a.Letter.Status != OfLetterStatus.Draft)
+                || await _uow.Set<OfLetter>().AnyAsync(l => l.SignatureDocumentId == documentId || l.DeliveryReceiptDocumentId == documentId)
+                || await _uow.Set<OfUserSignature>().AnyAsync(s => s.ImageDocumentId == documentId);
+            return locked ? "این فایل بخشی از یک نامه ارسال‌شده یا امضای ثبت‌شده است و تغییر یا حذف آن مجاز نیست." : null;
+        }
+
+        public async Task<bool> IsLetterFileAsync(Guid documentId) =>
+            await _uow.Set<OfLetterAttachment>().AnyAsync(a => a.DocumentId == documentId)
+            || await _uow.Set<OfLetter>().AnyAsync(l => l.SignatureDocumentId == documentId || l.DeliveryReceiptDocumentId == documentId);
+
+        public async Task<string> GetFileHashAsync(Guid documentId)
+        {
+            Document document = await _documents.AsNoTracking().FirstOrDefaultAsync(d => d.Id == documentId);
+            if (document == null) return null;
+            string path = GetRelativePath(document.Path);
+            if (!File.Exists(path)) return null;
+            using (FileStream stream = File.OpenRead(path))
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                return Convert.ToBase64String(await sha.ComputeHashAsync(stream));
         }
 
         private string GetRelativePath(string path)

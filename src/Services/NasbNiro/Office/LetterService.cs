@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -23,6 +24,9 @@ namespace Services.NasbNiro.Office
         Task<ResponseDto<LetterDto>> SaveLetterAsync(SaveLetterDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<LetterDto>> LetterActionAsync(LetterActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<LetterVerifyDto>> VerifyAsync(int id, CancellationToken cancellationToken);
+
+        /// <summary>Whether the user may read this file of the letter (attachment, signature image or receipt): full access to the letter only.</summary>
+        Task<bool> CanReadFileAsync(int letterId, Guid documentId, CancellationToken cancellationToken);
         Task<ResponseDto<LetterDto>> ReferAsync(ReferLetterDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<LetterDto>> ReferralActionAsync(ReferralActionDto dto, CancellationToken cancellationToken);
 
@@ -40,11 +44,13 @@ namespace Services.NasbNiro.Office
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
+        private readonly global::Services.Contracts.IDocumentService _documents;
 
-        public LetterService(IUnitOfWork uow, IInventoryUserContext user)
+        public LetterService(IUnitOfWork uow, IInventoryUserContext user, global::Services.Contracts.IDocumentService documents)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         }
 
         private int Me => _user.UserId;
@@ -53,55 +59,118 @@ namespace Services.NasbNiro.Office
 
         private enum Access { None, Meta, Full }
 
+        private sealed class DeputyGroup
+        {
+            public DateTime Since;
+            public List<int> Positions;
+        }
+
         private sealed class Ctx
         {
             public List<ActingPosition> Acting;
+
+            /// <summary>Every position the user acts for (held or as a deputy).</summary>
             public List<int> Pos;
+
+            /// <summary>Positions the user holds himself.</summary>
+            public List<int> Holder;
+
+            /// <summary>Deputy positions grouped by the start of the delegation.</summary>
+            public List<DeputyGroup> Deputy;
             public bool IsSec;
             public bool IsCeo;
+
+            /// <summary>The positions that count as a party of this issued letter: a deputy does not count for a Secret letter dated before his delegation started.</summary>
+            public List<int> PosFor(OfLetter l)
+            {
+                if (l.Classification != OfClassification.Secret || Deputy.Count == 0) return Pos;
+                var list = new List<int>(Holder);
+                foreach (DeputyGroup g in Deputy) if (l.Date.Date >= g.Since.Date) list.AddRange(g.Positions);
+                return list;
+            }
         }
 
         private async Task<Ctx> ContextAsync(CancellationToken ct)
         {
             List<ActingPosition> acting = await OfficeActors.ActingAsync(_uow, Me, ct);
-            return new Ctx { Acting = acting, Pos = acting.Select(a => a.PositionId).ToList(), IsSec = _user.IsInRole(OfficeRoles.Secretariat), IsCeo = _user.IsInRole(OfficeRoles.Ceo) };
+            return new Ctx
+            {
+                Acting = acting, Pos = acting.Select(a => a.PositionId).ToList(), Holder = acting.Where(a => !a.OnBehalf).Select(a => a.PositionId).ToList(),
+                Deputy = acting.Where(a => a.OnBehalf).GroupBy(a => (a.Since ?? DateTime.Today).Date).Select(g => new DeputyGroup { Since = g.Key, Positions = g.Select(x => x.PositionId).ToList() }).ToList(),
+                IsSec = _user.IsInRole(OfficeRoles.Secretariat), IsCeo = _user.IsInRole(OfficeRoles.Ceo),
+            };
         }
 
+        /// <summary>
+        /// Who reads what. Full: the writer, the explicit parties (sender, signer, approval chain, recipients, the positions of active referrals) and the CEO.
+        /// Company decision: for Confidential and Secret letters the secretariat gets register data only (Meta): number, date, kind, classification, parties, delivery data.
+        /// A deputy never reads Secret letters dated before his delegation started. A cancelled referral gives no access (its creator keeps it).
+        /// </summary>
         private Access AccessOf(OfLetter l, Ctx c)
         {
             int me = Me;
             bool creator = l.CreatorUserId == me;
+            if (l.Status == OfLetterStatus.Draft) return creator ? Access.Full : Access.None;
             bool sender = l.SenderPositionId.HasValue && c.Pos.Contains(l.SenderPositionId.Value);
             bool signer = l.SignerPositionId.HasValue && c.Pos.Contains(l.SignerPositionId.Value);
             bool chain = (l.Approvals ?? new List<OfLetterApproval>()).Any(a => c.Pos.Contains(a.PositionId));
-            if (l.Status == OfLetterStatus.Draft) return creator ? Access.Full : Access.None;
             if (l.Status == OfLetterStatus.InApproval) return creator || sender || signer || chain ? Access.Full : Access.None;
-            bool recipient = (l.Recipients ?? new List<OfLetterRecipient>()).Any(r => r.PositionId.HasValue && c.Pos.Contains(r.PositionId.Value));
-            bool referral = (l.Referrals ?? new List<OfReferral>()).Any(r => c.Pos.Contains(r.ToPositionId) || (r.FromPositionId.HasValue && c.Pos.Contains(r.FromPositionId.Value)) || r.CreatedByUserId == me);
+            List<int> pos = c.PosFor(l);
+            sender = l.SenderPositionId.HasValue && pos.Contains(l.SenderPositionId.Value);
+            signer = l.SignerPositionId.HasValue && pos.Contains(l.SignerPositionId.Value);
+            chain = (l.Approvals ?? new List<OfLetterApproval>()).Any(a => pos.Contains(a.PositionId));
+            bool recipient = (l.Recipients ?? new List<OfLetterRecipient>()).Any(r => r.PositionId.HasValue && pos.Contains(r.PositionId.Value));
+            bool referral = (l.Referrals ?? new List<OfReferral>()).Any(r => r.CreatedByUserId == me
+                || (r.Status != OfReferralStatus.Cancelled && (pos.Contains(r.ToPositionId) || (r.FromPositionId.HasValue && pos.Contains(r.FromPositionId.Value)))));
             if (creator || sender || signer || chain || recipient || referral) return Access.Full;
             if (c.IsCeo) return Access.Full;
-            if (c.IsSec && l.Number != null) return l.Classification == OfClassification.Secret ? Access.Meta : Access.Full;
+            if (c.IsSec && l.Number != null) return l.Classification == OfClassification.Normal ? Access.Full : Access.Meta;
             return Access.None;
         }
 
-        private IQueryable<OfLetter> Visible(IQueryable<OfLetter> q, Ctx c)
+        private static Expression<Func<OfLetter, bool>> PartyOf(List<int> pos, int me) =>
+            l => (l.SenderPositionId != null && pos.Contains(l.SenderPositionId.Value))
+                || (l.SignerPositionId != null && pos.Contains(l.SignerPositionId.Value))
+                || l.Approvals.Any(a => pos.Contains(a.PositionId))
+                || l.Recipients.Any(r => r.PositionId != null && pos.Contains(r.PositionId.Value))
+                || l.Referrals.Any(r => r.CreatedByUserId == me
+                    || (r.Status != OfReferralStatus.Cancelled && (pos.Contains(r.ToPositionId) || (r.FromPositionId != null && pos.Contains(r.FromPositionId.Value)))));
+
+        /// <summary>The letters the user may read in full (same rules as <see cref="AccessOf"/>).</summary>
+        private Expression<Func<OfLetter, bool>> FullExpr(Ctx c)
         {
             int me = Me;
             List<int> pos = c.Pos;
-            bool sec = c.IsSec, ceo = c.IsCeo;
-            return q.Where(l =>
-                (l.Status == OfLetterStatus.Draft && l.CreatorUserId == me)
-                || (l.Status == OfLetterStatus.InApproval && (l.CreatorUserId == me
-                    || (l.SenderPositionId != null && pos.Contains(l.SenderPositionId.Value))
-                    || (l.SignerPositionId != null && pos.Contains(l.SignerPositionId.Value))
-                    || l.Approvals.Any(a => pos.Contains(a.PositionId))))
-                || (l.Status != OfLetterStatus.Draft && l.Status != OfLetterStatus.InApproval && (l.CreatorUserId == me
-                    || ceo || (sec && l.Number != null)
-                    || (l.SenderPositionId != null && pos.Contains(l.SenderPositionId.Value))
-                    || (l.SignerPositionId != null && pos.Contains(l.SignerPositionId.Value))
-                    || l.Approvals.Any(a => pos.Contains(a.PositionId))
-                    || l.Recipients.Any(r => r.PositionId != null && pos.Contains(r.PositionId.Value))
-                    || l.Referrals.Any(r => pos.Contains(r.ToPositionId) || (r.FromPositionId != null && pos.Contains(r.FromPositionId.Value)) || r.CreatedByUserId == me))));
+            Expression<Func<OfLetter, bool>> draft = l => l.Status == OfLetterStatus.Draft && l.CreatorUserId == me;
+            Expression<Func<OfLetter, bool>> approval = l => l.Status == OfLetterStatus.InApproval && (l.CreatorUserId == me
+                || (l.SenderPositionId != null && pos.Contains(l.SenderPositionId.Value))
+                || (l.SignerPositionId != null && pos.Contains(l.SignerPositionId.Value))
+                || l.Approvals.Any(a => pos.Contains(a.PositionId)));
+            Expression<Func<OfLetter, bool>> issued = l => l.Status != OfLetterStatus.Draft && l.Status != OfLetterStatus.InApproval;
+            Expression<Func<OfLetter, bool>> access;
+            if (c.IsCeo) access = l => true;
+            else
+            {
+                Expression<Func<OfLetter, bool>> mine = l => l.CreatorUserId == me;
+                Expression<Func<OfLetter, bool>> ordinary = Pred.And<OfLetter>(l => l.Classification != OfClassification.Secret, PartyOf(pos, me));
+                Expression<Func<OfLetter, bool>> secretParty = PartyOf(c.Holder, me);
+                foreach (DeputyGroup g in c.Deputy)
+                {
+                    DateTime since = g.Since.Date;
+                    secretParty = Pred.Or(secretParty, Pred.And<OfLetter>(l => l.Date >= since, PartyOf(g.Positions, me)));
+                }
+                Expression<Func<OfLetter, bool>> secret = Pred.And<OfLetter>(l => l.Classification == OfClassification.Secret, secretParty);
+                access = Pred.Or(mine, Pred.Or(ordinary, secret));
+                if (c.IsSec) access = Pred.Or<OfLetter>(access, l => l.Number != null && l.Classification == OfClassification.Normal);
+            }
+            return Pred.Or(Pred.Or(draft, approval), Pred.And(issued, access));
+        }
+
+        /// <summary>Everything the user may see: the letters read in full, plus (secretariat) the numbered Confidential and Secret ones as register data only.</summary>
+        private IQueryable<OfLetter> Visible(IQueryable<OfLetter> q, Ctx c, Expression<Func<OfLetter, bool>> full)
+        {
+            if (!c.IsSec) return q.Where(full);
+            return q.Where(Pred.Or<OfLetter>(full, l => l.Number != null && l.Status != OfLetterStatus.Draft && l.Status != OfLetterStatus.InApproval));
         }
 
         // -------------------------------------------------------------------------------- reading
@@ -138,13 +207,11 @@ namespace Services.NasbNiro.Office
         {
             d.Id = l.Id; d.Kind = l.Kind; d.Number = l.Number; d.Date = l.Date; d.DateText = OfficeText.Date(l.Date); d.Status = l.Status; d.Classification = l.Classification;
             d.Urgency = l.Urgency; d.Imported = l.Imported; d.MetadataOnly = access == Access.Meta;
-            d.Subject = access == Access.Meta ? "(نامه سری — فقط مشخصات ثبت)" : l.Subject;
-            if (access != Access.Meta)
-            {
-                d.SenderName = l.SenderPositionId.HasValue ? positions.Title(l.SenderPositionId) : (l.SenderPartyId.HasValue && parties.TryGetValue(l.SenderPartyId.Value, out string pn) ? pn : null);
-                d.RecipientNames = Join((l.Recipients ?? new List<OfLetterRecipient>()).Where(r => r.Type == OfRecipientType.To)
-                    .Select(r => r.PositionId.HasValue ? positions.Title(r.PositionId) : (r.PartyId.HasValue && parties.TryGetValue(r.PartyId.Value, out string rn) ? rn : null)));
-            }
+            d.Subject = access == Access.Meta ? (l.Classification == OfClassification.Secret ? "(نامه سری — فقط مشخصات ثبت)" : "(نامه محرمانه — فقط مشخصات ثبت)") : l.Subject;
+            // the parties are register data: the secretariat sees them, never the subject or the text
+            d.SenderName = l.SenderPositionId.HasValue ? positions.Title(l.SenderPositionId) : (l.SenderPartyId.HasValue && parties.TryGetValue(l.SenderPartyId.Value, out string pn) ? pn : null);
+            d.RecipientNames = Join((l.Recipients ?? new List<OfLetterRecipient>()).Where(r => r.Type == OfRecipientType.To)
+                .Select(r => r.PositionId.HasValue ? positions.Title(r.PositionId) : (r.PartyId.HasValue && parties.TryGetValue(r.PartyId.Value, out string rn) ? rn : null)));
             return d;
         }
 
@@ -153,14 +220,16 @@ namespace Services.NasbNiro.Office
             query ??= new LetterQuery();
             Ctx c = await ContextAsync(ct);
             int me = Me;
-            IQueryable<OfLetter> q = Visible(_uow.Set<OfLetter>().AsNoTracking().Where(l => !l.Deleted), c);
+            Expression<Func<OfLetter, bool>> full = FullExpr(c);
+            IQueryable<OfLetter> q = Visible(_uow.Set<OfLetter>().AsNoTracking().Where(l => !l.Deleted), c, full);
             if (query.Kind.HasValue) q = q.Where(l => l.Kind == query.Kind.Value);
             if (query.Status.HasValue) q = q.Where(l => l.Status == query.Status.Value);
             if (query.Classification.HasValue) q = q.Where(l => l.Classification == query.Classification.Value);
             string number = Clean(query.Number);
             if (number != null) q = q.Where(l => l.Number != null && l.Number.Contains(number));
             string subject = Clean(query.Subject);
-            if (subject != null) q = q.Where(l => l.Subject.Contains(subject));
+            // subject, text and linked-record filters run only on the letters the user may read in full: otherwise a search would reveal the content of the others
+            if (subject != null) q = q.Where(Pred.And<OfLetter>(full, l => l.Subject.Contains(subject)));
             if (query.DateFrom.HasValue) { DateTime from = query.DateFrom.Value.Date; q = q.Where(l => l.Date >= from); }
             if (query.DateTo.HasValue) { DateTime to = query.DateTo.Value.Date; q = q.Where(l => l.Date <= to); }
             string party = Clean(query.Party);
@@ -173,11 +242,11 @@ namespace Services.NasbNiro.Office
             {
                 OfRelatedKind rk = query.RelatedKind.Value;
                 int? rid = query.RelatedRecordId;
-                q = q.Where(l => l.Links.Any(k => k.Kind == rk && (rid == null || k.RecordId == rid)));
+                q = q.Where(Pred.And<OfLetter>(full, l => l.Links.Any(k => k.Kind == rk && (rid == null || k.RecordId == rid))));
             }
             // text search: subject and body (LIKE; full-text indexes are a deployment option)
             string text = Clean(query.Contains);
-            if (text != null) q = q.Where(l => l.Subject.Contains(text) || (l.BodyHtml != null && l.BodyHtml.Contains(text)) || (l.Number != null && l.Number.Contains(text)));
+            if (text != null) q = q.Where(Pred.Or(Pred.And<OfLetter>(full, l => l.Subject.Contains(text) || (l.BodyHtml != null && l.BodyHtml.Contains(text))), l => l.Number != null && l.Number.Contains(text)));
             if (query.MineOnly == true) q = q.Where(l => l.CreatorUserId == me);
             if (query.WaitingForMe == true)
             {
@@ -261,7 +330,20 @@ namespace Services.NasbNiro.Office
             var names = await NamesAsync(new[] { l }, ct);
             var d = new LetterDto();
             FillList(d, l, access, names.Positions, names.Parties);
-            if (access == Access.Meta) return d;
+            if (access == Access.Meta)
+            {
+                // register data only: parties, delivery fields and what the secretariat may do. No subject, text, attachments, signature image or referral notes.
+                d.Recipients = l.Recipients.OrderBy(r => r.Type).ThenBy(r => r.Id).Select(r => new RecipientDto
+                {
+                    Type = r.Type, PositionTitle = names.Positions.Title(r.PositionId),
+                    PartyName = r.PartyId.HasValue && names.Parties.TryGetValue(r.PartyId.Value, out string mpn) ? mpn : null,
+                }).ToList();
+                d.SignedAt = l.SignedAt; d.SignedAtText = OfficeText.Stamp(l.SignedAt); d.PaperCopy = l.PaperCopy; d.DeliveryMethod = l.DeliveryMethod; d.SentDate = l.SentDate;
+                d.SentDateText = OfficeText.Date(l.SentDate); d.DeliveryReceipt = l.DeliveryReceipt; d.CancelReason = l.CancelReason;
+                d.AllowedActions = AllowedActions(l, c).Where(x => x != "refer").ToList();
+                d.RowVersion = l.RowVersion == null ? null : Convert.ToBase64String(l.RowVersion);
+                return d;
+            }
             d.BodyHtml = l.BodyHtml; d.SenderPositionId = l.SenderPositionId; d.SenderPartyId = l.SenderPartyId; d.IncomingNumber = l.IncomingNumber; d.IncomingDate = l.IncomingDate;
             d.IncomingDateText = OfficeText.Date(l.IncomingDate); d.SignerPositionId = l.SignerPositionId; d.SignerPositionTitle = names.Positions.Title(l.SignerPositionId);
             d.ApprovalRound = l.ApprovalRound; d.SignedAt = l.SignedAt; d.SignedAtText = OfficeText.Stamp(l.SignedAt); d.SignedByName = names.Users.Name(l.SignedByUserId);
@@ -379,7 +461,43 @@ namespace Services.NasbNiro.Office
                 _uow.Set<OfNumberCounter>().Add(counter);
             }
             counter.Last++;
-            return (FormatNumber(rule.Pattern, year, counter.Last, unitCode, kind), rule.Id, null);
+            // numbers already issued by another rule of the same kind (an older general rule, a changed pattern) are skipped, so one collision never blocks a unit for good
+            for (int guard = 0; guard < 1000; guard++)
+            {
+                string number = FormatNumber(rule.Pattern, year, counter.Last, unitCode, kind);
+                bool taken = await _uow.Set<OfLetter>().AnyAsync(x => x.Kind == kind && x.Number == number && !x.Deleted && !x.Imported, ct);
+                if (!taken) return (number, rule.Id, null);
+                counter.Last++;
+            }
+            return (null, 0, "شماره آزاد برای این قاعده پیدا نشد؛ الگوی شماره‌گذاری را بررسی کنید.");
+        }
+
+        /// <summary>
+        /// Saves a letter that just took a number. When the save fails because another request took the same counter (or the same number), the counter is re-read, the number is taken again
+        /// and the save is retried (at most three tries). A conflict on the letter itself is never retried.
+        /// </summary>
+        private async Task<string> SaveRenumberingAsync(Func<Task<string>> renumber, CancellationToken ct)
+        {
+            for (int attempt = 0; ; attempt++)
+            {
+                try { await _uow.SaveChangesAsync(ct); return null; }
+                catch (DbUpdateConcurrencyException ex)
+                {
+                    if (attempt >= 2 || ex.Entries.Any(e => e.Entity is OfLetter)) return OfficeText.Concurrency;
+                }
+                catch (DbUpdateException)
+                {
+                    if (attempt >= 2) return "ذخیره انجام نشد (احتمالاً هم‌زمان شماره گرفته شد)؛ دوباره تلاش کنید.";
+                }
+                foreach (OfNumberCounter counter in _uow.Set<OfNumberCounter>().Local.ToList())
+                {
+                    var entry = _uow.Entry(counter);
+                    if (entry.State == EntityState.Added) entry.State = EntityState.Detached;
+                    else await entry.ReloadAsync(ct);
+                }
+                string error = await renumber();
+                if (error != null) return error;
+            }
         }
 
         private async Task<(int? UnitId, string Code)> UnitOfAsync(int? positionId, CancellationToken ct)
@@ -395,14 +513,30 @@ namespace Services.NasbNiro.Office
 
         // -------------------------------------------------------------------------------- content hash
 
-        internal static string ComputeHash(OfLetter l)
+        private const string MissingFile = "MISSING";
+
+        /// <summary>SHA-256 of the bytes of every attachment and of the signature image as they are stored now.</summary>
+        private async Task<Dictionary<Guid, string>> CurrentFileHashesAsync(OfLetter l, CancellationToken ct)
         {
+            var ids = l.Attachments.Select(a => a.DocumentId).ToList();
+            if (l.SignatureDocumentId.HasValue) ids.Add(l.SignatureDocumentId.Value);
+            var result = new Dictionary<Guid, string>();
+            foreach (Guid id in ids.Distinct()) result[id] = await _documents.GetFileHashAsync(id) ?? MissingFile;
+            return result;
+        }
+
+        /// <summary>The hash of the letter content, including the SHA-256 of every attached file and of the signature image (so a swapped file is detected).</summary>
+        internal static string ComputeHash(OfLetter l, IDictionary<Guid, string> fileHashes)
+        {
+            string FileHash(Guid id) => fileHashes != null && fileHashes.TryGetValue(id, out string h) ? h : MissingFile;
             var sb = new StringBuilder();
             sb.Append(l.Number).Append('|').Append(l.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)).Append('|').Append((int)l.Kind).Append('|').Append((int)l.Classification)
               .Append('|').Append((int)l.Urgency).Append('|').Append(l.Subject).Append('|').Append(l.BodyHtml).Append('|').Append(l.SenderPositionId).Append('|').Append(l.SenderPartyId).Append('|').Append(l.SignerPositionId).Append('|');
             foreach (OfLetterRecipient r in l.Recipients.OrderBy(x => x.Type).ThenBy(x => x.PositionId).ThenBy(x => x.PartyId)) sb.Append((int)r.Type).Append(':').Append(r.PositionId).Append(':').Append(r.PartyId).Append(';');
             sb.Append('|');
-            foreach (OfLetterAttachment a in l.Attachments.OrderBy(x => x.DocumentId)) sb.Append(a.DocumentId).Append(';');
+            foreach (OfLetterAttachment a in l.Attachments.OrderBy(x => x.DocumentId)) sb.Append(a.DocumentId).Append(':').Append(FileHash(a.DocumentId)).Append(';');
+            sb.Append('|');
+            if (l.SignatureDocumentId.HasValue) sb.Append(l.SignatureDocumentId.Value).Append(':').Append(FileHash(l.SignatureDocumentId.Value));
             sb.Append('|');
             foreach (OfRecordLink k in l.Links.OrderBy(x => x.Kind).ThenBy(x => x.RecordId)) sb.Append((int)k.Kind).Append(':').Append(k.RecordId).Append(':').Append(k.Text).Append(';');
             using (SHA256 sha = SHA256.Create()) return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString())));
@@ -413,11 +547,26 @@ namespace Services.NasbNiro.Office
             Ctx c = await ContextAsync(ct);
             OfLetter l = await LoadAsync(id, false, ct);
             if (l == null || AccessOf(l, c) != Access.Full) return OfficeText.NotFound<LetterVerifyDto>("نامه پیدا نشد.");
-            string computed = ComputeHash(l);
+            // recomputed from the files as they are stored now, not from the hashes kept at signing
+            Dictionary<Guid, string> current = await CurrentFileHashesAsync(l, ct);
+            string computed = ComputeHash(l, current);
+            var changed = new List<Guid>();
+            foreach (OfLetterAttachment a in l.Attachments)
+                if (a.FileHash != null && current.TryGetValue(a.DocumentId, out string h) && h != a.FileHash) changed.Add(a.DocumentId);
+            if (l.SignatureDocumentId.HasValue && l.SignatureFileHash != null && current.TryGetValue(l.SignatureDocumentId.Value, out string sh) && sh != l.SignatureFileHash) changed.Add(l.SignatureDocumentId.Value);
             return ResponseDtoHelper.Ok(new LetterVerifyDto
             {
-                LetterId = l.Id, Number = l.Number, Signed = l.ContentHash != null, StoredHash = l.ContentHash, ComputedHash = computed, Valid = l.ContentHash != null && l.ContentHash == computed,
+                LetterId = l.Id, Number = l.Number, Signed = l.ContentHash != null, StoredHash = l.ContentHash, ComputedHash = computed, Valid = l.ContentHash != null && l.ContentHash == computed && changed.Count == 0,
+                ChangedDocumentIds = changed,
             });
+        }
+
+        public async Task<bool> CanReadFileAsync(int letterId, Guid documentId, CancellationToken ct)
+        {
+            Ctx c = await ContextAsync(ct);
+            OfLetter l = await LoadAsync(letterId, false, ct);
+            if (l == null || AccessOf(l, c) != Access.Full) return false;
+            return l.Attachments.Any(a => a.DocumentId == documentId) || l.SignatureDocumentId == documentId || l.DeliveryReceiptDocumentId == documentId;
         }
 
         // -------------------------------------------------------------------------------- saving
@@ -526,9 +675,17 @@ namespace Services.NasbNiro.Office
                 if (error != null) { DetachNew(l); return Bad<LetterDto>(error); }
                 registeredNow = true;
             }
-            try { await _uow.SaveChangesAsync(ct); }
-            catch (DbUpdateConcurrencyException) { return Bad<LetterDto>(OfficeText.Concurrency); }
-            catch (DbUpdateException) { return Bad<LetterDto>("ثبت نامه انجام نشد (احتمالاً هم‌زمان شماره گرفته شد)؛ دوباره تلاش کنید."); }
+            if (registeredNow)
+            {
+                string saveError = await SaveRenumberingAsync(() => RegisterIncomingAsync(l, ct), ct);
+                if (saveError != null) return Bad<LetterDto>(saveError);
+            }
+            else
+            {
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateConcurrencyException) { return Bad<LetterDto>(OfficeText.Concurrency); }
+                catch (DbUpdateException) { return Bad<LetterDto>("ثبت نامه انجام نشد (احتمالاً هم‌زمان شماره گرفته شد)؛ دوباره تلاش کنید."); }
+            }
             if (registeredNow)
             {
                 DeliverToPositions(l);

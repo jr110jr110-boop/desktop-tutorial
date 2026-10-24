@@ -69,6 +69,9 @@ namespace Services.NasbNiro.Office
         public int ApprovedOvertimeMinutes { get; set; }
 
         public bool DailyPaidLeave { get; set; }
+
+        /// <summary>Approved sick leave: a paid day, but counted apart from the annual leave.</summary>
+        public bool DailySickLeave { get; set; }
         public bool DailyUnpaidLeave { get; set; }
         public bool DailyMission { get; set; }
 
@@ -92,6 +95,7 @@ namespace Services.NasbNiro.Office
         public int AbsenceDays { get; set; }
         public int UnpaidLeaveDays { get; set; }
         public decimal PaidLeaveDays { get; set; }
+        public decimal SickLeaveDays { get; set; }
         public int MissionDays { get; set; }
         public string Note { get; set; }
     }
@@ -111,13 +115,21 @@ namespace Services.NasbNiro.Office
             return to > from ? (int)Math.Floor((to - from).TotalMinutes) : 0;
         }
 
-        /// <summary>The window that decides which clock events belong to the day of a shift.</summary>
-        public static (DateTime From, DateTime To) Window(DateTime date, OfShift shift)
+        /// <summary>
+        /// Where the day of <paramref name="day"/> ends and the next one begins for the clock events: halfway between the end of this day's shift and the start of the next day's shift.
+        /// A shift that ends after midnight keeps its late events; a day without a shift ends at midnight. Consecutive days share the boundary, so no event falls between two days.
+        /// </summary>
+        public static DateTime Boundary(DateTime day, OfShift today, OfShift next)
         {
-            DateTime d = date.Date;
-            if (shift != null && shift.EndMinute <= shift.StartMinute)
-                return (d.AddMinutes(shift.StartMinute - 180), d.AddDays(1).AddMinutes(shift.EndMinute + 180));
-            return (d, d.AddDays(1));
+            DateTime d = day.Date;
+            DateTime midnight = d.AddDays(1);
+            if (today == null) return midnight;
+            DateTime end = d.AddMinutes(today.EndMinute <= today.StartMinute ? today.EndMinute + 1440 : today.EndMinute);
+            if (next == null) return end.AddHours(3) > midnight ? end.AddHours(3) : midnight;
+            DateTime nextStart = midnight.AddMinutes(next.StartMinute);
+            if (nextStart < end) return end;
+            DateTime mid = end.AddTicks((nextStart - end).Ticks / 2);
+            return new DateTime(mid.Year, mid.Month, mid.Day, mid.Hour, mid.Minute, 0);
         }
 
         private static (DateTime From, DateTime To) Absolute(DayInput d, (int From, int To) w, int start, int end)
@@ -175,7 +187,8 @@ namespace Services.NasbNiro.Office
                 r.EarlyLeaveMinutes = early <= d.GraceMinutes ? 0 : early;
 
                 int raw = Math.Max(0, (int)Math.Floor((r.LastOut.Value - shiftEnd).TotalMinutes));
-                int cap = d.OvertimeNeedsPreApproval ? d.ApprovedOvertimeMinutes : (d.MaxOvertimeMinutes ?? d.ApprovedOvertimeMinutes);
+                // with pre-approval the approved request is the limit; without it every minute counts up to the daily maximum (no maximum configured: no limit)
+                int cap = d.OvertimeNeedsPreApproval ? d.ApprovedOvertimeMinutes : int.MaxValue;
                 if (d.MaxOvertimeMinutes.HasValue) cap = Math.Min(cap, d.MaxOvertimeMinutes.Value);
                 int overtime = Math.Min(raw, Math.Max(0, cap));
                 if (d.RoundingMinutes > 1) overtime = overtime / d.RoundingMinutes * d.RoundingMinutes;
@@ -196,6 +209,7 @@ namespace Services.NasbNiro.Office
             }
             if (d.DailyMission) { r.Status = OfDayStatus.Mission; r.MissionDays = 1; return r; }
             if (d.DailyPaidLeave) { r.Status = OfDayStatus.Leave; r.PaidLeaveDays = 1; return r; }
+            if (d.DailySickLeave) { r.Status = OfDayStatus.Leave; r.SickLeaveDays = 1; return r; }
             if (d.DailyUnpaidLeave) { r.Status = OfDayStatus.Leave; r.UnpaidLeaveDays = 1; return r; }
             if (p.Count == 1)
             {

@@ -42,6 +42,12 @@ namespace Entities.Model.NasbNiro.Office
         public DateTime ToDate { get; set; }
         public bool IsActive { get; set; } = true;
         public string Reason { get; set; }
+
+        /// <summary>A delegation made by somebody other than the holder is Pending until the holder (or the CEO) approves it; only Approved ones give access.</summary>
+        public OfDelegationStatus Status { get; set; } = OfDelegationStatus.Approved;
+
+        public int? DecidedByUserId { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
     }
 
     /// <summary>The stored signature image of a user (an uploaded document).</summary>
@@ -130,6 +136,9 @@ namespace Entities.Model.NasbNiro.Office
 
         public Guid? SignatureDocumentId { get; set; }
 
+        /// <summary>SHA-256 (Base64) of the signature image bytes at signature.</summary>
+        public string SignatureFileHash { get; set; }
+
         /// <summary>SHA-256 of the content at signature (Base64); the letter cannot change afterwards.</summary>
         public string ContentHash { get; set; }
 
@@ -198,6 +207,9 @@ namespace Entities.Model.NasbNiro.Office
         public OfLetter Letter { get; set; }
         public Guid DocumentId { get; set; }
         public string FileName { get; set; }
+
+        /// <summary>SHA-256 (Base64) of the file bytes at signature; verification recomputes it from the stored file.</summary>
+        public string FileHash { get; set; }
     }
 
     /// <summary>A record a letter or a meeting is about (contract, project, purchase order, tender, inquiry, service request ...).</summary>
@@ -454,6 +466,9 @@ namespace Entities.Model.NasbNiro.Office
         public int AbsenceDays { get; set; }
         public int UnpaidLeaveDays { get; set; }
         public decimal PaidLeaveDays { get; set; }
+
+        /// <summary>Approved sick leave (paid by insurance): kept apart from PaidLeaveDays so it never uses the annual leave balance.</summary>
+        public decimal SickLeaveDays { get; set; }
         public int MissionDays { get; set; }
         public string Note { get; set; }
         public DateTimeOffset ComputedAt { get; set; }

@@ -127,7 +127,7 @@ namespace Services.NasbNiro.Finance
             if (e.EndDate.HasValue && e.EndDate.Value.Date < monthEnd) notEmployed += (int)Math.Min(monthDays, (monthEnd - e.EndDate.Value.Date).TotalDays);
             notEmployed = Math.Min(notEmployed, monthDays);
             decimal daysPaid = Math.Max(0m, Math.Min(30m, 30m - s.UnpaidLeaveDays - s.AbsenceDays - notEmployed));
-            if (s.DaysWorked + s.PaidLeaveDays + s.MissionDays <= 0) daysPaid = 0; // no attendance at all: nothing is paid for days
+            if (s.DaysWorked + s.PaidLeaveDays + s.SickLeaveDays + s.MissionDays <= 0) daysPaid = 0; // no attendance at all: nothing is paid for days
             result.DaysPaid = daysPaid;
             decimal dailyWage = e.DailyWage;
 

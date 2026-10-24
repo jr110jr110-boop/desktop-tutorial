@@ -26,6 +26,7 @@ namespace Services.NasbNiro.Office
         Task<ResponseDto<PagedList<DelegationDto>>> GetDelegationsAsync(DelegationQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<DelegationDto>> SaveDelegationAsync(SaveDelegationDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<DelegationDto>> CancelDelegationAsync(int id, CancellationToken cancellationToken);
+        Task<ResponseDto<DelegationDto>> DecideDelegationAsync(int id, bool approve, CancellationToken cancellationToken);
         Task<ResponseDto<OrgNodeDto>> GetTreeAsync(CancellationToken cancellationToken);
         Task<ResponseDto<MyOfficeDto>> GetMineAsync(CancellationToken cancellationToken);
         Task<ResponseDto<MyOfficeDto>> SaveSignatureAsync(SaveSignatureDto dto, CancellationToken cancellationToken);
@@ -46,6 +47,23 @@ namespace Services.NasbNiro.Office
         private int Me => _user.UserId;
         private static string Clean(string s) => OfficeText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => OfficeText.Bad<T>(m);
+
+        /// <summary>An alert in the inbox of a user (or of a role), saved with the change that caused it.</summary>
+        private void Alert(string key, string title, int? userId, string role, string link, int? sourceId)
+        {
+            if (userId == null && role == null) return;
+            _uow.Set<OfInboxItem>().Add(new OfInboxItem
+            {
+                RecipientUserId = userId, RecipientRole = role, Kind = OfInboxKind.Alert, Title = title.Length > 300 ? title.Substring(0, 300) : title, SourceModule = "office", SourceType = "org",
+                SourceId = sourceId, SourceKey = key, Link = link, Status = OfInboxStatus.Unread, CreatedAt = DateTimeOffset.Now,
+            });
+        }
+
+        private async Task CloseAlertsAsync(string key, string reason, CancellationToken ct)
+        {
+            List<OfInboxItem> items = await _uow.Set<OfInboxItem>().Where(i => i.SourceKey == key && (i.Status == OfInboxStatus.Unread || i.Status == OfInboxStatus.Read)).ToListAsync(ct);
+            foreach (OfInboxItem i in items) { i.Status = OfInboxStatus.Done; i.ClosedAt = DateTimeOffset.Now; i.ClosedReason = reason; }
+        }
 
         private async Task<PagedList<T>> PageAsync<T>(List<T> rows, int total, int pageNumber, int pageSize)
         {
@@ -181,7 +199,19 @@ namespace Services.NasbNiro.Office
                 position = await _uow.Set<OfPosition>().FirstOrDefaultAsync(p => p.Id == dto.Id.Value && !p.Deleted, ct);
                 if (position == null) return OfficeText.NotFound<PositionDto>("سمت پیدا نشد.");
             }
-            else
+            // who sits in a position decides who reads its letters: only HR changes the holder (the CEO only for his own position or a vacant one), and never for himself
+            int? previousHolder = position?.UserId;
+            bool holderChanged = dto.UserId != previousHolder;
+            if (holderChanged && dto.UserId.HasValue)
+            {
+                if (dto.UserId.Value == Me) return Bad<PositionDto>("تعیین خود به‌عنوان دارنده یک سمت مجاز نیست؛ این کار را شخص دیگری انجام می‌دهد.");
+                bool hr = _user.IsInRole(OfficeRoles.Hr);
+                bool ceoRule = _user.IsInRole(OfficeRoles.Ceo) && (previousHolder == null || previousHolder == Me);
+                if (!hr && !ceoRule) return Bad<PositionDto>("فقط مسئول منابع انسانی دارنده سمت را تعیین یا تغییر می‌دهد (مدیرعامل برای سمت خودش یا سمت خالی).");
+            }
+            else if (holderChanged && previousHolder.HasValue && !_user.IsInRole(OfficeRoles.Hr) && !(_user.IsInRole(OfficeRoles.Ceo) && previousHolder == Me))
+                return Bad<PositionDto>("فقط مسئول منابع انسانی دارنده سمت را تعیین یا تغییر می‌دهد (مدیرعامل برای سمت خودش یا سمت خالی).");
+            if (position == null)
             {
                 position = new OfPosition { CreateDate = now, CreatorUserId = Me };
                 _uow.Set<OfPosition>().Add(position);
@@ -190,6 +220,11 @@ namespace Services.NasbNiro.Office
             position.IsManager = dto.IsManager; position.CanSign = dto.CanSign; position.IsActive = dto.IsActive;
             position.ModifyDate = now; position.ModifierUserId = Me;
             await _uow.SaveChangesAsync(ct);
+            if (holderChanged && position.UserId.HasValue)
+            {
+                Alert("position-holder:" + position.Id + ":" + position.UserId.Value, "شما به‌عنوان دارنده سمت «" + position.Title + "» ثبت شدید؛ نامه‌ها و کارتابل این سمت به شما می‌رسد.", position.UserId.Value, null, "/office/me", position.Id);
+                await _uow.SaveChangesAsync(ct);
+            }
             // one manager per unit: the unit points at the manager position
             if (position.IsManager && position.IsActive && unit.ManagerPositionId != position.Id)
             {
@@ -216,13 +251,14 @@ namespace Services.NasbNiro.Office
         private async Task<List<DelegationDto>> MapDelegationsAsync(List<OfDelegation> rows, CancellationToken ct)
         {
             Dictionary<int, string> titles = await OfficeActors.PositionTitlesAsync(_uow, rows.Select(d => (int?)d.PositionId), ct);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(d => (int?)d.DeputyUserId), ct);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(d => new int?[] { d.DeputyUserId, d.CreatorUserId, d.DecidedByUserId }), ct);
             DateTime today = DateTime.Today;
             return rows.Select(d => new DelegationDto
             {
                 Id = d.Id, PositionId = d.PositionId, PositionTitle = titles.Title(d.PositionId), DeputyUserId = d.DeputyUserId, DeputyName = names.Name(d.DeputyUserId),
                 FromDate = d.FromDate, ToDate = d.ToDate, FromDateText = OfficeText.Date(d.FromDate), ToDateText = OfficeText.Date(d.ToDate), IsActive = d.IsActive,
-                Current = d.IsActive && d.FromDate <= today && d.ToDate >= today, Reason = d.Reason,
+                Current = d.IsActive && d.Status == OfDelegationStatus.Approved && d.FromDate <= today && d.ToDate >= today, Reason = d.Reason,
+                Status = d.Status, CreatedByName = names.Name(d.CreatorUserId), DecidedByName = names.Name(d.DecidedByUserId), DecidedAtText = OfficeText.Stamp(d.DecidedAt),
             }).ToList();
         }
 
@@ -235,7 +271,7 @@ namespace Services.NasbNiro.Office
             if (query.CurrentOnly == true)
             {
                 DateTime today = DateTime.Today;
-                q = q.Where(d => d.IsActive && d.FromDate <= today && d.ToDate >= today);
+                q = q.Where(d => d.IsActive && d.Status == OfDelegationStatus.Approved && d.FromDate <= today && d.ToDate >= today);
             }
             int total = await q.CountAsync(ct);
             F2Page.Window(query.PageNumber, query.PageSize, total, out int number, out int size);
@@ -246,20 +282,55 @@ namespace Services.NasbNiro.Office
         public async Task<ResponseDto<DelegationDto>> SaveDelegationAsync(SaveDelegationDto dto, CancellationToken ct)
         {
             if (dto == null || dto.PositionId <= 0 || dto.DeputyUserId <= 0) return Bad<DelegationDto>(OfficeText.InvalidData);
+            if (Clean(dto.Reason) == null) return Bad<DelegationDto>("علت نیابت را بنویسید.");
             OfPosition position = await _uow.Set<OfPosition>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == dto.PositionId && !p.Deleted && p.IsActive, ct);
             if (position == null) return Bad<DelegationDto>("سمت پیدا نشد.");
             bool holder = position.UserId == Me;
             if (!holder && !_user.IsInRole(OfficeRoles.OrgAdmins)) return Bad<DelegationDto>(OfficeText.NotAllowed);
+            if (dto.DeputyUserId == Me) return Bad<DelegationDto>("تعیین خود به‌عنوان جانشین یک سمت مجاز نیست.");
             if (dto.ToDate.Date < dto.FromDate.Date) return Bad<DelegationDto>("تاریخ پایان نیابت از تاریخ شروع زودتر است.");
             if (position.UserId == dto.DeputyUserId) return Bad<DelegationDto>("جانشین نمی‌تواند خود دارنده سمت باشد.");
             if (!await _uow.Set<User>().AnyAsync(u => u.Id == dto.DeputyUserId, ct)) return Bad<DelegationDto>("کاربر جانشین پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
+            // the holder (or the CEO) decides; somebody else's delegation waits for that decision and gives no access until then
+            bool approvedNow = holder || _user.IsInRole(OfficeRoles.Ceo);
             var d = new OfDelegation
             {
                 PositionId = position.Id, DeputyUserId = dto.DeputyUserId, FromDate = dto.FromDate.Date, ToDate = dto.ToDate.Date, IsActive = true, Reason = Clean(dto.Reason),
+                Status = approvedNow ? OfDelegationStatus.Approved : OfDelegationStatus.Pending, DecidedByUserId = approvedNow ? Me : (int?)null, DecidedAt = approvedNow ? now : (DateTimeOffset?)null,
                 CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             _uow.Set<OfDelegation>().Add(d);
+            await _uow.SaveChangesAsync(ct);
+            string range = OfficeText.Date(d.FromDate) + " تا " + OfficeText.Date(d.ToDate);
+            if (d.Status == OfDelegationStatus.Pending)
+                Alert("delegation:" + d.Id, "درخواست نیابت سمت «" + position.Title + "» در بازه " + range + " منتظر تایید شماست.", position.UserId, position.UserId.HasValue ? null : OfficeRoles.Ceo, "/office/delegations", d.Id);
+            else
+            {
+                Alert("delegation-deputy:" + d.Id, "شما در بازه " + range + " جانشین سمت «" + position.Title + "» هستید.", d.DeputyUserId, null, "/office/me", d.Id);
+                if (position.UserId.HasValue && position.UserId != Me) Alert("delegation:" + d.Id, "برای سمت «" + position.Title + "» جانشین تعیین شد (" + range + ").", position.UserId, null, "/office/delegations", d.Id);
+            }
+            await _uow.SaveChangesAsync(ct);
+            return ResponseDtoHelper.Ok((await MapDelegationsAsync(new List<OfDelegation> { d }, ct))[0]);
+        }
+
+        public async Task<ResponseDto<DelegationDto>> DecideDelegationAsync(int id, bool approve, CancellationToken ct)
+        {
+            OfDelegation d = await _uow.Set<OfDelegation>().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
+            if (d == null) return OfficeText.NotFound<DelegationDto>("نیابت پیدا نشد.");
+            if (d.Status != OfDelegationStatus.Pending) return Bad<DelegationDto>("این نیابت در انتظار تایید نیست.");
+            OfPosition position = await _uow.Set<OfPosition>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == d.PositionId, ct);
+            if (d.CreatorUserId == Me) return Bad<DelegationDto>("نیابت را کسی که ثبت کرده نمی‌تواند تایید کند؛ دارنده سمت یا مدیرعامل تایید می‌کند.");
+            bool holder = position != null && position.UserId == Me;
+            if (!holder && !_user.IsInRole(OfficeRoles.Ceo)) return Bad<DelegationDto>("فقط دارنده سمت یا مدیرعامل نیابت را تایید می‌کند.");
+            d.Status = approve ? OfDelegationStatus.Approved : OfDelegationStatus.Rejected;
+            if (!approve) d.IsActive = false;
+            d.DecidedByUserId = Me; d.DecidedAt = DateTimeOffset.Now; d.ModifyDate = DateTimeOffset.Now; d.ModifierUserId = Me;
+            await CloseAlertsAsync("delegation:" + d.Id, approve ? "نیابت تایید شد" : "نیابت رد شد", ct);
+            string title = position?.Title ?? "";
+            string range = OfficeText.Date(d.FromDate) + " تا " + OfficeText.Date(d.ToDate);
+            if (approve) Alert("delegation-deputy:" + d.Id, "شما در بازه " + range + " جانشین سمت «" + title + "» هستید.", d.DeputyUserId, null, "/office/me", d.Id);
+            Alert("delegation-result:" + d.Id, "نیابت سمت «" + title + "» " + (approve ? "تایید شد." : "رد شد."), d.CreatorUserId, null, "/office/delegations", d.Id);
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await MapDelegationsAsync(new List<OfDelegation> { d }, ct))[0]);
         }
@@ -271,6 +342,7 @@ namespace Services.NasbNiro.Office
             bool holder = await _uow.Set<OfPosition>().AnyAsync(p => p.Id == d.PositionId && p.UserId == Me, ct);
             if (!holder && d.CreatorUserId != Me && !_user.IsInRole(OfficeRoles.OrgAdmins)) return Bad<DelegationDto>(OfficeText.NotAllowed);
             d.IsActive = false; d.ModifyDate = DateTimeOffset.Now; d.ModifierUserId = Me;
+            await CloseAlertsAsync("delegation:" + d.Id, "نیابت لغو شد", ct);
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await MapDelegationsAsync(new List<OfDelegation> { d }, ct))[0]);
         }
@@ -412,6 +484,17 @@ namespace Services.NasbNiro.Office
             return ResponseDtoHelper.Ok(counts);
         }
 
+        /// <summary>
+        /// Items that wait for a step (dispatch of a signed letter, recording a leave, completing a request, finalising vouchers, the gates of the other modules) are role tasks:
+        /// one person closing them by hand would leave the step waiting in nobody's inbox. Only free to-dos and alerts can be closed by hand.
+        /// </summary>
+        private static bool IsGateItem(OfInboxItem i)
+        {
+            string key = i.SourceKey ?? "";
+            if (key.EndsWith(":dispatch", StringComparison.Ordinal) || key.StartsWith("leave-record:", StringComparison.Ordinal) || key.StartsWith("req-complete:", StringComparison.Ordinal)) return true;
+            return i.SourceModule != null && i.SourceModule != "office" && i.Kind != OfInboxKind.Alert;
+        }
+
         public async Task<ResponseDto<InboxItemDto>> ActAsync(InboxActionDto dto, CancellationToken ct)
         {
             if (dto == null) return OfficeText.Bad<InboxItemDto>(OfficeText.InvalidData);
@@ -428,7 +511,7 @@ namespace Services.NasbNiro.Office
                     break;
                 case "done":
                     // approvals, referrals and meeting actions are closed by the gate itself, never by hand
-                    if (item.Kind == OfInboxKind.Approval || item.Kind == OfInboxKind.Referral || item.Kind == OfInboxKind.MeetingAction)
+                    if (item.Kind == OfInboxKind.Approval || item.Kind == OfInboxKind.Referral || item.Kind == OfInboxKind.MeetingAction || IsGateItem(item))
                         return OfficeText.Bad<InboxItemDto>("این مورد با انجام کار مربوطه بسته می‌شود.");
                     if (item.Status == OfInboxStatus.Unread || item.Status == OfInboxStatus.Read) { item.Status = OfInboxStatus.Done; item.ClosedAt = now; item.ClosedReason = "توسط کاربر بسته شد"; }
                     break;

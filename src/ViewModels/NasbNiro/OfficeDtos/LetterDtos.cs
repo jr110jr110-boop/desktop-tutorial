@@ -135,7 +135,7 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string RecipientNames { get; set; }
         public bool Imported { get; set; }
 
-        /// <summary>Secret letter seen by the secretariat: only the register data is returned.</summary>
+        /// <summary>Confidential or Secret letter seen by the secretariat: only the register data is returned (no subject, body, attachments or referral notes).</summary>
         public bool MetadataOnly { get; set; }
     }
 
@@ -240,6 +240,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public bool Valid { get; set; }
         public string StoredHash { get; set; }
         public string ComputedHash { get; set; }
+
+        /// <summary>Files (attachments or the signature image) whose bytes no longer match what was signed.</summary>
+        public List<Guid> ChangedDocumentIds { get; set; } = new List<Guid>();
     }
 
     public class ReferLetterDto

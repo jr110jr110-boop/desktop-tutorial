@@ -30,13 +30,17 @@ namespace Services.NasbNiro.Office
             if (dto == null) return Bad<LetterDto>(OfficeText.InvalidData);
             Ctx c = await ContextAsync(ct);
             OfLetter l = await LoadAsync(dto.Id, true, ct);
-            if (l == null || AccessOf(l, c) != Access.Full) return OfficeText.NotFound<LetterDto>("نامه پیدا نشد.");
+            string action = (dto.Action ?? "").Trim().ToLowerInvariant();
+            Access access = l == null ? Access.None : AccessOf(l, c);
+            // the secretariat registers, sends, records the receipt, archives and cancels a Confidential or Secret letter on register data alone
+            bool registerWork = access == Access.Meta && c.IsSec && (action == "register" || action == "send" || action == "receipt" || action == "archive" || action == "cancel");
+            if (l == null || (access != Access.Full && !registerWork)) return OfficeText.NotFound<LetterDto>("نامه پیدا نشد.");
             if (Clean(dto.RowVersion) != null)
             {
                 try { _uow.Entry(l).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); }
                 catch (FormatException) { return Bad<LetterDto>(OfficeText.InvalidData); }
             }
-            switch ((dto.Action ?? "").Trim().ToLowerInvariant())
+            switch (action)
             {
                 case "submit": return await SubmitAsync(l, c, dto, ct);
                 case "approve": return await ApproveAsync(l, c, dto, ct);
@@ -149,21 +153,41 @@ namespace Services.NasbNiro.Office
             if (number.Error != null) return Bad<LetterDto>(number.Error);
             l.Number = number.Number; l.NumberRuleId = number.RuleId; l.Date = today;
             l.SignedAt = DateTimeOffset.Now; l.SignedByUserId = Me; l.SignedOnBehalfOfPositionId = acting.OnBehalf ? l.SignerPositionId : null; l.SignatureDocumentId = signature.ImageDocumentId;
-            l.ContentHash = ComputeHash(l);
+            // the hash covers the bytes of every attachment and of the signature image; the per-file hashes are kept to name the file that changed later
+            Dictionary<Guid, string> fileHashes = await CurrentFileHashesAsync(l, ct);
+            if (fileHashes.Values.Any(h => h == MissingFile)) return Bad<LetterDto>("فایل یکی از پیوست‌ها یا تصویر امضا در محل ذخیره پیدا نشد؛ آن را دوباره بارگذاری کنید.");
+            foreach (OfLetterAttachment a in l.Attachments) a.FileHash = fileHashes[a.DocumentId];
+            l.SignatureFileHash = fileHashes[signature.ImageDocumentId];
+            l.ContentHash = ComputeHash(l, fileHashes);
             l.ModifyDate = DateTimeOffset.Now; l.ModifierUserId = Me;
+            l.Status = l.Kind == OfLetterKind.Internal ? OfLetterStatus.Sent : OfLetterStatus.Signed;
+            if (l.Kind == OfLetterKind.Internal) l.SentDate = today;
             await CloseKeyAsync("letter:" + l.Id + ":approval", "امضا شد", ct);
-            if (l.Kind == OfLetterKind.Internal)
+            string saveError = await SaveRenumberingAsync(async () =>
             {
-                l.Status = OfLetterStatus.Sent; l.SentDate = today;
-                DeliverToPositions(l);
-            }
-            else
+                var again = await NextNumberAsync(l.Kind, unit.UnitId, unit.Code, today, ct);
+                if (again.Error != null) return again.Error;
+                l.Number = again.Number; l.NumberRuleId = again.RuleId;
+                l.ContentHash = ComputeHash(l, fileHashes);
+                return null;
+            }, ct);
+            if (saveError != null) return Bad<LetterDto>(saveError);
+            // the notifications come after the gate passed and never block it
+            try
             {
-                l.Status = OfLetterStatus.Signed;
-                AddInbox("letter:" + l.Id + ":dispatch", OfInboxKind.Task, "نامه امضا شده برای ثبت و ارسال: " + l.Number + " — " + l.Subject, l.Id, null, null, OfficeRoles.Secretariat, null, l.Urgency);
+                if (l.Kind == OfLetterKind.Internal) DeliverToPositions(l);
+                else AddInbox("letter:" + l.Id + ":dispatch", OfInboxKind.Task, DispatchTitle(l), l.Id, null, null, OfficeRoles.Secretariat, null, l.Urgency);
+                await _uow.SaveChangesAsync(ct);
             }
-            return await FinishAsync(l, c, ct);
+            catch (DbUpdateException) { /* the inbox must never block a signed letter */ }
+            return ResponseDtoHelper.Ok(await BuildAsync(await LoadAsync(l.Id, false, ct), c, ct));
         }
+
+        /// <summary>The dispatch item goes to the whole secretariat: for Confidential and Secret letters it carries the number and the classification only, never the subject.</summary>
+        private static string DispatchTitle(OfLetter l) =>
+            l.Classification == OfClassification.Secret ? "نامه سری شماره " + l.Number + " برای ثبت و ارسال"
+            : l.Classification == OfClassification.Confidential ? "نامه محرمانه شماره " + l.Number + " برای ثبت و ارسال"
+            : "نامه امضا شده برای ثبت و ارسال: " + l.Number + " — " + l.Subject;
 
         private async Task<ResponseDto<LetterDto>> RegisterAsync(OfLetter l, Ctx c, CancellationToken ct)
         {
@@ -173,9 +197,8 @@ namespace Services.NasbNiro.Office
                 string error = await RegisterIncomingAsync(l, ct);
                 if (error != null) return Bad<LetterDto>(error);
                 l.ModifyDate = DateTimeOffset.Now; l.ModifierUserId = Me;
-                try { await _uow.SaveChangesAsync(ct); }
-                catch (DbUpdateConcurrencyException) { return Bad<LetterDto>(OfficeText.Concurrency); }
-                catch (DbUpdateException) { return Bad<LetterDto>("ثبت انجام نشد (احتمالاً هم‌زمان شماره گرفته شد)؛ دوباره تلاش کنید."); }
+                string saveError = await SaveRenumberingAsync(() => RegisterIncomingAsync(l, ct), ct);
+                if (saveError != null) return Bad<LetterDto>(saveError);
                 DeliverToPositions(l);
                 return await FinishAsync(l, c, ct);
             }

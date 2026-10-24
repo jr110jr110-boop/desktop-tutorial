@@ -76,7 +76,9 @@ namespace Services.NasbNiro.Office
             OfficeCalendar calendar = await OfficeCalendar.LoadAsync(_uow, ct);
             Dictionary<int, OfShift> shifts = await _uow.Set<OfShift>().AsNoTracking().ToDictionaryAsync(s => s.Id, ct);
 
-            IQueryable<OfShiftAssignment> assignQuery = _uow.Set<OfShiftAssignment>().AsNoTracking().Where(a => a.FromDate <= to && (a.ToDate == null || a.ToDate >= from));
+            // one day more on each side: the boundary between two days depends on the shift of the neighbour
+            DateTime assignFrom = from.AddDays(-1), assignTo = to.AddDays(1);
+            IQueryable<OfShiftAssignment> assignQuery = _uow.Set<OfShiftAssignment>().AsNoTracking().Where(a => a.FromDate <= assignTo && (a.ToDate == null || a.ToDate >= assignFrom));
             if (employeeId.HasValue) assignQuery = assignQuery.Where(a => a.EmployeeId == employeeId.Value);
             List<OfShiftAssignment> assignments = await assignQuery.ToListAsync(ct);
 
@@ -119,10 +121,15 @@ namespace Services.NasbNiro.Office
                 for (DateTime date = from; date <= to; date = date.AddDays(1))
                 {
                     if (date < emp.HireDate || (emp.EndDate.HasValue && date > emp.EndDate.Value)) continue;
-                    OfShiftAssignment assignment = mine.LastOrDefault(a => a.FromDate <= date && (a.ToDate == null || a.ToDate >= date));
-                    OfShift shift = assignment != null && shifts.TryGetValue(assignment.ShiftId, out OfShift found) ? found : null;
-                    var window = AttendanceMath.Window(date, shift);
-                    List<DateTime> punches = punchesOfEmployee.Where(t => t >= window.From && t < window.To).ToList();
+                    OfShift ShiftOn(DateTime x)
+                    {
+                        OfShiftAssignment found = mine.LastOrDefault(a => a.FromDate <= x && (a.ToDate == null || a.ToDate >= x));
+                        return found != null && shifts.TryGetValue(found.ShiftId, out OfShift sh) ? sh : null;
+                    }
+                    OfShift shift = ShiftOn(date);
+                    DateTime windowFrom = AttendanceMath.Boundary(date.AddDays(-1), ShiftOn(date.AddDays(-1)), shift);
+                    DateTime windowTo = AttendanceMath.Boundary(date, shift, ShiftOn(date.AddDays(1)));
+                    List<DateTime> punches = punchesOfEmployee.Where(t => t >= windowFrom && t < windowTo).ToList();
                     if (shift == null && punches.Count == 0) continue;
                     if (Locked(locks, date, emp.WorkshopId)) { result.SkippedLocked++; continue; }
 
@@ -141,8 +148,9 @@ namespace Services.NasbNiro.Office
                         switch (l.Kind)
                         {
                             case OfLeaveKind.DailyLeave:
-                            case OfLeaveKind.SickLeave:
                                 input.DailyPaidLeave = true; break;
+                            case OfLeaveKind.SickLeave:
+                                input.DailySickLeave = true; break;
                             case OfLeaveKind.UnpaidLeave:
                                 input.DailyUnpaidLeave = true; break;
                             case OfLeaveKind.HourlyLeave:
@@ -167,7 +175,7 @@ namespace Services.NasbNiro.Office
                     row.ShiftId = shift?.Id; row.Status = r.Status ?? OfDayStatus.Absent; row.NonWorkingDay = r.NonWorkingDay; row.FirstIn = r.FirstIn; row.LastOut = r.LastOut;
                     row.WorkedMinutes = r.WorkedMinutes; row.DelayMinutes = r.DelayMinutes; row.EarlyLeaveMinutes = r.EarlyLeaveMinutes; row.OvertimeMinutes = r.OvertimeMinutes;
                     row.NightMinutes = r.NightMinutes; row.HolidayMinutes = r.HolidayMinutes; row.AbsenceDays = r.AbsenceDays; row.UnpaidLeaveDays = r.UnpaidLeaveDays;
-                    row.PaidLeaveDays = r.PaidLeaveDays; row.MissionDays = r.MissionDays; row.Note = r.Note; row.ComputedAt = now;
+                    row.PaidLeaveDays = r.PaidLeaveDays; row.SickLeaveDays = r.SickLeaveDays; row.MissionDays = r.MissionDays; row.Note = r.Note; row.ComputedAt = now;
                     result.Days++;
                     computedEmployees.Add(emp.Id);
                 }
@@ -190,7 +198,7 @@ namespace Services.NasbNiro.Office
                 EmployeeId = d.EmployeeId, EmployeeName = EmployeeName(e), PersonnelCode = e?.PersonnelCode, Date = d.Date, DateText = OfficeText.Date(d.Date), ShiftId = d.ShiftId, ShiftTitle = shiftTitle,
                 Status = d.Status, NonWorkingDay = d.NonWorkingDay, FirstIn = d.FirstIn, LastOut = d.LastOut, WorkedMinutes = d.WorkedMinutes, DelayMinutes = d.DelayMinutes,
                 EarlyLeaveMinutes = d.EarlyLeaveMinutes, OvertimeMinutes = d.OvertimeMinutes, NightMinutes = d.NightMinutes, HolidayMinutes = d.HolidayMinutes, AbsenceDays = d.AbsenceDays,
-                UnpaidLeaveDays = d.UnpaidLeaveDays, PaidLeaveDays = d.PaidLeaveDays, MissionDays = d.MissionDays, Note = d.Note,
+                UnpaidLeaveDays = d.UnpaidLeaveDays, PaidLeaveDays = d.PaidLeaveDays, SickLeaveDays = d.SickLeaveDays, MissionDays = d.MissionDays, Note = d.Note,
             };
         }
 
@@ -271,7 +279,7 @@ namespace Services.NasbNiro.Office
                 {
                     EmployeeId = emp.Id, EmployeeName = EmployeeName(emp), PersonnelCode = emp.PersonnelCode,
                     DaysWorked = Math.Round(worked, 2), OvertimeHours = Math.Round(g.Sum(d => d.OvertimeMinutes) / 60m, 2), NightHours = Math.Round(g.Sum(d => d.NightMinutes) / 60m, 2),
-                    HolidayHours = Math.Round(g.Sum(d => d.HolidayMinutes) / 60m, 2), PaidLeaveDays = Math.Round(g.Sum(d => d.PaidLeaveDays), 2),
+                    HolidayHours = Math.Round(g.Sum(d => d.HolidayMinutes) / 60m, 2), PaidLeaveDays = Math.Round(g.Sum(d => d.PaidLeaveDays), 2), SickLeaveDays = Math.Round(g.Sum(d => d.SickLeaveDays), 2),
                     UnpaidLeaveDays = g.Sum(d => (decimal)d.UnpaidLeaveDays), AbsenceDays = absence, MissionDays = g.Sum(d => (decimal)d.MissionDays),
                 };
                 if (!sheets.TryGetValue(emp.Id, out FnAttendanceSheet sheet))
@@ -280,7 +288,7 @@ namespace Services.NasbNiro.Office
                     _uow.Set<FnAttendanceSheet>().Add(sheet);
                 }
                 sheet.DaysWorked = row.DaysWorked; sheet.OvertimeHours = row.OvertimeHours; sheet.NightHours = row.NightHours; sheet.HolidayHours = row.HolidayHours;
-                sheet.PaidLeaveDays = row.PaidLeaveDays; sheet.UnpaidLeaveDays = row.UnpaidLeaveDays; sheet.AbsenceDays = row.AbsenceDays; sheet.MissionDays = row.MissionDays;
+                sheet.PaidLeaveDays = row.PaidLeaveDays; sheet.SickLeaveDays = row.SickLeaveDays; sheet.UnpaidLeaveDays = row.UnpaidLeaveDays; sheet.AbsenceDays = row.AbsenceDays; sheet.MissionDays = row.MissionDays;
                 sheet.UpdatedAt = now; sheet.UpdatedByUserId = Me;
                 result.Rows.Add(row);
             }

@@ -28,13 +28,15 @@ namespace Services.NasbNiro.Finance
     {
         public const string DirectRolePrefix = "Account:";
         private readonly IUnitOfWork _uow;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
         private static readonly AccountingEventStatus[] Postable =
         {
             AccountingEventStatus.Pending, AccountingEventStatus.Exported, AccountingEventStatus.Failed, AccountingEventStatus.Sent,
         };
 
-        public EventPostingService(IUnitOfWork uow)
+        public EventPostingService(IUnitOfWork uow, global::Services.NasbNiro.Office.INotificationService notify)
         {
+            _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         }
 
@@ -262,6 +264,8 @@ namespace Services.NasbNiro.Finance
                     }
                 }
             }
+            // the vouchers made here wait Checked for the finance manager: the inbox item for the finalisation is opened without anybody touching a manual voucher
+            if (result.Posted > 0) await global::Services.NasbNiro.Office.OfficeGates.SweepVouchersAsync(_uow, _notify, ct);
             return result;
         }
 

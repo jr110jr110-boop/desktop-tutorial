@@ -2843,18 +2843,25 @@ call POST $OF/units '{"code":"ops","title":"واحد عملیات"}'; check "off
 OU1=$(val .data.id); OROOT=$(val .data.parentId)
 as "$OEMP_TOKEN" POST $OF/units '{"code":"X1","title":"x"}'; no "office: an ordinary user cannot change the chart"
 call POST $OF/units '{"code":"OPS","title":"تکراری"}'; no "office: a duplicate unit code is refused"
-call POST $OF/positions "{\"title\":\"مدیرعامل\",\"unitId\":$OROOT,\"userId\":$OCEOID,\"isManager\":true,\"canSign\":true}"; check "office: CEO position saved" '.success and .data.id > 0 and .data.isManager == true'
+as "$OHR_TOKEN" POST $OF/positions "{\"title\":\"مدیرعامل\",\"unitId\":$OROOT,\"userId\":$OCEOID,\"isManager\":true,\"canSign\":true}"; check "office: CEO position saved" '.success and .data.id > 0 and .data.isManager == true'
 OP_CEO=$(val .data.id)
-call POST $OF/positions "{\"title\":\"مدیر عملیات\",\"unitId\":$OU1,\"userId\":$OMGRID,\"isManager\":true,\"canSign\":true}"; check "office: manager position saved" '.success and .data.id > 0 and .data.canSign == true'
+as "$OHR_TOKEN" POST $OF/positions "{\"title\":\"مدیر عملیات\",\"unitId\":$OU1,\"userId\":$OMGRID,\"isManager\":true,\"canSign\":true}"; check "office: manager position saved" '.success and .data.id > 0 and .data.canSign == true'
 OP_MGR=$(val .data.id)
-call POST $OF/positions "{\"title\":\"ناظر عملیات\",\"unitId\":$OU1,\"userId\":$OCHKID,\"canSign\":false}"; check "office: checker position saved" '.success and .data.id > 0 and .data.canSign == false'
+as "$OHR_TOKEN" POST $OF/positions "{\"title\":\"ناظر عملیات\",\"unitId\":$OU1,\"userId\":$OCHKID,\"canSign\":false}"; check "office: checker position saved" '.success and .data.id > 0 and .data.canSign == false'
 OP_CHK=$(val .data.id)
-call POST $OF/positions "{\"title\":\"کارشناس عملیات\",\"unitId\":$OU1,\"userId\":$OEMPID,\"employeeId\":$OAEMP}"; check "office: expert position linked to the personnel record" ".success and .data.id > 0 and .data.employeeId == $OAEMP"
+as "$OHR_TOKEN" POST $OF/positions "{\"title\":\"کارشناس عملیات\",\"unitId\":$OU1,\"userId\":$OEMPID,\"employeeId\":$OAEMP}"; check "office: expert position linked to the personnel record" ".success and .data.id > 0 and .data.employeeId == $OAEMP"
 OP_EMP=$(val .data.id)
-call POST $OF/positions "{\"title\":\"مسئول دبیرخانه\",\"unitId\":$OROOT,\"userId\":$OSECID}"; check "office: secretariat position saved" '.success and .data.id > 0'
+as "$OHR_TOKEN" POST $OF/positions "{\"title\":\"مسئول دبیرخانه\",\"unitId\":$OROOT,\"userId\":$OSECID}"; check "office: secretariat position saved" '.success and .data.id > 0'
 OP_SEC=$(val .data.id)
-call POST $OF/positions "{\"title\":\"مسئول اداری\",\"unitId\":$OROOT,\"userId\":$OHRID}"; check "office: administration position saved" '.success and .data.id > 0'
+as "$CEO_TOKEN" POST $OF/positions "{\"title\":\"مسئول اداری\",\"unitId\":$OROOT,\"userId\":$OHRID}"; check "office: administration position saved" '.success and .data.id > 0'
 OP_HR=$(val .data.id)
+# R1 H4: the holder of a position decides who reads its letters, so only HR assigns it (the CEO only for a vacant position), never for oneself
+call POST $OF/positions "{\"title\":\"سمت آزمون\",\"unitId\":$OU1,\"userId\":$OCHKID}"; nomsg "office r1 H4: the PMO administrator cannot assign the holder of a position" "فقط مسئول منابع انسانی"
+as "$OHR_TOKEN" POST $OF/positions "{\"title\":\"سمت آزمون\",\"unitId\":$OU1,\"userId\":$OHRID}"; nomsg "office r1 H4: HR cannot assign himself as the holder of a position" "تعیین خود"
+as "$CEO_TOKEN" POST $OF/positions "{\"title\":\"سمت آزمون\",\"unitId\":$OU1,\"userId\":$OCEOID}"; nomsg "office r1 H4: the CEO cannot assign himself either" "تعیین خود"
+as "$CEO_TOKEN" POST $OF/positions "{\"id\":$OP_MGR,\"title\":\"مدیر عملیات\",\"unitId\":$OU1,\"userId\":$OCHKID,\"isManager\":true,\"canSign\":true}"; nomsg "office r1 H4: the CEO cannot take a position from its holder" "فقط مسئول منابع انسانی"
+ibx "$OMGR_TOKEN" "position-holder:$OP_MGR:$OMGRID"; check "office r1 H4: the new holder was told about his position in his inbox" '.success and (.data.data|length) == 1 and .data.data[0].kind == 5 and (.data.data[0].title|contains("مدیر عملیات"))'
+as "$OHR_TOKEN" POST $OF/positions "{\"id\":$OP_CHK,\"title\":\"ناظر عملیات\",\"unitId\":$OU1,\"userId\":$OCHKID,\"canSign\":false}"; check "office r1 H4: a position can still be edited without changing its holder" '.success and .data.id > 0'
 call GET "$OF/units?Contains=OPS"; check "office: the manager position of the unit is the one flagged as manager" ".success and .data.data[0].managerPositionId == $OP_MGR and .data.data[0].positionCount == 3"
 call GET $OF/org/tree; check "office: the chart tree shows the unit with its three positions" '.success and ([.data.children[]|select(.code == "OPS")][0].positions|length) == 3'
 as "$OMGR_TOKEN" GET $OF/me; check "office: a user sees the positions he holds" ".success and (.data.positions|length) == 1 and .data.positions[0].positionId == $OP_MGR and .data.positions[0].onBehalf == false"
@@ -2885,7 +2892,7 @@ as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; no
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$DOCID\"}"; check "office: signature image stored for the signer" '.success and .data.hasSignature == true'
 as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; check "office: signed: number by the rule pattern of the unit (exact), content hash and signature image stored" ".success and .data.status == 2 and .data.number == \"OUT-$OPY-OPS-0001\" and (.data.contentHash|length) > 0 and .data.signatureDocumentId == \"$DOCID\" and (.data.signedByName|length) > 0"
 as "$OEMP_TOKEN" POST $OF/letters "{\"id\":$OL1,\"kind\":2,\"subject\":\"تغییر پس از امضا\",\"senderPositionId\":$OP_EMP,\"recipients\":[{\"type\":1,\"partyId\":$OPARTY}]}"; nomsg "office: a signed letter cannot be edited" "قابل ویرایش نیست"
-as "$OMGR_TOKEN" GET $OF/letters/$OL1/verify; check "office: the stored hash matches the content of the signed letter" '.success and .data.signed == true and .data.valid == true'
+as "$OMGR_TOKEN" GET $OF/letters/$OL1/verify; check "office: the stored hash equals the hash computed again from the content and the files, and no file changed" '.success and .data.signed == true and .data.valid == true and (.data.storedHash|length) > 0 and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
 ibx "$OSEC_TOKEN" "letter:$OL1:dispatch"; check "office: the secretariat has the signed letter to register and send" '.success and (.data.data|length) == 1 and .data.data[0].recipientRole == "SECRETARIAT"'
 as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"register\"}"; no "office: only the secretariat registers a letter"
 as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"register\"}"; check "office: registered by the secretariat, number unchanged" ".success and .data.status == 3 and .data.number == \"OUT-$OPY-OPS-0001\""
@@ -2932,9 +2939,25 @@ as "$OSEC_TOKEN" GET "$OF/letters?Number=1399/"; check "office: the legacy lette
 as "$OSEC_TOKEN" POST $OF/letters/import '{"rows":[{"number":"x","date":"not a date","kind":"incoming","subject":"s"}]}'; check "office: an invalid legacy row is reported and nothing is imported" '.success and .data.imported == 0 and (.data.errors|length) == 1'
 
 # --- delegation: the deputy sees and acts on the inbox of the position
-call POST $OF/delegations "{\"positionId\":$OP_MGR,\"deputyUserId\":$OCHKID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\",\"reason\":\"ماموریت\"}"; check "office: delegation of the manager position to the checker saved (current)" '.success and .data.current == true and (.data.fromDateText|test("^14[0-9]{2}/[0-9]{2}/[0-9]{2}$"))'
+as "$OMGR_TOKEN" POST $OF/delegations "{\"positionId\":$OP_MGR,\"deputyUserId\":$OCHKID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\"}"; nomsg "office r1 H4: a delegation needs a reason" "علت نیابت"
+as "$OMGR_TOKEN" POST $OF/delegations "{\"positionId\":$OP_MGR,\"deputyUserId\":$OCHKID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\",\"reason\":\"ماموریت\"}"; check "office: delegation of the manager position to the checker saved by its holder (approved, current)" '.success and .data.current == true and .data.status == 0 and (.data.fromDateText|test("^14[0-9]{2}/[0-9]{2}/[0-9]{2}$"))'
 ODEL=$(val .data.id)
-call POST $OF/delegations "{\"positionId\":$OP_MGR,\"deputyUserId\":$OMGRID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\"}"; no "office: the holder cannot be his own deputy"
+as "$OMGR_TOKEN" POST $OF/delegations "{\"positionId\":$OP_MGR,\"deputyUserId\":$OMGRID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\",\"reason\":\"x\"}"; nomsg "office: the holder cannot be his own deputy" "تعیین خود"
+as "$OHR_TOKEN" POST $OF/delegations "{\"positionId\":$OP_EMP,\"deputyUserId\":$OHRID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\",\"reason\":\"x\"}"; nomsg "office r1 H4: the one who registers a delegation cannot make himself the deputy" "تعیین خود"
+# R1 H4: a delegation registered by somebody else (HR) is pending: no access until the holder (or the CEO) approves it
+as "$OHR_TOKEN" POST $OF/delegations "{\"positionId\":$OP_EMP,\"deputyUserId\":$OCHKID,\"fromDate\":\"2026-01-01T00:00:00\",\"toDate\":\"2035-12-31T00:00:00\",\"reason\":\"مرخصی کارشناس\"}"; check "office r1 H4: a delegation registered by HR for somebody else's position is pending and not current" '.success and .data.status == 1 and .data.current == false and (.data.createdByName|length) > 0'
+ODEL2=$(val .data.id)
+as "$OCHK_TOKEN" GET $OF/me; check "office r1 H4: while pending the deputy does not act for that position" ".success and ([.data.positions[]|select(.positionId == $OP_EMP)]|length) == 0"
+ibx "$OEMP_TOKEN" "delegation:$ODEL2"; check "office r1 H4: the holder of the position has the pending delegation in his inbox" '.success and (.data.data|length) == 1 and .data.data[0].kind == 5'
+as "$OHR_TOKEN" POST $OF/delegations/$ODEL2/approve; nomsg "office r1 H4: the one who registered the delegation cannot approve it" "نمی‌تواند تایید کند"
+call POST $OF/delegations/$ODEL2/approve; nomsg "office r1 H4: an administrator who does not hold the position cannot approve it" "فقط دارنده سمت"
+as "$OEMP_TOKEN" POST $OF/delegations/$ODEL2/approve; check "office r1 H4: the holder approves it" '.success and .data.status == 0 and .data.current == true and (.data.decidedByName|length) > 0'
+as "$OCHK_TOKEN" GET $OF/me; check "office r1 H4: after the approval the deputy acts for the position" ".success and ([.data.positions[]|select(.positionId == $OP_EMP and .onBehalf == true)]|length) == 1"
+ibx "$OEMP_TOKEN" "delegation:$ODEL2"; check "office r1 H4: the inbox item of the holder is closed by the decision" '.success and (.data.data|length) == 0'
+as "$OEMP_TOKEN" POST $OF/delegations/$ODEL2/cancel; check "office r1 H4: the holder cancels the delegation" '.success'
+as "$FM_TOKEN" GET "$FAU?EntityType=OfDelegation&EntityId=$ODEL2&PageSize=0"; check "office r1 M7: the approval and the cancellation of the delegation are in the audit trail, each with the user" '.success and ([.data.data[]|select(.action == "Modified" and (.userName|length) > 0)]|length) >= 2'
+as "$FM_TOKEN" GET "$FAU?EntityType=OfPosition&Action=Added&PageSize=0"; check "office r1 M7: the creation of the manager position (holder, flags) is in the audit trail with the user" '.success and ([.data.data[]|select((.afterJson|tostring|contains("مدیر عملیات")) and (.userName|length) > 0)]|length) == 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=OfDelegation&Action=Added&PageSize=0"; check "office r1 M7: the registration of a delegation is in the audit trail with its reason and Persian dates" '.success and ([.data.data[]|select((.afterJson|tostring|contains("مرخصی کارشناس")) and (.afterJson|tostring|test("14[0-9]{2}/[0-9]{2}/[0-9]{2}")) and (.afterJson|tostring|test("20[0-9]{2}-[0-9]{2}-[0-9]{2}")|not))]|length) == 1'
 as "$OCHK_TOKEN" GET $OF/me; check "office: the deputy sees the position on behalf of the holder" ".success and ([.data.positions[]|select(.positionId == $OP_MGR and .onBehalf == true)]|length) == 1"
 as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"نامه وارده دوم\",\"senderPartyId\":$OPARTY,\"incomingNumber\":\"EXT-78\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"register\":true}"
 check "office: the second incoming letter gets the next number: the legacy import did not consume the sequence" ".success and .data.number == \"$OPY2/و/OPS/00002\""
@@ -2957,6 +2980,89 @@ call POST $OF/delegations/$ODEL/cancel; check "office: delegation cancelled" '.s
 as "$OCHK_TOKEN" GET $OF/me; check "office: after the cancellation the deputy no longer acts for the position" '.success and ([.data.positions[]|select(.onBehalf == true)]|length) == 0'
 as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"cancel\"}"; nomsg "office: cancelling a numbered letter needs a reason" "علت ابطال"
 as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"cancel\",\"comment\":\"اشتباه در مخاطب\"}"; check "office: a cancelled letter keeps its number in the register" ".success and .data.status == 7 and .data.number == \"OUT-$OPY-OPS-0001\""
+
+# =================================================================== R1: confidential letters, files of letters, numbering (review findings C1, H1-H3, H5, M1, M6, M7)
+enc() { jq -rn --arg v "$1" '$v|@uri'; }
+# H1/H3: the secretariat registers Confidential and Secret letters but never reads them: register data only (number, date, kind, classification, parties, delivery)
+as "$OSEC_TOKEN" GET $OF/letters/$OL2; check "office r1 H1: the secretariat gets only the register data of a confidential letter (no text, no subject, no signature image, no attachments, no referrals)" ".success and .data.metadataOnly == true and .data.bodyHtml == null and (.data.subject|contains(\"داخلی محرمانه\")|not) and .data.number == \"$OPY2/د/OPS/00001\" and .data.classification == 1 and (.data.recipients|length) == 1 and .data.signatureDocumentId == null and .data.signedByName == null and .data.contentHash == null and (.data.attachments|length) == 0 and (.data.referrals|length) == 0 and (.data.approvals|length) == 0"
+as "$OSEC_TOKEN" GET "$OF/letters?PageSize=100"; check "office r1 H1: in the list the confidential letter shows its number and parties but a neutral subject" ".success and ([.data.data[]|select(.id == $OL2 and .metadataOnly == true and .number == \"$OPY2/د/OPS/00001\" and (.subject|contains(\"داخلی محرمانه\")|not) and (.senderName|length) > 0 and (.recipientNames|length) > 0)]|length) == 1"
+as "$OSEC_TOKEN" GET "$OF/letters?Subject=$(enc داخلی)&PageSize=100"; check "office r1 H3: a subject search by the secretariat does not find the confidential letter" ".success and ([.data.data[]|select(.id == $OL2)]|length) == 0"
+as "$OEMP_TOKEN" GET "$OF/letters?Subject=$(enc داخلی)&PageSize=100"; check "office r1 H3: the same search finds it for its writer (the search itself works)" ".success and ([.data.data[]|select(.id == $OL2)]|length) == 1"
+as "$OSEC_TOKEN" GET "$OF/letters?Number=$(enc "$OPY2/د/OPS/00001")"; check "office r1 H1: the secretariat still finds the confidential letter by its number" ".success and ([.data.data[]|select(.id == $OL2)]|length) == 1"
+as "$OSEC_TOKEN" POST $OF/letters/refer "{\"letterId\":$OL2,\"toPositionIds\":[$OP_CHK],\"instruction\":\"x\",\"action\":2}"; no "office r1 H1: the secretariat cannot refer a confidential letter it may not read"
+
+# M1: a cancelled referral gives no access any more
+as "$CEO_TOKEN" POST $OF/letters/refer "{\"letterId\":$OL2,\"fromPositionId\":$OP_CEO,\"toPositionIds\":[$OP_CHK],\"instruction\":\"جهت اطلاع\",\"action\":2}"; check "office r1 M1: the CEO refers the confidential letter to the checker" '.success and (.data.referrals|length) == 1'
+ORM=$(val '.data.referrals[0].id')
+as "$OCHK_TOKEN" GET $OF/letters/$OL2; check "office r1 M1: the receiver of the referral reads the letter" '.success and .data.classification == 1'
+as "$CEO_TOKEN" POST $OF/letters/referral-action "{\"id\":$ORM,\"action\":\"cancel\"}"; check "office r1 M1: the referral is cancelled" '.success'
+as "$OCHK_TOKEN" GET $OF/letters/$OL2; no "office r1 M1: after the cancellation the receiver no longer reads the letter"
+as "$OCHK_TOKEN" GET "$OF/letters?PageSize=100"; check "office r1 M1: and it is gone from his list" ".success and ([.data.data[]|select(.id == $OL2)]|length) == 0"
+ibx "$OCHK_TOKEN" "referral:$ORM"; check "office r1 M1: and from his inbox" '.success and (.data.data|length) == 0'
+
+# C1: the files of a letter. Upload two files; the first is attached to an internal letter, the second to a secret one
+printf 'attachment bytes C1\n' > "$OUT/letter-att.txt"; printf 'secret attachment bytes\n' > "$OUT/letter-att2.txt"; printf 'forged bytes\n' > "$OUT/letter-evil.txt"; printf 'control bytes\n' > "$OUT/letter-ctl.txt"
+curl -s -o "$B" -X POST "$API/Documents?Description=att&Name=letter-att&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att.txt"; OATT=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+curl -s -o "$B" -X POST "$API/Documents?Description=att2&Name=letter-att2&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att2.txt"; OATT2=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+curl -s -o "$B" -X POST "$API/Documents?Description=ctl&Name=letter-ctl&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-ctl.txt"; OCTL=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+[ -n "$OATT" ] && [ -n "$OATT2" ] && [ -n "$OCTL" ] && ok "office r1 C1: three test files uploaded" || bad "office r1 C1: three test files uploaded"
+# control: change-file works on an ordinary document (so the refusals below are not caused by the request format)
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.txt"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "office r1 C1: control: change-file replaces the bytes of an ordinary document" || bad "office r1 C1: control: change-file replaces the bytes of an ordinary document (code $CODE)"
+as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه داخلی با پیوست\",\"bodyHtml\":\"<p>متن</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CHK}],\"attachments\":[{\"documentId\":\"$OATT\",\"fileName\":\"letter-att.txt\"}]}"; check "office r1 C1: internal draft with an attachment saved" '.success and (.data.attachments|length) == 1'
+OL3=$(val .data.id)
+as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL3,\"action\":\"submit\"}"; check "office r1 C1: submitted" '.success and .data.status == 1'
+as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL3,\"action\":\"sign\"}"; check "office r1 H5: the second internal letter of the unit gets the next number of the general rule" ".success and .data.status == 4 and .data.number == \"$OPY2/د/OPS/00002\""
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/Documents?DocumentId=$OATT"); [ "$CODE" = "401" ] && ok "office r1 C1: an anonymous download of a letter file is refused (401)" || bad "office r1 C1: an anonymous download of a letter file is refused (401) got $CODE"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/Documents/get-file-info?fileId=$OATT"); [ "$CODE" = "401" ] && ok "office r1 C1: anonymous file information is refused (401)" || bad "office r1 C1: anonymous file information is refused (401) got $CODE"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "office r1 C1: a signed letter's attachment cannot be replaced by anybody (even a signed-in stranger)" "تغییر یا حذف آن مجاز نیست"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "office r1 C1: nor by the writer of the letter" "تغییر یا حذف آن مجاز نیست"
+OATTF=$(ls UploadedDocuments/${OATT}* 2>/dev/null | head -n1)
+[ -n "$OATTF" ] && grep -q "attachment bytes C1" "$OATTF" && ok "office r1 C1: the stored bytes of the attachment are unchanged after the attempts" || bad "office r1 C1: the stored bytes of the attachment are unchanged after the attempts (file '$OATTF')"
+as "$OCHK_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; { [ "$CODE" = "200" ] && grep -q "attachment bytes C1" "$B"; } && ok "office r1 C1: the recipient position downloads the attachment through the letter" || bad "office r1 C1: the recipient position downloads the attachment through the letter got $CODE"
+as "$OEMP_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; [ "$CODE" = "200" ] && ok "office r1 C1: the writer downloads it" || bad "office r1 C1: the writer downloads it got $CODE"
+as "$QC_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; [ "$CODE" = "404" ] && ok "office r1 C1: somebody who is not a party gets 404 for the attachment" || bad "office r1 C1: somebody who is not a party gets 404 for the attachment got $CODE"
+as "$OCHK_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "404" ] && ok "office r1 C1: the generic download does not serve a letter file even to a party" || bad "office r1 C1: the generic download does not serve a letter file even to a party got $CODE"
+as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: verify: signed, valid, the hashes agree and no file changed" '.success and .data.valid == true and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
+printf 'forged bytes\n' > "$OATTF"
+as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: after the bytes of the attachment are swapped on disk verify fails and names the file" ".success and .data.valid == false and (.data.changedDocumentIds|index(\"$OATT\")) != null"
+printf 'attachment bytes C1\n' > "$OATTF"
+as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: with the original bytes back the letter is valid again (the check reads the files, it is not a flag)" '.success and .data.valid == true and (.data.changedDocumentIds|length) == 0'
+
+# H5: numbering rules that can produce the same number are refused; a duplicate number is skipped forward
+call POST $OF/numbering-rules "{\"kind\":3,\"unitId\":$OU1,\"pattern\":\"{yy}/{kind}/{unit}/{seq:5}\"}"; nomsg "office r1 H5: an internal rule for the unit with the same shape as the general rule is refused" "می‌تواند شماره‌ای بسازد"
+call POST $OF/numbering-rules "{\"kind\":3,\"unitId\":$OU1,\"pattern\":\"INT-{yy}-{seq:3}\"}"; check "office r1 H5: a rule with a literal part is accepted and previews its first number" ".success and .data.preview == \"INT-$OPY2-001\""
+ORULE1=$(val .data.id)
+oint() { # oint SUBJECT : an internal letter of the unit written by the expert and signed by the manager (OLN = its id)
+  as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"$1\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CHK}]}"; OLN=$(val .data.id)
+  as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OLN,\"action\":\"submit\"}"
+  as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OLN,\"action\":\"sign\"}"
+}
+oint "نامه شماره سه"; check "office r1 H5: the next letter uses the rule of the unit" ".success and .data.number == \"INT-$OPY2-001\""
+call POST $OF/numbering-rules "{\"id\":$ORULE1,\"kind\":3,\"unitId\":$OU1,\"pattern\":\"INT-{yy}-{seq:3}\",\"isActive\":false}"; check "office r1 H5: the rule is switched off" '.success and .data.isActive == false'
+call POST $OF/numbering-rules "{\"kind\":3,\"unitId\":$OU1,\"pattern\":\"INT-{yy}-{seq:3}\"}"; check "office r1 H5: a new rule with the same pattern is accepted once the old one is off (its counter starts again)" '.success and .data.isActive == true'
+oint "نامه شماره چهار"; check "office r1 H5: the number INT-001 exists already: the counter skips forward to 002 inside the same signature instead of failing" ".success and .data.status == 4 and .data.number == \"INT-$OPY2-002\""
+as "$FM_TOKEN" GET "$FAU?EntityType=OfNumberingRule&Action=Added&PageSize=0"; check "office r1 M7: the numbering rules are audited with the pattern and the user" '.success and ([.data.data[]|select((.afterJson|tostring|contains("INT-{yy}-{seq:3}")) and (.userName|length) > 0)]|length) == 2'
+
+# H2/H1/M6: a Secret outgoing letter: signed, then the secretariat numbers/registers and sends it without ever reading it
+as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":2,\"subject\":\"نامه سری آزمون\",\"classification\":2,\"bodyHtml\":\"<p>RAREWORD123</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"partyId\":$OPARTY}],\"attachments\":[{\"documentId\":\"$OATT2\",\"fileName\":\"secret.txt\"}]}"; check "office r1 H2: secret outgoing draft saved" '.success and .data.classification == 2'
+OL4=$(val .data.id)
+as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL4,\"action\":\"submit\"}"; check "office r1 H2: submitted" '.success and .data.status == 1'
+as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL4,\"action\":\"sign\"}"; check "office r1 H2: signed: numbered, waiting for the secretariat" ".success and .data.status == 2 and .data.number == \"OUT-$OPY-OPS-0002\""
+ibx "$OSEC_TOKEN" "letter:$OL4:dispatch"; check "office r1 H2: the dispatch item for the secretariat carries the number and the classification only, never the subject" ".success and (.data.data|length) == 1 and (.data.data[0].title|contains(\"OUT-$OPY-OPS-0002\") and contains(\"سری\") and (contains(\"آزمون\")|not))"
+ODISP=$(val '.data.data[0].id')
+as "$OSEC_TOKEN" POST $OF/inbox/act "{\"id\":$ODISP,\"action\":\"done\"}"; nomsg "office r1 M6: the dispatch item cannot be closed by hand: it closes when the letter is sent" "با انجام کار مربوطه"
+ibx "$OSEC_TOKEN" "letter:$OL4:dispatch"; check "office r1 M6: and it is still waiting" '.success and (.data.data|length) == 1'
+as "$OSEC_TOKEN" GET $OF/letters/$OL4; check "office r1 H1: the secretariat sees the secret letter as register data only" '.success and .data.metadataOnly == true and .data.bodyHtml == null and .data.signatureDocumentId == null and (.data.attachments|length) == 0 and (.data.subject|contains("آزمون")|not)'
+as "$OSEC_TOKEN" GET $OF/letters/$OL4/attachments/$OATT2; [ "$CODE" = "404" ] && ok "office r1 C1/H1: the secretariat gets 404 for the attachment of a secret letter" || bad "office r1 C1/H1: the secretariat gets 404 for the attachment of a secret letter got $CODE"
+as "$OEMP_TOKEN" GET $OF/letters/$OL4/attachments/$OATT2; { [ "$CODE" = "200" ] && grep -q "secret attachment bytes" "$B"; } && ok "office r1 C1: its writer downloads it" || bad "office r1 C1: its writer downloads it got $CODE"
+as "$OSEC_TOKEN" GET "$OF/letters?Contains=RAREWORD123&PageSize=100"; check "office r1 H3: a text search by the secretariat does not find the secret letter by a word of its body" '.success and (.data.data|length) == 0'
+as "$OEMP_TOKEN" GET "$OF/letters?Contains=RAREWORD123&PageSize=100"; check "office r1 H3: the same search finds it for its writer" ".success and (.data.data|length) == 1 and .data.data[0].id == $OL4"
+as "$OSEC_TOKEN" GET "$OF/letters?Subject=$(enc سری)&PageSize=100"; check "office r1 H3: a subject search by the secretariat finds nothing either" '.success and (.data.data|length) == 0'
+as "$QC_TOKEN" GET $OF/letters/$OL4; no "office r1 H1: a stranger does not see the secret letter"
+as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL4,\"action\":\"register\"}"; check "office r1 H2: the secretariat registers the secret letter without reading it" '.success and .data.status == 3 and .data.metadataOnly == true and .data.bodyHtml == null'
+as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL4,\"action\":\"send\",\"deliveryMethod\":2}"; check "office r1 H2: and sends it by post" '.success and .data.status == 4 and .data.deliveryMethod == 2 and .data.bodyHtml == null'
+ibx "$OSEC_TOKEN" "letter:$OL4:dispatch"; check "office r1 H2: the dispatch item is closed by the sending" '.success and (.data.data|length) == 0'
+as "$CEO_TOKEN" GET $OF/letters/$OL4; check "office r1 H1: the CEO reads the secret letter in full" '.success and .data.metadataOnly == false and (.data.bodyHtml|contains("RAREWORD123"))'
 
 # --- meeting -> minutes -> decisions in the owners' inboxes -> overdue alert
 OMEET="{\"title\":\"جلسه هماهنگی آزمون\",\"kind\":1,\"startAt\":\"2026-07-01T10:00:00\",\"place\":\"اتاق جلسات\",\"chairPositionId\":$OP_MGR,\"secretaryPositionId\":$OP_EMP,\"agenda\":[{\"seq\":1,\"title\":\"بررسی پیشرفت\",\"minutes\":\"گزارش ارائه شد\"},{\"seq\":2,\"title\":\"موارد متفرقه\",\"minutes\":\"موردی نبود\"}],\"attendees\":[{\"positionId\":$OP_EMP,\"present\":true},{\"positionId\":$OP_CHK,\"present\":true},{\"externalName\":\"مهمان بیرونی\",\"present\":true}],\"decisions\":[{\"text\":\"تحویل گزارش نهایی\",\"ownerPositionId\":$OP_EMP,\"dueDate\":\"2026-07-10T00:00:00\",\"agendaSeq\":1},{\"text\":\"بازبینی نقشه‌ها\",\"ownerPositionId\":$OP_CHK,\"dueDate\":\"2035-01-01T00:00:00\",\"agendaSeq\":2}]}"
@@ -3001,7 +3107,7 @@ ibx "$PLAN_TOKEN" "pr:$OPR" "IncludeClosed=true"; check "office gate: and stays 
 as "$OEMP_TOKEN" GET $OF/request-types; check "office: three seed request types without company data" '.success and (.data|length) == 3 and ([.data[].title]|index("درخواست خودرو")) != null and ([.data[].title]|index("درخواست پشتیبانی فناوری اطلاعات")) != null and ([.data[].title]|index("درخواست آموزش")) != null'
 OVT=$(jq -r '.data[]|select(.title == "درخواست خودرو")|.id' "$B")
 as "$OEMP_TOKEN" POST $OF/requests "{\"typeId\":$OVT,\"values\":{\"destination\":\"سایت پروژه\"},\"submit\":true}"; nomsg "office: required fields are checked at submit" "را پر کنید"
-as "$OEMP_TOKEN" POST $OF/requests "{\"typeId\":$OVT,\"values\":{\"destination\":\"سایت پروژه\",\"date\":\"1405/08/10\",\"purpose\":\"بازدید\",\"passengers\":\"۳\"},\"submit\":true}"; check "office: vehicle request submitted: waits for the manager of the unit" ".success and .data.status == 1 and (.data.number|test(\"^RQ-[0-9]{4}-0*1\$\")) and (.data.approvals|length) == 1 and .data.approvals[0].positionId == $OP_MGR and .data.values.passengers == \"3\""
+as "$OEMP_TOKEN" POST $OF/requests "{\"typeId\":$OVT,\"values\":{\"destination\":\"سایت پروژه\",\"date\":\"1405/08/10\",\"purpose\":\"بازدید\",\"passengers\":\"۳\"},\"submit\":true}"; check "office: vehicle request submitted: waits for the manager of the unit; the date value comes back as the Persian text 1405/08/10" ".success and .data.status == 1 and (.data.number|test(\"^RQ-[0-9]{4}-0*1\$\")) and (.data.approvals|length) == 1 and .data.approvals[0].positionId == $OP_MGR and .data.values.passengers == \"3\" and .data.values.date == \"1405/08/10\""
 ORQ=$(val .data.id)
 as "$OEMP_TOKEN" POST $OF/requests/action "{\"id\":$ORQ,\"action\":\"approve\"}"; no "office: the requester cannot approve his own request"
 as "$OMGR_TOKEN" POST $OF/requests/action "{\"id\":$ORQ,\"action\":\"approve\"}"; check "office: the unit manager approves" '.success and .data.status == 2'
@@ -3063,7 +3169,7 @@ OROWS='[
  {"code":"ZZ999","date":"2026-06-28","time":"08:00","device":"GATE-1"}]'
 as "$OEMP_TOKEN" POST $OFA/clock/import "{\"rows\":$OROWS}"; no "office: an ordinary user cannot import clock events"
 as "$OHR_TOKEN" POST $OFA/clock/import "{\"deviceCode\":\"GATE-1\",\"rows\":$OROWS}"; check "office: clock import: 14 events stored, 1 duplicate minute ignored, the unknown personnel code reported" '.success and .data.imported == 14 and .data.duplicates == 1 and (.data.errors|length) == 1'
-as "$OHR_TOKEN" GET "$OFA/clock?EmployeeId=$OAEMP&PageSize=100"; check "office: the Persian-dated row landed in Mordad 1405 (August 2026) and all events are of source Import" '.success and (.data.data|length) == 14 and ([.data.data[]|select(.timestamp|test("^2026-08-1[0-2]T08:00"))]|length) == 1 and ([.data.data[]|select(.source != 2)]|length) == 0'
+as "$OHR_TOKEN" GET "$OFA/clock?EmployeeId=$OAEMP&PageSize=100"; check "office: the Persian-dated row 1405/05/20 landed exactly on 2026-08-11 08:00 and all events are of source Import" '.success and (.data.data|length) == 14 and ([.data.data[]|select(.timestamp|test("^2026-08-11T08:00"))]|length) == 1 and ([.data.data[]|select(.source != 2)]|length) == 0'
 as "$OHR_TOKEN" POST $OFA/clock/manual "{\"employeeId\":$OAEMP,\"timestamp\":\"2026-07-03T08:00:00\",\"direction\":1}"; no "office: a manual clock event needs a reason"
 as "$OEMP_TOKEN" POST $OFA/clock/manual "{\"employeeId\":$OAEMP,\"timestamp\":\"2026-07-03T08:00:00\",\"direction\":1,\"reason\":\"x\"}"; no "office: manual clock events are only for HR"
 as "$OHR_TOKEN" POST $OFA/compute "{\"fromDate\":\"2026-06-22T00:00:00\",\"toDate\":\"2026-07-22T00:00:00\",\"employeeId\":$OAEMP}"; check "office: the month is computed for the one employee with a shift" '.success and .data.employees == 1 and .data.days >= 23'
@@ -3108,7 +3214,111 @@ as "$OHR_TOKEN" GET $OFA/month/1405/4; check "office: the month is recorded as c
 as "$OHR_TOKEN" POST $OFA/close-month '{"year":1405,"month":6,"acceptIncompleteAsAbsent":true}'; check "office: Shahrivar 1405 (payroll approved) is not recomputed and writes no sheet for the employee" '.success and .data.sheets == 0'
 as "$PAYR_TOKEN" GET "$FP/attendance?Year=1405&Month=6"; check "office: the payroll sheet of Shahrivar is untouched" ".success and ([.data.data[]|select(.employeeId == $OAEMP)]|length) == 0"
 as "$OHR_TOKEN" POST $OFA/worked-hours "{\"employeeIds\":[$OAEMP],\"from\":\"2026-06-27T00:00:00\",\"to\":\"2026-06-27T00:00:00\"}"; check "office: worked hours for the production time-booking check (500 minutes)" '.success and (.data|length) == 1 and .data[0].workedMinutes == 500'
-as "$OEMP_TOKEN" GET $OF/inbox/counts; check "office: inbox counts are returned" '.success and .data.open >= 0'
+# =================================================================== R1: attendance, leave, payroll, gates, audit (review findings H6, H7, H8, M2, M3, M4, M5, M7)
+# M4: events in the future or in a month whose payroll is approved are refused by the import and by the device push (counted as rejected, nothing stored)
+ORJ=$(jq -nc --arg f "$(dd 2)" '{deviceCode:"GATE-1",rows:[{code:"ATT01",date:"2026-09-01",time:"08:00"},{code:"ATT01",date:$f,time:"08:00"}]}')
+as "$OHR_TOKEN" POST $OFA/clock/import "$ORJ"; check "office r1 M4: import: an event in a locked month (Shahrivar) and one in the future are both rejected and reported" '.success and .data.imported == 0 and .data.rejected == 2 and (.data.errors|length) == 2'
+opush GATE-1 "$ODKEY" "$(jq -nc --arg f "$(dd 2)" '{events:[{employeeCode:"ATT01",timestamp:"2026-09-01T08:00:00",direction:1},{employeeCode:"ATT01",timestamp:($f+"T08:00:00"),direction:1}]}')"; [ "$CODE" = "200" ] && jq -e '.success and .data.accepted == 0 and .data.rejected == 2' "$B" >/dev/null 2>&1 && ok "office r1 M4: device push: the same two events are rejected" || bad "office r1 M4: device push: the same two events are rejected got $CODE"
+as "$OHR_TOKEN" GET "$OFA/clock?EmployeeId=$OAEMP&PageSize=100"; check "office r1 M4: nothing was stored (14 imported + 2 pushed events only)" '.success and (.data.data|length) == 16'
+as "$OHR_TOKEN" POST $OFA/clock/manual "{\"employeeId\":$OAEMP,\"timestamp\":\"$(dd 2)T08:00:00\",\"direction\":1,\"reason\":\"آینده\"}"; nomsg "office r1 M4: a manual event in the future is refused" "در آینده"
+
+# H6: no pre-approval and no daily maximum means no limit (the old code gave 0). Tue 06-30 in 08:00 out 23:30: all 450 minutes after the shift end are overtime
+as "$OHR_TOKEN" POST $OFA/policy '{"graceMinutes":5,"maxOvertimeMinutesPerDay":null,"overtimeNeedsPreApproval":false,"roundingMinutes":15}'; check "office r1 H6: policy without pre-approval and without a daily maximum saved" '.success and .data.maxOvertimeMinutesPerDay == null and .data.overtimeNeedsPreApproval == false'
+as "$OHR_TOKEN" POST $OFA/compute "{\"fromDate\":\"2026-06-30T00:00:00\",\"toDate\":\"2026-06-30T00:00:00\",\"employeeId\":$OAEMP}"; check "office r1 H6: day recomputed" '.success'
+oday 2026-06-30; check "office r1 H6: with no limit the overtime of 06-30 is 450 minutes (the old code gave 0)" '.success and (.data.data[0]|.workedMinutes == 900 and .overtimeMinutes == 450 and .nightMinutes == 90)'
+
+# H7: a shift that ends after midnight keeps its late punches on the day it started. ATT02 afternoon shift 14:00-22:00, ATT03 night shift 22:00-06:00, on Tue 2026-08-04
+as "$PAYR_TOKEN" POST $FP/employees "$(EJ ATT02 حضور دو 1234567008 IR270170000000100324200001 | jq -c --argjson u "$OCHKID" '. + {userId:$u}')"; check "office r1 H7: payroll employee ATT02 linked to the checker user" ".success and .data.id > 0 and .data.userId == $OCHKID"
+OAEMP2=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/employees "$(EJ ATT03 حضور سه 1234567016 IR270170000000100324200001)"; check "office r1 H7: payroll employee ATT03 saved" '.success and .data.id > 0'
+OAEMP3=$(val .data.id)
+as "$OHR_TOKEN" POST $OFA/shifts '{"title":"شیفت عصر","start":"14:00","end":"22:00","breakMinutes":30,"nightStart":"22:00","nightEnd":"06:00","workDays":[6,0,1,2,3]}'; check "office r1 H7: afternoon shift 14:00-22:00 saved" '.success and .data.scheduledMinutes == 450'
+OSH2=$(val .data.id)
+as "$OHR_TOKEN" POST $OFA/shifts '{"title":"شیفت شب","start":"22:00","end":"06:00","breakMinutes":30,"nightStart":"22:00","nightEnd":"06:00","workDays":[6,0,1,2,3]}'; check "office r1 H7: night shift 22:00-06:00 saved and crosses midnight" '.success and .data.crossesMidnight == true and .data.scheduledMinutes == 450'
+OSH3=$(val .data.id)
+as "$OHR_TOKEN" POST $OFA/shift-assignments "{\"employeeId\":$OAEMP2,\"shiftId\":$OSH2,\"fromDate\":\"2026-08-01T00:00:00\"}"; check "office r1 H7: afternoon shift assigned" '.success'
+as "$OHR_TOKEN" POST $OFA/shift-assignments "{\"employeeId\":$OAEMP3,\"shiftId\":$OSH3,\"fromDate\":\"2026-08-01T00:00:00\"}"; check "office r1 H7: night shift assigned" '.success'
+OR7='{"deviceCode":"GATE-1","rows":[{"code":"ATT02","date":"2026-08-04","time":"13:55"},{"code":"ATT02","date":"2026-08-05","time":"00:30"},{"code":"ATT03","date":"2026-08-04","time":"22:00"},{"code":"ATT03","date":"2026-08-05","time":"10:00"}]}'
+as "$OHR_TOKEN" POST $OFA/clock/import "$OR7"; check "office r1 H7: four events imported" '.success and .data.imported == 4 and .data.rejected == 0'
+as "$OHR_TOKEN" POST $OFA/compute '{"fromDate":"2026-08-04T00:00:00","toDate":"2026-08-05T00:00:00"}'; check "office r1 H7: the two days are computed" '.success'
+odayE() { as "$OHR_TOKEN" GET "$OFA/days?EmployeeId=$1&From=$2&To=$2"; }
+odayE $OAEMP2 2026-08-04; check "office r1 H7: afternoon shift: in 13:55 out 00:30 next day is one present day of 605 minutes (635 minus the 30 minute break), last out on the next calendar day" '.success and (.data.data[0]|.status == 1 and .workedMinutes == 605 and (.firstIn|test("^2026-08-04T13:55")) and (.lastOut|test("^2026-08-05T00:30")))'
+odayE $OAEMP2 2026-08-05; check "office r1 H7: the next day has no punch of its own (00:30 belongs to the day before): an absence, not an incomplete day" '.success and (.data.data[0]|.status == 2 and .absenceDays == 1 and .firstIn == null)'
+odayE $OAEMP3 2026-08-04; check "office r1 H7: night shift: in 22:00 out 10:00 next day is one present day of 690 minutes with 240 minutes of overtime after the 06:00 end" '.success and (.data.data[0]|.status == 1 and .workedMinutes == 690 and .overtimeMinutes == 240 and (.lastOut|test("^2026-08-05T10:00")))'
+
+# M7: a manual clock event is audited with its reason, the Persian time and the user
+as "$OHR_TOKEN" POST $OFA/clock/manual "{\"employeeId\":$OAEMP,\"timestamp\":\"2026-08-06T08:00:00\",\"direction\":1,\"reason\":\"ثبت دستی R1\"}"; check "office r1 M7: manual clock event saved" '.success'
+as "$FM_TOKEN" GET "$FAU?EntityType=OfClockEvent&Action=Added&PageSize=0"; check "office r1 M7: the manual event is in the audit trail with the reason, the Persian time and the user (and no Gregorian date)" '.success and ([.data.data[]|select((.afterJson|tostring|contains("ثبت دستی R1")) and (.afterJson|tostring|test("14[0-9]{2}/[0-9]{2}/[0-9]{2} 08:00")) and ((.afterJson|tostring|test("20[0-9]{2}-[0-9]{2}-[0-9]{2}"))|not) and (.userName|length) > 0)]|length) == 1'
+
+# H8: sick leave is paid by insurance and never uses the annual leave: ATT02 (the checker user) is ill on Sun 08-09 and Mon 08-10
+as "$OCHK_TOKEN" POST $OF/leaves "{\"kind\":3,\"fromDate\":\"2026-08-09T00:00:00\",\"toDate\":\"2026-08-10T00:00:00\",\"reason\":\"بیماری\",\"attachmentDocumentId\":\"$DOCID\",\"submit\":true}"; check "office r1 H8: sick leave of two days submitted" '.success and .data.status == 1 and .data.days == 2'
+OSK=$(val .data.id)
+as "$OMGR_TOKEN" POST $OF/leaves/action "{\"id\":$OSK,\"action\":\"approve\"}"; check "office r1 H8: approved by the manager" '.success and .data.status == 2'
+as "$OHR_TOKEN" POST $OF/leaves/action "{\"id\":$OSK,\"action\":\"record\"}"; check "office r1 H8: recorded" '.success and .data.status == 3'
+as "$OCHK_TOKEN" GET "$OF/leaves/balance?employeeId=$OAEMP2&year=1405&month=5"; check "office r1 H8: the sick leave does not reduce the annual leave balance" '.success and .data.pendingDays == 0 and .data.available == (.data.carriedForward + .data.entitled - .data.used + .data.projectedEntitlement)'
+odayE $OAEMP2 2026-08-09; check "office r1 H8: the day is a sick leave day (not paid leave)" '.success and (.data.data[0]|.status == 3 and .sickLeaveDays == 1 and .paidLeaveDays == 0)'
+as "$OHR_TOKEN" POST $OFA/close-month '{"year":1405,"month":5,"acceptIncompleteAsAbsent":true}'; check "office r1 H8: Mordad closed: ATT02 has 2 sick leave days and no paid leave; ATT03 has 4 hours of overtime" ".success and ([.data.rows[]|select(.employeeId == $OAEMP2 and .sickLeaveDays == 2 and .paidLeaveDays == 0)]|length) == 1 and ([.data.rows[]|select(.employeeId == $OAEMP3 and .overtimeHours == 4)]|length) == 1"
+as "$PAYR_TOKEN" GET "$FP/attendance?Year=1405&Month=5"; check "office r1 H8: the payroll attendance sheet of ATT02 carries the sick leave days apart from the paid leave" ".success and ([.data.data[]|select(.employeeId == $OAEMP2 and .sickLeaveDays == 2 and .paidLeaveDays == 0)]|length) == 1"
+as "$FM_TOKEN" GET "$FAU?EntityType=FnAttendanceSheet&PageSize=0"; check "office r1 M7: the sheets written by the month close are in the audit trail with the user" '.success and ([.data.data[]|select((.userName|length) > 0)]|length) >= 2'
+as "$FM_TOKEN" GET "$FAU?EntityType=OfAttendancePolicy&PageSize=0"; check "office r1 M7: the policy change is in the audit trail with the old value and the user" '.success and ([.data.data[]|select(.action == "Modified" and (.beforeJson|tostring|contains("120")) and (.userName|length) > 0)]|length) >= 1'
+as "$OHR_TOKEN" POST $OFA/policy '{"graceMinutes":5,"maxOvertimeMinutesPerDay":120,"overtimeNeedsPreApproval":false,"roundingMinutes":15}'; check "office r1 H6: the original policy is restored" '.success and .data.maxOvertimeMinutesPerDay == 120'
+as "$OHR_TOKEN" POST $OFA/compute "{\"fromDate\":\"2026-06-30T00:00:00\",\"toDate\":\"2026-06-30T00:00:00\",\"employeeId\":$OAEMP}"; check "office r1 H6: day recomputed under the restored policy" '.success'
+oday 2026-06-30; check "office r1 H6: and the overtime of 06-30 is capped at 120 again" '.success and .data.data[0].overtimeMinutes == 120'
+
+# M3: a leave that spans a month whose payroll is approved cannot be approved or rejected (submitted when only its first and last month were open)
+as "$OEMP_TOKEN" POST $OF/leaves '{"kind":5,"fromDate":"2026-08-20T00:00:00","toDate":"2026-09-25T00:00:00","reason":"ماموریت بلندمدت","submit":true}'; check "office r1 M3: a long mission over the locked Shahrivar is submitted (its first and last month are open)" '.success and .data.status == 1'
+OLM=$(val .data.id)
+as "$OMGR_TOKEN" POST $OF/leaves/action "{\"id\":$OLM,\"action\":\"approve\"}"; nomsg "office r1 M3: it cannot be approved: it touches Shahrivar whose payroll is approved" "حقوق این ماه تایید شده"
+as "$OMGR_TOKEN" POST $OF/leaves/action "{\"id\":$OLM,\"action\":\"reject\",\"comment\":\"آزمون\"}"; nomsg "office r1 M3: nor rejected" "حقوق این ماه تایید شده"
+as "$OEMP_TOKEN" POST $OF/leaves/action "{\"id\":$OLM,\"action\":\"cancel\"}"; check "office r1 M3: the employee withdraws it" '.success and .data.status == 5'
+
+# M2: a leave that crosses the last month booked by payroll stays pending only for the days after it. Leave Tue 07-21 .. Sun 07-26 (working days 21, 22, 25, 26), approved before the Tir payroll is approved
+as "$OEMP_TOKEN" POST $OF/leaves '{"kind":1,"fromDate":"2026-07-21T00:00:00","toDate":"2026-07-26T00:00:00","reason":"عبور از مرز ماه","submit":true}'; check "office r1 M2: leave over the end of Tir submitted: 4 working days" '.success and .data.status == 1 and .data.days == 4'
+OLK=$(val .data.id)
+as "$OMGR_TOKEN" POST $OF/leaves/action "{\"id\":$OLK,\"action\":\"approve\"}"; check "office r1 M2: approved" '.success and .data.status == 2'
+as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":4,"note":"آزمون تیر"}'; check "office r1 M2: payroll run of Tir 1405 created" '.success and .data.status == 0'
+PRT=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/runs/$PRT/calculate; check "office r1 M2: calculated" '.success and .data.run.status == 1'
+as "$FM_TOKEN" POST $FP/runs/$PRT/approve; check "office r1 M2: approved by the finance manager" '.success and .data.status == 2'
+as "$OEMP_TOKEN" GET "$OF/leaves/balance?employeeId=$OAEMP&year=1405&month=5"; check "office r1 M2: payroll booked Tir (2.25 paid leave days used); of the leave over the month end only the 2 days after Tir are still pending" '.success and .data.lastMonth == 4 and .data.used == 2.25 and .data.pendingDays == 2'
+
+# M5b: the approval item of a payroll run leaves the inbox when a rate change sends the run back to be calculated again
+as "$PAYR_TOKEN" POST $FP/runs '{"year":1405,"month":5,"note":"آزمون مرداد"}'; check "office r1 M5: payroll run of Mordad 1405 created" '.success and .data.status == 0'
+PRM=$(val .data.id)
+as "$PAYR_TOKEN" POST $FP/runs/$PRM/calculate; check "office r1 M5: Mordad calculated (it holds ATT01, ATT02 and ATT03)" '.success and .data.run.status == 1'
+ibx "$FM_TOKEN" "payroll:$PRM"; check "office r1 M5: the finance manager has the approval item of the calculated run" '.success and (.data.data|length) == 1'
+as "$PAYR_TOKEN" POST $FP/rates "{\"year\":1405,\"key\":\"SeniorityDaily\",\"value\":10001,\"source\":\"$SRC\",\"verify\":true}"; check "office r1 M5: a rate changed after the calculation" '.success'
+as "$PAYR_TOKEN" GET $FP/runs/$PRM; check "office r1 M5: the run went back to draft" '.success and .data.status == 0'
+ibx "$FM_TOKEN" "payroll:$PRM"; check "office r1 M5: and its approval item left the inbox in the same save (the old item stayed open)" '.success and (.data.data|length) == 0'
+as "$PAYR_TOKEN" POST $FP/runs/$PRM/calculate; check "office r1 M5: calculated again" '.success and .data.run.status == 1'
+ibx "$FM_TOKEN" "payroll:$PRM"; check "office r1 M5: the approval item is back" '.success and (.data.data|length) == 1'
+as "$FM_TOKEN" POST $FP/runs/$PRM/approve; check "office r1 M5: Mordad approved" '.success and .data.status == 2'
+ibx "$FM_TOKEN" "payroll:$PRM"; check "office r1 M5: and the item is closed" '.success and (.data.data|length) == 0'
+as "$OHR_TOKEN" GET "$OF/leaves/balance?employeeId=$OAEMP2&year=1405&month=6"; check "office r1 H8: after payroll booked Mordad the sick leave of ATT02 used none of the annual leave" '.success and .data.lastMonth == 5 and .data.used == 0'
+
+# M5a: posting accounting events (the posting job) raises the voucher gate for the finance manager
+as "$FM_TOKEN" POST $FG/vouchers/finalize-up-to "{\"fiscalYearId\":$FY,\"upTo\":\"$(dd 400)T00:00:00\"}"; check "office r1 M5: all checked vouchers finalised" '.success'
+ibx "$FM_TOKEN" "vouchers:finalise"; check "office r1 M5: so the voucher gate is closed" '.success and (.data.data|length) == 0'
+as "$PAYR_TOKEN" POST $FP/runs/$PRM/post; check "office r1 M5: the Mordad payroll is posted as an accounting event" '.success and .data.status == 3'
+as "$FM_TOKEN" POST $FG/post-events; check "office r1 M5: the posting job turned the event into a voucher" '.success and .data.posted >= 1'
+ibx "$FM_TOKEN" "vouchers:finalise"; check "office r1 M5: and the finance manager has the vouchers waiting to be finalised (the posting job now raises the gate)" '.success and (.data.data|length) == 1'
+
+# M5c/M5d: a major NCR waits for the committee roles in the inbox; its CAPA waits for the quality assurance role to name an owner
+ncr "{\"id\":$R3NCR,\"severity\":2,\"disposition\":1,\"source\":1}"; check "office r1 M5: the auto NCR is classified major (its CAPA is drafted)" '.success and .data.severity == 2 and .data.capaId != null'
+R3CAPA=$(val .data.capaId)
+ibx "$QC_TOKEN" "ncr:$R3NCR"; check "office r1 M5: the quality manager has the NCR decision in the inbox" '.success and (.data.data|length) == 1'
+ibx "$ENG_TOKEN" "ncr:$R3NCR"; check "office r1 M5: and engineering" '.success and (.data.data|length) == 1'
+ibx "$PROD_TOKEN" "ncr:$R3NCR"; check "office r1 M5: and manufacturing" '.success and (.data.data|length) == 1'
+ibx "$WH_TOKEN" "ncr:$R3NCR"; check "office r1 M5: but not the warehouse" '.success and (.data.data|length) == 0'
+ibx "$QA_TOKEN" "capa-assign:$R3CAPA"; check "office r1 M5: the drafted CAPA waits in the inbox of the quality assurance role for an owner" '.success and (.data.data|length) == 1'
+capa_cycle $R3CAPA $QAID; check "office r1 M5: the CAPA gets its owner" '.success and .data.ownerUserId > 0'
+ibx "$QA_TOKEN" "capa-assign:$R3CAPA"; check "office r1 M5: and the assignment item is closed" '.success and (.data.data|length) == 0'
+
+# the inbox counts equal what the list shows, and reading an item moves exactly one unread to read
+as "$OEMP_TOKEN" GET "$OF/inbox?PageSize=100"; OIN_OPEN=$(jq -r '.data.data|length' "$B"); OIN_UNREAD=$(jq -r '[.data.data[]|select(.status == 0)]|length' "$B"); OIN_ONE=$(jq -r '[.data.data[]|select(.status == 0)][0].id' "$B")
+as "$OEMP_TOKEN" GET $OF/inbox/counts; check "office r1: the inbox counts equal the open and unread items of the list (and the list is not empty)" ".success and .data.open == $OIN_OPEN and .data.unread == $OIN_UNREAD and $OIN_OPEN > 0 and $OIN_OPEN < 100 and $OIN_UNREAD > 0"
+as "$OEMP_TOKEN" POST $OF/inbox/act "{\"id\":$OIN_ONE,\"action\":\"read\"}"; check "office r1: one unread item is read" '.success and .data.status == 1'
+as "$OEMP_TOKEN" GET $OF/inbox/counts; check "office r1: the unread count fell by exactly one and the open count did not change" ".success and .data.open == $OIN_OPEN and .data.unread == $((OIN_UNREAD - 1))"
 TOKEN=$ADMIN_TOKEN
 
 # ---------------------------------------------------------------- roles of the new users

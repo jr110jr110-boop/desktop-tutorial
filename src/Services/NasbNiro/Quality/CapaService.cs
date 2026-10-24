@@ -27,6 +27,9 @@ namespace Services.NasbNiro.Quality
         /// <summary>Stages a CAPA draft in the context (no save): the caller saves it together with its own change.</summary>
         Task<Capa> DraftAsync(CapaSource source, int? sourceId, string problem, bool auto, CancellationToken cancellationToken);
 
+        /// <summary>A CAPA without an owner (for example one the system drafted from a major NCR or an audit finding) is a task for QA until the owner and the actions are set. Call after the save.</summary>
+        Task SyncAssignGateAsync(Capa capa, CancellationToken cancellationToken);
+
         Task<ResponseDto<PagedList<ComplaintListDto>>> GetComplaintsAsync(ComplaintQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<ComplaintDto>> GetComplaintAsync(int id, CancellationToken cancellationToken);
         Task<ResponseDto<ComplaintDto>> SaveComplaintAsync(SaveComplaintDto dto, CancellationToken cancellationToken);
@@ -57,6 +60,13 @@ namespace Services.NasbNiro.Quality
         private static bool IsOverdue(Capa c, DateTime today) =>
             ((c.Status == CapaStatus.Open || c.Status == CapaStatus.ActionsDefined) && c.DueDate.HasValue && c.DueDate.Value.Date < today) ||
             (c.Status == CapaStatus.Implemented && c.EffectivenessDueDate.HasValue && c.EffectivenessDueDate.Value.Date < today);
+
+        public async Task SyncAssignGateAsync(Capa capa, CancellationToken cancellationToken)
+        {
+            if (capa == null || capa.Id == 0) return;
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "capa-assign:" + capa.Id, capa.Status == CapaStatus.Open && !capa.OwnerUserId.HasValue && !capa.Deleted, "quality", "capa", capa.Id,
+                "تعیین مسئول و اقدام‌های CAPA " + capa.Number, "/quality/capas/" + capa.Id, "QA", cancellationToken, capa.DueDate, global::Entities.Model.NasbNiro.Office.OfInboxKind.Task);
+        }
 
         public async Task<Capa> DraftAsync(CapaSource source, int? sourceId, string problem, bool auto, CancellationToken cancellationToken)
         {
@@ -213,6 +223,7 @@ namespace Services.NasbNiro.Quality
             capa.ModifyDate = now; capa.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<CapaDto>(QualityText.Concurrency); }
+            await SyncAssignGateAsync(capa, cancellationToken);
             return await GetCapaAsync(capa.Id, cancellationToken);
         }
 
@@ -272,6 +283,7 @@ namespace Services.NasbNiro.Quality
             await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "capa:" + capa.Id, capa.Status == CapaStatus.Implemented || capa.Status == CapaStatus.EffectivenessCheck, "quality", "capa", capa.Id,
                 (capa.Status == CapaStatus.Implemented ? "بررسی اثربخشی CAPA " : "بستن CAPA ") + capa.Number, "/quality/capas/" + capa.Id, QualityRoles.CapaClosers, cancellationToken,
                 capa.Status == CapaStatus.Implemented ? capa.EffectivenessDueDate : (DateTime?)null);
+            await SyncAssignGateAsync(capa, cancellationToken);
             return await GetCapaAsync(capa.Id, cancellationToken);
         }
 
@@ -352,6 +364,7 @@ namespace Services.NasbNiro.Quality
             c.Severity = dto.Severity; c.ResponseDue = received.AddDays((int)settings[QualitySettingKeys.ComplaintResponseDays]);
             c.ModifyDate = now; c.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncAssignGateAsync(c.Capa, cancellationToken);
             return ResponseDtoHelper.Ok(await ComplaintDtoAsync(c, cancellationToken));
         }
 

@@ -161,6 +161,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
     {
         public int Imported { get; set; }
         public int Duplicates { get; set; }
+
+        /// <summary>Events refused: in the future, or in a month whose payroll is approved.</summary>
+        public int Rejected { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
     }
 
@@ -239,6 +242,7 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int AbsenceDays { get; set; }
         public int UnpaidLeaveDays { get; set; }
         public decimal PaidLeaveDays { get; set; }
+        public decimal SickLeaveDays { get; set; }
         public int MissionDays { get; set; }
         public string Note { get; set; }
     }
@@ -262,6 +266,7 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public decimal NightHours { get; set; }
         public decimal HolidayHours { get; set; }
         public decimal PaidLeaveDays { get; set; }
+        public decimal SickLeaveDays { get; set; }
         public decimal UnpaidLeaveDays { get; set; }
         public decimal AbsenceDays { get; set; }
         public decimal MissionDays { get; set; }

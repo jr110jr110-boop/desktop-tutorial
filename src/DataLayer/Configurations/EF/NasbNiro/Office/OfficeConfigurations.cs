@@ -85,6 +85,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
                 b.Property(x => x.BodyHtml).HasColumnType("nvarchar(max)");
                 b.Property(x => x.IncomingNumber).HasMaxLength(Name);
                 b.Property(x => x.ContentHash).HasMaxLength(Name);
+                b.Property(x => x.SignatureFileHash).HasMaxLength(Code);
                 b.Property(x => x.DeliveryReceipt).HasMaxLength(Text);
                 b.Property(x => x.CancelReason).HasMaxLength(Text);
                 b.HasOne<OfPosition>().WithMany().HasForeignKey(x => x.SenderPositionId).OnDelete(DeleteBehavior.Restrict);
@@ -115,6 +116,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
             {
                 b.ToTable("OfLetterAttachments");
                 b.Property(x => x.FileName).HasMaxLength(Title);
+                b.Property(x => x.FileHash).HasMaxLength(Code);
                 b.HasOne(x => x.Letter).WithMany(x => x.Attachments).HasForeignKey(x => x.LetterId).OnDelete(DeleteBehavior.Cascade);
             });
             builder.Entity<OfRecordLink>(b =>
@@ -238,6 +240,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
             {
                 b.ToTable("OfAttendanceDays");
                 b.Property(x => x.PaidLeaveDays).HasPrecision(9, 4);
+                b.Property(x => x.SickLeaveDays).HasPrecision(9, 4);
                 b.Property(x => x.Note).HasMaxLength(Text);
                 b.HasIndex(x => new { x.EmployeeId, x.Date }).IsUnique();
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);

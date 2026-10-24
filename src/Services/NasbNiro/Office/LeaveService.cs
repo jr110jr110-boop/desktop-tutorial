@@ -86,6 +86,16 @@ namespace Services.NasbNiro.Office
             return await _uow.Set<FnPayrollRun>().AnyAsync(r => r.Year == y && r.Month == m && r.Status >= FnPayrollStatus.Approved && (r.WorkshopId == null || r.WorkshopId == workshopId), ct);
         }
 
+        /// <summary>The leave touches a month whose payroll is approved (any month between the two dates).</summary>
+        private async Task<bool> PayrollLockedRangeAsync(OfLeaveRequest r, int? workshopId, CancellationToken ct)
+        {
+            for (DateTime d = r.FromDate.Date; d <= r.ToDate.Date; d = PersianCal.End(PersianCal.Year(d), PersianCal.Month(d)).AddDays(1))
+                if (await PayrollLockedAsync(d, workshopId, ct)) return true;
+            return await PayrollLockedAsync(r.ToDate, workshopId, ct);
+        }
+
+        private const string LockedMonth = "حقوق این ماه تایید شده و این درخواست دیگر تایید، ثبت یا رد نمی‌شود.";
+
         /// <summary>The manager position of the employee's unit; the unit above when the employee is the manager.</summary>
         private async Task<int?> FindApproverAsync(FnEmployee emp, CancellationToken ct)
         {
@@ -152,9 +162,23 @@ namespace Services.NasbNiro.Office
             DateTime ys = PersianCal.Start(year, 1), ye = PersianCal.End(year, 12);
             var pendingRows = await _uow.Set<OfLeaveRequest>().AsNoTracking()
                 .Where(r => !r.Deleted && r.EmployeeId == employeeId && (r.Status == OfLeaveStatus.Approved || r.Status == OfLeaveStatus.Recorded) && r.FromDate >= ys && r.FromDate <= ye
-                    && (r.Kind == OfLeaveKind.DailyLeave || r.Kind == OfLeaveKind.HourlyLeave || r.Kind == OfLeaveKind.SickLeave) && (excludeLeaveId == null || r.Id != excludeLeaveId))
-                .Select(r => new { r.FromDate, r.Days }).ToListAsync(ct);
-            dto.PendingDays = pendingRows.Where(r => PersianCal.Month(r.FromDate) > dto.LastMonth).Sum(r => r.Days);
+                    && (r.Kind == OfLeaveKind.DailyLeave || r.Kind == OfLeaveKind.HourlyLeave) && (excludeLeaveId == null || r.Id != excludeLeaveId))
+                .Select(r => new { r.Kind, r.FromDate, r.ToDate, r.Days }).ToListAsync(ct);
+            // sick leave is paid by insurance and never uses the annual balance. Payroll books only the days inside each month it has approved, so a request that crosses
+            // a month boundary stays pending for the days after the last booked month
+            decimal pending = 0m;
+            if (dto.LastMonth < 12)
+            {
+                DateTime firstOpen = PersianCal.Start(year, dto.LastMonth + 1);
+                foreach (var r in pendingRows)
+                {
+                    if (r.FromDate >= firstOpen) { pending += r.Days; continue; }
+                    if (r.ToDate < firstOpen || r.Kind == OfLeaveKind.HourlyLeave) continue;
+                    DateTime last = r.ToDate > ye ? ye : r.ToDate;
+                    pending += await WorkingDaysAsync(employeeId, firstOpen, last, ct);
+                }
+            }
+            dto.PendingDays = pending;
             dto.Available = dto.CarriedForward + dto.Entitled - dto.Used + dto.ProjectedEntitlement - dto.PendingDays;
             return dto;
         }
@@ -499,6 +523,7 @@ namespace Services.NasbNiro.Office
                     {
                         ActingPosition acting = c.Pos.Contains(r.ApproverPositionId ?? -1) ? (await OfficeActors.ActingAsync(_uow, Me, ct)).First(a => a.PositionId == r.ApproverPositionId) : null;
                         if (acting == null || emp.UserId == Me) return Bad<LeaveDto>(OfficeText.NotAllowed);
+                        if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
                         string problem = await BalanceProblemAsync(r, ct);
                         if (problem != null) return Bad<LeaveDto>(problem);
                         r.Status = OfLeaveStatus.Approved; r.ApprovedByUserId = Me; r.ApprovedOnBehalf = acting.OnBehalf; r.ApprovedAt = now; r.ApproverComment = comment;
@@ -511,6 +536,7 @@ namespace Services.NasbNiro.Office
                 case "record":
                     {
                         if (r.Status != OfLeaveStatus.Approved || !c.IsHr || emp.UserId == Me) return Bad<LeaveDto>(OfficeText.NotAllowed);
+                        if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
                         if (r.Kind == OfLeaveKind.ForgotClock)
                         {
                             DateTime ts = r.FromDate.Date.AddMinutes(r.FromMinute ?? 0);
@@ -526,6 +552,7 @@ namespace Services.NasbNiro.Office
                 case "reject":
                     {
                         if (comment == null) return Bad<LeaveDto>("دلیل رد درخواست را بنویسید.");
+                        if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
                         r.Status = OfLeaveStatus.Rejected; r.RejectReason = comment;
                         await CloseKeysAsync("رد شد", ct, "leave:" + r.Id, "leave-record:" + r.Id);
                         if (emp.UserId.HasValue) AddInbox("leave-result:" + r.Id, OfInboxKind.Alert, $"{label} شما رد شد: {comment}", r, null, emp.UserId, null);

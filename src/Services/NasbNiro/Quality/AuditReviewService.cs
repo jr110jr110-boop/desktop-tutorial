@@ -213,6 +213,7 @@ namespace Services.NasbNiro.Quality
             else if (existing != null) f.Capa = existing;
             f.ModifyDate = now; f.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await _capa.SyncAssignGateAsync(f.Capa, cancellationToken);
             return await GetAuditAsync(audit.Id, cancellationToken);
         }
 
@@ -391,6 +392,7 @@ namespace Services.NasbNiro.Quality
                 d.Capa = await _capa.DraftAsync(CapaSource.ManagementReview, r.Id, $"تصمیم بازنگری مدیریت {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(r.ReviewDate))}: {d.Text}", true, cancellationToken);
             r.ModifyDate = DateTimeOffset.Now; r.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await _capa.SyncAssignGateAsync(d.Capa, cancellationToken);
             return ResponseDtoHelper.Ok(await BuildReviewAsync(r, cancellationToken));
         }
 

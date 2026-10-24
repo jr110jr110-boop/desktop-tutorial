@@ -648,6 +648,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal HolidayHours { get; set; }
         public int ShiftType { get; set; }
         public decimal PaidLeaveDays { get; set; }
+        public decimal SickLeaveDays { get; set; }
         public decimal UnpaidLeaveDays { get; set; }
         public decimal AbsenceDays { get; set; }
         public decimal MissionDays { get; set; }

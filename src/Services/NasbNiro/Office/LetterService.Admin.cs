@@ -104,6 +104,11 @@ namespace Services.NasbNiro.Office
             if (pattern.Length > 200) return Bad<NumberingRuleDto>(OfficeText.InvalidData);
             if (dto.UnitId.HasValue && !await _uow.Set<OfUnit>().AnyAsync(u => u.Id == dto.UnitId.Value && !u.Deleted, ct)) return Bad<NumberingRuleDto>("واحد پیدا نشد.");
             await EnsureRulesAsync(ct);
+            if (dto.IsActive)
+            {
+                string clash = await RuleCollisionAsync(dto.Kind, dto.UnitId, pattern, dto.Id, ct);
+                if (clash != null) return Bad<NumberingRuleDto>(clash);
+            }
             OfNumberingRule r;
             DateTimeOffset now = DateTimeOffset.Now;
             if (dto.Id.HasValue)
@@ -122,6 +127,42 @@ namespace Services.NasbNiro.Office
             r.Pattern = pattern; r.IsActive = dto.IsActive; r.ModifyDate = now; r.ModifierUserId = Me;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await MapRulesAsync(new List<OfNumberingRule> { r }, ct))[0]);
+        }
+
+        /// <summary>The pattern with every token replaced by a marker, so two patterns that produce the same numbers have the same shape. The unit token is written out for the unit being compared.</summary>
+        private static string Shape(string pattern, string unitCode, OfLetterKind kind) =>
+            Regex.Replace(pattern, @"\{(yyyy|yy|unit|kind|seq(?::\d{1,9})?)\}", m =>
+            {
+                string t = m.Groups[1].Value;
+                if (t == "yyyy") return "\u0001Y4";
+                if (t == "yy") return "\u0001Y2";
+                if (t == "unit") return unitCode ?? "CO";
+                if (t == "kind") return KindCode(kind);
+                return "\u0001S";
+            });
+
+        /// <summary>
+        /// Two active rules of one kind must not be able to issue the same number (the second would hit the unique index for good). A rule is refused when its pattern has the same shape as another active
+        /// rule of the kind, with the unit token written out as the code of the unit the two are compared for. A literal part that the other rule cannot produce keeps them apart.
+        /// </summary>
+        private async Task<string> RuleCollisionAsync(OfLetterKind kind, int? unitId, string pattern, int? ignoreId, CancellationToken ct)
+        {
+            List<OfNumberingRule> others = await _uow.Set<OfNumberingRule>().AsNoTracking().Where(x => !x.Deleted && x.IsActive && x.Kind == kind && (ignoreId == null || x.Id != ignoreId.Value)).ToListAsync(ct);
+            if (others.Count == 0) return null;
+            var unitIds = new List<int>();
+            if (unitId.HasValue) unitIds.Add(unitId.Value);
+            unitIds.AddRange(others.Where(o => o.UnitId.HasValue).Select(o => o.UnitId.Value));
+            Dictionary<int, string> codes = await _uow.Set<OfUnit>().AsNoTracking().Where(u => unitIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Code, ct);
+            string CodeOf(int? id) => id.HasValue && codes.TryGetValue(id.Value, out string c) ? c : "CO";
+            foreach (OfNumberingRule o in others)
+            {
+                string mine, theirs;
+                if (unitId.HasValue && o.UnitId.HasValue && unitId != o.UnitId) { mine = Shape(pattern, CodeOf(unitId), kind); theirs = Shape(o.Pattern, CodeOf(o.UnitId), kind); }
+                else { string code = CodeOf(unitId ?? o.UnitId); mine = Shape(pattern, code, kind); theirs = Shape(o.Pattern, code, kind); }
+                if (mine == theirs)
+                    return "این الگو می‌تواند شماره‌ای بسازد که قاعده فعال دیگری از همین نوع نامه ساخته است و شماره تکراری می‌دهد. در الگو یک حرف یا عبارت ثابت اضافه کنید (مثلاً INT-{yy}-{seq:3}).";
+            }
+            return null;
         }
 
         // -------------------------------------------------------------------------------- templates

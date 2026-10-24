@@ -91,6 +91,12 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public bool IsActive { get; set; }
         public bool Current { get; set; }
         public string Reason { get; set; }
+
+        /// <summary>0 approved, 1 pending (waits for the holder or the CEO), 2 rejected. Only an approved, active delegation in its dates gives access.</summary>
+        public Entities.Model.NasbNiro.Office.OfDelegationStatus Status { get; set; }
+        public string CreatedByName { get; set; }
+        public string DecidedByName { get; set; }
+        public string DecidedAtText { get; set; }
     }
 
     public class SaveDelegationDto

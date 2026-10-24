@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using Common.IdentityToolkit;
 using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Office;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -70,6 +71,13 @@ namespace DataLayer.Context
             { typeof(FnTermination), new[] { "Status", "VoucherId", "TerminationDate" } },
             { typeof(FnBonusRun), new[] { "Status", "Year", "TotalGross", "TotalNet", "VoucherId" } },
             { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Iban" } },
+            // office automation, review 1 (M7): who may act for a position, who sits in it, the numbering rules, the attendance policy, manual and imported clock events and the payroll attendance input
+            { typeof(OfDelegation), null },
+            { typeof(OfPosition), new[] { "Title", "UnitId", "UserId", "EmployeeId", "IsManager", "CanSign", "IsActive" } },
+            { typeof(OfNumberingRule), null },
+            { typeof(OfAttendancePolicy), null },
+            { typeof(OfClockEvent), new[] { "EmployeeId", "Timestamp", "Direction", "Source", "Reason", "DeviceCode" } },
+            { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays" } },
         };
 
         private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban" };
@@ -110,6 +118,8 @@ namespace DataLayer.Context
                     if (entry.Entity is FnVoucher v && (v.Type == FnVoucherType.Auto || v.IsImported)) continue;
                     if (entry.Entity is FnVoucherLine vl && vl.Voucher != null && (vl.Voucher.Type != FnVoucherType.Normal || vl.Voucher.IsImported)) continue;   // only the lines of manual vouchers
                     if (entry.Entity is FnDetailAccount d && d.LinkedEntityId.HasValue) continue;
+                    // the punches of the devices are too many to list; manual and imported events are the ones that need a trail
+                    if (entry.Entity is OfClockEvent ce && ce.Source == OfClockSource.Device) continue;
                 }
 
                 var before = new Dictionary<string, object>();
@@ -203,6 +213,11 @@ namespace DataLayer.Context
                 if (!string.IsNullOrWhiteSpace(t)) { text = name == "TemporaryNumber" ? "موقت " + t : t; break; }
             }
             if (entry.Entity is FnEmployee) text = "کارمند (شماره حساب)";
+            if (entry.Entity is OfClockEvent) text = "تردد " + (entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Source")?.CurrentValue?.ToString() == "Manual" ? "دستی" : "واردشده");
+            if (entry.Entity is FnAttendanceSheet) text = "برگه حضور ماهانه";
+            if (entry.Entity is OfAttendancePolicy) text = "سیاست حضور و غیاب";
+            if (entry.Entity is OfDelegation) text = "نیابت سمت";
+            if (entry.Entity is OfNumberingRule) text = "قاعده شماره‌گذاری نامه";
             if (text != null && text.Length > 280) text = text.Substring(0, 280);
             return text;
         }

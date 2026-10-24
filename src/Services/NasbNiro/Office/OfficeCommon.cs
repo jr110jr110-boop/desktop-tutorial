@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Linq;
 using System.Net;
 using System.Text;
@@ -101,6 +102,32 @@ namespace Services.NasbNiro.Office
 
         /// <summary>The user is a deputy, not the holder: every action is recorded "on behalf of".</summary>
         public bool OnBehalf { get; set; }
+
+        /// <summary>For a deputy: the start of the earliest current delegation of this position (a deputy never reads Secret letters dated before it).</summary>
+        public DateTime? Since { get; set; }
+    }
+
+    /// <summary>Small helpers to combine EF predicates over the same entity.</summary>
+    internal static class Pred
+    {
+        private sealed class Rebind : ExpressionVisitor
+        {
+            private readonly ParameterExpression _from, _to;
+            public Rebind(ParameterExpression from, ParameterExpression to) { _from = from; _to = to; }
+            protected override Expression VisitParameter(ParameterExpression node) => node == _from ? _to : base.VisitParameter(node);
+        }
+
+        public static Expression<Func<T, bool>> Or<T>(Expression<Func<T, bool>> a, Expression<Func<T, bool>> b)
+        {
+            ParameterExpression p = a.Parameters[0];
+            return Expression.Lambda<Func<T, bool>>(Expression.OrElse(a.Body, new Rebind(b.Parameters[0], p).Visit(b.Body)), p);
+        }
+
+        public static Expression<Func<T, bool>> And<T>(Expression<Func<T, bool>> a, Expression<Func<T, bool>> b)
+        {
+            ParameterExpression p = a.Parameters[0];
+            return Expression.Lambda<Func<T, bool>>(Expression.AndAlso(a.Body, new Rebind(b.Parameters[0], p).Visit(b.Body)), p);
+        }
     }
 
     internal static class OfficeActors
@@ -112,12 +139,17 @@ namespace Services.NasbNiro.Office
             if (userId <= 0) return result;
             List<int> own = await uow.Set<OfPosition>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && p.UserId == userId).Select(p => p.Id).ToListAsync(ct);
             foreach (int id in own) result.Add(new ActingPosition { PositionId = id, OnBehalf = false });
-            List<int> delegated = await uow.Set<OfDelegation>().AsNoTracking()
-                .Where(d => !d.Deleted && d.IsActive && d.DeputyUserId == userId && d.FromDate <= today && d.ToDate >= today).Select(d => d.PositionId).Distinct().ToListAsync(ct);
-            if (delegated.Count > 0)
+            // only approved delegations give access (a pending one waits for the holder or the CEO)
+            var delegations = await uow.Set<OfDelegation>().AsNoTracking()
+                .Where(d => !d.Deleted && d.IsActive && d.Status == OfDelegationStatus.Approved && d.DeputyUserId == userId && d.FromDate <= today && d.ToDate >= today)
+                .Select(d => new { d.PositionId, d.FromDate }).ToListAsync(ct);
+            if (delegations.Count > 0)
             {
+                List<int> delegated = delegations.Select(d => d.PositionId).Distinct().ToList();
                 List<int> active = await uow.Set<OfPosition>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && delegated.Contains(p.Id)).Select(p => p.Id).ToListAsync(ct);
-                foreach (int id in active) if (result.All(r => r.PositionId != id)) result.Add(new ActingPosition { PositionId = id, OnBehalf = true });
+                foreach (int id in active)
+                    if (result.All(r => r.PositionId != id))
+                        result.Add(new ActingPosition { PositionId = id, OnBehalf = true, Since = delegations.Where(d => d.PositionId == id).Min(d => d.FromDate) });
             }
             return result;
         }

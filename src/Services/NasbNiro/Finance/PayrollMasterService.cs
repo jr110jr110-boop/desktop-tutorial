@@ -82,7 +82,16 @@ namespace Services.NasbNiro.Finance
         {
             IQueryable<FnPayrollRun> q = _uow.Set<FnPayrollRun>().Where(r => r.Status == FnPayrollStatus.Calculated);
             if (year.HasValue) q = q.Where(r => r.Year == year.Value);
-            foreach (FnPayrollRun r in await q.ToListAsync(ct)) r.Status = FnPayrollStatus.Draft;
+            List<FnPayrollRun> runs = await q.ToListAsync(ct);
+            foreach (FnPayrollRun r in runs) r.Status = FnPayrollStatus.Draft;
+            // the approval item of a run that must be calculated again leaves the inbox in the same save (approving it would only answer "only a calculated run")
+            if (runs.Count > 0)
+            {
+                List<string> keys = runs.Select(r => "payroll:" + r.Id).ToList();
+                List<global::Entities.Model.NasbNiro.Office.OfInboxItem> items = await _uow.Set<global::Entities.Model.NasbNiro.Office.OfInboxItem>()
+                    .Where(i => i.SourceKey != null && keys.Contains(i.SourceKey) && (i.Status == global::Entities.Model.NasbNiro.Office.OfInboxStatus.Unread || i.Status == global::Entities.Model.NasbNiro.Office.OfInboxStatus.Read)).ToListAsync(ct);
+                foreach (var i in items) { i.Status = global::Entities.Model.NasbNiro.Office.OfInboxStatus.Done; i.ClosedAt = DateTimeOffset.Now; i.ClosedReason = "شرط‌های محاسبه تغییر کرد؛ حقوق دوباره محاسبه شود"; }
+            }
         }
 
         // ================================================================================== set-up
@@ -483,7 +492,7 @@ namespace Services.NasbNiro.Finance
             {
                 Id = s.Id, EmployeeId = s.EmployeeId, PersonnelCode = e?.PersonnelCode, EmployeeName = e == null ? null : (e.FirstName + " " + e.LastName).Trim(), Year = s.Year, Month = s.Month,
                 DaysWorked = s.DaysWorked, OvertimeHours = s.OvertimeHours, NightHours = s.NightHours, HolidayHours = s.HolidayHours, ShiftType = s.ShiftType,
-                PaidLeaveDays = s.PaidLeaveDays, UnpaidLeaveDays = s.UnpaidLeaveDays, AbsenceDays = s.AbsenceDays, MissionDays = s.MissionDays, Inputs = inputs,
+                PaidLeaveDays = s.PaidLeaveDays, SickLeaveDays = s.SickLeaveDays, UnpaidLeaveDays = s.UnpaidLeaveDays, AbsenceDays = s.AbsenceDays, MissionDays = s.MissionDays, Inputs = inputs,
                 WorkOrders = (s.WorkOrders ?? new List<FnAttendanceWorkOrder>()).Select(w => new AttendanceWorkOrderDto { WorkOrderId = w.WorkOrderId, Hours = w.Hours }).ToList(),
             };
         }

@@ -43,6 +43,13 @@ namespace WebApi.Controllers
         [HttpPost("delegations/{id:int}/cancel")]
         public async Task<IActionResult> CancelDelegationAsync(int id, CancellationToken ct) => Ok(await _org.CancelDelegationAsync(id, ct));
 
+        /// <summary>The holder of the position (or the CEO) approves a delegation made by somebody else. Not the one who made it.</summary>
+        [HttpPost("delegations/{id:int}/approve")]
+        public async Task<IActionResult> ApproveDelegationAsync(int id, CancellationToken ct) => Ok(await _org.DecideDelegationAsync(id, true, ct));
+
+        [HttpPost("delegations/{id:int}/reject")]
+        public async Task<IActionResult> RejectDelegationAsync(int id, CancellationToken ct) => Ok(await _org.DecideDelegationAsync(id, false, ct));
+
         [HttpGet("org/tree")]
         public async Task<IActionResult> TreeAsync(CancellationToken ct) => Ok(await _org.GetTreeAsync(ct));
 
@@ -79,7 +86,18 @@ namespace WebApi.Controllers
     public class OfficeLettersController : ControllerBase
     {
         private readonly ILetterService _letters;
-        public OfficeLettersController(ILetterService letters) { _letters = letters; }
+        private readonly global::Services.Contracts.IDocumentService _documents;
+        public OfficeLettersController(ILetterService letters, global::Services.Contracts.IDocumentService documents) { _letters = letters; _documents = documents; }
+
+        /// <summary>An attachment, the signature image or the delivery receipt of a letter. Only somebody who may read the letter in full gets the file; everybody else gets 404.</summary>
+        [HttpGet("letters/{id:int}/attachments/{documentId:guid}")]
+        public async Task<IActionResult> LetterFileAsync(int id, System.Guid documentId, CancellationToken ct)
+        {
+            if (!await _letters.CanReadFileAsync(id, documentId, ct)) return NotFound();
+            ViewModels.NasbNiro.DocumentDtos.ResponseDocumentDto file = await _documents.DownloadDocumentAsync(documentId);
+            if (file == null) return NotFound();
+            return File(file.FileStream, "application/x-download", file.Name);
+        }
 
         [HttpGet("letters")]
         public async Task<IActionResult> LettersAsync([FromQuery] LetterQuery query, CancellationToken ct) => Ok((await _letters.GetLettersAsync(query, ct)).ToPaginatedResultSafe());
