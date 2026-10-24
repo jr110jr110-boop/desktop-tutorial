@@ -199,8 +199,10 @@ namespace WebApi.Controllers
         /// <summary>For devices and middleware on the LAN. Headers X-Device-Code and X-Device-Key; a wrong code or key gives 401.</summary>
         [HttpPost("push")]
         [AllowAnonymous]
-        public async Task<IActionResult> PushAsync([FromHeader(Name = "X-Device-Code")] string deviceCode, [FromHeader(Name = "X-Device-Key")] string deviceKey, [FromBody] DevicePushDto dto, CancellationToken ct)
+        public async Task<IActionResult> PushAsync([FromBody] DevicePushDto dto, CancellationToken ct)
         {
+            string deviceCode = Request.Headers["X-Device-Code"].ToString();
+            string deviceKey = Request.Headers["X-Device-Key"].ToString();
             ResponseDto<DevicePushResultDto> result = await _attendance.PushAsync(deviceCode, deviceKey, dto, ct);
             if (result.HttpStatusCode == HttpStatusCode.Unauthorized) return StatusCode(401, result);
             return Ok(result);

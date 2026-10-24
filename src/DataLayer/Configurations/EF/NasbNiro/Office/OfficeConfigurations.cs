@@ -78,7 +78,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
             {
                 b.ToTable("OfLetters");
                 b.Property(x => x.Number).HasMaxLength(Name);
-                b.HasIndex(x => x.Number).IsUnique().HasFilter("[Deleted] = 0 AND [Number] IS NOT NULL AND [Imported] = 0");
+                b.HasIndex(x => new { x.Kind, x.Number }).IsUnique().HasFilter("[Deleted] = 0 AND [Number] IS NOT NULL AND [Imported] = 0");
                 b.HasIndex(x => new { x.Kind, x.Status });
                 b.HasIndex(x => x.Date);
                 b.Property(x => x.Subject).HasMaxLength(Title).IsRequired();
