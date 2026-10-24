@@ -812,7 +812,12 @@ namespace Services.NasbNiro.Finance
                         result.LastNumber = v.Number;
                     }
                 }
-                if (touched.Count == 0) return ResponseDtoHelper.Ok(result);
+                if (touched.Count == 0)
+                {
+                    // nothing left to finalise: a gate item that was left open by an earlier state must not stay
+                    await global::Services.NasbNiro.Office.OfficeGates.SweepVouchersAsync(_uow, _notify, ct);
+                    return ResponseDtoHelper.Ok(result);
+                }
                 try
                 {
                     await _uow.SaveChangesAsync(ct);
