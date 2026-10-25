@@ -22,7 +22,7 @@ namespace Services.NasbNiro.AfterSales
         {
             if (await uow.Set<SvInstalledUnit>().AnyAsync(u => u.ShipmentId == shipment.Id && !u.Deleted, ct)) return 0;
             int? customerId = await uow.Set<SlCustomerLink>().AsNoTracking()
-                .Where(l => l.SourceType == SlLinkSource.Contract && l.SourceId == shipment.ContractId && !l.Deleted).Select(l => (int?)l.CustomerId).FirstOrDefaultAsync(ct);
+                .Where(l => l.ContractId == shipment.ContractId && !l.Deleted).Select(l => (int?)l.CustomerId).FirstOrDefaultAsync(ct);
             string woCode = await uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == shipment.WorkOrderId).Select(w => w.Code).FirstOrDefaultAsync(ct);
             List<SerialUnit> serials = await uow.Set<SerialUnit>().AsNoTracking().Include(s => s.Item)
                 .Where(s => s.WorkOrderId == shipment.WorkOrderId && s.ParentSerialUnitId == null && s.Status == SerialUnitStatus.Delivered && !s.Deleted).OrderBy(s => s.Id).ToListAsync(ct);
