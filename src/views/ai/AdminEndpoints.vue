@@ -132,8 +132,8 @@ onMounted(load);
           <div class="col-md-6"><label class="form-label small mb-0">نام *</label><input v-model="form.name" class="form-control form-control-sm" /></div>
           <div class="col-md-6"><label class="form-label small mb-0">نوع *</label>
             <select v-model.number="form.kind" class="form-select form-select-sm"><option v-for="(t, k) in endpointKinds" :key="k" :value="Number(k)">{{ t }}</option></select></div>
-          <div class="col-12"><label class="form-label small mb-0">نشانی *</label><input v-model="form.url" class="form-control form-control-sm inv-ltr" placeholder="http://ai-server:8000/v1" /></div>
-          <div class="col-md-6"><label class="form-label small mb-0">نام مدل</label><input v-model="form.modelName" class="form-control form-control-sm inv-ltr" /></div>
+          <div class="col-12"><label class="form-label small mb-0">نشانی *</label><input v-model="form.url" class="form-control form-control-sm inv-ltr" placeholder="http://ai-server:8000 (بدون /v1)" /></div>
+          <div class="col-md-6"><label class="form-label small mb-0">نام مدل *</label><input v-model="form.modelName" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">اولویت</label><input v-model.number="form.priority" class="form-control form-control-sm" min="0" type="number" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">مهلت پاسخ (ثانیه)</label><input v-model.number="form.timeoutSeconds" class="form-control form-control-sm" min="1" type="number" /></div>
           <div class="col-12"><label class="form-check mb-0"><input v-model="form.enabled" class="form-check-input" type="checkbox" /> <span class="form-check-label">فعال</span></label></div>
