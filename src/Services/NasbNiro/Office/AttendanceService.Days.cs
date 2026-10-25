@@ -137,6 +137,7 @@ namespace Services.NasbNiro.Office
                     {
                         Date = date, HasShift = shift != null, NonWorking = !calendar.IsWorkingDay(date, shift), Punches = punches,
                         GraceMinutes = policy.GraceMinutes, MaxOvertimeMinutes = policy.MaxOvertimeMinutesPerDay, OvertimeNeedsPreApproval = policy.OvertimeNeedsPreApproval, RoundingMinutes = policy.RoundingMinutes,
+                        DelayPenaltyFactor = policy.DelayPenaltyFactor,
                     };
                     if (shift != null)
                     {
@@ -173,7 +174,7 @@ namespace Services.NasbNiro.Office
                         existing[(emp.Id, date)] = row;
                     }
                     row.ShiftId = shift?.Id; row.Status = r.Status ?? OfDayStatus.Absent; row.NonWorkingDay = r.NonWorkingDay; row.FirstIn = r.FirstIn; row.LastOut = r.LastOut;
-                    row.WorkedMinutes = r.WorkedMinutes; row.DelayMinutes = r.DelayMinutes; row.EarlyLeaveMinutes = r.EarlyLeaveMinutes; row.OvertimeMinutes = r.OvertimeMinutes;
+                    row.WorkedMinutes = r.WorkedMinutes; row.DelayMinutes = r.DelayMinutes; row.DelayDeductionMinutes = r.DelayDeductionMinutes; row.EarlyLeaveMinutes = r.EarlyLeaveMinutes; row.OvertimeMinutes = r.OvertimeMinutes;
                     row.NightMinutes = r.NightMinutes; row.HolidayMinutes = r.HolidayMinutes; row.AbsenceDays = r.AbsenceDays; row.UnpaidLeaveDays = r.UnpaidLeaveDays;
                     row.PaidLeaveDays = r.PaidLeaveDays; row.SickLeaveDays = r.SickLeaveDays; row.MissionDays = r.MissionDays; row.Note = r.Note; row.ComputedAt = now;
                     result.Days++;
@@ -196,7 +197,7 @@ namespace Services.NasbNiro.Office
             return new AttendanceDayDto
             {
                 EmployeeId = d.EmployeeId, EmployeeName = EmployeeName(e), PersonnelCode = e?.PersonnelCode, Date = d.Date, DateText = OfficeText.Date(d.Date), ShiftId = d.ShiftId, ShiftTitle = shiftTitle,
-                Status = d.Status, NonWorkingDay = d.NonWorkingDay, FirstIn = d.FirstIn, LastOut = d.LastOut, WorkedMinutes = d.WorkedMinutes, DelayMinutes = d.DelayMinutes,
+                Status = d.Status, NonWorkingDay = d.NonWorkingDay, FirstIn = d.FirstIn, LastOut = d.LastOut, WorkedMinutes = d.WorkedMinutes, DelayMinutes = d.DelayMinutes, DelayDeductionMinutes = d.DelayDeductionMinutes,
                 EarlyLeaveMinutes = d.EarlyLeaveMinutes, OvertimeMinutes = d.OvertimeMinutes, NightMinutes = d.NightMinutes, HolidayMinutes = d.HolidayMinutes, AbsenceDays = d.AbsenceDays,
                 UnpaidLeaveDays = d.UnpaidLeaveDays, PaidLeaveDays = d.PaidLeaveDays, SickLeaveDays = d.SickLeaveDays, MissionDays = d.MissionDays, Note = d.Note,
             };
@@ -257,8 +258,33 @@ namespace Services.NasbNiro.Office
                     DaysWorked = x.DaysWorked, OvertimeHours = x.OvertimeHours, NightHours = x.NightHours, HolidayHours = x.HolidayHours, PaidLeaveDays = x.PaidLeaveDays,
                     SickLeaveDays = x.SickLeaveDays, UnpaidLeaveDays = x.UnpaidLeaveDays, AbsenceDays = x.AbsenceDays, MissionDays = x.MissionDays,
                 }).ToList();
+                // the breakdown (overtime before the cap, delay, lateness deduction) is read from the computed days of the month
+                DateTime from = PersianCal.Start(year, month), to = PersianCal.End(year, month);
+                List<int> ids = status.Rows.Select(r => r.EmployeeId).ToList();
+                List<OfAttendanceDay> days = await _uow.Set<OfAttendanceDay>().AsNoTracking().Where(d => d.Date >= from && d.Date <= to && ids.Contains(d.EmployeeId)).ToListAsync(ct);
+                Dictionary<int, int> scheduled = await ScheduledMinutesAsync(ct);
+                foreach (SheetRowDto row in status.Rows)
+                    FillBreakdown(row, days.Where(d => d.EmployeeId == row.EmployeeId).ToList(), scheduled);
             }
             return ResponseDtoHelper.Ok(status);
+        }
+
+        /// <summary>Scheduled minutes of each shift (end - start - break), to turn deducted minutes into a part of a day.</summary>
+        private async Task<Dictionary<int, int>> ScheduledMinutesAsync(CancellationToken ct) =>
+            (await _uow.Set<OfShift>().AsNoTracking().Select(s => new { s.Id, s.StartMinute, s.EndMinute, s.BreakMinutes }).ToListAsync(ct))
+            .ToDictionary(s => s.Id, s => (s.EndMinute > s.StartMinute ? s.EndMinute - s.StartMinute : s.EndMinute + 1440 - s.StartMinute) - s.BreakMinutes);
+
+        /// <summary>Fills the breakdown fields of a sheet row from the days of the month and returns the unrounded days deducted for lateness.</summary>
+        private static decimal FillBreakdown(SheetRowDto row, List<OfAttendanceDay> days, Dictionary<int, int> scheduled)
+        {
+            decimal late = 0m;
+            foreach (OfAttendanceDay d in days)
+                if (d.DelayDeductionMinutes > 0 && d.ShiftId.HasValue && scheduled.TryGetValue(d.ShiftId.Value, out int minutes)) late += AttendanceMath.DeductionDays(d.DelayDeductionMinutes, minutes);
+            row.OvertimeWorkedHours = Math.Round(days.Sum(d => d.OvertimeMinutes) / 60m, 2);
+            row.DelayHours = Math.Round(days.Sum(d => d.DelayMinutes) / 60m, 2);
+            row.DelayDeductionHours = Math.Round(days.Sum(d => d.DelayDeductionMinutes) / 60m, 2);
+            row.LateDeductionDays = Math.Round(late, 2);
+            return late;
         }
 
         public async Task<ResponseDto<CloseMonthResultDto>> CloseMonthAsync(CloseMonthDto dto, CancellationToken ct)
@@ -276,6 +302,8 @@ namespace Services.NasbNiro.Office
                 return Bad<CloseMonthResultDto>($"{incomplete} روز فقط یک تردد دارد. ترددها را اصلاح کنید (ثبت دستی یا فراموشی تردد) یا پذیرش آن‌ها به‌عنوان غیبت را تایید کنید.");
 
             List<int> ids = days.Select(d => d.EmployeeId).Distinct().ToList();
+            OfAttendancePolicy policy = await LoadPolicyAsync(ct);
+            Dictionary<int, int> scheduled = await ScheduledMinutesAsync(ct);
             Dictionary<int, FnEmployee> employees = await EmployeesAsync(ids, ct);
             Dictionary<int, FnAttendanceSheet> sheets = await _uow.Set<FnAttendanceSheet>().Where(s => s.Year == dto.Year && s.Month == dto.Month && ids.Contains(s.EmployeeId)).ToDictionaryAsync(s => s.EmployeeId, ct);
             var result = new CloseMonthResultDto { Year = dto.Year, Month = dto.Month, IncompleteDays = incomplete };
@@ -285,14 +313,17 @@ namespace Services.NasbNiro.Office
                 if (!employees.TryGetValue(g.Key, out FnEmployee emp)) continue;
                 if (await MonthLockedAsync(dto.Year, dto.Month, emp.WorkshopId, ct)) { result.SkippedLocked++; continue; }
                 decimal worked = g.Where(d => d.Status == OfDayStatus.Present && !d.NonWorkingDay).Sum(d => 1m - d.PaidLeaveDays);
-                decimal absence = g.Sum(d => (decimal)d.AbsenceDays) + g.Count(d => d.Status == OfDayStatus.Incomplete);
                 var row = new SheetRowDto
                 {
                     EmployeeId = emp.Id, EmployeeName = EmployeeName(emp), PersonnelCode = emp.PersonnelCode,
-                    DaysWorked = Math.Round(worked, 2), OvertimeHours = Math.Round(g.Sum(d => d.OvertimeMinutes) / 60m, 2), NightHours = Math.Round(g.Sum(d => d.NightMinutes) / 60m, 2),
+                    DaysWorked = Math.Round(worked, 2), NightHours = Math.Round(g.Sum(d => d.NightMinutes) / 60m, 2),
                     HolidayHours = Math.Round(g.Sum(d => d.HolidayMinutes) / 60m, 2), PaidLeaveDays = Math.Round(g.Sum(d => d.PaidLeaveDays), 2), SickLeaveDays = Math.Round(g.Sum(d => d.SickLeaveDays), 2),
-                    UnpaidLeaveDays = g.Sum(d => (decimal)d.UnpaidLeaveDays), AbsenceDays = absence, MissionDays = g.Sum(d => (decimal)d.MissionDays),
+                    UnpaidLeaveDays = g.Sum(d => (decimal)d.UnpaidLeaveDays), MissionDays = g.Sum(d => (decimal)d.MissionDays),
                 };
+                // overtime: the monthly cap (policy, default 22 hours) applies to the sum of the days; absence: real absence + single-punch days + the lateness deduction (once, as fractions of a day)
+                decimal lateDays = FillBreakdown(row, g.ToList(), scheduled);
+                row.OvertimeHours = Math.Round(AttendanceMath.MonthlyOvertime(g.Select(d => d.OvertimeMinutes), policy.MonthlyOvertimeCapMinutes) / 60m, 2);
+                row.AbsenceDays = Math.Round(g.Sum(d => (decimal)d.AbsenceDays) + g.Count(d => d.Status == OfDayStatus.Incomplete) + lateDays, 2);
                 if (!sheets.TryGetValue(emp.Id, out FnAttendanceSheet sheet))
                 {
                     sheet = new FnAttendanceSheet { EmployeeId = emp.Id, Year = dto.Year, Month = dto.Month };

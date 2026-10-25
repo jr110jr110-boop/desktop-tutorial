@@ -95,6 +95,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
                 b.HasOne<OfLetter>().WithMany().HasForeignKey(x => x.ReplyToLetterId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<OfLetter>().WithMany().HasForeignKey(x => x.FollowUpLetterId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<OfLetterTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.TenderId);
+                b.HasIndex(x => x.ContractId);
+                b.HasOne<Entities.Model.NasbNiro.Tenders.Tender>().WithMany().HasForeignKey(x => x.TenderId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<Entities.Model.NasbNiro.Contracts.ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<OfLetterRecipient>(b =>
             {
@@ -235,7 +239,20 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
                 b.HasIndex(x => new { x.EmployeeId, x.Timestamp });
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
-            builder.Entity<OfAttendancePolicy>(b => b.ToTable("OfAttendancePolicies"));
+            builder.Entity<OfAttendancePolicy>(b =>
+            {
+                b.ToTable("OfAttendancePolicies");
+                // the defaults also fill the row of an existing database when the migration adds the columns; the value is always sent (0 is a real value for the cap and the coefficient)
+                b.Property(x => x.MonthlyOvertimeCapMinutes).HasDefaultValue(1320).ValueGeneratedNever();
+                b.Property(x => x.DelayPenaltyFactor).HasPrecision(5, 2).HasDefaultValue(3m).ValueGeneratedNever();
+            });
+            builder.Entity<OfClockImportProfile>(b =>
+            {
+                b.ToTable("OfClockImportProfiles");
+                b.Property(x => x.Name).HasMaxLength(Name).IsRequired();
+                b.HasIndex(x => x.Name).IsUnique().HasFilter(NotDeleted);
+                b.Property(x => x.MappingJson).HasColumnType("nvarchar(max)").IsRequired();
+            });
             builder.Entity<OfAttendanceDay>(b =>
             {
                 b.ToTable("OfAttendanceDays");

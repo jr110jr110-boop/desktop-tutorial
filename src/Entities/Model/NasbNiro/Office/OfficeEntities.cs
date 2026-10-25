@@ -153,6 +153,15 @@ namespace Entities.Model.NasbNiro.Office
         public int? FollowUpLetterId { get; set; }
         public int? TemplateId { get; set; }
 
+        /// <summary>
+        /// Optional link to a tender (legacy Tender entity); its code is part of the letter number ({code} token). At most one of TenderId and ContractId.
+        /// Set on a draft only: it is frozen once the letter is numbered.
+        /// </summary>
+        public int? TenderId { get; set; }
+
+        /// <summary>Optional link to a project (a contract; the code is the project code of project control, else the contract code). At most one of TenderId and ContractId.</summary>
+        public int? ContractId { get; set; }
+
         public DateTimeOffset? RegisteredAt { get; set; }
         public int? RegisteredByUserId { get; set; }
 
@@ -242,7 +251,11 @@ namespace Entities.Model.NasbNiro.Office
         public bool IsActive { get; set; } = true;
     }
 
-    /// <summary>"{yy}/{unit}/{seq:5}" and tokens {yyyy}, {yy}, {seq:n}, {unit}, {kind}. One counter per rule and Persian year.</summary>
+    /// <summary>
+    /// Pattern with the tokens {yyyy}, {yy}, {seq} or {seq:n} (n = zero padding; plain {seq} = no padding), {unit}, {kind} and {code}
+    /// ({code} = "tender-or-project-code-" when the letter is linked to a tender or project, else nothing). One counter per rule and Persian year.
+    /// Company default (office answers, 1405/08): incoming "INN-و-{code}{yyyy}-{seq}", outgoing "INN-{code}{yyyy}-{seq}", internal "INN-د-{code}{yyyy}-{seq}".
+    /// </summary>
     public class OfNumberingRule : BaseEntity
     {
         public OfLetterKind Kind { get; set; }
@@ -429,22 +442,42 @@ namespace Entities.Model.NasbNiro.Office
         public DateTimeOffset CreatedAt { get; set; }
     }
 
-    /// <summary>Inputs of the daily computation (one row). Only the grace is seeded (0).</summary>
+    /// <summary>
+    /// Inputs of the daily computation (one row; defaults apply while no row is saved). Company answers (1405/08): lateness up to 15 minutes is allowed (grace 15);
+    /// lateness beyond it is deducted with coefficient 3; overtime is not pre-approved but counted up to 22 hours a month.
+    /// </summary>
     public class OfAttendancePolicy
     {
         public int Id { get; set; }
-        public int GraceMinutes { get; set; }
+
+        /// <summary>Delay (and early leave) up to this many minutes is allowed. Beyond it the whole delay counts.</summary>
+        public int GraceMinutes { get; set; } = 15;
 
         /// <summary>Overtime allowed per day without a request; null means not configured (then only requested overtime counts).</summary>
         public int? MaxOvertimeMinutesPerDay { get; set; }
 
-        public bool OvertimeNeedsPreApproval { get; set; } = true;
+        public bool OvertimeNeedsPreApproval { get; set; }
 
         /// <summary>Overtime is rounded down to a multiple of this many minutes (0 or 1 = no rounding).</summary>
         public int RoundingMinutes { get; set; }
 
+        /// <summary>Overtime above this many minutes a month is neither counted nor paid (default 1320 = 22 hours; the monthly sheet takes the capped value).</summary>
+        public int MonthlyOvertimeCapMinutes { get; set; } = 1320;
+
+        /// <summary>A delay beyond the grace is deducted as delay minutes x this coefficient (default 3); 0 switches the deduction off. The deduction reaches payroll as fractions of an absence day.</summary>
+        public decimal DelayPenaltyFactor { get; set; } = 3m;
+
         public DateTimeOffset UpdatedAt { get; set; }
         public int UpdatedByUserId { get; set; }
+    }
+
+    /// <summary>A saved column mapping for the Excel export of the time-attendance software (PW Kara): which column holds the personnel number, the date, the time ...</summary>
+    public class OfClockImportProfile : BaseEntity
+    {
+        public string Name { get; set; }
+
+        /// <summary>JSON of ClockFileMappingDto.</summary>
+        public string MappingJson { get; set; }
     }
 
     public class OfAttendanceDay
@@ -459,6 +492,9 @@ namespace Entities.Model.NasbNiro.Office
         public DateTime? LastOut { get; set; }
         public int WorkedMinutes { get; set; }
         public int DelayMinutes { get; set; }
+
+        /// <summary>Deducted time for the delay of the day: DelayMinutes x the policy coefficient at the time of the computation (0 when the delay is inside the grace).</summary>
+        public int DelayDeductionMinutes { get; set; }
         public int EarlyLeaveMinutes { get; set; }
         public int OvertimeMinutes { get; set; }
         public int NightMinutes { get; set; }

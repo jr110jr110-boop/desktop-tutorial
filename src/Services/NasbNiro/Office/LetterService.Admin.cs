@@ -77,7 +77,7 @@ namespace Services.NasbNiro.Office
                 return new NumberingRuleDto
                 {
                     Id = r.Id, Kind = r.Kind, UnitId = r.UnitId, UnitCode = r.UnitId.HasValue ? code : null, Pattern = r.Pattern, IsActive = r.IsActive,
-                    Preview = FormatNumber(r.Pattern, year, (last.TryGetValue(r.Id, out int n) ? n : 0) + 1, code, r.Kind),
+                    Preview = FormatNumber(r.Pattern, year, (last.TryGetValue(r.Id, out int n) ? n : 0) + 1, code, r.Kind, null),
                 };
             }).ToList();
         }
@@ -98,9 +98,9 @@ namespace Services.NasbNiro.Office
             if (!_user.IsInRole(OfficeRoles.LetterAdmins)) return Bad<NumberingRuleDto>(OfficeText.NotAllowed);
             if (dto == null || Clean(dto.Pattern) == null || !Enum.IsDefined(typeof(OfLetterKind), dto.Kind)) return Bad<NumberingRuleDto>(OfficeText.InvalidData);
             string pattern = Clean(dto.Pattern);
-            if (!Regex.IsMatch(pattern, @"\{seq(:\d{1,9})?\}")) return Bad<NumberingRuleDto>("الگوی شماره باید شامل {seq:n} (شماره ترتیبی) باشد؛ مثلا {yy}/{kind}/{unit}/{seq:5}.");
-            string leftover = Regex.Replace(pattern, @"\{(yyyy|yy|unit|kind|seq(:\d{1,9})?)\}", "");
-            if (leftover.Contains("{") || leftover.Contains("}")) return Bad<NumberingRuleDto>("الگوی شماره نشانه ناشناخته دارد. نشانه‌های مجاز: {yyyy} {yy} {seq:n} {unit} {kind}.");
+            if (!Regex.IsMatch(pattern, @"\{seq(:\d{1,9})?\}")) return Bad<NumberingRuleDto>("الگوی شماره باید شامل {seq} (شماره ترتیبی) باشد؛ مثلا INN-{code}{yyyy}-{seq}.");
+            string leftover = Regex.Replace(pattern, @"\{(yyyy|yy|unit|kind|code|seq(:\d{1,9})?)\}", "");
+            if (leftover.Contains("{") || leftover.Contains("}")) return Bad<NumberingRuleDto>("الگوی شماره نشانه ناشناخته دارد. نشانه‌های مجاز: {yyyy} {yy} {seq} یا {seq:n} {unit} {kind} {code}.");
             if (pattern.Length > 200) return Bad<NumberingRuleDto>(OfficeText.InvalidData);
             if (dto.UnitId.HasValue && !await _uow.Set<OfUnit>().AnyAsync(u => u.Id == dto.UnitId.Value && !u.Deleted, ct)) return Bad<NumberingRuleDto>("واحد پیدا نشد.");
             await EnsureRulesAsync(ct);
@@ -131,11 +131,13 @@ namespace Services.NasbNiro.Office
 
         /// <summary>The pattern with every token replaced by a marker, so two patterns that produce the same numbers have the same shape. The unit token is written out for the unit being compared.</summary>
         private static string Shape(string pattern, string unitCode, OfLetterKind kind) =>
-            Regex.Replace(pattern, @"\{(yyyy|yy|unit|kind|seq(?::\d{1,9})?)\}", m =>
+            Regex.Replace(pattern, @"\{(yyyy|yy|unit|kind|code|seq(?::\d{1,9})?)\}", m =>
             {
                 string t = m.Groups[1].Value;
                 if (t == "yyyy") return "\u0001Y4";
                 if (t == "yy") return "\u0001Y2";
+                // the code is optional (a letter without a link prints nothing), so a pattern with {code} can produce the numbers of the same pattern without it: compared as if it were absent
+                if (t == "code") return "";
                 if (t == "unit") return unitCode ?? "CO";
                 if (t == "kind") return KindCode(kind);
                 return "\u0001S";
@@ -160,7 +162,7 @@ namespace Services.NasbNiro.Office
                 if (unitId.HasValue && o.UnitId.HasValue && unitId != o.UnitId) { mine = Shape(pattern, CodeOf(unitId), kind); theirs = Shape(o.Pattern, CodeOf(o.UnitId), kind); }
                 else { string code = CodeOf(unitId ?? o.UnitId); mine = Shape(pattern, code, kind); theirs = Shape(o.Pattern, code, kind); }
                 if (mine == theirs)
-                    return "این الگو می‌تواند شماره‌ای بسازد که قاعده فعال دیگری از همین نوع نامه ساخته است و شماره تکراری می‌دهد. در الگو یک حرف یا عبارت ثابت اضافه کنید (مثلاً INT-{yy}-{seq:3}).";
+                    return "این الگو می‌تواند شماره‌ای بسازد که قاعده فعال دیگری از همین نوع نامه ساخته است و شماره تکراری می‌دهد. در الگو یک حرف یا عبارت ثابت اضافه کنید (مثلاً INT-{yy}-{seq}).";
             }
             return null;
         }
@@ -349,6 +351,138 @@ namespace Services.NasbNiro.Office
             }
             result.Imported = added.Count;
             result.LetterIds = added.Select(l => l.Id).ToList();
+            return ResponseDtoHelper.Ok(result);
+        }
+
+        // -------------------------------------------------------------------------------- legacy archive: one PDF per letter
+
+        private const int MaxArchiveFiles = 300;
+        private const long MaxArchiveFileBytes = 50L * 1024 * 1024;
+
+        /// <summary>Compares old letter numbers and file names: Persian digits as Latin, Arabic ي/ك as ی/ک, characters a file name cannot hold as underscore, case ignored.</summary>
+        internal static string ArchiveKey(string text)
+        {
+            string t = OfficeText.Digits(text ?? "").Trim().Replace('ي', 'ی').Replace('ك', 'ک');
+            var sb = new System.Text.StringBuilder(t.Length);
+            foreach (char ch in t) sb.Append("/\\:*?\"<>|".IndexOf(ch) >= 0 ? '_' : ch);
+            return sb.ToString().ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// The old letter number in a file name: the whole name without extension, or the group «number» (else the first group) of the pattern. Null when the pattern does not match.
+        /// </summary>
+        internal static string ArchiveNumberOf(string fileName, string pattern)
+        {
+            string name = fileName ?? "";
+            int slash = Math.Max(name.LastIndexOf('/'), name.LastIndexOf('\\'));
+            if (slash >= 0) name = name.Substring(slash + 1);
+            int dot = name.LastIndexOf('.');
+            if (dot > 0) name = name.Substring(0, dot);
+            name = name.Trim();
+            if (Clean(pattern) == null) return name.Length == 0 ? null : name;
+            Match m = Regex.Match(name, pattern.Trim(), RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+            if (!m.Success) return null;
+            Group g = m.Groups["number"];
+            if (!g.Success) g = m.Groups.Count > 1 ? m.Groups[1] : m.Groups[0];
+            string value = g.Value.Trim();
+            return value.Length == 0 ? null : value;
+        }
+
+        private static async Task<bool> LooksLikePdfAsync(Microsoft.AspNetCore.Http.IFormFile file, CancellationToken ct)
+        {
+            if (file == null || file.Length < 5) return false;
+            using System.IO.Stream stream = file.OpenReadStream();
+            var head = new byte[5];
+            int read = 0;
+            while (read < head.Length)
+            {
+                int n = await stream.ReadAsync(head, read, head.Length - read, ct);
+                if (n == 0) break;
+                read += n;
+            }
+            return read == 5 && head[0] == '%' && head[1] == 'P' && head[2] == 'D' && head[3] == 'F' && head[4] == '-';
+        }
+
+        public async Task<ResponseDto<ArchiveFilesResultDto>> AttachArchiveFilesAsync(ArchiveFilesDto dto, List<ArchiveFileInput> files, CancellationToken ct)
+        {
+            if (!_user.IsInRole(OfficeRoles.Secretariat)) return Bad<ArchiveFilesResultDto>(OfficeText.NotAllowed);
+            dto ??= new ArchiveFilesDto();
+            files ??= new List<ArchiveFileInput>();
+            string pattern = Clean(dto.NamePattern);
+            if (pattern != null)
+            {
+                if (pattern.Length > 200) return Bad<ArchiveFilesResultDto>("الگوی نام فایل بیش از حد طولانی است.");
+                try { _ = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)); }
+                catch (ArgumentException) { return Bad<ArchiveFilesResultDto>("الگوی نام فایل (عبارت منظم) نامعتبر است."); }
+            }
+            if (files.Count == 0 && Clean(dto.Csv) == null) return Bad<ArchiveFilesResultDto>("فایل PDF یا فهرست نامه‌ها را ارسال کنید.");
+            if (files.Count > MaxArchiveFiles) return Bad<ArchiveFilesResultDto>("حداکثر " + MaxArchiveFiles + " فایل در هر بار.");
+            var result = new ArchiveFilesResultDto();
+
+            // the metadata list first (the same import as before), so the letters exist when the files are matched
+            if (Clean(dto.Csv) != null)
+            {
+                ResponseDto<ImportLettersResultDto> imported = await ImportAsync(new ImportLettersDto { Csv = dto.Csv }, ct);
+                if (!imported.Success) return Bad<ArchiveFilesResultDto>(imported.Message ?? OfficeText.InvalidData);
+                result.Import = imported.Data;
+            }
+
+            // match: the old number of the file against the imported letters
+            var letters = await _uow.Set<OfLetter>().AsNoTracking().Where(l => !l.Deleted && l.Imported).Select(l => new { l.Id, l.Number }).ToListAsync(ct);
+            ILookup<string, int> byKey = letters.ToLookup(l => ArchiveKey(l.Number), l => l.Id);
+            var numberOf = letters.ToDictionary(l => l.Id, l => l.Number);
+            var toAttach = new List<(ArchiveFileInput File, ArchiveFileLineDto Line)>();
+            foreach (ArchiveFileInput f in files)
+            {
+                string name = f?.FileName ?? f?.File?.FileName ?? "";
+                int slash = Math.Max(name.LastIndexOf('/'), name.LastIndexOf('\\'));
+                if (slash >= 0) name = name.Substring(slash + 1);
+                var line = new ArchiveFileLineDto { FileName = name };
+                result.Files.Add(line);
+                if (f?.File == null || f.File.Length == 0) { line.Result = "invalid"; line.Message = "فایل خالی است."; continue; }
+                if (!name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) { line.Result = "not-pdf"; line.Message = "فقط فایل PDF پذیرفته می‌شود."; continue; }
+                if (f.File.Length > MaxArchiveFileBytes) { line.Result = "invalid"; line.Message = "حجم فایل از ۵۰ مگابایت بیشتر است."; continue; }
+                if (!await LooksLikePdfAsync(f.File, ct)) { line.Result = "not-pdf"; line.Message = "محتوای فایل PDF معتبر نیست."; continue; }
+                string number = ArchiveNumberOf(name, pattern);
+                if (number == null) { line.Result = "unmatched"; line.Message = "نام فایل با الگوی شماره نامه نمی‌خواند."; result.Unmatched++; continue; }
+                line.Number = number;
+                List<int> hits = byKey[ArchiveKey(number)].Distinct().ToList();
+                if (hits.Count == 0) { line.Result = "unmatched"; line.Message = "نامه‌ای با شماره «" + number + "» در آرشیو واردشده پیدا نشد."; result.Unmatched++; continue; }
+                if (hits.Count > 1) { line.Result = "ambiguous"; line.Message = "چند نامه با این شماره وجود دارد (وارده، صادره یا داخلی)؛ نام فایل را یکتا کنید."; result.Unmatched++; continue; }
+                line.LetterId = hits[0];
+                line.Number = numberOf[hits[0]];
+                toAttach.Add((f, line));
+            }
+
+            if (toAttach.Count > 0)
+            {
+                List<int> ids = toAttach.Select(t => t.Line.LetterId.Value).Distinct().ToList();
+                Dictionary<int, OfLetter> loaded = (await _uow.Set<OfLetter>().Include(l => l.Attachments).Where(l => ids.Contains(l.Id)).ToListAsync(ct)).ToDictionary(l => l.Id);
+                DateTimeOffset now = DateTimeOffset.Now;
+                foreach (var item in toAttach)
+                {
+                    OfLetter letter = loaded[item.Line.LetterId.Value];
+                    if (letter.Attachments.Any(a => string.Equals(a.FileName, item.Line.FileName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        item.Line.Result = "already-attached"; item.Line.Message = "این فایل قبلاً به نامه پیوست شده است."; result.AlreadyAttached++;
+                        continue;
+                    }
+                    Guid documentId = await _documents.UploadDocumentAsync(new ViewModels.NasbNiro.DocumentDtos.UploadFileDto
+                    {
+                        File = item.File.File, Name = System.IO.Path.GetFileNameWithoutExtension(item.Line.FileName), Code = "LETTER-ARCHIVE", Description = "آرشیو نامه‌های قدیم — نامه " + letter.Number,
+                    });
+                    string hash = await _documents.GetFileHashAsync(documentId);
+                    letter.Attachments.Add(new OfLetterAttachment { DocumentId = documentId, FileName = item.Line.FileName, FileHash = hash });
+                    letter.ModifyDate = now; letter.ModifierUserId = Me;
+                    item.Line.Result = "attached"; item.Line.Message = "به نامه پیوست شد."; result.Attached++;
+                }
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { return Bad<ArchiveFilesResultDto>("ذخیره پیوست‌ها انجام نشد؛ دوباره تلاش کنید."); }
+            }
+
+            IQueryable<OfLetter> without = _uow.Set<OfLetter>().AsNoTracking().Where(l => !l.Deleted && l.Imported && !l.Attachments.Any());
+            result.LettersWithoutFileCount = await without.CountAsync(ct);
+            result.LettersWithoutFile = await without.OrderBy(l => l.Number).Select(l => l.Number).Take(200).ToListAsync(ct);
             return ResponseDtoHelper.Ok(result);
         }
     }

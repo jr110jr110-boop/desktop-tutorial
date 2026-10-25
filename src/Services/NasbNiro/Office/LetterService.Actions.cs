@@ -32,7 +32,7 @@ namespace Services.NasbNiro.Office
             OfLetter l = await LoadAsync(dto.Id, true, ct);
             string action = (dto.Action ?? "").Trim().ToLowerInvariant();
             Access access = l == null ? Access.None : AccessOf(l, c);
-            // the secretariat registers, sends, records the receipt, archives and cancels a Confidential or Secret letter on register data alone
+            // the secretariat registers, sends, records the receipt, archives and cancels a Secret letter on register data alone
             bool registerWork = access == Access.Meta && c.IsSec && (action == "register" || action == "send" || action == "receipt" || action == "archive" || action == "cancel");
             if (l == null || (access != Access.Full && !registerWork)) return OfficeText.NotFound<LetterDto>("نامه پیدا نشد.");
             if (Clean(dto.RowVersion) != null)
@@ -149,7 +149,9 @@ namespace Services.NasbNiro.Office
             if (signature == null) return Bad<LetterDto>("تصویر امضای شما ثبت نشده است؛ ابتدا تصویر امضا را بارگذاری کنید.");
             var unit = await UnitOfAsync(l.SenderPositionId, ct);
             DateTime today = DateTime.Today;
-            var number = await NextNumberAsync(l.Kind, unit.UnitId, unit.Code, today, ct);
+            var link = await LinkCodeAsync(l, ct);
+            if (link.Error != null) return Bad<LetterDto>(link.Error);
+            var number = await NextNumberAsync(l.Kind, unit.UnitId, unit.Code, today, link.Code, ct);
             if (number.Error != null) return Bad<LetterDto>(number.Error);
             l.Number = number.Number; l.NumberRuleId = number.RuleId; l.Date = today;
             l.SignedAt = DateTimeOffset.Now; l.SignedByUserId = Me; l.SignedOnBehalfOfPositionId = acting.OnBehalf ? l.SignerPositionId : null; l.SignatureDocumentId = signature.ImageDocumentId;
@@ -165,7 +167,7 @@ namespace Services.NasbNiro.Office
             await CloseKeyAsync("letter:" + l.Id + ":approval", "امضا شد", ct);
             string saveError = await SaveRenumberingAsync(async () =>
             {
-                var again = await NextNumberAsync(l.Kind, unit.UnitId, unit.Code, today, ct);
+                var again = await NextNumberAsync(l.Kind, unit.UnitId, unit.Code, today, link.Code, ct);
                 if (again.Error != null) return again.Error;
                 l.Number = again.Number; l.NumberRuleId = again.RuleId;
                 l.ContentHash = ComputeHash(l, fileHashes);
@@ -183,7 +185,7 @@ namespace Services.NasbNiro.Office
             return ResponseDtoHelper.Ok(await BuildAsync(await LoadAsync(l.Id, false, ct), c, ct));
         }
 
-        /// <summary>The dispatch item goes to the whole secretariat: for Confidential and Secret letters it carries the number and the classification only, never the subject.</summary>
+        /// <summary>The dispatch item goes to the whole secretariat: for Confidential and Secret letters it carries the number and the classification only, never the subject (the secretariat can open a Confidential letter, but the inbox title stays neutral).</summary>
         private static string DispatchTitle(OfLetter l) =>
             l.Classification == OfClassification.Secret ? "نامه سری شماره " + l.Number + " برای ثبت و ارسال"
             : l.Classification == OfClassification.Confidential ? "نامه محرمانه شماره " + l.Number + " برای ثبت و ارسال"

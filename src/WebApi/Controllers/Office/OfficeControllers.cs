@@ -1,9 +1,13 @@
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Net;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Office;
 using ViewModels.NasbNiro.OfficeDtos;
@@ -143,6 +147,30 @@ namespace WebApi.Controllers
         /// <summary>The old archive (for example the Rahkaran export): numbers are kept and the sequence is not consumed.</summary>
         [HttpPost("letters/import")]
         public async Task<IActionResult> ImportAsync([FromBody] ImportLettersDto dto, CancellationToken ct) => Ok(await _letters.ImportAsync(dto, ct));
+
+        /// <summary>The PDFs of the Rahkaran export (multipart: Files, optional NamePattern and Csv). Each PDF is attached to the imported letter whose old number is in its file name; the answer lists the unmatched files and the letters without a file.</summary>
+        [HttpPost("letters/import/files")]
+        [RequestSizeLimit(ArchiveFilesForm.MaxRequestBytes)]
+        [RequestFormLimits(MultipartBodyLengthLimit = ArchiveFilesForm.MaxRequestBytes)]
+        public async Task<IActionResult> ImportFilesAsync([FromForm] ArchiveFilesForm form, CancellationToken ct)
+        {
+            var files = (form?.Files ?? new List<IFormFile>()).Select(f => new ArchiveFileInput { FileName = f.FileName, File = f }).ToList();
+            return Ok(await _letters.AttachArchiveFilesAsync(new ArchiveFilesDto { NamePattern = form?.NamePattern, Csv = form?.Csv }, files, ct));
+        }
+    }
+
+    /// <summary>The multipart form of the archive PDF import.</summary>
+    public class ArchiveFilesForm
+    {
+        public const long MaxRequestBytes = 600L * 1024 * 1024;
+
+        public List<IFormFile> Files { get; set; }
+
+        /// <summary>Regular expression for the old number in the file name (group «number»); empty = the whole name without extension.</summary>
+        public string NamePattern { get; set; }
+
+        /// <summary>Optional manifest CSV imported first.</summary>
+        public string Csv { get; set; }
     }
 
     [ApiController]
@@ -214,6 +242,44 @@ namespace WebApi.Controllers
         [HttpPost("clock/import")]
         public async Task<IActionResult> ImportAsync([FromBody] ImportClockDto dto, CancellationToken ct) => Ok(await _attendance.ImportEventsAsync(dto, ct));
 
+        /// <summary>Excel export of the attendance software (PW Kara): the sheets, columns, sample rows and a guessed column mapping (multipart: File, optional Sheet).</summary>
+        [HttpPost("clock/import-file/preview")]
+        [RequestSizeLimit(ClockFileForm.MaxRequestBytes)]
+        public async Task<IActionResult> PreviewFileAsync([FromForm] ClockFileForm form, CancellationToken ct)
+        {
+            byte[] data = await ReadAsync(form?.File, ct);
+            return Ok(await _attendance.PreviewClockFileAsync(data, form?.Sheet, ct));
+        }
+
+        /// <summary>Imports the Excel file through a column mapping: Mapping (JSON of ClockFileMappingDto) or ProfileId (a saved profile); SaveProfileAs saves the mapping under a name.</summary>
+        [HttpPost("clock/import-file")]
+        [RequestSizeLimit(ClockFileForm.MaxRequestBytes)]
+        public async Task<IActionResult> ImportFileAsync([FromForm] ClockFileForm form, CancellationToken ct)
+        {
+            ClockFileMappingDto mapping = null;
+            if (!string.IsNullOrWhiteSpace(form?.Mapping))
+            {
+                try { mapping = JsonSerializer.Deserialize<ClockFileMappingDto>(form.Mapping, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+                catch (JsonException) { return Ok(ResponseDtoHelper.BadRequest<ClockImportResultDto>("ستون‌بندی فایل خوانده نشد.")); }
+            }
+            byte[] data = await ReadAsync(form?.File, ct);
+            return Ok(await _attendance.ImportClockFileAsync(data, new ClockFileImportDto { ProfileId = form?.ProfileId, Mapping = mapping, SaveProfileAs = form?.SaveProfileAs }, ct));
+        }
+
+        [HttpGet("clock/import-profiles")]
+        public async Task<IActionResult> ImportProfilesAsync(CancellationToken ct) => Ok(await _attendance.GetImportProfilesAsync(ct));
+
+        [HttpPost("clock/import-profiles")]
+        public async Task<IActionResult> SaveImportProfileAsync([FromBody] SaveClockImportProfileDto dto, CancellationToken ct) => Ok(await _attendance.SaveImportProfileAsync(dto, ct));
+
+        private static async Task<byte[]> ReadAsync(IFormFile file, CancellationToken ct)
+        {
+            if (file == null || file.Length == 0 || file.Length > ClockFileForm.MaxFileBytes) return null;
+            using var stream = new MemoryStream();
+            await file.CopyToAsync(stream, ct);
+            return stream.ToArray();
+        }
+
         /// <summary>For devices and middleware on the LAN. Headers X-Device-Code and X-Device-Key; a wrong code or key gives 401.</summary>
         [HttpPost("push")]
         [AllowAnonymous]
@@ -247,6 +313,21 @@ namespace WebApi.Controllers
         /// <summary>Hours present per person and day, for the production time-booking check.</summary>
         [HttpPost("worked-hours")]
         public async Task<IActionResult> WorkedHoursAsync([FromBody] WorkedHoursQuery query, CancellationToken ct) => Ok(await _attendance.GetWorkedHoursAsync(query, ct));
+    }
+
+    /// <summary>The multipart form of the Excel import of clock events.</summary>
+    public class ClockFileForm
+    {
+        public const long MaxFileBytes = 20L * 1024 * 1024;
+        public const long MaxRequestBytes = MaxFileBytes + 1024 * 1024;
+
+        public IFormFile File { get; set; }
+        public string Sheet { get; set; }
+        public int? ProfileId { get; set; }
+
+        /// <summary>JSON of ClockFileMappingDto.</summary>
+        public string Mapping { get; set; }
+        public string SaveProfileAs { get; set; }
     }
 
     [ApiController]

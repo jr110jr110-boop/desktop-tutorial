@@ -66,6 +66,9 @@ namespace Services.NasbNiro.Office
         public int? MaxOvertimeMinutes { get; set; }
         public bool OvertimeNeedsPreApproval { get; set; } = true;
         public int RoundingMinutes { get; set; }
+
+        /// <summary>Deduction coefficient for a delay beyond the grace (company: 3).</summary>
+        public decimal DelayPenaltyFactor { get; set; } = 3m;
         public int ApprovedOvertimeMinutes { get; set; }
 
         public bool DailyPaidLeave { get; set; }
@@ -88,6 +91,9 @@ namespace Services.NasbNiro.Office
         public DateTime? LastOut { get; set; }
         public int WorkedMinutes { get; set; }
         public int DelayMinutes { get; set; }
+
+        /// <summary>Deducted time for the delay: DelayMinutes x the coefficient (the whole delay, not only the part above the grace).</summary>
+        public int DelayDeductionMinutes { get; set; }
         public int EarlyLeaveMinutes { get; set; }
         public int OvertimeMinutes { get; set; }
         public int NightMinutes { get; set; }
@@ -103,6 +109,7 @@ namespace Services.NasbNiro.Office
     /// <summary>
     /// The daily attendance computation, free of any database access so the numbers can be checked by hand.
     /// Rules: the first and the last clock event of the day are the presence interval; delay and early leave beyond the grace are counted in full;
+    /// a delay beyond the grace is deducted as delay x coefficient (company: grace 15, coefficient 3: 14 minutes late = 0, 16 minutes late = 48 minutes deducted; no leave is used for lateness);
     /// overtime is the time after the shift end, limited to the approved hours (or the policy maximum when no pre-approval is needed) and rounded down;
     /// night minutes are the part of the presence interval inside the night window; on a non-working day all worked minutes are holiday work.
     /// </summary>
@@ -152,6 +159,21 @@ namespace Services.NasbNiro.Office
             return total;
         }
 
+        /// <summary>Deducted minutes for a delay that is already beyond the grace: the whole delay times the coefficient, rounded to a minute. A negative coefficient counts as 0.</summary>
+        public static int DelayDeduction(int delayMinutes, decimal factor) =>
+            delayMinutes <= 0 || factor <= 0m ? 0 : (int)Math.Round(delayMinutes * factor, MidpointRounding.AwayFromZero);
+
+        /// <summary>The overtime of a month that counts and is paid: the sum of the days, at most the monthly cap (a cap of 0 or less counts nothing).</summary>
+        public static int MonthlyOvertime(IEnumerable<int> dayMinutes, int capMinutes) =>
+            Math.Min(Math.Max(0, dayMinutes.Sum()), Math.Max(0, capMinutes));
+
+        /// <summary>
+        /// The deducted minutes of a day as a part of a paid day (deducted minutes / scheduled minutes of the shift), at most one day. This is how the lateness deduction reaches payroll:
+        /// as fractions of an absence day, so it lowers the paid days exactly once.
+        /// </summary>
+        public static decimal DeductionDays(int deductionMinutes, int scheduledMinutes) =>
+            deductionMinutes <= 0 || scheduledMinutes <= 0 ? 0m : Math.Min(1m, (decimal)deductionMinutes / scheduledMinutes);
+
         public static DayResult Compute(DayInput d)
         {
             var r = new DayResult { NonWorkingDay = d.NonWorking };
@@ -184,6 +206,7 @@ namespace Services.NasbNiro.Office
                 int early = Math.Max(0, (int)Math.Floor((shiftEnd - r.LastOut.Value).TotalMinutes));
                 if (early > 0) early = Math.Max(0, early - leaveWindows.Sum(w => Overlap(w.From, w.To, r.LastOut.Value, shiftEnd)));
                 r.DelayMinutes = delay <= d.GraceMinutes ? 0 : delay;
+                r.DelayDeductionMinutes = DelayDeduction(r.DelayMinutes, d.DelayPenaltyFactor);
                 r.EarlyLeaveMinutes = early <= d.GraceMinutes ? 0 : early;
 
                 int raw = Math.Max(0, (int)Math.Floor((r.LastOut.Value - shiftEnd).TotalMinutes));

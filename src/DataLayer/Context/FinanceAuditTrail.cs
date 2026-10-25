@@ -78,6 +78,7 @@ namespace DataLayer.Context
             { typeof(OfPosition), new[] { "Title", "UnitId", "UserId", "EmployeeId", "IsManager", "CanSign", "IsActive" } },
             { typeof(OfNumberingRule), null },
             { typeof(OfAttendancePolicy), null },
+            { typeof(OfClockImportProfile), null },
             { typeof(OfClockEvent), new[] { "EmployeeId", "Timestamp", "Direction", "Source", "Reason", "DeviceCode" } },
             // production / shop floor (release P1): master data, routing approvals, the release gate, status changes and edits of time bookings
             { typeof(MfWorkCenter), null },
@@ -267,6 +268,7 @@ namespace DataLayer.Context
             if (entry.Entity is OfAttendancePolicy) text = "سیاست حضور و غیاب";
             if (entry.Entity is OfDelegation) text = "نیابت سمت";
             if (entry.Entity is OfNumberingRule) text = "قاعده شماره‌گذاری نامه";
+            if (entry.Entity is OfClockImportProfile) text = "الگوی ستون‌بندی فایل اکسل ترددها";
             if (text != null && text.Length > 280) text = text.Substring(0, 280);
             return text;
         }
