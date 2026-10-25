@@ -4979,9 +4979,9 @@ as "$ADMIN_TOKEN" GET $AI/brief/latest; nomsg "ai brief: the PMO cannot read the
 as "$WH_TOKEN" GET $AI/notes/$AIBRIEFNOTE; nomsg "ai brief: a storekeeper cannot open the brief note (it looks like a missing one)" "یادداشت پیدا نشد"
 as "$WH_TOKEN" POST $AI/notes/decide "{\"id\":$AIBRIEFNOTE,\"decision\":\"accept\"}"; nomsg "ai brief: a storekeeper cannot decide the brief note" "$AINOTALLOWED"
 airun CEO-BRIEF "$AIBD"
-check "ai brief: the second run of the same day only reports that the brief exists" ".success and .data.status == 2 and .data.outputs == \"brief exists for $AIBKEY\""
+check "ai brief: the second run of the same day only reports that the brief exists" ".success and .data.status == 2 and .data.outputs == \"گزارش روز $AIBP قبلاً نوشته شده است\""
 as "$CEO_TOKEN" GET "$AI/notes?TargetType=CeoBrief&PageSize=0"; check "ai brief: still exactly one brief note" '.success and (.data.data|length) == 1'
-as "$CEO_TOKEN" GET "$AI/admin/seats"; check "ai seats: the CEO-BRIEF seat now shows its last run" ".success and (.data[]|select(.code == \"CEO-BRIEF\")|.lastRun.outputs) == \"brief exists for $AIBKEY\""
+as "$CEO_TOKEN" GET "$AI/admin/seats"; check "ai seats: the CEO-BRIEF seat now shows its last run" ".success and (.data[]|select(.code == \"CEO-BRIEF\")|.lastRun.outputs) == \"گزارش روز $AIBP قبلاً نوشته شده است\""
 
 # --- WH-REORDER: one draft purchase request for the items under their minimum that no open request asks for and no open order covers
 item AIWH1 "{\"code\":\"50.10.12.031.1\",\"title\":\"قطعه آزمون صندلی انبار یک\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":50,\"requiresIncomingInspection\":false}" "ai seat low-stock item 1"

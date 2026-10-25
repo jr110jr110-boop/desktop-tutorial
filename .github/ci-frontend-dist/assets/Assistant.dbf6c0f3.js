@@ -1,0 +1,1 @@
+import{A as e}from"./AssistantPanel.a02d01f8.js";import{d as s,o as t,c as a,a as o,b as r}from"./index.08ac7cc3.js";import"./QPager.aea4808d.js";import"./AiAPIs.ea270b56.js";import"./ai.d8bf0d78.js";const n={class:"inv-page"},_={class:"inv-card"},u=s({setup(c){return(i,p)=>(t(),a("div",n,[o("div",_,[r(e)])]))}});export{u as default};

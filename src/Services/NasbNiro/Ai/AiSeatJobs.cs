@@ -163,7 +163,7 @@ namespace Services.NasbNiro.Ai
         public async Task<AiSeatJobResult> RunAsync(AiSeatRunContext context, CancellationToken ct)
         {
             int key = AiSeatTexts.DayKey(context.AsOf);
-            if ((await _notes.ExistingTargetsAsync(Code, AiNoteTypes.CeoBrief, new[] { key }, ct)).Contains(key)) return AiSeatJobResult.Done("brief exists for " + key);
+            if ((await _notes.ExistingTargetsAsync(Code, AiNoteTypes.CeoBrief, new[] { key }, ct)).Contains(key)) return AiSeatJobResult.Done("گزارش روز " + InventoryText.PersianDate(context.AsOf.Date) + " قبلاً نوشته شده است");
             AiSeatAnswer a = await _ask.AskAsync(Question, ct);
             if (a.Degraded) return AiSeatJobResult.Skip(AiSeatTexts.LlmDown + ": " + AiText.Cut(a.Reason, 300));
             bool created = await _notes.TryAddAsync(new AiNote
