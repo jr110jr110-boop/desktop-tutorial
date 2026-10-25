@@ -439,6 +439,22 @@ namespace DataLayer.Migrations
                         },
                         new
                         {
+                            Id = 24,
+                            ConcurrencyStamp = "00000024-0000-0000-0000-000000000000",
+                            Description = "فروش و بازاریابی",
+                            Name = "SALES",
+                            NormalizedName = "SALES"
+                        },
+                        new
+                        {
+                            Id = 25,
+                            ConcurrencyStamp = "00000025-0000-0000-0000-000000000000",
+                            Description = "خدمات پس از فروش",
+                            Name = "SERVICE",
+                            NormalizedName = "SERVICE"
+                        },
+                        new
+                        {
                             Id = 28,
                             ConcurrencyStamp = "00000028-0000-0000-0000-000000000000",
                             Description = "حسابرس",
@@ -997,6 +1013,41 @@ namespace DataLayer.Migrations
                             ClaimType = "permission",
                             ClaimValue = "Warehouse",
                             RoleId = 23
+                        },
+                        new
+                        {
+                            Id = 2400,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 24
+                        },
+                        new
+                        {
+                            Id = 2401,
+                            ClaimType = "permission",
+                            ClaimValue = "Contract",
+                            RoleId = 24
+                        },
+                        new
+                        {
+                            Id = 2500,
+                            ClaimType = "permission",
+                            ClaimValue = "Warehouse",
+                            RoleId = 25
+                        },
+                        new
+                        {
+                            Id = 2501,
+                            ClaimType = "permission",
+                            ClaimValue = "Traceability",
+                            RoleId = 25
+                        },
+                        new
+                        {
+                            Id = 2502,
+                            ClaimType = "permission",
+                            ClaimValue = "Contract",
+                            RoleId = 25
                         },
                         new
                         {
@@ -1672,6 +1723,934 @@ namespace DataLayer.Migrations
                         .IsUnique();
 
                     b.ToTable("HolidaysDayOfWeek", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SlSurvey", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("AnsweredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal?>("AverageScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("Comments")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("DraftedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ServiceOrderId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ShipmentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("ServiceOrderId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [ServiceOrderId] IS NOT NULL");
+
+                    b.HasIndex("ShipmentId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [ShipmentId] IS NOT NULL");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("SlSurveys", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SlSurveyAnswer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Question")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("Score")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SurveyId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SurveyId");
+
+                    b.ToTable("SlSurveyAnswers", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvContract", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ActivatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ActivatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime?>("NextVisitDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal?>("PriceRial")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Scope")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("VisitIntervalMonths")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("SvContracts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvContractUnit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UnitId");
+
+                    b.HasIndex("ContractId", "UnitId")
+                        .IsUnique();
+
+                    b.ToTable("SvContractUnits", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvInstalledUnit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CommissioningDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Decommissioned")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("DecommissionedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("HandoverDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsConfirmed")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ProductType")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal>("RunningHours")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("RunningHoursAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("SerialUnitId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ShipmentId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SiteId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Tag")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("WarrantyEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("WarrantyMonths")
+                        .HasColumnType("int");
+
+                    b.Property<int>("WarrantySource")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("WarrantyStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("SerialUnitId");
+
+                    b.HasIndex("ShipmentId");
+
+                    b.HasIndex("SiteId");
+
+                    b.HasIndex("Tag")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.ToTable("SvInstalledUnits", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvMeasurement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal>("Value")
+                        .HasPrecision(22, 6)
+                        .HasColumnType("decimal(22,6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("SvMeasurements", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvOrderEngineer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("OrderId", "EmployeeId")
+                        .IsUnique();
+
+                    b.ToTable("SvOrderEngineers", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvOrderTask", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsDone")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("SvOrderTasks", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal?>("BillableLabourRateRial")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<bool>("CauseIsMisuse")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CostCenterCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("CostPostedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Decision")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("DraftNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Findings")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("GoodwillReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("GoodwillRequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("GoodwillRequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("LabourAggregatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("LabourAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<int>("LabourEmployeeCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("LabourHours")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("LabourPayrollEmployeeCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LabourPendingPeriod")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LtsaContractId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal>("PartsAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<DateTime?>("PlannedEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PlannedStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Recommendations")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid?>("ReportDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("RequestId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal?>("RunningHoursReading")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("TravelNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WarrantyEventId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("WarrantyTestedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("InvoiceId");
+
+                    b.HasIndex("LabourPendingPeriod")
+                        .HasFilter("[LabourPendingPeriod] IS NOT NULL");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("RequestId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("UnitId");
+
+                    b.HasIndex("WarrantyEventId");
+
+                    b.HasIndex("LtsaContractId", "UnitId", "PlannedStart")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [LtsaContractId] IS NOT NULL AND [Status] <> 5");
+
+                    b.ToTable("SvServiceOrders", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvServiceRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("AssignedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("AssignedToUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Channel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ContactId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("FirstResponseAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("ProductNonconformity")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Resolution")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime?>("ResolutionDue")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ResponseDue")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("UnitId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContactId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("UnitId");
+
+                    b.ToTable("SvServiceRequests", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("SvSettings", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvSlaRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("ResolutionHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<decimal>("ResponseHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Priority")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("SvSlaRules", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvTimeEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Hours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<bool?>("RateFromPayroll")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("WorkDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("SvTimeEntries", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvUnitSpare", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("UnitId");
+
+                    b.ToTable("SvUnitSpares", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Constract.Machine", b =>
@@ -9945,6 +10924,9 @@ namespace DataLayer.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<int?>("SalesOrderId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("SepidarExportedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -9953,6 +10935,9 @@ namespace DataLayer.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<int>("SepidarStatus")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ServiceOrderId")
                         .HasColumnType("int");
 
                     b.Property<int>("Status")
@@ -10003,7 +10988,11 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("PurchaseOrderId");
 
+                    b.HasIndex("SalesOrderId");
+
                     b.HasIndex("SepidarStatus");
+
+                    b.HasIndex("ServiceOrderId");
 
                     b.HasIndex("WarehouseId");
 
@@ -10066,6 +11055,9 @@ namespace DataLayer.Migrations
                     b.Property<int>("RowNumber")
                         .HasColumnType("int");
 
+                    b.Property<int?>("SalesOrderLineId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("SourceRowNumber")
                         .HasColumnType("int");
 
@@ -10086,6 +11078,8 @@ namespace DataLayer.Migrations
                     b.HasIndex("LotId");
 
                     b.HasIndex("PurchaseOrderLineId");
+
+                    b.HasIndex("SalesOrderLineId");
 
                     b.ToTable("InvDocumentLines", (string)null);
                 });
@@ -19395,6 +20389,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("ResponseDue")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("ServiceRequestId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Severity")
                         .HasColumnType("int");
 
@@ -19413,6 +20410,10 @@ namespace DataLayer.Migrations
                     b.HasIndex("Number")
                         .IsUnique()
                         .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("ServiceRequestId")
+                        .IsUnique()
+                        .HasFilter("[ServiceRequestId] IS NOT NULL");
 
                     b.HasIndex("Status");
 
@@ -21493,6 +22494,1554 @@ namespace DataLayer.Migrations
                     b.ToTable("ProgressReports", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlActivity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("ActivityDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ContactId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("InquiryId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime?>("NextActionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("OwnerUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ProposalId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ServiceRequestId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContactId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("InquiryId");
+
+                    b.HasIndex("ProposalId");
+
+                    b.HasIndex("ServiceRequestId");
+
+                    b.ToTable("SlActivities", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlBidDecision", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("CapacityCheckedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime?>("CapacityCheckedUntil")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CapacityNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("CapacityOverloadWeeks")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CommercialRiskNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("CommercialRiskReviewed")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal?>("ExpectedMarginPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<string>("GuaranteesNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("GuaranteesReviewed")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("InquiryId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PaymentTermsNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("PaymentTermsReviewed")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SanctionCheck")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SanctionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool?>("TechnicalCapabilityOk")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("TechnicalNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InquiryId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("SlBidDecisions", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlContact", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("JobTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.ToTable("SlContacts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlCustomerLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("LinkedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("TenderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [ContractId] IS NOT NULL");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("TenderId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0 AND [TenderId] IS NOT NULL");
+
+                    b.ToTable("SlCustomerLinks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SlCustomerLinks_OneSource", "([ContractId] IS NULL AND [TenderId] IS NOT NULL) OR ([ContractId] IS NOT NULL AND [TenderId] IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlCustomerProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("City")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Country")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("CreditLimitRial")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<DateTimeOffset?>("CreditSetAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CreditSetByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("Industry")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PaymentTermDays")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("Type")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.ToTable("SlCustomerProfiles", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("ContingencyCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal?>("ContingencyPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal>("CostBeforeOverhead")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("DirectCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal>("EngineeringCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<DateTimeOffset?>("FinalizedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("FinalizedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("FinancingAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal>("FinancingCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal?>("FinancingMonths")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal?>("FinancingRatePercentPerMonth")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal?>("GuaranteeAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal>("GuaranteeCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal?>("GuaranteeMonths")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal?>("GuaranteeRatePercentPerMonth")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<int>("InquiryId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("LabourCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal>("MaterialCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<int>("MissingCostLines")
+                        .HasColumnType("int");
+
+                    b.Property<string>("MissingInputs")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal>("OverheadCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal?>("OverheadPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal>("PackingTransportCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal?>("Price")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("RiskCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("SubcontractCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal?>("TargetMarginPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal>("TotalCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("InquiryId", "Revision")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("SlEstimates", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimateEquipment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Count")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EquipmentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EstimateId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EquipmentId");
+
+                    b.HasIndex("EstimateId");
+
+                    b.ToTable("SlEstimateEquipments", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimateLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<int>("CostSource")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int?>("EquipmentBomId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("EquipmentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EstimateId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal?>("UnitCost")
+                        .HasPrecision(22, 4)
+                        .HasColumnType("decimal(22,4)");
+
+                    b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EquipmentBomId");
+
+                    b.HasIndex("EquipmentId");
+
+                    b.HasIndex("EstimateId");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("WorkCenterId");
+
+                    b.ToTable("SlEstimateLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimateRisk", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("EstimateId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ExpectedCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal>("ImpactAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal>("ProbabilityPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EstimateId");
+
+                    b.ToTable("SlEstimateRisks", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlInquiry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AttachmentIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Channel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("ContactId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CustomerReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("ProductType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ProposalDueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("ReceivedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("RequiredDeliveryDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TenderId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContactId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenderId");
+
+                    b.ToTable("SlInquiries", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlOrderDelivery", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DraftNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("Reversed")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("SalesOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("InvoiceId");
+
+                    b.HasIndex("SalesOrderId");
+
+                    b.ToTable("SlOrderDeliveries", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlPriceList", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime>("ValidFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ValidTo")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("SlPriceLists", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlPriceListLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("MinQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("PriceListId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(22, 4)
+                        .HasColumnType("decimal(22,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("PriceListId");
+
+                    b.ToTable("SlPriceListLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlProposal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal?>("AdvancePercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<string>("ApprovalNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("BelowCost")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ClientReviewDays")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("CommercialDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Competitor")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal?>("CompetitorPrice")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CustomerReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("DeliveryWeeks")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DeviationsText")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("EstimateId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("EstimateTotalCost")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<string>("GuaranteesText")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("InquiryId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("LatePenaltyPercentPerWeek")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<string>("LessonsLearned")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("PaymentTermsText")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal?>("PenaltyCapPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<DateTimeOffset?>("ResultAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ResultReasonId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("RetentionPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("SubmittedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("TechnicalDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ValidityDays")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("VatPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId");
+
+                    b.HasIndex("EstimateId");
+
+                    b.HasIndex("InquiryId");
+
+                    b.HasIndex("ResultReasonId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("Number", "Revision")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("SlProposals", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlQuotation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ContactId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("NetAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("PriceListId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("QuotationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int?>("SalesOrderId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ValidUntil")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContactId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("PriceListId");
+
+                    b.HasIndex("SalesOrderId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("SlQuotations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlQuotationLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal>("DiscountPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("QuotationId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(22, 4)
+                        .HasColumnType("decimal(22,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("QuotationId");
+
+                    b.ToTable("SlQuotationLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlReasonCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Code")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("SlReasonCodes", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSalesOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ContactId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreditApprovalNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("CreditApprovalRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("CreditApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CreditApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("CreditApprovedNetAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal?>("CreditExcess")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<string>("CreditReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CustomerOrderNumber")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("NetAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("OrderDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("QuotationId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("RequestedDeliveryDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContactId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("QuotationId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("SlSalesOrders", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSalesOrderLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<decimal>("DeliveredQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal>("DiscountPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal>("InvoicedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("ReservedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(22, 4)
+                        .HasColumnType("decimal(22,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("SlSalesOrderLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal?>("Value")
+                        .HasPrecision(22, 4)
+                        .HasColumnType("decimal(22,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("SlSettings", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSite", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CoordinatesText")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Country")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.ToTable("SlSites", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Tenders.Tender", b =>
                 {
                     b.Property<int>("Id")
@@ -21986,6 +24535,221 @@ namespace DataLayer.Migrations
                         .IsRequired();
 
                     b.Navigation("Address");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SlSurvey", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", null)
+                        .WithMany()
+                        .HasForeignKey("ServiceOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcShipment", null)
+                        .WithMany()
+                        .HasForeignKey("ShipmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SlSurveyAnswer", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SlSurvey", null)
+                        .WithMany("Answers")
+                        .HasForeignKey("SurveyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvContract", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvContractUnit", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvContract", null)
+                        .WithMany("Units")
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvInstalledUnit", null)
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvInstalledUnit", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.SerialUnit", null)
+                        .WithMany()
+                        .HasForeignKey("SerialUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcShipment", null)
+                        .WithMany()
+                        .HasForeignKey("ShipmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlSite", null)
+                        .WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvMeasurement", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", null)
+                        .WithMany("Measurements")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvOrderEngineer", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", null)
+                        .WithMany("Engineers")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvOrderTask", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", null)
+                        .WithMany("Tasks")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnSalesInvoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvContract", null)
+                        .WithMany()
+                        .HasForeignKey("LtsaContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceRequest", null)
+                        .WithMany()
+                        .HasForeignKey("RequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvInstalledUnit", null)
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.AccountingEvent", "WarrantyEvent")
+                        .WithMany()
+                        .HasForeignKey("WarrantyEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Invoice");
+
+                    b.Navigation("WarrantyEvent");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvServiceRequest", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlContact", null)
+                        .WithMany()
+                        .HasForeignKey("ContactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvInstalledUnit", null)
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvTimeEntry", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", null)
+                        .WithMany("TimeEntries")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvUnitSpare", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvInstalledUnit", null)
+                        .WithMany("Spares")
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.ContractEquipments.ContractEquipment", b =>
@@ -23268,6 +26032,16 @@ namespace DataLayer.Migrations
                         .HasForeignKey("PurchaseOrderId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlSalesOrder", null)
+                        .WithMany()
+                        .HasForeignKey("SalesOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", null)
+                        .WithMany()
+                        .HasForeignKey("ServiceOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "Warehouse")
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -23330,6 +26104,11 @@ namespace DataLayer.Migrations
                     b.HasOne("Entities.Model.NasbNiro.Procurement.PurchaseOrderLine", "PurchaseOrderLine")
                         .WithMany()
                         .HasForeignKey("PurchaseOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlSalesOrderLine", null)
+                        .WithMany()
+                        .HasForeignKey("SalesOrderLineId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("DestinationLocation");
@@ -25299,6 +28078,11 @@ namespace DataLayer.Migrations
                         .HasForeignKey("ContractId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceRequest", "ServiceRequest")
+                        .WithMany()
+                        .HasForeignKey("ServiceRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Contracts.WorkOrder", "WorkOrder")
                         .WithMany()
                         .HasForeignKey("WorkOrderId")
@@ -25307,6 +28091,8 @@ namespace DataLayer.Migrations
                     b.Navigation("Capa");
 
                     b.Navigation("Contract");
+
+                    b.Navigation("ServiceRequest");
 
                     b.Navigation("WorkOrder");
                 });
@@ -25780,6 +28566,318 @@ namespace DataLayer.Migrations
                     b.Navigation("WorkOrder");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlActivity", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlContact", null)
+                        .WithMany()
+                        .HasForeignKey("ContactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlInquiry", null)
+                        .WithMany()
+                        .HasForeignKey("InquiryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlProposal", null)
+                        .WithMany()
+                        .HasForeignKey("ProposalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.AfterSales.SvServiceRequest", null)
+                        .WithMany()
+                        .HasForeignKey("ServiceRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlBidDecision", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlInquiry", null)
+                        .WithMany()
+                        .HasForeignKey("InquiryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlContact", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlCustomerLink", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", "Contract")
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Tenders.Tender", "Tender")
+                        .WithMany()
+                        .HasForeignKey("TenderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Contract");
+
+                    b.Navigation("Tender");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlCustomerProfile", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Customer");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimate", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlInquiry", null)
+                        .WithMany()
+                        .HasForeignKey("InquiryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimateEquipment", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Equipments.Equipment", null)
+                        .WithMany()
+                        .HasForeignKey("EquipmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlEstimate", null)
+                        .WithMany("Equipments")
+                        .HasForeignKey("EstimateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimateLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Equipments.EquipmentBom", null)
+                        .WithMany()
+                        .HasForeignKey("EquipmentBomId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Equipments.Equipment", null)
+                        .WithMany()
+                        .HasForeignKey("EquipmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlEstimate", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("EstimateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
+                        .WithMany()
+                        .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimateRisk", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlEstimate", null)
+                        .WithMany("Risks")
+                        .HasForeignKey("EstimateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlInquiry", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlContact", null)
+                        .WithMany()
+                        .HasForeignKey("ContactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Tenders.Tender", "Tender")
+                        .WithMany()
+                        .HasForeignKey("TenderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Tender");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlOrderDelivery", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryDocument", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnSalesInvoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlSalesOrder", null)
+                        .WithMany()
+                        .HasForeignKey("SalesOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Invoice");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlPriceListLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlPriceList", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("PriceListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlProposal", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", "Contract")
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlEstimate", null)
+                        .WithMany()
+                        .HasForeignKey("EstimateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlInquiry", null)
+                        .WithMany()
+                        .HasForeignKey("InquiryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlReasonCode", null)
+                        .WithMany()
+                        .HasForeignKey("ResultReasonId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Contract");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlQuotation", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlContact", null)
+                        .WithMany()
+                        .HasForeignKey("ContactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlPriceList", null)
+                        .WithMany()
+                        .HasForeignKey("PriceListId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlSalesOrder", "SalesOrder")
+                        .WithMany()
+                        .HasForeignKey("SalesOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("SalesOrder");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlQuotationLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlQuotation", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("QuotationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSalesOrder", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlContact", null)
+                        .WithMany()
+                        .HasForeignKey("ContactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlQuotation", null)
+                        .WithMany()
+                        .HasForeignKey("QuotationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSalesOrderLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlSalesOrder", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSite", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnCustomer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Tenders.TenderFile", b =>
                 {
                     b.HasOne("Entities.Model.Document", "Document")
@@ -25902,6 +29000,32 @@ namespace DataLayer.Migrations
                     b.Navigation("Province");
 
                     b.Navigation("Section");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SlSurvey", b =>
+                {
+                    b.Navigation("Answers");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvContract", b =>
+                {
+                    b.Navigation("Units");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvInstalledUnit", b =>
+                {
+                    b.Navigation("Spares");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SvServiceOrder", b =>
+                {
+                    b.Navigation("Engineers");
+
+                    b.Navigation("Measurements");
+
+                    b.Navigation("Tasks");
+
+                    b.Navigation("TimeEntries");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Contracts.AssemblyEntity", b =>
@@ -26381,6 +29505,30 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.Wps", b =>
                 {
                     b.Navigation("Pqrs");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlEstimate", b =>
+                {
+                    b.Navigation("Equipments");
+
+                    b.Navigation("Lines");
+
+                    b.Navigation("Risks");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlPriceList", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlQuotation", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Sales.SlSalesOrder", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Tenders.Tender", b =>
