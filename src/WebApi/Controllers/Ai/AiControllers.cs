@@ -34,8 +34,10 @@ namespace WebApi.Controllers
         /// <summary>Push-to-talk: speech to text, chat, text to speech. A webm or wav file up to 10 MB.</summary>
         [HttpPost("voice")]
         [RequestSizeLimit(MaxAudioBytes + 1024 * 1024)]
-        public async Task<IActionResult> VoiceAsync([FromForm] IFormFile file, [FromForm] int? conversationId, CancellationToken ct)
+        public async Task<IActionResult> VoiceAsync([FromForm] AiVoiceForm form, CancellationToken ct)
         {
+            IFormFile file = form?.File;
+            int? conversationId = form?.ConversationId;
             if (file == null || file.Length == 0) return Ok(ResponseDtoHelper.BadRequest<AiVoiceResponseDto>("فایل صوتی را بفرستید."));
             if (file.Length > MaxAudioBytes) return Ok(ResponseDtoHelper.BadRequest<AiVoiceResponseDto>("حجم فایل صوتی نباید از ۱۰ مگابایت بیشتر باشد."));
             using var stream = new MemoryStream();
@@ -88,5 +90,14 @@ namespace WebApi.Controllers
 
         [HttpPost("index/rebuild")]
         public async Task<IActionResult> RebuildAsync(CancellationToken ct) => Ok(await _admin.RebuildIndexAsync(ct));
+    }
+
+    /// <summary>The multipart form of the voice request (one model, so the API description can describe the file upload).</summary>
+    public class AiVoiceForm
+    {
+        /// <summary>The recorded question (webm, wav or ogg, up to 10 MB).</summary>
+        public IFormFile File { get; set; }
+
+        public int? ConversationId { get; set; }
     }
 }
