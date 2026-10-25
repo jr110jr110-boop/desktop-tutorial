@@ -221,7 +221,7 @@ onBeforeUnmount(() => {
     <div v-if="dialog" class="tm-backdrop" @click.self="dialog = null">
       <div class="tm-dialog">
         <h2 class="tm-dtitle">
-          {{ { start: "شروع کار", switch: "تغییر نوع کار", pause: "توقف کار", qty: "ثبت تعداد", finish: "پایان عملیات", qc: "درخواست بازرسی", down: "گزارش خرابی ماشین" }[dialog.type] }}
+          {{ ({ start: "شروع کار", "switch": "تغییر نوع کار", pause: "توقف کار", qty: "ثبت تعداد", finish: "پایان عملیات", qc: "درخواست بازرسی", down: "گزارش خرابی ماشین" })[dialog.type] }}
           <small v-if="dialog.op" class="inv-ltr"> {{ dialog.op.jobCard }}</small>
         </h2>
         <div v-if="banner && banner.kind === 'bad'" class="tm-banner bad" @click="banner = null">{{ banner.text }}</div>

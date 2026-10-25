@@ -2,7 +2,7 @@ import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
-import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
+import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -593,6 +593,40 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/production/maintenance-requests/:id", name: "MfMaintenanceRequest", component: () => import("@/views/production/Maintenance.vue"), meta: { roles: ProductionRoles.masterReaders } },
   { path: "/production/oee", name: "MfOee", component: () => import("@/views/production/Oee.vue"), meta: { roles: ProductionRoles.readers } },
   { path: "/production/cost", name: "MfCost", component: () => import("@/views/production/Cost.vue"), meta: { roles: ProductionRoles.costReaders } },
+
+  // Sales (فروش). meta.roles = who may open the page (the API checks every call again). The extra paths are the links the API writes into inbox items and CEO alerts:
+  // /sales/bid-decisions[/:id] (id = the INQUIRY id), /sales/proposals/:id, /sales/orders/:id, /sales/inquiries, /sales/proposals; pages read route.params.id.
+  { path: "/sales/dashboard", name: "SlDashboard", component: () => import("@/views/sales/Dashboard.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/customers", name: "SlCustomers", component: () => import("@/views/sales/Customers.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/customers/:id", name: "SlCustomer", component: () => import("@/views/sales/Customers.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/inquiries", name: "SlInquiries", component: () => import("@/views/sales/Inquiries.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/inquiries/:id", name: "SlInquiry", component: () => import("@/views/sales/InquiryDetail.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/bid-decisions", name: "SlBidDecisions", component: () => import("@/views/sales/Inquiries.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/bid-decisions/:id", name: "SlBidDecision", component: () => import("@/views/sales/InquiryDetail.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/estimates", name: "SlEstimates", component: () => import("@/views/sales/Estimates.vue"), meta: { roles: SalesRoles.commercialReaders } },
+  { path: "/sales/estimates/:id", name: "SlEstimate", component: () => import("@/views/sales/EstimateEdit.vue"), meta: { roles: SalesRoles.commercialReaders } },
+  { path: "/sales/proposals", name: "SlProposals", component: () => import("@/views/sales/Proposals.vue"), meta: { roles: SalesRoles.commercialReaders } },
+  { path: "/sales/proposals/:id", name: "SlProposal", component: () => import("@/views/sales/Proposals.vue"), meta: { roles: SalesRoles.commercialReaders } },
+  { path: "/sales/price-lists", name: "SlPriceLists", component: () => import("@/views/sales/PriceLists.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/quotations", name: "SlQuotations", component: () => import("@/views/sales/Quotations.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/orders", name: "SlOrders", component: () => import("@/views/sales/Orders.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/orders/:id", name: "SlOrder", component: () => import("@/views/sales/Orders.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/settings", name: "SlSettings", component: () => import("@/views/sales/Settings.vue"), meta: { roles: SalesRoles.readers } },
+
+  // After-sales service (خدمات پس از فروش). Links the API writes: /service/units/:id, /service/requests[/:id], /service/orders[/:id], /service/surveys/:id, /service/contracts/:id.
+  { path: "/service/dashboard", name: "SvDashboard", component: () => import("@/views/service/Dashboard.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/units", name: "SvUnits", component: () => import("@/views/service/Units.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/units/:id", name: "SvUnit", component: () => import("@/views/service/Units.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/requests", name: "SvRequests", component: () => import("@/views/service/Requests.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/requests/:id", name: "SvRequest", component: () => import("@/views/service/RequestDetail.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/orders", name: "SvOrders", component: () => import("@/views/service/Orders.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/orders/:id", name: "SvOrder", component: () => import("@/views/service/OrderDetail.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/contracts", name: "SvContracts", component: () => import("@/views/service/Contracts.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/contracts/:id", name: "SvContract", component: () => import("@/views/service/Contracts.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/surveys", name: "SvSurveys", component: () => import("@/views/service/Surveys.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/surveys/:id", name: "SvSurvey", component: () => import("@/views/service/Surveys.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/settings", name: "SvSettings", component: () => import("@/views/service/Settings.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/labour", name: "SvLabour", component: () => import("@/views/service/Labour.vue"), meta: { roles: ServiceRoles.labourRunners } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

@@ -84,7 +84,7 @@ function locationsFor(line: any): any[] {
 function emptyDoc(type: number) {
   return {
     id: null, type, number: null, status: 0, documentDate: today(), warehouseId: null, destinationWarehouseId: null,
-    providerId: null, workOrderId: null, contractId: null, buyOrderId: null, purchaseOrderId: null, referenceNumber: "", description: "", lines: [],
+    providerId: null, workOrderId: null, contractId: null, buyOrderId: null, purchaseOrderId: null, salesOrderId: null as number | null, serviceOrderId: null as number | null, referenceNumber: "", description: "", lines: [],
     materialRequestId: null, driverName: "", vehiclePlate: "", receiverName: "", destination: "", buyerName: "", minutesNumber: "",
     weighbridgeDocumentId: null, depositReference: "", priceQuotes: "",
   };
@@ -121,7 +121,7 @@ function fromDto(d: any) {
       certificateNumber: l.certificateNumber || "", locationId: l.locationId, destinationLocationId: l.destinationLocationId,
       unitPrice: l.unitPrice, description: l.description || "", serialText: (l.serialNumbers || []).join("\n"),
       locationCode: l.locationCode, destinationLocationCode: l.destinationLocationCode,
-      direction: l.direction || 0, sourceRowNumber: l.sourceRowNumber, purchaseOrderLineId: l.purchaseOrderLineId,
+      direction: l.direction || 0, sourceRowNumber: l.sourceRowNumber, purchaseOrderLineId: l.purchaseOrderLineId, salesOrderLineId: l.salesOrderLineId ?? null,
     })),
   };
 }
@@ -133,6 +133,8 @@ function toDto() {
     destinationWarehouseId: hasDestination.value ? d.destinationWarehouseId : null,
     providerId: needsProvider.value ? d.providerId : null, workOrderId: d.workOrderId, contractId: d.contractId,
     buyOrderId: d.buyOrderId, purchaseOrderId: usesOrder.value ? d.purchaseOrderId : null,
+    // sales and after-sales links (S1): kept on every save so a delivery or issue never loses its order
+    salesOrderId: d.salesOrderId ?? null, serviceOrderId: d.serviceOrderId ?? null,
     referenceNumber: d.referenceNumber, description: d.description,
     materialRequestId: issue.value ? d.materialRequestId : null,
     driverName: d.driverName, vehiclePlate: d.vehiclePlate, receiverName: d.receiverName, destination: d.destination,
@@ -142,6 +144,7 @@ function toDto() {
       direction: conversion.value ? l.direction : 0,
       sourceRowNumber: conversion.value && l.direction === 2 ? l.sourceRowNumber : null,
       purchaseOrderLineId: usesOrder.value && d.purchaseOrderId ? l.purchaseOrderLineId : null,
+      salesOrderLineId: d.salesOrderId ? l.salesOrderLineId ?? null : null,
       itemId: l.item.id, quantity: Number(l.quantity) || 0, lotId: l.item.trackingMode === 1 ? l.lotId : null,
       lotNumber: l.item.trackingMode === 1 && !l.lotId ? l.lotNumber : null, heatNumber: l.heatNumber || null,
       certificateNumber: l.certificateNumber || null, locationId: l.locationId, destinationLocationId: transfer.value ? l.destinationLocationId : null,
@@ -610,6 +613,8 @@ onMounted(async () => {
       doc.value.materialRequestId = Number(route.query.request);
       await fillFromRequest();
     }
+    if (route.query.salesOrder) doc.value.salesOrderId = Number(route.query.salesOrder);
+    if (route.query.serviceOrder) doc.value.serviceOrderId = Number(route.query.serviceOrder);
     if (route.query.order && doc.value.type === 1) {
       doc.value.purchaseOrderId = Number(route.query.order);
       await onOrderChange();

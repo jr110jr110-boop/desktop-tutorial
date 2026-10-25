@@ -31,6 +31,8 @@ export const Roles = {
   SHOPSUPERVISOR: "SHOPSUPERVISOR",
   OPERATOR: "OPERATOR",
   MAINTENANCE: "MAINTENANCE",
+  SALES: "SALES",
+  SERVICE: "SERVICE",
 } as const;
 
 /** Role ids of the finance roles in the API (RoleConstants.cs); the user page picks roles from the API list, these are for reference. */
@@ -45,6 +47,8 @@ export const RoleIds = {
   SHOPSUPERVISOR: 21,
   OPERATOR: 22,
   MAINTENANCE: 23,
+  SALES: 24,
+  SERVICE: 25,
 } as const;
 
 export const roleTitles: Record<string, string> = {
@@ -74,6 +78,8 @@ export const roleTitles: Record<string, string> = {
   SHOPSUPERVISOR: "سرپرست کارگاه",
   OPERATOR: "اپراتور",
   MAINTENANCE: "نگهداری و تعمیرات",
+  SALES: "فروش و بازاریابی",
+  SERVICE: "خدمات پس از فروش",
 };
 
 const list = (csv: string) => csv.split(",");
@@ -189,6 +195,72 @@ export const ProductionRoles = {
   attendanceCheck: list("SHOPSUPERVISOR,PRODUCTIONMANAGER,HR,CEO,PMO"),
   /** GET dashboard */
   dashboard: list("PRODUCTIONMANAGER,SHOPSUPERVISOR,CEO,PMO,PLANNING,MAINTENANCE,QC,QA,FINANCEMANAGER,AUDITOR"),
+};
+
+/**
+ * Sales (SalesRoles in Services/NasbNiro/Sales/SalesCommon.cs plus the checks inside the services). The controllers only require a signed-in user;
+ * a role with the GET right but not the write right sees the page without the buttons. Segregation of duties (the person who wrote a document may not approve it) is checked by the API.
+ */
+export const SalesRoles = {
+  sales: ["SALES"],
+  ceo: ["CEO"],
+  /** GET customers, contacts, sites, activities, links, settings, reason codes, inquiries, bid decisions, price lists, quotations, orders, dashboard */
+  readers: list("SALES,CEO,PMO,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,PLANNING,AUDITOR,SERVICE"),
+  /** GET estimates, proposals, win-loss statistics, price suggestions (the money pages; narrower than readers) */
+  commercialReaders: list("SALES,CEO,PMO,COMMERCIAL,FINANCEMANAGER,AUDITOR"),
+  /** save customer / contact / site / reason code */
+  masterWriters: list("SALES,PMO"),
+  /** inquiries, bid-decision checklist and submit, estimates, proposals (save, submit, revise, cancel), price lists (save), quotations, sales orders, draft invoice */
+  writers: ["SALES"],
+  /** save an activity (a SERVICE user may only edit what is theirs; SALES edits any) */
+  activityWriters: list("SALES,SERVICE"),
+  /** approve a proposal; the CEO alone when the price is below cost or above the threshold (or no threshold is set) */
+  proposalApprovers: list("SALES,CEO"),
+  /** approve / retire a price list (somebody who did not write it) */
+  priceListApprovers: list("SALES,CEO,FINANCEMANAGER"),
+  /** POST customers/credit: finance manager only */
+  creditSetters: ["FINANCEMANAGER"],
+  /** the credit limit is filled in the customer DTO only for these roles (otherwise null) */
+  creditViewers: list("FINANCEMANAGER,FINANCIAL"),
+  /** change the name / economic code / national id of an existing customer */
+  identityChangers: list("FINANCEMANAGER,FINANCIAL"),
+  /** POST orders/credit-approve: an order above the customer's credit limit */
+  creditApprovers: ["FINANCEMANAGER"],
+  /** proposals/result with Result = won (makes the contract) */
+  contractMakers: list("SALES,CEO"),
+  /** POST bid-decisions/decide (bid / no-bid): the CEO only */
+  bidDeciders: ["CEO"],
+  /** POST settings: the CEO only */
+  settingSetters: ["CEO"],
+  /** POST customers/link-legacy, customers/link */
+  legacyLinkers: list("SALES,PMO,CEO"),
+};
+
+/**
+ * After-sales service (SvRoles in Services/NasbNiro/AfterSales/SvCommon.cs plus the checks inside the services).
+ * Payroll-protected labour amounts come as null with labourHidden=true (orders) or warrantyCostHidden=true (dashboard, KPIs) for roles outside payrollSeers.
+ */
+export const ServiceRoles = {
+  service: ["SERVICE"],
+  ceo: ["CEO"],
+  /** GET settings, sla-rules, units, requests, orders, contracts, surveys, dashboard, kpis */
+  readers: list("SERVICE,CEO,PMO,SALES,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,QA,QC,AUDITOR"),
+  /** every write: units, requests, orders (save, action, time, measurements), contracts, draft invoice, warranty / billable decision */
+  writers: ["SERVICE"],
+  /** POST settings: the CEO only */
+  settingSetters: ["CEO"],
+  /** POST sla-rules */
+  slaWriters: list("SERVICE,CEO"),
+  /** POST orders/decision with Decision = Goodwill (the CEO only; SERVICE decides Warranty / Billable, a different person from the writer) */
+  goodwillDeciders: ["CEO"],
+  /** POST jobs/run */
+  jobRunners: list("SERVICE,CEO"),
+  /** POST labour/aggregate (monthly protected-labour posting) */
+  labourRunners: list("FINANCEMANAGER,CEO"),
+  /** surveys: send, skip, answer */
+  surveyWorkers: list("SERVICE,SALES"),
+  /** these roles see the labour amount of an order, the warranty cost of the dashboard and KPIs; for others they are null with a *Hidden flag */
+  payrollSeers: list("PAYROLL,FINANCEMANAGER,CEO"),
 };
 
 /** Finance controller. */

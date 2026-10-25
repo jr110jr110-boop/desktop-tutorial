@@ -213,6 +213,32 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="salesLinks"
+        has-sub
+        route-name="Sl"
+        tag="sales-collapse"
+        title="فروش">
+        <BriefcaseIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Sl') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
+        :subs="serviceLinks"
+        has-sub
+        route-name="Sv"
+        tag="service-collapse"
+        title="خدمات پس از فروش">
+        <BriefcaseIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Sv') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.providers"
         has-sub
         route-name="Providers"
@@ -241,7 +267,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
+import { FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -546,6 +572,31 @@ const productionLinks = computed<Links[]>(() => [
   { title: "نگهداری و تعمیرات", routeName: "MfMaintenance", disabled: !hasRole(ProductionRoles.masterReaders) },
   { title: "اثربخشی تجهیزات (OEE)", routeName: "MfOee", disabled: !hasRole(ProductionRoles.readers) },
   { title: "هزینه‌یابی تولید", routeName: "MfCost", disabled: !hasRole(ProductionRoles.costReaders) },
+]);
+
+// Sales: each page is disabled for the roles the API refuses (SalesRoles in composables/roles.ts).
+const salesLinks = computed<Links[]>(() => [
+  { title: "داشبورد فروش", routeName: "SlDashboard", disabled: !hasRole(SalesRoles.readers) },
+  { title: "مشتریان و CRM", routeName: "SlCustomers", disabled: !hasRole(SalesRoles.readers) },
+  { title: "استعلام‌ها و تصمیم شرکت", routeName: "SlInquiries", disabled: !hasRole(SalesRoles.readers) },
+  { title: "برآوردها", routeName: "SlEstimates", disabled: !hasRole(SalesRoles.commercialReaders) },
+  { title: "پیشنهادهای قیمت", routeName: "SlProposals", disabled: !hasRole(SalesRoles.commercialReaders) },
+  { title: "فهرست‌های قیمت", routeName: "SlPriceLists", disabled: !hasRole(SalesRoles.readers) },
+  { title: "پیش‌فاکتورها", routeName: "SlQuotations", disabled: !hasRole(SalesRoles.readers) },
+  { title: "سفارش‌های فروش", routeName: "SlOrders", disabled: !hasRole(SalesRoles.readers) },
+  { title: "تنظیمات فروش", routeName: "SlSettings", disabled: !hasRole(SalesRoles.readers) },
+]);
+
+// After-sales service: each page is disabled for the roles the API refuses (ServiceRoles in composables/roles.ts); the labour run is for the finance manager and the CEO.
+const serviceLinks = computed<Links[]>(() => [
+  { title: "داشبورد خدمات", routeName: "SvDashboard", disabled: !hasRole(ServiceRoles.readers) },
+  { title: "واحدهای نصب‌شده", routeName: "SvUnits", disabled: !hasRole(ServiceRoles.readers) },
+  { title: "درخواست‌های خدمات", routeName: "SvRequests", disabled: !hasRole(ServiceRoles.readers) },
+  { title: "دستورهای خدمات", routeName: "SvOrders", disabled: !hasRole(ServiceRoles.readers) },
+  { title: "قراردادهای خدمات (LTSA)", routeName: "SvContracts", disabled: !hasRole(ServiceRoles.readers) },
+  { title: "نظرسنجی رضایت", routeName: "SvSurveys", disabled: !hasRole(ServiceRoles.readers) },
+  { title: "تنظیمات خدمات و SLA", routeName: "SvSettings", disabled: !hasRole(ServiceRoles.readers) },
+  { title: "ثبت ماهانه دستمزد محرمانه", routeName: "SvLabour", disabled: !hasRole(ServiceRoles.labourRunners) },
 ]);
 
 const userRole = localStorage.getItem("userRole");
