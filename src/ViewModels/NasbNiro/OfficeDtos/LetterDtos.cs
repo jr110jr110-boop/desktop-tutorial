@@ -138,8 +138,20 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string RecipientNames { get; set; }
         public bool Imported { get; set; }
 
-        /// <summary>Confidential or Secret letter seen by the secretariat: only the register data is returned (no subject, body, attachments or referral notes).</summary>
+        /// <summary>Secret letter seen by the secretariat (and a Confidential or Secret letter seen by nobody with full access): only the register data is returned (no subject, body, attachments or referral notes). The secretariat reads Confidential letters in full.</summary>
         public bool MetadataOnly { get; set; }
+
+        /// <summary>The tender the letter is about (optional; its code is part of the number).</summary>
+        public int? TenderId { get; set; }
+
+        /// <summary>The project (contract) the letter is about (optional; its code is part of the number).</summary>
+        public int? ContractId { get; set; }
+
+        /// <summary>The tender code or the project code of the link, as printed in the number; null without a link.</summary>
+        public string LinkCode { get; set; }
+
+        /// <summary>Persian label of the link: «مناقصه …» or «پروژه …».</summary>
+        public string LinkTitle { get; set; }
     }
 
     public class LetterDto : LetterListDto
@@ -182,6 +194,25 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string RowVersion { get; set; }
     }
 
+    /// <summary>A tender or a project (contract) a letter can be linked to, with the code exactly as it goes into the letter number.</summary>
+    public class LinkOptionDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>Tender: the tender code. Project: the project code of project control, the contract code while the project has none.</summary>
+        public string Code { get; set; }
+        public string Title { get; set; }
+
+        /// <summary>Null when the code can be used in a number; otherwise why not (no code, or a character a number cannot hold). Such an option is refused when a letter is saved.</summary>
+        public string Problem { get; set; }
+    }
+
+    public class LinkOptionsDto
+    {
+        public List<LinkOptionDto> Tenders { get; set; } = new List<LinkOptionDto>();
+        public List<LinkOptionDto> Contracts { get; set; } = new List<LinkOptionDto>();
+    }
+
     public class SaveLetterDto
     {
         public int? Id { get; set; }
@@ -204,6 +235,12 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public bool PaperCopy { get; set; }
         public int? ReplyToLetterId { get; set; }
         public int? TemplateId { get; set; }
+
+        /// <summary>Optional tender link (draft only; at most one of TenderId and ContractId).</summary>
+        public int? TenderId { get; set; }
+
+        /// <summary>Optional project (contract) link (draft only).</summary>
+        public int? ContractId { get; set; }
         public List<RecipientDto> Recipients { get; set; } = new List<RecipientDto>();
         public List<LetterAttachmentDto> Attachments { get; set; } = new List<LetterAttachmentDto>();
         public List<RecordLinkDto> Links { get; set; } = new List<RecordLinkDto>();
@@ -351,5 +388,48 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int Skipped { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
         public List<int> LetterIds { get; set; } = new List<int>();
+    }
+
+    /// <summary>One PDF of the Rahkaran export (uploaded in the same request); the service reads the letter number from its file name.</summary>
+    public class ArchiveFileInput
+    {
+        public string FileName { get; set; }
+        public Microsoft.AspNetCore.Http.IFormFile File { get; set; }
+    }
+
+    public class ArchiveFilesDto
+    {
+        /// <summary>
+        /// Regular expression applied to the file name without extension; its group «number» (or else group 1) is the old letter number.
+        /// Empty: the whole file name without extension is the number. Characters that a file name cannot hold (/ \ : * ? " &lt; &gt; |) are compared as underscore on both sides.
+        /// </summary>
+        public string NamePattern { get; set; }
+
+        /// <summary>Optional manifest (the same CSV as the metadata import) imported before the files are attached.</summary>
+        public string Csv { get; set; }
+    }
+
+    public class ArchiveFileLineDto
+    {
+        public string FileName { get; set; }
+        public string Number { get; set; }
+        public int? LetterId { get; set; }
+
+        /// <summary>attached, already-attached, unmatched, ambiguous, not-pdf, invalid.</summary>
+        public string Result { get; set; }
+        public string Message { get; set; }
+    }
+
+    public class ArchiveFilesResultDto
+    {
+        public ImportLettersResultDto Import { get; set; }
+        public int Attached { get; set; }
+        public int AlreadyAttached { get; set; }
+        public int Unmatched { get; set; }
+        public List<ArchiveFileLineDto> Files { get; set; } = new List<ArchiveFileLineDto>();
+
+        /// <summary>Imported letters that still have no file (numbers; at most 200 are listed).</summary>
+        public List<string> LettersWithoutFile { get; set; } = new List<string>();
+        public int LettersWithoutFileCount { get; set; }
     }
 }

@@ -22,7 +22,7 @@ namespace Services.NasbNiro.Ai
         public const string ControlledDocument = "ControlledDocument";
         public const string MeetingMinutes = "MeetingMinutes";
 
-        /// <summary>Letters are never indexed: the secretariat does not see confidential or secret content, so neither may the AI.</summary>
+        /// <summary>Letters are never indexed: the secretariat reads Normal and Confidential letters but a Secret letter only as register data, and the AI seats must stay Normal-only, so no letter text goes to the index.</summary>
         public static readonly string[] All = { ControlledDocument, MeetingMinutes };
     }
 

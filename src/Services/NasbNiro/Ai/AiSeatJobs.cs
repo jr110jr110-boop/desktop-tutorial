@@ -550,11 +550,18 @@ namespace Services.NasbNiro.Ai
 
         public string Code => AiSeatCodes.OfficeDraft;
 
+        /// <summary>
+        /// The one test before any letter text goes to the model. The seat runs as SECRETARIAT, and since the office answers of 1405/08 the secretariat reads the content of Confidential letters too;
+        /// the seat must NOT follow that: it drafts for Normal incoming letters only. A Confidential or Secret letter (or one shown as register data) never passes, whatever the office service allows the role.
+        /// </summary>
+        internal static bool MayDraftFor(ViewModels.NasbNiro.OfficeDtos.LetterDto letter) =>
+            letter != null && !letter.MetadataOnly && letter.Classification == OfClassification.Normal && letter.Kind == OfLetterKind.Incoming;
+
         public async Task<AiSeatJobResult> RunAsync(AiSeatRunContext context, CancellationToken ct)
         {
             int created = 0;
 
-            // 1. incoming letters of normal classification that wait for an answer (a confidential or secret letter is never selected)
+            // 1. incoming letters of normal classification that wait for an answer (a confidential or secret letter is never selected: the query filters Normal, and MayDraftFor checks again on the text itself)
             IQueryable<int> repliedTo = _uow.Set<OfLetter>().AsNoTracking().Where(r => r.ReplyToLetterId != null && !r.Deleted && r.Status != OfLetterStatus.Cancelled).Select(r => r.ReplyToLetterId.Value);
             List<int> candidateIds = await _uow.Set<OfLetter>().AsNoTracking()
                 .Where(l => !l.Deleted && !l.Imported && l.Kind == OfLetterKind.Incoming && l.Status == OfLetterStatus.Received && l.Classification == OfClassification.Normal
@@ -564,8 +571,8 @@ namespace Services.NasbNiro.Ai
             foreach (int id in candidateIds.Where(i => !have.Contains(i)).Take(AiSeatTexts.MaxItemsPerRun))
             {
                 var read = await _letters.GetLetterAsync(id, ct);
-                // the office service shows the secretariat only the register data of confidential and secret letters; the check is repeated here before any text goes to the model
-                if (!read.Success || read.Data == null || read.Data.MetadataOnly || read.Data.Classification != OfClassification.Normal || read.Data.Kind != OfLetterKind.Incoming) continue;
+                // the check is repeated here before any text goes to the model (the secretariat now reads Confidential letters, the seat does not)
+                if (!read.Success || !MayDraftFor(read.Data)) continue;
                 string body = AiSeatTexts.StripHtml(read.Data.BodyHtml, 2500);
                 string question = $"پیش‌نویس پاسخ به نامه ورودی شماره {read.Data.Number} با موضوع «{read.Data.Subject}» از «{read.Data.SenderName}»: متن نامه: {body} " +
                                   "یک پیش‌نویس کوتاه، رسمی و مؤدبانه‌ی فارسی بنویس. امضا و ارسال با مدیر است. فقط از اعداد همین پرسش استفاده کن.";

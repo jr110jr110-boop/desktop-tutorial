@@ -162,6 +162,15 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int Imported { get; set; }
         public int Duplicates { get; set; }
 
+        /// <summary>Rows whose personnel number matches nobody: reported, never created.</summary>
+        public int Unknown { get; set; }
+
+        /// <summary>The distinct unknown personnel numbers (at most 200).</summary>
+        public List<string> UnknownCodes { get; set; } = new List<string>();
+
+        /// <summary>Rows read from the file (Excel import).</summary>
+        public int RowsRead { get; set; }
+
         /// <summary>Events refused: in the future, or in a month whose payroll is approved.</summary>
         public int Rejected { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
@@ -191,10 +200,18 @@ namespace ViewModels.NasbNiro.OfficeDtos
 
     public class AttendancePolicyDto
     {
-        public int GraceMinutes { get; set; }
+        /// <summary>Delay up to this many minutes is allowed (company: 15). Beyond it the whole delay is deducted.</summary>
+        public int GraceMinutes { get; set; } = 15;
         public int? MaxOvertimeMinutesPerDay { get; set; }
-        public bool OvertimeNeedsPreApproval { get; set; } = true;
+        public bool OvertimeNeedsPreApproval { get; set; }
         public int RoundingMinutes { get; set; }
+
+        /// <summary>Overtime above this many minutes a month is not counted (company: 1320 = 22 hours).</summary>
+        /// <summary>Null on a save = keep the stored value (an older client that does not know the field must not reset it).</summary>
+        public int? MonthlyOvertimeCapMinutes { get; set; }
+
+        /// <summary>Delay beyond the grace is deducted as delay minutes x this coefficient (company: 3). Null on a save = keep the stored value.</summary>
+        public decimal? DelayPenaltyFactor { get; set; }
     }
 
     public class ComputeDaysDto
@@ -235,6 +252,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public DateTime? LastOut { get; set; }
         public int WorkedMinutes { get; set; }
         public int DelayMinutes { get; set; }
+
+        /// <summary>Delay minutes x the coefficient (0 inside the grace).</summary>
+        public int DelayDeductionMinutes { get; set; }
         public int EarlyLeaveMinutes { get; set; }
         public int OvertimeMinutes { get; set; }
         public int NightMinutes { get; set; }
@@ -268,8 +288,22 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public decimal PaidLeaveDays { get; set; }
         public decimal SickLeaveDays { get; set; }
         public decimal UnpaidLeaveDays { get; set; }
+
+        /// <summary>Absence days for payroll: real absence plus the days deducted for lateness (LateDeductionDays), which reduce the paid days exactly once.</summary>
         public decimal AbsenceDays { get; set; }
         public decimal MissionDays { get; set; }
+
+        /// <summary>Overtime hours as worked before the monthly cap (OvertimeHours is the counted value, at most the policy cap).</summary>
+        public decimal OvertimeWorkedHours { get; set; }
+
+        /// <summary>Total delay in hours (beyond the grace, as counted per day).</summary>
+        public decimal DelayHours { get; set; }
+
+        /// <summary>Deducted lateness: delay x coefficient, in hours.</summary>
+        public decimal DelayDeductionHours { get; set; }
+
+        /// <summary>The part of AbsenceDays that comes from the lateness deduction (deducted minutes per day / scheduled minutes of the shift, at most 1 a day).</summary>
+        public decimal LateDeductionDays { get; set; }
     }
 
     public class CloseMonthResultDto
@@ -413,5 +447,113 @@ namespace ViewModels.NasbNiro.OfficeDtos
 
         /// <summary>CarriedForward + Entitled - Used + ProjectedEntitlement - PendingDays.</summary>
         public decimal Available { get; set; }
+    }
+}
+
+namespace ViewModels.NasbNiro.OfficeDtos
+{
+    // ------------------------------------------------------------------------------------------ Excel import of the time-attendance software (PW Kara)
+
+    /// <summary>
+    /// Which column of the Excel export holds what. A column is a letter (A, B ...) or the text of its header cell (when HeaderRow is set).
+    /// Date and time are either two columns or one date-time column. ★ Awaiting a real PW Kara export: the mapping is deliberately free.
+    /// </summary>
+    public class ClockFileMappingDto
+    {
+        /// <summary>Worksheet name; empty = the first sheet.</summary>
+        public string Sheet { get; set; }
+
+        /// <summary>1-based row of the headings; 0 = the file has no heading row.</summary>
+        public int HeaderRow { get; set; } = 1;
+
+        /// <summary>First data row (1-based); 0 = the row after the heading row.</summary>
+        public int FirstDataRow { get; set; }
+
+        /// <summary>Personnel number or card number (matched with the personnel code of the employee; leading zeros are ignored).</summary>
+        public string CodeColumn { get; set; }
+        public string DateColumn { get; set; }
+        public string TimeColumn { get; set; }
+
+        /// <summary>
+        /// Order of a written date: "YMD" (1405/05/20 or 2026-08-11), "DMY" (20/05/1405) or "MDY" (05/20/2026). A date that starts with a four digit year is read the same way whatever is chosen;
+        /// a year-last date such as 05/06/2026 is refused as ambiguous while no order is chosen. The preview suggests YMD for year-first dates and DMY otherwise ★.
+        /// </summary>
+        public string DateOrder { get; set; }
+
+        /// <summary>One column with date and time together (used when DateColumn and TimeColumn are empty).</summary>
+        public string DateTimeColumn { get; set; }
+
+        /// <summary>Optional: entry/exit column.</summary>
+        public string DirectionColumn { get; set; }
+
+        /// <summary>Texts of the direction column that mean entry (comma separated); empty: ورود, in, i, 1.</summary>
+        public string InValues { get; set; }
+
+        /// <summary>Texts that mean exit (comma separated); empty: خروج, out, o, 2.</summary>
+        public string OutValues { get; set; }
+
+        /// <summary>Optional: device (a code or title of a registered device is mapped to the device code).</summary>
+        public string DeviceColumn { get; set; }
+
+        /// <summary>Optional: site / place column (used as the device text when there is no device column).</summary>
+        public string SiteColumn { get; set; }
+
+        /// <summary>Device code stored when the file has no device or site column (for example US10C-HQ).</summary>
+        public string DefaultDeviceCode { get; set; }
+    }
+
+    public class ClockImportProfileDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public ClockFileMappingDto Mapping { get; set; } = new ClockFileMappingDto();
+    }
+
+    public class SaveClockImportProfileDto
+    {
+        public int? Id { get; set; }
+        public string Name { get; set; }
+        public ClockFileMappingDto Mapping { get; set; } = new ClockFileMappingDto();
+
+        /// <summary>Removes the profile (id required).</summary>
+        public bool Delete { get; set; }
+    }
+
+    public class ClockFileColumnDto
+    {
+        /// <summary>Column letter: A, B, ...</summary>
+        public string Letter { get; set; }
+
+        /// <summary>Text of the heading row (null without heading).</summary>
+        public string Header { get; set; }
+        public List<string> Samples { get; set; } = new List<string>();
+
+        /// <summary>For each sample: the Persian date it is read as ("1405/07/11"), "مبهم" when its order is ambiguous, "" when it is no date. Read with the suggested order.</summary>
+        public List<string> SampleDates { get; set; } = new List<string>();
+    }
+
+    public class ClockFilePreviewDto
+    {
+        public List<string> Sheets { get; set; } = new List<string>();
+        public string Sheet { get; set; }
+        public int RowCount { get; set; }
+        public List<ClockFileColumnDto> Columns { get; set; } = new List<ClockFileColumnDto>();
+
+        /// <summary>The first rows as text (index = column).</summary>
+        public List<List<string>> Rows { get; set; } = new List<List<string>>();
+
+        /// <summary>A guessed mapping from the heading texts (Persian and English); the admin confirms or changes it.</summary>
+        public ClockFileMappingDto Suggested { get; set; }
+    }
+
+    /// <summary>The Excel import form (the file travels beside it as multipart).</summary>
+    public class ClockFileImportDto
+    {
+        /// <summary>A saved profile; or Mapping below.</summary>
+        public int? ProfileId { get; set; }
+        public ClockFileMappingDto Mapping { get; set; }
+
+        /// <summary>Save the mapping under this name as a profile (new or the same name replaced).</summary>
+        public string SaveProfileAs { get; set; }
     }
 }

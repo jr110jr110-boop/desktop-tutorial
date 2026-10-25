@@ -31,8 +31,30 @@ namespace Services.NasbNiro.Office
             return now < today ? today : today.AddDays(1);
         }
 
+        /// <summary>Seeds the default letter numbering rules (and moves the ones with the first default pattern to the company patterns) once the database is ready; retried while it is not.</summary>
+        private async Task SeedNumberingRulesAsync(CancellationToken stoppingToken)
+        {
+            for (int attempt = 1; attempt <= 10 && !stoppingToken.IsCancellationRequested; attempt++)
+            {
+                try
+                {
+                    using IServiceScope scope = _scopes.CreateScope();
+                    await scope.ServiceProvider.GetRequiredService<ILetterService>().EnsureNumberingRulesAsync(stoppingToken);
+                    return;
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Numbering rules not seeded yet (attempt {Attempt}).", attempt);
+                    try { await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken); }
+                    catch (OperationCanceledException) { return; }
+                }
+            }
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            await SeedNumberingRulesAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 DateTime next = NextRun(DateTime.Now);

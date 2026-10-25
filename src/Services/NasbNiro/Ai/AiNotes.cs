@@ -181,7 +181,7 @@ namespace Services.NasbNiro.Ai
             if (n.TargetType == AiNoteTypes.OfficeLetter)
             {
                 var r = await _letters.GetLetterAsync(n.TargetId.Value, ct);
-                // a confidential or secret letter is shown to the secretariat as register data only: its notes are not shown either
+                // the notes follow the letter: a letter the caller reads only as register data (a Secret one for the secretariat, since the office answers of 1405/08 the secretariat reads Confidential content in full) shows no notes either
                 return r.Success && r.Data != null && !r.Data.MetadataOnly;
             }
             var m = await _meetings.GetMeetingAsync(n.TargetId.Value, ct);
