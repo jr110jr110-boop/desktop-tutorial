@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -117,7 +117,7 @@ namespace Services.NasbNiro.Production
                     SubcontractIssueId = d.SubcontractIssueId, SubcontractIssueNumber = d.SubcontractIssueNumber, IsRework = d.IsRework, ReworkOfOperationId = d.ReworkOfOperationId,
                     SkipReason = d.SkipReason, StartedAtText = d.StartedAtText, FinishedAtText = d.FinishedAtText, Note = d.Note, RunningBookings = d.RunningBookings, HoursBooked = d.HoursBooked,
                     ItemCode = item?.Code, ItemTitle = item?.Title, OrderQuantity = order.Quantity, Unit = order.Unit, OrderPriority = u != null && u.Priority > 0 ? u.Priority : (int?)null,
-                    NeedDateText = MfText.Date(u?.NeedDate), MyRunning = running != null, MyRunningSinceText = MfText.Stamp(running?.StartAt),
+                    NeedDateText = MfText.Date(u?.NeedDate), MyRunning = running != null, MyRunningSinceText = MfText.Stamp(running?.StartAt), MyRunningSince = running?.StartAt,
                 };
             }).ToList();
         }
@@ -562,7 +562,7 @@ namespace Services.NasbNiro.Production
                     EmployeeName = employees.TryGetValue(b.EmployeeId, out string en) ? en : null, MachineId = b.MachineId, MachineTitle = b.MachineId.HasValue && machines.TryGetValue(b.MachineId.Value, out string mt) ? mt : null,
                     Kind = b.Kind, StartAt = b.StartAt, StartAtText = MfText.Stamp(b.StartAt), EndAt = b.EndAt, EndAtText = MfText.Stamp(b.EndAt), Minutes = b.Minutes, Hours = b.Hours,
                     GoodQty = b.GoodQty, ScrapQty = b.ScrapQty, ScrapReasonCodeId = b.ScrapReasonCodeId, ReworkQty = b.ReworkQty, ReasonCodeId = b.ReasonCodeId, Note = b.Note, Source = b.Source,
-                    SupervisorReason = b.SupervisorReason, EditReason = b.EditReason, Running = b.EndAt == null, DayClosed = DayClosed(b),
+                    SupervisorReason = b.SupervisorReason, EditReason = b.EditReason, Running = b.EndAt == null, DayClosed = DayClosed(b), CostPosted = b.CostPostedAt != null,
                 };
             }).ToList();
         }
@@ -582,6 +582,7 @@ namespace Services.NasbNiro.Production
             if (query.OperationId.HasValue) q = q.Where(b => b.OperationId == query.OperationId.Value);
             if (query.OrderId.HasValue) q = q.Where(b => _uow.Set<MfOperation>().Any(o => o.Id == b.OperationId && o.OrderId == query.OrderId.Value));
             if (query.EmployeeId.HasValue) q = q.Where(b => b.EmployeeId == query.EmployeeId.Value);
+            if (query.WorkCenterId.HasValue) q = q.Where(b => _uow.Set<MfOperation>().Any(o => o.Id == b.OperationId && o.WorkCenterId == query.WorkCenterId.Value));
             if (query.From.HasValue) { DateTime f = query.From.Value.Date; q = q.Where(b => b.StartAt >= f); }
             if (query.To.HasValue) { DateTime t = query.To.Value.Date.AddDays(1); q = q.Where(b => b.StartAt < t); }
             if (query.RunningOnly == true) q = q.Where(b => b.EndAt == null);

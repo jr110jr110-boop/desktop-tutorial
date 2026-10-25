@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Production;
 
@@ -27,6 +27,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public bool MyRunning { get; set; }
 
         public string MyRunningSinceText { get; set; }
+
+        /// <summary>Start of the operator's running booking (ISO; the terminal timer counts from it).</summary>
+        public DateTime? MyRunningSince { get; set; }
     }
 
     public class StartOperationDto
@@ -102,6 +105,7 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? OperationId { get; set; }
         public int? OrderId { get; set; }
         public int? EmployeeId { get; set; }
+        public int? WorkCenterId { get; set; }
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
         public bool? RunningOnly { get; set; }
@@ -138,6 +142,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         /// <summary>The day of the booking is over: only the shop supervisor can still change it, with a reason.</summary>
         public bool DayClosed { get; set; }
+
+        /// <summary>The booking is costed in the accounting (daily cost posting): it cannot be changed any more.</summary>
+        public bool CostPosted { get; set; }
     }
 
     /// <summary>A completed booking made by a supervisor for somebody else (reason required).</summary>
