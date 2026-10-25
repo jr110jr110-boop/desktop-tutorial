@@ -51,8 +51,8 @@
   ],
   "rows": [
     {
-      "code": "P-1403-07",
-      "title": "توربین بخار ۲۵ مگاوات فولاد مبارکه",
+      "code": "P-01",
+      "title": "توربین بخار ۲۵ مگاوات فولاد نمونه ب",
       "spi": 0.86,
       "cpi": 0.94,
       "actual": 58,
@@ -62,8 +62,8 @@
       "link": "/project-control/project?contractId=307"
     },
     {
-      "code": "P-1403-11",
-      "title": "پمپ‌های فرآیندی پالایشگاه آبادان",
+      "code": "P-02",
+      "title": "پمپ‌های فرآیندی پالایشگاه نمونه الف",
       "spi": 0.97,
       "cpi": 0.88,
       "actual": 72,
@@ -73,8 +73,8 @@
       "link": "/project-control/project?contractId=311"
     },
     {
-      "code": "P-1404-02",
-      "title": "واحد ORC بازیافت حرارت سیمان تهران",
+      "code": "P-03",
+      "title": "واحد ORC بازیافت حرارت سیمان نمونه و",
       "spi": 0.92,
       "cpi": 0.96,
       "actual": 44,
@@ -84,8 +84,8 @@
       "link": "/project-control/project?contractId=402"
     },
     {
-      "code": "P-1404-05",
-      "title": "تعمیرات اساسی توربین نیروگاه دماوند",
+      "code": "P-04",
+      "title": "تعمیرات اساسی توربین نیروگاه آزمایشی د",
       "spi": 1.01,
       "cpi": 0.98,
       "actual": 81,
@@ -95,8 +95,8 @@
       "link": "/project-control/project?contractId=405"
     },
     {
-      "code": "P-1404-09",
-      "title": "کندانسور و سیستم روغن پتروشیمی مارون",
+      "code": "P-05",
+      "title": "کندانسور و سیستم روغن پتروشیمی نمونه ج",
       "spi": 0.99,
       "cpi": 1.03,
       "actual": 35,
@@ -106,8 +106,8 @@
       "link": "/project-control/project?contractId=409"
     },
     {
-      "code": "P-1405-01",
-      "title": "توربین بخار ۸ مگاوات قند اصفهان",
+      "code": "P-06",
+      "title": "توربین بخار ۸ مگاوات کارخانه قند نمونه ز",
       "spi": 1.04,
       "cpi": 1,
       "actual": 12,
@@ -117,8 +117,8 @@
       "link": "/project-control/project?contractId=501"
     },
     {
-      "code": "P-1404-11",
-      "title": "پمپ تزریق آب شرکت ملی گاز",
+      "code": "P-07",
+      "title": "پمپ تزریق آب شرکت گاز نمونه ه",
       "spi": 1,
       "cpi": 1.02,
       "actual": 63,
@@ -128,8 +128,8 @@
       "link": "/project-control/project?contractId=411"
     },
     {
-      "code": "P-1403-04",
-      "title": "واحد ORC میدان گازی بیدبلند",
+      "code": "P-08",
+      "title": "واحد ORC پالایش گاز نمونه ی",
       "spi": 0.98,
       "cpi": 0.99,
       "actual": 91,

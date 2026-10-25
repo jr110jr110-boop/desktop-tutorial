@@ -47,7 +47,7 @@
   "rows": [
     {
       "number": "SR-1405-0412",
-      "customer": "نیروگاه سیکل ترکیبی دماوند",
+      "customer": "نیروگاه آزمایشی د",
       "unit": "توربین ST-12",
       "priority": "بحرانی",
       "hoursOver": 118,
@@ -57,7 +57,7 @@
     },
     {
       "number": "SR-1405-0425",
-      "customer": "پتروشیمی مارون",
+      "customer": "پتروشیمی نمونه ج",
       "unit": "پمپ P-207B",
       "priority": "بالا",
       "hoursOver": 31,
@@ -67,7 +67,7 @@
     },
     {
       "number": "SR-1405-0431",
-      "customer": "قند اصفهان",
+      "customer": "کارخانه قند نمونه ز",
       "unit": "سیستم روغن LO-3",
       "priority": "عادی",
       "hoursOver": 6,

@@ -98,7 +98,7 @@ function answer(route, role) {
   else if (path === "ai/conversations") data = { data: [], currentPage: 1, itemsPerPage: 20, totalItems: 0, totalPages: 0 };
   else if (path === "ai/chat") data = { conversationId: 1, answer: "پاسخ نمونه‌ی پیش‌نمایش.", citations: [], toolCalls: [], verified: true, degraded: false, model: "preview" };
   else if (path === "office/inbox/counts") data = { open: 4 };
-  else if (path === "Accounts/get-current-user-info") data = { firstName: "مدیر", lastName: "عامل", profilePhotoId: null };
+  else if (path === "Accounts/get-current-user-info") data = { firstName: "کاربر", lastName: "آزمایشی", profilePhotoId: null };
   // the analysis takes a moment on a real server: a short delay keeps the busy state honest
   const delay = path === "ceo/analyze" ? 350 : 0;
   return new Promise((ok) => setTimeout(() => ok(route.fulfill({ status: 200, contentType: "application/json; charset=utf-8", body: wrap(data) })), delay));

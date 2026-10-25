@@ -41,7 +41,7 @@
   ],
   "rows": [
     {
-      "customer": "پالایشگاه نفت آبادان",
+      "customer": "پالایشگاه نمونه الف",
       "open": 78400000000,
       "over90": 41200000000,
       "share": 25.1,
@@ -50,7 +50,7 @@
       "link": "/fn/receivables/customers/1208/statement"
     },
     {
-      "customer": "فولاد مبارکه اصفهان",
+      "customer": "فولاد نمونه ب",
       "open": 64900000000.00001,
       "over90": 12600000000,
       "share": 20.8,
@@ -59,7 +59,7 @@
       "link": "/fn/receivables/customers/1214/statement"
     },
     {
-      "customer": "پتروشیمی مارون",
+      "customer": "پتروشیمی نمونه ج",
       "open": 41300000000,
       "over90": 9800000000,
       "share": 13.2,
@@ -68,7 +68,7 @@
       "link": "/fn/receivables/customers/1222/statement"
     },
     {
-      "customer": "نیروگاه سیکل ترکیبی دماوند",
+      "customer": "نیروگاه آزمایشی د",
       "open": 36700000000,
       "over90": 6100000000,
       "share": 11.7,
@@ -77,7 +77,7 @@
       "link": "/fn/receivables/customers/1230/statement"
     },
     {
-      "customer": "شرکت ملی گاز - منطقه‌ی ۳",
+      "customer": "شرکت گاز نمونه ه",
       "open": 28200000000,
       "over90": 3400000000,
       "share": 9,
@@ -86,7 +86,7 @@
       "link": "/fn/receivables/customers/1236/statement"
     },
     {
-      "customer": "سیمان تهران",
+      "customer": "سیمان نمونه و",
       "open": 21500000000,
       "over90": 1700000000,
       "share": 6.9,
@@ -95,7 +95,7 @@
       "link": "/fn/receivables/customers/1241/statement"
     },
     {
-      "customer": "قند اصفهان",
+      "customer": "کارخانه قند نمونه ز",
       "open": 14800000000,
       "over90": 0,
       "share": 4.7,
@@ -104,7 +104,7 @@
       "link": "/fn/receivables/customers/1249/statement"
     },
     {
-      "customer": "پتروشیمی بندر امام",
+      "customer": "پتروشیمی نمونه ح",
       "open": 12100000000,
       "over90": 0,
       "share": 3.9,
@@ -113,7 +113,7 @@
       "link": "/fn/receivables/customers/1253/statement"
     },
     {
-      "customer": "ذوب آهن اصفهان",
+      "customer": "ذوب‌آهن نمونه ط",
       "open": 8900000000,
       "over90": 0,
       "share": 2.8,
@@ -122,7 +122,7 @@
       "link": "/fn/receivables/customers/1258/statement"
     },
     {
-      "customer": "پالایش گاز بیدبلند",
+      "customer": "پالایش گاز نمونه ی",
       "open": 5600000000,
       "over90": 0,
       "share": 1.8,

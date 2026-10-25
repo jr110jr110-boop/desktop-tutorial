@@ -48,7 +48,7 @@
     {
       "number": "MO-1405-0187",
       "item": "روتور توربین T-25",
-      "project": "P-1403-07",
+      "project": "P-01",
       "workCenter": "تراش CNC",
       "lateDays": 19,
       "due": "۱۴۰۵/۰۷/۱۴",
@@ -58,7 +58,7 @@
     {
       "number": "MO-1405-0192",
       "item": "پوسته‌ی پمپ PP-4",
-      "project": "P-1403-11",
+      "project": "P-02",
       "workCenter": "فرز افقی",
       "lateDays": 12,
       "due": "۱۴۰۵/۰۷/۲۱",
@@ -68,7 +68,7 @@
     {
       "number": "MO-1405-0201",
       "item": "دیافراگم مرحله‌ی ۳",
-      "project": "P-1403-07",
+      "project": "P-01",
       "workCenter": "جوشکاری",
       "lateDays": 9,
       "due": "۱۴۰۵/۰۷/۲۴",
@@ -78,7 +78,7 @@
     {
       "number": "MO-1405-0210",
       "item": "شافت پمپ تزریق",
-      "project": "P-1404-11",
+      "project": "P-07",
       "workCenter": "تراش CNC",
       "lateDays": 6,
       "due": "۱۴۰۵/۰۷/۲۷",
@@ -88,7 +88,7 @@
     {
       "number": "MO-1405-0214",
       "item": "یاتاقان کفگرد",
-      "project": "P-1404-05",
+      "project": "P-04",
       "workCenter": "مونتاژ توربین",
       "lateDays": 4,
       "due": "۱۴۰۵/۰۷/۲۹",
@@ -98,7 +98,7 @@
     {
       "number": "MO-1405-0219",
       "item": "پره‌های ردیف ۵",
-      "project": "P-1404-02",
+      "project": "P-03",
       "workCenter": "بالانس دینامیکی",
       "lateDays": 2,
       "due": "۱۴۰۵/۰۸/۰۱",
