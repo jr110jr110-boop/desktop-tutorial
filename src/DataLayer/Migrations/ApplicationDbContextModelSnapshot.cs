@@ -2860,6 +2860,11 @@ namespace DataLayer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FinishedAt")
+                        .IsUnique()
+                        .HasDatabaseName("IX_AiEvalRuns_Running")
+                        .HasFilter("[FinishedAt] IS NULL");
+
                     b.ToTable("AiEvalRuns", (string)null);
                 });
 
@@ -2951,6 +2956,73 @@ namespace DataLayer.Migrations
                     b.HasIndex("Kind", "Priority");
 
                     b.ToTable("AiModelEndpoints", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Ai.AiNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("RuleCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("SeatCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("SeatRunId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TargetId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Text")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("Verified")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.HasIndex("TargetType", "TargetId");
+
+                    b.HasIndex("SeatCode", "TargetType", "TargetId", "RuleCode")
+                        .IsUnique()
+                        .HasFilter("[TargetId] IS NOT NULL");
+
+                    b.ToTable("AiNotes", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Ai.AiPromptVersion", b =>
@@ -3066,6 +3138,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTimeOffset?>("FinishedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<bool>("IsScheduled")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Outputs")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
@@ -3080,6 +3155,11 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SeatId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_AiSeatRuns_SeatId_Running")
+                        .HasFilter("[Status] = 1");
 
                     b.HasIndex("SeatId", "StartedAt");
 
