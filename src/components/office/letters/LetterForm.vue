@@ -2,6 +2,7 @@
 // Editor of a draft letter. The parent owns the form object (mutated here) and the lists.
 import { computed } from "vue";
 import AttachmentsEditor from "./AttachmentsEditor.vue";
+import LinkCodePicker from "./LinkCodePicker.vue";
 import LinksEditor from "./LinksEditor.vue";
 import PickSelect from "./PickSelect.vue";
 import RecipientsEditor from "./RecipientsEditor.vue";
@@ -78,6 +79,11 @@ const templateOptions = computed(() => props.templates.filter((t) => t.isActive 
         <PickSelect v-model="form.signerPositionId" :options="signerOptions" placeholder="انتخاب امضاکننده (دارای حق امضا)" />
       </div>
     </template>
+
+    <div class="col-12">
+      <label class="form-label small mb-1">مناقصه یا پروژه (اختیاری)</label>
+      <LinkCodePicker :form="form" :kind="form.kind" />
+    </div>
 
     <div class="col-12">
       <label class="form-label small mb-1">گیرندگان</label>

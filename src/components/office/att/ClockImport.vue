@@ -3,6 +3,7 @@
 // The file is read in the browser, shown as a preview, sent as rows and the server answers accepted / duplicates / rejected / errors.
 import { computed, ref } from "vue";
 import ExcelRows from "@/components/fn/ExcelRows.vue";
+import ClockExcelImport from "./ClockExcelImport.vue";
 import type { ImportField } from "@/components/fn/ExcelRows.vue";
 import { importClock } from "@/api/OfficeAPIs";
 import { fail, ok } from "@/composables/inventory";
@@ -16,6 +17,7 @@ const fields: ImportField[] = [
   { key: "device", label: "دستگاه", words: ["دستگاه", "device"] },
   { key: "direction", label: "ورود/خروج", words: ["جهت", "ورود/خروج", "نوع", "direction", "in/out"] },
 ];
+const mode = ref<"pw" | "simple">("pw");
 const rows = ref<any[]>([]);
 const deviceCode = ref("");
 const busy = ref(false);
@@ -39,6 +41,13 @@ async function run() {
   <div class="inv-modal-backdrop" @click.self="emit('close')">
     <div class="inv-modal wide">
       <h2 class="inv-title mb-2">ورود ترددها از فایل</h2>
+      <div class="btn-group btn-group-sm mb-3">
+        <button :class="mode === 'pw' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="mode = 'pw'">اکسل نرم‌افزار حضور و غیاب (PW Kara)</button>
+        <button :class="mode === 'simple' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="mode = 'simple'">فایل ساده (ستون‌های ثابت)</button>
+      </div>
+      <ClockExcelImport v-if="mode === 'pw'" @done="emit('done')" />
+      <div v-if="mode === 'pw'" class="d-flex justify-content-end mt-2"><button class="btn btn-sm btn-outline-secondary" @click="emit('close')">بستن</button></div>
+      <template v-else>
       <p class="inv-muted small">فایل xlsx یا csv با ردیف اول به عنوان عنوان ستون‌ها. ترددهای تکراری شمرده می‌شوند و دوباره ثبت نمی‌شوند؛ زمان آینده یا ماه با حقوق تایید شده رد می‌شود. ستون جهت: ورود، خروج، in یا out (خالی = نامشخص).</p>
       <ExcelRows :fields="fields" :disabled="busy" @rows="rows = $event; result = null" />
       <div class="d-flex align-items-end gap-3 flex-wrap mb-2">
@@ -54,6 +63,7 @@ async function run() {
         <ul v-if="result.errors?.length" class="small mt-2" style="max-height: 180px; overflow: auto"><li v-for="(e, i) in result.errors" :key="i">{{ e }}</li></ul>
       </div>
       <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-outline-secondary" @click="emit('close')">بستن</button><button :disabled="busy || !rows.length" class="btn btn-sm btn-primary" @click="run">ورود ترددها</button></div>
+      </template>
     </div>
   </div>
 </template>

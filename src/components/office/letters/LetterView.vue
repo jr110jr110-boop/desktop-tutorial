@@ -25,7 +25,7 @@ async function downloadReceipt() {
 <template>
   <div>
     <div v-if="meta" class="alert alert-warning py-2">
-      محتوای این نامه (موضوع، متن، پیوست‌ها و یادداشت‌های ارجاع) طبقه‌بندی «{{ classifications[letter.classification] }}» دارد و از دبیرخانه پنهان است. فقط اطلاعات ثبت نمایش داده می‌شود.
+      محتوای این نامه (موضوع، متن، پیوست‌ها و یادداشت‌های ارجاع) طبقه‌بندی «{{ classifications[letter.classification] }}» دارد و فقط به نویسنده، امضاکننده و گیرندگان نشان داده می‌شود؛ دبیرخانه فقط اطلاعات ثبت (شماره، تاریخ، طرف‌ها) را می‌بیند.
     </div>
     <div class="row g-2 mb-2">
       <div class="col-md-3"><b>شماره:</b> <span class="inv-ltr">{{ letter.number || "بدون شماره" }}</span></div>
@@ -42,6 +42,7 @@ async function downloadReceipt() {
         <b>رسید:</b> {{ letter.deliveryReceipt }}
         <button v-if="!meta && letter.deliveryReceiptDocumentId" class="btn btn-sm btn-link p-0 me-2" @click="downloadReceipt">دریافت فایل رسید</button>
       </div>
+      <div v-if="letter.linkCode" class="col-md-6"><b>{{ letter.contractId ? "پروژه" : "مناقصه" }}:</b> <span class="inv-ltr">{{ letter.linkCode }}</span> <span v-if="letter.linkTitle" class="inv-muted">{{ letter.linkTitle }}</span></div>
       <div v-if="letter.paperCopy" class="col-md-3"><span class="inv-badge info">نسخه کاغذی دارد</span></div>
       <div v-if="letter.cancelReason" class="col-12 text-danger"><b>دلیل ابطال:</b> {{ letter.cancelReason }}</div>
     </div>

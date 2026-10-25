@@ -41,13 +41,13 @@ const templateChain = computed<number[]>(() => templates.value.find((t) => t.id 
 const title = computed(() => (isNew.value ? "نامه جدید" : letter.value ? `${letterKinds[letter.value.kind]} ${letter.value.number || "(بدون شماره)"}` : "نامه"));
 
 function blank(kind: number) {
-  return { id: null, kind, subject: "", bodyHtml: "", senderPositionId: null, senderPartyId: null, classification: 0, urgency: 0, incomingNumber: "", incomingDate: null, signerPositionId: null, paperCopy: false, replyToLetterId: null, templateId: null, recipients: [], attachments: [], links: [], register: false, rowVersion: null };
+  return { id: null, kind, subject: "", bodyHtml: "", senderPositionId: null, senderPartyId: null, classification: 0, urgency: 0, incomingNumber: "", incomingDate: null, signerPositionId: null, paperCopy: false, replyToLetterId: null, templateId: null, tenderId: null, contractId: null, recipients: [], attachments: [], links: [], register: false, rowVersion: null };
 }
 function fill(l: any) {
   form.value = {
     id: l.id, kind: l.kind, subject: l.subject || "", bodyHtml: l.bodyHtml || "", senderPositionId: l.senderPositionId ?? null, senderPartyId: l.senderPartyId ?? null, classification: l.classification, urgency: l.urgency,
     incomingNumber: l.incomingNumber || "", incomingDate: l.incomingDate ? String(l.incomingDate).slice(0, 10) : null, signerPositionId: l.signerPositionId ?? null, paperCopy: !!l.paperCopy,
-    replyToLetterId: l.replyToLetterId ?? null, templateId: l.templateId ?? null,
+    replyToLetterId: l.replyToLetterId ?? null, templateId: l.templateId ?? null, tenderId: l.tenderId ?? null, contractId: l.contractId ?? null,
     recipients: (l.recipients || []).map((r: any) => ({ type: r.type, positionId: r.positionId ?? null, partyId: r.partyId ?? null, positionTitle: r.positionTitle, partyName: r.partyName })),
     attachments: (l.attachments || []).map((a: any) => ({ documentId: a.documentId, fileName: a.fileName })),
     links: (l.links || []).map((k: any) => ({ kind: k.kind, recordId: k.recordId ?? null, text: k.text })),
@@ -130,7 +130,7 @@ async function saveDraft(silent = false): Promise<boolean> {
     id: f.id, kind: f.kind, subject: f.subject.trim(), bodyHtml: f.bodyHtml || null,
     senderPositionId: incoming ? null : f.senderPositionId, senderPartyId: incoming ? f.senderPartyId : null,
     classification: f.classification, urgency: f.urgency, incomingNumber: incoming ? f.incomingNumber || null : null, incomingDate: incoming ? f.incomingDate : null,
-    signerPositionId: incoming ? null : f.signerPositionId, paperCopy: f.paperCopy, replyToLetterId: f.replyToLetterId, templateId: f.templateId,
+    signerPositionId: incoming ? null : f.signerPositionId, paperCopy: f.paperCopy, replyToLetterId: f.replyToLetterId, templateId: f.templateId, tenderId: f.tenderId || null, contractId: f.contractId || null,
     recipients: f.recipients.map((r: any) => ({ type: r.type, positionId: r.positionId, partyId: r.partyId })),
     attachments: f.attachments, links: f.links, register: incoming && isSecretariat ? f.register : false, rowVersion: f.rowVersion,
   };

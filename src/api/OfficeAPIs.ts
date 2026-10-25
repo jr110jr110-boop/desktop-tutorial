@@ -1,4 +1,4 @@
-import { call, clean, http, saveBlob } from "@/api/ApiClient";
+import { call, clean, http, rowsOf, saveBlob } from "@/api/ApiClient";
 import { camelize } from "@/composables/fn";
 
 // Office automation (api/v1/office, release O1). Every answer is { success, message, data }; a rule violation answers HTTP 200 with success=false
@@ -82,12 +82,13 @@ export const getLetters = (params?: OfficePageParams) => get(of + "letters", par
  * signedOnBehalfOfPosition, signatureDocumentId, contentHash, paperCopy, deliveryMethod, sentDate(Text), deliveryReceipt, deliveryReceiptDocumentId, replyToLetterId, followUpLetterId,
  * templateId, cancelReason, createdByName, recipients, approvals, attachments [{ documentId, fileName }], links, referrals (tree with children and entries), allowedActions, rowVersion.
  * allowedActions values: save, submit, approve, return, sign, register, send, receipt, archive, refer, cancel.
- * Who: the writer, the positions of the chain / recipients / referral tree, the CEO; SECRETARIAT for numbered letters (Confidential and Secret as metadata only). Others get "not found".
+ * Who: the writer, the positions of the chain / recipients / referral tree, the CEO; SECRETARIAT for numbered letters (Normal and Confidential in full, files and search included; Secret as register data only, metadataOnly). Others get "not found".
  */
 export const getLetter = (id: number) => get(of + "letters/" + id);
 /**
  * SaveLetterDto { id?, kind, date?, subject, bodyHtml, senderPositionId?, senderPartyId?, classification, urgency, incomingNumber?, incomingDate?, signerPositionId?, paperCopy,
  * replyToLetterId?, templateId?, recipients [{ type 1 to / 2 cc, positionId?, partyId? }], attachments [{ documentId, fileName }], links [{ kind, recordId?, text? }], register, rowVersion }.
+ * tenderId? or contractId? (at most one; the code of the tender or project goes into the number; free while the letter is a draft, frozen once it is numbered). The answer has tenderId, contractId, linkCode, linkTitle.
  * Who: everyone for outgoing / internal drafts; incoming letters: SECRETARIAT only (register=true numbers and delivers at once). No edit after signing; a refused call takes no number.
  */
 export const saveLetter = (dto: any) => post(of + "letters", dto);
@@ -197,7 +198,11 @@ export const saveParty = (dto: any) => post(of + "parties", dto);
 
 /** NumberingRuleDto { id, kind, unitId, unitCode, pattern, isActive, preview }. Who: everyone reads. */
 export const getNumberingRules = (params?: OfficePageParams) => get(of + "numbering-rules", params);
-/** SaveNumberingRuleDto { id?, kind, unitId?, pattern, isActive }. Tokens {yyyy} {yy} {seq:n} {unit} {kind}; {seq} is required. Who: SECRETARIAT, PMO, CEO (OfficeRoles.letterAdmins). */
+/**
+ * SaveNumberingRuleDto { id?, kind, unitId?, pattern, isActive }. Tokens {yyyy} {yy} {seq} or {seq:n} (required; plain {seq} is not padded) {unit} {kind} and {code}.
+ * {code} is the code of the tender or project the letter is linked to followed by a dash ("T-1405-17-"), and nothing when the letter has no link.
+ * Company defaults: incoming INN-و-{code}{yyyy}-{seq}, outgoing INN-{code}{yyyy}-{seq}, internal INN-د-{code}{yyyy}-{seq}. Who: SECRETARIAT, PMO, CEO (OfficeRoles.letterAdmins).
+ */
 export const saveNumberingRule = (dto: any) => post(of + "numbering-rules", dto);
 
 /** LetterTemplateDto { id, title, letterKind, headerHtml, footerHtml, bodyHtml, approvalChain[], signerPositionId, isActive }. Who: everyone reads. */
@@ -210,6 +215,29 @@ export const saveLetterTemplate = (dto: any) => post(of + "letter-templates", dt
  * Returns { imported, skipped, errors[], letterIds[] }. Numbers are kept and the sequence is not consumed. Who: SECRETARIAT only.
  */
 export const importLetters = (dto: { rows?: any[]; csv?: string | null }) => post(of + "letters/import", { rows: dto.rows || [], csv: dto.csv || null });
+/**
+ * The PDFs of the Rahkaran archive export (multipart: Files, NamePattern?, Csv?). Each PDF is attached to the imported letter whose old number is its file name without the extension
+ * (or the group «number» of NamePattern, a regular expression); characters a file name cannot hold (/ \\ :) match _ . An optional manifest CSV is imported first.
+ * Returns ArchiveFilesResultDto { import?, attached, alreadyAttached, unmatched, files: [{ fileName, number, letterId, result: attached | already-attached | unmatched | ambiguous | not-pdf | invalid, message }],
+ * lettersWithoutFile[] (at most 200 numbers), lettersWithoutFileCount }. At most 300 files of 50 MB. Who: SECRETARIAT only.
+ */
+export const importLetterFiles = (files: File[], opts: { namePattern?: string | null; csv?: string | null } = {}) => {
+  const form = new FormData();
+  files.forEach((f) => form.append("Files", f, f.name));
+  if (opts.namePattern?.trim()) form.append("NamePattern", opts.namePattern.trim());
+  if (opts.csv?.trim()) form.append("Csv", opts.csv);
+  return fcall("post", of + "letters/import/files", form);
+};
+
+/** Tenders and contracts (projects) a letter can be linked to: the existing list endpoints, all rows. Tender { id, code, description, company }, contract { id, code, title }. */
+export const getLinkTenders = async (): Promise<any[]> => {
+  const [data] = await call("get", "Tenders", undefined, { PageSize: 0 });
+  return rowsOf(data);
+};
+export const getLinkContracts = async (): Promise<any[]> => {
+  const [data] = await call("get", "Contracts", undefined, { PageSize: 0 });
+  return rowsOf(data);
+};
 
 // ---------------------------------------------------------------- meetings and decisions
 /** params: MeetingQuery { status 0..4, kind 1..6, dateFrom, dateTo, mineOnly } + paging. MeetingListDto { id, number, title, kind, startAt, startAtText, place, status, chairPositionTitle, openDecisions, overdueDecisions }. Who: everyone (own meetings). */
@@ -261,11 +289,44 @@ export const addManualClock = (dto: any) => post(at + "clock/manual", dto);
 export const importClock = (dto: { deviceCode?: string | null; rows?: any[]; csv?: string | null }) => post(at + "clock/import", { deviceCode: dto.deviceCode || null, rows: dto.rows || [], csv: dto.csv || null });
 
 /**
+ * Excel export of the attendance software (PW Kara; devices US 10C and M Face 302), multipart File + Sheet?. Returns ClockFilePreviewDto { sheets[], sheet, rowCount,
+ * columns: [{ letter, header, samples[] }], rows: string[][] (first rows), suggested: ClockFileMapping (guessed from the headings) }. Who: HR.
+ */
+export const previewClockFile = (file: File, sheet?: string | null) => {
+  const form = new FormData();
+  form.append("File", file, file.name);
+  if (sheet) form.append("Sheet", sheet);
+  return fcall("post", at + "clock/import-file/preview", form);
+};
+/**
+ * ClockFileMapping { sheet?, headerRow (1; 0 = no heading), firstDataRow (0 = the row after the heading), codeColumn, dateColumn + timeColumn or dateTimeColumn, directionColumn?, inValues?, outValues?,
+ * deviceColumn?, siteColumn?, defaultDeviceCode? }; a column is a heading text or a letter. Persian or Gregorian dates both work. Send the file with a mapping or a saved profileId; saveProfileAs saves
+ * the mapping under that name. Returns { imported, duplicates, unknown, unknownCodes[], rowsRead, rejected, errors[] }; unknown personnel numbers are reported, never created; importing the same file again stores nothing. Who: HR.
+ */
+export const importClockFile = (file: File, opts: { mapping?: any; profileId?: number | null; sheet?: string | null; saveProfileAs?: string | null }) => {
+  const form = new FormData();
+  form.append("File", file, file.name);
+  if (opts.mapping) form.append("Mapping", JSON.stringify(opts.mapping));
+  if (opts.profileId) form.append("ProfileId", String(opts.profileId));
+  if (opts.sheet) form.append("Sheet", opts.sheet);
+  if (opts.saveProfileAs?.trim()) form.append("SaveProfileAs", opts.saveProfileAs.trim());
+  return fcall("post", at + "clock/import-file", form);
+};
+/** The saved column mappings: [{ id, name, mapping }]. Who: HR, CEO. */
+export const getClockImportProfiles = () => get(at + "clock/import-profiles");
+/** SaveClockImportProfileDto { id?, name, mapping, delete? }. Who: HR. */
+export const saveClockImportProfile = (dto: { id?: number | null; name: string; mapping: any; delete?: boolean }) => post(at + "clock/import-profiles", { id: dto.id || null, name: dto.name, mapping: dto.mapping, delete: !!dto.delete });
+
+/**
  * Device push (POST attendance/push) is for the devices on the LAN: anonymous, headers X-Device-Code and X-Device-Key, HTTP 401 on a bad code or key.
  * It is NOT called from the browser, so there is intentionally no function for it.
  */
 
-/** AttendancePolicyDto { graceMinutes, maxOvertimeMinutesPerDay?, overtimeNeedsPreApproval, roundingMinutes }. Who: read by everyone. */
+/**
+ * AttendancePolicyDto { graceMinutes (15), maxOvertimeMinutesPerDay? (empty = none), overtimeNeedsPreApproval (false), roundingMinutes,
+ * monthlyOvertimeCapMinutes (1320 = 22 hours; overtime above it is not counted), delayPenaltyFactor (3: a delay beyond the grace costs delay x factor of working time, 0..10) }.
+ * Who: read by everyone.
+ */
 export const getAttendancePolicy = () => get(at + "policy");
 /** Same DTO. Who: HR, PMO, CEO. */
 export const saveAttendancePolicy = (dto: any) => post(at + "policy", dto);

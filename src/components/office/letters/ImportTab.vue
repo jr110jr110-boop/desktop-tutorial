@@ -2,13 +2,14 @@
 // Legacy archive import (SECRETARIAT only): paste a CSV manifest or fill a table of rows. Numbers are kept, the sequence is not used.
 import { ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
+import ArchiveFilesPanel from "./ArchiveFilesPanel.vue";
 import { importLetters } from "@/api/OfficeAPIs";
 import { uploadFile } from "@/api/InventoryAPIs";
 import { letterKinds } from "@/composables/office";
 import { fail, ok } from "@/composables/inventory";
 
 interface Row { number: string; date: string | null; kind: string; subject: string; party: string; fileNames: string[]; documentIds: string[] }
-const mode = ref<"csv" | "rows">("csv");
+const mode = ref<"csv" | "rows" | "pdf">("csv");
 const csv = ref("");
 const rows = ref<Row[]>([blank()]);
 const result = ref<any>(null);
@@ -61,14 +62,17 @@ async function run() {
     <div class="btn-group btn-group-sm mb-3">
       <button :class="mode === 'csv' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="mode = 'csv'">چسباندن CSV</button>
       <button :class="mode === 'rows' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="mode = 'rows'">جدول ردیف‌ها</button>
+      <button :class="mode === 'pdf' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="mode = 'pdf'">فایل‌های PDF راهکاران</button>
     </div>
 
-    <template v-if="mode === 'csv'">
+    <ArchiveFilesPanel v-if="mode === 'pdf'" />
+
+    <template v-else-if="mode === 'csv'">
       <p class="small inv-muted">هر سطر: شماره، تاریخ (شمسی مانند ۱۴۰۳/۰۵/۱۷)، نوع (وارده، صادره، داخلی)، موضوع، طرف مکاتبه، نام فایل‌ها (جدا شده با | ). فایل‌ها را در حالت «جدول ردیف‌ها» می‌توان بارگذاری کرد.</p>
       <textarea v-model="csv" class="form-control inv-ltr" dir="ltr" placeholder="12/ص/1/00045, 1403/05/17, صادره, موضوع نامه, نام طرف مکاتبه, scan1.pdf|scan2.pdf" rows="8"></textarea>
     </template>
 
-    <div v-else class="table-responsive">
+    <div v-else-if="mode === 'rows'" class="table-responsive">
       <table class="table table-sm">
         <thead><tr><th>شماره *</th><th>تاریخ *</th><th>نوع</th><th>موضوع</th><th>طرف مکاتبه</th><th>فایل‌ها</th><th></th></tr></thead>
         <tbody>
@@ -89,9 +93,9 @@ async function run() {
       <button class="btn btn-sm btn-outline-secondary" @click="rows.push(blank())">ردیف جدید</button>
     </div>
 
-    <div class="mt-3"><button :disabled="busy" class="btn btn-sm btn-primary" @click="run">ورود به آرشیو</button></div>
+    <div v-if="mode !== 'pdf'" class="mt-3"><button :disabled="busy" class="btn btn-sm btn-primary" @click="run">ورود به آرشیو</button></div>
 
-    <div v-if="result" class="alert mt-3" :class="result.errors && result.errors.length ? 'alert-warning' : 'alert-success'">
+    <div v-if="result && mode !== 'pdf'" class="alert mt-3" :class="result.errors && result.errors.length ? 'alert-warning' : 'alert-success'">
       واردشده: <b>{{ result.imported }}</b>، ردشده: <b>{{ result.skipped }}</b>
       <ul v-if="result.errors && result.errors.length" class="mb-0 mt-1"><li v-for="(e, i) in result.errors" :key="i">{{ e }}</li></ul>
     </div>
