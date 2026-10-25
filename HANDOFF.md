@@ -1,97 +1,99 @@
-# PMIS (INN ORCHESTRA) — handoff for the next account
+زبان این سند و همه مستندات پروژه فارسی است (به خواست کارفرما، 1405/08/03). کد، شناسه‌ها و پیام‌های کامیت انگلیسی می‌مانند.
 
-Date: 1405/08/02. Written by the orchestrating Claude session that built the phases below. Read this file first, then `docs/`.
+# PMIS (INN ORCHESTRA) — تحویل کار به حساب بعدی
 
-## 1. Where everything is
+تاریخ: 1405/08/02. نوشته‌شده توسط جلسه Claude هماهنگ‌کننده‌ای که فازهای زیر را ساخته است. ابتدا همین فایل را بخوانید، سپس `docs/` را.
 
-All in the user's private GitHub repo `jr110jr110-boop/desktop-tutorial`:
+## 1. همه‌چیز کجاست
 
-| Branch | Contents |
+همه‌چیز در مخزن خصوصی GitHub کاربر به نام `jr110jr110-boop/desktop-tutorial` است:
+
+| شاخه | محتوا |
 |---|---|
-| `innco-net10-build` | **Backend source of truth** (ASP.NET Core .NET 10, EF Core 10, SQL Server). CI runs only on pushes to this branch. |
-| `innco-front` | **Front source** (Vue 3 + Vite + TS). Was a local-only repo `phase2-front`; pushed here at commit f3e664c. The built copy used by the install package lives in the backend branch under `.github/ci-frontend-dist/`. |
-| `innco-handoff` | This file + all design briefs, reviews and reports (`docs/`) + helper scripts (`tools/`). |
-| `innco-ci-smoke-2022`, `innco-ci-smoke-2025-express` | CI smoke results (`smoke-output/7-inventory.txt`, failures with bodies in `7-inventory-fail.txt`). |
-| `innco-ci-install` | Windows IIS + SQL Express install test results (`install-output/checks-1-first.txt`, `checks-2-update.txt`, `checks-3-restore.txt`). |
-| `innco-ci-results` | Generated EF migrations (`ci-output/migration/*`). |
-| `innco-package` | Last built server package (`package-output/`). |
-| `innco-p1-production` | Production P1 work in progress (backend parts A+B), rebased on `innco-net10-build`; merged into it once the migration `ProductionMes` is generated. Not built by CI. |
-| `innco-nuget-cache` / `innco-nuget-pkgs` | Workflow + split tarball of the NuGet cache for offline local builds (see 4). |
+| `innco-net10-build` | **مرجع اصلی کد بک‌اند** (ASP.NET Core .NET 10، EF Core 10، SQL Server). CI فقط روی push به این شاخه اجرا می‌شود. |
+| `innco-front` | **کد منبع فرانت** (Vue 3 + Vite + TS). پیش‌تر یک مخزن صرفاً محلی به نام `phase2-front` بود؛ در کامیت f3e664c به اینجا push شد. نسخه ساخته‌شده‌ای که بسته نصب از آن استفاده می‌کند در شاخه بک‌اند و زیر `.github/ci-frontend-dist/` قرار دارد. |
+| `innco-handoff` | همین فایل + تمام طرح‌های فنی، بازبینی‌ها و گزارش‌ها (`docs/`) + اسکریپت‌های کمکی (`tools/`). |
+| `innco-ci-smoke-2022`، `innco-ci-smoke-2025-express` | نتایج آزمون خودکار CI (`smoke-output/7-inventory.txt`؛ خطاها همراه با بدنه پاسخ در `7-inventory-fail.txt`). |
+| `innco-ci-install` | نتایج آزمون نصب Windows IIS + SQL Express (`install-output/checks-1-first.txt`، `checks-2-update.txt`، `checks-3-restore.txt`). |
+| `innco-ci-results` | مایگریشن‌های EF تولیدشده (`ci-output/migration/*`). |
+| `innco-package` | آخرین بسته سرور ساخته‌شده (`package-output/`). |
+| `innco-p1-production` | کار در دست انجام تولید P1 (بخش‌های A و B بک‌اند)، rebase شده روی `innco-net10-build`؛ پس از تولید مایگریشن `ProductionMes` در آن ادغام می‌شود. توسط CI ساخته نمی‌شود. |
+| `innco-nuget-cache` / `innco-nuget-pkgs` | workflow و فایل tar تکه‌تکه‌شده کش NuGet برای ساخت محلی بدون اینترنت (بخش 4 را ببینید). |
 
-The user-facing specs that lived in the old Claude Project (`claude/*.md`) are copied into `project-docs/` in this branch (strategy, warehouse, procurement, processes/data review, quality spec + status, project-control spec, finance spec, remaining-phases plan, .NET 10 upgrade guide). The old "codebase overview" is not copied — the repo itself and `project-docs/upgrade-net10.md` replace it. `docs/` holds the developer briefs, reviews and reports.
+مشخصات سطح کاربری که در Project قدیمی Claude بودند (`claude/*.md`) به `project-docs/` در همین شاخه کپی شده‌اند (راهبرد، انبار، تدارکات، بازبینی فرایندها/داده، مشخصات کنترل کیفیت و وضعیت آن، مشخصات کنترل پروژه، مشخصات مالی، طرح فازهای باقی‌مانده، راهنمای ارتقا به .NET 10). «نمای کلی کد» قدیمی کپی نشده است — خود مخزن و `project-docs/upgrade-net10.md` جایگزین آن هستند. `docs/` شامل طرح‌های فنی توسعه‌دهنده، بازبینی‌ها و گزارش‌هاست.
 
-## 2. State at handoff
+## 2. وضعیت در لحظه تحویل
 
-| Phase | Backend | Front | Notes |
+| فاز | بک‌اند | فرانت | یادداشت‌ها |
 |---|---|---|---|
-| 0 .NET 10 upgrade, install package | done | done | `deploy/install.ps1`, nightly backup |
-| 1 Warehouse | done | done | waiting: user approval of warehouses / 85 data decisions |
-| 2 Procurement + cost accounting + CEO dashboard | done | done | |
-| 3 Project control | done | done | |
-| 4 Quality QC/QA | done | done | |
-| Finance F1, F2, F3, F3b + reviews R1, R2, R3 | **done, green** at 7865e2d (1530/0 both SQL, install 0 FAIL x3) | done (f3e664c) | test kit delivered to user (PMIS_Finance_Test.zip). **One company, rial only** (see 5). |
-| Office automation O1 | **done, green** (R1 at f581787; review of the front: allowedActions on decisions/delegations, referral canCancel, MineOnly, closed-month sheet) | **done** (front f24a643 + 950d477, packaged at 58f4599: 1880/0 both SQL, install 0 FAIL x3) | test kit delivered (PMIS_Office_Test.zip, 106 tests) |
-| Production P1 | part A done + independent review fixed; part B in progress (branch `innco-p1-production`) | — | migration `ProductionMes` not generated yet |
-| Sales & Service S1, Local AI A1 | briefs ready (`docs/*-backend-brief.md`) | — | not started |
-| Engineering module | waits for the user's Claude-team organisation | — | |
-| Final: server hardware BOM | — | — | after all phases (PMIS + local AI + voice + backup, UPS) |
+| 0 ارتقا به .NET 10، بسته نصب | انجام‌شده | انجام‌شده | `deploy/install.ps1`، پشتیبان‌گیری شبانه |
+| 1 انبار | انجام‌شده | انجام‌شده | در انتظار: تأیید کاربر برای انبارها / 85 تصمیم داده‌ای |
+| 2 تدارکات + حسابداری بها + داشبورد مدیرعامل | انجام‌شده | انجام‌شده | |
+| 3 کنترل پروژه | انجام‌شده | انجام‌شده | |
+| 4 کیفیت QC/QA | انجام‌شده | انجام‌شده | |
+| مالی F1، F2، F3، F3b + بازبینی‌های R1، R2، R3 | **انجام‌شده، سبز** در 7865e2d (1530/0 روی هر دو SQL، نصب 0 FAIL در هر سه) | انجام‌شده (f3e664c) | بسته آزمون به کاربر تحویل شد (PMIS_Finance_Test.zip). **یک شرکت، فقط ریال** (بخش 5 را ببینید). |
+| اتوماسیون اداری O1 | **انجام‌شده، سبز** (R1 در f581787؛ بازبینی فرانت: allowedActions روی تصمیم‌ها/تفویض‌ها، canCancel ارجاع، MineOnly، برگه ماه بسته) | **انجام‌شده** (فرانت f24a643 + 950d477، بسته‌بندی‌شده در 58f4599: 1880/0 روی هر دو SQL، نصب 0 FAIL در هر سه) | بسته آزمون تحویل شد (PMIS_Office_Test.zip، 106 آزمون) |
+| تولید P1 | بخش A انجام‌شده + بازبینی مستقل اصلاح شد؛ بخش B در حال انجام (شاخه `innco-p1-production`) | — | مایگریشن `ProductionMes` هنوز تولید نشده است |
+| فروش و خدمات S1، هوش مصنوعی محلی A1 | طرح‌ها آماده (`docs/*-backend-brief.md`) | — | شروع نشده |
+| ماژول مهندسی | منتظر سازمان‌دهی تیم Claude کاربر | — | |
+| نهایی: فهرست مواد (BOM) سخت‌افزار سرور | — | — | پس از همه فازها (PMIS + هوش مصنوعی محلی + صدا + پشتیبان‌گیری، UPS) |
 
-## 3. CI loop (binding discipline)
+## 3. چرخه CI (انضباط الزام‌آور)
 
-- Push to `innco-net10-build` → jobs: build → smoke (SQL 2022, SQL 2025 Express) → package → install-test (Windows IIS + SQL Express: first install, update, restore).
-- **Green = both** `--- inventory: N passed, 0 failed` lines (one per SQL branch) **and** 0 lines matching `^FAIL` in the three install files (strip NULs: `tr -d '\0'`). Job "success" alone is not enough (read the files).
-- Fetch result branches with explicit refspec: `git fetch origin '+innco-ci-smoke-2022:refs/remotes/origin/innco-ci-smoke-2022'` (same for the others).
-- One run at a time: workflow `concurrency: innco-build, cancel-in-progress` — **a push cancels the running run**. Never push while a run is going; batch fixes. Never force-push.
-- Migrations: write the name into `.github/migration-name.txt`, push; CI generates the migration into `innco-ci-results` `ci-output/migration/*`; copy those files into `src/DataLayer/Migrations`, set the name file back to `Net10ModelCheck`, push. Never edit an existing migration.
-- Smoke script: `.github/scripts/inventory-smoke.sh` (runs with `set -u`; EXIT trap prints the summary). Every fix needs an exact-number check that fails on the old behaviour; no vacuous checks (no `>= 0`, no comparing the service with itself). Before pushing: `bash -n` + `shellcheck -S warning` (look for SC2154).
+- push به `innco-net10-build` → کارها: build ← آزمون خودکار (SQL 2022، SQL 2025 Express) ← بسته‌سازی ← آزمون نصب (Windows IIS + SQL Express: نصب اول، به‌روزرسانی، بازیابی).
+- **سبز = هر دو** خط `--- inventory: N passed, 0 failed` (یکی برای هر شاخه SQL) **و** 0 خط منطبق با `^FAIL` در سه فایل نصب (کاراکترهای NUL را حذف کنید: `tr -d '\0'`). «موفق» بودن کار به‌تنهایی کافی نیست (فایل‌ها را بخوانید).
+- شاخه‌های نتیجه را با refspec صریح دریافت کنید: `git fetch origin '+innco-ci-smoke-2022:refs/remotes/origin/innco-ci-smoke-2022'` (برای بقیه نیز همین‌طور).
+- هر بار فقط یک اجرا: `concurrency: innco-build, cancel-in-progress` در workflow — **هر push اجرای در حال انجام را لغو می‌کند**. هرگز در حین اجرا push نکنید؛ اصلاحات را دسته‌ای بفرستید. هرگز force-push نکنید.
+- مایگریشن‌ها: نام را در `.github/migration-name.txt` بنویسید و push کنید؛ CI مایگریشن را در `innco-ci-results` و مسیر `ci-output/migration/*` تولید می‌کند؛ آن فایل‌ها را در `src/DataLayer/Migrations` کپی کنید، فایل نام را به `Net10ModelCheck` برگردانید و push کنید. هرگز مایگریشن موجود را ویرایش نکنید.
+- اسکریپت آزمون خودکار: `.github/scripts/inventory-smoke.sh` (با `set -u` اجرا می‌شود؛ EXIT trap خلاصه را چاپ می‌کند). هر اصلاح باید یک بررسی با عدد دقیق داشته باشد که روی رفتار قدیمی شکست بخورد؛ بدون بررسی توخالی (نه `>= 0`، نه مقایسه سرویس با خودش). پیش از push: `bash -n` + `shellcheck -S warning` (به دنبال SC2154 باشید).
 
-## 4. Local build (no .NET download allowed in the Claude sandbox)
+## 4. ساخت محلی (دانلود .NET در sandbox کلود مجاز نیست)
 
-- SDK: `apt-get install -y dotnet-sdk-10.0` (Ubuntu package works through the proxy).
-- NuGet is blocked; restore from the cache branch: `git clone --depth 1 --branch innco-nuget-pkgs <repo> p && mkdir -p ~/.nuget/packages ~/.nuget/emptysrc && cat p/nuget-packages.tgz.part-* | tar -xzf - -C ~/.nuget/packages`
-- Build: `dotnet build Base.sln --source ~/.nuget/emptysrc -v q -nologo` → must print "Build succeeded". If packages change, push to `innco-nuget-cache` to regenerate (does not run the main CI).
-- No SQL Server locally (Docker/Microsoft repos blocked): smoke and migrations only in CI.
-- Network (new account, 1405/08/02): with the user's claude.ai setting Capabilities > Domain allowlist = All domains, `apt-get`, NuGet, npm and pip work. apt sources must be https (`sed -i 's#http://#https://#' /etc/apt/sources.list.d/ubuntu.sources`; disable docker.list). npm and pip need the proxy env not bypassed: `export npm_config_noproxy=localhost NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1`. `apt-get install -y dotnet-sdk-10.0 shellcheck`.
-- shellcheck runs out of memory (7 GB) on the whole smoke script now: check a temp file of lines 1-95 + the changed section with `-e SC2154,SC2034` and look for variables used before assignment separately.
-- Package build of the front: `.env.production.local` with `VITE_API_URL=/` (git-ignored) before `npx vite build`, then copy `dist` to the backend `.github/ci-frontend-dist`.
-- Admin password: the repo `src/WebApi/appsettings.json` and every package carry `SET-BY-INSTALL-ps1`; CI injects its test password by the env var `AdminUserSeed__Password`; the package job fails if a password slips in (commit bc79b58).
-- Front: `npm`/`npx vite build` work locally; `npx vue-tsc --noEmit` has 5 legacy errors elsewhere — check only your files.
+- SDK: `apt-get install -y dotnet-sdk-10.0` (بسته Ubuntu از طریق پروکسی کار می‌کند).
+- NuGet مسدود است؛ از شاخه کش بازیابی کنید: `git clone --depth 1 --branch innco-nuget-pkgs <repo> p && mkdir -p ~/.nuget/packages ~/.nuget/emptysrc && cat p/nuget-packages.tgz.part-* | tar -xzf - -C ~/.nuget/packages`
+- ساخت: `dotnet build Base.sln --source ~/.nuget/emptysrc -v q -nologo` ← باید «Build succeeded» چاپ کند. اگر بسته‌ها تغییر کنند، برای تولید مجدد به `innco-nuget-cache` push کنید (CI اصلی را اجرا نمی‌کند).
+- SQL Server به‌صورت محلی موجود نیست (Docker/مخازن Microsoft مسدودند): آزمون خودکار و مایگریشن‌ها فقط در CI.
+- شبکه (حساب جدید، 1405/08/02): با تنظیم claude.ai کاربر Capabilities > Domain allowlist = All domains، `apt-get`، NuGet، npm و pip کار می‌کنند. منابع apt باید https باشند (`sed -i 's#http://#https://#' /etc/apt/sources.list.d/ubuntu.sources`؛ docker.list را غیرفعال کنید). npm و pip نیاز دارند متغیرهای محیطی پروکسی دور زده نشوند: `export npm_config_noproxy=localhost NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1`. `apt-get install -y dotnet-sdk-10.0 shellcheck`.
+- shellcheck اکنون روی کل اسکریپت آزمون خودکار حافظه کم می‌آورد (7 GB): یک فایل موقت شامل خطوط 1 تا 95 + بخش تغییرکرده را با `-e SC2154,SC2034` بررسی کنید و متغیرهای استفاده‌شده پیش از مقداردهی را جداگانه ببینید.
+- ساخت بسته فرانت: پیش از `npx vite build` فایل `.env.production.local` را با `VITE_API_URL=/` بسازید (در git نادیده گرفته می‌شود)، سپس `dist` را در `.github/ci-frontend-dist` بک‌اند کپی کنید.
+- گذرواژه ادمین: فایل `src/WebApi/appsettings.json` مخزن و هر بسته مقدار `SET-BY-INSTALL-ps1` را دارند؛ CI گذرواژه آزمون خود را با متغیر محیطی `AdminUserSeed__Password` تزریق می‌کند؛ اگر گذرواژه‌ای به بسته نشت کند کار بسته‌سازی شکست می‌خورد (کامیت bc79b58).
+- فرانت: `npm`/`npx vite build` به‌صورت محلی کار می‌کنند؛ `npx vue-tsc --noEmit` در جاهای دیگر 5 خطای قدیمی دارد — فقط فایل‌های خودتان را بررسی کنید.
 
-## 5. Binding user decisions (do not change without asking)
+## 5. تصمیم‌های الزام‌آور کاربر (بدون پرسش تغییر ندهید)
 
-- Everything of the company runs in PMIS, offline-capable. Only external links: **Sepidar** (receives only tax-office and social-insurance data; fallback = full voucher export to Sepidar) and **Claude seats in engineering** (may pause when internet is down).
-- Humans only at control gates (review/approve system drafts) and physical work; dashboards/reports read-only.
-- **Persian (Shamsi) dates only** in anything a user reads (screens, files, exports, file names, audit text, letter numbers). API JSON dates stay ISO (front converts). Gregorian is deliberately not offered now (sensitive); keep the seam (`IFiscalCalendar`) so it can be added later.
-- **One company, rial only** (1405/08/02): flags `Finance:MultiEntity` and `Finance:ForeignCurrency` default **false** (`FinanceFeatures` in `F3Common.cs`); front `src/utils/features.ts`. Tables/columns stay. The user will say later how to start the second company.
-- Payroll: month basis always 30 days (29/31-day months paid as 30); employee 7% social insurance fully deducted from taxable base; part months from HireDate/EndDate.
-- Maker-checker everywhere: creator and every editor excluded from check/approve/finalise. Payroll personal data only PAYROLL, FINANCEMANAGER, CEO.
-- Office: **the secretariat does not see confidential/secret letters — it only registers them** (metadata only: number, date, kind, classification, parties, delivery).
-- No invented statutory rates: rate tables with Source/Verify flags; missing rates fail with a clear Persian message.
-- Printouts: Persian B Zar font, RTL, A4.
-- Privacy/safety: no people's names in seed/test data (job titles only); never store/copy secrets; the admin password in packages must be the placeholder `SET-BY-INSTALL-ps1` (install.ps1 sets the real one) — **check `app/appsettings.json` line 10 of every package before delivery**. Never use the password PDFs the user has.
-- Cost: cheapest route without loss of accuracy — Sonnet sub-agents for bulk work, Opus for design and independent reviews; verify every result yourself; batch pushes.
-- Get user approval before each new phase (user has repeatedly said "continue").
+- همه فعالیت‌های شرکت در PMIS اجرا می‌شود و بدون اینترنت قابل‌کار است. تنها پیوندهای بیرونی: **سپیدار** (فقط داده‌های اداره دارایی و بیمه را دریافت می‌کند؛ راه جایگزین = خروجی کامل سند حسابداری به سپیدار) و **صندلی‌های Claude در مهندسی** (ممکن است هنگام قطع اینترنت متوقف شوند).
+- انسان فقط در گیت‌های کنترلی (بازبینی/تأیید پیش‌نویس‌های سیستم) و کارهای فیزیکی؛ داشبوردها/گزارش‌ها فقط‌خواندنی.
+- **فقط تاریخ فارسی (شمسی)** در هر چیزی که کاربر می‌خواند (صفحه‌ها، فایل‌ها، خروجی‌ها، نام فایل‌ها، متن ممیزی، شماره نامه‌ها). تاریخ‌های JSON در API به‌صورت ISO می‌مانند (فرانت تبدیل می‌کند). تقویم میلادی عمداً فعلاً ارائه نمی‌شود (حساس است)؛ درز (seam) یعنی `IFiscalCalendar` را حفظ کنید تا بعداً قابل افزودن باشد.
+- **یک شرکت، فقط ریال** (1405/08/02): پرچم‌های `Finance:MultiEntity` و `Finance:ForeignCurrency` به‌طور پیش‌فرض **false** هستند (`FinanceFeatures` در `F3Common.cs`)؛ در فرانت `src/utils/features.ts`. جدول‌ها/ستون‌ها باقی می‌مانند. کاربر بعداً می‌گوید شرکت دوم چگونه راه‌اندازی شود.
+- حقوق و دستمزد: مبنای ماه همیشه 30 روز (ماه‌های 29/31 روزه به‌صورت 30 روز پرداخت می‌شوند)؛ 7٪ بیمه سهم کارمند کاملاً از مبنای مشمول مالیات کسر می‌شود؛ ماه‌های ناقص بر پایه HireDate/EndDate.
+- Maker-checker (سازنده–بررسی‌کننده) در همه‌جا: سازنده و هر ویرایش‌کننده از بررسی/تأیید/نهایی‌سازی کنار گذاشته می‌شوند. داده‌های شخصی حقوق و دستمزد فقط برای PAYROLL، FINANCEMANAGER، CEO.
+- اداری: **دبیرخانه نامه‌های محرمانه/سری را نمی‌بیند — فقط ثبت می‌کند** (فقط فراداده: شماره، تاریخ، نوع، طبقه‌بندی، طرفین، تحویل).
+- هیچ نرخ قانونی ساختگی نباشد: جدول‌های نرخ با پرچم‌های Source/Verify؛ نرخ‌های موجود‌نبوده با پیام فارسی روشن شکست می‌خورند.
+- چاپ‌ها: قلم B Zar فارسی، راست‌به‌چپ، A4.
+- حریم خصوصی/ایمنی: هیچ نام شخصی در داده‌های اولیه/آزمون نباشد (فقط عنوان شغلی)؛ هرگز رمز و رازها را ذخیره/کپی نکنید؛ گذرواژه ادمین در بسته‌ها باید مقدار نگهدارنده `SET-BY-INSTALL-ps1` باشد (install.ps1 گذرواژه واقعی را تنظیم می‌کند) — **پیش از تحویل، خط 10 فایل `app/appsettings.json` را در هر بسته بررسی کنید**. هرگز از PDFهای گذرواژه‌دار کاربر استفاده نکنید.
+- هزینه: ارزان‌ترین مسیر بدون افت دقت — زیرعامل‌های Sonnet برای کارهای حجیم، Opus برای طراحی و بازبینی‌های مستقل؛ هر نتیجه را خودتان راستی‌آزمایی کنید؛ push ها را دسته‌ای بفرستید.
+- پیش از هر فاز جدید تأیید کاربر را بگیرید (کاربر بارها گفته است «ادامه بده»).
 
-## 6. Roles
+## 6. نقش‌ها
 
-PMO 1, COMMERCIAL 2, FINANCIAL 3, ENGINEERING 4, QC 5, WAREHOUSE 6, ASSEMBLER 7, ENGINEER 8, CONSTRUCTION 9, SECURITY 10, PLANNING 11, WHSUPERVISOR 12, CEO 13, QA 14, PROJECTMANAGER 15, DCC 16, FINANCEMANAGER 17, PAYROLL 18, TREASURY 19, (planned) PRODUCTIONMANAGER 20, SHOPSUPERVISOR 21, OPERATOR 22, MAINTENANCE 23, SALES 24, SERVICE 25, SECRETARIAT 26, HR 27, AUDITOR 28 (read-only).
+PMO 1، COMMERCIAL 2، FINANCIAL 3، ENGINEERING 4، QC 5، WAREHOUSE 6، ASSEMBLER 7، ENGINEER 8، CONSTRUCTION 9، SECURITY 10، PLANNING 11، WHSUPERVISOR 12، CEO 13، QA 14، PROJECTMANAGER 15، DCC 16، FINANCEMANAGER 17، PAYROLL 18، TREASURY 19، (برنامه‌ریزی‌شده) PRODUCTIONMANAGER 20، SHOPSUPERVISOR 21، OPERATOR 22، MAINTENANCE 23، SALES 24، SERVICE 25، SECRETARIAT 26، HR 27، AUDITOR 28 (فقط‌خواندنی).
 
-## 7. Next steps, in order
+## 7. گام‌های بعدی، به ترتیب
 
-1. **Office O1: DONE** (backend R1 + front + test kit). Also fixed on the way: every audit row was written twice (e219bf6, triggers ran in both SaveChanges overloads); uploaded files named after the document id (C1). Front tools: `tools/mc3o` (jsdom click-through of all office routes per role with mocks generated from the C# DTOs; build the bundle with `npx vite build --config tools/mc3o/vite.chk.config.mjs` from the front folder) and `tools/officebuild` (office test kit: guide PDF, data, feedback workbook).
-2. **Production P1** (branch `innco-p1-production`): part A (master data, routings with two-person approval, production orders, release gate, operations, terminal, time booking, attendance difference) built, independently reviewed (Opus, 13 findings incl. one critical: orders were never added to the context) and fixed; part B (cost posting aggregated per work order/WBS/work centre/day, scheduler, load/dispatch, maintenance + OEE, dashboards) in progress. Then: merge into `innco-net10-build` with `.github/migration-name.txt` = `ProductionMes`, copy the generated migration, set the name back, push, verify green; independent review of part B; front pages; test kit.
-3. Sales & Service S1 → Local AI A1 (mock LLM in CI) per the briefs in `docs/`.
-4. Engineering module after the user's Claude-team organisation.
-5. Server hardware BOM.
+1. **اتوماسیون اداری O1: انجام شد** (بک‌اند R1 + فرانت + بسته آزمون). در این مسیر این موارد نیز اصلاح شد: هر ردیف ممیزی دو بار نوشته می‌شد (e219bf6؛ تریگرها در هر دو سربارگذاری SaveChanges اجرا می‌شدند)؛ فایل‌های بارگذاری‌شده بر اساس شناسه سند نام‌گذاری می‌شوند (C1). ابزارهای فرانت: `tools/mc3o` (کلیک‌گردی jsdom روی همه مسیرهای اداری به تفکیک نقش با mockهای تولیدشده از DTOهای C#؛ بسته را با `npx vite build --config tools/mc3o/vite.chk.config.mjs` از پوشه فرانت بسازید) و `tools/officebuild` (بسته آزمون اداری: PDF راهنما، داده، دفتر بازخورد).
+2. **تولید P1** (شاخه `innco-p1-production`): بخش A (داده پایه، مسیرهای ساخت با تأیید دونفره، سفارش‌های تولید، گیت صدور، عملیات، ترمینال، ثبت زمان، اختلاف حضور و غیاب) ساخته، به‌صورت مستقل بازبینی (Opus، 13 یافته از جمله یک مورد بحرانی: سفارش‌ها هرگز به context افزوده نمی‌شدند) و اصلاح شد؛ بخش B (ثبت هزینه تجمیع‌شده به تفکیک دستور کار/WBS/مرکز کار/روز، زمان‌بند، بار/توزیع کار، نگهداری و تعمیرات + OEE، داشبوردها) در حال انجام است. سپس: ادغام در `innco-net10-build` با `.github/migration-name.txt` = `ProductionMes`، کپی مایگریشن تولیدشده، برگرداندن نام، push و راستی‌آزمایی سبز بودن؛ بازبینی مستقل بخش B؛ صفحه‌های فرانت؛ بسته آزمون.
+3. فروش و خدمات S1 ← هوش مصنوعی محلی A1 (LLM شبیه‌سازی‌شده در CI) طبق طرح‌های `docs/`.
+4. ماژول مهندسی پس از سازمان‌دهی تیم Claude توسط کاربر.
+5. فهرست مواد (BOM) سخت‌افزار سرور.
 
-Last fully green commit: **58f4599** (office complete; package carries the password placeholder).
+آخرین کامیت کاملاً سبز: **58f4599** (اتوماسیون اداری کامل؛ بسته حاوی نگهدارنده گذرواژه است).
 
-## 8. Waiting on the user / company
+## 8. در انتظار کاربر / شرکت
 
-Office kit (PMIS_Office_Test.zip, 1405/08/03): feedback workbook and the 10 company questions in it. 
-Finance: 16 accountant questions (`docs/finance-r3-report.md` §2; also in the test kit workbook), feedback on the finance test kit, which system prints the legal books. Office: real letter-number format (default `{yy}/{kind}/{unit}/{seq:5}`, kind letters و/ص/د), attendance device model/format (an earlier note says US10C by Donyaye Pardazesh, TCP/IP + RS485 — confirm), Rahkaran archive export format, attendance policy values. Earlier phases: warehouse list and 85 data decisions, procurement form codes, quality/ITP limits, project-control open questions (`claude/project-control-spec.md` §7). Hardware for local AI/voice (to be settled by the BOM).
+بسته آزمون اداری (PMIS_Office_Test.zip، 1405/08/03): دفتر بازخورد و 10 پرسش شرکت در آن.
+مالی: 16 پرسش حسابدار (`docs/finance-r3-report.md` §2؛ در دفتر بسته آزمون نیز هست)، بازخورد بسته آزمون مالی، اینکه کدام سیستم دفاتر قانونی را چاپ می‌کند. اداری: قالب واقعی شماره نامه (پیش‌فرض `{yy}/{kind}/{unit}/{seq:5}`، حروف نوع و/ص/د)، مدل/قالب دستگاه حضور و غیاب (یادداشتی قدیمی می‌گوید US10C از دنیای پردازش، TCP/IP + RS485 — تأیید شود)، قالب خروجی بایگانی Rahkaran، مقادیر سیاست حضور و غیاب. فازهای پیشین: فهرست انبارها و 85 تصمیم داده‌ای، کد فرم‌های تدارکات، حدود کیفیت/ITP، پرسش‌های باز کنترل پروژه (`claude/project-control-spec.md` §7). سخت‌افزار هوش مصنوعی محلی/صدا (با BOM مشخص می‌شود).
 
-## 9. Files in this branch
+## 9. فایل‌های این شاخه
 
-- `docs/` — binding backend briefs (finance, F3, office, production, sales-service, AI, quality, project control), independent reviews (finance 1–3, office 1), reports (finance R3, office O1).
-- `tools/finbuild` — Python/Node scripts that build the Persian test guide PDF (Playwright + B Zar) and the feedback workbook (openpyxl); `tools/mc3` — front mock click-through (esbuild bundle + mock API) used to check every screen per role without a backend; `tools/guide3` — earlier guide template.
+- `docs/` — طرح‌های فنی الزام‌آور بک‌اند (مالی، F3، اداری، تولید، فروش-خدمات، هوش مصنوعی، کیفیت، کنترل پروژه)، بازبینی‌های مستقل (مالی 1–3، اداری 1)، گزارش‌ها (مالی R3، اداری O1).
+- `tools/finbuild` — اسکریپت‌های Python/Node که PDF راهنمای آزمون فارسی (Playwright + B Zar) و دفتر بازخورد (openpyxl) را می‌سازند؛ `tools/mc3` — کلیک‌گردی mock فرانت (بسته esbuild + API شبیه‌سازی‌شده) برای بررسی هر صفحه به تفکیک نقش بدون بک‌اند؛ `tools/guide3` — قالب قدیمی‌تر راهنما.
