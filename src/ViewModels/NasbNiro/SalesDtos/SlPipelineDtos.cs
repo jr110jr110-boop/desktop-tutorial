@@ -78,6 +78,9 @@ namespace ViewModels.NasbNiro.SalesDtos
 
     public class SlBidDecisionDto
     {
+        /// <summary>True when the current user made or edited this record, so maker-checker refuses their approval; the page hides the approve button.</summary>
+        public bool TouchedByMe { get; set; }
+
         public int Id { get; set; }
         public int InquiryId { get; set; }
         public string InquiryNumber { get; set; }
@@ -303,6 +306,9 @@ namespace ViewModels.NasbNiro.SalesDtos
 
     public class SlProposalDto
     {
+        /// <summary>True when the current user made or edited this record, so maker-checker refuses their approval; the page hides the approve button.</summary>
+        public bool TouchedByMe { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public int Revision { get; set; }

@@ -70,6 +70,7 @@ namespace Services.NasbNiro.Sales
             Dictionary<int, InventoryItem> items = await ItemsAsync(rows.SelectMany(r => r.Lines.Select(l => l.ItemId)), ct);
             return rows.Select(r => new SlPriceListDto
             {
+                TouchedByMe = LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me),
                 Id = r.Id, Number = r.Number, Title = r.Title, ValidFrom = r.ValidFrom, ValidFromText = SlText.Date(r.ValidFrom), ValidTo = r.ValidTo, ValidToText = SlText.Date(r.ValidTo), Status = r.Status,
                 Note = r.Note, ApprovedByUserId = r.ApprovedByUserId, ApprovedAt = r.ApprovedAt, ApprovedAtText = SlText.Stamp(r.ApprovedAt),
                 Lines = r.Lines.OrderBy(l => l.Id).Select(l => new SlPriceListLineDto
@@ -460,6 +461,7 @@ namespace Services.NasbNiro.Sales
             Dictionary<int, string> invoiceNumbers = invoiceIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(d => invoiceIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, d => d.Number, ct);
             return rows.Select(r => new SlOrderDto
             {
+                TouchedByMe = LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me),
                 Id = r.Id, Number = r.Number, OrderDate = r.OrderDate, OrderDateText = SlText.Date(r.OrderDate), CustomerId = r.CustomerId, CustomerName = customers.TryGetValue(r.CustomerId, out string cn) ? cn : null,
                 ContactId = r.ContactId, QuotationId = r.QuotationId, CustomerOrderNumber = r.CustomerOrderNumber, RequestedDeliveryDate = r.RequestedDeliveryDate,
                 RequestedDeliveryDateText = SlText.Date(r.RequestedDeliveryDate), Status = r.Status, StatusText = SlText.OrderStatus(r.Status), NetAmount = r.NetAmount,

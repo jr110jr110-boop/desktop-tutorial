@@ -70,6 +70,9 @@ namespace ViewModels.NasbNiro.ServiceDtos
 
     public class SvUnitDto
     {
+        /// <summary>True when the current user made or edited this record, so maker-checker refuses their approval; the page hides the approve button.</summary>
+        public bool TouchedByMe { get; set; }
+
         public int Id { get; set; }
         public string Tag { get; set; }
         public string Title { get; set; }
@@ -325,6 +328,9 @@ namespace ViewModels.NasbNiro.ServiceDtos
 
     public class SvOrderDto
     {
+        /// <summary>True when the current user made or edited this record, so maker-checker refuses their approval; the page hides the approve button.</summary>
+        public bool TouchedByMe { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public int? RequestId { get; set; }
@@ -489,6 +495,9 @@ namespace ViewModels.NasbNiro.ServiceDtos
 
     public class SvContractDto
     {
+        /// <summary>True when the current user made or edited this record, so maker-checker refuses their approval; the page hides the approve button.</summary>
+        public bool TouchedByMe { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public string Title { get; set; }

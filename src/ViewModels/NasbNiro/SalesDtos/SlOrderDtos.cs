@@ -23,6 +23,9 @@ namespace ViewModels.NasbNiro.SalesDtos
 
     public class SlPriceListDto
     {
+        /// <summary>True when the current user made or edited this record, so maker-checker refuses their approval; the page hides the approve button.</summary>
+        public bool TouchedByMe { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public string Title { get; set; }
@@ -180,6 +183,9 @@ namespace ViewModels.NasbNiro.SalesDtos
 
     public class SlOrderDto
     {
+        /// <summary>True when the current user made or edited this record, so maker-checker refuses their approval; the page hides the approve button.</summary>
+        public bool TouchedByMe { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public DateTime OrderDate { get; set; }

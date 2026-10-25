@@ -186,6 +186,7 @@ namespace Services.NasbNiro.Sales
                 SlInquiry i = inquiries.FirstOrDefault(x => x.Id == r.InquiryId);
                 return new SlBidDecisionDto
                 {
+                    TouchedByMe = LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me),
                     Id = r.Id, InquiryId = r.InquiryId, InquiryNumber = i?.Number, InquiryTitle = i?.Title, CustomerName = i != null && customers.TryGetValue(i.CustomerId, out string n) ? n : null,
                     Status = r.Status, TechnicalCapabilityOk = r.TechnicalCapabilityOk, TechnicalNote = r.TechnicalNote, CapacityOverloadWeeks = r.CapacityOverloadWeeks,
                     CapacityCheckedUntil = r.CapacityCheckedUntil, CapacityCheckedUntilText = SlText.Date(r.CapacityCheckedUntil), CapacityNote = r.CapacityNote,

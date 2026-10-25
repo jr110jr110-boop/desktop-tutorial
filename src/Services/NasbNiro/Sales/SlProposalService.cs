@@ -83,6 +83,7 @@ namespace Services.NasbNiro.Sales
                 int? reviewId = r.ContractId.HasValue ? reviews.Where(x => x.ContractId == r.ContractId.Value).OrderByDescending(x => x.Id).Select(x => (int?)x.Id).FirstOrDefault() : null;
                 return new SlProposalDto
                 {
+                    TouchedByMe = LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me),
                     Id = r.Id, Number = r.Number, Revision = r.Revision, InquiryId = r.InquiryId, InquiryNumber = i?.Number, InquiryTitle = i?.Title, CustomerId = i?.CustomerId ?? 0,
                     CustomerName = i != null && customers.TryGetValue(i.CustomerId, out string cn) ? cn : null, ProductType = i?.ProductType ?? SlProductType.Other, EstimateId = r.EstimateId,
                     TechnicalDocumentId = r.TechnicalDocumentId, CommercialDocumentId = r.CommercialDocumentId, ValidityDays = r.ValidityDays, Price = r.Price, DeliveryWeeks = r.DeliveryWeeks,

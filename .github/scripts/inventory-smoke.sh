@@ -4042,6 +4042,8 @@ as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$SLI1,\"estimateId\":$SLE1}"; 
 as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"approve\"}"; nomsg "sales: another sales user cannot approve while the CEO has set no ceiling" "هنوز تعیین نکرده"
 as "$CEO_TOKEN" POST $SL/settings '{"key":"ProposalApprovalThresholdRial","value":50000000}'; check "sales: the CEO sets the approval ceiling for sales: 50,000,000 rials" '.success and .data.value == 50000000'
 as "$SL_TOKEN" GET $SL/proposals/$SLP1; check "sales: with the ceiling set, P1 (37,365,625) no longer needs the CEO" '.success and .data.needsCeo == false'
+as "$SL_TOKEN" GET $SL/proposals/$SLP1; check "sales: the proposal tells its preparer that they touched it (the page hides approve)" '.success and .data.touchedByMe == true'
+as "$SL2_TOKEN" GET $SL/proposals/$SLP1; check "sales: the second sales user did not touch the proposal (approve is offered)" '.success and .data.touchedByMe == false'
 as "$SL_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"approve\"}"; nomsg "sales: the sales user who prepared the proposal cannot approve it (maker-checker)" "تفکیک وظایف"
 as "$SV_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"approve\"}"; nomsg "sales: the service role cannot approve proposals" "مجوز"
 as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"submit\"}"; nomsg "sales: a proposal that is not approved cannot be sent to the customer" "تأییدشده"
@@ -4240,6 +4242,8 @@ call GET inventory/material-requests/$SLMR; check "sales: with O1 delivered the 
 
 # --- finance approves the invoice of D1 (posts it); the delivery can then no longer be cancelled; the open receivable is counted by the credit check
 as "$FM_TOKEN" POST $FR/invoices/action "{\"id\":$SLINV1,\"action\":\"approve\"}"; check "sales: finance approves the drafted invoice of D1: it is posted" '.success and .data.status == 2 and .data.grossAmount == 21120000'
+as "$SL_TOKEN" GET $SL/customers/$SLCA; check "sales: customer A now has a posted invoice, so the page locks its name and codes for sales" '.success and .data.hasPostedInvoices == true'
+as "$SL_TOKEN" GET $SL/customers/$SLCB; check "sales: customer B has no posted invoice, so sales may still correct its name and codes" '.success and .data.hasPostedInvoices == false'
 call POST "inventory/documents/$SLD1/cancel" '{"reason":"درخواست مشتری"}'; nomsg "sales: a delivery whose invoice is posted cannot be cancelled until finance reverses it" "ابتدا مالی باید آن را برگرداند"
 as "$FM_TOKEN" GET "$FR/customers?PageSize=0"; check "sales: the open receivable of customer A is the posted invoice: 21,120,000" ".success and ([.data.data[]|select(.id == $SLCA)][0].openAmount) == 21120000"
 

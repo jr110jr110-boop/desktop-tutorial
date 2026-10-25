@@ -94,6 +94,7 @@ namespace Services.NasbNiro.AfterSales
                 decimal waiting = r.TimeEntries.Where(t => t.Kind == SvTimeKind.Waiting).Sum(t => t.Hours);
                 return new SvOrderDto
                 {
+                    TouchedByMe = LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me),
                     Id = r.Id, Number = r.Number, RequestId = r.RequestId, RequestNumber = r.RequestId.HasValue ? requests.GetValueOrDefault(r.RequestId.Value) : null, UnitId = r.UnitId, UnitTag = units.GetValueOrDefault(r.UnitId),
                     CustomerId = r.CustomerId, CustomerName = r.CustomerId.HasValue ? customers.GetValueOrDefault(r.CustomerId.Value) : null, ContractId = r.ContractId, LtsaContractId = r.LtsaContractId,
                     LtsaNumber = r.LtsaContractId.HasValue ? ltsas.GetValueOrDefault(r.LtsaContractId.Value) : null, Kind = r.Kind, Status = r.Status, StatusText = SvText.OrderStatus(r.Status), Title = r.Title,

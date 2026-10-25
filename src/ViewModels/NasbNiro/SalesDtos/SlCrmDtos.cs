@@ -25,6 +25,9 @@ namespace ViewModels.NasbNiro.SalesDtos
 
     public class SlCustomerDto
     {
+        /// <summary>The customer has posted invoices: its name and codes are on tax documents, so only finance changes them.</summary>
+        public bool HasPostedInvoices { get; set; }
+
         public int Id { get; set; }
         public string Name { get; set; }
         public string EconomicCode { get; set; }

@@ -80,11 +80,13 @@ namespace Services.NasbNiro.Sales
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, profiles.Select(p => p.OwnerUserId), ct);
             // the credit limit is finance's number: the others do not see it
             bool seesCredit = _user.IsInRole(SalesRoles.CreditViewers);
+            List<int> posted = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => ids.Contains(i.CustomerId) && i.Status == FnDocStatus.Posted).Select(i => i.CustomerId).Distinct().ToListAsync(ct);
             return rows.Select(c =>
             {
                 SlCustomerProfile p = profiles.FirstOrDefault(x => x.CustomerId == c.Id);
                 return new SlCustomerDto
                 {
+                    HasPostedInvoices = posted.Contains(c.Id),
                     Id = c.Id, Name = c.Name, EconomicCode = c.EconomicCode, NationalId = c.NationalId, PostalCode = c.PostalCode, Address = c.Address, Phone = c.Phone,
                     EmployerName = c.EmployerName, IsActive = c.IsActive, ProfileId = p?.Id, Type = p?.Type, Industry = p?.Industry, Country = p?.Country, City = p?.City,
                     Status = p?.Status ?? SlCustomerStatus.Active, OwnerUserId = p?.OwnerUserId, OwnerName = names.Name(p?.OwnerUserId), CreditLimitRial = seesCredit ? p?.CreditLimitRial : null,

@@ -93,6 +93,7 @@ namespace Services.NasbNiro.AfterSales
                 SvUnitStatus status = StatusOf(r, ltsa, asOf);
                 return new SvUnitDto
                 {
+                    TouchedByMe = r.EditorUserIds != null && LedgerMath.Touched(0, r.EditorUserIds, Me),
                     Id = r.Id, Tag = r.Tag, Title = r.Title, SerialUnitId = r.SerialUnitId, SerialNumber = r.SerialUnitId.HasValue ? serials.GetValueOrDefault(r.SerialUnitId.Value) : null,
                     ProductType = r.ProductType, ProductTypeText = SlText.Product(r.ProductType), CustomerId = r.CustomerId, CustomerName = r.CustomerId.HasValue ? customers.GetValueOrDefault(r.CustomerId.Value) : null,
                     SiteId = r.SiteId, SiteTitle = r.SiteId.HasValue ? sites.GetValueOrDefault(r.SiteId.Value) : null, ContractId = r.ContractId, ContractCode = r.ContractId.HasValue ? contracts.GetValueOrDefault(r.ContractId.Value) : null,

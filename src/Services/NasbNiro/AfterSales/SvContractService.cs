@@ -65,6 +65,7 @@ namespace Services.NasbNiro.AfterSales
                 .Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.N);
             return rows.Select(r => new SvContractDto
             {
+                TouchedByMe = LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me),
                 Id = r.Id, Number = r.Number, Title = r.Title, CustomerId = r.CustomerId, CustomerName = customers.GetValueOrDefault(r.CustomerId), Status = r.Status, StatusText = SvText.ContractStatus(r.Status),
                 StartDate = r.StartDate, StartDateText = SlText.Date(r.StartDate), EndDate = r.EndDate, EndDateText = SlText.Date(r.EndDate), Scope = r.Scope, VisitIntervalMonths = r.VisitIntervalMonths, PriceRial = r.PriceRial,
                 NextVisitDate = r.NextVisitDate, NextVisitDateText = SlText.Date(r.NextVisitDate), UnitIds = r.Units.OrderBy(u => u.Id).Select(u => u.UnitId).ToList(),
