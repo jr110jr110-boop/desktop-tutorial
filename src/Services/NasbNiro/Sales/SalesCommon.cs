@@ -26,6 +26,8 @@ namespace Services.NasbNiro.Sales
         public const string Writers = "SALES";
         public const string ActivityWriters = "SALES,SERVICE";
         public const string Readers = "SALES,CEO,PMO,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,PLANNING,AUDITOR,SERVICE";
+        /// <summary>Who reads sales orders: the readers plus the warehouse, which builds the delivery document against the order lines.</summary>
+        public const string OrderReaders = Readers + ",WAREHOUSE,WHSUPERVISOR";
         public const string CommercialReaders = "SALES,CEO,PMO,COMMERCIAL,FINANCEMANAGER,AUDITOR";
         public const string ProposalApprovers = "SALES,CEO";
         /// <summary>Price lists are approved by someone who did not write them.</summary>

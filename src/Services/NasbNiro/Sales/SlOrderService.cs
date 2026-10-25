@@ -304,7 +304,7 @@ namespace Services.NasbNiro.Sales
         {
             if (!_user.IsInRole(SalesRoles.Readers)) return Bad<SlQuotationDto>(SlText.NotAllowed);
             SlQuotation row = await _uow.Set<SlQuotation>().AsNoTracking().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
-            if (row == null) return SlText.NotFound<SlQuotationDto>("پیشنهاد قیمت پیدا نشد.");
+            if (row == null) return SlText.NotFound<SlQuotationDto>("پیش‌فاکتور پیدا نشد.");
             return ResponseDtoHelper.Ok((await QuotationDtosAsync(new List<SlQuotation> { row }, ct))[0]);
         }
 
@@ -322,8 +322,8 @@ namespace Services.NasbNiro.Sales
             if (!_user.IsInRole(SalesRoles.Writers)) return Bad<SlQuotationDto>(SlText.NotAllowed);
             if (dto == null) return Bad<SlQuotationDto>(SlText.InvalidData);
             DateTime date = (dto.QuotationDate ?? DateTime.Today).Date;
-            if (!dto.ValidUntil.HasValue) return Bad<SlQuotationDto>("تاریخ پایان اعتبار پیشنهاد قیمت را وارد کنید.");
-            if (dto.ValidUntil.Value.Date < date) return Bad<SlQuotationDto>("پایان اعتبار قبل از تاریخ پیشنهاد قیمت است.");
+            if (!dto.ValidUntil.HasValue) return Bad<SlQuotationDto>("تاریخ پایان اعتبار پیش‌فاکتور را وارد کنید.");
+            if (dto.ValidUntil.Value.Date < date) return Bad<SlQuotationDto>("پایان اعتبار قبل از تاریخ پیش‌فاکتور است.");
             string customerProblem = await CheckCustomerAsync(dto.CustomerId, dto.ContactId, ct);
             if (customerProblem != null) return Bad<SlQuotationDto>(customerProblem);
             var (priced, error) = await PriceLinesAsync(dto.Lines, date, dto.PriceListId, ct);
@@ -334,8 +334,8 @@ namespace Services.NasbNiro.Sales
             if (dto.Id.HasValue)
             {
                 row = await _uow.Set<SlQuotation>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, ct);
-                if (row == null) return SlText.NotFound<SlQuotationDto>("پیشنهاد قیمت پیدا نشد.");
-                if (row.Status != SlQuotationStatus.Draft) return Bad<SlQuotationDto>("فقط پیشنهاد قیمت پیش‌نویس ویرایش می‌شود.");
+                if (row == null) return SlText.NotFound<SlQuotationDto>("پیش‌فاکتور پیدا نشد.");
+                if (row.Status != SlQuotationStatus.Draft) return Bad<SlQuotationDto>("فقط پیش‌فاکتور پیش‌نویس ویرایش می‌شود.");
                 if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SlQuotationDto>(SlText.InvalidData);
                 _uow.RemoveRange(row.Lines.ToList());
                 row.Lines.Clear();
@@ -368,31 +368,31 @@ namespace Services.NasbNiro.Sales
             if (!_user.IsInRole(SalesRoles.Writers)) return Bad<SlQuotationDto>(SlText.NotAllowed);
             if (dto == null) return Bad<SlQuotationDto>(SlText.InvalidData);
             SlQuotation row = await _uow.Set<SlQuotation>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
-            if (row == null) return SlText.NotFound<SlQuotationDto>("پیشنهاد قیمت پیدا نشد.");
+            if (row == null) return SlText.NotFound<SlQuotationDto>("پیش‌فاکتور پیدا نشد.");
             if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SlQuotationDto>(SlText.InvalidData);
             string action = (dto.Action ?? "").Trim().ToLowerInvariant();
             switch (action)
             {
                 case "send":
-                    if (row.Status != SlQuotationStatus.Draft) return Bad<SlQuotationDto>("فقط پیشنهاد قیمت پیش‌نویس ارسال می‌شود.");
-                    if (row.ValidUntil < DateTime.Today) return Bad<SlQuotationDto>("اعتبار این پیشنهاد قیمت گذشته است.");
+                    if (row.Status != SlQuotationStatus.Draft) return Bad<SlQuotationDto>("فقط پیش‌فاکتور پیش‌نویس ارسال می‌شود.");
+                    if (row.ValidUntil < DateTime.Today) return Bad<SlQuotationDto>("اعتبار این پیش‌فاکتور گذشته است.");
                     row.Status = SlQuotationStatus.Sent;
                     break;
                 case "accept":
-                    if (row.Status != SlQuotationStatus.Sent) return Bad<SlQuotationDto>("فقط پیشنهاد قیمت ارسال‌شده پذیرفته می‌شود.");
-                    if (row.ValidUntil < DateTime.Today) return Bad<SlQuotationDto>("اعتبار این پیشنهاد قیمت گذشته است.");
+                    if (row.Status != SlQuotationStatus.Sent) return Bad<SlQuotationDto>("فقط پیش‌فاکتور ارسال‌شده پذیرفته می‌شود.");
+                    if (row.ValidUntil < DateTime.Today) return Bad<SlQuotationDto>("اعتبار این پیش‌فاکتور گذشته است.");
                     row.Status = SlQuotationStatus.Accepted;
                     break;
                 case "reject":
-                    if (row.Status != SlQuotationStatus.Sent) return Bad<SlQuotationDto>("فقط پیشنهاد قیمت ارسال‌شده رد می‌شود.");
+                    if (row.Status != SlQuotationStatus.Sent) return Bad<SlQuotationDto>("فقط پیش‌فاکتور ارسال‌شده رد می‌شود.");
                     row.Status = SlQuotationStatus.Rejected;
                     break;
                 case "expire":
-                    if (row.Status != SlQuotationStatus.Sent || row.ValidUntil >= DateTime.Today) return Bad<SlQuotationDto>("فقط پیشنهاد قیمت ارسال‌شده‌ای که اعتبارش تمام شده منقضی می‌شود.");
+                    if (row.Status != SlQuotationStatus.Sent || row.ValidUntil >= DateTime.Today) return Bad<SlQuotationDto>("فقط پیش‌فاکتور ارسال‌شده‌ای که اعتبارش تمام شده منقضی می‌شود.");
                     row.Status = SlQuotationStatus.Expired;
                     break;
                 case "cancel":
-                    if (row.Status != SlQuotationStatus.Draft && row.Status != SlQuotationStatus.Sent) return Bad<SlQuotationDto>("این پیشنهاد قیمت لغو نمی‌شود.");
+                    if (row.Status != SlQuotationStatus.Draft && row.Status != SlQuotationStatus.Sent) return Bad<SlQuotationDto>("این پیش‌فاکتور لغو نمی‌شود.");
                     row.Status = SlQuotationStatus.Cancelled;
                     break;
                 default:
@@ -416,10 +416,10 @@ namespace Services.NasbNiro.Sales
             if (!_user.IsInRole(SalesRoles.Writers)) return Bad<SlOrderDto>(SlText.NotAllowed);
             if (dto == null) return Bad<SlOrderDto>(SlText.InvalidData);
             SlQuotation q = await _uow.Set<SlQuotation>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.QuotationId && !x.Deleted, ct);
-            if (q == null) return SlText.NotFound<SlOrderDto>("پیشنهاد قیمت پیدا نشد.");
-            if (q.Status != SlQuotationStatus.Accepted) return Bad<SlOrderDto>("فقط از پیشنهاد قیمت پذیرفته‌شده سفارش فروش ساخته می‌شود.");
-            if (q.SalesOrderId.HasValue) return Bad<SlOrderDto>("برای این پیشنهاد قیمت قبلاً سفارش فروش ساخته شده است.");
-            if (q.ValidUntil < DateTime.Today) return Bad<SlOrderDto>("اعتبار این پیشنهاد قیمت گذشته است.");
+            if (q == null) return SlText.NotFound<SlOrderDto>("پیش‌فاکتور پیدا نشد.");
+            if (q.Status != SlQuotationStatus.Accepted) return Bad<SlOrderDto>("فقط از پیش‌فاکتور پذیرفته‌شده سفارش فروش ساخته می‌شود.");
+            if (q.SalesOrderId.HasValue) return Bad<SlOrderDto>("برای این پیش‌فاکتور قبلاً سفارش فروش ساخته شده است.");
+            if (q.ValidUntil < DateTime.Today) return Bad<SlOrderDto>("اعتبار این پیش‌فاکتور گذشته است.");
             string customerProblem = await CheckCustomerAsync(q.CustomerId, q.ContactId, ct);
             if (customerProblem != null) return Bad<SlOrderDto>(customerProblem);
             DateTimeOffset now = DateTimeOffset.Now;
@@ -480,7 +480,7 @@ namespace Services.NasbNiro.Sales
 
         public async Task<ResponseDto<PagedList<SlOrderDto>>> GetOrdersAsync(SlOrderQuery query, CancellationToken ct)
         {
-            if (!_user.IsInRole(SalesRoles.Readers)) return Bad<PagedList<SlOrderDto>>(SlText.NotAllowed);
+            if (!_user.IsInRole(SalesRoles.OrderReaders)) return Bad<PagedList<SlOrderDto>>(SlText.NotAllowed);
             query ??= new SlOrderQuery();
             IQueryable<SlSalesOrder> q = _uow.Set<SlSalesOrder>().AsNoTracking().Where(x => !x.Deleted);
             if (query.Status.HasValue) q = q.Where(x => x.Status == query.Status.Value);
@@ -498,7 +498,7 @@ namespace Services.NasbNiro.Sales
 
         public async Task<ResponseDto<SlOrderDto>> GetOrderAsync(int id, CancellationToken ct)
         {
-            if (!_user.IsInRole(SalesRoles.Readers)) return Bad<SlOrderDto>(SlText.NotAllowed);
+            if (!_user.IsInRole(SalesRoles.OrderReaders)) return Bad<SlOrderDto>(SlText.NotAllowed);
             SlSalesOrder row = await _uow.Set<SlSalesOrder>().AsNoTracking().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
             if (row == null) return SlText.NotFound<SlOrderDto>("سفارش فروش پیدا نشد.");
             return ResponseDtoHelper.Ok((await OrderDtosAsync(new List<SlSalesOrder> { row }, ct))[0]);
@@ -521,7 +521,7 @@ namespace Services.NasbNiro.Sales
                 row = await _uow.Set<SlSalesOrder>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, ct);
                 if (row == null) return SlText.NotFound<SlOrderDto>("سفارش فروش پیدا نشد.");
                 if (row.Status != SlOrderStatus.Draft) return Bad<SlOrderDto>("فقط سفارش فروش پیش‌نویس ویرایش می‌شود.");
-                if (row.QuotationId.HasValue && row.CustomerId != dto.CustomerId) return Bad<SlOrderDto>("مشتری سفارشی که از پیشنهاد قیمت ساخته شده تغییر نمی‌کند.");
+                if (row.QuotationId.HasValue && row.CustomerId != dto.CustomerId) return Bad<SlOrderDto>("مشتری سفارشی که از پیش‌فاکتور ساخته شده تغییر نمی‌کند.");
                 if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SlOrderDto>(SlText.InvalidData);
                 _uow.RemoveRange(row.Lines.ToList());
                 row.Lines.Clear();

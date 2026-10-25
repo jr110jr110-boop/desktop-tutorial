@@ -4235,6 +4235,8 @@ as "$FM_TOKEN" GET "$FR/invoices?CustomerId=$SLCA"; check "sales: the customer h
 sldeliver "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":2,\"salesOrderLineId\":$SLO1L1}" "D3 (the last 2 impellers again)"
 SLD3=$SLDOC
 call GET "inventory/documents?SalesOrderId=$SLO1&PageSize=0"; check "sales: the warehouse list filtered by the sales order shows exactly its 3 deliveries (D2 cancelled, still listed)" ".success and .data.totalItems == 3 and ([.data.data[].id]|sort) == ([$SLD1,$SLD2,$SLD3]|sort)"
+as "$WH_TOKEN" GET $SL/orders/$SLO1; check "sales: the storekeeper reads the sales order to build its delivery" ".success and .data.id == $SLO1"
+as "$WH_TOKEN" GET "$SL/customers/$SLCA"; nomsg "sales: the storekeeper still cannot read the customer file" "مجوز"
 as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: after D3 the order is invoiced again" '.success and .data.status == 5 and (.data.deliveries|length) == 3 and ([.data.deliveries[]|select(.reversed == false)]|length) == 2'
 as "$FM_TOKEN" GET "$FR/invoices?CustomerId=$SLCA"; check "sales: the customer has 3 invoices: 21,120,000 (draft), 5,940,000 (cancelled) and 5,940,000 (draft)" '.success and (.data.data|length) == 3 and ([.data.data[]|select(.status == 0 and .grossAmount == 5940000)]|length) == 1 and ([.data.data[]|select(.status == 3 and .grossAmount == 5940000)]|length) == 1'
 as "$SL_TOKEN" POST $SL/orders/draft-invoice "{\"orderId\":$SLO1}"; nomsg "sales: every delivery of O1 already has its invoice, so there is nothing to draft afterwards" "تحویلی بدون پیش‌نویس فاکتور"
@@ -4489,6 +4491,8 @@ SVIS1=$(val .data.id)
 svdoc "{\"type\":11,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"serviceOrderId\":$SVO1,\"driverName\":\"راننده\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"تحویل‌گیرنده\",\"lines\":[{\"itemId\":$SVPB,\"quantity\":1}]}"; check "service: delivery of 1 O-ring drafted against O1 (parts left on site)" ".success and .data.status == 0 and .data.serviceOrderId == $SVO1"
 SVDL1=$(val .data.id)
 call GET "inventory/documents?ServiceOrderId=$SVO1&PageSize=0"; check "service: the warehouse list filtered by the service order shows exactly the issue and the delivery of O1" ".success and .data.totalItems == 2 and ([.data.data[].id]|sort) == ([$SVIS1,$SVDL1]|sort)"
+as "$WH_TOKEN" GET "$SVC/orders/$SVO1"; check "service: the storekeeper reads the service order to issue and deliver its parts" ".success and .data.id == $SVO1"
+as "$WH_TOKEN" GET "$SVC/requests?PageSize=0"; nomsg "service: the storekeeper still cannot read service requests" "مجوز"
 sva POST "$SVC/orders/time-entries" "{\"orderId\":$SVO1,\"employeeId\":$SVE1,\"hours\":1,\"kind\":2}"; check "service: (setup) a first time row" '.success'
 SVTE0=$(val '.data.timeEntries[0].id')
 sva POST "$SVC/orders/time-entries/remove" "{\"orderId\":$SVO1,\"rowId\":$SVTE0}"; check "service: a wrong time row is removed again" '.success and (.data.timeEntries|length) == 0'

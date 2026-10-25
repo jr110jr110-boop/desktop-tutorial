@@ -128,7 +128,7 @@ namespace Services.NasbNiro.AfterSales
 
         public async Task<ResponseDto<PagedList<SvOrderDto>>> GetOrdersAsync(SvOrderQuery query, CancellationToken ct)
         {
-            if (!_user.IsInRole(SvRoles.Readers)) return Bad<PagedList<SvOrderDto>>(SlText.NotAllowed);
+            if (!_user.IsInRole(SvRoles.OrderReaders)) return Bad<PagedList<SvOrderDto>>(SlText.NotAllowed);
             query ??= new SvOrderQuery();
             IQueryable<SvServiceOrder> q = _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => !o.Deleted);
             if (query.Status.HasValue) q = q.Where(o => o.Status == query.Status.Value);
@@ -148,7 +148,7 @@ namespace Services.NasbNiro.AfterSales
 
         public async Task<ResponseDto<SvOrderDto>> GetOrderAsync(int id, CancellationToken ct)
         {
-            if (!_user.IsInRole(SvRoles.Readers)) return Bad<SvOrderDto>(SlText.NotAllowed);
+            if (!_user.IsInRole(SvRoles.OrderReaders)) return Bad<SvOrderDto>(SlText.NotAllowed);
             SvServiceOrder row = await Full().AsNoTracking().FirstOrDefaultAsync(o => o.Id == id && !o.Deleted, ct);
             if (row == null) return SlText.NotFound<SvOrderDto>("دستور خدمات پیدا نشد.");
             return ResponseDtoHelper.Ok((await DtosAsync(new List<SvServiceOrder> { row }, ct))[0]);

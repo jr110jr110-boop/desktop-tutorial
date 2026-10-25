@@ -22,6 +22,8 @@ namespace Services.NasbNiro.AfterSales
 
         /// <summary>SALES reads customers and the units of its customers; the finance and quality roles read what concerns them.</summary>
         public const string Readers = "SERVICE,CEO,PMO,SALES,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,QA,QC,AUDITOR";
+        /// <summary>Who reads service orders: the readers plus the warehouse, which issues and delivers the parts of an order.</summary>
+        public const string OrderReaders = Readers + ",WAREHOUSE,WHSUPERVISOR";
 
         public const string SettingSetters = "CEO";
         public const string GoodwillDeciders = "CEO";
