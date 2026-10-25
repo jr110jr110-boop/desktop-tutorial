@@ -3,6 +3,7 @@
 // by brief/latest/audio and fetched as a blob with the Bearer token (never as a link).
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { getAiBrief, getAiBriefAudio } from "@/api/AiAPIs";
+import { NOT_VERIFIED_TEXT } from "@/composables/ai";
 import { fail } from "@/composables/inventory";
 
 const brief = ref<any>(null);
@@ -62,6 +63,7 @@ onBeforeUnmount(dropAudio);
         <button :disabled="loading" class="btn btn-sm btn-outline-secondary" @click="load">بازخوانی</button>
       </div>
     </div>
+    <div v-if="brief && !brief.verified" class="brief-unverified small mb-2">{{ NOT_VERIFIED_TEXT }}</div>
     <p v-if="loading && !brief" class="inv-muted mb-0"><span class="spinner-border spinner-border-sm"></span> در حال بارگذاری...</p>
     <p v-else-if="!brief" class="inv-muted mb-0">{{ message }}</p>
     <div v-else class="brief-text">{{ brief.text }}</div>
@@ -70,6 +72,12 @@ onBeforeUnmount(dropAudio);
 </template>
 
 <style scoped>
+.brief-unverified {
+  border-right: 3px solid #dc3545;
+  background: #fdf0f1;
+  color: #842029;
+  padding: 0.25rem 0.5rem;
+}
 .brief {
   direction: rtl;
   text-align: right;

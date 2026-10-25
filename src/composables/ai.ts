@@ -1,4 +1,6 @@
 import type { Router } from "vue-router";
+import { fail } from "@/composables/inventory";
+import { hasRole } from "@/composables/roles";
 
 // Names and helpers of the Local AI module (release A1). Enum values are numbers in the JSON and match Entities/Model/NasbNiro/Ai/AiEntities.cs exactly.
 // Everything a person reads is Persian (Jalali); the API JSON stays ISO. The AI never approves anything: nothing in this module offers an approve action on behalf of the AI.
@@ -32,6 +34,20 @@ export const noteTypes: Record<string, string> = {
   PcWeeklyReport: "گزارش هفتگی پروژه",
   CeoBrief: "گزارش روزانه مدیرعامل",
 };
+/** Who reads the notes of a type: AiNoteTypes.Roles in Services/NasbNiro/Ai/AiNotes.cs (null = decided per record by the office service, so everybody may be offered the type). The server checks again. */
+export const noteTypeRoles: Record<string, string[] | null> = {
+  QualityNcr: ["PMO", "QC"],
+  FinanceJournal: ["FINANCEMANAGER", "FINANCIAL"],
+  BankLine: ["FINANCEMANAGER", "FINANCIAL"],
+  SupplierIbanChange: ["FINANCEMANAGER", "FINANCIAL"],
+  PurchaseRfq: ["COMMERCIAL", "PMO", "FINANCIAL", "FINANCEMANAGER", "TREASURY", "ENGINEERING", "QC", "CONSTRUCTION", "CEO"],
+  OfficeLetter: null,
+  OfficeMeeting: null,
+  PcWeeklyReport: ["PMO", "PLANNING"],
+  CeoBrief: ["CEO"],
+};
+/** The target types the signed-in person may read (for the type filter). */
+export const readableNoteTypes = (): string[] => Object.keys(noteTypes).filter((t) => hasRole(noteTypeRoles[t]));
 /** The target types of the financial anomaly seat. */
 export const financeNoteTypes = ["FinanceJournal", "BankLine", "SupplierIbanChange"];
 /** FIN-ANOMALY rule codes. */
@@ -65,27 +81,13 @@ export const auditKinds: Record<string, string> = {
 };
 
 /**
- * The links the API writes for a record do not always equal the paths of this front end (query form «?id=» instead of «/:id», other prefixes).
- * Returns a path that exists in the router, or null when the page is missing (the chip is then shown without a link).
+ * The links the API writes for a record are real routes of this front end (/inventory/ncr/{id}, /fn/vouchers/{id}, /fn/treasury/statements, /procurement/inquiries/{id}, /office/letters/{id},
+ * /office/meetings/{id}, ...). Returns the path when the router knows it, or null when the page is missing (the chip is then shown without a link).
  */
-const idPaths: Record<string, string> = {
-  "/inventory/ncr": "/inventory/ncr",
-  "/fn/gl/vouchers": "/fn/vouchers",
-  "/procurement/inquiries": "/procurement/inquiries",
-  "/office/letters": "/office/letters",
-  "/office/meetings": "/office/meetings",
-};
-const pathFix: Record<string, string> = {
-  "/fn/treasury/bank-statements": "/fn/treasury/statements",
-  "/inventory/ncrs": "/inventory/ncr",
-};
 export function frontLink(router: Router, link: string | null | undefined): string | null {
   if (!link) return null;
-  let target = String(link).trim();
+  const target = String(link).trim();
   if (!target.startsWith("/")) return null;
-  const m = /^([^?#]+)\?id=(\d+)$/.exec(target);
-  if (m && idPaths[m[1]]) target = idPaths[m[1]] + "/" + m[2];
-  else if (pathFix[target]) target = pathFix[target];
   try {
     const resolved = router.resolve(target);
     if (!resolved.matched.length || resolved.matched.some((r) => r.path.includes("pathMatch"))) return null;
@@ -101,21 +103,33 @@ export const DEGRADED_TEXT = "تحلیل هوشمند موقتاً در دستر
 
 /**
  * Reads a background job again and again (a seat run, an evaluation) until it has finished. tick() returns true when the job is finished (or must not be read any more).
- * The next read starts only after the previous one has answered and 2 seconds have passed (no overlapping requests). Returns the function that stops it (call it when the page is left).
+ * The next read starts only after the previous one has answered and 2 seconds have passed (no overlapping requests). A read that throws is tried again up to 3 times in a row;
+ * after that (or after maxMs) onGiveUp() is called so the page can clear its «running» state. A thrown error is shown with fail(). Returns the function that stops it.
  */
-export function startPolling(tick: () => Promise<boolean>, ms = 2000, maxMs = 15 * 60 * 1000): () => void {
+export function startPolling(tick: () => Promise<boolean>, ms = 2000, maxMs = 15 * 60 * 1000, onGiveUp?: () => void): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let errors = 0;
   const began = Date.now();
+  const giveUp = () => {
+    stopped = true;
+    onGiveUp?.();
+  };
   const step = async () => {
     if (stopped) return;
     let finished = false;
     try {
       finished = await tick();
-    } catch {
-      finished = true;
+      errors = 0;
+    } catch (e) {
+      errors++;
+      if (errors >= 3) {
+        if (!stopped) fail(e);
+        return giveUp();
+      }
     }
-    if (stopped || finished || Date.now() - began > maxMs) return;
+    if (stopped || finished) return;
+    if (Date.now() - began > maxMs) return giveUp();
     timer = setTimeout(step, ms);
   };
   timer = setTimeout(step, ms);
@@ -124,6 +138,8 @@ export function startPolling(tick: () => Promise<boolean>, ms = 2000, maxMs = 15
     if (timer) clearTimeout(timer);
   };
 }
+
+export const POLL_LOST_TEXT = "وضعیت اجرا خوانده نشد؛ صفحه را بازخوانی کنید";
 
 /**
  * A purchase request made by an AI seat (WH-REORDER drafts). The request DTO has no flag for it: the seat user is created with the last name «(صندلی هوش مصنوعی)» and the user name starts with

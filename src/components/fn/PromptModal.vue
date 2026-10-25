@@ -12,6 +12,8 @@ export interface PromptField {
   required?: boolean;
   options?: { value: any; text: string }[];
   value?: any;
+  /** longest text the field takes (text and textarea) */
+  maxlength?: number;
 }
 
 const props = defineProps<{ title: string; fields: PromptField[]; confirmText?: string; hint?: string }>();
@@ -34,13 +36,13 @@ function confirm() {
       <p v-if="hint" class="inv-muted">{{ hint }}</p>
       <div v-for="f in fields" :key="f.key" class="mb-2">
         <label class="form-label small mb-0">{{ f.label }}<span v-if="f.required"> *</span></label>
-        <textarea v-if="f.type === 'textarea'" v-model="values[f.key]" class="form-control form-control-sm" rows="2"></textarea>
+        <textarea v-if="f.type === 'textarea'" v-model="values[f.key]" :maxlength="f.maxlength" class="form-control form-control-sm" rows="2"></textarea>
         <FnDate v-else-if="f.type === 'date'" v-model="values[f.key]" />
         <select v-else-if="f.type === 'select'" v-model="values[f.key]" class="form-select form-select-sm">
           <option :value="null">-</option>
           <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.text }}</option>
         </select>
-        <input v-else v-model="values[f.key]" :type="f.type === 'number' ? 'number' : 'text'" class="form-control form-control-sm" />
+        <input v-else v-model="values[f.key]" :maxlength="f.maxlength" :type="f.type === 'number' ? 'number' : 'text'" class="form-control form-control-sm" />
       </div>
       <div class="d-flex gap-2 justify-content-end mt-3">
         <button class="btn btn-sm btn-outline-secondary" @click="emit('cancel')">انصراف</button>

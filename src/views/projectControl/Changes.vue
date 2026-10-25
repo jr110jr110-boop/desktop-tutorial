@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
@@ -82,7 +83,14 @@ async function saveAuth() {
   loadAuth();
 }
 const statusBadge = (s: number) => (s === 6 ? "bad" : s === 4 || s === 5 ? "ok" : s === 0 ? "info" : "warn");
-onMounted(() => { load(); loadAuth(); });
+// the link /project-control/changes?id=N (a citation of the assistant, an inbox item) opens that change request, whatever contract is selected
+const route = useRoute();
+function openFromLink() {
+  const id = Number(route.query.id);
+  if (Number.isInteger(id) && id > 0) open(id);
+}
+onMounted(() => { load(); loadAuth(); openFromLink(); });
+watch(() => route.query.id, openFromLink);
 watch(pcContractId, load);
 </script>
 

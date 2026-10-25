@@ -42,8 +42,10 @@ function openHistory() {
   history.load();
 }
 async function openConversation(id: number) {
+  if (busy.value || recording.value) return;
   const [data, error] = await getAiConversation(id);
   if (error) return fail(error);
+  if (busy.value || recording.value || unmounted) return; // a question was sent meanwhile: the old conversation must not replace it
   dropAudio();
   const out: Turn[] = [];
   let pending: Turn | null = null;
@@ -159,7 +161,19 @@ function stopPlaying() {
 const recording = ref(false);
 const starting = ref(false);
 const seconds = ref(0);
-const micSupported = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
+/** the recording formats the API accepts (webm, ogg, wav): the first one this browser can record */
+const MIMES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+function pickMime(): string | null {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return null;
+  return MIMES.find((m) => MediaRecorder.isTypeSupported(m)) || null;
+}
+const recordMime = pickMime();
+const secure = typeof window === "undefined" || window.isSecureContext !== false;
+const micSupported = secure && typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia && !!recordMime;
+const micHint = !secure
+  ? "گفت‌وگوی صوتی نیاز به اتصال امن (HTTPS) دارد؛ گفت‌وگوی متنی در دسترس است"
+  : "این مرورگر ضبط صدا با قالب پشتیبانی‌شده (webm یا ogg) را ندارد؛ گفت‌وگوی متنی در دسترس است";
+let unmounted = false;
 let recorder: MediaRecorder | null = null;
 let stream: MediaStream | null = null;
 let chunks: BlobPart[] = [];
@@ -186,12 +200,17 @@ async function startRecording() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch {
     starting.value = false;
+    if (unmounted) return;
     return fail("اجازه استفاده از میکروفون داده نشد.");
   }
   starting.value = false;
-  const mime = typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined;
+  if (unmounted) {
+    // the panel was left while the permission question was open: nothing may record
+    releaseMic();
+    return;
+  }
   try {
-    recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    recorder = new MediaRecorder(stream, { mimeType: recordMime! });
   } catch {
     releaseMic();
     return fail("ضبط صدا در این مرورگر آغاز نشد.");
@@ -218,13 +237,15 @@ function stopRecording() {
 }
 
 async function onRecorded() {
-  const type = recorder?.mimeType || "audio/webm";
+  if (unmounted) return;
+  const type = recorder?.mimeType || recordMime || "audio/webm";
   const blob = new Blob(chunks, { type });
   chunks = [];
   recorder = null;
   if (blob.size < MIN_BYTES) return fail("صدایی ضبط نشد؛ دکمه را بیشتر نگه دارید یا دوباره بزنید.");
   busy.value = true;
-  const [r, error] = await aiVoice(blob, "question.webm", conversationId.value);
+  const [r, error] = await aiVoice(blob, type.includes("ogg") ? "question.ogg" : "question.webm", conversationId.value);
+  if (unmounted) return;
   busy.value = false;
   if (error) return fail(error);
   const url = audioUrlOf(r.audioBase64);
@@ -273,6 +294,7 @@ const micLabel = computed(() => (recording.value ? "در حال ضبط... برا
 const clock = computed(() => String(Math.floor(seconds.value / 60)).padStart(2, "0") + ":" + String(seconds.value % 60).padStart(2, "0"));
 
 onBeforeUnmount(() => {
+  unmounted = true;
   if (recorder && recorder.state !== "inactive") {
     recorder.onstop = null;
     recorder.stop();
@@ -280,6 +302,13 @@ onBeforeUnmount(() => {
   releaseMic();
   dropAudio();
 });
+
+// ---------------------------------------------------------------- what the answer says about itself
+/** the model did not answer at all (no model, no tool): the dashboard is the only thing left. With a model or tools, degraded only means the speech service failed. */
+const trueDegraded = (t: Turn) => t.degraded && !t.toolCalls.length && !t.model;
+/** the server already wrote the same sentence at the start of the answer: the box keeps its colour but the sentence is not repeated */
+const startsUnverified = (t: Turn) => t.answer.trim().startsWith("پاسخ مدل قابل راستی‌آزمایی نبود");
+const isDegradedAnswer = (t: Turn) => t.answer.trim() === DEGRADED_TEXT;
 
 // ---------------------------------------------------------------- citations
 function linkOf(c: { link: string }) {
@@ -297,12 +326,12 @@ function openCitation(c: { link: string }) {
       <h2 class="inv-title">دستیار هوشمند</h2>
       <div class="d-flex gap-2 flex-wrap">
         <button class="btn btn-sm btn-outline-secondary" :disabled="busy || recording" @click="freshConversation">گفت‌وگوی تازه</button>
-        <button class="btn btn-sm btn-outline-secondary" @click="openHistory">تاریخچه</button>
+        <button :disabled="busy || recording" class="btn btn-sm btn-outline-secondary" @click="openHistory">تاریخچه</button>
       </div>
     </div>
 
     <div ref="listEl" class="ai-list">
-      <p v-if="!turns.length && !busy" class="inv-muted mb-0">پرسش خود را بنویسید یا دکمه میکروفون را نگه دارید. دستیار با دسترسی‌های خود شما پاسخ می‌دهد و هیچ چیزی را تایید نمی‌کند.</p>
+      <p v-if="!turns.length && !busy" class="inv-muted mb-0">{{ micSupported ? "پرسش خود را بنویسید یا دکمه میکروفون را نگه دارید." : "پرسش خود را بنویسید." }} دستیار با دسترسی‌های خود شما پاسخ می‌دهد و هیچ چیزی را تایید نمی‌کند.</p>
 
       <div v-for="t in turns" :key="t.key" class="ai-turn">
         <div v-if="t.question" class="ai-q">
@@ -312,15 +341,16 @@ function openCitation(c: { link: string }) {
         <div class="ai-a">
           <div class="ai-meta">
             <span class="ai-who">دستیار</span>
-            <span v-if="t.degraded" class="inv-badge warn">حالت کاهش‌یافته</span>
-            <span v-else-if="t.verified === true" class="inv-badge ok" title="اعداد پاسخ با داده‌های سامانه سنجیده شد">راستی‌آزمایی‌شده</span>
+            <span v-if="trueDegraded(t)" class="inv-badge warn">حالت کاهش‌یافته</span>
+            <span v-if="t.verified === true" class="inv-badge ok" title="اعداد پاسخ با داده‌های سامانه سنجیده شد">راستی‌آزمایی‌شده</span>
             <span v-else-if="t.verified === false" class="inv-badge bad">راستی‌آزمایی‌نشده</span>
             <span v-if="t.model" class="ai-model inv-ltr">{{ t.model }}</span>
             <button v-if="t.audioUrl" class="btn btn-sm btn-outline-primary py-0 ms-auto" @click="playing === t.key ? stopPlaying() : play(t)">{{ playing === t.key ? "توقف صدا" : "پخش صدا" }}</button>
           </div>
-          <div v-if="t.degraded" class="alert alert-warning py-1 px-2 small mb-1">{{ DEGRADED_TEXT }}</div>
-          <div v-else-if="t.verified === false && t.via !== 'history'" class="ai-unverified small">{{ NOT_VERIFIED_TEXT }}</div>
-          <div class="ai-text">{{ t.answer }}</div>
+          <div v-if="trueDegraded(t) && !isDegradedAnswer(t)" class="alert alert-warning py-1 px-2 small mb-1">{{ DEGRADED_TEXT }}</div>
+          <div v-else-if="t.degraded && !trueDegraded(t)" class="inv-muted small mb-1">پاسخ صوتی در دسترس نبود</div>
+          <div v-if="t.verified === false && t.via !== 'history' && !startsUnverified(t)" class="ai-unverified small">{{ NOT_VERIFIED_TEXT }}</div>
+          <div :class="{ 'ai-unverified': t.verified === false && startsUnverified(t), 'alert alert-warning py-1 px-2': trueDegraded(t) && isDegradedAnswer(t) }" class="ai-text">{{ t.answer }}</div>
 
           <div v-if="t.citations.length" class="ai-chips">
             <button
@@ -362,8 +392,9 @@ function openCitation(c: { link: string }) {
         <button :disabled="busy || recording || !text.trim()" class="btn btn-sm btn-primary" @click="send">
           <span v-if="busy" class="spinner-border spinner-border-sm me-1"></span>ارسال
         </button>
+        <button v-if="!micSupported" :title="micHint" class="btn btn-sm btn-outline-secondary" disabled type="button">میکروفون</button>
         <button
-          v-if="micSupported"
+          v-else
           :class="recording ? 'btn-danger' : 'btn-outline-primary'"
           :disabled="busy"
           :title="micLabel"
@@ -379,6 +410,7 @@ function openCitation(c: { link: string }) {
           {{ recording ? "ضبط " + clock : starting ? "..." : "میکروفون" }}
         </button>
       </div>
+      <div v-if="!micSupported" class="inv-muted small">{{ micHint }}</div>
       <div v-if="recording" class="inv-muted small">در حال ضبط... رها کنید تا ارسال شود (یا اگر کوتاه زدید، دوباره بزنید).</div>
     </div>
 

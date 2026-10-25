@@ -6,7 +6,7 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import AiAdminTabs from "@/components/ai/AiAdminTabs.vue";
 import QPager from "@/components/quality/QPager.vue";
 import { getAiEvalCases, getAiEvalRun, getAiEvalRuns, runAiEval } from "@/api/AiAPIs";
-import { startPolling } from "@/composables/ai";
+import { POLL_LOST_TEXT, startPolling } from "@/composables/ai";
 import { usePagedList } from "@/composables/fn";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { AiRoles, hasRole } from "@/composables/roles";
@@ -18,6 +18,7 @@ const current = ref<any>(null);
 const detail = ref<any>(null);
 const detailBusy = ref(false);
 const starting = ref(false);
+const lost = ref(false);
 const cases = ref<any[] | null>(null);
 const openCase = ref<string | null>(null);
 let stop: (() => void) | null = null;
@@ -34,17 +35,23 @@ async function start() {
 }
 function watch(id: number) {
   stop?.();
-  stop = startPolling(async () => {
-    const [run, error] = await getAiEvalRun(id);
-    if (error) {
-      fail(error);
+  lost.value = false;
+  stop = startPolling(
+    async () => {
+      const [run, error] = await getAiEvalRun(id);
+      if (error) throw error; // startPolling tries again, and gives up after 3 failures in a row
+      current.value = run;
+      if (run.running) return false;
+      list.load();
       return true;
+    },
+    2000,
+    60 * 60 * 1000,
+    () => {
+      lost.value = true;
+      if (current.value) current.value = { ...current.value, running: false };
     }
-    current.value = run;
-    if (run.running) return false;
-    list.load();
-    return true;
-  }, 2000, 60 * 60 * 1000);
+  );
 }
 async function show(id: number) {
   detailBusy.value = true;
@@ -67,7 +74,15 @@ const failClass = (n: number) => (n === 0 ? "ok" : "bad");
 const p95Class = (ms: number) => (ms <= 8000 ? "ok" : "warn");
 const secs = (ms: number) => (ms / 1000).toFixed(1);
 
-onMounted(list.load);
+onMounted(async () => {
+  await list.load();
+  // an evaluation that is still running (started before this page was opened) is followed too
+  const r = list.rows.value.find((x) => x.running);
+  if (r && !current.value) {
+    current.value = r;
+    watch(r.id);
+  }
+});
 onBeforeUnmount(() => stop?.());
 </script>
 
@@ -84,8 +99,9 @@ onBeforeUnmount(() => stop?.());
       </div>
 
       <div v-if="current" class="border rounded p-2 mb-3">
+        <div v-if="lost" class="text-danger mb-1">{{ POLL_LOST_TEXT }}</div>
         <div v-if="current.running" class="mb-0"><span class="spinner-border spinner-border-sm"></span> ارزیابی در حال انجام است؛ هر ۲ ثانیه بازخوانی می‌شود... (شروع: {{ current.startedAtText }})</div>
-        <div v-else class="d-flex flex-wrap gap-3 align-items-center">
+        <div v-else-if="!lost" class="d-flex flex-wrap gap-3 align-items-center">
           <b>ارزیابی {{ current.id }} پایان یافت</b>
           <span>قبول: {{ current.passed }} از {{ current.total }}</span>
           <span :class="passClass(current.passPercent)" class="inv-badge">{{ current.passPercent }}٪</span>

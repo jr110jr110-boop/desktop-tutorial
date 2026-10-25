@@ -8,7 +8,7 @@ import { useRouter } from "vue-router";
 import PromptModal from "@/components/fn/PromptModal.vue";
 import QPager from "@/components/quality/QPager.vue";
 import { decideAiNote, getAiNotes } from "@/api/AiAPIs";
-import { badgeOfNote, frontLink, noteStatuses, noteTypes, ruleTitles, seatTitleOf, seatTitles } from "@/composables/ai";
+import { badgeOfNote, frontLink, noteStatuses, noteTypes, readableNoteTypes, ruleTitles, seatTitleOf, seatTitles } from "@/composables/ai";
 import { usePagedList } from "@/composables/fn";
 import { fail, ok } from "@/composables/inventory";
 
@@ -25,11 +25,11 @@ const router = useRouter();
 const filters = ref<any>({ TargetType: null, Status: 1, Seat: null, Rule: null });
 /** several fixed types and no type picked: the API takes them comma separated in one request (paged on the server) */
 function fetchNotes(params: any) {
-  if (props.types && props.types.length > 1 && !filters.value.TargetType) return getAiNotes({ ...params, TargetType: props.types.join(",") });
+  if (props.types && props.types.length >= 1 && !filters.value.TargetType) return getAiNotes({ ...params, TargetType: props.types.join(",") });
   return getAiNotes(params);
 }
 const list = usePagedList(fetchNotes, filters, 25);
-const typeChoices = computed(() => (props.types || Object.keys(noteTypes)).map((k) => ({ key: k, title: noteTypes[k] || k })));
+const typeChoices = computed(() => (props.types || readableNoteTypes()).map((k) => ({ key: k, title: noteTypes[k] || k })));
 const open = ref<number | null>(null);
 const refused = ref<Record<number, string>>({});
 const dialog = ref<{ note: any; decision: "accept" | "dismiss" } | null>(null);
@@ -133,7 +133,7 @@ onMounted(list.load);
     <PromptModal
       v-if="dialog"
       :confirm-text="dialog.decision === 'accept' ? 'پذیرش' : 'رد'"
-      :fields="[{ key: 'note', label: 'توضیح (اختیاری، تا ۱۰۰۰ نویسه)', type: 'textarea' }]"
+      :fields="[{ key: 'note', label: 'توضیح (اختیاری، تا ۱۰۰۰ نویسه)', type: 'textarea', maxlength: 1000 }]"
       hint="این کار فقط یادداشت دستیار را می‌بندد؛ رکورد مربوط تغییر نمی‌کند."
       :title="dialog.decision === 'accept' ? 'پذیرش یادداشت' : 'رد یادداشت'"
       @cancel="dialog = null"

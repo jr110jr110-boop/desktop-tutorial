@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { addGuaranteeEvent, getGuarantees, parseGuarantees, saveGuarantee } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import JDate from "@/components/pc/JDate.vue";
@@ -10,6 +11,7 @@ import { hasRole, ProjectControlRoles } from "@/composables/roles";
 // Guarantees of the contract: the legacy free-text amount is read once («parse»); then type, issuer, validity, release condition and events (issue, extension, cancellation) are kept here.
 const emit = defineEmits(["print"]);
 const props = defineProps({ contractId: { type: Number, required: true } });
+const route = useRoute();
 const rows = ref<any[]>([]);
 const status = ref<number | null>(null);
 const onlyUnparsed = ref(false);
@@ -22,6 +24,8 @@ async function load() {
   const [d, e] = await getGuarantees({ ContractId: props.contractId, Status: status.value, OnlyUnparsed: onlyUnparsed.value || null });
   if (e) return fail(e);
   rows.value = rowsOf(d);
+  await nextTick();
+  document.getElementById("guarantee-" + route.query.id)?.scrollIntoView({ block: "center" }); // /project-control/guarantees?id=N: the row of that guarantee is marked
 }
 async function parse() {
   busy.value = true;
@@ -70,7 +74,7 @@ watch(() => props.contractId, load);
       <tbody>
         <tr v-if="!rows.length"><td colspan="8" class="text-center inv-muted">ضمانت‌نامه‌ای نیست.</td></tr>
         <template v-for="r in rows" :key="r.id">
-          <tr>
+          <tr :id="'guarantee-' + r.id" :class="{ 'table-warning': String(route.query.id) === String(r.id) }">
             <td>{{ r.title }} <span class="inv-ltr">{{ r.no }}</span><div class="small inv-muted">{{ r.bank }} — {{ guaranteeSources[r.sourceKind] }}</div></td>
             <td>{{ guaranteeTypes[r.guaranteeType] }}</td><td>{{ guaranteeIssuers[r.issuerKind] }}</td>
             <td>{{ r.amountDecimal != null ? rial(r.amountDecimal) : "—" }}<div v-if="r.parseFailed" class="small text-danger">{{ r.parseNote }}</div></td>

@@ -7,7 +7,7 @@ import AiAdminTabs from "@/components/ai/AiAdminTabs.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
 import QPager from "@/components/quality/QPager.vue";
 import { enableAiSeat, getAiSeatRun, getAiSeatRuns, getAiSeats, runAiSeat } from "@/api/AiAPIs";
-import { badgeOfRun, runStatuses, seatTitleOf, seatTitles, startPolling } from "@/composables/ai";
+import { badgeOfRun, POLL_LOST_TEXT, runStatuses, seatTitleOf, seatTitles, startPolling } from "@/composables/ai";
 import { usePagedList } from "@/composables/fn";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { AiRoles, hasRole, roleTitles } from "@/composables/roles";
@@ -20,6 +20,8 @@ const runDialog = ref<any>(null);
 /** the runs started here, by seat code: the last answer of the API for each */
 const active = ref<Record<string, any>>({});
 const stops: Record<string, () => void> = {};
+/** the polling of this seat gave up: the run state is unknown */
+const lost = ref<Record<string, boolean>>({});
 const filters = ref<any>({ Seat: null, Status: null });
 const history = usePagedList(getAiSeatRuns, filters, 25);
 const open = ref<number | null>(null);
@@ -33,13 +35,18 @@ async function load() {
   loading.value = false;
   if (error) return fail(error);
   seats.value = data || [];
+  resume();
 }
 
-async function toggle(s: any) {
+async function toggle(s: any, e: Event) {
+  const box = e.target as HTMLInputElement;
   busy.value = true;
   const [, error] = await enableAiSeat(s.code, !s.enabled);
   busy.value = false;
-  if (error) return fail(error);
+  if (error) {
+    box.checked = s.enabled; // the switch goes back to what the server has
+    return fail(error);
+  }
   ok(s.enabled ? "دستیار غیرفعال شد." : "دستیار فعال شد.");
   load();
 }
@@ -58,21 +65,34 @@ async function start(values: { asOf?: string | null }) {
 
 function watchRun(code: string, id: number) {
   stops[code]?.();
-  stops[code] = startPolling(async () => {
-    const [run, error] = await getAiSeatRun(id);
-    if (error) {
-      fail(error);
+  lost.value = { ...lost.value, [code]: false };
+  stops[code] = startPolling(
+    async () => {
+      const [run, error] = await getAiSeatRun(id);
+      if (error) throw error; // startPolling tries again, and gives up after 3 failures in a row
+      active.value = { ...active.value, [code]: run };
+      if (run.status === 1) return false;
+      load();
+      history.load();
       return true;
-    }
-    active.value = { ...active.value, [code]: run };
-    if (run.status === 1) return false;
-    load();
-    history.load();
-    return true;
-  });
+    },
+    2000,
+    15 * 60 * 1000,
+    () => (lost.value = { ...lost.value, [code]: true })
+  );
 }
 
-const running = (s: any) => active.value[s.code]?.status === 1;
+/** a run that was started before this page was opened (by the scheduler or by another person) is followed too */
+function resume() {
+  for (const s of seats.value) {
+    if (s.lastRun?.status === 1 && active.value[s.code]?.id !== s.lastRun.id) {
+      active.value = { ...active.value, [s.code]: s.lastRun };
+      watchRun(s.code, s.lastRun.id);
+    }
+  }
+}
+
+const running = (s: any) => !lost.value[s.code] && (active.value[s.code]?.status === 1 || s.lastRun?.status === 1);
 onMounted(() => {
   load();
   history.load();
@@ -103,7 +123,7 @@ onBeforeUnmount(() => Object.values(stops).forEach((stop) => stop()));
                 <td>{{ s.scheduleText || s.schedule }}</td>
                 <td>
                   <label v-if="canWrite" class="form-check form-switch mb-0">
-                    <input :checked="s.enabled" :disabled="busy" class="form-check-input" role="switch" type="checkbox" @change="toggle(s)" />
+                    <input :checked="s.enabled" :disabled="busy" class="form-check-input" role="switch" type="checkbox" @change="toggle(s, $event)" />
                   </label>
                   <span v-else :class="s.enabled ? 'ok' : 'warn'" class="inv-badge">{{ s.enabled ? "فعال" : "غیرفعال" }}</span>
                 </td>
@@ -127,7 +147,8 @@ onBeforeUnmount(() => Object.values(stops).forEach((stop) => stop()));
                     <span class="inv-muted">شروع: {{ active[s.code].startedAtText }}</span>
                     <span v-if="active[s.code].finishedAt" class="inv-muted">پایان: {{ jalali(active[s.code].finishedAt, true) }}</span>
                     <span v-if="active[s.code].asOf" class="inv-muted">روز داده: {{ jalali(active[s.code].asOf) }}</span>
-                    <span v-if="active[s.code].status === 1" class="inv-muted"><span class="spinner-border spinner-border-sm"></span> در حال اجرا؛ هر ۲ ثانیه بازخوانی می‌شود...</span>
+                    <span v-if="lost[s.code]" class="text-danger">{{ POLL_LOST_TEXT }}</span>
+                    <span v-else-if="active[s.code].status === 1" class="inv-muted"><span class="spinner-border spinner-border-sm"></span> در حال اجرا؛ هر ۲ ثانیه بازخوانی می‌شود...</span>
                   </div>
                   <div v-if="active[s.code].outputs" class="run-text mt-1"><b>خروجی:</b> {{ active[s.code].outputs }}</div>
                   <div v-if="active[s.code].error" class="run-text mt-1 text-danger"><b>خطا:</b> {{ active[s.code].error }}</div>

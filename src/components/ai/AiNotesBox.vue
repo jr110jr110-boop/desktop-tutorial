@@ -22,12 +22,30 @@ const refused = ref<Record<number, string>>({});
 const dialog = ref<{ note: any; decision: "accept" | "dismiss" } | null>(null);
 const busy = ref(false);
 
-async function load() {
+const PAGE = 50;
+const page = ref(1);
+const total = ref(0);
+let token = 0;
+
+/** more = false reads the first page again; true appends the next one. An older answer that arrives after a newer request was sent is dropped. */
+async function load(more = false) {
+  const mine = ++token;
+  const wanted = more === true ? page.value + 1 : 1;
   loading.value = true;
-  const [data, error] = await getAiNotes({ TargetType: props.targetType, TargetId: props.targetId, Rule: props.ruleCode, PageNumber: 1, PageSize: 50 });
+  const [data, error] = await getAiNotes({ TargetType: props.targetType, TargetId: props.targetId, Rule: props.ruleCode, PageNumber: wanted, PageSize: PAGE });
+  if (mine !== token) return;
   loading.value = false;
   // a record the person may open but whose notes the person may not read simply shows no box
-  notes.value = error ? [] : data?.data || [];
+  if (error) {
+    if (wanted === 1) {
+      notes.value = [];
+      total.value = 0;
+    }
+    return;
+  }
+  page.value = wanted;
+  total.value = data?.totalItems ?? (data?.data || []).length;
+  notes.value = wanted === 1 ? data?.data || [] : [...notes.value, ...(data?.data || [])];
 }
 
 function ask(note: any, decision: "accept" | "dismiss") {
@@ -43,7 +61,9 @@ async function decide(values: { note?: string }) {
   busy.value = false;
   if (error) {
     refused.value = { ...refused.value, [d.note.id]: error.message || "شما مجاز به تصمیم درباره این یادداشت نیستید." };
-    return fail(error);
+    fail(error);
+    load(); // the note may have been decided by somebody else meanwhile: show what the server has now
+    return;
   }
   ok(d.decision === "accept" ? "یادداشت پذیرفته شد." : "یادداشت رد شد.");
   const i = notes.value.findIndex((n) => n.id === d.note.id);
@@ -51,9 +71,9 @@ async function decide(values: { note?: string }) {
   emit("changed");
 }
 
-onMounted(load);
-watch(() => [props.targetType, props.targetId, props.ruleCode], load);
-defineExpose({ reload: load });
+onMounted(() => load());
+watch(() => [props.targetType, props.targetId, props.ruleCode], () => load());
+defineExpose({ reload: () => load() });
 </script>
 
 <template>
@@ -83,10 +103,14 @@ defineExpose({ reload: load });
       </div>
     </div>
 
+    <div v-if="notes.length < total" class="mt-2">
+      <button :disabled="loading" class="btn btn-sm btn-outline-secondary" @click="load(true)">بیشتر ({{ total - notes.length }} یادداشت دیگر)</button>
+    </div>
+
     <PromptModal
       v-if="dialog"
       :confirm-text="dialog.decision === 'accept' ? 'پذیرش' : 'رد'"
-      :fields="[{ key: 'note', label: 'توضیح (اختیاری، تا ۱۰۰۰ نویسه)', type: 'textarea' }]"
+      :fields="[{ key: 'note', label: 'توضیح (اختیاری، تا ۱۰۰۰ نویسه)', type: 'textarea', maxlength: 1000 }]"
       :hint="'این کار فقط یادداشت دستیار را می‌بندد؛ رکورد مربوط تغییر نمی‌کند.'"
       :title="dialog.decision === 'accept' ? 'پذیرش یادداشت' : 'رد یادداشت'"
       @cancel="dialog = null"
@@ -98,9 +122,6 @@ defineExpose({ reload: load });
 .ai-note {
   border-top: 1px solid #e9ecef;
   padding: 0.6rem 0;
-}
-.ai-note:first-of-type {
-  border-top: 0;
 }
 .ai-note-text {
   white-space: pre-wrap;
