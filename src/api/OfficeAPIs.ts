@@ -219,7 +219,8 @@ export const importLetters = (dto: { rows?: any[]; csv?: string | null }) => pos
  * The PDFs of the Rahkaran archive export (multipart: Files, NamePattern?, Csv?). Each PDF is attached to the imported letter whose old number is its file name without the extension
  * (or the group «number» of NamePattern, a regular expression); characters a file name cannot hold (/ \\ :) match _ . An optional manifest CSV is imported first.
  * Returns ArchiveFilesResultDto { import?, attached, alreadyAttached, unmatched, files: [{ fileName, number, letterId, result: attached | already-attached | unmatched | ambiguous | not-pdf | invalid, message }],
- * lettersWithoutFile[] (at most 200 numbers), lettersWithoutFileCount }. At most 300 files of 50 MB. Who: SECRETARIAT only.
+ * lettersWithoutFile[] (at most 200 numbers), lettersWithoutFileCount }. At most 300 files of 50 MB and 600 MB in all per request. Every file is handled on its own: one that fails is reported as invalid
+ * and the others are still attached. Sending the same file name again attaches nothing (already-attached); a file with a DIFFERENT name for the same letter is added as a second attachment. Who: SECRETARIAT only.
  */
 export const importLetterFiles = (files: File[], opts: { namePattern?: string | null; csv?: string | null } = {}) => {
   const form = new FormData();
@@ -229,14 +230,14 @@ export const importLetterFiles = (files: File[], opts: { namePattern?: string | 
   return fcall("post", of + "letters/import/files", form);
 };
 
-/** Tenders and contracts (projects) a letter can be linked to: the existing list endpoints, all rows. Tender { id, code, description, company }, contract { id, code, title }. */
-export const getLinkTenders = async (): Promise<any[]> => {
-  const [data] = await call("get", "Tenders", undefined, { PageSize: 0 });
-  return rowsOf(data);
-};
-export const getLinkContracts = async (): Promise<any[]> => {
-  const [data] = await call("get", "Contracts", undefined, { PageSize: 0 });
-  return rowsOf(data);
+/**
+ * Tenders and projects a draft letter can be linked to (GET letters/link-options; any signed-in user, up to 3000 of each): { tenders: [{ id, code, title, problem }], contracts: [{ id, code, title, problem }] }.
+ * The code is computed by the server exactly as it goes into the number (tender code; project code of project control, falling back to the contract code). `problem` is a Persian text when the code
+ * cannot be used in a number (empty, or characters other than letters, digits and dashes): such an option must not be picked.
+ */
+export const getLinkOptions = async (): Promise<{ tenders: any[]; contracts: any[] }> => {
+  const [data] = await get(of + "letters/link-options");
+  return { tenders: data?.tenders ?? data?.Tenders ?? [], contracts: data?.contracts ?? data?.Contracts ?? [] };
 };
 
 // ---------------------------------------------------------------- meetings and decisions
@@ -300,7 +301,9 @@ export const previewClockFile = (file: File, sheet?: string | null) => {
 };
 /**
  * ClockFileMapping { sheet?, headerRow (1; 0 = no heading), firstDataRow (0 = the row after the heading), codeColumn, dateColumn + timeColumn or dateTimeColumn, directionColumn?, inValues?, outValues?,
- * deviceColumn?, siteColumn?, defaultDeviceCode? }; a column is a heading text or a letter. Persian or Gregorian dates both work. Send the file with a mapping or a saved profileId; saveProfileAs saves
+ * deviceColumn?, siteColumn?, defaultDeviceCode?, dateOrder (YMD | DMY | MDY: how a date with the year LAST is read; year-first dates never need it) }; a column is a heading text or a letter. Persian or Gregorian dates both work.
+ * A date that can be read two ways (both parts up to 12) with no dateOrder makes the server refuse the whole import. The preview columns carry sampleDates (the Shamsi date of each sample, «مبهم» when ambiguous) and suggested.dateOrder.
+ * The file is at most 20 MB (the server answers with a Persian message above it). Send the file with a mapping or a saved profileId; saveProfileAs saves
  * the mapping under that name. Returns { imported, duplicates, unknown, unknownCodes[], rowsRead, rejected, errors[] }; unknown personnel numbers are reported, never created; importing the same file again stores nothing. Who: HR.
  */
 export const importClockFile = (file: File, opts: { mapping?: any; profileId?: number | null; sheet?: string | null; saveProfileAs?: string | null }) => {
@@ -324,7 +327,8 @@ export const saveClockImportProfile = (dto: { id?: number | null; name: string; 
 
 /**
  * AttendancePolicyDto { graceMinutes (15), maxOvertimeMinutesPerDay? (empty = none), overtimeNeedsPreApproval (false), roundingMinutes,
- * monthlyOvertimeCapMinutes (1320 = 22 hours; overtime above it is not counted), delayPenaltyFactor (3: a delay beyond the grace costs delay x factor of working time, 0..10) }.
+ * monthlyOvertimeCapMinutes (1320 = 22 hours of WORKING-DAY overtime; holiday and night hours are not capped), delayPenaltyFactor (3: a delay beyond the grace costs delay x factor of working time, 0..10) }.
+ * On save, a missing (null) monthlyOvertimeCapMinutes or delayPenaltyFactor keeps the stored value. Early leave is not deducted.
  * Who: read by everyone.
  */
 export const getAttendancePolicy = () => get(at + "policy");

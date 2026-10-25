@@ -36,6 +36,7 @@ onMounted(load);
 
 <template>
   <div v-if="form" style="max-width: 640px">
+    <div class="alert alert-info small py-2">قواعد شرکت پیش‌فرض این سیاست است: مهلت ۱۵ دقیقه، کسر تاخیر بیش از مهلت با ضریب ۳ و سقف اضافه‌کار ماهانه ۲۲ ساعت. سقف ۲۲ ساعت فقط اضافه‌کار روز کاری را در بر می‌گیرد (ساعت‌های تعطیل، جمعه و شب‌کاری سقف ندارد) و تعجیل (خروج زودتر) کسر نمی‌شود. در سیستم‌های قدیمی که هنوز مقدارهای اولیه (مهلت ۰ و اضافه‌کار با تایید قبلی) را داشتند، این قواعد یک بار خودکار اعمال و در سابقه ثبت شده است.</div>
     <div class="row g-3">
       <div class="col-md-6"><label class="form-label small mb-0">مهلت تاخیر و تعجیل (دقیقه)</label><input v-model="form.graceMinutes" class="form-control form-control-sm fn-num" /><div class="inv-muted small">پیش‌فرض شرکت ۱۵ دقیقه. تاخیر یا تعجیل بیش از مهلت، کامل شمرده می‌شود (۱۴ دقیقه تاخیر بدون کسر، ۱۶ دقیقه با کسر).</div></div>
       <div class="col-md-6"><label class="form-label small mb-0">ضریب کسر تاخیر</label><input v-model="form.factor" class="form-control form-control-sm fn-num" /><div class="inv-muted small">پیش‌فرض ۳: تاخیر بیش از مهلت، به اندازه‌ی «کل تاخیر × ضریب» از کارکرد کم می‌شود (۱۶ دقیقه تاخیر = ۴۸ دقیقه کسر). کسر فقط یک بار و به شکل بخشی از روز غیبت در فیش حقوقی می‌آید. ۰ یعنی بدون کسر.</div></div>

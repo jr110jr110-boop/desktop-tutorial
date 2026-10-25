@@ -6,6 +6,7 @@ import { computed, onMounted, ref } from "vue";
 import { getClockImportProfiles, importClockFile, previewClockFile, saveClockImportProfile } from "@/api/OfficeAPIs";
 import { fail, ok } from "@/composables/inventory";
 
+const MaxFileBytes = 20 * 1048576; // the server refuses a larger file
 const emit = defineEmits(["done"]);
 const file = ref<File | null>(null);
 const preview = ref<any>(null);
@@ -19,7 +20,7 @@ const timeMode = ref<"split" | "single">("split");
 const map = ref<any>(blank());
 
 function blank() {
-  return { headerRow: 1, firstDataRow: 0, codeColumn: "", dateColumn: "", timeColumn: "", dateTimeColumn: "", directionColumn: "", inValues: "", outValues: "", deviceColumn: "", siteColumn: "", defaultDeviceCode: "" };
+  return { headerRow: 1, firstDataRow: 0, codeColumn: "", dateColumn: "", timeColumn: "", dateTimeColumn: "", directionColumn: "", inValues: "", outValues: "", deviceColumn: "", siteColumn: "", defaultDeviceCode: "", dateOrder: "" };
 }
 const columns = computed<any[]>(() => preview.value?.columns || []);
 const fieldRows = computed(() => [
@@ -39,6 +40,8 @@ function toLetter(ref: string | null | undefined): string {
 function applyMapping(m: any) {
   const next = { ...blank(), ...(m || {}) };
   for (const k of ["codeColumn", "dateColumn", "timeColumn", "dateTimeColumn", "directionColumn", "deviceColumn", "siteColumn"]) next[k] = columns.value.length ? toLetter(next[k]) : next[k] || "";
+  // how a date with the year LAST is read; a profile saved before this field existed takes the guess of the file
+  next.dateOrder = String(m?.dateOrder || preview.value?.suggested?.dateOrder || "").toUpperCase();
   next.headerRow = Number(m?.headerRow ?? 1);
   next.firstDataRow = Number(m?.firstDataRow ?? 0);
   map.value = next;
@@ -53,6 +56,11 @@ async function choose(event: Event) {
   file.value = input.files?.[0] || null;
   preview.value = null;
   result.value = null;
+  if (file.value && file.value.size > MaxFileBytes) {
+    file.value = null;
+    input.value = "";
+    return fail("حجم فایل اکسل از ۲۰ مگابایت بیشتر است؛ خروجی را در بازه‌های کوتاه‌تر بگیرید.");
+  }
   if (file.value) await read("");
 }
 async function read(sheetName: string) {
@@ -94,6 +102,7 @@ function validate(): string | null {
   if (!m.codeColumn) return "ستون شماره‌ی پرسنلی را مشخص کنید.";
   if (timeMode.value === "split" && (!m.dateColumn || !m.timeColumn)) return "ستون تاریخ و ستون ساعت را مشخص کنید.";
   if (timeMode.value === "single" && !m.dateTimeColumn) return "ستون تاریخ و ساعت را مشخص کنید.";
+  if (!m.dateOrder) return "ترتیب تاریخ (سال-ماه-روز، روز/ماه/سال یا ماه/روز/سال) را انتخاب کنید.";
   return null;
 }
 async function run() {
@@ -157,6 +166,10 @@ onMounted(loadProfiles);
         </table>
       </div>
       <div class="small inv-muted mb-2">{{ preview.rowCount }} ردیف در برگه.</div>
+      <div v-for="c in columns.filter((x) => (x.sampleDates || []).some((d: string) => d))" :key="'sd' + c.letter" class="small mb-1">
+        نمونه‌ی تاریخ ستون <span class="inv-ltr">{{ c.letter }}</span> به شمسی:
+        <span v-for="(d, i) in c.sampleDates" :key="i" :class="d === 'مبهم' ? 'text-danger' : ''" class="me-2 inv-ltr" dir="ltr">{{ d || "-" }}</span>
+      </div>
 
       <div class="row g-2 mb-2">
         <div class="col-md-3"><label class="form-label small mb-0">ردیف عنوان ستون‌ها</label><input v-model.number="map.headerRow" class="form-control form-control-sm fn-num" /><div class="inv-muted small">۰ = بدون ردیف عنوان</div></div>
@@ -164,6 +177,11 @@ onMounted(loadProfiles);
         <div class="col-md-6 d-flex align-items-end gap-3">
           <label class="small"><input v-model="timeMode" class="me-1" type="radio" value="split" />تاریخ و ساعت جدا</label>
           <label class="small"><input v-model="timeMode" class="me-1" type="radio" value="single" />تاریخ و ساعت در یک ستون</label>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-0">ترتیب تاریخ *</label>
+          <select v-model="map.dateOrder" class="form-select form-select-sm"><option value="">انتخاب کنید</option><option value="YMD">سال-ماه-روز (۱۴۰۵/۰۷/۱۱ یا 2026-10-03)</option><option value="DMY">روز/ماه/سال (03/10/2026)</option><option value="MDY">ماه/روز/سال (10/03/2026)</option></select>
+          <div class="inv-muted small">تاریخ سال‌اولی هرگز مبهم نیست؛ تاریخ سال‌آخری مثل 03/10/2026 بدون این انتخاب پذیرفته نمی‌شود و کل بارگذاری رد می‌شود.</div>
         </div>
         <div v-for="f in fieldRows" :key="f.key" class="col-md-4">
           <label class="form-label small mb-0">{{ f.label }}</label>

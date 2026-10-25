@@ -5,6 +5,7 @@ import { computed, ref } from "vue";
 import { importLetterFiles } from "@/api/OfficeAPIs";
 import { fail, ok } from "@/composables/inventory";
 
+const MaxTotalBytes = 600 * 1048576; // the server refuses a request above this
 const files = ref<File[]>([]);
 const namePattern = ref("");
 const csv = ref("");
@@ -22,6 +23,9 @@ function pick(event: Event) {
 async function run() {
   if (!files.value.length) return fail("فایل‌های PDF را انتخاب کنید.");
   if (files.value.length > 300) return fail("در هر بار حداکثر ۳۰۰ فایل مجاز است؛ فایل‌ها را در چند نوبت بفرستید.");
+  const total = files.value.reduce((a, f) => a + f.size, 0);
+  if (total > MaxTotalBytes) return fail(`مجموع حجم فایل‌ها ${(total / 1048576).toFixed(0)} مگابایت است و از ۶۰۰ مگابایت بیشتر است؛ فایل‌ها را در چند نوبت بفرستید.`);
+  if (files.value.some((f) => f.size > 50 * 1048576)) return fail("حجم هر فایل باید حداکثر ۵۰ مگابایت باشد.");
   if (namePattern.value.trim()) {
     try {
       new RegExp(namePattern.value);
@@ -43,11 +47,11 @@ async function run() {
     <div class="alert alert-info py-2">
       برای هر نامه‌ی واردشده از آرشیو راهکاران یک فایل PDF بفرستید. فایل با نامش به نامه وصل می‌شود: نام فایل بدون پسوند باید با شماره‌ی قدیمی نامه برابر باشد
       (نویسه‌هایی که در نام فایل نمی‌آیند، مانند / و \ و :، با <code>_</code> جایگزین می‌شوند؛ مثلا <code dir="ltr">1399_OUT_45.pdf</code> برای نامه‌ی <code dir="ltr">1399/OUT/45</code>).
-      فایلی که نامه‌ای برایش نیست یا PDF نیست رد و گزارش می‌شود، و فهرست نامه‌های بدون فایل در پایان می‌آید. ارسال دوباره‌ی همان فایل چیزی را دوبار پیوست نمی‌کند.
+      فایلی که نامه‌ای برایش نیست یا PDF نیست رد و گزارش می‌شود، و فهرست نامه‌های بدون فایل در پایان می‌آید. هر فایل جدا بررسی می‌شود؛ فایلی که پیوست نشود گزارش می‌شود و بقیه پیوست می‌شوند. ارسال دوباره‌ی فایلی با همان نام چیزی را دوبار پیوست نمی‌کند، اما فایلی با نام دیگر برای همان نامه به‌عنوان پیوست دوم اضافه می‌شود. مجموع حجم هر بار ارسال حداکثر ۶۰۰ مگابایت است.
     </div>
     <div class="row g-3 mb-2">
       <div class="col-md-6">
-        <label class="form-label small mb-0">فایل‌های PDF (حداکثر ۳۰۰ فایل، هر کدام تا ۵۰ مگابایت)</label>
+        <label class="form-label small mb-0">فایل‌های PDF (حداکثر ۳۰۰ فایل، هر کدام تا ۵۰ و مجموعا تا ۶۰۰ مگابایت)</label>
         <input :disabled="busy" accept=".pdf,application/pdf" class="form-control form-control-sm" multiple type="file" @change="pick" />
         <div v-if="files.length" class="small mt-1">{{ files.length }} فایل، {{ sizeText }}</div>
       </div>
