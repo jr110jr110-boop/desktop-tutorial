@@ -250,6 +250,8 @@ namespace Services.NasbNiro.Ai
             IQueryable<AiAuditEvent> q = _uow.Set<AiAuditEvent>().AsNoTracking();
             string kind = AiText.Clean(query.Kind);
             if (kind != null) q = q.Where(e => e.Kind == kind);
+            string seatFilter = AiText.Clean(query.SeatCode);
+            if (seatFilter != null) q = q.Where(e => e.SeatCode == seatFilter);
             if (query.UserId.HasValue) q = q.Where(e => e.UserId == query.UserId.Value);
             if (query.From.HasValue) { DateTimeOffset from = new DateTimeOffset(query.From.Value.Date, TimeZoneInfo.Local.GetUtcOffset(query.From.Value.Date)); q = q.Where(e => e.At >= from); }
             if (query.To.HasValue) { DateTime end = query.To.Value.Date.AddDays(1); DateTimeOffset to = new DateTimeOffset(end, TimeZoneInfo.Local.GetUtcOffset(end)); q = q.Where(e => e.At < to); }

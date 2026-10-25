@@ -82,7 +82,7 @@ namespace Services.NasbNiro.AfterSales
                 .Where(d => d.ServiceOrderId != null && ids.Contains(d.ServiceOrderId.Value) && !d.Deleted && d.Status != InventoryDocumentStatus.Cancelled).OrderBy(d => d.Id).ToListAsync(ct);
             List<int> itemIds = docs.SelectMany(d => d.Lines.Select(l => l.ItemId)).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
-            bool seesPayroll = _user.IsInRole(SvRoles.PayrollSeers);
+            bool seesPayroll = SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
 
             return rows.Select(r =>
             {

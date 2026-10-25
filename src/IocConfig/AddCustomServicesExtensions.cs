@@ -213,6 +213,25 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Ai.IRetrievalService, Services.NasbNiro.Ai.RetrievalService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiChatService, Services.NasbNiro.Ai.AiChatService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiAdminService, Services.NasbNiro.Ai.AiAdminService>();
+            // release A1 part B: the seats (each runs as its own service user), their notes, the evaluation and the scheduler (Ai:Jobs=false switches it off)
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatProvisioner, Services.NasbNiro.Ai.AiSeatProvisioner>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiNoteWriter, Services.NasbNiro.Ai.AiNoteWriter>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiNoteService, Services.NasbNiro.Ai.AiNoteService>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatAsk, Services.NasbNiro.Ai.AiSeatAsk>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.CeoBriefSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.PmoWeeklySeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.WhReorderSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.ProcCompareSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.QcNcrAssistSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.FinAnomalySeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.OfficeDraftSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatAdminService, Services.NasbNiro.Ai.AiSeatAdminService>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiEvalService, Services.NasbNiro.Ai.AiEvalService>();
+            services.AddSingleton<Services.NasbNiro.Ai.AiWorkQueue>();
+            services.AddSingleton<Services.NasbNiro.Ai.IAiWorkQueue>(sp => sp.GetRequiredService<Services.NasbNiro.Ai.AiWorkQueue>());
+            services.AddHostedService(sp => sp.GetRequiredService<Services.NasbNiro.Ai.AiWorkQueue>());
+            services.AddHostedService<Services.NasbNiro.Ai.AiSeatScheduler>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();

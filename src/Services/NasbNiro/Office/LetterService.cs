@@ -21,6 +21,9 @@ namespace Services.NasbNiro.Office
     {
         Task<ResponseDto<PagedList<LetterListDto>>> GetLettersAsync(LetterQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<LetterDto>> GetLetterAsync(int id, CancellationToken cancellationToken);
+
+        /// <summary>The ids of the letters the caller may read in full (the same rule as <see cref="GetLetterAsync"/>, as one query that can be composed with others on the same unit of work).</summary>
+        Task<IQueryable<int>> ReadableLetterIdsAsync(CancellationToken cancellationToken);
         Task<ResponseDto<LetterDto>> SaveLetterAsync(SaveLetterDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<LetterDto>> LetterActionAsync(LetterActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<LetterVerifyDto>> VerifyAsync(int id, CancellationToken cancellationToken);
@@ -164,6 +167,12 @@ namespace Services.NasbNiro.Office
                 if (c.IsSec) access = Pred.Or<OfLetter>(access, l => l.Number != null && l.Classification == OfClassification.Normal);
             }
             return Pred.Or(Pred.Or(draft, approval), Pred.And(issued, access));
+        }
+
+        public async Task<IQueryable<int>> ReadableLetterIdsAsync(CancellationToken ct)
+        {
+            Ctx c = await ContextAsync(ct);
+            return _uow.Set<OfLetter>().AsNoTracking().Where(l => !l.Deleted).Where(FullExpr(c)).Select(l => l.Id);
         }
 
         /// <summary>Everything the user may see: the letters read in full, plus (secretariat) the numbered Confidential and Secret ones as register data only.</summary>

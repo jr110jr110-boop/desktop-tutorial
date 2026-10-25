@@ -19,9 +19,35 @@ FORGE_WORD = "جعل"
 FORCE_WORD = "اجبار"
 REPEAT_WORD = "تکرار"
 
+# release A1 part B: the questions of the seats (they are checked before every other keyword)
+SEAT_BRIEF = "گزارش روزانه"
+SEAT_WEEKLY = "روایت هفتگی"
+SEAT_COMPARE = "یادداشت مقایسه"
+SEAT_CLASSIFY = "پیشنهاد دسته\u200cبندی"
+SEAT_REPLY = "پیش\u200cنویس پاسخ"
+SEAT_MINUTES = "خلاصه صورت\u200cجلسه"
+SEAT_ANSWERS = (
+    (SEAT_COMPARE, "مقایسه\u200cی پیشنهادها: تفاوت قیمت و زمان تحویل میان تامین\u200cکنندگان بررسی شد؛ تصمیم نهایی با کمیته است."),
+    (SEAT_CLASSIFY, "دسته\u200cبندی پیشنهادی: Major؛ روش ریشه\u200cیابی: پنج چرا"),
+    (SEAT_REPLY, "با سلام و احترام؛ نامه\u200cی شما دریافت شد و پس از بررسی، پاسخ لازم اعلام خواهد شد. با تشکر"),
+    (SEAT_MINUTES, "خلاصه: بندهای دستور جلسه بررسی و مصوبات ثبت شد."),
+)
+
+
+def seat_answer(text):
+    """The fixed text (without digits) a seat question is answered with, or None."""
+    for word, answer in SEAT_ANSWERS:
+        if word in text:
+            return answer
+    return None
+
 
 def pick_tool(text):
     """Keyword routing of a user question: (tool name, arguments) or None."""
+    if SEAT_BRIEF in text:
+        return "ceo_dashboard", {}
+    if SEAT_WEEKLY in text:
+        return "project_portfolio", {}
     if FORCE_WORD in text:
         return "cash_position", {}
     if FORGE_WORD in text:
@@ -83,6 +109,9 @@ def decide(messages, tools):
     offered = {t.get("function", {}).get("name") for t in (tools or [])}
     if last.get("role") != "tool":
         text = message_text(last)
+        fixed = seat_answer(text)
+        if fixed is not None:
+            return fixed, None
         if REPEAT_WORD in text:
             # no tool call: repeat the first three numbers of the most recent tool message of the history
             for m in reversed(messages):

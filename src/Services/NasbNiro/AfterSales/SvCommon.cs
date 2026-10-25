@@ -30,6 +30,11 @@ namespace Services.NasbNiro.AfterSales
 
         /// <summary>Who sees the labour cost of an order when it could show one person's hourly pay.</summary>
         public const string PayrollSeers = "PAYROLL,FINANCEMANAGER,CEO";
+
+        /// <summary>
+        /// Whether the caller sees the labour cost. A seat or the evaluation user (it acts as CEO, but its text is read by other people) never does: it gets the masked form.
+        /// </summary>
+        public static bool SeesPayroll(bool inRole) => inRole && !Ai.AiActing.IsActing;
     }
 
     internal static class SvNumbers

@@ -38,6 +38,27 @@ namespace Services.NasbNiro.Ai
 
         /// <summary>How long the audit rows must be kept. The rows are append-only and A1 has no delete job: this is the policy for a later archive job. Default 3 years.</summary>
         public const string AuditRetentionYears = "Ai:AuditRetentionYears";
+
+        /// <summary>False switches the seat scheduler off (the CI runs the seats by hand).</summary>
+        public const string Jobs = "Ai:Jobs";
+
+        /// <summary>A run by hand for a day in the future needs this switch (like Service:AllowFutureAsOf).</summary>
+        public const string AllowFutureAsOf = "Ai:AllowFutureAsOf";
+
+        /// <summary>A scheduled seat that did not succeed is tried again after this many minutes. Default 5.</summary>
+        public const string RetryMinutes = "Ai:RetryMinutes";
+
+        /// <summary>A scheduled seat whose last run was skipped because the model was down waits this many minutes before it asks again. Default 30.</summary>
+        public const string SkipBackoffMinutes = "Ai:SkipBackoffMinutes";
+
+        /// <summary>FIN-ANOMALY: a posting of at least this amount (rial) that is also a round number is reported. Default 1,000,000,000.</summary>
+        public const string FinRoundAmount = "Ai:FinRoundAmount";
+
+        /// <summary>FIN-ANOMALY: a round number is a multiple of this unit (rial). Default 100,000,000.</summary>
+        public const string FinRoundUnit = "Ai:FinRoundUnit";
+
+        /// <summary>FIN-ANOMALY: how many days back the vouchers and bank lines are looked at. Default 60.</summary>
+        public const string FinLookbackDays = "Ai:FinLookbackDays";
     }
 
     public static class AiAuditKinds
@@ -49,6 +70,15 @@ namespace Services.NasbNiro.Ai
         public const string Degraded = "degraded";
         public const string Failover = "failover";
         public const string Admin = "admin";
+
+        /// <summary>A run of a seat (started, finished, failed, skipped).</summary>
+        public const string Seat = "seat";
+
+        /// <summary>A decision on a note of a seat.</summary>
+        public const string Note = "note";
+
+        /// <summary>An evaluation run.</summary>
+        public const string Eval = "eval";
     }
 
     /// <summary>What a voice upload must look like: an audio media type (parameters such as codecs=opus are ignored) and the first bytes of a WAV, WebM or Ogg file.</summary>
@@ -135,7 +165,7 @@ namespace Services.NasbNiro.Ai
         {
             _uow.Set<AiAuditEvent>().Add(new AiAuditEvent
             {
-                At = DateTimeOffset.Now, UserId = userId ?? _user.UserId, SeatCode = seatCode, Kind = kind, PromptVersionId = promptVersionId,
+                At = DateTimeOffset.Now, UserId = userId ?? _user.UserId, SeatCode = seatCode ?? AiSeatContext.Code, Kind = kind, PromptVersionId = promptVersionId,
                 Model = AiText.Cut(model, 200), LatencyMs = latencyMs, Detail = AiText.Cut(detail, 4000), PromptHash = promptHash,
             });
         }
