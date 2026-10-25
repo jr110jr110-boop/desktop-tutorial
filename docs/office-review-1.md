@@ -1,138 +1,140 @@
-# Independent review 1 of office automation O1 (commit 97f4c54) — findings to fix (milestone OR1)
+ترجمه فارسی سند اصلی (1405/08/03)؛ شناسه‌ها و کد به همان صورت انگلیسی مانده‌اند.
 
-Reviewer: independent (read-only, no build). Paths are relative to `src/Services/NasbNiro/Office/` unless shown. Every fix needs a smoke check that FAILS on the old behaviour, with exact values. Persian calendar only. Migration as needed (`OfficeReviewFixes1`).
+# بازبینی مستقل شماره ۱ از اتوماسیون اداری O1 (کامیت 97f4c54) — یافته‌های نیازمند رفع (milestone OR1)
 
-Checked and found correct (no action): device keys (24 random bytes, SHA-256 stored, per device, `FixedTimeEquals`, 401 on unknown device, wrong key or missing key: AttendanceService.cs:443-453). Manual clock events are HR-only, need a reason, and are refused in a payroll-locked month (AttendanceService.cs:290-302). Cancelled letters keep their number. Legacy import keeps its numbers as text and does not touch the counter. `{yy}`/`{yyyy}` are Persian years. Persian month boundaries come from `PersianCal` (29/30 Esfand by leap year). The monthly close writes `FnAttendanceSheet` field by field and skips payroll-locked employees (AttendanceService.Days.cs:245-296). Payroll approval refuses sheets changed after the calculation. `OfficeGates.SyncAsync` and `NotificationService` swallow every error, and every call site runs after the gate's own save. Items are idempotent per (source key, recipient) and are closed on pass/reject for PR, payment request, payroll approve, CAPA, release note, baseline, CR, ITP H point and transmittal.
+بازبین: مستقل (فقط خواندنی، بدون build). مسیرها نسبت به `src/Services/NasbNiro/Office/` هستند مگر خلاف آن ذکر شود. هر رفع نیاز به یک smoke check دارد که روی رفتار قدیمی FAIL شود، با مقادیر دقیق. فقط تقویم شمسی. مایگریشن در صورت نیاز (`OfficeReviewFixes1`).
 
-## Critical
+بررسی‌شده و صحیح یافت شد (بدون اقدام): کلیدهای دستگاه (۲۴ بایت تصادفی، SHA-256 ذخیره‌شده، برای هر دستگاه، `FixedTimeEquals`، 401 برای دستگاه ناشناخته، کلید نادرست یا نبود کلید: AttendanceService.cs:443-453). رویدادهای ساعت دستی فقط توسط HR هستند، نیاز به دلیل دارند و در ماه قفل‌شده حقوق و دستمزد رد می‌شوند (AttendanceService.cs:290-302). نامه‌های ابطال‌شده شماره خود را نگه می‌دارند. درون‌ریزی قدیمی شماره‌هایش را به‌صورت متن نگه می‌دارد و به شمارنده دست نمی‌زند. `{yy}`/`{yyyy}` سال‌های شمسی هستند. مرزهای ماه شمسی از `PersianCal` می‌آیند (29/30 اسفند بر اساس سال کبیسه). بستن ماهانه `FnAttendanceSheet` را فیلد به فیلد می‌نویسد و کارمندان قفل‌شده حقوق و دستمزد را رد می‌کند (AttendanceService.Days.cs:245-296). تأیید حقوق و دستمزد برگه‌هایی را که پس از محاسبه تغییر کرده‌اند رد می‌کند. `OfficeGates.SyncAsync` و `NotificationService` همه خطاها را می‌بلعند و هر محل فراخوانی پس از ذخیره خود گیت اجرا می‌شود. آیتم‌ها به ازای (کلید مبدأ، گیرنده) idempotent هستند و هنگام عبور/رد برای PR، درخواست پرداخت، تأیید حقوق و دستمزد، CAPA، release note، baseline، CR، نقطه H در ITP و transmittal بسته می‌شوند.
 
-C1. **Signed letters are not immutable, and confidential attachments can be downloaded without logging in.**
-- The hash covers only the attachment ids, not the file bytes (LetterService.cs:405).
-- Any logged-in user can replace the bytes of any document through `PUT api/v1/documents/change-file`. There is no owner or reference check (WebApi/Controllers/DocumentsController.cs:36-42 → Services/Services/DocumentService.cs:89-114).
-- `GET api/v1/documents?DocumentId=` has no `[Authorize]` and no global fallback policy (DocumentsController.cs:54-69).
-- `LetterDto` gives every full reader the attachment ids and `SignatureDocumentId`.
+## بحرانی
 
-Example: Secret outgoing letter L, signed with attachment A (contract annex). User X, who is not a party but once saw A's id in a list or log, (1) downloads A anonymously, and (2) uploads a different annex over A, or a different image over the signer's signature image. `GET letters/L/verify` still answers `valid:true`.
+C1. **نامه‌های امضاشده تغییرناپذیر نیستند و پیوست‌های محرمانه بدون ورود به سیستم قابل دانلودند.**
+- هش فقط شناسه‌های پیوست را پوشش می‌دهد، نه بایت‌های فایل را (LetterService.cs:405).
+- هر کاربر واردشده می‌تواند بایت‌های هر مدرکی را از طریق `PUT api/v1/documents/change-file` جایگزین کند. هیچ بررسی مالک یا ارجاعی وجود ندارد (WebApi/Controllers/DocumentsController.cs:36-42 → Services/Services/DocumentService.cs:89-114).
+- `GET api/v1/documents?DocumentId=` فاقد `[Authorize]` است و سیاست fallback سراسری ندارد (DocumentsController.cs:54-69).
+- `LetterDto` شناسه‌های پیوست و `SignatureDocumentId` را به هر خواننده کامل می‌دهد.
 
-FIX:
-- At signing, hash the SHA-256 of every attachment file and of the signature image into `ContentHash`.
-- Refuse `ChangeFileAsync`/`UpdateDocumentAsync` for any document referenced by an `OfLetterAttachment` of a non-Draft letter, by `OfLetter.SignatureDocumentId` or `DeliveryReceiptDocumentId`, or by an `OfUserSignature` (in general: owner only).
-- Serve letter files only through `GET office/letters/{id}/attachments/{documentId}`, which requires `AccessOf == Full`.
-- Put `[Authorize]` on the generic download (check the other modules' front-end use first).
+مثال: نامه صادره سری L، امضاشده با پیوست A (پیوست قرارداد). کاربر X که طرف نامه نیست اما یک بار شناسه A را در یک فهرست یا لاگ دیده است، (1) A را به‌صورت ناشناس دانلود می‌کند و (2) یک پیوست دیگر را روی A، یا یک تصویر دیگر را روی تصویر امضای امضاکننده بارگذاری می‌کند. `GET letters/L/verify` همچنان `valid:true` پاسخ می‌دهد.
 
-SMOKE:
-- Anonymous `GET documents?DocumentId=<attachment of OL2>` → 401.
-- QC user `PUT documents/change-file` on that id → refused, and the bytes are unchanged.
-- A non-party GET of `office/letters/OL2/attachments/<id>` → 404. The writer → 200.
-- After a forced byte change in the test DB (or a direct storage swap), `verify` → `valid:false`.
+اصلاح:
+- هنگام امضا، SHA-256 هر فایل پیوست و تصویر امضا در `ContentHash` هش شود.
+- `ChangeFileAsync`/`UpdateDocumentAsync` برای هر مدرکی که توسط `OfLetterAttachment` یک نامه غیر Draft، یا `OfLetter.SignatureDocumentId` یا `DeliveryReceiptDocumentId`، یا `OfUserSignature` ارجاع شده رد شود (به‌طور کلی: فقط مالک).
+- فایل‌های نامه فقط از طریق `GET office/letters/{id}/attachments/{documentId}` ارائه شوند که `AccessOf == Full` می‌خواهد.
+- روی دانلود عمومی `[Authorize]` گذاشته شود (ابتدا استفاده فرانت‌اند ماژول‌های دیگر بررسی شود).
 
-## High
+آزمون smoke:
+- `GET documents?DocumentId=<attachment of OL2>` ناشناس ← 401.
+- کاربر QC با `PUT documents/change-file` روی آن شناسه ← رد می‌شود و بایت‌ها بدون تغییر می‌مانند.
+- GET غیرطرف روی `office/letters/OL2/attachments/<id>` ← 404. نویسنده ← 200.
+- پس از تغییر اجباری بایت در DB آزمون (یا جایگزینی مستقیم storage)، `verify` ← `valid:false`.
 
-H1. **Every SECRETARIAT user reads the full text of every numbered Confidential letter.** `AccessOf` gives SECRETARIAT `Full` whenever `Number != null` and the class is not Secret (LetterService.cs:83). `Visible` lists such letters to SECRETARIAT (LetterService.cs:99). The brief says Confidential and Secret go only to explicit parties and the CEO. Example: internal Confidential letter OL2 (expert → CEO position) is returned with its body to every SECRETARIAT user.
-FIX: Confidential → `Meta` for SECRETARIAT, as for Secret (number, date, kind, status, delivery data). Secretariat users who are a party (creator, recipient, referral) keep Full.
-SMOKE: `as OSEC GET letters/OL2` → success, `.data.metadataOnly == true`, `.data.bodyHtml == null`, subject masked.
+## بالا
 
-H2. **A Secret outgoing letter can never be registered, sent or cancelled, and its subject leaks to all SECRETARIAT users.**
-- `LetterActionAsync` and `ReferAsync` require `Access.Full` (LetterService.Actions.cs:33, 248). SECRETARIAT has only `Meta` for Secret, so register/send/receipt/archive/cancel return "نامه پیدا نشد".
-- A numbered letter may be cancelled only by SECRETARIAT (Actions.cs:230).
-- The dispatch item goes to role SECRETARIAT with `Number — Subject` in its title (Actions.cs:163).
+H1. **هر کاربر SECRETARIAT متن کامل هر نامه محرمانه شماره‌دار را می‌خواند.** `AccessOf` وقتی `Number != null` و طبقه‌بندی Secret نیست به SECRETARIAT دسترسی `Full` می‌دهد (LetterService.cs:83). `Visible` چنین نامه‌هایی را برای SECRETARIAT فهرست می‌کند (LetterService.cs:99). دستور کار می‌گوید Confidential و Secret فقط به طرف‌های صریح و مدیرعامل (CEO) می‌روند. مثال: نامه داخلی محرمانه OL2 (کارشناس ← سمت مدیرعامل (CEO)) با متن آن به هر کاربر SECRETARIAT برگردانده می‌شود.
+اصلاح: Confidential ← برای SECRETARIAT مانند Secret دسترسی `Meta` (شماره، تاریخ، نوع، وضعیت، داده‌های تحویل). کاربران دبیرخانه که طرف نامه‌اند (ایجادکننده، گیرنده، ارجاع) دسترسی Full را نگه می‌دارند.
+آزمون smoke: `as OSEC GET letters/OL2` ← موفق، `.data.metadataOnly == true`، `.data.bodyHtml == null`، موضوع پوشانده‌شده.
 
-Example: Secret outgoing letter signed → status Signed forever. Every SECRETARIAT inbox shows "نامه امضا شده برای ثبت و ارسال: 05/ص/OPS/00004 — <secret subject>".
+H2. **نامه صادره سری هرگز نمی‌تواند ثبت، ارسال یا ابطال شود و موضوع آن به همه کاربران SECRETARIAT نشت می‌کند.**
+- `LetterActionAsync` و `ReferAsync` به `Access.Full` نیاز دارند (LetterService.Actions.cs:33, 248). SECRETARIAT برای Secret فقط `Meta` دارد، بنابراین ثبت/ارسال/رسید/بایگانی/ابطال «نامه پیدا نشد» برمی‌گردانند.
+- نامه شماره‌دار را فقط SECRETARIAT می‌تواند ابطال کند (Actions.cs:230).
+- آیتم ارسال به نقش SECRETARIAT می‌رود و `Number — Subject` را در عنوان خود دارد (Actions.cs:163).
 
-FIX: allow register/send/receipt/archive/cancel at `Meta` level for SECRETARIAT, and return the external recipients and delivery data in the Meta DTO. Use a neutral dispatch title for Confidential and Secret ("نامه سری شماره …").
-SMOKE: Secret outgoing letter signed → `as OSEC` register, then send with method 2 → status 4. Inbox item `letter:<id>:dispatch` has a title without the subject. `as OSEC GET letters/<id>` → `bodyHtml == null`.
+مثال: نامه صادره سری امضا می‌شود ← وضعیت برای همیشه Signed می‌ماند. صندوق ورودی همه SECRETARIAT نشان می‌دهد «نامه امضا شده برای ثبت و ارسال: 05/ص/OPS/00004 — <secret subject>».
 
-H3. **Search works as a content oracle on letters the user may see only as metadata.** `Subject`, `Contains` (subject + `BodyHtml`) and `Party` filters run on the whole `Visible` set, including Meta rows (LetterService.cs:162-180). Example: SECRETARIAT `GET letters?Contains=مناقصه` returns Secret letter S (masked subject) only when its body contains the word. Repeated queries reveal the text.
-FIX: apply the subject, body and party filters only to rows the user has Full access to. In the query: `(Full condition) && filter` OR `(Meta condition) && Number filter only`.
-SMOKE: Secret letter whose body contains `RAREWORD123` → `as OSEC GET letters?Contains=RAREWORD123` → 0 rows. As a party → 1 row.
+اصلاح: ثبت/ارسال/رسید/بایگانی/ابطال در سطح `Meta` برای SECRETARIAT مجاز شود و گیرندگان خارجی و داده‌های تحویل در DTO سطح Meta برگردانده شود. برای Confidential و Secret از یک عنوان ارسال خنثی استفاده شود («نامه سری شماره …»).
+آزمون smoke: نامه صادره سری امضا می‌شود ← `as OSEC` ثبت، سپس ارسال با روش 2 ← وضعیت 4. آیتم صندوق ورودی `letter:<id>:dispatch` عنوانی بدون موضوع دارد. `as OSEC GET letters/<id>` ← `bodyHtml == null`.
 
-H4. **Delegation and holder abuse: an org admin can take over any position silently.**
-- `SaveDelegationAsync` lets any OrgAdmin (HR, PMO, CEO) make any user, including himself, the deputy of any position. The holder does not consent, no alert is sent and nothing is audited (OrgInboxService.cs:246-265).
-- `SavePositionAsync` lets HR set itself as the holder of any position (OrgInboxService.cs:189).
-- Access is checked against current positions, so the deputy immediately gets Full access to every past Confidential and Secret letter of the position. He can also sign for it (Actions.cs:141).
+H3. **جستجو برای نامه‌هایی که کاربر فقط در سطح فراداده می‌تواند ببیند مثل oracle محتوا عمل می‌کند.** فیلترهای `Subject`، `Contains` (موضوع + `BodyHtml`) و `Party` روی کل مجموعه `Visible` اجرا می‌شوند، از جمله ردیف‌های Meta (LetterService.cs:162-180). مثال: `GET letters?Contains=مناقصه` توسط SECRETARIAT نامه سری S (موضوع پوشانده‌شده) را فقط وقتی برمی‌گرداند که متن آن شامل این کلمه باشد. پرس‌وجوهای مکرر متن را فاش می‌کنند.
+اصلاح: فیلترهای موضوع، متن و طرف فقط روی ردیف‌هایی اعمال شوند که کاربر به آنها دسترسی Full دارد. در کوئری: `(Full condition) && filter` یا `(Meta condition) && Number filter only`.
+آزمون smoke: نامه سری که متنش `RAREWORD123` را دارد ← `as OSEC GET letters?Contains=RAREWORD123` ← 0 ردیف. به‌عنوان طرف ← 1 ردیف.
 
-Example: an HR user delegates the CEO position to himself for one day, reads every Secret letter ever addressed to the CEO position, and signs as the CEO's position.
+H4. **سوءاستفاده از نیابت و دارنده سمت: یک مدیر سازمان می‌تواند بی‌صدا هر سمتی را در اختیار بگیرد.**
+- `SaveDelegationAsync` به هر OrgAdmin (HR، PMO، CEO) اجازه می‌دهد هر کاربری، از جمله خودش، را نایب هر سمتی کند. دارنده رضایت نمی‌دهد، هشداری ارسال نمی‌شود و چیزی ممیزی نمی‌شود (OrgInboxService.cs:246-265).
+- `SavePositionAsync` به HR اجازه می‌دهد خودش را دارنده هر سمتی تعیین کند (OrgInboxService.cs:189).
+- دسترسی بر اساس سمت‌های فعلی بررسی می‌شود، بنابراین نایب بلافاصله به همه نامه‌های محرمانه و سری گذشته آن سمت دسترسی Full می‌گیرد. او همچنین می‌تواند به‌جای آن امضا کند (Actions.cs:141).
 
-FIX:
-- A delegation created by somebody other than the holder needs the holder's or the CEO's approval (status Pending until then). The deputy must not be the creator.
-- The reason is required. An inbox alert goes to the holder.
-- `OfDelegation` and `OfPosition.UserId` go into the audit trail.
-- Optional ★: deputies see Secret letters only when they were received during the delegation period.
+مثال: یک کاربر HR سمت مدیرعامل (CEO) را برای یک روز به خود نیابت می‌دهد، همه نامه‌های سری که تاکنون به سمت مدیرعامل (CEO) نوشته شده را می‌خواند و به‌عنوان سمت مدیرعامل (CEO) امضا می‌کند.
 
-SMOKE: `as OHR` delegation of OP_MGR to OHRID → stays pending, and `as OHR GET office/me` has no on-behalf position. After `as OMGR` approves → the position appears. `OMGR` has an Alert item `delegation:<id>`.
+اصلاح:
+- نیابتی که کسی غیر از دارنده ایجاد کرده باشد به تأیید دارنده یا مدیرعامل (CEO) نیاز دارد (تا آن زمان وضعیت Pending). نایب نباید ایجادکننده باشد.
+- ذکر دلیل الزامی است. یک هشدار صندوق ورودی به دارنده می‌رود.
+- `OfDelegation` و `OfPosition.UserId` وارد audit trail شوند.
+- اختیاری ★: نایب‌ها نامه‌های سری را فقط در صورتی ببینند که در بازه نیابت دریافت شده باشند.
 
-H5. **A letter number can collide, and then that unit cannot sign or register any letter, permanently.** `NextNumberAsync` keeps one counter per rule and year (LetterService.cs:367-383). `SaveRuleAsync` accepts a unit rule whose pattern can produce numbers that the general rule already issued (LetterService.Admin.cs:96-125). The unique index (Kind, Number) then throws. `FinishAsync` maps the error to "دوباره تلاش کنید" (Actions.cs:21), but the counter increment rolls back too, so every retry produces the same number. A concurrent increment (RowVersion on the counter) also only fails, with no retry.
+آزمون smoke: `as OHR` نیابت OP_MGR به OHRID ← Pending می‌ماند و `as OHR GET office/me` سمت «از طرف» ندارد. پس از تأیید `as OMGR` ← سمت ظاهر می‌شود. `OMGR` یک آیتم Alert به نام `delegation:<id>` دارد.
 
-Example: the general outgoing rule `{yy}/{kind}/{unit}/{seq:5}` has issued 05/ص/OPS/00003 and 05/ص/OPS/00007 (the counter is shared by all units). The admin adds an OPS rule with the same pattern. OPS letters 00001 and 00002 go through. 00003 hits the unique index, and from then on every OPS outgoing signature fails.
+H5. **شماره نامه می‌تواند تصادم کند و آن‌گاه آن واحد برای همیشه نمی‌تواند هیچ نامه‌ای را امضا یا ثبت کند.** `NextNumberAsync` برای هر قاعده و سال یک شمارنده نگه می‌دارد (LetterService.cs:367-383). `SaveRuleAsync` قاعده واحدی را می‌پذیرد که الگوی آن می‌تواند شماره‌هایی تولید کند که قاعده عمومی قبلاً صادر کرده است (LetterService.Admin.cs:96-125). ایندکس یکتای (Kind, Number) آن‌گاه خطا می‌دهد. `FinishAsync` خطا را به «دوباره تلاش کنید» نگاشت می‌کند (Actions.cs:21)، اما افزایش شمارنده نیز rollback می‌شود، بنابراین هر تلاش مجدد همان شماره را تولید می‌کند. یک افزایش هم‌زمان (RowVersion روی شمارنده) نیز فقط شکست می‌خورد، بدون تلاش مجدد.
 
-FIX:
-- On save, a unit rule must contain a literal prefix or token that the general rule of the kind cannot produce, or the save is refused. Simplest: refuse a unit rule whose pattern equals the general pattern unless it has an extra literal.
-- In `NextNumberAsync`, skip numbers that already exist: loop `Last++` while (Kind, Number) exists. The skipped values were issued to other letters, so this creates no gap in the rule's own register.
-- Retry two or three times on `DbUpdateConcurrencyException` and on a unique violation of the counter or the number.
+مثال: قاعده عمومی صادره `{yy}/{kind}/{unit}/{seq:5}` شماره‌های 05/ص/OPS/00003 و 05/ص/OPS/00007 را صادر کرده است (شمارنده بین همه واحدها مشترک است). مدیر یک قاعده OPS با همان الگو اضافه می‌کند. نامه‌های OPS با 00001 و 00002 رد می‌شوند. 00003 به ایندکس یکتا برخورد می‌کند و از آن پس امضای هر نامه صادره OPS شکست می‌خورد.
 
-SMOKE: sign 2 OPS outgoing letters under the general rule, add an OPS rule with the same pattern → refused with a message. Second case: patterns with a literal → a third OPS letter signs, and the number is exact.
+اصلاح:
+- هنگام ذخیره، قاعده واحد باید یک پیشوند لفظی یا توکن داشته باشد که قاعده عمومی آن نوع نتواند تولید کند، وگرنه ذخیره رد شود. ساده‌ترین: قاعده واحدی که الگویش با الگوی عمومی برابر است رد شود مگر آنکه یک لفظ اضافه داشته باشد.
+- در `NextNumberAsync` شماره‌هایی که از قبل وجود دارند را رد کن: تا زمانی که (Kind, Number) وجود دارد `Last++` در حلقه. مقادیر ردشده به نامه‌های دیگر صادر شده‌اند، بنابراین در دفتر ثبت خود قاعده شکافی ایجاد نمی‌شود.
+- دو یا سه بار تلاش مجدد روی `DbUpdateConcurrencyException` و روی نقض یکتایی شمارنده یا شماره.
 
-H6. **Overtime is zero when the policy needs no pre-approval and has no daily maximum.** `cap = OvertimeNeedsPreApproval ? Approved : (Max ?? Approved)` (AttendanceMath.cs:178): with pre-approval off, no maximum and no approved request, the cap is 0. Example: shift 08:00-16:00, policy `overtimeNeedsPreApproval:false, maxOvertimeMinutesPerDay:null`, clock 08:00 / 19:00 → overtime 0, expected 180. Payroll pays no overtime.
-FIX: `cap = needsPre ? approved : int.MaxValue`, then `Math.Min(cap, Max)` when Max is set.
-SMOKE: that policy and day → `overtimeMinutes == 180`. Restore the policy afterwards.
+آزمون smoke: ۲ نامه صادره OPS تحت قاعده عمومی امضا شود، یک قاعده OPS با همان الگو اضافه شود ← با پیام رد می‌شود. حالت دوم: الگوهای دارای لفظ ← نامه سوم OPS امضا می‌شود و شماره دقیق است.
 
-H7. **Clock events after midnight on a day shift, and after +3 h on a night shift, are given to the wrong day or dropped.**
-- A day shift's window is the calendar day (AttendanceMath.cs:115-121). The events are filtered by that window (AttendanceService.Days.cs:124-125).
-- Day shift 14:00-22:00, in 13:55, out 00:30: day D has 1 event → Incomplete. With `acceptIncompleteAsAbsent` that becomes 1 absence day. Day D+1 then runs from 00:30 to 22:05: 1265 minutes worked and 330 night minutes.
-- Night shift 22:00-06:00 with approved overtime until 10:00: the window ends at 09:00, so the 10:00 out is in no window and is lost. Day D becomes Incomplete.
+H6. **اضافه‌کار صفر است وقتی سیاست نیاز به تأیید پیشین ندارد و حداکثر روزانه هم ندارد.** `cap = OvertimeNeedsPreApproval ? Approved : (Max ?? Approved)` (AttendanceMath.cs:178): با خاموش بودن تأیید پیشین، بدون حداکثر و بدون درخواست تأییدشده، سقف 0 است. مثال: شیفت 08:00-16:00، سیاست `overtimeNeedsPreApproval:false, maxOvertimeMinutesPerDay:null`، ساعت 08:00 / 19:00 ← اضافه‌کار 0، مورد انتظار 180. حقوق و دستمزد هیچ اضافه‌کاری نمی‌پردازد.
+اصلاح: `cap = needsPre ? approved : int.MaxValue`، سپس `Math.Min(cap, Max)` وقتی Max تنظیم شده باشد.
+آزمون smoke: همان سیاست و روز ← `overtimeMinutes == 180`. سیاست پس از آن بازگردانده شود.
 
-FIX: build the windows per employee from consecutive shift starts. Day D runs from (start of D − 3 h, or the midpoint between the end of D−1 and the start of D) to the same point before D+1. At minimum, extend the day-shift window to `end + max(OT, 6 h)` when the next day's shift starts later than that. Never leave a gap between two consecutive windows.
-SMOKE: shift 14:00-22:00, events D 13:55 and D+1 00:30 → D: worked 605 (13:55-00:30 = 635, minus the 30-minute break), Present, lastOut D+1 00:30. D+1: no 00:30 event. Night shift 22:00-06:00 with 4 h approved overtime, out 10:00 → D overtime 240.
+H7. **رویدادهای ساعت پس از نیمه‌شب در شیفت روز، و پس از +3 ساعت در شیفت شب، به روز اشتباه داده می‌شوند یا حذف می‌شوند.**
+- پنجره شیفت روز همان روز تقویمی است (AttendanceMath.cs:115-121). رویدادها با این پنجره فیلتر می‌شوند (AttendanceService.Days.cs:124-125).
+- شیفت روز 14:00-22:00، ورود 13:55، خروج 00:30: روز D یک رویداد دارد ← Incomplete. با `acceptIncompleteAsAbsent` این به ۱ روز غیبت تبدیل می‌شود. روز D+1 سپس از 00:30 تا 22:05 اجرا می‌شود: 1265 دقیقه کارکرد و 330 دقیقه شب‌کاری.
+- شیفت شب 22:00-06:00 با اضافه‌کار تأییدشده تا 10:00: پنجره در 09:00 پایان می‌یابد، بنابراین خروج 10:00 در هیچ پنجره‌ای نیست و گم می‌شود. روز D به Incomplete تبدیل می‌شود.
 
-H8. **Sick leave reduces the annual leave balance.** `UsesBalance` excludes SickLeave (LeaveService.cs:58), but `BalanceAsync` counts approved sick leave in `PendingDays` (LeaveService.cs:153-157). The daily computation turns sick days into `PaidLeaveDays` (AttendanceMath.cs:143-145, AttendanceService.Days.cs:144-145). Payroll approval then adds `PaidLeaveDays` to `FnLeaveBalance.Used` (Finance/PayrollRunService.cs:380, 396). Example: 3 working days of sick leave → available balance −3 now, and `Used` +3 after payroll. Sick leave is paid by insurance and is not taken from the annual leave.
-FIX: a separate `SickLeaveDays` on `OfAttendanceDay`, and on `FnAttendanceSheet` (or have payroll read it as its own input). `PaidLeaveDays` holds only DailyLeave and HourlyLeave. Pending counts only `UsesBalance` kinds.
-SMOKE: approved sick leave of 2 days → balance unchanged. The month close puts 2 in the sick field and 0 in `paidLeaveDays`. After payroll approval, `FnLeaveBalance.used` is unchanged.
+اصلاح: پنجره‌ها برای هر کارمند از شروع‌های متوالی شیفت ساخته شوند. روز D از (شروع D منهای ۳ ساعت، یا نقطه میانی بین پایان D−1 و شروع D) تا همان نقطه پیش از D+1 اجرا می‌شود. دست‌کم، پنجره شیفت روز به `end + max(OT, 6 h)` گسترش یابد وقتی شیفت روز بعد دیرتر از آن شروع می‌شود. هرگز بین دو پنجره متوالی شکافی نگذار.
+آزمون smoke: شیفت 14:00-22:00، رویدادهای D 13:55 و D+1 00:30 ← D: کارکرد 605 (13:55-00:30 = 635، منهای ۳۰ دقیقه استراحت)، Present، lastOut D+1 00:30. D+1: هیچ رویداد 00:30 ندارد. شیفت شب 22:00-06:00 با ۴ ساعت اضافه‌کار تأییدشده، خروج 10:00 ← اضافه‌کار D برابر 240.
 
-## Medium
+H8. **مرخصی استعلاجی مانده مرخصی سالانه را کاهش می‌دهد.** `UsesBalance` مرخصی SickLeave را مستثنی می‌کند (LeaveService.cs:58)، اما `BalanceAsync` مرخصی استعلاجی تأییدشده را در `PendingDays` می‌شمارد (LeaveService.cs:153-157). محاسبه روزانه روزهای استعلاجی را به `PaidLeaveDays` تبدیل می‌کند (AttendanceMath.cs:143-145, AttendanceService.Days.cs:144-145). تأیید حقوق و دستمزد سپس `PaidLeaveDays` را به `FnLeaveBalance.Used` اضافه می‌کند (Finance/PayrollRunService.cs:380, 396). مثال: ۳ روز کاری مرخصی استعلاجی ← مانده در دسترس اکنون −3 و پس از حقوق و دستمزد `Used` برابر +3. مرخصی استعلاجی را بیمه می‌پردازد و از مرخصی سالانه کسر نمی‌شود.
+اصلاح: یک `SickLeaveDays` جداگانه روی `OfAttendanceDay` و روی `FnAttendanceSheet` (یا حقوق و دستمزد آن را به‌عنوان ورودی مستقل بخواند). `PaidLeaveDays` فقط DailyLeave و HourlyLeave را نگه دارد. Pending فقط انواع `UsesBalance` را بشمارد.
+آزمون smoke: مرخصی استعلاجی تأییدشده ۲ روزه ← مانده بدون تغییر. بستن ماه 2 را در فیلد استعلاجی و 0 را در `paidLeaveDays` می‌گذارد. پس از تأیید حقوق و دستمزد، `FnLeaveBalance.used` بدون تغییر است.
 
-M1. **A cancelled referral keeps granting Full access.** `AccessOf` and `Visible` accept any referral, cancelled ones included (LetterService.cs:80, 104). Example: a Confidential letter misdirected by referral to position P; the referral is cancelled; P still reads the letter.
-FIX: ignore `Status == Cancelled` for the target position (keep access for the creator of the referral).
-SMOKE: refer OL2 to OP_CHK, cancel → `as OCHK GET letters/OL2` → 404.
+## متوسط
 
-M2. **The leave balance loses days across a month boundary.** `PendingDays` counts a request only when the month of its FromDate is after `LastMonth` (LeaveService.cs:157), while payroll books only the days inside each month. Example: leave 1405/04/30-1405/05/02 (3 days). After Tir payroll, Used is +1, and the request is no longer pending because month 4 ≤ 4. Available is overstated by 2 until Mordad payroll, so a second leave beyond the real balance is accepted.
-FIX: pending = the days of approved requests that fall in months after `LastMonth` (split per day by the calendar).
-SMOKE: that case → after Tir approval, `available` = before − 3 exactly.
+M1. **ارجاع ابطال‌شده همچنان دسترسی Full می‌دهد.** `AccessOf` و `Visible` هر ارجاعی را می‌پذیرند، از جمله ابطال‌شده‌ها (LetterService.cs:80, 104). مثال: یک نامه محرمانه به‌اشتباه با ارجاع به سمت P فرستاده شده؛ ارجاع ابطال می‌شود؛ P همچنان نامه را می‌خواند.
+اصلاح: `Status == Cancelled` برای سمت هدف نادیده گرفته شود (دسترسی برای ایجادکننده ارجاع حفظ شود).
+آزمون smoke: ارجاع OL2 به OP_CHK، ابطال ← `as OCHK GET letters/OL2` ← 404.
 
-M3. **Leave approve, record and reject ignore the payroll lock** (LeaveService.cs:498-533). Submit and cancel do check it. Example: leave submitted in Shahrivar, payroll for Shahrivar approved, then the leave is approved. The days stay absent in the approved payroll, and the leave is never deducted, because pending skips months ≤ LastMonth.
-FIX: refuse approve/record/reject when FromDate or ToDate is in a locked month.
-SMOKE: approving such a leave → message "حقوق این ماه تایید شده".
+M2. **مانده مرخصی در مرز ماه روز از دست می‌دهد.** `PendingDays` یک درخواست را فقط وقتی می‌شمارد که ماه FromDate آن پس از `LastMonth` باشد (LeaveService.cs:157)، در حالی که حقوق و دستمزد فقط روزهای داخل هر ماه را ثبت می‌کند. مثال: مرخصی 1405/04/30 تا 1405/05/02 (۳ روز). پس از حقوق و دستمزد تیر، Used برابر +1 است و درخواست دیگر pending نیست زیرا ماه 4 ≤ 4. مانده در دسترس تا حقوق و دستمزد مرداد به اندازه ۲ بیش از واقع نشان داده می‌شود، بنابراین مرخصی دومی فراتر از مانده واقعی پذیرفته می‌شود.
+اصلاح: pending = روزهای درخواست‌های تأییدشده که در ماه‌های پس از `LastMonth` قرار می‌گیرند (تفکیک به ازای هر روز بر اساس تقویم).
+آزمون smoke: همان مورد ← پس از تأیید تیر، `available` = پیش از آن − 3 دقیقاً.
 
-M4. **Clock import and device push write into payroll-locked months and accept future timestamps** (AttendanceService.cs:387-417, 443-475). The events are stored but the days are not recomputed, so the clock records no longer match the approved payroll.
-FIX: in `StoreAsync`, reject rows in locked months (count them as rejected with a reason) and timestamps later than now + 5 minutes.
-SMOKE: push one event on 2026-09-01 (Shahrivar, locked) and one for tomorrow → `accepted == 0`, `rejected == 2`.
+M3. **تأیید، ثبت و رد مرخصی قفل حقوق و دستمزد را نادیده می‌گیرند** (LeaveService.cs:498-533). ثبت درخواست و ابطال آن را بررسی می‌کنند. مثال: مرخصی در شهریور ثبت می‌شود، حقوق و دستمزد شهریور تأیید می‌شود، سپس مرخصی تأیید می‌شود. روزها در حقوق و دستمزد تأییدشده غیبت می‌مانند و مرخصی هرگز کسر نمی‌شود، زیرا pending ماه‌های ≤ LastMonth را رد می‌کند.
+اصلاح: تأیید/ثبت/رد وقتی FromDate یا ToDate در ماه قفل‌شده باشد رد شود.
+آزمون smoke: تأیید چنین مرخصی‌ای ← پیام «حقوق این ماه تایید شده».
 
-M5. **Missing or stale gate items.**
-- (a) Automatic vouchers created Checked by the posting job (Finance/EventPostingService.cs:153) never call `SweepVouchersAsync`, so FINANCEMANAGER gets no item until somebody touches a manual voucher.
-- (b) `ReopenCalculatedRunsAsync` sets Calculated runs back to Draft without closing `payroll:<id>` (Finance/PayrollMasterService.cs:81-86). The approval item stays open, and approving gives "فقط اجرای محاسبه‌شده".
-- (c) The NCR committee and approval gates of `InventoryQualityService` have no notify call (the brief lists NCR).
-- (d) An auto-drafted CAPA (Open, no owner) creates no item for QA (Quality/CapaService.cs:272 waits only for Implemented or EffectivenessCheck).
+M4. **درون‌ریزی ساعت و push دستگاه در ماه‌های قفل‌شده حقوق و دستمزد می‌نویسند و زمان‌های آینده را می‌پذیرند** (AttendanceService.cs:387-417, 443-475). رویدادها ذخیره می‌شوند اما روزها محاسبه مجدد نمی‌شوند، بنابراین سوابق ساعت دیگر با حقوق و دستمزد تأییدشده مطابقت ندارند.
+اصلاح: در `StoreAsync`، ردیف‌های ماه‌های قفل‌شده رد شوند (با ذکر دلیل در شمار رد‌شده‌ها) و زمان‌های بعد از now + 5 دقیقه نیز.
+آزمون smoke: یک رویداد در 2026-09-01 (شهریور، قفل‌شده) و یک رویداد برای فردا push شود ← `accepted == 0`، `rejected == 2`.
 
-FIX: sweep after the posting job's save. Sync `payroll:<id>` inside the reopen. Add `ncr:<id>` (committee roles) and `capa-assign:<id>` (QA).
-SMOKE: post an automatic event → `vouchers:finalise` is open for FINANCEMANAGER. Change a rate after a calculation → the `payroll:<id>` item is Done. A Major NCR → an item for the committee.
+M5. **آیتم‌های گیت گم‌شده یا کهنه.**
+- (الف) سندهای حسابداری خودکار که job ثبت با وضعیت Checked ایجاد می‌کند (Finance/EventPostingService.cs:153) هرگز `SweepVouchersAsync` را فرا نمی‌خوانند، بنابراین FINANCEMANAGER آیتمی نمی‌گیرد تا زمانی که کسی به یک سند دستی دست بزند.
+- (ب) `ReopenCalculatedRunsAsync` اجراهای Calculated را به Draft برمی‌گرداند بدون بستن `payroll:<id>` (Finance/PayrollMasterService.cs:81-86). آیتم تأیید باز می‌ماند و تأیید کردن «فقط اجرای محاسبه‌شده» را می‌دهد.
+- (ج) گیت‌های کمیته NCR و تأیید در `InventoryQualityService` فراخوانی notify ندارند (دستور کار NCR را فهرست کرده است).
+- (د) یک CAPA پیش‌نویس‌شده خودکار (Open، بدون مسئول) هیچ آیتمی برای QA ایجاد نمی‌کند (Quality/CapaService.cs:272 فقط منتظر Implemented یا EffectivenessCheck است).
 
-M6. **Gate Task items can be closed by hand and are never recreated.** "done" is allowed for kind Task and Alert (OrgInboxService.cs:429-434). `letter:<id>:dispatch`, `leave-record:<id>` and `req-complete:<id>` are role Tasks. Example: one SECRETARIAT user closes the dispatch item; the signed letter is then waiting in no inbox.
-FIX: refuse manual "done" for items whose `SourceKey` belongs to a gate. Or make these items kind Approval.
-SMOKE: `as OSEC POST inbox/act {done}` on `letter:<id>:dispatch` → refused.
+اصلاح: پس از ذخیره job ثبت sweep انجام شود. `payroll:<id>` درون reopen همگام‌سازی شود. `ncr:<id>` (نقش‌های کمیته) و `capa-assign:<id>` (QA) اضافه شود.
+آزمون smoke: یک رویداد خودکار ثبت شود ← `vouchers:finalise` برای FINANCEMANAGER باز است. نرخی پس از محاسبه تغییر کند ← آیتم `payroll:<id>` برابر Done است. یک NCR از نوع Major ← یک آیتم برای کمیته.
 
-M7. **Office records are not audited.** `FinanceAuditTrail.Audited` (DataLayer/Context/FinanceAuditTrail.cs:21-73) leaves out `OfClockEvent` (manual and import, where the brief requires an audit), `OfDelegation`, `OfPosition` (UserId, CanSign), `OfNumberingRule`, `OfAttendancePolicy` and `FnAttendanceSheet` (payroll input).
-FIX: add them. For the sheet, audit the day and hour fields only.
-SMOKE: a manual clock event and a policy change → each has an audit row with the user and the Persian date.
+M6. **آیتم‌های Task گیت‌ها را می‌توان دستی بست و هرگز دوباره ایجاد نمی‌شوند.** «done» برای نوع Task و Alert مجاز است (OrgInboxService.cs:429-434). `letter:<id>:dispatch`، `leave-record:<id>` و `req-complete:<id>` از نوع Task نقش‌محور هستند. مثال: یک کاربر SECRETARIAT آیتم ارسال را می‌بندد؛ نامه امضاشده آن‌گاه در هیچ صندوق ورودی‌ای منتظر نیست.
+اصلاح: «done» دستی برای آیتم‌هایی که `SourceKey` آنها به یک گیت تعلق دارد رد شود. یا این آیتم‌ها از نوع Approval شوند.
+آزمون smoke: `as OSEC POST inbox/act {done}` روی `letter:<id>:dispatch` ← رد می‌شود.
 
-M8. **Date fields of general requests are shown in the Gregorian calendar.** A value entered as 1405/06/10 is stored and returned as "2026-09-01" (RequestService.cs:297-300, returned at :216-222).
-FIX: store the ISO date, and return the value Persian-formatted (or add a `ValuesText` map with Persian dates).
-SMOKE: vehicle request with date "1405/06/10" → `.data.values.<field> == "1405/06/10"` (or `valuesText`).
+M7. **رکوردهای اداری ممیزی نمی‌شوند.** `FinanceAuditTrail.Audited` (DataLayer/Context/FinanceAuditTrail.cs:21-73) این‌ها را کنار می‌گذارد: `OfClockEvent` (دستی و درون‌ریزی، جایی که دستور کار ممیزی را الزامی می‌کند)، `OfDelegation`، `OfPosition` (UserId، CanSign)، `OfNumberingRule`، `OfAttendancePolicy` و `FnAttendanceSheet` (ورودی حقوق و دستمزد).
+اصلاح: آنها اضافه شوند. برای برگه، فقط فیلدهای روز و ساعت ممیزی شوند.
+آزمون smoke: یک رویداد ساعت دستی و یک تغییر سیاست ← هر کدام یک ردیف ممیزی با کاربر و تاریخ شمسی دارند.
 
-## Vacuous or weak smoke checks (replace)
+M8. **فیلدهای تاریخ درخواست‌های عمومی در تقویم میلادی نشان داده می‌شوند.** مقداری که به‌صورت 1405/06/10 وارد شده به‌صورت "2026-09-01" ذخیره و برگردانده می‌شود (RequestService.cs:297-300، بازگردانده در :216-222).
+اصلاح: تاریخ ISO ذخیره شود و مقدار با قالب شمسی برگردانده شود (یا یک نگاشت `ValuesText` با تاریخ‌های شمسی اضافه شود).
+آزمون smoke: درخواست خودرو با تاریخ "1405/06/10" ← `.data.values.<field> == "1405/06/10"` (یا `valuesText`).
 
-| Line in .github/scripts/inventory-smoke.sh | Check | Problem | Replace with |
+## smoke checkهای توخالی یا ضعیف (جایگزین شوند)
+
+| خط در .github/scripts/inventory-smoke.sh | بررسی | مشکل | جایگزین |
 |---|---|---|---|
-| 3111 | "inbox counts are returned" | `.data.open >= 0` is always true | exact `open` and `unread` for OEMP after a known set of items |
-| 2888 | "the stored hash matches" | `verify` recomputes the hash with the same function, so `valid` is true by construction | the tamper case of C1 (`valid:false`) |
-| 3066 | "Persian-dated row landed in Mordad" | the regex `2026-08-1[0-2]` accepts an off-by-one or off-by-two conversion | the exact Gregorian date of the Persian row |
-| 2951-2954 | confidential invisibility | tested only with QC_TOKEN; no SECRETARIAT, Secret, search or attachment case | the H1, H2, H3 and C1 checks |
-| 3017 | policy | only `max:120`, so H6 is never exercised | the H6 check |
+| 3111 | "inbox counts are returned" | `.data.open >= 0` همیشه درست است | `open` و `unread` دقیق برای OEMP پس از مجموعه‌ای معلوم از آیتم‌ها |
+| 2888 | "the stored hash matches" | `verify` هش را با همان تابع دوباره محاسبه می‌کند، بنابراین `valid` طبق ساختار درست است | حالت دست‌کاری C1 (`valid:false`) |
+| 3066 | "Persian-dated row landed in Mordad" | عبارت منظم `2026-08-1[0-2]` تبدیل با خطای یک یا دو روز را می‌پذیرد | تاریخ میلادی دقیق ردیف شمسی |
+| 2951-2954 | confidential invisibility | فقط با QC_TOKEN آزموده شده؛ هیچ مورد SECRETARIAT، Secret، جستجو یا پیوست ندارد | بررسی‌های H1، H2، H3 و C1 |
+| 3017 | policy | فقط `max:120`، بنابراین H6 هرگز اجرا نمی‌شود | بررسی H6 |

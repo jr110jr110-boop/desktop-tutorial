@@ -1,57 +1,59 @@
-# Local AI and CEO voice dashboard — design and backend brief (release A1)
+ترجمه فارسی سند اصلی (1405/08/03)؛ شناسه‌ها و کد به همان صورت انگلیسی مانده‌اند.
 
-Company rule: during an internet outage only the Claude seats (engineering design) may stop; every critical operation continues on the **company's own AI server**, fully offline. Hardware is not bought yet: the software must run against any OpenAI-compatible local inference endpoint, and be fully testable in CI with a deterministic mock.
+# هوش مصنوعی محلی و داشبورد صوتی مدیرعامل — طراحی و خلاصه‌ی فنی بک‌اند (انتشار A1)
 
-## 1. Principles (binding)
-1. **Numbers come from PMIS, never from the model.** The model only selects tools, reads their results, writes Persian text and drafts. Every figure in an answer must appear verbatim in a tool result of the same conversation; the gateway verifies this (numeric-claim check: every number token in the answer, after Persian/Arabic digit normalisation and thousands-separator removal, must exist in the tool results or the user's question; otherwise the answer is replaced by the tool results in a fixed template and the event is logged).
-2. **The AI acts as the user, never more.** Every tool call runs with the caller's JWT/roles through the existing services (same authorisation, same row filtering). Scheduled seats run as a dedicated service user per seat with only the roles listed for that seat.
-3. **Drafts and gates.** The AI may create drafts only through existing "draft" operations (purchase request draft, letter draft, NCR draft, voucher draft, report narrative). It never approves, finalises, pays, releases or deletes. Approval is always a human action in the UI (click + the user's own session; for money above a threshold also a PIN re-entry ★).
-4. **Every AI action is audited** (prompt, tools called with arguments, results hash, answer, model id, latency, user/seat) in an append-only table; retention configurable (default 3 years ★).
-5. **Offline.** No external call from this module except the separate Claude gateway (§7). Models, voices and embeddings are installed from an offline bundle.
-6. **Degrade, don't fail.** If the LLM is down, dashboards and all PMIS functions keep working; voice/text assistant answers with "تحلیل هوشمند موقتاً در دسترس نیست" and shows the deterministic dashboard; seats' jobs queue and resume.
+قاعده‌ی شرکت: در زمان قطع اینترنت فقط صندلی‌های Claude (طراحی مهندسی) مجازند متوقف شوند؛ هر عملیات بحرانی روی **سرور هوش مصنوعی اختصاصی شرکت** و کاملاً آفلاین ادامه می‌یابد. سخت‌افزار هنوز خریداری نشده است: نرم‌افزار باید با هر endpoint استنتاج محلیِ سازگار با OpenAI کار کند و در CI با یک mock قطعی (deterministic) کاملاً قابل‌آزمون باشد.
 
-## 2. Components
-- **Inference server(s)** (Linux, GPU): OpenAI-compatible HTTP endpoint (vLLM or llama.cpp server). Model chosen at procurement time from open-weight instruct models with strong Persian and tool calling; acceptance = passes the Persian evaluation set (§8). Two logical endpoints: `primary` (large model) and `fallback` (smaller model on a second GPU or CPU) — the gateway fails over automatically by health check.
-- **Speech**: STT service (faster-whisper large-v3 class, Persian) and TTS service (Persian voice, e.g. Piper fa_IR class) — local HTTP services with simple JSON/WAV APIs; the gateway adapts to them through `ISpeechToText` / `ITextToSpeech` interfaces (configurable URLs).
-- **Embeddings + retrieval** for documents (procedures, work instructions, standards excerpts the company owns, letters, minutes): local embedding endpoint (OpenAI-compatible `/embeddings`), vectors stored in SQL Server (VARBINARY + cosine in .NET for the first release ★; SQL Server 2025 native vector type when the server runs 2025 — detect and use). Retrieval results always carry document id + revision for citation.
-- **PMIS AI gateway** (inside the PMIS backend, .NET): conversation API, tool registry, seat scheduler, verification, audit, failover. Tables prefix `Ai`, routes `api/v1/ai`.
+## 1. اصول (الزام‌آور)
+1. **اعداد از PMIS می‌آیند، هرگز از مدل.** مدل فقط ابزارها را انتخاب می‌کند، نتایج آن‌ها را می‌خواند، متن فارسی و پیش‌نویس می‌نویسد. هر عددی در پاسخ باید عیناً در نتیجه‌ی یک ابزار در همان مکالمه ظاهر شده باشد؛ gateway این را راستی‌آزمایی می‌کند (بررسی ادعای عددی: هر توکن عددی در پاسخ، پس از یکسان‌سازی ارقام فارسی/عربی و حذف جداکننده‌ی هزارگان، باید در نتایج ابزارها یا در پرسش کاربر وجود داشته باشد؛ وگرنه پاسخ با نتایج ابزارها در یک قالب ثابت جایگزین می‌شود و رویداد ثبت می‌گردد).
+2. **هوش مصنوعی به‌جای کاربر عمل می‌کند، نه بیشتر.** هر فراخوانی ابزار با JWT/نقش‌های فراخواننده از طریق سرویس‌های موجود اجرا می‌شود (همان مجوزدهی، همان فیلتر سطری). صندلی‌های زمان‌بندی‌شده به‌عنوان یک کاربر سرویس اختصاصی برای هر صندلی و فقط با نقش‌های فهرست‌شده برای آن صندلی اجرا می‌شوند.
+3. **پیش‌نویس‌ها و گیت‌ها.** هوش مصنوعی فقط از طریق عملیات «پیش‌نویس» موجود می‌تواند پیش‌نویس بسازد (پیش‌نویس درخواست خرید، پیش‌نویس نامه، پیش‌نویس NCR، پیش‌نویس سند حسابداری، متن روایی گزارش). هرگز تأیید، نهایی‌سازی، پرداخت، آزادسازی یا حذف نمی‌کند. تأیید همیشه یک اقدام انسانی در رابط کاربری است (کلیک + نشست خود کاربر؛ برای مبالغ بالاتر از یک آستانه، وارد کردن دوباره‌ی PIN نیز ★).
+4. **هر اقدام هوش مصنوعی ممیزی می‌شود** (prompt، ابزارهای فراخوانی‌شده با آرگومان‌ها، هش نتایج، پاسخ، شناسه‌ی مدل، تأخیر، کاربر/صندلی) در یک جدول فقط‌افزودنی (append-only)؛ مدت نگهداری قابل پیکربندی (پیش‌فرض 3 سال ★).
+5. **آفلاین.** هیچ فراخوانی خارجی از این ماژول، جز Claude gateway جداگانه (§7)، وجود ندارد. مدل‌ها، صداها و embeddingها از یک بسته‌ی آفلاین نصب می‌شوند.
+6. **تنزل تدریجی، نه شکست.** اگر LLM از کار بیفتد، داشبوردها و همه‌ی قابلیت‌های PMIS به کار خود ادامه می‌دهند؛ دستیار صوتی/متنی با «تحلیل هوشمند موقتاً در دسترس نیست» پاسخ می‌دهد و داشبورد قطعی (deterministic) را نشان می‌دهد؛ کارهای صندلی‌ها در صف می‌مانند و از سر گرفته می‌شوند.
 
-## 3. Tool registry (read tools)
-- A tool = name, Persian description, JSON schema of arguments, required roles, and a C# delegate calling an existing service method; results trimmed to a token budget (lists: top N with total count).
-- Release A1 tools (wrap existing services, read only): CEO dashboard; finance dashboard, trial balance summary, cash position, receivables ageing, payables due; stock of an item / items below minimum / item cardex summary; purchase requests and orders status (by number, supplier, project); supplier profile and grade; project portfolio, project status (SPI/CPI, late activities, next milestones), change requests, guarantees expiring; quality dashboard, open NCRs/CAPAs, calibration due, ITP status of a work order; MDR status of a project; document search (retrieval); "explain alert" (returns the alert's source records).
-- Tool results include record ids and front-end links so the UI renders clickable citations.
+## 2. اجزا
+- **سرور(های) استنتاج** (لینوکس، GPU): endpoint HTTP سازگار با OpenAI (vLLM یا llama.cpp server). مدل در زمان خرید از میان مدل‌های instruct با وزن باز و با زبان فارسی قوی و tool calling انتخاب می‌شود؛ پذیرش = قبولی در مجموعه‌ی ارزیابی فارسی (§8). دو endpoint منطقی: `primary` (مدل بزرگ) و `fallback` (مدل کوچک‌تر روی GPU دوم یا CPU) — gateway به‌صورت خودکار بر اساس بررسی سلامت به دیگری سوئیچ می‌کند.
+- **گفتار**: سرویس STT (در رده‌ی faster-whisper large-v3، فارسی) و سرویس TTS (صدای فارسی، مثلاً در رده‌ی Piper fa_IR) — سرویس‌های HTTP محلی با APIهای ساده‌ی JSON/WAV؛ gateway از طریق رابط‌های `ISpeechToText` / `ITextToSpeech` (نشانی‌های قابل پیکربندی) به آن‌ها متصل می‌شود.
+- **Embeddings + بازیابی** برای اسناد (رویه‌ها، دستورالعمل‌های کاری، گزیده‌های استاندارد که شرکت مالک آن‌هاست، نامه‌ها، صورت‌جلسات): endpoint محلی embedding (سازگار با OpenAI `/embeddings`)، بردارها در SQL Server ذخیره می‌شوند (VARBINARY + کسینوس در .NET برای انتشار اول ★؛ نوع بردار بومی SQL Server 2025 زمانی که سرور 2025 باشد — تشخیص و استفاده شود). نتایج بازیابی همیشه شناسه‌ی سند + revision را برای ارجاع (citation) همراه دارند.
+- **PMIS AI gateway** (درون بک‌اند PMIS، .NET): API مکالمه، رجیستری ابزار، زمان‌بند صندلی، راستی‌آزمایی، ممیزی، failover. جدول‌ها با پیشوند `Ai`، مسیرها `api/v1/ai`.
 
-## 4. Conversation API
-- `POST ai/chat` {conversationId?, text} → {answer, citations[{type,id,title,link}], toolCalls[], verified:bool, model}. Streaming optional (SSE) ★.
-- `POST ai/voice` (multipart audio webm/wav) → STT → chat → TTS → {transcript, answer, audioUrl/base64, citations}. Push-to-talk in the UI; no always-on microphone ★.
-- System prompt (Persian), fixed and versioned in the database (`AiPromptVersion`), states the principles, the company context and the answer style (short, numbers with units and dates in Persian calendar, always cite).
-- Max tool-call rounds 6 ★; timeout 60 s ★; conversation memory = last 10 turns ★.
+## 3. رجیستری ابزار (ابزارهای خواندنی)
+- یک ابزار = نام، توضیح فارسی، JSON schema آرگومان‌ها، نقش‌های لازم، و یک delegate در C# که یک متد سرویس موجود را فرا می‌خواند؛ نتایج به یک بودجه‌ی توکن بریده می‌شوند (فهرست‌ها: N مورد برتر همراه با تعداد کل).
+- ابزارهای انتشار A1 (پوشش سرویس‌های موجود، فقط خواندنی): داشبورد مدیرعامل؛ داشبورد مالی، خلاصه‌ی تراز آزمایشی، وضعیت نقدینگی، سنی‌سازی مطالبات، بدهی‌های سررسیدشده؛ موجودی یک قلم / اقلام زیر حداقل / خلاصه‌ی کاردکس قلم؛ وضعیت درخواست‌ها و سفارش‌های خرید (بر اساس شماره، تأمین‌کننده، پروژه)؛ پروفایل و درجه‌ی تأمین‌کننده؛ سبد پروژه‌ها، وضعیت پروژه (SPI/CPI، فعالیت‌های دارای تأخیر، نقاط عطف بعدی)، درخواست‌های تغییر، تضمین‌های در آستانه‌ی انقضا؛ داشبورد کیفیت، NCR/CAPAهای باز، کالیبراسیون سررسیدشده، وضعیت ITP یک دستور کار؛ وضعیت MDR یک پروژه؛ جست‌وجوی سند (بازیابی)؛ «توضیح هشدار» (رکوردهای منبع هشدار را برمی‌گرداند).
+- نتایج ابزار شامل شناسه‌ی رکوردها و پیوندهای فرانت‌اند هستند تا رابط کاربری ارجاع‌های قابل‌کلیک را نمایش دهد.
 
-## 5. Seats (scheduled assistants) — release A1
-Each seat: code, Persian title, service user + roles, schedule (cron-like, server-local), trigger events (optional), prompt version, enabled flag, output kind. Outputs land as **drafts or notes in the module's own gate**, never as final records.
-- `CEO-BRIEF` daily 07:00 ★: Persian daily briefing (text + audio file) from CEO dashboard, alerts, cash, projects red/amber — read at the start of the CEO dashboard and playable.
-- `PMO-WEEKLY` weekly on the data-date weekday after the snapshot: narrative for the internal weekly report (causes of slippage from late activities, change requests) → stored as a draft narrative attached to the report issue; PMO edits/approves.
-- `WH-REORDER` daily: items below minimum without open PR → drafts purchase requests (existing draft API) with reason text; planning approves as today.
-- `PROC-COMPARE`: on quotation set complete → draft comparison memo (technical/commercial notes) for the committee; the selection rule stays deterministic in the procurement service.
-- `QC-NCR-ASSIST`: on new NCR → suggested classification (Minor/Major) and root-cause method + similar past NCRs (retrieval); QC accepts/edits.
-- `FIN-ANOMALY` daily: unusual vouchers (duplicate amounts/parties, round amounts, weekend postings, vendor IBAN changes), bank lines unmatched > 7 days → finance dashboard notes.
-- `OFFICE-DRAFT` (after office automation exists): letter reply drafts and minutes summaries.
-- Each seat run is a row `AiSeatRun` (status, started, finished, outputs, errors); failures alert PMO.
+## 4. API مکالمه
+- `POST ai/chat` {conversationId?, text} → {answer, citations[{type,id,title,link}], toolCalls[], verified:bool, model}. استریم اختیاری (SSE) ★.
+- `POST ai/voice` (صوت multipart با قالب webm/wav) → STT → chat → TTS → {transcript, answer, audioUrl/base64, citations}. فشار-و-صحبت (push-to-talk) در رابط کاربری؛ بدون میکروفن همیشه‌روشن ★.
+- System prompt (فارسی)، ثابت و نسخه‌دار در پایگاه داده (`AiPromptVersion`)، اصول، زمینه‌ی شرکت و سبک پاسخ را بیان می‌کند (کوتاه، اعداد با واحد و تاریخ‌ها به تقویم فارسی، همیشه با ارجاع).
+- حداکثر دورهای فراخوانی ابزار 6 ★؛ timeout 60 ثانیه ★؛ حافظه‌ی مکالمه = 10 نوبت آخر ★.
 
-## 6. CEO voice dashboard (front)
-- The existing CEO dashboard stays the main screen (deterministic). Add: assistant panel (text box + push-to-talk button), daily briefing player, answers with citation chips that open the record, and "show me" navigation commands (the model can return a front-end route to open).
-- Voice approvals: not in A1. The CEO can ask the assistant to open the approval screen; the approval itself is a click.
-- Persian speech: numbers spoken in Persian words by the TTS normaliser (implement a Persian number-to-words helper for rial amounts with "میلیارد/میلیون" scaling ★).
+## 5. صندلی‌ها (دستیارهای زمان‌بندی‌شده) — انتشار A1
+هر صندلی: کد، عنوان فارسی، کاربر سرویس + نقش‌ها، زمان‌بندی (شبه‌cron، به وقت محلی سرور)، رویدادهای محرک (اختیاری)، نسخه‌ی prompt، پرچم فعال بودن، نوع خروجی. خروجی‌ها به‌صورت **پیش‌نویس یا یادداشت در گیت خود ماژول** ثبت می‌شوند، هرگز به‌صورت رکورد نهایی.
+- `CEO-BRIEF` روزانه ساعت 07:00 ★: گزارش روزانه‌ی فارسی (متن + فایل صوتی) از داشبورد مدیرعامل، هشدارها، نقدینگی، پروژه‌های قرمز/زرد — در ابتدای داشبورد مدیرعامل خوانده می‌شود و قابل پخش است.
+- `PMO-WEEKLY` هفتگی در روز هفته‌ی تاریخ داده پس از snapshot: روایت برای گزارش هفتگی داخلی (علل انحراف از برنامه بر اساس فعالیت‌های دارای تأخیر، درخواست‌های تغییر) → به‌صورت یک روایت پیش‌نویس ضمیمه‌ی شماره‌ی گزارش ذخیره می‌شود؛ PMO ویرایش/تأیید می‌کند.
+- `WH-REORDER` روزانه: اقلام زیر حداقل بدون PR باز → پیش‌نویس درخواست‌های خرید (API پیش‌نویس موجود) با متن دلیل؛ برنامه‌ریزی مانند امروز تأیید می‌کند.
+- `PROC-COMPARE`: هنگام کامل شدن مجموعه‌ی استعلام‌ها → پیش‌نویس یادداشت مقایسه (نکات فنی/بازرگانی) برای کمیته؛ قاعده‌ی انتخاب در سرویس تدارکات قطعی باقی می‌ماند.
+- `QC-NCR-ASSIST`: با NCR جدید → دسته‌بندی پیشنهادی (Minor/Major) و روش ریشه‌یابی علت + NCRهای مشابه گذشته (بازیابی)؛ QC می‌پذیرد/ویرایش می‌کند.
+- `FIN-ANOMALY` روزانه: اسناد حسابداری غیرعادی (مبالغ/طرف‌های تکراری، مبالغ رُند، ثبت در تعطیلات آخر هفته، تغییر IBAN فروشنده)، سطرهای بانکی تطبیق‌نیافته > 7 روز → یادداشت‌ها در داشبورد مالی.
+- `OFFICE-DRAFT` (پس از وجود اتوماسیون اداری): پیش‌نویس پاسخ نامه‌ها و خلاصه‌ی صورت‌جلسات.
+- هر اجرای صندلی یک سطر `AiSeatRun` است (وضعیت، شروع، پایان، خروجی‌ها، خطاها)؛ شکست‌ها به PMO هشدار می‌دهند.
 
-## 7. Claude gateway (internet-dependent, engineering only)
-- Separate component `ClaudeGateway` with an outbox: requests from engineering seats are queued; when internet is down they wait (status visible); never used by critical seats. API key stored only in server configuration (never in the database or logs). Detailed seat design waits for the engineering module (the user's Claude team will define it).
+## 6. داشبورد صوتی مدیرعامل (فرانت)
+- داشبورد مدیرعامل موجود صفحه‌ی اصلی (قطعی) باقی می‌ماند. افزوده می‌شود: پنل دستیار (کادر متن + دکمه‌ی push-to-talk)، پخش‌کننده‌ی گزارش روزانه، پاسخ‌ها با chipهای ارجاع که رکورد را باز می‌کنند، و دستورهای ناوبری «نشانم بده» (مدل می‌تواند یک مسیر فرانت‌اند برای باز شدن برگرداند).
+- تأیید صوتی: در A1 نیست. مدیرعامل می‌تواند از دستیار بخواهد صفحه‌ی تأیید را باز کند؛ خود تأیید یک کلیک است.
+- گفتار فارسی: اعداد توسط نرمال‌ساز TTS به‌صورت کلمات فارسی خوانده می‌شوند (یک helper تبدیل عدد به کلمات فارسی برای مبالغ ریالی با مقیاس «میلیارد/میلیون» پیاده‌سازی شود ★).
 
-## 8. Evaluation and acceptance
-- `AiEvalCase` set (Persian questions + expected tools + expected facts) seeded with ≥ 60 cases ★ derived from the smoke-test dataset; endpoint runs the set against the configured model and reports pass rate, numeric-check failures, latency p50/p95. Acceptance for go-live ★: ≥ 90 % pass, 0 unverified numbers shown, p95 latency ≤ 8 s text / ≤ 12 s voice.
+## 7. Claude gateway (وابسته به اینترنت، فقط مهندسی)
+- مؤلفه‌ی جداگانه‌ی `ClaudeGateway` با یک outbox: درخواست‌های صندلی‌های مهندسی در صف قرار می‌گیرند؛ وقتی اینترنت قطع است منتظر می‌مانند (وضعیت قابل‌مشاهده)؛ هرگز توسط صندلی‌های بحرانی استفاده نمی‌شود. کلید API فقط در پیکربندی سرور ذخیره می‌شود (هرگز در پایگاه داده یا لاگ‌ها). طراحی تفصیلی صندلی‌ها منتظر ماژول مهندسی می‌ماند (تیم Claude کاربر آن را تعریف خواهد کرد).
 
-## 9. Implementation for release A1 (code)
-- Entities: `AiModelEndpoint` (name, kind {Chat, Embeddings, Stt, Tts}, url, model name, priority, enabled, timeout, last health), `AiPromptVersion`, `AiConversation`, `AiMessage`, `AiToolCallLog`, `AiAuditEvent` (append-only), `AiSeat`, `AiSeatRun`, `AiDocumentChunk` (source type/id/revision, text, embedding bytes, model), `AiEvalCase`, `AiEvalRun`.
-- Services: `ILlmClient` (OpenAI chat-completions with tools; JSON tool-call parsing; failover by priority), `IToolRegistry`, `IAnswerVerifier` (numeric check), `IAiChatService`, `ISeatScheduler` (hosted service), `ISpeechToText`/`ITextToSpeech` HTTP adapters, `IRetrievalService`, `IPersianNumberWords`.
-- Admin endpoints (role PMO ★ + CEO read): endpoints health, seats enable/disable/run now, prompt versions (new version, activate), eval run, audit query.
-- CI: a **mock LLM** (small ASP.NET minimal app or Python script started in the smoke job) implementing `/v1/chat/completions` with deterministic scripted behaviour (keyword → tool call → answer that quotes tool numbers; one script that invents a number to prove the verifier blocks it), `/v1/embeddings` (hash-based vectors), STT mock (returns fixed transcript) and TTS mock (returns a tiny WAV). Smoke tests: chat answer uses the CEO dashboard tool and cites; unverified number replaced; tool respects roles (warehouse user cannot get finance tool results → tool returns forbidden and the answer says so); failover to the fallback endpoint when primary is down; WH-REORDER seat run creates draft PRs only (status Draft) and is idempotent on a second run; audit rows written; voice endpoint round-trip with mocks; eval run reports pass rate on mock.
-- Migration name `LocalAi`.
+## 8. ارزیابی و پذیرش
+- مجموعه‌ی `AiEvalCase` (پرسش‌های فارسی + ابزارهای مورد انتظار + واقعیت‌های مورد انتظار) با ≥ 60 مورد ★ مشتق از مجموعه‌داده‌ی smoke-test بذر می‌شود؛ endpoint مجموعه را روی مدل پیکربندی‌شده اجرا می‌کند و نرخ قبولی، شکست‌های بررسی عددی، تأخیر p50/p95 را گزارش می‌دهد. پذیرش برای go-live ★: ≥ 90 % قبولی، 0 عدد راستی‌آزمایی‌نشده‌ی نمایش‌داده‌شده، تأخیر p95 ≤ 8 ثانیه متنی / ≤ 12 ثانیه صوتی.
+
+## 9. پیاده‌سازی برای انتشار A1 (کد)
+- موجودیت‌ها: `AiModelEndpoint` (name, kind {Chat, Embeddings, Stt, Tts}, url, model name, priority, enabled, timeout, last health)، `AiPromptVersion`، `AiConversation`، `AiMessage`، `AiToolCallLog`، `AiAuditEvent` (فقط‌افزودنی)، `AiSeat`، `AiSeatRun`، `AiDocumentChunk` (source type/id/revision, text, embedding bytes, model)، `AiEvalCase`، `AiEvalRun`.
+- سرویس‌ها: `ILlmClient` (chat-completions سازگار با OpenAI با ابزارها؛ تجزیه‌ی JSON فراخوانی ابزار؛ failover بر اساس اولویت)، `IToolRegistry`، `IAnswerVerifier` (بررسی عددی)، `IAiChatService`، `ISeatScheduler` (hosted service)، آداپتورهای HTTP برای `ISpeechToText`/`ITextToSpeech`، `IRetrievalService`، `IPersianNumberWords`.
+- endpointهای مدیریتی (نقش PMO ★ + خواندن برای CEO): سلامت endpointها، فعال/غیرفعال کردن صندلی‌ها / اجرای همین‌حالا، نسخه‌های prompt (نسخه‌ی جدید، فعال‌سازی)، اجرای ارزیابی، پرس‌وجوی ممیزی.
+- CI: یک **mock LLM** (برنامه‌ی کوچک minimal ASP.NET یا اسکریپت Python که در job مربوط به smoke راه‌اندازی می‌شود) که `/v1/chat/completions` را با رفتار اسکریپت‌شده‌ی قطعی پیاده‌سازی می‌کند (کلیدواژه → فراخوانی ابزار → پاسخی که اعداد ابزار را نقل می‌کند؛ یک اسکریپت که یک عدد را جعل می‌کند تا ثابت شود verifier آن را مسدود می‌کند)، `/v1/embeddings` (بردارهای مبتنی بر هش)، mock مربوط به STT (یک transcript ثابت برمی‌گرداند) و mock مربوط به TTS (یک WAV کوچک برمی‌گرداند). تست‌های smoke: پاسخ chat از ابزار داشبورد مدیرعامل استفاده می‌کند و ارجاع می‌دهد؛ عدد راستی‌آزمایی‌نشده جایگزین می‌شود؛ ابزار به نقش‌ها احترام می‌گذارد (کاربر انبار نمی‌تواند نتایج ابزار مالی را بگیرد → ابزار forbidden برمی‌گرداند و پاسخ همین را می‌گوید)؛ failover به endpoint پشتیبان هنگام از کار افتادن primary؛ اجرای صندلی WH-REORDER فقط پیش‌نویس درخواست خرید می‌سازد (وضعیت Draft) و در اجرای دوم idempotent است؛ سطرهای ممیزی نوشته می‌شوند؛ رفت‌وبرگشت endpoint صوتی با mockها؛ اجرای ارزیابی نرخ قبولی را روی mock گزارش می‌کند.
+- نام migration: `LocalAi`.

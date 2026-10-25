@@ -1,98 +1,100 @@
-# Independent review 3 of finance R2 + F3b + scope flags (commit 95bbfe6) — findings to fix (milestone R3)
+ترجمه فارسی سند اصلی (1405/08/03)؛ شناسه‌ها و کد به همان صورت انگلیسی مانده‌اند.
 
-Reviewer: independent (read-only, no build). Paths relative to src/Services/NasbNiro/Finance/ unless shown. Rial-only / one-entity scope respected: FX and intercompany logic itself not reviewed. Every fix needs a smoke check that FAILS on the old behaviour with exact numbers. Persian calendar only. Migration as needed (FinanceReviewFixes3).
+# بازبینی مستقل 3 از R2 + F3b + پرچم‌های دامنه (کامیت 95bbfe6) — یافته‌هایی که باید اصلاح شوند (milestone R3)
 
-## Status of review-2 findings (non-FX)
+بازبین: مستقل (فقط خواندنی، بدون build). مسیرها نسبت به src/Services/NasbNiro/Finance/ هستند مگر آنکه چیز دیگری نشان داده شود. دامنه فقط ریال / یک شخصیت حقوقی رعایت شده است: خود منطق ارز و تهاتر بین شرکتی بازبینی نشد. هر اصلاح یک smoke check لازم دارد که روی رفتار قدیمی با اعداد دقیق شکست بخورد. فقط تقویم شمسی. مایگریشن در صورت نیاز (FinanceReviewFixes3).
 
-| # | Status | Note |
+## وضعیت یافته‌های بازبینی 2 (غیرارزی)
+
+| # | وضعیت | یادداشت |
 |---|---|---|
-| 1 | Fixed in code, smoke missing | Bad debt reads all years incl. closing+opening (GlService.Collections.cs:82). True-up (GlService.Deferrals.cs:298) also counts Draft vouchers — align with bad debt (exclude drafts). No smoke across a year close. |
-| 3 | Partly | Returns fixed and tested. Cancelled production receipts still break `TransferredOut` (new H4). |
-| 4 | Partly | Cost side added (GlService.Costing.cs:485-509) but PoC work orders are now costed twice (C1) and absorbed overhead never reaches PoC cost of sales (C1). Smoke checks revenue only, not 70101/10520. |
-| 5 | Fixed, with a reversal gap | Relief on delivery works and is tested (smoke 2684-2710). Cancelling the delivery does not restore the counters (H3). |
-| 6 | Partly | Initiator recorded and excluded from finalising (smoke ok). Loan disbursement and instalments, LC margin/fee/pay and guarantee fees still credit the bank directly from a Checked auto voucher (counts in bank balances immediately) instead of the treasury approval flow. Reopen of a close-out (GlService.Costing.cs:384) still has creator 0. |
-| 8 | Verified-fixed | No renumbering; opening voucher number 1 only when the year has no finals; one SaveChanges; audit row (GlService.cs:262-286). |
-| 9 | Verified-fixed (no smoke) | LinkDetailsAsync + DetailResolver uses LinkedEntityId; comparison maps through FnDetailSepidarMap. Add the smoke from review 2. |
-| 10 | Partly | Gate on PR and PO approval (ProcurementService.cs:310,839) with open commitments; not on payment approval. GateAsync fails OPEN if CheckAsync returns an error (GlService.Budget.cs:363). |
-| 11 | Verified-fixed | Closed periods only; dimensions from line fields (SepidarFullExportService.cs:194,217-253). |
-| 12 | Verified-fixed | Only Paid advances (PayablesService.cs:345); smoke r2 f12. |
-| 13 | Verified-fixed (no new smoke) | Settlement uses the GRNI role (TreasuryService.Bank.cs:155); reconciliation excludes drafts (LedgerReportService.cs:416). |
-| 14 | Fixed in code, smoke partial | Instalment expenses only the unaccrued part. Current-portion run has a tracker bug (M1). No smoke on 80202 total after accrual + instalment. |
-| 15 | Verified-fixed | Only Final originals (GlService.Deferrals.cs:177). |
-| 16 | Verified-fixed | Unique indexes (CompletenessConfigurationsM2.cs:126,136,161). F3b runs lack them (M9). |
-| 18 | Verified-fixed | Warning returned; smoke r2 f18. |
-| 19 | Verified-fixed | Codes on purchase rows, carry across years, sign validation (GlService.TaxCompleteness.cs:62-80, 98-99). |
-| 20 | Verified-fixed | CSV/Excel/audit/file names Persian; smoke r2 f20. |
-| 21 | Partly | FnPaymentLine (PayeeIban, amount), FnLoanInstallment and all F3b records (FnInsuranceClearance, FnBankGuarantee, FnSupplierNote, FnTermination, FnBonusRun, FnRetentionRelease) are not in DataLayer/Context/FinanceAuditTrail.cs:21-61. "CEO grants AUDITOR per period" not built (state it). |
-| 22 | Verified-fixed | Cash-flow "Other" + exact sections, VAT carry exact, loan accrual exact, close-out FG/returns. New vacuous F3b checks listed under V. |
-| 23 | Verified-fixed | Old path creates a draft treasury payment; BONUS vs ANNUAL_BONUS split; smoke r2 f23. |
+| 1 | در کد اصلاح شده، smoke ندارد | ذخیره مطالبات مشکوک‌الوصول همه سال‌ها شامل بستن+افتتاحیه را می‌خواند (GlService.Collections.cs:82). تعدیل (true-up) (GlService.Deferrals.cs:298) هم اسناد Draft را می‌شمارد — با ذخیره مطالبات مشکوک‌الوصول هماهنگ شود (پیش‌نویس‌ها کنار گذاشته شوند). smoke در عبور از بستن سال نیست. |
+| 3 | بخشی | برگشت‌ها اصلاح و تست شده‌اند. رسیدهای تولید ابطال‌شده هنوز `TransferredOut` را می‌شکنند (H4 جدید). |
+| 4 | بخشی | سمت هزینه اضافه شد (GlService.Costing.cs:485-509) ولی دستورکارهای PoC اکنون دوبار هزینه می‌شوند (C1) و سربار جذب‌شده هرگز به بهای تمام‌شده فروش PoC نمی‌رسد (C1). smoke فقط درآمد را چک می‌کند، نه 70101/10520. |
+| 5 | اصلاح شده، با شکاف برگشت | تخلیه در تحویل کار می‌کند و تست شده است (smoke 2684-2710). ابطال تحویل شمارنده‌ها را بازنمی‌گرداند (H3). |
+| 6 | بخشی | آغازکننده ثبت و از قطعی‌سازی کنار گذاشته می‌شود (smoke درست). پرداخت و اقساط وام، حاشیه/کارمزد/پرداخت LC و کارمزد ضمانت‌نامه هنوز از یک سند خودکار Checked مستقیماً بانک را بستانکار می‌کنند (فوراً در مانده بانک می‌آید) به‌جای مسیر تأیید خزانه‌داری. بازگشایی بستن پرونده (GlService.Costing.cs:384) هنوز ایجادکننده 0 دارد. |
+| 8 | اصلاح تأییدشده | بدون شماره‌گذاری مجدد؛ شماره سند افتتاحیه 1 فقط وقتی سال سند قطعی ندارد؛ یک SaveChanges؛ سطر ممیزی (GlService.cs:262-286). |
+| 9 | اصلاح تأییدشده (بدون smoke) | LinkDetailsAsync + DetailResolver از LinkedEntityId استفاده می‌کند؛ مقایسه از طریق FnDetailSepidarMap نگاشت می‌شود. smoke بازبینی 2 را اضافه کنید. |
+| 10 | بخشی | دروازه روی تأیید PR و PO (ProcurementService.cs:310,839) با تعهدات باز؛ روی تأیید پرداخت نیست. GateAsync اگر CheckAsync خطا برگرداند باز می‌ماند (fails OPEN) (GlService.Budget.cs:363). |
+| 11 | اصلاح تأییدشده | فقط دوره‌های Closed؛ ابعاد از فیلدهای سطر (SepidarFullExportService.cs:194,217-253). |
+| 12 | اصلاح تأییدشده | فقط پیش‌پرداخت‌های Paid (PayablesService.cs:345)؛ smoke r2 f12. |
+| 13 | اصلاح تأییدشده (بدون smoke جدید) | تسویه از نقش GRNI استفاده می‌کند (TreasuryService.Bank.cs:155)؛ مغایرت‌گیری پیش‌نویس‌ها را کنار می‌گذارد (LedgerReportService.cs:416). |
+| 14 | در کد اصلاح شده، smoke بخشی | قسط فقط بخش انباشته‌نشده را هزینه می‌کند. اجرای حصه جاری باگ ردیاب دارد (M1). smoke روی مجموع 80202 پس از تعهد + قسط نیست. |
+| 15 | اصلاح تأییدشده | فقط اسناد اصلی Final (GlService.Deferrals.cs:177). |
+| 16 | اصلاح تأییدشده | ایندکس‌های یکتا (CompletenessConfigurationsM2.cs:126,136,161). اجراهای F3b آن‌ها را ندارند (M9). |
+| 18 | اصلاح تأییدشده | هشدار برمی‌گردد؛ smoke r2 f18. |
+| 19 | اصلاح تأییدشده | کدها روی سطرهای خرید، انتقال بین سال‌ها، اعتبارسنجی علامت (GlService.TaxCompleteness.cs:62-80, 98-99). |
+| 20 | اصلاح تأییدشده | CSV/Excel/ممیزی/نام فایل‌ها شمسی؛ smoke r2 f20. |
+| 21 | بخشی | FnPaymentLine (PayeeIban، مبلغ)، FnLoanInstallment و همه رکوردهای F3b (FnInsuranceClearance، FnBankGuarantee، FnSupplierNote، FnTermination، FnBonusRun، FnRetentionRelease) در DataLayer/Context/FinanceAuditTrail.cs:21-61 نیستند. «CEO در هر دوره AUDITOR را مجاز می‌کند» ساخته نشده (بیان کنید). |
+| 22 | اصلاح تأییدشده | «Other» جریان نقد + بخش‌های دقیق، انتقال مازاد VAT دقیق، انباشت بهره وام دقیق، FG/برگشت‌های بستن پرونده. چک‌های توخالی جدید F3b زیر V فهرست شده‌اند. |
+| 23 | اصلاح تأییدشده | مسیر قدیمی یک پرداخت پیش‌نویس خزانه می‌سازد؛ تفکیک BONUS و ANNUAL_BONUS؛ smoke r2 f23. |
 
-## Scope flags (Finance:MultiEntity / Finance:ForeignCurrency)
-Blocked correctly: currency/rate save, revaluation, FX settle, non-IRR LC/loan/bank, currency fields on any voucher line (manual, mass import, templates, Sepidar migration all go through BuildLinesAsync, GlService.cs:556), treasury currency amounts (TreasuryService.cs:541), new legal entity, pairs, intercompany. Rial paths not broken (smoke "scope:" block). Two holes — see H7 and M2.
+## پرچم‌های دامنه (Finance:MultiEntity / Finance:ForeignCurrency)
+درست مسدود شده‌اند: ذخیره ارز/نرخ، تسعیر، FX settle، LC/وام/بانک غیر IRR، فیلدهای ارزی روی هر سطر سند (دستی، واردسازی انبوه، قالب‌ها، مهاجرت سپیدار همگی از BuildLinesAsync عبور می‌کنند، GlService.cs:556)، مبالغ ارزی خزانه‌داری (TreasuryService.cs:541)، شخصیت حقوقی جدید، جفت‌ها، تهاتر بین شرکتی. مسیرهای ریالی نشکسته‌اند (بلوک «scope:» در smoke). دو حفره — به H7 و M2 نگاه کنید.
 
-## Critical
+## بحرانی
 
-C1. **Percentage-of-completion work orders are expensed twice.** The PoC run credits WIP with ContractId only (GlService.Costing.cs:508); `BuildCostAsync` reads the WIP balance by WorkOrderId (GlService.Costing.cs:290) so it still sees the cost, and CloseWorkOrderAsync (no PoC check) moves it to 10503; CustomerDelivery then relieves 10503 to 70101 (CostingService.cs:361-381). Example: WO of PoC contract C, material 100 into WIP (WO+C). PoC run: Dr 70101 100 / Cr 10520 100. Close-out: Dr 10503 100 / Cr 10520 100. Delivery: Dr 70101 100 / Cr 10503 100. Cost of sales 200, WIP −100. Second defect in the same path: overhead absorption lines carry WorkOrderId but no ContractId (GlService.Costing.cs:246), so absorbed overhead (e.g. 30) never leaves WIP in the PoC run: margin overstated by 30 and WIP keeps 30 forever.
-FIX: a WO whose contract is PoC is not closed to finished goods (refuse close-out; on delivery no FG relief) — or the PoC run credits WIP per work order (WorkOrderId + ContractId) so the WO balance is zero. Derive ContractId from the work order on every auto line that has WorkOrderId (AddAutoVoucherAsync), as EventPostingService.cs:188 does.
-SMOKE: PoC contract with one WO: issue 100, absorb overhead 30; PoC run at 50% → 70101 +130 exactly, 10520 for the contract 0; close-out of that WO refused (or posts 0); delivery → 70101 still +130.
+C1. **سفارش‌های کار درصد پیشرفت (PoC) دوبار هزینه می‌شوند.** اجرای PoC فقط با ContractId، WIP را بستانکار می‌کند (GlService.Costing.cs:508)؛ `BuildCostAsync` مانده WIP را به تفکیک WorkOrderId می‌خواند (GlService.Costing.cs:290) پس هنوز هزینه را می‌بیند، و CloseWorkOrderAsync (بدون بررسی PoC) آن را به 10503 منتقل می‌کند؛ سپس CustomerDelivery، 10503 را به 70101 تخلیه می‌کند (CostingService.cs:361-381). مثال: WO از قرارداد PoC به نام C، مواد 100 به WIP (WO+C). اجرای PoC: بدهکار 70101 100 / بستانکار 10520 100. بستن: بدهکار 10503 100 / بستانکار 10520 100. تحویل: بدهکار 70101 100 / بستانکار 10503 100. بهای تمام‌شده فروش 200، WIP −100. نقص دوم در همان مسیر: سطرهای جذب سربار WorkOrderId دارند ولی ContractId ندارند (GlService.Costing.cs:246)، پس سربار جذب‌شده (مثلاً 30) هرگز در اجرای PoC از WIP خارج نمی‌شود: حاشیه سود 30 بیش‌ازحد و WIP برای همیشه 30 می‌ماند.
+اصلاح: WO‌ای که قراردادش PoC است به کالای ساخته‌شده بسته نشود (بستن رد شود؛ در تحویل تخلیه FG نباشد) — یا اجرای PoC، WIP را به ازای هر دستور کار (WorkOrderId + ContractId) بستانکار کند تا مانده WO صفر شود. ContractId را از دستور کار برای هر سطر خودکاری که WorkOrderId دارد مشتق کنید (AddAutoVoucherAsync)، همان‌طور که EventPostingService.cs:188 انجام می‌دهد.
+SMOKE: قرارداد PoC با یک WO: حواله 100، جذب سربار 30؛ اجرای PoC در 50% → 70101 دقیقاً +130، 10520 قرارداد 0؛ بستن آن WO رد شود (یا 0 ثبت کند)؛ تحویل → 70101 همچنان +130.
 
-## High
+## زیاد
 
-H1. **Supplier credit notes do not reduce what may be paid.** Invoice payment limit is `invoice.TotalAmount` (Procurement/PayablesService.cs:341); posted FnSupplierNote is ignored. Invoice 1,100,000 (1,000,000+VAT), credit note 220,000 → ledger payable 880,000, payment request for 1,100,000 accepted and paid → supplier owes us 220,000 by mistake.
-FIX: limit = TotalAmount − posted credit notes + posted debit notes on that invoice − earlier requests.
-SMOKE: after the credit note, a request for 1,100,000 is refused; 880,000 accepted.
+H1. **یادداشت‌های بستانکار تامین‌کننده مبلغ قابل پرداخت را کم نمی‌کنند.** سقف پرداخت فاکتور `invoice.TotalAmount` است (Procurement/PayablesService.cs:341)؛ FnSupplierNote ثبت‌شده نادیده گرفته می‌شود. فاکتور 1,100,000 (1,000,000+VAT)، یادداشت بستانکار 220,000 → پرداختنی دفتر 880,000، درخواست پرداخت 1,100,000 پذیرفته و پرداخت می‌شود → تامین‌کننده به‌اشتباه 220,000 به ما بدهکار می‌شود.
+اصلاح: سقف = TotalAmount − یادداشت‌های بستانکار ثبت‌شده + یادداشت‌های بدهکار ثبت‌شده روی آن فاکتور − درخواست‌های قبلی.
+SMOKE: پس از یادداشت بستانکار، درخواست 1,100,000 رد می‌شود؛ 880,000 پذیرفته می‌شود.
 
-H2. **AP and bank reconciliations (and so the year-close gate) are broken by F3/F3b postings.** AP sub-ledger = approved invoices − paid requests (LedgerReportService.cs:442-446): supplier notes (Dr/Cr 30101) and retention releases (Cr 30101, GlService.F3b.Clearance.cs:126) are missing. Bank sub-ledger = posted events with PartyType BankAccount (LedgerReportService.cs:465): loan disbursement/instalments, LC margin/fee/pay, guarantee fees are direct auto vouchers, not events. Example: rial loan of 3,000,000 disbursed → bank ledger +3,000,000, sub-ledger 0 → difference 3,000,000; CloseYearAsync then needs an override, which also hides real differences.
-FIX: AP sub-ledger adds posted supplier notes and retention releases (or compare to the per-document open items); bank sub-ledger includes the bank lines of these auto vouchers (or tag them PartyType/PartyId via a source list).
-SMOKE: after the existing loan, LC, guarantee, credit-note and retention-release tests, reconciliation rows `ap` and `bank` are Ok with Difference 0.
+H2. **مغایرت‌گیری AP و بانک (و در نتیجه دروازه بستن سال) با ثبت‌های F3/F3b خراب می‌شود.** زیرحساب AP = فاکتورهای تأییدشده − درخواست‌های پرداخت‌شده (LedgerReportService.cs:442-446): یادداشت‌های تامین‌کننده (بدهکار/بستانکار 30101) و آزادسازی حسن انجام کار (بستانکار 30101، GlService.F3b.Clearance.cs:126) نیستند. زیرحساب بانک = رویدادهای ثبت‌شده با PartyType BankAccount (LedgerReportService.cs:465): پرداخت/اقساط وام، حاشیه/کارمزد/پرداخت LC، کارمزد ضمانت‌نامه اسناد خودکار مستقیم هستند، نه رویداد. مثال: وام ریالی 3,000,000 پرداخت‌شده → دفتر بانک +3,000,000، زیرحساب 0 → اختلاف 3,000,000؛ سپس CloseYearAsync به override نیاز دارد که اختلاف‌های واقعی را هم پنهان می‌کند.
+اصلاح: زیرحساب AP یادداشت‌ها و آزادسازی‌های حسن انجام کار ثبت‌شده را اضافه کند (یا با اقلام باز هر سند مقایسه شود)؛ زیرحساب بانک سطرهای بانکی این اسناد خودکار را شامل شود (یا با فهرست مبدأ PartyType/PartyId برچسب بخورند).
+SMOKE: پس از تست‌های موجود وام، LC، ضمانت‌نامه، یادداشت بستانکار و آزادسازی حسن انجام کار، سطرهای مغایرت `ap` و `bank` برابر Ok با Difference 0 هستند.
 
-H3. **Cancelling a delivery of a closed job loses the FG relief.** ReverseDocumentAsync (CostingService.cs:468-523) reverses the event but never decrements `DeliveredQuantity` / `RelievedAmount` (set at CostingService.cs:379-380). Close 2 units, FG 1,000; deliver 1 (relief 500); cancel (GL back: 10503 = 1,000); deliver 2 units again → take = min(2, 1) = 1, relief 500; 500 stays in 10503 forever, cost of sales short 500; reconciliation `closeOutHeld` = 0 while 10503 holds 500; reopen blocked (GlService.Costing.cs:376) though nothing is delivered. Same when the delivery event is Pending and becomes NotRequired.
-FIX: store relief per delivery (document id, qty, amount); the reversal subtracts them.
-SMOKE: close 2 / FG 1,000, deliver 1, cancel, deliver 2 → 10503 back to its start and 70101 +1,000 exactly.
+H3. **ابطال تحویل پرونده بسته‌شده تخلیه FG را از دست می‌دهد.** ReverseDocumentAsync (CostingService.cs:468-523) رویداد را برمی‌گرداند ولی `DeliveredQuantity` / `RelievedAmount` را کم نمی‌کند (در CostingService.cs:379-380 تنظیم می‌شوند). 2 واحد بسته شد، FG 1,000؛ 1 تحویل (تخلیه 500)؛ ابطال (دفتر برمی‌گردد: 10503 = 1,000)؛ دوباره 2 واحد تحویل → take = min(2, 1) = 1، تخلیه 500؛ 500 برای همیشه در 10503 می‌ماند، بهای تمام‌شده فروش 500 کم است؛ مغایرت `closeOutHeld` = 0 در حالی‌که 10503 مبلغ 500 دارد؛ بازگشایی مسدود است (GlService.Costing.cs:376) با اینکه چیزی تحویل نشده است. همین‌طور وقتی رویداد تحویل Pending است و NotRequired می‌شود.
+اصلاح: تخلیه را به ازای هر تحویل ذخیره کنید (شناسه سند، تعداد، مبلغ)؛ برگشت آن‌ها را کم کند.
+SMOKE: بستن 2 / FG 1,000، تحویل 1، ابطال، تحویل 2 → 10503 به مقدار اولیه برگردد و 70101 دقیقاً +1,000.
 
-H4. **Cancelled production receipt still counts as transferred.** `transferred` takes only vouchers of ProductionReceipt events or WorkOrderClose (GlService.Costing.cs:293-296); the reversal of a cancelled receipt is a Reversal event and is left out. Sheet 180 (material 100, labour 50, overhead 30), receipt 60 posted then cancelled: transferred = 60, FG = 120, false variance 60.
-FIX: include Reversal events whose ReversesEventId is a ProductionReceipt event.
-SMOKE: that scenario → FG 180, variance 0.
+H4. **رسید تولید ابطال‌شده هنوز منتقل‌شده شمرده می‌شود.** `transferred` فقط اسناد رویدادهای ProductionReceipt یا WorkOrderClose را می‌گیرد (GlService.Costing.cs:293-296)؛ برگشت رسید ابطال‌شده یک رویداد Reversal است و کنار گذاشته می‌شود. برگه 180 (مواد 100، دستمزد 50، سربار 30)، رسید 60 ثبت و سپس ابطال شد: transferred = 60، FG = 120، انحراف کاذب 60.
+اصلاح: رویدادهای Reversal که ReversesEventId آن‌ها رویداد ProductionReceipt است را شامل کنید.
+SMOKE: آن سناریو → FG 180، انحراف 0.
 
-H5. **F3b balances read only the current fiscal year, so before the previous year is closed they miss everything brought forward.** LedgerYearAsync + `FiscalYearId == year.Id` in ProvisionBalanceAsync (GlService.F3b.Payroll.cs:38), retention held (GlService.F3b.Clearance.cs:73), supplier statement (GlService.F3b.Purchasing.cs:199), customer confirmation (GlService.F3b.Purchasing.cs:332), payables note (GlService.F3b.Notes.cs:83). Iranian books are closed months after year end. Example: 40201 = 500,000,000 at end-1404, 1404 not closed yet; termination on 1405/02/10 with severance 81,000,000 and 1405 accruals 20,000,000 → only 20,000,000 from the provision, 61,000,000 expensed again (80103), provision overstated 61,000,000. A confirmation letter in 1405/02 shows the customer only 1405 movements.
-FIX: same rule as review-2 fix 1: all years of the entity up to the date, excluding drafts, including closing and opening vouchers (they cancel).
-SMOKE: post in year N, do not close N, act in N+1: provision used, retention held, confirmation and statement balances equal the cumulative balance.
+H5. **مانده‌های F3b فقط سال مالی جاری را می‌خوانند، پس پیش از بسته شدن سال قبل همه مانده‌های منتقل‌شده را از دست می‌دهند.** LedgerYearAsync + `FiscalYearId == year.Id` در ProvisionBalanceAsync (GlService.F3b.Payroll.cs:38)، نگهداری حسن انجام کار (GlService.F3b.Clearance.cs:73)، صورت‌حساب تامین‌کننده (GlService.F3b.Purchasing.cs:199)، تأییدیه مشتری (GlService.F3b.Purchasing.cs:332)، یادداشت پرداختنی‌ها (GlService.F3b.Notes.cs:83). دفاتر ایران ماه‌ها پس از پایان سال بسته می‌شوند. مثال: 40201 = 500,000,000 در پایان 1404، سال 1404 هنوز بسته نشده؛ تسویه پایان خدمت در 1405/02/10 با سنوات 81,000,000 و تعهدات 1405 به مبلغ 20,000,000 → فقط 20,000,000 از ذخیره می‌آید، 61,000,000 دوباره هزینه می‌شود (80103)، ذخیره 61,000,000 بیش‌ازحد می‌ماند. نامه تأییدیه در 1405/02 فقط حرکات 1405 را به مشتری نشان می‌دهد.
+اصلاح: همان قاعده اصلاح 1 بازبینی 2: همه سال‌های شخصیت حقوقی تا تاریخ، بدون پیش‌نویس‌ها، شامل اسناد بستن و افتتاحیه (یکدیگر را خنثی می‌کنند).
+SMOKE: ثبت در سال N، بستن N انجام نشود، عمل در N+1: ذخیره مصرف شود، نگهداری، مانده‌های تأییدیه و صورت‌حساب برابر مانده تجمعی باشند.
 
-H6. **Bonus (عیدی) and termination net pay have no payment path.** Both credit 30201 (GlService.F3b.Payroll.cs:192, 339) but FnPaymentPurpose has only Supplier/PettyCash/Payroll-run/EmployeeLoan (Entities/Model/NasbNiro/Finance/LedgerEntities.cs:369) and the payroll purpose requires `TotalNet == run.TotalNet` (TreasuryService.cs:651). 30201 never clears, or is cleared by a manual voucher outside treasury/IBAN controls.
-FIX: payment purposes BonusRun and Termination (amount = net, per-employee IBAN transfer file, same approve→post flow).
-SMOKE: pay the bonus run 101,900,000 through treasury → 30201 back to its start.
+H6. **عیدی (عیدی) و خالص تسویه پایان خدمت مسیر پرداخت ندارند.** هر دو 30201 را بستانکار می‌کنند (GlService.F3b.Payroll.cs:192, 339) ولی FnPaymentPurpose فقط Supplier/PettyCash/Payroll-run/EmployeeLoan دارد (Entities/Model/NasbNiro/Finance/LedgerEntities.cs:369) و هدف حقوق و دستمزد `TotalNet == run.TotalNet` را می‌خواهد (TreasuryService.cs:651). 30201 هرگز تسویه نمی‌شود، یا با سند دستی خارج از کنترل‌های خزانه‌داری/IBAN تسویه می‌شود.
+اصلاح: اهداف پرداخت BonusRun و Termination (مبلغ = خالص، فایل انتقال IBAN به ازای هر کارمند، همان جریان تأیید←ثبت).
+SMOKE: اجرای عیدی 101,900,000 از خزانه‌داری پرداخت شود → 30201 به مقدار اولیه برگردد.
 
-H7. **Rial LC payment still multiplies by a typed rate** (GlService.Fx.cs:457-460). Rial LC 200,000,000, rate 1.1 entered → Dr 30101 220,000,000 / Cr bank 220,000,000: 20,000,000 overpaid, no difference booked (carryBase = settled).
-FIX: when the LC currency is IRR (always, while ForeignCurrency is off) ignore/refuse any rate ≠ 1; settled = Amount.
-SMOKE: rial LC pay with rate 1.1 refused (or posts exactly 200,000,000).
+H7. **پرداخت LC ریالی هنوز در نرخ تایپی ضرب می‌شود** (GlService.Fx.cs:457-460). LC ریالی 200,000,000، نرخ 1.1 وارد شده → بدهکار 30101 220,000,000 / بستانکار بانک 220,000,000: 20,000,000 بیش‌ازحد پرداخت شده، تفاوتی ثبت نمی‌شود (carryBase = settled).
+اصلاح: وقتی ارز LC برابر IRR است (همیشه، تا زمانی که ForeignCurrency خاموش است) هر نرخ ≠ 1 را نادیده بگیرید/رد کنید؛ settled = Amount.
+SMOKE: پرداخت LC ریالی با نرخ 1.1 رد شود (یا دقیقاً 200,000,000 ثبت کند).
 
-H8. **Annual bonus can be paid twice and is not capped.** (a) ANNUAL_BONUS payroll item (F2Seed.cs:87, Dr 30402) and the bonus run (GlService.F3b.Payroll.cs:313-347) can both pay the same year; no cross-check. (b) Statutory (verify with finance): the labour law caps عیدی at 90 days of minimum wage; the code uses `CapDays × MinimumDailyWage` only as the tax threshold and never caps the gross (GlService.F3b.Payroll.cs:239-243); the tax exemption for عیدی is a separate figure (1/12 of the annual salary exemption). Daily wage 10,000,000, cap 311,700,000: gross 600,000,000 paid instead of 311,700,000. Smoke "f3b bonus: gross 66,000,000 ... above 45,000,000 is taxed" fixes the current interpretation in place.
-FIX: refuse the bonus run for employees with an ANNUAL_BONUS line in a posted run of that year (and vice versa); separate rate keys for the gross cap and the tax exemption, both prorated by days employed.
-SMOKE: exact gross at the cap; double payment refused both ways.
+H8. **عیدی سالانه می‌تواند دوبار پرداخت شود و سقف ندارد.** (الف) قلم حقوقی ANNUAL_BONUS (F2Seed.cs:87، بدهکار 30402) و اجرای عیدی (GlService.F3b.Payroll.cs:313-347) هر دو می‌توانند همان سال را پرداخت کنند؛ بررسی متقابل ندارند. (ب) قانونی (با مالی تأیید شود): قانون کار سقف عیدی را 90 روز حداقل مزد می‌داند؛ کد `CapDays × MinimumDailyWage` را فقط به‌عنوان آستانه مالیات به کار می‌برد و ناخالص را هرگز سقف نمی‌زند (GlService.F3b.Payroll.cs:239-243)؛ معافیت مالیاتی عیدی عدد جداگانه‌ای است (1/12 معافیت سالانه حقوق). مزد روزانه 10,000,000، سقف 311,700,000: ناخالص 600,000,000 پرداخت می‌شود به‌جای 311,700,000. Smoke «f3b bonus: gross 66,000,000 ... above 45,000,000 is taxed» برداشت فعلی را ثابت می‌کند.
+اصلاح: اجرای عیدی را برای کارمندانی که در اجرای ثبت‌شده همان سال خط ANNUAL_BONUS دارند رد کنید (و برعکس)؛ کلیدهای نرخ جداگانه برای سقف ناخالص و معافیت مالیاتی، هر دو به نسبت روزهای اشتغال.
+SMOKE: ناخالص دقیق در سقف؛ پرداخت مضاعف در هر دو جهت رد شود.
 
-H9. **Comparative inventory note shows the prior year as zero once it is closed.** InventoryByGroupAsync (GlService.F3b.Notes.cs:110) does not exclude the Closing voucher dated the prior year end. 10501 = 500,000,000 at end-1404 (closed) → prior column 0.
-FIX: exclude FnVoucherType.Closing (and YearEndTemporaryClose) as the payables note does.
-SMOKE: close a year with inventory, notes of the next year show the exact prior balance.
+H9. **یادداشت مقایسه‌ای موجودی، سال قبل را وقتی بسته شده صفر نشان می‌دهد.** InventoryByGroupAsync (GlService.F3b.Notes.cs:110) سند Closing با تاریخ پایان سال قبل را کنار نمی‌گذارد. 10501 = 500,000,000 در پایان 1404 (بسته‌شده) → ستون قبل 0.
+اصلاح: FnVoucherType.Closing (و YearEndTemporaryClose) را همان‌طور که یادداشت پرداختنی‌ها انجام می‌دهد کنار بگذارید.
+SMOKE: سالی با موجودی ببندید، یادداشت‌های سال بعد مانده دقیق سال قبل را نشان دهند.
 
-## Medium
+## متوسط
 
-M1. Current-portion tracker is set on a DRAFT (GlService.Loans.cs:375); deleting the draft (allowed, Type Normal: GlService.cs:648) leaves `CurrentPortionReclassified` = due, so the next run posts nothing and 40101/30501 stay mis-split (e.g. 1,200,000 never reclassified). FIX: derive the reclassified amount from final/checked LoanCurrentPortion vouchers, or reset on delete. SMOKE: run, delete draft, run again → same draft amount.
-M2. Flag hole: with MultiEntity off the main entity can still change BaseCurrency/Jurisdiction while it has no vouchers (GlService.Entities.cs:36-63); with BaseCurrency "EUR" an IRR loan becomes "foreign" (GlService.Loans.cs:141-145) and posts currency lines and sets the account CurrencyAllowed — bypassing ForeignCurrency. FIX: while the flags are off, force IR / IRR on the main entity. SMOKE: saving the main entity with EUR is refused.
-M3. Insurance clearance gate is weak: DocumentId is any GUID, not checked against stored files (GlService.F3b.Clearance.cs:59); a clearance can be edited/revoked/back-dated after it was used for a release with no audit (not in the audit list); only the performance retention is gated — the 5% insurance retention (InsuranceRetentionPayable), which the Social Security Act ties to the clearance, can be released by any voucher; retention deductions carry no ContractId (TreasuryService.cs:607) so the per-contract status always shows 0 held. FIX: verify the file exists, lock a used clearance, audit it, gate the insurance retention too, carry ContractId on deduction lines. SMOKE: fake GUID → not valid; edit of a used clearance refused.
-M4. Termination: leave and notice pay go gross to 30201 (GlService.F3b.Payroll.cs:186-193); income tax and insurance on leave encashment are never booked (note text says "separately") → net payable overstated. FIX: compute tax/insurance on leave+notice (severance exempt) or require them as inputs; credit 30203/30202. SMOKE: exact tax line on a leave pay of 6,000,000.
-M5. Non-recoverable VAT: on a capital line it goes to price variance 70108 (PayablesService.cs:244-248), not into the asset cost; a supplier credit note on such an invoice credits input VAT 10403 that was never debited (GlService.F3b.Purchasing.cs:163) and lowers deductible VAT in the return (TaxService.cs:150-157). Invoice 1,000,000 + VAT 100,000 all non-recoverable, credit note 100,000 + 10,000 → 10403 −10,000 and return −10,000. FIX: capitalise on capital lines; credit note follows the original invoice's recoverable share. SMOKE: both numbers.
-M6. Payables ageing note treats the opening voucher as one invoice dated day 1 (GlService.F3b.Notes.cs:83-99): an invoice of 1404/09/01 shows as "Current" on 1405/01/15. Provisions note lists only FnProvision movements (GlService.F3b.Notes.cs:158), not 30402/30403/40201, 10309, 30404. FIX: age brought-forward items by their source date (carry the supplier open items) and build the provisions note from the ledger accounts.
-M7. Direct cash flow misclassifies mixed vouchers (GlService.F3b.CashFlow.cs:100-115): every non-cash line of a voucher that touches cash is taken as a cash counterpart. Payroll voucher Dr 80101 1,000 / Cr 30203 200 / Cr bank 800 → OperatingCosts −1,000 and Taxes +200 (a "receipt"). Totals still tie. FIX: allocate the cash amount only to the lines on the opposite side, proportionally, or classify by the voucher's source type.
-M8. Tax provision draft is created for the full amount on every run (GlService.TaxCompleteness.cs:137-150): two runs → two 500,000,000 drafts; both can be finalised. FIX: post the difference to the 30401 balance for the year; refuse while a draft exists.
-M9. Races without DB constraints: two concurrent bonus runs for one year, two terminations for one employee, two retention releases each seeing the full releasable amount (checks are AnyAsync/Sum only). FIX: filtered unique indexes (FnBonusRun.Year where not cancelled; FnTermination.EmployeeId where not cancelled) and a row lock / concurrency token on the retention status.
-M10. Payroll tax reconciliation: LedgerWithheld sums credits only and excludes Reversal vouchers (GlService.F3b.Payroll.cs:381-384); a reversed payroll run keeps its original credit → TiesToLedger false although both sides are right. FIX: net credits minus debits of reversal vouchers.
-M11. Commitment gate fails open (GlService.Budget.cs:363: `if (!r.Success) return (true, null)`); not called on payment approval. FIX: fail closed in Block mode; add the payment gate.
+M1. ردیاب حصه جاری روی یک پیش‌نویس تنظیم می‌شود (GlService.Loans.cs:375)؛ حذف پیش‌نویس (مجاز، نوع Normal: GlService.cs:648) باعث می‌شود `CurrentPortionReclassified` = due بماند، پس اجرای بعدی چیزی ثبت نمی‌کند و 40101/30501 غلط تقسیم می‌مانند (مثلاً 1,200,000 هرگز طبقه‌بندی مجدد نمی‌شود). اصلاح: مبلغ طبقه‌بندی‌شده را از اسناد LoanCurrentPortion قطعی/کنترل‌شده بخوانید، یا هنگام حذف بازنشانی کنید. SMOKE: اجرا، حذف پیش‌نویس، اجرای دوباره → همان مبلغ پیش‌نویس.
+M2. حفره پرچم: با MultiEntity خاموش، شخصیت حقوقی اصلی تا وقتی سند ندارد هنوز می‌تواند BaseCurrency/Jurisdiction را تغییر دهد (GlService.Entities.cs:36-63)؛ با BaseCurrency "EUR" یک وام IRR «ارزی» می‌شود (GlService.Loans.cs:141-145) و سطرهای ارزی ثبت می‌کند و CurrencyAllowed حساب را تنظیم می‌کند — ForeignCurrency را دور می‌زند. اصلاح: تا وقتی پرچم‌ها خاموش‌اند، IR / IRR را روی شخصیت حقوقی اصلی اجباری کنید. SMOKE: ذخیره شخصیت حقوقی اصلی با EUR رد شود.
+M3. دروازه مفاصاحساب بیمه ضعیف است: DocumentId هر GUIDی است، با فایل‌های ذخیره‌شده بررسی نمی‌شود (GlService.F3b.Clearance.cs:59)؛ مفاصاحساب پس از استفاده در آزادسازی بدون ممیزی قابل ویرایش/ابطال/عقب‌بردن تاریخ است (در فهرست ممیزی نیست)؛ فقط حسن انجام کار دروازه دارد — نگهداری 5% بیمه (InsuranceRetentionPayable) که قانون تامین اجتماعی آن را به مفاصاحساب گره می‌زند با هر سندی قابل آزادسازی است؛ کسورات نگهداری ContractId ندارند (TreasuryService.cs:607) پس وضعیت هر قرارداد همیشه 0 نگهداری‌شده نشان می‌دهد. اصلاح: وجود فایل را بررسی کنید، مفاصاحساب استفاده‌شده را قفل کنید، ممیزی کنید، نگهداری بیمه را هم دروازه‌دار کنید، ContractId را روی سطرهای کسر حمل کنید. SMOKE: GUID ساختگی → معتبر نیست؛ ویرایش مفاصاحساب استفاده‌شده رد شود.
+M4. تسویه پایان خدمت: مرخصی و اخطار به‌صورت ناخالص به 30201 می‌روند (GlService.F3b.Payroll.cs:186-193)؛ مالیات بر درآمد و بیمه روی نقدکردن مرخصی هرگز ثبت نمی‌شود (متن یادداشت می‌گوید «جداگانه») → خالص پرداختنی بیش‌ازحد نشان داده می‌شود. اصلاح: مالیات/بیمه روی مرخصی+اخطار محاسبه شود (سنوات معاف) یا به‌عنوان ورودی الزامی شود؛ 30203/30202 بستانکار شود. SMOKE: سطر مالیات دقیق روی پرداخت مرخصی 6,000,000.
+M5. مالیات بر ارزش افزوده غیرقابل‌استرداد: روی سطر سرمایه‌ای به اختلاف قیمت 70108 می‌رود (PayablesService.cs:244-248)، نه بهای دارایی؛ یادداشت بستانکار تامین‌کننده روی چنین فاکتوری 10403 را بستانکار می‌کند که هرگز بدهکار نشده بود (GlService.F3b.Purchasing.cs:163) و مالیات بر ارزش افزوده قابل‌کسر اظهارنامه را کم می‌کند (TaxService.cs:150-157). فاکتور 1,000,000 + VAT 100,000 همگی غیرقابل‌استرداد، یادداشت بستانکار 100,000 + 10,000 → 10403 برابر −10,000 و اظهارنامه −10,000. اصلاح: روی سطرهای سرمایه‌ای سرمایه‌ای شود؛ یادداشت بستانکار از سهم قابل‌استرداد فاکتور اصلی پیروی کند. SMOKE: هر دو عدد.
+M6. یادداشت سن پرداختنی‌ها سند افتتاحیه را یک فاکتور با تاریخ روز اول می‌گیرد (GlService.F3b.Notes.cs:83-99): فاکتور 1404/09/01 در 1405/01/15 «جاری» نشان داده می‌شود. یادداشت ذخایر فقط حرکات FnProvision را فهرست می‌کند (GlService.F3b.Notes.cs:158)، نه 30402/30403/40201، 10309، 30404. اصلاح: اقلام منتقل‌شده را با تاریخ مبدأ سن‌گذاری کنید (اقلام باز تامین‌کننده را حمل کنید) و یادداشت ذخایر را از حساب‌های دفتر بسازید.
+M7. جریان وجوه نقد روش مستقیم اسناد مختلط را غلط طبقه‌بندی می‌کند (GlService.F3b.CashFlow.cs:100-115): هر سطر غیرنقدی سندی که نقد را لمس می‌کند، طرف مقابل نقد گرفته می‌شود. سند حقوق بدهکار 80101 1,000 / بستانکار 30203 200 / بستانکار بانک 800 → OperatingCosts −1,000 و Taxes +200 (یک «دریافت»). جمع‌ها هنوز می‌خوانند. اصلاح: مبلغ نقد را به‌نسبت فقط به سطرهای طرف مقابل تخصیص دهید، یا بر اساس نوع مبدأ سند طبقه‌بندی کنید.
+M8. پیش‌نویس ذخیره مالیات در هر اجرا برای کل مبلغ ساخته می‌شود (GlService.TaxCompleteness.cs:137-150): دو اجرا → دو پیش‌نویس 500,000,000؛ هر دو قابل قطعی‌سازی‌اند. اصلاح: تفاوت را به مانده 30401 سال ثبت کنید؛ تا وقتی پیش‌نویس وجود دارد رد کنید.
+M9. رقابت‌ها بدون قید پایگاه داده: دو اجرای هم‌زمان عیدی برای یک سال، دو تسویه پایان خدمت برای یک کارمند، دو آزادسازی حسن انجام کار که هر کدام کل مبلغ قابل آزادسازی را می‌بینند (بررسی‌ها فقط AnyAsync/Sum هستند). اصلاح: ایندکس‌های یکتای فیلترشده (FnBonusRun.Year وقتی ابطال نشده؛ FnTermination.EmployeeId وقتی ابطال نشده) و قفل سطر / توکن همزمانی روی وضعیت نگهداری.
+M10. تطبیق مالیات حقوق: LedgerWithheld فقط بستانکارها را جمع می‌زند و اسناد Reversal را کنار می‌گذارد (GlService.F3b.Payroll.cs:381-384)؛ اجرای حقوق برگشت‌خورده بستانکار اصلی خود را نگه می‌دارد → TiesToLedger نادرست است با اینکه دو طرف درست‌اند. اصلاح: بستانکارها منهای بدهکارهای اسناد برگشت.
+M11. دروازه تعهد باز می‌ماند (fails open) (GlService.Budget.cs:363: `if (!r.Success) return (true, null)`)؛ روی تأیید پرداخت صدا زده نمی‌شود. اصلاح: در حالت Block بسته شود (fail closed)؛ دروازه پرداخت اضافه شود.
 
-## V. Vacuous smoke checks (would pass on wrong behaviour)
-- 2651 direct cash flow: netChange = closing − opening, = indirect, = sum of rows — all identities of double entry. Assert exact rows (e.g. Loans receipts +3,000,000 from the rial loan, Suppliers payments = the known payment, Taxes 0 receipts).
-- 2652 comparative: change == current − prior is an identity. Assert prior amounts equal the prior-year balance sheet lines exactly (e.g. 10101 prior = known value).
-- 2655 notes: totals equal the sum of own rows; loan split equals outstanding by construction. Assert an exact prior inventory balance (catches H9) and an exact payable bucket.
-- 2627 tax reconciliation: totals of own rows; PE1 only `>= 1046000`. Assert exact recomputed tax, difference and `tiesToLedger == true`.
-- No smoke for review-2 fixes 1 (year close), 4 cost side, 9, 13, 14 (80202 total), 15, 19.
+## V. smoke checkهای توخالی (روی رفتار غلط هم می‌گذرند)
+- 2651 جریان نقد مستقیم: netChange = closing − opening، = غیرمستقیم، = جمع سطرها — همگی اتحادهای دوطرفه‌نویسی هستند. سطرهای دقیق را assert کنید (مثلاً دریافت‌های Loans +3,000,000 از وام ریالی، پرداخت‌های Suppliers = پرداخت شناخته‌شده، دریافت‌های Taxes صفر).
+- 2652 مقایسه‌ای: change == current − prior یک اتحاد است. assert کنید که مبالغ قبل دقیقاً برابر سطرهای ترازنامه سال قبل است (مثلاً 10101 قبل = مقدار شناخته‌شده).
+- 2655 یادداشت‌ها: جمع‌ها برابر مجموع سطرهای خودشان هستند؛ تفکیک وام به‌طور ساختاری برابر مانده است. مانده دقیق موجودی سال قبل (H9 را می‌گیرد) و یک بازه پرداختنی دقیق را assert کنید.
+- 2627 تطبیق مالیاتی: جمع سطرهای خودش؛ PE1 فقط `>= 1046000`. مالیات بازمحاسبه‌شده دقیق، اختلاف و `tiesToLedger == true` را assert کنید.
+- smoke برای اصلاحات بازبینی 2 نیست: 1 (بستن سال)، 4 سمت هزینه، 9، 13، 14 (مجموع 80202)، 15، 19.
 
-Top fixes in order: C1, H1, H2, H5, H6.
+مهم‌ترین اصلاحات به ترتیب: C1، H1، H2، H5، H6.

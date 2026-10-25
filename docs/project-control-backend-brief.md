@@ -1,54 +1,56 @@
-# Project control (PMO) module, release 1 — backend brief
+ترجمه فارسی سند اصلی (1405/08/03)؛ شناسه‌ها و کد به همان صورت انگلیسی مانده‌اند.
 
-Binding decision layer on top of the analysis /home/claude/innco/docs/project-control-spec.md (read sections 4, 5.3 and 6 fully; section 6 is the detailed design). Where they differ, THIS brief wins. ★ = provisional architect decision per the standards; implement as configurable data, not hard-coded.
+# ماژول کنترل پروژه (PMO)، انتشار ۱ — دستور کار بک‌اند
 
-## Ground rules
-- Same as /home/claude/innco/docs/quality-backend-brief.md sections "Ground rules", "CI loop" and the Addendum (read them; they are binding here too). Repository is /home/claude/desktop-tutorial (NOT /home/claude/innco/api, which the spec mentions — that is an older local copy; read code only from desktop-tutorial).
-- Table prefix `Pc`, route prefix `api/v1/projectcontrol`, number sequence kinds 421–440, constants class `ProjectControlRoles`.
-- The quality module (prefix `Qa`, route `api/v1/quality`) is already in the codebase: reuse its ITP, release note, document control and NCR — never duplicate.
-- Legacy entities (ContractEntity, WorkOrder, AssemblyEntity, Bom, ProcessEntity, ContractGuaranty, TenderGuaranty, ProvisionalStatement, Machine, holidays) are extended with nullable columns or 1:1 side tables (prefer side tables for ContractEntity: `PcContractTerms`). Existing screens and the existing progress report must keep working (mirror computed dates back to legacy date fields as spec 6.1 says). Do not delete legacy behaviour; where legacy code completes a process on finance acceptance of a buy order, leave it but make the new progress engine independent of it.
-- Fix the legacy scheduling bugs listed in spec 4.3 item 5 only where the new engine replaces them (cycle detection is mandatory on any predecessor link save, including the legacy ones).
+لایه تصمیم الزام‌آور بر فراز تحلیل /home/claude/innco/docs/project-control-spec.md (بخش‌های ۴، ۵.۳ و ۶ را کامل بخوانید؛ بخش ۶ طراحی تفصیلی است). در هر جا که اختلاف دارند، این دستور کار برتر است. ★ = تصمیم موقت معمار طبق استانداردها؛ به‌صورت داده قابل پیکربندی پیاده‌سازی شود، نه hard-coded.
 
-## Roles ★
-- New: `PROJECTMANAGER` id 15 "مدیر پروژه"; `DCC` id 16 "کنترل مدارک پروژه". (QA id 14 exists from the quality module.) Claims ids 1500+/1600+ (Contract, WorkOrder, Traceability read).
-- Planning manager = PLANNING; PMO deputy = PMO; CEO = CEO.
+## قواعد پایه
+- مانند بخش‌های «Ground rules»، «CI loop» و Addendum در /home/claude/innco/docs/quality-backend-brief.md (آنها را بخوانید؛ اینجا نیز الزام‌آورند). مخزن /home/claude/desktop-tutorial است (نه /home/claude/innco/api که در spec آمده — آن یک کپی محلی قدیمی‌تر است؛ کد را فقط از desktop-tutorial بخوانید).
+- پیشوند جدول `Pc`، پیشوند مسیر `api/v1/projectcontrol`، انواع شماره‌گذاری ۴۲۱ تا ۴۴۰، کلاس ثابت‌ها `ProjectControlRoles`.
+- ماژول کیفیت (پیشوند `Qa`، مسیر `api/v1/quality`) هم‌اکنون در کدبیس وجود دارد: ITP، release note، کنترل مدارک و NCR آن را استفاده مجدد کنید — هرگز تکرار نکنید.
+- موجودیت‌های قدیمی (ContractEntity، WorkOrder، AssemblyEntity، Bom، ProcessEntity، ContractGuaranty، TenderGuaranty، ProvisionalStatement، Machine، holidays) با ستون‌های nullable یا جدول‌های جانبی 1:1 توسعه می‌یابند (برای ContractEntity جدول جانبی ترجیح دارد: `PcContractTerms`). صفحه‌های موجود و گزارش پیشرفت موجود باید به کار خود ادامه دهند (تاریخ‌های محاسبه‌شده به فیلدهای تاریخ قدیمی بازتاب داده شوند، طبق spec 6.1). رفتار قدیمی را حذف نکنید؛ جایی که کد قدیمی فرایند را با پذیرش مالی یک سفارش خرید تکمیل می‌کند، آن را بگذارید اما موتور پیشرفت جدید را مستقل از آن کنید.
+- باگ‌های زمان‌بندی قدیمی فهرست‌شده در spec 4.3 مورد ۵ را فقط جایی که موتور جدید جایگزین آنها می‌شود رفع کنید (تشخیص چرخه در هر ذخیره پیوند پیش‌نیاز، از جمله پیوندهای قدیمی، الزامی است).
 
-## Decisions on the spec's conflicts and questions ★
-1. Progress rules: WI-PL-009 values as configurable defaults (engineering 60/80/100; supply 0/70/100, rework held at 80, reject 0). Supply reaches 100 only on QC-accepted permanent receipt (or receipt without inspection), never on finance acceptance.
-2. Release note: the quality module's ReleaseNote is the single record (QC signs). Planning owns the shipping gate (packing start / shipment confirm require Released).
-3. PV accrual: linear between baseline start and finish (default); "accrue at end" (WI-PL-009) selectable per contract. AC from `CostEntry`; add nullable `WbsNodeId` to CostEntry. Management reserve excluded from BAC.
-4. Manual progress: proposed by the unit manager or PM, approved by PLANNING (not the proposer); unapproved manual values are excluded from EV.
-5. SPI/CPI never appear in the client report unless the contract setting `ClientReportShowsIndices` is true (default false).
-6. Thresholds: amber < 0.95, red < 0.90, corrective action required < 1.00 (configurable).
-7. Data date / weekly snapshot weekday: Wednesday (configurable per contract).
-8. Guarantee expiry alerts 30/14/7 days (configurable).
-9. Change approval authority by value and change-board composition: configurable table `PcApprovalAuthority` (role, max amount, max delay days); seed: PROJECTMANAGER up to 0 (recommend only), PMO up to 5,000,000,000 rial and 30 days, CEO above. Board default = PM, Planning manager, affected unit managers, QC if quality impact, Commercial if contract impact.
-10. Risk scale 1–5 (release 2).
-11. Product coding (WI-PL-005): coding tables as data (`PcCodingTable`) so ORC and valve codes can be added later; seed only what WI-PL-005 states; ORC/valve rows left empty with a note.
-12. MS Project: PMIS replaces it; provide MS Project XML export of the schedule (read-only) for clients — import not needed.
+## نقش‌ها ★
+- جدید: `PROJECTMANAGER` شناسه 15 «مدیر پروژه»؛ `DCC` شناسه 16 «کنترل مدارک پروژه». (QA شناسه 14 از ماژول کیفیت موجود است.) شناسه‌های Claim از 1500+/1600+ (خواندن Contract، WorkOrder، Traceability).
+- مدیر برنامه‌ریزی = PLANNING؛ قائم‌مقام PMO = PMO؛ مدیرعامل = CEO.
 
-## Engineering documents — MDR / MDL (company decision, binding)
-- `PcEngineeringDeliverable` of the spec becomes the **MDR line** (full internal master document register). Add: `ClientSubmittal` (bool → the line is part of the **MDL**, the client list), `StandardSource` (text, e.g. "API 611 VDDR", "added per standard"), `Discipline`, `DocumentType`, `Required` (bool), client response code (configurable list `PcClientResponseCode`, seed ★: A Approved, B Approved with comments, C Revise and resubmit, D Rejected, I For information), transmittal rows `PcTransmittal` (number, date, direction, lines with document + revision + purpose {ForApproval, ForInformation, AsBuilt}, response code/date, response due = sent + client review days (contract setting, default 14 ★)).
-- `PcMdrTemplate` per product type (SteamTurbine, OrcUnit, Condenser, Pump, LubeOilSystem, Valve, Other) with template lines. Seed ★ from the vendor drawing and data requirement lists of API 611 / API 612 (steam turbines), API 610 (pumps), API 614 (lube/seal oil systems) and ASME VIII + HEI (condensers) as far as known to you (typical items: general arrangement/outline drawing, cross-section, P&IDs (lube oil, steam, seal), electrical/instrument schematics and lists, foundation/loading data, rotor dynamics/lateral and torsional analysis, performance curves/data sheets, material list, weld procedures and NDE procedures, ITP, hydro/run test procedures and reports, mechanical run test data, spare parts list, installation/operation/maintenance manual, preservation/packing procedure, certificates (material, conformity), progress reports, final data book). Every seeded line: `StandardSource` = the standard name + "(to be verified against licensed copy)" — do NOT cite clause or annex numbers you are not certain about. Template lines are editable data.
-- Per work order the system drafts the MDR from the template on WBS generation; Engineering/DCC edit and approve (gate); MDL = MDR lines with ClientSubmittal.
-- Engineering progress (EngineeringIssue method) reads the MDR line state; for MDL lines "Approved" means client code A or B; for internal lines "Approved" means internal approval.
-- Final books: extend the quality module's final data book index so `variant=company` lists MDR lines (with their latest revision document) plus quality records, and `variant=client` lists MDL lines plus the client-relevant quality records. Store each generated book as a controlled record in the quality module's document control under the project (`ControlledDocument` type `FinalBook`, linked to contract/work order) — the generator creates a new revision each time it is issued.
+## تصمیم‌ها درباره تعارض‌ها و پرسش‌های spec ★
+1. قواعد پیشرفت: مقادیر WI-PL-009 به‌عنوان پیش‌فرض‌های قابل پیکربندی (مهندسی 60/80/100؛ تأمین 0/70/100، بازکاری روی 80 نگه داشته می‌شود، رد 0). تأمین فقط با رسید دائمی پذیرفته‌شده توسط QC (یا رسید بدون بازرسی) به 100 می‌رسد، هرگز با پذیرش مالی.
+2. Release note: ReleaseNote ماژول کیفیت رکورد واحد است (QC امضا می‌کند). برنامه‌ریزی مالک گیت ارسال است (شروع بسته‌بندی / تأیید ارسال نیاز به Released دارد).
+3. تعلق PV: خطی بین شروع و پایان baseline (پیش‌فرض)؛ «تعلق در پایان» (WI-PL-009) برای هر قرارداد قابل انتخاب است. AC از `CostEntry`؛ ستون nullable `WbsNodeId` به CostEntry اضافه شود. ذخیره مدیریتی از BAC مستثنی است.
+4. پیشرفت دستی: توسط مدیر واحد یا PM پیشنهاد می‌شود، توسط PLANNING (نه پیشنهاددهنده) تأیید می‌شود؛ مقادیر دستی تأییدنشده از EV مستثنی‌اند.
+5. SPI/CPI هرگز در گزارش مشتری ظاهر نمی‌شوند مگر تنظیم قرارداد `ClientReportShowsIndices` برابر true باشد (پیش‌فرض false).
+6. آستانه‌ها: زرد < 0.95، قرمز < 0.90، اقدام اصلاحی لازم < 1.00 (قابل پیکربندی).
+7. تاریخ داده / روز هفته snapshot هفتگی: چهارشنبه (قابل پیکربندی برای هر قرارداد).
+8. هشدارهای انقضای ضمانت‌نامه 30/14/7 روز (قابل پیکربندی).
+9. اختیار تأیید تغییر بر اساس مبلغ و ترکیب هیئت تغییر: جدول قابل پیکربندی `PcApprovalAuthority` (نقش، حداکثر مبلغ، حداکثر روزهای تأخیر)؛ seed: PROJECTMANAGER تا 0 (فقط توصیه)، PMO تا 5,000,000,000 ریال و 30 روز، CEO بالاتر از آن. هیئت پیش‌فرض = PM، مدیر برنامه‌ریزی، مدیران واحدهای متأثر، QC در صورت اثر کیفی، بازرگانی در صورت اثر قراردادی.
+10. مقیاس ریسک 1–5 (انتشار ۲).
+11. کدگذاری محصول (WI-PL-005): جدول‌های کدگذاری به‌صورت داده (`PcCodingTable`) تا کدهای ORC و شیر بعداً قابل افزودن باشند؛ فقط آنچه WI-PL-005 بیان می‌کند seed شود؛ ردیف‌های ORC/شیر با یک یادداشت خالی بمانند.
+12. MS Project: PMIS جایگزین آن می‌شود؛ خروجی MS Project XML از زمان‌بندی (فقط خواندنی) برای مشتریان فراهم شود — درون‌ریزی لازم نیست.
 
-## Release 1 scope (build)
-Spec phases 3a + 3b plus change control and variation orders:
-- 6.2 project/contract terms, project coding, initiation state machine with SLAs, structured charter/PEP (sections as text fields are fine), contract review (ISO 8.2.3) and amendments, payment milestones (+ ProvisionalStatement link), guarantees (typed, events, alerts, one-time parser of the string amount fields with failures flagged), penalty assessment, variation orders.
-- 6.3 WBS generation and rules; 6.4 activities, dependencies (FS/SS/FF/SF, lag), calendars, CPM engine (forward/backward pass, floats, critical path, cycle detection, forecasts) and mirror to legacy dates; weekly executive plan list.
-- 6.5 baselines with signatures and approval, re-baseline only via approved change request.
-- 6.6 progress methods except AssemblyChecklist (release 2) and resources; weekly immutable snapshots (a hosted background service that runs on the server at the configured weekday/time, offline; plus an endpoint PMO can call to take a snapshot now); daily report pre-fill.
-- 6.7 cost baseline, PV/EV/AC, CV/SV/CPI/SPI, earned schedule, EAC variants, ETC/VAC/TCPI, cash flow buckets.
-- 6.9 change requests with automatic impact scenario, claims register (basic), variation orders.
-- 6.11 generated client monthly report, internal weekly and CEO monthly report as JSON endpoints plus stored immutable issues (`PcReportIssue` with hash); MS Project XML export.
-- 6.12 integrations listed there (need-by dates on PR drafts, PO delivery dates as forecasts, receipt/QC/NCR-driven supply progress, issue-driven actual start, ITP activities as schedule activities and W-point notice drafts, shipping gate).
-- 6.13 shipment record with gate.
-- CEO dashboard additions (spec 6.11 last bullet) + alerts.
+## مدارک مهندسی — MDR / MDL (تصمیم شرکت، الزام‌آور)
+- `PcEngineeringDeliverable` در spec به **ردیف MDR** (دفتر کامل داخلی مدارک اصلی) تبدیل می‌شود. افزودن: `ClientSubmittal` (bool ← ردیف جزو **MDL**، فهرست مشتری است)، `StandardSource` (متن، مثلاً "API 611 VDDR"، "added per standard")، `Discipline`، `DocumentType`، `Required` (bool)، کد پاسخ مشتری (فهرست قابل پیکربندی `PcClientResponseCode`، seed ★: A Approved، B Approved with comments، C Revise and resubmit، D Rejected، I For information)، ردیف‌های transmittal با نام `PcTransmittal` (شماره، تاریخ، جهت، ردیف‌ها با مدرک + بازنگری + هدف {ForApproval, ForInformation, AsBuilt}، کد/تاریخ پاسخ، سررسید پاسخ = ارسال + روزهای بررسی مشتری (تنظیم قرارداد، پیش‌فرض 14 ★)).
+- `PcMdrTemplate` برای هر نوع محصول (SteamTurbine, OrcUnit, Condenser, Pump, LubeOilSystem, Valve, Other) با ردیف‌های قالب. Seed ★ از فهرست‌های الزامات نقشه و داده فروشنده API 611 / API 612 (توربین‌های بخار)، API 610 (پمپ‌ها)، API 614 (سامانه‌های روغن روانکاری/آب‌بندی) و ASME VIII + HEI (کندانسورها) تا جایی که شما می‌دانید (اقلام نمونه: نقشه چیدمان کلی/طرح کلی، مقطع، P&IDها (روغن روانکاری، بخار، آب‌بندی)، شماتیک‌ها و فهرست‌های برق/ابزار دقیق، داده‌های پی/بارگذاری، دینامیک روتور/تحلیل جانبی و پیچشی، منحنی‌های عملکرد/دیتاشیت‌ها، فهرست مواد، روش‌های جوشکاری و روش‌های NDE، ITP، روش‌ها و گزارش‌های آزمون هیدرو/کارکرد، داده‌های آزمون کارکرد مکانیکی، فهرست قطعات یدکی، راهنمای نصب/بهره‌برداری/نگهداری و تعمیرات، روش حفاظت/بسته‌بندی، گواهی‌ها (مواد، انطباق)، گزارش‌های پیشرفت، کتاب نهایی داده‌ها). هر ردیف seed: `StandardSource` = نام استاندارد + "(to be verified against licensed copy)" — شماره بند یا پیوستی را که از آن مطمئن نیستید ذکر نکنید. ردیف‌های قالب داده قابل ویرایش‌اند.
+- برای هر دستور کار، سیستم هنگام تولید WBS، MDR را از قالب پیش‌نویس می‌کند؛ مهندسی/DCC ویرایش و تأیید می‌کنند (گیت)؛ MDL = ردیف‌های MDR با ClientSubmittal.
+- پیشرفت مهندسی (روش EngineeringIssue) وضعیت ردیف MDR را می‌خواند؛ برای ردیف‌های MDL «Approved» یعنی کد مشتری A یا B؛ برای ردیف‌های داخلی «Approved» یعنی تأیید داخلی.
+- کتاب‌های نهایی: نمایه کتاب نهایی داده‌های ماژول کیفیت توسعه یابد تا `variant=company` ردیف‌های MDR (با آخرین مدرک بازنگری آنها) را به‌علاوه سوابق کیفیت فهرست کند و `variant=client` ردیف‌های MDL را به‌علاوه سوابق کیفیت مرتبط با مشتری فهرست کند. هر کتاب تولیدشده را به‌عنوان رکورد کنترل‌شده در کنترل مدارک ماژول کیفیت زیر پروژه ذخیره کنید (`ControlledDocument` از نوع `FinalBook`، پیوندخورده به قرارداد/دستور کار) — مولد هر بار که صادر شود بازنگری جدیدی ایجاد می‌کند.
 
-## Release 2 (NOT now)
-Risk register, stakeholders/communication/meetings/letters (letters belong to office automation), resources and capacity/production planning (WI-PL-014), closure and lessons, customer survey, assembly checklist templates (3SY).
+## دامنه انتشار ۱ (ساخت)
+فازهای 3a + 3b spec به‌علاوه کنترل تغییر و دستورهای تغییر (variation order):
+- 6.2 شرایط پروژه/قرارداد، کدگذاری پروژه، ماشین حالت شروع با SLA، منشور/PEP ساختاریافته (بخش‌ها به‌صورت فیلدهای متنی کافی است)، بازبینی قرارداد (ISO 8.2.3) و الحاقیه‌ها، مایلستون‌های پرداخت (+ پیوند ProvisionalStatement)، ضمانت‌نامه‌ها (نوع‌دار، رویدادها، هشدارها، تجزیه‌گر یک‌باره فیلدهای مبلغ رشته‌ای با علامت‌گذاری خطاها)، ارزیابی جریمه، دستورهای تغییر.
+- 6.3 تولید WBS و قواعد؛ 6.4 فعالیت‌ها، وابستگی‌ها (FS/SS/FF/SF، lag)، تقویم‌ها، موتور CPM (عبور رو به جلو/عقب، شناوری‌ها، مسیر بحرانی، تشخیص چرخه، پیش‌بینی‌ها) و بازتاب به تاریخ‌های قدیمی؛ فهرست برنامه اجرایی هفتگی.
+- 6.5 baselineها با امضا و تأیید، baseline مجدد فقط از طریق درخواست تغییر تأییدشده.
+- 6.6 روش‌های پیشرفت به‌جز AssemblyChecklist (انتشار ۲) و منابع؛ snapshotهای هفتگی تغییرناپذیر (یک سرویس پس‌زمینه hosted که روی سرور در روز/ساعت پیکربندی‌شده اجرا می‌شود، آفلاین؛ به‌علاوه endpointی که PMO بتواند برای گرفتن snapshot فوری صدا بزند)؛ پیش‌پر کردن گزارش روزانه.
+- 6.7 baseline هزینه، PV/EV/AC، CV/SV/CPI/SPI، زمان‌بندی کسب‌شده (earned schedule)، گونه‌های EAC، ETC/VAC/TCPI، سطل‌های جریان نقدی.
+- 6.9 درخواست‌های تغییر با سناریوی اثر خودکار، ثبت claim (پایه)، دستورهای تغییر.
+- 6.11 گزارش ماهانه تولیدشده برای مشتری، گزارش هفتگی داخلی و گزارش ماهانه مدیرعامل (CEO) به‌صورت endpointهای JSON به‌علاوه نسخه‌های صادرشده تغییرناپذیر ذخیره‌شده (`PcReportIssue` با hash)؛ خروجی MS Project XML.
+- 6.12 یکپارچه‌سازی‌های فهرست‌شده در آنجا (تاریخ‌های نیاز در پیش‌نویس PR، تاریخ‌های تحویل PO به‌عنوان پیش‌بینی، پیشرفت تأمین مبتنی بر رسید/QC/NCR، شروع واقعی مبتنی بر خروج کالا، فعالیت‌های ITP به‌عنوان فعالیت‌های زمان‌بندی و پیش‌نویس اعلان نقطه W، گیت ارسال).
+- 6.13 رکورد ارسال با گیت.
+- افزوده‌های داشبورد مدیرعامل (CEO) (آخرین مورد spec 6.11) + هشدارها.
 
-## Tests
-Extend `.github/scripts/inventory-smoke.sh` with a project-control section (before "roles of the new users"): create contract + work order through the existing APIs (look how the API creates them: ContractController, WorkOrderController, Equipment templates); generate WBS, MDR from template (MDL subset), activities; CPM results checked on a small known network (assert exact dates and critical path); cycle rejected; baseline signatures/approval; progress from a PO receipt (70 temporary/quarantine → 100 after QC accept), NCR rework caps at 80; engineering progress 60/80/100 via MDR state and transmittal codes; manual progress excluded until approved by a different user; snapshot taken and immutable; EV/PV/AC/CPI/SPI numbers asserted on a simple case; change request impact scenario then approval creates baseline 1; guarantee alert listed; payment milestone becomes Due on its trigger; penalty computed; shipping gate blocked without released release note; client report has no indices; MS Project XML export valid XML; CEO dashboard new fields. Assertions must be exact where the math is deterministic.
+## انتشار ۲ (اکنون نه)
+ثبت ریسک، ذی‌نفعان/ارتباطات/جلسه‌ها/نامه‌ها (نامه‌ها به اتوماسیون اداری تعلق دارند)، منابع و ظرفیت/برنامه‌ریزی تولید (WI-PL-014)، بستن پروژه و درس‌آموخته‌ها، نظرسنجی مشتری، قالب‌های چک‌لیست مونتاژ (3SY).
+
+## آزمون‌ها
+`.github/scripts/inventory-smoke.sh` با یک بخش کنترل پروژه گسترش یابد (پیش از «roles of the new users»): ایجاد قرارداد + دستور کار از طریق APIهای موجود (ببینید API چگونه آنها را می‌سازد: ContractController، WorkOrderController، قالب‌های Equipment)؛ تولید WBS، MDR از قالب (زیرمجموعه MDL)، فعالیت‌ها؛ نتایج CPM روی یک شبکه کوچک معلوم بررسی شود (تاریخ‌های دقیق و مسیر بحرانی assert شود)؛ چرخه رد می‌شود؛ امضاها/تأیید baseline؛ پیشرفت از رسید PO (70 موقت/قرنطینه → 100 پس از پذیرش QC)، بازکاری NCR سقف 80 را اعمال می‌کند؛ پیشرفت مهندسی 60/80/100 از طریق وضعیت MDR و کدهای transmittal؛ پیشرفت دستی تا تأیید توسط کاربر دیگر مستثنی است؛ snapshot گرفته می‌شود و تغییرناپذیر است؛ اعداد EV/PV/AC/CPI/SPI روی یک مورد ساده assert شوند؛ سناریوی اثر درخواست تغییر سپس تأیید، baseline 1 را ایجاد می‌کند؛ هشدار ضمانت‌نامه فهرست می‌شود؛ مایلستون پرداخت با محرک خود Due می‌شود؛ جریمه محاسبه می‌شود؛ گیت ارسال بدون release note صادرشده مسدود است؛ گزارش مشتری شاخص ندارد؛ خروجی MS Project XML یک XML معتبر است؛ فیلدهای جدید داشبورد مدیرعامل (CEO). assertionها در جایی که ریاضی قطعی است باید دقیق باشند.
