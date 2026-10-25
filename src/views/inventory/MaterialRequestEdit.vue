@@ -28,7 +28,7 @@ const isNew = computed(() => !request.value?.id);
 const editable = computed(() => request.value && request.value.status === 0 && hasRole(InventoryRoles.materialRequest));
 const shortages = computed(() => (request.value?.lines || []).filter((l: any) => l.shortage > 0));
 const canApprovePlanning = hasRole(["PLANNING", "PMO"]);
-const canApproveManufacturing = hasRole([Roles.CONSTRUCTION]);
+const canApproveManufacturing = hasRole([Roles.CONSTRUCTION, "PRODUCTIONMANAGER"]); // the service accepts CONSTRUCTION and PRODUCTIONMANAGER
 const canReject = canApprovePlanning || canApproveManufacturing;
 const canClose = hasRole(["PLANNING", "PMO", "WAREHOUSE", "WHSUPERVISOR"]);
 const canIssue = hasRole(InventoryRoles.documents);

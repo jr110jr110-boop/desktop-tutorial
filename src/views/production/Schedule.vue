@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
+import { hasRole, ProductionRoles } from "@/composables/roles";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import ScheduleRun from "@/components/production/floor/ScheduleRun.vue";
 import LoadReport from "@/components/production/floor/LoadReport.vue";
@@ -17,10 +18,13 @@ async function printCards(rows: any[], centre: string) {
   await nextTick();
   cards.value?.print();
 }
+// the operator reads the dispatch list only; the load report needs the readers, the scheduler run the planners of the schedule (MfScheduleService)
+const canLoad = hasRole(ProductionRoles.readers);
+const canRun = hasRole(["PRODUCTIONMANAGER", "SHOPSUPERVISOR", "PLANNING", "PMO"]);
 const tabs = [
   { key: "dispatch", title: "فهرست توزیع کار" },
-  { key: "load", title: "گزارش بار" },
-  { key: "run", title: "اجرای برنامه‌ریزی" },
+  ...(canLoad ? [{ key: "load", title: "گزارش بار" }] : []),
+  ...(canRun ? [{ key: "run", title: "اجرای برنامه‌ریزی" }] : []),
 ];
 </script>
 
