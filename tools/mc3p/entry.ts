@@ -1,0 +1,15 @@
+import * as Vue from "vue";
+import * as VR from "vue-router";
+import { http } from "@/api/ApiClient";
+import Bookings from "@/views/production/Bookings.vue";
+import Cost from "@/views/production/Cost.vue";
+import Dashboard from "@/views/production/Dashboard.vue";
+import Maintenance from "@/views/production/Maintenance.vue";
+import Oee from "@/views/production/Oee.vue";
+import OrderDetail from "@/views/production/OrderDetail.vue";
+import Orders from "@/views/production/Orders.vue";
+import Routings from "@/views/production/Routings.vue";
+import Schedule from "@/views/production/Schedule.vue";
+import Terminal from "@/views/production/Terminal.vue";
+import WorkCenters from "@/views/production/WorkCenters.vue";
+(window as any).__chk = { Vue, VR, http, views: { Bookings, Cost, Dashboard, Maintenance, Oee, OrderDetail, Orders, Routings, Schedule, Terminal, WorkCenters } };
