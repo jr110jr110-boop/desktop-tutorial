@@ -59,8 +59,8 @@ namespace Services.NasbNiro.Ai
 
         private static AiPromptVersionDto ToDto(AiPromptVersion p) => new AiPromptVersionDto
         {
-            Id = p.Id, Code = p.Code, Version = p.Version, Text = p.Text, IsActive = p.IsActive, CreatedAt = p.CreatedAt, CreatedByUserId = p.CreatedByUserId,
-            ActivatedAt = p.ActivatedAt, ActivatedByUserId = p.ActivatedByUserId,
+            Id = p.Id, Code = p.Code, Version = p.Version, Text = p.Text, IsActive = p.IsActive, CreatedAt = p.CreatedAt, CreatedAtText = AiText.Stamp(p.CreatedAt), CreatedByUserId = p.CreatedByUserId,
+            ActivatedAt = p.ActivatedAt, ActivatedAtText = p.ActivatedAt.HasValue ? AiText.Stamp(p.ActivatedAt.Value) : null, ActivatedByUserId = p.ActivatedByUserId,
         };
 
         /// <summary>http or https, a host, no user name or password, no query or fragment. Returns the cleaned URL or null.</summary>
@@ -257,9 +257,10 @@ namespace Services.NasbNiro.Ai
             if (query.To.HasValue) { DateTime end = query.To.Value.Date.AddDays(1); DateTimeOffset to = new DateTimeOffset(end, TimeZoneInfo.Local.GetUtcOffset(end)); q = q.Where(e => e.At < to); }
             IQueryable<AiAuditEvent> ordered = q.OrderByDescending(e => e.At).ThenByDescending(e => e.Id);
             PagedList<AiAuditEvent> page = await AiText.PageAsync(ordered, query.PageNumber, query.PageSize, ct);
+            Dictionary<int, string> userNames = await InventoryUsers.GetNamesAsync(_uow, page.Select(e => (int?)e.UserId), ct);
             PagedList<AiAuditEventDto> dtos = await PagedList<AiAuditEventDto>.CreateAsync(page.Select(e => new AiAuditEventDto
             {
-                Id = e.Id, At = e.At, AtText = AiText.Stamp(e.At), UserId = e.UserId, SeatCode = e.SeatCode, Kind = e.Kind, PromptVersionId = e.PromptVersionId,
+                Id = e.Id, At = e.At, AtText = AiText.Stamp(e.At), UserId = e.UserId, UserName = userNames.Name(e.UserId), SeatCode = e.SeatCode, Kind = e.Kind, PromptVersionId = e.PromptVersionId,
                 Model = e.Model, LatencyMs = e.LatencyMs, Detail = e.Detail, PromptHash = e.PromptHash,
             }).ToList(), 1, 0, ct);
             dtos.TotalCount = page.TotalCount;

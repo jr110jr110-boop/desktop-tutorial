@@ -126,7 +126,7 @@ namespace WebApi.Controllers
         [HttpPost("notes/decide")]
         public async Task<IActionResult> DecideAsync([FromBody] AiDecideNoteDto dto, CancellationToken ct) => Ok(await _notes.DecideAsync(dto, ct));
 
-        /// <summary>The latest daily brief of the CEO seat (CEO and PMO).</summary>
+        /// <summary>The latest daily brief of the CEO seat (CEO only: it is written with what only the CEO sees).</summary>
         [HttpGet("brief/latest")]
         public async Task<IActionResult> LatestBriefAsync(CancellationToken ct) => Ok(await _notes.LatestBriefAsync(ct));
 

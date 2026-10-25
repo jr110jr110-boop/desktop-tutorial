@@ -124,8 +124,12 @@ namespace Services.NasbNiro.Procurement
             var ordered = await _uow.Set<PurchaseOrderLine>()
                 .Where(l => l.RequestLineId.HasValue && lineIds.Contains(l.RequestLineId.Value) && l.PurchaseOrder.Status != PurchaseOrderStatus.Cancelled && !l.PurchaseOrder.Deleted)
                 .GroupBy(l => l.RequestLineId.Value).Select(g => new { g.Key, Quantity = g.Sum(l => l.Quantity) }).ToListAsync(cancellationToken);
+            List<int> creatorIds = rows.Select(r => r.CreatorUserId).Distinct().ToList();
+            List<int> seatCreators = await _uow.Set<Entities.Identity.User>().AsNoTracking()
+                .Where(u => creatorIds.Contains(u.Id) && u.UserName.StartsWith("seat.")).Select(u => u.Id).ToListAsync(cancellationToken);
             foreach (PurchaseRequestDto r in rows)
             {
+                r.CreatedBySeat = seatCreators.Contains(r.CreatorUserId);
                 r.CreatorName = names.Name(r.CreatorUserId);
                 r.PlanningApprovedByName = names.Name(r.PlanningApprovedByUserId);
                 r.ManagementApprovedByName = names.Name(r.ManagementApprovedByUserId);

@@ -63,6 +63,9 @@ namespace ViewModels.NasbNiro.ProcurementDtos
 
     public class PurchaseRequestDto
     {
+        /// <summary>True when an AI seat (the warehouse reorder assistant) drafted the request; the first person who edits or submits it adopts it.</summary>
+        public bool CreatedBySeat { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public PurchaseRequestSource Source { get; set; }

@@ -63,13 +63,13 @@ namespace Services.NasbNiro.Ai
             if (!id.HasValue) return null;
             switch (type)
             {
-                case QualityNcr: return "/inventory/ncr?id=" + id.Value.ToString(CultureInfo.InvariantCulture);
-                case FinanceJournal: return "/fn/gl/vouchers?id=" + id.Value.ToString(CultureInfo.InvariantCulture);
-                case BankLine: return "/fn/treasury/bank-statements";
+                case QualityNcr: return "/inventory/ncr/" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case FinanceJournal: return "/fn/vouchers/" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case BankLine: return "/fn/treasury/statements";
                 case SupplierIbanChange: return "/procurement/suppliers";
-                case PurchaseRfq: return "/procurement/inquiries?id=" + id.Value.ToString(CultureInfo.InvariantCulture);
-                case OfficeLetter: return "/office/letters?id=" + id.Value.ToString(CultureInfo.InvariantCulture);
-                case OfficeMeeting: return "/office/meetings?id=" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case PurchaseRfq: return "/procurement/inquiries/" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case OfficeLetter: return "/office/letters/" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case OfficeMeeting: return "/office/meetings/" + id.Value.ToString(CultureInfo.InvariantCulture);
                 case PcWeeklyReport: return "/project-control/reports";
                 default: return null;
             }
@@ -225,8 +225,10 @@ namespace Services.NasbNiro.Ai
             // types read by role; the office types are decided note by note by the office service
             string[] roleTypes = AiNoteTypes.All.Where(t => !AiNoteTypes.IsOffice(t) && _user.IsInRole(AiNoteTypes.Roles(t))).ToArray();
             IQueryable<AiNote> baseQuery = _uow.Set<AiNote>().AsNoTracking();
-            string type = AiText.Clean(query.TargetType);
-            if (type != null) baseQuery = baseQuery.Where(n => n.TargetType == type);
+            // one type or several separated by commas (the finance page asks for its three types at once)
+            string[] types = (AiText.Clean(query.TargetType) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (types.Length == 1) { string type = types[0]; baseQuery = baseQuery.Where(n => n.TargetType == type); }
+            else if (types.Length > 1) baseQuery = baseQuery.Where(n => types.Contains(n.TargetType));
             if (query.TargetId.HasValue) baseQuery = baseQuery.Where(n => n.TargetId == query.TargetId.Value);
             if (query.Status.HasValue) baseQuery = baseQuery.Where(n => n.Status == query.Status.Value);
             string seat = AiText.Clean(query.Seat);
@@ -236,7 +238,7 @@ namespace Services.NasbNiro.Ai
 
             // the office notes: the office services say which letters and meetings the caller may read, as queries that are joined to the notes (one SQL statement, no limit)
             IQueryable<AiNote> rows;
-            if (type == null || AiNoteTypes.IsOffice(type))
+            if (types.Length == 0 || types.Any(AiNoteTypes.IsOffice))
             {
                 IQueryable<int> letterIds = await _letters.ReadableLetterIdsAsync(ct);
                 IQueryable<int> meetingIds = await _meetings.VisibleMeetingIdsAsync(ct);

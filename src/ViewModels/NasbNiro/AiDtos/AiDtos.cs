@@ -146,8 +146,10 @@ namespace ViewModels.NasbNiro.AiDtos
         public string Text { get; set; }
         public bool IsActive { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
+        public string CreatedAtText { get; set; }
         public int CreatedByUserId { get; set; }
         public DateTimeOffset? ActivatedAt { get; set; }
+        public string ActivatedAtText { get; set; }
         public int? ActivatedByUserId { get; set; }
     }
 
@@ -177,6 +179,7 @@ namespace ViewModels.NasbNiro.AiDtos
         public DateTimeOffset At { get; set; }
         public string AtText { get; set; }
         public int UserId { get; set; }
+        public string UserName { get; set; }
         public string SeatCode { get; set; }
         public string Kind { get; set; }
         public int? PromptVersionId { get; set; }
