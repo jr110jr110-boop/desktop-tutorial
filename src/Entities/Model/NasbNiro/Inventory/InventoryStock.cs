@@ -116,6 +116,9 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>Sales order (spare parts and small sales, release S1) a customer delivery belongs to, instead of a contract. The foreign key is configured by the sales module.</summary>
         public int? SalesOrderId { get; set; }
 
+        /// <summary>After-sales service order (release S1 part B) an issue (parts consumed) or a customer delivery (parts left on site) belongs to. The foreign key is configured by the service module.</summary>
+        public int? ServiceOrderId { get; set; }
+
         /// <summary>Supplier invoice, delivery note or request number.</summary>
         public string ReferenceNumber { get; set; }
 

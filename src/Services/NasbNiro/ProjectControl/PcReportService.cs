@@ -148,6 +148,8 @@ namespace Services.NasbNiro.ProjectControl
                     if (s.Status != PcShipmentStatus.Delivered) return Bad<PcShipmentDto>("محموله هنوز تحویل نشده است.");
                     if (Clean(dto.HandoverMinutesNumber) == null) return Bad<PcShipmentDto>("شماره صورتجلسه تحویل را وارد کنید.");
                     s.HandoverMinutesNumber = Clean(dto.HandoverMinutesNumber); s.HandoverAt = date; s.Status = PcShipmentStatus.HandoverReceived;
+                    // after-sales: the handover creates the draft of the installed unit (service confirms the site, the tag and the warranty); saved together with the shipment
+                    await AfterSales.SvUnitDraft.DraftAsync(_uow, s, Me, cancellationToken);
                     break;
                 default:
                     return Bad<PcShipmentDto>("عملیات نامعتبر است.");

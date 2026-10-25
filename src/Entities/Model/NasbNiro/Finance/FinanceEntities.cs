@@ -96,6 +96,8 @@ namespace Entities.Model.NasbNiro.Finance
         StageConversion = 12,
         /// <summary>Production: direct labour and machine overhead absorbed into work in progress from the time bookings (release P1).</summary>
         LabourAbsorbed = 13,
+        /// <summary>After-sales: the cost of a warranty service order is charged against the warranty provision (release S1 part B).</summary>
+        WarrantyCost = 14,
         SupplierInvoice = 20,
         SupplierAdvance = 21,
         PaymentRequest = 22,

@@ -189,6 +189,13 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Sales.ISlProposalService, Services.NasbNiro.Sales.SlProposalService>();
             services.AddScoped<Services.NasbNiro.Sales.ISlOrderService, Services.NasbNiro.Sales.SlOrderService>();
             services.AddScoped<Services.NasbNiro.Sales.ISlDashboardService, Services.NasbNiro.Sales.SlDashboardService>();
+            services.AddScoped<Services.NasbNiro.AfterSales.ISvUnitService, Services.NasbNiro.AfterSales.SvUnitService>();
+            services.AddScoped<Services.NasbNiro.AfterSales.ISvRequestService, Services.NasbNiro.AfterSales.SvRequestService>();
+            services.AddScoped<Services.NasbNiro.AfterSales.ISvOrderService, Services.NasbNiro.AfterSales.SvOrderService>();
+            services.AddScoped<Services.NasbNiro.AfterSales.ISvContractService, Services.NasbNiro.AfterSales.SvContractService>();
+            services.AddScoped<Services.NasbNiro.AfterSales.ISvSurveyService, Services.NasbNiro.AfterSales.SvSurveyService>();
+            services.AddScoped<Services.NasbNiro.AfterSales.ISvDashboardService, Services.NasbNiro.AfterSales.SvDashboardService>();
+            services.AddHostedService<Services.NasbNiro.AfterSales.SvHostedService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();

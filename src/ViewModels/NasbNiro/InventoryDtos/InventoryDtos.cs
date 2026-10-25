@@ -194,6 +194,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>A customer delivery of a sales order (spare parts, small sales) names the order instead of a contract.</summary>
         public int? SalesOrderId { get; set; }
+
+        /// <summary>After-sales service order: an issue names it for the parts consumed; a customer delivery names it for parts left on site.</summary>
+        public int? ServiceOrderId { get; set; }
         public string ReferenceNumber { get; set; }
         public string Description { get; set; }
         public int? MaterialRequestId { get; set; }
@@ -304,6 +307,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ContractCode { get; set; }
         public int? SalesOrderId { get; set; }
         public string SalesOrderNumber { get; set; }
+        public int? ServiceOrderId { get; set; }
+        public string ServiceOrderNumber { get; set; }
         public string ReferenceNumber { get; set; }
         public string Description { get; set; }
         public string CreatorName { get; set; }

@@ -97,6 +97,10 @@ namespace Entities.Model.NasbNiro.Quality
         public DateTime? RespondedAt { get; set; }
         public DateTimeOffset? ClosedAt { get; set; }
         public int? ClosedByUserId { get; set; }
+
+        /// <summary>The after-sales service request this complaint was opened from (release S1 part B); the request points back with its ComplaintId. The foreign key is configured by the service module.</summary>
+        public int? ServiceRequestId { get; set; }
+        public AfterSales.SvServiceRequest ServiceRequest { get; set; }
     }
 
     public class ReleaseNote : BaseEntity

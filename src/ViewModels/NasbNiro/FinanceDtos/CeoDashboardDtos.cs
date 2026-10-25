@@ -89,6 +89,16 @@ namespace ViewModels.NasbNiro.FinanceDtos
         /// <summary>Won / (won + lost), percent; empty until a result exists.</summary>
         public decimal? SalesHitRatePercent { get; set; }
 
+        // after-sales service (release S1 part B)
+        public int ServiceOpenRequests { get; set; }
+        /// <summary>Open requests whose response or resolution time is past.</summary>
+        public int ServiceSlaBreaches { get; set; }
+        public int ServiceUnitsInWarranty { get; set; }
+        /// <summary>Warranty cost of the closed warranty orders since the first day of the Persian year (the CEO sees payroll-based labour).</summary>
+        public decimal? ServiceWarrantyCostYtd { get; set; }
+        public int ServiceGoodwillWaiting { get; set; }
+        public decimal? ServiceSurveyAverageScore { get; set; }
+
         // Sepidar link
         public int EventsPending { get; set; }
         public int EventsFailed { get; set; }

@@ -4274,6 +4274,424 @@ as "$FM_TOKEN" GET "$FAU?EntityType=SlCustomerProfile&PageSize=0"; check "sales 
 as "$FM_TOKEN" GET "$FAU?EntityType=SlSetting&PageSize=0"; check "sales audit: the CEO's approval ceiling (50,000,000) is in the trail exactly once" '.success and ([.data.data[]|select(.action == "Added" and (.afterJson|tostring|contains("50000000")))]|length) == 1'
 TOKEN=$ADMIN_TOKEN
 
+# =================================================================== SALES AND SERVICE (release S1 part B: AFTER-SALES SERVICE)
+# Self-contained: its own second service user (the maker-checker partner), customer, site, engineers, work centre, spare parts with stock, units, requests, orders, an LTSA and surveys.
+# The SLA clock of every request is a fixed time counted from the day of the run, and the hosted-job logic is driven by an injected "today" (asOf), so every due time, hour, cost and KPI below is exact and worked out by hand in the check text.
+TOKEN=$ADMIN_TOKEN
+SVC=service
+ts() { date -d "$1" +%Y-%m-%dT%H:%M:%S; } # ts "YYYY-MM-DD HH:MM" : the ISO form the API prints
+sva() { as "$SV_TOKEN" "$@"; }            # the first service user (svc.ci)
+svb() { as "$SV2_TOKEN" "$@"; }           # the second service user (svc2.ci)
+user2 svc2.ci 25 'Ci#Svc2-User-2026' 09120000074 0012345674
+SV2_TOKEN=$(login svc2.ci 'Ci#Svc2-User-2026')
+[ -n "$SV2_TOKEN" ] && ok "service: login of the second service user (role 25), who checks what the first one prepared" || bad "service: login of the second service user (role 25), who checks what the first one prepared"
+SV2ID=$(uid "$SV2_TOKEN")
+
+# --- setup: the customer and its site (sales owns the customer master), four engineers, the work centre that carries the standard labour rate, two spare parts with stock
+as "$SL_TOKEN" POST sales/customers '{"name":"شرکت بهره‌بردار آزمون خدمات","type":1,"industry":3,"status":2,"paymentTermDays":30}'; check "service: setup: the customer that owns the installed base (created by sales)" '.success and .data.id > 0 and .data.paymentTermDays == 30'
+SVCA=$(val .data.id)
+as "$SL_TOKEN" POST sales/sites "{\"customerId\":$SVCA,\"title\":\"نیروگاه خدمات آزمون\",\"country\":\"ایران\",\"address\":\"محل نصب آزمون خدمات\"}"; check "service: setup: the installation site of the customer" ".success and .data.customerId == $SVCA"
+SVSITE=$(val .data.id)
+as "$PAYR_TOKEN" POST "$FP/employees" "$(EJ SVE1 آزمون "خدمات یک" 2345678119 IR270170000000100324200001)"; check "service: setup: engineer 1 (an employee of the payroll master; no approved payslip, so the standard rate applies)" '.success and .data.id > 0'
+SVE1=$(val .data.id)
+as "$PAYR_TOKEN" POST "$FP/employees" "$(EJ SVE2 آزمون "خدمات دو" 2345678224 IR270170000000100324200001)"; check "service: setup: engineer 2" '.success and .data.id > 0'
+SVE2=$(val .data.id)
+as "$PAYR_TOKEN" POST "$FP/employees" "$(EJ SVE3 آزمون "خدمات سه" 2345678331 IR270170000000100324200001)"; check "service: setup: engineer 3" '.success and .data.id > 0'
+SVE3=$(val .data.id)
+as "$PAYR_TOKEN" POST "$FP/employees" "$(EJ SVE4 آزمون "خدمات چهار" 2345678445 IR270170000000100324200001)"; check "service: setup: engineer 4" '.success and .data.id > 0'
+SVE4=$(val .data.id)
+call POST "$MF/work-centers" '{"code":"SV-WC","title":"مرکز دستمزد استاندارد خدمات","kind":1}'; check "service: setup: a work centre whose standard labour rate is used for engineers without an approved payslip" '.success and .data.id > 0'
+SVWC=$(val .data.id)
+item SVPA "{\"code\":\"77.31.00.001.1\",\"title\":\"یاتاقان یدکی خدمات\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "service: spare part A (bearing)"
+item SVPB "{\"code\":\"77.31.00.002.1\",\"title\":\"اورینگ یدکی خدمات\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "service: spare part B (O-ring)"
+call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "service: setup: purchase-order rule switched off for the opening receipt" '.success and .data.value == 0'
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$SVPA,\"quantity\":10,\"unitPrice\":250000},{\"itemId\":$SVPB,\"quantity\":10,\"unitPrice\":80000}]}"; SVRC=$(val .data.id)
+call POST "inventory/documents/$SVRC/confirm"; check "service: setup: opening receipt confirmed: 10 bearings at 250,000 and 10 O-rings at 80,000" '.success and .data.status == 1'
+call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "service: setup: purchase-order rule switched on again" '.success and .data.value == 1'
+call GET "inventory/stock/items?ItemId=$SVPA"; check "service: stock of bearing A is 10" '.data.data[0].onHand == 10'
+call GET "inventory/stock/items?ItemId=$SVPB"; check "service: stock of O-ring B is 10" '.data.data[0].onHand == 10'
+# a general (no work order) material request: the only way an issue leaves the warehouse; 6 bearings and 5 O-rings
+call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"قطعات یدکی خدمات پس از فروش\",\"lines\":[{\"itemId\":$SVPA,\"quantity\":6},{\"itemId\":$SVPB,\"quantity\":5}]}"; check "service: setup: material request for the spare parts of the service orders" '.success and .data.id > 0'
+SVMR=$(val .data.id)
+call POST inventory/material-requests/action "{\"id\":$SVMR,\"action\":\"submit\"}"; call POST inventory/material-requests/action "{\"id\":$SVMR,\"action\":\"approve-planning\"}"
+as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$SVMR,\"action\":\"approve-manufacturing\"}"; check "service: setup: the material request is approved by planning and manufacturing" '.success and .data.status == 2'
+
+# --- who may do what
+as "$WH_TOKEN" GET "$SVC/units"; nomsg "service: a storekeeper cannot read the installed base" "مجوز"
+as "$SL_TOKEN" POST "$SVC/units" '{"title":"واحد بدون مجوز"}'; nomsg "service: sales reads the installed base of its customers but cannot write it" "مجوز"
+as "$WH_TOKEN" POST "$SVC/requests" '{"customerId":1,"description":"x","type":1,"priority":3}'; nomsg "service: a storekeeper cannot register a service request" "مجوز"
+as "$SL_TOKEN" POST "$SVC/jobs/run" '{}'; nomsg "service: sales cannot run the service jobs" "مجوز"
+sva GET "$SVC/settings"; check "service: settings: the cost centre defaults to AFTERSALES, the survey and visit lead days to 30 (the brief's figures, changeable); the labour work centre has no default" '.success and ([.data[]|select(.key == "CostCenterCode")][0].effective) == "AFTERSALES" and ([.data[]|select(.key == "SurveyLeadDays")][0].effective) == "30" and ([.data[]|select(.key == "VisitLeadDays")][0].effective) == "30" and ([.data[]|select(.key == "LabourWorkCenterCode")][0].effective) == null and ([.data[]|select(.key == "LabourWorkCenterCode")][0].text) == null'
+sva POST "$SVC/settings" '{"key":"LabourWorkCenterCode","text":"SV-WC"}'; nomsg "service: service cannot enter the labour work centre (CEO only)" "مدیرعامل"
+as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"NoSuchSetting","text":"1"}'; nomsg "service: an unknown setting key is refused" "نامعتبر"
+as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"SurveyLeadDays","text":"-1"}'; nomsg "service: a negative number of lead days is refused" "غیرمنفی"
+as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"LabourWorkCenterCode","text":"NO-SUCH-WC"}'; nomsg "service: a work centre that does not exist is refused" "پیدا نشد"
+sva GET "$SVC/sla-rules"; check "service: the SLA table has no seeded row (no response or resolution hour is invented)" '.success and (.data|length) == 0'
+
+# --- the installed base: the handover of shipment PCSH1 drafted exactly one unit
+sva GET "$SVC/units?NeedsConfirm=true"
+check "service: the handover (HandoverReceived) of the shipment of work order 1 drafted exactly one installed unit: no serial unit was delivered, so one unit for the shipment; unconfirmed, with the handover date and the contract" ".success and .data.totalItems == 1 and (.data.data[0] | .shipmentId == $PCSH1 and .workOrderId == $WO1 and .contractId == $QCT and .serialUnitId == null and .isConfirmed == false and (.tag|startswith(\"SVU\")) and (.handoverDate|startswith(\"$TODAY\")) and (.handoverDateText|test(\"^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}\$\")) and (.title|contains(\"QA-WO-1\")))"
+SVUAU=$(val '.data.data[0].id'); SVAUTITLE=$(val '.data.data[0].title'); SVHO=$(val '.data.data[0].handoverDate[:10]')
+as "$SL_TOKEN" GET "$SVC/units?NeedsConfirm=true"; check "service: sales reads the same installed base" '.success and .data.totalItems == 1'
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${TODAY}T00:00:00\"}"; check "service: a night with nothing to do changes nothing: no visit, no survey, no expiry, no SLA alert" '.success and .data.visitsDrafted == 0 and .data.surveysDrafted == 0 and .data.contractsExpired == 0 and .data.breachAlerts == 0'
+ibx "$SV_TOKEN" "sv:unit:$SVUAU"; check "service: the unit the system drafted waits in the service inbox (the nightly job opens the gate)" '.success and (.data.data|length) == 1'
+
+# unit A: a pump in warranty (manual dates), linked to the rotor serial unit of the traceability section, with a spare-parts list
+sva POST "$SVC/units" "{\"title\":\"پمپ تغذیه خدمات آزمون\",\"tag\":\"SV-UA\",\"serialUnitId\":$RT,\"productType\":4,\"customerId\":$SVCA,\"siteId\":$SVSITE,\"contractId\":$QCT,\"handoverDate\":\"$(dd -200)T00:00:00\",\"warrantyStart\":\"$(dd -200)T00:00:00\",\"warrantyEnd\":\"$(dd 160)T00:00:00\",\"spares\":[{\"itemId\":$SVPA,\"quantity\":2},{\"itemId\":$SVPB,\"quantity\":4}]}"
+check "service: unit A saved: a pump in warranty from 200 days ago to 160 days ahead (manual dates), 2 spare lines, linked to the rotor serial unit, unconfirmed" ".success and .data.tag == \"SV-UA\" and .data.productType == 4 and .data.isConfirmed == false and .data.warrantySource == 3 and .data.warrantyMonths == null and .data.status == 1 and .data.inWarranty == true and (.data.warrantyEnd|startswith(\"$(dd 160)\")) and (.data.spares|length) == 2 and .data.runningHours == 0 and .data.serialUnitId == $RT and .data.serialNumber != null and .data.contractCode == \"QA-CT-01\" and .data.customerName == \"شرکت بهره‌بردار آزمون خدمات\" and .data.siteTitle == \"نیروگاه خدمات آزمون\""
+SVUA=$(val .data.id)
+sva POST "$SVC/units" "{\"title\":\"تکرار\",\"tag\":\"SV-UA\"}"; nomsg "service: the same tag cannot be used for two units" "tag برای واحد دیگری"
+sva POST "$SVC/units" "{\"title\":\"هر دو گارانتی\",\"warrantyMonths\":12,\"warrantyStart\":\"$(dd -10)T00:00:00\",\"warrantyEnd\":\"$(dd 10)T00:00:00\"}"; nomsg "service: the warranty is entered as months or as dates, not both" "نه هر دو"
+sva POST "$SVC/units" "{\"title\":\"گارانتی بدون تاریخ تحویل\",\"warrantyMonths\":12}"; nomsg "service: months of warranty need the handover date to count from" "تاریخ تحویل"
+sva POST "$SVC/units" "{\"title\":\"ماه صفر\",\"handoverDate\":\"$(dd -10)T00:00:00\",\"warrantyMonths\":0}"; nomsg "service: zero months of warranty are refused" "بیشتر از صفر"
+sva POST "$SVC/units" "{\"title\":\"سایت مشتری دیگر\",\"customerId\":$SLCA,\"siteId\":$SVSITE}"; nomsg "service: the site must belong to the customer of the unit" "این سایت مال"
+sva POST "$SVC/units" '{"title":"   "}'; nomsg "service: a unit needs a title" "عنوان واحد"
+
+# unit B: a steam turbine whose warranty ended 35 days ago; edited twice to prove the concurrency token
+sva POST "$SVC/units" "{\"title\":\"توربین بخار خدمات آزمون\",\"tag\":\"SV-UB\",\"productType\":1,\"customerId\":$SVCA,\"siteId\":$SVSITE,\"contractId\":$QCT,\"handoverDate\":\"$(dd -400)T00:00:00\",\"warrantyStart\":\"$(dd -400)T00:00:00\",\"warrantyEnd\":\"$(dd -35)T00:00:00\"}"
+check "service: unit B saved: its warranty ended 35 days ago, so it is out of warranty" ".success and .data.tag == \"SV-UB\" and .data.status == 2 and .data.inWarranty == false and .data.statusText == \"خارج از گارانتی\" and (.data.warrantyEnd|startswith(\"$(dd -35)\"))"
+SVUB=$(val .data.id); SVUBRV=$(val .data.rowVersion)
+sva POST "$SVC/units" "{\"id\":$SVUB,\"title\":\"توربین بخار خدمات آزمون\",\"note\":\"ویرایش اول\"}"; check "service: unit B edited: the note is saved and the other fields stay" ".success and .data.note == \"ویرایش اول\" and .data.customerId == $SVCA and .data.siteId == $SVSITE and .data.productType == 1 and .data.rowVersion != \"$SVUBRV\""
+sva POST "$SVC/units" "{\"id\":$SVUB,\"title\":\"توربین بخار خدمات آزمون\",\"note\":\"ویرایش دوم\",\"rowVersion\":\"$SVUBRV\"}"; nomsg "service: an edit made on an old copy of the unit is refused (somebody else changed it meanwhile)" "هم‌زمان"
+
+# unit D: a valve without a site, decommissioned later
+sva POST "$SVC/units" "{\"title\":\"شیر خدمات آزمون\",\"tag\":\"SV-UD\",\"productType\":6,\"customerId\":$SVCA}"; check "service: unit D saved without a site" '.success and .data.tag == "SV-UD" and .data.siteId == null and .data.productType == 6'
+SVUD=$(val .data.id)
+ibx "$SV_TOKEN" "sv:unit:$SVUA"; check "service: unit A waits for its confirmation in the service inbox" '.success and (.data.data|length) == 1'
+sva POST "$SVC/units/action" "{\"id\":$SVUA,\"action\":\"confirm\"}"; nomsg "service: the person who prepared a unit cannot confirm it" "تفکیک وظایف"
+svb POST "$SVC/units/action" "{\"id\":$SVUD,\"action\":\"confirm\"}"; nomsg "service: a unit without a site cannot be confirmed" "سایت نصب"
+svb POST "$SVC/units/action" "{\"id\":$SVUA,\"action\":\"confirm\"}"; check "service: the second service user confirms unit A" '.success and .data.isConfirmed == true and .data.confirmedAtText != null'
+svb POST "$SVC/units/action" "{\"id\":$SVUB,\"action\":\"confirm\"}"; check "service: ... and unit B" '.success and .data.isConfirmed == true'
+ibx "$SV_TOKEN" "sv:unit:$SVUA"; check "service: the confirmation of unit A closed its inbox gate" '.success and (.data.data|length) == 0'
+svb POST "$SVC/units/action" "{\"id\":$SVUA,\"action\":\"confirm\"}"; nomsg "service: a unit is confirmed once" "قبلاً تأیید"
+
+# the system's draft: customer, site, product type and 12 months of warranty from the handover; then the second user confirms it
+sva POST "$SVC/units" "{\"id\":$SVUAU,\"title\":\"$SVAUTITLE\",\"productType\":3,\"customerId\":$SVCA,\"siteId\":$SVSITE,\"warrantyMonths\":12}"
+check "service: the drafted unit completed by service: condenser, customer, site, 12 months from the handover date (system draft overwritten by the months rule)" ".success and .data.productType == 3 and .data.customerId == $SVCA and .data.warrantyMonths == 12 and .data.warrantySource == 1 and (.data.warrantyStart|startswith(\"$SVHO\")) and (.data.warrantyEnd|startswith(\"$(date -d "$SVHO +1 year" +%Y-%m-%d)\")) and .data.status == 1 and .data.isConfirmed == false"
+svb POST "$SVC/units/action" "{\"id\":$SVUAU,\"action\":\"confirm\"}"; check "service: the second user confirms the drafted unit" '.success and .data.isConfirmed == true'
+sva POST "$SVC/units/action" "{\"id\":$SVUD,\"action\":\"decommission\"}"; check "service: unit D decommissioned" '.success and .data.decommissioned == true and .data.status == 4 and .data.statusText == "از رده خارج"'
+sva POST "$SVC/units" "{\"id\":$SVUD,\"title\":\"شیر خدمات آزمون\",\"note\":\"x\"}"; nomsg "service: a decommissioned unit is not edited" "از رده خارج"
+ibx "$SV_TOKEN" "sv:unit:$SVUD"; check "service: a decommissioned unit has no inbox gate" '.success and (.data.data|length) == 0'
+sva GET "$SVC/units?Status=1"; check "service: filter 'in warranty' (today): units A and the drafted condenser" '.success and .data.totalItems == 2 and ([.data.data[].tag]|sort|first) == "SV-UA"'
+sva GET "$SVC/units?Status=2"; check "service: filter 'out of warranty': unit B only" '.success and .data.totalItems == 1 and .data.data[0].tag == "SV-UB"'
+sva GET "$SVC/units?Status=4"; check "service: filter 'decommissioned': unit D only" '.success and .data.totalItems == 1 and .data.data[0].tag == "SV-UD"'
+sva GET "$SVC/units?Status=1&AsOf=$(dd -200)"; check "service: judged 200 days ago (injected day) units A and B were in warranty and the drafted condenser was not yet" '.success and .data.totalItems == 2 and ([.data.data[].tag]|sort) == ["SV-UA","SV-UB"]'
+sva GET "$SVC/units/$SVUB?asOf=$(dd -200)"; check "service: the status of unit B on that day is 'in warranty'" '.success and .data.status == 1'
+sva GET "$SVC/units?CustomerId=$SVCA"; check "service: the customer has 4 units" '.success and .data.totalItems == 4'
+sva GET "$SVC/units?NeedsConfirm=true"; check "service: no active unit is waiting for confirmation any more (the decommissioned one does not count)" '.success and .data.totalItems == 0'
+sva GET "$SVC/units/$SVUA/as-built"; check "service: as-built of unit A: the rotor with its installed shaft S-2, read through the traceability service" '.success and .data.tag == "SV-UA" and (.data.trace.children|map(.serialNumber)|index("S-2")) != null'
+sva GET "$SVC/units/$SVUAU/as-built"; check "service: a unit without a serial unit has no as-built tree" '.success and .data.trace == null'
+as "$SL_TOKEN" GET "$SVC/units/$SVUA"; check "service: sales reads a unit of its customer" ".success and .data.customerId == $SVCA"
+
+# --- requests: R0 is registered before any SLA row exists
+sva POST "$SVC/requests" "{\"customerId\":$SVCA,\"unitId\":$SVUA,\"channel\":\"تلفن\",\"receivedAt\":\"$(ts "$(dd -9) 09:00")\",\"description\":\"پرسش فنی درباره‌ی دور مجاز پمپ\",\"type\":6,\"priority\":3}"
+check "service: request R0 (technical query, normal) before any SLA row exists: no due time is invented and the request says it has no SLA" ".success and .data.status == 1 and (.data.number|startswith(\"SVR\")) and .data.responseDue == null and .data.resolutionDue == null and .data.slaMissing == true and .data.complaintId == null and .data.receivedAt == \"$(ts "$(dd -9) 09:00")\" and .data.breached == false"
+SVR0=$(val .data.id)
+sva POST "$SVC/requests/action" "{\"id\":$SVR0,\"action\":\"assign\",\"userId\":$SVID,\"at\":\"$(ts "$(dd -9) 10:30")\"}"; check "service: R0 assigned: the first response is the assignment time, 1.5 hours after the receipt" ".success and .data.status == 2 and .data.assignedToUserId == $SVID and .data.firstResponseAt == \"$(ts "$(dd -9) 10:30")\""
+sva POST "$SVC/requests/action" "{\"id\":$SVR0,\"action\":\"resolve\",\"resolution\":\"دور مجاز طبق دفترچه اعلام شد\",\"at\":\"$(ts "$(dd -8) 09:00")\"}"; check "service: R0 resolved 24 hours after the receipt" ".success and .data.status == 5 and .data.resolvedAt == \"$(ts "$(dd -8) 09:00")\" and .data.resolutionBreached == false"
+sva POST "$SVC/requests/action" "{\"id\":$SVR0,\"action\":\"close\"}"; check "service: R0 closed" '.success and .data.status == 6'
+sva POST "$SVC/requests/action" "{\"id\":$SVR0,\"action\":\"progress\"}"; nomsg "service: a closed request takes no more actions" "بسته شده"
+
+# the SLA table is entered by service or the CEO; the hours are inputs
+svb POST "$SVC/sla-rules" '{"priority":1,"responseHours":0}'; nomsg "service: SLA response hours must be above zero" "بیشتر از صفر"
+svb POST "$SVC/sla-rules" '{"priority":1,"responseHours":4,"resolutionHours":2}'; nomsg "service: the resolution hours cannot be below the response hours" "از ساعت‌های پاسخ کمتر"
+as "$WH_TOKEN" POST "$SVC/sla-rules" '{"priority":1,"responseHours":2,"resolutionHours":8}'; nomsg "service: a storekeeper cannot enter SLA hours" "مجوز"
+svb POST "$SVC/sla-rules" '{"priority":1,"responseHours":2,"resolutionHours":8}'; check "service: SLA critical: respond within 2 hours, resolve within 8" '.success and .data.priority == 1 and .data.responseHours == 2 and .data.resolutionHours == 8 and .data.isActive == true'
+svb POST "$SVC/sla-rules" '{"priority":2,"responseHours":4,"resolutionHours":24}'; check "service: SLA high: 4 and 24 hours" '.success and .data.priority == 2'
+as "$CEO_TOKEN" POST "$SVC/sla-rules" '{"priority":3,"responseHours":8,"resolutionHours":72}'; check "service: SLA normal: 8 and 72 hours (entered by the CEO)" '.success and .data.priority == 3'
+sva GET "$SVC/sla-rules"; check "service: the SLA table now holds exactly the 3 rows entered; low has none" '.success and (.data|length) == 3 and ([.data[].priority]|sort) == [1,2,3]'
+
+# R1: a critical breakdown of unit A; R2: a high breakdown of unit B; R3: a complaint about unit B; R4: a high breakdown of unit A that is also a product nonconformity and that nobody answers
+sva POST "$SVC/requests" "{\"customerId\":$SVCA,\"unitId\":$SVUA,\"channel\":\"تلفن\",\"receivedAt\":\"$(ts "$(dd -3) 08:00")\",\"description\":\"لرزش شدید و صدای یاتاقان پمپ\",\"type\":1,\"priority\":1}"
+check "service: request R1 (critical breakdown, received 3 days ago at 08:00): response due 10:00 (2 h) and resolution due 16:00 (8 h) the same day" ".success and .data.priority == 1 and .data.responseDue == \"$(ts "$(dd -3) 10:00")\" and .data.resolutionDue == \"$(ts "$(dd -3) 16:00")\" and .data.slaMissing == false and .data.status == 1 and .data.unitTag == \"SV-UA\" and .data.complaintId == null"
+SVR1=$(val .data.id); SVR1N=$(val .data.number)
+sva POST "$SVC/requests" "{\"customerId\":$SVCA,\"unitId\":$SVUB,\"channel\":\"ایمیل\",\"receivedAt\":\"$(ts "$(dd -3) 10:00")\",\"description\":\"توقف توربین هنگام راه‌اندازی\",\"type\":1,\"priority\":2}"
+check "service: request R2 (high breakdown, received 3 days ago at 10:00): response due 14:00 (4 h), resolution due 10:00 the next day (24 h)" ".success and .data.responseDue == \"$(ts "$(dd -3) 14:00")\" and .data.resolutionDue == \"$(ts "$(dd -2) 10:00")\" and .data.unitTag == \"SV-UB\""
+SVR2=$(val .data.id)
+sva POST "$SVC/requests" "{\"customerId\":$SVCA,\"unitId\":$SVUB,\"channel\":\"نامه\",\"receivedAt\":\"$(ts "$(dd -2) 08:00")\",\"description\":\"شکایت از طولانی‌شدن توقف توربین\",\"type\":7,\"priority\":3}"
+check "service: request R3 (complaint, normal, received 2 days ago at 08:00): response due 16:00 (8 h), resolution due 72 hours after the receipt; the complaint of the quality module is opened and linked" ".success and .data.responseDue == \"$(ts "$(dd -2) 16:00")\" and .data.resolutionDue == \"$(ts "$(dd -2) 08:00 +72 hours")\" and .data.complaintId > 0 and (.data.complaintNumber|startswith(\"CC\"))"
+SVR3=$(val .data.id); SVR3N=$(val .data.number); SVCC3=$(val .data.complaintId)
+as "$QA_TOKEN" GET quality/complaints/"$SVCC3"; check "service: the complaint knows its request (linked both ways), the contract and the description with the request number" ".success and .data.serviceRequestId == $SVR3 and .data.serviceRequestNumber == \"$SVR3N\" and .data.contractId == $QCT and (.data.description|contains(\"$SVR3N\"))"
+sva POST "$SVC/requests" "{\"customerId\":$SVCA,\"unitId\":$SVUA,\"channel\":\"تلفن\",\"receivedAt\":\"$(ts "$(dd -1) 07:00")\",\"description\":\"خرابی مجدد پمپ؛ یاتاقان نو نیز آسیب دیده\",\"type\":1,\"priority\":2,\"productNonconformity\":true}"
+check "service: request R4 (high breakdown of unit A, received yesterday at 07:00, product nonconformity): response due 11:00, resolution due today 07:00; a nonconformity opens its own complaint" ".success and .data.responseDue == \"$(ts "$(dd -1) 11:00")\" and .data.resolutionDue == \"$(ts "$(dd -1) 07:00 +24 hours")\" and .data.productNonconformity == true and .data.complaintId > 0 and .data.complaintId != $SVCC3"
+SVR4=$(val .data.id); SVR4N=$(val .data.number); SVCC4=$(val .data.complaintId)
+as "$QA_TOKEN" GET quality/complaints/"$SVCC4"; check "service: the complaint of R4 is linked to R4" ".success and .data.serviceRequestId == $SVR4"
+sva POST "$SVC/requests" "{\"customerId\":$SLCA,\"unitId\":$SVUA,\"description\":\"واحد مشتری دیگر\",\"type\":1,\"priority\":3}"; nomsg "service: the unit of a request must belong to its customer" "مال مشتری انتخاب‌شده نیست"
+sva POST "$SVC/requests" "{\"customerId\":$SVCA,\"description\":\"  \",\"type\":1,\"priority\":3}"; nomsg "service: a request needs a description" "شرح درخواست"
+ibx "$SV_TOKEN" "sv:assign:$SVR4"; check "service: R4 waits for an assignment in the service inbox" '.success and (.data.data|length) == 1'
+sva POST "$SVC/requests/action" "{\"id\":$SVR1,\"action\":\"assign\",\"userId\":$SVID,\"at\":\"$(ts "$(dd -3) 09:30")\"}"; check "service: R1 assigned at 09:30, 1.5 hours after the receipt, inside the 2-hour SLA; its resolution time is already past (not resolved)" ".success and .data.status == 2 and .data.firstResponseAt == \"$(ts "$(dd -3) 09:30")\" and .data.responseBreached == false and .data.resolutionBreached == true and .data.breached == true"
+sva POST "$SVC/requests/action" "{\"id\":$SVR2,\"action\":\"assign\",\"userId\":$SVID,\"at\":\"$(ts "$(dd -3) 16:00")\"}"; check "service: R2 assigned at 16:00, 6 hours after the receipt: the 4-hour response SLA was missed" ".success and .data.firstResponseAt == \"$(ts "$(dd -3) 16:00")\" and .data.responseBreached == true"
+sva POST "$SVC/requests/action" "{\"id\":$SVR3,\"action\":\"assign\",\"userId\":$SVID,\"at\":\"$(ts "$(dd -2) 09:00")\"}"; check "service: R3 assigned at 09:00, 1 hour after the receipt" ".success and .data.firstResponseAt == \"$(ts "$(dd -2) 09:00")\" and .data.responseBreached == false"
+sva POST "$SVC/requests/action" "{\"id\":$SVR3,\"action\":\"progress\"}"; check "service: R3 in progress; the first response time stays the assignment time" ".success and .data.status == 3 and .data.firstResponseAt == \"$(ts "$(dd -2) 09:00")\""
+sva POST "$SVC/requests" "{\"id\":$SVR1,\"customerId\":$SVCA,\"description\":\"x\",\"type\":1,\"priority\":1}"; nomsg "service: an assigned request is not edited any more" "واگذار شده ویرایش نمی‌شود"
+sva POST "$SVC/requests/action" "{\"id\":$SVR1,\"action\":\"close\"}"; nomsg "service: only a resolved request is closed" "فقط درخواست رفع‌شده"
+ibx "$SV_TOKEN" "sv:assign:$SVR1"; check "service: the assignment closed the inbox gate of R1" '.success and (.data.data|length) == 0'
+sva POST "$SVC/requests/action" "{\"id\":$SVR1,\"action\":\"wait\"}"; check "service: R1 waits for the customer once" '.success and .data.status == 4'
+sva POST "$SVC/requests/action" "{\"id\":$SVR1,\"action\":\"progress\"}"; check "service: ... and is in progress again" '.success and .data.status == 3'
+sva GET "$SVC/requests?Priority=2&OpenOnly=true"; check "service: filter: the open high-priority requests are R2 and R4" ".success and .data.totalItems == 2 and ([.data.data[].id]|sort) == ([$SVR2,$SVR4]|sort)"
+sva GET "$SVC/requests?Breached=true"; check "service: filter: the breached open requests: R1 (resolution past), R2 (assigned late, resolution past), R4 (never answered); R3 is still inside its 72 hours" ".success and .data.totalItems == 3 and ([.data.data[].id]|sort) == ([$SVR1,$SVR2,$SVR4]|sort)"
+
+# --- order O1: a warranty repair of unit A for R1. The labour rate is not known to the system until finance enters it.
+sva POST "$SVC/orders" "{\"requestId\":$SVR1,\"unitId\":$SVUB,\"title\":\"x\"}"; nomsg "service: the unit of an order must be the unit of its request" "با واحد درخواست یکی نیست"
+sva POST "$SVC/orders" "{\"requestId\":$SVR0,\"unitId\":$SVUA,\"title\":\"x\"}"; nomsg "service: a request that is resolved or closed takes no new order" "رفع یا بسته شده"
+sva POST "$SVC/orders" "{\"unitId\":$SVUD,\"title\":\"x\"}"; nomsg "service: a decommissioned unit takes no order" "از رده خارج"
+sva POST "$SVC/orders" "{\"unitId\":$SVUA,\"title\":\"\"}"; nomsg "service: an order needs a title" "عنوان دستور خدمات"
+sva POST "$SVC/orders" "{\"unitId\":$SVUA,\"title\":\"x\",\"plannedStart\":\"$(dd 2)T00:00:00\",\"plannedEnd\":\"$(dd 1)T00:00:00\"}"; nomsg "service: the plan cannot end before it starts" "پایان برنامه قبل از شروع"
+sva POST "$SVC/orders" "{\"unitId\":$SVUA,\"title\":\"x\",\"runningHoursReading\":-1}"; nomsg "service: a negative meter reading is refused" "منفی"
+sva POST "$SVC/orders" "{\"requestId\":$SVR1,\"unitId\":$SVUA,\"kind\":1,\"title\":\"تعمیر یاتاقان پمپ تغذیه\",\"plannedStart\":\"$(dd -2)T00:00:00\",\"plannedEnd\":\"$(dd -1)T00:00:00\",\"travelNote\":\"سفر زمینی\",\"engineerEmployeeIds\":[$SVE1,$SVE2],\"tasks\":[{\"description\":\"بازکردن و بازدید یاتاقان\"},{\"description\":\"تعویض یاتاقان و تراز\"}]}"
+check "service: order O1 planned for R1: in the after-sales cost centre, the contract of the unit, 2 engineers and 2 tasks; the warranty is judged on the day the failure was reported" ".success and .data.status == 2 and (.data.number|startswith(\"SVO\")) and .data.costCenterCode == \"AFTERSALES\" and .data.requestNumber == \"$SVR1N\" and .data.unitTag == \"SV-UA\" and .data.customerId == $SVCA and .data.contractId == $QCT and (.data.engineers|length) == 2 and (.data.tasks|length) == 2 and .data.decision == 0 and (.data.warrantyTestedOn|startswith(\"$(dd -3)\")) and .data.costPosted == false and .data.invoiceId == null"
+SVO1=$(val .data.id); SVO1N=$(val .data.number)
+call GET finance/cost-centers; check "service: the after-sales cost centre was created on first use (exactly one AFTERSALES)" '[.. | objects | select(.code? == "AFTERSALES")] | length == 1'
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"start\"}"; check "service: O1 started" '.success and .data.status == 3 and .data.startedAtText != null'
+ibx "$SV_TOKEN" "sv:close:$SVO1"; check "service: an order in progress waits for its signed report: inbox gate open" '.success and (.data.data|length) == 1'
+sva POST "$SVC/requests/action" "{\"id\":$SVR1,\"action\":\"resolve\",\"resolution\":\"x\"}"; nomsg "service: a request with an open order cannot be resolved" "دستور خدماتِ باز"
+# the parts: an issue of 2 bearings (consumed) and a customer delivery of 1 O-ring (left on site), both against the order
+svdoc() { # svdoc TYPE-FIELDS : a draft warehouse document for order O1
+  call POST inventory/documents "$1"
+}
+svdoc "{\"type\":11,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"contractId\":$QCT,\"serviceOrderId\":$SVO1,\"driverName\":\"راننده\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"تحویل‌گیرنده\",\"lines\":[{\"itemId\":$SVPB,\"quantity\":1}]}"; nomsg "service: a delivery is for a contract or for a service order, not both" "یا برای دستور خدمات"
+svdoc "{\"type\":4,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$SVMR,\"serviceOrderId\":$SVO1,\"lines\":[{\"itemId\":$SVPA,\"quantity\":2}]}"; check "service: issue of 2 bearings drafted against O1: the cost centre is the after-sales one of the order" ".success and .data.status == 0 and .data.serviceOrderId == $SVO1 and .data.serviceOrderNumber == \"$SVO1N\" and .data.costCenter == \"AFTERSALES\""
+SVIS1=$(val .data.id)
+svdoc "{\"type\":11,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"serviceOrderId\":$SVO1,\"driverName\":\"راننده\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"تحویل‌گیرنده\",\"lines\":[{\"itemId\":$SVPB,\"quantity\":1}]}"; check "service: delivery of 1 O-ring drafted against O1 (parts left on site)" ".success and .data.status == 0 and .data.serviceOrderId == $SVO1"
+SVDL1=$(val .data.id)
+sva POST "$SVC/orders/time-entries" "{\"orderId\":$SVO1,\"employeeId\":$SVE1,\"hours\":1,\"kind\":2}"; check "service: (setup) a first time row" '.success'
+SVTE0=$(val '.data.timeEntries[0].id')
+sva POST "$SVC/orders/time-entries/remove" "{\"orderId\":$SVO1,\"rowId\":$SVTE0}"; check "service: a wrong time row is removed again" '.success and (.data.timeEntries|length) == 0'
+# time: engineer 1 travel 2 h and work 4 h two days ago, waiting 1 h yesterday; engineer 2 work 5 h yesterday = travel 2, work 9, waiting 1, 12 hours in all
+svtime() { # svtime ORDER EMPLOYEE DATE HOURS KIND [NOTE]
+  sva POST "$SVC/orders/time-entries" "{\"orderId\":$1,\"employeeId\":$2,\"workDate\":\"$3T00:00:00\",\"hours\":$4,\"kind\":$5${6:+,\"note\":\"$6\"}}"
+}
+svtime "$SVO1" "$SVE1" "$(dd -2)" 25 2; nomsg "service: a row of more than 24 hours is refused" "حداکثر ۲۴"
+svtime "$SVO1" "$SVE3" "$(dd -2)" 2 2; nomsg "service: only an engineer of the order books hours on it" "مهندس دستور خدمات نیست"
+svtime "$SVO1" "$SVE1" "$(dd 5)" 2 2; nomsg "service: hours cannot be booked in the future" "آینده"
+svtime "$SVO1" "$SVE1" "$(dd -2)" 2 1 "سفر"; check "service: engineer 1: 2 hours of travel two days ago" '.success and (.data.timeEntries|length) == 1 and .data.travelHours == 2'
+svtime "$SVO1" "$SVE1" "$(dd -2)" 4 2 "کار"; check "service: engineer 1: 4 hours of work" '.success and .data.workHours == 4'
+svtime "$SVO1" "$SVE1" "$(dd -2)" 19 2; nomsg "service: one engineer cannot book more than 24 hours a day (2 + 4 + 19 = 25)" "بیشتر از ۲۴"
+svtime "$SVO1" "$SVE1" "$(dd -1)" 1 3 "انتظار"; check "service: engineer 1: 1 hour of waiting yesterday" '.success and .data.waitingHours == 1'
+svtime "$SVO1" "$SVE2" "$(dd -1)" 5 2 "کار"; check "service: engineer 2: 5 hours of work yesterday: travel 2, work 9, waiting 1, total 12 hours; the labour hours before the close are the booked hours" '.success and (.data.timeEntries|length) == 4 and .data.travelHours == 2 and .data.workHours == 9 and .data.waitingHours == 1 and .data.totalHours == 12 and .data.labourHours == 12 and .data.costPosted == false and .data.totalCost == 0'
+svtime "$SVO1" "$SVE2" "$(dd -1)" 3 3 "اشتباه"; SVTE1=$(val '[.data.timeEntries[]|select(.note == "اشتباه")][0].id')
+sva POST "$SVC/orders/time-entries/remove" "{\"orderId\":$SVO1,\"rowId\":$SVTE1}"; check "service: the wrong row is removed: the hours are 12 again" '.success and (.data.timeEntries|length) == 4 and .data.totalHours == 12'
+sva POST "$SVC/orders/measurements" "{\"orderId\":$SVO1,\"name\":\"ارتعاش یاتاقان\",\"value\":2.8,\"unit\":\"mm/s\"}"; check "service: measurement 1: vibration 2.8 mm/s" '.success and (.data.measurements|length) == 1'
+sva POST "$SVC/orders/measurements" "{\"orderId\":$SVO1,\"name\":\"دمای یاتاقان\",\"value\":68,\"unit\":\"C\",\"note\":\"پس از تعویض\"}"; check "service: measurement 2: bearing temperature 68 C" '.success and (.data.measurements|length) == 2 and .data.measurements[1].value == 68'
+sva POST "$SVC/orders/measurements" "{\"orderId\":$SVO1,\"name\":\"بدون واحد\",\"value\":1,\"unit\":\" \"}"; nomsg "service: a measurement needs its unit" "واحد اندازه"
+sva POST "$SVC/orders/measurements" "{\"orderId\":$SVO1,\"name\":\"اشتباه\",\"value\":1,\"unit\":\"mm\"}"; SVM3=$(val '[.data.measurements[]|select(.name == "اشتباه")][0].id')
+sva POST "$SVC/orders/measurements/remove" "{\"orderId\":$SVO1,\"rowId\":$SVM3}"; check "service: a wrong measurement is removed: 2 remain" '.success and (.data.measurements|length) == 2'
+# closing: the signed report, the warranty decision, the meter reading
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"close\"}"; nomsg "service: the order is not closed without the signed service report" "گزارش خدمات امضاشده"
+sva POST "$SVC/orders" "{\"id\":$SVO1,\"requestId\":$SVR1,\"unitId\":$SVUA,\"kind\":1,\"title\":\"تعمیر یاتاقان پمپ تغذیه\",\"plannedStart\":\"$(dd -2)T00:00:00\",\"plannedEnd\":\"$(dd -1)T00:00:00\",\"travelNote\":\"سفر زمینی\",\"findings\":\"سایش یاتاقان رانش\",\"recommendations\":\"بازدید ارتعاش پس از ۵۰۰ ساعت کار\",\"runningHoursReading\":1200,\"reportDocumentId\":\"$DOCID\"}"
+check "service: the signed report is attached with the findings and the meter reading 1200; engineers, tasks and hours are untouched" ".success and .data.reportDocumentId == \"$DOCID\" and .data.runningHoursReading == 1200 and (.data.engineers|length) == 2 and (.data.tasks|length) == 2 and (.data.timeEntries|length) == 4 and .data.findings != null"
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"close\"}"; nomsg "service: the order is not closed without the warranty decision" "تصمیم گارانتی"
+sva POST "$SVC/orders/decision" "{\"orderId\":$SVO1,\"decision\":1}"; nomsg "service: the person who prepared the order cannot take the warranty decision (maker-checker)" "تفکیک وظایف"
+as "$CEO_TOKEN" POST "$SVC/orders/decision" "{\"orderId\":$SVO1,\"decision\":1}"; nomsg "service: the CEO decides only on goodwill, not on warranty" "مجوز"
+svb POST "$SVC/orders/decision" "{\"orderId\":$SVO1,\"decision\":3}"; nomsg "service: goodwill is the CEO's decision" "فقط مدیرعامل"
+svb POST "$SVC/orders/decision" "{\"orderId\":$SVO1,\"decision\":1,\"causeIsMisuse\":true}"; nomsg "service: misuse by the customer excludes the warranty" "سوءاستفاده"
+svb POST "$SVC/orders/decision" "{\"orderId\":$SVO1,\"decision\":1,\"note\":\"خرابی در دوره گارانتی و بدون سوءاستفاده\"}"; check "service: the second service user decides: warranty" ".success and .data.decision == 1 and .data.decisionText == \"گارانتی\" and .data.decidedByUserId == $SV2ID and .data.decidedAtText != null"
+# the parts documents are still drafts: the order cannot close; then the warehouse confirms them
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"close\"}"; nomsg "service: the order cannot be closed while a parts document is still a draft" "تأییدنشده"
+call POST "inventory/documents/$SVIS1/confirm"; check "service: the issue of the bearings is confirmed" '.success and .data.status == 1'
+as "$QC_TOKEN" POST "inventory/documents/$SVDL1/approve" '{"kind":4}'
+call POST "inventory/documents/$SVDL1/confirm"; check "service: the delivery of the O-ring is confirmed after the QC loading approval" '.success and .data.status == 1'
+call GET "inventory/stock/items?ItemId=$SVPA"; check "service: stock of bearing A fell to 8" '.data.data[0].onHand == 8'
+call GET "inventory/stock/items?ItemId=$SVPB"; check "service: stock of O-ring B fell to 9" '.data.data[0].onHand == 9'
+sva GET "$SVC/orders/$SVO1"; check "service: O1 lists its two parts documents: the issue (2 bearings) and the delivery (1 O-ring)" ".success and (.data.parts|length) == 2 and ([.data.parts[]|select(.type == 4)][0].lines[0].quantity) == 2 and ([.data.parts[]|select(.type == 4)][0].lines[0].itemId) == $SVPA and ([.data.parts[]|select(.type == 11)][0].lines[0].quantity) == 1 and ([.data.parts[]|select(.type == 11)][0].lines[0].itemId) == $SVPB"
+# the cost of labour is never invented: first no work centre in the settings, then no rate on it, then finance enters the rate
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"close\"}"; nomsg "service: with no labour work centre in the settings the cost of the engineers is not guessed" "مرکز کار ندارد"
+as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"LabourWorkCenterCode","text":"SV-WC"}'; check "service: the CEO names the work centre whose standard labour rate applies" '.success and .data.key == "LabourWorkCenterCode" and .data.text == "SV-WC"'
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"close\"}"; nomsg "service: the work centre has no rate yet, so the close is refused and says whose rate is missing" "نرخ ساعتی دستمزد استاندارد مرکز کار SV-WC"
+as "$FM_TOKEN" POST "$MF/work-centers/rates" "{\"id\":$SVWC,\"labourRateRial\":400000}"; check "service: finance enters the standard labour rate: 400,000 rials an hour" '.success and .data.labourRateRial == 400000'
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"close\"}"
+check "service: O1 closed: labour 12 h x 400,000 = 4,800,000; parts 2 x 250,000 + 1 x 80,000 = 580,000; total 5,380,000; two engineers, none from payroll, so nothing is masked; the order is in the after-sales cost centre" '.success and .data.status == 4 and .data.labourHours == 12 and .data.labourAmount == 4800000 and .data.labourHidden == false and .data.partsAmount == 580000 and .data.totalCost == 5380000 and .data.costPosted == true and .data.closedAtText != null and .data.costCenterCode == "AFTERSALES" and .data.invoiceId == null'
+ibx "$SV_TOKEN" "sv:close:$SVO1"; check "service: the close gate of O1 is closed" '.success and (.data.data|length) == 0'
+as "$FM_TOKEN" GET "finance/events?Type=14&IncludeNotRequired=true&PageSize=0"
+check "service: the warranty cost of O1 went to the accounting event 'warranty cost': debit the warranty provision 5,380,000 (after-sales cost centre, contract of the unit) against labour absorbed 4,800,000 and material expense 580,000; the event balances" ".success and ([.data.data[]|select(.sourceId == $SVO1)]|length) == 1 and ([.data.data[]|select(.sourceId == $SVO1)][0] | .type == 14 and .sourceType == \"ServiceOrder\" and .sourceNumber == \"$SVO1N\" and .amount == 5380000 and ([.lines[]|select(.accountRole == \"WarrantyProvision\")|.debit]|add) == 5380000 and ([.lines[]|select(.accountRole == \"WarrantyProvision\" and .costCenter == \"AFTERSALES\" and .contractId == $QCT)]|length) == 1 and ([.lines[]|select(.accountRole == \"LabourAbsorbed\")|.credit]|add) == 4800000 and ([.lines[]|select(.accountRole == \"MaterialExpense\")|.credit]|add) == 580000 and ([.lines[]|.debit]|add) == ([.lines[]|.credit]|add))"
+as "$FM_TOKEN" GET "$FG/setup-check"; check "service: the account roles of the warranty provision and the goodwill expense are mapped (no unmapped role problem)" '.success and ([.data.problems[]|select(.code|test("WarrantyProvision|WarrantyExpense"))]|length) == 0'
+sva POST "$SVC/orders/time-entries" "{\"orderId\":$SVO1,\"employeeId\":$SVE1,\"hours\":1,\"kind\":2}"; nomsg "service: a closed order takes no more hours" "تغییر نمی‌کند"
+sva POST "$SVC/orders/action" "{\"id\":$SVO1,\"action\":\"cancel\",\"reason\":\"x\"}"; nomsg "service: a closed order is not cancelled" "تغییر نمی‌کند"
+sva POST "$SVC/orders/draft-invoice" "{\"id\":$SVO1}"; nomsg "service: only a billable order has an invoice" "قابل‌فاکتور"
+sva GET "$SVC/units/$SVUA"; check "service: unit A follows the meter reading of the visit: 1200 running hours" '.success and .data.runningHours == 1200 and .data.runningHoursAtText != null'
+sva GET "$SVC/surveys?Kind=2"; check "service: closing O1 drafted its satisfaction survey: 4 questions, no score yet" ".success and .data.totalItems == 1 and (.data.data[0] | .serviceOrderId == $SVO1 and .status == 1 and .customerId == $SVCA and (.answers|length) == 4 and ([.answers[].score]|map(select(. != null))|length) == 0 and (.number|startswith(\"SSV\")))"
+SVSU1=$(val '.data.data[0].id')
+sva POST "$SVC/requests/action" "{\"id\":$SVR1,\"action\":\"resolve\",\"resolution\":\"یاتاقان تعویض شد\",\"at\":\"$(ts "$(dd -1) 12:00")\"}"; check "service: R1 resolved yesterday at 12:00, 52 hours after the receipt: the 8-hour resolution SLA was missed, the response SLA was kept" ".success and .data.status == 5 and .data.resolvedAt == \"$(ts "$(dd -1) 12:00")\" and .data.resolutionBreached == true and .data.responseBreached == false and .data.breached == false"
+sva POST "$SVC/requests/action" "{\"id\":$SVR1,\"action\":\"close\"}"; check "service: R1 closed" '.success and .data.status == 6'
+
+# --- order O2: a billable repair of unit B (out of warranty) for R2, with an hourly rate for the customer
+sva POST "$SVC/orders" "{\"requestId\":$SVR2,\"unitId\":$SVUB,\"kind\":1,\"title\":\"راه‌اندازی مجدد و بازبینی توربین\",\"plannedStart\":\"$(dd -2)T00:00:00\",\"plannedEnd\":\"$(dd -2)T00:00:00\",\"engineerEmployeeIds\":[$SVE3,$SVE4],\"billableLabourRateRial\":1500000}"
+check "service: order O2 planned for R2 with a billable rate of 1,500,000 an hour" ".success and .data.status == 2 and .data.billableLabourRateRial == 1500000 and .data.unitTag == \"SV-UB\" and (.data.warrantyTestedOn|startswith(\"$(dd -3)\"))"
+SVO2=$(val .data.id); SVO2N=$(val .data.number)
+sva POST "$SVC/orders/action" "{\"id\":$SVO2,\"action\":\"start\"}"; check "service: O2 started" '.success and .data.status == 3'
+svtime "$SVO2" "$SVE3" "$(dd -2)" 2 1 "سفر"; svtime "$SVO2" "$SVE3" "$(dd -2)" 6 2 "کار"
+svtime "$SVO2" "$SVE4" "$(dd -2)" 6 2 "کار"; check "service: O2 hours: engineer 3 travel 2 and work 6, engineer 4 work 6 = 14 billable hours" '.success and .data.travelHours == 2 and .data.workHours == 12 and .data.waitingHours == 0 and .data.totalHours == 14'
+sva POST "$SVC/orders" "{\"id\":$SVO2,\"requestId\":$SVR2,\"unitId\":$SVUB,\"kind\":1,\"title\":\"راه‌اندازی مجدد و بازبینی توربین\",\"plannedStart\":\"$(dd -2)T00:00:00\",\"plannedEnd\":\"$(dd -2)T00:00:00\",\"runningHoursReading\":800,\"reportDocumentId\":\"$DOCID\"}"; check "service: O2 report attached, meter reading 800; the rate stays" '.success and .data.runningHoursReading == 800 and .data.billableLabourRateRial == 1500000'
+svb POST "$SVC/orders/decision" "{\"orderId\":$SVO2,\"decision\":1}"; nomsg "service: the warranty of unit B ended 35 days ago, so 'warranty' is refused for a failure reported 3 days ago" "در گارانتی نبوده"
+svb POST "$SVC/orders/decision" "{\"orderId\":$SVO2,\"decision\":2,\"note\":\"خارج از گارانتی\"}"; check "service: the second user decides: billable" '.success and .data.decision == 2 and .data.decisionText == "قابل‌فاکتور"'
+sva POST "$SVC/orders/action" "{\"id\":$SVO2,\"action\":\"close\"}"
+check "service: O2 closed: labour 14 h x 400,000 = 5,600,000, no parts; a billable order posts no warranty event; its invoice is drafted" '.success and .data.status == 4 and .data.labourHours == 14 and .data.labourAmount == 5600000 and .data.partsAmount == 0 and .data.totalCost == 5600000 and .data.invoiceId > 0 and .data.draftNote == null'
+SVINV2=$(val .data.invoiceId)
+as "$FM_TOKEN" GET "$FR/invoices?CustomerId=$SVCA"; check "service: the draft invoice of O2: 14 billable hours x 1,500,000 = 21,000,000 net, VAT 10 % = 2,100,000, total 23,100,000" ".success and .data.totalItems == 1 and (.data.data[0] | .id == $SVINV2 and .status == 0 and .netAmount == 21000000 and .vatAmount == 2100000 and .grossAmount == 23100000)"
+as "$FM_TOKEN" GET "finance/events?Type=14&IncludeNotRequired=true&PageSize=0"; check "service: no warranty event exists for the billable order O2" ".success and ([.data.data[]|select(.sourceId == $SVO2)]|length) == 0"
+sva POST "$SVC/orders/draft-invoice" "{\"id\":$SVO2}"; nomsg "service: the invoice of O2 is drafted once" "قبلاً پیش‌نویس فاکتور"
+sva POST "$SVC/requests/action" "{\"id\":$SVR2,\"action\":\"resolve\",\"resolution\":\"راه‌اندازی مجدد انجام شد\",\"at\":\"$(ts "$(dd -2) 09:00")\"}"; check "service: R2 resolved 23 hours after the receipt, inside its 24 hours" ".success and .data.resolvedAt == \"$(ts "$(dd -2) 09:00")\" and .data.resolutionBreached == false"
+sva POST "$SVC/requests/action" "{\"id\":$SVR2,\"action\":\"close\"}"; check "service: R2 closed" '.success and .data.status == 6'
+
+# --- order O3: goodwill for the complaint R3. Goodwill needs a written request and is decided by the CEO alone.
+sva POST "$SVC/orders" "{\"requestId\":$SVR3,\"unitId\":$SVUB,\"kind\":2,\"title\":\"بازبینی کارگاهی توربین به‌عنوان حسن نیت\",\"plannedStart\":\"$(dd -1)T00:00:00\",\"plannedEnd\":\"$(dd -1)T00:00:00\",\"engineerEmployeeIds\":[$SVE1]}"; check "service: order O3 (a workshop job) planned for the complaint R3" '.success and .data.status == 2 and .data.kind == 2'
+SVO3=$(val .data.id); SVO3N=$(val .data.number)
+sva POST "$SVC/orders/action" "{\"id\":$SVO3,\"action\":\"start\"}"; check "service: O3 started" '.success and .data.status == 3'
+svtime "$SVO3" "$SVE1" "$(dd -1)" 3 2 "کار"; check "service: O3: 3 hours of work" '.success and .data.totalHours == 3'
+sva POST "$SVC/orders" "{\"id\":$SVO3,\"requestId\":$SVR3,\"unitId\":$SVUB,\"kind\":2,\"title\":\"بازبینی کارگاهی توربین به‌عنوان حسن نیت\",\"plannedStart\":\"$(dd -1)T00:00:00\",\"plannedEnd\":\"$(dd -1)T00:00:00\",\"reportDocumentId\":\"$DOCID\"}"; check "service: O3 report attached" '.success and .data.reportDocumentId != null'
+as "$CEO_TOKEN" POST "$SVC/orders/decision" "{\"orderId\":$SVO3,\"decision\":3}"; nomsg "service: goodwill cannot be decided before service has written the request for it" "درخواست حسن نیت"
+sva POST "$SVC/orders/goodwill-request" "{\"orderId\":$SVO3,\"reason\":\" \"}"; nomsg "service: the goodwill request needs its reason" "دلیل درخواست حسن نیت"
+sva POST "$SVC/orders/goodwill-request" "{\"orderId\":$SVO3,\"reason\":\"شکایت موجه مشتری؛ توقف طولانی پس از پایان گارانتی\"}"; check "service: service asks for goodwill with the reason" '.success and .data.goodwillRequested == true and .data.goodwillReason != null and .data.decision == 0'
+ibx "$CEO_TOKEN" "sv:goodwill:$SVO3"; check "service: the goodwill request waits in the CEO inbox" '.success and (.data.data|length) == 1'
+sva GET "$SVC/dashboard"; check "service: the dashboard counts the goodwill request waiting for the CEO" '.success and .data.goodwillWaiting == 1'
+sva POST "$SVC/orders/action" "{\"id\":$SVO3,\"action\":\"close\"}"; nomsg "service: a goodwill request does not replace the decision" "تصمیم گارانتی"
+as "$CEO_TOKEN" POST "$SVC/orders/decision" "{\"orderId\":$SVO3,\"decision\":3,\"note\":\"به‌دلیل رضایت مشتری\"}"; check "service: the CEO decides: goodwill" ".success and .data.decision == 3 and .data.decisionText == \"حسن نیت\" and .data.decidedByUserId == $CEOID"
+ibx "$CEO_TOKEN" "sv:goodwill:$SVO3"; check "service: the CEO's decision closed the goodwill gate" '.success and (.data.data|length) == 0'
+sva POST "$SVC/orders/action" "{\"id\":$SVO3,\"action\":\"close\"}"; check "service: O3 closed: labour 3 h x 400,000 = 1,200,000, no parts" '.success and .data.status == 4 and .data.labourAmount == 1200000 and .data.partsAmount == 0 and .data.totalCost == 1200000 and .data.invoiceId == null'
+as "$FM_TOKEN" GET "finance/events?Type=14&IncludeNotRequired=true&PageSize=0"; check "service: goodwill cost goes to the expense account, not to the provision: debit 1,200,000 against labour absorbed 1,200,000, no material line" ".success and ([.data.data[]|select(.sourceId == $SVO3)]|length) == 1 and ([.data.data[]|select(.sourceId == $SVO3)][0] | .amount == 1200000 and ([.lines[]|select(.accountRole == \"WarrantyExpense\")|.debit]|add) == 1200000 and ([.lines[]|select(.accountRole == \"WarrantyProvision\")]|length) == 0 and ([.lines[]|select(.accountRole == \"LabourAbsorbed\")|.credit]|add) == 1200000 and ([.lines[]|select(.accountRole == \"MaterialExpense\")]|length) == 0)"
+
+# --- order O4: a warranty repair of unit A for R4 by one engineer who is paid through payroll: the labour cost would show his hourly pay, so it is masked
+sva POST "$SVC/orders" "{\"requestId\":$SVR4,\"unitId\":$SVUA,\"kind\":1,\"title\":\"تعویض مجدد یاتاقان و بررسی علت\",\"plannedStart\":\"${TODAY}T00:00:00\",\"plannedEnd\":\"${TODAY}T00:00:00\",\"engineerEmployeeIds\":[$OAEMP3]}"; check "service: order O4 planned for R4 with one engineer who has an approved payslip" ".success and .data.status == 2 and (.data.engineers|length) == 1 and (.data.warrantyTestedOn|startswith(\"$(dd -1)\"))"
+SVO4=$(val .data.id); SVO4N=$(val .data.number)
+sva POST "$SVC/orders/action" "{\"id\":$SVO4,\"action\":\"start\"}"; check "service: O4 started" '.success and .data.status == 3'
+svtime "$SVO4" "$OAEMP3" "$TODAY" 2 2 "کار"; check "service: O4: 2 hours of work" '.success and .data.totalHours == 2'
+sva POST "$SVC/orders" "{\"id\":$SVO4,\"requestId\":$SVR4,\"unitId\":$SVUA,\"kind\":1,\"title\":\"تعویض مجدد یاتاقان و بررسی علت\",\"plannedStart\":\"${TODAY}T00:00:00\",\"plannedEnd\":\"${TODAY}T00:00:00\",\"runningHoursReading\":1000,\"reportDocumentId\":\"$DOCID\"}"; nomsg "service: a meter reading below the one on record (1200) is refused" "از کارکرد ثبت"
+sva POST "$SVC/orders" "{\"id\":$SVO4,\"requestId\":$SVR4,\"unitId\":$SVUA,\"kind\":1,\"title\":\"تعویض مجدد یاتاقان و بررسی علت\",\"plannedStart\":\"${TODAY}T00:00:00\",\"plannedEnd\":\"${TODAY}T00:00:00\",\"runningHoursReading\":1500,\"reportDocumentId\":\"$DOCID\"}"; check "service: O4 report attached, meter reading 1500" '.success and .data.runningHoursReading == 1500'
+svb POST "$SVC/orders/decision" "{\"orderId\":$SVO4,\"decision\":1}"; check "service: O4: warranty (the failure of R4 was reported yesterday, inside the warranty of unit A)" '.success and .data.decision == 1'
+sva POST "$SVC/orders/action" "{\"id\":$SVO4,\"action\":\"close\"}"
+check "service: O4 closed: the service user sees the hours (2) but neither the labour amount nor the total (one payroll employee behind it would give his hourly pay)" '.success and .data.status == 4 and .data.labourHours == 2 and .data.labourAmount == null and .data.labourHidden == true and .data.totalCost == null and .data.partsAmount == 0 and .data.costPosted == true'
+as "$FM_TOKEN" GET "$SVC/orders/$SVO4"; check "service: the finance manager sees the exact labour: 2 hours at the payroll hourly rate of the engineer (worked out from his payslip in the production section)" ".success and .data.labourHidden == false and .data.labourAmount == $MBEXPECT and .data.totalCost == $MBEXPECT"
+as "$CEO_TOKEN" GET "$SVC/orders/$SVO4"; check "service: the CEO sees it too" ".success and .data.labourHidden == false and .data.labourAmount == $MBEXPECT"
+as "$QA_TOKEN" GET "$SVC/orders/$SVO4"; check "service: quality (a reader) gets the same masked view as service" '.success and .data.labourHidden == true and .data.labourAmount == null and .data.totalCost == null'
+as "$FM_TOKEN" GET "finance/events?Type=14&IncludeNotRequired=true&PageSize=0"; check "service: the event of O4 carries the exact labour for finance: debit the provision, credit labour absorbed" ".success and ([.data.data[]|select(.sourceId == $SVO4)]|length) == 1 and ([.data.data[]|select(.sourceId == $SVO4)][0] | .amount == $MBEXPECT and ([.lines[]|select(.accountRole == \"WarrantyProvision\")|.debit]|add) == $MBEXPECT and ([.lines[]|select(.accountRole == \"LabourAbsorbed\")|.credit]|add) == $MBEXPECT)"
+
+# --- order O5: a billable job with no hourly rate on it: the order closes and says why no invoice was made; the rate is entered afterwards
+sva POST "$SVC/orders" "{\"unitId\":$SVUB,\"kind\":1,\"title\":\"بازدید پس از راه‌اندازی\",\"plannedStart\":\"${TODAY}T00:00:00\",\"plannedEnd\":\"${TODAY}T00:00:00\",\"engineerEmployeeIds\":[$SVE3]}"; check "service: order O5 for unit B without a request and without a billable rate" '.success and .data.status == 2 and .data.requestId == null and .data.billableLabourRateRial == null'
+SVO5=$(val .data.id)
+sva POST "$SVC/orders/action" "{\"id\":$SVO5,\"action\":\"start\"}"; svtime "$SVO5" "$SVE3" "$TODAY" 1 2 "کار"
+sva POST "$SVC/orders" "{\"id\":$SVO5,\"unitId\":$SVUB,\"kind\":1,\"title\":\"بازدید پس از راه‌اندازی\",\"plannedStart\":\"${TODAY}T00:00:00\",\"plannedEnd\":\"${TODAY}T00:00:00\",\"reportDocumentId\":\"$DOCID\"}"; check "service: O5: 1 hour booked, report attached" '.success and .data.totalHours == 1 and .data.reportDocumentId != null'
+svb POST "$SVC/orders/decision" "{\"orderId\":$SVO5,\"decision\":2}"; check "service: O5 is billable" '.success and .data.decision == 2'
+sva POST "$SVC/orders/action" "{\"id\":$SVO5,\"action\":\"close\"}"; check "service: O5 closed: labour 1 h x 400,000 = 400,000; no invoice, and the order says the rate is missing" '.success and .data.status == 4 and .data.labourAmount == 400000 and .data.invoiceId == null and (.data.draftNote|contains("نرخ ساعتی صورتحساب"))'
+sva POST "$SVC/orders/draft-invoice" "{\"id\":$SVO5}"; nomsg "service: the invoice cannot be drafted without a rate" "نرخ ساعتی صورتحساب"
+sva POST "$SVC/orders/draft-invoice" "{\"id\":$SVO5,\"billableLabourRateRial\":0}"; nomsg "service: a rate of zero is refused" "بیشتر از صفر"
+sva POST "$SVC/orders/draft-invoice" "{\"id\":$SVO5,\"billableLabourRateRial\":1000000}"; check "service: with the rate 1,000,000 entered, the invoice is drafted" '.success and .data.invoiceId > 0 and .data.billableLabourRateRial == 1000000 and .data.draftNote == null'
+SVINV5=$(val .data.invoiceId)
+as "$FM_TOKEN" GET "$FR/invoices?CustomerId=$SVCA"; check "service: the customer now has 2 draft invoices; the second is 1 hour x 1,000,000 + VAT 100,000 = 1,100,000" ".success and .data.totalItems == 2 and ([.data.data[]|select(.id == $SVINV5)][0] | .status == 0 and .netAmount == 1000000 and .vatAmount == 100000 and .grossAmount == 1100000) and ([.data.data[]|select(.id == $SVINV2)][0].grossAmount) == 23100000"
+
+# --- the long-term service agreement (LTSA) of unit B, its periodic visits drafted by the hosted job on an injected day
+SVLS=$(date -d "$(date +%Y-%m-01) -1 month" +%Y-%m-%d); SVLE=$(date -d "$SVLS +20 months" +%Y-%m-%d)
+SVV1=$(date -d "$SVLS +6 months" +%Y-%m-%d); SVV2=$(date -d "$SVLS +12 months" +%Y-%m-%d); SVV3=$(date -d "$SVLS +18 months" +%Y-%m-%d)
+sva POST "$SVC/contracts" "{\"title\":\"x\",\"customerId\":$SVCA,\"startDate\":\"${SVLE}T00:00:00\",\"endDate\":\"${SVLS}T00:00:00\",\"visitIntervalMonths\":6,\"unitIds\":[$SVUB]}"; nomsg "service: the agreement cannot end before it starts" "پایان قرارداد"
+sva POST "$SVC/contracts" "{\"title\":\"x\",\"customerId\":$SVCA,\"startDate\":\"${SVLS}T00:00:00\",\"endDate\":\"${SVLE}T00:00:00\",\"visitIntervalMonths\":0,\"unitIds\":[$SVUB]}"; nomsg "service: the visit interval must be above zero" "فاصله"
+sva POST "$SVC/contracts" "{\"title\":\"x\",\"customerId\":$SLCA,\"startDate\":\"${SVLS}T00:00:00\",\"endDate\":\"${SVLE}T00:00:00\",\"visitIntervalMonths\":6,\"unitIds\":[$SVUB]}"; nomsg "service: the units of an agreement belong to its customer" "مال مشتری انتخاب‌شده نیست"
+sva POST "$SVC/contracts" "{\"title\":\"x\",\"customerId\":$SVCA,\"startDate\":\"${SVLS}T00:00:00\",\"endDate\":\"${SVLE}T00:00:00\",\"visitIntervalMonths\":6,\"unitIds\":[$SVUD]}"; nomsg "service: a decommissioned unit is not put under an agreement" "از رده خارج"
+sva POST "$SVC/contracts" "{\"title\":\"x\",\"customerId\":$SVCA,\"startDate\":\"${SVLS}T00:00:00\",\"endDate\":\"${SVLE}T00:00:00\",\"visitIntervalMonths\":6,\"unitIds\":[]}"; nomsg "service: an agreement needs at least one unit" "حداقل یک واحد"
+sva POST "$SVC/contracts" "{\"title\":\"قرارداد خدمات دوره‌ای توربین\",\"customerId\":$SVCA,\"startDate\":\"${SVLS}T00:00:00\",\"endDate\":\"${SVLE}T00:00:00\",\"scope\":\"بازدید ششماهه\",\"visitIntervalMonths\":6,\"priceRial\":60000000,\"unitIds\":[$SVUB]}"
+check "service: LTSA drafted: from the first of last month for 20 months, a visit every 6 months (three visits), the first due on $SVV1" ".success and .data.status == 1 and (.data.number|startswith(\"LTSA\")) and .data.visitIntervalMonths == 6 and .data.priceRial == 60000000 and (.data.nextVisitDate|startswith(\"$SVV1\")) and .data.unitTags == [\"SV-UB\"] and .data.draftedVisits == 0"
+SVLT=$(val .data.id); SVLTN=$(val .data.number)
+sva GET "$SVC/units/$SVUB"; check "service: a draft agreement does not change the status of unit B" '.success and .data.status == 2'
+ibx "$SV_TOKEN" "sv:ltsa:$SVLT"; check "service: the draft agreement waits for a second person in the service inbox" '.success and (.data.data|length) == 1'
+sva POST "$SVC/contracts/action" "{\"id\":$SVLT,\"action\":\"activate\"}"; nomsg "service: the person who wrote the agreement cannot activate it" "تفکیک وظایف"
+svb POST "$SVC/contracts/action" "{\"id\":$SVLT,\"action\":\"activate\"}"; check "service: the second user activates the agreement" '.success and .data.status == 2'
+ibx "$SV_TOKEN" "sv:ltsa:$SVLT"; check "service: the activation closed the gate" '.success and (.data.data|length) == 0'
+sva POST "$SVC/contracts" "{\"id\":$SVLT,\"title\":\"x\",\"customerId\":$SVCA,\"startDate\":\"${SVLS}T00:00:00\",\"endDate\":\"${SVLE}T00:00:00\",\"visitIntervalMonths\":6,\"unitIds\":[$SVUB]}"; nomsg "service: an active agreement is not edited" "فعال‌شده ویرایش"
+sva GET "$SVC/units/$SVUB"; check "service: under an active agreement unit B (out of warranty) is 'under LTSA'" '.success and .data.status == 3 and .data.statusText == "تحت قرارداد خدمات"'
+sva GET "$SVC/units?Status=3"; check "service: filter 'under LTSA': unit B" '.success and .data.totalItems == 1 and .data.data[0].tag == "SV-UB"'
+# the hosted job on injected days. The handover of the shipment is today, so its delivery survey is due on the 30th day after it.
+SVRA=$(date -d "$SVHO +29 days" +%Y-%m-%d); SVRB=$(date -d "$SVHO +30 days" +%Y-%m-%d)
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRA}T00:00:00\"}"; check "service: job on day handover+29: no delivery survey yet (30 days are needed), no visit is due, nothing expires; two open requests are past their SLA (R3 and R4)" ".success and .data.surveysDrafted == 0 and .data.visitsDrafted == 0 and .data.contractsExpired == 0 and .data.breachAlerts == 2 and (.data.asOf|startswith(\"$SVRA\"))"
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRB}T00:00:00\"}"; check "service: job on day handover+30: the delivery survey of the shipment is drafted" '.success and .data.surveysDrafted == 1 and .data.visitsDrafted == 0 and .data.contractsExpired == 0 and .data.breachAlerts == 2'
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRB}T00:00:00\"}"; check "service: the same day again drafts nothing (idempotent)" '.success and .data.surveysDrafted == 0 and .data.visitsDrafted == 0'
+sva GET "$SVC/surveys?Kind=1"; check "service: the delivery survey: for the shipment and the customer, dated with the injected day, 4 questions" ".success and .data.totalItems == 1 and (.data.data[0] | .shipmentId == $PCSH1 and .customerId == $SVCA and .status == 1 and (.draftedOn|startswith(\"$SVRB\")) and (.answers|length) == 4 and .serviceOrderId == null)"
+SVSUD=$(val '.data.data[0].id')
+ibx "$SV_TOKEN" "sv:sla:$SVR4"; check "service: the SLA alert of R4 is in the service inbox" '.success and (.data.data|length) == 1'
+ibx "$CEO_TOKEN" "sv:sla:$SVR4"; check "service: ... and in the CEO inbox" '.success and (.data.data|length) == 1'
+SVRD=$(date -d "$SVV1 -30 days" +%Y-%m-%d); SVRD0=$(date -d "$SVV1 -31 days" +%Y-%m-%d)
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRD0}T00:00:00\"}"; check "service: job 31 days before the first visit: not yet within the 30-day lead" '.success and .data.visitsDrafted == 0'
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRD}T00:00:00\"}"; check "service: job 30 days before the first visit: one visit order is drafted (one unit)" '.success and .data.visitsDrafted == 1 and .data.surveysDrafted == 0'
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRD}T00:00:00\"}"; check "service: the same day again drafts nothing (one order per unit and visit)" '.success and .data.visitsDrafted == 0'
+sva GET "$SVC/orders?Status=1"; check "service: the drafted visit order: for unit B, planned on the visit date, in the after-sales cost centre, no engineers yet, no decision needed" ".success and .data.totalItems == 1 and (.data.data[0] | .ltsaContractId == $SVLT and .ltsaNumber == \"$SVLTN\" and .unitId == $SVUB and .status == 1 and (.plannedStart|startswith(\"$SVV1\")) and .costCenterCode == \"AFTERSALES\" and .decision == 0 and (.engineers|length) == 0 and (.title|contains(\"$SVLTN\")) and .draftNote != null)"
+SVOV1=$(val '.data.data[0].id')
+sva GET "$SVC/contracts/$SVLT"; check "service: the agreement shows one drafted visit; the next visit without an order is the second" ".success and .data.draftedVisits == 1 and (.data.nextVisitDate|startswith(\"$SVV2\"))"
+svdoc "{\"type\":4,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$SVMR,\"serviceOrderId\":$SVOV1,\"lines\":[{\"itemId\":$SVPA,\"quantity\":1}]}"; nomsg "service: a draft visit order takes no parts document" "سند قطعات ندارد"
+sva POST "$SVC/orders/action" "{\"id\":$SVOV1,\"action\":\"start\"}"; nomsg "service: only a planned order starts" "برنامه‌ریزی‌شده"
+sva POST "$SVC/orders/action" "{\"id\":$SVOV1,\"action\":\"confirm\"}"; check "service: the visit order is confirmed and becomes planned" '.success and .data.status == 2'
+sva POST "$SVC/orders/action" "{\"id\":$SVOV1,\"action\":\"start\"}"; nomsg "service: an order without an engineer does not start" "حداقل یک مهندس"
+sva POST "$SVC/orders" "{\"id\":$SVOV1,\"unitId\":$SVUB,\"kind\":1,\"title\":\"بازدید دوره‌ای $SVLTN\",\"plannedStart\":\"${SVV1}T00:00:00\",\"plannedEnd\":\"${SVV1}T00:00:00\",\"engineerEmployeeIds\":[$SVE2],\"reportDocumentId\":\"$DOCID\"}"; check "service: the engineer and the signed report are entered on the visit order; it keeps its agreement" ".success and (.data.engineers|length) == 1 and .data.ltsaContractId == $SVLT and .data.reportDocumentId != null"
+sva POST "$SVC/orders/action" "{\"id\":$SVOV1,\"action\":\"start\"}"; svtime "$SVOV1" "$SVE2" "$TODAY" 4 2 "بازدید دوره‌ای"
+sva POST "$SVC/orders/action" "{\"id\":$SVOV1,\"action\":\"close\"}"; check "service: the visit order closes without a warranty decision (the agreement covers it): labour 4 h x 400,000 = 1,600,000, no invoice" '.success and .data.status == 4 and .data.decision == 0 and .data.labourAmount == 1600000 and .data.totalCost == 1600000 and .data.invoiceId == null'
+as "$FM_TOKEN" GET "finance/events?Type=14&IncludeNotRequired=true&PageSize=0"; check "service: the visit order posts no warranty event: the agreement is a service the customer pays for" ".success and ([.data.data[]|select(.sourceId == $SVOV1)]|length) == 0 and (.data.data|length) == 3"
+SVRG=$(date -d "$SVV3 -30 days" +%Y-%m-%d)
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRG}T00:00:00\"}"; check "service: job 30 days before the third visit: the second and third visits are due; the first already has its order" '.success and .data.visitsDrafted == 2'
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRG}T00:00:00\"}"; check "service: ... and drafted once" '.success and .data.visitsDrafted == 0'
+sva GET "$SVC/contracts/$SVLT"; check "service: the agreement now has 3 visit orders and no visit left to draft" '.success and .data.draftedVisits == 3 and .data.nextVisitDate == null'
+sva GET "$SVC/orders?Status=1"; check "service: two draft visit orders wait for confirmation (the second and the third visit)" '.success and .data.totalItems == 2'
+
+# --- surveys: sent, answered, skipped
+sva GET "$SVC/surveys"; check "service: 7 surveys exist: 6 after closed orders (O1 to O5 and the visit) and the delivery survey" '.success and .data.totalItems == 7'
+sva GET "$SVC/surveys?Kind=2&Status=1"; check "service: all 6 service surveys are drafts" '.success and .data.totalItems == 6'
+sva POST "$SVC/surveys/answer" "{\"id\":$SVSU1,\"scores\":[{\"rowNumber\":1,\"score\":5}]}"; nomsg "service: only a sent survey takes answers" "ارسال‌شده ثبت می‌شود"
+as "$WH_TOKEN" POST "$SVC/surveys/action" "{\"id\":$SVSU1,\"action\":\"send\"}"; nomsg "service: a storekeeper cannot send a survey" "مجوز"
+sva POST "$SVC/surveys/action" "{\"id\":$SVSU1,\"action\":\"send\"}"; check "service: the survey of O1 is sent to the customer" '.success and .data.status == 2 and .data.sentAtText != null'
+sva POST "$SVC/surveys/action" "{\"id\":$SVSU1,\"action\":\"send\"}"; nomsg "service: a survey is sent once" "فقط نظرسنجی پیش‌نویس"
+sva POST "$SVC/surveys/answer" "{\"id\":$SVSU1,\"scores\":[{\"rowNumber\":1,\"score\":6}]}"; nomsg "service: a score is between 1 and 5" "بین ۱ تا ۵"
+sva POST "$SVC/surveys/answer" "{\"id\":$SVSU1,\"scores\":[{\"rowNumber\":1,\"score\":4},{\"rowNumber\":1,\"score\":5}]}"; nomsg "service: a question has one score" "فقط یک امتیاز"
+sva POST "$SVC/surveys/answer" "{\"id\":$SVSU1,\"scores\":[{\"rowNumber\":9,\"score\":4}]}"; nomsg "service: an unknown question is refused" "پیدا نشد"
+sva POST "$SVC/surveys/answer" "{\"id\":$SVSU1,\"scores\":[{\"rowNumber\":1,\"score\":5},{\"rowNumber\":2,\"score\":4},{\"rowNumber\":3,\"score\":4},{\"rowNumber\":4,\"score\":3}],\"comments\":\"پاسخ‌گویی سریع\"}"; check "service: the survey of O1 is answered: 5 + 4 + 4 + 3 = 16 over 4 questions, average 4" '.success and .data.status == 3 and .data.averageScore == 4 and .data.answeredAtText != null'
+sva GET "$SVC/surveys?Kind=2&Status=1"; SVSU2=$(val ".data.data[]|select(.serviceOrderId == $SVO2)|.id"); SVSU3=$(val ".data.data[]|select(.serviceOrderId == $SVO3)|.id")
+sva POST "$SVC/surveys/action" "{\"id\":$SVSU2,\"action\":\"send\"}"; sva POST "$SVC/surveys/answer" "{\"id\":$SVSU2,\"scores\":[{\"rowNumber\":1,\"score\":3},{\"rowNumber\":2,\"score\":2},{\"rowNumber\":3,\"score\":3},{\"rowNumber\":4,\"score\":4}]}"; check "service: the survey of O2 is answered: 3 + 2 + 3 + 4 = 12, average 3" '.success and .data.status == 3 and .data.averageScore == 3'
+sva POST "$SVC/surveys/action" "{\"id\":$SVSU3,\"action\":\"skip\"}"; check "service: the customer of O3 declined: the survey is skipped" '.success and .data.status == 4'
+sva POST "$SVC/surveys/action" "{\"id\":$SVSU3,\"action\":\"send\"}"; nomsg "service: a skipped survey is not sent" "فقط نظرسنجی پیش‌نویس"
+as "$SL_TOKEN" POST "$SVC/surveys/action" "{\"id\":$SVSUD,\"action\":\"send\"}"; check "service: sales may send the delivery survey (it follows up its customers)" '.success and .data.status == 2'
+as "$SL_TOKEN" POST "$SVC/surveys/answer" "{\"id\":$SVSUD,\"scores\":[{\"rowNumber\":1,\"score\":5},{\"rowNumber\":2,\"score\":5},{\"rowNumber\":3,\"score\":4},{\"rowNumber\":4,\"score\":5}]}"; check "service: ... and enters the answers: 5 + 5 + 4 + 5 = 19, average 4.75" '.success and .data.status == 3 and .data.averageScore == 4.75'
+sva GET "$SVC/surveys?Status=3"; check "service: three surveys are answered" '.success and .data.totalItems == 3'
+call POST quality/management-reviews "{\"reviewDate\":\"$(dd 1)\",\"attendees\":\"مدیرعامل، تضمین کیفیت\"}"
+check "service: the management review draft reads the survey average: (4 + 3 + 4.75) / 3 = 3.92 over 3 answered surveys" '.success and ([.data.inputs[]|select(.autoDrafted == true)|.text|select(. != null and contains("میانگین امتیاز نظرسنجی مشتریان (از ۵): 3.92 از 3 نظرسنجی"))]|length) == 1'
+
+# --- a final job on the real day: the SLA alerts follow the real clock again
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${TODAY}T00:00:00\"}"; check "service: job on the real day: only R4 (never answered) is past its SLA; R3 is inside its 72 hours; two visit orders and nothing else" '.success and .data.breachAlerts == 1 and .data.visitsDrafted == 0 and .data.surveysDrafted == 0 and .data.contractsExpired == 0'
+ibx "$SV_TOKEN" "sv:sla:$SVR3"; check "service: the SLA alert of R3 was withdrawn" '.success and (.data.data|length) == 0'
+ibx "$SV_TOKEN" "sv:sla:$SVR4"; check "service: the SLA alert of R4 stays" '.success and (.data.data|length) == 1'
+ibx "$SV_TOKEN" "sv:assign:$SVR4"; check "service: R4 is still waiting for an assignment" '.success and (.data.data|length) == 1'
+
+# --- dashboards and KPIs: exact figures
+sva GET "$SVC/dashboard"
+check "service: dashboard: 2 open requests (R3 normal, R4 high), 1 past its SLA (R4); units: 2 in warranty (A and the condenser), 1 under LTSA (B), 0 out, none to confirm; 2 warranty orders this year (the cost is hidden from service because O4's labour is one payroll employee's pay); 2 open orders (the draft visits), none in progress, no goodwill waiting; 3 surveys still drafts, average 3.92" '.success and .data.openRequests == 2 and (.data.openByPriority|map(.count)) == [0,1,1,0] and .data.slaBreaches == 1 and .data.unitsInWarranty == 2 and .data.unitsUnderLtsa == 1 and .data.unitsOutOfWarranty == 0 and .data.unitsToConfirm == 0 and .data.warrantyCostHidden == true and .data.warrantyCostYtd == null and .data.warrantyOrdersYtd == 2 and .data.openOrders == 2 and .data.ordersWaitingClose == 0 and .data.goodwillWaiting == 0 and .data.surveysDrafted == 3 and .data.surveyAverageScore == 3.92'
+as "$FM_TOKEN" GET "$SVC/dashboard"; check "service: the finance manager sees the warranty cost of the year: O1 5,380,000 + O4 (2 h at the payroll rate)" ".success and .data.warrantyCostHidden == false and .data.warrantyOrdersYtd == 2 and .data.warrantyCostYtd == $((5380000 + MBEXPECT))"
+sva GET "$SVC/dashboard?asOf=$(dd 2)"; check "service: the same dashboard judged two days ahead (injected day): R3 is past its 72 hours too, so 2 requests are in breach" ".success and .data.slaBreaches == 2 and .data.openRequests == 2 and (.data.asOf|startswith(\"$(dd 2)\"))"
+as "$SL_TOKEN" GET "$SVC/dashboard"; check "service: sales reads the service dashboard" '.success and .data.openRequests == 2'
+as "$WH_TOKEN" GET "$SVC/dashboard"; nomsg "service: a storekeeper cannot open the service dashboard" "مجوز"
+as "$CEO_TOKEN" GET finance/ceo-dashboard
+check "service: CEO dashboard carries the service figures: 2 open requests, 1 SLA breach, 2 units in warranty, the warranty cost of the year, no goodwill waiting, survey average 3.92; and the SLA alert (danger) with its link" ".success and .data.serviceOpenRequests == 2 and .data.serviceSlaBreaches == 1 and .data.serviceUnitsInWarranty == 2 and .data.serviceWarrantyCostYtd == $((5380000 + MBEXPECT)) and .data.serviceGoodwillWaiting == 0 and .data.serviceSurveyAverageScore == 3.92 and (.data.alerts|map(select(.link == \"/service/requests\" and .level == \"danger\"))|length) == 1 and (.data.alerts|map(select(.link == \"/service/orders\"))|length) == 0"
+as "$CEO_TOKEN" GET "finance/ceo-dashboard?asOf=$(dd 2)"; check "service: CEO dashboard judged two days ahead: 2 SLA breaches" '.success and .data.serviceSlaBreaches == 2'
+sva GET "$SVC/kpis?From=$(dd -10)&To=$(dd 0)"
+check "service: KPIs: 5 requests; first response (1.5 + 1.5 + 6 + 1) / 4 = 2.5 h (R4 has none); resolution (24 + 52 + 23) / 3 = 33 h; repeat failures: unit A failed twice (R1, R4) = 1 repeat; 3 failures in all; running hours 1500 + 800 = 2300; field MTBF 2300 / 3 = 766.67 h" '.success and .data.requestsCounted == 5 and .data.firstResponseHours == 2.5 and .data.resolutionHours == 33 and (.data.repeatFailures|length) == 1 and .data.repeatFailures[0].unitTag == "SV-UA" and .data.repeatFailures[0].failures == 2 and .data.repeatFailures[0].repeats == 1 and .data.totalFailures == 3 and .data.totalRunningHours == 2300 and .data.mtbfHours == 766.67'
+check "service: KPIs by product type (turbine, condenser, pump, valve): turbine 1 unit, 800 h, 1 failure, MTBF 800, no warranty order; condenser 1 unit, 0 h, no failure, no MTBF; pump 1 unit, 1500 h, 2 failures, MTBF 750, 2 warranty orders whose cost is hidden from service; valve 1 unit" '(.data.byProduct|map(.productType)) == [1,3,4,6] and (.data.byProduct[0] | .units == 1 and .runningHours == 800 and .failures == 1 and .mtbfHours == 800 and .warrantyOrders == 0 and .warrantyCost == 0 and .warrantyCostHidden == false) and (.data.byProduct[1] | .units == 1 and .runningHours == 0 and .failures == 0 and .mtbfHours == null) and (.data.byProduct[2] | .units == 1 and .runningHours == 1500 and .failures == 2 and .mtbfHours == 750 and .warrantyOrders == 2 and .warrantyCostHidden == true and .warrantyCost == null) and (.data.byProduct[3] | .units == 1 and .failures == 0)'
+as "$FM_TOKEN" GET "$SVC/kpis?From=$(dd -10)&To=$(dd 0)"; check "service: the finance manager sees the warranty cost of the pumps: O1 5,380,000 + O4" ".success and (.data.byProduct[2] | .warrantyCostHidden == false and .warrantyCost == $((5380000 + MBEXPECT)))"
+sva GET "$SVC/kpis?From=$(dd -2)&To=$(dd 0)"; check "service: the KPIs of a shorter window count only the requests received in it (R3, R4): first response 1 h (R3 only), no resolution, 1 failure" '.success and .data.requestsCounted == 2 and .data.firstResponseHours == 1 and .data.resolutionHours == null and .data.totalFailures == 1'
+as "$WH_TOKEN" GET "$SVC/kpis"; nomsg "service: a storekeeper cannot read the KPIs" "مجوز"
+
+# --- the agreement ends: the job expires it and the unit falls back to 'out of warranty'
+SVRF=$(date -d "$SVLE +1 day" +%Y-%m-%d)
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${SVRF}T00:00:00\"}"; check "service: job the day after the agreement ends: the agreement expires and no new visit is drafted" '.success and .data.contractsExpired == 1 and .data.visitsDrafted == 0'
+sva GET "$SVC/contracts/$SVLT"; check "service: the agreement is expired and has no next visit" '.success and .data.status == 3 and .data.nextVisitDate == null and .data.statusText == "منقضی"'
+sva GET "$SVC/units/$SVUB"; check "service: unit B is out of warranty again" '.success and .data.status == 2'
+sva POST "$SVC/jobs/run" "{\"asOf\":\"${TODAY}T00:00:00\"}"; check "service: job on the real day: the SLA alerts follow the real clock again" '.success and .data.breachAlerts == 1'
+
+# --- inbox gates of the closing day
+ibx "$CEO_TOKEN" "sv:goodwill:$SVO3"; check "service: no goodwill request waits any more" '.success and (.data.data|length) == 0'
+
+# --- audit trail: before and after values, the user, no labour money
+as "$FM_TOKEN" GET "$FAU?EntityType=SvServiceOrder&EntityId=$SVO1&PageSize=0"
+check "service audit: the warranty decision of O1 is in the trail exactly once, decided by the second user, with the user name; no row carries a labour amount or labour hours (they would give a person's pay)" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.Decision == \"Warranty\" and .DecidedByUserId == $SV2ID) and (.userName|length) > 0)]|length) == 1 and ([.data.data[]|((.afterJson // \"\") + (.beforeJson // \"\"))|select(contains(\"Labour\"))]|length) == 0"
+as "$FM_TOKEN" GET "$FAU?EntityType=SvInstalledUnit&EntityId=$SVUA&PageSize=0"; check "service audit: the confirmation of unit A by the second user is in the trail exactly once" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.IsConfirmed == true and .ConfirmedByUserId == $SV2ID))]|length) == 1"
+as "$FM_TOKEN" GET "$FAU?EntityType=SvContract&EntityId=$SVLT&PageSize=0"; check "service audit: the activation of the agreement by the second user is in the trail exactly once" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.Status == \"Active\" and .ActivatedByUserId == $SV2ID))]|length) == 1"
+as "$FM_TOKEN" GET "$FAU?EntityType=SvServiceRequest&EntityId=$SVR1&PageSize=0"; check "service audit: the assignment of R1 is in the trail exactly once" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.AssignedToUserId == $SVID))]|length) == 1"
+as "$FM_TOKEN" GET "$FAU?EntityType=SvSlaRule&PageSize=0"; check "service audit: the three SLA rows entered are in the trail" '.success and ([.data.data[]|select(.action == "Added")]|length) == 3'
+as "$FM_TOKEN" GET "$FAU?EntityType=SvSetting&PageSize=0"; check "service audit: the CEO's labour work centre is in the trail exactly once" '.success and ([.data.data[]|select(.action == "Added" and (.afterJson|tostring|contains("SV-WC")))]|length) == 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=SlSurvey&EntityId=$SVSU1&PageSize=0"; check "service audit: the answer of the survey of O1 left its status and average (4)" '.success and ([.data.data[]|select(.action == "Modified" and ((.afterJson // "{}")|fromjson|.Status == "Answered" and .AverageScore == 4))]|length) == 1'
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'

@@ -105,6 +105,14 @@ namespace DataLayer.Context
             { typeof(SlProposal), new[] { "Revision", "Status", "Price", "EstimateTotalCost", "BelowCost", "ApprovedByUserId", "ApprovedAt", "ApprovalNote", "SubmittedByUserId", "ResultReasonId", "ContractId" } },
             { typeof(SlPriceList), new[] { "Status", "ValidFrom", "ValidTo", "ApprovedByUserId" } },
             { typeof(SlSalesOrder), new[] { "Status", "NetAmount", "CreditApprovalRequired", "CreditApprovedByUserId", "CreditApprovedNetAmount", "ConfirmedByUserId", "CancelReason" } },
+            // after-sales service (release S1 part B): SLA table, settings, the installed base, the warranty decision and the gates; time entries and the labour cost of an order are not listed (they give a person's hourly pay)
+            { typeof(Entities.Model.NasbNiro.AfterSales.SvSetting), null },
+            { typeof(Entities.Model.NasbNiro.AfterSales.SvSlaRule), null },
+            { typeof(Entities.Model.NasbNiro.AfterSales.SvInstalledUnit), new[] { "Tag", "CustomerId", "SiteId", "ContractId", "WarrantyMonths", "WarrantyStart", "WarrantyEnd", "WarrantySource", "Decommissioned", "IsConfirmed", "ConfirmedByUserId" } },
+            { typeof(Entities.Model.NasbNiro.AfterSales.SvServiceRequest), new[] { "CustomerId", "UnitId", "Type", "Priority", "Status", "ResponseDue", "ResolutionDue", "AssignedToUserId", "ComplaintId", "ClosedAt" } },
+            { typeof(Entities.Model.NasbNiro.AfterSales.SvServiceOrder), new[] { "Status", "UnitId", "RequestId", "Decision", "CauseIsMisuse", "DecidedByUserId", "GoodwillRequestedByUserId", "ReportDocumentId", "ClosedByUserId", "InvoiceId", "WarrantyEventId" } },
+            { typeof(Entities.Model.NasbNiro.AfterSales.SvContract), new[] { "Status", "StartDate", "EndDate", "VisitIntervalMonths", "PriceRial", "ActivatedByUserId" } },
+            { typeof(Entities.Model.NasbNiro.AfterSales.SlSurvey), new[] { "Status", "Kind", "AverageScore" } },
             { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays" } },
         };
 

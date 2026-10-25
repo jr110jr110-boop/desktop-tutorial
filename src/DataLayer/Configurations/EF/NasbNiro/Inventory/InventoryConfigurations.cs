@@ -1,3 +1,4 @@
+using DataLayer.Configurations.EF.NasbNiro.AfterSales;
 using DataLayer.Configurations.EF.NasbNiro.Finance;
 using DataLayer.Configurations.EF.NasbNiro.Office;
 using DataLayer.Configurations.EF.NasbNiro.Production;
@@ -30,6 +31,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddOfficeConfigurations();
             builder.AddProductionConfigurations();
             builder.AddSalesConfigurations();
+            builder.AddAfterSalesConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());

@@ -294,8 +294,10 @@ namespace Services.NasbNiro.Quality
             string wo = c.WorkOrderId.HasValue ? await _uow.Set<WorkOrder>().Where(w => w.Id == c.WorkOrderId.Value).Select(w => w.Code).FirstOrDefaultAsync(cancellationToken) : null;
             string ncr = c.NcrId.HasValue ? await _uow.Set<NonConformance>().Where(n => n.Id == c.NcrId.Value).Select(n => n.Number).FirstOrDefaultAsync(cancellationToken) : null;
             string capa = c.CapaId.HasValue ? await _uow.Set<Capa>().Where(n => n.Id == c.CapaId.Value).Select(n => n.Number).FirstOrDefaultAsync(cancellationToken) : null;
+            string serviceRequest = c.ServiceRequestId.HasValue ? await _uow.Set<Entities.Model.NasbNiro.AfterSales.SvServiceRequest>().Where(r => r.Id == c.ServiceRequestId.Value).Select(r => r.Number).FirstOrDefaultAsync(cancellationToken) : null;
             return new ComplaintDto
             {
+                ServiceRequestId = c.ServiceRequestId, ServiceRequestNumber = serviceRequest,
                 Id = c.Id, Number = c.Number, ContractId = c.ContractId, WorkOrderId = c.WorkOrderId, WorkOrderCode = wo, ReceivedDate = c.ReceivedDate, Severity = c.Severity,
                 Status = c.Status, ResponseDue = c.ResponseDue, Overdue = c.Status != ComplaintStatus.Responded && c.Status != ComplaintStatus.Closed && c.ResponseDue.Date < DateTime.Today,
                 NcrId = c.NcrId, CapaId = c.CapaId, Channel = c.Channel, Description = c.Description, Response = c.Response, RespondedAt = c.RespondedAt, ClosedAt = c.ClosedAt,

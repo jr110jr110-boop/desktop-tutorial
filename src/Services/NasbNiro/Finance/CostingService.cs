@@ -90,6 +90,10 @@ namespace Services.NasbNiro.Finance
         public const string LabourAbsorbed = "LabourAbsorbed";            // دستمزد مستقیم جذب‌شده (مقابل کالای در جریان ساخت)
         public const string OverheadAbsorbed = "OverheadAbsorbed";        // سربار ساخت جذب‌شده (هزینه ساعت ماشین)
 
+        // ---- after-sales (release S1 part B): the cost of a warranty service order against the warranty provision
+        public const string WarrantyProvision = "WarrantyProvision";      // ذخیره تضمین محصولات
+        public const string WarrantyExpense = "WarrantyExpense";          // هزینه گارانتی
+
         public static string InventoryOf(string itemCode)
         {
             string prefix = itemCode != null && itemCode.Length >= 2 && char.IsDigit(itemCode[0]) && char.IsDigit(itemCode[1]) ? itemCode.Substring(0, 2) : null;
@@ -175,6 +179,8 @@ namespace Services.NasbNiro.Finance
             yield return (CapitalAdvance, "پیش‌پرداخت سرمایه‌ای");
             yield return (LabourAbsorbed, "دستمزد مستقیم جذب‌شده");
             yield return (OverheadAbsorbed, "سربار ساخت جذب‌شده");
+            yield return (WarrantyProvision, "ذخیره تضمین محصولات");
+            yield return (WarrantyExpense, "هزینه گارانتی");
         }
     }
 
@@ -323,7 +329,16 @@ namespace Services.NasbNiro.Finance
             int? contractId = document.ContractId;
             if (document.WorkOrderId.HasValue && !contractId.HasValue)
                 contractId = await _uow.Set<WorkOrder>().Where(w => w.Id == document.WorkOrderId.Value).Select(w => (int?)w.ContractId).FirstOrDefaultAsync(cancellationToken);
-            if (type == InventoryDocumentType.Issue || type == InventoryDocumentType.ProductionReturn)
+            // parts of an after-sales service order (release S1 part B) are charged to the after-sales cost centre and to the contract of the unit, never to work in progress
+            bool service = document.ServiceOrderId.HasValue && (type == InventoryDocumentType.Issue || type == InventoryDocumentType.CustomerDelivery);
+            string serviceCostCenter = null;
+            if (service)
+            {
+                var so = await _uow.Set<Entities.Model.NasbNiro.AfterSales.SvServiceOrder>().Where(o => o.Id == document.ServiceOrderId.Value).Select(o => new { o.ContractId, o.CostCenterCode }).FirstOrDefaultAsync(cancellationToken);
+                contractId = so?.ContractId;
+                serviceCostCenter = so?.CostCenterCode ?? document.CostCenter;
+            }
+            if (type == InventoryDocumentType.Issue || type == InventoryDocumentType.ProductionReturn || service)
             {
                 foreach (var g in transactions.Where(t => Valued(t)).GroupBy(t => t.ItemId))
                 {
@@ -331,18 +346,18 @@ namespace Services.NasbNiro.Finance
                     if (amount == 0) continue;
                     _uow.Set<CostEntry>().Add(new CostEntry
                     {
-                        EntryDate = document.DocumentDate, Kind = CostKind.Material, WorkOrderId = document.WorkOrderId, ContractId = contractId,
-                        CostCenter = document.WorkOrderId.HasValue || contractId.HasValue ? null : document.CostCenter,
+                        EntryDate = document.DocumentDate, Kind = CostKind.Material, WorkOrderId = service ? null : document.WorkOrderId, ContractId = contractId,
+                        CostCenter = service ? serviceCostCenter : document.WorkOrderId.HasValue || contractId.HasValue ? null : document.CostCenter,
                         ItemId = g.Key, Quantity = -g.Sum(t => t.Quantity), Amount = amount,
                         SourceType = InventoryDocumentSource, SourceId = document.Id, SourceNumber = document.Number,
-                        Description = type == InventoryDocumentType.Issue ? "حواله مواد" : "برگشت از تولید",
+                        Description = service ? "قطعات دستور خدمات پس از فروش" : type == InventoryDocumentType.Issue ? "حواله مواد" : "برگشت از تولید",
                         CreatedAt = DateTimeOffset.Now, CreatedByUserId = _user.UserId,
                     });
                 }
             }
 
             // 4) the accounting event: inventory roles against the account of this kind of document
-            string counter = CounterRole(type, document.WorkOrderId.HasValue || contractId.HasValue);
+            string counter = CounterRole(type, !service && (document.WorkOrderId.HasValue || contractId.HasValue));
             var eventLines = new List<AccountingEventLine>();
             foreach (var pair in roleNet.Where(p => R(p.Value) != 0).OrderBy(p => p.Key))
             {

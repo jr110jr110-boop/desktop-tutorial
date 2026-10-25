@@ -156,7 +156,7 @@ namespace Services.NasbNiro.Finance
             }
 
             // the provisions note is built from the ledger accounts (review 3, M6), not from the provision register: bonus, leave, severance, doubtful debts and warranty
-            string[] provisionCodes = { "30402", "30403", "40201", "10309", "30404", "30405" };
+            string[] provisionCodes = { "30402", "30403", "40201", "10309", "30404", "30405", "30406" };
             foreach (string pc in provisionCodes)
             {
                 FnAccount pa = await AccountByCodeAsync(pc, ct);

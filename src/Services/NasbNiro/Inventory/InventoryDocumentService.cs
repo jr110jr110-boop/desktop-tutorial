@@ -140,6 +140,7 @@ namespace Services.NasbNiro.Inventory
                     ContractId = d.ContractId,
                     ContractCode = d.Contract.Code,
                     SalesOrderId = d.SalesOrderId,
+                    ServiceOrderId = d.ServiceOrderId,
                     ReferenceNumber = d.ReferenceNumber,
                     Description = d.Description,
                     CreateDate = d.CreateDate,
@@ -217,6 +218,8 @@ namespace Services.NasbNiro.Inventory
             }, cancellationToken);
             if (document.SalesOrderId.HasValue)
                 document.SalesOrderNumber = await _uow.Set<Entities.Model.NasbNiro.Sales.SlSalesOrder>().Where(o => o.Id == document.SalesOrderId.Value).Select(o => o.Number).FirstOrDefaultAsync(cancellationToken);
+            if (document.ServiceOrderId.HasValue)
+                document.ServiceOrderNumber = await _uow.Set<Entities.Model.NasbNiro.AfterSales.SvServiceOrder>().Where(o => o.Id == document.ServiceOrderId.Value).Select(o => o.Number).FirstOrDefaultAsync(cancellationToken);
             document.CreatorName = names.Name(raw.CreatorUserId);
             document.ConfirmedByName = names.Name(raw.ConfirmedByUserId);
             document.CancelledByName = names.Name(raw.CancelledByUserId);
@@ -299,6 +302,10 @@ namespace Services.NasbNiro.Inventory
             string salesError = await Sales.SlFulfilment.CheckDraftAsync(_uow, dto, lines, cancellationToken);
             if (salesError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesError);
 
+            // parts of an after-sales service order: the order must be open; an issue is charged to the after-sales cost centre of the order
+            string serviceError = await AfterSales.SvDocumentLink.CheckDraftAsync(_uow, dto, cancellationToken);
+            if (serviceError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(serviceError);
+
             MaterialRequest request = null;
             if (dto.Type == InventoryDocumentType.Issue)
             {
@@ -308,6 +315,7 @@ namespace Services.NasbNiro.Inventory
                     .FirstOrDefaultAsync(r => r.Id == dto.MaterialRequestId.Value && !r.Deleted, cancellationToken);
                 string requestError = CheckRequest(request, lines.Select(l => (l.ItemId, l.Quantity)), dto.Id);
                 if (requestError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(requestError);
+                if (dto.ServiceOrderId.HasValue && request.WorkOrderId.HasValue) return ResponseDtoHelper.BadRequest<DocumentDto>("قطعات دستور خدمات با درخواست کالای بدون دستور کار (مصرف عمومی) صادر می‌شود؛ هزینه آن به مرکز هزینه پس از فروش می‌رود.");
                 dto.WorkOrderId = request.WorkOrderId;
             }
             else
@@ -404,6 +412,7 @@ namespace Services.NasbNiro.Inventory
             document.WorkOrderId = dto.WorkOrderId;
             document.ContractId = dto.ContractId;
             document.SalesOrderId = dto.Type == InventoryDocumentType.CustomerDelivery ? dto.SalesOrderId : null;
+            document.ServiceOrderId = dto.Type == InventoryDocumentType.CustomerDelivery || dto.Type == InventoryDocumentType.Issue ? dto.ServiceOrderId : null;
             document.ReferenceNumber = InventoryText.Clean(dto.ReferenceNumber);
             document.Description = InventoryText.Clean(dto.Description);
             document.MaterialRequestId = dto.MaterialRequestId;
@@ -533,7 +542,7 @@ namespace Services.NasbNiro.Inventory
                 return "ورود به انبار اموال مشتری فقط با رسید اموال مشتری است.";
             }
 
-            if (type == InventoryDocumentType.CustomerDelivery && !dto.ContractId.HasValue && !dto.SalesOrderId.HasValue) return "قرارداد (مشتری) یا سفارش فروش تحویل را انتخاب کنید.";
+            if (type == InventoryDocumentType.CustomerDelivery && !dto.ContractId.HasValue && !dto.SalesOrderId.HasValue && !dto.ServiceOrderId.HasValue) return "قرارداد (مشتری)، سفارش فروش یا دستور خدمات تحویل را انتخاب کنید.";
             if (type == InventoryDocumentType.Issue && source.Kind == WarehouseKind.Subcontractor) return "از انبار پیمانکار حواله صادر نمی‌شود.";
             return null;
         }
@@ -790,7 +799,7 @@ namespace Services.NasbNiro.Inventory
                 string salesError = await Sales.SlFulfilment.CheckConfirmAsync(_uow, document, cancellationToken);
                 if (salesError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesError);
             }
-            else if (document.Type == InventoryDocumentType.CustomerDelivery)
+            else if (document.Type == InventoryDocumentType.CustomerDelivery && !document.ServiceOrderId.HasValue)
             {
                 string releaseError = await _release.CheckDeliveryAsync(document.WorkOrderId, cancellationToken);
                 if (releaseError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(releaseError);

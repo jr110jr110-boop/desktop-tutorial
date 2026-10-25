@@ -178,7 +178,8 @@ namespace Services.NasbNiro.Production
             OverheadAmount = r.OverheadAmount, AccountingEventId = r.AccountingEventId,
         };
 
-        private sealed class Rate
+        /// <summary>The hourly labour cost of one employee (also used by the after-sales service orders).</summary>
+        internal sealed class Rate
         {
             public decimal PerHour;
             public bool FromPayroll;
@@ -356,7 +357,7 @@ namespace Services.NasbNiro.Production
         private static int DayKey(DateTime day) => day.Year * 10000 + day.Month * 100 + day.Day;
 
         /// <summary>The hourly labour cost of an employee: payroll when there is an approved payslip, else the work-centre standard labour rate.</summary>
-        private async Task<Rate> LabourRateAsync(int employeeId, MfWorkCenter wc, string where, Dictionary<int, Rate> cache, CancellationToken ct)
+        internal async Task<Rate> LabourRateAsync(int employeeId, MfWorkCenter wc, string where, Dictionary<int, Rate> cache, CancellationToken ct)
         {
             // payroll rates are per employee; the work-centre rate is per work centre
             if (!cache.TryGetValue(employeeId, out Rate payroll))

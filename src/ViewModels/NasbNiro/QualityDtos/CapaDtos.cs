@@ -126,6 +126,11 @@ namespace ViewModels.NasbNiro.QualityDtos
         public DateTimeOffset? ClosedAt { get; set; }
         public string NcrNumber { get; set; }
         public string CapaNumber { get; set; }
+
+        /// <summary>The after-sales service request this complaint was opened from (release S1 part B).</summary>
+        public int? ServiceRequestId { get; set; }
+
+        public string ServiceRequestNumber { get; set; }
     }
 
     public class ComplaintQuery : PaginationParams
