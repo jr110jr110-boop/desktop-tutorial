@@ -13214,6 +13214,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("DelayDeductionMinutes")
+                        .HasColumnType("int");
+
                     b.Property<int>("DelayMinutes")
                         .HasColumnType("int");
 
@@ -13318,11 +13321,23 @@ namespace DataLayer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("CompanyRulesApplied")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("DelayPenaltyFactor")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)")
+                        .HasDefaultValue(3m);
+
                     b.Property<int>("GraceMinutes")
                         .HasColumnType("int");
 
                     b.Property<int?>("MaxOvertimeMinutesPerDay")
                         .HasColumnType("int");
+
+                    b.Property<int>("MonthlyOvertimeCapMinutes")
+                        .HasColumnType("int")
+                        .HasDefaultValue(1320);
 
                     b.Property<bool>("OvertimeNeedsPreApproval")
                         .HasColumnType("bit");
@@ -13380,6 +13395,47 @@ namespace DataLayer.Migrations
                     b.HasIndex("EmployeeId", "Timestamp");
 
                     b.ToTable("OfClockEvents", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfClockImportProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("MappingJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("OfClockImportProfiles", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfDecision", b =>
@@ -13842,6 +13898,9 @@ namespace DataLayer.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreateDate")
                         .HasColumnType("datetimeoffset");
 
@@ -13952,10 +14011,15 @@ namespace DataLayer.Migrations
                     b.Property<int?>("TemplateId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("TenderId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Urgency")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ContractId");
 
                     b.HasIndex("Date");
 
@@ -13972,6 +14036,8 @@ namespace DataLayer.Migrations
                     b.HasIndex("SignerPositionId");
 
                     b.HasIndex("TemplateId");
+
+                    b.HasIndex("TenderId");
 
                     b.HasIndex("Kind", "Number")
                         .IsUnique()
@@ -27254,6 +27320,11 @@ namespace DataLayer.Migrations
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfLetter", b =>
                 {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Office.OfLetter", null)
                         .WithMany()
                         .HasForeignKey("FollowUpLetterId")
@@ -27287,6 +27358,11 @@ namespace DataLayer.Migrations
                     b.HasOne("Entities.Model.NasbNiro.Office.OfLetterTemplate", null)
                         .WithMany()
                         .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Tenders.Tender", null)
+                        .WithMany()
+                        .HasForeignKey("TenderId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
