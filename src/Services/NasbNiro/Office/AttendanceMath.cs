@@ -218,7 +218,8 @@ namespace Services.NasbNiro.Office
                 r.OvertimeMinutes = overtime;
 
                 // hourly leave is a part of a paid day; hourly mission only excuses the delay and the early leave
-                int dayMinutes = Math.Max(1, end - start);
+                // the day is the scheduled working time (end − start − break), the same basis as the lateness deduction and the month close
+                int dayMinutes = Math.Max(1, end - start - (d.HasShift ? d.BreakMinutes : 0));
                 int leaveMinutes = d.HourlyLeave.Select(w => Absolute(d, w, start, end)).Sum(w => Overlap(w.From, w.To, shiftStart, shiftEnd));
                 if (leaveMinutes > 0) r.PaidLeaveDays = Math.Round((decimal)leaveMinutes / dayMinutes, 4);
                 return r;
