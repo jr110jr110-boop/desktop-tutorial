@@ -27,6 +27,10 @@ export const Roles = {
   AUDITOR: "AUDITOR",
   SECRETARIAT: "SECRETARIAT",
   HR: "HR",
+  PRODUCTIONMANAGER: "PRODUCTIONMANAGER",
+  SHOPSUPERVISOR: "SHOPSUPERVISOR",
+  OPERATOR: "OPERATOR",
+  MAINTENANCE: "MAINTENANCE",
 } as const;
 
 /** Role ids of the finance roles in the API (RoleConstants.cs); the user page picks roles from the API list, these are for reference. */
@@ -37,6 +41,10 @@ export const RoleIds = {
   AUDITOR: 28,
   SECRETARIAT: 26,
   HR: 27,
+  PRODUCTIONMANAGER: 20,
+  SHOPSUPERVISOR: 21,
+  OPERATOR: 22,
+  MAINTENANCE: 23,
 } as const;
 
 export const roleTitles: Record<string, string> = {
@@ -62,6 +70,10 @@ export const roleTitles: Record<string, string> = {
   AUDITOR: "حسابرس",
   SECRETARIAT: "دبیرخانه",
   HR: "اداری و منابع انسانی",
+  PRODUCTIONMANAGER: "مدیر تولید",
+  SHOPSUPERVISOR: "سرپرست کارگاه",
+  OPERATOR: "اپراتور",
+  MAINTENANCE: "نگهداری و تعمیرات",
 };
 
 const list = (csv: string) => csv.split(",");
@@ -118,6 +130,65 @@ export const OfficeRoles = {
   /** the CEO decides on delegations of a vacant position or of somebody else (with the holder) */
   ceo: ["CEO"],
   /** the unit manager approves leave and requests through the position chain, not by role: no role list, use allowedActions */
+};
+
+/**
+ * Production / shop floor (MES) and maintenance (ProductionRoles in Services/NasbNiro/Production/ProductionCommon.cs plus the constants of the services).
+ * The controllers only require a signed-in user; the roles are checked inside the services. A role with the GET right but not the write right sees the page without the buttons.
+ */
+export const ProductionRoles = {
+  manager: ["PRODUCTIONMANAGER"],
+  supervisor: ["SHOPSUPERVISOR"],
+  /** Readers: routings, load report, KPIs, OEE (not the operators) */
+  readers: list("PMO,CEO,PRODUCTIONMANAGER,SHOPSUPERVISOR,PLANNING,QC,QA,ENGINEERING,ENGINEER,PROJECTMANAGER,WHSUPERVISOR,WAREHOUSE,MAINTENANCE,FINANCEMANAGER,AUDITOR"),
+  /** Readers + operators: work centres, machines, standards, reason codes, orders, operations, bookings, dispatch, maintenance lists */
+  masterReaders: list("PMO,CEO,PRODUCTIONMANAGER,SHOPSUPERVISOR,PLANNING,QC,QA,ENGINEERING,ENGINEER,PROJECTMANAGER,WHSUPERVISOR,WAREHOUSE,MAINTENANCE,FINANCEMANAGER,AUDITOR,OPERATOR,ASSEMBLER,CONSTRUCTION"),
+  /** GET work centres (list and by id): masterReaders + FINANCIAL (ProductionRoles.WorkCenterReaders) */
+  workCenterReaders: list("PMO,CEO,PRODUCTIONMANAGER,SHOPSUPERVISOR,PLANNING,QC,QA,ENGINEERING,ENGINEER,PROJECTMANAGER,WHSUPERVISOR,WAREHOUSE,MAINTENANCE,FINANCEMANAGER,AUDITOR,OPERATOR,ASSEMBLER,CONSTRUCTION,FINANCIAL"),
+  /** bookings page: masterReaders + HR (HR sees only the attendance-differences tab) */
+  bookingsPage: list("PMO,CEO,PRODUCTIONMANAGER,SHOPSUPERVISOR,PLANNING,QC,QA,ENGINEERING,ENGINEER,PROJECTMANAGER,WHSUPERVISOR,WAREHOUSE,MAINTENANCE,FINANCEMANAGER,AUDITOR,OPERATOR,ASSEMBLER,CONSTRUCTION,HR"),
+  /** work centres, machine info, reason codes (reason codes also by the shop supervisor, machine info also by maintenance: see reasonEditors / machineEditors) */
+  masterEditors: list("PRODUCTIONMANAGER,PMO"),
+  machineEditors: list("PRODUCTIONMANAGER,PMO,MAINTENANCE"),
+  reasonEditors: list("PRODUCTIONMANAGER,PMO,SHOPSUPERVISOR"),
+  /** operation standards */
+  standardEditors: list("PRODUCTIONMANAGER,ENGINEERING,ENGINEER,PMO"),
+  /** second approver of a routing revision (approve-engineering) */
+  engineering: list("ENGINEERING,ENGINEER"),
+  /** open a routing revision, delete a draft one */
+  routingWriters: list("PRODUCTIONMANAGER,ENGINEERING,ENGINEER,PMO,PLANNING"),
+  /** approve-production (first of the two people) */
+  routingApproveProduction: ["PRODUCTIONMANAGER"],
+  /** approve-engineering (second person, never the creator) */
+  routingApproveEngineering: list("ENGINEERING,ENGINEER"),
+  /** hourly rates of a work centre: finance only */
+  rateSetters: list("FINANCEMANAGER,FINANCIAL"),
+  /** who sees the hourly rates in the work-centre DTO */
+  rateViewers: list("FINANCEMANAGER,FINANCIAL,PRODUCTIONMANAGER,CEO,PMO,AUDITOR"),
+  /** release an order, skip / complete-outside / rework an operation, close, kit-override, create and edit bookings */
+  supervisors: list("SHOPSUPERVISOR,PRODUCTIONMANAGER"),
+  /** draft orders by hand, edit components, cancel a draft order, refresh-routing */
+  planners: list("PRODUCTIONMANAGER,SHOPSUPERVISOR,PLANNING,PMO,ENGINEERING,ENGINEER"),
+  /** the tablet terminal and the terminal calls (my-operations, scan, start, pause, report, finish, request-qc, machine-down) */
+  terminal: list("OPERATOR,SHOPSUPERVISOR,PRODUCTIONMANAGER,ASSEMBLER,CONSTRUCTION"),
+  /** machine-down report: terminal roles and maintenance */
+  machineDownReporters: list("OPERATOR,SHOPSUPERVISOR,PRODUCTIONMANAGER,ASSEMBLER,CONSTRUCTION,MAINTENANCE"),
+  /** QC decision on an operation: QC inspectors only */
+  inspectors: ["QC"],
+  /** maintenance plans, orders, labour (writes) */
+  maintenanceWriters: list("MAINTENANCE,PRODUCTIONMANAGER"),
+  /** scheduler run (POST schedule/run) */
+  scheduleRunners: list("PRODUCTIONMANAGER,SHOPSUPERVISOR,PLANNING,PMO"),
+  /** cost run (POST cost/run) */
+  costRunners: list("FINANCEMANAGER,FINANCIAL,PRODUCTIONMANAGER"),
+  /** cost runs and postings (read) */
+  costReaders: list("FINANCEMANAGER,FINANCIAL,PRODUCTIONMANAGER,CEO,AUDITOR,PMO"),
+  /** roles that see the single employee's labour amount in cost rows */
+  payrollSeers: list("PAYROLL,FINANCEMANAGER,CEO"),
+  /** attendance versus booking difference list */
+  attendanceCheck: list("SHOPSUPERVISOR,PRODUCTIONMANAGER,HR,CEO,PMO"),
+  /** GET dashboard */
+  dashboard: list("PRODUCTIONMANAGER,SHOPSUPERVISOR,CEO,PMO,PLANNING,MAINTENANCE,QC,QA,FINANCEMANAGER,AUDITOR"),
 };
 
 /** Finance controller. */

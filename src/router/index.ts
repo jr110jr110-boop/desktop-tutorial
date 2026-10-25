@@ -2,7 +2,7 @@ import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
-import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
+import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -574,6 +574,25 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/office/requests", name: "OfRequests", component: () => import("@/views/office/Requests.vue") },
   { path: "/office/requests/:id", name: "OfRequest", component: () => import("@/views/office/Requests.vue") },
   { path: "/office/request-types", name: "OfRequestTypes", component: () => import("@/views/office/RequestTypes.vue"), meta: { roles: OfficeRoles.orgAdmins } },
+
+  // Production / shop floor (تولید و نگهداری). meta.roles = who may open the page (the API checks every call again). The extra paths are the links the API writes
+  // into inbox items and CEO alerts: /production/orders/:id, /production/operations/:id (QC request), /production/routings/:id, /production/maintenance-requests/:id,
+  // /production/maintenance-orders[/:id], /production/machines, /production/load; pages read route.params.id.
+  { path: "/production/dashboard", name: "MfDashboard", component: () => import("@/views/production/Dashboard.vue"), meta: { roles: ProductionRoles.dashboard } },
+  { path: "/production/work-centers", name: "MfWorkCenters", alias: "/production/machines", component: () => import("@/views/production/WorkCenters.vue"), meta: { roles: ProductionRoles.workCenterReaders } },
+  { path: "/production/routings", name: "MfRoutings", component: () => import("@/views/production/Routings.vue"), meta: { roles: ProductionRoles.readers } },
+  { path: "/production/routings/:id", name: "MfRouting", component: () => import("@/views/production/Routings.vue"), meta: { roles: ProductionRoles.readers } },
+  { path: "/production/orders", name: "MfOrders", component: () => import("@/views/production/Orders.vue"), meta: { roles: ProductionRoles.masterReaders } },
+  { path: "/production/orders/:id", name: "MfOrder", component: () => import("@/views/production/OrderDetail.vue"), meta: { roles: ProductionRoles.masterReaders } },
+  { path: "/production/operations/:id", name: "MfOperation", component: () => import("@/views/production/Orders.vue"), meta: { roles: ProductionRoles.masterReaders } },
+  { path: "/production/terminal", name: "MfTerminal", component: () => import("@/views/production/Terminal.vue"), meta: { roles: ProductionRoles.terminal } },
+  { path: "/production/bookings", name: "MfBookings", component: () => import("@/views/production/Bookings.vue"), meta: { roles: ProductionRoles.bookingsPage } },
+  { path: "/production/schedule", name: "MfSchedule", alias: "/production/load", component: () => import("@/views/production/Schedule.vue"), meta: { roles: ProductionRoles.masterReaders } },
+  { path: "/production/maintenance", name: "MfMaintenance", alias: "/production/maintenance-orders", component: () => import("@/views/production/Maintenance.vue"), meta: { roles: ProductionRoles.masterReaders } },
+  { path: "/production/maintenance-orders/:id", name: "MfMaintenanceOrder", component: () => import("@/views/production/Maintenance.vue"), meta: { roles: ProductionRoles.masterReaders } },
+  { path: "/production/maintenance-requests/:id", name: "MfMaintenanceRequest", component: () => import("@/views/production/Maintenance.vue"), meta: { roles: ProductionRoles.masterReaders } },
+  { path: "/production/oee", name: "MfOee", component: () => import("@/views/production/Oee.vue"), meta: { roles: ProductionRoles.readers } },
+  { path: "/production/cost", name: "MfCost", component: () => import("@/views/production/Cost.vue"), meta: { roles: ProductionRoles.costReaders } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

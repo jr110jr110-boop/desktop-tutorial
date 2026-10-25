@@ -59,6 +59,11 @@ const tiles = (d: any) => [
   { title: "گام شروع پروژه از مهلت گذشته", value: num(d.pcOverdueInitiationSteps), link: "/project-control/portfolio", warn: d.pcOverdueInitiationSteps > 0 },
   { title: "پاسخ کارفرما به مدارک عقب‌افتاده", value: num(d.pcOverdueClientResponses), link: "/project-control/transmittals", warn: d.pcOverdueClientResponses > 0 },
   { title: "جریمه تاخیر محاسبه‌شده (ریال)", value: rial(d.pcPenaltyExposure), link: "/project-control/penalties", warn: d.pcPenaltyExposure > 0 },
+  // production (MES)
+  { title: "سفارش تولید با تاخیر", value: num(d.productionLateOrders), link: "/production/dashboard", warn: d.productionLateOrders > 0 },
+  { title: "ماشین خراب", value: num(d.productionMachinesDown), link: "/production/dashboard", warn: d.productionMachinesDown > 0 },
+  { title: "هفته‌های پرباری (۴ هفته آینده، بیش از ۱۱۰٪)", value: num(d.productionOverloadWeeks), link: "/production/schedule", warn: d.productionOverloadWeeks > 0 },
+  { title: "نگهداری و تعمیرات عقب‌افتاده", value: num(d.productionMaintenanceOverdue), link: "/production/maintenance", warn: d.productionMaintenanceOverdue > 0 },
 ];
 
 onMounted(load);

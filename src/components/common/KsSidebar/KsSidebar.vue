@@ -200,6 +200,19 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="productionLinks"
+        has-sub
+        route-name="Mf"
+        tag="production-collapse"
+        title="تولید و نگهداری">
+        <BriefcaseIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Mf') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.providers"
         has-sub
         route-name="Providers"
@@ -228,7 +241,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
+import { FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles } from "@/composables/roles";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -519,6 +532,20 @@ const officeLinks = computed<Links[]>(() => [
   { title: "ساختار سازمانی و نیابت", routeName: "OfOrg" },
   { title: "دفتر کار من (سمت‌ها و امضا)", routeName: "OfMe" },
   { title: "انواع درخواست عمومی", routeName: "OfRequestTypes", disabled: !hasRole(OfficeRoles.orgAdmins) },
+]);
+
+// Production / shop floor: each page is disabled for the roles the API refuses (ProductionRoles in composables/roles.ts); the terminal is for the terminal roles only.
+const productionLinks = computed<Links[]>(() => [
+  { title: "داشبورد تولید", routeName: "MfDashboard", disabled: !hasRole(ProductionRoles.dashboard) },
+  { title: "ترمینال کارگاه", routeName: "MfTerminal", disabled: !hasRole(ProductionRoles.terminal) },
+  { title: "دستورهای تولید", routeName: "MfOrders", disabled: !hasRole(ProductionRoles.masterReaders) },
+  { title: "زمان‌بندی و بار کاری", routeName: "MfSchedule", disabled: !hasRole(ProductionRoles.masterReaders) },
+  { title: "ثبت زمان و مغایرت حضور", routeName: "MfBookings", disabled: !hasRole(ProductionRoles.bookingsPage) },
+  { title: "مراکز کار و ماشین‌ها", routeName: "MfWorkCenters", disabled: !hasRole(ProductionRoles.workCenterReaders) },
+  { title: "مسیرهای ساخت و استانداردها", routeName: "MfRoutings", disabled: !hasRole(ProductionRoles.readers) },
+  { title: "نگهداری و تعمیرات", routeName: "MfMaintenance", disabled: !hasRole(ProductionRoles.masterReaders) },
+  { title: "اثربخشی تجهیزات (OEE)", routeName: "MfOee", disabled: !hasRole(ProductionRoles.readers) },
+  { title: "هزینه‌یابی تولید", routeName: "MfCost", disabled: !hasRole(ProductionRoles.costReaders) },
 ]);
 
 const userRole = localStorage.getItem("userRole");
