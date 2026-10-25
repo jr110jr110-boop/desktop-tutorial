@@ -271,8 +271,16 @@ namespace Services.NasbNiro.ProjectControl
             };
         }
 
+        // The rows of the whole portfolio are computed project by project (earned value, late activities, guarantees ...). The CEO dashboard and the CEO overview both ask for them
+        // inside one request, so this service instance keeps the last answer for a few seconds (the callers only read it).
+        private const long PortfolioRowsLifetimeMs = 10_000;
+        private List<PcPortfolioRowDto> _portfolioRows;
+        private long _portfolioRowsAt;
+        private DateTime _portfolioRowsDay;
+
         private async Task<List<PcPortfolioRowDto>> AllRowsAsync(CancellationToken cancellationToken)
         {
+            if (_portfolioRows != null && _portfolioRowsDay == DateTime.Today && Environment.TickCount64 - _portfolioRowsAt < PortfolioRowsLifetimeMs) return _portfolioRows;
             List<int> ids = await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => !t.Deleted && t.Contract.Deleted == false).OrderBy(t => t.ContractId).Select(t => t.ContractId).ToListAsync(cancellationToken);
             var rows = new List<PcPortfolioRowDto>();
             foreach (int id in ids)
@@ -281,6 +289,9 @@ namespace Services.NasbNiro.ProjectControl
                 PcContractTerms terms = await PcContext.TermsAsync(_uow, id, false, cancellationToken);
                 rows.Add(await RowAsync(id, c, terms, DateTime.Today, cancellationToken));
             }
+            _portfolioRows = rows;
+            _portfolioRowsDay = DateTime.Today;
+            _portfolioRowsAt = Environment.TickCount64;
             return rows;
         }
 

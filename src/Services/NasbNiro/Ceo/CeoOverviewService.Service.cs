@@ -1,0 +1,92 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Entities.Model.NasbNiro.AfterSales;
+using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.AfterSales;
+using ViewModels.NasbNiro.CeoDtos;
+using ViewModels.NasbNiro.FinanceDtos;
+
+namespace Services.NasbNiro.Ceo
+{
+    // Section 8: after-sales service. SLA breaches, open requests, units in warranty, the warranty cost of the year (masked for a reader who does not see pay),
+    // goodwill waiting for the CEO, customer satisfaction; requests received and resolved by month, the warranty cost by month (masked), the satisfaction by month.
+    public sealed partial class CeoOverviewService
+    {
+        private async Task<CeoSectionDto> ServiceAsync(CeoContext ctx, CancellationToken ct)
+        {
+            CeoDashboardDto b = await BaseAsync(ctx, ct);
+
+            var section = new CeoSectionDto();
+            section.Kpis.Add(Trended(ctx, Kpi(CeoKeys.ServiceSlaBreaches, "درخواست‌های خارج از SLA", b.ServiceSlaBreaches, CeoUnit.Count, CeoRules.DangerIfAny(b.ServiceSlaBreaches), CeoLinks.ServiceRequests, CeoDrillRef.SvSlaBreaches,
+                "درخواست‌های بازی که مهلت پاسخ یا مهلت حل آن‌ها گذشته است."), higherIsBetter: false));
+            section.Kpis.Add(Kpi("serviceOpenRequests", "درخواست‌های خدمات باز", b.ServiceOpenRequests, CeoUnit.Count, null, CeoLinks.ServiceRequests, CeoDrillRef.SvRequestsOpen,
+                "باز، واگذارشده، در حال انجام یا منتظر مشتری"));
+            section.Kpis.Add(Kpi("serviceUnitsInWarranty", "تجهیزات نصب‌شده در دوره‌ی گارانتی", b.ServiceUnitsInWarranty, CeoUnit.Count, null, CeoLinks.ServiceUnits, CeoDrillRef.SvUnitsByCustomer,
+                "تجهیزات فعال مشتریان که گارانتی آن‌ها هنوز تمام نشده است."));
+            const string warrantyTitle = "هزینه‌ی گارانتی از ابتدای سال";
+            if (b.ServiceWarrantyCostHidden)
+                section.Kpis.Add(HiddenKpi("serviceWarrantyCostYtd", warrantyTitle, CeoUnit.Rial, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
+                    "هزینه‌ی نیروی کار برخی سفارش‌ها حقوق یک یا دو نفر است و فقط برای مدیرعامل، مدیر مالی و حقوق و دستمزد نمایش داده می‌شود."));
+            else
+                section.Kpis.Add(Kpi("serviceWarrantyCostYtd", warrantyTitle, b.ServiceWarrantyCostYtd, CeoUnit.Rial, null, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
+                    "سفارش‌های گارانتی بسته‌شده از ابتدای سال شمسی؛ نیروی کار و قطعات"));
+            section.Kpis.Add(Kpi("serviceGoodwillWaiting", "درخواست‌های حسن نیت منتظر تصمیم", b.ServiceGoodwillWaiting, CeoUnit.Count, CeoRules.WarnIfAny(b.ServiceGoodwillWaiting), CeoLinks.ServiceOrders, CeoDrillRef.SvOrdersOpen,
+                "سفارش‌های خارج از گارانتی که مشتری حسن نیت خواسته و تصمیم مدیرعامل لازم است."));
+            decimal? score = b.ServiceSurveyAverageScore;
+            section.Kpis.Add(Kpi("serviceSurveyScore", "میانگین رضایت مشتریان", score, CeoUnit.Count, score.HasValue ? CeoRules.Satisfaction(score.Value) : CeoStatus.Neutral, CeoLinks.ServiceSurveys, CeoDrillRef.SvSurveyByMonth,
+                "میانگین امتیاز نظرسنجی‌های پاسخ‌داده‌شده از پنج؛ بدون نظرسنجی مقداری ندارد.", score.HasValue ? CeoText.Number(score.Value, 2) + " از " + CeoText.Number(5) : null));
+
+            // chart 1: requests received and requests resolved, by month
+            var received = await _uow.Set<SvServiceRequest>().AsNoTracking()
+                .Where(r => !r.Deleted && r.ReceivedAt >= ctx.From && r.ReceivedAt < ctx.End)
+                .GroupBy(r => r.ReceivedAt.Date).Select(g => new { Day = g.Key, Count = g.Count() }).ToListAsync(ct);
+            var resolved = await _uow.Set<SvServiceRequest>().AsNoTracking()
+                .Where(r => !r.Deleted && r.ResolvedAt != null && r.ResolvedAt >= ctx.From && r.ResolvedAt < ctx.End)
+                .GroupBy(r => r.ResolvedAt.Value.Date).Select(g => new { Day = g.Key, Count = g.Count() }).ToListAsync(ct);
+            section.Charts.Add(Chart("requestsByMonth", "درخواست‌های خدمات دریافت‌شده و حل‌شده به تفکیک ماه", CeoKind.Bar, CeoUnit.Count, ctx.Labels, CeoLinks.ServiceRequests, CeoDrillRef.SvRequestsOpen,
+                "دریافت‌شده بر پایه‌ی زمان دریافت و حل‌شده بر پایه‌ی زمان حل.",
+                Series("دریافت‌شده", CeoTrends.SumByMonth(ctx.Window, received.Select(r => (r.Day, (decimal)r.Count))), CeoRole.Primary),
+                Series("حل‌شده", CeoTrends.SumByMonth(ctx.Window, resolved.Select(r => (r.Day, (decimal)r.Count))), CeoRole.Positive)));
+
+            // chart 2: the warranty cost of the closed warranty orders by closing month; hidden under the same rule as the dashboard of the service module
+            DateTimeOffset from = new DateTimeOffset(ctx.From);
+            var warranty = await _uow.Set<SvServiceOrder>().AsNoTracking()
+                .Where(o => !o.Deleted && o.Status == SvOrderStatus.Closed && o.Decision == SvWarrantyDecision.Warranty && o.ClosedAt != null && o.ClosedAt >= from)
+                .Select(o => new { o.ClosedAt, o.LabourAmount, o.PartsAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
+            const string costTitle = "هزینه‌ی گارانتی به تفکیک ماه";
+            if (!ctx.SeesPayroll && warranty.Any(o => SvPrivacy.LabourProtected(o.LabourEmployeeCount, o.LabourPayrollEmployeeCount)))
+            {
+                section.Charts.Add(HiddenChart("warrantyCostByMonth", costTitle, CeoKind.StackedBar, CeoUnit.Rial, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
+                    "هزینه‌ی نیروی کار برخی سفارش‌ها حقوق یک یا دو نفر است و فقط برای مدیرعامل، مدیر مالی و حقوق و دستمزد نمایش داده می‌شود."));
+            }
+            else
+            {
+                section.Charts.Add(Chart("warrantyCostByMonth", costTitle, CeoKind.StackedBar, CeoUnit.Rial, ctx.Labels, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
+                    "سفارش‌های گارانتی بسته‌شده بر پایه‌ی زمان بستن.",
+                    Series("قطعات", CeoTrends.SumByMonth(ctx.Window, warranty.Select(o => (o.ClosedAt.Value.LocalDateTime.Date, o.PartsAmount))), CeoRole.Primary),
+                    Series("نیروی کار", CeoTrends.SumByMonth(ctx.Window, warranty.Select(o => (o.ClosedAt.Value.LocalDateTime.Date, o.LabourAmount))), CeoRole.Secondary)));
+            }
+
+            // chart 3: the average score of the surveys answered in each month (months without an answer are left out)
+            var surveys = await _uow.Set<SlSurvey>().AsNoTracking()
+                .Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.AverageScore != null && s.AnsweredAt != null && s.AnsweredAt >= from)
+                .Select(s => new { s.AnsweredAt, Score = s.AverageScore.Value }).ToListAsync(ct);
+            var months = new List<string>();
+            var averages = new List<decimal>();
+            for (int i = 0; i < ctx.Window.Count; i++)
+            {
+                List<decimal> scores = surveys.Where(s => CeoTrends.IndexOf(ctx.Window, s.AnsweredAt.Value.LocalDateTime.Date) == i).Select(s => s.Score).ToList();
+                if (scores.Count == 0) continue;
+                months.Add(ctx.Labels[i]);
+                averages.Add(Math.Round(scores.Average(), 2, MidpointRounding.AwayFromZero));
+            }
+            section.Charts.Add(Chart("surveyScoreByMonth", "میانگین رضایت مشتریان به تفکیک ماه", CeoKind.Line, CeoUnit.Count, months, CeoLinks.ServiceSurveys, CeoDrillRef.SvSurveyByMonth,
+                "میانگین امتیاز از پنج بر پایه‌ی ماه پاسخ؛ ماه‌های بدون پاسخ نمایش داده نمی‌شوند.",
+                Series("میانگین امتیاز", averages)));
+            return section;
+        }
+    }
+}

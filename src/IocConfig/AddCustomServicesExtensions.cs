@@ -26,6 +26,16 @@ namespace IocConfig
 {
     public static class AddCustomServicesExtensions
     {
+        /// <summary>Release D1 part A1: the overview of the CEO dashboard, its nightly snapshot and the job at 00:30 (switch Ceo:Jobs=false).</summary>
+        private static void AddCeoOverview(this IServiceCollection services)
+        {
+            services.AddMemoryCache();
+            services.AddScoped<Services.NasbNiro.Ceo.ICeoOverviewService, Services.NasbNiro.Ceo.CeoOverviewService>();
+            services.AddScoped<Services.NasbNiro.Ceo.ICeoSnapshotService, Services.NasbNiro.Ceo.CeoSnapshotService>();
+            services.AddScoped<Services.NasbNiro.Ceo.ICeoSpeechService, Services.NasbNiro.Ceo.CeoSpeechService>();
+            services.AddHostedService<Services.NasbNiro.Ceo.CeoHostedService>();
+        }
+
         public static IServiceCollection AddCustomServices(this IServiceCollection services)
         {
             #region Identity
@@ -252,6 +262,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Office.ILeaveService, Services.NasbNiro.Office.LeaveService>();
             services.AddScoped<Services.NasbNiro.Office.IRequestService, Services.NasbNiro.Office.RequestService>();
             services.AddHostedService<Services.NasbNiro.Office.OfficeHostedService>();
+            services.AddCeoOverview();
 
             services.AddScoped<IInventoryQualityService, InventoryQualityService>();
             services.AddScoped<IInventoryWorkflowService, InventoryWorkflowService>();
