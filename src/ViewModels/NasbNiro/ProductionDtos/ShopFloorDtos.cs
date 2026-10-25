@@ -30,6 +30,12 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         /// <summary>Start of the operator's running booking (ISO; the terminal timer counts from it).</summary>
         public DateTime? MyRunningSince { get; set; }
+
+        /// <summary>The quantity the finish must reach: the order quantity, or for a rework operation the rework quantity of the rejected step.</summary>
+        public decimal ExpectedQty { get; set; }
+
+        /// <summary>The signed-in operator has a booking (running or ended) on this operation, so he may report quantities and finish it.</summary>
+        public bool HasMyBooking { get; set; }
     }
 
     public class StartOperationDto
@@ -145,6 +151,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         /// <summary>The booking is costed in the accounting (daily cost posting): it cannot be changed any more.</summary>
         public bool CostPosted { get; set; }
+
+        /// <summary>Concurrency token for bookings/edit.</summary>
+        public string RowVersion { get; set; }
     }
 
     /// <summary>A completed booking made by a supervisor for somebody else (reason required).</summary>

@@ -96,6 +96,11 @@ namespace Services.NasbNiro.Production
             var items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).Select(i => new { i.Id, i.Code, i.Title }).ToListAsync(ct);
             Dictionary<int, MfFlow.Urgency> urgency = await MfFlow.UrgencyAsync(_uow, ct);
             List<int> opIds = ops.Select(o => o.Id).ToList();
+            List<int> originIds = ops.Where(o => o.IsRework && o.ReworkOfOperationId.HasValue).Select(o => o.ReworkOfOperationId.Value).Distinct().ToList();
+            Dictionary<int, decimal> originRework = await _uow.Set<MfOperation>().AsNoTracking().Where(o => originIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, o => o.ReworkQty, ct);
+            HashSet<int> booked = employeeId.HasValue
+                ? (await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.EmployeeId == employeeId.Value && opIds.Contains(b.OperationId)).Select(b => b.OperationId).Distinct().ToListAsync(ct)).ToHashSet()
+                : new HashSet<int>();
             var mine = employeeId.HasValue
                 ? await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.EndAt == null && b.EmployeeId == employeeId.Value && opIds.Contains(b.OperationId)).ToListAsync(ct)
                 : new List<MfTimeBooking>();
@@ -118,6 +123,8 @@ namespace Services.NasbNiro.Production
                     SkipReason = d.SkipReason, StartedAtText = d.StartedAtText, FinishedAtText = d.FinishedAtText, Note = d.Note, RunningBookings = d.RunningBookings, HoursBooked = d.HoursBooked,
                     ItemCode = item?.Code, ItemTitle = item?.Title, OrderQuantity = order.Quantity, Unit = order.Unit, OrderPriority = u != null && u.Priority > 0 ? u.Priority : (int?)null,
                     NeedDateText = MfText.Date(u?.NeedDate), MyRunning = running != null, MyRunningSinceText = MfText.Stamp(running?.StartAt), MyRunningSince = running?.StartAt,
+                    ExpectedQty = d.IsRework && d.ReworkOfOperationId.HasValue && originRework.TryGetValue(d.ReworkOfOperationId.Value, out decimal rq) && rq > 0 ? rq : order.Quantity,
+                    HasMyBooking = booked.Contains(d.Id),
                 };
             }).ToList();
         }
@@ -562,7 +569,7 @@ namespace Services.NasbNiro.Production
                     EmployeeName = employees.TryGetValue(b.EmployeeId, out string en) ? en : null, MachineId = b.MachineId, MachineTitle = b.MachineId.HasValue && machines.TryGetValue(b.MachineId.Value, out string mt) ? mt : null,
                     Kind = b.Kind, StartAt = b.StartAt, StartAtText = MfText.Stamp(b.StartAt), EndAt = b.EndAt, EndAtText = MfText.Stamp(b.EndAt), Minutes = b.Minutes, Hours = b.Hours,
                     GoodQty = b.GoodQty, ScrapQty = b.ScrapQty, ScrapReasonCodeId = b.ScrapReasonCodeId, ReworkQty = b.ReworkQty, ReasonCodeId = b.ReasonCodeId, Note = b.Note, Source = b.Source,
-                    SupervisorReason = b.SupervisorReason, EditReason = b.EditReason, Running = b.EndAt == null, DayClosed = DayClosed(b), CostPosted = b.CostPostedAt != null,
+                    SupervisorReason = b.SupervisorReason, EditReason = b.EditReason, Running = b.EndAt == null, DayClosed = DayClosed(b), CostPosted = b.CostPostedAt != null, RowVersion = b.RowVersion == null ? null : Convert.ToBase64String(b.RowVersion),
                 };
             }).ToList();
         }

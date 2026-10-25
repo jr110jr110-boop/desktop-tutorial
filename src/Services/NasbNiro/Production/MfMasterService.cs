@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -85,7 +85,7 @@ namespace Services.NasbNiro.Production
 
         public async Task<ResponseDto<PagedList<WorkCenterDto>>> GetWorkCentersAsync(WorkCenterQuery query, CancellationToken ct)
         {
-            if (!_user.IsInRole(ProductionRoles.MasterReaders)) return Bad<PagedList<WorkCenterDto>>(MfText.NotAllowed);
+            if (!_user.IsInRole(ProductionRoles.WorkCenterReaders)) return Bad<PagedList<WorkCenterDto>>(MfText.NotAllowed);
             query ??= new WorkCenterQuery();
             IQueryable<MfWorkCenter> q = _uow.Set<MfWorkCenter>().AsNoTracking().Where(w => !w.Deleted);
             if (query.Kind.HasValue) q = q.Where(w => w.Kind == query.Kind.Value);
@@ -112,7 +112,7 @@ namespace Services.NasbNiro.Production
 
         public async Task<ResponseDto<WorkCenterDto>> GetWorkCenterAsync(int id, CancellationToken ct)
         {
-            if (!_user.IsInRole(ProductionRoles.MasterReaders)) return Bad<WorkCenterDto>(MfText.NotAllowed);
+            if (!_user.IsInRole(ProductionRoles.WorkCenterReaders)) return Bad<WorkCenterDto>(MfText.NotAllowed);
             MfWorkCenter row = await _uow.Set<MfWorkCenter>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == id && !w.Deleted, ct);
             if (row == null) return MfText.NotFound<WorkCenterDto>("مرکز کار پیدا نشد.");
             return ResponseDtoHelper.Ok((await WorkCenterDtosAsync(new List<MfWorkCenter> { row }, ct))[0]);

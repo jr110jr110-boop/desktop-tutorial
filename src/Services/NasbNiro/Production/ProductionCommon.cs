@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -53,6 +53,9 @@ namespace Services.NasbNiro.Production
 
         /// <summary>Whoever reads or writes on the terminal also sees the machines and reason codes.</summary>
         public const string MasterReaders = Readers + ",OPERATOR,ASSEMBLER,CONSTRUCTION";
+
+        /// <summary>Work-centre list: master readers plus the finance roles that set the rates.</summary>
+        public const string WorkCenterReaders = MasterReaders + ",FINANCIAL";
 
         public const string AttendanceCheck = "SHOPSUPERVISOR,PRODUCTIONMANAGER,HR,CEO,PMO";
     }
