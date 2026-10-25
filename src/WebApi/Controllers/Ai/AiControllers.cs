@@ -38,11 +38,11 @@ namespace WebApi.Controllers
         {
             if (file == null || file.Length == 0) return Ok(ResponseDtoHelper.BadRequest<AiVoiceResponseDto>("فایل صوتی را بفرستید."));
             if (file.Length > MaxAudioBytes) return Ok(ResponseDtoHelper.BadRequest<AiVoiceResponseDto>("حجم فایل صوتی نباید از ۱۰ مگابایت بیشتر باشد."));
-            string extension = Path.GetExtension(file.FileName ?? string.Empty).ToLowerInvariant();
-            if (extension != ".webm" && extension != ".wav") return Ok(ResponseDtoHelper.BadRequest<AiVoiceResponseDto>("فقط فایل webm یا wav پذیرفته می‌شود."));
             using var stream = new MemoryStream();
             await file.CopyToAsync(stream, ct);
-            return Ok(await _chat.VoiceAsync(stream.ToArray(), Path.GetFileName(file.FileName), file.ContentType, conversationId, ct));
+            byte[] audio = stream.ToArray();
+            if (!AiAudioCheck.IsAllowed(file.ContentType, audio)) return Ok(ResponseDtoHelper.BadRequest<AiVoiceResponseDto>(AiAudioCheck.Message));
+            return Ok(await _chat.VoiceAsync(audio, Path.GetFileName(file.FileName), file.ContentType, conversationId, ct));
         }
 
         [HttpGet("conversations")]

@@ -124,7 +124,7 @@ namespace DataLayer.Context
             List<EntityEntry> entries = context.ChangeTracker.Entries().ToList();
             foreach (EntityEntry e in entries)
             {
-                if ((e.Entity is FnAuditLog || e.Entity is Entities.Model.NasbNiro.Ai.AiAuditEvent) && (e.State == EntityState.Modified || e.State == EntityState.Deleted))
+                if ((e.Entity is FnAuditLog || e.Entity is Entities.Model.NasbNiro.Ai.AiAuditEvent || e.Entity is Entities.Model.NasbNiro.Ai.AiMessage || e.Entity is Entities.Model.NasbNiro.Ai.AiToolCallLog) && (e.State == EntityState.Modified || e.State == EntityState.Deleted))
                     throw new InvalidOperationException("سوابق ممیزی قابل ویرایش یا حذف نیست.");
             }
 

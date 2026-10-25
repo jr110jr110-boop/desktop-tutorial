@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -128,22 +129,46 @@ namespace Services.NasbNiro.Ai
     {
         public const string ClientName = "ai-local";
 
+        /// <summary>The largest answer read from a chat, embeddings or speech-to-text endpoint.</summary>
+        public const int MaxTextBytes = 4 * 1024 * 1024;
+
+        /// <summary>The largest audio read from a text-to-speech endpoint.</summary>
+        public const int MaxAudioBytes = 20 * 1024 * 1024;
+
         private readonly IUnitOfWork _uow;
         private readonly IHttpClientFactory _http;
         private readonly IAiAudit _audit;
+        private readonly IConfiguration _configuration;
 
-        public AiEndpointRunner(IUnitOfWork uow, IHttpClientFactory http, IAiAudit audit)
+        public AiEndpointRunner(IUnitOfWork uow, IHttpClientFactory http, IAiAudit audit, IConfiguration configuration = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _http = http ?? throw new ArgumentNullException(nameof(http));
             _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+            _configuration = configuration;
+        }
+
+        private TimeSpan Breaker
+        {
+            get
+            {
+                string text = _configuration?[AiConfigKeys.BreakerSeconds];
+                return TimeSpan.FromSeconds(int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int s) && s >= 0 ? s : 60);
+            }
+        }
+
+        /// <summary>An endpoint that failed less than the breaker time ago is skipped, unless every endpoint of the kind is in that state.</summary>
+        public static List<AiModelEndpoint> Candidates(List<AiModelEndpoint> endpoints, DateTimeOffset now, TimeSpan breaker)
+        {
+            List<AiModelEndpoint> open = endpoints.Where(e => !(e.LastHealthOk == false && e.LastHealthAt.HasValue && now - e.LastHealthAt.Value < breaker)).ToList();
+            return open.Count > 0 ? open : endpoints;
         }
 
         public async Task<AiRunResult<T>> RunAsync<T>(AiEndpointKind kind, Func<AiModelEndpoint, HttpClient, CancellationToken, Task<T>> call, CancellationToken ct)
         {
             List<AiModelEndpoint> endpoints = await _uow.Set<AiModelEndpoint>().Where(e => e.Kind == kind && e.Enabled).OrderBy(e => e.Priority).ThenBy(e => e.Id).ToListAsync(ct);
             string lastError = endpoints.Count == 0 ? "no enabled endpoint" : null;
-            foreach (AiModelEndpoint ep in endpoints)
+            foreach (AiModelEndpoint ep in Candidates(endpoints, DateTimeOffset.Now, Breaker))
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -187,10 +212,35 @@ namespace Services.NasbNiro.Ai
         public static async Task<string> PostJsonAsync(HttpClient client, string url, string json, CancellationToken ct)
         {
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using HttpResponseMessage response = await client.PostAsync(url, content, ct);
-            string body = await response.Content.ReadAsStringAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+            using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            return await ReadTextAsync(response, ct);
+        }
+
+        /// <summary>The body as text, at most <see cref="MaxTextBytes"/>; a non-success status is an endpoint failure.</summary>
+        public static async Task<string> ReadTextAsync(HttpResponseMessage response, CancellationToken ct)
+        {
+            byte[] bytes = await ReadLimitedAsync(response, MaxTextBytes, ct);
+            string body = Encoding.UTF8.GetString(bytes);
             if (!response.IsSuccessStatusCode) throw new AiEndpointException($"HTTP {(int)response.StatusCode}: {AiText.Cut(body, 300)}");
             return body;
+        }
+
+        /// <summary>Reads at most <paramref name="limit"/> bytes; a longer answer (by header or by count) is an endpoint failure. A redirect is a failure too (no redirects are followed).</summary>
+        public static async Task<byte[]> ReadLimitedAsync(HttpResponseMessage response, int limit, CancellationToken ct)
+        {
+            if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400) throw new AiEndpointException($"HTTP {(int)response.StatusCode}: redirects are not followed");
+            if (response.Content.Headers.ContentLength.HasValue && response.Content.Headers.ContentLength.Value > limit) throw new AiEndpointException("the response is too large");
+            using Stream stream = await response.Content.ReadAsStreamAsync(ct);
+            using var buffer = new MemoryStream();
+            var chunk = new byte[16 * 1024];
+            int read;
+            while ((read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), ct)) > 0)
+            {
+                if (buffer.Length + read > limit) throw new AiEndpointException("the response is too large");
+                buffer.Write(chunk, 0, read);
+            }
+            return buffer.ToArray();
         }
     }
 
@@ -335,19 +385,27 @@ namespace Services.NasbNiro.Ai
             _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         }
 
+        /// <summary>The media type of an upload without its parameters ("audio/webm;codecs=opus" is "audio/webm"); octet-stream when it cannot be read.</summary>
+        public static MediaTypeHeaderValue MediaType(string contentType)
+        {
+            if (!string.IsNullOrWhiteSpace(contentType) && MediaTypeHeaderValue.TryParse(contentType, out MediaTypeHeaderValue parsed) && !string.IsNullOrWhiteSpace(parsed.MediaType))
+                return new MediaTypeHeaderValue(parsed.MediaType);
+            return new MediaTypeHeaderValue("application/octet-stream");
+        }
+
         public async Task<SttResult> TranscribeAsync(byte[] audio, string fileName, string contentType, CancellationToken ct)
         {
             AiRunResult<string> run = await _runner.RunAsync(AiEndpointKind.Stt, async (ep, client, token) =>
             {
                 using var form = new MultipartFormDataContent();
                 var file = new ByteArrayContent(audio);
-                file.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
+                file.Headers.ContentType = MediaType(contentType);
                 form.Add(file, "file", string.IsNullOrWhiteSpace(fileName) ? "audio.wav" : fileName);
                 form.Add(new StringContent(ep.ModelName), "model");
                 form.Add(new StringContent("fa"), "language");
-                using HttpResponseMessage response = await client.PostAsync(AiEndpointRunner.Join(ep, "/v1/audio/transcriptions"), form, token);
-                string body = await response.Content.ReadAsStringAsync(token);
-                if (!response.IsSuccessStatusCode) throw new AiEndpointException($"HTTP {(int)response.StatusCode}: {AiText.Cut(body, 300)}");
+                using var request = new HttpRequestMessage(HttpMethod.Post, AiEndpointRunner.Join(ep, "/v1/audio/transcriptions")) { Content = form };
+                using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                string body = await AiEndpointRunner.ReadTextAsync(response, token);
                 using JsonDocument doc = JsonDocument.Parse(body);
                 if (!doc.RootElement.TryGetProperty("text", out JsonElement text) || text.ValueKind != JsonValueKind.String) throw new AiEndpointException("the response has no text");
                 return text.GetString();
@@ -375,9 +433,10 @@ namespace Services.NasbNiro.Ai
             {
                 var body = new JsonObject { ["model"] = ep.ModelName, ["input"] = text, ["voice"] = voice, ["response_format"] = "wav" };
                 using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
-                using HttpResponseMessage response = await client.PostAsync(AiEndpointRunner.Join(ep, "/v1/audio/speech"), content, token);
-                if (!response.IsSuccessStatusCode) throw new AiEndpointException($"HTTP {(int)response.StatusCode}: {AiText.Cut(await response.Content.ReadAsStringAsync(token), 300)}");
-                byte[] audio = await response.Content.ReadAsByteArrayAsync(token);
+                using var request = new HttpRequestMessage(HttpMethod.Post, AiEndpointRunner.Join(ep, "/v1/audio/speech")) { Content = content };
+                using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                if (!response.IsSuccessStatusCode) throw new AiEndpointException($"HTTP {(int)response.StatusCode}: {AiText.Cut(Encoding.UTF8.GetString(await AiEndpointRunner.ReadLimitedAsync(response, 4096, token)), 300)}");
+                byte[] audio = await AiEndpointRunner.ReadLimitedAsync(response, AiEndpointRunner.MaxAudioBytes, token);
                 if (audio.Length < 44) throw new AiEndpointException("the audio is empty");
                 return audio;
             }, ct);

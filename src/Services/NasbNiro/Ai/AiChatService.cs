@@ -96,7 +96,16 @@ namespace Services.NasbNiro.Ai
             }
         }
 
-        /// <summary>The active prompt of a code; version 1 of CHAT is seeded on first use.</summary>
+        private int VoiceTimeoutSeconds
+        {
+            get
+            {
+                string text = _configuration?[AiConfigKeys.VoiceTimeoutSeconds];
+                return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int s) && s > 0 ? s : 90;
+            }
+        }
+
+        /// <summary>The active prompt of a code; version 1 of CHAT is seeded on first use. Two requests that seed at the same time: the loser of the unique index re-reads the winner's row.</summary>
         public static async Task<AiPromptVersion> ActivePromptAsync(IUnitOfWork uow, string code, int userId, CancellationToken ct)
         {
             AiPromptVersion active = await uow.Set<AiPromptVersion>().Where(p => p.Code == code && p.IsActive).OrderByDescending(p => p.Version).FirstOrDefaultAsync(ct);
@@ -105,7 +114,15 @@ namespace Services.NasbNiro.Ai
             DateTimeOffset now = DateTimeOffset.Now;
             active = new AiPromptVersion { Code = code, Version = 1, Text = SeedPromptText, IsActive = true, CreatedAt = now, CreatedByUserId = userId, ActivatedAt = now, ActivatedByUserId = userId };
             uow.Set<AiPromptVersion>().Add(active);
-            await uow.SaveChangesAsync(ct);
+            try
+            {
+                await uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException)
+            {
+                uow.Entry(active).State = EntityState.Detached;
+                active = await uow.Set<AiPromptVersion>().AsNoTracking().Where(p => p.Code == code && p.IsActive).OrderByDescending(p => p.Version).FirstOrDefaultAsync(ct);
+            }
             return active;
         }
 
@@ -140,69 +157,21 @@ namespace Services.NasbNiro.Ai
             string promptHash = AiText.Sha256Hex(systemPrompt + text);
 
             var messages = new List<LlmMessage> { new LlmMessage { Role = "system", Content = systemPrompt } };
-            if (conversation != null)
-            {
-                // the last ten turns (a turn is a question and its answer)
-                List<AiMessage> history = await _uow.Set<AiMessage>().AsNoTracking().Where(m => m.ConversationId == conversation.Id && m.Role != AiMessageRole.Tool)
-                    .OrderByDescending(m => m.Id).Take(MemoryTurns * 2).ToListAsync(ct);
-                foreach (AiMessage m in history.OrderBy(m => m.Id))
-                    messages.Add(new LlmMessage { Role = m.Role == AiMessageRole.User ? "user" : "assistant", Content = m.Text });
-            }
+            var earlier = new List<string>();
+            if (conversation != null) await LoadHistoryAsync(conversation.Id, messages, earlier, ct);
             messages.Add(new LlmMessage { Role = "user", Content = text });
 
             IReadOnlyList<AiToolDefinition> offered = _tools.Offered();
             List<LlmToolSpec> specs = offered.Select(t => new LlmToolSpec { Name = t.Name, Description = t.Description, SchemaJson = t.SchemaJson }).ToList();
 
-            var results = new List<(AiToolResult Result, string Arguments)>();
-            string model = null;
-            string final = null;
-            string degradedReason = null;
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            {
-                timeout.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
-                try
-                {
-                    for (int round = 1; round <= MaxToolRounds + 1; round++)
-                    {
-                        // after the last tool round the model must answer: no tools are offered
-                        LlmResult r = await _llm.CompleteAsync(messages, round > MaxToolRounds ? null : specs, timeout.Token);
-                        if (!r.Ok) { degradedReason = r.Error ?? "no endpoint answered"; break; }
-                        model = r.Model;
-                        if (r.ToolCalls.Count == 0 || round > MaxToolRounds) { final = r.Content ?? string.Empty; break; }
-                        messages.Add(new LlmMessage { Role = "assistant", Content = r.Content, ToolCalls = r.ToolCalls });
-                        foreach (LlmToolCall call in r.ToolCalls)
-                        {
-                            AiToolResult tr = await _tools.ExecuteAsync(call.Name, call.ArgumentsJson, timeout.Token);
-                            results.Add((tr, call.ArgumentsJson));
-                            messages.Add(new LlmMessage { Role = "tool", ToolCallId = call.Id, Content = tr.Json });
-                        }
-                    }
-                }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-                {
-                    degradedReason = $"timeout after {TimeoutSeconds} s";
-                }
-            }
+            AiLoopResult loop = await AiChatLoop.RunAsync(_llm, _tools, _verifier, messages, specs, text, earlier, TimeoutSeconds, ct);
+            List<(AiToolResult Result, string Arguments)> results = loop.Results;
+            string model = loop.Model;
+            bool degraded = loop.Degraded;
 
-            var outcome = new Outcome { Model = model };
+            var outcome = new Outcome { Model = model, Answer = AiText.YeKe(loop.Answer), Verified = loop.Verified, Degraded = degraded };
+            if (degraded) outcome.Model = null;
             var now = DateTimeOffset.Now;
-            bool degraded = degradedReason != null;
-            List<VerifierToolResult> verifierInput = results.Select(x => new VerifierToolResult { Name = x.Result.Name, Title = x.Result.Title, Json = x.Result.Json }).ToList();
-            VerificationResult verification = null;
-            if (degraded)
-            {
-                outcome.Degraded = true;
-                outcome.Verified = true;
-                outcome.Answer = AiText.DegradedAnswer;
-                outcome.Model = null;
-            }
-            else
-            {
-                string answer = string.IsNullOrWhiteSpace(final) ? "مدل پاسخی تولید نکرد؛ دوباره تلاش کنید." : final.Trim();
-                verification = _verifier.Verify(answer, text, verifierInput);
-                outcome.Answer = verification.Answer;
-                outcome.Verified = verification.Verified;
-            }
             foreach (var x in results)
             {
                 outcome.ToolCalls.Add(new AiToolCallDto { Name = x.Result.Name, Allowed = x.Result.Allowed });
@@ -213,14 +182,14 @@ namespace Services.NasbNiro.Ai
             // persist: the conversation, the messages, the tool call logs and the audit rows in one save
             if (conversation == null)
             {
-                conversation = new AiConversation { UserId = Me, Title = AiText.Cut(text, 80), CreatedAt = now, LastAt = now };
+                conversation = new AiConversation { UserId = Me, Title = AiText.Cut(AiText.YeKe(text), 80), CreatedAt = now, LastAt = now };
                 _uow.Set<AiConversation>().Add(conversation);
             }
             conversation.LastAt = now;
-            _uow.Set<AiMessage>().Add(new AiMessage { Conversation = conversation, Role = AiMessageRole.User, Text = text, CreatedAt = now });
+            _uow.Set<AiMessage>().Add(new AiMessage { Conversation = conversation, Role = AiMessageRole.User, Text = AiText.YeKe(text), CreatedAt = now });
             foreach (var x in results)
                 _uow.Set<AiMessage>().Add(new AiMessage { Conversation = conversation, Role = AiMessageRole.Tool, Text = x.Result.Json, ToolName = x.Result.Name, CreatedAt = now });
-            var assistant = new AiMessage { Conversation = conversation, Role = AiMessageRole.Assistant, Text = outcome.Answer, CreatedAt = now, Verified = degraded ? (bool?)null : outcome.Verified, Model = outcome.Model };
+            var assistant = new AiMessage { Conversation = conversation, Role = AiMessageRole.Assistant, Text = outcome.Answer, CreatedAt = now, Verified = degraded ? (bool?)null : outcome.Verified, Model = AiText.Cut(outcome.Model, 200) };
             _uow.Set<AiMessage>().Add(assistant);
             foreach (var x in results)
             {
@@ -229,18 +198,69 @@ namespace Services.NasbNiro.Ai
                     Conversation = conversation, Message = assistant, ToolName = x.Result.Name, ArgumentsJson = AiText.Cut(x.Arguments, 4000),
                     ResultHash = x.Result.Hash, ResultChars = x.Result.Chars, Allowed = x.Result.Allowed, DurationMs = x.Result.DurationMs,
                 });
-                _audit.Add(AiAuditKinds.Tool, $"{x.Result.Name} {AiText.Cut(x.Arguments, 500)} allowed={x.Result.Allowed} chars={x.Result.Chars} hash={x.Result.Hash}", model, x.Result.DurationMs, prompt?.Id, promptHash);
+                _audit.Add(AiAuditKinds.Tool, $"{x.Result.Name} {AiText.Cut(x.Arguments, 2000)} allowed={x.Result.Allowed} chars={x.Result.Chars} hash={x.Result.Hash}", model, x.Result.DurationMs, prompt?.Id, promptHash);
             }
             total.Stop();
             string tools = string.Join(",", results.Select(x => x.Result.Name));
-            if (degraded) _audit.Add(AiAuditKinds.Degraded, AiText.Cut(degradedReason, 1000), null, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
-            if (verification != null && !verification.Verified)
-                _audit.Add(AiAuditKinds.Unverified, "tokens: " + string.Join(" ", verification.OffendingTokens) + "; tools: " + tools, model, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
-            _audit.Add(AiAuditKinds.Chat, $"tools: {(tools.Length == 0 ? "-" : tools)}; verified={(degraded ? "n/a" : outcome.Verified.ToString().ToLowerInvariant())}; degraded={degraded.ToString().ToLowerInvariant()}", model, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
+            if (degraded) _audit.Add(AiAuditKinds.Degraded, AiText.Cut(loop.DegradedReason, 1000), null, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
+            if (loop.Verification != null && !loop.Verification.Verified)
+                _audit.Add(AiAuditKinds.Unverified, "tokens: " + string.Join(" ", loop.Verification.OffendingTokens) + "; tools: " + tools, model, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
+            // the question as asked (at most 2000 characters) and the SHA-256 of the stored answer (the answer itself is the AiMessage row)
+            _audit.Add(AiAuditKinds.Chat,
+                $"tools: {(tools.Length == 0 ? "-" : tools)}; verified={(degraded ? "n/a" : outcome.Verified.ToString().ToLowerInvariant())}; degraded={degraded.ToString().ToLowerInvariant()}; answerSha256={AiText.Sha256Hex(outcome.Answer)}\nq: {AiText.Cut(text, MaxTextLength)}",
+                model, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
             await _uow.SaveChangesAsync(ct);
 
             outcome.ConversationId = conversation.Id;
             return (outcome, null);
+        }
+
+        /// <summary>The last ten turns as chat messages (earlier tool results are replayed as tool calls, newest first within a budget of characters) and the tool results of the window for the verifier.</summary>
+        private async Task LoadHistoryAsync(int conversationId, List<LlmMessage> messages, List<string> earlierResults, CancellationToken ct)
+        {
+            const int ToolContextBudget = 24000;
+            List<AiMessage> chat = await _uow.Set<AiMessage>().AsNoTracking().Where(m => m.ConversationId == conversationId && m.Role != AiMessageRole.Tool)
+                .OrderByDescending(m => m.Id).Take(MemoryTurns * 2).ToListAsync(ct);
+            if (chat.Count == 0) return;
+            int minId = chat.Min(m => m.Id);
+            List<AiMessage> allTools = await _uow.Set<AiMessage>().AsNoTracking().Where(m => m.ConversationId == conversationId && m.Role == AiMessageRole.Tool).OrderBy(m => m.Id).ToListAsync(ct);
+            List<string> argumentsByOrder = await _uow.Set<AiToolCallLog>().AsNoTracking().Where(l => l.ConversationId == conversationId).OrderBy(l => l.Id).Select(l => l.ArgumentsJson).ToListAsync(ct);
+            bool paired = argumentsByOrder.Count == allTools.Count;
+
+            var window = new List<(AiMessage Message, string Arguments)>();
+            for (int i = 0; i < allTools.Count; i++)
+                if (allTools[i].Id > minId) window.Add((allTools[i], paired ? argumentsByOrder[i] : "{}"));
+            foreach (var t in window) earlierResults.Add(t.Message.Text);
+
+            var inContext = new HashSet<int>();
+            int budget = ToolContextBudget;
+            foreach (var t in Enumerable.Reverse(window))
+            {
+                budget -= t.Message.Text?.Length ?? 0;
+                if (budget < 0) break;
+                inContext.Add(t.Message.Id);
+            }
+
+            var ordered = chat.Concat(window.Where(t => inContext.Contains(t.Message.Id)).Select(t => t.Message)).OrderBy(m => m.Id).ToList();
+            var group = new List<AiMessage>();
+            void Flush()
+            {
+                if (group.Count == 0) return;
+                messages.Add(new LlmMessage
+                {
+                    Role = "assistant",
+                    ToolCalls = group.Select(g => new LlmToolCall { Id = "h" + g.Id, Name = g.ToolName ?? "?", ArgumentsJson = window.First(w => w.Message.Id == g.Id).Arguments ?? "{}" }).ToList(),
+                });
+                foreach (AiMessage g in group) messages.Add(new LlmMessage { Role = "tool", ToolCallId = "h" + g.Id, Content = g.Text });
+                group.Clear();
+            }
+            foreach (AiMessage m in ordered)
+            {
+                if (m.Role == AiMessageRole.Tool) { group.Add(m); continue; }
+                Flush();
+                messages.Add(new LlmMessage { Role = m.Role == AiMessageRole.User ? "user" : "assistant", Content = m.Text });
+            }
+            Flush();
         }
 
         // ------------------------------------------------------------------------------------------ voice
@@ -249,49 +269,65 @@ namespace Services.NasbNiro.Ai
         {
             if (Me == 0) return AiText.Bad<AiVoiceResponseDto>(AiText.NotAllowed);
             if (audio == null || audio.Length == 0) return AiText.Bad<AiVoiceResponseDto>("فایل صوتی خالی است.");
+            // the conversation must be the caller's before anything else happens (also when speech to text fails)
+            if (conversationId.HasValue && !await _uow.Set<AiConversation>().AsNoTracking().AnyAsync(c => c.Id == conversationId.Value && c.UserId == Me, ct))
+                return AiText.NotFound<AiVoiceResponseDto>("گفتگو پیدا نشد.");
             var total = Stopwatch.StartNew();
-            var dto = new AiVoiceResponseDto();
+            var dto = new AiVoiceResponseDto { ConversationId = conversationId ?? 0 };
 
-            SttResult stt = await _stt.TranscribeAsync(audio, fileName, contentType, ct);
-            if (!stt.Ok || string.IsNullOrWhiteSpace(stt.Text))
+            // speech to text, chat and text to speech share one budget
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(TimeSpan.FromSeconds(VoiceTimeoutSeconds));
+            try
             {
-                dto.Answer = AiText.VoiceNoTranscript;
-                dto.Degraded = true;
-                dto.Verified = true;
-                dto.ConversationId = conversationId ?? 0;
-                await _audit.LogAsync(AiAuditKinds.Voice, stt.Ok ? "speech to text returned no text" : "speech to text endpoint unavailable", ct, latencyMs: (int)total.ElapsedMilliseconds);
+                SttResult stt = await _stt.TranscribeAsync(audio, fileName, contentType, budget.Token);
+                if (!stt.Ok || string.IsNullOrWhiteSpace(stt.Text))
+                {
+                    dto.Answer = AiText.VoiceNoTranscript;
+                    dto.Degraded = true;
+                    dto.Verified = true;
+                    await _audit.LogAsync(AiAuditKinds.Voice, stt.Ok ? "speech to text returned no text" : "speech to text endpoint unavailable", ct, latencyMs: (int)total.ElapsedMilliseconds);
+                    return ResponseDtoHelper.Ok(dto);
+                }
+
+                dto.Transcript = AiText.Cut(stt.Text.Trim(), MaxTextLength);
+                (Outcome outcome, string error) = await RunAsync(dto.Transcript, conversationId, budget.Token);
+                if (error != null) return AiText.NotFound<AiVoiceResponseDto>(error);
+                dto.ConversationId = outcome.ConversationId;
+                dto.Answer = outcome.Answer;
+                dto.Citations = outcome.Citations;
+                dto.ToolCalls = outcome.ToolCalls;
+                dto.Verified = outcome.Verified;
+                dto.Degraded = outcome.Degraded;
+                dto.Model = outcome.Model;
+
+                string ttsState = "skipped";
+                if (!outcome.Degraded)
+                {
+                    TtsResult tts = await _tts.SynthesizeAsync(_words.SpeechNormalize(outcome.Answer), budget.Token);
+                    if (tts.Ok)
+                    {
+                        dto.AudioBase64 = Convert.ToBase64String(tts.Audio);
+                        ttsState = "ok";
+                    }
+                    else
+                    {
+                        dto.Degraded = true;
+                        dto.Answer = outcome.Answer + "\n" + AiText.VoiceNoAudio;
+                        ttsState = "unavailable";
+                    }
+                }
+                await _audit.LogAsync(AiAuditKinds.Voice, $"stt=ok; tts={ttsState}; chars={dto.Transcript.Length}", ct, model: outcome.Model, latencyMs: (int)total.ElapsedMilliseconds);
                 return ResponseDtoHelper.Ok(dto);
             }
-
-            dto.Transcript = AiText.Cut(stt.Text.Trim(), MaxTextLength);
-            (Outcome outcome, string error) = await RunAsync(dto.Transcript, conversationId, ct);
-            if (error != null) return AiText.NotFound<AiVoiceResponseDto>(error);
-            dto.ConversationId = outcome.ConversationId;
-            dto.Answer = outcome.Answer;
-            dto.Citations = outcome.Citations;
-            dto.ToolCalls = outcome.ToolCalls;
-            dto.Verified = outcome.Verified;
-            dto.Degraded = outcome.Degraded;
-            dto.Model = outcome.Model;
-
-            string ttsState = "skipped";
-            if (!outcome.Degraded)
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                TtsResult tts = await _tts.SynthesizeAsync(_words.SpeechNormalize(outcome.Answer), ct);
-                if (tts.Ok)
-                {
-                    dto.AudioBase64 = Convert.ToBase64String(tts.Audio);
-                    ttsState = "ok";
-                }
-                else
-                {
-                    dto.Degraded = true;
-                    dto.Answer = outcome.Answer + "\n" + AiText.VoiceNoAudio;
-                    ttsState = "unavailable";
-                }
+                dto.Degraded = true;
+                dto.Verified = true;
+                dto.Answer = dto.Transcript == null ? AiText.VoiceNoTranscript : AiText.DegradedAnswer;
+                await _audit.LogAsync(AiAuditKinds.Voice, $"voice budget of {VoiceTimeoutSeconds} s exceeded", ct, latencyMs: (int)total.ElapsedMilliseconds);
+                return ResponseDtoHelper.Ok(dto);
             }
-            await _audit.LogAsync(AiAuditKinds.Voice, $"stt=ok; tts={ttsState}; chars={dto.Transcript.Length}", ct, model: outcome.Model, latencyMs: (int)total.ElapsedMilliseconds);
-            return ResponseDtoHelper.Ok(dto);
         }
 
         // ------------------------------------------------------------------------------------------ conversations
@@ -317,6 +353,72 @@ namespace Services.NasbNiro.Ai
                 Id = m.Id, Role = m.Role.ToString(), Text = m.Text, ToolName = m.ToolName, CreatedAt = m.CreatedAt, Verified = m.Verified, Model = m.Model,
             }).ToList();
             return ResponseDtoHelper.Ok(dto);
+        }
+    }
+
+    /// <summary>The outcome of one model loop: the answer to show, whether it passed the numeric check, the tool results of the turn.</summary>
+    public sealed class AiLoopResult
+    {
+        public string Answer { get; set; }
+        public bool Verified { get; set; }
+        public bool Degraded { get; set; }
+        public string DegradedReason { get; set; }
+        public string Model { get; set; }
+        public VerificationResult Verification { get; set; }
+        public List<(AiToolResult Result, string Arguments)> Results { get; set; } = new List<(AiToolResult Result, string Arguments)>();
+    }
+
+    /// <summary>
+    /// The model loop (pure given its collaborators, so it is unit tested with a fake model): at most <see cref="AiChatService.MaxToolRounds"/> rounds of tool calls, then one more
+    /// call without tools that must answer; every non-degraded path goes through the verifier.
+    /// </summary>
+    public static class AiChatLoop
+    {
+        public static async Task<AiLoopResult> RunAsync(ILlmClient llm, IToolRegistry tools, IAnswerVerifier verifier, List<LlmMessage> messages, List<LlmToolSpec> specs,
+            string question, IReadOnlyList<string> earlierResults, int timeoutSeconds, CancellationToken ct)
+        {
+            var loop = new AiLoopResult();
+            string final = null;
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+                try
+                {
+                    for (int round = 1; round <= AiChatService.MaxToolRounds + 1; round++)
+                    {
+                        // after the last tool round the model must answer: no tools are offered
+                        LlmResult r = await llm.CompleteAsync(messages, round > AiChatService.MaxToolRounds ? null : specs, timeout.Token);
+                        if (!r.Ok) { loop.DegradedReason = r.Error ?? "no endpoint answered"; break; }
+                        loop.Model = AiText.Cut(r.Model, 200);
+                        if (r.ToolCalls.Count == 0 || round > AiChatService.MaxToolRounds) { final = r.Content ?? string.Empty; break; }
+                        messages.Add(new LlmMessage { Role = "assistant", Content = r.Content, ToolCalls = r.ToolCalls });
+                        foreach (LlmToolCall call in r.ToolCalls)
+                        {
+                            AiToolResult tr = await tools.ExecuteAsync(call.Name, call.ArgumentsJson, timeout.Token);
+                            loop.Results.Add((tr, call.ArgumentsJson));
+                            messages.Add(new LlmMessage { Role = "tool", ToolCallId = call.Id, Content = tr.Json });
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    loop.DegradedReason = $"timeout after {timeoutSeconds} s";
+                }
+            }
+
+            if (loop.DegradedReason != null)
+            {
+                loop.Degraded = true;
+                loop.Verified = true;
+                loop.Answer = AiText.DegradedAnswer;
+                return loop;
+            }
+            string answer = string.IsNullOrWhiteSpace(final) ? "مدل پاسخی تولید نکرد؛ دوباره تلاش کنید." : final.Trim();
+            List<VerifierToolResult> input = loop.Results.Select(x => new VerifierToolResult { Name = x.Result.Name, Title = x.Result.Title, Json = x.Result.Json }).ToList();
+            loop.Verification = verifier.Verify(answer, question, input, earlierResults);
+            loop.Answer = loop.Verification.Answer;
+            loop.Verified = loop.Verification.Verified;
+            return loop;
         }
     }
 }

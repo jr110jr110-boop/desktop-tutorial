@@ -43,6 +43,9 @@ namespace Services.NasbNiro.Ai
         public const int ChunkOverlap = 100;
         private const int PageRows = 500;
 
+        /// <summary>★ Hits at or below this cosine are noise and are dropped.</summary>
+        public const double MinScore = 0.05;
+
         private readonly IUnitOfWork _uow;
         private readonly IEmbeddingClient _embeddings;
         private readonly IInventoryUserContext _user;
@@ -175,6 +178,7 @@ namespace Services.NasbNiro.Ai
 
             EmbeddingResult embedded = await _embeddings.EmbedAsync(new[] { query }, ct);
             float[] q = embedded?.Vectors.Count == 1 ? embedded.Vectors[0] : null;
+            string queryModel = AiText.Cut(embedded?.Model, 200);
 
             // best chunk of every source
             var best = new Dictionary<(string Type, int Id), AiSearchHitDto>();
@@ -182,12 +186,15 @@ namespace Services.NasbNiro.Ai
             while (true)
             {
                 var page = await _uow.Set<AiDocumentChunk>().AsNoTracking().Where(c => types.Contains(c.SourceType) && c.Id > lastId)
-                    .OrderBy(c => c.Id).Take(PageRows).Select(c => new { c.Id, c.SourceType, c.SourceId, c.Revision, c.Title, c.Text, c.Embedding, c.Dim }).ToListAsync(ct);
+                    .OrderBy(c => c.Id).Take(PageRows).Select(c => new { c.Id, c.SourceType, c.SourceId, c.Revision, c.Title, c.Text, c.Embedding, c.Dim, c.Model }).ToListAsync(ct);
                 if (page.Count == 0) break;
                 foreach (var c in page)
                 {
-                    double score = q != null && c.Embedding != null && c.Dim == q.Length ? Cosine(q, FromBytes(c.Embedding)) : (q == null ? Lexical(query, c.Title + " " + c.Text) : 0);
-                    if (q == null && score <= 0) continue;
+                    // vectors are comparable only when the same model made them and they have the same size
+                    double score = q != null
+                        ? (c.Embedding != null && c.Dim == q.Length && string.Equals(c.Model, queryModel, StringComparison.Ordinal) ? Cosine(q, FromBytes(c.Embedding)) : 0)
+                        : Lexical(query, c.Title + " " + c.Text);
+                    if (score <= (q != null ? MinScore : 0)) continue;
                     var key = (c.SourceType, c.SourceId);
                     if (best.TryGetValue(key, out AiSearchHitDto current) && current.Score >= score) continue;
                     best[key] = new AiSearchHitDto
@@ -219,7 +226,7 @@ namespace Services.NasbNiro.Ai
             var result = new AiIndexRebuildResultDto();
 
             List<ControlledDocument> documents = await _uow.Set<ControlledDocument>().AsNoTracking().Include(d => d.Revisions)
-                .Where(d => !d.Deleted && d.Status != ControlledDocumentStatus.Obsolete).OrderBy(d => d.Id).ToListAsync(ct);
+                .Where(d => !d.Deleted && (d.Status == ControlledDocumentStatus.Approved || d.Status == ControlledDocumentStatus.Effective)).OrderBy(d => d.Id).ToListAsync(ct);
             foreach (ControlledDocument d in documents)
             {
                 DocumentRevisionRecord revision = (d.Revisions ?? new List<DocumentRevisionRecord>()).Where(r => !r.Deleted && r.Revision == d.CurrentRevision).OrderByDescending(r => r.Id).FirstOrDefault();
@@ -251,7 +258,7 @@ namespace Services.NasbNiro.Ai
                 else result.Failed++;
             }
 
-            // sources that are no longer indexable (obsolete, deleted, minutes not approved) leave the index
+            // sources that are no longer indexable (not approved, obsolete, deleted, minutes not approved) leave the index
             List<int> documentIds = documents.Select(d => d.Id).ToList();
             List<int> meetingIds = meetings.Select(m => m.Id).ToList();
             List<AiDocumentChunk> stale = await _uow.Set<AiDocumentChunk>().Where(c =>

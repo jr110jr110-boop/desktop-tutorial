@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.AiDtos;
 
@@ -125,7 +126,11 @@ namespace Services.NasbNiro.Ai
         };
 
         // personal and banking data never goes to the model
-        private static readonly string[] Hidden = { "iban", "nationalid", "economiccode", "password", "token", "rowversion", "secret" };
+        private static readonly string[] Hidden =
+        {
+            "iban", "nationalid", "nationalcode", "economiccode", "password", "token", "rowversion", "secret",
+            "phone", "mobile", "address", "salary", "wage", "accountnumber",
+        };
         private static readonly Regex DateOnly = new Regex(@"^\d{4}-\d{2}-\d{2}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Regex DateTimeText = new Regex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly string[] NumberKeys = { "number", "code", "documentNumber", "projectCode", "itemCode", "no" };
@@ -168,16 +173,27 @@ namespace Services.NasbNiro.Ai
             }
         }
 
+        /// <summary>The first day of the Persian calendar (622-03-22): earlier dates (an empty DateTime) are left as they are.</summary>
+        private static readonly DateTime FirstPersianDay = new DateTime(622, 3, 22);
+
         public static string ShamsiText(string text)
         {
             if (string.IsNullOrEmpty(text) || text.Length < 10 || text.Length > 40) return null;
-            if (DateOnly.IsMatch(text) && DateTime.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime d))
-                return InventoryText.PersianDate(d);
-            if (DateTimeText.IsMatch(text) && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTimeOffset dto))
+            try
             {
-                DateTime local = dto.LocalDateTime;
-                string date = InventoryText.PersianDate(local);
-                return local.TimeOfDay == TimeSpan.Zero ? date : date + " " + local.ToString("HH:mm", CultureInfo.InvariantCulture);
+                if (DateOnly.IsMatch(text) && DateTime.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime d))
+                    return d < FirstPersianDay ? null : InventoryText.PersianDate(d);
+                if (DateTimeText.IsMatch(text) && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTimeOffset dto))
+                {
+                    DateTime local = dto.LocalDateTime;
+                    if (local < FirstPersianDay) return null;
+                    string date = InventoryText.PersianDate(local);
+                    return local.TimeOfDay == TimeSpan.Zero ? date : date + " " + local.ToString("HH:mm", CultureInfo.InvariantCulture);
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is FormatException || ex is InvalidOperationException)
+            {
+                // one odd date never breaks a tool
             }
             return null;
         }
@@ -356,14 +372,21 @@ namespace Services.NasbNiro.Ai
     {
         private static readonly IReadOnlyList<AiToolDefinition> All = AiTools.Build();
 
+        public const int MaxNameLength = 50;
+
         private readonly IServiceProvider _services;
         private readonly IInventoryUserContext _user;
+        private readonly ILogger<ToolRegistry> _logger;
 
-        public ToolRegistry(IServiceProvider services, IInventoryUserContext user)
+        public ToolRegistry(IServiceProvider services, IInventoryUserContext user, ILogger<ToolRegistry> logger = null)
         {
             _services = services ?? throw new ArgumentNullException(nameof(services));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _logger = logger;
         }
+
+        /// <summary>A tool name from the model, safe to store: at most 50 characters, "?" when empty.</summary>
+        public static string SafeName(string name) => string.IsNullOrWhiteSpace(name) ? "?" : AiText.Cut(name.Trim(), MaxNameLength);
 
         public static IReadOnlyList<AiToolDefinition> Definitions => All;
 
@@ -374,6 +397,7 @@ namespace Services.NasbNiro.Ai
 
         public async Task<AiToolResult> ExecuteAsync(string name, string argumentsJson, CancellationToken ct)
         {
+            name = SafeName(name);
             AiToolDefinition tool = Find(name);
             var result = new AiToolResult { Name = name, Title = tool?.Title ?? name, Allowed = true };
             var sw = Stopwatch.StartNew();
@@ -382,7 +406,7 @@ namespace Services.NasbNiro.Ai
             if (tool == null)
             {
                 result.Allowed = false;
-                json = AiToolShaper.ErrorJson("ابزار ناشناخته است.");
+                json = AiToolShaper.ErrorJson(AiText.UnknownTool);
             }
             else if (!string.IsNullOrWhiteSpace(tool.RequiredRoles) && !_user.IsInRole(tool.RequiredRoles))
             {
@@ -420,10 +444,12 @@ namespace Services.NasbNiro.Ai
                     json = AiToolShaper.ErrorJson("اجرای ابزار با خطا روبه‌رو شد.");
                     result.Title = tool.Title;
                     result.Citations = new List<AiCitationDto>();
-                    System.Diagnostics.Debug.WriteLine(ex);
+                    _logger?.LogError(ex, "AI tool {Tool} failed", name);
                 }
             }
             sw.Stop();
+            // the text that is stored (the context turns ي and ك into ی and ک) is the text that is hashed: ResultHash is the SHA-256 of AiMessage.Text
+            json = AiText.YeKe(json);
             result.Json = json;
             result.Chars = json.Length;
             result.Hash = AiText.Sha256Hex(json);

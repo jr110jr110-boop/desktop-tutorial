@@ -29,6 +29,15 @@ namespace Services.NasbNiro.Ai
     {
         public const string ChatTimeoutSeconds = "Ai:ChatTimeoutSeconds";
         public const string TtsVoice = "Ai:TtsVoice";
+
+        /// <summary>Voice requests (speech to text, chat, text to speech) share one budget. Default 90.</summary>
+        public const string VoiceTimeoutSeconds = "Ai:VoiceTimeoutSeconds";
+
+        /// <summary>An endpoint that failed is skipped for this many seconds while another one is healthy. Default 60.</summary>
+        public const string BreakerSeconds = "Ai:BreakerSeconds";
+
+        /// <summary>How long the audit rows must be kept. The rows are append-only and A1 has no delete job: this is the policy for a later archive job. Default 3 years.</summary>
+        public const string AuditRetentionYears = "Ai:AuditRetentionYears";
     }
 
     public static class AiAuditKinds
@@ -42,6 +51,29 @@ namespace Services.NasbNiro.Ai
         public const string Admin = "admin";
     }
 
+    /// <summary>What a voice upload must look like: an audio media type (parameters such as codecs=opus are ignored) and the first bytes of a WAV, WebM or Ogg file.</summary>
+    public static class AiAudioCheck
+    {
+        public const string Message = "فقط فایل صوتی webm، wav یا ogg پذیرفته می‌شود.";
+        private static readonly string[] AudioTypes = { "audio/webm", "audio/wav", "audio/x-wav", "audio/wave", "audio/ogg", "video/webm" };
+
+        /// <summary>The media type (parameters such as codecs=opus ignored) is an audio type or absent, and the first bytes are a RIFF/WAVE, EBML (webm) or OggS header.</summary>
+        public static bool IsAllowed(string contentType, byte[] audio)
+        {
+            if (!string.IsNullOrWhiteSpace(contentType))
+            {
+                if (!System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out var parsed)) return false;
+                string type = (parsed.MediaType ?? string.Empty).ToLowerInvariant();
+                if (type != "application/octet-stream" && !AudioTypes.Contains(type)) return false;
+            }
+            if (audio == null || audio.Length < 12) return false;
+            bool wav = audio[0] == 'R' && audio[1] == 'I' && audio[2] == 'F' && audio[3] == 'F' && audio[8] == 'W' && audio[9] == 'A' && audio[10] == 'V' && audio[11] == 'E';
+            bool webm = audio[0] == 0x1A && audio[1] == 0x45 && audio[2] == 0xDF && audio[3] == 0xA3;
+            bool ogg = audio[0] == 'O' && audio[1] == 'g' && audio[2] == 'g' && audio[3] == 'S';
+            return wav || webm || ogg;
+        }
+    }
+
     internal static class AiText
     {
         public const string NotAllowed = "شما مجوز این کار را ندارید.";
@@ -50,6 +82,7 @@ namespace Services.NasbNiro.Ai
         public const string ToolForbidden = "شما به این اطلاعات دسترسی ندارید.";
         public const string Unverifiable = "پاسخ مدل قابل راستی‌آزمایی نبود؛ نتایج مستقیم سامانه:";
         public const string VoiceNoAudio = "سرویس گفتار در دسترس نیست؛ پاسخ فقط به‌صورت متن ارائه شد.";
+        public const string UnknownTool = "ابزار ناشناخته";
         public const string VoiceNoTranscript = "تبدیل گفتار به متن انجام نشد؛ سرویس گفتار در دسترس نیست. متن خود را تایپ کنید.";
 
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
@@ -67,7 +100,11 @@ namespace Services.NasbNiro.Ai
             return Convert.ToHexString(hash).ToLowerInvariant();
         }
 
-        public static int Size(int pageSize) => pageSize <= 0 ? 25 : Math.Min(pageSize, 200);
+        /// <summary>Like PagedList: 0 (or less) means all rows; other sizes are capped at 200.</summary>
+        public static int Size(int pageSize) => pageSize <= 0 ? 0 : Math.Min(pageSize, 200);
+
+        /// <summary>Arabic ي and ك to the Persian letters, as the context does on save, so that a hash is taken over the text that is stored.</summary>
+        public static string YeKe(string s) => s?.Replace('ي', 'ی').Replace('ك', 'ک');
 
         public static async Task<PagedList<T>> PageAsync<T>(IQueryable<T> rows, int pageNumber, int pageSize, CancellationToken ct) =>
             await PagedList<T>.CreateAsync(rows, pageNumber, Size(pageSize), ct);

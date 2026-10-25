@@ -200,7 +200,7 @@ namespace IocConfig
             // local AI (release A1): OpenAI-compatible endpoints on the company's own server, the tool registry, the numeric answer check, retrieval, chat and voice
             services.AddHttpClient(Services.NasbNiro.Ai.AiEndpointRunner.ClientName)
                 .ConfigureHttpClient(client => client.Timeout = System.Threading.Timeout.InfiniteTimeSpan)
-                .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler { UseProxy = false, ConnectTimeout = System.TimeSpan.FromSeconds(5) });
+                .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false, ConnectTimeout = System.TimeSpan.FromSeconds(5) });
             services.AddScoped<Services.NasbNiro.Ai.IAiAudit, Services.NasbNiro.Ai.AiAudit>();
             services.AddScoped<Services.NasbNiro.Ai.IAiEndpointRunner, Services.NasbNiro.Ai.AiEndpointRunner>();
             services.AddScoped<Services.NasbNiro.Ai.ILlmClient, Services.NasbNiro.Ai.LlmClient>();

@@ -16,10 +16,14 @@ GREETING = "سلام؛ چه کمکی از من برمی‌آید؟"
 NO_TOOL = "این ابزار برای شما در دسترس نیست."
 FORBIDDEN = "شما به این اطلاعات دسترسی ندارید."
 FORGE_WORD = "جعل"
+FORCE_WORD = "اجبار"
+REPEAT_WORD = "تکرار"
 
 
 def pick_tool(text):
     """Keyword routing of a user question: (tool name, arguments) or None."""
+    if FORCE_WORD in text:
+        return "cash_position", {}
     if FORGE_WORD in text:
         return "ceo_dashboard", {}
     if "داشبورد" in text:
@@ -47,6 +51,15 @@ def numeric_values(node, out):
             numeric_values(v, out)
 
 
+def first_numbers(text, count):
+    values = []
+    try:
+        numeric_values(json.loads(text, parse_float=Decimal, parse_int=int), values)
+    except ValueError:
+        pass
+    return values[:count]
+
+
 def plain(n):
     d = Decimal(n)
     if d == d.to_integral_value():
@@ -70,11 +83,18 @@ def decide(messages, tools):
     offered = {t.get("function", {}).get("name") for t in (tools or [])}
     if last.get("role") != "tool":
         text = message_text(last)
+        if REPEAT_WORD in text:
+            # no tool call: repeat the first three numbers of the most recent tool message of the history
+            for m in reversed(messages):
+                if m.get("role") == "tool":
+                    return "طبق نتایج سامانه: " + "، ".join(plain(v) for v in first_numbers(message_text(m), 3)), None
+            return GREETING, None
         tool = pick_tool(text)
         if tool is None:
             return GREETING, None
         name, args = tool
-        if name not in offered:
+        # the force word calls the tool even when the request does not offer it (the backend must refuse it)
+        if name not in offered and FORCE_WORD not in text:
             return NO_TOOL, None
         call = {"id": "call_" + hashlib.sha256((name + text).encode("utf-8")).hexdigest()[:12],
                 "type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}

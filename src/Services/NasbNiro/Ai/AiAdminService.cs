@@ -64,13 +64,38 @@ namespace Services.NasbNiro.Ai
         };
 
         /// <summary>http or https, a host, no user name or password, no query or fragment. Returns the cleaned URL or null.</summary>
-        public static string CleanUrl(string url)
+        public static string CleanUrl(string url) => CleanUrl(url, out _);
+
+        /// <summary>
+        /// As above, and the host must be on the company's own network (the module works offline): a loopback address, a private address (10/8, 172.16/12, 192.168/16, fc00::/7),
+        /// a single-label name (no dot) or a name ending in .local. <paramref name="external"/> is true when only that last rule refused the address.
+        /// </summary>
+        public static string CleanUrl(string url, out bool external)
         {
+            external = false;
             if (string.IsNullOrWhiteSpace(url)) return null;
             if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out Uri uri)) return null;
             if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return null;
             if (!string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment) || string.IsNullOrEmpty(uri.Host)) return null;
+            if (!IsInternalHost(uri))
+            {
+                external = true;
+                return null;
+            }
             return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        }
+
+        public static bool IsInternalHost(Uri uri)
+        {
+            string host = uri.Host.Trim('[', ']');
+            if (System.Net.IPAddress.TryParse(host, out System.Net.IPAddress ip))
+            {
+                if (System.Net.IPAddress.IsLoopback(ip)) return true;
+                byte[] b = ip.GetAddressBytes();
+                if (b.Length == 4) return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168);
+                return (b[0] & 0xFE) == 0xFC;
+            }
+            return !host.Contains('.') || host.EndsWith(".local", StringComparison.OrdinalIgnoreCase);
         }
 
         // ------------------------------------------------------------------------------------------ endpoints
@@ -87,7 +112,8 @@ namespace Services.NasbNiro.Ai
             if (!_user.IsInRole(AiRoles.Admins)) return AiText.Bad<AiEndpointDto>(AiText.NotAllowed);
             if (dto == null || AiText.Clean(dto.Name) == null || AiText.Clean(dto.ModelName) == null) return AiText.Bad<AiEndpointDto>(AiText.InvalidData);
             if (!Enum.IsDefined(typeof(AiEndpointKind), dto.Kind)) return AiText.Bad<AiEndpointDto>(AiText.InvalidData);
-            string url = CleanUrl(dto.Url);
+            string url = CleanUrl(dto.Url, out bool external);
+            if (external) return AiText.Bad<AiEndpointDto>("نشانی باید به شبکه‌ی داخلی شرکت اشاره کند: آدرس loopback یا خصوصی (10، 172.16 تا 172.31، 192.168)، نام بدون نقطه یا نام با پسوند local.");
             if (url == null) return AiText.Bad<AiEndpointDto>("نشانی باید با http یا https شروع شود، میزبان داشته باشد و نام کاربری، گذرواژه، پرس‌وجو یا بخش # نداشته باشد.");
             if (dto.Name.Trim().Length > 200 || dto.ModelName.Trim().Length > 200 || url.Length > 1000) return AiText.Bad<AiEndpointDto>("نام، نام مدل یا نشانی بیش از حد طولانی است.");
             if (dto.Priority < 0 || dto.Priority > 1000) return AiText.Bad<AiEndpointDto>("اولویت باید بین ۰ و ۱۰۰۰ باشد.");
@@ -203,13 +229,13 @@ namespace Services.NasbNiro.Ai
         {
             if (!_user.IsInRole(AiRoles.Admins)) return AiText.Bad<AiPromptVersionDto>(AiText.NotAllowed);
             if (dto == null || dto.Id <= 0) return AiText.Bad<AiPromptVersionDto>(AiText.InvalidData);
-            AiPromptVersion target = await _uow.Set<AiPromptVersion>().FirstOrDefaultAsync(p => p.Id == dto.Id, ct);
+            AiPromptVersion target = await _uow.Set<AiPromptVersion>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == dto.Id, ct);
             if (target == null) return AiText.NotFound<AiPromptVersionDto>("نسخه‌ی prompt پیدا نشد.");
-            foreach (AiPromptVersion other in await _uow.Set<AiPromptVersion>().Where(p => p.Code == target.Code && p.IsActive && p.Id != target.Id).ToListAsync(ct))
-                other.IsActive = false;
-            target.IsActive = true;
-            target.ActivatedAt = DateTimeOffset.Now;
-            target.ActivatedByUserId = Me;
+            // one statement: the previous version is switched off and this one on together, so the filtered unique index (one active version per code) is never violated in between
+            _uow.ExecuteSqlCommand(
+                "UPDATE AiPromptVersions SET IsActive = CASE WHEN Id = {0} THEN 1 ELSE 0 END, ActivatedAt = CASE WHEN Id = {0} THEN {1} ELSE ActivatedAt END, ActivatedByUserId = CASE WHEN Id = {0} THEN {2} ELSE ActivatedByUserId END WHERE Code = {3} AND (Id = {0} OR IsActive = 1)",
+                target.Id, DateTimeOffset.Now, Me, target.Code);
+            target = await _uow.Set<AiPromptVersion>().AsNoTracking().FirstAsync(p => p.Id == dto.Id, ct);
             _audit.Add(AiAuditKinds.Admin, $"prompt {target.Code} version {target.Version} activated", promptVersionId: target.Id);
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(ToDto(target));

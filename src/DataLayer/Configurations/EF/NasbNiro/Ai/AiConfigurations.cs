@@ -29,6 +29,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Ai
                 b.Property(x => x.Code).HasMaxLength(Code).IsRequired();
                 b.Property(x => x.Text).IsRequired();
                 b.HasIndex(x => new { x.Code, x.Version }).IsUnique();
+                b.HasIndex(x => x.Code).IsUnique().HasFilter("[IsActive] = 1"); // one active version per code
             });
             builder.Entity<AiConversation>(b =>
             {

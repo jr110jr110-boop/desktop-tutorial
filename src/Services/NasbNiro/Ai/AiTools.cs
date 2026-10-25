@@ -264,7 +264,7 @@ namespace Services.NasbNiro.Ai
                     PagedList<PcActivityDto> late = AiToolShaper.Unwrap(await c.Get<Pc.IPcScheduleService>().GetActivitiesAsync(new PcActivityQuery { ContractId = contractId, OnlyLate = true, PageNumber = 1, PageSize = 10 }, ct));
                     PagedList<PcMilestoneDto> ms = AiToolShaper.Unwrap(await c.Get<Pc.IPcCommercialService>().GetMilestonesAsync(new PcContractQuery { ContractId = contractId, PageNumber = 1, PageSize = 200 }, ct));
                     List<PcMilestoneDto> next = ms.Where(m => m.Status != Entities.Model.NasbNiro.ProjectControl.PcMilestoneStatus.Paid).OrderBy(m => m.PlannedDate ?? DateTime.MaxValue).Take(5).ToList();
-                    return new { contractId, evm, lateActivitiesTotalCount = late.TotalCount, lateActivities = late.ToList(), nextMilestones = next };
+                    return new { evm, lateActivitiesTotalCount = late.TotalCount, lateActivities = late.ToList(), nextMilestones = next };
                 },
             });
             tools.Add(new AiToolDefinition
@@ -328,7 +328,7 @@ namespace Services.NasbNiro.Ai
                     int? id = await WorkOrderIdAsync(c, a, ct);
                     if (!id.HasValue) throw new AiToolFailureException("دستور کاری با این مشخصات پیدا نشد.");
                     ItpDto itp = AiToolShaper.Unwrap(await c.Get<Qa.IItpService>().GetByWorkOrderAsync(id.Value, ct));
-                    return new { workOrderId = id, items = new[] { itp } };
+                    return new { items = new[] { itp } };
                 },
             });
             tools.Add(new AiToolDefinition
@@ -343,7 +343,7 @@ namespace Services.NasbNiro.Ai
                     if (!contractId.HasValue) throw new AiToolFailureException("پروژه‌ای با این مشخصات پیدا نشد؛ شناسه یا کد پروژه را بدهید.");
                     PagedList<PcDeliverableDto> docs = AiToolShaper.Unwrap(await c.Get<Pc.IPcMdrService>().GetDeliverablesAsync(new PcDeliverableQuery { ContractId = contractId, PageNumber = 1, PageSize = 200 }, ct));
                     var byState = docs.GroupBy(d => d.IssueState).OrderBy(g => (int)g.Key).Select(g => new { state = g.Key.ToString(), count = g.Count() }).ToList();
-                    return new { contractId, totalCount = docs.TotalCount, byState, notIssuedTotalCount = docs.Count(d => d.IssueState == Entities.Model.NasbNiro.ProjectControl.PcIssueState.NotIssued), notIssued = docs.Where(d => d.IssueState == Entities.Model.NasbNiro.ProjectControl.PcIssueState.NotIssued).Take(10).ToList() };
+                    return new { totalCount = docs.TotalCount, byState, notIssuedTotalCount = docs.Count(d => d.IssueState == Entities.Model.NasbNiro.ProjectControl.PcIssueState.NotIssued), notIssued = docs.Where(d => d.IssueState == Entities.Model.NasbNiro.ProjectControl.PcIssueState.NotIssued).Take(10).ToList() };
                 },
             });
 
@@ -391,10 +391,10 @@ namespace Services.NasbNiro.Ai
                 {
                     string link = Str(a, "link") ?? Str(a, "kind");
                     string inner = AlertSource(link);
-                    if (inner == null) return new { supported = false, alertLink = link, message = "برای این هشدار منبع داده‌ی قابل‌خواندن تعریف نشده است؛ پیوند هشدار را در سامانه باز کنید." };
+                    if (inner == null) return new { supported = false, message = "برای این هشدار منبع داده‌ی قابل‌خواندن تعریف نشده است؛ پیوند هشدار را در سامانه باز کنید." };
                     AiToolResult r = await c.Registry.ExecuteAsync(inner, "{}", ct);
                     if (!r.Allowed) throw new AiToolForbiddenException();
-                    return new AiToolOutput { Data = new { alertLink = link, sourceTool = inner, result = JsonNode.Parse(r.Json) }, Citations = r.Citations };
+                    return new AiToolOutput { Data = new { sourceTool = inner, result = JsonNode.Parse(r.Json) }, Citations = r.Citations };
                 },
             });
             return tools;

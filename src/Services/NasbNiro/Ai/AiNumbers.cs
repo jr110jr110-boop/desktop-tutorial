@@ -8,21 +8,29 @@ using System.Text.RegularExpressions;
 
 namespace Services.NasbNiro.Ai
 {
-    /// <summary>One numeric token of a text: its canonical form, and the parts when it was written with thousands separators.</summary>
+    /// <summary>One numeric token of a text, reduced to its merged normalised value (no part matching anywhere).</summary>
     public sealed class AiNumberToken
     {
+        /// <summary>The value the token stands for: sign kept, separators removed, scale word applied ("5 میلیارد" is 5000000000), no leading or trailing zeros.</summary>
         public string Canonical { get; set; }
 
-        /// <summary>The groups of "1,234,567" as separate numbers (empty for a plain number).</summary>
-        public List<string> Parts { get; set; } = new List<string>();
+        /// <summary>The written number without its scale word (but with the sign): "5" for "5 میلیارد".</summary>
+        public string Plain { get; set; }
+
+        /// <summary>The token is followed by درصد, % or ٪ (the number itself is what has to exist in the results).</summary>
+        public bool Percent { get; set; }
         public string Original { get; set; }
     }
 
     /// <summary>Digit and token handling shared by the answer verifier and the speech normaliser (pure, no state).</summary>
     public static class AiNumbers
     {
-        // 1,234,567.89 (any of , ٬ ،) or a plain 123.45. "/", "-" and ":" are not part of a number: dates and times split into tokens.
-        private static readonly Regex TokenRegex = new Regex(@"\d+(?:[,٬،]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        // [-]1,234,567.89 (any of , ٬ ،) or a plain 123.45, optionally followed by a scale word or a percent sign.
+        // "/", "-" and ":" inside a text are not part of a number: dates and times split into tokens. A minus counts as a sign only at the start of a text
+        // or after a space or a bracket.
+        private static readonly Regex TokenRegex = new Regex(
+            @"(?<sign>(?<=^|[\s(\[])[-−])?(?<num>\d+(?:[,٬،]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:[ \t ‌]*(?<scale>(?:هزار|میلیون|میلیارد)(?!\p{L})|%|٪|درصد(?!\p{L})))?",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline);
         private static readonly Regex ListMarker = new Regex(@"^[ \t]*\d{1,2}[.)\-–][ \t]", RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
         /// <summary>Persian (۰-۹) and Arabic-Indic (٠-٩) digits to ASCII; the Arabic decimal separator to ".".</summary>
@@ -56,6 +64,19 @@ namespace Services.NasbNiro.Ai
             return fraction.Length == 0 ? integer : integer + "." + fraction;
         }
 
+        private static string Signed(string canonical, bool negative) => negative && canonical != "0" ? "-" + canonical : canonical;
+
+        private static decimal? ScaleOf(string scale)
+        {
+            switch (scale)
+            {
+                case "هزار": return 1_000m;
+                case "میلیون": return 1_000_000m;
+                case "میلیارد": return 1_000_000_000m;
+                default: return null;
+            }
+        }
+
         public static List<AiNumberToken> Tokens(string text, bool dropListMarkers)
         {
             string normalized = NormalizeDigits(text);
@@ -63,31 +84,37 @@ namespace Services.NasbNiro.Ai
             var result = new List<AiNumberToken>();
             foreach (Match m in TokenRegex.Matches(normalized))
             {
-                string value = m.Value;
-                var token = new AiNumberToken { Original = value };
-                if (value.IndexOfAny(new[] { ',', '٬', '،' }) >= 0)
+                string merged = m.Groups["num"].Value.Replace(",", string.Empty).Replace("٬", string.Empty).Replace("،", string.Empty);
+                bool negative = m.Groups["sign"].Success;
+                string plain = Canonical(merged);
+                var token = new AiNumberToken { Original = m.Value.Trim(), Plain = Signed(plain, negative) };
+                string scale = m.Groups["scale"].Success ? m.Groups["scale"].Value : null;
+                decimal? factor = ScaleOf(scale);
+                if (factor.HasValue)
                 {
-                    string merged = value.Replace(",", string.Empty).Replace("٬", string.Empty).Replace("،", string.Empty);
-                    token.Canonical = Canonical(merged);
-                    int dot = value.IndexOf('.');
-                    string integerPart = dot >= 0 ? value.Substring(0, dot) : value;
-                    foreach (string part in integerPart.Split(new[] { ',', '٬', '،' })) token.Parts.Add(Canonical(part));
-                    if (dot >= 0 && token.Parts.Count > 0) token.Parts[token.Parts.Count - 1] = Canonical(integerPart.Split(new[] { ',', '٬', '،' }).Last() + value.Substring(dot));
+                    if (decimal.TryParse(merged, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal value) && Math.Abs(value) < 79_000_000_000m)
+                        token.Canonical = Signed(Canonical((value * factor.Value).ToString("0.############################", CultureInfo.InvariantCulture)), negative);
+                    else
+                        token.Canonical = plain + "x" + scale; // too big to compute: never equal to a number of a result
                 }
-                else token.Canonical = Canonical(value);
+                else
+                {
+                    token.Canonical = token.Plain;
+                    token.Percent = scale != null;
+                }
                 result.Add(token);
             }
             return result;
         }
 
-        /// <summary>Adds every number of a JSON text (numbers as such, strings tokenised). Property names are not numbers.</summary>
+        /// <summary>Adds every number of a JSON text (numbers as such, strings and property names tokenised). The message of an error or forbidden result is not read: it may echo the arguments.</summary>
         public static void CollectAllowed(string jsonOrText, HashSet<string> allowed)
         {
             if (string.IsNullOrEmpty(jsonOrText)) return;
             try
             {
                 using JsonDocument doc = JsonDocument.Parse(jsonOrText);
-                Walk(doc.RootElement, allowed);
+                Walk(doc.RootElement, allowed, true);
             }
             catch (JsonException)
             {
@@ -100,31 +127,47 @@ namespace Services.NasbNiro.Ai
             foreach (AiNumberToken t in Tokens(text, false))
             {
                 allowed.Add(t.Canonical);
-                foreach (string p in t.Parts) allowed.Add(p);
+                allowed.Add(t.Plain);
             }
         }
 
-        private static void Walk(JsonElement el, HashSet<string> allowed)
+        /// <summary>The value of a JSON number as written, without exponent, sign kept.</summary>
+        public static string JsonNumber(JsonElement el)
+        {
+            string raw = el.GetRawText();
+            if (raw.IndexOfAny(new[] { 'e', 'E' }) >= 0 && decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal d))
+                raw = d.ToString("0.############################", CultureInfo.InvariantCulture);
+            bool negative = raw.StartsWith("-", StringComparison.Ordinal);
+            if (negative) raw = raw.Substring(1);
+            return Signed(Canonical(raw), negative);
+        }
+
+        private static void Walk(JsonElement el, HashSet<string> allowed, bool root)
         {
             switch (el.ValueKind)
             {
                 case JsonValueKind.Number:
-                    string raw = el.GetRawText();
-                    if (raw.IndexOfAny(new[] { 'e', 'E' }) >= 0 && decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal d))
-                        raw = d.ToString("0.############################", CultureInfo.InvariantCulture);
-                    if (raw.StartsWith("-", StringComparison.Ordinal)) raw = raw.Substring(1);
-                    allowed.Add(Canonical(raw));
+                    allowed.Add(JsonNumber(el));
                     break;
                 case JsonValueKind.String:
                     AddText(el.GetString(), allowed);
                     break;
                 case JsonValueKind.Array:
-                    foreach (JsonElement item in el.EnumerateArray()) Walk(item, allowed);
+                    foreach (JsonElement item in el.EnumerateArray()) Walk(item, allowed, false);
                     break;
                 case JsonValueKind.Object:
-                    foreach (JsonProperty p in el.EnumerateObject()) Walk(p.Value, allowed);
+                    bool failed = root && (Flag(el, "error") || Flag(el, "forbidden"));
+                    foreach (JsonProperty p in el.EnumerateObject())
+                    {
+                        // digits of a key ("payablesDue30") are legitimate to mention: "due in 30 days"
+                        AddText(p.Name, allowed);
+                        if (failed && p.NameEquals("message")) continue;
+                        Walk(p.Value, allowed, false);
+                    }
                     break;
             }
         }
+
+        private static bool Flag(JsonElement el, string name) => el.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.True;
     }
 }
