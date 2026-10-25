@@ -17,6 +17,8 @@ const routes: Array<RouteRecordRaw> = [
     name: "Login",
     component: () => import("@/views/Login.vue"),
   },
+  // CEO executive dashboard (release D1): the whole company in one place, the detail tables and the AI analysis; the CEO lands here after login (see beforeEach)
+  { path: "/ceo", name: "CeoHome", component: () => import("@/views/ceo/CeoHome.vue"), meta: { roles: FinanceRoles.ceo } },
 
   // Cardboard
   {
@@ -431,7 +433,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/procurement/invoices", name: "ProcurementInvoices", component: () => import("@/views/procurement/Invoices.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/payments", name: "ProcurementPayments", component: () => import("@/views/procurement/Payments.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/suppliers", name: "ProcurementSuppliers", component: () => import("@/views/procurement/Suppliers.vue"), meta: { roles: ProcurementRoles.readers } },
-  { path: "/finance/ceo-dashboard", name: "FinanceCeoDashboard", component: () => import("@/views/finance/CeoDashboard.vue"), meta: { roles: FinanceRoles.ceo } },
+  // the old CEO dashboard address (links and bookmarks) opens the CEO home page (release D1)
+  { path: "/finance/ceo-dashboard", name: "FinanceCeoDashboard", redirect: { name: "CeoHome" } },
   { path: "/finance/events", name: "FinanceEvents", component: () => import("@/views/finance/Events.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/finance/accounts", name: "FinanceAccounts", component: () => import("@/views/finance/Accounts.vue"), meta: { roles: FinanceRoles.readers } },
   { path: "/finance/costs", name: "FinanceCosts", component: () => import("@/views/finance/Costs.vue"), meta: { roles: FinanceRoles.readers } },
@@ -680,8 +683,8 @@ router.beforeEach((to, from, next) => {
     return;
   }
   if (!loggedIn) return next({ name: "Login" });
-  // the CEO starts on the CEO dashboard
-  if (to.name === "Dashboard" && currentRole() === Roles.CEO) return next({ name: "FinanceCeoDashboard" });
+  // the CEO starts on the CEO home page (the login page reloads to "/", which lands here)
+  if (to.name === "Dashboard" && currentRole() === Roles.CEO) return next({ name: "CeoHome" });
   const claim = typeof to.meta.access === "string" ? claims[to.meta.access] : undefined;
   if (claim && !accessList.includes(claim)) return handleHasNoAccess(next);
   // features switched off by company decision (one company, rial only)

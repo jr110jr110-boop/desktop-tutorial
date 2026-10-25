@@ -1,0 +1,149 @@
+{
+  "key": "qc.ncr_open",
+  "title": "NCRهای باز",
+  "asOfText": "۱۴۰۵/۰۸/۰۳",
+  "columns": [
+    {
+      "key": "number",
+      "title": "شماره",
+      "kind": "text"
+    },
+    {
+      "key": "subject",
+      "title": "موضوع",
+      "kind": "text"
+    },
+    {
+      "key": "cause",
+      "title": "علت",
+      "kind": "text"
+    },
+    {
+      "key": "severity",
+      "title": "شدت",
+      "kind": "text"
+    },
+    {
+      "key": "ageDays",
+      "title": "روز باز",
+      "kind": "number"
+    },
+    {
+      "key": "opened",
+      "title": "تاریخ ثبت",
+      "kind": "date"
+    },
+    {
+      "key": "link",
+      "title": "NCR",
+      "kind": "link"
+    }
+  ],
+  "rows": [
+    {
+      "number": "NCR-1405-061",
+      "subject": "ترک سطحی در ریخته‌گری پوسته‌ی پمپ",
+      "cause": "مواد",
+      "severity": "عمده (Major)",
+      "ageDays": 34,
+      "opened": "۱۴۰۵/۰۶/۳۰",
+      "link": "/inventory/ncr/61"
+    },
+    {
+      "number": "NCR-1405-066",
+      "subject": "انحراف ابعادی شیار پره‌ی ردیف ۴",
+      "cause": "روش",
+      "severity": "عمده (Major)",
+      "ageDays": 21,
+      "opened": "۱۴۰۵/۰۷/۱۲",
+      "link": "/inventory/ncr/62"
+    },
+    {
+      "number": "NCR-1405-068",
+      "subject": "سختی خارج از رواداری میل‌لنگ",
+      "cause": "مواد",
+      "severity": "جزئی (Minor)",
+      "ageDays": 18,
+      "opened": "۱۴۰۵/۰۷/۱۵",
+      "link": "/inventory/ncr/63"
+    },
+    {
+      "number": "NCR-1405-070",
+      "subject": "گواهی مواد ناقص فلنج‌ها",
+      "cause": "مواد",
+      "severity": "جزئی (Minor)",
+      "ageDays": 15,
+      "opened": "۱۴۰۵/۰۷/۱۸",
+      "link": "/inventory/ncr/64"
+    },
+    {
+      "number": "NCR-1405-071",
+      "subject": "عیب جوش نفوذ ناقص نازل",
+      "cause": "نیروی انسانی",
+      "severity": "عمده (Major)",
+      "ageDays": 12,
+      "opened": "۱۴۰۵/۰۷/۲۱",
+      "link": "/inventory/ncr/65"
+    },
+    {
+      "number": "NCR-1405-073",
+      "subject": "لرزش بالا در آزمون عملکرد پمپ",
+      "cause": "روش",
+      "severity": "عمده (Major)",
+      "ageDays": 9,
+      "opened": "۱۴۰۵/۰۷/۲۴",
+      "link": "/inventory/ncr/66"
+    },
+    {
+      "number": "NCR-1405-074",
+      "subject": "خطای کالیبراسیون ترک‌متر",
+      "cause": "تجهیزات",
+      "severity": "جزئی (Minor)",
+      "ageDays": 8,
+      "opened": "۱۴۰۵/۰۷/۲۵",
+      "link": "/inventory/ncr/67"
+    },
+    {
+      "number": "NCR-1405-075",
+      "subject": "نقشه‌ی منسوخ در کارگاه",
+      "cause": "نقشه",
+      "severity": "جزئی (Minor)",
+      "ageDays": 6,
+      "opened": "۱۴۰۵/۰۷/۲۷",
+      "link": "/inventory/ncr/68"
+    },
+    {
+      "number": "NCR-1405-076",
+      "subject": "پوشش رنگ کمتر از ضخامت",
+      "cause": "روش",
+      "severity": "جزئی (Minor)",
+      "ageDays": 5,
+      "opened": "۱۴۰۵/۰۷/۲۸",
+      "link": "/inventory/ncr/69"
+    },
+    {
+      "number": "NCR-1405-077",
+      "subject": "آب‌بند مکانیکی معیوب",
+      "cause": "مواد",
+      "severity": "جزئی (Minor)",
+      "ageDays": 3,
+      "opened": "۱۴۰۵/۰۷/۳۰",
+      "link": "/inventory/ncr/70"
+    },
+    {
+      "number": "NCR-1405-078",
+      "subject": "جوشکار بدون صلاحیت معتبر",
+      "cause": "نیروی انسانی",
+      "severity": "عمده (Major)",
+      "ageDays": 1,
+      "opened": "۱۴۰۵/۰۸/۰۲",
+      "link": "/inventory/ncr/71"
+    }
+  ],
+  "totalCount": 11,
+  "page": 1,
+  "pageSize": 50,
+  "link": "/inventory/ncr",
+  "note": null,
+  "hidden": false
+}

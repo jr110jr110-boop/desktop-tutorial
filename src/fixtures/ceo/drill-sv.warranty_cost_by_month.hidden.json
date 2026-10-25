@@ -1,0 +1,24 @@
+{
+  "key": "sv.warranty_cost_by_month",
+  "title": "هزینه‌ی گارانتی ماهانه",
+  "asOfText": "۱۴۰۵/۰۸/۰۳",
+  "columns": [
+    {
+      "key": "month",
+      "title": "ماه",
+      "kind": "text"
+    },
+    {
+      "key": "cost",
+      "title": "هزینه",
+      "kind": "rial"
+    }
+  ],
+  "rows": [],
+  "totalCount": 0,
+  "page": 1,
+  "pageSize": 50,
+  "link": null,
+  "note": "این جدول شامل مبالغ دستمزد است و برای نقش شما نمایش داده نمی‌شود.",
+  "hidden": true
+}

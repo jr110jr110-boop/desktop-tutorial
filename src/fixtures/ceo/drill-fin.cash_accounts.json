@@ -1,0 +1,82 @@
+{
+  "key": "fin.cash_accounts",
+  "title": "موجودی حساب‌های بانکی و صندوق‌ها",
+  "asOfText": "۱۴۰۵/۰۸/۰۳",
+  "columns": [
+    {
+      "key": "account",
+      "title": "حساب",
+      "kind": "text"
+    },
+    {
+      "key": "bank",
+      "title": "بانک / محل",
+      "kind": "text"
+    },
+    {
+      "key": "balance",
+      "title": "موجودی",
+      "kind": "rial"
+    },
+    {
+      "key": "share",
+      "title": "سهم",
+      "kind": "percent"
+    },
+    {
+      "key": "lastStatement",
+      "title": "آخرین صورت‌حساب",
+      "kind": "date"
+    }
+  ],
+  "rows": [
+    {
+      "account": "جاری ۱۰۲۴۵",
+      "bank": "بانک ملت - شعبه‌ی مرکزی",
+      "balance": 21600000000,
+      "share": 44.8,
+      "lastStatement": "۱۴۰۵/۰۸/۰۲"
+    },
+    {
+      "account": "جاری ۸۸۱۳",
+      "bank": "بانک تجارت - شعبه‌ی صنعت",
+      "balance": 12400000000,
+      "share": 25.7,
+      "lastStatement": "۱۴۰۵/۰۸/۰۲"
+    },
+    {
+      "account": "سپرده‌ی کوتاه‌مدت ۴۴۰۲",
+      "bank": "بانک صادرات",
+      "balance": 8100000000,
+      "share": 16.8,
+      "lastStatement": "۱۴۰۵/۰۷/۳۰"
+    },
+    {
+      "account": "جاری ارزی‌نما ۲۷۷",
+      "bank": "بانک پاسارگاد",
+      "balance": 2800000000,
+      "share": 5.8,
+      "lastStatement": "۱۴۰۵/۰۸/۰۱"
+    },
+    {
+      "account": "صندوق مرکزی",
+      "bank": "دفتر مرکزی",
+      "balance": 1900000000,
+      "share": 3.9,
+      "lastStatement": "۱۴۰۵/۰۸/۰۳"
+    },
+    {
+      "account": "تنخواه کارگاه",
+      "bank": "کارخانه",
+      "balance": 1400000000,
+      "share": 2.9,
+      "lastStatement": "۱۴۰۵/۰۸/۰۳"
+    }
+  ],
+  "totalCount": 6,
+  "page": 1,
+  "pageSize": 50,
+  "link": "/fn/treasury/cash-position",
+  "note": null,
+  "hidden": false
+}

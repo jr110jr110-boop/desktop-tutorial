@@ -465,7 +465,7 @@ const links = {
     { title: "گزارش‌های پروژه", routeName: "ProjectControlReports", disabled: !hasRole(ProjectControlRoles.readers) },
   ] as Links[],
   finance: [
-    { title: "داشبورد مدیرعامل", routeName: "FinanceCeoDashboard", disabled: !hasRole(FinanceRoles.ceo) },
+    { title: "داشبورد مدیرعامل", routeName: "CeoHome", disabled: !hasRole(FinanceRoles.ceo) },
     { title: "رویدادهای حسابداری و سند سپیدار", routeName: "FinanceEvents", disabled: !hasRole(FinanceRoles.readers) },
     { title: "بهای تمام‌شده پروژه و دستور ساخت", routeName: "FinanceCosts", disabled: !hasRole(FinanceRoles.readers) },
     { title: "ارزش‌گذاری موجودی", routeName: "FinanceValuation", disabled: !hasRole(FinanceRoles.readers) },

@@ -1,0 +1,9 @@
+{
+  "conversationId": null,
+  "answer": "تحلیل هوشمند موقتاً در دسترس نیست؛ داشبورد اصلی همچنان در دسترس است.",
+  "citations": [],
+  "toolCalls": [],
+  "verified": false,
+  "degraded": true,
+  "model": null
+}

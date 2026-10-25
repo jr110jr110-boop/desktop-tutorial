@@ -2,6 +2,8 @@
 // The assistant (Local AI, release A1): a text box and a push-to-talk button. The answer, the verified badge, the citations that open the cited page, the tools that were called
 // (collapsed) and the spoken answer. The assistant acts as the signed-in user and never approves anything; this panel has no approve action.
 // The microphone is asked for only when the person presses the button and is released as soon as the recording stops (no always-on microphone).
+// prefill(question) (exposed) writes a question into the box without sending it; the optional slot «suggestions» is shown just above the box. The colours are CSS variables (--ai-*) with the old values as defaults, so a page with
+// its own theme (the CEO dashboard, light and dark) can set them; every other page looks as before.
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
@@ -32,6 +34,7 @@ const conversationId = ref<number | null>(null);
 const text = ref("");
 const busy = ref(false);
 const listEl = ref<HTMLElement | null>(null);
+const inputEl = ref<HTMLTextAreaElement | null>(null);
 let seq = 0;
 
 // ---------------------------------------------------------------- history drawer
@@ -113,6 +116,23 @@ async function send() {
   text.value = "";
   addTurn("text", question, r, null);
 }
+
+/**
+ * Writes a question into the box without sending it (the suggested questions of the CEO dashboard, «پرسش از دستیار درباره این جدول»): the person reads it, edits it and sends it.
+ * Refused (false) while an answer or a recording is running.
+ */
+function prefill(question: string): boolean {
+  if (busy.value || recording.value) return false;
+  text.value = String(question || "").slice(0, 2000);
+  nextTick(() => {
+    const el = inputEl.value;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
+  return true;
+}
+defineExpose({ prefill });
 
 function onEnter(e: KeyboardEvent) {
   if (e.shiftKey) return;
@@ -379,8 +399,11 @@ function openCitation(c: { link: string }) {
       <div v-if="busy" class="ai-busy"><span class="spinner-border spinner-border-sm"></span> در حال پاسخ‌دادن...</div>
     </div>
 
+    <slot name="suggestions" />
+
     <div class="ai-input">
       <textarea
+        ref="inputEl"
         v-model="text"
         :disabled="busy || recording"
         class="form-control form-control-sm"
@@ -476,16 +499,16 @@ function openCitation(c: { link: string }) {
   padding: 0.5rem 0.7rem;
 }
 .ai-q {
-  background: #eef3fb;
+  background: var(--ai-q-bg, #eef3fb);
 }
 .ai-a {
-  background: #fff;
-  border: 1px solid #dfe3e8;
+  background: var(--ai-a-bg, #fff);
+  border: 1px solid var(--ai-line, #dfe3e8);
 }
 .ai-who {
   font-size: 0.72rem;
   font-weight: 700;
-  color: #555;
+  color: var(--ai-muted, #555);
   margin-left: 0.4rem;
 }
 .ai-text {
@@ -502,12 +525,12 @@ function openCitation(c: { link: string }) {
 }
 .ai-model {
   font-size: 0.68rem;
-  color: #888;
+  color: var(--ai-faint, #888);
 }
 .ai-unverified {
-  border-right: 3px solid #dc3545;
-  background: #fdf0f1;
-  color: #842029;
+  border-right: 3px solid var(--ai-bad-edge, #dc3545);
+  background: var(--ai-bad-bg, #fdf0f1);
+  color: var(--ai-bad-ink, #842029);
   padding: 0.25rem 0.5rem;
   margin-bottom: 0.3rem;
 }
@@ -518,25 +541,25 @@ function openCitation(c: { link: string }) {
   margin-top: 0.4rem;
 }
 .ai-chip {
-  border: 1px solid #0d6efd;
-  background: #f1f6ff;
-  color: #084298;
+  border: 1px solid var(--ai-chip-edge, #0d6efd);
+  background: var(--ai-chip-bg, #f1f6ff);
+  color: var(--ai-chip-ink, #084298);
   border-radius: 1rem;
   padding: 0.1rem 0.7rem;
   font-size: 0.78rem;
 }
 .ai-chip:disabled {
-  border-color: #ced4da;
-  background: #f4f6f8;
-  color: #6c757d;
+  border-color: var(--ai-line, #ced4da);
+  background: var(--ai-off-bg, #f4f6f8);
+  color: var(--ai-faint, #6c757d);
 }
 .ai-tools {
   margin-top: 0.4rem;
   font-size: 0.78rem;
-  color: #555;
+  color: var(--ai-muted, #555);
 }
 .ai-busy {
-  color: #555;
+  color: var(--ai-muted, #555);
   font-size: 0.85rem;
 }
 .ai-input {
@@ -577,7 +600,7 @@ function openCitation(c: { link: string }) {
   justify-content: flex-start;
 }
 .ai-drawer {
-  background: #fff;
+  background: var(--ai-a-bg, #fff);
   width: min(420px, 100%);
   height: 100%;
   overflow-y: auto;
@@ -590,14 +613,14 @@ function openCitation(c: { link: string }) {
   width: 100%;
   text-align: right;
   gap: 0.1rem;
-  border: 1px solid #dfe3e8;
-  background: #fff;
+  border: 1px solid var(--ai-line, #dfe3e8);
+  background: var(--ai-a-bg, #fff);
   border-radius: 8px;
   padding: 0.45rem 0.7rem;
   margin-bottom: 0.4rem;
 }
 .ai-conv.active {
-  border-color: #0d6efd;
-  background: #f1f6ff;
+  border-color: var(--ai-chip-edge, #0d6efd);
+  background: var(--ai-chip-bg, #f1f6ff);
 }
 </style>

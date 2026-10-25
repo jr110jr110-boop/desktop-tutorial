@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": 801,
+      "seatCode": "QC-NCR-ASSIST",
+      "targetType": "QualityNcr",
+      "targetId": 61,
+      "title": "پیشنهاد علت ریشه‌ای NCR-1405-061",
+      "status": 1,
+      "createdAtText": "۱۴۰۵/۰۸/۰۳ ۰۶:۱۲",
+      "verified": true,
+      "link": "/inventory/ncr/61"
+    }
+  ],
+  "currentPage": 1,
+  "itemsPerPage": 1,
+  "totalItems": 3,
+  "totalPages": 3
+}

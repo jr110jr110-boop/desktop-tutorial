@@ -73,9 +73,9 @@ onBeforeUnmount(dropAudio);
 
 <style scoped>
 .brief-unverified {
-  border-right: 3px solid #dc3545;
-  background: #fdf0f1;
-  color: #842029;
+  border-right: 3px solid var(--ai-bad-edge, #dc3545);
+  background: var(--ai-bad-bg, #fdf0f1);
+  color: var(--ai-bad-ink, #842029);
   padding: 0.25rem 0.5rem;
 }
 .brief {

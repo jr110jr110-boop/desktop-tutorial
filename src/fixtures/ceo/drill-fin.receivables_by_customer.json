@@ -1,0 +1,140 @@
+{
+  "key": "fin.receivables_by_customer",
+  "title": "مطالبات به تفکیک مشتری",
+  "asOfText": "۱۴۰۵/۰۸/۰۳",
+  "columns": [
+    {
+      "key": "customer",
+      "title": "مشتری",
+      "kind": "text"
+    },
+    {
+      "key": "open",
+      "title": "مانده‌ی باز",
+      "kind": "rial"
+    },
+    {
+      "key": "over90",
+      "title": "بیش از ۹۰ روز",
+      "kind": "rial"
+    },
+    {
+      "key": "share",
+      "title": "سهم از کل",
+      "kind": "percent"
+    },
+    {
+      "key": "lastReceipt",
+      "title": "آخرین دریافت",
+      "kind": "date"
+    },
+    {
+      "key": "status",
+      "title": "وضعیت",
+      "kind": "status"
+    },
+    {
+      "key": "link",
+      "title": "صورت‌حساب",
+      "kind": "link"
+    }
+  ],
+  "rows": [
+    {
+      "customer": "پالایشگاه نفت آبادان",
+      "open": 78400000000,
+      "over90": 41200000000,
+      "share": 25.1,
+      "lastReceipt": "۱۴۰۵/۰۵/۱۸",
+      "status": "danger",
+      "link": "/fn/receivables/customers/1208/statement"
+    },
+    {
+      "customer": "فولاد مبارکه اصفهان",
+      "open": 64900000000.00001,
+      "over90": 12600000000,
+      "share": 20.8,
+      "lastReceipt": "۱۴۰۵/۰۷/۰۲",
+      "status": "warn",
+      "link": "/fn/receivables/customers/1214/statement"
+    },
+    {
+      "customer": "پتروشیمی مارون",
+      "open": 41300000000,
+      "over90": 9800000000,
+      "share": 13.2,
+      "lastReceipt": "۱۴۰۵/۰۶/۲۴",
+      "status": "warn",
+      "link": "/fn/receivables/customers/1222/statement"
+    },
+    {
+      "customer": "نیروگاه سیکل ترکیبی دماوند",
+      "open": 36700000000,
+      "over90": 6100000000,
+      "share": 11.7,
+      "lastReceipt": "۱۴۰۵/۰۷/۱۵",
+      "status": "ok",
+      "link": "/fn/receivables/customers/1230/statement"
+    },
+    {
+      "customer": "شرکت ملی گاز - منطقه‌ی ۳",
+      "open": 28200000000,
+      "over90": 3400000000,
+      "share": 9,
+      "lastReceipt": "۱۴۰۵/۰۷/۲۱",
+      "status": "ok",
+      "link": "/fn/receivables/customers/1236/statement"
+    },
+    {
+      "customer": "سیمان تهران",
+      "open": 21500000000,
+      "over90": 1700000000,
+      "share": 6.9,
+      "lastReceipt": "۱۴۰۵/۰۷/۰۹",
+      "status": "ok",
+      "link": "/fn/receivables/customers/1241/statement"
+    },
+    {
+      "customer": "قند اصفهان",
+      "open": 14800000000,
+      "over90": 0,
+      "share": 4.7,
+      "lastReceipt": "۱۴۰۵/۰۷/۲۸",
+      "status": "ok",
+      "link": "/fn/receivables/customers/1249/statement"
+    },
+    {
+      "customer": "پتروشیمی بندر امام",
+      "open": 12100000000,
+      "over90": 0,
+      "share": 3.9,
+      "lastReceipt": "۱۴۰۵/۰۷/۲۶",
+      "status": "ok",
+      "link": "/fn/receivables/customers/1253/statement"
+    },
+    {
+      "customer": "ذوب آهن اصفهان",
+      "open": 8900000000,
+      "over90": 0,
+      "share": 2.8,
+      "lastReceipt": "۱۴۰۵/۰۸/۰۱",
+      "status": "ok",
+      "link": "/fn/receivables/customers/1258/statement"
+    },
+    {
+      "customer": "پالایش گاز بیدبلند",
+      "open": 5600000000,
+      "over90": 0,
+      "share": 1.8,
+      "lastReceipt": "۱۴۰۵/۰۷/۳۰",
+      "status": "ok",
+      "link": "/fn/receivables/customers/1262/statement"
+    }
+  ],
+  "totalCount": 23,
+  "page": 1,
+  "pageSize": 10,
+  "link": "/fn/receivables/customers",
+  "note": "مبالغ به ریال؛ ۱۳ مشتری دیگر با مانده‌ی کمتر از ۵ میلیارد ریال در صفحه‌های بعد.",
+  "hidden": false
+}

@@ -1,0 +1,2271 @@
+{
+  "asOf": "2026-10-25T00:00:00",
+  "asOfText": "1405/08/03",
+  "generatedAt": "2026-10-25T07:42:10",
+  "generatedInMs": 864,
+  "cached": false,
+  "headline": [
+    {
+      "key": "cash",
+      "title": "نقدینگی",
+      "value": 48200000000,
+      "unit": "rial",
+      "valueText": "۴۸٬۲۰۰٬۰۰۰٬۰۰۰ ریال",
+      "shortText": "۴۸٫۲ میلیارد ریال",
+      "delta": 2900000000,
+      "deltaText": "+۲٫۹ میلیارد ریال",
+      "deltaGood": true,
+      "trend": [
+        36100000000,
+        41800000000,
+        39500000000,
+        33200000000.000004,
+        44700000000,
+        52300000000,
+        47900000000,
+        42600000000,
+        38400000000,
+        43100000000,
+        45300000000,
+        48200000000
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "warn",
+      "hidden": false,
+      "link": "/fn/treasury/cash-position",
+      "drillKey": "fin.cash_accounts",
+      "note": "پوشش بدهی‌های سررسیدگذشته: ۱٫۲ برابر"
+    },
+    {
+      "key": "receivablesOpen",
+      "title": "مطالبات باز",
+      "value": 312400000000,
+      "unit": "rial",
+      "valueText": "۳۱۲٬۴۰۰٬۰۰۰٬۰۰۰ ریال",
+      "shortText": "۳۱۲٫۴ میلیارد ریال",
+      "delta": 18600000000,
+      "deltaText": "+۱۸٫۶ میلیارد ریال",
+      "deltaGood": false,
+      "trend": [
+        248000000000,
+        256399999999.99997,
+        263899999999.99997,
+        271200000000,
+        266800000000,
+        280500000000,
+        284100000000,
+        279600000000,
+        288300000000,
+        297000000000,
+        293800000000,
+        312400000000
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "warn",
+      "hidden": false,
+      "link": "/fn/receivables/ageing",
+      "drillKey": "fin.receivables_by_customer",
+      "note": null
+    },
+    {
+      "key": "payablesOverdue",
+      "title": "بدهی سررسیدگذشته",
+      "value": 41700000000,
+      "unit": "rial",
+      "valueText": "۴۱٬۷۰۰٬۰۰۰٬۰۰۰ ریال",
+      "shortText": "۴۱٫۷ میلیارد ریال",
+      "delta": -6300000000,
+      "deltaText": "−۶٫۳ میلیارد ریال",
+      "deltaGood": true,
+      "trend": [
+        22400000000,
+        25100000000,
+        31700000000,
+        38200000000,
+        44900000000,
+        39600000000,
+        35200000000,
+        41800000000,
+        46300000000,
+        52100000000,
+        48000000000,
+        41700000000
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "danger",
+      "hidden": false,
+      "link": "/procurement/payments",
+      "drillKey": "fin.payables_overdue",
+      "note": null
+    },
+    {
+      "key": "salesBacklog",
+      "title": "سفارش‌های در دست",
+      "value": 1860000000000,
+      "unit": "rial",
+      "valueText": "۱٬۸۶۰٬۰۰۰٬۰۰۰٬۰۰۰ ریال",
+      "shortText": "۱٬۸۶۰ میلیارد ریال",
+      "delta": 240000000000,
+      "deltaText": "+۲۴۰ میلیارد ریال",
+      "deltaGood": true,
+      "trend": [
+        1310000000000,
+        1355000000000,
+        1420000000000,
+        1395000000000,
+        1480000000000,
+        1525000000000,
+        1590000000000,
+        1610000000000,
+        1575000000000,
+        1640000000000,
+        1620000000000,
+        1860000000000
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "ok",
+      "hidden": false,
+      "link": "/sales/orders",
+      "drillKey": "sl.orders_open",
+      "note": null
+    },
+    {
+      "key": "activeProjects",
+      "title": "پروژه‌های فعال",
+      "value": 14,
+      "unit": "count",
+      "valueText": "۱۴",
+      "shortText": null,
+      "delta": 1,
+      "deltaText": "+۱",
+      "deltaGood": null,
+      "trend": [
+        11,
+        11,
+        12,
+        12,
+        12,
+        13,
+        13,
+        13,
+        12,
+        13,
+        13,
+        14
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "warn",
+      "hidden": false,
+      "link": "/project-control/portfolio",
+      "drillKey": "pc.portfolio",
+      "note": "۲ پروژه قرمز و ۳ پروژه زرد"
+    },
+    {
+      "key": "lateProductionOrders",
+      "title": "سفارش تولید با تاخیر",
+      "value": 6,
+      "unit": "count",
+      "valueText": "۶",
+      "shortText": null,
+      "delta": 2,
+      "deltaText": "+۲",
+      "deltaGood": false,
+      "trend": [
+        3,
+        2,
+        4,
+        5,
+        3,
+        2,
+        3,
+        4,
+        5,
+        3,
+        4,
+        6
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "danger",
+      "hidden": false,
+      "link": "/production/dashboard",
+      "drillKey": "mf.orders_late",
+      "note": null
+    },
+    {
+      "key": "openNcrs",
+      "title": "NCR باز",
+      "value": 11,
+      "unit": "count",
+      "valueText": "۱۱",
+      "shortText": null,
+      "delta": -3,
+      "deltaText": "−۳",
+      "deltaGood": true,
+      "trend": [
+        9,
+        12,
+        15,
+        13,
+        11,
+        14,
+        16,
+        18,
+        15,
+        13,
+        14,
+        11
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "warn",
+      "hidden": false,
+      "link": "/inventory/ncr",
+      "drillKey": "qc.ncr_open",
+      "note": null
+    },
+    {
+      "key": "serviceSlaBreaches",
+      "title": "درخواست خارج از SLA",
+      "value": 3,
+      "unit": "count",
+      "valueText": "۳",
+      "shortText": null,
+      "delta": 1,
+      "deltaText": "+۱",
+      "deltaGood": false,
+      "trend": [
+        1,
+        0,
+        2,
+        1,
+        1,
+        3,
+        2,
+        1,
+        0,
+        2,
+        2,
+        3
+      ],
+      "trendLabels": [
+        "آبان ۱۴۰۴",
+        "آذر ۱۴۰۴",
+        "دی ۱۴۰۴",
+        "بهمن ۱۴۰۴",
+        "اسفند ۱۴۰۴",
+        "فروردین ۱۴۰۵",
+        "اردیبهشت ۱۴۰۵",
+        "خرداد ۱۴۰۵",
+        "تیر ۱۴۰۵",
+        "مرداد ۱۴۰۵",
+        "شهریور ۱۴۰۵",
+        "مهر ۱۴۰۵"
+      ],
+      "status": "danger",
+      "hidden": false,
+      "link": "/service/requests",
+      "drillKey": "sv.sla_breaches",
+      "note": null
+    }
+  ],
+  "sections": [
+    {
+      "key": "finance",
+      "title": "مالی و خزانه",
+      "alertCount": 3,
+      "link": "/fn/dashboard",
+      "analysisPrompt": "وضعیت نقدینگی، مطالبات و بدهی‌ها را نسبت به ماه قبل تحلیل کن و سه نکته‌ی مهم و ریسک‌ها را بگو.",
+      "kpis": [
+        {
+          "key": "receivedThisMonth",
+          "title": "دریافتی این ماه",
+          "value": 96400000000,
+          "unit": "rial",
+          "valueText": "۹۶٬۴۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۹۶٫۴ میلیارد ریال",
+          "delta": 12100000000,
+          "deltaText": "+۱۲٫۱ میلیارد ریال",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "ok",
+          "hidden": false,
+          "link": "/fn/treasury/receipts",
+          "drillKey": "fin.revenue_by_month",
+          "note": null
+        },
+        {
+          "key": "paidThisMonth",
+          "title": "پرداختی این ماه",
+          "value": 88700000000,
+          "unit": "rial",
+          "valueText": "۸۸٬۷۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۸۸٫۷ میلیارد ریال",
+          "delta": 9400000000,
+          "deltaText": "+۹٫۴ میلیارد ریال",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/fn/treasury/payments",
+          "drillKey": "fin.cost_by_month",
+          "note": null
+        },
+        {
+          "key": "receivablesOver90",
+          "title": "مطالبات بیش از ۹۰ روز",
+          "value": 74800000000,
+          "unit": "rial",
+          "valueText": "۷۴٬۸۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۷۴٫۸ میلیارد ریال",
+          "delta": 5200000000,
+          "deltaText": "+۵٫۲ میلیارد ریال",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/fn/receivables/ageing",
+          "drillKey": "fin.receivable_invoices_overdue",
+          "note": null
+        },
+        {
+          "key": "chequesDue30",
+          "title": "چک‌های سررسید ۳۰ روز آینده",
+          "value": 27500000000,
+          "unit": "rial",
+          "valueText": "۲۷٬۵۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۲۷٫۵ میلیارد ریال",
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/fn/treasury/cheques",
+          "drillKey": "fin.cheques_due",
+          "note": "۱۲ فقره چک صادره"
+        },
+        {
+          "key": "bankUnreconciled",
+          "title": "ردیف بانکی تطبیق‌نخورده",
+          "value": 23,
+          "unit": "count",
+          "valueText": "۲۳",
+          "shortText": null,
+          "delta": 8,
+          "deltaText": "+۸",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/fn/treasury/reconciliations",
+          "drillKey": "fin.bank_unreconciled",
+          "note": null
+        },
+        {
+          "key": "vouchersWaiting",
+          "title": "سند در انتظار تایید",
+          "value": 9,
+          "unit": "count",
+          "valueText": "۹",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/fn/vouchers",
+          "drillKey": "fin.vouchers_waiting",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "cashFlowMonthly",
+          "title": "دریافت و پرداخت ماهانه",
+          "kind": "bar",
+          "unit": "rial",
+          "labels": [
+            "اردیبهشت",
+            "خرداد",
+            "تیر",
+            "مرداد",
+            "شهریور",
+            "مهر"
+          ],
+          "series": [
+            {
+              "name": "دریافت",
+              "values": [
+                71200000000,
+                84500000000,
+                66900000000.00001,
+                92300000000,
+                84300000000,
+                96400000000
+              ],
+              "role": "positive"
+            },
+            {
+              "name": "پرداخت",
+              "values": [
+                69800000000,
+                77100000000,
+                74600000000,
+                81000000000,
+                79300000000,
+                88700000000
+              ],
+              "role": "negative"
+            }
+          ],
+          "note": null,
+          "link": "/fn/treasury/cash-position",
+          "drillKey": "fin.revenue_by_month",
+          "hidden": false
+        },
+        {
+          "key": "receivablesAgeing",
+          "title": "سنی مطالبات",
+          "kind": "hbar",
+          "unit": "rial",
+          "labels": [
+            "جاری",
+            "۱ تا ۳۰ روز",
+            "۳۱ تا ۶۰ روز",
+            "۶۱ تا ۹۰ روز",
+            "بیش از ۹۰ روز"
+          ],
+          "series": [
+            {
+              "name": "مانده مطالبات",
+              "values": [
+                118600000000,
+                61300000000,
+                34900000000,
+                22800000000,
+                74800000000
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": "۷۴٫۸ میلیارد ریال از مطالبات بیش از ۹۰ روز است؛ بیشترین سهم: پالایشگاه نفت آبادان",
+          "link": "/fn/receivables/ageing",
+          "drillKey": "fin.receivables_by_customer",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "sales",
+      "title": "فروش",
+      "alertCount": 1,
+      "link": "/sales/dashboard",
+      "analysisPrompt": "قیف فروش، نرخ موفقیت و دلایل باخت را تحلیل کن؛ کدام فرصت‌ها نیاز به تصمیم مدیرعامل دارند؟",
+      "kpis": [
+        {
+          "key": "openInquiries",
+          "title": "استعلام‌های باز",
+          "value": 17,
+          "unit": "count",
+          "valueText": "۱۷",
+          "shortText": null,
+          "delta": 3,
+          "deltaText": "+۳",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "ok",
+          "hidden": false,
+          "link": "/sales/inquiries",
+          "drillKey": "sl.inquiries_open",
+          "note": null
+        },
+        {
+          "key": "pipelineValue",
+          "title": "ارزش پیشنهادهای در جریان",
+          "value": 2340000000000,
+          "unit": "rial",
+          "valueText": "۲٬۳۴۰٬۰۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۲٬۳۴۰ میلیارد ریال",
+          "delta": 410000000000,
+          "deltaText": "+۴۱۰ میلیارد ریال",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "ok",
+          "hidden": false,
+          "link": "/sales/proposals",
+          "drillKey": "sl.pipeline_by_stage",
+          "note": null
+        },
+        {
+          "key": "hitRate",
+          "title": "نرخ موفقیت (۱۲ ماه)",
+          "value": 31.5,
+          "unit": "percent",
+          "valueText": "۳۱٫۵٪",
+          "shortText": null,
+          "delta": 2.4,
+          "deltaText": "+۲٫۴ واحد درصد",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "ok",
+          "hidden": false,
+          "link": "/sales/dashboard",
+          "drillKey": "sl.hit_rate_by_month",
+          "note": null
+        },
+        {
+          "key": "proposalsWaiting",
+          "title": "پیشنهاد منتظر تایید",
+          "value": 2,
+          "unit": "count",
+          "valueText": "۲",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/sales/proposals",
+          "drillKey": "sl.proposals_waiting",
+          "note": "هر دو بالاتر از سقف تایید فروش"
+        },
+        {
+          "key": "quotationsExpiring",
+          "title": "پیش‌فاکتور در آستانه انقضا",
+          "value": 3,
+          "unit": "count",
+          "valueText": "۳",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/sales/quotations",
+          "drillKey": "sl.quotations_expiring",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "pipelineByStage",
+          "title": "ارزش فرصت‌ها به تفکیک مرحله",
+          "kind": "hbar",
+          "unit": "rial",
+          "labels": [
+            "دریافت‌شده",
+            "در حال بررسی",
+            "در حال تهیه پیشنهاد",
+            "ارسال‌شده",
+            "در مذاکره"
+          ],
+          "series": [
+            {
+              "name": "ارزش",
+              "values": [
+                420000000000,
+                310000000000,
+                655000000000,
+                720000000000,
+                235000000000
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": "/sales/inquiries",
+          "drillKey": "sl.pipeline_by_stage",
+          "hidden": false
+        },
+        {
+          "key": "hitRateMonthly",
+          "title": "نرخ موفقیت پیشنهادها",
+          "kind": "line",
+          "unit": "percent",
+          "labels": [
+            "آبان ۱۴۰۴",
+            "آذر ۱۴۰۴",
+            "دی ۱۴۰۴",
+            "بهمن ۱۴۰۴",
+            "اسفند ۱۴۰۴",
+            "فروردین ۱۴۰۵",
+            "اردیبهشت ۱۴۰۵",
+            "خرداد ۱۴۰۵",
+            "تیر ۱۴۰۵",
+            "مرداد ۱۴۰۵",
+            "شهریور ۱۴۰۵",
+            "مهر ۱۴۰۵"
+          ],
+          "series": [
+            {
+              "name": "نرخ موفقیت",
+              "values": [
+                24,
+                26.5,
+                25.1,
+                27.8,
+                29,
+                28.4,
+                30.2,
+                27.9,
+                29.6,
+                31,
+                29.1,
+                31.5
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "sl.hit_rate_by_month",
+          "hidden": false
+        },
+        {
+          "key": "lostByReason",
+          "title": "دلایل باخت (۱۲ ماه)",
+          "kind": "donut",
+          "unit": "count",
+          "labels": [
+            "قیمت",
+            "زمان تحویل",
+            "سابقه‌ی فنی",
+            "شرایط پرداخت",
+            "سایر"
+          ],
+          "series": [
+            {
+              "name": "تعداد",
+              "values": [
+                7,
+                4,
+                2,
+                2,
+                1
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "sl.lost_by_reason",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "projects",
+      "title": "پروژه‌ها",
+      "alertCount": 3,
+      "link": "/project-control/portfolio",
+      "analysisPrompt": "عملکرد زمانی و هزینه‌ای پروژه‌ها را تحلیل کن؛ پروژه‌های قرمز، علت تاخیر و ریسک جریمه را بگو.",
+      "kpis": [
+        {
+          "key": "activeProjects",
+          "title": "پروژه‌های فعال",
+          "value": 14,
+          "unit": "count",
+          "valueText": "۱۴",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/project-control/portfolio",
+          "drillKey": "pc.portfolio",
+          "note": null
+        },
+        {
+          "key": "projectsRed",
+          "title": "پروژه قرمز",
+          "value": 2,
+          "unit": "count",
+          "valueText": "۲",
+          "shortText": null,
+          "delta": 1,
+          "deltaText": "+۱",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "danger",
+          "hidden": false,
+          "link": "/project-control/portfolio",
+          "drillKey": "pc.portfolio",
+          "note": "SPI یا CPI کمتر از ۰٫۹"
+        },
+        {
+          "key": "projectsAmber",
+          "title": "پروژه زرد",
+          "value": 3,
+          "unit": "count",
+          "valueText": "۳",
+          "shortText": null,
+          "delta": -1,
+          "deltaText": "−۱",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/project-control/portfolio",
+          "drillKey": "pc.portfolio",
+          "note": null
+        },
+        {
+          "key": "lateActivities",
+          "title": "فعالیت با تاخیر",
+          "value": 23,
+          "unit": "count",
+          "valueText": "۲۳",
+          "shortText": null,
+          "delta": 4,
+          "deltaText": "+۴",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/project-control/activities",
+          "drillKey": "pc.late_activities",
+          "note": null
+        },
+        {
+          "key": "guaranteesExpiring",
+          "title": "ضمانت‌نامه در آستانه انقضا",
+          "value": 2,
+          "unit": "count",
+          "valueText": "۲",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/project-control/guarantees",
+          "drillKey": "pc.guarantees_expiring",
+          "note": null
+        },
+        {
+          "key": "penaltyExposure",
+          "title": "جریمه‌ی تاخیر محاسبه‌شده",
+          "value": 6400000000,
+          "unit": "rial",
+          "valueText": "۶٬۴۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۶٫۴ میلیارد ریال",
+          "delta": 1900000000,
+          "deltaText": "+۱٫۹ میلیارد ریال",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "danger",
+          "hidden": false,
+          "link": "/project-control/penalties",
+          "drillKey": "pc.penalty_exposure",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "spiCpi",
+          "title": "شاخص زمان و هزینه‌ی پروژه‌های بزرگ",
+          "kind": "bar",
+          "unit": "percent",
+          "labels": [
+            "P-1403-07",
+            "P-1403-11",
+            "P-1404-02",
+            "P-1404-05",
+            "P-1404-09",
+            "P-1405-01"
+          ],
+          "series": [
+            {
+              "name": "SPI",
+              "values": [
+                86,
+                97,
+                92,
+                101,
+                99,
+                104
+              ],
+              "role": "primary"
+            },
+            {
+              "name": "CPI",
+              "values": [
+                94,
+                88,
+                96,
+                98,
+                103,
+                100
+              ],
+              "role": "secondary"
+            }
+          ],
+          "note": "زیر ۹۰٪ یعنی قرمز",
+          "link": null,
+          "drillKey": "pc.portfolio",
+          "hidden": false
+        },
+        {
+          "key": "portfolioProgress",
+          "title": "پیشرفت برنامه‌ای و واقعی سبد پروژه‌ها",
+          "kind": "line",
+          "unit": "percent",
+          "labels": [
+            "آبان ۱۴۰۴",
+            "آذر ۱۴۰۴",
+            "دی ۱۴۰۴",
+            "بهمن ۱۴۰۴",
+            "اسفند ۱۴۰۴",
+            "فروردین ۱۴۰۵",
+            "اردیبهشت ۱۴۰۵",
+            "خرداد ۱۴۰۵",
+            "تیر ۱۴۰۵",
+            "مرداد ۱۴۰۵",
+            "شهریور ۱۴۰۵",
+            "مهر ۱۴۰۵"
+          ],
+          "series": [
+            {
+              "name": "برنامه",
+              "values": [
+                18,
+                23,
+                28,
+                33,
+                38,
+                43,
+                48,
+                53,
+                58,
+                63,
+                67,
+                71
+              ],
+              "role": "neutral"
+            },
+            {
+              "name": "واقعی",
+              "values": [
+                17,
+                21,
+                26,
+                30,
+                34,
+                39,
+                43,
+                48,
+                52,
+                56,
+                60,
+                64
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "pc.portfolio",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "production",
+      "title": "تولید و نگهداری",
+      "alertCount": 2,
+      "link": "/production/dashboard",
+      "analysisPrompt": "وضعیت سفارش‌های تولید، بار مراکز کاری و OEE را تحلیل کن؛ گلوگاه‌ها و سفارش‌های در خطر را بگو.",
+      "kpis": [
+        {
+          "key": "ordersInProgress",
+          "title": "سفارش‌های تولید در جریان",
+          "value": 38,
+          "unit": "count",
+          "valueText": "۳۸",
+          "shortText": null,
+          "delta": 2,
+          "deltaText": "+۲",
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/production/orders",
+          "drillKey": "mf.orders_by_status",
+          "note": null
+        },
+        {
+          "key": "lateOrders",
+          "title": "سفارش با تاخیر",
+          "value": 6,
+          "unit": "count",
+          "valueText": "۶",
+          "shortText": null,
+          "delta": 2,
+          "deltaText": "+۲",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "danger",
+          "hidden": false,
+          "link": "/production/orders",
+          "drillKey": "mf.orders_late",
+          "note": null
+        },
+        {
+          "key": "machinesDown",
+          "title": "ماشین خراب",
+          "value": 2,
+          "unit": "count",
+          "valueText": "۲",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "danger",
+          "hidden": false,
+          "link": "/production/machines",
+          "drillKey": "mf.machines_down",
+          "note": null
+        },
+        {
+          "key": "maintenanceOverdue",
+          "title": "نگهداری عقب‌افتاده",
+          "value": 4,
+          "unit": "count",
+          "valueText": "۴",
+          "shortText": null,
+          "delta": -1,
+          "deltaText": "−۱",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/production/maintenance",
+          "drillKey": "mf.maintenance_overdue",
+          "note": null
+        },
+        {
+          "key": "oee",
+          "title": "OEE ماه جاری",
+          "value": 71.4,
+          "unit": "percent",
+          "valueText": "۷۱٫۴٪",
+          "shortText": null,
+          "delta": -2.2,
+          "deltaText": "−۲٫۲ واحد درصد",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/production/oee",
+          "drillKey": "mf.oee_by_work_center",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "ordersByStatus",
+          "title": "سفارش‌های تولید به تفکیک وضعیت",
+          "kind": "donut",
+          "unit": "count",
+          "labels": [
+            "در حال اجرا",
+            "صادرشده",
+            "تکمیل‌شده این ماه",
+            "متوقف"
+          ],
+          "series": [
+            {
+              "name": "سفارش",
+              "values": [
+                21,
+                9,
+                14,
+                3
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "mf.orders_by_status",
+          "hidden": false
+        },
+        {
+          "key": "workCenterLoad",
+          "title": "بار مراکز کاری در ۴ هفته‌ی آینده",
+          "kind": "hbar",
+          "unit": "percent",
+          "labels": [
+            "تراش CNC",
+            "مونتاژ توربین",
+            "فرز افقی",
+            "جوشکاری",
+            "میز آزمون",
+            "بالانس دینامیکی"
+          ],
+          "series": [
+            {
+              "name": "بار",
+              "values": [
+                118,
+                104,
+                96,
+                87,
+                62,
+                45
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": "بیش از ۱۰۰٪ یعنی اضافه‌بار",
+          "link": "/production/schedule",
+          "drillKey": "mf.work_center_load",
+          "hidden": false
+        },
+        {
+          "key": "oeeMonthly",
+          "title": "OEE ماهانه",
+          "kind": "line",
+          "unit": "percent",
+          "labels": [
+            "آبان ۱۴۰۴",
+            "آذر ۱۴۰۴",
+            "دی ۱۴۰۴",
+            "بهمن ۱۴۰۴",
+            "اسفند ۱۴۰۴",
+            "فروردین ۱۴۰۵",
+            "اردیبهشت ۱۴۰۵",
+            "خرداد ۱۴۰۵",
+            "تیر ۱۴۰۵",
+            "مرداد ۱۴۰۵",
+            "شهریور ۱۴۰۵",
+            "مهر ۱۴۰۵"
+          ],
+          "series": [
+            {
+              "name": "OEE",
+              "values": [
+                68.2,
+                69.5,
+                70.1,
+                72.4,
+                73,
+                71.8,
+                74.2,
+                75.1,
+                73.6,
+                74,
+                73.6,
+                71.4
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": "/production/oee",
+          "drillKey": "mf.oee_by_work_center",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "quality",
+      "title": "کیفیت",
+      "alertCount": 1,
+      "link": "/quality/dashboard",
+      "analysisPrompt": "روند NCRها، اقدام‌های اصلاحی و کالیبراسیون را تحلیل کن؛ علت‌های تکرارشونده و ریسک‌ها را بگو.",
+      "kpis": [
+        {
+          "key": "openNcrs",
+          "title": "NCR باز",
+          "value": 11,
+          "unit": "count",
+          "valueText": "۱۱",
+          "shortText": null,
+          "delta": -3,
+          "deltaText": "−۳",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/inventory/ncr",
+          "drillKey": "qc.ncr_open",
+          "note": null
+        },
+        {
+          "key": "capaOverdue",
+          "title": "CAPA از مهلت گذشته",
+          "value": 3,
+          "unit": "count",
+          "valueText": "۳",
+          "shortText": null,
+          "delta": 1,
+          "deltaText": "+۱",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/quality/capa",
+          "drillKey": "qc.capa_overdue",
+          "note": null
+        },
+        {
+          "key": "calibrationDue",
+          "title": "کالیبراسیون سررسید ۳۰ روز",
+          "value": 5,
+          "unit": "count",
+          "valueText": "۵",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/quality/calibration",
+          "drillKey": "qc.calibration_due",
+          "note": null
+        },
+        {
+          "key": "hPointsPending",
+          "title": "نقطه‌ی توقف در انتظار",
+          "value": 4,
+          "unit": "count",
+          "valueText": "۴",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/quality/itp",
+          "drillKey": "qc.h_points_pending",
+          "note": null
+        },
+        {
+          "key": "complaintsOpen",
+          "title": "شکایت باز مشتری",
+          "value": 2,
+          "unit": "count",
+          "valueText": "۲",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/quality/complaints",
+          "drillKey": "qc.complaints_open",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "ncrMonthly",
+          "title": "NCR ثبت‌شده و بسته‌شده",
+          "kind": "bar",
+          "unit": "count",
+          "labels": [
+            "اردیبهشت",
+            "خرداد",
+            "تیر",
+            "مرداد",
+            "شهریور",
+            "مهر"
+          ],
+          "series": [
+            {
+              "name": "ثبت‌شده",
+              "values": [
+                9,
+                12,
+                8,
+                11,
+                10,
+                7
+              ],
+              "role": "primary"
+            },
+            {
+              "name": "بسته‌شده",
+              "values": [
+                7,
+                9,
+                11,
+                10,
+                9,
+                10
+              ],
+              "role": "positive"
+            }
+          ],
+          "note": null,
+          "link": "/inventory/ncr",
+          "drillKey": "qc.ncr_open",
+          "hidden": false
+        },
+        {
+          "key": "ncrByCause",
+          "title": "NCR باز به تفکیک علت",
+          "kind": "donut",
+          "unit": "count",
+          "labels": [
+            "مواد",
+            "روش",
+            "نیروی انسانی",
+            "تجهیزات",
+            "نقشه",
+            "محیط"
+          ],
+          "series": [
+            {
+              "name": "NCR",
+              "values": [
+                4,
+                3,
+                2,
+                1,
+                1,
+                0
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "qc.ncr_open",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "inventory",
+      "title": "انبار",
+      "alertCount": 1,
+      "link": "/inventory/stock",
+      "analysisPrompt": "ارزش موجودی، اقلام زیر حداقل و اقلام راکد را تحلیل کن؛ کدام اقلام تولید را متوقف می‌کنند؟",
+      "kpis": [
+        {
+          "key": "stockValue",
+          "title": "ارزش موجودی",
+          "value": 642300000000,
+          "unit": "rial",
+          "valueText": "۶۴۲٬۳۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۶۴۲٫۳ میلیارد ریال",
+          "delta": 21700000000,
+          "deltaText": "+۲۱٫۷ میلیارد ریال",
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/finance/valuation",
+          "drillKey": "inv.stock_value_by_warehouse",
+          "note": null
+        },
+        {
+          "key": "belowMinimum",
+          "title": "کالای زیر حداقل موجودی",
+          "value": 27,
+          "unit": "count",
+          "valueText": "۲۷",
+          "shortText": null,
+          "delta": 5,
+          "deltaText": "+۵",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/inventory/stock",
+          "drillKey": "inv.items_below_minimum",
+          "note": null
+        },
+        {
+          "key": "slowMoving",
+          "title": "کالای راکد (۱۸۰ روز)",
+          "value": 112,
+          "unit": "count",
+          "valueText": "۱۱۲",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/inventory/stock",
+          "drillKey": "inv.slow_moving",
+          "note": "ارزش: ۵۸٫۴ میلیارد ریال"
+        },
+        {
+          "key": "quarantine",
+          "title": "ردیف در قرنطینه",
+          "value": 8,
+          "unit": "count",
+          "valueText": "۸",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/inventory/inspections",
+          "drillKey": "inv.quarantine",
+          "note": null
+        },
+        {
+          "key": "materialRequestsOpen",
+          "title": "درخواست کالای باز",
+          "value": 15,
+          "unit": "count",
+          "valueText": "۱۵",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/inventory/material-requests",
+          "drillKey": "inv.material_requests_open",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "stockByWarehouse",
+          "title": "ارزش موجودی به تفکیک انبار",
+          "kind": "hbar",
+          "unit": "rial",
+          "labels": [
+            "قطعات",
+            "مواد اولیه",
+            "در جریان ساخت",
+            "محصول ساخته‌شده",
+            "ابزار و ملزومات"
+          ],
+          "series": [
+            {
+              "name": "ارزش",
+              "values": [
+                231500000000,
+                186200000000,
+                142800000000,
+                61400000000,
+                20400000000
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "inv.stock_value_by_warehouse",
+          "hidden": false
+        },
+        {
+          "key": "stockTrend",
+          "title": "روند ارزش موجودی",
+          "kind": "line",
+          "unit": "rial",
+          "labels": [
+            "آبان ۱۴۰۴",
+            "آذر ۱۴۰۴",
+            "دی ۱۴۰۴",
+            "بهمن ۱۴۰۴",
+            "اسفند ۱۴۰۴",
+            "فروردین ۱۴۰۵",
+            "اردیبهشت ۱۴۰۵",
+            "خرداد ۱۴۰۵",
+            "تیر ۱۴۰۵",
+            "مرداد ۱۴۰۵",
+            "شهریور ۱۴۰۵",
+            "مهر ۱۴۰۵"
+          ],
+          "series": [
+            {
+              "name": "ارزش موجودی",
+              "values": [
+                548000000000,
+                556000000000,
+                571000000000,
+                590000000000,
+                583000000000,
+                597000000000,
+                604000000000,
+                612000000000,
+                608000000000,
+                615000000000,
+                620600000000,
+                642300000000
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": "/finance/valuation",
+          "drillKey": "inv.stock_value_by_warehouse",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "procurement",
+      "title": "تأمین و خرید",
+      "alertCount": 1,
+      "link": "/procurement/orders",
+      "analysisPrompt": "عملکرد تحویل تامین‌کنندگان، ردیف‌های با تاخیر و پرداخت‌های معوق را تحلیل کن.",
+      "kpis": [
+        {
+          "key": "requestsOpen",
+          "title": "درخواست خرید باز",
+          "value": 34,
+          "unit": "count",
+          "valueText": "۳۴",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/procurement/requests",
+          "drillKey": "pr.requests_open",
+          "note": "۸ درخواست منتظر تایید"
+        },
+        {
+          "key": "ordersOpen",
+          "title": "سفارش خرید باز",
+          "value": 52,
+          "unit": "count",
+          "valueText": "۵۲",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/procurement/orders",
+          "drillKey": "pr.orders_open",
+          "note": null
+        },
+        {
+          "key": "lateLines",
+          "title": "ردیف سفارش با تاخیر",
+          "value": 9,
+          "unit": "count",
+          "valueText": "۹",
+          "shortText": null,
+          "delta": 2,
+          "deltaText": "+۲",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/procurement/orders",
+          "drillKey": "pr.late_lines",
+          "note": null
+        },
+        {
+          "key": "onTime",
+          "title": "تحویل به‌موقع (۳ ماه)",
+          "value": 78.6,
+          "unit": "percent",
+          "valueText": "۷۸٫۶٪",
+          "shortText": null,
+          "delta": -4.1,
+          "deltaText": "−۴٫۱ واحد درصد",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "warn",
+          "hidden": false,
+          "link": "/procurement/suppliers",
+          "drillKey": "pr.supplier_on_time",
+          "note": null
+        },
+        {
+          "key": "invoicesWaiting",
+          "title": "فاکتور در انتظار تایید",
+          "value": 6,
+          "unit": "count",
+          "valueText": "۶",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/procurement/invoices",
+          "drillKey": "pr.invoices_waiting",
+          "note": null
+        },
+        {
+          "key": "blockedSuppliers",
+          "title": "تامین‌کننده‌ی مسدود",
+          "value": 1,
+          "unit": "count",
+          "valueText": "۱",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/procurement/suppliers",
+          "drillKey": "pr.blocked_suppliers",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "onTimeMonthly",
+          "title": "تحویل به‌موقع تامین‌کنندگان",
+          "kind": "line",
+          "unit": "percent",
+          "labels": [
+            "آبان ۱۴۰۴",
+            "آذر ۱۴۰۴",
+            "دی ۱۴۰۴",
+            "بهمن ۱۴۰۴",
+            "اسفند ۱۴۰۴",
+            "فروردین ۱۴۰۵",
+            "اردیبهشت ۱۴۰۵",
+            "خرداد ۱۴۰۵",
+            "تیر ۱۴۰۵",
+            "مرداد ۱۴۰۵",
+            "شهریور ۱۴۰۵",
+            "مهر ۱۴۰۵"
+          ],
+          "series": [
+            {
+              "name": "به‌موقع",
+              "values": [
+                84.1,
+                85.3,
+                82.6,
+                80.2,
+                83.5,
+                86,
+                84.4,
+                82.1,
+                81,
+                80.7,
+                79.3,
+                78.6
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "pr.supplier_on_time",
+          "hidden": false
+        },
+        {
+          "key": "spendBySupplier",
+          "title": "خرید ۱۲ ماه به تفکیک تامین‌کننده",
+          "kind": "hbar",
+          "unit": "rial",
+          "labels": [
+            "فولاد آلیاژی ایران",
+            "ریخته‌گری دقیق پارس",
+            "یاتاقان‌سازی تبریز",
+            "الکتروموتور جم",
+            "ابزار دقیق نوین",
+            "سایر تامین‌کنندگان"
+          ],
+          "series": [
+            {
+              "name": "مبلغ خرید",
+              "values": [
+                212400000000,
+                168900000000,
+                94300000000,
+                71600000000,
+                48200000000,
+                133500000000
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "pr.spend_by_supplier",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "service",
+      "title": "خدمات پس از فروش",
+      "alertCount": 1,
+      "link": "/service/dashboard",
+      "analysisPrompt": "درخواست‌های خدمات، تخطی از SLA، هزینه‌ی گارانتی و رضایت مشتری را تحلیل کن.",
+      "kpis": [
+        {
+          "key": "openRequests",
+          "title": "درخواست خدمات باز",
+          "value": 12,
+          "unit": "count",
+          "valueText": "۱۲",
+          "shortText": null,
+          "delta": 2,
+          "deltaText": "+۲",
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/service/requests",
+          "drillKey": "sv.requests_open",
+          "note": null
+        },
+        {
+          "key": "slaBreaches",
+          "title": "خارج از SLA",
+          "value": 3,
+          "unit": "count",
+          "valueText": "۳",
+          "shortText": null,
+          "delta": 1,
+          "deltaText": "+۱",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "danger",
+          "hidden": false,
+          "link": "/service/requests",
+          "drillKey": "sv.sla_breaches",
+          "note": null
+        },
+        {
+          "key": "unitsInWarranty",
+          "title": "واحد در گارانتی",
+          "value": 41,
+          "unit": "count",
+          "valueText": "۴۱",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/service/units",
+          "drillKey": "sv.units_by_customer",
+          "note": null
+        },
+        {
+          "key": "warrantyCostYtd",
+          "title": "هزینه‌ی گارانتی از ابتدای سال",
+          "value": 18900000000,
+          "unit": "rial",
+          "valueText": "۱۸٬۹۰۰٬۰۰۰٬۰۰۰ ریال",
+          "shortText": "۱۸٫۹ میلیارد ریال",
+          "delta": 2400000000,
+          "deltaText": "+۲٫۴ میلیارد ریال",
+          "deltaGood": false,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/service/orders",
+          "drillKey": "sv.warranty_cost_by_month",
+          "note": null
+        },
+        {
+          "key": "surveyScore",
+          "title": "میانگین رضایت مشتری",
+          "value": 4.3,
+          "unit": "count",
+          "valueText": "۴٫۳ از ۵",
+          "shortText": null,
+          "delta": 0.1,
+          "deltaText": "+۰٫۱",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "ok",
+          "hidden": false,
+          "link": "/service/surveys",
+          "drillKey": "sv.survey_by_month",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "requestsMonthly",
+          "title": "درخواست‌های خدمات ماهانه",
+          "kind": "stackedBar",
+          "unit": "count",
+          "labels": [
+            "اردیبهشت",
+            "خرداد",
+            "تیر",
+            "مرداد",
+            "شهریور",
+            "مهر"
+          ],
+          "series": [
+            {
+              "name": "در SLA",
+              "values": [
+                14,
+                11,
+                16,
+                13,
+                15,
+                12
+              ],
+              "role": "positive"
+            },
+            {
+              "name": "خارج از SLA",
+              "values": [
+                1,
+                0,
+                2,
+                2,
+                1,
+                3
+              ],
+              "role": "negative"
+            }
+          ],
+          "note": null,
+          "link": "/service/requests",
+          "drillKey": "sv.requests_open",
+          "hidden": false
+        },
+        {
+          "key": "warrantyCostMonthly",
+          "title": "هزینه‌ی گارانتی ماهانه",
+          "kind": "bar",
+          "unit": "rial",
+          "labels": [
+            "اردیبهشت",
+            "خرداد",
+            "تیر",
+            "مرداد",
+            "شهریور",
+            "مهر"
+          ],
+          "series": [
+            {
+              "name": "هزینه‌ی گارانتی",
+              "values": [
+                2100000000,
+                3400000000,
+                2800000000,
+                4200000000,
+                3000000000,
+                3400000000
+              ],
+              "role": "primary"
+            }
+          ],
+          "note": null,
+          "link": null,
+          "drillKey": "sv.warranty_cost_by_month",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "key": "office",
+      "title": "اداری",
+      "alertCount": 0,
+      "link": "/office/inbox",
+      "analysisPrompt": "پیگیری مصوبات، نامه‌های منتظر اقدام و حضور و غیاب ماه جاری را خلاصه کن.",
+      "kpis": [
+        {
+          "key": "decisionsOverdue",
+          "title": "مصوبه‌ی از موعد گذشته",
+          "value": 0,
+          "unit": "count",
+          "valueText": "۰",
+          "shortText": null,
+          "delta": -2,
+          "deltaText": "−۲",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "ok",
+          "hidden": false,
+          "link": "/office/decisions",
+          "drillKey": "of.decisions_overdue",
+          "note": null
+        },
+        {
+          "key": "lettersWaiting",
+          "title": "نامه‌ی منتظر اقدام",
+          "value": 14,
+          "unit": "count",
+          "valueText": "۱۴",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/office/letters",
+          "drillKey": "of.letters_waiting",
+          "note": null
+        },
+        {
+          "key": "leavePending",
+          "title": "درخواست مرخصی در انتظار",
+          "value": 6,
+          "unit": "count",
+          "valueText": "۶",
+          "shortText": null,
+          "delta": null,
+          "deltaText": null,
+          "deltaGood": null,
+          "trend": null,
+          "trendLabels": null,
+          "status": "neutral",
+          "hidden": false,
+          "link": "/office/leaves",
+          "drillKey": "of.leave_requests_pending",
+          "note": null
+        },
+        {
+          "key": "presentToday",
+          "title": "حضور امروز",
+          "value": 91.3,
+          "unit": "percent",
+          "valueText": "۹۱٫۳٪",
+          "shortText": null,
+          "delta": 1.2,
+          "deltaText": "+۱٫۲ واحد درصد",
+          "deltaGood": true,
+          "trend": null,
+          "trendLabels": null,
+          "status": "ok",
+          "hidden": false,
+          "link": "/office/attendance",
+          "drillKey": "of.attendance_month",
+          "note": null
+        }
+      ],
+      "charts": [
+        {
+          "key": "attendanceDaily",
+          "title": "حضور و غیاب ده روز کاری اخیر",
+          "kind": "stackedBar",
+          "unit": "count",
+          "labels": [
+            "۱۹ مهر",
+            "۲۰ مهر",
+            "۲۱ مهر",
+            "۲۲ مهر",
+            "۲۳ مهر",
+            "۲۶ مهر",
+            "۲۷ مهر",
+            "۲۸ مهر",
+            "۲۹ مهر",
+            "۳۰ مهر"
+          ],
+          "series": [
+            {
+              "name": "به‌موقع",
+              "values": [
+                142,
+                139,
+                145,
+                140,
+                137,
+                143,
+                146,
+                141,
+                138,
+                144
+              ],
+              "role": "primary"
+            },
+            {
+              "name": "با تاخیر",
+              "values": [
+                9,
+                12,
+                7,
+                10,
+                13,
+                8,
+                6,
+                11,
+                12,
+                7
+              ],
+              "role": "accent"
+            },
+            {
+              "name": "مرخصی",
+              "values": [
+                8,
+                7,
+                6,
+                9,
+                8,
+                7,
+                7,
+                6,
+                8,
+                8
+              ],
+              "role": "secondary"
+            },
+            {
+              "name": "غایب",
+              "values": [
+                3,
+                4,
+                4,
+                3,
+                4,
+                4,
+                3,
+                4,
+                4,
+                3
+              ],
+              "role": "negative"
+            }
+          ],
+          "note": "فقط شمارش کل؛ ریز افراد در صفحه‌ی حضور و غیاب",
+          "link": "/office/attendance",
+          "drillKey": "of.attendance_month",
+          "hidden": false
+        },
+        {
+          "key": "decisionsMonthly",
+          "title": "مصوبات جلسات",
+          "kind": "bar",
+          "unit": "count",
+          "labels": [
+            "اردیبهشت",
+            "خرداد",
+            "تیر",
+            "مرداد",
+            "شهریور",
+            "مهر"
+          ],
+          "series": [
+            {
+              "name": "انجام‌شده",
+              "values": [
+                11,
+                14,
+                9,
+                13,
+                12,
+                15
+              ],
+              "role": "positive"
+            },
+            {
+              "name": "از موعد گذشته",
+              "values": [
+                3,
+                2,
+                4,
+                2,
+                2,
+                0
+              ],
+              "role": "negative"
+            }
+          ],
+          "note": null,
+          "link": "/office/decisions",
+          "drillKey": "of.decisions_overdue",
+          "hidden": false
+        }
+      ]
+    }
+  ],
+  "alerts": [
+    {
+      "severity": "danger",
+      "text": "۲ پروژه‌ی قرمز: توربین بخار ۲۵ مگاوات فولاد مبارکه (SPI ۰٫۸۶) و پمپ‌های فرآیندی پالایشگاه آبادان (CPI ۰٫۸۸)",
+      "link": "/project-control/portfolio"
+    },
+    {
+      "severity": "danger",
+      "text": "جریمه‌ی تاخیر محاسبه‌شده‌ی پروژه‌ی P-1403-07 به ۶٫۴ میلیارد ریال رسید",
+      "link": "/project-control/penalties"
+    },
+    {
+      "severity": "danger",
+      "text": "۶ سفارش تولید از موعد گذشته؛ بیشترین تاخیر ۱۹ روز (روتور توربین T-25)",
+      "link": "/production/dashboard"
+    },
+    {
+      "severity": "danger",
+      "text": "۲ ماشین خراب: تراش CNC شماره‌ی ۲ و دستگاه بالانس دینامیکی",
+      "link": "/production/machines"
+    },
+    {
+      "severity": "danger",
+      "text": "۳ درخواست خدمات خارج از SLA؛ قدیمی‌ترین: نیروگاه سیکل ترکیبی دماوند (۵ روز)",
+      "link": "/service/requests"
+    },
+    {
+      "severity": "warning",
+      "text": "۷۴٫۸ میلیارد ریال مطالبات بیش از ۹۰ روز",
+      "link": "/fn/receivables/ageing"
+    },
+    {
+      "severity": "warning",
+      "text": "۲۳ ردیف صورت‌حساب بانکی تطبیق‌نخورده",
+      "link": "/fn/treasury/reconciliations"
+    },
+    {
+      "severity": "warning",
+      "text": "۲ ضمانت‌نامه‌ی حسن انجام کار در ۳۰ روز آینده منقضی می‌شود",
+      "link": "/project-control/guarantees"
+    },
+    {
+      "severity": "warning",
+      "text": "۳ اقدام اصلاحی (CAPA) از مهلت گذشته",
+      "link": "/quality/capa"
+    },
+    {
+      "severity": "warning",
+      "text": "۲۷ کالا زیر حداقل موجودی",
+      "link": "/inventory/stock"
+    },
+    {
+      "severity": "warning",
+      "text": "۹ ردیف سفارش خرید با تاخیر تحویل",
+      "link": "/procurement/orders"
+    },
+    {
+      "severity": "info",
+      "text": "۲ پیشنهاد قیمت منتظر تایید مدیرعامل",
+      "link": "/sales/proposals"
+    },
+    {
+      "severity": "info",
+      "text": "۹ سند حسابداری منتظر تایید",
+      "link": "/fn/vouchers"
+    }
+  ],
+  "pulse": [
+    {
+      "key": "finance",
+      "title": "مالی",
+      "status": "warn",
+      "dangerCount": 0,
+      "warnCount": 2,
+      "link": "/fn/dashboard"
+    },
+    {
+      "key": "sales",
+      "title": "فروش",
+      "status": "ok",
+      "dangerCount": 0,
+      "warnCount": 0,
+      "link": "/sales/dashboard"
+    },
+    {
+      "key": "projects",
+      "title": "پروژه‌ها",
+      "status": "danger",
+      "dangerCount": 2,
+      "warnCount": 1,
+      "link": "/project-control/portfolio"
+    },
+    {
+      "key": "production",
+      "title": "تولید",
+      "status": "danger",
+      "dangerCount": 2,
+      "warnCount": 0,
+      "link": "/production/dashboard"
+    },
+    {
+      "key": "quality",
+      "title": "کیفیت",
+      "status": "warn",
+      "dangerCount": 0,
+      "warnCount": 1,
+      "link": "/quality/dashboard"
+    },
+    {
+      "key": "inventory",
+      "title": "انبار",
+      "status": "warn",
+      "dangerCount": 0,
+      "warnCount": 1,
+      "link": "/inventory/stock"
+    },
+    {
+      "key": "procurement",
+      "title": "تأمین",
+      "status": "warn",
+      "dangerCount": 0,
+      "warnCount": 1,
+      "link": "/procurement/orders"
+    },
+    {
+      "key": "service",
+      "title": "خدمات",
+      "status": "danger",
+      "dangerCount": 1,
+      "warnCount": 0,
+      "link": "/service/dashboard"
+    },
+    {
+      "key": "office",
+      "title": "اداری",
+      "status": "ok",
+      "dangerCount": 0,
+      "warnCount": 0,
+      "link": "/office/inbox"
+    }
+  ]
+}

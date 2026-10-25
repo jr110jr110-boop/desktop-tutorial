@@ -1,0 +1,600 @@
+[
+  {
+    "key": "fin.cash_accounts",
+    "title": "موجودی حساب‌های بانکی و صندوق‌ها",
+    "description": "جزئیات: موجودی حساب‌های بانکی و صندوق‌ها",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.receivables_by_customer",
+    "title": "مطالبات به تفکیک مشتری",
+    "description": "جزئیات: مطالبات به تفکیک مشتری",
+    "module": "finance",
+    "parameters": [
+      {
+        "name": "customerId",
+        "type": "int",
+        "required": false,
+        "description": "فقط یک مشتری"
+      }
+    ],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.receivable_invoices_overdue",
+    "title": "فاکتورهای فروش سررسیدگذشته",
+    "description": "جزئیات: فاکتورهای فروش سررسیدگذشته",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.payables_by_supplier",
+    "title": "بدهی به تفکیک تامین‌کننده",
+    "description": "جزئیات: بدهی به تفکیک تامین‌کننده",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.payables_overdue",
+    "title": "بدهی‌های سررسیدگذشته",
+    "description": "جزئیات: بدهی‌های سررسیدگذشته",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.cheques_due",
+    "title": "چک‌های سررسید آینده",
+    "description": "جزئیات: چک‌های سررسید آینده",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.revenue_by_month",
+    "title": "درآمد و دریافت ماهانه",
+    "description": "جزئیات: درآمد و دریافت ماهانه",
+    "module": "finance",
+    "parameters": [
+      {
+        "name": "from",
+        "type": "date",
+        "required": false,
+        "description": "از تاریخ"
+      },
+      {
+        "name": "to",
+        "type": "date",
+        "required": false,
+        "description": "تا تاریخ"
+      }
+    ],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.cost_by_month",
+    "title": "هزینه و پرداخت ماهانه",
+    "description": "جزئیات: هزینه و پرداخت ماهانه",
+    "module": "finance",
+    "parameters": [
+      {
+        "name": "from",
+        "type": "date",
+        "required": false,
+        "description": "از تاریخ"
+      },
+      {
+        "name": "to",
+        "type": "date",
+        "required": false,
+        "description": "تا تاریخ"
+      }
+    ],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.project_profitability",
+    "title": "سودآوری پروژه‌ها",
+    "description": "جزئیات: سودآوری پروژه‌ها",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.bank_unreconciled",
+    "title": "ردیف‌های بانکی تطبیق‌نخورده",
+    "description": "جزئیات: ردیف‌های بانکی تطبیق‌نخورده",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "fin.vouchers_waiting",
+    "title": "اسناد حسابداری در انتظار تایید",
+    "description": "جزئیات: اسناد حسابداری در انتظار تایید",
+    "module": "finance",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.pipeline_by_stage",
+    "title": "فرصت‌های فروش به تفکیک مرحله",
+    "description": "جزئیات: فرصت‌های فروش به تفکیک مرحله",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.inquiries_open",
+    "title": "استعلام‌های باز",
+    "description": "جزئیات: استعلام‌های باز",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.proposals_waiting",
+    "title": "پیشنهادهای منتظر تایید",
+    "description": "جزئیات: پیشنهادهای منتظر تایید",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.proposals_due",
+    "title": "پیشنهادهای نزدیک به مهلت",
+    "description": "جزئیات: پیشنهادهای نزدیک به مهلت",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.quotations_expiring",
+    "title": "پیش‌فاکتورهای در آستانه انقضا",
+    "description": "جزئیات: پیش‌فاکتورهای در آستانه انقضا",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.orders_open",
+    "title": "سفارش‌های فروش باز",
+    "description": "جزئیات: سفارش‌های فروش باز",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.orders_waiting_credit",
+    "title": "سفارش‌های منتظر تایید اعتبار",
+    "description": "جزئیات: سفارش‌های منتظر تایید اعتبار",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.customers_top",
+    "title": "مشتریان اصلی",
+    "description": "جزئیات: مشتریان اصلی",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.hit_rate_by_month",
+    "title": "نرخ موفقیت ماهانه",
+    "description": "جزئیات: نرخ موفقیت ماهانه",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sl.lost_by_reason",
+    "title": "باخت‌ها به تفکیک دلیل",
+    "description": "جزئیات: باخت‌ها به تفکیک دلیل",
+    "module": "sales",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.portfolio",
+    "title": "سبد پروژه‌ها",
+    "description": "جزئیات: سبد پروژه‌ها",
+    "module": "projects",
+    "parameters": [
+      {
+        "name": "contractId",
+        "type": "int",
+        "required": false,
+        "description": "فقط یک پروژه"
+      }
+    ],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.late_activities",
+    "title": "فعالیت‌های با تاخیر",
+    "description": "جزئیات: فعالیت‌های با تاخیر",
+    "module": "projects",
+    "parameters": [
+      {
+        "name": "contractId",
+        "type": "int",
+        "required": false,
+        "description": "فقط یک پروژه"
+      }
+    ],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.milestones_next",
+    "title": "مراحل پرداخت پیش رو",
+    "description": "جزئیات: مراحل پرداخت پیش رو",
+    "module": "projects",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.change_requests_open",
+    "title": "درخواست‌های تغییر باز",
+    "description": "جزئیات: درخواست‌های تغییر باز",
+    "module": "projects",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.guarantees_expiring",
+    "title": "ضمانت‌نامه‌های در آستانه انقضا",
+    "description": "جزئیات: ضمانت‌نامه‌های در آستانه انقضا",
+    "module": "projects",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.penalty_exposure",
+    "title": "جریمه‌های تاخیر",
+    "description": "جزئیات: جریمه‌های تاخیر",
+    "module": "projects",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.initiation_overdue",
+    "title": "گام‌های شروع پروژه از مهلت گذشته",
+    "description": "جزئیات: گام‌های شروع پروژه از مهلت گذشته",
+    "module": "projects",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pc.client_responses_overdue",
+    "title": "پاسخ‌های کارفرما عقب‌افتاده",
+    "description": "جزئیات: پاسخ‌های کارفرما عقب‌افتاده",
+    "module": "projects",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "mf.orders_late",
+    "title": "سفارش‌های تولید با تاخیر",
+    "description": "جزئیات: سفارش‌های تولید با تاخیر",
+    "module": "production",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "mf.orders_by_status",
+    "title": "سفارش‌های تولید به تفکیک وضعیت",
+    "description": "جزئیات: سفارش‌های تولید به تفکیک وضعیت",
+    "module": "production",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "mf.work_center_load",
+    "title": "بار مراکز کاری",
+    "description": "جزئیات: بار مراکز کاری",
+    "module": "production",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "mf.machines_down",
+    "title": "ماشین‌های خراب",
+    "description": "جزئیات: ماشین‌های خراب",
+    "module": "production",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "mf.maintenance_overdue",
+    "title": "نگهداری عقب‌افتاده",
+    "description": "جزئیات: نگهداری عقب‌افتاده",
+    "module": "production",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "mf.oee_by_work_center",
+    "title": "OEE به تفکیک مرکز کاری",
+    "description": "جزئیات: OEE به تفکیک مرکز کاری",
+    "module": "production",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "qc.ncr_open",
+    "title": "NCRهای باز",
+    "description": "جزئیات: NCRهای باز",
+    "module": "quality",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "qc.capa_overdue",
+    "title": "اقدام‌های اصلاحی از مهلت گذشته",
+    "description": "جزئیات: اقدام‌های اصلاحی از مهلت گذشته",
+    "module": "quality",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "qc.calibration_due",
+    "title": "کالیبراسیون‌های سررسید",
+    "description": "جزئیات: کالیبراسیون‌های سررسید",
+    "module": "quality",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "qc.complaints_open",
+    "title": "شکایت‌های باز مشتری",
+    "description": "جزئیات: شکایت‌های باز مشتری",
+    "module": "quality",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "qc.h_points_pending",
+    "title": "نقاط توقف در انتظار",
+    "description": "جزئیات: نقاط توقف در انتظار",
+    "module": "quality",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "qc.documents_waiting",
+    "title": "مدارک در انتظار تایید",
+    "description": "جزئیات: مدارک در انتظار تایید",
+    "module": "quality",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "inv.items_below_minimum",
+    "title": "کالاهای زیر حداقل موجودی",
+    "description": "جزئیات: کالاهای زیر حداقل موجودی",
+    "module": "inventory",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "inv.stock_value_by_warehouse",
+    "title": "ارزش موجودی به تفکیک انبار",
+    "description": "جزئیات: ارزش موجودی به تفکیک انبار",
+    "module": "inventory",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "inv.slow_moving",
+    "title": "کالاهای راکد",
+    "description": "جزئیات: کالاهای راکد",
+    "module": "inventory",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "inv.top_movements",
+    "title": "بیشترین گردش کالا",
+    "description": "جزئیات: بیشترین گردش کالا",
+    "module": "inventory",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "inv.quarantine",
+    "title": "ردیف‌های قرنطینه",
+    "description": "جزئیات: ردیف‌های قرنطینه",
+    "module": "inventory",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "inv.material_requests_open",
+    "title": "درخواست‌های کالای باز",
+    "description": "جزئیات: درخواست‌های کالای باز",
+    "module": "inventory",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.requests_open",
+    "title": "درخواست‌های خرید باز",
+    "description": "جزئیات: درخواست‌های خرید باز",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.orders_open",
+    "title": "سفارش‌های خرید باز",
+    "description": "جزئیات: سفارش‌های خرید باز",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.late_lines",
+    "title": "ردیف‌های سفارش با تاخیر",
+    "description": "جزئیات: ردیف‌های سفارش با تاخیر",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.supplier_on_time",
+    "title": "تحویل به‌موقع تامین‌کنندگان",
+    "description": "جزئیات: تحویل به‌موقع تامین‌کنندگان",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.spend_by_supplier",
+    "title": "خرید به تفکیک تامین‌کننده",
+    "description": "جزئیات: خرید به تفکیک تامین‌کننده",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.invoices_waiting",
+    "title": "فاکتورهای در انتظار تایید",
+    "description": "جزئیات: فاکتورهای در انتظار تایید",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.payments_waiting",
+    "title": "پرداخت‌های در انتظار",
+    "description": "جزئیات: پرداخت‌های در انتظار",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "pr.blocked_suppliers",
+    "title": "تامین‌کنندگان مسدود",
+    "description": "جزئیات: تامین‌کنندگان مسدود",
+    "module": "procurement",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sv.requests_open",
+    "title": "درخواست‌های خدمات باز",
+    "description": "جزئیات: درخواست‌های خدمات باز",
+    "module": "service",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sv.sla_breaches",
+    "title": "درخواست‌های خارج از SLA",
+    "description": "جزئیات: درخواست‌های خارج از SLA",
+    "module": "service",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sv.orders_open",
+    "title": "دستورهای خدمات باز",
+    "description": "جزئیات: دستورهای خدمات باز",
+    "module": "service",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sv.warranty_cost_by_month",
+    "title": "هزینه‌ی گارانتی ماهانه",
+    "description": "جزئیات: هزینه‌ی گارانتی ماهانه",
+    "module": "service",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sv.units_by_customer",
+    "title": "واحدهای نصب‌شده به تفکیک مشتری",
+    "description": "جزئیات: واحدهای نصب‌شده به تفکیک مشتری",
+    "module": "service",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sv.survey_by_month",
+    "title": "رضایت مشتری ماهانه",
+    "description": "جزئیات: رضایت مشتری ماهانه",
+    "module": "service",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "sv.ltsa_expiring",
+    "title": "قراردادهای LTSA در آستانه انقضا",
+    "description": "جزئیات: قراردادهای LTSA در آستانه انقضا",
+    "module": "service",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "of.decisions_overdue",
+    "title": "مصوبات از موعد گذشته",
+    "description": "جزئیات: مصوبات از موعد گذشته",
+    "module": "office",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "of.letters_waiting",
+    "title": "نامه‌های منتظر اقدام",
+    "description": "جزئیات: نامه‌های منتظر اقدام",
+    "module": "office",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "of.attendance_month",
+    "title": "حضور و غیاب ماه جاری (شمارش کل)",
+    "description": "جزئیات: حضور و غیاب ماه جاری (شمارش کل)",
+    "module": "office",
+    "parameters": [
+      {
+        "name": "month",
+        "type": "int",
+        "required": false,
+        "description": "ماه (۱ تا ۱۲)؛ خالی = ماه جاری"
+      }
+    ],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "of.leave_requests_pending",
+    "title": "درخواست‌های مرخصی در انتظار",
+    "description": "جزئیات: درخواست‌های مرخصی در انتظار",
+    "module": "office",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "ai.notes_new",
+    "title": "یادداشت‌های تازه‌ی هوش مصنوعی",
+    "description": "جزئیات: یادداشت‌های تازه‌ی هوش مصنوعی",
+    "module": "ai",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  },
+  {
+    "key": "ai.seat_runs",
+    "title": "اجراهای صندلی‌های هوش مصنوعی",
+    "description": "جزئیات: اجراهای صندلی‌های هوش مصنوعی",
+    "module": "ai",
+    "parameters": [],
+    "roles": "CEO,PMO"
+  }
+]
