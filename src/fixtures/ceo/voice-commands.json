@@ -1,0 +1,115 @@
+{
+  "_note": "Preview only (tools/ceo-preview): what ai/chat and ai/voice answer for the four suggested voice commands. ai/chat picks the first command whose «match» word is in the question; ai/voice answers the command the review script says was spoken (the transcript is the command). The answers are the confirming sentences of §7.1; every number matches overview.json and the drill fixtures; names are fictional.",
+  "model": "مدل زبانی محلی (آزمایشی)",
+  "commands": [
+    {
+      "command": "باز کن سفارش‌های عقب‌افتاده تولید",
+      "match": [
+        "عقب",
+        "تاخیر",
+        "تأخیر"
+      ],
+      "answer": "جدول سفارش‌های تولید با تاخیر را باز می‌کنم: ۶ سفارش از موعد گذشته‌اند و بیشترین تاخیر ۱۹ روز است، برای روتور توربین T-25.",
+      "toolCalls": [
+        {
+          "name": "ceo_drill",
+          "allowed": true
+        },
+        {
+          "name": "ui_open_drill",
+          "allowed": true
+        }
+      ],
+      "actions": [
+        {
+          "type": "openDrill",
+          "drillKey": "mf.orders_late",
+          "params": null,
+          "title": "سفارش‌های تولید با تاخیر"
+        }
+      ]
+    },
+    {
+      "command": "بخوان هشدارها",
+      "match": [
+        "هشدار"
+      ],
+      "answer": "هشدارها را می‌خوانم.",
+      "toolCalls": [
+        {
+          "name": "ui_read",
+          "allowed": true
+        }
+      ],
+      "actions": [
+        {
+          "type": "read",
+          "what": "alerts",
+          "sectionKey": null,
+          "title": "خواندن هشدارها"
+        }
+      ]
+    },
+    {
+      "command": "تحلیل کن بخش فروش",
+      "match": [
+        "فروش"
+      ],
+      "answer": "تحلیل بخش فروش را شروع کردم؛ نتیجه در همان بخش نمایش داده می‌شود.",
+      "toolCalls": [
+        {
+          "name": "ui_analyze",
+          "allowed": true
+        }
+      ],
+      "actions": [
+        {
+          "type": "analyze",
+          "sectionKey": "sales",
+          "title": "تحلیل بخش فروش"
+        }
+      ]
+    },
+    {
+      "command": "نشانم بده پروژه‌های قرمز",
+      "match": [
+        "قرمز"
+      ],
+      "answer": "۲ پروژه قرمزند: توربین بخار ۲۵ مگاوات فولاد نمونه ب و پمپ‌های فرآیندی پالایشگاه نمونه الف. جدولشان را باز می‌کنم.",
+      "toolCalls": [
+        {
+          "name": "ceo_overview",
+          "allowed": true
+        },
+        {
+          "name": "ui_scroll",
+          "allowed": true
+        },
+        {
+          "name": "ui_open_drill",
+          "allowed": true
+        }
+      ],
+      "actions": [
+        {
+          "type": "scroll",
+          "sectionKey": "projects",
+          "title": "بخش پروژه‌ها"
+        },
+        {
+          "type": "openDrill",
+          "drillKey": "pc.portfolio",
+          "params": {
+            "status": "danger"
+          },
+          "title": "پروژه‌های قرمز"
+        }
+      ]
+    }
+  ],
+  "fallback": {
+    "answer": "پاسخ نمونه‌ی پیش‌نمایش.",
+    "toolCalls": [],
+    "actions": []
+  }
+}

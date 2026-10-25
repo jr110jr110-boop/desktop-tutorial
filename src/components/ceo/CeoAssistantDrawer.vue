@@ -1,11 +1,14 @@
 <script setup lang="ts">
 // The assistant beside the dashboard: a drawer on the left edge (the end side in right-to-left) hosting the existing AssistantPanel — the same conversation, voice, citations
 // and verification as everywhere else; this drawer only adds the suggested questions of the visible sections, which prefill the question box (nothing is sent by itself).
-// On a wide screen the drawer sits beside the page (the page makes room); on a tablet or a phone it slides over the page with a scrim. The panel is created on the first opening
-// and kept while the page is open, so closing the drawer does not lose the conversation.
+// On a wide screen the drawer sits beside the page (the page makes room); on a tablet or a phone it slides over the page with a scrim. The panel is kept while the page is open,
+// so closing the drawer does not lose the conversation. Voice mode (§7.3): the page's voice session, UI context and action runner are handed to the panel, which then exists from the
+// start (the page listens with Space or the capsule while the drawer is closed), and the suggested voice commands are sent at once and answered aloud.
 import { computed, nextTick, ref, watch } from "vue";
 import AssistantPanel from "@/components/ai/AssistantPanel.vue";
 import CeoIcon from "@/components/ceo/CeoIcon.vue";
+import type { AiUiAction, AiUiContext } from "@/api/AiAPIs";
+import type { ActionOutcome, VoiceSession } from "@/composables/voice";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -13,10 +16,16 @@ const props = defineProps({
   beside: { type: Boolean, default: false },
   /** suggested questions, most urgent section first: [{ key, title, questions }] */
   suggestions: { type: Array as () => { key: string; title: string; questions: string[] }[], default: () => [] },
+  /** voice mode: the page's session (null = the panel keeps push-to-talk) */
+  voice: { type: Object as () => VoiceSession | null, default: null },
+  uiContext: { type: Object as () => AiUiContext | null, default: null },
+  actionRunner: { type: Function as unknown as () => ((actions: AiUiAction[]) => Promise<ActionOutcome>) | null, default: null },
+  /** spoken-style commands shown as chips (sent at once) */
+  voiceCommands: { type: Array as () => string[], default: () => [] },
 });
 const emit = defineEmits<{ (e: "close"): void }>();
 
-const created = ref(false);
+const created = ref(!!props.voice);
 const panel = ref<InstanceType<typeof AssistantPanel> | null>(null);
 const drawer = ref<HTMLElement | null>(null);
 const pending = ref<string | null>(null);
@@ -29,6 +38,7 @@ watch(
       opener = document.activeElement as HTMLElement | null;
       created.value = true;
       await nextTick();
+      (panel.value as any)?.reveal?.();
       if (pending.value) {
         const q = pending.value;
         pending.value = null;
@@ -47,7 +57,11 @@ function ask(question: string) {
   }
   nextTick(() => (panel.value as any)?.prefill?.(question));
 }
-defineExpose({ ask });
+/** Sends a command at once (the voice-command chips), answered aloud. */
+function command(text: string) {
+  (panel.value as any)?.command?.(text);
+}
+defineExpose({ ask, command });
 
 const flat = computed(() => props.suggestions.flatMap((s) => s.questions.slice(0, 1).map((q) => ({ key: s.key, section: s.title, q }))));
 const showAll = ref(false);
@@ -80,8 +94,17 @@ function onKey(e: KeyboardEvent) {
         <button aria-label="بستن دستیار" class="ceo-icon-btn" title="بستن دستیار (Esc)" type="button" @click="emit('close')"><CeoIcon name="close" /></button>
       </div>
       <div class="assist-body">
-        <AssistantPanel v-if="created" ref="panel">
+        <AssistantPanel v-if="created" ref="panel" :action-runner="actionRunner" :ui-context="uiContext" :voice-mode="!!voice" :voice-session="voice">
           <template #suggestions>
+            <div v-if="voice && voiceCommands.length" class="assist-chips cmds">
+              <span class="assist-chips-title">فرمان‌های صوتی؛ بگویید یا بزنید</span>
+              <div class="assist-chip-list">
+                <button v-for="c in voiceCommands" :key="c" class="ceo-chip cmd" title="همین حالا انجام می‌شود" type="button" @click="command(c)">
+                  <CeoIcon :size="13" name="assistant" />
+                  {{ c }}
+                </button>
+              </div>
+            </div>
             <div v-if="visible.length" class="assist-chips">
               <span class="assist-chips-title">پرسش‌های پیشنهادی</span>
               <div class="assist-chip-list">
@@ -164,6 +187,9 @@ function onKey(e: KeyboardEvent) {
 }
 .ceo-chip.more {
   border-style: dashed;
+}
+.ceo-chip.cmd {
+  background: var(--ceo-card);
 }
 @media (max-width: 640px) {
   .assist-drawer {

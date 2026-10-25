@@ -2,6 +2,7 @@
 // The side column of the dashboard: the alerts of the whole company grouped by severity (each opens its page), the count of new AI notes, the catalogue of every detail table,
 // the module pages, and the "snapshot now" action of the KPI trends. layout: «column» beside the sections (stays in view while they scroll), «band» above them in two columns
 // (tablet), «stack» one column (phone). On a phone the warning and information groups start folded so the sections are reached quickly; the critical ones are always open.
+// «بخوان» beside the title: the alerts spoken (GET ceo/speech?what=alerts, played by the page).
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import type { CeoAlert } from "@/api/CeoAPIs";
@@ -14,8 +15,10 @@ const props = defineProps({
   quickLinks: { type: Array as () => { title: string; to: string }[], default: () => [] },
   snapshotBusy: { type: Boolean, default: false },
   layout: { type: String as () => "column" | "band" | "stack", default: "column" },
+  /** the alerts are being read aloud */
+  reading: { type: Boolean, default: false },
 });
-const emit = defineEmits<{ (e: "notes"): void; (e: "catalogue"): void; (e: "snapshot"): void }>();
+const emit = defineEmits<{ (e: "notes"): void; (e: "catalogue"): void; (e: "snapshot"): void; (e: "read-alerts"): void }>();
 
 const router = useRouter();
 const order: CeoAlert["severity"][] = ["danger", "warning", "info"];
@@ -30,10 +33,23 @@ const groups = computed(() =>
 <template>
   <aside :class="layout" aria-labelledby="ceo-alerts-title" class="side">
     <section class="side-block">
-      <h2 id="ceo-alerts-title" class="side-title">
-        هشدارها
-        <span v-if="alerts.length" class="side-count">{{ faNum(alerts.length, 0) }}</span>
-      </h2>
+      <div class="side-head">
+        <h2 id="ceo-alerts-title" class="side-title">
+          هشدارها
+          <span v-if="alerts.length" class="side-count">{{ faNum(alerts.length, 0) }}</span>
+        </h2>
+        <button
+          v-if="alerts.length"
+          :aria-label="reading ? 'توقف خواندن' : 'خواندن هشدارها'"
+          :aria-pressed="reading"
+          :title="reading ? 'توقف خواندن' : 'هشدارها را بخوان'"
+          class="ceo-tool ceo-read"
+          type="button"
+          @click="emit('read-alerts')">
+          <CeoIcon :name="reading ? 'stop' : 'speaker'" :size="15" />
+          {{ reading ? "توقف" : "بخوان" }}
+        </button>
+      </div>
       <p v-if="!alerts.length" class="side-empty">هشداری نیست؛ همه‌ی ماژول‌ها در وضعیت عادی‌اند.</p>
       <details v-for="g in groups" :key="g.sev + layout" :class="'sev-' + g.sev" :open="g.sev === 'danger' || layout !== 'stack'" class="alert-group">
         <summary class="alert-group-title">
@@ -111,6 +127,17 @@ const groups = computed(() =>
   background: transparent;
   border: 0;
   padding: 0 4px;
+}
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  scroll-margin-top: 72px;
+}
+.side-head .side-title {
+  margin: 0;
 }
 .side-title {
   display: flex;

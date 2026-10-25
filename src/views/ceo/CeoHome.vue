@@ -4,10 +4,15 @@
 // each window scrolls to its section); the 8 headline KPIs; the nine sections (KPIs, charts, details, AI analysis) beside the alerts column; the assistant drawer;
 // the detail tables (drill panel) and their catalogue. Data: GET ceo/overview (api/CeoAPIs.ts). The brief and the assistant do not depend on the overview: they keep working
 // when it cannot be read, and the overview keeps working when the AI is down. Nothing of the business data is stored in the browser; only the theme choice is (composables/ceo.ts).
+//
+// Voice mode (§7.3, "like Siri"): the page owns the voice session (composables/voice.ts) — the capsule at the bottom-left, holding Space anywhere outside a field, the «بخوان»
+// buttons — and hands it to the assistant panel in the drawer, which asks the questions (with uiContext) and answers them. The UI actions of an answer (§7.1) are carried out
+// here by runActions(), in order, each with a one-line confirmation: navigate (inside the app, after the spoken answer), openDrill (with params), analyze, read (GET ceo/speech,
+// or the brief), scroll. Esc stops listening, speaking and the follow-up window.
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { analyzeCeo, getCeoDrills, getCeoOverview, snapshotCeo, type CeoDrillDescriptor, type CeoKpi, type CeoOverview, type CeoSection } from "@/api/CeoAPIs";
-import { getAiNotes } from "@/api/AiAPIs";
+import { analyzeCeo, getCeoDrills, getCeoOverview, getCeoSpeech, snapshotCeo, type CeoDrillDescriptor, type CeoKpi, type CeoOverview, type CeoSection } from "@/api/CeoAPIs";
+import { getAiBrief, getAiBriefAudio, getAiNotes, type AiUiAction, type AiUiContext } from "@/api/AiAPIs";
 import BriefCard from "@/components/ai/BriefCard.vue";
 import CeoAnalysisBox from "@/components/ceo/CeoAnalysis.vue";
 import CeoAssistantDrawer from "@/components/ceo/CeoAssistantDrawer.vue";
@@ -18,9 +23,11 @@ import CeoKpiCluster from "@/components/ceo/CeoKpiCluster.vue";
 import CeoPulse from "@/components/ceo/CeoPulse.vue";
 import CeoSectionPanel from "@/components/ceo/CeoSection.vue";
 import CeoSideColumn from "@/components/ceo/CeoSideColumn.vue";
-import { agoText, COMPANY_NAME, faNum, morningLine, openableLink, suggestedQuestions, todayText, useCeoTheme, type AnalysisState } from "@/composables/ceo";
+import CeoVoiceCapsule from "@/components/ceo/CeoVoiceCapsule.vue";
+import { agoText, COMPANY_NAME, faDigits, faNum, morningLine, openableLink, suggestedQuestions, todayText, useCeoTheme, voiceCommands, type AnalysisState } from "@/composables/ceo";
 import { fail, ok } from "@/composables/inventory";
 import { AiRoles, hasRole } from "@/composables/roles";
+import { useVoiceSession, VOICE_TIMING, type ActionOutcome, type ActionResult, type SpeechItem } from "@/composables/voice";
 
 const router = useRouter();
 const { theme, toggle: toggleTheme } = useCeoTheme();
@@ -122,7 +129,8 @@ async function loadDrills() {
 }
 const drillTitle = (key: string, fallback: string) => drills.value.find((d) => d.key === key)?.title || fallback;
 
-const drill = reactive({ open: false, key: "", related: [] as { key: string; title: string }[] });
+/** params: the filter of an assistant's openDrill action (sent to ceo/drill with the key; cleared when another table is picked) */
+const drill = reactive({ open: false, key: "", related: [] as { key: string; title: string }[], params: null as Record<string, any> | null });
 function relatedOf(items: { drillKey: string | null; title: string }[]) {
   const seen = new Set<string>();
   const out: { key: string; title: string }[] = [];
@@ -133,9 +141,10 @@ function relatedOf(items: { drillKey: string | null; title: string }[]) {
   }
   return out;
 }
-function openDrill(key: string, related: { key: string; title: string }[] = []) {
+function openDrill(key: string, related: { key: string; title: string }[] = [], params: Record<string, any> | null = null) {
   catalogueOpen.value = false;
   drill.key = key;
+  drill.params = params && Object.keys(params).length ? { ...params } : null;
   drill.related = related.some((r) => r.key === key) ? related : [{ key, title: drillTitle(key, "جزئیات") }, ...related];
   drill.open = true;
 }
@@ -225,8 +234,193 @@ function checkBrief() {
   briefLong.value = !!text && text.scrollHeight > text.clientHeight + 2;
 }
 
+// ---------------------------------------------------------------- voice mode (§7.3): the session, the UI actions of the assistant (§7.1), reading aloud (§7.2)
+const voice = useVoiceSession();
+/** sent with every question of this page: the model learns which sections and UI actions exist here */
+const uiContext = computed<AiUiContext>(() => ({ page: "ceo", sections: (overview.value?.sections || []).map((s) => s.key), theme: theme.value }));
+/** the route prefixes the assistant may open (the same allow-list as the server's ui_navigate) */
+const NAV_PREFIXES = ["/ceo", "/finance", "/fn", "/sales", "/service", "/production", "/project-control", "/quality", "/inventory", "/procurement", "/office", "/ai"];
+const sectionOf = (key: string | null | undefined) => (key ? overview.value?.sections.find((s) => s.key === key) || null : null);
+/** the places a read-out or a scroll can show besides the sections */
+const ANCHORS: Record<string, string> = { headline: "ceo-headline", alerts: "ceo-alerts-title", morning: "ceo-morning" };
+function reveal(target: string) {
+  if (sectionOf(target)) return goToSection(target);
+  document.getElementById(ANCHORS[target] || "")?.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+}
+type ReadWhat = "headline" | "section" | "alerts" | "brief";
+const readTitles: Record<string, string> = { headline: "شاخص‌های اصلی", alerts: "هشدارها", brief: "گزارش روزانه" };
+const readLabel = (what: string, sectionKey?: string | null) => (what === "section" ? `بخش «${sectionOf(sectionKey)?.title || sectionKey}»` : readTitles[what] || what);
+
+/** The spoken summary: GET ceo/speech (headline, a section, the alerts; works without the language model), or the latest brief with its audio. */
+async function speechFor(what: ReadWhat, sectionKey: string | null = null): Promise<{ item: SpeechItem | null; error: string }> {
+  if (what === "brief") {
+    if (!canBrief) return { item: null, error: "گزارش روزانه فقط برای مدیرعامل خوانده می‌شود" };
+    const [brief, err] = await getAiBrief();
+    if (err || !brief?.text) return { item: null, error: err?.message || "گزارش روزانه‌ای برای خواندن نیست" };
+    const [blob] = await getAiBriefAudio();
+    return { item: { text: brief.text, audioBlob: blob }, error: "" };
+  }
+  const [data, err] = await getCeoSpeech(what, what === "section" ? sectionKey : null);
+  if (err || !data?.text) return { item: null, error: err?.message || "خلاصه‌ی صوتی " + readLabel(what, sectionKey) + " ساخته نشد" };
+  return { item: { text: data.text, audioBase64: data.audioBase64 }, error: "" };
+}
+
+/** A value of an assistant's drill filter in words: the status words of the page, otherwise as it came. */
+function paramText(params: Record<string, any> | null, key: string | null) {
+  if (!params) return "";
+  const d = drills.value.find((x) => x.key === key);
+  const status: Record<string, string> = { danger: "قرمز (بحرانی)", red: "قرمز (بحرانی)", warn: "زرد (هشدار)", amber: "زرد (هشدار)", ok: "سبز (عادی)", green: "سبز (عادی)" };
+  return Object.entries(params)
+    .filter(([, v]) => v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => (d?.parameters.find((p) => p.name === k)?.description || k) + ": " + (status[String(v)] || (/^-?\d+(\.\d+)?$/.test(String(v)) ? faNum(Number(v), 0) : faDigits(String(v)))))
+    .join("، ");
+}
+
+/** One UI action of an answer (§7.1). Leaving the page is queued in out.deferred (it runs after the spoken answer); read-outs are queued in out.speech. */
+async function runAction(a: AiUiAction, out: ActionOutcome): Promise<ActionResult> {
+  const title = String(a.title || "").trim();
+  switch (a.type) {
+    case "navigate": {
+      const link = String(a.link || "").trim();
+      const inside = link.startsWith("/") && !link.startsWith("//") && NAV_PREFIXES.some((p) => link === p || link.startsWith(p + "/") || link.startsWith(p + "?"));
+      const to = inside ? openableLink(router, link) : null;
+      if (!to) return { ok: false, text: `صفحه‌ی «${title || link}» در این سامانه یا برای نقش شما باز نمی‌شود` };
+      if (router.resolve(to).path === router.currentRoute.value.path) return { ok: true, text: `همین صفحه باز است` };
+      out.deferred.push(() => router.push(to));
+      return { ok: true, text: `صفحه‌ی «${title || link}» پس از پایان پاسخ باز می‌شود` };
+    }
+    case "openDrill": {
+      const key = String(a.drillKey || "");
+      const known = drills.value.length ? drills.value.some((d) => d.key === key) : !!key;
+      if (!known) return { ok: false, text: `جدول «${title || key}» در فهرست جدول‌های جزئیات نیست` };
+      const section = overview.value?.sections.find((s) => [...s.charts, ...s.kpis].some((x) => x.drillKey === key));
+      const params = a.params && typeof a.params === "object" ? a.params : null;
+      openDrill(key, section ? relatedOf([...section.charts, ...section.kpis]) : [], params);
+      const filter = paramText(drill.params, key);
+      return { ok: true, text: `جدول «${drillTitle(key, title || "جزئیات")}» باز شد` + (filter ? `؛ فیلتر ${filter}` : "") };
+    }
+    case "analyze": {
+      const section = sectionOf(a.sectionKey);
+      if (a.sectionKey && !section) return { ok: false, text: `بخش «${title || a.sectionKey}» در این صفحه نیست` };
+      drill.open = false;
+      catalogueOpen.value = false;
+      analyze(section);
+      reveal(section ? section.key : "morning");
+      return { ok: true, text: section ? `تحلیل بخش «${section.title}» آغاز شد؛ نتیجه در همان بخش می‌آید` : "تحلیل کل شرکت آغاز شد؛ نتیجه زیر خط امروز می‌آید" };
+    }
+    case "read": {
+      const what = String(a.what || "") as ReadWhat;
+      if (!["headline", "section", "alerts", "brief"].includes(what)) return { ok: false, text: `«${title || what}» خواندنی نیست` };
+      if (what === "section" && !sectionOf(a.sectionKey)) return { ok: false, text: `بخش «${title || a.sectionKey}» در این صفحه نیست` };
+      const got = await speechFor(what, a.sectionKey || null);
+      if (!got.item) return { ok: false, text: got.error };
+      out.speech.push(got.item);
+      if (what !== "brief") {
+        drill.open = false;
+        catalogueOpen.value = false;
+        reveal(what === "section" ? String(a.sectionKey) : what);
+      }
+      return { ok: true, text: `${readLabel(what, a.sectionKey)} خوانده می‌شود` };
+    }
+    case "scroll": {
+      const key = String(a.sectionKey || "");
+      if (!sectionOf(key) && !ANCHORS[key]) return { ok: false, text: `بخش «${title || key}» در این صفحه نیست` };
+      drill.open = false;
+      catalogueOpen.value = false;
+      reveal(key);
+      return { ok: true, text: `${sectionOf(key) ? "بخش «" + sectionOf(key)!.title + "»" : readTitles[key] || title} نمایش داده شد` };
+    }
+    default:
+      return { ok: false, text: `کار «${title || a.type || "نامشخص"}» در این صفحه انجام‌شدنی نیست` };
+  }
+}
+
+/** Carries out the UI actions of an answer in order (at most 8). On a tablet or a phone the drawer covers the page: it closes first, so what the actions show is seen. */
+async function runActions(actions: AiUiAction[]): Promise<ActionOutcome> {
+  const out: ActionOutcome = { results: [], speech: [], deferred: [] };
+  const shows = actions.some((a) => a.type !== "navigate" && !(a.type === "read" && a.what === "brief"));
+  if (shows && drawerOpen.value && !beside.value) drawerOpen.value = false;
+  for (const a of actions.slice(0, 8)) out.results.push(await runAction(a || ({} as AiUiAction), out));
+  return out;
+}
+
+/** The «بخوان» buttons: the spoken summary of the headline, a section or the alerts (the same button again stops it). */
+const reading = ref<string | null>(null);
+let readSeq = 0;
+function stopReading() {
+  readSeq++;
+  reading.value = null;
+  voice.cancel();
+}
+async function readAloud(what: "headline" | "section" | "alerts", sectionKey: string | null = null) {
+  const id = what === "section" ? "section:" + sectionKey : what;
+  if (reading.value === id) return stopReading();
+  const mine = ++readSeq;
+  voice.cancel(); // listening, a follow-up window or another read-out stop
+  reading.value = id;
+  const mark = voice.mark();
+  voice.setThinking(true);
+  const got = await speechFor(what, sectionKey);
+  if (mine !== readSeq) return; // stopped, or another read-out took over
+  voice.setThinking(false);
+  if (!got.item) {
+    voice.caption("system", got.error);
+    reading.value = null;
+    return;
+  }
+  await voice.say([got.item], { followup: false, epoch: mark });
+  if (mine === readSeq) reading.value = null;
+}
+
+// Space anywhere outside a text field: held = push-to-talk, a short press = listen until a short silence, pressed while listening = send now, while the assistant speaks =
+// barge-in. Space does not scroll the page or press the focused button here (Enter still does). Esc stops everything. Both in the capture phase, so Esc stops the voice before
+// it closes a drawer or a slide-over (a second Esc closes them).
+let spaceAt = 0;
+let spaceHeld = false;
+let spaceOurs = false;
+function typingIn(target: EventTarget | null) {
+  const el = target instanceof HTMLElement ? target : null;
+  return !!el?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"]');
+}
+function onKeyDown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    if (voice.state !== "idle" || voice.countdown || reading.value) {
+      e.preventDefault();
+      e.stopPropagation();
+      stopReading();
+    }
+    return;
+  }
+  if (e.code !== "Space" || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || !voice.supported || typingIn(e.target)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  spaceOurs = true;
+  if (e.repeat) return;
+  if (voice.state === "listening") {
+    spaceHeld = false;
+    voice.stop();
+    return;
+  }
+  if (voice.state === "thinking") return;
+  readSeq++;
+  reading.value = null;
+  spaceHeld = true;
+  spaceAt = Date.now();
+  voice.start();
+}
+function onKeyUp(e: KeyboardEvent) {
+  if (e.code !== "Space" || !spaceOurs) return;
+  e.preventDefault(); // the focused button is not pressed by the release either
+  e.stopPropagation();
+  spaceOurs = false;
+  if (!spaceHeld) return;
+  spaceHeld = false;
+  if (voice.state === "listening" && Date.now() - spaceAt >= VOICE_TIMING.hold) voice.stop();
+}
+
 // ---------------------------------------------------------------- print
 function printPage() {
+  stopReading();
   drawerOpen.value = false;
   drill.open = false;
   catalogueOpen.value = false;
@@ -239,6 +433,8 @@ onMounted(() => {
   loadNotes();
   ticker = setInterval(() => (now.value = Date.now()), 30000);
   window.addEventListener("resize", onResize);
+  window.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("keyup", onKeyUp, true);
   measurePage();
   if (typeof ResizeObserver !== "undefined" && root.value) {
     observer = new ResizeObserver(measurePage);
@@ -252,6 +448,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (ticker) clearInterval(ticker);
   window.removeEventListener("resize", onResize);
+  window.removeEventListener("keydown", onKeyDown, true);
+  window.removeEventListener("keyup", onKeyUp, true);
   observer?.disconnect();
   briefObserver?.disconnect();
 });
@@ -291,7 +489,7 @@ onBeforeUnmount(() => {
     </header>
 
     <!-- the morning line and the daily brief -->
-    <section :class="{ 'no-brief': !canBrief }" aria-label="خلاصه‌ی امروز" class="ceo-morning">
+    <section id="ceo-morning" :class="{ 'no-brief': !canBrief }" aria-label="خلاصه‌ی امروز" class="ceo-morning">
       <div class="morning-main">
         <p v-if="morning" class="morning-text">
           <span class="morning-lead">{{ morning.lead }}:</span>{{ " " }}
@@ -342,6 +540,13 @@ onBeforeUnmount(() => {
     <template v-else>
       <div :class="{ refreshing: loading }" class="ceo-data">
         <CeoPulse :class="{ compact: size === 'm' || size === 's' }" :lamp-test="lampTest" :pulse="overview.pulse" class="ceo-pulse" @go="goToSection" />
+        <div id="ceo-headline" class="kpi-head">
+          <h2 class="kpi-head-title">شاخص‌های اصلی</h2>
+          <button :aria-pressed="reading === 'headline'" :title="reading === 'headline' ? 'توقف خواندن' : 'خلاصه‌ی صوتی شاخص‌های اصلی'" class="ceo-tool ceo-read" type="button" @click="readAloud('headline')">
+            <CeoIcon :name="reading === 'headline' ? 'stop' : 'speaker'" :size="15" />
+            {{ reading === "headline" ? "توقف" : "بخوان" }}
+          </button>
+        </div>
         <CeoKpiCluster :class="{ narrow: size === 'm' || size === 's' }" :kpis="overview.headline" class="ceo-kpis" @open="openKpi" />
 
         <div class="ceo-main">
@@ -350,24 +555,56 @@ onBeforeUnmount(() => {
               v-for="s in overview.sections"
               :key="s.key"
               :analysis="analyses[s.key] || null"
+              :reading="reading === 'section:' + s.key"
               :section="s"
               :status="pulseOf(s.key)"
               :theme="theme"
               @analyze="analyze(s)"
               @close-analysis="closeAnalysis(s.key)"
-              @drill="openSectionDrill(s, $event)" />
+              @drill="openSectionDrill(s, $event)"
+              @read="readAloud('section', s.key)" />
           </div>
-          <CeoSideColumn :alerts="overview.alerts" :layout="size === 'xl' ? 'column' : size === 's' ? 'stack' : 'band'" :notes-count="notesCount" :quick-links="quickLinks" :snapshot-busy="snapshotBusy" class="ceo-side" @catalogue="openCatalogue" @notes="openDrill('ai.notes_new', [{ key: 'ai.notes_new', title: drillTitle('ai.notes_new', 'یادداشت‌های تازه‌ی هوش مصنوعی') }, { key: 'ai.seat_runs', title: drillTitle('ai.seat_runs', 'اجراهای صندلی‌های هوش مصنوعی') }])" @snapshot="snapshot" />
+          <CeoSideColumn
+            :alerts="overview.alerts"
+            :layout="size === 'xl' ? 'column' : size === 's' ? 'stack' : 'band'"
+            :notes-count="notesCount"
+            :quick-links="quickLinks"
+            :reading="reading === 'alerts'"
+            :snapshot-busy="snapshotBusy"
+            class="ceo-side"
+            @catalogue="openCatalogue"
+            @notes="openDrill('ai.notes_new', [{ key: 'ai.notes_new', title: drillTitle('ai.notes_new', 'یادداشت‌های تازه‌ی هوش مصنوعی') }, { key: 'ai.seat_runs', title: drillTitle('ai.seat_runs', 'اجراهای صندلی‌های هوش مصنوعی') }])"
+            @read-alerts="readAloud('alerts')"
+            @snapshot="snapshot" />
         </div>
       </div>
     </template>
 
-    <button v-if="!drawerOpen" aria-label="باز کردن دستیار هوشمند" class="assist-handle" type="button" @click="drawerOpen = true">
-      <CeoIcon :size="18" name="assistant" />
-      <span>دستیار هوشمند</span>
-    </button>
-    <CeoAssistantDrawer ref="drawerRef" :beside="beside" :open="drawerOpen" :suggestions="suggestions" @close="drawerOpen = false" />
-    <CeoDrillPanel :drill-key="drill.key" :offset="panelOffset" :open="drill.open" :related="drill.related" @ask="askAssistant" @change="drill.key = $event" @close="drill.open = false" />
+    <CeoVoiceCapsule v-if="!drawerOpen" :voice="voice" @open-drawer="drawerOpen = true" />
+    <CeoAssistantDrawer
+      ref="drawerRef"
+      :action-runner="runActions"
+      :beside="beside"
+      :open="drawerOpen"
+      :suggestions="suggestions"
+      :ui-context="uiContext"
+      :voice="voice"
+      :voice-commands="voiceCommands"
+      @close="drawerOpen = false" />
+    <CeoDrillPanel
+      :drill-key="drill.key"
+      :filter-text="paramText(drill.params, drill.key)"
+      :offset="panelOffset"
+      :open="drill.open"
+      :params="drill.params"
+      :related="drill.related"
+      @ask="askAssistant"
+      @change="
+        drill.key = $event;
+        drill.params = null;
+      "
+      @clear-params="drill.params = null"
+      @close="drill.open = false" />
     <CeoCatalogue :drills="drills" :error="drillsError" :loading="drillsLoading" :offset="panelOffset" :open="catalogueOpen" @close="catalogueOpen = false" @pick="openDrill($event)" @retry="loadDrills" />
   </div>
 </template>
@@ -437,6 +674,14 @@ onBeforeUnmount(() => {
   --ai-chip-bg: var(--ceo-primary-soft);
   --ai-chip-ink: var(--ceo-primary);
   --ai-off-bg: var(--ceo-surface);
+  /* voice mode: waveform, state marks, captions */
+  --ai-wave: var(--ceo-primary);
+  --ai-accent: var(--ceo-primary);
+  --ai-accent-ring: rgba(36, 92, 140, 0.35);
+  --ai-live: var(--ceo-danger);
+  --ai-live-ring: rgba(180, 56, 47, 0.4);
+  --ai-ok: var(--ceo-ok);
+  --ai-voice-bg: var(--ceo-surface);
 }
 .ceo[data-ceo-theme="dark"] {
   --ceo-surface: #121a22;
@@ -488,6 +733,8 @@ onBeforeUnmount(() => {
   --ceo-scrim: rgba(0, 0, 0, 0.5);
   --ceo-skel: #22303c;
   --ai-chip-edge: #3d5a75;
+  --ai-accent-ring: rgba(127, 176, 219, 0.35);
+  --ai-live-ring: rgba(240, 138, 126, 0.4);
 }
 
 /* ------------------------------------------------------------------ page */
@@ -1020,30 +1267,26 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr;
 }
 
-/* ------------------------------------------------------------------ assistant handle */
-.assist-handle {
-  position: fixed;
-  left: 20px;
-  bottom: 20px;
-  z-index: 1030;
-  display: inline-flex;
+/* ------------------------------------------------------------------ the heading of the headline KPIs (with its «بخوان») */
+.kpi-head {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 18px 0 16px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--ceo-primary-btn);
-  color: var(--ceo-on-primary);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(10, 18, 26, 0.22);
+  justify-content: space-between;
+  gap: 12px;
+  margin: -6px 0 8px;
+  scroll-margin-top: 72px;
 }
-.assist-handle:hover {
-  filter: brightness(1.08);
+.kpi-head-title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--ceo-muted);
+}
+.ceo .ceo-read[aria-pressed="true"] {
+  color: var(--ceo-primary);
+  border-color: var(--ceo-primary);
+  background: var(--ceo-primary-soft);
 }
 
 /* ------------------------------------------------------------------ action-driven motion (slide-overs) */
@@ -1105,18 +1348,6 @@ onBeforeUnmount(() => {
   .skel-kpis {
     grid-template-columns: repeat(2, 1fr);
   }
-  /* on a phone the handle is the icon alone (its name is read out by aria-label) */
-  .assist-handle {
-    left: 16px;
-    bottom: 16px;
-    width: 52px;
-    height: 52px;
-    padding: 0;
-    justify-content: center;
-  }
-  .assist-handle span {
-    display: none;
-  }
 }
 
 /* ------------------------------------------------------------------ print: A4, right to left, B Zar, light, no drawer or buttons */
@@ -1175,7 +1406,8 @@ onBeforeUnmount(() => {
     text-align: left;
   }
   .ceo-header,
-  .assist-handle,
+  .ceo-read,
+  .kpi-head,
   .assist-root,
   .drill-root,
   .cat-root,

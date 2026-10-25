@@ -2,6 +2,7 @@
 // The detail table behind a KPI or a chart (GET ceo/drill) in a slide-over from the left edge. Columns are formatted by kind (rial with separators, percent, Shamsi date,
 // status with its shape, link to the record), sorted on the page by a click on the heading, and paged by the API (50 rows). The other tables of the same section are one click away.
 // «پرسش از دستیار درباره این جدول» opens the assistant with a question about this table already written (nothing is sent until the CEO sends it).
+// params: the filter of an assistant's openDrill action (voice mode, §7.1), sent to ceo/drill with the key and named above the table, with «نمایش همه» to drop it.
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { getCeoDrill, type CeoColumnKind, type CeoDrillTable } from "@/api/CeoAPIs";
@@ -15,8 +16,12 @@ const props = defineProps({
   related: { type: Array as () => { key: string; title: string }[], default: () => [] },
   /** px kept free at the left edge (the assistant drawer when it is open beside the page) */
   offset: { type: Number, default: 0 },
+  /** the drill parameters of an assistant's action (null = none) */
+  params: { type: Object as () => Record<string, any> | null, default: null },
+  /** those parameters in words */
+  filterText: { type: String, default: "" },
 });
-const emit = defineEmits<{ (e: "close"): void; (e: "ask", question: string): void; (e: "change", key: string): void }>();
+const emit = defineEmits<{ (e: "close"): void; (e: "ask", question: string): void; (e: "change", key: string): void; (e: "clear-params"): void }>();
 
 const router = useRouter();
 const PAGE = 50;
@@ -36,7 +41,7 @@ async function load() {
   const mine = ++seq;
   loading.value = true;
   error.value = "";
-  const [data, err] = await getCeoDrill(props.drillKey, { top: PAGE, page: page.value });
+  const [data, err] = await getCeoDrill(props.drillKey, { ...(props.params || {}), top: PAGE, page: page.value });
   if (mine !== seq) return; // an older answer arrived after a newer request
   loading.value = false;
   if (err) {
@@ -47,7 +52,7 @@ async function load() {
 }
 
 watch(
-  () => [props.open, props.drillKey],
+  () => [props.open, props.drillKey, JSON.stringify(props.params || {})],
   async ([open], before) => {
     if (!open) return;
     if (!before?.[0]) opener = document.activeElement as HTMLElement | null;
@@ -179,6 +184,11 @@ function onKey(e: KeyboardEvent) {
           <button v-for="r in related" :key="r.key" :aria-current="r.key === drillKey ? 'true' : undefined" :class="{ active: r.key === drillKey }" class="ceo-chip" type="button" @click="r.key !== drillKey && emit('change', r.key)">{{ r.title }}</button>
         </nav>
 
+        <p v-if="params && filterText" class="drill-filter">
+          <span>فیلتر دستیار: {{ filterText }}</span>
+          <button class="ceo-chip" type="button" @click="emit('clear-params')">نمایش همه</button>
+        </p>
+
         <p v-if="table?.note" class="drill-note">{{ table.note }}</p>
 
         <div class="drill-body">
@@ -290,6 +300,20 @@ function onKey(e: KeyboardEvent) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.drill-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 6px 10px;
+  border-right: 3px solid var(--ceo-primary);
+  border-radius: 4px;
+  background: var(--ceo-primary-soft);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ceo-ink);
 }
 .drill-note {
   margin: 0;

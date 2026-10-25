@@ -22,21 +22,51 @@ const post = (url: string, body?: any) => fcall("post", url, body);
 export type AiPageParams = { PageNumber?: number; PageSize?: number; [key: string]: any };
 
 // ---------------------------------------------------------------- chat
+/** Where the question was asked (release D1 §7.1): the page and what is on it, so the model knows which UI actions make sense. */
+export interface AiUiContext {
+  page: string;
+  sections: string[];
+  theme: string;
+}
 /**
- * AiChatRequestDto { conversationId? (continue a conversation), text (1..2000 characters) }. Returns AiChatResponseDto { conversationId, answer, citations: [{ type, id, title, link }],
- * toolCalls: [{ name, allowed }], verified, degraded, model }. verified=false: the model's numbers could not be checked, the answer then holds the direct results of the system.
- * degraded=true: the model is down, the deterministic dashboard still works. Who: every signed-in user.
+ * A UI action of an answer (release D1 §7.1), in the order the model called the ui_* tools. It runs NO server code: the page carries it out (navigate inside the app,
+ * open a detail table, run a section analysis, read aloud, scroll) and confirms it in one line. The assistant never approves, finalises, pays or deletes anything.
  */
-export const aiChat = (dto: { conversationId?: number | null; text: string }) => post(ai + "chat", { conversationId: dto.conversationId || null, text: dto.text });
+export interface AiUiAction {
+  type: "navigate" | "openDrill" | "analyze" | "read" | "scroll" | string;
+  link?: string | null;
+  drillKey?: string | null;
+  params?: Record<string, any> | null;
+  sectionKey?: string | null;
+  what?: "section" | "alerts" | "brief" | "headline" | string | null;
+  title?: string | null;
+}
 
 /**
- * Push-to-talk: multipart form with the fields `file` (the recording: webm, wav or ogg, up to 10 MB) and `conversationId` (optional). Returns AiVoiceResponseDto
- * { conversationId, transcript, answer, audioBase64 (WAV, base64; empty when the speech services were not available), citations, toolCalls, verified, degraded, model }. Who: every signed-in user.
+ * AiChatRequestDto { conversationId? (continue a conversation), text (1..2000 characters), uiContext? { page, sections, theme } (D1 §7.1, sent by the CEO page) }.
+ * Returns AiChatResponseDto { conversationId, answer, citations: [{ type, id, title, link }], toolCalls: [{ name, allowed }], verified, degraded, model,
+ * actions: [{ type: navigate | openDrill | analyze | read | scroll, link?, drillKey?, params?, sectionKey?, what?, title }] (D1 §7.1; empty or missing when the model called no ui_* tool) }.
+ * verified=false: the model's numbers could not be checked, the answer then holds the direct results of the system. degraded=true: the model is down, the deterministic dashboard still works.
+ * Who: every signed-in user.
  */
-export function aiVoice(file: Blob, fileName: string, conversationId?: number | null) {
+export const aiChat = (dto: { conversationId?: number | null; text: string; uiContext?: AiUiContext | null }) =>
+  post(ai + "chat", dto.uiContext ? { conversationId: dto.conversationId || null, text: dto.text, uiContext: dto.uiContext } : { conversationId: dto.conversationId || null, text: dto.text });
+
+/**
+ * Push-to-talk: multipart form with the fields `file` (the recording: webm, wav or ogg, up to 10 MB), `conversationId` (optional) and, from the CEO page, the UI context as the
+ * nested form fields `uiContext.page`, `uiContext.theme`, `uiContext.sections[0..n]` (bound by [FromForm] to AiVoiceForm.UiContext). Returns AiVoiceResponseDto
+ * { conversationId, transcript, answer, audioBase64 (WAV, base64; empty when the speech services were not available), citations, toolCalls, verified, degraded, model, actions (as aiChat) }.
+ * Who: every signed-in user.
+ */
+export function aiVoice(file: Blob, fileName: string, conversationId?: number | null, uiContext?: AiUiContext | null) {
   const form = new FormData();
   form.append("file", file, fileName);
   if (conversationId) form.append("conversationId", String(conversationId));
+  if (uiContext) {
+    form.append("uiContext.page", uiContext.page);
+    form.append("uiContext.theme", uiContext.theme);
+    uiContext.sections.forEach((s, i) => form.append(`uiContext.sections[${i}]`, s));
+  }
   return fcall("post", ai + "voice", form);
 }
 

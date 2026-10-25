@@ -4,15 +4,34 @@
 // The microphone is asked for only when the person presses the button and is released as soon as the recording stops (no always-on microphone).
 // prefill(question) (exposed) writes a question into the box without sending it; the optional slot «suggestions» is shown just above the box. The colours are CSS variables (--ai-*) with the old values as defaults, so a page with
 // its own theme (the CEO dashboard, light and dark) can set them; every other page looks as before.
-import { computed, nextTick, onBeforeUnmount, ref } from "vue";
+//
+// Voice mode (prop voiceMode, release D1 §7.3; set by the CEO page, every other page keeps push-to-talk): one tap starts listening with a waveform, a short silence ends the
+// question (voice session, composables/voice.ts), the answer is spoken (the server's audio, else the browser's Persian voice, else the caption), the UI actions of the answer are
+// carried out by the page (prop actionRunner) with a caption line each, and in continuous conversation the microphone reopens for a few seconds. uiContext is sent with every question.
+// The session can come from the page (prop voiceSession: the page also listens with Space and reads sections aloud) or be created here (Esc then stops it on this page).
+// Exposed: prefill, command, reveal, startVoice, stopVoice.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
-import { aiChat, aiVoice, getAiConversation, getAiConversations } from "@/api/AiAPIs";
+import VoiceIndicator from "@/components/ai/VoiceIndicator.vue";
+import VoiceWave from "@/components/ai/VoiceWave.vue";
+import { aiChat, aiVoice, getAiConversation, getAiConversations, type AiUiAction, type AiUiContext } from "@/api/AiAPIs";
 import { DEGRADED_TEXT, frontLink, NOT_VERIFIED_TEXT } from "@/composables/ai";
 import { usePagedList } from "@/composables/fn";
 import { fail, jalali } from "@/composables/inventory";
+import { useVoiceSession, VOICE_TIMING, type ActionOutcome, type ActionResult, type SpeechItem, type VoiceSession } from "@/composables/voice";
 
-const props = defineProps({ compact: { type: Boolean, default: false } });
+const props = defineProps({
+  compact: { type: Boolean, default: false },
+  /** the voice session of §7.3 instead of push-to-talk */
+  voiceMode: { type: Boolean, default: false },
+  /** a session owned by the page (optional; without it voice mode makes its own) */
+  voiceSession: { type: Object as () => VoiceSession | null, default: null },
+  /** sent with every question (§7.1) */
+  uiContext: { type: Object as () => AiUiContext | null, default: null },
+  /** carries out the UI actions of an answer; without it the actions are only listed in the answer */
+  actionRunner: { type: Function as unknown as () => ((actions: AiUiAction[]) => Promise<ActionOutcome>) | null, default: null },
+});
 
 type Turn = {
   key: number;
@@ -26,6 +45,9 @@ type Turn = {
   model: string | null;
   audioUrl: string | null;
   at?: string | null;
+  /** UI actions of the answer (§7.1) and, when the page carried them out, one result line each */
+  actions?: AiUiAction[];
+  results?: ActionResult[] | null;
 };
 
 const router = useRouter();
@@ -101,20 +123,85 @@ function addTurn(via: Turn["via"], question: string, r: any, audioUrl: string | 
     degraded: !!r.degraded,
     model: r.model || null,
     audioUrl,
+    actions: Array.isArray(r.actions) ? r.actions : [],
+    results: null,
   });
   scrollDown();
 }
 
 async function send() {
   const question = text.value.trim();
-  if (!question || busy.value || recording.value) return;
+  if (!question || busy.value || recording.value || voiceListening.value) return;
   if (question.length > 2000) return fail("متن پرسش نباید از ۲۰۰۰ نویسه بیشتر باشد.");
+  await ask(question, false);
+}
+
+/** Sends a written question; speak=true answers aloud (the voice-command chips; the microphone does not reopen after a click). */
+async function ask(question: string, speak: boolean) {
   busy.value = true;
-  const [r, error] = await aiChat({ conversationId: conversationId.value, text: question });
+  voice?.setThinking(true);
+  const mark = voice?.mark();
+  const [r, error] = await aiChat({ conversationId: conversationId.value, text: question, uiContext: props.uiContext });
+  if (unmounted) return;
   busy.value = false;
-  if (error) return fail(error);
-  text.value = "";
+  voice?.setThinking(false);
+  if (error) {
+    voice?.caption("system", error.message || "پاسخ دریافت نشد.");
+    return fail(error);
+  }
+  if (!speak) text.value = "";
+  if (speak) voice?.caption("user", question);
   addTurn("text", question, r, null);
+  await respond(r, speak, false, mark);
+}
+
+/** A voice command written or tapped (chips of the CEO page): sent at once and answered aloud. */
+function command(question: string) {
+  if (busy.value || voiceListening.value) return false;
+  ask(String(question || "").slice(0, 2000), !!voice);
+  return true;
+}
+
+/**
+ * After an answer: the page carries out its UI actions in order (a caption line each), then the answer is spoken (speak=true), then the refusals (the answer cannot know that the
+ * page refused an action), then the read-outs the actions asked for; leaving the page waits until all of it was said (interrupting it — a tap or Esc — keeps the CEO on the page).
+ * In continuous conversation (followup=true: a spoken question) the follow-up window opens when the speech ends. If Esc was pressed while the answer was on its way (mark),
+ * the answer is only listed: no action runs and nothing is said. Returns false when nothing more should happen on this page (it is being left, or Esc).
+ */
+async function respond(r: any, speak: boolean, followup: boolean, mark?: number): Promise<boolean> {
+  const actions: AiUiAction[] = Array.isArray(r.actions) ? r.actions : [];
+  const turn = turns.value[turns.value.length - 1];
+  const stale = !!voice && mark !== undefined && voice.mark() !== mark;
+  if (stale) {
+    if (turn && actions.length) turn.results = actions.map((a) => ({ ok: false, text: (a.title || a.type) + ": لغو شد" }));
+    return false;
+  }
+  let outcome: ActionOutcome | null = null;
+  if (actions.length && props.actionRunner) {
+    try {
+      outcome = await props.actionRunner(actions);
+    } catch {
+      outcome = { results: actions.map((a) => ({ ok: false, text: (a.title || "کار دستیار") + ": انجام نشد" })), speech: [], deferred: [] };
+    }
+    if (unmounted) return false;
+    if (turn) turn.results = outcome.results;
+    outcome.results.forEach((x) => voice?.caption("action", x.text, x.ok));
+  }
+  const after = () => outcome?.deferred.forEach((fn) => fn());
+  const leaves = !!outcome?.deferred.length;
+  if (!voice) {
+    after();
+    return !leaves;
+  }
+  const items: SpeechItem[] = [];
+  if (speak) {
+    items.push({ text: r.answer || "", audioBase64: r.audioBase64 || null });
+    items.push(...(outcome?.results || []).filter((x) => !x.ok).map((x) => ({ text: x.text, caption: false })));
+  }
+  items.push(...(outcome?.speech || []));
+  if (items.length) voice.say(items, { after, followup: followup && !leaves, epoch: mark });
+  else after();
+  return !leaves;
 }
 
 /**
@@ -132,7 +219,11 @@ function prefill(question: string): boolean {
   });
   return true;
 }
-defineExpose({ prefill });
+/** The drawer was opened: the newest turn in view (answers that came while it was closed were added out of sight). */
+function reveal() {
+  scrollDown();
+}
+defineExpose({ prefill, command, reveal, startVoice: () => voice?.start(), stopVoice: () => voice?.cancel() });
 
 function onEnter(e: KeyboardEvent) {
   if (e.shiftKey) return;
@@ -310,11 +401,113 @@ function onKeyToggle(e: KeyboardEvent) {
   else startRecording();
 }
 
+// ---------------------------------------------------------------- voice mode (§7.3)
+const voice: VoiceSession | null = props.voiceSession || (props.voiceMode ? useVoiceSession() : null);
+const voiceListening = computed(() => !!voice && voice.state === "listening");
+/** a spoken question: speech to text and chat in one call, then the answer (actions, speech, follow-up); true = answered and the conversation goes on here */
+async function handleUtterance(blob: Blob, mime: string): Promise<boolean> {
+  busy.value = true;
+  const mark = voice?.mark();
+  const [r, error] = await aiVoice(blob, mime.includes("ogg") ? "question.ogg" : "question.webm", conversationId.value, props.uiContext);
+  if (unmounted) return false;
+  busy.value = false;
+  if (error) {
+    voice?.caption("system", error.message || "پاسخ دریافت نشد.");
+    fail(error);
+    return false;
+  }
+  if (!r.transcript && !r.answer) {
+    voice?.caption("system", "سخن شما فهمیده نشد؛ دوباره بگویید.");
+    return false;
+  }
+  if (r.transcript) voice?.caption("user", r.transcript);
+  addTurn("voice", r.transcript || "", r, audioUrlOf(r.audioBase64));
+  return respond(r, true, true, mark);
+}
+/** a session of this panel's own (not the page's): Esc stops it anywhere on the page */
+function onWindowKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && voice && (voice.state !== "idle" || voice.countdown)) voice.cancel();
+}
+const ownSession = !props.voiceSession && !!voice;
+onMounted(() => {
+  voice?.onUtterance(handleUtterance);
+  if (ownSession) window.addEventListener("keydown", onWindowKey);
+});
+
+let voicePressedAt = 0;
+let voiceHeld = false;
+let voiceIgnoreUp = false;
+/** tap = start (the silence ends it) or, while listening, send now; while the assistant speaks = barge-in; a held press is push-to-talk */
+function onVoicePress(e: PointerEvent) {
+  if (!voice || (e.button !== undefined && e.button !== 0)) return;
+  try {
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  } catch {
+    /* not supported */
+  }
+  if (voice.state === "listening") {
+    voiceIgnoreUp = true;
+    voice.stop();
+    return;
+  }
+  if (voice.state === "thinking") return;
+  voiceIgnoreUp = false;
+  voiceHeld = true;
+  voicePressedAt = Date.now();
+  voice.start();
+}
+function onVoiceRelease() {
+  if (voiceIgnoreUp) {
+    voiceIgnoreUp = false;
+    return;
+  }
+  if (!voiceHeld || !voice) return;
+  voiceHeld = false;
+  if (voice.state === "listening" && Date.now() - voicePressedAt >= VOICE_TIMING.hold) voice.stop();
+}
+function onVoiceKey(e: KeyboardEvent) {
+  if (e.repeat || !voice) return;
+  if (voice.state === "listening") voice.stop();
+  else if (voice.state !== "thinking") voice.start();
+}
+function onVoiceEsc() {
+  voice?.cancel();
+}
+const voiceStateText = computed(() => {
+  if (!voice) return "";
+  switch (voice.state) {
+    case "listening":
+      return voice.followup && !voice.heard ? "اگر پرسش دیگری دارید، بگویید" : voice.heard ? "می‌شنوم… پس از مکثی کوتاه ارسال می‌شود" : "در حال شنیدن…";
+    case "thinking":
+      return "در حال فکر کردن…";
+    case "speaking":
+      return voice.muted ? "پاسخ روی صفحه (بدون صدا)" : "در حال گفتن… برای صحبت، میکروفون را بزنید";
+    default:
+      return voice.supported ? "برای گفتن، میکروفون را بزنید" : voice.hint;
+  }
+});
+const voiceButtonText = computed(() => {
+  if (!voice) return "";
+  return voice.state === "listening" ? "ارسال" : voice.state === "speaking" ? "صحبت کنید" : voice.state === "thinking" ? "…" : "میکروفون";
+});
+/**
+ * The caption under the conversation: the turns already show the question, the answer and the action lines, so here only what is being said right now (an answer or
+ * a read-out) or, when nothing is said, a message of the session itself (nothing heard, no microphone).
+ */
+const liveCaption = computed(() => {
+  if (!voice) return null;
+  if (voice.state === "speaking" && voice.speaking?.text) return { who: "assistant", text: voice.speaking.text };
+  const last = voice.captions[voice.captions.length - 1];
+  return last && last.who === "system" && voice.state === "idle" ? { who: "system", text: last.text } : null;
+});
+
 const micLabel = computed(() => (recording.value ? "در حال ضبط... برای پایان رها کنید یا دوباره بزنید" : starting.value ? "منتظر اجازه میکروفون..." : "نگه دارید و صحبت کنید"));
 const clock = computed(() => String(Math.floor(seconds.value / 60)).padStart(2, "0") + ":" + String(seconds.value % 60).padStart(2, "0"));
 
 onBeforeUnmount(() => {
   unmounted = true;
+  voice?.onUtterance(null);
+  if (ownSession) window.removeEventListener("keydown", onWindowKey);
   if (recorder && recorder.state !== "inactive") {
     recorder.onstop = null;
     recorder.stop();
@@ -329,6 +522,13 @@ const trueDegraded = (t: Turn) => t.degraded && !t.toolCalls.length && !t.model;
 /** the server already wrote the same sentence at the start of the answer: the box keeps its colour but the sentence is not repeated */
 const startsUnverified = (t: Turn) => t.answer.trim().startsWith("پاسخ مدل قابل راستی‌آزمایی نبود");
 const isDegradedAnswer = (t: Turn) => t.answer.trim() === DEGRADED_TEXT;
+
+// ---------------------------------------------------------------- UI actions listed in an answer (pages without an action runner: a navigation is one click away)
+const actionLink = (a: AiUiAction) => (a.type === "navigate" ? frontLink(router, a.link || "") : null);
+function openAction(a: AiUiAction) {
+  const to = actionLink(a);
+  if (to) router.push(to);
+}
 
 // ---------------------------------------------------------------- citations
 function linkOf(c: { link: string }) {
@@ -351,7 +551,8 @@ function openCitation(c: { link: string }) {
     </div>
 
     <div ref="listEl" class="ai-list">
-      <p v-if="!turns.length && !busy" class="inv-muted mb-0">{{ micSupported ? "پرسش خود را بنویسید یا دکمه میکروفون را نگه دارید." : "پرسش خود را بنویسید." }} دستیار با دسترسی‌های خود شما پاسخ می‌دهد و هیچ چیزی را تایید نمی‌کند.</p>
+      <p v-if="!turns.length && !busy && !voice" class="inv-muted mb-0">{{ micSupported ? "پرسش خود را بنویسید یا دکمه میکروفون را نگه دارید." : "پرسش خود را بنویسید." }} دستیار با دسترسی‌های خود شما پاسخ می‌دهد و هیچ چیزی را تایید نمی‌کند.</p>
+      <p v-else-if="!turns.length && !busy" class="inv-muted mb-0">بگویید یا بنویسید؛ دستیار پاسخ را می‌گوید و کارهایی مثل باز کردن جدول، تحلیل یک بخش یا خواندن هشدارها را انجام می‌دهد. با دسترسی‌های خود شما کار می‌کند و هیچ چیزی را تایید نمی‌کند.</p>
 
       <div v-for="t in turns" :key="t.key" class="ai-turn">
         <div v-if="t.question" class="ai-q">
@@ -384,6 +585,15 @@ function openCitation(c: { link: string }) {
             </button>
           </div>
 
+          <ul v-if="t.results && t.results.length" class="ai-acts">
+            <li v-for="(x, i) in t.results" :key="i" :class="x.ok ? 'ok' : 'bad'">{{ x.ok ? "✓" : "✗" }} {{ x.text }}</li>
+          </ul>
+          <div v-else-if="t.actions && t.actions.length" class="ai-chips">
+            <button v-for="(a, i) in t.actions" :key="i" :disabled="!actionLink(a)" :title="actionLink(a) ? 'باز کردن' : 'این کار در داشبورد مدیرعامل انجام می‌شود'" class="ai-chip" @click="openAction(a)">
+              {{ a.title || a.type }}
+            </button>
+          </div>
+
           <details v-if="t.toolCalls.length" class="ai-tools">
             <summary>ابزارهای استفاده‌شده ({{ t.toolCalls.length }})</summary>
             <ul class="mb-0">
@@ -397,6 +607,20 @@ function openCitation(c: { link: string }) {
       </div>
 
       <div v-if="busy" class="ai-busy"><span class="spinner-border spinner-border-sm"></span> در حال پاسخ‌دادن...</div>
+    </div>
+
+    <div v-if="voice" :class="'vs-' + voice.state" aria-live="polite" class="ai-voice">
+      <div class="ai-voice-row">
+        <VoiceIndicator :followup="voice.followup" :muted="voice.muted" :state="voice.state" />
+        <span class="ai-voice-state">{{ voiceStateText }}</span>
+        <span v-if="voice.countdown" class="ai-voice-count" title="پنجره‌ی پرسش بعدی">{{ voice.countdown.toLocaleString("fa-IR") }}</span>
+        <label class="ai-voice-switch" title="پس از پاسخ، میکروفون چند ثانیه برای پرسش بعدی باز می‌ماند">
+          <input v-model="voice.continuous" type="checkbox" />
+          <span>گفت‌وگوی پیوسته</span>
+        </label>
+      </div>
+      <VoiceWave v-if="voice.state === 'listening'" :voice="voice" />
+      <p v-if="liveCaption" :class="'cap-' + liveCaption.who" class="ai-caption">{{ liveCaption.text }}</p>
     </div>
 
     <slot name="suggestions" />
@@ -415,7 +639,28 @@ function openCitation(c: { link: string }) {
         <button :disabled="busy || recording || !text.trim()" class="btn btn-sm btn-primary" @click="send">
           <span v-if="busy" class="spinner-border spinner-border-sm me-1"></span>ارسال
         </button>
-        <button v-if="!micSupported" :title="micHint" class="btn btn-sm btn-outline-secondary" disabled type="button">میکروفون</button>
+        <template v-if="voice">
+          <button v-if="!voice.supported" :title="voice.hint" class="btn btn-sm btn-outline-secondary" disabled type="button">میکروفون</button>
+          <button
+            v-else
+            :aria-pressed="voice.state === 'listening'"
+            :class="voice.state === 'listening' ? 'btn-danger' : 'btn-outline-primary'"
+            :disabled="voice.state === 'thinking'"
+            :title="voice.state === 'listening' ? 'ارسال حالا (یا مکث کنید)' : voice.state === 'speaking' ? 'قطع پاسخ و صحبت' : 'بزنید و بگویید (Esc برای توقف)'"
+            class="btn btn-sm ai-mic"
+            type="button"
+            @contextmenu.prevent
+            @keydown.enter.prevent="onVoiceKey"
+            @keydown.esc.prevent="onVoiceEsc"
+            @keydown.space.prevent="onVoiceKey"
+            @pointercancel="onVoiceRelease"
+            @pointerdown.prevent="onVoicePress"
+            @pointerup="onVoiceRelease">
+            <span v-if="voice.state === 'listening'" class="ai-rec"></span>
+            {{ voiceButtonText }}
+          </button>
+        </template>
+        <button v-else-if="!micSupported" :title="micHint" class="btn btn-sm btn-outline-secondary" disabled type="button">میکروفون</button>
         <button
           v-else
           :class="recording ? 'btn-danger' : 'btn-outline-primary'"
@@ -433,7 +678,7 @@ function openCitation(c: { link: string }) {
           {{ recording ? "ضبط " + clock : starting ? "..." : "میکروفون" }}
         </button>
       </div>
-      <div v-if="!micSupported" class="inv-muted small">{{ micHint }}</div>
+      <div v-if="voice ? !voice.supported : !micSupported" class="inv-muted small">{{ voice ? voice.hint : micHint }}</div>
       <div v-if="recording" class="inv-muted small">در حال ضبط... رها کنید تا ارسال شود (یا اگر کوتاه زدید، دوباره بزنید).</div>
     </div>
 
@@ -590,6 +835,74 @@ function openCitation(c: { link: string }) {
   50% {
     opacity: 0.25;
   }
+}
+.ai-acts {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--ai-muted, #555);
+}
+.ai-acts li.ok {
+  color: var(--ai-ok, #1f7a5a);
+}
+.ai-acts li.bad {
+  color: var(--ai-bad-ink, #842029);
+}
+.ai-voice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--ai-line, #dfe3e8);
+  border-radius: 8px;
+  background: var(--ai-voice-bg, #f7f9fb);
+}
+.ai-voice.vs-listening {
+  border-color: var(--ai-wave, #245c8c);
+}
+.ai-voice-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--ai-muted, #555);
+}
+.ai-voice-state {
+  flex: 1;
+  min-width: 0;
+}
+.ai-voice-count {
+  min-width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ai-wave, #245c8c);
+  color: var(--ai-wave, #245c8c);
+  font-weight: 700;
+}
+.ai-voice-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  user-select: none;
+}
+.ai-caption {
+  margin: 0;
+  max-height: 7.2em;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.8;
+}
+.ai-caption.cap-assistant {
+  font-weight: 500;
+}
+.ai-caption.cap-system {
+  color: var(--ai-bad-ink, #842029);
 }
 .ai-drawer-backdrop {
   position: fixed;

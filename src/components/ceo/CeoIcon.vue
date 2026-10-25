@@ -47,6 +47,8 @@ defineProps({
     <template v-else-if="name === 'analysis'"><path d="M10 2.8l1.6 4.2 4.2 1.6-4.2 1.6L10 14.4l-1.6-4.2-4.2-1.6 4.2-1.6z" /><path d="M15.4 13.2l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" /></template>
     <template v-else-if="name === 'note'"><path d="M4.6 3h7.8l3 3v11H4.6z" /><path d="M12.2 3v3.2h3.2M7.4 10h5.2M7.4 13h3.4" /></template>
     <template v-else-if="name === 'camera'"><path d="M3 6.6h3l1.4-2h5.2l1.4 2h3v9.4H3z" /><circle cx="10" cy="11" r="2.8" /></template>
+    <template v-else-if="name === 'speaker'"><path d="M3.2 7.6h2.9l4.1-3.3v11.4l-4.1-3.3H3.2z" /><path d="M13.2 7.5a3.5 3.5 0 0 1 0 5M15.4 5.3a6.6 6.6 0 0 1 0 9.4" /></template>
+    <template v-else-if="name === 'stop'"><rect height="8.4" rx="1.6" width="8.4" x="5.8" y="5.8" /></template>
   </svg>
 </template>
 

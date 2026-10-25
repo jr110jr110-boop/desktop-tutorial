@@ -150,5 +150,19 @@ export const getCeoDrill = (key: string, params: { top?: number; page?: number; 
 export const analyzeCeo = (dto: { sectionKey: string | null; question?: string | null; conversationId?: number | null }) =>
   call("post", base + "analyze", { sectionKey: dto.sectionKey ?? null, question: dto.question || null, conversationId: dto.conversationId || null }) as Promise<[CeoAnalysis, null] | [null, Error]>;
 
+/** Spoken summary (D1 §7.2). */
+export interface CeoSpeech {
+  text: string;
+  audioBase64: string | null;
+  degraded: boolean;
+}
+/**
+ * GET ceo/speech?what=headline|section|alerts&sectionKey=. A deterministic spoken summary that works even when the language model is down: { text (Persian sentences built from
+ * the KPIs or the alerts, numbers in words), audioBase64 (WAV, base64; null when no speech endpoint is up — the page then uses the browser's Persian voice or shows the text), degraded }.
+ * sectionKey is required for what=section. Who: CEO, PMO.
+ */
+export const getCeoSpeech = (what: "headline" | "section" | "alerts", sectionKey?: string | null) =>
+  call("get", base + "speech", undefined, clean({ what, sectionKey })) as Promise<[CeoSpeech, null] | [null, Error]>;
+
 /** POST ceo/snapshot. Stores today's KPI snapshot now (the nightly job does the same at 00:30; one row per day and key). Returns { dateText, keys } (the number of KPI keys stored). Who: CEO, PMO. */
 export const snapshotCeo = () => call("post", base + "snapshot") as Promise<[{ dateText: string; keys: number }, null] | [null, Error]>;

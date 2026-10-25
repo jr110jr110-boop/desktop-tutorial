@@ -2,7 +2,8 @@
 // One module of the company (SectionDto) as a quiet panel: the title with the module's status (shape + colour + words) and its alert count, the KPIs in a hairline strip,
 // 1-3 charts, and two actions: «جزئیات» opens the detail table of the section's main drill key (the other tables of the section are one click away in the panel)
 // and «تحلیل هوشمند» asks the AI for an analysis of exactly this section (POST ceo/analyze), shown at the bottom of the panel. The module's own page is reached from the
-// side column (module pages) and from the drill panel («باز کردن صفحه‌ی ماژول»), so the header keeps only these two actions.
+// side column (module pages) and from the drill panel («باز کردن صفحه‌ی ماژول»), so the header keeps only these two actions — and the quiet «بخوان» (voice mode):
+// the section's spoken summary (GET ceo/speech, played by the page; «توقف» while it is read).
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import type { CeoKpi, CeoSection, CeoStatus } from "@/api/CeoAPIs";
@@ -16,11 +17,14 @@ const props = defineProps({
   status: { type: String as () => CeoStatus, default: "neutral" },
   theme: { type: String as () => CeoTheme, default: "light" },
   analysis: { type: Object as () => AnalysisState | null, default: null },
+  /** its spoken summary is being read */
+  reading: { type: Boolean, default: false },
 });
 const emit = defineEmits<{
   (e: "drill", key: string): void;
   (e: "analyze"): void;
   (e: "close-analysis"): void;
+  (e: "read"): void;
 }>();
 
 const router = useRouter();
@@ -53,6 +57,16 @@ const analysisLabel = computed(() => {
         <span v-if="section.alertCount > 0" class="sec-alerts">{{ faNum(section.alertCount, 0) }} هشدار</span>
       </div>
       <div class="sec-actions">
+        <button
+          :aria-label="reading ? 'توقف خواندن' : 'خلاصه‌ی صوتی بخش ' + section.title"
+          :aria-pressed="reading"
+          :title="reading ? 'توقف خواندن' : 'خلاصه‌ی صوتی این بخش'"
+          class="ceo-tool ceo-read"
+          type="button"
+          @click="emit('read')">
+          <CeoIcon :name="reading ? 'stop' : 'speaker'" :size="15" />
+          {{ reading ? "توقف" : "بخوان" }}
+        </button>
         <button :disabled="!mainDrill" class="ceo-btn ghost" type="button" @click="mainDrill && emit('drill', mainDrill)">
           <CeoIcon :size="16" name="list" />
           جزئیات
@@ -158,6 +172,7 @@ const analysisLabel = computed(() => {
 .sec-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
 .sec-kpis {

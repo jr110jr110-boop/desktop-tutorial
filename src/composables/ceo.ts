@@ -196,6 +196,12 @@ export const suggestedQuestions: Record<string, string[]> = {
   service: ["درخواست‌های خارج از SLA", "هزینه‌ی گارانتی امسال به تفکیک ماه"],
   office: ["مصوبات جلسات از موعد گذشته", "نامه‌های منتظر اقدام من"],
 };
+/**
+ * Voice commands shown as chips in the assistant drawer (voice mode, §7.3): a tap sends one at once and the answer is spoken, so the CEO learns what can be said.
+ * Each maps to UI actions of §7.1 on the server (openDrill mf.orders_late; read alerts; analyze sales; scroll projects + openDrill pc.portfolio with the red filter).
+ */
+export const voiceCommands = ["باز کن سفارش‌های عقب‌افتاده تولید", "بخوان هشدارها", "تحلیل کن بخش فروش", "نشانم بده پروژه‌های قرمز"];
+
 /** One AI analysis of the page (a section, or the whole company under the key «*»): kept for the visit only, never stored. */
 export interface AnalysisState {
   busy: boolean;
