@@ -207,10 +207,11 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int RoundingMinutes { get; set; }
 
         /// <summary>Overtime above this many minutes a month is not counted (company: 1320 = 22 hours).</summary>
-        public int MonthlyOvertimeCapMinutes { get; set; } = 1320;
+        /// <summary>Null on a save = keep the stored value (an older client that does not know the field must not reset it).</summary>
+        public int? MonthlyOvertimeCapMinutes { get; set; }
 
-        /// <summary>Delay beyond the grace is deducted as delay minutes x this coefficient (company: 3).</summary>
-        public decimal DelayPenaltyFactor { get; set; } = 3m;
+        /// <summary>Delay beyond the grace is deducted as delay minutes x this coefficient (company: 3). Null on a save = keep the stored value.</summary>
+        public decimal? DelayPenaltyFactor { get; set; }
     }
 
     public class ComputeDaysDto
@@ -473,6 +474,12 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string DateColumn { get; set; }
         public string TimeColumn { get; set; }
 
+        /// <summary>
+        /// Order of a written date: "YMD" (1405/05/20 or 2026-08-11), "DMY" (20/05/1405) or "MDY" (05/20/2026). A date that starts with a four digit year is read the same way whatever is chosen;
+        /// a year-last date such as 05/06/2026 is refused as ambiguous while no order is chosen. The preview suggests YMD for year-first dates and DMY otherwise ★.
+        /// </summary>
+        public string DateOrder { get; set; }
+
         /// <summary>One column with date and time together (used when DateColumn and TimeColumn are empty).</summary>
         public string DateTimeColumn { get; set; }
 
@@ -520,6 +527,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         /// <summary>Text of the heading row (null without heading).</summary>
         public string Header { get; set; }
         public List<string> Samples { get; set; } = new List<string>();
+
+        /// <summary>For each sample: the Persian date it is read as ("1405/07/11"), "مبهم" when its order is ambiguous, "" when it is no date. Read with the suggested order.</summary>
+        public List<string> SampleDates { get; set; } = new List<string>();
     }
 
     public class ClockFilePreviewDto

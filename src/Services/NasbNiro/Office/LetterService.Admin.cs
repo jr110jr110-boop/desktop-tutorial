@@ -85,7 +85,7 @@ namespace Services.NasbNiro.Office
         public async Task<ResponseDto<PagedList<NumberingRuleDto>>> GetRulesAsync(OfficePageQuery query, CancellationToken ct)
         {
             query ??= new OfficePageQuery();
-            await EnsureRulesAsync(ct);
+            // a read: the default rules are seeded at start-up (OfficeHostedService) and on the write paths, never here
             IQueryable<OfNumberingRule> q = _uow.Set<OfNumberingRule>().AsNoTracking().Where(r => !r.Deleted);
             int total = await q.CountAsync(ct);
             F2Page.Window(query.PageNumber, query.PageSize, total, out int number, out int size);
@@ -130,18 +130,37 @@ namespace Services.NasbNiro.Office
         }
 
         /// <summary>The pattern with every token replaced by a marker, so two patterns that produce the same numbers have the same shape. The unit token is written out for the unit being compared.</summary>
-        private static string Shape(string pattern, string unitCode, OfLetterKind kind) =>
+        private static string Shape(string pattern, string unitCode, OfLetterKind kind) => Shape(pattern, unitCode, kind, false);
+
+        /// <summary>
+        /// ★ The collision check is advisory: the number really issued is always checked against the numbers already taken (NextNumberAsync skips a taken number, and the unique index of
+        /// kind and number backs it), so a collision this check misses costs a skipped number, never a duplicate.
+        /// With <paramref name="codeMarker"/> the {code} token is written as a marker for "a tender or project code and its dash, or nothing".
+        /// </summary>
+        private static string Shape(string pattern, string unitCode, OfLetterKind kind, bool codeMarker) =>
             Regex.Replace(pattern, @"\{(yyyy|yy|unit|kind|code|seq(?::\d{1,9})?)\}", m =>
             {
                 string t = m.Groups[1].Value;
                 if (t == "yyyy") return "\u0001Y4";
                 if (t == "yy") return "\u0001Y2";
-                // the code is optional (a letter without a link prints nothing), so a pattern with {code} can produce the numbers of the same pattern without it: compared as if it were absent
-                if (t == "code") return "";
+                // the code is optional (a letter without a link prints nothing), so a pattern with {code} can produce the numbers of the same pattern without it: compared as if it were absent,
+                // or (codeMarker) as a marker that CouldCollide expands to any code
+                if (t == "code") return codeMarker ? "\u0002" : "";
                 if (t == "unit") return unitCode ?? "CO";
                 if (t == "kind") return KindCode(kind);
                 return "\u0001S";
             });
+
+        /// <summary>True when the numbers of two shapes (with the code marker) can be equal: the same shape, or one of them has {code} and the other equals it for some tender / project code (letters, digits, dashes).</summary>
+        internal static bool CouldCollide(string a, string b)
+        {
+            if (a == b) return true;
+            bool ac = a.Contains('\u0002'), bc = b.Contains('\u0002');
+            if (ac == bc) return false;
+            string withCode = ac ? a : b, plain = ac ? b : a;
+            string regex = "^" + string.Join("(?:[A-Za-z0-9-]{1,40}-)?", withCode.Split('\u0002').Select(Regex.Escape)) + "$";
+            return Regex.IsMatch(plain, regex, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        }
 
         /// <summary>
         /// Two active rules of one kind must not be able to issue the same number (the second would hit the unique index for good). A rule is refused when its pattern has the same shape as another active
@@ -159,9 +178,9 @@ namespace Services.NasbNiro.Office
             foreach (OfNumberingRule o in others)
             {
                 string mine, theirs;
-                if (unitId.HasValue && o.UnitId.HasValue && unitId != o.UnitId) { mine = Shape(pattern, CodeOf(unitId), kind); theirs = Shape(o.Pattern, CodeOf(o.UnitId), kind); }
-                else { string code = CodeOf(unitId ?? o.UnitId); mine = Shape(pattern, code, kind); theirs = Shape(o.Pattern, code, kind); }
-                if (mine == theirs)
+                if (unitId.HasValue && o.UnitId.HasValue && unitId != o.UnitId) { mine = Shape(pattern, CodeOf(unitId), kind, true); theirs = Shape(o.Pattern, CodeOf(o.UnitId), kind, true); }
+                else { string code = CodeOf(unitId ?? o.UnitId); mine = Shape(pattern, code, kind, true); theirs = Shape(o.Pattern, code, kind, true); }
+                if (CouldCollide(mine, theirs))
                     return "این الگو می‌تواند شماره‌ای بسازد که قاعده فعال دیگری از همین نوع نامه ساخته است و شماره تکراری می‌دهد. در الگو یک حرف یا عبارت ثابت اضافه کنید (مثلاً INT-{yy}-{seq}).";
             }
             return null;
@@ -403,6 +422,25 @@ namespace Services.NasbNiro.Office
             return read == 5 && head[0] == '%' && head[1] == 'P' && head[2] == 'D' && head[3] == 'F' && head[4] == '-';
         }
 
+        /// <summary>Takes a letter (and its attachments) out of the tracking of the unit of work, so a failed file leaves nothing behind for the next save.</summary>
+        private void Detach(OfLetter letter)
+        {
+            if (letter == null) return;
+            foreach (OfLetterAttachment a in letter.Attachments.ToList()) _uow.Entry(a).State = EntityState.Detached;
+            _uow.Entry(letter).State = EntityState.Detached;
+        }
+
+        /// <summary>A document row that was added but whose save failed would be retried by the next save: forget it.</summary>
+        private void DetachPendingDocuments()
+        {
+            foreach (var d in _uow.Set<Entities.Model.Document>().Local.ToList())
+                if (_uow.Entry(d).State == EntityState.Added) _uow.Entry(d).State = EntityState.Detached;
+        }
+
+        /// <summary>
+        /// Attaches the PDFs of the Rahkaran export, one per imported letter, matched by file name. Every file is reported on its own line (attached, already-attached, unmatched, ambiguous, not-pdf, invalid).
+        /// A file of the same name as an existing attachment of the letter is skipped (already-attached), so sending a batch again is safe; a file with a different name for the same letter is added as a second attachment.
+        /// </summary>
         public async Task<ResponseDto<ArchiveFilesResultDto>> AttachArchiveFilesAsync(ArchiveFilesDto dto, List<ArchiveFileInput> files, CancellationToken ct)
         {
             if (!_user.IsInRole(OfficeRoles.Secretariat)) return Bad<ArchiveFilesResultDto>(OfficeText.NotAllowed);
@@ -443,7 +481,9 @@ namespace Services.NasbNiro.Office
                 if (!name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) { line.Result = "not-pdf"; line.Message = "فقط فایل PDF پذیرفته می‌شود."; continue; }
                 if (f.File.Length > MaxArchiveFileBytes) { line.Result = "invalid"; line.Message = "حجم فایل از ۵۰ مگابایت بیشتر است."; continue; }
                 if (!await LooksLikePdfAsync(f.File, ct)) { line.Result = "not-pdf"; line.Message = "محتوای فایل PDF معتبر نیست."; continue; }
-                string number = ArchiveNumberOf(name, pattern);
+                string number;
+                try { number = ArchiveNumberOf(name, pattern); }
+                catch (RegexMatchTimeoutException) { line.Result = "invalid"; line.Message = "خواندن شماره از نام فایل با این عبارت منظم زیاد طول کشید؛ عبارت را ساده‌تر کنید."; continue; }
                 if (number == null) { line.Result = "unmatched"; line.Message = "نام فایل با الگوی شماره نامه نمی‌خواند."; result.Unmatched++; continue; }
                 line.Number = number;
                 List<int> hits = byKey[ArchiveKey(number)].Distinct().ToList();
@@ -454,17 +494,22 @@ namespace Services.NasbNiro.Office
                 toAttach.Add((f, line));
             }
 
-            if (toAttach.Count > 0)
+            // each file is attached on its own: a failure of one (a full disk, a broken file, a conflicting save) is reported on its line, the state of the unit of work is cleaned,
+            // and the next file starts from a clean slate, so the batch is never left half-reported
+            DateTimeOffset now = DateTimeOffset.Now;
+            foreach (var item in toAttach)
             {
-                List<int> ids = toAttach.Select(t => t.Line.LetterId.Value).Distinct().ToList();
-                Dictionary<int, OfLetter> loaded = (await _uow.Set<OfLetter>().Include(l => l.Attachments).Where(l => ids.Contains(l.Id)).ToListAsync(ct)).ToDictionary(l => l.Id);
-                DateTimeOffset now = DateTimeOffset.Now;
-                foreach (var item in toAttach)
+                OfLetter letter = null;
+                OfLetterAttachment added = null;
+                try
                 {
-                    OfLetter letter = loaded[item.Line.LetterId.Value];
+                    letter = await _uow.Set<OfLetter>().Include(l => l.Attachments).FirstOrDefaultAsync(l => l.Id == item.Line.LetterId.Value && !l.Deleted, ct);
+                    if (letter == null) { item.Line.Result = "unmatched"; item.Line.Message = "نامه پیدا نشد."; result.Unmatched++; continue; }
+                    // a file of the same name is not attached twice (sending the batch again is safe); a file of another name for the same letter is a second attachment
                     if (letter.Attachments.Any(a => string.Equals(a.FileName, item.Line.FileName, StringComparison.OrdinalIgnoreCase)))
                     {
                         item.Line.Result = "already-attached"; item.Line.Message = "این فایل قبلاً به نامه پیوست شده است."; result.AlreadyAttached++;
+                        Detach(letter);
                         continue;
                     }
                     Guid documentId = await _documents.UploadDocumentAsync(new ViewModels.NasbNiro.DocumentDtos.UploadFileDto
@@ -472,12 +517,20 @@ namespace Services.NasbNiro.Office
                         File = item.File.File, Name = System.IO.Path.GetFileNameWithoutExtension(item.Line.FileName), Code = "LETTER-ARCHIVE", Description = "آرشیو نامه‌های قدیم — نامه " + letter.Number,
                     });
                     string hash = await _documents.GetFileHashAsync(documentId);
-                    letter.Attachments.Add(new OfLetterAttachment { DocumentId = documentId, FileName = item.Line.FileName, FileHash = hash });
+                    added = new OfLetterAttachment { DocumentId = documentId, FileName = item.Line.FileName, FileHash = hash };
+                    letter.Attachments.Add(added);
                     letter.ModifyDate = now; letter.ModifierUserId = Me;
+                    await _uow.SaveChangesAsync(ct);
                     item.Line.Result = "attached"; item.Line.Message = "به نامه پیوست شد."; result.Attached++;
+                    Detach(letter);
                 }
-                try { await _uow.SaveChangesAsync(ct); }
-                catch (DbUpdateException) { return Bad<ArchiveFilesResultDto>("ذخیره پیوست‌ها انجام نشد؛ دوباره تلاش کنید."); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception)
+                {
+                    Detach(letter);
+                    DetachPendingDocuments();
+                    item.Line.Result = "invalid"; item.Line.Message = "پیوست این فایل انجام نشد؛ فایل‌های دیگر بررسی شدند و دوباره ارسال این یکی بی‌خطر است.";
+                }
             }
 
             IQueryable<OfLetter> without = _uow.Set<OfLetter>().AsNoTracking().Where(l => !l.Deleted && l.Imported && !l.Attachments.Any());

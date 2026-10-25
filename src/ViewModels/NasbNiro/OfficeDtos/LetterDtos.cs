@@ -194,6 +194,25 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string RowVersion { get; set; }
     }
 
+    /// <summary>A tender or a project (contract) a letter can be linked to, with the code exactly as it goes into the letter number.</summary>
+    public class LinkOptionDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>Tender: the tender code. Project: the project code of project control, the contract code while the project has none.</summary>
+        public string Code { get; set; }
+        public string Title { get; set; }
+
+        /// <summary>Null when the code can be used in a number; otherwise why not (no code, or a character a number cannot hold). Such an option is refused when a letter is saved.</summary>
+        public string Problem { get; set; }
+    }
+
+    public class LinkOptionsDto
+    {
+        public List<LinkOptionDto> Tenders { get; set; } = new List<LinkOptionDto>();
+        public List<LinkOptionDto> Contracts { get; set; } = new List<LinkOptionDto>();
+    }
+
     public class SaveLetterDto
     {
         public int? Id { get; set; }

@@ -102,8 +102,21 @@ namespace MsTests
             Assert.IsNull(p.MaxOvertimeMinutesPerDay);
             var dto = new AttendancePolicyDto();
             Assert.AreEqual(15, dto.GraceMinutes);
-            Assert.AreEqual(1320, dto.MonthlyOvertimeCapMinutes);
-            Assert.AreEqual(3m, dto.DelayPenaltyFactor);
+            // a save that does not send the new fields keeps the stored values
+            Assert.IsNull(dto.MonthlyOvertimeCapMinutes);
+            Assert.IsNull(dto.DelayPenaltyFactor);
+        }
+
+        [TestMethod]
+        public void Old_Policy_Defaults_Are_Upgraded_Once_And_An_Admins_Row_Is_Not_Touched()
+        {
+            Assert.IsTrue(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = true }));
+            // an admin changed it: grace 5, or pre-approval off
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 5, OvertimeNeedsPreApproval = true }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = false }));
+            // already upgraded (the marker): an admin who chose grace 0 again is not overwritten
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = true, CompanyRulesApplied = true }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(null));
         }
 
         [TestMethod]
@@ -330,6 +343,89 @@ namespace MsTests
             Assert.AreEqual(LetterService.ArchiveKey("۱۳۹۹/ص/۱۲۳"), LetterService.ArchiveKey("1399_ص_123"));
             Assert.AreEqual(LetterService.ArchiveKey("12ي"), LetterService.ArchiveKey("12ی"));
             Assert.AreNotEqual(LetterService.ArchiveKey("1399/OUT/45"), LetterService.ArchiveKey("1399/OUT/46"));
+        }
+
+        // ------------------------------------------------------------------------------------------ review fixes
+
+        [TestMethod]
+        public void A_Year_Last_Date_Is_Refused_As_Ambiguous_Until_The_Order_Is_Chosen()
+        {
+            DateTime d; bool amb;
+            Assert.IsFalse(ClockCellParser.TryDateText("05/06/2026", ClockDateOrder.Auto, out d, out amb)); Assert.IsTrue(amb);
+            Assert.IsTrue(ClockCellParser.TryDateText("05/06/2026", ClockDateOrder.DMY, out d, out amb)); Assert.AreEqual(new DateTime(2026, 6, 5), d);
+            Assert.IsTrue(ClockCellParser.TryDateText("05/06/2026", ClockDateOrder.MDY, out d, out amb)); Assert.AreEqual(new DateTime(2026, 5, 6), d);
+            // one reading is impossible, or both are the same
+            Assert.IsTrue(ClockCellParser.TryDateText("20/05/2026", ClockDateOrder.Auto, out d, out amb)); Assert.AreEqual(new DateTime(2026, 5, 20), d);
+            Assert.IsTrue(ClockCellParser.TryDateText("05/20/2026", ClockDateOrder.Auto, out d, out amb)); Assert.AreEqual(new DateTime(2026, 5, 20), d);
+            Assert.IsTrue(ClockCellParser.TryDateText("05/05/2026", ClockDateOrder.Auto, out d, out amb));
+            // a year-first date is never ambiguous
+            Assert.IsTrue(ClockCellParser.TryDateText("1405/06/05", ClockDateOrder.Auto, out d, out amb)); Assert.AreEqual(new DateTime(2026, 8, 27), d);
+            // YMD chosen but the text is year-last: not read
+            Assert.IsFalse(ClockCellParser.TryDateText("05/06/2026", ClockDateOrder.YMD, out d, out amb)); Assert.IsFalse(amb);
+            Assert.AreEqual(ClockDateOrder.DMY, ClockCellParser.OrderOf("dmy"));
+            Assert.AreEqual(ClockDateOrder.Auto, ClockCellParser.OrderOf("x"));
+            Assert.IsTrue(ClockCellParser.IsYearFirst("1405/05/20"));
+            Assert.IsFalse(ClockCellParser.IsYearFirst("20/05/1405"));
+        }
+
+        [TestMethod]
+        public void Excel_Serials_Honour_The_1904_Date_System()
+        {
+            DateTime d;
+            Assert.IsTrue(ClockCellParser.TryDate(new XlsxCell { Number = 46245d, IsDateFormat = true, Date1904 = false }, out d)); Assert.AreEqual(new DateTime(2026, 8, 11), d);
+            Assert.IsTrue(ClockCellParser.TryDate(new XlsxCell { Number = 46245d - 1462d, IsDateFormat = true, Date1904 = true }, out d)); Assert.AreEqual(new DateTime(2026, 8, 11), d);
+        }
+
+        [TestMethod]
+        public void Persian_Am_Pm_Markers_Are_Read()
+        {
+            int m;
+            Assert.IsTrue(ClockCellParser.TryTimeText("۰۵:۳۰ ب.ظ", out m)); Assert.AreEqual(17 * 60 + 30, m);
+            Assert.IsTrue(ClockCellParser.TryTimeText("05:30 ق.ظ", out m)); Assert.AreEqual(5 * 60 + 30, m);
+            Assert.IsTrue(ClockCellParser.TryTimeText("12:10 ق.ظ", out m)); Assert.AreEqual(10, m);
+            Assert.IsTrue(ClockCellParser.TryTimeText("12:10 ب.ظ", out m)); Assert.AreEqual(12 * 60 + 10, m);
+            Assert.IsTrue(ClockCellParser.TryTimeText("1405/05/20 05:30 ب.ظ", out m)); Assert.AreEqual(17 * 60 + 30, m);
+            Assert.IsTrue(ClockCellParser.TryTimeText("5:30 PM", out m)); Assert.AreEqual(17 * 60 + 30, m);
+        }
+
+        [TestMethod]
+        public void Xlsx_Limits_Refuse_A_Sheet_With_Too_Many_Columns_And_A_Broken_Package()
+        {
+            var cells = new StringBuilder("<row r=\"1\">");
+            for (int c = 0; c < 300; c++) cells.Append("<c r=\"" + XlsxReader.ColumnLetter(c) + "1\"><v>1</v></c>");
+            cells.Append("</row>");
+            Assert.ThrowsException<XlsxFormatException>(() => XlsxReader.Read(Xlsx(cells.ToString()), null));
+            // a zip that is cut short, and a part that is not XML, give the Persian format error and not an exception that ends as HTTP 500
+            byte[] good = Xlsx("<row r=\"1\"><c r=\"A1\"><v>1</v></c></row>");
+            byte[] cut = good.Take(good.Length - 40).ToArray();
+            Assert.ThrowsException<XlsxFormatException>(() => XlsxReader.Read(cut, null));
+            Assert.ThrowsException<XlsxFormatException>(() => XlsxReader.Read(Xlsx("<row r=\"1\"><c r=\"A1\"><v>1</c></row>"), null));
+        }
+
+        [TestMethod]
+        public void A_Code_Must_Be_Usable_In_A_Number()
+        {
+            Assert.IsNull(LetterService.CodeProblem("T-1405-17", true));
+            Assert.IsNull(LetterService.CodeProblem("40501MA01", false));
+            Assert.IsNotNull(LetterService.CodeProblem(null, true));
+            StringAssert.Contains(LetterService.CodeProblem("  ", true), "کد ندارد");
+            Assert.AreEqual(LetterService.UnusableCode, LetterService.CodeProblem("T 17", true));
+            Assert.AreEqual(LetterService.UnusableCode, LetterService.CodeProblem("T/17", false));
+            Assert.AreEqual(LetterService.UnusableCode, LetterService.CodeProblem("مناقصه", true));
+            Assert.AreEqual(LetterService.UnusableCode, LetterService.CodeProblem(new string('A', 41), true));
+        }
+
+        [TestMethod]
+        public void A_Unit_Rule_That_Looks_Like_A_Code_Pattern_Collides_With_It()
+        {
+            // INN-{code}{yyyy}-{seq} with the tender code T5 prints INN-T5-1405-n, the same as a unit rule INN-T5-{yyyy}-{seq}
+            string general = "INN-\u0002\u0001Y4-\u0001S", unit = "INN-T5-\u0001Y4-\u0001S";
+            Assert.IsTrue(LetterService.CouldCollide(general, unit));
+            Assert.IsTrue(LetterService.CouldCollide(unit, general));
+            // the pattern without a link: INN-1405-n
+            Assert.IsTrue(LetterService.CouldCollide(general, "INN-\u0001Y4-\u0001S"));
+            Assert.IsFalse(LetterService.CouldCollide(general, "OUT-T5-\u0001Y4-\u0001S"));
+            Assert.IsFalse(LetterService.CouldCollide("INT-\u0001Y2-\u0001S", general));
         }
     }
 }

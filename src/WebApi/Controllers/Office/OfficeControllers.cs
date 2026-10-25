@@ -106,6 +106,10 @@ namespace WebApi.Controllers
         [HttpGet("letters")]
         public async Task<IActionResult> LettersAsync([FromQuery] LetterQuery query, CancellationToken ct) => Ok((await _letters.GetLettersAsync(query, ct)).ToPaginatedResultSafe());
 
+        /// <summary>Tenders and projects a draft letter can be linked to, with the code as it goes into the number (project code, else the contract code). Any signed-in user.</summary>
+        [HttpGet("letters/link-options")]
+        public async Task<IActionResult> LinkOptionsAsync(CancellationToken ct) => Ok(await _letters.GetLinkOptionsAsync(ct));
+
         [HttpGet("letters/{id:int}")]
         public async Task<IActionResult> LetterAsync(int id, CancellationToken ct) => Ok(await _letters.GetLetterAsync(id, ct));
 
@@ -247,6 +251,7 @@ namespace WebApi.Controllers
         [RequestSizeLimit(ClockFileForm.MaxRequestBytes)]
         public async Task<IActionResult> PreviewFileAsync([FromForm] ClockFileForm form, CancellationToken ct)
         {
+            if (form?.File != null && form.File.Length > ClockFileForm.MaxFileBytes) return Ok(ResponseDtoHelper.BadRequest<ClockFilePreviewDto>(ClockFileForm.TooBig));
             byte[] data = await ReadAsync(form?.File, ct);
             return Ok(await _attendance.PreviewClockFileAsync(data, form?.Sheet, ct));
         }
@@ -262,6 +267,7 @@ namespace WebApi.Controllers
                 try { mapping = JsonSerializer.Deserialize<ClockFileMappingDto>(form.Mapping, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
                 catch (JsonException) { return Ok(ResponseDtoHelper.BadRequest<ClockImportResultDto>("ستون‌بندی فایل خوانده نشد.")); }
             }
+            if (form?.File != null && form.File.Length > ClockFileForm.MaxFileBytes) return Ok(ResponseDtoHelper.BadRequest<ClockImportResultDto>(ClockFileForm.TooBig));
             byte[] data = await ReadAsync(form?.File, ct);
             return Ok(await _attendance.ImportClockFileAsync(data, new ClockFileImportDto { ProfileId = form?.ProfileId, Mapping = mapping, SaveProfileAs = form?.SaveProfileAs }, ct));
         }
@@ -319,7 +325,10 @@ namespace WebApi.Controllers
     public class ClockFileForm
     {
         public const long MaxFileBytes = 20L * 1024 * 1024;
-        public const long MaxRequestBytes = MaxFileBytes + 1024 * 1024;
+
+        /// <summary>The request may be larger than the file limit so that the action can answer a too big file with a clear Persian message instead of a bare HTTP 413.</summary>
+        public const long MaxRequestBytes = 64L * 1024 * 1024;
+        public const string TooBig = "حجم فایل اکسل نباید از ۲۰ مگابایت بیشتر باشد؛ فایل را بازه‌ای کوچک‌تر خروجی بگیرید.";
 
         public IFormFile File { get; set; }
         public string Sheet { get; set; }

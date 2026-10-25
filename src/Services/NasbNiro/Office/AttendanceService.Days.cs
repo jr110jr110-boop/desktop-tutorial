@@ -59,8 +59,11 @@ namespace Services.NasbNiro.Office
             return await ComputeCoreAsync(today.AddDays(-3), today.AddDays(-1), null, ct);
         }
 
-        private async Task<OfAttendancePolicy> LoadPolicyAsync(CancellationToken ct) =>
-            await _uow.Set<OfAttendancePolicy>().AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new OfAttendancePolicy();
+        private async Task<OfAttendancePolicy> LoadPolicyAsync(CancellationToken ct)
+        {
+            await EnsureCompanyPolicyAsync(ct);
+            return await _uow.Set<OfAttendancePolicy>().AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new OfAttendancePolicy();
+        }
 
         /// <summary>Computes (or recomputes) the days of the range for every employee that has a shift or clock events. Today and the future are not computed; locked months are left alone.</summary>
         internal async Task<ComputeResultDto> ComputeCoreAsync(DateTime fromDate, DateTime toDate, int? employeeId, CancellationToken ct)

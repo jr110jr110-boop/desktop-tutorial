@@ -23,6 +23,12 @@ namespace Services.NasbNiro.Office
     public interface ILetterService
     {
         Task<ResponseDto<PagedList<LetterListDto>>> GetLettersAsync(LetterQuery query, CancellationToken cancellationToken);
+
+        /// <summary>The tenders and projects a letter writer can link a draft to, with the code that goes into the number (project code, else the contract code). Open to every signed-in letter writer.</summary>
+        Task<ResponseDto<LinkOptionsDto>> GetLinkOptionsAsync(CancellationToken cancellationToken);
+
+        /// <summary>Seeds the default numbering rules and upgrades the ones that still have the first default pattern (idempotent; called at start-up).</summary>
+        Task EnsureNumberingRulesAsync(CancellationToken cancellationToken);
         Task<ResponseDto<LetterDto>> GetLetterAsync(int id, CancellationToken cancellationToken);
 
         /// <summary>The ids of the letters the caller may read in full (the same rule as <see cref="GetLetterAsync"/>, as one query that can be composed with others on the same unit of work).</summary>
@@ -233,7 +239,7 @@ namespace Services.NasbNiro.Office
             d.Urgency = l.Urgency; d.Imported = l.Imported; d.MetadataOnly = access == Access.Meta;
             d.Subject = access == Access.Meta ? (l.Classification == OfClassification.Secret ? "(نامه سری — فقط مشخصات ثبت)" : "(نامه محرمانه — فقط مشخصات ثبت)") : l.Subject;
             d.TenderId = l.TenderId; d.ContractId = l.ContractId;
-            if (links != null && links.TryGetValue(l.Id, out LinkInfo link)) { d.LinkCode = link.Code; d.LinkTitle = link.Title; }
+            if (links != null && links.TryGetValue(l.Id, out LinkInfo link)) { d.LinkCode = link.Code; d.LinkTitle = access == Access.Meta ? null : link.Title; } // the code is register data (part of the number); the title (project name) is content
             // the parties are register data: the secretariat sees them, never the subject or the text
             d.SenderName = l.SenderPositionId.HasValue ? positions.Title(l.SenderPositionId) : (l.SenderPartyId.HasValue && parties.TryGetValue(l.SenderPartyId.Value, out string pn) ? pn : null);
             d.RecipientNames = Join((l.Recipients ?? new List<OfLetterRecipient>()).Where(r => r.Type == OfRecipientType.To)
@@ -479,13 +485,44 @@ namespace Services.NasbNiro.Office
             return result;
         }
 
-        /// <summary>The code that goes into the number (null without a link). An error when the linked tender or project has no code.</summary>
+        public async Task<ResponseDto<LinkOptionsDto>> GetLinkOptionsAsync(CancellationToken ct)
+        {
+            if (Me <= 0) return Bad<LinkOptionsDto>(OfficeText.NotAllowed);
+            var dto = new LinkOptionsDto();
+            var tenders = await _uow.Set<Tender>().AsNoTracking().Where(t => !t.Deleted).OrderByDescending(t => t.Id).Take(3000).Select(t => new { t.Id, t.Code, t.Description, t.Company }).ToListAsync(ct);
+            foreach (var t in tenders)
+                dto.Tenders.Add(new LinkOptionDto { Id = t.Id, Code = Clean(t.Code), Title = Clean(t.Description) ?? Clean(t.Company), Problem = CodeProblem(t.Code, true) });
+            var contracts = await _uow.Set<ContractEntity>().AsNoTracking().Where(c => !c.Deleted).OrderByDescending(c => c.Id).Take(3000).Select(c => new { c.Id, c.Code, c.Title }).ToListAsync(ct);
+            List<int> ids = contracts.Select(c => c.Id).ToList();
+            Dictionary<int, string> terms = await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => !t.Deleted && ids.Contains(t.ContractId) && t.ProjectCode != null).ToDictionaryAsync(t => t.ContractId, t => t.ProjectCode, ct);
+            foreach (var c in contracts)
+            {
+                string code = ProjectCodeOf(terms.TryGetValue(c.Id, out string pc) ? pc : null, c.Code);
+                dto.Contracts.Add(new LinkOptionDto { Id = c.Id, Code = code, Title = Clean(c.Title), Problem = CodeProblem(code, false) });
+            }
+            return ResponseDtoHelper.Ok(dto);
+        }
+
+        /// <summary>A code that goes into a letter number: letters, digits and dashes only, 1 to 40 characters (no slash, space or other character that would break a file name or a number search).</summary>
+        internal static readonly System.Text.RegularExpressions.Regex UsableCode = new System.Text.RegularExpressions.Regex("^[A-Za-z0-9-]{1,40}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        internal const string UnusableCode = "کد مناقصه/پروژه برای شماره نامه مناسب نیست؛ فقط حروف انگلیسی، رقم و خط تیره (حداکثر ۴۰ نویسه) مجاز است. کد را اصلاح کنید.";
+
+        /// <summary>Why the code of the tender (or project) cannot be used in a number, or null when it can.</summary>
+        internal static string CodeProblem(string code, bool tender)
+        {
+            string c = Clean(code);
+            if (c == null) return tender ? "این مناقصه کد ندارد؛ ابتدا کد مناقصه را ثبت کنید." : "این پروژه کد ندارد؛ ابتدا کد پروژه را صادر کنید.";
+            return UsableCode.IsMatch(c) ? null : UnusableCode;
+        }
+
+        /// <summary>The code that goes into the number (null without a link). An error when the linked tender or project is gone, has no code, or has a code that cannot be part of a number.</summary>
         private async Task<(string Code, string Error)> LinkCodeAsync(OfLetter l, CancellationToken ct)
         {
             if (!l.TenderId.HasValue && !l.ContractId.HasValue) return (null, null);
             Dictionary<int, LinkInfo> links = await LinksAsync(new[] { l }, ct);
-            if (!links.TryGetValue(l.Id, out LinkInfo link) || link.Code == null) return (null, "کد مناقصه یا پروژه مرتبط با نامه پیدا نشد؛ پیوند نامه را اصلاح کنید.");
-            return (link.Code, null);
+            if (!links.TryGetValue(l.Id, out LinkInfo link)) return (null, "مناقصه یا پروژه‌ی مرتبط با نامه پیدا نشد؛ پیوند نامه را اصلاح کنید.");
+            string problem = CodeProblem(link.Code, l.TenderId.HasValue);
+            return problem == null ? (Clean(link.Code), null) : (null, problem);
         }
 
         /// <summary>Checks the optional link of a draft: at most one of the two, the record exists and has a code.</summary>
@@ -494,16 +531,18 @@ namespace Services.NasbNiro.Office
             if (tenderId.HasValue && contractId.HasValue) return "نامه فقط به یک مناقصه یا یک پروژه وصل می‌شود، نه هر دو.";
             if (tenderId.HasValue)
             {
-                string code = await _uow.Set<Tender>().AsNoTracking().Where(t => t.Id == tenderId.Value && !t.Deleted).Select(t => t.Code).FirstOrDefaultAsync(ct);
-                if (code == null) return "مناقصه پیدا نشد.";
-                if (Clean(code) == null) return "این مناقصه کد ندارد؛ ابتدا کد مناقصه را ثبت کنید.";
+                var t = await _uow.Set<Tender>().AsNoTracking().Where(x => x.Id == tenderId.Value && !x.Deleted).Select(x => new { x.Code }).FirstOrDefaultAsync(ct);
+                if (t == null) return "مناقصه پیدا نشد.";
+                string problem = CodeProblem(t.Code, true);
+                if (problem != null) return problem;
             }
             if (contractId.HasValue)
             {
                 var c = await _uow.Set<ContractEntity>().AsNoTracking().Where(x => x.Id == contractId.Value && !x.Deleted).Select(x => new { x.Code }).FirstOrDefaultAsync(ct);
                 if (c == null) return "پروژه (قرارداد) پیدا نشد.";
                 string pc = await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => t.ContractId == contractId.Value && !t.Deleted).Select(t => t.ProjectCode).FirstOrDefaultAsync(ct);
-                if (ProjectCodeOf(pc, c.Code) == null) return "این پروژه کد ندارد؛ ابتدا کد پروژه را صادر کنید.";
+                string projectProblem = CodeProblem(ProjectCodeOf(pc, c.Code), false);
+                if (projectProblem != null) return projectProblem;
             }
             return null;
         }
@@ -568,10 +607,21 @@ namespace Services.NasbNiro.Office
             }
         }
 
+        /// <summary>No rule yet, or a general rule that still has the very first default pattern: <see cref="EnsureRulesAsync"/> has work to do. A read only.</summary>
+        private async Task<bool> RulesNeedSetupAsync(CancellationToken ct)
+        {
+            var rules = await _uow.Set<OfNumberingRule>().AsNoTracking().Where(r => !r.Deleted).Select(r => new { r.UnitId, r.Pattern }).ToListAsync(ct);
+            return rules.Count == 0 || rules.Any(r => r.UnitId == null && r.Pattern == FirstDefaultPattern);
+        }
+
+        /// <summary>Seeds / upgrades the default numbering rules (start-up job and write paths).</summary>
+        public Task EnsureNumberingRulesAsync(CancellationToken ct) => EnsureRulesAsync(ct);
+
         /// <summary>Takes the next number of the rule that fits the letter: the rule of the unit if there is one, else the general rule of the kind.</summary>
         private async Task<(string Number, int RuleId, string Error)> NextNumberAsync(OfLetterKind kind, int? unitId, string unitCode, DateTime date, string linkCode, CancellationToken ct)
         {
-            await EnsureRulesAsync(ct);
+            // the rules are seeded / upgraded before a letter is changed (save, sign) and at start-up; this save would also commit the half-built letter, so it only happens as a last resort
+            if (await RulesNeedSetupAsync(ct)) await EnsureRulesAsync(ct);
             List<OfNumberingRule> rules = await _uow.Set<OfNumberingRule>().Where(r => !r.Deleted && r.IsActive && r.Kind == kind).ToListAsync(ct);
             OfNumberingRule rule = rules.FirstOrDefault(r => unitId.HasValue && r.UnitId == unitId) ?? rules.FirstOrDefault(r => r.UnitId == null);
             if (rule == null) return (null, 0, "قاعده شماره‌گذاری فعالی برای این نوع نامه تعریف نشده است.");

@@ -50,6 +50,7 @@ namespace Services.NasbNiro.Office
         private static ResponseDto<T> Bad<T>(string m) => OfficeText.Bad<T>(m);
 
         private const string NoRecord = "پرونده پرسنلی شما در سامانه ثبت نشده است؛ با واحد اداری تماس بگیرید.";
+        /// <summary>The day of an employee without a shift: 8 hours. With a shift the day is the scheduled minutes of the shift (end - start - break).</summary>
         private const int DefaultDayMinutes = 480;
 
         private static bool IsDayKind(OfLeaveKind k, int? fromMinute) =>
@@ -120,7 +121,9 @@ namespace Services.NasbNiro.Office
             if (a == null) return DefaultDayMinutes;
             OfShift s = await _uow.Set<OfShift>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == a.ShiftId, ct);
             if (s == null) return DefaultDayMinutes;
-            return s.EndMinute > s.StartMinute ? s.EndMinute - s.StartMinute : s.EndMinute + 1440 - s.StartMinute;
+            // ★ the day of a shift is its scheduled minutes: end - start - break (the same basis the lateness deduction uses), e.g. 08:00-16:00 with a 30 minute break is 450 minutes
+            int scheduled = (s.EndMinute > s.StartMinute ? s.EndMinute - s.StartMinute : s.EndMinute + 1440 - s.StartMinute) - s.BreakMinutes;
+            return scheduled > 0 ? scheduled : DefaultDayMinutes;
         }
 
         private async Task<int> WorkingDaysAsync(int employeeId, DateTime from, DateTime to, CancellationToken ct)

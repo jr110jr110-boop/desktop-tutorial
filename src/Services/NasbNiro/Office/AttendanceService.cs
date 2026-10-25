@@ -456,9 +456,15 @@ namespace Services.NasbNiro.Office
             List<RawClock> rows = ParseRows(dto, result.Errors);
             if (rows.Count > 20000) return Bad<ClockImportResultDto>("حداکثر ۲۰٬۰۰۰ تردد در هر بار بارگذاری مجاز است.");
             var unknownCodes = new List<string>();
-            var (added, duplicates, unknown, rejected) = await StoreAsync(rows, OfClockSource.Import, Clean(dto.DeviceCode) ?? "IMPORT", result.Errors, ct, unknownCodes);
-            try { await _uow.SaveChangesAsync(ct); }
-            catch (DbUpdateException) { return Bad<ClockImportResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
+            int added, duplicates, unknown, rejected;
+            await ClockStoreLock.WaitAsync(ct);
+            try
+            {
+                (added, duplicates, unknown, rejected) = await StoreAsync(rows, OfClockSource.Import, Clean(dto.DeviceCode) ?? "IMPORT", result.Errors, ct, unknownCodes);
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { return Bad<ClockImportResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
+            }
+            finally { ClockStoreLock.Release(); }
             result.Imported = added;
             result.Duplicates = duplicates;
             result.Unknown = unknown;
@@ -498,10 +504,16 @@ namespace Services.NasbNiro.Office
                 if (string.IsNullOrWhiteSpace(e.EmployeeCode) || e.Timestamp == default) { result.Rejected++; errors.Add($"رویداد {n}: کد یا زمان نامعتبر است."); continue; }
                 rows.Add(new RawClock { Code = OfficeText.Digits(e.EmployeeCode.Trim()), Timestamp = e.Timestamp, Device = device.Code, Direction = e.Direction, Line = "رویداد " + n });
             }
-            var (added, duplicates, unknown, rejectedRows) = await StoreAsync(rows, OfClockSource.Device, device.Code, errors, ct);
-            device.LastPushAt = DateTimeOffset.Now;
-            try { await _uow.SaveChangesAsync(ct); }
-            catch (DbUpdateException) { return Bad<DevicePushResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
+            int added, duplicates, unknown, rejectedRows;
+            await ClockStoreLock.WaitAsync(ct);
+            try
+            {
+                (added, duplicates, unknown, rejectedRows) = await StoreAsync(rows, OfClockSource.Device, device.Code, errors, ct);
+                device.LastPushAt = DateTimeOffset.Now;
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { return Bad<DevicePushResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
+            }
+            finally { ClockStoreLock.Release(); }
             result.Accepted = added;
             result.Duplicates = duplicates;
             result.Rejected += unknown + rejectedRows;
@@ -517,9 +529,28 @@ namespace Services.NasbNiro.Office
             MonthlyOvertimeCapMinutes = p.MonthlyOvertimeCapMinutes, DelayPenaltyFactor = p.DelayPenaltyFactor,
         };
 
+        /// <summary>True for a policy row that still holds the first-release defaults (grace 0, overtime needs pre-approval) and was never moved to the company rules.</summary>
+        internal static bool NeedsCompanyUpgrade(OfAttendancePolicy p) => p != null && !p.CompanyRulesApplied && p.GraceMinutes == 0 && p.OvertimeNeedsPreApproval;
+
+        /// <summary>
+        /// One-time, idempotent upgrade of an existing install to the company rules (answer 5): a row with the old defaults gets grace 15 and no pre-approval; any other row is left as the admin set it.
+        /// The flag CompanyRulesApplied is the marker, so an admin who later chooses grace 0 again is not overwritten. The change is audited like any policy save (with the user who triggered it).
+        /// Called on the write paths (save, compute, close, import); the read shows the same result without writing.
+        /// </summary>
+        private async Task EnsureCompanyPolicyAsync(CancellationToken ct)
+        {
+            OfAttendancePolicy p = await _uow.Set<OfAttendancePolicy>().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+            if (p == null || p.CompanyRulesApplied) return;
+            if (NeedsCompanyUpgrade(p)) { p.GraceMinutes = 15; p.OvertimeNeedsPreApproval = false; }
+            p.CompanyRulesApplied = true; p.UpdatedAt = DateTimeOffset.Now; p.UpdatedByUserId = Me;
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { await _uow.Entry(p).ReloadAsync(ct); }
+        }
+
         public async Task<ResponseDto<AttendancePolicyDto>> GetPolicyAsync(CancellationToken ct)
         {
             OfAttendancePolicy p = await _uow.Set<OfAttendancePolicy>().AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new OfAttendancePolicy();
+            if (NeedsCompanyUpgrade(p)) { p.GraceMinutes = 15; p.OvertimeNeedsPreApproval = false; } // what the first write will store
             return ResponseDtoHelper.Ok(ToDto(p));
         }
 
@@ -530,12 +561,15 @@ namespace Services.NasbNiro.Office
             if (dto.GraceMinutes < 0 || dto.GraceMinutes > 120) return Bad<AttendancePolicyDto>("مهلت تاخیر باید بین ۰ تا ۱۲۰ دقیقه باشد.");
             if (dto.MaxOvertimeMinutesPerDay.HasValue && (dto.MaxOvertimeMinutesPerDay < 0 || dto.MaxOvertimeMinutesPerDay > 720)) return Bad<AttendancePolicyDto>("سقف اضافه‌کار روزانه نامعتبر است.");
             if (dto.RoundingMinutes < 0 || dto.RoundingMinutes > 60) return Bad<AttendancePolicyDto>("گرد کردن اضافه‌کار باید بین ۰ تا ۶۰ دقیقه باشد.");
-            if (dto.MonthlyOvertimeCapMinutes < 0 || dto.MonthlyOvertimeCapMinutes > 31 * 24 * 60) return Bad<AttendancePolicyDto>("سقف ماهانه اضافه‌کار نامعتبر است (۰ تا ۴۴٬۶۴۰ دقیقه).");
-            if (dto.DelayPenaltyFactor < 0m || dto.DelayPenaltyFactor > 10m) return Bad<AttendancePolicyDto>("ضریب کسر تاخیر باید بین ۰ تا ۱۰ باشد (۰ یعنی بدون کسر).");
+            if (dto.MonthlyOvertimeCapMinutes.HasValue && (dto.MonthlyOvertimeCapMinutes < 0 || dto.MonthlyOvertimeCapMinutes > 31 * 24 * 60)) return Bad<AttendancePolicyDto>("سقف ماهانه اضافه‌کار نامعتبر است (۰ تا ۴۴٬۶۴۰ دقیقه).");
+            if (dto.DelayPenaltyFactor.HasValue && (dto.DelayPenaltyFactor < 0m || dto.DelayPenaltyFactor > 10m)) return Bad<AttendancePolicyDto>("ضریب کسر تاخیر باید بین ۰ تا ۱۰ باشد (۰ یعنی بدون کسر).");
+            await EnsureCompanyPolicyAsync(ct);
             OfAttendancePolicy p = await _uow.Set<OfAttendancePolicy>().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
-            if (p == null) { p = new OfAttendancePolicy(); _uow.Set<OfAttendancePolicy>().Add(p); }
+            if (p == null) { p = new OfAttendancePolicy { CompanyRulesApplied = true }; _uow.Set<OfAttendancePolicy>().Add(p); }
             p.GraceMinutes = dto.GraceMinutes; p.MaxOvertimeMinutesPerDay = dto.MaxOvertimeMinutesPerDay; p.OvertimeNeedsPreApproval = dto.OvertimeNeedsPreApproval;
-            p.RoundingMinutes = dto.RoundingMinutes; p.MonthlyOvertimeCapMinutes = dto.MonthlyOvertimeCapMinutes; p.DelayPenaltyFactor = Math.Round(dto.DelayPenaltyFactor, 2);
+            p.RoundingMinutes = dto.RoundingMinutes;
+            if (dto.MonthlyOvertimeCapMinutes.HasValue) p.MonthlyOvertimeCapMinutes = dto.MonthlyOvertimeCapMinutes.Value;
+            if (dto.DelayPenaltyFactor.HasValue) p.DelayPenaltyFactor = Math.Round(dto.DelayPenaltyFactor.Value, 2);
             p.UpdatedAt = DateTimeOffset.Now; p.UpdatedByUserId = Me;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(ToDto(p));

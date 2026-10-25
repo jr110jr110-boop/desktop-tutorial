@@ -147,6 +147,7 @@ namespace Services.NasbNiro.Office
             if (!await _uow.Set<OfPosition>().AnyAsync(p => p.Id == l.SignerPositionId.Value && p.IsActive && p.CanSign, ct)) return Bad<LetterDto>("این سمت حق امضا ندارد.");
             OfUserSignature signature = await _uow.Set<OfUserSignature>().AsNoTracking().FirstOrDefaultAsync(s => s.UserId == Me, ct);
             if (signature == null) return Bad<LetterDto>("تصویر امضای شما ثبت نشده است؛ ابتدا تصویر امضا را بارگذاری کنید.");
+            await EnsureRulesAsync(ct); // before anything of this letter changes: the save inside must not commit a half-done signature
             var unit = await UnitOfAsync(l.SenderPositionId, ct);
             DateTime today = DateTime.Today;
             var link = await LinkCodeAsync(l, ct);
@@ -196,6 +197,7 @@ namespace Services.NasbNiro.Office
             if (!c.IsSec) return Bad<LetterDto>(OfficeText.NotAllowed);
             if (l.Kind == OfLetterKind.Incoming && l.Status == OfLetterStatus.Draft)
             {
+                await EnsureRulesAsync(ct); // before the letter is touched
                 string error = await RegisterIncomingAsync(l, ct);
                 if (error != null) return Bad<LetterDto>(error);
                 l.ModifyDate = DateTimeOffset.Now; l.ModifierUserId = Me;

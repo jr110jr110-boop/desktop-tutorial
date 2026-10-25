@@ -23,6 +23,14 @@ namespace Services.NasbNiro.Office
         private const int MaxExcelBytes = 20 * 1024 * 1024;
         private const string DefaultExcelDevice = "PWKARA";
 
+        /// <summary>
+        /// ★ Duplicate protection of the clock events (EmployeeId, minute): the check reads the existing events and then inserts, so two imports (or an import and a device push) at the same moment
+        /// could both add the same event. A unique index would close that for good, but an existing database may already hold two events of one minute (a manual event beside a device event),
+        /// and the migration would then fail; so the read-and-insert is serialised here instead. This guarantees it for one API process (the installation is a single server); if the API is ever
+        /// scaled out, a unique filtered index must be added after the old duplicates are cleaned.
+        /// </summary>
+        private static readonly SemaphoreSlim ClockStoreLock = new SemaphoreSlim(1, 1);
+
         private static readonly JsonSerializerOptions MappingJson = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         private static ClockFileMappingDto ReadMapping(string json)
@@ -58,6 +66,8 @@ namespace Services.NasbNiro.Office
                 return found;
             }
             string e;
+            if (!string.IsNullOrWhiteSpace(m.DateOrder) && ClockCellParser.OrderOf(m.DateOrder) == ClockDateOrder.Auto) return "ترتیب تاریخ باید YMD (سال/ماه/روز)، DMY (روز/ماه/سال) یا MDY (ماه/روز/سال) باشد.";
+            map.Order = ClockCellParser.OrderOf(m.DateOrder);
             map.Code = Resolve(m.CodeColumn, "شماره پرسنلی", out e); if (e != null) return e;
             map.Date = Resolve(m.DateColumn, "تاریخ", out e); if (e != null) return e;
             map.Time = Resolve(m.TimeColumn, "ساعت", out e); if (e != null) return e;
@@ -73,6 +83,7 @@ namespace Services.NasbNiro.Office
         internal sealed class ColumnMap
         {
             public int Code = -1, Date = -1, Time = -1, DateTime = -1, Direction = -1, Device = -1, Site = -1;
+            public ClockDateOrder Order = ClockDateOrder.Auto;
         }
 
         /// <summary>A column reference is the text of a heading cell, else a column letter.</summary>
@@ -103,6 +114,7 @@ namespace Services.NasbNiro.Office
             if (name == null || name.Length > 200) return Bad<ClockImportProfileDto>("نام الگو را وارد کنید (مثلاً PW Kara).");
             // the heading texts can only be checked against a file: here the shape is (the columns are checked again at every import)
             if (dto.Mapping == null || !HasRequiredColumns(dto.Mapping)) return Bad<ClockImportProfileDto>("ستون‌های شماره پرسنلی، تاریخ و ساعت (یا تاریخ و ساعت در یک ستون) را مشخص کنید.");
+            if (!string.IsNullOrWhiteSpace(dto.Mapping.DateOrder) && ClockCellParser.OrderOf(dto.Mapping.DateOrder) == ClockDateOrder.Auto) return Bad<ClockImportProfileDto>("ترتیب تاریخ باید YMD، DMY یا MDY باشد.");
             if (dto.Mapping.HeaderRow < 0 || dto.Mapping.HeaderRow > 1000 || dto.Mapping.FirstDataRow < 0 || dto.Mapping.FirstDataRow > 1000000) return Bad<ClockImportProfileDto>(OfficeText.InvalidData);
             OfClockImportProfile p;
             if (dto.Id.HasValue)
@@ -171,13 +183,14 @@ namespace Services.NasbNiro.Office
             }
             foreach (XlsxRow r in data.Rows.Take(15))
                 dto.Rows.Add(Enumerable.Range(0, data.MaxColumn).Select(i => DisplayCell(r.Cell(i))).ToList());
+            var sampleCells = new List<(int Column, XlsxCell Cell)>();
             for (int c = 0; c < data.MaxColumn; c++)
             {
                 var col = new ClockFileColumnDto { Letter = XlsxReader.ColumnLetter(c), Header = header == null ? null : header.Cell(c)?.AsText()?.Trim() };
                 foreach (XlsxRow r in data.Rows.Where(x => header == null || x.RowNumber > header.RowNumber).Take(5))
                 {
                     string t = DisplayCell(r.Cell(c));
-                    if (t.Length > 0) col.Samples.Add(t);
+                    if (t.Length > 0) { col.Samples.Add(t); sampleCells.Add((c, r.Cell(c))); }
                 }
                 dto.Columns.Add(col);
             }
@@ -194,6 +207,28 @@ namespace Services.NasbNiro.Office
                     else if (field == "direction" && suggested.DirectionColumn == null) suggested.DirectionColumn = letter;
                     else if (field == "device" && suggested.DeviceColumn == null) suggested.DeviceColumn = letter;
                     else if (field == "site" && suggested.SiteColumn == null) suggested.SiteColumn = letter;
+                }
+            // the suggested order of the written dates: year first (Persian or Gregorian) is YMD, otherwise day first ★; the admin confirms or changes it
+            int dateCol = XlsxReader.ColumnIndex(suggested.DateColumn ?? suggested.DateTimeColumn ?? "");
+            if (dateCol >= 0)
+            {
+                var texts = data.Rows.Where(x => header == null || x.RowNumber > header.RowNumber).Take(30).Select(x => x.Cell(dateCol)).Where(x => x != null && x.Text != null).Select(x => x.Text).ToList();
+                if (texts.Count > 0) suggested.DateOrder = texts.Any(ClockCellParser.IsYearFirst) ? "YMD" : "DMY";
+            }
+            ClockDateOrder order = ClockCellParser.OrderOf(suggested.DateOrder);
+            // the Persian date each sample is read as, so a wrong order is seen before anything is stored
+            int k = 0;
+            foreach (ClockFileColumnDto col in dto.Columns)
+                foreach (string _ in col.Samples)
+                {
+                    XlsxCell cell = sampleCells[k++].Cell;
+                    string shown = "";
+                    if (cell != null && !(cell.Number.HasValue && !cell.IsDateFormat && cell.Number.Value < 13000101))
+                    {
+                        bool isDate = ClockCellParser.TryDate(cell, order, out DateTime d, out bool ambiguous);
+                        shown = isDate ? OfficeText.Date(d) : ambiguous ? "مبهم" : "";
+                    }
+                    col.SampleDates.Add(shown);
                 }
             dto.Suggested = suggested;
             return ResponseDtoHelper.Ok(dto);
@@ -260,7 +295,8 @@ namespace Services.NasbNiro.Office
 
             var result = new ClockImportResultDto();
             var rows = new List<RawClock>();
-            int badRows = 0;
+            int badRows = 0, ambiguousRows = 0;
+            string ambiguousExample = null;
             foreach (XlsxRow row in data.Rows)
             {
                 if (row.RowNumber < firstData) continue;
@@ -269,13 +305,14 @@ namespace Services.NasbNiro.Office
                 result.RowsRead++;
                 if (codeText.Length == 0) { badRows++; AddFileError(result, row.RowNumber, "شماره پرسنلی خالی است."); continue; }
                 DateTime when;
+                bool ambiguous;
                 if (map.Date >= 0 && map.Time >= 0)
                 {
-                    if (!ClockCellParser.TryDate(row.Cell(map.Date), out DateTime date)) { badRows++; AddFileError(result, row.RowNumber, "تاریخ نامعتبر است."); continue; }
+                    if (!ClockCellParser.TryDate(row.Cell(map.Date), map.Order, out DateTime date, out ambiguous)) { badRows++; if (ambiguous) { ambiguousRows++; ambiguousExample ??= row.Cell(map.Date)?.AsText(); } AddFileError(result, row.RowNumber, ambiguous ? "تاریخ مبهم است (ترتیب روز و ماه معلوم نیست)." : "تاریخ نامعتبر است."); continue; }
                     if (!ClockCellParser.TryTime(row.Cell(map.Time), out int minute)) { badRows++; AddFileError(result, row.RowNumber, "ساعت نامعتبر است."); continue; }
                     when = date.AddMinutes(minute);
                 }
-                else if (!ClockCellParser.TryDateTime(row.Cell(map.DateTime), out when)) { badRows++; AddFileError(result, row.RowNumber, "تاریخ و ساعت نامعتبر است."); continue; }
+                else if (!ClockCellParser.TryDateTime(row.Cell(map.DateTime), map.Order, out when, out ambiguous)) { badRows++; if (ambiguous) { ambiguousRows++; ambiguousExample ??= row.Cell(map.DateTime)?.AsText(); } AddFileError(result, row.RowNumber, ambiguous ? "تاریخ مبهم است (ترتیب روز و ماه معلوم نیست)." : "تاریخ و ساعت نامعتبر است."); continue; }
 
                 string code = codeText;
                 if (!personnelSet.Contains(codeText) && byKey.TryGetValue(ClockCellParser.CodeKey(codeText), out List<string> matches) && matches.Count == 1) code = matches[0];
@@ -290,12 +327,21 @@ namespace Services.NasbNiro.Office
                 rows.Add(new RawClock { Code = code, Timestamp = when, Device = device, Direction = direction, Line = "ردیف " + row.RowNumber });
             }
             if (rows.Count > 20000) return Bad<ClockImportResultDto>("حداکثر ۲۰٬۰۰۰ تردد در هر بار بارگذاری مجاز است.");
+            // a date such as 05/06/2026 can be read two ways: nothing is stored until the order of the dates is chosen in the mapping
+            if (ambiguousRows > 0) return Bad<ClockImportResultDto>($"{ambiguousRows} ردیف تاریخ مبهم دارد (مثلاً «{ambiguousExample}»): ترتیب تاریخ را در ستون‌بندی انتخاب کنید (روز/ماه/سال یا ماه/روز/سال). چیزی ثبت نشد.");
 
             var unknownCodes = new List<string>();
-            var (added, duplicates, unknown, rejected) = await StoreAsync(rows, OfClockSource.Import, fallbackDevice, result.Errors, ct, unknownCodes);
-            if (saveAs != null) await UpsertProfileAsync(saveAs, mapping, ct);
-            try { await _uow.SaveChangesAsync(ct); }
-            catch (DbUpdateException) { return Bad<ClockImportResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
+            int added, duplicates, unknown, rejected;
+            // the read of the existing events and the insert of the new ones are one step: two files imported at the same moment cannot both add the same event
+            await ClockStoreLock.WaitAsync(ct);
+            try
+            {
+                (added, duplicates, unknown, rejected) = await StoreAsync(rows, OfClockSource.Import, fallbackDevice, result.Errors, ct, unknownCodes);
+                if (saveAs != null) await UpsertProfileAsync(saveAs, mapping, ct);
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { return Bad<ClockImportResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
+            }
+            finally { ClockStoreLock.Release(); }
             result.Imported = added;
             result.Duplicates = duplicates;
             result.Unknown = unknown;

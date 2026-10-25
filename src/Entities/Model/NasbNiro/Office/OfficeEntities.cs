@@ -445,6 +445,9 @@ namespace Entities.Model.NasbNiro.Office
     /// <summary>
     /// Inputs of the daily computation (one row; defaults apply while no row is saved). Company answers (1405/08): lateness up to 15 minutes is allowed (grace 15);
     /// lateness beyond it is deducted with coefficient 3; overtime is not pre-approved but counted up to 22 hours a month.
+    /// ★ Stated explicitly for the company to confirm: (1) the 22 hour cap covers the overtime of working days only - work on a holiday or a day off (HolidayMinutes) and night hours (NightMinutes) are
+    /// separate sheet columns and are not capped; (2) early leave is reported but not deducted; (3) the day is the shift's scheduled minutes = end - start - break (08:00-16:00 with a 30 minute
+    /// break = 450), for the lateness deduction (deducted minutes / 450 of a day, at most one day a day) and for an hourly leave (120 minutes = 120/450 of a day); an employee without a shift counts 480.
     /// </summary>
     public class OfAttendancePolicy
     {
@@ -466,6 +469,12 @@ namespace Entities.Model.NasbNiro.Office
 
         /// <summary>A delay beyond the grace is deducted as delay minutes x this coefficient (default 3); 0 switches the deduction off. The deduction reaches payroll as fractions of an absence day.</summary>
         public decimal DelayPenaltyFactor { get; set; } = 3m;
+
+        /// <summary>
+        /// Set once the company rules (grace 15, no pre-approval) were applied to this row: either it was created after the rules, or the one-time upgrade moved a row that still had the old
+        /// defaults (grace 0 and pre-approval on). Rows an admin changed otherwise are never touched; the flag stops the upgrade from running again.
+        /// </summary>
+        public bool CompanyRulesApplied { get; set; }
 
         public DateTimeOffset UpdatedAt { get; set; }
         public int UpdatedByUserId { get; set; }
