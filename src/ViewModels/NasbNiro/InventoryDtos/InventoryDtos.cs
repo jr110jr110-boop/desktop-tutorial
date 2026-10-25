@@ -191,6 +191,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? PurchaseOrderId { get; set; }
         public int? WorkOrderId { get; set; }
         public int? ContractId { get; set; }
+
+        /// <summary>A customer delivery of a sales order (spare parts, small sales) names the order instead of a contract.</summary>
+        public int? SalesOrderId { get; set; }
         public string ReferenceNumber { get; set; }
         public string Description { get; set; }
         public int? MaterialRequestId { get; set; }
@@ -233,6 +236,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? DestinationLocationId { get; set; }
         public decimal? UnitPrice { get; set; }
         public int? PurchaseOrderLineId { get; set; }
+
+        /// <summary>The sales order line a customer delivery line delivers (picked by item when empty).</summary>
+        public int? SalesOrderLineId { get; set; }
         public string Description { get; set; }
         public DocumentLineDirection Direction { get; set; }
         public int? SourceRowNumber { get; set; }
@@ -296,6 +302,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string WorkOrderCode { get; set; }
         public int? ContractId { get; set; }
         public string ContractCode { get; set; }
+        public int? SalesOrderId { get; set; }
+        public string SalesOrderNumber { get; set; }
         public string ReferenceNumber { get; set; }
         public string Description { get; set; }
         public string CreatorName { get; set; }
@@ -359,6 +367,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string DestinationLocationCode { get; set; }
         public decimal? UnitPrice { get; set; }
         public int? PurchaseOrderLineId { get; set; }
+        public int? SalesOrderLineId { get; set; }
         public string Description { get; set; }
         public DocumentLineDirection Direction { get; set; }
         public int? SourceRowNumber { get; set; }

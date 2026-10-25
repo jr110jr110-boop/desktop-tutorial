@@ -390,6 +390,8 @@ namespace Services.NasbNiro.Production
                                 where itemIds.Contains(b.ItemId) && !w.Deleted && w.IsActive && CompanyKinds.Contains(w.Kind)
                                 group b by b.ItemId into g
                                 select new { Id = g.Key, Qty = g.Sum(x => x.Quantity) }).ToListAsync(ct);
+            // stock held for confirmed customer sales orders is not available to the plant
+            Dictionary<int, decimal> salesHeld = await Sales.SlReservations.ReservedAsync(uow, itemIds, ct);
             PurchaseOrderStatus[] open = { PurchaseOrderStatus.Approved, PurchaseOrderStatus.Released, PurchaseOrderStatus.PartlyReceived };
             var incoming = (await (from l in uow.Set<PurchaseOrderLine>().AsNoTracking()
                                    join p in uow.Set<PurchaseOrder>().AsNoTracking() on l.PurchaseOrderId equals p.Id
@@ -403,7 +405,7 @@ namespace Services.NasbNiro.Production
                 foreach (var g in lines.Where(l => l.MaterialRequestId == o.KitRequestId.Value && l.Quantity > l.IssuedQuantity).GroupBy(l => l.ItemId))
                 {
                     decimal need = g.Sum(l => l.Quantity - l.IssuedQuantity);
-                    decimal stock = onHand.FirstOrDefault(x => x.Id == g.Key)?.Qty ?? 0;
+                    decimal stock = (onHand.FirstOrDefault(x => x.Id == g.Key)?.Qty ?? 0) - salesHeld.GetValueOrDefault(g.Key);
                     if (stock >= need) continue;
                     anyShort = true;
                     decimal missing = need - stock, cumulative = 0;

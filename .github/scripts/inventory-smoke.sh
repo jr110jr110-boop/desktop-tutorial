@@ -3888,6 +3888,392 @@ as "$MPM_TOKEN" GET "$MF/dashboard"; check "mes B: production dashboard of the r
 TOKEN=$ADMIN_TOKEN
 TOKEN=$ADMIN_TOKEN
 
+# =================================================================== SALES AND SERVICE (release S1 part A: SALES)
+# Self-contained: its own users (two sales users and one service user), customers, items with stock, an equipment template and prices. Every figure is worked out by hand in the check text.
+TOKEN=$ADMIN_TOKEN
+SL=sales
+user2 sales.ci 24 'Ci#Sales-User-2026' 09120000071 0012345671
+user2 sales2.ci 24 'Ci#Sales2-User-2026' 09120000072 0012345672
+user2 svc.ci 25 'Ci#Svc-User-2026' 09120000073 0012345673
+SL_TOKEN=$(login sales.ci 'Ci#Sales-User-2026'); SL2_TOKEN=$(login sales2.ci 'Ci#Sales2-User-2026'); SV_TOKEN=$(login svc.ci 'Ci#Svc-User-2026')
+[ -n "$SL_TOKEN" ] && [ -n "$SL2_TOKEN" ] && [ -n "$SV_TOKEN" ] && ok "sales: login of two sales users (role 24) and one service user (role 25)" || bad "sales: login of two sales users (role 24) and one service user (role 25)"
+SLID=$(uid "$SL_TOKEN"); SL2ID=$(uid "$SL2_TOKEN"); SVID=$(uid "$SV_TOKEN"); FMID=$(uid "$FM_TOKEN"); CEOID=$(uid "$CEO_TOKEN")
+as "$FM_TOKEN" GET "$FX/rates?PageSize=0"; check "sales: setup: the VAT rate finance entered earlier (10 %) is the one in force; the sales module takes it from the table" '.success and ([.data.data[]|select(.kind == 1 and .rate == 10)]|length) == 1'
+
+# --- who may do what
+as "$WH_TOKEN" GET $SL/customers; nomsg "sales: a storekeeper cannot read the customers" "مجوز"
+as "$SV_TOKEN" POST $SL/customers '{"name":"مشتری بدون مجوز","status":2}'; nomsg "sales: the service role cannot create customers (sales keeps the customer master)" "مجوز"
+as "$SL_TOKEN" GET $SL/settings; check "sales: the approval ceiling for proposals has no seeded value (the CEO enters it)" '.success and ([.data[]|select(.key == "ProposalApprovalThresholdRial")]|length) == 1 and ([.data[]|select(.key == "ProposalApprovalThresholdRial")][0].value) == null'
+as "$SL_TOKEN" POST $SL/settings '{"key":"ProposalApprovalThresholdRial","value":50000000}'; nomsg "sales: sales cannot set its own approval ceiling (CEO only)" "مدیرعامل"
+as "$CEO_TOKEN" POST $SL/settings '{"key":"NoSuchSetting","value":1}'; nomsg "sales: an unknown setting key is refused" "شناخته"
+as "$CEO_TOKEN" POST $SL/settings '{"key":"ProposalApprovalThresholdRial","value":-1}'; nomsg "sales: a negative ceiling is refused" "منفی"
+
+# --- reason codes (won / lost / no-bid)
+as "$SL_TOKEN" POST $SL/reason-codes '{"code":"W-TECH","title":"برتری فنی","kind":1}'; check "sales: reason code for a won proposal" '.success and .data.kind == 1 and .data.isActive == true'
+SLRW=$(val .data.id)
+as "$SL_TOKEN" POST $SL/reason-codes '{"code":"L-PRICE","title":"قیمت بالاتر","kind":2}'; check "sales: reason code for a lost proposal" '.success and .data.kind == 2'
+SLRL=$(val .data.id)
+as "$SL_TOKEN" POST $SL/reason-codes '{"code":"L-PRICE","title":"تکرار","kind":2}'; nomsg "sales: a reason code is unique within its kind" "قبلاً ثبت"
+as "$SL_TOKEN" GET "$SL/reason-codes?Kind=2"; check "sales: the lost-reason list holds exactly the one lost code" ".success and (.data.data|length) == 1 and .data.data[0].id == $SLRL"
+
+# --- customers, contacts, sites, activities
+as "$SL_TOKEN" POST $SL/customers '{"name":"پتروشیمی نمونه آزمون","economicCode":"411100000001","nationalId":"10100000001","postalCode":"1234500001","employerName":"پتروشیمی نمونه آزمون","type":1,"industry":2,"city":"تهران","status":2,"paymentTermDays":30}'
+check "sales: customer A saved with its sales profile (active, end user, petrochemical, 30 days, no credit limit yet)" '.success and .data.id > 0 and .data.status == 2 and .data.type == 1 and .data.industry == 2 and .data.paymentTermDays == 30 and .data.creditLimitRial == null and .data.contactCount == 0 and .data.siteCount == 0 and .data.isActive == true'
+SLCA=$(val .data.id)
+as "$SL_TOKEN" POST $SL/customers '{"name":"نیروگاه نمونه آزمون","economicCode":"411100000002","nationalId":"10100000002","postalCode":"1234500002","type":4,"industry":3,"status":2}'; check "sales: customer B saved (government, power)" '.success and .data.id > 0 and .data.type == 4 and .data.industry == 3 and .data.creditLimitRial == null'
+SLCB=$(val .data.id)
+as "$SL_TOKEN" POST $SL/customers '{"name":"پتروشیمی نمونه آزمون","status":2}'; nomsg "sales: a second customer with the same name is refused" "همین نام"
+as "$SL_TOKEN" POST $SL/customers '{"name":"مشتری کد اشتباه","economicCode":"123","status":2}'; nomsg "sales: an economic code must have 12 or 14 digits" "۱۲ یا ۱۴"
+as "$SL_TOKEN" POST $SL/customers/credit "{\"customerId\":$SLCA,\"creditLimitRial\":1000}"; nomsg "sales: only finance sets the credit limit" "فقط مالی"
+as "$SL_TOKEN" POST $SL/contacts "{\"customerId\":$SLCA,\"fullName\":\"مدیر تدارکات\",\"jobTitle\":\"مدیر تدارکات\",\"phone\":\"02100000001\",\"email\":\"procurement@example.com\",\"isPrimary\":true}"; check "sales: primary contact of customer A (a job title, not a person)" ".success and .data.customerId == $SLCA and .data.isPrimary == true and .data.customerName == \"پتروشیمی نمونه آزمون\""
+SLCT1=$(val .data.id)
+as "$SL_TOKEN" POST $SL/sites "{\"customerId\":$SLCA,\"title\":\"پالایشگاه جنوب\",\"country\":\"ایران\",\"address\":\"محل نصب آزمون\"}"; check "sales: installation site of customer A" ".success and .data.customerId == $SLCA and .data.title == \"پالایشگاه جنوب\""
+as "$SL_TOKEN" GET $SL/customers/$SLCA; check "sales: customer A shows exactly 1 contact and 1 site" '.success and .data.contactCount == 1 and .data.siteCount == 1'
+as "$SL_TOKEN" POST $SL/activities "{\"customerId\":$SLCA,\"contactId\":$SLCT1,\"kind\":2,\"subject\":\"جلسه معرفی محصولات\",\"notes\":\"معرفی پمپ و قطعات یدکی\",\"nextActionDate\":\"$(dd 7)T00:00:00\"}"
+check "sales: activity (meeting) logged; owner is the sales user; Persian dates" ".success and .data.kind == 2 and .data.customerId == $SLCA and .data.contactId == $SLCT1 and .data.ownerUserId == $SLID and .data.serviceRequestId == null and (.data.activityDateText|test(\"^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}\")) and (.data.nextActionDateText|test(\"^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}\"))"
+SLACT1=$(val .data.id)
+as "$SV_TOKEN" POST $SL/activities "{\"customerId\":$SLCA,\"kind\":1,\"subject\":\"پیگیری رضایت پس از فروش\"}"; check "sales: the service role logs its own activity on the same customer" ".success and .data.ownerUserId == $SVID and .data.kind == 1"
+as "$SV_TOKEN" POST $SL/activities "{\"id\":$SLACT1,\"customerId\":$SLCA,\"kind\":2,\"subject\":\"تغییر فعالیت دیگران\"}"; nomsg "sales: the service role cannot edit the sales user's activity" "مجوز"
+as "$SL_TOKEN" GET "$SL/activities?CustomerId=$SLCA"; check "sales: the customer timeline holds exactly the 2 activities" '.success and (.data.data|length) == 2'
+
+# --- legacy linker: contracts and tenders of the old registers are linked to customers by the exact (normalised) employer text; the rest is listed for a person
+call POST Contracts '{"code":"SL-CT-LEG","title":"قرارداد قدیمی فروش","status":1,"employer":"پتروشيمي  نمونه آزمون"}'; check "sales: setup: legacy contract whose employer is written with Arabic letters and a double space" '.success and .data.id > 0'
+SLLCT=$(val .data.id)
+call POST Contracts '{"code":"SL-CT-UNK","title":"قرارداد قدیمی بدون مشتری","status":1,"employer":"کارفرمای ناشناس آزمون"}'; check "sales: setup: legacy contract of an employer that is not a customer" '.success and .data.id > 0'
+SLUCT=$(val .data.id)
+call POST Tenders '{"code":"SL-TND-LEG","description":"مناقصه قدیمی","count":"1","company":"پتروشیمی نمونه آزمون","reciveDate":"2026-01-10T00:00:00+03:30","tenderDate":"2026-01-20T00:00:00+03:30"}'; check "sales: setup: legacy tender of customer A" '.success and .data.id > 0'
+SLLTD=$(val .data.id)
+as "$SV_TOKEN" POST $SL/customers/link-legacy; nomsg "sales: the service role cannot run the legacy linker" "مجوز"
+as "$SL_TOKEN" POST $SL/customers/link-legacy; check "sales: legacy linker: the tender of customer A is linked (the only tender in the books), the unknown employer is left for a person, nothing was linked before" "
+  .success and .data.linkedTenders == 1 and .data.alreadyLinked == 0 and .data.linkedContracts >= 1 and ([.data.unmatched[]|select(.sourceType == 1 and .sourceId == $SLUCT and .text == \"کارفرمای ناشناس آزمون\")]|length) == 1 and ([.data.unmatched[]|select((.sourceType == 1 and .sourceId == $SLLCT) or (.sourceType == 2 and .sourceId == $SLLTD))]|length) == 0"
+SLLC=$(val .data.linkedContracts)
+as "$SL_TOKEN" GET "$SL/customers/links?SourceType=1&PageSize=500"; check "sales: the number of contract links stored equals the number the linker reported (all by name match)" ".success and (.data.data|length) == $SLLC and ([.data.data[]|select(.method == 1)]|length) == $SLLC"
+as "$SL_TOKEN" GET "$SL/customers/links?CustomerId=$SLCA"; check "sales: customer A has exactly the 2 legacy-match links (1 contract, 1 tender) although the contract was written with Arabic letters and a double space" ".success and (.data.data|length) == 2 and ([.data.data[]|select(.sourceType == 1 and .sourceId == $SLLCT and .method == 1)]|length) == 1 and ([.data.data[]|select(.sourceType == 2 and .sourceId == $SLLTD and .method == 1)]|length) == 1"
+as "$SL_TOKEN" POST $SL/customers/link-legacy; check "sales: running the linker again changes nothing (idempotent): nothing new, everything already linked" ".success and .data.linkedContracts == 0 and .data.linkedTenders == 0 and .data.alreadyLinked == $((SLLC + 1))"
+as "$SL_TOKEN" POST $SL/customers/link "{\"sourceType\":1,\"sourceId\":$SLUCT,\"customerId\":$SLCB}"; check "sales: a person links the unmatched contract to customer B by hand" ".success and .data.method == 2 and .data.customerId == $SLCB and .data.sourceId == $SLUCT"
+as "$SL_TOKEN" GET $SL/customers/unlinked; check "sales: the unmatched contract is no longer in the list of unlinked legacy records" ".success and ([.data[]|select(.sourceType == 1 and .sourceId == $SLUCT)]|length) == 0"
+
+# --- stock and prices for the spare parts and the equipment template (the purchase-order rule is switched off only while the opening receipt is made)
+item SLSPA "{\"code\":\"77.30.00.001.1\",\"title\":\"پروانه پمپ یدکی\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "sales: spare part A (impeller)"
+item SLSPB "{\"code\":\"77.30.00.002.1\",\"title\":\"مکانیکال سیل یدکی\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "sales: spare part B (mechanical seal)"
+call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "sales: setup: purchase-order rule switched off for the opening receipt" '.success and .data.value == 0'
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$SLSPA,\"quantity\":10,\"unitPrice\":2000000},{\"itemId\":$SLSPB,\"quantity\":20,\"unitPrice\":500000}]}"; SLRC=$(val .data.id)
+call POST "inventory/documents/$SLRC/confirm"; check "sales: setup: opening receipt confirmed: 10 impellers at 2,000,000 and 20 seals at 500,000" '.success and .data.status == 1'
+call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "sales: setup: purchase-order rule switched on again" '.success and .data.value == 1'
+call GET "inventory/stock/items?ItemId=$SLSPA"; check "sales: stock of impeller A is 10" '.data.data[0].onHand == 10'
+call GET "inventory/stock/items?ItemId=$SLSPB"; check "sales: stock of seal B is 20" '.data.data[0].onHand == 20'
+
+# equipment template (legacy registers): one assembly, two purchased BOM lines whose exit code is the stock item
+call POST Equipments '{"code":"SL-EQ-PUMP","title":"Process Pump (sales template)"}'; check "sales: setup: equipment template" '.success and .data.id > 0'
+SLEQ=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$SLEQ,\"assemblerDuration\":1,\"code\":\"SL-ASM-1\",\"title\":\"مجموعه پمپ\"}"; check "sales: setup: assembly of the template" '.success and .data.id > 0'
+SLASM=$(val .data.id)
+call POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":1,\"title\":\"پروانه\",\"count\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":1}"; check "sales: setup: BOM line 1 (2 impellers per pump)" '.success and .data.id > 0'
+SLBOM1=$(val .data.id)
+call POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":2,\"title\":\"مکانیکال سیل\",\"count\":4,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":2}"; check "sales: setup: BOM line 2 (4 seals per pump)" '.success and .data.id > 0'
+SLBOM2=$(val .data.id)
+call POST EquipmentProcess "{\"exitCommodityCode\":\"77.30.00.001.1\",\"enterCommodityCode\":\"77.30.00.001.1\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":1,\"programPrice\":0,\"title\":\"خرید پروانه\",\"equipmentBomId\":$SLBOM1}"; check "sales: setup: purchase process of BOM line 1 (exit code = impeller)" '.success and .data.id > 0'
+call POST EquipmentProcess "{\"exitCommodityCode\":\"77.30.00.002.1\",\"enterCommodityCode\":\"77.30.00.002.1\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":1,\"programPrice\":0,\"title\":\"خرید مکانیکال سیل\",\"equipmentBomId\":$SLBOM2}"; check "sales: setup: purchase process of BOM line 2 (exit code = seal)" '.success and .data.id > 0'
+
+# --- inquiries: validation, then inquiry I1 (two pumps for customer A), received on a fixed day so that the Persian date is exact
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"\",\"quantity\":1}"; nomsg "sales: an inquiry needs a title" "عنوان استعلام"
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"استعلام بدون تعداد\",\"quantity\":0}"; nomsg "sales: an inquiry needs a quantity above zero" "تعداد باید"
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"استعلام مهلت اشتباه\",\"quantity\":1,\"receivedDate\":\"2026-08-10T00:00:00\",\"proposalDueDate\":\"2026-08-01T00:00:00\"}"; nomsg "sales: the proposal deadline cannot be before the day the inquiry was received" "مهلت ارسال پیشنهاد"
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCB,\"contactId\":$SLCT1,\"title\":\"مخاطب مشتری دیگر\",\"quantity\":1}"; nomsg "sales: the contact must belong to the inquiry's customer" "مخاطب انتخاب"
+as "$SV_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"استعلام سرویس\",\"quantity\":1}"; nomsg "sales: the service role cannot register inquiries" "مجوز"
+as "$SL_TOKEN" POST $SL/inquiries "{\"receivedDate\":\"2026-08-10T00:00:00\",\"customerId\":$SLCA,\"contactId\":$SLCT1,\"channel\":\"ایمیل\",\"customerReference\":\"RFQ-CA-001\",\"title\":\"دو دستگاه پمپ فرایندی\",\"productType\":4,\"quantity\":2,\"requiredDeliveryDate\":\"$(dd 60)T00:00:00\",\"proposalDueDate\":\"$(dd 2)T00:00:00\"}"
+check "sales: inquiry I1 registered: received, numbered, Persian date exact (2026-08-10 is 1405/05/19), no tender yet" '.success and .data.id > 0 and .data.status == 1 and (.data.number|test("^INQ-[0-9]{4}-0*1$")) and .data.receivedDateText == "1405/05/19" and .data.productTypeText == "پمپ" and .data.customerName == "پتروشیمی نمونه آزمون" and .data.tenderId == null and .data.quantity == 2'
+SLI1=$(val .data.id); SLI1N=$(val .data.number)
+as "$SL_TOKEN" POST $SL/inquiries/action "{\"id\":$SLI1,\"action\":\"review\"}"; check "sales: I1 goes under review" '.success and .data.status == 2'
+as "$SL_TOKEN" POST $SL/estimates "{\"inquiryId\":$SLI1,\"lines\":[]}"; nomsg "sales: no estimate before the CEO has decided to bid" "مدیرعامل شرکت در آن را تأیید کرده"
+
+# --- bid / no-bid gate for I1: sales prepares the checklist, only the CEO decides
+as "$SL_TOKEN" POST $SL/bid-decisions "{\"inquiryId\":$SLI1,\"technicalCapabilityOk\":true,\"commercialRiskReviewed\":true,\"paymentTermsReviewed\":true,\"guaranteesReviewed\":true,\"expectedMarginPercent\":20}"
+check "sales: checklist saved without the sanction check (still a draft)" '.success and .data.status == 1 and .data.sanctionCheck == 0 and .data.technicalCapabilityOk == true'
+as "$SL_TOKEN" POST $SL/bid-decisions/submit "{\"inquiryId\":$SLI1}"; check "sales: an incomplete checklist cannot be sent to the CEO; the message names the missing sanction check" '.success == false and (.message|contains("چک‌لیست کامل نیست")) and (.message|contains("استعلام تحریم"))'
+as "$SL_TOKEN" POST $SL/bid-decisions "{\"inquiryId\":$SLI1,\"technicalCapabilityOk\":true,\"technicalNote\":\"ساخت پمپ مشابه سابقه دارد\",\"commercialRiskReviewed\":true,\"paymentTermsReviewed\":true,\"guaranteesReviewed\":true,\"sanctionCheck\":1,\"expectedMarginPercent\":20}"
+check "sales: checklist completed (sanction check clear)" '.success and .data.status == 1 and .data.sanctionCheck == 1'
+as "$MPM_TOKEN" GET "$MF/load?From=$TODAY&Weeks=10&Threshold=100"; SLCAPW=$(jq --arg u "$(dd 60)" '[.data.overloads[]|select((.weekStart|.[0:10]) <= $u)|.weekStart]|unique|length' "$B")
+as "$SL_TOKEN" GET $SL/bid-decisions/$SLI1; check "sales: the capacity item equals the number of overloaded weeks in the production load report up to the required delivery (60 days: a 10-week window), checked until that date" ".success and .data.capacityOverloadWeeks == $SLCAPW and (.data.capacityCheckedUntil|startswith(\"$(dd 60)\")) and (.data.capacityCheckedUntilText|test(\"^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}\"))"
+as "$SL_TOKEN" POST $SL/bid-decisions/submit "{\"inquiryId\":$SLI1}"; check "sales: complete checklist sent to the CEO" '.success and .data.status == 2 and .data.submittedAtText != null'
+ibx "$CEO_TOKEN" "sl:bid:$SLI1"; check "sales: the bid decision of I1 is in the CEO's inbox" '.success and (.data.data|length) == 1'
+as "$SL2_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI1,\"decision\":\"bid\"}"; nomsg "sales: a sales user cannot decide to bid in the CEO's place" "فقط مدیرعامل"
+call POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI1,\"decision\":\"bid\"}"; nomsg "sales: the PMO cannot decide to bid in the CEO's place" "فقط مدیرعامل"
+as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI1,\"decision\":\"maybe\"}"; nomsg "sales: the decision must be bid or nobid" "bid یا nobid"
+as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI1,\"decision\":\"bid\"}"; check "sales: the CEO decides to bid on I1" ".success and .data.status == 3 and .data.decidedByUserId == $CEOID and .data.decidedAtText != null and .data.tenderId > 0"
+SLT1=$(val .data.tenderId)
+as "$SL_TOKEN" GET $SL/inquiries/$SLI1; check "sales: I1 is now being bid on and has the tender the system drafted" ".success and .data.status == 4 and .data.tenderId == $SLT1"
+call GET Tenders/$SLT1; check "sales: the drafted tender of the old register carries the customer and the inquiry text" '.success and .data.company == "پتروشیمی نمونه آزمون" and .data.description == "دو دستگاه پمپ فرایندی" and .data.pmrNo == "RFQ-CA-001" and .data.result == "در حال تهیه پیشنهاد"'
+as "$SL_TOKEN" GET "$SL/customers/links?CustomerId=$SLCA"; check "sales: the new tender is linked to customer A by the proposal flow (3 links now: 2 legacy and 1 tender from the inquiry)" ".success and (.data.data|length) == 3 and ([.data.data[]|select(.sourceType == 2 and .sourceId == $SLT1 and .method == 3)]|length) == 1"
+ibx "$CEO_TOKEN" "sl:bid:$SLI1"; check "sales: the CEO's bid gate of I1 is closed" '.success and (.data.data|length) == 0'
+as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI1,\"decision\":\"nobid\",\"reason\":\"x\"}"; nomsg "sales: a decided checklist cannot be decided again" "قبلاً تصمیم"
+
+# slbid INQUIRYID LABEL : checklist, submit, CEO bids (the inquiry becomes "being bid on")
+slbid() {
+  as "$SL_TOKEN" POST $SL/bid-decisions "{\"inquiryId\":$1,\"technicalCapabilityOk\":true,\"commercialRiskReviewed\":true,\"paymentTermsReviewed\":true,\"guaranteesReviewed\":true,\"sanctionCheck\":1,\"expectedMarginPercent\":20}"; check "sales: checklist of $2 saved" '.success and .data.status == 1 and (.data.capacityOverloadWeeks|type) == "number"'
+  as "$SL_TOKEN" POST $SL/bid-decisions/submit "{\"inquiryId\":$1}"; check "sales: checklist of $2 sent to the CEO" '.success and .data.status == 2'
+  as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$1,\"decision\":\"bid\"}"; check "sales: the CEO decides to bid on $2" '.success and .data.status == 3 and .data.tenderId > 0'
+}
+
+# --- estimate of I1 from the equipment template: 2 pumps = 4 impellers and 8 seals at the average cost of the books
+as "$SL_TOKEN" POST $SL/estimates/from-equipment "{\"inquiryId\":$SLI1,\"equipments\":[{\"equipmentId\":$SLEQ,\"count\":0}],\"overheadPercent\":10,\"contingencyPercent\":5,\"targetMarginPercent\":20}"; nomsg "sales: the count of an equipment must be above zero" "تعداد هر تجهیز"
+as "$SL_TOKEN" POST $SL/estimates/from-equipment "{\"inquiryId\":$SLI1,\"equipments\":[{\"equipmentId\":$SLEQ,\"count\":2}],\"overheadPercent\":10,\"contingencyPercent\":5,\"targetMarginPercent\":100}"; nomsg "sales: the target margin must be below 100 %" "حاشیه سود هدف"
+as "$SL_TOKEN" POST $SL/estimates/from-equipment "{\"inquiryId\":$SLI1,\"equipments\":[{\"equipmentId\":$SLEQ,\"count\":2}],\"overheadPercent\":10,\"contingencyPercent\":5,\"targetMarginPercent\":20}"
+check "sales: estimate from the template: material 4 x 2,000,000 + 8 x 500,000 = 12,000,000; contingency 5 % = 600,000; overhead 10 % of 12,600,000 = 1,260,000; total cost 13,860,000; price at a 20 % margin = 13,860,000 / 0.8 = 17,325,000" ".success and .data.revision == 1 and .data.status == 1 and (.data.number|endswith(\"/E1\")) and (.data.equipments|length) == 1 and .data.equipments[0].count == 2 and (.data.lines|length) == 2 and .data.lines[0].kind == 1 and .data.lines[0].itemId == $SLSPA and .data.lines[0].quantity == 4 and .data.lines[0].unitCost == 2000000 and .data.lines[0].costSource == 1 and .data.lines[0].amount == 8000000 and .data.lines[1].itemId == $SLSPB and .data.lines[1].quantity == 8 and .data.lines[1].unitCost == 500000 and .data.lines[1].amount == 4000000 and .data.materialCost == 12000000 and .data.directCost == 12000000 and .data.contingencyCost == 600000 and .data.costBeforeOverhead == 12600000 and .data.overheadCost == 1260000 and .data.totalCost == 13860000 and .data.price == 17325000 and .data.missingCostLines == 0 and .data.missingInputs == null"
+SLE1=$(val .data.id)
+as "$SL_TOKEN" POST $SL/estimates/from-equipment "{\"inquiryId\":$SLI1,\"equipments\":[{\"equipmentId\":$SLEQ,\"count\":2}],\"overheadPercent\":10,\"contingencyPercent\":5,\"targetMarginPercent\":20}"; nomsg "sales: one active estimate per inquiry" "برآورد فعال"
+# the engineer adds engineering and packing lines, the guarantee, financing and two risks (every percentage is an input)
+SLESAVE=$(as "$SL_TOKEN" GET $SL/estimates/$SLE1 >/dev/null; jq -c --argjson inq "$SLI1" '{inquiryId:$inq, id:.data.id, rowVersion:.data.rowVersion, overheadPercent:10, contingencyPercent:5, targetMarginPercent:20, guaranteeAmount:20000000, guaranteeMonths:12, guaranteeRatePercentPerMonth:0.5, financingAmount:10000000, financingMonths:3, financingRatePercentPerMonth:1, lines:([.data.lines[]|{kind,description,equipmentId,equipmentBomId,itemId,unit,quantity}] + [{kind:3,description:"طراحی و مهندسی",unit:"ساعت",quantity:40,unitCost:250000},{kind:5,description:"بسته‌بندی و حمل",unit:"سرویس",quantity:1,unitCost:1500000}]), risks:[{title:"تأخیر تأمین قطعه",probabilityPercent:10,impactAmount:5000000},{title:"نوسان قیمت",probabilityPercent:20,impactAmount:2500000}]}' "$B")
+as "$SL_TOKEN" POST $SL/estimates "$SLESAVE"
+check "sales: estimate edited: material 12,000,000 + engineering 40 x 250,000 = 10,000,000 + packing 1,500,000 = direct 23,500,000; guarantee 20,000,000 x 0.5 % x 12 = 1,200,000; financing 10,000,000 x 1 % x 3 = 300,000; risks 10 % x 5,000,000 + 20 % x 2,500,000 = 1,000,000; contingency 5 % of direct = 1,175,000; overhead 10 % of 27,175,000 = 2,717,500; total 29,892,500; price 29,892,500 / 0.8 = 37,365,625" ".success and .data.id == $SLE1 and (.data.lines|length) == 4 and .data.materialCost == 12000000 and .data.engineeringCost == 10000000 and .data.packingTransportCost == 1500000 and .data.directCost == 23500000 and .data.guaranteeCost == 1200000 and .data.financingCost == 300000 and .data.riskCost == 1000000 and .data.contingencyCost == 1175000 and .data.costBeforeOverhead == 27175000 and .data.overheadCost == 2717500 and .data.totalCost == 29892500 and .data.price == 37365625 and (.data.risks|length) == 2 and ([.data.risks[].expectedCost]|add) == 1000000 and .data.missingCostLines == 0"
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$SLE1,\"action\":\"finalize\"}"; check "sales: estimate finalized with its Persian date" '.success and .data.status == 2 and (.data.finalizedAtText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}")) and .data.price == 37365625'
+as "$SL_TOKEN" POST $SL/estimates "$SLESAVE"; nomsg "sales: a finalized estimate cannot be edited (a revision is made instead)" "نهایی‌شده ویرایش نمی"
+
+# --- proposal of I1: approval route is decided by the CEO's ceiling, the maker-checker rule and the cost
+as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$SLI1,\"estimateId\":$SLE1,\"validityDays\":30,\"deliveryWeeks\":12,\"paymentTermsText\":\"۲۰٪ پیش‌پرداخت، ۷۵٪ هنگام تحویل، ۵٪ حسن انجام کار\",\"vatPercent\":10,\"advancePercent\":20,\"retentionPercent\":5,\"latePenaltyPercentPerWeek\":0.5,\"penaltyCapPercent\":10,\"clientReviewDays\":14,\"customerReference\":\"RFQ-CA-001\"}"
+check "sales: proposal P1 drafted at the estimate's price 37,365,625 (above the cost 29,892,500, so not below cost); with no ceiling set yet only the CEO may approve" '.success and .data.status == 1 and .data.revision == 1 and (.data.number|test("^PRP-[0-9]{4}-0*1$")) and .data.price == 37365625 and .data.estimateTotalCost == 29892500 and .data.belowCost == false and .data.needsCeo == true and .data.deliveryWeeks == 12 and .data.customerName == "پتروشیمی نمونه آزمون"'
+SLP1=$(val .data.id)
+ibx "$CEO_TOKEN" "sl:proposal:$SLP1"; check "sales: with no ceiling the approval of P1 waits in the CEO's inbox" '.success and (.data.data|length) == 1'
+as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$SLI1,\"estimateId\":$SLE1}"; nomsg "sales: one live proposal per inquiry" "پیشنهاد فعال"
+as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"approve\"}"; nomsg "sales: another sales user cannot approve while the CEO has set no ceiling" "هنوز تعیین نکرده"
+as "$CEO_TOKEN" POST $SL/settings '{"key":"ProposalApprovalThresholdRial","value":50000000}'; check "sales: the CEO sets the approval ceiling for sales: 50,000,000 rials" '.success and .data.value == 50000000'
+as "$SL_TOKEN" GET $SL/proposals/$SLP1; check "sales: with the ceiling set, P1 (37,365,625) no longer needs the CEO" '.success and .data.needsCeo == false'
+as "$SL_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"approve\"}"; nomsg "sales: the sales user who prepared the proposal cannot approve it (maker-checker)" "تفکیک وظایف"
+as "$SV_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"approve\"}"; nomsg "sales: the service role cannot approve proposals" "مجوز"
+as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"submit\"}"; nomsg "sales: a proposal that is not approved cannot be sent to the customer" "تأییدشده"
+as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"approve\"}"; check "sales: a second sales user approves P1 within the ceiling" ".success and .data.status == 2 and .data.approvedByUserId == $SL2ID and .data.approvedAtText != null"
+ibx "$CEO_TOKEN" "sl:proposal:$SLP1"; check "sales: the proposal gate of P1 is closed" '.success and (.data.data|length) == 0'
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$SLP1,\"result\":\"won\"}"; nomsg "sales: a result is recorded only for a proposal that was sent" "ارسال‌شده"
+as "$SL_TOKEN" POST $SL/proposals/action "{\"id\":$SLP1,\"action\":\"submit\"}"; check "sales: P1 sent to the customer; the inquiry is submitted" '.success and .data.status == 3 and .data.submittedAtText != null'
+as "$SL_TOKEN" GET $SL/inquiries/$SLI1; check "sales: inquiry I1 is now in the submitted stage" '.success and .data.status == 5'
+call GET Tenders/$SLT1; check "sales: the legacy tender records that the proposal was sent" '.success and (.data.result|contains("پیشنهاد ارسال شد")) and .data.techSendDate != null'
+
+# --- P1 is won: the system drafts the contract, its terms (rials), the contract equipment, the pending contract review and the project initiation
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$SLP1,\"result\":\"won\",\"reasonId\":$SLRL}"; nomsg "sales: a won proposal needs a reason of the won kind (a lost-kind reason is refused)" "برنده‌شدن پیدا نشد"
+as "$SV_TOKEN" POST $SL/proposals/result "{\"id\":$SLP1,\"result\":\"won\",\"reasonId\":$SLRW}"; nomsg "sales: the service role cannot record a result" "مجوز"
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$SLP1,\"result\":\"won\",\"reasonId\":$SLRW,\"lessonsLearned\":\"پیشنهاد فنی کامل و تحویل کوتاه‌تر از رقبا\"}"
+check "sales: P1 recorded as won with the reason and the contract the system drafted" '.success and .data.status == 5 and .data.resultReason == "برتری فنی" and .data.contractId > 0 and (.data.resultAtText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
+SLCT=$(val .data.contractId)
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$SLP1,\"result\":\"won\",\"reasonId\":$SLRW}"; nomsg "sales: a result is recorded once" "ارسال‌شده"
+as "$SL_TOKEN" GET $SL/inquiries/$SLI1; check "sales: inquiry I1 is won" '.success and .data.status == 6'
+call GET Tenders/$SLT1; check "sales: the legacy tender records the win" '.success and .data.result == "برنده"'
+call GET "Contracts/contracts?Id=$SLCT"; check "sales: the drafted contract carries the customer, the price of the proposal (37,365,625), 12 weeks = 84 days, the order reference and the tender code" '.success and .data.employer == "پتروشیمی نمونه آزمون" and .data.price == 37365625 and .data.duration == 84 and .data.title == "دو دستگاه پمپ فرایندی" and (.data.code|test("^CT-[0-9]{4}-0*1$")) and .data.employerOrderNo == "RFQ-CA-001" and (.data.tenderCode|startswith("TND-")) and .data.services == "پمپ"'
+as "$PLAN_TOKEN" GET "$PC/terms/$SLCT"; check "sales: contract terms drafted from the proposal in rials (IRR) with every percentage taken from the proposal" ".success and .data.currencyCode == \"IRR\" and .data.valueExVat == 37365625 and .data.vatPercent == 10 and .data.advancePercent == 20 and .data.retentionPercent == 5 and .data.latePenaltyPercentPerWeek == 0.5 and .data.penaltyCapPercent == 10 and .data.clientReviewDays == 14 and .data.category == 1 and (.data.contractDeliveryDate|startswith(\"$(dd 84)\"))"
+call GET "ContractEquipments?ContractId=$SLCT"; check "sales: contract equipment drafted from the estimate: 2 pumps of the template" ".success and (.data.data|length) == 1 and .data.data[0].equipmentId == $SLEQ and .data.data[0].count == 2"
+call GET "$PC/reviews?ContractId=$SLCT"; check "sales: the contract review is drafted and pending for the people who decide (standard product, nothing ticked, the note names the proposal)" '.success and (.data.data|length) == 1 and .data.data[0].decision == 0 and .data.data[0].kind == 1 and .data.data[0].requirementsDefined == false and (.data.data[0].notes|contains("PRP-"))'
+as "$PLAN_TOKEN" GET "$PC/initiation/$SLCT"; check "sales: the project initiation is opened with its 10 steps, the announcement step done and the code assignment next" '.success and (.data.steps|length) == 10 and .data.currentStep == 2 and .data.completed == false'
+as "$SL_TOKEN" GET "$SL/customers/links?CustomerId=$SLCA"; check "sales: the new contract is linked to customer A by the proposal flow (4 links now)" ".success and (.data.data|length) == 4 and ([.data.data[]|select(.sourceType == 1 and .sourceId == $SLCT and .method == 3)]|length) == 1"
+
+# --- inquiry I2 (valves, customer B): an incomplete estimate names what is missing; a below-cost proposal is approved by the CEO with a reason and then lost
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCB,\"title\":\"پنج شیر کنترل\",\"productType\":6,\"quantity\":5,\"requiredDeliveryDate\":\"$(dd 30)T00:00:00\",\"proposalDueDate\":\"$(dd 5)T00:00:00\"}"; check "sales: inquiry I2 (valves) registered" '.success and .data.status == 1 and .data.productTypeText != null and .data.customerName == "نیروگاه نمونه آزمون"'
+SLI2=$(val .data.id)
+slbid "$SLI2" "I2"
+as "$SL_TOKEN" POST $SL/estimates "{\"inquiryId\":$SLI2,\"lines\":[{\"kind\":1,\"description\":\"شیر کنترل\",\"unit\":\"عدد\",\"quantity\":5,\"unitCost\":2000000},{\"kind\":2,\"description\":\"کار نصب\",\"unit\":\"ساعت\",\"quantity\":3}]}"
+check "sales: an estimate with no percentages and a line without a cost has no price; the answer names what is missing (nothing is assumed)" '.success and .data.price == null and .data.materialCost == 10000000 and .data.missingCostLines == 1 and (.data.missingInputs|contains("درصد سربار")) and (.data.missingInputs|contains("حاشیه سود هدف")) and (.data.missingInputs|contains("درصد پیش‌بینی نشده")) and (.data.missingInputs|contains("هزینه واحد 1 ردیف"))'
+SLE2=$(val .data.id); SLE2RV=$(val .data.rowVersion)
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$SLE2,\"action\":\"finalize\"}"; nomsg "sales: an incomplete estimate cannot be finalized" "برآورد کامل نیست"
+as "$SL_TOKEN" POST $SL/estimates "{\"id\":$SLE2,\"inquiryId\":$SLI2,\"rowVersion\":\"$SLE2RV\",\"overheadPercent\":10,\"contingencyPercent\":0,\"targetMarginPercent\":20,\"lines\":[{\"kind\":1,\"description\":\"شیر کنترل\",\"unit\":\"عدد\",\"quantity\":5,\"unitCost\":2000000}]}"
+check "sales: estimate completed: material 5 x 2,000,000 = 10,000,000; overhead 10 % = 1,000,000; total 11,000,000; price 11,000,000 / 0.8 = 13,750,000" '.success and .data.directCost == 10000000 and .data.contingencyCost == 0 and .data.overheadCost == 1000000 and .data.totalCost == 11000000 and .data.price == 13750000 and .data.missingInputs == null and .data.missingCostLines == 0'
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$SLE2,\"action\":\"finalize\"}"; check "sales: estimate of I2 finalized" '.success and .data.status == 2'
+as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$SLI2,\"estimateId\":$SLE2,\"price\":10500000,\"validityDays\":30,\"deliveryWeeks\":8}"
+check "sales: proposal P2 at 10,500,000 is below the cost 11,000,000: flagged, and only the CEO may approve it" '.success and .data.price == 10500000 and .data.estimateTotalCost == 11000000 and .data.belowCost == true and .data.needsCeo == true'
+SLP2=$(val .data.id)
+ibx "$CEO_TOKEN" "sl:belowcost:$SLP2"; check "sales: the below-cost alert of P2 is in the CEO's inbox" '.success and (.data.data|length) == 1'
+as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$SLP2,\"action\":\"approve\"}"; nomsg "sales: a sales user cannot approve a below-cost proposal even within the ceiling" "فقط مدیرعامل تأیید می"
+as "$CEO_TOKEN" POST $SL/proposals/action "{\"id\":$SLP2,\"action\":\"approve\"}"; nomsg "sales: the CEO must write the reason for approving below cost" "دلیل را در توضیح"
+as "$CEO_TOKEN" POST $SL/proposals/action "{\"id\":$SLP2,\"action\":\"approve\",\"note\":\"ورود به بازار مشتری جدید\"}"; check "sales: the CEO approves P2 below cost with the reason on record" ".success and .data.status == 2 and .data.approvedByUserId == $CEOID and .data.approvalNote == \"ورود به بازار مشتری جدید\""
+ibx "$CEO_TOKEN" "sl:belowcost:$SLP2"; check "sales: the below-cost alert of P2 is closed" '.success and (.data.data|length) == 0'
+as "$SL_TOKEN" POST $SL/proposals/action "{\"id\":$SLP2,\"action\":\"submit\"}"; check "sales: P2 sent to customer B" '.success and .data.status == 3'
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$SLP2,\"result\":\"lost\"}"; nomsg "sales: a lost proposal needs its reason code" "کد دلیل را انتخاب"
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$SLP2,\"result\":\"lost\",\"reasonId\":$SLRW}"; nomsg "sales: a lost proposal needs a reason of the lost kind" "بازنده‌شدن پیدا نشد"
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$SLP2,\"result\":\"lost\",\"reasonId\":$SLRL,\"competitor\":\"رقیب الف\",\"competitorPrice\":10000000,\"lessonsLearned\":\"قیمت رقیب ۵٪ کمتر بود\"}"
+check "sales: P2 recorded as lost with the reason, the competitor and his price; no contract is made" '.success and .data.status == 6 and .data.resultReason == "قیمت بالاتر" and .data.competitor == "رقیب الف" and .data.competitorPrice == 10000000 and .data.contractId == null'
+as "$SL_TOKEN" GET $SL/inquiries/$SLI2; check "sales: inquiry I2 is lost" '.success and .data.status == 7'
+as "$SL_TOKEN" GET $SL/statistics/win-loss; check "sales: win/loss statistics: 1 won, 1 lost, hit rate 50 %; pumps 1 of 1 (100 %, 37,365,625 won), valves 0 of 1 (0 %, 10,500,000 lost); by customer and by reason" '.success and .data.won == 1 and .data.lost == 1 and .data.hitRatePercent == 50 and (.data.byProduct|length) == 2 and .data.byProduct[0].name == "پمپ" and .data.byProduct[0].won == 1 and .data.byProduct[0].lost == 0 and .data.byProduct[0].hitRatePercent == 100 and .data.byProduct[0].wonValue == 37365625 and .data.byProduct[1].won == 0 and .data.byProduct[1].lost == 1 and .data.byProduct[1].hitRatePercent == 0 and .data.byProduct[1].lostValue == 10500000 and ([.data.byCustomer[]|select(.name == "پتروشیمی نمونه آزمون")][0] | .won == 1 and .lost == 0) and ([.data.byCustomer[]|select(.name == "نیروگاه نمونه آزمون")][0] | .won == 0 and .lost == 1) and ([.data.byReason[]|select(.name == "برتری فنی")][0] | .won == 1 and .lost == 0) and ([.data.byReason[]|select(.name == "قیمت بالاتر")][0] | .won == 0 and .lost == 1)'
+as "$SL_TOKEN" GET "$SL/statistics/win-loss?From=$(dd 1)T00:00:00"; check "sales: the statistics can be limited by date: nothing was decided from tomorrow on" '.success and .data.won == 0 and .data.lost == 0 and .data.hitRatePercent == null'
+
+# --- inquiry I3: the CEO decides not to bid, with a reason
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"قطعات یدکی خارج از توان\",\"productType\":7,\"quantity\":1,\"requiredDeliveryDate\":\"$(dd 45)T00:00:00\",\"proposalDueDate\":\"$(dd 10)T00:00:00\"}"; check "sales: inquiry I3 registered" '.success and .data.status == 1'
+SLI3=$(val .data.id)
+as "$SL_TOKEN" POST $SL/bid-decisions "{\"inquiryId\":$SLI3,\"technicalCapabilityOk\":false,\"technicalNote\":\"خارج از ظرفیت فنی\",\"commercialRiskReviewed\":true,\"paymentTermsReviewed\":true,\"guaranteesReviewed\":true,\"sanctionCheck\":2,\"sanctionNote\":\"نیاز به بررسی بیشتر\"}"; check "sales: checklist of I3: technical capability no, sanction concern" '.success and .data.technicalCapabilityOk == false and .data.sanctionCheck == 2'
+as "$SL_TOKEN" POST $SL/bid-decisions/submit "{\"inquiryId\":$SLI3}"; check "sales: checklist of I3 sent to the CEO" '.success and .data.status == 2'
+as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI3,\"decision\":\"nobid\"}"; nomsg "sales: not bidding needs a reason" "دلیل"
+as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI3,\"decision\":\"nobid\",\"reason\":\"خارج از توان فنی شرکت\"}"; check "sales: the CEO decides not to bid on I3; no tender is drafted" '.success and .data.status == 4 and .data.decisionReason == "خارج از توان فنی شرکت" and .data.tenderId == null'
+as "$SL_TOKEN" GET $SL/inquiries/$SLI3; check "sales: inquiry I3 is closed as no-bid with the reason" '.success and .data.status == 3 and .data.cancelReason == "خارج از توان فنی شرکت"'
+as "$SL_TOKEN" POST $SL/estimates "{\"inquiryId\":$SLI3,\"lines\":[]}"; nomsg "sales: no estimate for a no-bid inquiry" "مدیرعامل شرکت در آن را تأیید کرده"
+
+# --- inquiry I4: cancelled by sales with a reason
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCB,\"title\":\"استعلام لغوشده\",\"productType\":8,\"quantity\":1}"; check "sales: inquiry I4 registered" '.success and .data.status == 1'
+SLI4=$(val .data.id)
+as "$SL_TOKEN" POST $SL/inquiries/action "{\"id\":$SLI4,\"action\":\"cancel\"}"; nomsg "sales: cancelling an inquiry needs a reason" "دلیل لغو"
+as "$SL_TOKEN" POST $SL/inquiries/action "{\"id\":$SLI4,\"action\":\"cancel\",\"reason\":\"مشتری استعلام را پس گرفت\"}"; check "sales: I4 cancelled" '.success and .data.status == 8 and .data.cancelReason == "مشتری استعلام را پس گرفت"'
+as "$SL_TOKEN" POST $SL/inquiries/action "{\"id\":$SLI1,\"action\":\"cancel\",\"reason\":\"x\"}"; nomsg "sales: a won inquiry cannot be cancelled" "لغو نمی"
+
+# --- inquiry I5: its checklist waits for the CEO (stays open for the dashboards)
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"واحد ORC برای بازیافت حرارت\",\"productType\":2,\"quantity\":1,\"requiredDeliveryDate\":\"$(dd 120)T00:00:00\",\"proposalDueDate\":\"$(dd 3)T00:00:00\"}"; check "sales: inquiry I5 (ORC unit) registered" '.success and .data.status == 1 and .data.productTypeText != null'
+SLI5=$(val .data.id); SLI5N=$(val .data.number)
+as "$SL_TOKEN" POST $SL/bid-decisions "{\"inquiryId\":$SLI5,\"technicalCapabilityOk\":true,\"commercialRiskReviewed\":true,\"paymentTermsReviewed\":true,\"guaranteesReviewed\":true,\"sanctionCheck\":1}"; check "sales: checklist of I5 saved; saving it puts the inquiry under review" '.success and .data.status == 1'
+as "$SL_TOKEN" POST $SL/bid-decisions/submit "{\"inquiryId\":$SLI5}"; check "sales: checklist of I5 sent to the CEO, who has not decided yet" '.success and .data.status == 2'
+ibx "$CEO_TOKEN" "sl:bid:$SLI5"; check "sales: the bid decision of I5 waits in the CEO's inbox" '.success and (.data.data|length) == 1'
+as "$SL_TOKEN" GET $SL/inquiries/$SLI5; check "sales: inquiry I5 is under review" '.success and .data.status == 2'
+
+# --- inquiry I6: an estimate revision, then a below-cost proposal that waits for the CEO (stays open for the dashboards)
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCB,\"title\":\"یک دستگاه پمپ برای نیروگاه\",\"productType\":4,\"quantity\":1,\"requiredDeliveryDate\":\"$(dd 90)T00:00:00\",\"proposalDueDate\":\"$(dd 20)T00:00:00\"}"; check "sales: inquiry I6 (pump) registered" '.success and .data.status == 1'
+SLI6=$(val .data.id)
+slbid "$SLI6" "I6"
+as "$SL_TOKEN" POST $SL/estimates "{\"inquiryId\":$SLI6,\"overheadPercent\":10,\"contingencyPercent\":0,\"targetMarginPercent\":20,\"lines\":[{\"kind\":1,\"description\":\"تجهیز کامل پمپ\",\"unit\":\"دستگاه\",\"quantity\":1,\"unitCost\":20000000}]}"
+check "sales: estimate of I6: material 20,000,000; overhead 10 % = 2,000,000; total 22,000,000; price 22,000,000 / 0.8 = 27,500,000" '.success and .data.directCost == 20000000 and .data.overheadCost == 2000000 and .data.totalCost == 22000000 and .data.price == 27500000 and .data.revision == 1'
+SLE6=$(val .data.id)
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$SLE6,\"action\":\"revise\"}"; nomsg "sales: only a finalized estimate can be revised" "نهایی‌شده"
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$SLE6,\"action\":\"finalize\"}"; check "sales: estimate of I6 finalized" '.success and .data.status == 2'
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$SLE6,\"action\":\"revise\"}"; check "sales: revision 2 of the estimate: a copy with the same lines and price, a draft; the old revision is superseded" '.success and .data.revision == 2 and (.data.number|endswith("/E2")) and .data.status == 1 and (.data.lines|length) == 1 and .data.price == 27500000 and .data.totalCost == 22000000'
+SLE6B=$(val .data.id)
+as "$SL_TOKEN" GET $SL/estimates/$SLE6; check "sales: revision 1 is superseded" '.success and .data.status == 3'
+as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$SLI6,\"estimateId\":$SLE6}"; nomsg "sales: a proposal cannot be built on a superseded estimate" "نهایی‌شده"
+as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$SLI6,\"estimateId\":$SLE6B}"; nomsg "sales: a proposal cannot be built on an estimate that is still a draft" "نهایی‌شده"
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$SLE6B,\"action\":\"finalize\"}"; check "sales: revision 2 of I6 finalized" '.success and .data.status == 2'
+as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$SLI6,\"estimateId\":$SLE6B,\"price\":20000000,\"validityDays\":30,\"deliveryWeeks\":16}"; check "sales: proposal P6 at 20,000,000 is below the cost 22,000,000" '.success and .data.status == 1 and .data.belowCost == true and .data.needsCeo == true and .data.price == 20000000 and .data.estimateId == '"$SLE6B"
+SLP6=$(val .data.id)
+ibx "$CEO_TOKEN" "sl:belowcost:$SLP6"; check "sales: the below-cost alert of P6 waits in the CEO's inbox" '.success and (.data.data|length) == 1'
+ibx "$CEO_TOKEN" "sl:proposal:$SLP6"; check "sales: and so does its approval gate (the CEO only)" '.success and (.data.data|length) == 1'
+
+# --- price list for the spare parts: cost-plus suggestion, then a draft that a second person approves
+as "$SL_TOKEN" POST $SL/price-lists/suggest "{\"itemIds\":[$SLSPA,$SLSPB]}"; nomsg "sales: a cost-plus price suggestion needs the markup as an input (no percentage is assumed)" "درصد سود"
+as "$SL_TOKEN" POST $SL/price-lists/suggest "{\"itemIds\":[$SLSPA,$SLSPB],\"markupPercent\":50}"
+check "sales: suggested prices at a 50 % markup on the average cost: impeller 2,000,000 -> 3,000,000, seal 500,000 -> 750,000" ".success and (.data|length) == 2 and .data[0].itemId == $SLSPA and .data[0].unitCost == 2000000 and .data[0].costSource == 1 and .data[0].suggestedPrice == 3000000 and .data[1].itemId == $SLSPB and .data[1].unitCost == 500000 and .data[1].suggestedPrice == 750000"
+as "$SL_TOKEN" POST $SL/quotations "{\"customerId\":$SLCA,\"validUntil\":\"$(dd 10)T00:00:00\",\"lines\":[{\"itemId\":$SLSPA,\"quantity\":6}]}"; nomsg "sales: a quotation line without a price needs an approved price list; nothing is guessed" "قیمتی نیست"
+as "$SL_TOKEN" POST $SL/price-lists "{\"title\":\"فهرست تکراری\",\"validFrom\":\"2026-01-01T00:00:00\",\"lines\":[{\"itemId\":$SLSPA,\"unitPrice\":3000000},{\"itemId\":$SLSPA,\"unitPrice\":3100000}]}"; nomsg "sales: an item appears once per minimum quantity in a price list" "فقط یک بار"
+as "$SL_TOKEN" POST $SL/price-lists "{\"title\":\"فهرست قیمت قطعات یدکی\",\"validFrom\":\"2026-01-01T00:00:00\",\"lines\":[{\"itemId\":$SLSPA,\"unitPrice\":3000000},{\"itemId\":$SLSPB,\"unitPrice\":750000},{\"itemId\":$SLSPB,\"unitPrice\":700000,\"minQuantity\":10}]}"
+check "sales: price list drafted with 3 lines (seal: 750,000 each, 700,000 from 10 pieces)" '.success and .data.status == 1 and (.data.number|test("^PL-[0-9]{4}-0*1$")) and (.data.lines|length) == 3 and ([.data.lines[]|select(.unitPrice == 700000 and .minQuantity == 10)]|length) == 1'
+SLPL=$(val .data.id)
+as "$SL_TOKEN" POST $SL/price-lists/action "{\"id\":$SLPL,\"action\":\"approve\"}"; nomsg "sales: the author cannot approve his own price list (maker-checker)" "تفکیک وظایف"
+as "$SV_TOKEN" POST $SL/price-lists/action "{\"id\":$SLPL,\"action\":\"approve\"}"; nomsg "sales: the service role cannot approve a price list" "مجوز"
+as "$SL2_TOKEN" POST $SL/price-lists/action "{\"id\":$SLPL,\"action\":\"approve\"}"; check "sales: a second sales user approves the price list" ".success and .data.status == 2 and .data.approvedByUserId == $SL2ID and .data.approvedAtText != null"
+as "$SL_TOKEN" POST $SL/price-lists "{\"id\":$SLPL,\"title\":\"تغییر پس از تأیید\",\"validFrom\":\"2026-01-01T00:00:00\",\"lines\":[{\"itemId\":$SLSPA,\"unitPrice\":1}]}"; nomsg "sales: an approved price list is not edited" "پیش‌نویس ویرایش"
+
+# --- quotation Q1 from the price list: 6 impellers with 10 % discount and 12 seals at the 10-piece price
+as "$SL_TOKEN" POST $SL/quotations "{\"customerId\":$SLCA,\"contactId\":$SLCT1,\"validUntil\":\"$(dd 10)T00:00:00\",\"lines\":[{\"itemId\":$SLSPA,\"quantity\":6,\"discountPercent\":10},{\"itemId\":$SLSPB,\"quantity\":12}]}"
+check "sales: quotation Q1: 6 x 3,000,000 = 18,000,000 less 10 % = 16,200,000; 12 x 700,000 (the 10-piece price) = 8,400,000; net 24,600,000" '.success and .data.status == 1 and (.data.number|test("^QUO-[0-9]{4}-0*1$")) and .data.netAmount == 24600000 and (.data.lines|length) == 2 and .data.lines[0].unitPrice == 3000000 and .data.lines[0].discountPercent == 10 and .data.lines[0].amount == 16200000 and .data.lines[1].unitPrice == 700000 and .data.lines[1].amount == 8400000 and (.data.validUntilText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
+SLQ1=$(val .data.id)
+as "$SL_TOKEN" POST $SL/quotations/action "{\"id\":$SLQ1,\"action\":\"accept\"}"; nomsg "sales: a quotation that was not sent cannot be accepted" "ارسال‌شده پذیرفته"
+as "$SL_TOKEN" POST $SL/quotations/action "{\"id\":$SLQ1,\"action\":\"send\"}"; check "sales: Q1 sent to the customer" '.success and .data.status == 2'
+as "$SL_TOKEN" POST $SL/quotations/action "{\"id\":$SLQ1,\"action\":\"expire\"}"; nomsg "sales: a quotation that is still valid is not expired" "اعتبارش تمام شده"
+as "$SL_TOKEN" POST $SL/quotations/to-order "{\"quotationId\":$SLQ1}"; nomsg "sales: only an accepted quotation becomes an order" "پذیرفته‌شده"
+as "$SL_TOKEN" POST $SL/quotations/action "{\"id\":$SLQ1,\"action\":\"accept\"}"; check "sales: Q1 accepted by the customer" '.success and .data.status == 3'
+as "$SL_TOKEN" POST $SL/quotations/to-order "{\"quotationId\":$SLQ1,\"customerOrderNumber\":\"PO-CA-77\",\"requestedDeliveryDate\":\"$(dd 14)T00:00:00\"}"
+check "sales: sales order O1 drafted from Q1 with the same lines and amounts (a draft, no credit approval needed yet)" '.success and .data.status == 1 and (.data.number|test("^SO-[0-9]{4}-0*1$")) and .data.netAmount == 24600000 and .data.customerOrderNumber == "PO-CA-77" and (.data.lines|length) == 2 and .data.lines[0].unitPrice == 3000000 and .data.lines[0].discountPercent == 10 and .data.lines[0].amount == 16200000 and .data.lines[1].amount == 8400000 and .data.creditApprovalRequired == false'
+SLO1=$(val .data.id); SLO1L1=$(val '.data.lines[0].id'); SLO1L2=$(val '.data.lines[1].id')
+as "$SL_TOKEN" POST $SL/quotations/to-order "{\"quotationId\":$SLQ1}"; nomsg "sales: one order per quotation" "قبلاً سفارش فروش"
+as "$SL_TOKEN" GET $SL/quotations/$SLQ1; check "sales: Q1 points to its order" ".success and .data.salesOrderId == $SLO1"
+
+# --- a material request of the plant sees the free stock before any reservation
+call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"آزمون رزرو سفارش فروش\",\"lines\":[{\"itemId\":$SLSPA,\"quantity\":8},{\"itemId\":$SLSPB,\"quantity\":1}]}"; check "sales: setup: a plant material request for 8 impellers and 1 seal" '.success and .data.id > 0'
+SLMR=$(val .data.id)
+call GET inventory/material-requests/$SLMR; check "sales: before any reservation the plant sees all 10 impellers and 20 seals as available" '.success and .data.lines[0].available == 10 and .data.lines[0].shortage == 0 and .data.lines[1].available == 20 and .data.lines[1].shortage == 0'
+
+# --- credit check of O1: no limit set, then a limit below the order, then the finance manager's approval
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO1,\"action\":\"confirm\"}"; nomsg "sales: with no credit limit entered by finance the order cannot be confirmed" "تعیین نکرده است"
+as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: O1 stays a draft and is marked as waiting for the finance manager (no excess can be computed without a limit)" '.success and .data.status == 1 and .data.creditApprovalRequired == true and .data.creditExcess == null and .data.creditApprovedNetAmount == null'
+ibx "$FM_TOKEN" "sl:credit:$SLO1"; check "sales: the credit approval of O1 waits in the finance manager's inbox" '.success and (.data.data|length) == 1'
+as "$SL_TOKEN" GET "$SL/orders?CreditPending=true"; check "sales: the credit-pending list holds exactly O1" ".success and (.data.data|length) == 1 and .data.data[0].id == $SLO1"
+as "$SL_TOKEN" GET $SL/dashboard; check "sales: the sales dashboard already counts 1 order waiting for credit approval" '.success and .data.ordersWaitingCredit == 1'
+as "$FM_TOKEN" POST $SL/customers/credit "{\"customerId\":$SLCA,\"creditLimitRial\":-5}"; nomsg "sales: a credit limit cannot be negative" "منفی"
+as "$FM_TOKEN" POST $SL/customers/credit "{\"customerId\":$SLCA,\"creditLimitRial\":20000000}"; check "sales: finance sets the credit limit of customer A: 20,000,000 rials" '.success and .data.creditLimitRial == 20000000'
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO1,\"action\":\"confirm\"}"
+check "sales: O1 (24,600,000 + 10 % VAT = 27,060,000, nothing open yet) exceeds the limit 20,000,000 by 7,060,000; the refusal says so" '.success == false and (.message|contains("27,060,000")) and (.message|contains("20,000,000")) and (.message|contains("7,060,000"))'
+as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: the excess is stored on the order" '.success and .data.status == 1 and .data.creditApprovalRequired == true and .data.creditExcess == 7060000'
+as "$SL_TOKEN" POST $SL/orders/credit-approve "{\"id\":$SLO1}"; nomsg "sales: sales cannot approve the credit excess (finance manager only)" "مدیر مالی"
+as "$SL2_TOKEN" POST $SL/orders/credit-approve "{\"id\":$SLO1}"; nomsg "sales: another sales user cannot either" "مدیر مالی"
+as "$FM_TOKEN" POST $SL/orders/credit-approve "{\"id\":$SLO1,\"note\":\"مشتری سابقه پرداخت خوب دارد\"}"; check "sales: the finance manager approves the excess for exactly the order's net amount" ".success and .data.creditApprovedByUserId == $FMID and .data.creditApprovedNetAmount == 24600000 and .data.creditApprovalNote == \"مشتری سابقه پرداخت خوب دارد\" and .data.status == 1"
+as "$FM_TOKEN" POST $SL/orders/credit-approve "{\"id\":$SLO1}"; nomsg "sales: the approval is given once" "قبلاً تأیید"
+ibx "$FM_TOKEN" "sl:credit:$SLO1"; check "sales: the credit gate of O1 is closed" '.success and (.data.data|length) == 0'
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO1,\"action\":\"confirm\"}"; check "sales: O1 confirmed; the open quantities are reserved (6 impellers, 12 seals)" '.success and .data.status == 2 and .data.confirmedAtText != null and .data.lines[0].reservedQuantity == 6 and .data.lines[1].reservedQuantity == 12'
+call GET inventory/material-requests/$SLMR; check "sales: the plant now sees 4 impellers (10 - 6 reserved) and a shortage of 4 for its 8, and 8 seals (20 - 12)" '.success and .data.lines[0].available == 4 and .data.lines[0].shortage == 4 and .data.lines[1].available == 8 and .data.lines[1].shortage == 0'
+
+# --- delivery against O1: wrong documents are refused, then two correct ones
+sldoc() { # sldoc ORDERID LINES-JSON [EXTRA-FIELDS] : a draft customer delivery against a sales order
+  call POST inventory/documents "{\"type\":11,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"salesOrderId\":$1,\"driverName\":\"راننده\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"تحویل‌گیرنده\",\"lines\":[$2]${3:+,$3}}"
+}
+sldeliver() { # sldeliver ORDERID LINES-JSON LABEL : draft, QC loading approval, confirm (sets SLDOC)
+  sldoc "$1" "$2"; check "sales: delivery $3 saved as a draft against the sales order" ".success and .data.status == 0 and .data.salesOrderId == $1"
+  SLDOC=$(val .data.id)
+  as "$QC_TOKEN" POST "inventory/documents/$SLDOC/approve" '{"kind":4}'
+  call POST "inventory/documents/$SLDOC/confirm"; check "sales: delivery $3 confirmed" '.success and .data.status == 1'
+}
+sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":1,\"salesOrderLineId\":$SLO1L1}" "\"contractId\":$QCT"; nomsg "sales: a delivery is for a contract or for a sales order, not both" "نه هر دو"
+sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":7,\"salesOrderLineId\":$SLO1L1}"; nomsg "sales: a delivery above the open quantity of the order line (7 of 6) is refused" "از مانده سفارش (6) بیشتر است"
+sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":1}"; nomsg "sales: every delivery line must name the order line" "ردیف سفارش فروش را انتخاب کنید"
+sldoc "$SLO1" "{\"itemId\":$SLSPB,\"quantity\":1,\"salesOrderLineId\":$SLO1L1}"; nomsg "sales: the item of the delivery line must be the item of the order line" "یکی نیست"
+sldeliver "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":4,\"salesOrderLineId\":$SLO1L1},{\"itemId\":$SLSPB,\"quantity\":12,\"salesOrderLineId\":$SLO1L2}" "D1 (4 impellers and 12 seals)"
+SLD1=$SLDOC
+as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: after D1 the order is partly delivered: impellers 4 delivered / 2 still reserved / 4 invoiced, seals 12 delivered / 0 reserved / 12 invoiced; one delivery with its invoice" '.success and .data.status == 3 and .data.lines[0].deliveredQuantity == 4 and .data.lines[0].reservedQuantity == 2 and .data.lines[0].invoicedQuantity == 4 and .data.lines[1].deliveredQuantity == 12 and .data.lines[1].reservedQuantity == 0 and .data.lines[1].invoicedQuantity == 12 and (.data.deliveries|length) == 1 and .data.deliveries[0].invoiceId > 0 and .data.deliveries[0].reversed == false and .data.deliveries[0].draftNote == null'
+call GET "inventory/stock/items?ItemId=$SLSPA"; check "sales: stock of impeller A fell to 6" '.data.data[0].onHand == 6'
+call GET "inventory/stock/items?ItemId=$SLSPB"; check "sales: stock of seal B fell to 8" '.data.data[0].onHand == 8'
+as "$FM_TOKEN" GET "$FR/invoices?CustomerId=$SLCA"
+check "sales: the system drafted sales invoice 1: impellers 4 x 3,000,000 = 12,000,000 less 10 % = 10,800,000 (VAT 1,080,000); seals 12 x 700,000 = 8,400,000 (VAT 840,000); net 19,200,000, discount 1,200,000, VAT 1,920,000, total 21,120,000, due in 30 days" ".success and (.data.data|length) == 1 and .data.data[0].status == 0 and .data.data[0].type == 4 and (.data.data[0].number|startswith(\"SI-\")) and .data.data[0].netAmount == 19200000 and .data.data[0].discountAmount == 1200000 and .data.data[0].vatAmount == 1920000 and .data.data[0].grossAmount == 21120000 and .data.data[0].receivableAmount == 21120000 and (.data.data[0].dueDate|startswith(\"$(dd 30)\")) and (.data.data[0].lines|length) == 2 and .data.data[0].lines[0].quantity == 4 and .data.data[0].lines[0].unitPrice == 3000000 and .data.data[0].lines[0].discount == 1200000 and .data.data[0].lines[0].amount == 10800000 and .data.data[0].lines[0].vatAmount == 1080000 and .data.data[0].lines[0].total == 11880000 and .data.data[0].lines[1].quantity == 12 and .data.data[0].lines[1].amount == 8400000 and .data.data[0].lines[1].vatAmount == 840000 and .data.data[0].lines[1].total == 9240000"
+SLINV1=$(val '.data.data[0].id')
+sldeliver "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":2,\"salesOrderLineId\":$SLO1L1}" "D2 (the last 2 impellers)"
+SLD2=$SLDOC
+as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: after D2 everything is delivered and invoiced: the order is invoiced, nothing is reserved" '.success and .data.status == 5 and .data.lines[0].deliveredQuantity == 6 and .data.lines[0].reservedQuantity == 0 and .data.lines[0].invoicedQuantity == 6 and (.data.deliveries|length) == 2'
+sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":1,\"salesOrderLineId\":$SLO1L1}"; nomsg "sales: an order that is fully delivered takes no further delivery" "تحویل ندارد"
+call POST "inventory/documents/$SLD2/cancel" '{"reason":"تحویل اشتباه ثبت شد"}'; check "sales: delivery D2 cancelled: the order is partly delivered again, 2 impellers reserved again, the draft invoice of D2 is cancelled" '.success and .data.status == 2'
+as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: after the cancellation impellers 4 delivered / 2 reserved / 4 invoiced; the delivery shows as reversed" '.success and .data.status == 3 and .data.lines[0].deliveredQuantity == 4 and .data.lines[0].reservedQuantity == 2 and .data.lines[0].invoicedQuantity == 4 and (.data.deliveries|length) == 2 and ([.data.deliveries[]|select(.reversed == true)]|length) == 1'
+call GET "inventory/stock/items?ItemId=$SLSPA"; check "sales: stock of impeller A is back to 6" '.data.data[0].onHand == 6'
+as "$FM_TOKEN" GET "$FR/invoices?CustomerId=$SLCA"; check "sales: the customer has 2 invoices: the first (draft) and the cancelled one of D2 (5,940,000 = 2 x 3,000,000 less 10 % + 10 % VAT)" '.success and (.data.data|length) == 2 and ([.data.data[]|select(.status == 3 and .grossAmount == 5940000)]|length) == 1 and ([.data.data[]|select(.status == 0 and .grossAmount == 21120000)]|length) == 1'
+sldeliver "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":2,\"salesOrderLineId\":$SLO1L1}" "D3 (the last 2 impellers again)"
+SLD3=$SLDOC
+as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: after D3 the order is invoiced again" '.success and .data.status == 5 and (.data.deliveries|length) == 3 and ([.data.deliveries[]|select(.reversed == false)]|length) == 2'
+as "$FM_TOKEN" GET "$FR/invoices?CustomerId=$SLCA"; check "sales: the customer has 3 invoices: 21,120,000 (draft), 5,940,000 (cancelled) and 5,940,000 (draft)" '.success and (.data.data|length) == 3 and ([.data.data[]|select(.status == 0 and .grossAmount == 5940000)]|length) == 1 and ([.data.data[]|select(.status == 3 and .grossAmount == 5940000)]|length) == 1'
+as "$SL_TOKEN" POST $SL/orders/draft-invoice "{\"orderId\":$SLO1}"; nomsg "sales: every delivery of O1 already has its invoice, so there is nothing to draft afterwards" "تحویلی بدون پیش‌نویس فاکتور"
+call GET inventory/material-requests/$SLMR; check "sales: with O1 delivered the plant sees the 4 impellers and 8 seals that are really left" '.success and .data.lines[0].available == 4 and .data.lines[0].shortage == 4 and .data.lines[1].available == 8'
+
+# --- finance approves the invoice of D1 (posts it); the delivery can then no longer be cancelled; the open receivable is counted by the credit check
+as "$FM_TOKEN" POST $FR/invoices/action "{\"id\":$SLINV1,\"action\":\"approve\"}"; check "sales: finance approves the drafted invoice of D1: it is posted" '.success and .data.status == 2 and .data.grossAmount == 21120000'
+call POST "inventory/documents/$SLD1/cancel" '{"reason":"درخواست مشتری"}'; nomsg "sales: a delivery whose invoice is posted cannot be cancelled until finance reverses it" "ابتدا مالی باید آن را برگرداند"
+as "$FM_TOKEN" GET "$FR/customers?PageSize=0"; check "sales: the open receivable of customer A is the posted invoice: 21,120,000" ".success and ([.data.data[]|select(.id == $SLCA)][0].openAmount) == 21120000"
+
+# --- order O2: a small order from a typed-price quotation; the open receivable now counts in the credit check
+as "$SL_TOKEN" POST $SL/quotations "{\"customerId\":$SLCA,\"validUntil\":\"$(dd 3)T00:00:00\",\"lines\":[{\"itemId\":$SLSPA,\"quantity\":1,\"unitPrice\":2900000}]}"; check "sales: quotation Q2 with a typed price: 1 x 2,900,000" '.success and .data.netAmount == 2900000 and .data.lines[0].unitPrice == 2900000'
+SLQ2=$(val .data.id)
+as "$SL_TOKEN" POST $SL/quotations/action "{\"id\":$SLQ2,\"action\":\"send\"}"; as "$SL_TOKEN" POST $SL/quotations/action "{\"id\":$SLQ2,\"action\":\"accept\"}"; check "sales: Q2 sent and accepted" '.success and .data.status == 3'
+as "$SL_TOKEN" POST $SL/quotations/to-order "{\"quotationId\":$SLQ2}"; check "sales: order O2 drafted from Q2" '.success and .data.status == 1 and .data.netAmount == 2900000'
+SLO2=$(val .data.id); SLO2L1=$(val '.data.lines[0].id')
+sldoc "$SLO2" "{\"itemId\":$SLSPA,\"quantity\":1,\"salesOrderLineId\":$SLO2L1}"; nomsg "sales: a draft order takes no delivery" "تحویل ندارد"
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO2,\"action\":\"confirm\"}"
+check "sales: O2 (2,900,000 + 290,000 VAT = 3,190,000) on top of the open 21,120,000 exceeds the limit 20,000,000 by 4,310,000" '.success == false and (.message|contains("21,120,000")) and (.message|contains("3,190,000")) and (.message|contains("4,310,000"))'
+as "$FM_TOKEN" POST $SL/orders/credit-approve "{\"id\":$SLO2,\"note\":\"تأیید با هماهنگی مالی\"}"; check "sales: the finance manager approves O2's excess" ".success and .data.creditApprovedNetAmount == 2900000"
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO2,\"action\":\"confirm\"}"; check "sales: O2 confirmed, 1 impeller reserved" '.success and .data.status == 2 and .data.lines[0].reservedQuantity == 1'
+
+# --- order O3: a direct order of customer B, who has no credit limit: it waits for the finance manager
+as "$SL_TOKEN" POST $SL/orders "{\"customerId\":$SLCB,\"lines\":[{\"itemId\":$SLSPB,\"quantity\":1,\"unitPrice\":800000}]}"; check "sales: direct order O3 for customer B: 1 x 800,000" '.success and .data.status == 1 and .data.netAmount == 800000 and .data.quotationId == null'
+SLO3=$(val .data.id)
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO3,\"action\":\"confirm\"}"; nomsg "sales: customer B has no credit limit either, so O3 waits" "تعیین نکرده است"
+as "$SL_TOKEN" GET "$SL/orders?CreditPending=true"; check "sales: the credit-pending list holds exactly O3 now" ".success and (.data.data|length) == 1 and .data.data[0].id == $SLO3"
+ibx "$FM_TOKEN" "sl:credit:$SLO3"; check "sales: the credit approval of O3 waits in the finance manager's inbox" '.success and (.data.data|length) == 1'
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO1,\"action\":\"cancel\",\"reason\":\"x\"}"; nomsg "sales: an invoiced order cannot be cancelled" "لغو نمی"
+as "$SL_TOKEN" POST $SL/orders/action "{\"id\":$SLO1,\"action\":\"close\"}"; check "sales: O1 closed" '.success and .data.status == 6'
+
+# --- quotation Q3 stays sent (it expires within the week)
+as "$SL_TOKEN" POST $SL/quotations "{\"customerId\":$SLCB,\"validUntil\":\"$(dd 5)T00:00:00\",\"lines\":[{\"itemId\":$SLSPB,\"quantity\":3}]}"; check "sales: quotation Q3: 3 seals at the list price 750,000 = 2,250,000" '.success and .data.netAmount == 2250000 and .data.lines[0].unitPrice == 750000'
+SLQ3=$(val .data.id)
+as "$SL_TOKEN" POST $SL/quotations/action "{\"id\":$SLQ3,\"action\":\"send\"}"; check "sales: Q3 sent" '.success and .data.status == 2'
+
+# --- dashboards: exact figures
+as "$SL_TOKEN" GET $SL/dashboard
+check "sales: dashboard: 2 open inquiries (I5 under review, I6 being bid on), pipeline = P6's 20,000,000 (I5 has no figure yet), 1 won / 1 lost = 50 %, 1 inquiry due within the week (I5), 1 quotation expiring (Q3, 2,250,000), 1 bid decision and 1 proposal waiting, 1 order waiting for credit (O3), 1 open order (O2)" ".success and .data.openInquiries == 2 and .data.pipelineValue == 20000000 and .data.won == 1 and .data.lost == 1 and .data.hitRatePercent == 50 and .data.proposalsDueThisWeekCount == 1 and .data.proposalsDueThisWeek[0].inquiryNumber == \"$SLI5N\" and .data.quotationsExpiringCount == 1 and .data.quotationsExpiring[0].number != null and .data.quotationsExpiring[0].netAmount == 2250000 and .data.bidDecisionsWaiting == 1 and .data.proposalsWaitingApproval == 1 and .data.ordersWaitingCredit == 1 and .data.openOrders == 1"
+check "sales: dashboard pipeline by stage and by product: under review 1 inquiry worth 0, being bid on 1 inquiry worth 20,000,000; ORC unit 1 / 0, pump 1 / 20,000,000" '(.data.pipelineByStage|length) == 4 and .data.pipelineByStage[0].count == 0 and .data.pipelineByStage[1].count == 1 and .data.pipelineByStage[1].value == 0 and .data.pipelineByStage[2].count == 1 and .data.pipelineByStage[2].value == 20000000 and .data.pipelineByStage[3].count == 0 and (.data.pipelineByProduct|length) == 2 and .data.pipelineByProduct[0].count == 1 and .data.pipelineByProduct[0].value == 0 and .data.pipelineByProduct[1].count == 1 and .data.pipelineByProduct[1].value == 20000000'
+as "$SV_TOKEN" GET $SL/dashboard; check "sales: the service role reads the same dashboard" '.success and .data.openInquiries == 2'
+as "$WH_TOKEN" GET $SL/dashboard; nomsg "sales: a storekeeper cannot open the sales dashboard" "مجوز"
+as "$CEO_TOKEN" GET finance/ceo-dashboard
+check "sales: CEO dashboard carries the sales figures: 2 open inquiries, pipeline 20,000,000, 1 bid decision, 1 proposal waiting (P6, below cost), 1 inquiry due within 3 days (I5), 1 order waiting for credit, hit rate 50 %" '.success and .data.salesOpenInquiries == 2 and .data.salesPipelineValue == 20000000 and .data.salesBidDecisionsWaiting == 1 and .data.salesProposalsWaitingApproval == 1 and .data.salesProposalsDueSoon == 1 and .data.salesBelowCostProposals == 1 and .data.salesOrdersWaitingCredit == 1 and .data.salesHitRatePercent == 50'
+check "sales: CEO dashboard alerts: due soon (warning), below cost (danger), bid decision waiting (info)" '(.data.alerts|map(select(.link == "/sales/inquiries" and .level == "warning"))|length) == 1 and (.data.alerts|map(select(.link == "/sales/proposals" and .level == "danger"))|length) == 1 and (.data.alerts|map(select(.link == "/sales/bid-decisions" and .level == "info"))|length) == 1'
+
+# --- audit trail of the sales gates
+as "$FM_TOKEN" GET "$FAU?EntityType=SlProposal&EntityId=$SLP1&PageSize=0"; check "sales audit: the approval of P1 left before and after values and the user, exactly once" '.success and ([.data.data[]|select(.action == "Modified" and (.beforeJson|tostring|contains("Draft")) and (.afterJson|tostring|contains("Approved")) and (.userName|length) > 0)]|length) == 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=SlCustomerProfile&PageSize=0"; check "sales audit: the credit limit of customer A (20,000,000) is in the trail exactly once, with the user" '.success and ([.data.data[]|select(.action == "Modified" and (.afterJson|tostring|contains("20000000")) and (.userName|length) > 0)]|length) == 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=SlSetting&PageSize=0"; check "sales audit: the CEO's approval ceiling (50,000,000) is in the trail exactly once" '.success and ([.data.data[]|select(.action == "Added" and (.afterJson|tostring|contains("50000000")))]|length) == 1'
+TOKEN=$ADMIN_TOKEN
+
 # ---------------------------------------------------------------- roles of the new users
 as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "security user cannot write documents (403)" || bad "security user cannot write documents (403) got $CODE"
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'

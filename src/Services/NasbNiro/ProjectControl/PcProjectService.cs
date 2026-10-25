@@ -334,6 +334,30 @@ namespace Services.NasbNiro.ProjectControl
             (PcInitiationStep.BaselineApproved, "تایید مبنای زمان‌بندی (سیستم)", "SYSTEM", null),
         };
 
+        /// <summary>
+        /// Adds (without saving) the initiation record of a contract with its steps, the first one done, and the claims file of WI-PL-013.
+        /// Used by the start of the process and by the sales module when a won proposal becomes a contract (<paramref name="newContract"/> is then a contract that is not saved yet).
+        /// </summary>
+        internal static async Task<PcProjectInitiation> DraftInitiationAsync(IUnitOfWork uow, ContractEntity newContract, int contractId, int userId, CancellationToken cancellationToken)
+        {
+            DateTimeOffset now = DateTimeOffset.Now;
+            var init = new PcProjectInitiation { CurrentStep = PcInitiationStep.CodeAssigned, CreateDate = now, CreatorUserId = userId, ModifyDate = now, ModifierUserId = userId, Steps = new List<PcInitiationStepRecord>() };
+            if (newContract != null) init.Contract = newContract; else init.ContractId = contractId;
+            foreach (var def in StepDefs) init.Steps.Add(new PcInitiationStepRecord { Step = def.Step });
+            PcInitiationStepRecord first = init.Steps.First(s => s.Step == PcInitiationStep.AnnouncementReceived);
+            first.DoneAt = now; first.DoneByUserId = userId;
+            uow.Set<PcProjectInitiation>().Add(init);
+            // WI-PL-013 6-2-2-1: a claims file is opened for every contract at project start
+            var claim = new PcClaim
+            {
+                Number = await InventoryNumbers.NextNumberAsync(uow, PcNumbers.Claim, "CLM", DateTime.Today, cancellationToken),
+                Direction = PcClaimDirection.AgainstClient, Issue = "پرونده ادعا (Claims file) در شروع پروژه باز شد (WI-PL-013).", Status = PcClaimStatus.Issue, CreateDate = now, CreatorUserId = userId, ModifyDate = now, ModifierUserId = userId,
+            };
+            if (newContract != null) claim.Contract = newContract; else claim.ContractId = contractId;
+            uow.Set<PcClaim>().Add(claim);
+            return init;
+        }
+
         private async Task<PcInitiationDto> InitiationDtoAsync(PcProjectInitiation init, CancellationToken cancellationToken)
         {
             ContractEntity c = await _uow.Set<ContractEntity>().AsNoTracking().FirstAsync(x => x.Id == init.ContractId, cancellationToken);
@@ -376,18 +400,7 @@ namespace Services.NasbNiro.ProjectControl
             ContractEntity c = await _uow.Set<ContractEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == contractId && !x.Deleted, cancellationToken);
             if (c == null) return PcText.NotFound<PcInitiationDto>(PcText.ContractNotFound);
             if (await _uow.Set<PcProjectInitiation>().AnyAsync(i => i.ContractId == contractId && !i.Deleted, cancellationToken)) return Bad<PcInitiationDto>("فرآیند شروع این پروژه قبلاً ثبت شده است.");
-            DateTimeOffset now = DateTimeOffset.Now;
-            var init = new PcProjectInitiation { ContractId = contractId, CurrentStep = PcInitiationStep.CodeAssigned, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me, Steps = new List<PcInitiationStepRecord>() };
-            foreach (var def in StepDefs) init.Steps.Add(new PcInitiationStepRecord { Step = def.Step });
-            PcInitiationStepRecord first = init.Steps.First(s => s.Step == PcInitiationStep.AnnouncementReceived);
-            first.DoneAt = now; first.DoneByUserId = Me;
-            _uow.Set<PcProjectInitiation>().Add(init);
-            // WI-PL-013 6-2-2-1: a claims file is opened for every contract at project start
-            _uow.Set<PcClaim>().Add(new PcClaim
-            {
-                Number = await InventoryNumbers.NextNumberAsync(_uow, PcNumbers.Claim, "CLM", DateTime.Today, cancellationToken), ContractId = contractId,
-                Direction = PcClaimDirection.AgainstClient, Issue = "پرونده ادعا (Claims file) در شروع پروژه باز شد (WI-PL-013).", Status = PcClaimStatus.Issue, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
-            });
+            PcProjectInitiation init = await DraftInitiationAsync(_uow, null, contractId, Me, cancellationToken);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(await InitiationDtoAsync(init, cancellationToken));
         }

@@ -3,6 +3,7 @@ using DataLayer.Configurations.EF.NasbNiro.Office;
 using DataLayer.Configurations.EF.NasbNiro.Production;
 using DataLayer.Configurations.EF.NasbNiro.ProjectControl;
 using DataLayer.Configurations.EF.NasbNiro.Quality;
+using DataLayer.Configurations.EF.NasbNiro.Sales;
 using Entities.Model.NasbNiro.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -28,6 +29,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddProjectControlConfigurations();
             builder.AddOfficeConfigurations();
             builder.AddProductionConfigurations();
+            builder.AddSalesConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());

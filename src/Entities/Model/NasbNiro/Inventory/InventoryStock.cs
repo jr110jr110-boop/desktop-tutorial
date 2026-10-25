@@ -113,6 +113,9 @@ namespace Entities.Model.NasbNiro.Inventory
         public int? ContractId { get; set; }
         public ContractEntity Contract { get; set; }
 
+        /// <summary>Sales order (spare parts and small sales, release S1) a customer delivery belongs to, instead of a contract. The foreign key is configured by the sales module.</summary>
+        public int? SalesOrderId { get; set; }
+
         /// <summary>Supplier invoice, delivery note or request number.</summary>
         public string ReferenceNumber { get; set; }
 
@@ -215,6 +218,9 @@ namespace Entities.Model.NasbNiro.Inventory
 
         public decimal? UnitPrice { get; set; }
         public string Description { get; set; }
+
+        /// <summary>Sales order line delivered by this line (customer delivery of a sales order).</summary>
+        public int? SalesOrderLineId { get; set; }
 
         /// <summary>Purchase order line received or returned by this line.</summary>
         public int? PurchaseOrderLineId { get; set; }

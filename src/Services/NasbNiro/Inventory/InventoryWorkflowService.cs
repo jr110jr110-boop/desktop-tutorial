@@ -96,9 +96,11 @@ namespace Services.NasbNiro.Inventory
             var stock = await _uow.Set<StockBalance>()
                 .Where(b => itemIds.Contains(b.ItemId) && b.Quantity > 0 && (!request.WarehouseId.HasValue || b.WarehouseId == request.WarehouseId.Value))
                 .Select(b => new { b.ItemId, b.Quantity, b.Warehouse.Kind }).ToListAsync(cancellationToken);
+            // stock held for confirmed customer sales orders is not available
+            Dictionary<int, decimal> salesHeld = await Sales.SlReservations.ReservedAsync(_uow, itemIds, cancellationToken);
             foreach (var group in request.Lines.GroupBy(l => l.ItemId))
             {
-                decimal available = stock.Where(s => s.ItemId == group.Key && IsUsable(s.Kind)).Sum(s => s.Quantity);
+                decimal available = Math.Max(0, stock.Where(s => s.ItemId == group.Key && IsUsable(s.Kind)).Sum(s => s.Quantity) - salesHeld.GetValueOrDefault(group.Key));
                 foreach (MaterialRequestLineDto line in group.OrderBy(l => l.RowNumber))
                 {
                     line.Remaining = Math.Max(0, line.Quantity - line.IssuedQuantity);

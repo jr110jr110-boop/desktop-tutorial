@@ -182,6 +182,19 @@ namespace Services.NasbNiro.Finance
             Alert(production.MachinesDown > 0, "danger", $"{production.MachinesDown} ماشین خراب است", "/production/machines");
             Alert(production.OverloadWeeks > 0, "warning", $"بار {production.OverloadWeeks} هفته مرکز کار در چهار هفته آینده بیش از ۱۱۰٪ ظرفیت است", "/production/load");
             Alert(production.MaintenanceOverdue > 0, "info", $"{production.MaintenanceOverdue} دستور نگهداری از موعد گذشته است", "/production/maintenance-orders");
+            // sales: pipeline, gates waiting for the CEO and deadlines
+            var sales = await Sales.SlDashboardService.CeoCountsAsync(_uow, productionAsOf?.Date ?? today, ct);
+            d.SalesOpenInquiries = sales.OpenInquiries;
+            d.SalesPipelineValue = sales.PipelineValue;
+            d.SalesBidDecisionsWaiting = sales.BidDecisionsWaiting;
+            d.SalesProposalsWaitingApproval = sales.ProposalsWaitingApproval;
+            d.SalesProposalsDueSoon = sales.ProposalsDueSoon;
+            d.SalesBelowCostProposals = sales.BelowCostProposals;
+            d.SalesOrdersWaitingCredit = sales.OrdersWaitingCredit;
+            d.SalesHitRatePercent = sales.HitRatePercent;
+            Alert(sales.ProposalsDueSoon > 0, "warning", $"{sales.ProposalsDueSoon} پیشنهاد تا ۳ روز دیگر (یا گذشته) به مهلت ارسال می‌رسد و هنوز ارسال نشده است", "/sales/inquiries");
+            Alert(sales.BelowCostProposals > 0, "danger", $"{sales.BelowCostProposals} پیشنهاد با قیمت کمتر از بهای تمام‌شده منتظر تصمیم مدیرعامل است", "/sales/proposals");
+            Alert(sales.BidDecisionsWaiting > 0, "info", $"{sales.BidDecisionsWaiting} استعلام منتظر تصمیم شرکت یا عدم شرکت است", "/sales/bid-decisions");
             // finance module: cash, receivables, cheques, profit, margins
             d.Finance = await _finance.GetCeoFinanceAsync(ct);
             d.Alerts.AddRange(d.Finance.Alerts);

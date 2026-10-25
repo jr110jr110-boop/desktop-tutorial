@@ -6,6 +6,7 @@ using Common.IdentityToolkit;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.Production;
+using Entities.Model.NasbNiro.Sales;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -94,6 +95,16 @@ namespace DataLayer.Context
             { typeof(MfMaintenanceLabour), new[] { "OrderId", "EmployeeId", "WorkDate", "Hours" } },
             { typeof(MfMaintenancePart), new[] { "OrderId", "ItemId", "Quantity" } },
             { typeof(MfCostRun), new[] { "Number", "PostingDate", "RunByUserId", "BookingCount", "MachineHours", "OverheadAmount", "AccountingEventId" } }, // not the labour amount or hours: with one employee they give his hourly payroll cost
+            // sales (release S1): the thresholds, the credit limit, the reason codes and the gates (bid decision, proposal approval, price list approval, credit approval); contacts and sites hold personal data and are not listed
+            { typeof(SlSetting), null },
+            { typeof(SlReasonCode), null },
+            { typeof(SlCustomerProfile), null },
+            { typeof(SlCustomerLink), null },
+            { typeof(SlBidDecision), new[] { "Status", "SanctionCheck", "CapacityOverloadWeeks", "DecidedByUserId", "DecidedAt", "DecisionReason" } },
+            { typeof(SlEstimate), new[] { "Status", "TotalCost", "Price", "FinalizedByUserId" } },
+            { typeof(SlProposal), new[] { "Revision", "Status", "Price", "EstimateTotalCost", "BelowCost", "ApprovedByUserId", "ApprovedAt", "ApprovalNote", "SubmittedByUserId", "ResultReasonId", "ContractId" } },
+            { typeof(SlPriceList), new[] { "Status", "ValidFrom", "ValidTo", "ApprovedByUserId" } },
+            { typeof(SlSalesOrder), new[] { "Status", "NetAmount", "CreditApprovalRequired", "CreditApprovedByUserId", "CreditApprovedNetAmount", "ConfirmedByUserId", "CancelReason" } },
             { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays" } },
         };
 
@@ -140,6 +151,8 @@ namespace DataLayer.Context
                     // operations and terminal bookings are made by the system or by the floor in bulk; their changes and supervisor edits are the trail
                     if (entry.Entity is MfOperation) continue;
                     if (entry.Entity is MfTimeBooking tb && tb.Source == MfBookingSource.Terminal) continue;
+                    // the one-off linker of legacy contracts and tenders links them in bulk; a person's manual link is listed
+                    if (entry.Entity is SlCustomerLink link && link.Method == SlLinkMethod.LegacyMatch) continue;
                 }
 
                 // a terminal start or stop changes a booking all the time; only a correction (with its reason) is written
@@ -239,6 +252,9 @@ namespace DataLayer.Context
             if (entry.Entity is MfTimeBooking) text = "ثبت زمان کار";
             if (entry.Entity is MfOperation) text = "عملیات دستور تولید";
             if (entry.Entity is OfClockEvent) text = "تردد " + (entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Source")?.CurrentValue?.ToString() == "Manual" ? "دستی" : "واردشده");
+            if (entry.Entity is SlCustomerProfile) text = "پروفایل فروش مشتری (سقف اعتبار)";
+            if (entry.Entity is SlBidDecision) text = "تصمیم شرکت در استعلام";
+            if (entry.Entity is SlCustomerLink) text = "اتصال قرارداد یا مناقصه به مشتری";
             if (entry.Entity is FnAttendanceSheet) text = "برگه حضور ماهانه";
             if (entry.Entity is OfAttendancePolicy) text = "سیاست حضور و غیاب";
             if (entry.Entity is OfDelegation) text = "نیابت سمت";

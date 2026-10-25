@@ -333,6 +333,9 @@ namespace Services.NasbNiro.Production
                                              && (r.Status == MaterialRequestStatus.Submitted || r.Status == MaterialRequestStatus.Approved || (r.Status == MaterialRequestStatus.Draft && kitIds.Contains(r.Id)))
                                        select new { l.ItemId, l.Quantity, l.IssuedQuantity }).ToListAsync(ct);
 
+            // stock held for confirmed customer sales orders is not available to the plant
+            Dictionary<int, decimal> salesHeld = await Sales.SlReservations.ReservedAsync(_uow, itemIds, ct);
+
             DateTime horizon = (order.PlannedStart ?? DateTime.Today).Date;
             PurchaseOrderStatus[] open = { PurchaseOrderStatus.Approved, PurchaseOrderStatus.Released, PurchaseOrderStatus.PartlyReceived };
             var incomingLines = await (from l in _uow.Set<PurchaseOrderLine>().AsNoTracking()
@@ -344,7 +347,7 @@ namespace Services.NasbNiro.Production
             {
                 decimal required = g.Sum(c => c.Quantity);
                 decimal stock = onHand.FirstOrDefault(x => x.Id == g.Key)?.Qty ?? 0;
-                decimal reserved = reservedLines.Where(l => l.ItemId == g.Key).Sum(l => Math.Max(l.Quantity - l.IssuedQuantity, 0));
+                decimal reserved = reservedLines.Where(l => l.ItemId == g.Key).Sum(l => Math.Max(l.Quantity - l.IssuedQuantity, 0)) + salesHeld.GetValueOrDefault(g.Key);
                 decimal incoming = incomingLines.Where(l => l.ItemId == g.Key && l.Delivery.HasValue && l.Delivery.Value.Date <= horizon).Sum(l => Math.Max(l.Quantity - l.ReceivedQuantity, 0));
                 decimal available = stock - reserved + incoming;
                 decimal shortQty = required - available;

@@ -139,6 +139,7 @@ namespace Services.NasbNiro.Inventory
                     WorkOrderCode = d.WorkOrder.Code,
                     ContractId = d.ContractId,
                     ContractCode = d.Contract.Code,
+                    SalesOrderId = d.SalesOrderId,
                     ReferenceNumber = d.ReferenceNumber,
                     Description = d.Description,
                     CreateDate = d.CreateDate,
@@ -191,6 +192,7 @@ namespace Services.NasbNiro.Inventory
                         DestinationLocationCode = l.DestinationLocation.Code,
                         UnitPrice = l.UnitPrice,
                         PurchaseOrderLineId = l.PurchaseOrderLineId,
+                        SalesOrderLineId = l.SalesOrderLineId,
                         Description = l.Description,
                         Direction = l.Direction,
                         SourceRowNumber = l.SourceRowNumber,
@@ -213,6 +215,8 @@ namespace Services.NasbNiro.Inventory
                 raw.CreatorUserId, raw.ConfirmedByUserId, raw.CancelledByUserId, raw.ExitCheckedByUserId, raw.QcLoadingApprovedByUserId,
                 raw.WarehouseApprovedByUserId, raw.PlanningApprovedByUserId, raw.FinanceApprovedByUserId,
             }, cancellationToken);
+            if (document.SalesOrderId.HasValue)
+                document.SalesOrderNumber = await _uow.Set<Entities.Model.NasbNiro.Sales.SlSalesOrder>().Where(o => o.Id == document.SalesOrderId.Value).Select(o => o.Number).FirstOrDefaultAsync(cancellationToken);
             document.CreatorName = names.Name(raw.CreatorUserId);
             document.ConfirmedByName = names.Name(raw.ConfirmedByUserId);
             document.CancelledByName = names.Name(raw.CancelledByUserId);
@@ -290,6 +294,10 @@ namespace Services.NasbNiro.Inventory
 
             string conversionError = CheckConversionLines(dto.Type, lines);
             if (conversionError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(conversionError);
+
+            // a delivery against a sales order: the order, its lines and the open quantities
+            string salesError = await Sales.SlFulfilment.CheckDraftAsync(_uow, dto, lines, cancellationToken);
+            if (salesError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesError);
 
             MaterialRequest request = null;
             if (dto.Type == InventoryDocumentType.Issue)
@@ -395,6 +403,7 @@ namespace Services.NasbNiro.Inventory
             document.PurchaseOrderId = InventoryDocumentRules.UsesPurchaseOrder(dto.Type) ? dto.PurchaseOrderId : null;
             document.WorkOrderId = dto.WorkOrderId;
             document.ContractId = dto.ContractId;
+            document.SalesOrderId = dto.Type == InventoryDocumentType.CustomerDelivery ? dto.SalesOrderId : null;
             document.ReferenceNumber = InventoryText.Clean(dto.ReferenceNumber);
             document.Description = InventoryText.Clean(dto.Description);
             document.MaterialRequestId = dto.MaterialRequestId;
@@ -419,6 +428,7 @@ namespace Services.NasbNiro.Inventory
                     DestinationLocationId = line.DestinationLocationId,
                     UnitPrice = line.UnitPrice,
                     PurchaseOrderLineId = InventoryDocumentRules.UsesPurchaseOrder(dto.Type) ? line.PurchaseOrderLineId : null,
+                    SalesOrderLineId = dto.Type == InventoryDocumentType.CustomerDelivery ? line.SalesOrderLineId : null,
                     Description = InventoryText.Clean(line.Description),
                     Direction = line.Direction,
                     SourceRowNumber = line.SourceRowNumber,
@@ -523,7 +533,7 @@ namespace Services.NasbNiro.Inventory
                 return "ورود به انبار اموال مشتری فقط با رسید اموال مشتری است.";
             }
 
-            if (type == InventoryDocumentType.CustomerDelivery && !dto.ContractId.HasValue) return "قرارداد (مشتری) تحویل را انتخاب کنید.";
+            if (type == InventoryDocumentType.CustomerDelivery && !dto.ContractId.HasValue && !dto.SalesOrderId.HasValue) return "قرارداد (مشتری) یا سفارش فروش تحویل را انتخاب کنید.";
             if (type == InventoryDocumentType.Issue && source.Kind == WarehouseKind.Subcontractor) return "از انبار پیمانکار حواله صادر نمی‌شود.";
             return null;
         }
@@ -774,7 +784,13 @@ namespace Services.NasbNiro.Inventory
             string headerError = CheckBeforeConfirm(document) ?? await CheckPurchaseOrderAsync(document, cancellationToken);
             if (headerError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(headerError);
             // customer delivery needs a signed release note for the work order (API Q1 / ISO 9001 8.6)
-            if (document.Type == InventoryDocumentType.CustomerDelivery)
+            // (a delivery of spare parts against a sales order has no work order: the sales order is checked instead)
+            if (document.Type == InventoryDocumentType.CustomerDelivery && document.SalesOrderId.HasValue)
+            {
+                string salesError = await Sales.SlFulfilment.CheckConfirmAsync(_uow, document, cancellationToken);
+                if (salesError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesError);
+            }
+            else if (document.Type == InventoryDocumentType.CustomerDelivery)
             {
                 string releaseError = await _release.CheckDeliveryAsync(document.WorkOrderId, cancellationToken);
                 if (releaseError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(releaseError);
@@ -1163,6 +1179,9 @@ namespace Services.NasbNiro.Inventory
             }
 
             document.Number = await NextNumberAsync(type, document.DocumentDate, cancellationToken);
+            // sales order: delivered quantities, reservation and the invoice the system drafts (saved together with the stock movements)
+            if (type == InventoryDocumentType.CustomerDelivery && document.SalesOrderId.HasValue)
+                await Sales.SlFulfilment.ApplyConfirmAsync(_uow, _user.UserId, document, cancellationToken);
             // value (weighted average), work order cost and the accounting event for Sepidar
             await _costing.PostDocumentAsync(document, posted, cancellationToken);
             document.Status = InventoryDocumentStatus.Confirmed;
@@ -1507,6 +1526,12 @@ namespace Services.NasbNiro.Inventory
                     ncr.ExecutedAt = null;
                     ncr.ExecutedByUserId = null;
                 }
+            }
+
+            if (document.SalesOrderId.HasValue)
+            {
+                string salesCancelError = await Sales.SlFulfilment.ApplyCancelAsync(_uow, _user.UserId, document, cancellationToken);
+                if (salesCancelError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesCancelError);
             }
 
             document.Status = InventoryDocumentStatus.Cancelled;

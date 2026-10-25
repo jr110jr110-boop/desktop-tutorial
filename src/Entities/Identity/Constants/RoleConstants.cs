@@ -221,6 +221,23 @@ namespace Entities.Identity.Constants
             Description = "اداری و منابع انسانی"
         };
 
+        // Sales and service release S1: sales and marketing (CRM, inquiries, estimates, proposals, spare-part sales) and after-sales service.
+        public const string Sales = "SALES";
+        public static readonly ResponseRole SalesResponseRole = new ResponseRole()
+        {
+            Id = 24,
+            Name = Sales,
+            Description = "فروش و بازاریابی"
+        };
+
+        public const string Service = "SERVICE";
+        public static readonly ResponseRole ServiceResponseRole = new ResponseRole()
+        {
+            Id = 25,
+            Name = Service,
+            Description = "خدمات پس از فروش"
+        };
+
         public static IEnumerable<ResponseRole> GetResponseRoles()
         {
             yield return PMOResponseRole;
@@ -246,6 +263,8 @@ namespace Entities.Identity.Constants
             yield return ShopSupervisorResponseRole;
             yield return OperatorResponseRole;
             yield return MaintenanceResponseRole;
+            yield return SalesResponseRole;
+            yield return ServiceResponseRole;
             yield return AuditorResponseRole;
             yield return SecretariatResponseRole;
             yield return HrResponseRole;

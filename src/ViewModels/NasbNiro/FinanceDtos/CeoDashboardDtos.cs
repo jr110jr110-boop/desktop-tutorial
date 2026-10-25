@@ -70,6 +70,25 @@ namespace ViewModels.NasbNiro.FinanceDtos
 
         public int ProductionMaintenanceOverdue { get; set; }
 
+        // sales (CRM, inquiries, proposals, spare-part orders), rial
+        /// <summary>Inquiries still in play: received, under review, bidding or submitted.</summary>
+        public int SalesOpenInquiries { get; set; }
+
+        /// <summary>Value of the open inquiries: the live proposal, else the estimate price.</summary>
+        public decimal SalesPipelineValue { get; set; }
+
+        public int SalesBidDecisionsWaiting { get; set; }
+        public int SalesProposalsWaitingApproval { get; set; }
+
+        /// <summary>Proposal deadline within three days (or past) and not sent.</summary>
+        public int SalesProposalsDueSoon { get; set; }
+
+        public int SalesBelowCostProposals { get; set; }
+        public int SalesOrdersWaitingCredit { get; set; }
+
+        /// <summary>Won / (won + lost), percent; empty until a result exists.</summary>
+        public decimal? SalesHitRatePercent { get; set; }
+
         // Sepidar link
         public int EventsPending { get; set; }
         public int EventsFailed { get; set; }

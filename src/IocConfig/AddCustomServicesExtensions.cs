@@ -182,6 +182,13 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Production.IMfMaintenanceService, Services.NasbNiro.Production.MfMaintenanceService>();
             services.AddScoped<Services.NasbNiro.Production.IMfDashboardService, Services.NasbNiro.Production.MfDashboardService>();
             services.AddHostedService<Services.NasbNiro.Production.ProductionHostedService>();
+            // sales (release S1 part A)
+            services.AddScoped<Services.NasbNiro.Sales.ISlCrmService, Services.NasbNiro.Sales.SlCrmService>();
+            services.AddScoped<Services.NasbNiro.Sales.ISlPipelineService, Services.NasbNiro.Sales.SlPipelineService>();
+            services.AddScoped<Services.NasbNiro.Sales.ISlEstimateService, Services.NasbNiro.Sales.SlEstimateService>();
+            services.AddScoped<Services.NasbNiro.Sales.ISlProposalService, Services.NasbNiro.Sales.SlProposalService>();
+            services.AddScoped<Services.NasbNiro.Sales.ISlOrderService, Services.NasbNiro.Sales.SlOrderService>();
+            services.AddScoped<Services.NasbNiro.Sales.ISlDashboardService, Services.NasbNiro.Sales.SlDashboardService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();

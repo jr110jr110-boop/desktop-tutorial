@@ -91,5 +91,20 @@ namespace MsTests
               });
         }
 
+
+        [TestMethod]
+        public void Sales_Temporary_Keys_Are_Fixed_Up_In_One_Save()
+        {
+            _serviceProvider.RunScopedService<IUnitOfWork>(uow =>
+            {
+                var customer = new Entities.Model.NasbNiro.Finance.FnCustomer { Name = "مشتری آزمون" };
+                uow.Set<Entities.Model.NasbNiro.Finance.FnCustomer>().Add(customer);
+                var profile = new Entities.Model.NasbNiro.Sales.SlCustomerProfile { CustomerId = customer.Id };
+                uow.Set<Entities.Model.NasbNiro.Sales.SlCustomerProfile>().Add(profile);
+                uow.SaveChanges();
+                Assert.IsTrue(customer.Id > 0);
+                Assert.AreEqual(customer.Id, profile.CustomerId);
+            });
+        }
     }
 }
