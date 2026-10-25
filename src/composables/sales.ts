@@ -19,8 +19,8 @@ export const linkMethods: Record<number, string> = { 1: "تطبیق خودکار
 
 // ---------------------------------------------------------------- inquiries, bid decision
 /** What the company sells (the first six equal ItpProductType). Also used by the service module. */
-export const productTypes: Record<number, string> = { 1: "توربین بخار", 2: "واحد ORC", 3: "کندانسور", 4: "پمپ", 5: "سامانه روغن روانکاری", 6: "شیر", 7: "قطعات یدکی", 8: "خدمات", 9: "سایر" };
-export const inquiryStatuses: Record<number, string> = { 1: "دریافت‌شده", 2: "در حال بررسی", 3: "عدم شرکت", 4: "در حال تهیه پیشنهاد", 5: "پیشنهاد ارسال‌شده", 6: "برنده", 7: "بازنده", 8: "لغوشده" };
+export const productTypes: Record<number, string> = { 1: "توربین بخار", 2: "واحد ORC", 3: "کندانسور", 4: "پمپ", 5: "سیستم روغن روانکاری", 6: "شیر", 7: "قطعات یدکی", 8: "خدمات", 9: "سایر" };
+export const inquiryStatuses: Record<number, string> = { 1: "دریافت‌شده", 2: "در حال بررسی", 3: "عدم شرکت", 4: "در حال تهیه پیشنهاد", 5: "ارسال‌شده", 6: "برنده", 7: "بازنده", 8: "لغوشده" };
 export const bidStatuses: Record<number, string> = { 1: "پیش‌نویس چک‌لیست", 2: "منتظر تصمیم مدیرعامل", 3: "شرکت در مناقصه", 4: "عدم شرکت" };
 export const sanctionChecks: Record<number, string> = { 0: "بررسی نشده", 1: "بدون مانع", 2: "دارای نگرانی" };
 /** Decision strings of POST bid-decisions/decide. */
@@ -31,13 +31,13 @@ export const estimateStatuses: Record<number, string> = { 1: "پیش‌نویس"
 export const costKinds: Record<number, string> = { 1: "مواد و قطعات", 2: "دستمزد ساخت", 3: "مهندسی", 4: "پیمانکار فرعی", 5: "بسته‌بندی و حمل" };
 /** Where the unit cost of an estimate line / a price suggestion came from. */
 export const costSources: Record<number, string> = { 0: "دستی", 1: "میانگین بهای انبار", 2: "آخرین خرید", 3: "آخرین سفارش خرید", 4: "نرخ مرکز کار" };
-export const proposalStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "تاییدشده", 3: "ارسال‌شده", 4: "بازنگری‌شده", 5: "برنده", 6: "بازنده", 7: "لغوشده" };
+export const proposalStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "تأییدشده", 3: "ارسال‌شده", 4: "بازنگری‌شده", 5: "برنده", 6: "بازنده", 7: "لغوشده" };
 export const proposalResults: Record<string, string> = { won: "برنده", lost: "بازنده" };
 
 // ---------------------------------------------------------------- price lists, quotations, sales orders
-export const priceListStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "تاییدشده", 3: "بازنشسته" };
+export const priceListStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "تأییدشده", 3: "بازنشسته" };
 export const quotationStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "ارسال‌شده", 3: "پذیرفته‌شده", 4: "ردشده", 5: "منقضی‌شده", 6: "لغوشده" };
-export const orderStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "تاییدشده", 3: "تحویل جزئی", 4: "تحویل‌شده", 5: "فاکتورشده", 6: "بسته‌شده", 7: "لغوشده" };
+export const orderStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "تأییدشده", 3: "تحویل بخشی", 4: "تحویل‌شده", 5: "فاکتورشده", 6: "بسته‌شده", 7: "لغوشده" };
 
 /** Persian title of an action string (every sales action endpoint). */
 export const salesActionTitles: Record<string, string> = {

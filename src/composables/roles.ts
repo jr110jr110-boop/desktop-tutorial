@@ -206,6 +206,8 @@ export const SalesRoles = {
   ceo: ["CEO"],
   /** GET customers, contacts, sites, activities, links, settings, reason codes, inquiries, bid decisions, price lists, quotations, orders, dashboard */
   readers: list("SALES,CEO,PMO,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,PLANNING,AUDITOR,SERVICE"),
+  /** GET sales/orders and sales/orders/{id} only: readers + the warehouse (builds the delivery document on the order page) */
+  orderReaders: list("SALES,CEO,PMO,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,PLANNING,AUDITOR,SERVICE,WAREHOUSE,WHSUPERVISOR"),
   /** GET estimates, proposals, win-loss statistics, price suggestions (the money pages; narrower than readers) */
   commercialReaders: list("SALES,CEO,PMO,COMMERCIAL,FINANCEMANAGER,AUDITOR"),
   /** save customer / contact / site / reason code */
@@ -245,6 +247,8 @@ export const ServiceRoles = {
   ceo: ["CEO"],
   /** GET settings, sla-rules, units, requests, orders, contracts, surveys, dashboard, kpis */
   readers: list("SERVICE,CEO,PMO,SALES,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,QA,QC,AUDITOR"),
+  /** GET service/orders and service/orders/{id} only: readers + the warehouse (builds the parts issue and delivery on the order page) */
+  orderReaders: list("SERVICE,CEO,PMO,SALES,COMMERCIAL,FINANCEMANAGER,FINANCIAL,PROJECTMANAGER,QA,QC,AUDITOR,WAREHOUSE,WHSUPERVISOR"),
   /** every write: units, requests, orders (save, action, time, measurements), contracts, draft invoice, warranty / billable decision */
   writers: ["SERVICE"],
   /** POST settings: the CEO only */

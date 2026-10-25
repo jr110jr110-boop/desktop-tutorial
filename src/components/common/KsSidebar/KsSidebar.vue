@@ -212,6 +212,7 @@
       </KsSidebarLink>
 
       <KsSidebarLink
+        v-if="salesLinks.some((x) => !x.hidden)"
         :sidebar-state="sidebarState"
         :subs="salesLinks"
         has-sub
@@ -225,6 +226,7 @@
       </KsSidebarLink>
 
       <KsSidebarLink
+        v-if="serviceLinks.some((x) => !x.hidden)"
         :sidebar-state="sidebarState"
         :subs="serviceLinks"
         has-sub
@@ -576,27 +578,27 @@ const productionLinks = computed<Links[]>(() => [
 
 // Sales: each page is disabled for the roles the API refuses (SalesRoles in composables/roles.ts).
 const salesLinks = computed<Links[]>(() => [
-  { title: "داشبورد فروش", routeName: "SlDashboard", disabled: !hasRole(SalesRoles.readers) },
-  { title: "مشتریان و CRM", routeName: "SlCustomers", disabled: !hasRole(SalesRoles.readers) },
-  { title: "استعلام‌ها و تصمیم شرکت", routeName: "SlInquiries", disabled: !hasRole(SalesRoles.readers) },
-  { title: "برآوردها", routeName: "SlEstimates", disabled: !hasRole(SalesRoles.commercialReaders) },
-  { title: "پیشنهادهای قیمت", routeName: "SlProposals", disabled: !hasRole(SalesRoles.commercialReaders) },
-  { title: "فهرست‌های قیمت", routeName: "SlPriceLists", disabled: !hasRole(SalesRoles.readers) },
-  { title: "پیش‌فاکتورها", routeName: "SlQuotations", disabled: !hasRole(SalesRoles.readers) },
-  { title: "سفارش‌های فروش", routeName: "SlOrders", disabled: !hasRole(SalesRoles.readers) },
-  { title: "تنظیمات فروش", routeName: "SlSettings", disabled: !hasRole(SalesRoles.readers) },
+  { title: "داشبورد فروش", routeName: "SlDashboard", disabled: !hasRole(SalesRoles.readers), hidden: !hasRole(SalesRoles.readers) },
+  { title: "مشتریان و CRM", routeName: "SlCustomers", disabled: !hasRole(SalesRoles.readers), hidden: !hasRole(SalesRoles.readers) },
+  { title: "استعلام‌ها و تصمیم شرکت", routeName: "SlInquiries", disabled: !hasRole(SalesRoles.readers), hidden: !hasRole(SalesRoles.readers) },
+  { title: "برآوردها", routeName: "SlEstimates", disabled: !hasRole(SalesRoles.commercialReaders), hidden: !hasRole(SalesRoles.commercialReaders) },
+  { title: "پیشنهادهای قیمت", routeName: "SlProposals", disabled: !hasRole(SalesRoles.commercialReaders), hidden: !hasRole(SalesRoles.commercialReaders) },
+  { title: "فهرست‌های قیمت", routeName: "SlPriceLists", disabled: !hasRole(SalesRoles.readers), hidden: !hasRole(SalesRoles.readers) },
+  { title: "پیش‌فاکتورها", routeName: "SlQuotations", disabled: !hasRole(SalesRoles.readers), hidden: !hasRole(SalesRoles.readers) },
+  { title: "سفارش‌های فروش", routeName: "SlOrders", disabled: !hasRole(SalesRoles.orderReaders), hidden: !hasRole(SalesRoles.orderReaders) },
+  { title: "تنظیمات فروش", routeName: "SlSettings", disabled: !hasRole(SalesRoles.readers), hidden: !hasRole(SalesRoles.readers) },
 ]);
 
 // After-sales service: each page is disabled for the roles the API refuses (ServiceRoles in composables/roles.ts); the labour run is for the finance manager and the CEO.
 const serviceLinks = computed<Links[]>(() => [
-  { title: "داشبورد خدمات", routeName: "SvDashboard", disabled: !hasRole(ServiceRoles.readers) },
-  { title: "واحدهای نصب‌شده", routeName: "SvUnits", disabled: !hasRole(ServiceRoles.readers) },
-  { title: "درخواست‌های خدمات", routeName: "SvRequests", disabled: !hasRole(ServiceRoles.readers) },
-  { title: "دستورهای خدمات", routeName: "SvOrders", disabled: !hasRole(ServiceRoles.readers) },
-  { title: "قراردادهای خدمات (LTSA)", routeName: "SvContracts", disabled: !hasRole(ServiceRoles.readers) },
-  { title: "نظرسنجی رضایت", routeName: "SvSurveys", disabled: !hasRole(ServiceRoles.readers) },
-  { title: "تنظیمات خدمات و SLA", routeName: "SvSettings", disabled: !hasRole(ServiceRoles.readers) },
-  { title: "ثبت ماهانه دستمزد محرمانه", routeName: "SvLabour", disabled: !hasRole(ServiceRoles.labourRunners) },
+  { title: "داشبورد خدمات", routeName: "SvDashboard", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
+  { title: "واحدهای نصب‌شده", routeName: "SvUnits", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
+  { title: "درخواست‌های خدمات", routeName: "SvRequests", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
+  { title: "دستورهای خدمات", routeName: "SvOrders", disabled: !hasRole(ServiceRoles.orderReaders), hidden: !hasRole(ServiceRoles.orderReaders) },
+  { title: "قراردادهای خدمات (LTSA)", routeName: "SvContracts", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
+  { title: "نظرسنجی رضایت", routeName: "SvSurveys", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
+  { title: "تنظیمات خدمات و SLA", routeName: "SvSettings", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
+  { title: "ثبت ماهانه دستمزد محرمانه", routeName: "SvLabour", disabled: !hasRole(ServiceRoles.labourRunners), hidden: !hasRole(ServiceRoles.labourRunners) },
 ]);
 
 const userRole = localStorage.getItem("userRole");

@@ -95,7 +95,7 @@ async function save() {
   busy.value = false;
   if (error) return fail(error);
   form.value = fromDto(camelize(data));
-  ok("پیشنهاد قیمت ذخیره شد.");
+  ok("پیش‌فاکتور ذخیره شد.");
 }
 
 async function act(action: "send" | "accept" | "reject" | "expire" | "cancel") {

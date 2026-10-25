@@ -13,7 +13,7 @@ import { getDocuments } from "@/api/InventoryAPIs";
 import { rowsOf } from "@/api/InventoryAPIs";
 import { printSheet } from "@/composables/fn";
 import { documentStatuses, documentTypes, fail, jalali, ok, rial } from "@/composables/inventory";
-import { hasRole, ServiceRoles } from "@/composables/roles";
+import { hasRole, InventoryRoles, ServiceRoles } from "@/composables/roles";
 import { badgeOfDecision, badgeOfServiceOrder, hoursText, labourText, orderKinds, orderStatuses, periodText, qtyText, rialText, serviceActionTitles, timeKinds, warrantyDecisions } from "@/composables/service";
 
 const route = useRoute();
@@ -21,6 +21,8 @@ const router = useRouter();
 const id = computed(() => Number(route.params.id) || 0);
 const canWrite = hasRole(ServiceRoles.writers);
 const isCeo = hasRole(ServiceRoles.goodwillDeciders);
+/** The warehouse builds the parts issue and the delivery document (InventoryRoles.documents). */
+const canBuildDocument = hasRole(InventoryRoles.documents);
 const { employees, loadEmployees } = useEmployees();
 
 const order = ref<any>(null);
@@ -324,12 +326,13 @@ onMounted(() => {
           </tbody>
         </table>
       </div>
-      <p v-if="canWrite" class="small mb-2">
+      <p v-if="canBuildDocument" class="small mb-2">
         سند جدید انبار برای این دستور (به دستور وصل می‌شود):
         <router-link :to="{ name: 'InventoryDocumentEdit', params: { id: 'new' }, query: { type: '4', serviceOrder: String(order.id) } }">حواله مصرف قطعات (درخواست مواد تأییدشده را در صفحهٔ سند انتخاب کنید)</router-link>
         <span class="mx-1">|</span>
         <router-link :to="{ name: 'InventoryDocumentEdit', params: { id: 'new' }, query: { type: '11', serviceOrder: String(order.id) } }">تحویل به مشتری (قطعات باقی‌مانده در محل)</router-link>
       </p>
+      <p v-else-if="canWrite" class="small inv-muted mb-2">حواله و تحویل قطعات را انبار از همین صفحه می‌سازد.</p>
       <div class="table-responsive mb-4">
         <table class="table table-sm">
           <thead><tr><th>اسناد انبار این دستور</th><th>نوع</th><th>وضعیت</th><th>تاریخ</th><th></th></tr></thead>

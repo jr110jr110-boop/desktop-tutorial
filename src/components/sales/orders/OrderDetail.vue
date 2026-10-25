@@ -6,7 +6,7 @@ import OrderPrint from "./OrderPrint.vue";
 import { creditApproveSlOrder, draftSlInvoice, slOrderAction } from "@/api/SalesAPIs";
 import { camelize, printSheet } from "@/composables/fn";
 import { fail, ok } from "@/composables/inventory";
-import { SalesRoles, hasRole } from "@/composables/roles";
+import { InventoryRoles, SalesRoles, hasRole } from "@/composables/roles";
 import { badgeOfSalesOrder, orderStatuses, persianOf, qtyText, rialText, salesActionTitles } from "@/composables/sales";
 
 // Sales order detail: lines with ordered / reserved / delivered / invoiced quantities, actions the API accepts, credit gate, deliveries and drafted invoices, print.
@@ -14,6 +14,8 @@ const props = defineProps<{ order: any }>();
 const emit = defineEmits<{ (e: "update", order: any): void; (e: "reload"): void }>();
 
 const canWrite = hasRole(SalesRoles.writers);
+/** The warehouse builds the delivery document (InventoryRoles.documents); QC approves the loading on the document page. */
+const canBuildDocument = hasRole(InventoryRoles.documents);
 const canCredit = hasRole(SalesRoles.creditApprovers);
 const busy = ref(false);
 const editing = ref(false);
@@ -175,7 +177,8 @@ function onSaved(order: any) {
     </div>
     <p class="small inv-muted">تایید فاکتور پیش‌نویس با مالی است و در صفحهٔ فاکتورهای فروش انجام می‌شود.</p>
     <div class="d-flex flex-wrap gap-2">
-      <button v-if="canDeliver && canWrite" class="btn btn-sm btn-primary" @click="delivering = true">ساخت سند تحویل به مشتری</button>
+      <button v-if="canDeliver && canBuildDocument" class="btn btn-sm btn-primary" @click="delivering = true">ساخت سند تحویل به مشتری</button>
+      <span v-else-if="canDeliver && canWrite" class="small inv-muted">سند تحویل را انبار در همین صفحه می‌سازد؛ تأیید بارگیری با کنترل کیفیت است.</span>
       <button v-if="canWrite && missingInvoice" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="draftInvoices">پیش‌نویس فاکتورهای جاافتاده</button>
     </div>
     <p v-if="liveDeliveries.length && status === 3" class="small inv-muted mt-2">تحویل جزئی انجام شده است؛ برای مانده می‌توان سند تحویل دیگری ساخت.</p>

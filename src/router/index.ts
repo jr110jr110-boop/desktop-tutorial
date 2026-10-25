@@ -609,8 +609,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/sales/proposals/:id", name: "SlProposal", component: () => import("@/views/sales/Proposals.vue"), meta: { roles: SalesRoles.commercialReaders } },
   { path: "/sales/price-lists", name: "SlPriceLists", component: () => import("@/views/sales/PriceLists.vue"), meta: { roles: SalesRoles.readers } },
   { path: "/sales/quotations", name: "SlQuotations", component: () => import("@/views/sales/Quotations.vue"), meta: { roles: SalesRoles.readers } },
-  { path: "/sales/orders", name: "SlOrders", component: () => import("@/views/sales/Orders.vue"), meta: { roles: SalesRoles.readers } },
-  { path: "/sales/orders/:id", name: "SlOrder", component: () => import("@/views/sales/Orders.vue"), meta: { roles: SalesRoles.readers } },
+  { path: "/sales/orders", name: "SlOrders", component: () => import("@/views/sales/Orders.vue"), meta: { roles: SalesRoles.orderReaders } },
+  { path: "/sales/orders/:id", name: "SlOrder", component: () => import("@/views/sales/Orders.vue"), meta: { roles: SalesRoles.orderReaders } },
   { path: "/sales/settings", name: "SlSettings", component: () => import("@/views/sales/Settings.vue"), meta: { roles: SalesRoles.readers } },
 
   // After-sales service (خدمات پس از فروش). Links the API writes: /service/units/:id, /service/requests[/:id], /service/orders[/:id], /service/surveys/:id, /service/contracts/:id.
@@ -619,8 +619,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/service/units/:id", name: "SvUnit", component: () => import("@/views/service/Units.vue"), meta: { roles: ServiceRoles.readers } },
   { path: "/service/requests", name: "SvRequests", component: () => import("@/views/service/Requests.vue"), meta: { roles: ServiceRoles.readers } },
   { path: "/service/requests/:id", name: "SvRequest", component: () => import("@/views/service/RequestDetail.vue"), meta: { roles: ServiceRoles.readers } },
-  { path: "/service/orders", name: "SvOrders", component: () => import("@/views/service/Orders.vue"), meta: { roles: ServiceRoles.readers } },
-  { path: "/service/orders/:id", name: "SvOrder", component: () => import("@/views/service/OrderDetail.vue"), meta: { roles: ServiceRoles.readers } },
+  { path: "/service/orders", name: "SvOrders", component: () => import("@/views/service/Orders.vue"), meta: { roles: ServiceRoles.orderReaders } },
+  { path: "/service/orders/:id", name: "SvOrder", component: () => import("@/views/service/OrderDetail.vue"), meta: { roles: ServiceRoles.orderReaders } },
   { path: "/service/contracts", name: "SvContracts", component: () => import("@/views/service/Contracts.vue"), meta: { roles: ServiceRoles.readers } },
   { path: "/service/contracts/:id", name: "SvContract", component: () => import("@/views/service/Contracts.vue"), meta: { roles: ServiceRoles.readers } },
   { path: "/service/surveys", name: "SvSurveys", component: () => import("@/views/service/Surveys.vue"), meta: { roles: ServiceRoles.readers } },

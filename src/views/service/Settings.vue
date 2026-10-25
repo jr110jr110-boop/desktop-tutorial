@@ -136,7 +136,7 @@ onMounted(() => {
         <p v-if="jobsError" class="alert alert-danger py-1 small">{{ jobsError }}</p>
         <div v-if="jobs" class="small">
           <div>روز اجرا: {{ dateText(jobs.asOf) }}</div>
-          <div>بازدیدهای پیش‌نویس‌شده: {{ jobs.visitsDrafted }} | قراردادهای پایان‌یافته: {{ jobs.contractsExpired }} | هشدارهای تخطی SLA: {{ jobs.breachAlerts }} | نظرسنجی‌های پیش‌نویس‌شده: {{ jobs.surveysDrafted }}</div>
+          <div>بازدیدهای پیش‌نویس‌شده: {{ jobs.visitsDrafted }} | قراردادهای منقضی: {{ jobs.contractsExpired }} | هشدارهای تخطی SLA: {{ jobs.breachAlerts }} | نظرسنجی‌های پیش‌نویس‌شده: {{ jobs.surveysDrafted }}</div>
           <ul v-if="(jobs.notes || []).length" class="mb-0"><li v-for="(n, i) in jobs.notes" :key="i">{{ n }}</li></ul>
         </div>
       </template>

@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { getCeoDashboard } from "@/api/FinanceAPIs";
 import { fail, jalali, num, rial } from "@/composables/inventory";
+import { labourText } from "@/composables/service";
 
 // One screen for the CEO: money, stock, procurement, quality and the alerts of the whole company (rial).
 const router = useRouter();
@@ -66,6 +67,31 @@ const tiles = (d: any) => [
   { title: "نگهداری و تعمیرات عقب‌افتاده", value: num(d.productionMaintenanceOverdue), link: "/production/maintenance", warn: d.productionMaintenanceOverdue > 0 },
 ];
 
+/** «—» for an empty value (a nullable field before any result exists). */
+const dash = (v: number | null | undefined, text: (x: number) => string) => (v === null || v === undefined ? "—" : text(Number(v)));
+
+// sales: pipeline and the gates waiting for the CEO / credit (the API sends the sales* fields)
+const salesTiles = (d: any) => [
+  { title: "استعلام باز", value: num(d.salesOpenInquiries), link: "/sales/inquiries" },
+  { title: "ارزش استعلام‌های باز (ریال)", value: rial(d.salesPipelineValue), link: "/sales/inquiries" },
+  { title: "استعلام منتظر تصمیم شرکت یا عدم شرکت", value: num(d.salesBidDecisionsWaiting), link: "/sales/bid-decisions", warn: d.salesBidDecisionsWaiting > 0 },
+  { title: "پیشنهاد منتظر تایید", value: num(d.salesProposalsWaitingApproval), link: "/sales/proposals", warn: d.salesProposalsWaitingApproval > 0 },
+  { title: "پیشنهاد نزدیک به مهلت ارسال (۳ روز)", value: num(d.salesProposalsDueSoon), link: "/sales/proposals", warn: d.salesProposalsDueSoon > 0 },
+  { title: "پیشنهاد کمتر از بهای تمام‌شده", value: num(d.salesBelowCostProposals), link: "/sales/proposals", warn: d.salesBelowCostProposals > 0 },
+  { title: "سفارش فروش منتظر اعتبار", value: num(d.salesOrdersWaitingCredit), link: "/sales/orders", warn: d.salesOrdersWaitingCredit > 0 },
+  { title: "نرخ موفقیت پیشنهادها", value: dash(d.salesHitRatePercent, (x) => num(x) + "٪"), link: "/sales/dashboard" },
+];
+
+// after-sales service: requests, SLA, warranty, goodwill and satisfaction (the service* fields; the warranty cost is payroll-protected)
+const serviceTiles = (d: any) => [
+  { title: "درخواست خدمات باز", value: num(d.serviceOpenRequests), link: "/service/requests" },
+  { title: "درخواست خارج از SLA", value: num(d.serviceSlaBreaches), link: "/service/requests", warn: d.serviceSlaBreaches > 0 },
+  { title: "واحد در گارانتی", value: num(d.serviceUnitsInWarranty), link: "/service/units" },
+  { title: "هزینه گارانتی از ابتدای سال (ریال)", value: d.serviceWarrantyCostHidden ? labourText(null, true) : dash(d.serviceWarrantyCostYtd, rial), link: "/service/orders" },
+  { title: "حسن نیت منتظر تصمیم مدیرعامل", value: num(d.serviceGoodwillWaiting), link: "/service/orders", warn: d.serviceGoodwillWaiting > 0 },
+  { title: "میانگین رضایت (از ۵)", value: dash(d.serviceSurveyAverageScore, (x) => x.toFixed(2)), link: "/service/surveys" },
+];
+
 onMounted(load);
 </script>
 
@@ -97,6 +123,22 @@ onMounted(load);
           <span class="ceo-value">{{ t.value }}</span>
           <span class="ceo-title">{{ t.title }}</span>
           <span v-if="t.sub" class="ceo-sub">{{ t.sub }}</span>
+        </button>
+      </div>
+
+      <h2 class="inv-title mb-2">فروش</h2>
+      <div class="ceo-tiles mb-3">
+        <button v-for="t in salesTiles(data)" :key="t.title" class="ceo-tile" :class="{ warn: t.warn }" @click="open(t.link)">
+          <span class="ceo-value">{{ t.value }}</span>
+          <span class="ceo-title">{{ t.title }}</span>
+        </button>
+      </div>
+
+      <h2 class="inv-title mb-2">خدمات پس از فروش</h2>
+      <div class="ceo-tiles mb-3">
+        <button v-for="t in serviceTiles(data)" :key="t.title" class="ceo-tile" :class="{ warn: t.warn }" @click="open(t.link)">
+          <span class="ceo-value">{{ t.value }}</span>
+          <span class="ceo-title">{{ t.title }}</span>
         </button>
       </div>
 
