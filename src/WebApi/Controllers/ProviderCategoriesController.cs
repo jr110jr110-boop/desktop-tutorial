@@ -1,4 +1,5 @@
 ﻿using Common.Results;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro;
 using System.Net;
@@ -12,6 +13,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace WebApi.Controllers
 {
+    [Authorize]
     public class ProviderCategoriesController : BaseApiController
     {
         private readonly IProviderCategoryService _categories;
