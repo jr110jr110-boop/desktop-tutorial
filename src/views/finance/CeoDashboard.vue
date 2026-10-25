@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import AssistantPanel from "@/components/ai/AssistantPanel.vue";
+import BriefCard from "@/components/ai/BriefCard.vue";
 import { getCeoDashboard } from "@/api/FinanceAPIs";
 import { fail, jalali, num, rial } from "@/composables/inventory";
+import { AiRoles, hasRole } from "@/composables/roles";
 import { labourText } from "@/composables/service";
 
 // One screen for the CEO: money, stock, procurement, quality and the alerts of the whole company (rial).
 const router = useRouter();
 const data = ref<any>(null);
+// the daily brief is for the CEO only (the brief endpoints refuse every other role); the assistant is for everybody who opens this page
+const canBrief = hasRole(AiRoles.brief);
 
 async function load() {
   const [result, error] = await getCeoDashboard();
@@ -97,6 +102,12 @@ onMounted(load);
 
 <template>
   <div class="inv-page">
+    <!-- the assistant and the brief do not depend on the dashboard below: they stay when the dashboard cannot be read, and the dashboard stays when the AI is down -->
+    <div class="ceo-ai mb-3">
+      <div class="inv-card mb-0"><AssistantPanel compact /></div>
+      <div v-if="canBrief" class="inv-card mb-0"><BriefCard /></div>
+    </div>
+
     <div v-if="data" class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -182,6 +193,12 @@ onMounted(load);
 
 <style lang="scss" src="../inventory/inventory.scss"></style>
 <style scoped>
+.ceo-ai {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
 .ceo-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));

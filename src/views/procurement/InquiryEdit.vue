@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import AiNotesBox from "@/components/ai/AiNotesBox.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { getProviders, rowsOf, uploadFile } from "@/api/InventoryAPIs";
 import {
@@ -321,6 +322,9 @@ onMounted(async () => {
       </div>
       <p v-if="inq.committeeMinutes" class="small mt-2 mb-0">صورت‌جلسه کمیته: {{ inq.committeeMinutes }}</p>
     </div>
+
+    <!-- notes of the AI seat PROC-COMPARE on this quotation comparison (a suggestion; the committee approvals above stay with the people) -->
+    <AiNotesBox v-if="!isNew" :target-id="inq.id" target-type="PurchaseRfq" />
 
     <div v-if="minutes !== null" class="inv-modal-backdrop" @click.self="minutes = null">
       <div class="inv-modal">

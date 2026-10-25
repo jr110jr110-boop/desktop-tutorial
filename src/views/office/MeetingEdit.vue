@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import AiNotesBox from "@/components/ai/AiNotesBox.vue";
 import MeetingAttendees from "@/components/office/wf/MeetingAttendees.vue";
 import MeetingDecisionsEditor from "@/components/office/wf/MeetingDecisionsEditor.vue";
 import MeetingPrint from "@/components/office/wf/MeetingPrint.vue";
@@ -181,6 +182,9 @@ function toggleHolding(id: number) {
         <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="holding = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-success" @click="run('hold', { presentAttendeeIds: holding.ids })">ثبت برگزاری</button></div>
       </div>
     </div>
+
+    <!-- minutes summary note of the AI seat OFFICE-DRAFT -->
+    <AiNotesBox v-if="meeting && meeting.id" :target-id="meeting.id" target-type="OfficeMeeting" />
 
     <div v-if="cancelling" class="inv-modal-backdrop screen-only" @click.self="cancelling = null">
       <div class="inv-modal">

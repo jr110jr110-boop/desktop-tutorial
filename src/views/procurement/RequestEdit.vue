@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { isSeatDraft, SEAT_DRAFT_TEXT } from "@/composables/ai";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { getContracts, getWorkOrders, rowsOf } from "@/api/InventoryAPIs";
@@ -181,7 +182,8 @@ onMounted(async () => {
     <div class="inv-card screen-only">
       <div class="inv-toolbar">
         <div>
-          <h1 class="inv-title">درخواست خرید <span v-if="req.number" class="inv-ltr ms-2">{{ req.number }}</span></h1>
+          <h1 class="inv-title">درخواست خرید <span v-if="req.number" class="inv-ltr ms-2">{{ req.number }}</span>
+            <span v-if="isSeatDraft(req)" class="inv-badge info ms-2" title="این پیش‌نویس را دستیار هوشمند ساخته است؛ بررسی، ویرایش و ارسال با برنامه‌ریزی است.">{{ SEAT_DRAFT_TEXT }}</span></h1>
           <span class="inv-badge" :class="{ ok: req.status === 2 || req.status === 3, warn: req.status <= 1, bad: req.status === 9 }">{{ requestStatuses[req.status] }}</span>
         </div>
         <div class="d-flex flex-wrap gap-2">

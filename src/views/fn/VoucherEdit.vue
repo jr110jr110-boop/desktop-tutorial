@@ -2,6 +2,7 @@
 import { Features } from "@/utils/features";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import AiNotesBox from "@/components/ai/AiNotesBox.vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import LookupBox from "@/components/fn/LookupBox.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
@@ -354,6 +355,9 @@ onMounted(async () => {
         | کنترل‌کننده و قطعی‌کننده نمی‌توانند تهیه‌کننده سند باشند.
       </div>
     </div>
+
+    <!-- findings of the AI seat FIN-ANOMALY about this voucher (report only; the voucher is changed by the accountant behind the voucher gates) -->
+    <AiNotesBox v-if="v && v.id" :target-id="v.id" target-type="FinanceJournal" />
 
     <PromptModal
       v-if="dialog === 'reverse'"

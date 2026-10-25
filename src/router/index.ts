@@ -2,7 +2,7 @@ import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
-import { currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -627,6 +627,19 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/service/surveys/:id", name: "SvSurvey", component: () => import("@/views/service/Surveys.vue"), meta: { roles: ServiceRoles.readers } },
   { path: "/service/settings", name: "SvSettings", component: () => import("@/views/service/Settings.vue"), meta: { roles: ServiceRoles.readers } },
   { path: "/service/labour", name: "SvLabour", component: () => import("@/views/service/Labour.vue"), meta: { roles: ServiceRoles.labourRunners } },
+
+  // Local AI (هوش مصنوعی, release A1). The assistant and the notes are open to every signed-in user (the API shows each person only what their roles allow); the admin pages are read by PMO and CEO
+  // (AiRoles.readers; the write buttons are PMO only). /ai/seats is the link the API writes in the inbox alert of a failed seat run.
+  { path: "/ai/assistant", name: "AiAssistant", component: () => import("@/views/ai/Assistant.vue") },
+  { path: "/ai/notes", name: "AiNotes", component: () => import("@/views/ai/Notes.vue") },
+  { path: "/ai/admin", name: "AiAdmin", redirect: { name: "AiAdminEndpoints" }, meta: { roles: AiRoles.readers } },
+  { path: "/ai/admin/endpoints", name: "AiAdminEndpoints", component: () => import("@/views/ai/AdminEndpoints.vue"), meta: { roles: AiRoles.readers } },
+  { path: "/ai/admin/prompts", name: "AiAdminPrompts", component: () => import("@/views/ai/AdminPrompts.vue"), meta: { roles: AiRoles.readers } },
+  { path: "/ai/admin/seats", name: "AiAdminSeats", component: () => import("@/views/ai/AdminSeats.vue"), meta: { roles: AiRoles.readers } },
+  { path: "/ai/admin/eval", name: "AiAdminEval", component: () => import("@/views/ai/AdminEval.vue"), meta: { roles: AiRoles.readers } },
+  { path: "/ai/admin/audit", name: "AiAdminAudit", component: () => import("@/views/ai/AdminAudit.vue"), meta: { roles: AiRoles.readers } },
+  { path: "/ai/seats", redirect: { name: "AiAdminSeats" } },
+  { path: "/fn/ai-anomalies", name: "FnAiAnomalies", component: () => import("@/views/fn/AiAnomalies.vue"), meta: { roles: AiRoles.financeNotes } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

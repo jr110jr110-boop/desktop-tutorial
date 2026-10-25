@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import AiNotesBox from "@/components/ai/AiNotesBox.vue";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
 import {
@@ -644,6 +645,9 @@ onMounted(async () => {
       <p v-if="ncr.sourceRecordNumber" class="small mt-2 mb-0">ایجاد خودکار از سند کیفیت: <span class="inv-ltr">{{ ncr.sourceRecordNumber }}</span></p>
       <p v-if="ncr.severity === 2" class="inv-muted mt-2 mb-0">عدم انطباق عمده کمیته فنی با حداقل سه عضو (کیفیت، مهندسی، تولید) می‌خواهد و CAPA آن را سیستم پیش‌نویس می‌کند.</p>
     </div>
+
+    <!-- notes of the AI seat QC-NCR-ASSIST for this report (it only suggests; the quality gate stays with the people) -->
+    <AiNotesBox v-if="!isNew" :target-id="ncr.id" target-type="QualityNcr" />
   </div>
 </template>
 

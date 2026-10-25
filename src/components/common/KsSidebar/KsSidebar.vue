@@ -240,6 +240,20 @@
       </KsSidebarLink>
 
       <KsSidebarLink
+        v-if="aiLinks.some((x) => !x.hidden)"
+        :sidebar-state="sidebarState"
+        :subs="aiLinks"
+        has-sub
+        route-name="Ai"
+        tag="ai-collapse"
+        title="هوش مصنوعی">
+        <CpuIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Ai') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
         :sidebar-state="sidebarState"
         :subs="links.providers"
         has-sub
@@ -269,7 +283,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -282,6 +296,7 @@ import PinCircleIcon from "@/components/icons/PinCircleIcon.vue";
 import CopyIcon from "@/components/icons/CopyIcon.vue";
 import ShoppingCartIcon from "@/components/icons/ShoppingCartIcon.vue";
 import BriefcaseIcon from "@/components/icons/BriefcaseIcon.vue";
+import CpuIcon from "@/components/icons/CpuIcon.vue";
 import UserIcon from "@/components/icons/UserIcon.vue";
 import HandShakeIcon from "@/components/icons/HandShakeIcon.vue";
 import UmbrellaBeachIcon from "@/components/icons/UmbrellaBeachIcon.vue";
@@ -459,6 +474,7 @@ const links = {
   ] as Links[],
   fn: [
     { title: "داشبورد مالی", routeName: "FnDashboard", disabled: !hasRole(FnRoles.readers) },
+    { title: "یادداشت‌های ناهنجاری مالی", routeName: "FnAiAnomalies", disabled: !hasRole(AiRoles.financeNotes), hidden: !hasRole(AiRoles.financeNotes) },
     { title: "بررسی راه‌اندازی حسابداری", routeName: "FnSetupCheck", disabled: !hasRole(FnRoles.readers) },
     { title: "دفتر کل: سال و دوره مالی", routeName: "FnYears", disabled: !hasRole(FnRoles.readers) },
     { title: "دفتر کل: سرفصل حساب‌ها و تفصیلی", routeName: "FnAccounts", disabled: !hasRole(FnRoles.readers) },
@@ -599,6 +615,13 @@ const serviceLinks = computed<Links[]>(() => [
   { title: "نظرسنجی رضایت", routeName: "SvSurveys", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
   { title: "تنظیمات خدمات و SLA", routeName: "SvSettings", disabled: !hasRole(ServiceRoles.readers), hidden: !hasRole(ServiceRoles.readers) },
   { title: "ثبت ماهانه دستمزد محرمانه", routeName: "SvLabour", disabled: !hasRole(ServiceRoles.labourRunners), hidden: !hasRole(ServiceRoles.labourRunners) },
+]);
+
+// Local AI: the assistant and the notes are for every signed-in user; the admin pages for the roles that read them (PMO, CEO). The section shows only when a child is visible.
+const aiLinks = computed<Links[]>(() => [
+  { title: "دستیار هوشمند", routeName: "AiAssistant" },
+  { title: "یادداشت‌های هوش مصنوعی", routeName: "AiNotes" },
+  { title: "مدیریت هوش مصنوعی", routeName: "AiAdminEndpoints", disabled: !hasRole(AiRoles.readers), hidden: !hasRole(AiRoles.readers) },
 ]);
 
 const userRole = localStorage.getItem("userRole");

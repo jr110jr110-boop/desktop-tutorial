@@ -12,6 +12,7 @@ import WeeklyReportPrint from "@/components/pc/print/WeeklyReportPrint.vue";
 import CeoReportPrint from "@/components/pc/print/CeoReportPrint.vue";
 import { contractLabel, idx, milestoneLine, parseContent, pcContractId, pct, phases, reportKinds, usePcPrint } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
+import AiNotesBox from "@/components/ai/AiNotesBox.vue";
 
 // Periodic reports. The content is frozen when the report is generated (hash); the project manager releases it. The client report shows SPI and CPI only when the contract terms allow it.
 const rows = ref<any[]>([]);
@@ -21,6 +22,7 @@ const d = ref<any>(null);
 const busy = ref(false);
 const canGenerate = hasRole(ProjectControlRoles.reportGenerate);
 const canRelease = hasRole(ProjectControlRoles.projectManagers);
+const canAiNotes = hasRole(ProjectControlRoles.planning);
 const kinds = [1, 2, 3];
 const { job, run } = usePcPrint();
 
@@ -130,6 +132,8 @@ watch(pcContractId, load);
           <thead><tr><th>BAC</th><th>PV</th><th>EV</th><th>AC</th><th>EAC</th><th>ETC</th><th>VAC</th></tr></thead>
           <tbody><tr><td>{{ rial(evm.bac) }}</td><td>{{ rial(evm.pv) }}</td><td>{{ rial(evm.ev) }}</td><td>{{ rial(evm.ac) }}</td><td>{{ evm.eacTypical != null ? rial(evm.eacTypical) : "—" }}</td><td>{{ evm.etcTypical != null ? rial(evm.etcTypical) : "—" }}</td><td>{{ evm.vacTypical != null ? rial(evm.vacTypical) : "—" }}</td></tr></tbody>
         </table>
+        <!-- narrative of the AI seat PMO-WEEKLY for the weekly report (kind 2); only PMO and planning read these notes -->
+        <AiNotesBox v-if="d.kind === 2 && canAiNotes" :target-id="d.id" target-type="PcWeeklyReport" />
         <div class="small inv-muted inv-ltr">hash: {{ d.hash }}</div>
       </div>
     </div>

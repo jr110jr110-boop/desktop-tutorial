@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import AiNotesBox from "@/components/ai/AiNotesBox.vue";
 import LetterActionDialog from "@/components/office/letters/LetterActionDialog.vue";
 import LetterApprovals from "@/components/office/letters/LetterApprovals.vue";
 import LetterForm from "@/components/office/letters/LetterForm.vue";
@@ -220,6 +221,9 @@ onBeforeUnmount(() => { if (signatureUrl.value) URL.revokeObjectURL(signatureUrl
         </template>
       </template>
     </div>
+
+    <!-- draft reply notes of the AI seat OFFICE-DRAFT (never for a confidential letter shown as register data only) -->
+    <AiNotesBox v-if="letter && !meta && letter.id" :target-id="letter.id" target-type="OfficeLetter" />
 
     <LetterPrint v-if="letter && !meta" :letter="letter" :signature-url="signatureUrl" />
 

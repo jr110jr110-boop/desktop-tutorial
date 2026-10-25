@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { getPurchaseRequests } from "@/api/ProcurementAPIs";
+import { isSeatDraft, SEAT_DRAFT_TEXT } from "@/composables/ai";
 import { fail, jalali, printPage, rial } from "@/composables/inventory";
 import { purchaseKinds, requestSources, requestStatuses } from "@/composables/procurement";
 import { hasRole, ProcurementRoles } from "@/composables/roles";
@@ -57,7 +58,7 @@ onMounted(load);
         <tbody>
           <tr v-if="!rows.length"><td colspan="8" class="text-center inv-muted">درخواستی نیست.</td></tr>
           <tr v-for="r in rows" :key="r.id" role="button" @click="router.push({ name: 'ProcurementRequestEdit', params: { id: r.id } })">
-            <td class="inv-ltr">{{ r.number }}</td>
+            <td><span class="inv-ltr">{{ r.number }}</span><span v-if="isSeatDraft(r)" class="inv-badge info ms-1" title="این پیش‌نویس را دستیار هوشمند ساخته است؛ بررسی و ارسال با برنامه‌ریزی است.">{{ SEAT_DRAFT_TEXT }}</span></td>
             <td>{{ jalali(r.requestDate) }}</td>
             <td>{{ purchaseKinds[r.kind] }}</td>
             <td>{{ requestSources[r.source] }}</td>

@@ -427,3 +427,20 @@ export const ProjectControlRoles = {
   claimSettle: list("COMMERCIAL,PMO,CEO"),
   claimDesign: list("ENGINEERING,CONSTRUCTION,PMO"),
 };
+
+/**
+ * Local AI, release A1 (AiRoles in Services/NasbNiro/Ai/AiCommon.cs). Chat, voice, conversations and the notes endpoints need only a signed-in user;
+ * the service of each note checks the module roles of its target (AiNoteTypes.Roles). The brief endpoints are CEO only.
+ */
+export const AiRoles = {
+  /** the admin pages are read by these roles (AiRoles.Readers) */
+  readers: list("PMO,CEO"),
+  /** endpoints, prompt versions, seat switches and runs, evaluation start, index rebuild (AiRoles.Admins) */
+  admins: ["PMO"],
+  /** the daily brief of the CEO seat (the note is written as the CEO) */
+  brief: ["CEO"],
+  /** the evaluation answers are returned to the CEO only; the PMO reads the counts */
+  evalAnswers: ["CEO"],
+  /** the financial anomaly notes (FinanceJournal, BankLine, SupplierIbanChange) */
+  financeNotes: list("FINANCEMANAGER,FINANCIAL"),
+};
