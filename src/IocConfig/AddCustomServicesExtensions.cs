@@ -197,6 +197,22 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.AfterSales.ISvSurveyService, Services.NasbNiro.AfterSales.SvSurveyService>();
             services.AddScoped<Services.NasbNiro.AfterSales.ISvDashboardService, Services.NasbNiro.AfterSales.SvDashboardService>();
             services.AddHostedService<Services.NasbNiro.AfterSales.SvHostedService>();
+            // local AI (release A1): OpenAI-compatible endpoints on the company's own server, the tool registry, the numeric answer check, retrieval, chat and voice
+            services.AddHttpClient(Services.NasbNiro.Ai.AiEndpointRunner.ClientName)
+                .ConfigureHttpClient(client => client.Timeout = System.Threading.Timeout.InfiniteTimeSpan)
+                .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler { UseProxy = false, ConnectTimeout = System.TimeSpan.FromSeconds(5) });
+            services.AddScoped<Services.NasbNiro.Ai.IAiAudit, Services.NasbNiro.Ai.AiAudit>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiEndpointRunner, Services.NasbNiro.Ai.AiEndpointRunner>();
+            services.AddScoped<Services.NasbNiro.Ai.ILlmClient, Services.NasbNiro.Ai.LlmClient>();
+            services.AddScoped<Services.NasbNiro.Ai.IEmbeddingClient, Services.NasbNiro.Ai.EmbeddingClient>();
+            services.AddScoped<Services.NasbNiro.Ai.ISpeechToText, Services.NasbNiro.Ai.SpeechToTextClient>();
+            services.AddScoped<Services.NasbNiro.Ai.ITextToSpeech, Services.NasbNiro.Ai.TextToSpeechClient>();
+            services.AddSingleton<Services.NasbNiro.Ai.IAnswerVerifier, Services.NasbNiro.Ai.AnswerVerifier>();
+            services.AddSingleton<Services.NasbNiro.Ai.IPersianNumberWords, Services.NasbNiro.Ai.PersianNumberWords>();
+            services.AddScoped<Services.NasbNiro.Ai.IToolRegistry, Services.NasbNiro.Ai.ToolRegistry>();
+            services.AddScoped<Services.NasbNiro.Ai.IRetrievalService, Services.NasbNiro.Ai.RetrievalService>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiChatService, Services.NasbNiro.Ai.AiChatService>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiAdminService, Services.NasbNiro.Ai.AiAdminService>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();

@@ -168,11 +168,14 @@ jobs:
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
+          Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/smoke.sh
 
+      - name: Start the mock local AI endpoints (chat, embeddings, speech)
+        run: bash .github/ci-tools/mock-llm/start.sh
       - name: Warehouse and traceability scenario
         continue-on-error: true
         env:
@@ -180,6 +183,7 @@ jobs:
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
+          Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
@@ -193,6 +197,7 @@ jobs:
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
+          Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: |

@@ -4789,6 +4789,109 @@ as "$SEC_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10
 as "$PROD_TOKEN" POST inventory/material-requests "{\"requestDate\":\"2026-10-21T00:00:00\",\"purpose\":\"تعمیرات\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "production user writes a material request" '.success'
 TOKEN=$ADMIN_TOKEN
 
+# =================================================================== LOCAL AI (release A1 part A)
+# The mock LLM (.github/ci-tools/mock-llm) answers on 5091 (mock-primary) and 5092 (mock-fallback); it is started here when the workflow did not start it.
+AI=ai
+AIMOCK_STARTED=0
+if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5091/health)" != "200" ] || [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5092/health)" != "200" ]; then
+  MOCK_LLM_LOG_DIR="$OUT" bash .github/ci-tools/mock-llm/start.sh > "$OUT/7-inventory-mock.log" 2>&1 && AIMOCK_STARTED=1
+fi
+[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5091/health)" = "200" ] && [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5092/health)" = "200" ] && ok "ai: both mock model servers answer /health" || bad "ai: both mock model servers answer /health"
+AIQ_DASH="خلاصه داشبورد مدیرعامل"
+AIQ_FORGE="جعل کن: خلاصه داشبورد"
+AIQ_CASH="نقدینگی امروز چقدر است؟"
+AIQ_DOC="روش control measuring equipment کدام است؟"
+AIQ_HI="سلام"
+AINOTALLOWED="مجوز"
+
+# --- who may register model endpoints
+as "$WH_TOKEN" POST $AI/admin/endpoints '{"name":"x","kind":1,"url":"http://127.0.0.1:5091","modelName":"mock-primary","priority":1,"enabled":true,"timeoutSeconds":30}'; nomsg "ai: a storekeeper cannot register a model endpoint" "$AINOTALLOWED"
+as "$CEO_TOKEN" POST $AI/admin/endpoints '{"name":"x","kind":1,"url":"http://127.0.0.1:5091","modelName":"mock-primary","priority":1,"enabled":true,"timeoutSeconds":30}'; nomsg "ai: the CEO reads but cannot register a model endpoint" "$AINOTALLOWED"
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints '{"name":"x","kind":1,"url":"http://user:pass@127.0.0.1:5091","modelName":"m","priority":1,"enabled":true,"timeoutSeconds":30}'; check "ai: an address with credentials is rejected" '.success == false'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints '{"name":"x","kind":1,"url":"ftp://127.0.0.1:5091","modelName":"m","priority":1,"enabled":true,"timeoutSeconds":30}'; check "ai: an address that is not http or https is rejected" '.success == false'
+
+# --- admin registers the endpoints
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints '{"name":"chat primary","kind":1,"url":"http://127.0.0.1:5091","modelName":"mock-primary","priority":1,"enabled":true,"timeoutSeconds":20}'; check "ai: chat primary registered" '.success and .data.kind == 1 and .data.priority == 1 and .data.modelName == "mock-primary" and .data.enabled == true'
+AIEP1=$(val .data.id)
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints '{"name":"chat fallback","kind":1,"url":"http://127.0.0.1:5092","modelName":"mock-fallback","priority":2,"enabled":true,"timeoutSeconds":20}'; check "ai: chat fallback registered" '.success and .data.kind == 1 and .data.priority == 2 and .data.modelName == "mock-fallback"'
+AIEP2=$(val .data.id)
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints '{"name":"embeddings","kind":2,"url":"http://127.0.0.1:5091","modelName":"mock-primary","priority":1,"enabled":true,"timeoutSeconds":20}'; check "ai: embeddings endpoint registered" '.success and .data.kind == 2'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints '{"name":"stt","kind":3,"url":"http://127.0.0.1:5091","modelName":"mock-primary","priority":1,"enabled":true,"timeoutSeconds":20}'; check "ai: speech to text endpoint registered" '.success and .data.kind == 3'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints '{"name":"tts","kind":4,"url":"http://127.0.0.1:5091","modelName":"mock-primary","priority":1,"enabled":true,"timeoutSeconds":20}'; check "ai: text to speech endpoint registered" '.success and .data.kind == 4'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints/health-check; check "ai: health check marks the two chat endpoints and the embeddings endpoint healthy" '.success and ([.data[]|select((.kind == 1 or .kind == 2) and .lastHealthOk == true)]|length) == 3'
+as "$CEO_TOKEN" GET $AI/admin/endpoints; check "ai: the CEO reads the five endpoints" '.success and (.data|length) == 5'
+as "$WH_TOKEN" GET $AI/admin/endpoints; nomsg "ai: a storekeeper cannot read the endpoints" "$AINOTALLOWED"
+
+# --- retrieval index: exactly the non-obsolete controlled documents and the one approved set of minutes
+as "$QC_TOKEN" GET "quality/documents?PageSize=0"; AINDOC=$(jq '[.data.data[]|select(.status != 4)]|length' "$B")
+as "$WH_TOKEN" POST $AI/index/rebuild; nomsg "ai: a storekeeper cannot rebuild the index" "$AINOTALLOWED"
+as "$ADMIN_TOKEN" POST $AI/index/rebuild; check "ai: the index holds every controlled document that is not obsolete ($AINDOC) and the one approved set of minutes, nothing failed" ".success and .data.controlledDocuments == $AINDOC and .data.meetingMinutes == 1 and .data.failed == 0"
+
+# --- the CEO asks for the dashboard: the answer carries the first number of the dashboard
+as "$CEO_TOKEN" GET finance/ceo-dashboard; AISV=$(val '.data.stockValue')
+as "$CEO_TOKEN" POST $AI/chat "{\"text\":\"$AIQ_DASH\"}"
+check "ai: the CEO's dashboard question is answered by the primary model with the dashboard tool, verified, with citations" '.success and .data.verified == true and .data.degraded == false and .data.model == "mock-primary" and (.data.toolCalls|length) == 1 and .data.toolCalls[0].name == "ceo_dashboard" and .data.toolCalls[0].allowed == true and (.data.citations|length) > 0 and .data.conversationId > 0'
+AICONV=$(val .data.conversationId)
+check "ai: the answer starts with the first number of the dashboard (the stock value $AISV)" ".success and (.data.answer|startswith(\"طبق نتایج سامانه: $AISV\"))"
+as "$CEO_TOKEN" GET $AI/conversations/$AICONV; check "ai: the conversation holds the question, the tool result and the answer" '.success and (.data.messageList|length) == 3 and .data.messageList[0].role == "User" and .data.messageList[1].role == "Tool" and .data.messageList[2].role == "Assistant"'
+as "$CEO_TOKEN" GET $AI/conversations; check "ai: the CEO's conversation list holds exactly the one conversation" '.success and (.data.data|length) == 1 and .data.data[0].id == '$AICONV
+as "$QC_TOKEN" GET $AI/conversations/$AICONV; nomsg "ai: another user cannot open the CEO's conversation" "پیدا نشد"
+as "$QC_TOKEN" POST $AI/chat "{\"conversationId\":$AICONV,\"text\":\"$AIQ_HI\"}"; nomsg "ai: another user cannot continue the CEO's conversation" "پیدا نشد"
+
+# --- a fabricated number is never shown
+as "$CEO_TOKEN" POST $AI/chat "{\"text\":\"$AIQ_FORGE\"}"
+check "ai: the fabricated answer is replaced by the fixed template and the invented number is gone" '.success and .data.verified == false and (.data.answer|startswith("پاسخ مدل قابل راستی‌آزمایی نبود")) and (.data.answer|contains("987654321")|not) and (.data.toolCalls|length) == 1'
+
+# --- a user without the finance role is not even offered the cash tool
+as "$WH_TOKEN" POST $AI/chat "{\"text\":\"$AIQ_CASH\"}"
+check "ai: the storekeeper asking for cash gets no tool call and the no-access answer, verified" '.success and .data.verified == true and (.data.toolCalls|length) == 0 and .data.answer == "این ابزار برای شما در دسترس نیست."'
+
+# --- document search cites a controlled document
+as "$QC_TOKEN" POST $AI/chat "{\"text\":\"$AIQ_DOC\"}"
+check "ai: the document question calls search_documents, is verified and cites a controlled document" '.success and .data.verified == true and (.data.toolCalls|length) == 1 and .data.toolCalls[0].name == "search_documents" and (.data.citations|any(.type == "ControlledDocument"))'
+
+# --- failover: the primary points to a dead port
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP1,\"name\":\"chat primary\",\"kind\":1,\"url\":\"http://127.0.0.1:5099\",\"modelName\":\"mock-primary\",\"priority\":1,\"enabled\":true,\"timeoutSeconds\":20}"; check "ai: primary endpoint pointed at a dead port" '.success and .data.url == "http://127.0.0.1:5099"'
+as "$CEO_TOKEN" POST $AI/chat "{\"text\":\"$AIQ_HI\"}"; check "ai: the fallback model answers when the primary is down" '.success and .data.model == "mock-fallback" and .data.degraded == false and .data.verified == true and .data.answer == "سلام؛ چه کمکی از من برمی‌آید؟"'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP1,\"name\":\"chat primary\",\"kind\":1,\"url\":\"http://127.0.0.1:5091\",\"modelName\":\"mock-primary\",\"priority\":1,\"enabled\":true,\"timeoutSeconds\":20}"; check "ai: primary endpoint restored" '.success and .data.url == "http://127.0.0.1:5091"'
+
+# --- degraded: no chat endpoint is enabled
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP1,\"name\":\"chat primary\",\"kind\":1,\"url\":\"http://127.0.0.1:5091\",\"modelName\":\"mock-primary\",\"priority\":1,\"enabled\":false,\"timeoutSeconds\":20}"
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP2,\"name\":\"chat fallback\",\"kind\":1,\"url\":\"http://127.0.0.1:5092\",\"modelName\":\"mock-fallback\",\"priority\":2,\"enabled\":false,\"timeoutSeconds\":20}"
+as "$CEO_TOKEN" POST $AI/chat "{\"text\":\"$AIQ_DASH\"}"; check "ai: with every chat endpoint disabled the answer is the fixed degraded text (a success, not an error)" '.success and .data.degraded == true and .data.answer == "تحلیل هوشمند موقتاً در دسترس نیست؛ داشبورد اصلی همچنان در دسترس است." and (.data.toolCalls|length) == 0'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP1,\"name\":\"chat primary\",\"kind\":1,\"url\":\"http://127.0.0.1:5091\",\"modelName\":\"mock-primary\",\"priority\":1,\"enabled\":true,\"timeoutSeconds\":20}"; check "ai: primary endpoint enabled again" '.success and .data.enabled == true'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP2,\"name\":\"chat fallback\",\"kind\":1,\"url\":\"http://127.0.0.1:5092\",\"modelName\":\"mock-fallback\",\"priority\":2,\"enabled\":true,\"timeoutSeconds\":20}"; check "ai: fallback endpoint enabled again" '.success and .data.enabled == true'
+
+# --- voice round trip with a tiny 16 kHz mono WAV (0.1 s of silence)
+AIWAV="$OUT/ai-voice.wav"
+python3 - "$AIWAV" <<'PYWAV'
+import struct, sys
+n = 1600
+data = b"\x00\x00" * n
+open(sys.argv[1], "wb").write(b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16) + b"data" + struct.pack("<I", len(data)) + data)
+PYWAV
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/$AI/voice" -H "Authorization: Bearer $CEO_TOKEN" -F "file=@$AIWAV;type=audio/wav")
+[ "$CODE" = "200" ] && ok "ai: voice request accepted (200)" || bad "ai: voice request accepted (200) got $CODE"
+check "ai: voice round trip: the transcript is the spoken question, the answer is verified and the audio is returned" '.success and .data.transcript == "خلاصه داشبورد مدیرعامل" and .data.verified == true and .data.degraded == false and .data.model == "mock-primary" and (.data.audioBase64|length) > 0'
+AIVOICE_B64=$(val '.data.audioBase64'); printf '%s' "$AIVOICE_B64" | base64 -d 2>/dev/null | head -c 4 | grep -q '^RIFF$' && ok "ai: the returned audio is a WAV file" || bad "ai: the returned audio is a WAV file"
+printf 'not audio' > "$OUT/ai-voice.txt"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/$AI/voice" -H "Authorization: Bearer $CEO_TOKEN" -F "file=@$OUT/ai-voice.txt;type=text/plain")
+check "ai: a file that is not webm or wav is refused" '.success == false'
+
+# --- audit trail
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=chat&PageSize=0"; check "ai: audit holds seven chat events (dashboard, forged, cash, document, failover, degraded, voice)" '.success and (.data.data|length) == 7'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=unverified&PageSize=0"; check "ai: audit holds exactly one unverified event and it names the invented number" '.success and (.data.data|length) == 1 and (.data.data[0].detail|contains("987654321"))'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=failover&PageSize=0"; check "ai: audit holds exactly one failover event (the dead primary)" '.success and (.data.data|length) == 1'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=degraded&PageSize=0"; check "ai: audit holds exactly one degraded event" '.success and (.data.data|length) == 1'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=voice&PageSize=0"; check "ai: audit holds exactly one voice event" '.success and (.data.data|length) == 1'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=tool&PageSize=0"; check "ai: audit holds four tool events (dashboard, forged, document, voice)" '.success and (.data.data|length) == 4'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=admin&PageSize=0"; check "ai: audit holds the thirteen admin writes (eleven endpoint saves, the health check and the index rebuild)" '.success and (.data.data|length) == 13'
+as "$WH_TOKEN" GET "$AI/admin/audit?PageSize=0"; nomsg "ai: a storekeeper cannot read the audit" "$AINOTALLOWED"
+
+[ "$AIMOCK_STARTED" = 1 ] && { pkill -f mock_llm.py 2>/dev/null || true; }
+TOKEN=$ADMIN_TOKEN
+rm -f "$AIWAV" "$OUT/ai-voice.txt"
+
 finished=1
 echo "--- inventory: $pass passed, $fail failed" | tee -a "$R"
 rm -f "$B"
