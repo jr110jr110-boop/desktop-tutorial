@@ -5091,6 +5091,7 @@ airun PROC-COMPARE; check "ai seats: the procurement seat runs (no complete inqu
 # --- evaluation: 66 fixed cases against the mock, run as the evaluation user in the background
 as "$WH_TOKEN" POST $AI/admin/eval/run; nomsg "ai eval: a storekeeper cannot run the evaluation" "$AINOTALLOWED"
 as "$CEO_TOKEN" GET $AI/admin/eval/cases; check "ai eval: the catalogue holds 66 cases" '.success and (.data|length) == 66'
+as "$CEO_TOKEN" GET "$AI/conversations?PageSize=0"; AICONVN=$(val .data.totalItems); AICONVMAX=$(val '[.data.data[].id]|max')
 as "$ADMIN_TOKEN" POST $AI/admin/eval/run; AIEVID=$(val .data.id)
 check "ai eval: the request answers at once with a run that is still running" '.success and .data.running == true and .data.total == 0 and (.data.id|type) == "number"'
 as "$ADMIN_TOKEN" POST $AI/admin/eval/run; nomsg "ai eval: a second evaluation cannot start while one is running" "هنوز در حال اجراست"
@@ -5105,7 +5106,7 @@ as "$CEO_TOKEN" GET $AI/admin/eval/runs/$AIEVID
 check "ai eval: the CEO reads the 66 results with the answers; EV-001 and EV-055 pass, EV-012 does not" '.success and (.data.cases|length) == 66 and ([.data.cases[]|select(.passed)]|length) == 27 and ([.data.cases[]|select(.code == "EV-001" and .passed and (.answer|type) == "string")]|length) == 1 and ([.data.cases[]|select(.code == "EV-055" and .passed)]|length) == 1 and ([.data.cases[]|select(.code == "EV-012" and (.passed|not))]|length) == 1'
 as "$CEO_TOKEN" GET "$AI/admin/eval/runs?PageSize=0"; check "ai eval: the CEO sees the one run in the list" ".success and (.data.data|length) == 1 and .data.data[0].id == $AIEVID and .data.data[0].running == false"
 as "$WH_TOKEN" GET $AI/admin/eval/runs/$AIEVID; nomsg "ai eval: a storekeeper cannot open a run" "$AINOTALLOWED"
-as "$CEO_TOKEN" GET $AI/conversations; check "ai eval: the evaluation left no conversation (the CEO still has the one of the dashboard question)" ".success and (.data.data|length) == 1 and .data.data[0].id == $AICONV"
+as "$CEO_TOKEN" GET "$AI/conversations?PageSize=0"; check "ai eval: the evaluation left no conversation (the CEO has the same $AICONVN conversations as before, the newest still #$AICONVMAX)" ".success and .data.totalItems == $AICONVN and ([.data.data[].id]|max) == $AICONVMAX"
 
 fi
 
