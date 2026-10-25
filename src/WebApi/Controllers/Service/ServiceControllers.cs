@@ -122,9 +122,11 @@ namespace WebApi.Controllers
         private readonly ISvContractService _contracts;
         private readonly ISvSurveyService _surveys;
         private readonly ISvDashboardService _dashboard;
+        private readonly ISvLabourService _labour;
 
-        public ServiceAgreementsController(ISvContractService contracts, ISvSurveyService surveys, ISvDashboardService dashboard)
+        public ServiceAgreementsController(ISvContractService contracts, ISvSurveyService surveys, ISvDashboardService dashboard, ISvLabourService labour)
         {
+            _labour = labour;
             _contracts = contracts;
             _surveys = surveys;
             _dashboard = dashboard;
@@ -144,6 +146,10 @@ namespace WebApi.Controllers
 
         [HttpPost("jobs/run")]
         public async Task<IActionResult> RunJobsAsync([FromBody] SvJobsRunDto dto, CancellationToken ct) => Ok(await _contracts.RunJobsAsync(dto, ct));
+
+        /// <summary>The monthly aggregate posting of the protected labour (finance manager, CEO): one accounting event per ended Persian month, without order numbers.</summary>
+        [HttpPost("labour/aggregate")]
+        public async Task<IActionResult> AggregateLabourAsync([FromBody] SvJobsRunDto dto, CancellationToken ct) => Ok(await _labour.RunAsync(dto, ct));
 
         [HttpGet("surveys")]
         public async Task<IActionResult> SurveysAsync([FromQuery] SlSurveyQuery query, CancellationToken ct) => Ok((await _surveys.GetSurveysAsync(query, ct)).ToPaginatedResultSafe());

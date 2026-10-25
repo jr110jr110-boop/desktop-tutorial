@@ -56,6 +56,15 @@ namespace Services.NasbNiro.AfterSales
                     }
                     catch (OperationCanceledException) { return; }
                     catch (Exception ex) { _logger?.LogWarning(ex, "Service job failed; it will run again tomorrow."); }
+                    try
+                    {
+                        // the first nights of a month: the aggregate posting of the protected labour of the month before (idempotent; a missed night is caught up)
+                        using IServiceScope scope = _scopes.CreateScope();
+                        int months = await scope.ServiceProvider.GetRequiredService<ISvLabourService>().RunNightlyAsync(stoppingToken);
+                        if (months > 0) _logger?.LogInformation("Service job: protected labour posted for {Months} month(s)", months);
+                    }
+                    catch (OperationCanceledException) { return; }
+                    catch (Exception ex) { _logger?.LogWarning(ex, "Monthly labour posting failed; it will run again tomorrow."); }
                 }
                 try { await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken); }
                 catch (OperationCanceledException) { return; }

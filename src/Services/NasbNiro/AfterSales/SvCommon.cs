@@ -355,25 +355,127 @@ namespace Services.NasbNiro.AfterSales
                 : null;
     }
 
-    /// <summary>The accounting event of a warranty or goodwill order. Labour absorbed goes to its own service account (70113, not the production labour), the parts left on site are cost of sales (as their delivery document posted) and the parts consumed are material expense. When the labour is one or two people's pay the labour and the parts are one amount on one line each side, so no line shows the labour alone.</summary>
+    /// <summary>The accounting event of a warranty or goodwill order at its close. Labour absorbed goes to its own service account (70113, not the production labour), the parts left on site are cost of sales (as their delivery document posted) and the parts consumed are material expense.
+    /// The labour passed here is zero for an order whose labour is protected: that labour is not posted per order but in the monthly aggregate (<see cref="SvLabourMonth"/>).</summary>
     internal static class SvPosting
     {
-        public static List<(string Role, decimal Debit, decimal Credit, string Description)> WarrantyLines(bool warranty, decimal labour, decimal partsConsumed, decimal partsLeftOnSite, bool labourProtected, string number)
+        public static List<(string Role, decimal Debit, decimal Credit, string Description)> WarrantyLines(bool warranty, decimal labour, decimal partsConsumed, decimal partsLeftOnSite, string number)
         {
             decimal total = labour + partsConsumed + partsLeftOnSite;
             var lines = new List<(string, decimal, decimal, string)>
             {
                 (warranty ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, total, 0m, "هزینه خدمات " + (warranty ? "گارانتی" : "حسن نیت") + " " + number),
             };
-            if (labourProtected)
-            {
-                lines.Add((AccountRoles.ServiceLabourAbsorbed, 0m, total, "هزینه جذب‌شده در خدمات " + number));
-                return lines;
-            }
             if (labour != 0) lines.Add((AccountRoles.ServiceLabourAbsorbed, 0m, labour, "دستمزد جذب‌شده در خدمات " + number));
             if (partsConsumed != 0) lines.Add((AccountRoles.MaterialExpense, 0m, partsConsumed, "قطعات مصرفی خدمات " + number));
             if (partsLeftOnSite != 0) lines.Add((AccountRoles.Cogs, 0m, partsLeftOnSite, "قطعات باقی‌مانده در سایت خدمات " + number));
             return lines;
+        }
+    }
+
+    /// <summary>One closed order whose protected labour waits for its monthly aggregate posting (the pure input of <see cref="SvLabourMonth"/>).</summary>
+    internal sealed class SvPendingLabour
+    {
+        public int OrderId { get; set; }
+        public SvWarrantyDecision Decision { get; set; }
+        public int? ContractId { get; set; }
+        public string CostCenter { get; set; }
+        public decimal Labour { get; set; }
+
+        /// <summary>The employees with hours on the order, and those among them paid through an approved payslip (their hourly pay is the personal data).</summary>
+        public HashSet<int> Employees { get; set; } = new HashSet<int>();
+        public HashSet<int> PayrollEmployees { get; set; } = new HashSet<int>();
+    }
+
+    /// <summary>
+    /// Monthly aggregate posting of protected labour (the labour of an order that fewer than three payroll-rated employees worked on; binding rule: payroll personal data only PAYROLL / FINANCEMANAGER / CEO).
+    /// A per-order posting of such labour would let every reader of the accounting events (PMO, CEO, FINANCIAL, FINANCEMANAGER, PLANNING) and of the cost entries divide the amount by the visible hours of the order and get one person's hourly pay.
+    /// So at the close the labour of a protected order is only marked pending for a Persian month; the parts part (not personal) is still posted at once. The monthly run posts ONE accounting event per month with the summed labour of all the pending orders
+    /// of the month (no order number, no per-order line) and one labour cost entry per contract and month.
+    /// The month of an order is the month it closes in; when that month already has its aggregate posting (only possible with an injected future day) the order goes to the first later month that has none: a posted month is never touched again.
+    /// </summary>
+    internal static class SvLabourMonth
+    {
+        public const string SourceType = "ServiceLabourMonth";
+
+        private static readonly PersianCalendar Calendar = new PersianCalendar();
+
+        /// <summary>The Persian month of a day as yyyymm (for example 140507).</summary>
+        public static int Of(DateTime day) => Calendar.GetYear(day) * 100 + Calendar.GetMonth(day);
+
+        public static int Next(int period) => period % 100 == 12 ? (period / 100 + 1) * 100 + 1 : period + 1;
+
+        /// <summary>The last day of the Persian month; the date of its aggregate posting.</summary>
+        public static DateTime End(int period)
+        {
+            int year = period / 100, month = period % 100;
+            return Calendar.ToDateTime(year, month, Calendar.GetDaysInMonth(year, month), 0, 0, 0, 0);
+        }
+
+        public static string Text(int period) => $"{period / 100}/{(period % 100).ToString("00", CultureInfo.InvariantCulture)}";
+        public static string Number(int period) => "SVL-" + period.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>The labour of the order is not posted at its close: it is protected and not zero.</summary>
+        public static bool Deferred(decimal labour, bool labourProtected) => labourProtected && labour != 0;
+
+        /// <summary>The month an order closed on <paramref name="closeDay"/> is aggregated in: the month of the close, or the first later month without a posting.</summary>
+        public static int Assign(DateTime closeDay, IEnumerable<int> postedPeriods)
+        {
+            HashSet<int> posted = postedPeriods.ToHashSet();
+            int period = Of(closeDay);
+            while (posted.Contains(period)) period = Next(period);
+            return period;
+        }
+
+        /// <summary>A month is posted by a run on <paramref name="asOf"/> only when it has ended (the run day is in a later month).</summary>
+        public static bool Due(int period, DateTime asOf) => period < Of(asOf);
+
+        private static bool Protected(IEnumerable<SvPendingLabour> orders)
+        {
+            List<SvPendingLabour> list = orders.ToList();
+            return SvPrivacy.LabourProtected(list.SelectMany(o => o.Employees).Distinct().Count(), list.SelectMany(o => o.PayrollEmployees).Distinct().Count());
+        }
+
+        /// <summary>
+        /// The lines of the one accounting event of a month (warranty and goodwill orders only; a billable order and the visit of an agreement are paid by the customer and post no event). Debit: the warranty provision for the warranty labour and the
+        /// goodwill expense for the goodwill labour; credit: the service labour absorbed. Never an order number, never a per-order line. When both kinds exist but one of them comes from fewer than three payroll-rated employees, that split would show
+        /// a person's pay again, so both go to one debit line of the larger kind (warranty on a tie): the books get the exact month total, the split is not published.
+        /// </summary>
+        public static List<(string Role, decimal Debit, decimal Credit, string Description)> EventLines(IEnumerable<SvPendingLabour> orders, int period)
+        {
+            List<SvPendingLabour> warranty = orders.Where(o => o.Decision == SvWarrantyDecision.Warranty).ToList();
+            List<SvPendingLabour> goodwill = orders.Where(o => o.Decision == SvWarrantyDecision.Goodwill).ToList();
+            decimal w = warranty.Sum(o => o.Labour), g = goodwill.Sum(o => o.Labour);
+            var lines = new List<(string, decimal, decimal, string)>();
+            string label = "ماه " + Text(period);
+            if (w + g == 0) return lines;
+            bool split = w != 0 && g != 0 && !Protected(warranty) && !Protected(goodwill);
+            if (split)
+            {
+                lines.Add((AccountRoles.WarrantyProvision, w, 0m, "هزینه خدمات گارانتی " + label));
+                lines.Add((AccountRoles.WarrantyExpense, g, 0m, "هزینه خدمات حسن نیت " + label));
+            }
+            else if (w != 0 && g != 0)
+                lines.Add((w >= g ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, w + g, 0m, "هزینه خدمات پس از فروش " + label));
+            else
+                lines.Add((w != 0 ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, w + g, 0m, "هزینه خدمات " + (w != 0 ? "گارانتی" : "حسن نیت") + " " + label));
+            lines.Add((AccountRoles.ServiceLabourAbsorbed, 0m, w + g, "دستمزد جذب‌شده در خدمات پس از فروش " + label));
+            return lines;
+        }
+
+        /// <summary>
+        /// The labour cost entries of a month (every kind of order): one per contract and cost centre. A contract whose own share comes from fewer than three payroll-rated employees would show a person's pay in the contract cost list, so its share
+        /// joins the entry without a contract of the same cost centre (the cost stays in the cost centre and the books; only the contract allocation of that small share is lost).
+        /// </summary>
+        public static List<(int? ContractId, string CostCenter, decimal Amount)> CostGroups(IEnumerable<SvPendingLabour> orders)
+        {
+            var result = new Dictionary<(int?, string), decimal>();
+            foreach (var group in orders.Where(o => o.Labour != 0).GroupBy(o => (o.ContractId, o.CostCenter)))
+            {
+                (int?, string) key = group.Key.ContractId.HasValue && !Protected(group) ? (group.Key.ContractId, group.Key.CostCenter) : ((int?)null, group.Key.CostCenter);
+                result[key] = result.GetValueOrDefault(key) + group.Sum(o => o.Labour);
+            }
+            return result.OrderBy(x => x.Key.Item1 ?? int.MaxValue).ThenBy(x => x.Key.Item2, StringComparer.Ordinal).Select(x => (x.Key.Item1, x.Key.Item2, x.Value)).ToList();
         }
     }
 

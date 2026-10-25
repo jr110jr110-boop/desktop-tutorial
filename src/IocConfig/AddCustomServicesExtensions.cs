@@ -193,6 +193,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.AfterSales.ISvRequestService, Services.NasbNiro.AfterSales.SvRequestService>();
             services.AddScoped<Services.NasbNiro.AfterSales.ISvOrderService, Services.NasbNiro.AfterSales.SvOrderService>();
             services.AddScoped<Services.NasbNiro.AfterSales.ISvContractService, Services.NasbNiro.AfterSales.SvContractService>();
+            services.AddScoped<Services.NasbNiro.AfterSales.ISvLabourService, Services.NasbNiro.AfterSales.SvLabourService>();
             services.AddScoped<Services.NasbNiro.AfterSales.ISvSurveyService, Services.NasbNiro.AfterSales.SvSurveyService>();
             services.AddScoped<Services.NasbNiro.AfterSales.ISvDashboardService, Services.NasbNiro.AfterSales.SvDashboardService>();
             services.AddHostedService<Services.NasbNiro.AfterSales.SvHostedService>();

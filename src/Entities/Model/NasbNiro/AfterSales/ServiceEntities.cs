@@ -191,6 +191,12 @@ namespace Entities.Model.NasbNiro.AfterSales
         /// <summary>Set together with <see cref="WarrantyEventId"/> so the close is one save (the id exists only after it).</summary>
         public Finance.AccountingEvent WarrantyEvent { get; set; }
 
+        /// <summary>Protected labour (one or two payroll employees behind it) is not posted per order: the Persian month (yyyymm) whose monthly aggregate posting will carry it. Empty when the labour was posted with the order.</summary>
+        public int? LabourPendingPeriod { get; set; }
+
+        /// <summary>When the monthly aggregate posting took the labour of this order (empty while it is pending).</summary>
+        public DateTimeOffset? LabourAggregatedAt { get; set; }
+
         // ----- billing (Billable)
         public decimal? BillableLabourRateRial { get; set; }
         public int? InvoiceId { get; set; }

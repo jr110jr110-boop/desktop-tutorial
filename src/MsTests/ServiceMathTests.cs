@@ -176,7 +176,7 @@ namespace MsTests
         public void Warranty_Event_Splits_The_Parts_Credit_And_Uses_The_Service_Labour_Account()
         {
             // O1 of the smoke: 12 h x 400,000 = 4,800,000 labour, 500,000 consumed, 80,000 left on site
-            var lines = SvPosting.WarrantyLines(true, 4800000m, 500000m, 80000m, false, "SVO-1");
+            var lines = SvPosting.WarrantyLines(true, 4800000m, 500000m, 80000m, "SVO-1");
             Assert.AreEqual(4, lines.Count);
             Assert.AreEqual(5380000m, lines.Where(l => l.Role == Services.NasbNiro.Finance.AccountRoles.WarrantyProvision).Sum(l => l.Debit));
             Assert.AreEqual(4800000m, lines.Where(l => l.Role == Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed).Sum(l => l.Credit));
@@ -186,21 +186,118 @@ namespace MsTests
             Assert.IsFalse(lines.Any(l => l.Role == Services.NasbNiro.Finance.AccountRoles.LabourAbsorbed));
 
             // goodwill with labour only: the expense account against the service labour account, nothing else
-            var goodwill = SvPosting.WarrantyLines(false, 1200000m, 0m, 0m, false, "SVO-3");
+            var goodwill = SvPosting.WarrantyLines(false, 1200000m, 0m, 0m, "SVO-3");
             Assert.AreEqual(2, goodwill.Count);
             Assert.AreEqual(1200000m, goodwill.Single(l => l.Role == Services.NasbNiro.Finance.AccountRoles.WarrantyExpense).Debit);
             Assert.AreEqual(1200000m, goodwill.Single(l => l.Role == Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed).Credit);
         }
 
         [TestMethod]
-        public void Warranty_Event_Of_A_Protected_Order_Is_One_Amount_On_One_Line_Each_Side()
+        public void Protected_Order_Posts_Only_Its_Parts_At_The_Close_And_Nothing_Without_Parts()
         {
-            var lines = SvPosting.WarrantyLines(true, 480000m, 500000m, 80000m, true, "SVO-4");
+            // the labour of a protected order is deferred (zero here): the event carries the parts and no labour amount at all
+            Assert.IsTrue(SvLabourMonth.Deferred(480000m, true));
+            Assert.IsFalse(SvLabourMonth.Deferred(480000m, false), "a labour of three or more people is posted with the order");
+            Assert.IsFalse(SvLabourMonth.Deferred(0m, true), "nothing to defer");
+            var lines = SvPosting.WarrantyLines(true, 0m, 500000m, 80000m, "SVO-4");
+            Assert.AreEqual(3, lines.Count);
+            Assert.AreEqual(580000m, lines.Sum(l => l.Debit));
+            Assert.IsFalse(lines.Any(l => l.Role == Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed));
+            Assert.IsFalse(lines.Any(l => l.Debit == 480000m || l.Credit == 480000m));
+            // no parts: the lines carry no amount (the service posts no event then)
+            Assert.AreEqual(0m, SvPosting.WarrantyLines(true, 0m, 0m, 0m, "SVO-4").Sum(l => l.Debit));
+        }
+
+        private static SvPendingLabour Pend(int id, SvWarrantyDecision decision, int? contract, decimal labour, int[] employees, int[] payroll, string center = "AFTERSALES") =>
+            new SvPendingLabour { OrderId = id, Decision = decision, ContractId = contract, CostCenter = center, Labour = labour, Employees = employees.ToHashSet(), PayrollEmployees = payroll.ToHashSet() };
+
+        [TestMethod]
+        public void Labour_Months_Are_Persian_Months()
+        {
+            Assert.AreEqual(140508, SvLabourMonth.Of(new DateTime(2026, 10, 25)));
+            Assert.AreEqual(140507, SvLabourMonth.Of(new DateTime(2026, 10, 22)));
+            Assert.AreEqual(140509, SvLabourMonth.Next(140508));
+            Assert.AreEqual(140601, SvLabourMonth.Next(140512));
+            Assert.AreEqual("1405/08", SvLabourMonth.Text(140508));
+            Assert.AreEqual(new DateTime(2026, 11, 21), SvLabourMonth.End(140508), "Aban has 30 days: the last day is 30 Aban");
+            // a month is due only after it has ended
+            Assert.IsFalse(SvLabourMonth.Due(140508, new DateTime(2026, 11, 21)));
+            Assert.IsTrue(SvLabourMonth.Due(140508, new DateTime(2026, 11, 22)));
+        }
+
+        [TestMethod]
+        public void A_Posted_Month_Is_Never_Reopened_A_Later_Close_Goes_To_The_Next_Month()
+        {
+            var day = new DateTime(2026, 10, 25); // 1405/08
+            Assert.AreEqual(140508, SvLabourMonth.Assign(day, new int[0]));
+            Assert.AreEqual(140508, SvLabourMonth.Assign(day, new[] { 140507 }), "an earlier month posted does not matter");
+            Assert.AreEqual(140509, SvLabourMonth.Assign(day, new[] { 140508 }));
+            Assert.AreEqual(140510, SvLabourMonth.Assign(day, new[] { 140508, 140509 }));
+        }
+
+        [TestMethod]
+        public void Monthly_Event_Has_One_Debit_One_Credit_And_No_Order_Number()
+        {
+            // O4 of the smoke: one payroll employee, warranty, 480,000
+            var lines = SvLabourMonth.EventLines(new[] { Pend(4, SvWarrantyDecision.Warranty, 9, 480000m, new[] { 1 }, new[] { 1 }) }, 140508);
             Assert.AreEqual(2, lines.Count);
-            Assert.AreEqual(1060000m, lines[0].Debit);
-            Assert.AreEqual(1060000m, lines[1].Credit);
+            Assert.AreEqual(Services.NasbNiro.Finance.AccountRoles.WarrantyProvision, lines[0].Role);
+            Assert.AreEqual(480000m, lines[0].Debit);
             Assert.AreEqual(Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed, lines[1].Role);
-            Assert.IsFalse(lines.Any(l => l.Credit == 480000m));
+            Assert.AreEqual(480000m, lines[1].Credit);
+            Assert.IsFalse(lines.Any(l => l.Description.Contains("SVO")), "no order number in any line");
+            // goodwill alone goes to the expense account
+            var goodwill = SvLabourMonth.EventLines(new[] { Pend(5, SvWarrantyDecision.Goodwill, null, 100m, new[] { 1 }, new[] { 1 }) }, 140508);
+            Assert.AreEqual(Services.NasbNiro.Finance.AccountRoles.WarrantyExpense, goodwill[0].Role);
+            // billable work and the visits of an agreement post no event
+            Assert.AreEqual(0, SvLabourMonth.EventLines(new[] { Pend(6, SvWarrantyDecision.Billable, 9, 700m, new[] { 1 }, new[] { 1 }) }, 140508).Count);
+            Assert.AreEqual(0, SvLabourMonth.EventLines(new[] { Pend(7, SvWarrantyDecision.None, 9, 700m, new[] { 1 }, new[] { 1 }) }, 140508).Count);
+        }
+
+        [TestMethod]
+        public void Monthly_Event_Splits_Warranty_And_Goodwill_Only_When_Each_Has_Three_People()
+        {
+            var big = new[] { 1, 2, 3 };
+            var split = SvLabourMonth.EventLines(new[]
+            {
+                Pend(1, SvWarrantyDecision.Warranty, null, 600m, big, big),
+                Pend(2, SvWarrantyDecision.Goodwill, null, 300m, new[] { 4, 5, 6 }, new[] { 4, 5, 6 }),
+            }, 140508);
+            Assert.AreEqual(3, split.Count);
+            Assert.AreEqual(600m, split.Single(l => l.Role == Services.NasbNiro.Finance.AccountRoles.WarrantyProvision).Debit);
+            Assert.AreEqual(300m, split.Single(l => l.Role == Services.NasbNiro.Finance.AccountRoles.WarrantyExpense).Debit);
+            Assert.AreEqual(900m, split.Single(l => l.Role == Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed).Credit);
+
+            // the goodwill share is one person: showing it alone would show his pay, so one debit line of the larger kind carries the month
+            var merged = SvLabourMonth.EventLines(new[]
+            {
+                Pend(1, SvWarrantyDecision.Warranty, null, 600m, big, big),
+                Pend(2, SvWarrantyDecision.Goodwill, null, 300m, new[] { 4 }, new[] { 4 }),
+            }, 140508);
+            Assert.AreEqual(2, merged.Count);
+            Assert.AreEqual(Services.NasbNiro.Finance.AccountRoles.WarrantyProvision, merged[0].Role);
+            Assert.AreEqual(900m, merged[0].Debit);
+            Assert.AreEqual(900m, merged[1].Credit);
+            Assert.AreEqual(merged.Sum(l => l.Debit), merged.Sum(l => l.Credit));
+        }
+
+        [TestMethod]
+        public void Labour_Cost_Entries_Are_One_Per_Contract_And_A_Small_Contract_Joins_The_Cost_Centre_Entry()
+        {
+            var three = new[] { 1, 2, 3 };
+            var groups = SvLabourMonth.CostGroups(new[]
+            {
+                Pend(1, SvWarrantyDecision.Warranty, 10, 100m, three, three),
+                Pend(2, SvWarrantyDecision.Billable, 10, 50m, three, three),
+                Pend(3, SvWarrantyDecision.Warranty, 20, 70m, new[] { 9 }, new[] { 9 }),
+                Pend(4, SvWarrantyDecision.Goodwill, null, 30m, new[] { 8 }, new[] { 8 }),
+                Pend(5, SvWarrantyDecision.None, 30, 0m, new[] { 7 }, new[] { 7 }),
+            });
+            Assert.AreEqual(2, groups.Count);
+            Assert.AreEqual((10, "AFTERSALES", 150m), (groups[0].ContractId.Value, groups[0].CostCenter, groups[0].Amount), "contract 10: three people, its own entry");
+            Assert.IsNull(groups[1].ContractId, "contract 20 was one person: joined with the entry without contract");
+            Assert.AreEqual(100m, groups[1].Amount);
+            Assert.AreEqual(250m, groups.Sum(g => g.Amount), "the month total is kept");
         }
 
         [TestMethod]

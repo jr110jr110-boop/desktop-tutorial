@@ -375,6 +375,12 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public decimal LabourHours { get; set; }
         public decimal? LabourAmount { get; set; }
         public bool LabourHidden { get; set; }
+
+        /// <summary>The labour is protected and waits for the monthly aggregate posting (it is not posted per order).</summary>
+        public bool LabourAggregatePending { get; set; }
+
+        /// <summary>The Persian month (yyyymm) whose aggregate posting carries the protected labour of this order (not a cost figure; empty when the labour was posted with the order).</summary>
+        public int? LabourAggregatePeriod { get; set; }
         public decimal PartsAmount { get; set; }
         public decimal? TotalCost { get; set; }
         public bool CostPosted { get; set; }
@@ -531,6 +537,29 @@ namespace ViewModels.NasbNiro.ServiceDtos
     {
         /// <summary>The day the jobs count from; today when empty (tests and what-if runs).</summary>
         public DateTime? AsOf { get; set; }
+    }
+
+    /// <summary>The monthly aggregate posting of protected labour: for the finance manager and the CEO only (the exact amounts are payroll-derived).</summary>
+    public class SvLabourAggregateResultDto
+    {
+        public DateTime AsOf { get; set; }
+        public List<SvLabourPeriodDto> Periods { get; set; } = new List<SvLabourPeriodDto>();
+    }
+
+    public class SvLabourPeriodDto
+    {
+        /// <summary>The Persian month as yyyymm.</summary>
+        public int Period { get; set; }
+        public string PeriodText { get; set; }
+        public int Orders { get; set; }
+
+        /// <summary>The labour in the accounting event (warranty and goodwill orders).</summary>
+        public decimal EventAmount { get; set; }
+
+        /// <summary>The labour in the cost entries (every kind of order).</summary>
+        public decimal CostAmount { get; set; }
+
+        public int? EventId { get; set; }
     }
 
     public class SvJobsResultDto

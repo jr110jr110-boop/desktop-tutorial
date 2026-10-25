@@ -104,6 +104,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.HasIndex(x => x.Status);
                 b.HasIndex(x => x.UnitId);
                 b.HasIndex(x => x.RequestId);
+                // the protected labour waiting for (or taken by) a monthly aggregate posting
+                b.HasIndex(x => x.LabourPendingPeriod).HasFilter("[LabourPendingPeriod] IS NOT NULL");
                 // one visit order for a unit and a visit date of an agreement (the job is idempotent)
                 b.HasIndex(x => new { x.LtsaContractId, x.UnitId, x.PlannedStart }).IsUnique().HasFilter("[Deleted] = 0 AND [LtsaContractId] IS NOT NULL AND [Status] <> 5");
                 b.Property(x => x.Title).HasMaxLength(Title).IsRequired();

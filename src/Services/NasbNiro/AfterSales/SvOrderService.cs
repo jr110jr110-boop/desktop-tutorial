@@ -115,7 +115,7 @@ namespace Services.NasbNiro.AfterSales
                         Lines = d.Lines.OrderBy(l => l.RowNumber).Select(l => new SvPartLineDto { ItemId = l.ItemId, ItemCode = items.GetValueOrDefault(l.ItemId)?.Code, ItemName = items.GetValueOrDefault(l.ItemId)?.Title, Quantity = l.Quantity }).ToList(),
                     }).ToList(),
                     TravelHours = travel, WorkHours = work, WaitingHours = waiting, TotalHours = travel + work + waiting,
-                    LabourHours = r.CostPostedAt.HasValue ? r.LabourHours : travel + work + waiting, LabourAmount = labour, LabourHidden = hidden, PartsAmount = r.PartsAmount,
+                    LabourHours = r.CostPostedAt.HasValue ? r.LabourHours : travel + work + waiting, LabourAmount = labour, LabourHidden = hidden, LabourAggregatePending = r.LabourPendingPeriod.HasValue && !r.LabourAggregatedAt.HasValue, LabourAggregatePeriod = r.LabourPendingPeriod, PartsAmount = r.PartsAmount,
                     TotalCost = labour.HasValue ? labour.Value + r.PartsAmount : (decimal?)null, CostPosted = r.CostPostedAt.HasValue,
                     BillableLabourRateRial = r.BillableLabourRateRial, InvoiceId = r.InvoiceId, InvoiceNumber = r.InvoiceId.HasValue ? invoices.GetValueOrDefault(r.InvoiceId.Value) : null, DraftNote = r.DraftNote,
                     RowVersion = SlConcurrency.Text(r.RowVersion),
@@ -479,8 +479,18 @@ namespace Services.NasbNiro.AfterSales
             string center = row.CostCenterCode ?? await SvSettings.EnsureCostCenterAsync(_uow, ct);
             row.CostCenterCode = center;
 
-            // the labour is one aggregated cost entry of the order (never one per person), without the hours (as the production cost run does): the hours stay on the order
-            if (labour != 0)
+            // Protected labour (one or two payroll-rated people behind it) is posted neither as a cost entry nor in the event of the order: the amount next to the visible hours of the order would show one person's hourly pay.
+            // It is marked pending for a Persian month and the monthly aggregate posting (SvLabourService) carries it: one event and one cost entry per contract and month. The labour hours stay on the order.
+            bool protectedLabour = SvPrivacy.LabourProtected(employees.Count, payroll.Count);
+            bool deferred = SvLabourMonth.Deferred(labour, protectedLabour);
+            if (deferred)
+            {
+                var posted = await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => o.LabourPendingPeriod != null && o.LabourAggregatedAt != null).Select(o => o.LabourPendingPeriod.Value).Distinct().ToListAsync(ct);
+                row.LabourPendingPeriod = SvLabourMonth.Assign(today, posted); // a month already posted is never reopened: a later close goes to the next month's run
+            }
+
+            // otherwise the labour is one aggregated cost entry of the order (never one per person), without the hours (as the production cost run does): the hours stay on the order
+            if (labour != 0 && !deferred)
                 _uow.Set<CostEntry>().Add(new CostEntry
                 {
                     EntryDate = today, Kind = CostKind.Labour, ContractId = row.ContractId, CostCenter = center, Quantity = 0, Amount = labour, SourceType = SvCostSource.Order, SourceId = row.Id, SourceNumber = row.Number,
@@ -489,11 +499,12 @@ namespace Services.NasbNiro.AfterSales
 
             // Only warranty and goodwill orders post an accounting event: the brief asks for the event on the warranty provision (warranty) and for a draft invoice (billable work). A billable order earns its revenue
             // through the invoice, and the visit of a service agreement (LTSA) is paid by the agreement, so neither takes a cost out of the provision or the goodwill expense; their labour stays a cost entry of the cost centre and the contract.
+            // A protected order posts its parts part now and no labour (no event at all when it has no parts).
             AccountingEvent ev = null;
-            if ((row.Decision == SvWarrantyDecision.Warranty || row.Decision == SvWarrantyDecision.Goodwill) && labour + parts != 0)
+            decimal eventLabour = deferred ? 0m : labour;
+            if ((row.Decision == SvWarrantyDecision.Warranty || row.Decision == SvWarrantyDecision.Goodwill) && eventLabour + parts != 0)
             {
-                bool protectedLabour = SvPrivacy.LabourProtected(employees.Count, payroll.Count);
-                var lines = SvPosting.WarrantyLines(row.Decision == SvWarrantyDecision.Warranty, labour, partsConsumed, partsLeftOnSite, protectedLabour, row.Number)
+                var lines = SvPosting.WarrantyLines(row.Decision == SvWarrantyDecision.Warranty, eventLabour, partsConsumed, partsLeftOnSite, row.Number)
                     .Select(l => new AccountingEventLine { AccountRole = l.Role, Debit = l.Debit, Credit = l.Credit, ContractId = row.ContractId, CostCenter = center, Description = l.Description }).ToList();
                 ev = _costing.AddEvent(AccountingEventType.WarrantyCost, today, SvCostSource.Order, row.Id, row.Number, "هزینه خدمات پس از فروش " + row.Number, lines);
                 row.WarrantyEvent = ev;
