@@ -165,6 +165,7 @@ namespace ViewModels.NasbNiro.AiDtos
     public class AiAuditQuery : PaginationParams
     {
         public string Kind { get; set; }
+        public string SeatCode { get; set; }
         public int? UserId { get; set; }
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
@@ -183,5 +184,174 @@ namespace ViewModels.NasbNiro.AiDtos
         public int? LatencyMs { get; set; }
         public string Detail { get; set; }
         public string PromptHash { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ notes of the seats
+
+    public class AiNoteQuery : PaginationParams
+    {
+        public string TargetType { get; set; }
+        public int? TargetId { get; set; }
+        public AiNoteStatus? Status { get; set; }
+        public string Seat { get; set; }
+
+        /// <summary>The rule that raised the note (FIN-ANOMALY: DUPLICATE, ROUND, OFFDAY, UNMATCHED, IBAN).</summary>
+        public string Rule { get; set; }
+    }
+
+    public class AiNoteDto
+    {
+        public int Id { get; set; }
+        public string SeatCode { get; set; }
+        public string TargetType { get; set; }
+        public int? TargetId { get; set; }
+        public string RuleCode { get; set; }
+        public string Title { get; set; }
+        public string Text { get; set; }
+        public AiNoteStatus Status { get; set; }
+        public DateTimeOffset CreatedAt { get; set; }
+        public string CreatedAtText { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecidedAtText { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public string DecidedByName { get; set; }
+        public string DecisionNote { get; set; }
+        public bool Verified { get; set; }
+        public int? SeatRunId { get; set; }
+
+        /// <summary>The page of the front end that shows the record the note is about.</summary>
+        public string Link { get; set; }
+    }
+
+    public class AiDecideNoteDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>accept or dismiss.</summary>
+        public string Decision { get; set; }
+        public string Note { get; set; }
+    }
+
+    public class AiBriefDto
+    {
+        public DateTime Date { get; set; }
+        public string DateText { get; set; }
+        public string Text { get; set; }
+        public bool Verified { get; set; }
+        public int NoteId { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ seats
+
+    public class AiSeatDto
+    {
+        public int Id { get; set; }
+        public string Code { get; set; }
+        public string Title { get; set; }
+        public string ServiceUserName { get; set; }
+        public string Roles { get; set; }
+        public string Schedule { get; set; }
+        public string ScheduleText { get; set; }
+        public string PromptVersionCode { get; set; }
+        public bool Enabled { get; set; }
+        public string OutputKind { get; set; }
+        public AiSeatRunDto LastRun { get; set; }
+    }
+
+    public class AiSeatRunDto
+    {
+        public int Id { get; set; }
+        public int SeatId { get; set; }
+        public string SeatCode { get; set; }
+        public DateTimeOffset StartedAt { get; set; }
+        public string StartedAtText { get; set; }
+        public DateTimeOffset? FinishedAt { get; set; }
+        public AiSeatRunStatus Status { get; set; }
+        public string Outputs { get; set; }
+        public string Error { get; set; }
+        public DateTime? AsOf { get; set; }
+    }
+
+    public class AiSeatRunQuery : PaginationParams
+    {
+        public string Seat { get; set; }
+        public AiSeatRunStatus? Status { get; set; }
+    }
+
+    public class AiRunSeatDto
+    {
+        public string Code { get; set; }
+
+        /// <summary>The data day; today when empty. A day in the future needs the switch Ai:AllowFutureAsOf.</summary>
+        public DateTime? AsOf { get; set; }
+    }
+
+    public class AiEnableSeatDto
+    {
+        public string Code { get; set; }
+        public bool Enabled { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ evaluation
+
+    public class AiEvalCaseDto
+    {
+        public int Id { get; set; }
+        public string Code { get; set; }
+        public string Question { get; set; }
+        public string ExpectedTools { get; set; }
+        public string ExpectedFacts { get; set; }
+        public bool Enabled { get; set; }
+    }
+
+    public class AiEvalFactResultDto
+    {
+        public string Fact { get; set; }
+        public bool Ok { get; set; }
+        public string Reason { get; set; }
+    }
+
+    public class AiEvalCaseResultDto
+    {
+        public string Code { get; set; }
+        public string Question { get; set; }
+        public bool Passed { get; set; }
+        public string ExpectedTools { get; set; }
+        public List<string> CalledTools { get; set; } = new List<string>();
+        public bool ToolsOk { get; set; }
+        public bool FactsOk { get; set; }
+        public bool Verified { get; set; }
+        public bool Degraded { get; set; }
+        public int Ms { get; set; }
+        public string Model { get; set; }
+        public string Answer { get; set; }
+        public List<AiEvalFactResultDto> Facts { get; set; } = new List<AiEvalFactResultDto>();
+    }
+
+    public class AiEvalRunDto
+    {
+        public int Id { get; set; }
+        public DateTimeOffset StartedAt { get; set; }
+        public string StartedAtText { get; set; }
+        public DateTimeOffset? FinishedAt { get; set; }
+        public int Total { get; set; }
+        public int Passed { get; set; }
+
+        /// <summary>The evaluation is still being made in the background: read the run again until this is false.</summary>
+        public bool Running { get; set; }
+
+        /// <summary>Passed divided by total, in percent (one decimal).</summary>
+        public decimal PassPercent { get; set; }
+        public int NumericFailures { get; set; }
+        public int P50Ms { get; set; }
+        public int P95Ms { get; set; }
+        public string Model { get; set; }
+
+        /// <summary>Only in the answer for one run.</summary>
+        public List<AiEvalCaseResultDto> Cases { get; set; }
+    }
+
+    public class AiEvalRunQuery : PaginationParams
+    {
     }
 }

@@ -175,6 +175,14 @@ namespace Services.NasbNiro.Finance
                                         where dec.Status == OfDecisionStatus.Open && dec.DueDate != null && dec.DueDate < today && meeting.Status == OfMeetingStatus.MinutesApproved && !meeting.Deleted
                                         select dec.Id).CountAsync(ct);
             Alert(d.OverdueDecisions > 0, "warning", $"{d.OverdueDecisions} مصوبه جلسه از موعد گذشته است", "/office/decisions");
+            // local AI: a seat whose latest run failed (read directly, so the constructor stays as it is)
+            var aiSeats = await _uow.Set<Entities.Model.NasbNiro.Ai.AiSeat>().AsNoTracking().Where(x => x.Enabled).OrderBy(x => x.Id).Select(x => new { x.Id, x.Title }).ToListAsync(ct);
+            foreach (var aiSeat in aiSeats)
+            {
+                var lastStatus = await _uow.Set<Entities.Model.NasbNiro.Ai.AiSeatRun>().AsNoTracking().Where(r => r.SeatId == aiSeat.Id).OrderByDescending(r => r.Id)
+                    .Select(r => (Entities.Model.NasbNiro.Ai.AiSeatRunStatus?)r.Status).FirstOrDefaultAsync(ct);
+                Alert(lastStatus == Entities.Model.NasbNiro.Ai.AiSeatRunStatus.Failed, "warning", $"اجرای آخر صندلی هوش مصنوعی «{aiSeat.Title}» با خطا پایان یافته است", "/ai/seats");
+            }
             // production: late orders, machines down, overload of the next four weeks, overdue maintenance (read directly, so the constructor stays as it is)
             var production = await Production.MfDashboardService.CeoCountsAsync(_uow, productionAsOf?.Date ?? today, ct);
             d.ProductionLateOrders = production.LateOrders;
@@ -200,7 +208,7 @@ namespace Services.NasbNiro.Finance
             Alert(sales.BidDecisionsWaiting > 0, "info", $"{sales.BidDecisionsWaiting} استعلام منتظر تصمیم شرکت یا عدم شرکت است", "/sales/bid-decisions");
             // after-sales service: open requests, SLA breaches, units in warranty, the warranty cost of the year, goodwill waiting for the CEO, the satisfaction average
             // the warranty cost is masked for a reader (PMO) who is not payroll, finance manager or CEO when an order's labour came from fewer than three people
-            var service = await AfterSales.SvDashboardService.CoreAsync(_uow, productionAsOf ?? DateTime.Now, _user.IsInRole(AfterSales.SvRoles.PayrollSeers), ct);
+            var service = await AfterSales.SvDashboardService.CoreAsync(_uow, productionAsOf ?? DateTime.Now, AfterSales.SvRoles.SeesPayroll(_user.IsInRole(AfterSales.SvRoles.PayrollSeers)), ct);
             d.ServiceOpenRequests = service.OpenRequests;
             d.ServiceSlaBreaches = service.SlaBreaches;
             d.ServiceUnitsInWarranty = service.UnitsInWarranty;

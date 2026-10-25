@@ -179,25 +179,32 @@ namespace Services.NasbNiro.Ai
                     if (outcome.Citations.Count < 12 && !outcome.Citations.Any(e => e.Type == c.Type && e.Id == c.Id && e.Link == c.Link)) outcome.Citations.Add(c);
             }
 
-            // persist: the conversation, the messages, the tool call logs and the audit rows in one save
-            if (conversation == null)
+            // persist: the conversation, the messages, the tool call logs and the audit rows in one save.
+            // The evaluation keeps no conversation (it would leave 66 per run under the evaluation user): its audit rows and its run record are enough.
+            bool keepConversation = AiSeatContext.Code != AiSeatCodes.Eval;
+            AiMessage assistant = null;
+            if (keepConversation)
             {
-                conversation = new AiConversation { UserId = Me, Title = AiText.Cut(AiText.YeKe(text), 80), CreatedAt = now, LastAt = now };
-                _uow.Set<AiConversation>().Add(conversation);
-            }
-            conversation.LastAt = now;
-            _uow.Set<AiMessage>().Add(new AiMessage { Conversation = conversation, Role = AiMessageRole.User, Text = AiText.YeKe(text), CreatedAt = now });
-            foreach (var x in results)
-                _uow.Set<AiMessage>().Add(new AiMessage { Conversation = conversation, Role = AiMessageRole.Tool, Text = x.Result.Json, ToolName = x.Result.Name, CreatedAt = now });
-            var assistant = new AiMessage { Conversation = conversation, Role = AiMessageRole.Assistant, Text = outcome.Answer, CreatedAt = now, Verified = degraded ? (bool?)null : outcome.Verified, Model = AiText.Cut(outcome.Model, 200) };
-            _uow.Set<AiMessage>().Add(assistant);
-            foreach (var x in results)
-            {
-                _uow.Set<AiToolCallLog>().Add(new AiToolCallLog
+                if (conversation == null)
                 {
-                    Conversation = conversation, Message = assistant, ToolName = x.Result.Name, ArgumentsJson = AiText.Cut(x.Arguments, 4000),
-                    ResultHash = x.Result.Hash, ResultChars = x.Result.Chars, Allowed = x.Result.Allowed, DurationMs = x.Result.DurationMs,
-                });
+                    conversation = new AiConversation { UserId = Me, Title = AiText.Cut(AiText.YeKe(text), 80), CreatedAt = now, LastAt = now };
+                    _uow.Set<AiConversation>().Add(conversation);
+                }
+                conversation.LastAt = now;
+                _uow.Set<AiMessage>().Add(new AiMessage { Conversation = conversation, Role = AiMessageRole.User, Text = AiText.YeKe(text), CreatedAt = now });
+                foreach (var x in results)
+                    _uow.Set<AiMessage>().Add(new AiMessage { Conversation = conversation, Role = AiMessageRole.Tool, Text = x.Result.Json, ToolName = x.Result.Name, CreatedAt = now });
+                assistant = new AiMessage { Conversation = conversation, Role = AiMessageRole.Assistant, Text = outcome.Answer, CreatedAt = now, Verified = degraded ? (bool?)null : outcome.Verified, Model = AiText.Cut(outcome.Model, 200) };
+                _uow.Set<AiMessage>().Add(assistant);
+            }
+            foreach (var x in results)
+            {
+                if (keepConversation)
+                    _uow.Set<AiToolCallLog>().Add(new AiToolCallLog
+                    {
+                        Conversation = conversation, Message = assistant, ToolName = x.Result.Name, ArgumentsJson = AiText.Cut(x.Arguments, 4000),
+                        ResultHash = x.Result.Hash, ResultChars = x.Result.Chars, Allowed = x.Result.Allowed, DurationMs = x.Result.DurationMs,
+                    });
                 _audit.Add(AiAuditKinds.Tool, $"{x.Result.Name} {AiText.Cut(x.Arguments, 2000)} allowed={x.Result.Allowed} chars={x.Result.Chars} hash={x.Result.Hash}", model, x.Result.DurationMs, prompt?.Id, promptHash);
             }
             total.Stop();
@@ -211,7 +218,7 @@ namespace Services.NasbNiro.Ai
                 model, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
             await _uow.SaveChangesAsync(ct);
 
-            outcome.ConversationId = conversation.Id;
+            outcome.ConversationId = conversation?.Id ?? 0;
             return (outcome, null);
         }
 

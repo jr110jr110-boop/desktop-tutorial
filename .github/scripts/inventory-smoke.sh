@@ -4912,11 +4912,206 @@ as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=tool&PageSize=0"; check "ai: audit hol
 as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=admin&PageSize=0"; check "ai: audit holds the thirteen admin writes (eleven endpoint saves, the health check and the index rebuild)" '.success and (.data.data|length) == 13'
 as "$WH_TOKEN" GET "$AI/admin/audit?PageSize=0"; nomsg "ai: a storekeeper cannot read the audit" "$AINOTALLOWED"
 
+# =====================================================================================================================
+# release A1 part B: the seats (service identities, notes, scheduled jobs) and the evaluation
+# A run by hand and the evaluation are made in the background: the request answers at once (Running) and the run is read by its id until it is finished.
+# =====================================================================================================================
+# airun CODE [YYYY-MM-DD] : starts the run (answer: Running, at once), then waits at most 60 s for the end; $B holds the finished run, $AIRID its id
+airun() {
+  local body="{\"code\":\"$1\"}"
+  [ -n "${2:-}" ] && body="{\"code\":\"$1\",\"asOf\":\"$2T00:00:00\"}"
+  as "$ADMIN_TOKEN" POST $AI/admin/seats/run "$body"
+  check "ai run $1: the request answers at once with the run, still Running" '.success and .data.status == 1 and (.data.id|type) == "number"'
+  AIRID=$(val '.data.id')
+  local i
+  for i in $(seq 1 60); do
+    as "$ADMIN_TOKEN" GET $AI/admin/seats/runs/$AIRID
+    [ "$(val '.data.status')" != "1" ] && break
+    sleep 1
+  done
+}
+# pdate YYYY-MM-DD : the Persian date as the application writes it (yyyy/mm/dd)
+pdate() {
+  python3 - "$1" <<'PYJ'
+import sys
+gy, gm, gd = (int(x) for x in sys.argv[1].split("-"))
+g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+gy2 = gy + 1 if gm > 2 else gy
+days = 355666 + 365 * gy + (gy2 + 3) // 4 - (gy2 + 99) // 100 + (gy2 + 399) // 400 + gd + g_d_m[gm - 1]
+jy = -1595 + 33 * (days // 12053); days %= 12053
+jy += 4 * (days // 1461); days %= 1461
+if days > 365:
+    jy += (days - 1) // 365; days = (days - 1) % 365
+if days < 186:
+    jm = 1 + days // 31; jd = 1 + days % 31
+else:
+    jm = 7 + (days - 186) // 30; jd = 1 + (days - 186) % 30
+print("%04d/%02d/%02d" % (jy, jm, jd))
+PYJ
+}
+
+AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true"
+as "$CEO_TOKEN" GET $AI/admin/seats
+check "ai seats: the CEO reads exactly the seven seats with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
+check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 7'
+as "$WH_TOKEN" GET $AI/admin/seats; nomsg "ai seats: a storekeeper cannot list the seats" "$AINOTALLOWED"
+as "$WH_TOKEN" POST $AI/admin/seats/enable '{"code":"CEO-BRIEF","enabled":false}'; nomsg "ai seats: a storekeeper cannot switch a seat" "$AINOTALLOWED"
+as "$CEO_TOKEN" POST $AI/admin/seats/run '{"code":"CEO-BRIEF"}'; nomsg "ai seats: the CEO reads the seats but cannot run one" "$AINOTALLOWED"
+login seat.ceo-brief 'Seat#Try-2026' >/dev/null; nomsg "ai seats: the service user of a seat cannot log in" "نام کاربری یا رمزعبور معتبر نیست"
+login seat.eval 'Seat#Try-2026' >/dev/null; nomsg "ai seats: the evaluation user cannot log in either" "نام کاربری یا رمزعبور معتبر نیست"
+as "$ADMIN_TOKEN" GET "Accounts/get-all-users?PageSize=0"
+check "ai seats: the user list shows the people (control: ceo.ci) and no service user of a seat" '.success and ([.. | objects | select(.userName? == "ceo.ci")]|length) == 1 and ([.. | objects | select((.userName? // "") | startswith("seat."))]|length) == 0'
+as "$ADMIN_TOKEN" POST $AI/admin/seats/run "{\"code\":\"CEO-BRIEF\",\"asOf\":\"$(dd 5)T00:00:00\"}"; nomsg "ai seats: a run for a day in the future is refused" "تاریخ آینده"
+as "$ADMIN_TOKEN" POST $AI/admin/seats/run '{"code":"NO-SUCH-SEAT"}'; nomsg "ai seats: an unknown seat is refused" "صندلی پیدا نشد"
+
+# --- CEO-BRIEF: the daily report of the CEO, written as the seat user, shown as a note and as the latest brief (to the CEO only: it is written with the CEO's data)
+AIBD=$(dd -10); AIBKEY=${AIBD//-/}; AIBP=$(pdate "$AIBD")
+as "$CEO_TOKEN" GET $AI/brief/latest; nomsg "ai brief: before the first run there is no brief" "هنوز گزارش روزانه‌ای ساخته نشده است"
+airun CEO-BRIEF "$AIBD"
+check "ai brief: the run for $AIBD succeeded with one verified note by the primary model" '.success and .data.status == 2 and .data.seatCode == "CEO-BRIEF" and .data.outputs == "notes=1; verified=true; model=mock-primary"'
+as "$CEO_TOKEN" GET "$AI/notes?TargetType=CeoBrief&PageSize=0"; AIBRIEFNOTE=$(val '.data.data[0].id')
+check "ai brief: the CEO sees exactly one brief note: new, verified, dated $AIBKEY, starting with the stock value $AISV" ".success and (.data.data|length) == 1 and .data.data[0].seatCode == \"CEO-BRIEF\" and .data.data[0].targetId == $AIBKEY and .data.data[0].status == 1 and .data.data[0].verified == true and (.data.data[0].text|startswith(\"طبق نتایج سامانه: $AISV\"))"
+as "$CEO_TOKEN" GET $AI/brief/latest; check "ai brief: the latest brief is the note of that day, dated $AIBP" ".success and .data.dateText == \"$AIBP\" and .data.noteId == $AIBRIEFNOTE and .data.verified == true"
+AICODE=$(curl -s -o "$OUT/ai-brief.wav" -w '%{http_code} %{content_type} %{size_download}' "$API/$AI/brief/latest/audio" -H "Authorization: Bearer $CEO_TOKEN")
+[ "$AICODE" = "200 audio/wav 3244" ] && ok "ai brief: the audio of the latest brief is the 3244 bytes WAV of the mock" || bad "ai brief: the audio of the latest brief is the 3244 bytes WAV of the mock (got '$AICODE')"
+as "$WH_TOKEN" GET $AI/brief/latest; nomsg "ai brief: a storekeeper cannot read the brief" "$AINOTALLOWED"
+as "$ADMIN_TOKEN" GET $AI/brief/latest; nomsg "ai brief: the PMO cannot read the brief either (it is written with the CEO's data)" "$AINOTALLOWED"
+as "$WH_TOKEN" GET $AI/notes/$AIBRIEFNOTE; nomsg "ai brief: a storekeeper cannot open the brief note (it looks like a missing one)" "یادداشت پیدا نشد"
+as "$WH_TOKEN" POST $AI/notes/decide "{\"id\":$AIBRIEFNOTE,\"decision\":\"accept\"}"; nomsg "ai brief: a storekeeper cannot decide the brief note" "$AINOTALLOWED"
+airun CEO-BRIEF "$AIBD"
+check "ai brief: the second run of the same day only reports that the brief exists" ".success and .data.status == 2 and .data.outputs == \"brief exists for $AIBKEY\""
+as "$CEO_TOKEN" GET "$AI/notes?TargetType=CeoBrief&PageSize=0"; check "ai brief: still exactly one brief note" '.success and (.data.data|length) == 1'
+as "$CEO_TOKEN" GET "$AI/admin/seats"; check "ai seats: the CEO-BRIEF seat now shows its last run" ".success and (.data[]|select(.code == \"CEO-BRIEF\")|.lastRun.outputs) == \"brief exists for $AIBKEY\""
+
+# --- WH-REORDER: one draft purchase request for the items under their minimum that no open request asks for and no open order covers
+item AIWH1 "{\"code\":\"50.10.12.031.1\",\"title\":\"قطعه آزمون صندلی انبار یک\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":50,\"requiresIncomingInspection\":false}" "ai seat low-stock item 1"
+airun WH-REORDER "$TODAY"; AIWHOUT=$(val .data.outputs); AIWHST=$(val .data.status)
+[ "$AIWHST" = "2" ] && ok "ai reorder: the run succeeded" || bad "ai reorder: the run succeeded (status $AIWHST)"
+AIWHNUM=${AIWHOUT##*request=}
+as "$ADMIN_TOKEN" GET "procurement/requests?PageSize=0"; AIWHPR=$(jq -r --arg n "$AIWHNUM" '[.data.data[]|select(.number == $n)][0].id // empty' "$B")
+[ -n "$AIWHPR" ] && ok "ai reorder: the draft request named in the outputs exists ($AIWHNUM)" || bad "ai reorder: the draft request named in the outputs exists ($AIWHNUM)"
+as "$ADMIN_TOKEN" GET "procurement/requests/${AIWHPR:-0}"; AIWHLN=$(val '.data.lines|length')
+check "ai reorder: the draft is a draft, from the reorder point, written by the seat user, with the new item for 50 (minimum 50, on hand 0, nothing on order)" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"صندلی هوش مصنوعی\")) and ([.data.lines[]|select(.itemId == $AIWH1 and .quantity == 50)]|length) == 1"
+[ "$AIWHOUT" = "drafts=1; lines=$AIWHLN; request=$AIWHNUM" ] && ok "ai reorder: the outputs name exactly the lines of the draft ($AIWHLN)" || bad "ai reorder: the outputs name exactly the lines of the draft (got '$AIWHOUT', lines $AIWHLN)"
+airun WH-REORDER "$TODAY"
+check "ai reorder: a second run asks for nothing again (every low item is on the open draft)" '.success and .data.status == 2 and .data.outputs == "drafts=0; lines=0"'
+# maker-checker: the person who puts the seat's draft into the flow becomes its creator and can never approve it
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$AIWHPR,\"action\":\"submit\"}"; check "ai reorder: the planner adopts the seat's draft by submitting it" '.success and .data.status == 1'
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$AIWHPR,\"action\":\"approve-planning\"}"; nomsg "ai reorder: the planner who submitted the seat's draft cannot approve it (maker-checker)" "شخص دیگری"
+as "$ADMIN_TOKEN" POST procurement/requests/action "{\"id\":$AIWHPR,\"action\":\"approve-planning\"}"; check "ai reorder: another planning approver approves it" '.success and (.data.planningApprovedByUserId|type) == "number"'
+
+# --- QC-NCR-ASSIST: a classification suggestion for every open NCR (ten at most per run)
+as "$QC_TOKEN" GET "inventory/quality/ncr?PageSize=0"; AINCROPEN=$(val '[.data.data[]|select(.status == 0)]|length')
+AIQCOUT=""
+for AIN in 1 2 3 4 5 6; do
+  airun QC-NCR-ASSIST; AIQCOUT=$(val .data.outputs)
+  [ "$AIQCOUT" = "notes=0" ] && break
+done
+[ "$AIQCOUT" = "notes=0" ] && ok "ai qc: the seat ran until no open NCR was left without a note" || bad "ai qc: the seat ran until no open NCR was left without a note (last outputs '$AIQCOUT')"
+as "$QC_TOKEN" GET "$AI/notes?TargetType=QualityNcr&PageSize=0"
+check "ai qc: one note per open NCR ($AINCROPEN), all new and verified, each with the suggested class and the similar-reports line" ".success and (.data.data|length) == $AINCROPEN and ([.data.data[]|select(.status == 1 and .verified == true and (.text|contains(\"دسته‌بندی پیشنهادی: Major\")) and (.text|contains(\"گزارش‌های مشابه گذشته\")))]|length) == $AINCROPEN"
+AIQCNOTE=$(val '.data.data[0].id'); AIQCNCR=$(val '.data.data[0].targetId')
+as "$WH_TOKEN" POST $AI/notes/decide "{\"id\":$AIQCNOTE,\"decision\":\"accept\"}"; nomsg "ai qc: a storekeeper cannot decide an NCR note" "$AINOTALLOWED"
+as "$QC_TOKEN" POST $AI/notes/decide "{\"id\":$AIQCNOTE,\"decision\":\"accept\",\"note\":\"مورد بررسی شد\"}"
+check "ai qc: the QC officer accepts the note: accepted, the decision text is kept, the decider is a person" '.success and .data.status == 2 and .data.decisionNote == "مورد بررسی شد" and .data.decidedByName != null and (.data.decidedByName|startswith("seat.")|not)'
+as "$QC_TOKEN" POST $AI/notes/decide "{\"id\":$AIQCNOTE,\"decision\":\"dismiss\"}"; nomsg "ai qc: a decided note cannot be decided again" "قبلاً تصمیم گرفته شده است"
+as "$QC_TOKEN" GET "inventory/quality/ncr?PageSize=0"
+check "ai qc: accepting a note changed nothing in the NCRs: the same number of open reports, the reported one still open" ".success and ([.data.data[]|select(.status == 0)]|length) == $AINCROPEN and ([.data.data[]|select(.id == $AIQCNCR and .status == 0)]|length) == 1"
+
+# --- FIN-ANOMALY: warnings on vouchers (duplicate, round amount, Friday), written only for the finance roles; one note per voucher and rule
+fv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند آزمون صندلی مالی یک\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":123456000,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60102\",\"credit\":123456000}]}"; AIFV1=$FVID
+fv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند آزمون صندلی مالی دو\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":123456000,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60102\",\"credit\":123456000}]}"; AIFV2=$FVID
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند آزمون رند\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":2000000000,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60102\",\"credit\":2000000000}]}"; check "ai fin: the round voucher (2,000,000,000 rials) saved" '.success and (.data.id|type) == "number"'; AIFV3=$(val .data.id)
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند آزمون غیر رند\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":2050000000,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60102\",\"credit\":2050000000}]}"; check "ai fin: the control voucher (2,050,000,000 rials, not a multiple of 100,000,000) saved" '.success and (.data.id|type) == "number"'; AIFV4=$(val .data.id)
+airun FIN-ANOMALY "$TODAY"; check "ai fin: the run succeeded" '.success and .data.status == 2 and .data.seatCode == "FIN-ANOMALY"'
+as "$FM_TOKEN" GET "$AI/notes?TargetType=FinanceJournal&TargetId=$AIFV1&Rule=DUPLICATE&PageSize=0"; check "ai fin: the first voucher of the pair has one repetition note" '.success and (.data.data|length) == 1 and (.data.data[0].text|contains("تکرار")) and .data.data[0].seatCode == "FIN-ANOMALY" and .data.data[0].ruleCode == "DUPLICATE"'
+as "$FM_TOKEN" GET "$AI/notes?TargetType=FinanceJournal&TargetId=$AIFV2&Rule=DUPLICATE&PageSize=0"; check "ai fin: the second voucher of the pair has one repetition note" '.success and (.data.data|length) == 1 and (.data.data[0].text|contains("تکرار"))'
+as "$FM_TOKEN" GET "$AI/notes?TargetType=FinanceJournal&TargetId=$AIFV3&Rule=ROUND&PageSize=0"; check "ai fin: the round voucher has one round-amount note that states the amount in rials" '.success and (.data.data|length) == 1 and (.data.data[0].text|contains("رند")) and (.data.data[0].text|contains("2,000,000,000 ریال"))'
+as "$FM_TOKEN" GET "$AI/notes?TargetType=FinanceJournal&TargetId=$AIFV4&Rule=ROUND&PageSize=0"; check "ai fin: the control voucher has no round-amount note" '.success and (.data.data|length) == 0'
+as "$FM_TOKEN" GET "$AI/notes?TargetType=FinanceJournal&TargetId=$AIFV3&Rule=DUPLICATE&PageSize=0"; check "ai fin: the round voucher has no repetition note (a draft or a different amount is no duplicate)" '.success and (.data.data|length) == 0'
+airun FIN-ANOMALY "$TODAY"; check "ai fin: a second run finds nothing new" '.success and .data.status == 2 and (.data.outputs|endswith("; notes=0"))'
+# the latest Friday that lies in an open period (a locked period refuses the voucher; the next Friday back is tried)
+AIFRI=""
+for AIK in 0 7 14 21 28 35 42 49; do
+  AIFD=$(date -d "$TODAY -$(( ($(date -d "$TODAY" +%u)+2)%7 + AIK )) days" +%F)
+  as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${AIFD}T00:00:00\",\"description\":\"سند آزمون روز جمعه\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":77000000,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60102\",\"credit\":77000000}]}"
+  if jq -e '.success and (.data.id|type) == "number"' "$B" >/dev/null 2>&1; then AIFRI=$AIFD; AIFV5=$(val .data.id); break; fi
+done
+[ -n "$AIFRI" ] && ok "ai fin: a voucher dated on a Friday saved ($AIFRI)" || bad "ai fin: a voucher dated on a Friday saved (no open Friday in the last eight weeks)"
+airun FIN-ANOMALY "${AIFRI:-$TODAY}"; check "ai fin: the run for the Friday succeeded (a past day is allowed)" '.success and .data.status == 2'
+as "$FM_TOKEN" GET "$AI/notes?TargetType=FinanceJournal&TargetId=${AIFV5:-0}&Rule=OFFDAY&PageSize=0"
+check "ai fin: the Friday voucher has one note that names Friday and the Persian date $(pdate "${AIFRI:-$TODAY}")" ".success and (.data.data|length) == 1 and (.data.data[0].text|contains(\"جمعه\")) and (.data.data[0].text|contains(\"$(pdate "${AIFRI:-$TODAY}")\"))"
+AIFNOTE=$(val '.data.data[0].id')
+as "$WH_TOKEN" POST $AI/notes/decide "{\"id\":$AIFNOTE,\"decision\":\"dismiss\"}"; nomsg "ai fin: a storekeeper cannot decide a finance note" "$AINOTALLOWED"
+as "$WH_TOKEN" GET "$AI/notes?TargetType=FinanceJournal&PageSize=0"; check "ai fin: a storekeeper sees no finance note in the list" '.success and (.data.data|length) == 0'
+as "$FM_TOKEN" POST $AI/notes/decide "{\"id\":$AIFNOTE,\"decision\":\"dismiss\",\"note\":\"روز کاری مجاز بود\"}"; check "ai fin: the finance manager dismisses the note" '.success and .data.status == 3'
+as "$FM_TOKEN" GET "$FG/vouchers/$AIFV5"; check "ai fin: the voucher is as it was (same date, same text)" ".success and .data.id == $AIFV5 and .data.description == \"سند آزمون روز جمعه\" and (.data.date|startswith(\"$AIFRI\"))"
+
+# --- OFFICE-DRAFT: a reply draft for each normal incoming letter, never for a confidential or secret one
+as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"وارده عادی صندلی دفتر\",\"senderPartyId\":$OPARTY,\"incomingNumber\":\"AI-N-1\",\"incomingDate\":\"2026-10-01T00:00:00\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"register\":true}"; check "ai office: normal incoming letter registered" '.success and .data.status == 5 and .data.classification == 0'; AILN=$(val .data.id)
+as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"وارده محرمانه صندلی دفتر\",\"classification\":1,\"senderPartyId\":$OPARTY,\"incomingNumber\":\"AI-C-1\",\"incomingDate\":\"2026-10-01T00:00:00\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"register\":true}"; check "ai office: confidential incoming letter registered" '.success and .data.status == 5'; AILC=$(val .data.id)
+as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"وارده سری صندلی دفتر\",\"classification\":2,\"senderPartyId\":$OPARTY,\"incomingNumber\":\"AI-S-1\",\"incomingDate\":\"2026-10-01T00:00:00\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"register\":true}"; check "ai office: secret incoming letter registered" '.success and .data.status == 5'; AILS=$(val .data.id)
+AIOFOUT=""
+for AIN in 1 2 3 4 5 6; do
+  airun OFFICE-DRAFT; AIOFOUT=$(val .data.outputs)
+  [ "$AIOFOUT" = "notes=0" ] && break
+done
+[ "$AIOFOUT" = "notes=0" ] && ok "ai office: the seat ran until nothing was left to draft" || bad "ai office: the seat ran until nothing was left to draft (last outputs '$AIOFOUT')"
+as "$OSEC_TOKEN" GET "$AI/notes?TargetType=OfficeLetter&TargetId=$AILN&PageSize=0"; check "ai office: the normal incoming letter has exactly one reply draft, marked as a draft for the secretariat" '.success and (.data.data|length) == 1 and .data.data[0].seatCode == "OFFICE-DRAFT" and .data.data[0].status == 1 and (.data.data[0].text|contains("با سلام و احترام"))'
+as "$OSEC_TOKEN" GET "$AI/notes?TargetType=OfficeLetter&TargetId=$AILC&PageSize=0"; check "ai office: the confidential letter has no note" '.success and (.data.data|length) == 0'
+as "$OSEC_TOKEN" GET "$AI/notes?TargetType=OfficeLetter&TargetId=$AILS&PageSize=0"; check "ai office: the secret letter has no note" '.success and (.data.data|length) == 0'
+as "$OSEC_TOKEN" GET "$AI/notes?TargetType=OfficeLetter&PageSize=0"; check "ai office: the secretariat lists its reply drafts in one query: none of them is about the confidential or the secret letter" ".success and ([.data.data[]|select(.targetId == $AILC or .targetId == $AILS)]|length) == 0 and ([.data.data[]|select(.targetId == $AILN)]|length) == 1"
+as "$OSEC_TOKEN" GET "$AI/notes?TargetType=OfficeMeeting&PageSize=0"; check "ai office: no minutes summary: the seat user holds no position and is in no meeting, and the meeting service shows it none" '.success and (.data.data|length) == 0'
+as "$WH_TOKEN" GET "$AI/notes?TargetType=OfficeLetter&TargetId=$AILN&PageSize=0"; check "ai office: a storekeeper sees no office note" '.success and (.data.data|length) == 0'
+
+# --- the language model is down: the seats that need it are skipped (not failed), the others still work
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP1,\"name\":\"chat primary\",\"kind\":1,\"url\":\"http://127.0.0.1:5091\",\"modelName\":\"mock-primary\",\"priority\":1,\"enabled\":false,\"timeoutSeconds\":20}"; check "ai seats: primary endpoint disabled" '.success and .data.enabled == false'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP2,\"name\":\"chat fallback\",\"kind\":1,\"url\":\"http://127.0.0.1:5092\",\"modelName\":\"mock-fallback\",\"priority\":2,\"enabled\":false,\"timeoutSeconds\":20}"; check "ai seats: fallback endpoint disabled" '.success and .data.enabled == false'
+AIDD=$(dd -11)
+airun CEO-BRIEF "$AIDD"
+check "ai seats: with the model down the brief run is skipped with the fixed text" '.success and .data.status == 4 and (.data.error|startswith("تحلیل هوشمند در دسترس نیست"))'
+as "$CEO_TOKEN" GET "$AI/notes?TargetType=CeoBrief&PageSize=0"; check "ai seats: a skipped run wrote no brief" '.success and (.data.data|length) == 1'
+item AIWH2 "{\"code\":\"50.10.12.032.1\",\"title\":\"قطعه آزمون صندلی انبار دو\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":30,\"requiresIncomingInspection\":false}" "ai seat low-stock item 2"
+airun WH-REORDER "$TODAY"; AIWHOUT2=$(val .data.outputs); AIWHST2=$(val .data.status)
+[ "$AIWHST2" = "2" ] && [ "${AIWHOUT2%%; request=*}" = "drafts=1; lines=1" ] && ok "ai seats: with the model down the reorder seat (no model needed) still drafts one request with the one new item" || bad "ai seats: with the model down the reorder seat still drafts one request with the one new item (status $AIWHST2, outputs '$AIWHOUT2')"
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP1,\"name\":\"chat primary\",\"kind\":1,\"url\":\"http://127.0.0.1:5091\",$AIBODY_BASE}"; check "ai seats: primary endpoint enabled again" '.success and .data.enabled == true'
+as "$ADMIN_TOKEN" POST $AI/admin/endpoints "{\"id\":$AIEP2,\"name\":\"chat fallback\",\"kind\":1,\"url\":\"http://127.0.0.1:5092\",\"modelName\":\"mock-fallback\",\"priority\":2,\"enabled\":true,\"timeoutSeconds\":20}"; check "ai seats: fallback endpoint enabled again" '.success and .data.enabled == true'
+
+# --- the run list and the switch of a seat
+as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Seat=CEO-BRIEF&Status=2&PageSize=0"; check "ai runs: the brief seat has two succeeded runs" '.success and (.data.data|length) == 2'
+as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Seat=CEO-BRIEF&Status=4&PageSize=0"; check "ai runs: the brief seat has one skipped run, with the fixed text, for the day asked" ".success and (.data.data|length) == 1 and (.data.data[0].error|startswith(\"تحلیل هوشمند در دسترس نیست\")) and (.data.data[0].asOf|startswith(\"$AIDD\"))"
+as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Status=3&PageSize=0"; check "ai runs: no seat run failed" '.success and (.data.data|length) == 0'
+as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Status=1&PageSize=0"; check "ai runs: no seat run is still running" '.success and (.data.data|length) == 0'
+as "$WH_TOKEN" GET "$AI/admin/seats/runs?PageSize=0"; nomsg "ai runs: a storekeeper cannot read the runs" "$AINOTALLOWED"
+as "$ADMIN_TOKEN" POST $AI/admin/seats/enable '{"code":"PROC-COMPARE","enabled":false}'; check "ai seats: the procurement seat is switched off" '.success and .data.enabled == false'
+as "$ADMIN_TOKEN" POST $AI/admin/seats/run '{"code":"PROC-COMPARE"}'; nomsg "ai seats: a switched-off seat cannot be run" "این صندلی غیرفعال است"
+as "$ADMIN_TOKEN" POST $AI/admin/seats/enable '{"code":"PROC-COMPARE","enabled":true}'; check "ai seats: the procurement seat is switched on again" '.success and .data.enabled == true'
+airun PROC-COMPARE; check "ai seats: the procurement seat runs (no complete inquiry yet: no note)" '.success and .data.status == 2 and .data.outputs == "notes=0"'
+
+# --- evaluation: 66 fixed cases against the mock, run as the evaluation user in the background
+as "$WH_TOKEN" POST $AI/admin/eval/run; nomsg "ai eval: a storekeeper cannot run the evaluation" "$AINOTALLOWED"
+as "$CEO_TOKEN" GET $AI/admin/eval/cases; check "ai eval: the catalogue holds 66 cases" '.success and (.data|length) == 66'
+as "$ADMIN_TOKEN" POST $AI/admin/eval/run; AIEVID=$(val .data.id)
+check "ai eval: the request answers at once with a run that is still running" '.success and .data.running == true and .data.total == 0 and (.data.id|type) == "number"'
+as "$ADMIN_TOKEN" POST $AI/admin/eval/run; nomsg "ai eval: a second evaluation cannot start while one is running" "هنوز در حال اجراست"
+for AIN in $(seq 1 120); do
+  as "$ADMIN_TOKEN" GET $AI/admin/eval/runs/$AIEVID
+  [ "$(val '.data.running')" = "false" ] && break
+  sleep 1
+done
+check "ai eval: finished: 66 cases, 27 pass on the mock, no unverified number, answered by the primary model" '.success and .data.running == false and .data.total == 66 and .data.passed == 27 and .data.numericFailures == 0 and .data.model == "mock-primary" and (.data.p50Ms|type) == "number" and (.data.p95Ms|type) == "number" and .data.passPercent == 40.9'
+check "ai eval: the PMO reads the results without the answers (they were written with the CEO's data)" '.success and (.data.cases|length) == 66 and ([.data.cases[]|select(.answer != null)]|length) == 0'
+as "$CEO_TOKEN" GET $AI/admin/eval/runs/$AIEVID
+check "ai eval: the CEO reads the 66 results with the answers; EV-001 and EV-055 pass, EV-012 does not" '.success and (.data.cases|length) == 66 and ([.data.cases[]|select(.passed)]|length) == 27 and ([.data.cases[]|select(.code == "EV-001" and .passed and (.answer|type) == "string")]|length) == 1 and ([.data.cases[]|select(.code == "EV-055" and .passed)]|length) == 1 and ([.data.cases[]|select(.code == "EV-012" and (.passed|not))]|length) == 1'
+as "$CEO_TOKEN" GET "$AI/admin/eval/runs?PageSize=0"; check "ai eval: the CEO sees the one run in the list" ".success and (.data.data|length) == 1 and .data.data[0].id == $AIEVID and .data.data[0].running == false"
+as "$WH_TOKEN" GET $AI/admin/eval/runs/$AIEVID; nomsg "ai eval: a storekeeper cannot open a run" "$AINOTALLOWED"
+as "$CEO_TOKEN" GET $AI/conversations; check "ai eval: the evaluation left no conversation (the CEO still has the one of the dashboard question)" ".success and (.data.data|length) == 1 and .data.data[0].id == $AICONV"
+
 fi
 
 [ "$AIMOCK_STARTED" = 1 ] && { pkill -f mock_llm.py 2>/dev/null || true; }
 TOKEN=$ADMIN_TOKEN
-rm -f "$OUT/ai-voice.wav" "$OUT/ai-voice.txt"
+rm -f "$OUT/ai-voice.wav" "$OUT/ai-voice.txt" "$OUT/ai-brief.wav"
 
 finished=1
 echo "--- inventory: $pass passed, $fail failed" | tee -a "$R"

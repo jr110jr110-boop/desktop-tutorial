@@ -73,14 +73,14 @@ namespace Services.NasbNiro.AfterSales
         public async Task<ResponseDto<SvDashboardDto>> GetAsync(DateTime? asOf, CancellationToken ct)
         {
             if (!_user.IsInRole(SvRoles.Readers)) return SlText.Bad<SvDashboardDto>(SlText.NotAllowed);
-            return ResponseDtoHelper.Ok(await CoreAsync(_uow, asOf ?? DateTime.Now, _user.IsInRole(SvRoles.PayrollSeers), ct));
+            return ResponseDtoHelper.Ok(await CoreAsync(_uow, asOf ?? DateTime.Now, SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers)), ct));
         }
 
         public async Task<ResponseDto<SvKpiDto>> GetKpisAsync(SvKpiQuery query, CancellationToken ct)
         {
             if (!_user.IsInRole(SvRoles.Readers)) return SlText.Bad<SvKpiDto>(SlText.NotAllowed);
             query ??= new SvKpiQuery();
-            bool seesPayroll = _user.IsInRole(SvRoles.PayrollSeers);
+            bool seesPayroll = SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
             IQueryable<SvServiceRequest> rq = _uow.Set<SvServiceRequest>().AsNoTracking().Where(r => !r.Deleted);
             if (query.From.HasValue) rq = rq.Where(r => r.ReceivedAt >= query.From.Value);
             if (query.To.HasValue) rq = rq.Where(r => r.ReceivedAt < query.To.Value.Date.AddDays(1));

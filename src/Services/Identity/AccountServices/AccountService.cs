@@ -70,6 +70,11 @@ namespace Services.Identity.AccountServices
                 return ResponseDtoHelper
                     .BadRequest<ResponseUserDto>(AccountServiceMessages.NullDataReceived);
 
+            // nobody may register a name that belongs to an AI seat
+            if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(registerUserDto.UserName))
+                return ResponseDtoHelper
+                    .BadRequest<ResponseUserDto>(AccountServiceMessages.InvalidLoginData);
+
             var user = await _userManager
                 .FindByNameAsync(registerUserDto.UserName)
                 .WithCancellationTokenAsync(cancellationToken);
@@ -137,6 +142,12 @@ namespace Services.Identity.AccountServices
                 return ResponseDtoHelper
                     .BadRequest<ResponseLoginUserDto>
                     (AccountServiceMessages.NullDataReceived);
+
+            // the service users of the AI seats ("seat.*") are locked out for good; this check keeps them out even if a lockout were ever lifted
+            if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(loginUserDto.UserName))
+                return ResponseDtoHelper
+                    .BadRequest<ResponseLoginUserDto>
+                    (AccountServiceMessages.InvalidLoginData);
 
             var user = await _userManager
                 .FindByNameAsync(loginUserDto.UserName)
@@ -292,6 +303,10 @@ namespace Services.Identity.AccountServices
                 return ResponseDtoHelper.NotFound<ResponseLoginUserDto>
                          (AccountServiceMessages.UserNotFound);
 
+            // the service users of the AI seats are managed by the system only
+            if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(user.UserName))
+                return ResponseDtoHelper.BadRequest<ResponseLoginUserDto>(SeatUserMessage);
+
             string token = await _userManager.GeneratePasswordResetTokenAsync(user)
                 .WithCancellationTokenAsync(cancellationToken);
 
@@ -310,6 +325,8 @@ namespace Services.Identity.AccountServices
                     (AccountServiceMessages.ChangePasswordFailed + Environment.NewLine + result.DumpErrors());
         }
 
+        private const string SeatUserMessage = "کاربر سرویس صندلی هوش مصنوعی را فقط خود سامانه مدیریت می‌کند.";
+
         public async ValueTask<ResponseDto<string>> ChangeRoleAsync(ChangeRoleDto changeRoleDto, CancellationToken cancellationToken)
         {
             if (changeRoleDto is null)
@@ -323,6 +340,10 @@ namespace Services.Identity.AccountServices
             if (user is null)
                 return ResponseDtoHelper.NotFound<string>
                     (AccountServiceMessages.UserNotFound);
+
+            // the service users of the AI seats are managed by the system only
+            if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(user.UserName))
+                return ResponseDtoHelper.BadRequest<string>(SeatUserMessage);
 
             IList<string> selectedRoles = await _roleManager
                 .Roles.Where(role => changeRoleDto.RoleIds.Any(ri => ri == role.Id))
@@ -410,7 +431,8 @@ namespace Services.Identity.AccountServices
         public async ValueTask<ResponseDto<PagedList<ResponseUserDto>>> GetAllUsersAsync(
             UserPaginationParams userPaginationParams, CancellationToken cancellationToken)
         {
-            IQueryable<User> users = _userManager.Users;
+            // the service users of the AI seats are not in the user list
+            IQueryable<User> users = _userManager.Users.Where(u => !u.UserName.StartsWith("seat."));
 
             if (userPaginationParams.IsDeleted.HasValue)
                 users = users.Where(u => u.IsDeleted == userPaginationParams.IsDeleted);
@@ -477,6 +499,10 @@ namespace Services.Identity.AccountServices
                 return ResponseDtoHelper
                     .NotFound<ResponseUserDto>("کاربری با این شناسه یافت نشد.");
 
+            // the service users of the AI seats are managed by the system only
+            if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(user.UserName))
+                return ResponseDtoHelper.BadRequest<ResponseUserDto>(SeatUserMessage);
+
             _mapper.Map(updateUserDto, user);
 
             IdentityResult result = await _userManager.UpdateAsync(user).WithCancellationTokenAsync(cancellationToken);
@@ -511,7 +537,7 @@ namespace Services.Identity.AccountServices
             if (getUserDto is null)
                 return ResponseDtoHelper.BadRequest<ResponseUserDto>(NasbNiroMessages.InvalidData);
 
-            IQueryable<User> query = _userManager.Users;
+            IQueryable<User> query = _userManager.Users.Where(u => !u.UserName.StartsWith("seat."));
             IQueryable<ResponseUserDto> result;
 
             result = query.ProjectTo<ResponseUserDto>(_mapper.ConfigurationProvider);
@@ -527,6 +553,10 @@ namespace Services.Identity.AccountServices
             if (user is null)
                 return ResponseDtoHelper
                     .NotFound<bool>("کاربری با این شناسه یافت نشد.");
+
+            // the service users of the AI seats are managed by the system only
+            if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(user.UserName))
+                return ResponseDtoHelper.BadRequest<bool>(SeatUserMessage);
 
             if (user.IsDeleted == true)
                 return ResponseDtoHelper

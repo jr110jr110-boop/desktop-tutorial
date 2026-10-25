@@ -28,6 +28,13 @@ namespace Entities.Model.NasbNiro.Ai
         Skipped = 4,
     }
 
+    public enum AiNoteStatus
+    {
+        New = 1,
+        Accepted = 2,
+        Dismissed = 3,
+    }
+
     /// <summary>An OpenAI-compatible inference endpoint on the company's own server (no key: local network only).</summary>
     public class AiModelEndpoint
     {
@@ -174,6 +181,9 @@ namespace Entities.Model.NasbNiro.Ai
 
         /// <summary>The data day the run was made for.</summary>
         public DateTime? AsOf { get; set; }
+
+        /// <summary>Started by the scheduler (only these runs decide whether a scheduled slot is still due; a run by hand for another day does not).</summary>
+        public bool IsScheduled { get; set; }
     }
 
     public class AiEvalCase
@@ -198,5 +208,35 @@ namespace Entities.Model.NasbNiro.Ai
         public int P95Ms { get; set; }
         public string Model { get; set; }
         public string Detail { get; set; }
+    }
+
+    /// <summary>
+    /// What a seat leaves in the gate of a module: a memo, a suggestion, a finding. It is never a final record: a human accepts or dismisses it and acts in the module.
+    /// One note per seat and target (the unique index makes the seats idempotent).
+    /// </summary>
+    public class AiNote
+    {
+        public int Id { get; set; }
+        public string SeatCode { get; set; }
+
+        /// <summary>For example PurchaseRfq, QualityNcr, FinanceJournal, BankLine, Supplier, OfficeLetter, OfficeMeeting, PcWeeklyReport, CeoBrief.</summary>
+        public string TargetType { get; set; }
+
+        /// <summary>The record the note is about (the day as yyyymmdd for the CEO brief).</summary>
+        public int? TargetId { get; set; }
+
+        /// <summary>The rule that raised the note (FIN-ANOMALY: DUPLICATE, ROUND, OFFDAY, UNMATCHED, IBAN); null for the other seats. A record can have one note per rule.</summary>
+        public string RuleCode { get; set; }
+        public string Title { get; set; }
+        public string Text { get; set; }
+        public AiNoteStatus Status { get; set; } = AiNoteStatus.New;
+        public DateTimeOffset CreatedAt { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public string DecisionNote { get; set; }
+
+        /// <summary>The text passed the numeric check (or is built from the data by a template).</summary>
+        public bool Verified { get; set; }
+        public int? SeatRunId { get; set; }
     }
 }

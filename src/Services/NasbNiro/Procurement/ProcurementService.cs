@@ -160,6 +160,17 @@ namespace Services.NasbNiro.Procurement
             return ResponseDtoHelper.Ok(list[0]);
         }
 
+        /// <summary>
+        /// A draft that an AI seat wrote (the creator is a "seat.*" service user). It is adopted by the first person who edits or submits it: that person becomes the creator, so the
+        /// maker-checker rule (the creator cannot approve) applies to the person who put it into the flow and not to the seat.
+        /// </summary>
+        private async Task<bool> IsSeatDraftAsync(PurchaseRequest r, CancellationToken ct)
+        {
+            if (r.CreatorUserId == Me || global::Services.NasbNiro.Ai.AiActing.IsActing) return false;
+            string creator = await _uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => u.Id == r.CreatorUserId).Select(u => u.UserName).FirstOrDefaultAsync(ct);
+            return global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(creator);
+        }
+
         public async Task<ResponseDto<PurchaseRequestDto>> SaveRequestAsync(SavePurchaseRequestDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return Bad<PurchaseRequestDto>("اطلاعات ارسال‌شده کامل نیست.");
@@ -211,7 +222,9 @@ namespace Services.NasbNiro.Procurement
                 request = await _uow.Set<PurchaseRequest>().Include(r => r.Lines).FirstOrDefaultAsync(r => r.Id == dto.Id.Value && !r.Deleted, cancellationToken);
                 if (request == null) return ResponseDtoHelper.NotFound<PurchaseRequestDto>("درخواست خرید پیدا نشد.");
                 if (request.Status != PurchaseRequestStatus.Draft) return Bad<PurchaseRequestDto>("فقط پیش‌نویس ویرایش می‌شود.");
-                if (request.CreatorUserId != Me && !_user.IsInRole("PMO")) return Bad<PurchaseRequestDto>(NotAllowed);
+                bool seatDraft = await IsSeatDraftAsync(request, cancellationToken);
+                if (request.CreatorUserId != Me && !_user.IsInRole("PMO") && !(seatDraft && _user.IsInRole(ProcurementRoles.Requesters))) return Bad<PurchaseRequestDto>(NotAllowed);
+                if (seatDraft) request.CreatorUserId = Me;
                 _uow.Set<PurchaseRequestLine>().RemoveRange(request.Lines);
                 request.Lines = new List<PurchaseRequestLine>();
             }
@@ -273,6 +286,12 @@ namespace Services.NasbNiro.Procurement
             {
                 case "submit":
                     if (r.Status != PurchaseRequestStatus.Draft) return Bad<PurchaseRequestDto>("درخواست قبلاً ارسال شده است.");
+                    if (await IsSeatDraftAsync(r, cancellationToken))
+                    {
+                        // adopting a seat's draft: the person who submits it is its creator from now on (the creator can never approve it)
+                        if (!_user.IsInRole(ProcurementRoles.Requesters)) return Bad<PurchaseRequestDto>(NotAllowed);
+                        r.CreatorUserId = Me;
+                    }
                     r.Status = PurchaseRequestStatus.Submitted;
                     r.SubmittedAt = now;
                     break;

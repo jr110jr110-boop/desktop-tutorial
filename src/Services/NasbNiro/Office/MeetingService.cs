@@ -19,6 +19,9 @@ namespace Services.NasbNiro.Office
     {
         Task<ResponseDto<PagedList<MeetingListDto>>> GetMeetingsAsync(MeetingQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<MeetingDto>> GetMeetingAsync(int id, CancellationToken cancellationToken);
+
+        /// <summary>The ids of the meetings the caller may see (the same rule as <see cref="GetMeetingAsync"/>, as one query).</summary>
+        Task<IQueryable<int>> VisibleMeetingIdsAsync(CancellationToken cancellationToken);
         Task<ResponseDto<MeetingDto>> SaveMeetingAsync(SaveMeetingDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<MeetingDto>> MeetingActionAsync(MeetingActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PagedList<DecisionDto>>> GetDecisionsAsync(DecisionQuery query, CancellationToken cancellationToken);
@@ -79,6 +82,12 @@ namespace Services.NasbNiro.Office
                 || (m.SecretaryPositionId != null && pos.Contains(m.SecretaryPositionId.Value))
                 || m.Attendees.Any(a => a.UserId == me || (a.PositionId != null && pos.Contains(a.PositionId.Value)))
                 || m.Decisions.Any(d => pos.Contains(d.OwnerPositionId)));
+        }
+
+        public async Task<IQueryable<int>> VisibleMeetingIdsAsync(CancellationToken ct)
+        {
+            Ctx c = await ContextAsync(ct);
+            return Visible(_uow.Set<OfMeeting>().AsNoTracking().Where(m => !m.Deleted), c).Select(m => m.Id);
         }
 
         private async Task<OfMeeting> LoadAsync(int id, bool tracking, CancellationToken ct)

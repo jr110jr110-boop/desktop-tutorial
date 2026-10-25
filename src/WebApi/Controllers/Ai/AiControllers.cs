@@ -100,4 +100,86 @@ namespace WebApi.Controllers
 
         public int? ConversationId { get; set; }
     }
+
+    /// <summary>
+    /// What the seats left for people, and the CEO's brief. A note is read and decided only by the people of the module it belongs to (the service decides);
+    /// accepting a note never changes the record it is about.
+    /// </summary>
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/ai")]
+    public class AiNotesController : ControllerBase
+    {
+        private readonly IAiNoteService _notes;
+
+        public AiNotesController(IAiNoteService notes)
+        {
+            _notes = notes;
+        }
+
+        [HttpGet("notes")]
+        public async Task<IActionResult> NotesAsync([FromQuery] AiNoteQuery query, CancellationToken ct) => Ok((await _notes.GetNotesAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("notes/{id:int}")]
+        public async Task<IActionResult> NoteAsync(int id, CancellationToken ct) => Ok(await _notes.GetNoteAsync(id, ct));
+
+        [HttpPost("notes/decide")]
+        public async Task<IActionResult> DecideAsync([FromBody] AiDecideNoteDto dto, CancellationToken ct) => Ok(await _notes.DecideAsync(dto, ct));
+
+        /// <summary>The latest daily brief of the CEO seat (CEO and PMO).</summary>
+        [HttpGet("brief/latest")]
+        public async Task<IActionResult> LatestBriefAsync(CancellationToken ct) => Ok(await _notes.LatestBriefAsync(ct));
+
+        /// <summary>The latest brief spoken (audio/wav). Made on demand; a Persian message as a normal answer when there is none.</summary>
+        [HttpGet("brief/latest/audio")]
+        public async Task<IActionResult> LatestBriefAudioAsync(CancellationToken ct)
+        {
+            var result = await _notes.LatestBriefAudioAsync(ct);
+            if (!result.Success) return Ok(result);
+            return File(result.Data, "audio/wav");
+        }
+    }
+
+    /// <summary>The seats (PMO runs and switches them, PMO and CEO read) and the evaluation.</summary>
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/ai")]
+    public class AiSeatsController : ControllerBase
+    {
+        private readonly IAiSeatAdminService _seats;
+        private readonly IAiEvalService _eval;
+
+        public AiSeatsController(IAiSeatAdminService seats, IAiEvalService eval)
+        {
+            _seats = seats;
+            _eval = eval;
+        }
+
+        [HttpGet("admin/seats")]
+        public async Task<IActionResult> SeatsAsync(CancellationToken ct) => Ok(await _seats.GetSeatsAsync(ct));
+
+        [HttpPost("admin/seats/enable")]
+        public async Task<IActionResult> EnableAsync([FromBody] AiEnableSeatDto dto, CancellationToken ct) => Ok(await _seats.EnableAsync(dto, ct));
+
+        [HttpPost("admin/seats/run")]
+        public async Task<IActionResult> RunAsync([FromBody] AiRunSeatDto dto, CancellationToken ct) => Ok(await _seats.RunAsync(dto, ct));
+
+        [HttpGet("admin/seats/runs/{id:int}")]
+        public async Task<IActionResult> RunAsync(int id, CancellationToken ct) => Ok(await _seats.GetRunAsync(id, ct));
+
+        [HttpGet("admin/seats/runs")]
+        public async Task<IActionResult> RunsAsync([FromQuery] AiSeatRunQuery query, CancellationToken ct) => Ok((await _seats.GetRunsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("admin/eval/cases")]
+        public async Task<IActionResult> EvalCasesAsync(CancellationToken ct) => Ok(await _eval.GetCasesAsync(ct));
+
+        [HttpPost("admin/eval/run")]
+        public async Task<IActionResult> EvalRunAsync(CancellationToken ct) => Ok(await _eval.RunAsync(ct));
+
+        [HttpGet("admin/eval/runs")]
+        public async Task<IActionResult> EvalRunsAsync([FromQuery] AiEvalRunQuery query, CancellationToken ct) => Ok((await _eval.GetRunsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("admin/eval/runs/{id:int}")]
+        public async Task<IActionResult> EvalRunAsync(int id, CancellationToken ct) => Ok(await _eval.GetRunAsync(id, ct));
+    }
 }

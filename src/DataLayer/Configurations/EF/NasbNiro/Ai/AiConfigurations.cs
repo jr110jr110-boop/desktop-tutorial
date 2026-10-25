@@ -97,6 +97,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Ai
                 b.Property(x => x.Outputs).HasMaxLength(LongText);
                 b.Property(x => x.Error).HasMaxLength(LongText);
                 b.HasIndex(x => new { x.SeatId, x.StartedAt });
+                // at most one run of a seat is Running (Status 1): the database, not a read before a write, keeps two runs apart
+                b.HasIndex(x => x.SeatId).IsUnique().HasFilter("[Status] = 1").HasDatabaseName("IX_AiSeatRuns_SeatId_Running");
                 b.HasOne(x => x.Seat).WithMany().HasForeignKey(x => x.SeatId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<AiEvalCase>(b =>
@@ -112,6 +114,23 @@ namespace DataLayer.Configurations.EF.NasbNiro.Ai
             {
                 b.ToTable("AiEvalRuns");
                 b.Property(x => x.Model).HasMaxLength(Name);
+                b.Property(x => x.Detail).HasColumnType("nvarchar(max)");
+                // at most one evaluation is running (FinishedAt empty)
+                b.HasIndex(x => x.FinishedAt).IsUnique().HasFilter("[FinishedAt] IS NULL").HasDatabaseName("IX_AiEvalRuns_Running");
+            });
+            builder.Entity<AiNote>(b =>
+            {
+                b.ToTable("AiNotes");
+                b.Property(x => x.SeatCode).HasMaxLength(Code).IsRequired();
+                b.Property(x => x.TargetType).HasMaxLength(Code).IsRequired();
+                b.Property(x => x.RuleCode).HasMaxLength(Code);
+                b.Property(x => x.Title).HasMaxLength(Title);
+                b.Property(x => x.Text).HasColumnType("nvarchar(max)");
+                b.Property(x => x.DecisionNote).HasMaxLength(Text);
+                // one note per seat, target and rule: the seats are idempotent (a note without a target is not unique)
+                b.HasIndex(x => new { x.SeatCode, x.TargetType, x.TargetId, x.RuleCode }).IsUnique().HasFilter("[TargetId] IS NOT NULL");
+                b.HasIndex(x => new { x.TargetType, x.TargetId });
+                b.HasIndex(x => new { x.Status, x.CreatedAt });
             });
         }
     }
