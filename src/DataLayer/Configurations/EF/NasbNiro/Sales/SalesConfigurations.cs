@@ -41,7 +41,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Sales
                 b.Property(x => x.City).HasMaxLength(Name);
                 b.Property(x => x.CreditLimitRial).HasPrecision(22, 2);
                 b.Property(x => x.Note).HasMaxLength(Text);
-                b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<SlContact>(b =>
             {
@@ -80,9 +80,15 @@ namespace DataLayer.Configurations.EF.NasbNiro.Sales
             builder.Entity<SlCustomerLink>(b =>
             {
                 b.ToTable("SlCustomerLinks");
-                b.HasIndex(x => new { x.SourceType, x.SourceId }).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => x.ContractId).IsUnique().HasFilter("[Deleted] = 0 AND [ContractId] IS NOT NULL");
+                b.HasIndex(x => x.TenderId).IsUnique().HasFilter("[Deleted] = 0 AND [TenderId] IS NOT NULL");
                 b.HasIndex(x => x.CustomerId);
+                b.ToTable(t => t.HasCheckConstraint("CK_SlCustomerLinks_OneSource", "([ContractId] IS NULL AND [TenderId] IS NOT NULL) OR ([ContractId] IS NOT NULL AND [TenderId] IS NULL)"));
+                b.Ignore(x => x.SourceType);
+                b.Ignore(x => x.SourceId);
                 b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Tender).WithMany().HasForeignKey(x => x.TenderId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ------------------------------------------------------------------ inquiry and bid decision
@@ -102,7 +108,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Sales
                 b.Property(x => x.CancelReason).HasMaxLength(Text);
                 b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SlContact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<Tender>().WithMany().HasForeignKey(x => x.TenderId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Tender).WithMany().HasForeignKey(x => x.TenderId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<SlBidDecision>(b =>
             {
@@ -214,7 +220,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Sales
                 b.HasOne<SlInquiry>().WithMany().HasForeignKey(x => x.InquiryId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SlEstimate>().WithMany().HasForeignKey(x => x.EstimateId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SlReasonCode>().WithMany().HasForeignKey(x => x.ResultReasonId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ------------------------------------------------------------------ price lists, quotations, sales orders
@@ -248,6 +254,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Sales
                 b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SlContact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SlPriceList>().WithMany().HasForeignKey(x => x.PriceListId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.SalesOrder).WithMany().HasForeignKey(x => x.SalesOrderId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<SlQuotationLine>(b =>
             {
@@ -304,7 +311,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Sales
                 b.Property(x => x.DraftNote).HasMaxLength(Text);
                 b.HasOne<SlSalesOrder>().WithMany().HasForeignKey(x => x.SalesOrderId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<InventoryDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<FnSalesInvoice>().WithMany().HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Invoice).WithMany().HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // delivery documents of the warehouse module name the order they deliver

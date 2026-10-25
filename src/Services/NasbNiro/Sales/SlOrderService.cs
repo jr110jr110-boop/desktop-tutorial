@@ -432,12 +432,10 @@ namespace Services.NasbNiro.Sales
             foreach (SlQuotationLine l in q.Lines.OrderBy(l => l.RowNumber))
                 order.Lines.Add(new SlSalesOrderLine { RowNumber = l.RowNumber, ItemId = l.ItemId, Description = l.Description, Quantity = l.Quantity, UnitPrice = l.UnitPrice, DiscountPercent = l.DiscountPercent, Amount = l.Amount });
             _uow.Set<SlSalesOrder>().Add(order);
+            q.SalesOrder = order;
             q.ModifyDate = now; q.ModifierUserId = Me;
             try
             {
-                await _uow.SaveChangesAsync(ct);
-                // the key of the new order is known only now
-                q.SalesOrderId = order.Id;
                 await _uow.SaveChangesAsync(ct);
             }
             catch (DbUpdateConcurrencyException)

@@ -1398,6 +1398,12 @@ namespace Services.NasbNiro.Inventory
                 return ResponseDtoHelper.BadRequest<DocumentDto>("سند ترخیص از قرنطینه نتیجه بازرسی کنترل کیفیت است و باطل نمی‌شود؛ در صورت اشتباه، کالا با NCR یا انتقال برگردانده شود.");
             if (document.ExitCheckedAt.HasValue)
                 return ResponseDtoHelper.BadRequest<DocumentDto>("کالای این سند از شرکت خارج شده است؛ برگشت آن با سند ورود جداگانه ثبت می‌شود.");
+            if (document.SalesOrderId.HasValue)
+            {
+                // refused before anything is changed: the invoice of the delivery is already approved or posted
+                string salesRefusal = await Sales.SlFulfilment.CheckCancelAsync(_uow, document, cancellationToken);
+                if (salesRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesRefusal);
+            }
             List<QcInspection> inspections = await _uow.Set<QcInspection>()
                 .Where(q => q.ReceiptDocumentId == id && !q.Deleted).ToListAsync(cancellationToken);
             if (inspections.Any(q => q.Status == InspectionStatus.Done))
@@ -1539,8 +1545,7 @@ namespace Services.NasbNiro.Inventory
 
             if (document.SalesOrderId.HasValue)
             {
-                string salesCancelError = await Sales.SlFulfilment.ApplyCancelAsync(_uow, _user.UserId, document, cancellationToken);
-                if (salesCancelError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesCancelError);
+                await Sales.SlFulfilment.ApplyCancelAsync(_uow, _user.UserId, document, cancellationToken);
             }
 
             document.Status = InventoryDocumentStatus.Cancelled;

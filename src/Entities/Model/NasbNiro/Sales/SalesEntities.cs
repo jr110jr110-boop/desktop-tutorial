@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Tenders;
 
 namespace Entities.Model.NasbNiro.Sales
 {
@@ -22,6 +25,9 @@ namespace Entities.Model.NasbNiro.Sales
     public class SlCustomerProfile : BaseEntity
     {
         public int CustomerId { get; set; }
+
+        /// <summary>Set for a new customer so that the customer and the profile save together (the key is database-generated).</summary>
+        public FnCustomer Customer { get; set; }
         public SlCustomerType? Type { get; set; }
         public SlIndustry? Industry { get; set; }
         public string Country { get; set; }
@@ -84,11 +90,18 @@ namespace Entities.Model.NasbNiro.Sales
     /// <summary>Links a legacy contract or tender (free text employer) to the customer master without changing the legacy tables.</summary>
     public class SlCustomerLink : BaseEntity
     {
-        public SlLinkSource SourceType { get; set; }
-        public int SourceId { get; set; }
+        /// <summary>Exactly one of ContractId and TenderId is set.</summary>
+        public int? ContractId { get; set; }
+
+        public ContractEntity Contract { get; set; }
+        public int? TenderId { get; set; }
+        public Tender Tender { get; set; }
         public int CustomerId { get; set; }
         public SlLinkMethod Method { get; set; }
         public int LinkedByUserId { get; set; }
+
+        public SlLinkSource SourceType => ContractId.HasValue ? SlLinkSource.Contract : SlLinkSource.Tender;
+        public int SourceId => ContractId ?? TenderId ?? 0;
     }
 
     // ------------------------------------------------------------------------------------------ inquiry, bid decision
@@ -116,6 +129,8 @@ namespace Entities.Model.NasbNiro.Sales
 
         /// <summary>The tender record the system drafted when the company decided to bid.</summary>
         public int? TenderId { get; set; }
+
+        public Tender Tender { get; set; }
 
         public string Note { get; set; }
         public string CancelReason { get; set; }
@@ -318,6 +333,8 @@ namespace Entities.Model.NasbNiro.Sales
         public string LessonsLearned { get; set; }
         public int? ContractId { get; set; }
 
+        public ContractEntity Contract { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -365,6 +382,7 @@ namespace Entities.Model.NasbNiro.Sales
         public string Note { get; set; }
         public decimal NetAmount { get; set; }
         public int? SalesOrderId { get; set; }
+        public SlSalesOrder SalesOrder { get; set; }
         public ICollection<SlQuotationLine> Lines { get; set; } = new List<SlQuotationLine>();
 
         [Timestamp]
@@ -445,6 +463,7 @@ namespace Entities.Model.NasbNiro.Sales
         public int SalesOrderId { get; set; }
         public int DocumentId { get; set; }
         public int? InvoiceId { get; set; }
+        public FnSalesInvoice Invoice { get; set; }
         public string DraftNote { get; set; }
         public bool Reversed { get; set; }
     }

@@ -234,13 +234,18 @@ namespace Services.NasbNiro.Sales
                 if (!_user.IsInRole(SalesRoles.Writers)) return Bad<SlProposalDto>(SlText.NotAllowed);
                 if (row.Status != SlProposalStatus.Submitted && row.Status != SlProposalStatus.Approved) return Bad<SlProposalDto>("بازنگری فقط از پیشنهاد تأییدشده یا ارسال‌شده ساخته می‌شود.");
                 int revision = await _uow.Set<SlProposal>().Where(p => p.Number == row.Number).MaxAsync(p => p.Revision, ct) + 1;
+                // maker-checker: the revision carries everyone who touched the proposal and the estimate behind it
+                string estimateEditors = await _uow.Set<SlEstimate>().AsNoTracking().Where(e => e.Id == row.EstimateId).Select(e => e.EditorUserIds).FirstOrDefaultAsync(ct);
+                string editors = LedgerMath.WithEditor(row.EditorUserIds, row.CreatorUserId);
+                foreach (string id in (estimateEditors ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    if (int.TryParse(id, out int editor)) editors = LedgerMath.WithEditor(editors, editor);
                 SlProposal copy = new SlProposal
                 {
                     Number = row.Number, Revision = revision, InquiryId = row.InquiryId, EstimateId = row.EstimateId, TechnicalDocumentId = row.TechnicalDocumentId, CommercialDocumentId = row.CommercialDocumentId,
                     ValidityDays = row.ValidityDays, Price = row.Price, DeliveryWeeks = row.DeliveryWeeks, PaymentTermsText = row.PaymentTermsText, GuaranteesText = row.GuaranteesText,
                     DeviationsText = row.DeviationsText, VatPercent = row.VatPercent, AdvancePercent = row.AdvancePercent, RetentionPercent = row.RetentionPercent,
                     LatePenaltyPercentPerWeek = row.LatePenaltyPercentPerWeek, PenaltyCapPercent = row.PenaltyCapPercent, ClientReviewDays = row.ClientReviewDays, Status = SlProposalStatus.Draft,
-                    EstimateTotalCost = row.EstimateTotalCost, BelowCost = row.BelowCost, CustomerReference = row.CustomerReference, EditorUserIds = LedgerMath.WithEditor(null, Me),
+                    EstimateTotalCost = row.EstimateTotalCost, BelowCost = row.BelowCost, CustomerReference = row.CustomerReference, EditorUserIds = LedgerMath.WithEditor(editors, Me),
                     CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
                 };
                 _uow.Set<SlProposal>().Add(copy);
@@ -301,7 +306,9 @@ namespace Services.NasbNiro.Sales
                 if (!await _uow.Set<SlReasonCode>().AnyAsync(r => r.Id == dto.ReasonId.Value && r.Kind == kind && r.IsActive && !r.Deleted, ct))
                     return Bad<SlProposalDto>(won ? "کد دلیل برنده‌شدن پیدا نشد یا غیرفعال است." : "کد دلیل بازنده‌شدن پیدا نشد یا غیرفعال است.");
             }
+            if (won && !_user.IsInRole(SalesRoles.ContractMakers)) return Bad<SlProposalDto>(SlText.NotAllowed);
             SlInquiry inquiry = await _uow.Set<SlInquiry>().FirstAsync(i => i.Id == row.InquiryId, ct);
+            if (won && !await _uow.Set<FnCustomer>().AnyAsync(c => c.Id == inquiry.CustomerId, ct)) return Bad<SlProposalDto>("مشتری پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             row.Status = won ? SlProposalStatus.Won : SlProposalStatus.Lost;
             row.ResultAt = now; row.ResultReasonId = dto.ReasonId; row.Competitor = Clean(dto.Competitor); row.CompetitorPrice = dto.CompetitorPrice; row.LessonsLearned = Clean(dto.LessonsLearned);
@@ -311,20 +318,14 @@ namespace Services.NasbNiro.Sales
             ContractEntity contract = null;
             if (won)
             {
-                if (!_user.IsInRole(SalesRoles.ContractMakers)) return Bad<SlProposalDto>(SlText.NotAllowed);
                 contract = await DraftContractAsync(row, inquiry, now, ct);
-                if (contract == null) return Bad<SlProposalDto>("مشتری پیدا نشد.");
+                row.Contract = contract;
+                // the link of the new contract to the customer saves in the same unit of work
+                _uow.Set<SlCustomerLink>().Add(new SlCustomerLink { Contract = contract, CustomerId = inquiry.CustomerId, Method = SlLinkMethod.FromProposal, LinkedByUserId = Me, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
             }
             try
             {
                 await _uow.SaveChangesAsync(ct);
-                if (contract != null)
-                {
-                    // the key of the new contract is known only now
-                    row.ContractId = contract.Id;
-                    _uow.Set<SlCustomerLink>().Add(new SlCustomerLink { SourceType = SlLinkSource.Contract, SourceId = contract.Id, CustomerId = inquiry.CustomerId, Method = SlLinkMethod.FromProposal, LinkedByUserId = Me, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
-                    await _uow.SaveChangesAsync(ct);
-                }
             }
             catch (DbUpdateConcurrencyException)
             {

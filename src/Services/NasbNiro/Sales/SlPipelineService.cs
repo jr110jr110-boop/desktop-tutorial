@@ -287,6 +287,7 @@ namespace Services.NasbNiro.Sales
             var missing = new List<string>();
             if (!d.TechnicalCapabilityOk.HasValue) missing.Add("توان فنی");
             if (!d.CapacityOverloadWeeks.HasValue) missing.Add("ظرفیت (تاریخ تحویل درخواستی استعلام ثبت نشده است)");
+            if (!d.ExpectedMarginPercent.HasValue) missing.Add("حاشیه سود مورد انتظار");
             if (!d.CommercialRiskReviewed) missing.Add("ریسک بازرگانی");
             if (!d.PaymentTermsReviewed) missing.Add("شرایط پرداخت");
             if (!d.GuaranteesReviewed) missing.Add("ضمانت‌ها");
@@ -358,7 +359,9 @@ namespace Services.NasbNiro.Sales
                         Result = "در حال تهیه پیشنهاد", CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
                     };
                     _uow.Set<Tender>().Add(tender);
-                    inquiry.TenderId = tender.Id;
+                    inquiry.Tender = tender;
+                    // the link of the new tender to the customer saves in the same unit of work
+                    _uow.Set<SlCustomerLink>().Add(new SlCustomerLink { Tender = tender, CustomerId = inquiry.CustomerId, Method = SlLinkMethod.FromProposal, LinkedByUserId = Me, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                 }
             }
             else
@@ -371,12 +374,6 @@ namespace Services.NasbNiro.Sales
             try
             {
                 await _uow.SaveChangesAsync(ct);
-                if (tender != null)
-                {
-                    // the key of the new tender is known only now
-                    _uow.Set<SlCustomerLink>().Add(new SlCustomerLink { SourceType = SlLinkSource.Tender, SourceId = tender.Id, CustomerId = inquiry.CustomerId, Method = SlLinkMethod.FromProposal, LinkedByUserId = Me, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
-                    await _uow.SaveChangesAsync(ct);
-                }
             }
             catch (DbUpdateConcurrencyException)
             {

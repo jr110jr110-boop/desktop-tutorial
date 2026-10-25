@@ -78,6 +78,8 @@ namespace Services.NasbNiro.Sales
             var contacts = await _uow.Set<SlContact>().AsNoTracking().Where(c => ids.Contains(c.CustomerId) && !c.Deleted).GroupBy(c => c.CustomerId).Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct);
             var sites = await _uow.Set<SlSite>().AsNoTracking().Where(c => ids.Contains(c.CustomerId) && !c.Deleted).GroupBy(c => c.CustomerId).Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, profiles.Select(p => p.OwnerUserId), ct);
+            // the credit limit is finance's number: the others do not see it
+            bool seesCredit = _user.IsInRole(SalesRoles.CreditViewers);
             return rows.Select(c =>
             {
                 SlCustomerProfile p = profiles.FirstOrDefault(x => x.CustomerId == c.Id);
@@ -85,7 +87,7 @@ namespace Services.NasbNiro.Sales
                 {
                     Id = c.Id, Name = c.Name, EconomicCode = c.EconomicCode, NationalId = c.NationalId, PostalCode = c.PostalCode, Address = c.Address, Phone = c.Phone,
                     EmployerName = c.EmployerName, IsActive = c.IsActive, ProfileId = p?.Id, Type = p?.Type, Industry = p?.Industry, Country = p?.Country, City = p?.City,
-                    Status = p?.Status ?? SlCustomerStatus.Active, OwnerUserId = p?.OwnerUserId, OwnerName = names.Name(p?.OwnerUserId), CreditLimitRial = p?.CreditLimitRial,
+                    Status = p?.Status ?? SlCustomerStatus.Active, OwnerUserId = p?.OwnerUserId, OwnerName = names.Name(p?.OwnerUserId), CreditLimitRial = seesCredit ? p?.CreditLimitRial : null,
                     PaymentTermDays = p?.PaymentTermDays, Note = p?.Note, ContactCount = contacts.FirstOrDefault(x => x.Key == c.Id)?.N ?? 0,
                     SiteCount = sites.FirstOrDefault(x => x.Key == c.Id)?.N ?? 0, RowVersion = SlConcurrency.Text(p?.RowVersion),
                 };
@@ -142,23 +144,27 @@ namespace Services.NasbNiro.Sales
             {
                 c = await _uow.Set<FnCustomer>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct);
                 if (c == null) return SlText.NotFound<SlCustomerDto>("مشتری پیدا نشد.");
+                // the identity of a customer with posted invoices is finance's: the name and the codes are on the tax documents
+                if ((c.Name != name || c.EconomicCode != eco || c.NationalId != nat) && !_user.IsInRole(SalesRoles.IdentityChangers)
+                    && await _uow.Set<FnSalesInvoice>().AnyAsync(i => i.CustomerId == c.Id && i.Status == FnDocStatus.Posted, ct))
+                    return Bad<SlCustomerDto>("این مشتری فاکتور ثبت‌شده دارد؛ نام، کد اقتصادی و شناسه ملی او را فقط مالی تغییر می‌دهد.");
                 profile = await _uow.Set<SlCustomerProfile>().FirstOrDefaultAsync(p => p.CustomerId == c.Id && !p.Deleted, ct);
                 if (profile != null && !SlConcurrency.Apply(_uow, profile, dto.RowVersion)) return Bad<SlCustomerDto>(SlText.InvalidData);
             }
             else
             {
                 c = new FnCustomer { CreatedAt = now, CreatedByUserId = Me, IsActive = true };
-                _uow.Set<FnCustomer>().Add(c);
             }
             int self = c.Id;
             if (await _uow.Set<FnCustomer>().AnyAsync(x => x.Name == name && x.Id != self, ct)) return Bad<SlCustomerDto>("مشتری دیگری با همین نام وجود دارد.");
+            if (!dto.Id.HasValue) _uow.Set<FnCustomer>().Add(c);
             c.Name = name; c.EconomicCode = eco; c.NationalId = nat; c.PostalCode = postal; c.Address = Clean(dto.Address); c.Phone = Clean(dto.Phone);
             if (Clean(dto.EmployerName) != null || dto.Id.HasValue) c.EmployerName = Clean(dto.EmployerName);
             c.IsActive = dto.Status != SlCustomerStatus.Inactive;
 
             if (profile == null)
             {
-                profile = new SlCustomerProfile { CustomerId = c.Id, CreateDate = now, CreatorUserId = Me };
+                profile = new SlCustomerProfile { Customer = c, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<SlCustomerProfile>().Add(profile);
             }
             profile.Type = dto.Type; profile.Industry = dto.Industry; profile.Country = Clean(dto.Country); profile.City = Clean(dto.City); profile.Status = dto.Status;
@@ -177,7 +183,7 @@ namespace Services.NasbNiro.Sales
 
         public async Task<ResponseDto<SlCustomerDto>> SetCreditAsync(SlSetCreditDto dto, CancellationToken ct)
         {
-            if (!_user.IsInRole(SalesRoles.CreditSetters)) return Bad<SlCustomerDto>("سقف اعتبار مشتری را فقط مالی تعیین می‌کند.");
+            if (!_user.IsInRole(SalesRoles.CreditSetters)) return Bad<SlCustomerDto>("سقف اعتبار مشتری را فقط مالی (مدیر مالی) تعیین می‌کند.");
             if (dto == null) return Bad<SlCustomerDto>(SlText.InvalidData);
             if (dto.CreditLimitRial.HasValue && dto.CreditLimitRial.Value < 0) return Bad<SlCustomerDto>("سقف اعتبار نمی‌تواند منفی باشد.");
             FnCustomer c = await _uow.Set<FnCustomer>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == dto.CustomerId, ct);
@@ -376,8 +382,8 @@ namespace Services.NasbNiro.Sales
                     set.Add(c.Id);
                 }
             }
-            var existing = await _uow.Set<SlCustomerLink>().AsNoTracking().Where(l => !l.Deleted).Select(l => new { l.SourceType, l.SourceId }).ToListAsync(ct);
-            var linked = new HashSet<(SlLinkSource, int)>(existing.Select(l => (l.SourceType, l.SourceId)));
+            var existing = await _uow.Set<SlCustomerLink>().AsNoTracking().Where(l => !l.Deleted).Select(l => new { l.ContractId, l.TenderId }).ToListAsync(ct);
+            var linked = new HashSet<(SlLinkSource, int)>(existing.Select(l => l.ContractId.HasValue ? (SlLinkSource.Contract, l.ContractId.Value) : (SlLinkSource.Tender, l.TenderId.Value)));
             var result = new SlLinkLegacyResultDto { AlreadyLinked = existing.Count };
             DateTimeOffset now = DateTimeOffset.Now;
 
@@ -388,7 +394,11 @@ namespace Services.NasbNiro.Sales
                 if (key == null) return;
                 if (keys.TryGetValue(key, out HashSet<int> set) && set.Count == 1)
                 {
-                    _uow.Set<SlCustomerLink>().Add(new SlCustomerLink { SourceType = type, SourceId = id, CustomerId = set.First(), Method = SlLinkMethod.LegacyMatch, LinkedByUserId = Me, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                    _uow.Set<SlCustomerLink>().Add(new SlCustomerLink
+                    {
+                        ContractId = type == SlLinkSource.Contract ? id : (int?)null, TenderId = type == SlLinkSource.Tender ? id : (int?)null, CustomerId = set.First(),
+                        Method = SlLinkMethod.LegacyMatch, LinkedByUserId = Me, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
+                    });
                     linked.Add((type, id));
                     if (type == SlLinkSource.Contract) result.LinkedContracts++; else result.LinkedTenders++;
                 }
@@ -406,8 +416,8 @@ namespace Services.NasbNiro.Sales
         public async Task<ResponseDto<List<SlLinkSourceDto>>> GetUnlinkedAsync(CancellationToken ct)
         {
             if (!_user.IsInRole(SalesRoles.Readers)) return Bad<List<SlLinkSourceDto>>(SlText.NotAllowed);
-            var linked = await _uow.Set<SlCustomerLink>().AsNoTracking().Where(l => !l.Deleted).Select(l => new { l.SourceType, l.SourceId }).ToListAsync(ct);
-            var set = new HashSet<(SlLinkSource, int)>(linked.Select(l => (l.SourceType, l.SourceId)));
+            var linked = await _uow.Set<SlCustomerLink>().AsNoTracking().Where(l => !l.Deleted).Select(l => new { l.ContractId, l.TenderId }).ToListAsync(ct);
+            var set = new HashSet<(SlLinkSource, int)>(linked.Select(l => l.ContractId.HasValue ? (SlLinkSource.Contract, l.ContractId.Value) : (SlLinkSource.Tender, l.TenderId.Value)));
             var rows = new List<SlLinkSourceDto>();
             foreach (var c in await _uow.Set<ContractEntity>().AsNoTracking().Where(c => !c.Deleted).OrderBy(c => c.Id).Select(c => new { c.Id, c.Employer }).ToListAsync(ct))
                 if (!set.Contains((SlLinkSource.Contract, c.Id)) && SlText.Normalize(c.Employer) != null) rows.Add(new SlLinkSourceDto { SourceType = SlLinkSource.Contract, SourceId = c.Id, Text = c.Employer });
@@ -426,10 +436,11 @@ namespace Services.NasbNiro.Sales
                 : await _uow.Set<Tender>().AnyAsync(c => c.Id == dto.SourceId && !c.Deleted, ct);
             if (!exists) return Bad<SlLinkDto>(dto.SourceType == SlLinkSource.Contract ? "قرارداد پیدا نشد." : "مناقصه پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
-            SlCustomerLink link = await _uow.Set<SlCustomerLink>().FirstOrDefaultAsync(l => l.SourceType == dto.SourceType && l.SourceId == dto.SourceId && !l.Deleted, ct);
+            bool contract = dto.SourceType == SlLinkSource.Contract;
+            SlCustomerLink link = await _uow.Set<SlCustomerLink>().FirstOrDefaultAsync(l => !l.Deleted && (contract ? l.ContractId == dto.SourceId : l.TenderId == dto.SourceId), ct);
             if (link == null)
             {
-                link = new SlCustomerLink { SourceType = dto.SourceType, SourceId = dto.SourceId, CreateDate = now, CreatorUserId = Me };
+                link = new SlCustomerLink { ContractId = contract ? dto.SourceId : (int?)null, TenderId = contract ? (int?)null : dto.SourceId, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<SlCustomerLink>().Add(link);
             }
             link.CustomerId = dto.CustomerId; link.Method = SlLinkMethod.Manual; link.LinkedByUserId = Me; link.ModifyDate = now; link.ModifierUserId = Me;
@@ -459,8 +470,8 @@ namespace Services.NasbNiro.Sales
             query ??= new SlLinkQuery();
             IQueryable<SlCustomerLink> q = _uow.Set<SlCustomerLink>().AsNoTracking().Where(l => !l.Deleted);
             if (query.CustomerId.HasValue) q = q.Where(l => l.CustomerId == query.CustomerId.Value);
-            if (query.SourceType.HasValue) q = q.Where(l => l.SourceType == query.SourceType.Value);
-            return ResponseDtoHelper.Ok(await SlText.CutAsync(q.OrderBy(l => l.SourceType).ThenBy(l => l.SourceId), query.PageNumber, query.PageSize, rows => LinkDtosAsync(rows, ct), ct));
+            if (query.SourceType.HasValue) q = query.SourceType.Value == SlLinkSource.Contract ? q.Where(l => l.ContractId != null) : q.Where(l => l.TenderId != null);
+            return ResponseDtoHelper.Ok(await SlText.CutAsync(q.OrderBy(l => l.ContractId == null).ThenBy(l => l.ContractId).ThenBy(l => l.TenderId), query.PageNumber, query.PageSize, rows => LinkDtosAsync(rows, ct), ct));
         }
 
         // ================================================================================== settings and reason codes

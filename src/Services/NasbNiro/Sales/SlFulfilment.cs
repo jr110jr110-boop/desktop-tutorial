@@ -114,6 +114,7 @@ namespace Services.NasbNiro.Sales
                 delivery.DraftNote = "مشتری پیدا نشد یا غیرفعال است؛ پیش‌نویس فاکتور ساخته نشد.";
                 return;
             }
+            bool replacing = delivery.Invoice != null && delivery.Invoice.Status == FnDocStatus.Cancelled;
             int? termDays = await uow.Set<SlCustomerProfile>().AsNoTracking().Where(p => p.CustomerId == order.CustomerId && !p.Deleted).Select(p => p.PaymentTermDays).FirstOrDefaultAsync(ct);
             List<int> itemIds = parts.Select(p => p.Line.ItemId).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
@@ -134,7 +135,8 @@ namespace Services.NasbNiro.Sales
                     RowNumber = row++, Description = SlText.Clean(line.Description) ?? item?.Title ?? "کالا", ItemCode = item?.Code, Quantity = quantity, Unit = item?.Unit, UnitPrice = line.UnitPrice,
                     Discount = discount, Amount = amount, VatRatePercent = rate.Value, VatAmount = vat, Total = amount + vat,
                 });
-                line.InvoicedQuantity += quantity;
+                // the cancelled invoice this one replaces is still counted
+                if (!replacing) line.InvoicedQuantity += quantity;
             }
             invoice.NetAmount = invoice.Lines.Sum(l => l.Amount);
             invoice.DiscountAmount = invoice.Lines.Sum(l => l.Discount);
@@ -142,18 +144,28 @@ namespace Services.NasbNiro.Sales
             invoice.GrossAmount = invoice.NetAmount + invoice.VatAmount;
             invoice.ReceivableAmount = invoice.GrossAmount;
             uow.Set<FnSalesInvoice>().Add(invoice);
-            delivery.InvoiceId = invoice.Id;
+            delivery.Invoice = invoice;
             delivery.DraftNote = null;
         }
 
-        /// <summary>Called by the cancel of a confirmed delivery document. Returns a Persian refusal when the invoice is already approved or posted.</summary>
-        public static async Task<string> ApplyCancelAsync(IUnitOfWork uow, int userId, InventoryDocument document, CancellationToken ct)
+        /// <summary>Checked before the cancel of a confirmed delivery document changes anything. Returns a Persian refusal when the invoice is already approved or posted.</summary>
+        public static async Task<string> CheckCancelAsync(IUnitOfWork uow, InventoryDocument document, CancellationToken ct)
         {
-            SlOrderDelivery delivery = await uow.Set<SlOrderDelivery>().FirstOrDefaultAsync(d => d.DocumentId == document.Id && !d.Deleted && !d.Reversed, ct);
-            if (delivery == null) return null;
-            FnSalesInvoice invoice = delivery.InvoiceId.HasValue ? await uow.Set<FnSalesInvoice>().FirstOrDefaultAsync(i => i.Id == delivery.InvoiceId.Value, ct) : null;
+            FnSalesInvoice invoice = await uow.Set<SlOrderDelivery>().AsNoTracking().Where(d => d.DocumentId == document.Id && !d.Deleted && !d.Reversed && d.InvoiceId != null)
+                .Select(d => d.Invoice).FirstOrDefaultAsync(ct);
             if (invoice != null && invoice.Status != FnDocStatus.Draft && invoice.Status != FnDocStatus.Cancelled)
                 return $"فاکتور فروش {invoice.Number} این تحویل تأیید یا ثبت شده است؛ ابتدا مالی باید آن را برگرداند.";
+            return null;
+        }
+
+        /// <summary>Called by the cancel of a confirmed delivery document after <see cref="CheckCancelAsync"/> passed. Changes are made in memory; the caller saves.</summary>
+        public static async Task ApplyCancelAsync(IUnitOfWork uow, int userId, InventoryDocument document, CancellationToken ct)
+        {
+            SlOrderDelivery delivery = await uow.Set<SlOrderDelivery>().FirstOrDefaultAsync(d => d.DocumentId == document.Id && !d.Deleted && !d.Reversed, ct);
+            if (delivery == null) return;
+            FnSalesInvoice invoice = delivery.InvoiceId.HasValue ? await uow.Set<FnSalesInvoice>().FirstOrDefaultAsync(i => i.Id == delivery.InvoiceId.Value, ct) : null;
+            // a draft or a cancelled invoice still counts in InvoicedQuantity until the delivery is reversed
+            bool counted = invoice != null && (invoice.Status == FnDocStatus.Draft || invoice.Status == FnDocStatus.Cancelled);
             SlSalesOrder order = await uow.Set<SlSalesOrder>().Include(o => o.Lines).FirstAsync(o => o.Id == delivery.SalesOrderId, ct);
             List<InventoryDocumentLine> lines = await uow.Set<InventoryDocumentLine>().AsNoTracking().Where(l => l.DocumentId == document.Id).ToListAsync(ct);
             DateTimeOffset now = DateTimeOffset.Now;
@@ -163,7 +175,7 @@ namespace Services.NasbNiro.Sales
                 SlSalesOrderLine line = order.Lines.FirstOrDefault(l => l.Id == dl.SalesOrderLineId);
                 if (line == null) continue;
                 line.DeliveredQuantity = Math.Max(0, line.DeliveredQuantity - dl.Quantity);
-                if (invoice != null && invoice.Status == FnDocStatus.Draft) line.InvoicedQuantity = Math.Max(0, line.InvoicedQuantity - dl.Quantity);
+                if (counted) line.InvoicedQuantity = Math.Max(0, line.InvoicedQuantity - dl.Quantity);
                 if (open) line.ReservedQuantity = line.Quantity - line.DeliveredQuantity;
             }
             if (invoice != null && invoice.Status == FnDocStatus.Draft)
@@ -175,7 +187,6 @@ namespace Services.NasbNiro.Sales
             delivery.ModifyDate = now;
             delivery.ModifierUserId = userId;
             Recompute(order, userId, now);
-            return null;
         }
 
         /// <summary>For the order's deliveries without an invoice (and not reversed) drafts the invoice now. Returns a Persian message when nothing could be drafted.</summary>
@@ -183,7 +194,9 @@ namespace Services.NasbNiro.Sales
         {
             SlSalesOrder order = await uow.Set<SlSalesOrder>().Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == orderId && !o.Deleted, ct);
             if (order == null) return "سفارش فروش پیدا نشد.";
-            List<SlOrderDelivery> pending = await uow.Set<SlOrderDelivery>().Where(d => d.SalesOrderId == orderId && !d.Deleted && !d.Reversed && d.InvoiceId == null).OrderBy(d => d.Id).ToListAsync(ct);
+            // a delivery whose invoice finance cancelled has no invoice any more: it is drafted again
+            List<SlOrderDelivery> pending = await uow.Set<SlOrderDelivery>().Include(d => d.Invoice)
+                .Where(d => d.SalesOrderId == orderId && !d.Deleted && !d.Reversed && (d.InvoiceId == null || d.Invoice.Status == FnDocStatus.Cancelled)).OrderBy(d => d.Id).ToListAsync(ct);
             if (pending.Count == 0) return "تحویلی بدون پیش‌نویس فاکتور برای این سفارش نیست.";
             DateTimeOffset now = DateTimeOffset.Now;
             int made = 0;
@@ -196,8 +209,9 @@ namespace Services.NasbNiro.Sales
                     SlSalesOrderLine line = order.Lines.FirstOrDefault(l => l.Id == dl.SalesOrderLineId);
                     if (line != null) parts.Add((line, dl.Quantity));
                 }
+                FnSalesInvoice before = d.Invoice;
                 await DraftInvoiceAsync(uow, userId, order, d, doc.Number, doc.DocumentDate, parts, ct);
-                if (d.InvoiceId.HasValue) made++;
+                if (d.Invoice != null && !ReferenceEquals(d.Invoice, before)) made++;
                 d.ModifyDate = now;
                 d.ModifierUserId = userId;
             }

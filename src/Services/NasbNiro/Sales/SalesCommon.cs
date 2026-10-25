@@ -31,7 +31,10 @@ namespace Services.NasbNiro.Sales
         /// <summary>Price lists are approved by someone who did not write them.</summary>
         public const string PriceListApprovers = "SALES,CEO,FINANCEMANAGER";
 
-        public const string CreditSetters = "FINANCEMANAGER,FINANCIAL";
+        /// <summary>The credit limit is set by the finance manager only (the same person who approves an order above it).</summary>
+        public const string CreditSetters = "FINANCEMANAGER";
+        public const string CreditViewers = "FINANCEMANAGER,FINANCIAL";
+        public const string IdentityChangers = "FINANCEMANAGER,FINANCIAL";
         public const string CreditApprovers = "FINANCEMANAGER";
         public const string ContractMakers = "SALES,CEO";
         public const string SettingSetters = "CEO";
