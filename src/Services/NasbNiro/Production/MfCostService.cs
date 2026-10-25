@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -212,6 +212,7 @@ namespace Services.NasbNiro.Production
             if (bookings.Count == 0)
             {
                 result.Message = "رزرو زمانی پست‌نشده‌ای برای ثبت هزینه وجود ندارد.";
+                result.LabourAmount = 0; // nothing posted: zero, not hidden (null means hidden payroll cost)
                 return result;
             }
             await _costing.EnsureAccountRolesAsync(ct);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -154,6 +154,7 @@ namespace Services.NasbNiro.Production
             if (query.ContractId.HasValue) q = q.Where(o => o.ContractId == query.ContractId.Value);
             if (query.ItemId.HasValue) q = q.Where(o => o.ItemId == query.ItemId.Value);
             if (query.OpenOnly == true) q = q.Where(o => o.Status == MfOrderStatus.Draft || o.Status == MfOrderStatus.Released || o.Status == MfOrderStatus.InProgress);
+            if (query.LateOnly == true) q = q.Where(o => o.IsLate);
             string text = Clean(query.Contains);
             if (text != null)
                 q = q.Where(o => o.Number.Contains(text) || _uow.Set<InventoryItem>().Any(i => i.Id == o.ItemId && (i.Code.Contains(text) || i.Title.Contains(text)))
@@ -178,6 +179,7 @@ namespace Services.NasbNiro.Production
             if (!_user.IsInRole(ProductionRoles.MasterReaders)) return Bad<PagedList<OperationDto>>(MfText.NotAllowed);
             query ??= new OperationQuery();
             IQueryable<MfOperation> q = _uow.Set<MfOperation>().AsNoTracking().Where(o => !o.Deleted);
+            if (query.Id.HasValue) q = q.Where(o => o.Id == query.Id.Value);
             if (query.OrderId.HasValue) q = q.Where(o => o.OrderId == query.OrderId.Value);
             if (query.WorkCenterId.HasValue) q = q.Where(o => o.WorkCenterId == query.WorkCenterId.Value);
             if (query.Status.HasValue) q = q.Where(o => o.Status == query.Status.Value);

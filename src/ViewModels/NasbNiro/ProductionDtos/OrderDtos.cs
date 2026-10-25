@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.Quality;
@@ -14,6 +14,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         /// <summary>Only the orders that are open (draft, released or in progress).</summary>
         public bool? OpenOnly { get; set; }
+
+        /// <summary>Only the orders the last scheduler run found late against their need date.</summary>
+        public bool? LateOnly { get; set; }
     }
 
     public class OrderComponentDto
@@ -102,6 +105,8 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
     public class OperationQuery : MfPageQuery
     {
+        /// <summary>One operation (the inbox links of QC requests point to an operation).</summary>
+        public int? Id { get; set; }
         public int? OrderId { get; set; }
         public int? WorkCenterId { get; set; }
         public MfOperationStatus? Status { get; set; }
