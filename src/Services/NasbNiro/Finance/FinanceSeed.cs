@@ -66,6 +66,7 @@ namespace Services.NasbNiro.Finance
             ("60301", "سود سپرده"), ("60302", "سود فروش دارایی"), ("60303", "سود تسعیر ارز"), ("60304", "سایر"), ("60305", "جرائم دیرکرد کسرشده از تامین‌کنندگان"),
             ("70101", "مواد مستقیم"), ("70102", "دستمزد مستقیم"), ("70103", "سربار ساخت"), ("70104", "پیمانکاری و خدمات خریداری‌شده"),
             ("70105", "بهای تمام‌شده ضایعات فروخته‌شده"), ("70106", "اضافات و کسورات انبار"), ("70107", "تعدیل ارزش موجودی"), ("70108", "اختلاف قیمت خرید"), ("70109", "انحراف بهای تمام‌شده"), ("70110", "سربار جذب‌شده"), ("70111", "انحراف جذب سربار"), ("70112", "هزینه زیان مورد انتظار قراردادها"),
+            ("70113", "دستمزد جذب‌شده خدمات پس از فروش"), // ★ new in S1 part B (assumption: the accountant confirms the code); 70102 stays the production direct labour
             ("70201", "حقوق و دستمزد غیرمستقیم"), ("70202", "مواد غیرمستقیم و مصرفی"), ("70203", "استهلاک"), ("70204", "تعمیر و نگهداری"), ("70205", "انرژی"), ("70206", "سایر"),
             ("80101", "حقوق و دستمزد"), ("80102", "بیمه سهم کارفرما"), ("80103", "مزایای پایان خدمت"), ("80104", "استهلاک"), ("80105", "اجاره"),
             ("80106", "حمل و نقل"), ("80107", "خدمات حرفه‌ای"), ("80108", "سایر"), ("80109", "هزینه گارانتی"),
@@ -206,8 +207,11 @@ namespace Services.NasbNiro.Finance
             { AccountRoles.AssetUnderConstruction, "20108" }, { AccountRoles.CapitalAdvance, "20109" },
             // release P1 (production): absorbed direct labour (70102) and machine overhead (70103) against work in progress (10520); finance reconciles absorbed against actual each month
             { AccountRoles.LabourAbsorbed, "70102" }, { AccountRoles.OverheadAbsorbed, "70103" },
-            // release S1 part B (after-sales) ★ assumption for the accountant: 30404 already holds the provision for expected contract losses, so the warranty provision is the new 30406; the expense is 80109
-            { AccountRoles.WarrantyProvision, "30406" }, { AccountRoles.WarrantyExpense, "80109" },
+            // release S1 part B (after-sales) ★ assumptions for the accountant to confirm:
+            //  - the warranty provision is 30406 «ذخیره تضمین محصولات»: the brief said 30404, but 30404 already holds the provision for expected contract losses (GlService.Costing). The alternative is 30405 «ذخایر عمومی (ضمانت، دعاوی، سایر)», which the provision register (GlService.F3b.Notes) already lists.
+            //  - the warranty expense (goodwill) is 80109 «هزینه گارانتی»
+            //  - the labour of an after-sales order is absorbed into the new 70113, not into the production labour 70102
+            { AccountRoles.WarrantyProvision, "30406" }, { AccountRoles.WarrantyExpense, "80109" }, { AccountRoles.ServiceLabourAbsorbed, "70113" },
         };
 
         /// <summary>The few long-standing statutory ratios that are seeded (each with its source and Verify = true).</summary>

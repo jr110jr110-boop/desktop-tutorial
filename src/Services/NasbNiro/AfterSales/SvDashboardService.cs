@@ -63,7 +63,7 @@ namespace Services.NasbNiro.AfterSales
 
             dto.OpenOrders = await uow.Set<SvServiceOrder>().AsNoTracking().CountAsync(o => !o.Deleted && (o.Status == SvOrderStatus.Draft || o.Status == SvOrderStatus.Planned || o.Status == SvOrderStatus.InProgress), ct);
             dto.OrdersWaitingClose = await uow.Set<SvServiceOrder>().AsNoTracking().CountAsync(o => !o.Deleted && o.Status == SvOrderStatus.InProgress, ct);
-            dto.GoodwillWaiting = await uow.Set<SvServiceOrder>().AsNoTracking().CountAsync(o => !o.Deleted && o.GoodwillRequestedAt != null && o.Decision != SvWarrantyDecision.Goodwill && (o.Status == SvOrderStatus.Planned || o.Status == SvOrderStatus.InProgress), ct);
+            dto.GoodwillWaiting = await uow.Set<SvServiceOrder>().AsNoTracking().CountAsync(o => !o.Deleted && o.GoodwillRequestedAt != null && o.Decision != SvWarrantyDecision.Goodwill && (o.Status == SvOrderStatus.Draft || o.Status == SvOrderStatus.Planned || o.Status == SvOrderStatus.InProgress), ct); // the same orders as the goodwill gate (SvGates.GoodwillAsync): every order that is not closed or cancelled
             dto.SurveysDrafted = await uow.Set<SlSurvey>().AsNoTracking().CountAsync(s => !s.Deleted && s.Status == SlSurveyStatus.Drafted, ct);
             List<decimal> averages = await uow.Set<SlSurvey>().AsNoTracking().Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.AverageScore != null).Select(s => s.AverageScore.Value).ToListAsync(ct);
             dto.SurveyAverageScore = averages.Count == 0 ? (decimal?)null : SlText.R2(averages.Average());

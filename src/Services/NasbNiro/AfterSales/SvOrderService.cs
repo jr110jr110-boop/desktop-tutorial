@@ -156,6 +156,7 @@ namespace Services.NasbNiro.AfterSales
         {
             await SvGates.GoodwillAsync(_notify, row, ct);
             await SvGates.CloseAsync(_notify, row, ct);
+            await SvGates.VisitAsync(_notify, row, ct);
             return await GetOrderAsync(row.Id, ct);
         }
 
@@ -178,6 +179,8 @@ namespace Services.NasbNiro.AfterSales
             if (dto.PlannedStart.HasValue && dto.PlannedEnd.HasValue && dto.PlannedEnd.Value.Date < dto.PlannedStart.Value.Date) return Bad<SvOrderDto>("پایان برنامه قبل از شروع آن است.");
             if (dto.BillableLabourRateRial.HasValue && dto.BillableLabourRateRial.Value <= 0) return Bad<SvOrderDto>("نرخ ساعتی صورتحساب باید بیشتر از صفر باشد.");
             if (dto.RunningHoursReading.HasValue && dto.RunningHoursReading.Value < 0) return Bad<SvOrderDto>("عدد کارکرد نمی‌تواند منفی باشد.");
+            string tooLong = SvLimits.First((dto.Title, SvLimits.Title, "عنوان دستور خدمات"), (dto.TravelNote, SvLimits.Text, "یادداشت سفر"), (dto.Findings, SvLimits.LongText, "یافته‌ها"), (dto.Recommendations, SvLimits.LongText, "توصیه‌ها"));
+            if (tooLong != null) return Bad<SvOrderDto>(tooLong);
             SvInstalledUnit unit = await _uow.Set<SvInstalledUnit>().AsNoTracking().FirstOrDefaultAsync(u => u.Id == dto.UnitId && !u.Deleted, ct);
             if (unit == null) return Bad<SvOrderDto>("واحد نصب‌شده پیدا نشد.");
             if (unit.Decommissioned) return Bad<SvOrderDto>("واحد از رده خارج شده است.");
@@ -194,6 +197,7 @@ namespace Services.NasbNiro.AfterSales
             if (engineerIds.Count > 0 && await _uow.Set<FnEmployee>().CountAsync(e => engineerIds.Contains(e.Id), ct) != engineerIds.Count) return Bad<SvOrderDto>("یکی از مهندسان پیدا نشد.");
             List<SvSaveTaskDto> tasks = (dto.Tasks ?? new List<SvSaveTaskDto>()).Where(t => t != null).ToList();
             if (tasks.Any(t => Clean(t.Description) == null)) return Bad<SvOrderDto>("شرح هر وظیفه را وارد کنید.");
+            if (tasks.Select(t => SvLimits.TooLong(Clean(t.Description), SvLimits.Text, "شرح وظیفه")).FirstOrDefault(m => m != null) is string taskTooLong) return Bad<SvOrderDto>(taskTooLong);
             if (dto.ReportDocumentId.HasValue && !await _uow.Set<Entities.Model.Document>().AnyAsync(d => d.Id == dto.ReportDocumentId.Value, ct)) return Bad<SvOrderDto>("فایل گزارش پیدا نشد.");
 
             DateTimeOffset now = DateTimeOffset.Now;
@@ -254,6 +258,8 @@ namespace Services.NasbNiro.AfterSales
             if (row.Status == SvOrderStatus.Draft) return Bad<SvOrderDto>("دستور پیش‌نویس ابتدا باید تأیید شود.");
             if (!Enum.IsDefined(typeof(SvTimeKind), dto.Kind)) return Bad<SvOrderDto>(SlText.InvalidData);
             if (dto.Hours <= 0 || dto.Hours > 24) return Bad<SvOrderDto>("ساعت هر ردیف باید بیشتر از صفر و حداکثر ۲۴ باشد.");
+            string noteTooLong = SvLimits.TooLong(Clean(dto.Note), SvLimits.Text, "یادداشت ردیف ساعت");
+            if (noteTooLong != null) return Bad<SvOrderDto>(noteTooLong);
             if (row.Engineers.All(e => e.EmployeeId != dto.EmployeeId)) return Bad<SvOrderDto>("این کارمند مهندس دستور خدمات نیست.");
             DateTime day = (dto.WorkDate ?? DateTime.Today).Date;
             if (day > DateTime.Today.AddDays(1)) return Bad<SvOrderDto>("تاریخ کار در آینده است.");
@@ -287,6 +293,8 @@ namespace Services.NasbNiro.AfterSales
             (SvServiceOrder row, ResponseDto<SvOrderDto> error) = await LoadOpenAsync(dto.OrderId, false, ct);
             if (error != null) return error;
             if (Clean(dto.Name) == null || Clean(dto.Unit) == null) return Bad<SvOrderDto>("نام و واحد اندازه‌گیری را وارد کنید.");
+            string measureTooLong = SvLimits.First((dto.Name, SvLimits.Name, "نام اندازه‌گیری"), (dto.Unit, SvLimits.Code, "واحد اندازه‌گیری"), (dto.Note, SvLimits.Text, "یادداشت اندازه‌گیری"));
+            if (measureTooLong != null) return Bad<SvOrderDto>(measureTooLong);
             row.Measurements.Add(new SvMeasurement { Name = Clean(dto.Name), Value = dto.Value, Unit = Clean(dto.Unit), Note = Clean(dto.Note) });
             Touch(row);
             try { await _uow.SaveChangesAsync(ct); }
@@ -330,6 +338,8 @@ namespace Services.NasbNiro.AfterSales
             (SvServiceOrder row, ResponseDto<SvOrderDto> error) = await LoadOpenAsync(dto.OrderId, false, ct);
             if (error != null) return error;
             if (Clean(dto.Reason) == null) return Bad<SvOrderDto>("دلیل درخواست حسن نیت را وارد کنید.");
+            string reasonTooLong = SvLimits.TooLong(Clean(dto.Reason), SvLimits.Text, "دلیل درخواست حسن نیت");
+            if (reasonTooLong != null) return Bad<SvOrderDto>(reasonTooLong);
             row.GoodwillRequestedAt = DateTimeOffset.Now; row.GoodwillRequestedByUserId = Me; row.GoodwillReason = Clean(dto.Reason);
             Touch(row);
             try { await _uow.SaveChangesAsync(ct); }
@@ -342,6 +352,10 @@ namespace Services.NasbNiro.AfterSales
             if (dto == null) return Bad<SvOrderDto>(SlText.InvalidData);
             (SvServiceOrder row, ResponseDto<SvOrderDto> error) = await LoadOpenAsync(dto.OrderId, true, ct);
             if (error != null) return error;
+            // a goodwill decision is the CEO's: once taken, nobody else changes it
+            if (row.Decision == SvWarrantyDecision.Goodwill && !_user.IsInRole(SvRoles.GoodwillDeciders)) return Bad<SvOrderDto>("تصمیم حسن نیت گرفته شده است و آن را فقط مدیرعامل تغییر می‌دهد.");
+            string noteTooLong = SvLimits.TooLong(Clean(dto.Note), SvLimits.Text, "یادداشت تصمیم");
+            if (noteTooLong != null) return Bad<SvOrderDto>(noteTooLong);
             if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SvOrderDto>(SlText.InvalidData);
             if (dto.Decision == SvWarrantyDecision.Goodwill)
             {
@@ -386,6 +400,8 @@ namespace Services.NasbNiro.AfterSales
                     if (Clean(dto.Reason) == null) return Bad<SvOrderDto>("دلیل لغو را وارد کنید.");
                     if (await _uow.Set<InventoryDocument>().AnyAsync(d => d.ServiceOrderId == row.Id && !d.Deleted && d.Status == InventoryDocumentStatus.Confirmed, ct))
                         return Bad<SvOrderDto>("دستور سند قطعات تأییدشده دارد؛ دستور بسته می‌شود، لغو نمی‌شود.");
+                    if (await _uow.Set<InventoryDocument>().AnyAsync(d => d.ServiceOrderId == row.Id && !d.Deleted && d.Status == InventoryDocumentStatus.Draft, ct))
+                        return Bad<SvOrderDto>("دستور سند قطعات پیش‌نویس دارد؛ آن را تأیید یا حذف کنید و سپس دستور را لغو کنید.");
                     row.Status = SvOrderStatus.Cancelled;
                     break;
                 case "close":
@@ -441,9 +457,21 @@ namespace Services.NasbNiro.AfterSales
             }
             labour = SlText.R0(labour);
 
-            // parts: the cost entries of the confirmed warehouse documents of this order (issue and customer delivery, reversals included)
-            List<int> docIds = await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => d.ServiceOrderId == row.Id && !d.Deleted).Select(d => d.Id).ToListAsync(ct);
-            decimal parts = docIds.Count == 0 ? 0 : SlText.R0(await _uow.Set<CostEntry>().AsNoTracking().Where(c => c.SourceType == CostingService.InventoryDocumentSource && docIds.Contains(c.SourceId) && c.Kind == CostKind.Material).SumAsync(c => (decimal?)c.Amount, ct) ?? 0m);
+            // parts: the cost entries of the warehouse documents of this order (issue and customer delivery, reversals included), split by the kind of document:
+            // the parts consumed (issue) and the parts left on site (customer delivery, whose own posting went to cost of sales)
+            var docs = await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => d.ServiceOrderId == row.Id && !d.Deleted).Select(d => new { d.Id, d.Type }).ToListAsync(ct);
+            List<int> docIds = docs.Select(d => d.Id).ToList();
+            decimal consumedRaw = 0, leftRaw = 0;
+            if (docIds.Count > 0)
+            {
+                var bySource = await _uow.Set<CostEntry>().AsNoTracking().Where(c => c.SourceType == CostingService.InventoryDocumentSource && docIds.Contains(c.SourceId) && c.Kind == CostKind.Material)
+                    .GroupBy(c => c.SourceId).Select(g => new { Id = g.Key, Amount = g.Sum(c => c.Amount) }).ToListAsync(ct);
+                foreach (var x in bySource)
+                    if (docs.First(d => d.Id == x.Id).Type == InventoryDocumentType.CustomerDelivery) leftRaw += x.Amount; else consumedRaw += x.Amount;
+            }
+            decimal parts = SlText.R0(consumedRaw + leftRaw);
+            decimal partsLeftOnSite = SlText.R0(leftRaw);
+            decimal partsConsumed = parts - partsLeftOnSite;
 
             row.LabourHours = hours; row.LabourAmount = labour; row.LabourEmployeeCount = employees.Count; row.LabourPayrollEmployeeCount = payroll.Count; row.PartsAmount = parts;
             row.CostPostedAt = now; row.Status = SvOrderStatus.Closed; row.ClosedAt = now; row.ClosedByUserId = Me;
@@ -451,31 +479,28 @@ namespace Services.NasbNiro.AfterSales
             string center = row.CostCenterCode ?? await SvSettings.EnsureCostCenterAsync(_uow, ct);
             row.CostCenterCode = center;
 
-            // the labour is one aggregated cost entry of the order (never one per person)
+            // the labour is one aggregated cost entry of the order (never one per person), without the hours (as the production cost run does): the hours stay on the order
             if (labour != 0)
                 _uow.Set<CostEntry>().Add(new CostEntry
                 {
-                    EntryDate = today, Kind = CostKind.Labour, ContractId = row.ContractId, CostCenter = center, Quantity = hours, Amount = labour, SourceType = SvCostSource.Order, SourceId = row.Id, SourceNumber = row.Number,
+                    EntryDate = today, Kind = CostKind.Labour, ContractId = row.ContractId, CostCenter = center, Quantity = 0, Amount = labour, SourceType = SvCostSource.Order, SourceId = row.Id, SourceNumber = row.Number,
                     Description = "دستمزد دستور خدمات پس از فروش " + row.Number, CreatedAt = now, CreatedByUserId = Me,
                 });
 
-            // warranty and goodwill: the cost is taken against the warranty provision (goodwill: against the expense account)
+            // Only warranty and goodwill orders post an accounting event: the brief asks for the event on the warranty provision (warranty) and for a draft invoice (billable work). A billable order earns its revenue
+            // through the invoice, and the visit of a service agreement (LTSA) is paid by the agreement, so neither takes a cost out of the provision or the goodwill expense; their labour stays a cost entry of the cost centre and the contract.
             AccountingEvent ev = null;
             if ((row.Decision == SvWarrantyDecision.Warranty || row.Decision == SvWarrantyDecision.Goodwill) && labour + parts != 0)
             {
-                string debitRole = row.Decision == SvWarrantyDecision.Warranty ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense;
-                var lines = new List<AccountingEventLine>
-                {
-                    new AccountingEventLine { AccountRole = debitRole, Debit = labour + parts, ContractId = row.ContractId, CostCenter = center, Description = "هزینه خدمات " + (row.Decision == SvWarrantyDecision.Warranty ? "گارانتی" : "حسن نیت") + " " + row.Number },
-                };
-                if (labour != 0) lines.Add(new AccountingEventLine { AccountRole = AccountRoles.LabourAbsorbed, Credit = labour, ContractId = row.ContractId, CostCenter = center, Description = "دستمزد جذب‌شده در خدمات " + row.Number });
-                if (parts != 0) lines.Add(new AccountingEventLine { AccountRole = AccountRoles.MaterialExpense, Credit = parts, ContractId = row.ContractId, CostCenter = center, Description = "قطعات مصرفی خدمات " + row.Number });
+                bool protectedLabour = SvPrivacy.LabourProtected(employees.Count, payroll.Count);
+                var lines = SvPosting.WarrantyLines(row.Decision == SvWarrantyDecision.Warranty, labour, partsConsumed, partsLeftOnSite, protectedLabour, row.Number)
+                    .Select(l => new AccountingEventLine { AccountRole = l.Role, Debit = l.Debit, Credit = l.Credit, ContractId = row.ContractId, CostCenter = center, Description = l.Description }).ToList();
                 ev = _costing.AddEvent(AccountingEventType.WarrantyCost, today, SvCostSource.Order, row.Id, row.Number, "هزینه خدمات پس از فروش " + row.Number, lines);
+                row.WarrantyEvent = ev;
             }
 
-            // a billable order drafts its invoice
-            FnSalesInvoice invoice = null;
-            if (row.Decision == SvWarrantyDecision.Billable) invoice = await DraftInvoiceCoreAsync(row, ct);
+            // a billable order drafts its invoice (the invoice and the event are linked through navigations: one save, no second one for the ids)
+            if (row.Decision == SvWarrantyDecision.Billable) row.Invoice = await DraftInvoiceCoreAsync(row, ct);
 
             // the satisfaction survey of the closed order
             if (row.CustomerId.HasValue) await SvSurveyDraft.ForOrderAsync(_uow, row, today, Me, ct);
@@ -485,13 +510,8 @@ namespace Services.NasbNiro.AfterSales
 
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<SvOrderDto>(SlText.Concurrency); }
-            if (ev != null || invoice != null)
-            {
-                // the ids exist only after the save
-                if (ev != null) row.WarrantyEventId = ev.Id;
-                if (invoice != null) row.InvoiceId = invoice.Id;
-                await _uow.SaveChangesAsync(ct);
-            }
+            SlSurvey survey = await _uow.Set<SlSurvey>().AsNoTracking().FirstOrDefaultAsync(x => x.ServiceOrderId == row.Id && !x.Deleted, ct);
+            if (survey != null) await SvGates.SurveyAsync(_notify, survey, ct);
             return await SavedAsync(row, ct);
         }
 
@@ -512,47 +532,73 @@ namespace Services.NasbNiro.AfterSales
             }
             FnSalesInvoice invoice = await DraftInvoiceCoreAsync(row, ct);
             if (invoice == null && row.DraftNote != null) return Bad<SvOrderDto>(row.DraftNote);
+            // one save: the invoice is linked to the order through the navigation; the row version of the order makes a second click (a retry) fail instead of drafting a second invoice
+            row.Invoice = invoice;
             Touch(row);
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<SvOrderDto>(SlText.Concurrency); }
-            if (invoice != null)
-            {
-                row.InvoiceId = invoice.Id;
-                await _uow.SaveChangesAsync(ct);
-            }
             return await GetOrderAsync(row.Id, ct);
         }
 
-        /// <summary>Drafts the invoice of the billable hours (work and travel) at the rate entered on the order. Parts are not priced here: sales prices them. Without a VAT rate, a rate or a customer no invoice is made and the order says why.</summary>
+        /// <summary>
+        /// Drafts the invoice of a billable order: the work and travel hours at the rate entered on the order, and the spare parts of its confirmed documents (consumed and left on site) at the price of the approved price list valid today.
+        /// Nothing is invented: without a VAT rate, a customer, an hourly rate (when there are hours) or a price for every part no invoice is made and the order says why.
+        /// </summary>
         private async Task<FnSalesInvoice> DraftInvoiceCoreAsync(SvServiceOrder row, CancellationToken ct)
         {
             decimal billableHours = SvCostMath.BillableHours(row.TimeEntries.Where(t => t.Kind == SvTimeKind.Travel).Sum(t => t.Hours), row.TimeEntries.Where(t => t.Kind == SvTimeKind.Work).Sum(t => t.Hours));
-            if (!row.BillableLabourRateRial.HasValue) { row.DraftNote = "نرخ ساعتی صورتحساب روی دستور وارد نشده است؛ پس از ثبت نرخ، «پیش‌نویس فاکتور» را بزنید."; return null; }
-            if (!row.CustomerId.HasValue) { row.DraftNote = "مشتری دستور مشخص نیست؛ پیش‌نویس فاکتور ساخته نشد."; return null; }
-            if (billableHours <= 0) { row.DraftNote = "ساعت کار یا سفرِ قابل‌فاکتور ثبت نشده است؛ پیش‌نویس فاکتور ساخته نشد."; return null; }
             DateTime date = DateTime.Today;
+
+            // the parts: quantity per item over the confirmed documents of the order
+            var partLines = await _uow.Set<InventoryDocumentLine>().AsNoTracking()
+                .Where(l => l.Document.ServiceOrderId == row.Id && !l.Document.Deleted && l.Document.Status == InventoryDocumentStatus.Confirmed)
+                .GroupBy(l => l.ItemId).Select(g => new { ItemId = g.Key, Quantity = g.Sum(l => l.Quantity) }).ToListAsync(ct);
+            List<int> itemIds = partLines.Select(p => p.ItemId).ToList();
+            Dictionary<int, InventoryItem> items = itemIds.Count == 0 ? new Dictionary<int, InventoryItem>() : await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
+            var parts = partLines.Where(p => p.Quantity > 0).OrderBy(p => items.GetValueOrDefault(p.ItemId)?.Code, StringComparer.Ordinal).ThenBy(p => p.ItemId).ToList();
+
+            if (billableHours > 0 && !row.BillableLabourRateRial.HasValue) { row.DraftNote = "نرخ ساعتی صورتحساب روی دستور وارد نشده است؛ پس از ثبت نرخ، «پیش‌نویس فاکتور» را بزنید."; return null; }
+            if (!row.CustomerId.HasValue) { row.DraftNote = "مشتری دستور مشخص نیست؛ پیش‌نویس فاکتور ساخته نشد."; return null; }
+            if (billableHours <= 0 && parts.Count == 0) { row.DraftNote = "ساعت کار یا سفرِ قابل‌فاکتور و قطعه‌ی مصرفی ثبت نشده است؛ پیش‌نویس فاکتور ساخته نشد."; return null; }
             decimal? rate = await TaxRates.RateAtAsync(_uow, FnTaxKind.Vat, date, ct);
             if (!rate.HasValue) { row.DraftNote = "نرخ مالیات بر ارزش افزوده برای این تاریخ در جدول نرخ‌ها ثبت نشده است؛ پس از ثبت نرخ، «پیش‌نویس فاکتور» را بزنید."; return null; }
             FnCustomer customer = await _uow.Set<FnCustomer>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == row.CustomerId.Value, ct);
             if (customer == null || !customer.IsActive) { row.DraftNote = "مشتری پیدا نشد یا غیرفعال است؛ پیش‌نویس فاکتور ساخته نشد."; return null; }
+
+            List<SlPriceList> lists = parts.Count == 0 ? new List<SlPriceList>() : await _uow.Set<SlPriceList>().AsNoTracking().Include(p => p.Lines)
+                .Where(p => !p.Deleted && p.Status == SlPriceListStatus.Approved && p.ValidFrom <= date && (p.ValidTo == null || p.ValidTo >= date)).ToListAsync(ct);
+            var priced = parts.Select(p => new { p.ItemId, p.Quantity, Item = items.GetValueOrDefault(p.ItemId), Price = SvPricing.PriceOf(lists, p.ItemId, p.Quantity) }).ToList();
+            var unpriced = priced.Where(p => !p.Price.HasValue).ToList();
+            if (unpriced.Count > 0)
+            {
+                row.DraftNote = "برای قطعه‌ی " + string.Join("، ", unpriced.Select(p => p.Item?.Code ?? p.ItemId.ToString())) + " در لیست قیمت تأییدشده‌ی امروز قیمتی نیست؛ فروش قیمت را در لیست قیمت وارد و تأیید کند و سپس «پیش‌نویس فاکتور» را بزنید.";
+                return null;
+            }
+
             int? termDays = await _uow.Set<SlCustomerProfile>().AsNoTracking().Where(p => p.CustomerId == row.CustomerId.Value && !p.Deleted).Select(p => p.PaymentTermDays).FirstOrDefaultAsync(ct);
-            var (_, discount, amount) = SlText.LineAmount(billableHours, row.BillableLabourRateRial.Value, 0);
-            decimal vat = SlText.R0(amount * rate.Value / 100m);
             var invoice = new FnSalesInvoice
             {
                 Number = await InventoryNumbers.NextNumberAsync(_uow, FinanceNumbers.SalesInvoice, "SI", date, ct), Date = date, DueDate = termDays.HasValue ? date.AddDays(termDays.Value) : (DateTime?)null,
-                CustomerId = row.CustomerId.Value, ContractId = row.ContractId, Type = FnInvoiceType.Service, Status = FnDocStatus.Draft, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, EditorUserIds = LedgerMath.WithEditor(null, Me),
+                CustomerId = row.CustomerId.Value, ContractId = row.ContractId, Type = billableHours > 0 ? FnInvoiceType.Service : FnInvoiceType.Goods, Status = FnDocStatus.Draft, CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, EditorUserIds = LedgerMath.WithEditor(null, Me),
                 Description = $"پیش‌نویس خودکار از دستور خدمات پس از فروش {row.Number}", Lines = new List<FnSalesInvoiceLine>(),
             };
-            invoice.Lines.Add(new FnSalesInvoiceLine
+            int rowNumber = 0;
+            void AddLine(string description, string itemCode, decimal quantity, string unit, decimal unitPrice)
             {
-                RowNumber = 1, Description = "خدمات پس از فروش - ساعت کار و سفر " + row.Number, Quantity = billableHours, Unit = "ساعت", UnitPrice = row.BillableLabourRateRial.Value,
-                Discount = discount, Amount = amount, VatRatePercent = rate.Value, VatAmount = vat, Total = amount + vat,
-            });
-            invoice.NetAmount = amount; invoice.DiscountAmount = discount; invoice.VatAmount = vat; invoice.GrossAmount = amount + vat; invoice.ReceivableAmount = amount + vat;
+                var (_, discount, amount) = SlText.LineAmount(quantity, unitPrice, 0);
+                decimal vat = SlText.R0(amount * rate.Value / 100m);
+                invoice.Lines.Add(new FnSalesInvoiceLine
+                {
+                    RowNumber = ++rowNumber, Description = description, ItemCode = itemCode, Quantity = quantity, Unit = unit, UnitPrice = unitPrice,
+                    Discount = discount, Amount = amount, VatRatePercent = rate.Value, VatAmount = vat, Total = amount + vat,
+                });
+            }
+            if (billableHours > 0) AddLine("خدمات پس از فروش - ساعت کار و سفر " + row.Number, null, billableHours, "ساعت", row.BillableLabourRateRial.Value);
+            foreach (var p in priced) AddLine(p.Item?.Title ?? "قطعه یدکی", p.Item?.Code, p.Quantity, p.Item?.Unit, p.Price.Value);
+            invoice.NetAmount = invoice.Lines.Sum(l => l.Amount); invoice.DiscountAmount = invoice.Lines.Sum(l => l.Discount); invoice.VatAmount = invoice.Lines.Sum(l => l.VatAmount);
+            invoice.GrossAmount = invoice.NetAmount + invoice.VatAmount; invoice.ReceivableAmount = invoice.GrossAmount;
             _uow.Set<FnSalesInvoice>().Add(invoice);
-            bool hasParts = row.PartsAmount != 0;
-            row.DraftNote = hasParts ? "قطعات مصرفی در فاکتور نیامده است؛ قیمت‌گذاری قطعات را فروش به فاکتور اضافه می‌کند." : null;
+            row.DraftNote = null;
             return invoice;
         }
     }

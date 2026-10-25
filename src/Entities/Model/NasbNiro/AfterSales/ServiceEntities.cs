@@ -122,8 +122,7 @@ namespace Entities.Model.NasbNiro.AfterSales
         public string Resolution { get; set; }
         public DateTimeOffset? ClosedAt { get; set; }
 
-        /// <summary>The quality complaint made for this request (the complaint points back with its ServiceRequestId).</summary>
-        public int? ComplaintId { get; set; }
+        // The quality complaint made for this request points to the request with its own ServiceRequestId (one foreign key, no cycle); the request finds its complaint by that key.
 
         public string EditorUserIds { get; set; }
 
@@ -189,9 +188,13 @@ namespace Entities.Model.NasbNiro.AfterSales
         public DateTimeOffset? CostPostedAt { get; set; }
         public int? WarrantyEventId { get; set; }
 
+        /// <summary>Set together with <see cref="WarrantyEventId"/> so the close is one save (the id exists only after it).</summary>
+        public Finance.AccountingEvent WarrantyEvent { get; set; }
+
         // ----- billing (Billable)
         public decimal? BillableLabourRateRial { get; set; }
         public int? InvoiceId { get; set; }
+        public Finance.FnSalesInvoice Invoice { get; set; }
         public string DraftNote { get; set; }
 
         public string EditorUserIds { get; set; }

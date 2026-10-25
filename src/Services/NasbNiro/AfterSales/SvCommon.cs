@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.AfterSales;
 using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Sales;
 using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Finance;
 using Services.NasbNiro.Sales;
 
 namespace Services.NasbNiro.AfterSales
@@ -160,6 +162,9 @@ namespace Services.NasbNiro.AfterSales
             _ => "لغوشده",
         };
 
+        /// <summary>Persian date and the clock time (HH:mm), for the due times of the SLA and the other instants where the hour matters.</summary>
+        public static string Stamp(DateTime? d) => d.HasValue ? SlText.Date(d.Value) + " " + d.Value.ToString("HH:mm", CultureInfo.InvariantCulture) : null;
+
         public static string Survey(SlSurveyKind k) => k == SlSurveyKind.Delivery ? "تحویل" : "خدمات";
 
         public static string SurveyStatus(SlSurveyStatus s) => s switch
@@ -291,5 +296,94 @@ namespace Services.NasbNiro.AfterSales
     internal static class SvPrivacy
     {
         public static bool LabourProtected(int employees, int payrollEmployees) => Production.MfCostMask.IsProtected(employees, payrollEmployees);
+    }
+
+    /// <summary>The lengths of the columns of the service tables (the same figures as the model configuration): a longer text is refused with a message instead of failing in the database.</summary>
+    internal static class SvLimits
+    {
+        public const int Code = 50;
+        public const int Name = 200;
+        public const int Title = 300;
+        public const int Text = 1000;
+        public const int LongText = 4000;
+
+        private static string Digits(int n) => string.Concat(n.ToString(CultureInfo.InvariantCulture).Select(c => (char)('\u06f0' + (c - '0'))));
+
+        /// <summary>A Persian message when the (cleaned) text is longer than the column, else null.</summary>
+        public static string TooLong(string cleaned, int max, string label) =>
+            cleaned != null && cleaned.Length > max ? $"{label} بیش از اندازه طولانی است؛ حداکثر {Digits(max)} نویسه." : null;
+
+        /// <summary>The first message among several (text, column length, label) fields.</summary>
+        public static string First(params (string Text, int Max, string Label)[] fields)
+        {
+            foreach (var f in fields)
+            {
+                string m = TooLong(SlText.Clean(f.Text), f.Max, f.Label);
+                if (m != null) return m;
+            }
+            return null;
+        }
+
+        /// <summary>The text cut to the column (a text built by the system from a validated one).</summary>
+        public static string Cut(string text, int max) => text == null || text.Length <= max ? text : text.Substring(0, max);
+    }
+
+    /// <summary>Running the jobs by hand for a day in the future changes real data (visits drafted, agreements expired), so it needs the switch Service:AllowFutureAsOf.</summary>
+    internal static class SvJobsGuard
+    {
+        public const string AllowFutureKey = "Service:AllowFutureAsOf";
+
+        public static string Refusal(DateTime asOf, DateTime today, bool allowFuture) =>
+            asOf.Date > today.Date && !allowFuture
+                ? "اجرای دستی کارها برای روزی در آینده داده‌های واقعی را عوض می‌کند و مجاز نیست؛ فقط وقتی تنظیم Service:AllowFutureAsOf روشن باشد (آزمایش) مجاز است."
+                : null;
+    }
+
+    /// <summary>A parts document of a service order against the state of the order.</summary>
+    internal static class SvDocumentRules
+    {
+        /// <summary>A draft parts document is confirmed only while the order is planned or in progress.</summary>
+        public static string CheckConfirm(SvOrderStatus status, string orderNumber) =>
+            status == SvOrderStatus.Planned || status == SvOrderStatus.InProgress
+                ? null
+                : $"دستور خدمات {orderNumber} در وضعیت «{SvText.OrderStatus(status)}» است و سند قطعات آن تأیید نمی‌شود.";
+
+        /// <summary>A confirmed parts document is cancelled only while its order is not closed (the cost is posted at the close).</summary>
+        public static string CheckCancel(SvOrderStatus status, string orderNumber) =>
+            status == SvOrderStatus.Closed
+                ? $"دستور خدمات {orderNumber} بسته شده و هزینه‌ی قطعات آن ثبت شده است؛ سند قطعات آن باطل نمی‌شود."
+                : null;
+    }
+
+    /// <summary>The accounting event of a warranty or goodwill order. Labour absorbed goes to its own service account (70113, not the production labour), the parts left on site are cost of sales (as their delivery document posted) and the parts consumed are material expense. When the labour is one or two people's pay the labour and the parts are one amount on one line each side, so no line shows the labour alone.</summary>
+    internal static class SvPosting
+    {
+        public static List<(string Role, decimal Debit, decimal Credit, string Description)> WarrantyLines(bool warranty, decimal labour, decimal partsConsumed, decimal partsLeftOnSite, bool labourProtected, string number)
+        {
+            decimal total = labour + partsConsumed + partsLeftOnSite;
+            var lines = new List<(string, decimal, decimal, string)>
+            {
+                (warranty ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, total, 0m, "هزینه خدمات " + (warranty ? "گارانتی" : "حسن نیت") + " " + number),
+            };
+            if (labourProtected)
+            {
+                lines.Add((AccountRoles.ServiceLabourAbsorbed, 0m, total, "هزینه جذب‌شده در خدمات " + number));
+                return lines;
+            }
+            if (labour != 0) lines.Add((AccountRoles.ServiceLabourAbsorbed, 0m, labour, "دستمزد جذب‌شده در خدمات " + number));
+            if (partsConsumed != 0) lines.Add((AccountRoles.MaterialExpense, 0m, partsConsumed, "قطعات مصرفی خدمات " + number));
+            if (partsLeftOnSite != 0) lines.Add((AccountRoles.Cogs, 0m, partsLeftOnSite, "قطعات باقی‌مانده در سایت خدمات " + number));
+            return lines;
+        }
+    }
+
+    /// <summary>The price of a spare part on the invoice of a billable order: the approved price list valid on the day (never an invented price).</summary>
+    internal static class SvPricing
+    {
+        /// <summary>The newest list (valid from, then id) that has a line for the item with a minimum quantity not above the quantity; within a list the highest minimum quantity wins.</summary>
+        public static decimal? PriceOf(IEnumerable<SlPriceList> lists, int itemId, decimal quantity) =>
+            lists.OrderByDescending(p => p.ValidFrom).ThenByDescending(p => p.Id)
+                .SelectMany(p => p.Lines.Where(x => x.ItemId == itemId && x.MinQuantity <= quantity).OrderByDescending(x => x.MinQuantity).Take(1))
+                .Select(x => (decimal?)x.UnitPrice).FirstOrDefault();
     }
 }

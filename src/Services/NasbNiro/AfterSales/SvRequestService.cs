@@ -74,6 +74,8 @@ namespace Services.NasbNiro.AfterSales
             var def = SvSettingKeys.All.FirstOrDefault(k => k.Key == dto.Key);
             if (def.Key == null) return Bad<SvSettingDto>("کلید تنظیم نامعتبر است.");
             string text = Clean(dto.Text);
+            string textTooLong = SvLimits.TooLong(text, SvLimits.Name, "مقدار تنظیم");
+            if (textTooLong != null) return Bad<SvSettingDto>(textTooLong);
             if ((dto.Key == SvSettingKeys.SurveyLeadDays || dto.Key == SvSettingKeys.VisitLeadDays) && (text == null || !int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n) || n < 0))
                 return Bad<SvSettingDto>("تعداد روز باید عدد صحیح غیرمنفی باشد.");
             if (dto.Key == SvSettingKeys.LabourWorkCenterCode && text != null && !await _uow.Set<Entities.Model.NasbNiro.Production.MfWorkCenter>().AnyAsync(w => w.Code == text && !w.Deleted, ct))
@@ -126,11 +128,12 @@ namespace Services.NasbNiro.AfterSales
         {
             List<int> customerIds = rows.Select(r => r.CustomerId).Distinct().ToList();
             List<int> unitIds = rows.Where(r => r.UnitId.HasValue).Select(r => r.UnitId.Value).Distinct().ToList();
-            List<int> complaintIds = rows.Where(r => r.ComplaintId.HasValue).Select(r => r.ComplaintId.Value).Distinct().ToList();
             List<int> ids = rows.Select(r => r.Id).ToList();
             Dictionary<int, string> customers = await _uow.Set<FnCustomer>().AsNoTracking().Where(c => customerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
             Dictionary<int, string> units = await _uow.Set<SvInstalledUnit>().AsNoTracking().Where(u => unitIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Tag, ct);
-            Dictionary<int, string> complaints = await _uow.Set<CustomerComplaint>().AsNoTracking().Where(c => complaintIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Number, ct);
+            // the complaint points to its request (one complaint per request); the request finds it by that key
+            Dictionary<int, (int Id, string Number)> complaints = (await _uow.Set<CustomerComplaint>().AsNoTracking().Where(c => c.ServiceRequestId != null && ids.Contains(c.ServiceRequestId.Value))
+                .Select(c => new { RequestId = c.ServiceRequestId.Value, c.Id, c.Number }).ToListAsync(ct)).ToDictionary(c => c.RequestId, c => (c.Id, c.Number));
             Dictionary<int, int> orderCounts = (await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => !o.Deleted && o.RequestId != null && ids.Contains(o.RequestId.Value)).GroupBy(o => o.RequestId.Value)
                 .Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.N);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => r.AssignedToUserId), ct);
@@ -145,11 +148,11 @@ namespace Services.NasbNiro.AfterSales
                     UnitTag = r.UnitId.HasValue ? units.GetValueOrDefault(r.UnitId.Value) : null, Channel = r.Channel, ReceivedAt = r.ReceivedAt, ReceivedAtText = SlText.Date(r.ReceivedAt) + " " + r.ReceivedAt.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
                     Description = r.Description, Type = r.Type, TypeText = SvText.RequestType(r.Type), Priority = r.Priority, PriorityText = SvText.Priority(r.Priority), ProductNonconformity = r.ProductNonconformity,
                     Status = r.Status, StatusText = SvText.RequestStatus(r.Status),
-                    ResponseDue = r.ResponseDue, ResponseDueText = SlText.Date(r.ResponseDue), ResolutionDue = r.ResolutionDue, ResolutionDueText = SlText.Date(r.ResolutionDue), SlaMissing = !r.ResponseDue.HasValue,
-                    AssignedToUserId = r.AssignedToUserId, AssignedToName = names.Name(r.AssignedToUserId), FirstResponseAt = r.FirstResponseAt, FirstResponseAtText = SlText.Date(r.FirstResponseAt),
-                    ResolvedAt = r.ResolvedAt, ResolvedAtText = SlText.Date(r.ResolvedAt), Resolution = r.Resolution,
+                    ResponseDue = r.ResponseDue, ResponseDueText = SvText.Stamp(r.ResponseDue), ResolutionDue = r.ResolutionDue, ResolutionDueText = SvText.Stamp(r.ResolutionDue), SlaMissing = !r.ResponseDue.HasValue,
+                    AssignedToUserId = r.AssignedToUserId, AssignedToName = names.Name(r.AssignedToUserId), FirstResponseAt = r.FirstResponseAt, FirstResponseAtText = SvText.Stamp(r.FirstResponseAt),
+                    ResolvedAt = r.ResolvedAt, ResolvedAtText = SvText.Stamp(r.ResolvedAt), Resolution = r.Resolution,
                     ResponseBreached = respB, ResolutionBreached = resB, Breached = !done && (respB || resB),
-                    ComplaintId = r.ComplaintId, ComplaintNumber = r.ComplaintId.HasValue ? complaints.GetValueOrDefault(r.ComplaintId.Value) : null,
+                    ComplaintId = complaints.TryGetValue(r.Id, out var cp) ? cp.Id : (int?)null, ComplaintNumber = complaints.TryGetValue(r.Id, out var cn) ? cn.Number : null,
                     OrderCount = orderCounts.GetValueOrDefault(r.Id), RowVersion = SlConcurrency.Text(r.RowVersion),
                 };
             }).ToList();
@@ -185,6 +188,8 @@ namespace Services.NasbNiro.AfterSales
         {
             if (!_user.IsInRole(SvRoles.Writers)) return Bad<SvRequestDto>(SlText.NotAllowed);
             if (dto == null || Clean(dto.Description) == null) return Bad<SvRequestDto>("شرح درخواست را وارد کنید.");
+            string tooLong = SvLimits.First((dto.Description, SvLimits.LongText, "شرح درخواست"), (dto.Channel, SvLimits.Name, "کانال دریافت"));
+            if (tooLong != null) return Bad<SvRequestDto>(tooLong);
             if (!Enum.IsDefined(typeof(SvRequestType), dto.Type) || !Enum.IsDefined(typeof(SvPriority), dto.Priority)) return Bad<SvRequestDto>(SlText.InvalidData);
             if (!await _uow.Set<FnCustomer>().AnyAsync(c => c.Id == dto.CustomerId, ct)) return Bad<SvRequestDto>("مشتری پیدا نشد.");
             if (dto.ContactId.HasValue && !await _uow.Set<SlContact>().AnyAsync(c => c.Id == dto.ContactId.Value && c.CustomerId == dto.CustomerId && !c.Deleted, ct)) return Bad<SvRequestDto>("مخاطب پیدا نشد یا مال این مشتری نیست.");
@@ -194,18 +199,21 @@ namespace Services.NasbNiro.AfterSales
                 if (!await _uow.Set<SvInstalledUnit>().AnyAsync(u => u.Id == dto.UnitId.Value && !u.Deleted, ct)) return Bad<SvRequestDto>("واحد نصب‌شده پیدا نشد.");
                 if (unitCustomer.HasValue && unitCustomer.Value != dto.CustomerId) return Bad<SvRequestDto>("این واحد مال مشتری انتخاب‌شده نیست.");
             }
-            DateTime received = dto.ReceivedAt ?? DateTime.Now;
             DateTimeOffset now = DateTimeOffset.Now;
             SvServiceRequest row;
+            DateTime received;
             if (dto.Id.HasValue)
             {
                 row = await _uow.Set<SvServiceRequest>().FirstOrDefaultAsync(r => r.Id == dto.Id.Value && !r.Deleted, ct);
                 if (row == null) return SlText.NotFound<SvRequestDto>("درخواست خدمات پیدا نشد.");
                 if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SvRequestDto>(SlText.InvalidData);
                 if (row.Status != SvRequestStatus.Open) return Bad<SvRequestDto>("درخواستی که واگذار شده ویرایش نمی‌شود.");
+                // an edit without a received time keeps the original one (the SLA clock does not restart)
+                received = dto.ReceivedAt ?? row.ReceivedAt;
             }
             else
             {
+                received = dto.ReceivedAt ?? DateTime.Now;
                 row = new SvServiceRequest { Number = await InventoryNumbers.NextNumberAsync(_uow, SvNumbers.Request, "SVR", received, ct), Status = SvRequestStatus.Open, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<SvServiceRequest>().Add(row);
             }
@@ -218,7 +226,8 @@ namespace Services.NasbNiro.AfterSales
             row.ModifyDate = now; row.ModifierUserId = Me;
 
             // a complaint or a product nonconformity opens the quality complaint, linked both ways
-            bool needsComplaint = (dto.Type == SvRequestType.Complaint || dto.ProductNonconformity) && !row.ComplaintId.HasValue;
+            // (a request that has one is never given a second: the lookup is by the complaint's key to the request)
+            bool needsComplaint = (dto.Type == SvRequestType.Complaint || dto.ProductNonconformity) && (!dto.Id.HasValue || !await _uow.Set<CustomerComplaint>().AnyAsync(c => c.ServiceRequestId == row.Id, ct));
             CustomerComplaint complaint = null;
             if (needsComplaint)
             {
@@ -228,19 +237,15 @@ namespace Services.NasbNiro.AfterSales
                 complaint = new CustomerComplaint
                 {
                     Number = await InventoryNumbers.NextNumberAsync(_uow, QualityNumbers.Complaint, "CC", received, ct), Status = ComplaintStatus.Received, CreateDate = now, CreatorUserId = Me,
-                    ContractId = contractId, WorkOrderId = workOrderId, ReceivedDate = received, Channel = row.Channel, Description = $"[{row.Number}] {row.Description}",
+                    ContractId = contractId, WorkOrderId = workOrderId, ReceivedDate = received, Channel = row.Channel, Description = SvLimits.Cut($"[{row.Number}] {row.Description}", SvLimits.LongText),
                     Severity = Entities.Model.NasbNiro.Inventory.NcrSeverity.NotClassified, ResponseDue = received.AddDays((int)settings[QualitySettingKeys.ComplaintResponseDays]), ModifyDate = now, ModifierUserId = Me,
                     ServiceRequest = row,
                 };
                 _uow.Set<CustomerComplaint>().Add(complaint);
             }
+            // one save: the complaint points to the request through its navigation, so the request and its complaint are written together
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<SvRequestDto>(SlText.Concurrency); }
-            if (complaint != null)
-            {
-                row.ComplaintId = complaint.Id;
-                await _uow.SaveChangesAsync(ct);
-            }
             await SvGates.AssignAsync(_notify, row, ct);
             return await GetRequestAsync(row.Id, null, ct);
         }
@@ -274,6 +279,8 @@ namespace Services.NasbNiro.AfterSales
                     break;
                 case "resolve":
                     if (Clean(dto.Resolution) == null) return Bad<SvRequestDto>("شرح راه‌حل را وارد کنید.");
+                    string resolutionTooLong = SvLimits.TooLong(Clean(dto.Resolution), SvLimits.LongText, "شرح راه‌حل");
+                    if (resolutionTooLong != null) return Bad<SvRequestDto>(resolutionTooLong);
                     if (row.Status == SvRequestStatus.Resolved) return Bad<SvRequestDto>("درخواست قبلاً رفع شده است.");
                     if (await _uow.Set<SvServiceOrder>().AnyAsync(o => o.RequestId == row.Id && !o.Deleted && o.Status != SvOrderStatus.Closed && o.Status != SvOrderStatus.Cancelled, ct))
                         return Bad<SvRequestDto>("این درخواست دستور خدماتِ باز دارد؛ ابتدا آن را ببندید یا لغو کنید.");

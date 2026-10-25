@@ -108,6 +108,7 @@ namespace Services.NasbNiro.AfterSales
                         Id = s.Id, ItemId = s.ItemId, ItemCode = items.GetValueOrDefault(s.ItemId)?.Code, ItemName = items.GetValueOrDefault(s.ItemId)?.Title, Quantity = s.Quantity, Source = s.Source, Note = s.Note,
                     }).ToList(),
                     SpareListDeliverableId = list?.Id, SpareListDocumentNumber = list?.DocumentNumber, SpareListDocumentId = list?.DocumentId,
+                    SpareListSource = list != null ? SvSpareSource.MdrList : (SvSpareSource?)null, SpareListSourceText = list != null ? "فهرست قطعات یدکی MDR دستور کار" : null,
                     RowVersion = SlConcurrency.Text(r.RowVersion),
                 };
             }).ToList();
@@ -174,6 +175,10 @@ namespace Services.NasbNiro.AfterSales
         {
             if (!_user.IsInRole(SvRoles.Writers)) return Bad<SvUnitDto>(SlText.NotAllowed);
             if (dto == null || Clean(dto.Title) == null) return Bad<SvUnitDto>("عنوان واحد را وارد کنید.");
+            string tooLong = SvLimits.First((dto.Title, SvLimits.Title, "عنوان واحد"), (dto.Tag, SvLimits.Name, "شماره tag"), (dto.Note, SvLimits.Text, "یادداشت واحد"));
+            if (tooLong != null) return Bad<SvUnitDto>(tooLong);
+            string spareTooLong = (dto.Spares ?? new List<SvSaveSpareDto>()).Where(x => x != null).Select(x => SvLimits.TooLong(Clean(x.Note), SvLimits.Text, "یادداشت قطعه یدکی")).FirstOrDefault(m => m != null);
+            if (spareTooLong != null) return Bad<SvUnitDto>(spareTooLong);
             if (dto.WarrantyMonths.HasValue && dto.WarrantyMonths.Value <= 0) return Bad<SvUnitDto>("ماه‌های گارانتی باید بیشتر از صفر باشد.");
             if (dto.WarrantyStart.HasValue != dto.WarrantyEnd.HasValue) return Bad<SvUnitDto>("شروع و پایان گارانتی را با هم وارد کنید.");
             if (dto.WarrantyStart.HasValue && dto.WarrantyEnd.Value.Date < dto.WarrantyStart.Value.Date) return Bad<SvUnitDto>("پایان گارانتی قبل از شروع آن است.");

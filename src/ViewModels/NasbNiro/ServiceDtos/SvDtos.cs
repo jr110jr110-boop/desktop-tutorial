@@ -112,6 +112,10 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public int? SpareListDeliverableId { get; set; }
         public string SpareListDocumentNumber { get; set; }
         public Guid? SpareListDocumentId { get; set; }
+
+        /// <summary>MdrList when the contract's «spare parts list» document of the MDR was found (title match); the manual lines of <see cref="Spares"/> are Manual. Empty when there is no such document.</summary>
+        public SvSpareSource? SpareListSource { get; set; }
+        public string SpareListSourceText { get; set; }
         public string RowVersion { get; set; }
     }
 

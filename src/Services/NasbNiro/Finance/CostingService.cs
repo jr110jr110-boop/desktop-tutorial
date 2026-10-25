@@ -94,6 +94,9 @@ namespace Services.NasbNiro.Finance
         public const string WarrantyProvision = "WarrantyProvision";      // ذخیره تضمین محصولات
         public const string WarrantyExpense = "WarrantyExpense";          // هزینه گارانتی
 
+        /// <summary>★ دستمزد جذب‌شده خدمات پس از فروش: جدا از LabourAbsorbed تولید (70102) تا هزینه‌ی دستمزد تعمیرات گارانتی با کالای در جریان ساخت قاطی نشود. فرض: حسابدار تایید کند.</summary>
+        public const string ServiceLabourAbsorbed = "ServiceLabourAbsorbed";
+
         public static string InventoryOf(string itemCode)
         {
             string prefix = itemCode != null && itemCode.Length >= 2 && char.IsDigit(itemCode[0]) && char.IsDigit(itemCode[1]) ? itemCode.Substring(0, 2) : null;
@@ -181,6 +184,7 @@ namespace Services.NasbNiro.Finance
             yield return (OverheadAbsorbed, "سربار ساخت جذب‌شده");
             yield return (WarrantyProvision, "ذخیره تضمین محصولات");
             yield return (WarrantyExpense, "هزینه گارانتی");
+            yield return (ServiceLabourAbsorbed, "دستمزد جذب‌شده خدمات پس از فروش");
         }
     }
 

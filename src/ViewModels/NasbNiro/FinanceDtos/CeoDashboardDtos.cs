@@ -96,6 +96,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int ServiceUnitsInWarranty { get; set; }
         /// <summary>Warranty cost of the closed warranty orders since the first day of the Persian year (the CEO sees payroll-based labour).</summary>
         public decimal? ServiceWarrantyCostYtd { get; set; }
+
+        /// <summary>True when the warranty cost is empty because an order's labour is one or two people's pay and the reader is not payroll, finance manager or CEO.</summary>
+        public bool ServiceWarrantyCostHidden { get; set; }
         public int ServiceGoodwillWaiting { get; set; }
         public decimal? ServiceSurveyAverageScore { get; set; }
 

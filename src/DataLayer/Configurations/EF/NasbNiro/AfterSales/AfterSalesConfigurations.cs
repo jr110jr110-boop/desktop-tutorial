@@ -83,12 +83,11 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SlContact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SvInstalledUnit>().WithMany().HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<CustomerComplaint>().WithMany().HasForeignKey(x => x.ComplaintId).OnDelete(DeleteBehavior.Restrict);
             });
-            // the complaint points back to its request
+            // the complaint points to its request (the only key between the two; the request finds the complaint by it). One complaint per request.
             builder.Entity<CustomerComplaint>(b =>
             {
-                b.HasIndex(x => x.ServiceRequestId);
+                b.HasIndex(x => x.ServiceRequestId).IsUnique().HasFilter("[ServiceRequestId] IS NOT NULL");
                 b.HasOne(x => x.ServiceRequest).WithMany().HasForeignKey(x => x.ServiceRequestId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<SlActivity>(b =>
@@ -126,8 +125,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<SvContract>().WithMany().HasForeignKey(x => x.LtsaContractId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<FnSalesInvoice>().WithMany().HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<AccountingEvent>().WithMany().HasForeignKey(x => x.WarrantyEventId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Invoice).WithMany().HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.WarrantyEvent).WithMany().HasForeignKey(x => x.WarrantyEventId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<SvOrderEngineer>(b =>
             {

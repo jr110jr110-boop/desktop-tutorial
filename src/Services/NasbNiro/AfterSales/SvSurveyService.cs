@@ -9,6 +9,7 @@ using Entities.Model.NasbNiro.AfterSales;
 using Entities.Model.NasbNiro.Finance;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
+using Services.NasbNiro.Office;
 using Services.NasbNiro.Sales;
 using ViewModels.NasbNiro.Pagination;
 using ViewModels.NasbNiro.ServiceDtos;
@@ -62,11 +63,13 @@ namespace Services.NasbNiro.AfterSales
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
+        private readonly INotificationService _notify;
 
-        public SvSurveyService(IUnitOfWork uow, IInventoryUserContext user)
+        public SvSurveyService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _notify = notify;
         }
 
         private static ResponseDto<T> Bad<T>(string m) => SlText.Bad<T>(m);
@@ -134,6 +137,7 @@ namespace Services.NasbNiro.AfterSales
             row.ModifyDate = now; row.ModifierUserId = _user.UserId;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<SlSurveyDto>(SlText.Concurrency); }
+            await SvGates.SurveyAsync(_notify, row, ct);
             return await GetSurveyAsync(row.Id, ct);
         }
 
@@ -143,6 +147,8 @@ namespace Services.NasbNiro.AfterSales
             if (dto == null || dto.Scores == null || dto.Scores.Count == 0) return Bad<SlSurveyDto>("امتیاز حداقل یک پرسش را وارد کنید.");
             if (dto.Scores.Any(s => !SvSurveyMath.ValidScore(s.Score))) return Bad<SlSurveyDto>("امتیاز هر پرسش باید بین ۱ تا ۵ باشد.");
             if (dto.Scores.GroupBy(s => s.RowNumber).Any(g => g.Count() > 1)) return Bad<SlSurveyDto>("هر پرسش فقط یک امتیاز دارد.");
+            string commentsTooLong = SvLimits.TooLong(SlText.Clean(dto.Comments), SvLimits.LongText, "توضیحات نظرسنجی");
+            if (commentsTooLong != null) return Bad<SlSurveyDto>(commentsTooLong);
             SlSurvey row = await _uow.Set<SlSurvey>().Include(s => s.Answers).FirstOrDefaultAsync(s => s.Id == dto.Id && !s.Deleted, ct);
             if (row == null) return SlText.NotFound<SlSurveyDto>("نظرسنجی پیدا نشد.");
             if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SlSurveyDto>(SlText.InvalidData);
@@ -158,6 +164,7 @@ namespace Services.NasbNiro.AfterSales
             row.Comments = SlText.Clean(dto.Comments); row.Status = SlSurveyStatus.Answered; row.AnsweredAt = now; row.ModifyDate = now; row.ModifierUserId = _user.UserId;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<SlSurveyDto>(SlText.Concurrency); }
+            await SvGates.SurveyAsync(_notify, row, ct);
             return await GetSurveyAsync(row.Id, ct);
         }
     }

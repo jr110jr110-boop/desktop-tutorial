@@ -10,6 +10,7 @@ using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.Procurement;
+using Services.NasbNiro.Inventory;
 using Microsoft.EntityFrameworkCore;
 using ViewModels.NasbNiro.FinanceDtos;
 
@@ -32,10 +33,12 @@ namespace Services.NasbNiro.Finance
         private readonly Quality.IQualityDashboardService _quality;
         private readonly ProjectControl.IPcReportService _projectControl;
         private readonly IFinanceDashboardService _finance;
+        private readonly IInventoryUserContext _user;
 
         public CeoDashboardService(IUnitOfWork uow, Quality.IQualityDashboardService quality, ProjectControl.IPcReportService projectControl,
-            IFinanceDashboardService finance)
+            IFinanceDashboardService finance, IInventoryUserContext user)
         {
+            _user = user ?? throw new ArgumentNullException(nameof(user));
             _finance = finance ?? throw new ArgumentNullException(nameof(finance));
             _projectControl = projectControl ?? throw new ArgumentNullException(nameof(projectControl));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
@@ -196,11 +199,13 @@ namespace Services.NasbNiro.Finance
             Alert(sales.BelowCostProposals > 0, "danger", $"{sales.BelowCostProposals} پیشنهاد با قیمت کمتر از بهای تمام‌شده منتظر تصمیم مدیرعامل است", "/sales/proposals");
             Alert(sales.BidDecisionsWaiting > 0, "info", $"{sales.BidDecisionsWaiting} استعلام منتظر تصمیم شرکت یا عدم شرکت است", "/sales/bid-decisions");
             // after-sales service: open requests, SLA breaches, units in warranty, the warranty cost of the year, goodwill waiting for the CEO, the satisfaction average
-            var service = await AfterSales.SvDashboardService.CoreAsync(_uow, productionAsOf ?? DateTime.Now, true, ct);
+            // the warranty cost is masked for a reader (PMO) who is not payroll, finance manager or CEO when an order's labour came from fewer than three people
+            var service = await AfterSales.SvDashboardService.CoreAsync(_uow, productionAsOf ?? DateTime.Now, _user.IsInRole(AfterSales.SvRoles.PayrollSeers), ct);
             d.ServiceOpenRequests = service.OpenRequests;
             d.ServiceSlaBreaches = service.SlaBreaches;
             d.ServiceUnitsInWarranty = service.UnitsInWarranty;
             d.ServiceWarrantyCostYtd = service.WarrantyCostYtd;
+            d.ServiceWarrantyCostHidden = service.WarrantyCostHidden;
             d.ServiceGoodwillWaiting = service.GoodwillWaiting;
             d.ServiceSurveyAverageScore = service.SurveyAverageScore;
             Alert(service.SlaBreaches > 0, "danger", $"{service.SlaBreaches} درخواست خدمات پس از فروش از موعد SLA گذشته است", "/service/requests");

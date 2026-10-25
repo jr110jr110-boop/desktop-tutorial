@@ -24,6 +24,16 @@ namespace Services.NasbNiro.AfterSales
             OfficeGates.SyncAsync(notify, "sv:close:" + o.Id, o.Status == SvOrderStatus.InProgress && !o.Deleted, "service", "order-close", o.Id,
                 $"دستور خدمات {o.Number} در حال انجام است؛ پس از پیوست گزارش امضاشده ببندید", "/service/orders/" + o.Id, SvRoles.Service, ct);
 
+        /// <summary>A visit order the system drafted from a service agreement waits for service to choose the engineers and confirm it.</summary>
+        public static Task VisitAsync(INotificationService notify, SvServiceOrder o, CancellationToken ct) =>
+            OfficeGates.SyncAsync(notify, "sv:visit:" + o.Id, o.Status == SvOrderStatus.Draft && o.LtsaContractId.HasValue && !o.Deleted, "service", "visit-confirm", o.Id,
+                $"دستور خدمات {o.Number} پیش‌نویس سیستم از بازدید دوره‌ای است؛ مهندسان را انتخاب و دستور را تأیید کنید", "/service/orders/" + o.Id, SvRoles.Service, ct, o.PlannedStart);
+
+        /// <summary>A survey the system drafted waits for a person to send it to the customer (or to skip it).</summary>
+        public static Task SurveyAsync(INotificationService notify, SlSurvey s, CancellationToken ct) =>
+            OfficeGates.SyncAsync(notify, "sv:survey:" + s.Id, s.Status == SlSurveyStatus.Drafted && !s.Deleted, "service", "survey-send", s.Id,
+                $"نظرسنجی {s.Number} پیش‌نویس سیستم است؛ برای مشتری ارسال یا رد کنید", "/service/surveys/" + s.Id, SvRoles.Service + ",SALES", ct);
+
         public static Task ContractAsync(INotificationService notify, SvContract c, CancellationToken ct) =>
             OfficeGates.SyncAsync(notify, "sv:ltsa:" + c.Id, c.Status == SvContractStatus.Draft && !c.Deleted, "service", "ltsa-activate", c.Id,
                 $"قرارداد خدمات {c.Number} منتظر فعال‌سازی توسط شخص دیگری است", "/service/contracts/" + c.Id, SvRoles.Service, ct);

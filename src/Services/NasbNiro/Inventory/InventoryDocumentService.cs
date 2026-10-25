@@ -792,6 +792,12 @@ namespace Services.NasbNiro.Inventory
 
             string headerError = CheckBeforeConfirm(document) ?? await CheckPurchaseOrderAsync(document, cancellationToken);
             if (headerError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(headerError);
+            if (document.ServiceOrderId.HasValue)
+            {
+                // the parts of an after-sales order are confirmed only while the order is planned or in progress
+                string serviceRefusal = await AfterSales.SvDocumentLink.CheckConfirmAsync(_uow, document, cancellationToken);
+                if (serviceRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(serviceRefusal);
+            }
             // customer delivery needs a signed release note for the work order (API Q1 / ISO 9001 8.6)
             // (a delivery of spare parts against a sales order has no work order: the sales order is checked instead)
             if (document.Type == InventoryDocumentType.CustomerDelivery && document.SalesOrderId.HasValue)
@@ -1403,6 +1409,12 @@ namespace Services.NasbNiro.Inventory
                 // refused before anything is changed: the invoice of the delivery is already approved or posted
                 string salesRefusal = await Sales.SlFulfilment.CheckCancelAsync(_uow, document, cancellationToken);
                 if (salesRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesRefusal);
+            }
+            if (document.ServiceOrderId.HasValue)
+            {
+                // refused before anything is changed: the order is closed and its cost and warranty event came from this document
+                string serviceRefusal = await AfterSales.SvDocumentLink.CheckCancelAsync(_uow, document, cancellationToken);
+                if (serviceRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(serviceRefusal);
             }
             List<QcInspection> inspections = await _uow.Set<QcInspection>()
                 .Where(q => q.ReceiptDocumentId == id && !q.Deleted).ToListAsync(cancellationToken);

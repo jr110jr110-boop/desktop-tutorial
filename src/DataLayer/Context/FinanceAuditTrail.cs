@@ -109,7 +109,7 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.AfterSales.SvSetting), null },
             { typeof(Entities.Model.NasbNiro.AfterSales.SvSlaRule), null },
             { typeof(Entities.Model.NasbNiro.AfterSales.SvInstalledUnit), new[] { "Tag", "CustomerId", "SiteId", "ContractId", "WarrantyMonths", "WarrantyStart", "WarrantyEnd", "WarrantySource", "Decommissioned", "IsConfirmed", "ConfirmedByUserId" } },
-            { typeof(Entities.Model.NasbNiro.AfterSales.SvServiceRequest), new[] { "CustomerId", "UnitId", "Type", "Priority", "Status", "ResponseDue", "ResolutionDue", "AssignedToUserId", "ComplaintId", "ClosedAt" } },
+            { typeof(Entities.Model.NasbNiro.AfterSales.SvServiceRequest), new[] { "CustomerId", "UnitId", "Type", "Priority", "Status", "ResponseDue", "ResolutionDue", "AssignedToUserId", "ClosedAt" } },
             { typeof(Entities.Model.NasbNiro.AfterSales.SvServiceOrder), new[] { "Status", "UnitId", "RequestId", "Decision", "CauseIsMisuse", "DecidedByUserId", "GoodwillRequestedByUserId", "ReportDocumentId", "ClosedByUserId", "InvoiceId", "WarrantyEventId" } },
             { typeof(Entities.Model.NasbNiro.AfterSales.SvContract), new[] { "Status", "StartDate", "EndDate", "VisitIntervalMonths", "PriceRial", "ActivatedByUserId" } },
             { typeof(Entities.Model.NasbNiro.AfterSales.SlSurvey), new[] { "Status", "Kind", "AverageScore" } },

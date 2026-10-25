@@ -27,5 +27,21 @@ namespace Services.NasbNiro.AfterSales
             if (dto.Type == InventoryDocumentType.Issue && string.IsNullOrWhiteSpace(dto.CostCenter)) dto.CostCenter = order.CostCenterCode;
             return null;
         }
+
+        /// <summary>Confirming a parts document: the order must still be planned or in progress (its cost is posted when the order closes).</summary>
+        public static async Task<string> CheckConfirmAsync(IUnitOfWork uow, InventoryDocument document, CancellationToken ct)
+        {
+            if (!document.ServiceOrderId.HasValue) return null;
+            var order = await uow.Set<SvServiceOrder>().AsNoTracking().Where(o => o.Id == document.ServiceOrderId.Value).Select(o => new { o.Number, o.Status }).FirstOrDefaultAsync(ct);
+            return order == null ? "دستور خدماتِ این سند پیدا نشد." : SvDocumentRules.CheckConfirm(order.Status, order.Number);
+        }
+
+        /// <summary>Cancelling a confirmed parts document: refused once the order is closed (its cost and event were posted from these documents).</summary>
+        public static async Task<string> CheckCancelAsync(IUnitOfWork uow, InventoryDocument document, CancellationToken ct)
+        {
+            if (!document.ServiceOrderId.HasValue) return null;
+            var order = await uow.Set<SvServiceOrder>().AsNoTracking().Where(o => o.Id == document.ServiceOrderId.Value).Select(o => new { o.Number, o.Status }).FirstOrDefaultAsync(ct);
+            return order == null ? null : SvDocumentRules.CheckCancel(order.Status, order.Number);
+        }
     }
 }

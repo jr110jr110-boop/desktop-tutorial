@@ -8,6 +8,7 @@ using DataLayer.Context;
 using Entities.Model.NasbNiro.AfterSales;
 using Entities.Model.NasbNiro.Finance;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Services.NasbNiro.Finance;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
@@ -37,12 +38,14 @@ namespace Services.NasbNiro.AfterSales
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly INotificationService _notify;
+        private readonly IConfiguration _configuration;
 
-        public SvContractService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify = null)
+        public SvContractService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify = null, IConfiguration configuration = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _notify = notify;
+            _configuration = configuration;
         }
 
         private int Me => _user.UserId;
@@ -98,6 +101,8 @@ namespace Services.NasbNiro.AfterSales
         {
             if (!_user.IsInRole(SvRoles.Writers)) return Bad<SvContractDto>(SlText.NotAllowed);
             if (dto == null || Clean(dto.Title) == null) return Bad<SvContractDto>("عنوان قرارداد خدمات را وارد کنید.");
+            string tooLong = SvLimits.First((dto.Title, SvLimits.Title, "عنوان قرارداد خدمات"), (dto.Scope, SvLimits.LongText, "دامنه‌ی قرارداد"));
+            if (tooLong != null) return Bad<SvContractDto>(tooLong);
             if (dto.EndDate.Date <= dto.StartDate.Date) return Bad<SvContractDto>("پایان قرارداد باید بعد از شروع آن باشد.");
             if (dto.VisitIntervalMonths <= 0) return Bad<SvContractDto>("فاصله‌ی بازدیدها (ماه) باید بیشتر از صفر باشد.");
             if (dto.PriceRial.HasValue && dto.PriceRial.Value < 0) return Bad<SvContractDto>("قیمت نمی‌تواند منفی باشد.");
@@ -168,7 +173,12 @@ namespace Services.NasbNiro.AfterSales
         public async Task<ResponseDto<SvJobsResultDto>> RunJobsAsync(SvJobsRunDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole("SERVICE,CEO")) return Bad<SvJobsResultDto>(SlText.NotAllowed);
-            return ResponseDtoHelper.Ok(await RunAsync((dto?.AsOf ?? DateTime.Today).Date, Me, ct));
+            DateTime asOf = (dto?.AsOf ?? DateTime.Today).Date;
+            // a day in the future changes real data (visits drafted, agreements expired): only when the switch is on (the smoke test turns it on)
+            bool allowFuture = string.Equals(_configuration?[SvJobsGuard.AllowFutureKey], "true", StringComparison.OrdinalIgnoreCase);
+            string refusal = SvJobsGuard.Refusal(asOf, DateTime.Today, allowFuture);
+            if (refusal != null) return Bad<SvJobsResultDto>(refusal);
+            return ResponseDtoHelper.Ok(await RunAsync(asOf, Me, ct));
         }
 
         public Task<SvJobsResultDto> RunNightlyAsync(CancellationToken ct) => RunAsync(DateTime.Today, 0, ct);
@@ -239,6 +249,12 @@ namespace Services.NasbNiro.AfterSales
             // 5) the units the system drafted at a handover wait in the inbox of service until a person confirms them (the handover itself runs in the project-control module, which has no inbox)
             List<SvInstalledUnit> waiting = await _uow.Set<SvInstalledUnit>().AsNoTracking().Where(u => !u.Deleted && !u.IsConfirmed && !u.Decommissioned).ToListAsync(ct);
             foreach (SvInstalledUnit u in waiting) await SvGates.UnitAsync(_notify, u, ct);
+
+            // 6) the visit orders and the surveys the system drafted wait for a person (confirm the engineers; send or skip), and their gates close when the person acted
+            List<SvServiceOrder> visitOrders = await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => !o.Deleted && o.LtsaContractId != null && o.Status == SvOrderStatus.Draft).ToListAsync(ct);
+            foreach (SvServiceOrder o in visitOrders) await SvGates.VisitAsync(_notify, o, ct);
+            List<SlSurvey> drafted = await _uow.Set<SlSurvey>().AsNoTracking().Where(x => !x.Deleted && x.Status == SlSurveyStatus.Drafted).ToListAsync(ct);
+            foreach (SlSurvey x in drafted) await SvGates.SurveyAsync(_notify, x, ct);
             return result;
         }
     }

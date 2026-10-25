@@ -4,6 +4,7 @@ using System.Linq;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.AfterSales;
 using Entities.Model.NasbNiro.Inventory;
+using Entities.Model.NasbNiro.Sales;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -131,6 +132,96 @@ namespace MsTests
             Assert.AreEqual(new DateTime(2026, 3, 21), SvPersianYear.Start(new DateTime(2026, 10, 25)));
             Assert.AreEqual(new DateTime(2026, 3, 21), SvPersianYear.Start(new DateTime(2026, 3, 21)));
             Assert.AreEqual(new DateTime(2025, 3, 21), SvPersianYear.Start(new DateTime(2026, 3, 20)));
+        }
+
+        [TestMethod]
+        public void Limits_Refuse_A_Text_Longer_Than_Its_Column_And_Cut_A_System_Text()
+        {
+            Assert.IsNull(SvLimits.TooLong(new string('x', 4000), SvLimits.LongText, "شرح"));
+            string msg = SvLimits.TooLong(new string('x', 4001), SvLimits.LongText, "شرح");
+            Assert.IsNotNull(msg);
+            StringAssert.Contains(msg, "حداکثر ۴۰۰۰ نویسه");
+            Assert.IsNull(SvLimits.TooLong(null, 10, "x"));
+            StringAssert.Contains(SvLimits.First(("ok", 10, "الف"), (new string('y', 301), SvLimits.Title, "عنوان")), "حداکثر ۳۰۰ نویسه");
+            Assert.IsNull(SvLimits.First(("ok", 10, "الف")));
+            Assert.AreEqual(4000, SvLimits.Cut(new string('z', 5000), 4000).Length);
+            Assert.AreEqual("abc", SvLimits.Cut("abc", 4000));
+        }
+
+        [TestMethod]
+        public void Jobs_Guard_Refuses_A_Future_Day_Unless_The_Test_Setting_Is_On()
+        {
+            var today = new DateTime(2026, 10, 25, 14, 0, 0);
+            Assert.IsNull(SvJobsGuard.Refusal(new DateTime(2026, 10, 25), today, false));
+            Assert.IsNull(SvJobsGuard.Refusal(new DateTime(2026, 10, 1), today, false));
+            Assert.IsNotNull(SvJobsGuard.Refusal(new DateTime(2026, 10, 26), today, false));
+            Assert.IsNull(SvJobsGuard.Refusal(new DateTime(2027, 1, 1), today, true));
+            Assert.AreEqual("Service:AllowFutureAsOf", SvJobsGuard.AllowFutureKey);
+        }
+
+        [TestMethod]
+        public void Parts_Documents_Follow_The_State_Of_Their_Order()
+        {
+            Assert.IsNull(SvDocumentRules.CheckConfirm(SvOrderStatus.Planned, "SVO-1"));
+            Assert.IsNull(SvDocumentRules.CheckConfirm(SvOrderStatus.InProgress, "SVO-1"));
+            Assert.IsNotNull(SvDocumentRules.CheckConfirm(SvOrderStatus.Draft, "SVO-1"));
+            Assert.IsNotNull(SvDocumentRules.CheckConfirm(SvOrderStatus.Closed, "SVO-1"));
+            Assert.IsNotNull(SvDocumentRules.CheckConfirm(SvOrderStatus.Cancelled, "SVO-1"));
+            Assert.IsNotNull(SvDocumentRules.CheckCancel(SvOrderStatus.Closed, "SVO-1"));
+            Assert.IsNull(SvDocumentRules.CheckCancel(SvOrderStatus.InProgress, "SVO-1"));
+            Assert.IsNull(SvDocumentRules.CheckCancel(SvOrderStatus.Planned, "SVO-1"));
+        }
+
+        [TestMethod]
+        public void Warranty_Event_Splits_The_Parts_Credit_And_Uses_The_Service_Labour_Account()
+        {
+            // O1 of the smoke: 12 h x 400,000 = 4,800,000 labour, 500,000 consumed, 80,000 left on site
+            var lines = SvPosting.WarrantyLines(true, 4800000m, 500000m, 80000m, false, "SVO-1");
+            Assert.AreEqual(4, lines.Count);
+            Assert.AreEqual(5380000m, lines.Where(l => l.Role == Services.NasbNiro.Finance.AccountRoles.WarrantyProvision).Sum(l => l.Debit));
+            Assert.AreEqual(4800000m, lines.Where(l => l.Role == Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed).Sum(l => l.Credit));
+            Assert.AreEqual(500000m, lines.Where(l => l.Role == Services.NasbNiro.Finance.AccountRoles.MaterialExpense).Sum(l => l.Credit));
+            Assert.AreEqual(80000m, lines.Where(l => l.Role == Services.NasbNiro.Finance.AccountRoles.Cogs).Sum(l => l.Credit));
+            Assert.AreEqual(lines.Sum(l => l.Debit), lines.Sum(l => l.Credit));
+            Assert.IsFalse(lines.Any(l => l.Role == Services.NasbNiro.Finance.AccountRoles.LabourAbsorbed));
+
+            // goodwill with labour only: the expense account against the service labour account, nothing else
+            var goodwill = SvPosting.WarrantyLines(false, 1200000m, 0m, 0m, false, "SVO-3");
+            Assert.AreEqual(2, goodwill.Count);
+            Assert.AreEqual(1200000m, goodwill.Single(l => l.Role == Services.NasbNiro.Finance.AccountRoles.WarrantyExpense).Debit);
+            Assert.AreEqual(1200000m, goodwill.Single(l => l.Role == Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed).Credit);
+        }
+
+        [TestMethod]
+        public void Warranty_Event_Of_A_Protected_Order_Is_One_Amount_On_One_Line_Each_Side()
+        {
+            var lines = SvPosting.WarrantyLines(true, 480000m, 500000m, 80000m, true, "SVO-4");
+            Assert.AreEqual(2, lines.Count);
+            Assert.AreEqual(1060000m, lines[0].Debit);
+            Assert.AreEqual(1060000m, lines[1].Credit);
+            Assert.AreEqual(Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed, lines[1].Role);
+            Assert.IsFalse(lines.Any(l => l.Credit == 480000m));
+        }
+
+        [TestMethod]
+        public void Spare_Part_Price_Comes_From_The_Newest_List_And_The_Highest_Quantity_Tier()
+        {
+            var older = new SlPriceList { Id = 1, ValidFrom = new DateTime(2026, 1, 1), Lines = new List<SlPriceListLine> { new SlPriceListLine { ItemId = 7, UnitPrice = 100m, MinQuantity = 0m } } };
+            var newer = new SlPriceList { Id = 2, ValidFrom = new DateTime(2026, 6, 1), Lines = new List<SlPriceListLine> { new SlPriceListLine { ItemId = 7, UnitPrice = 300m, MinQuantity = 0m }, new SlPriceListLine { ItemId = 7, UnitPrice = 250m, MinQuantity = 10m } } };
+            var lists = new[] { older, newer };
+            Assert.AreEqual(300m, SvPricing.PriceOf(lists, 7, 1m));
+            Assert.AreEqual(250m, SvPricing.PriceOf(lists, 7, 10m));
+            Assert.AreEqual(250m, SvPricing.PriceOf(lists, 7, 25m));
+            Assert.IsNull(SvPricing.PriceOf(lists, 8, 1m), "an item without a price is never priced by guess");
+            Assert.IsNull(SvPricing.PriceOf(new SlPriceList[0], 7, 1m));
+        }
+
+        [TestMethod]
+        public void Stamp_Carries_The_Persian_Date_And_The_Clock_Time()
+        {
+            string stamp = SvText.Stamp(new DateTime(2026, 10, 25, 16, 5, 0));
+            Assert.IsTrue(stamp.EndsWith(" 16:05"), stamp);
+            Assert.IsNull(SvText.Stamp(null));
         }
 
         [TestMethod]
