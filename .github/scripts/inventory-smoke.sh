@@ -3617,7 +3617,7 @@ as "$MOP_TOKEN" GET $FP/employees; [ "$CODE" = "403" ] && ok "mes: the operator 
 as "$MOP_TOKEN" GET "$FP/employees/$MFEMP"; [ "$CODE" = "403" ] && ok "mes: the operator cannot read his own payroll record either (403)" || bad "mes: the operator cannot read his own payroll record either (403) got $CODE"
 as "$MOP_TOKEN" GET "$FG/years"; [ "$CODE" = "403" ] && ok "mes: the operator cannot read the general ledger (403)" || bad "mes: the operator cannot read the general ledger (403) got $CODE"
 as "$MOP_TOKEN" GET "$MF/work-centers/$MFWC1"; check "mes: the operator reads the work centre but the hourly rates are not shown to him" '.success and .data.code == "MF-LATHE" and .data.machineRateRial == null and .data.labourRateRial == null'
-as "$MOP_TOKEN" GET "$MF/bookings?PageSize=0"; check "mes: the operator's booking list carries no payroll or rate field (names, personnel codes and hours only)" '.success and (.data.data|length) >= 1 and ([.. | objects | keys[] | select(test("Rial$|[Rr]ate$|[Ww]age|[Ss]alary|[Ii]ban|[Nn]ationalCode|[Cc]ost"))]|length) == 0'
+as "$MOP_TOKEN" GET "$MF/bookings?PageSize=0"; check "mes: the operator's booking list carries no payroll or rate field (names, personnel codes and hours only)" '.success and (.data.data|length) >= 1 and ([.. | objects | keys[] | select(. != "costPosted") | select(test("Rial$|[Rr]ate$|[Ww]age|[Ss]alary|[Ii]ban|[Nn]ationalCode|[Cc]ost"))]|length) == 0 and ([.data.data[].costPosted|type]|unique) == ["boolean"]'
 
 # =================================================================== PRODUCTION / SHOP FLOOR (MES), release P1 part B
 # daily cost posting, finite-capacity scheduler with load report and dispatch list, maintenance with KPIs, dashboards.
