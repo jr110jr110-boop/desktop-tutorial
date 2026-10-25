@@ -254,6 +254,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public InventoryDocumentStatus? Status { get; set; }
         public int? WarehouseId { get; set; }
         public int? WorkOrderId { get; set; }
+        public int? SalesOrderId { get; set; }
+        public int? ServiceOrderId { get; set; }
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
         public string Contains { get; set; }

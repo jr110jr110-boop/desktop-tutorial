@@ -133,6 +133,7 @@ namespace Services.NasbNiro.AfterSales
             if (query.Status.HasValue) q = q.Where(o => o.Status == query.Status.Value);
             if (query.RequestId.HasValue) q = q.Where(o => o.RequestId == query.RequestId.Value);
             if (query.UnitId.HasValue) q = q.Where(o => o.UnitId == query.UnitId.Value);
+            if (query.ContractId.HasValue) q = q.Where(o => o.ContractId == query.ContractId.Value);
             if (query.Decision.HasValue) q = q.Where(o => o.Decision == query.Decision.Value);
             string text = Clean(query.Contains);
             if (text != null) q = q.Where(o => o.Number.Contains(text) || o.Title.Contains(text));

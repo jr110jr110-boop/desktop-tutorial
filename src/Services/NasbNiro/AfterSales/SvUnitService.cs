@@ -123,6 +123,7 @@ namespace Services.NasbNiro.AfterSales
             DateTime asOf = (query.AsOf ?? DateTime.Today).Date;
             IQueryable<SvInstalledUnit> q = _uow.Set<SvInstalledUnit>().AsNoTracking().Where(u => !u.Deleted);
             if (query.CustomerId.HasValue) q = q.Where(u => u.CustomerId == query.CustomerId.Value);
+            if (query.ProductType.HasValue) q = q.Where(u => u.ProductType == query.ProductType.Value);
             if (query.NeedsConfirm == true) q = q.Where(u => !u.IsConfirmed && !u.Decommissioned);
             string text = Clean(query.Contains);
             if (text != null) q = q.Where(u => u.Tag.Contains(text) || u.Title.Contains(text));

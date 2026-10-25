@@ -1,1 +1,0 @@
-import{f as t,h as c}from"./FnAPIs.a3e4c6f1.js";const s=a=>Array.isArray(a)?a:(a==null?void 0:a.data)||[],o=async a=>s((await t({Level:3,Contains:a,PageSize:15}))[0]),n=async a=>s((await c({Contains:a,PageSize:15}))[0]),i=a=>`${a.code} - ${a.title}`;export{i as a,n as b,o as s};

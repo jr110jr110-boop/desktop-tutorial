@@ -80,6 +80,8 @@ namespace Services.NasbNiro.Inventory
             if (query.WarehouseId.HasValue)
                 documents = documents.Where(d => d.WarehouseId == query.WarehouseId.Value || d.DestinationWarehouseId == query.WarehouseId.Value);
             if (query.WorkOrderId.HasValue) documents = documents.Where(d => d.WorkOrderId == query.WorkOrderId.Value);
+            if (query.SalesOrderId.HasValue) documents = documents.Where(d => d.SalesOrderId == query.SalesOrderId.Value);
+            if (query.ServiceOrderId.HasValue) documents = documents.Where(d => d.ServiceOrderId == query.ServiceOrderId.Value);
             if (query.From.HasValue) documents = documents.Where(d => d.DocumentDate >= query.From.Value.Date);
             if (query.To.HasValue) documents = documents.Where(d => d.DocumentDate < query.To.Value.Date.AddDays(1));
             string text = InventoryText.Clean(query.Contains);

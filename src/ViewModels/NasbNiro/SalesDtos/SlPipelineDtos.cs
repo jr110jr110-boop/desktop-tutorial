@@ -161,7 +161,10 @@ namespace ViewModels.NasbNiro.SalesDtos
         public int? EquipmentId { get; set; }
         public int? EquipmentBomId { get; set; }
         public int? ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public string ItemName { get; set; }
         public int? WorkCenterId { get; set; }
+        public string WorkCenterName { get; set; }
         public string Unit { get; set; }
         public decimal Quantity { get; set; }
         public decimal? UnitCost { get; set; }
@@ -345,6 +348,9 @@ namespace ViewModels.NasbNiro.SalesDtos
         public decimal? CompetitorPrice { get; set; }
         public string LessonsLearned { get; set; }
         public int? ContractId { get; set; }
+
+        /// <summary>The contract review drafted when the proposal was won (project control).</summary>
+        public int? ContractReviewId { get; set; }
         public string RowVersion { get; set; }
     }
 

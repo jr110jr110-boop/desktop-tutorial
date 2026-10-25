@@ -151,6 +151,10 @@ namespace WebApi.Controllers
         [HttpPost("labour/aggregate")]
         public async Task<IActionResult> AggregateLabourAsync([FromBody] SvJobsRunDto dto, CancellationToken ct) => Ok(await _labour.RunAsync(dto, ct));
 
+        /// <summary>The months already posted, newest first (finance manager, CEO).</summary>
+        [HttpGet("labour/history")]
+        public async Task<IActionResult> LabourHistoryAsync(CancellationToken ct) => Ok(await _labour.HistoryAsync(ct));
+
         [HttpGet("surveys")]
         public async Task<IActionResult> SurveysAsync([FromQuery] SlSurveyQuery query, CancellationToken ct) => Ok((await _surveys.GetSurveysAsync(query, ct)).ToPaginatedResultSafe());
 

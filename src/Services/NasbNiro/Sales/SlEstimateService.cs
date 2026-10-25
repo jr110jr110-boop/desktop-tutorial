@@ -148,6 +148,12 @@ namespace Services.NasbNiro.Sales
             List<int> equipmentIds = rows.SelectMany(r => r.Equipments.Select(e => e.EquipmentId)).Distinct().ToList();
             Dictionary<int, string> equipments = equipmentIds.Count == 0 ? new Dictionary<int, string>()
                 : await _uow.Set<Equipment>().AsNoTracking().Where(e => equipmentIds.Contains(e.Id)).ToDictionaryAsync(e => e.Id, e => e.Title, ct);
+            List<int> lineItemIds = rows.SelectMany(r => r.Lines.Where(l => l.ItemId.HasValue).Select(l => l.ItemId.Value)).Distinct().ToList();
+            var lineItems = lineItemIds.Count == 0 ? new Dictionary<int, (string Code, string Title)>()
+                : (await _uow.Set<InventoryItem>().AsNoTracking().Where(i => lineItemIds.Contains(i.Id)).Select(i => new { i.Id, i.Code, i.Title }).ToListAsync(ct)).ToDictionary(i => i.Id, i => (i.Code, i.Title));
+            List<int> lineCenterIds = rows.SelectMany(r => r.Lines.Where(l => l.WorkCenterId.HasValue).Select(l => l.WorkCenterId.Value)).Distinct().ToList();
+            var lineCenters = lineCenterIds.Count == 0 ? new Dictionary<int, string>()
+                : await _uow.Set<MfWorkCenter>().AsNoTracking().Where(c => lineCenterIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Title, ct);
             return rows.Select(r => new SlEstimateDto
             {
                 Id = r.Id, Number = r.Number, InquiryId = r.InquiryId, InquiryNumber = inquiries.TryGetValue(r.InquiryId, out string n) ? n : null, Revision = r.Revision, Status = r.Status, Note = r.Note,
@@ -161,6 +167,9 @@ namespace Services.NasbNiro.Sales
                 Lines = r.Lines.OrderBy(l => l.RowNumber).Select(l => new SlEstimateLineDto
                 {
                     Id = l.Id, RowNumber = l.RowNumber, Kind = l.Kind, Description = l.Description, EquipmentId = l.EquipmentId, EquipmentBomId = l.EquipmentBomId, ItemId = l.ItemId,
+                    ItemCode = l.ItemId.HasValue && lineItems.TryGetValue(l.ItemId.Value, out var li) ? li.Code : null,
+                    ItemName = l.ItemId.HasValue && lineItems.TryGetValue(l.ItemId.Value, out var li2) ? li2.Title : null,
+                    WorkCenterName = l.WorkCenterId.HasValue && lineCenters.TryGetValue(l.WorkCenterId.Value, out string wc) ? wc : null,
                     WorkCenterId = l.WorkCenterId, Unit = l.Unit, Quantity = l.Quantity, UnitCost = l.UnitCost, CostSource = l.CostSource, Amount = l.Amount, Note = l.Note,
                 }).ToList(),
                 Risks = r.Risks.OrderBy(x => x.Id).Select(x => new SlEstimateRiskDto { Id = x.Id, Title = x.Title, ProbabilityPercent = x.ProbabilityPercent, ImpactAmount = x.ImpactAmount, ExpectedCost = x.ExpectedCost }).ToList(),

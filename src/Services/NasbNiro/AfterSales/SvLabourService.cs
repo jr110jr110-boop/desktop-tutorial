@@ -23,6 +23,9 @@ namespace Services.NasbNiro.AfterSales
 
         /// <summary>The same run for the nightly job (no user; the day is today): the first nights of a month post the month before. Returns the months posted.</summary>
         Task<int> RunNightlyAsync(CancellationToken ct);
+
+        /// <summary>The months already posted, newest first (finance manager, CEO): rebuilt from the aggregated orders, the cost entries and the accounting events, so every browser sees the same history.</summary>
+        Task<ResponseDto<List<SvLabourPeriodDto>>> HistoryAsync(CancellationToken ct);
     }
 
     /// <summary>The monthly aggregate posting of protected labour (see <see cref="SvLabourMonth"/>). Idempotent: an order is taken once; a month with nothing pending posts nothing.</summary>
@@ -54,6 +57,27 @@ namespace Services.NasbNiro.AfterSales
         }
 
         public async Task<int> RunNightlyAsync(CancellationToken ct) => (await PostAsync(DateTime.Today, ct)).Periods.Count;
+
+        public async Task<ResponseDto<List<SvLabourPeriodDto>>> HistoryAsync(CancellationToken ct)
+        {
+            if (!_user.IsInRole(Runners)) return SlText.Bad<List<SvLabourPeriodDto>>(SlText.NotAllowed);
+            var orders = await _uow.Set<SvServiceOrder>().AsNoTracking()
+                .Where(o => !o.Deleted && o.LabourAggregatedAt != null && o.LabourPendingPeriod != null)
+                .Select(o => new { Period = o.LabourPendingPeriod.Value, o.Decision, o.LabourAmount, o.LabourAggregatedAt }).ToListAsync(ct);
+            var costs = await _uow.Set<CostEntry>().AsNoTracking().Where(c => c.SourceType == SvLabourMonth.SourceType)
+                .GroupBy(c => c.SourceId).Select(g => new { Period = g.Key, Amount = g.Sum(c => c.Amount) }).ToListAsync(ct);
+            var events = await _uow.Set<AccountingEvent>().AsNoTracking().Where(e => e.SourceType == SvLabourMonth.SourceType && e.ReversesEventId == null)
+                .Select(e => new { e.Id, e.SourceId }).ToListAsync(ct);
+            var rows = orders.GroupBy(o => o.Period).OrderByDescending(g => g.Key).Select(g => new SvLabourPeriodDto
+            {
+                Period = g.Key, PeriodText = SvLabourMonth.Text(g.Key), Orders = g.Count(),
+                EventAmount = g.Where(o => o.Decision == SvWarrantyDecision.Warranty || o.Decision == SvWarrantyDecision.Goodwill).Sum(o => o.LabourAmount),
+                CostAmount = costs.Where(c => c.Period == g.Key).Sum(c => c.Amount),
+                EventId = events.Where(e => e.SourceId == g.Key).OrderByDescending(e => e.Id).Select(e => (int?)e.Id).FirstOrDefault(),
+                PostedAt = g.Max(o => o.LabourAggregatedAt),
+            }).ToList();
+            return ResponseDtoHelper.Ok(rows);
+        }
 
         private async Task<SvLabourAggregateResultDto> PostAsync(DateTime asOf, CancellationToken ct)
         {
@@ -97,7 +121,7 @@ namespace Services.NasbNiro.AfterSales
                 foreach (SvServiceOrder o in month) { o.LabourAggregatedAt = now; o.ModifyDate = now; o.ModifierUserId = _user.UserId; }
                 posted.Add((new SvLabourPeriodDto
                 {
-                    Period = period, PeriodText = SvLabourMonth.Text(period), Orders = month.Count(), CostAmount = groups.Sum(g => g.Amount),
+                    Period = period, PeriodText = SvLabourMonth.Text(period), Orders = month.Count(), PostedAt = now, CostAmount = groups.Sum(g => g.Amount),
                     EventAmount = pending.Where(p => p.Decision == SvWarrantyDecision.Warranty || p.Decision == SvWarrantyDecision.Goodwill).Sum(p => p.Labour),
                 }, ev));
             }

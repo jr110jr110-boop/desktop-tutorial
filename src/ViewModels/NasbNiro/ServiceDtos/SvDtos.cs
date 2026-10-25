@@ -51,6 +51,7 @@ namespace ViewModels.NasbNiro.ServiceDtos
     public class SvUnitQuery : SlPageQuery
     {
         public int? CustomerId { get; set; }
+        public SlProductType? ProductType { get; set; }
         public SvUnitStatus? Status { get; set; }
         public bool? NeedsConfirm { get; set; }
         public DateTime? AsOf { get; set; }
@@ -264,6 +265,7 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public SvOrderStatus? Status { get; set; }
         public int? RequestId { get; set; }
         public int? UnitId { get; set; }
+        public int? ContractId { get; set; }
         public SvWarrantyDecision? Decision { get; set; }
     }
 
@@ -560,6 +562,9 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public decimal CostAmount { get; set; }
 
         public int? EventId { get; set; }
+
+        /// <summary>When the month was posted.</summary>
+        public DateTimeOffset? PostedAt { get; set; }
     }
 
     public class SvJobsResultDto

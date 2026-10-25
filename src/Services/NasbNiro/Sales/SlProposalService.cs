@@ -73,9 +73,14 @@ namespace Services.NasbNiro.Sales
             Dictionary<int, string> users = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => r.ApprovedByUserId), ct);
             List<int> reasonIds = rows.Where(r => r.ResultReasonId.HasValue).Select(r => r.ResultReasonId.Value).Distinct().ToList();
             Dictionary<int, string> reasons = reasonIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<SlReasonCode>().AsNoTracking().Where(x => reasonIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Title, ct);
+            List<int> contractIds = rows.Where(r => r.ContractId.HasValue).Select(r => r.ContractId.Value).Distinct().ToList();
+            var reviews = contractIds.Count == 0 ? new List<(int ContractId, int Id)>() : (await _uow.Set<PcContractReview>().AsNoTracking()
+                .Where(x => !x.Deleted && x.ContractId.HasValue && contractIds.Contains(x.ContractId.Value)).Select(x => new { ContractId = x.ContractId.Value, x.Id }).ToListAsync(ct))
+                .Select(x => (x.ContractId, x.Id)).ToList();
             return rows.Select(r =>
             {
                 SlInquiry i = inquiries.FirstOrDefault(x => x.Id == r.InquiryId);
+                int? reviewId = r.ContractId.HasValue ? reviews.Where(x => x.ContractId == r.ContractId.Value).OrderByDescending(x => x.Id).Select(x => (int?)x.Id).FirstOrDefault() : null;
                 return new SlProposalDto
                 {
                     Id = r.Id, Number = r.Number, Revision = r.Revision, InquiryId = r.InquiryId, InquiryNumber = i?.Number, InquiryTitle = i?.Title, CustomerId = i?.CustomerId ?? 0,
@@ -87,7 +92,7 @@ namespace Services.NasbNiro.Sales
                     ApprovedAt = r.ApprovedAt, ApprovedAtText = SlText.Stamp(r.ApprovedAt), ApprovedByUserId = r.ApprovedByUserId, ApprovedByName = users.Name(r.ApprovedByUserId),
                     ApprovalNote = r.ApprovalNote, SubmittedAt = r.SubmittedAt, SubmittedAtText = SlText.Stamp(r.SubmittedAt), CustomerReference = r.CustomerReference, ResultAt = r.ResultAt,
                     ResultAtText = SlText.Stamp(r.ResultAt), ResultReasonId = r.ResultReasonId, ResultReason = r.ResultReasonId.HasValue && reasons.TryGetValue(r.ResultReasonId.Value, out string rt) ? rt : null,
-                    Competitor = r.Competitor, CompetitorPrice = r.CompetitorPrice, LessonsLearned = r.LessonsLearned, ContractId = r.ContractId, RowVersion = SlConcurrency.Text(r.RowVersion),
+                    Competitor = r.Competitor, CompetitorPrice = r.CompetitorPrice, LessonsLearned = r.LessonsLearned, ContractId = r.ContractId, ContractReviewId = reviewId, RowVersion = SlConcurrency.Text(r.RowVersion),
                 };
             }).ToList();
         }
