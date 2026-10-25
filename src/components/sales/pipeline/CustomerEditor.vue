@@ -8,7 +8,7 @@ import { SalesRoles, hasRole } from "@/composables/roles";
 import { groupDigits, numOrNull } from "./pipelineKit";
 
 // Customer profile editor. The credit limit is not part of the save DTO: it is shown only when the API returned it (finance roles) and set by the finance manager alone.
-// Name, economic code and national id of an existing customer belong to finance (identityChangers); for the other roles they are read-only here.
+// Name, economic code and national id of an existing customer with posted invoices belong to finance (identityChangers); for the other roles they are read-only here (hasPostedInvoices).
 const props = defineProps({ row: { type: Object, default: null } });
 const emit = defineEmits(["close", "saved"]);
 
@@ -22,7 +22,9 @@ const f = ref<any>({
 const credit = ref(r?.creditLimitRial !== null && r?.creditLimitRial !== undefined ? groupDigits(r.creditLimitRial) : "");
 const busy = ref(false);
 const canWrite = hasRole(SalesRoles.masterWriters);
-const canIdentity = isNew || hasRole(SalesRoles.identityChangers);
+// name / economic code / national id are locked only for an existing customer that already has posted invoices, unless the user is an identity changer (finance)
+const identityLocked = !isNew && !!r?.hasPostedInvoices && !hasRole(SalesRoles.identityChangers);
+const canIdentity = !identityLocked;
 const canSeeCredit = computed(() => hasRole(SalesRoles.creditViewers) || (r && r.creditLimitRial !== null && r.creditLimitRial !== undefined));
 const canSetCredit = hasRole(SalesRoles.creditSetters) && !isNew;
 
@@ -58,7 +60,7 @@ async function saveCredit() {
   <div class="inv-modal-backdrop" @click.self="emit('close')">
     <div class="inv-modal" style="max-width: 860px">
       <h2 class="inv-title mb-2">{{ isNew ? "مشتری جدید" : "پروفایل مشتری" }}</h2>
-      <p v-if="!canIdentity" class="small text-muted mb-2">نام، کد اقتصادی و شناسه ملی مشتری موجود را فقط مالی تغییر می‌دهد.</p>
+      <p v-if="identityLocked" class="small text-muted mb-2">این مشتری فاکتور ثبت‌شده دارد؛ نام و کدها را فقط مالی تغییر می‌دهد.</p>
       <div class="row g-2">
         <div class="col-md-6"><label class="form-label small mb-0">نام</label><input v-model="f.name" :disabled="!canIdentity || !canWrite" class="form-control form-control-sm" /></div>
         <div class="col-md-3"><label class="form-label small mb-0">کد اقتصادی</label><input v-model="f.economicCode" :disabled="!canIdentity || !canWrite" class="form-control form-control-sm inv-ltr" /></div>

@@ -33,7 +33,7 @@ function blank() {
 }
 function fromDto(d: any) {
   return {
-    id: d.id, number: d.number, title: d.title, validFrom: isoDay(d.validFrom), validTo: isoDay(d.validTo), note: d.note || "", status: d.status, rowVersion: d.rowVersion,
+    id: d.id, number: d.number, title: d.title, validFrom: isoDay(d.validFrom), validTo: isoDay(d.validTo), note: d.note || "", status: d.status, rowVersion: d.rowVersion, touchedByMe: !!d.touchedByMe,
     approvedAtText: persianOf(d.approvedAtText, d.approvedAt), validFromText: d.validFromText, validToText: d.validToText,
     lines: (d.lines || []).map((l: any) => ({ itemId: l.itemId, itemCode: l.itemCode, itemName: l.itemName, unitPrice: l.unitPrice, minQuantity: l.minQuantity, suggest: null as any })),
   };
@@ -193,7 +193,8 @@ onMounted(() => list.load());
 
       <div class="d-flex flex-wrap gap-2 mt-3">
         <button v-if="editable" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
-        <button v-if="!isNew && form.status === 1 && canApprove" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">{{ salesActionTitles.approve }} و فعال‌سازی</button>
+        <button v-if="!isNew && form.status === 1 && canApprove && !form.touchedByMe" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">{{ salesActionTitles.approve }} و فعال‌سازی</button>
+        <span v-else-if="!isNew && form.status === 1 && canApprove" class="inv-muted align-self-center small">شما این مورد را ثبت یا ویرایش کرده‌اید؛ تأیید با کاربر دیگر است</span>
         <button v-if="!isNew && form.status === 2 && canApprove" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('retire')">غیرفعال‌سازی ({{ salesActionTitles.retire }})</button>
       </div>
       <p v-if="!isNew && form.status === 1" class="small inv-muted mt-2">تایید لیست قیمت را فردی غیر از کسی که آن را ساخته یا ویرایش کرده انجام می‌دهد؛ ذخیرهٔ دوباره، تایید را از ویرایشگر می‌گیرد.</p>

@@ -213,12 +213,12 @@ onMounted(async () => {
       <div class="d-flex flex-wrap gap-2 mt-3 align-items-center">
         <button v-if="editable" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
         <template v-if="!isNew && canWrite">
-          <button v-if="form.status === 1" :disabled="busy" class="btn btn-sm btn-success" @click="act('send')">{{ salesActionTitles.send }}</button>
-          <button v-if="form.status === 2" :disabled="busy" class="btn btn-sm btn-success" @click="act('accept')">{{ salesActionTitles.accept }}</button>
+          <button v-if="form.status === 1 && !pastValidity" :disabled="busy" class="btn btn-sm btn-success" @click="act('send')">{{ salesActionTitles.send }}</button>
+          <button v-if="form.status === 2 && !pastValidity" :disabled="busy" class="btn btn-sm btn-success" @click="act('accept')">{{ salesActionTitles.accept }}</button>
           <button v-if="form.status === 2" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('reject')">{{ salesActionTitles.reject }}</button>
           <button v-if="form.status === 2 && pastValidity" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="act('expire')">{{ salesActionTitles.expire }}</button>
           <button v-if="form.status === 1 || form.status === 2" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('cancel')">{{ salesActionTitles.cancel }}</button>
-          <button v-if="form.status === 3 && !form.salesOrderId" :disabled="busy" class="btn btn-sm btn-primary" @click="orderDlg = { customerOrderNumber: '', requestedDeliveryDate: null }">تبدیل به سفارش فروش</button>
+          <button v-if="form.status === 3 && !form.salesOrderId && !pastValidity" :disabled="busy" class="btn btn-sm btn-primary" @click="orderDlg = { customerOrderNumber: '', requestedDeliveryDate: null }">تبدیل به سفارش فروش</button>
         </template>
         <router-link v-if="form.salesOrderId" class="btn btn-sm btn-outline-primary" :to="{ name: 'SlOrder', params: { id: form.salesOrderId } }">مشاهده سفارش فروش</router-link>
       </div>

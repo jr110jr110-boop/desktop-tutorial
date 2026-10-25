@@ -26,6 +26,9 @@ export const saveLocation = (dto: any) => call("post", base + "warehouses/locati
 export const deleteLocation = (id: number) => call("delete", base + "warehouses/locations/" + id);
 
 // documents
+/**
+ * Paged list of warehouse documents. DocumentQuery { Type?, Status?, WarehouseId?, WorkOrderId?, SalesOrderId? (documents linked to a sales order), ServiceOrderId? (documents linked to a service order), From?, To?, Contains?, PageNumber, PageSize }.
+ */
 export const getDocuments = (params: any) => call("get", base + "documents", undefined, clean(params));
 export const getDocument = (id: number) => call("get", base + "documents/" + id);
 export const saveDocument = (dto: any) => call("post", base + "documents", dto);

@@ -7,7 +7,7 @@ import { reviewDecisions, reviewKinds } from "@/composables/projectControl";
 import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Contract review (ISO 9001 8.2.3, WI-IP-002): eight checks, the capability check by planning (special orders), the decision by the CEO.
-const props = defineProps({ contractId: { type: Number, required: true } });
+const props = defineProps({ contractId: { type: Number, required: true }, openId: { type: Number, default: null } });
 const rows = ref<any[]>([]);
 const r = ref<any>(null);
 const busy = ref(false);
@@ -25,6 +25,9 @@ async function load() {
   const [data, error] = await getReviews({ ContractId: props.contractId, PageSize: 100 });
   if (error) return fail(error);
   rows.value = rowsOf(data);
+  // deep link (?review=): open that review
+  const wanted = props.openId ? rows.value.find((x: any) => x.id === props.openId) : null;
+  if (wanted && r.value?.id !== wanted.id) r.value = { ...wanted };
 }
 const blank = () => ({ id: null, contractId: props.contractId, tenderCode: "", kind: 1, notes: "", decision: 0, requirementsDefined: false, differencesResolved: false, capabilityChecked: false, deliveryFeasible: false, standardsItpAgreed: false, guaranteesReviewed: false, penaltiesReviewed: false, paymentTermsReviewed: false, currencyReviewed: false });
 const pending = () => r.value && r.value.decision === 0;

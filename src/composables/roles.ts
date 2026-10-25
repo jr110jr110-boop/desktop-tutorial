@@ -318,6 +318,20 @@ export const ProcurementRoles = {
   committeeFinancial: ["PMO"],
 };
 
+/** The numeric id of the signed-in user, read from the name-identifier claim of the access token; null when the token is missing or unreadable. */
+export function currentUserId(): number | null {
+  try {
+    const part = (localStorage.getItem("token") || "").split(".")[1];
+    if (!part) return null;
+    const payload = JSON.parse(decodeURIComponent(atob(part.replace(/-/g, "+").replace(/_/g, "/")).split("").map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join("")));
+    const raw = payload["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"] ?? payload["nameid"] ?? payload["sub"];
+    const id = Number(raw);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The role of the signed-in user (upper case), or "" when it is unknown. */
 export function currentRole(): string {
   try {

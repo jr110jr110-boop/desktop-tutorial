@@ -4,6 +4,8 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
+import { getSlOrder } from "@/api/SalesAPIs";
+import { getSvOrder } from "@/api/ServiceAPIs";
 import {
   approveDocument, cancelDocument, confirmDocument, deleteDocument, downloadFile, exitCheckDocument, getContracts, getDocument,
   getItemByCode, getLots, getMaterialRequest, getMaterialRequests, getOpenPurchaseOrders, getProviders, getPurchaseOrderForReceipt,
@@ -99,8 +101,23 @@ function newLine(item: any = null) {
   };
 }
 
+/** Numbers of the linked sales / service order (read-only line); falls back to the id when the order cannot be read. */
+const linkedNumbers = ref<{ sales: string; service: string }>({ sales: "", service: "" });
+async function loadLinkedNumbers(dto: any) {
+  linkedNumbers.value = { sales: dto.salesOrderNumber || "", service: dto.serviceOrderNumber || "" };
+  if (dto.salesOrderId && !linkedNumbers.value.sales) {
+    const [o] = await getSlOrder(dto.salesOrderId);
+    linkedNumbers.value.sales = o?.number || String(dto.salesOrderId);
+  }
+  if (dto.serviceOrderId && !linkedNumbers.value.service) {
+    const [o] = await getSvOrder(dto.serviceOrderId);
+    linkedNumbers.value.service = o?.number || String(dto.serviceOrderId);
+  }
+}
+
 function setDoc(dto: any) {
   doc.value = fromDto(dto);
+  loadLinkedNumbers(dto);
   parseQuotes(dto.priceQuotes);
   doc.value.lines.forEach(loadLots);
   if (doc.value.purchaseOrderId && doc.value.status === 0) loadOrderLines();
@@ -615,6 +632,7 @@ onMounted(async () => {
     }
     if (route.query.salesOrder) doc.value.salesOrderId = Number(route.query.salesOrder);
     if (route.query.serviceOrder) doc.value.serviceOrderId = Number(route.query.serviceOrder);
+    if (doc.value.salesOrderId || doc.value.serviceOrderId) loadLinkedNumbers(doc.value);
     if (route.query.order && doc.value.type === 1) {
       doc.value.purchaseOrderId = Number(route.query.order);
       await onOrderChange();
@@ -848,6 +866,10 @@ onMounted(async () => {
             <option v-if="doc.purchaseOrderId && !orders.find((o) => o.id === doc.purchaseOrderId)" :value="doc.purchaseOrderId">{{ doc.purchaseOrderNumber }}</option>
             <option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} — {{ o.providerName }} ({{ rial(o.totalAmount) }})</option>
           </select>
+        </div>
+        <div v-if="doc.salesOrderId || doc.serviceOrderId" class="col-12 small">
+          <span v-if="doc.serviceOrderId">مرتبط با دستور خدمات شماره <b class="inv-ltr">{{ linkedNumbers.service || doc.serviceOrderId }}</b> (غیرقابل تغییر)</span>
+          <span v-if="doc.salesOrderId">مرتبط با سفارش فروش شماره <b class="inv-ltr">{{ linkedNumbers.sales || doc.salesOrderId }}</b> (غیرقابل تغییر)</span>
         </div>
         <div v-if="needsProvider" class="col-md-3">
           <label class="form-label small mb-0">{{ [9, 10].includes(type) ? "پیمانکار *" : "تامین‌کننده" }}</label>

@@ -91,7 +91,7 @@ onMounted(async () => {
               <td>{{ rialText(r.netAmount) }}</td>
               <td>
                 <span :class="badgeOfSalesOrder(r.status)" class="inv-badge">{{ orderStatuses[r.status] }}</span>
-                <span v-if="r.status === 1 && r.creditApprovalRequired && !r.creditApprovedAt" class="inv-badge bad ms-1">منتظر سقف اعتبار</span>
+                <span v-if="r.status === 1 && r.creditApprovalRequired && !(r.creditApprovedAt && Number(r.creditApprovedNetAmount) === Number(r.netAmount))" class="inv-badge bad ms-1">منتظر سقف اعتبار</span>
               </td>
               <td><router-link class="btn btn-sm btn-outline-primary" :to="{ name: 'SlOrder', params: { id: r.id } }">مشاهده</router-link></td>
             </tr>

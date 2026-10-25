@@ -114,7 +114,8 @@ function onSaved(order: any) {
         <div>موضوع به مدیر مالی اعلام شده است. پس از تایید او، سفارش را دوباره تایید کنید.</div>
         <div v-if="canCredit && status === 1" class="d-flex flex-wrap gap-2 mt-2 align-items-center">
           <input v-model="creditNote" class="form-control form-control-sm" style="max-width: 320px" placeholder="توضیح (اختیاری)" />
-          <button :disabled="busy" class="btn btn-sm btn-success" @click="approveCredit">تایید سقف اعتبار</button>
+          <button v-if="!o.touchedByMe" :disabled="busy" class="btn btn-sm btn-success" @click="approveCredit">تایید سقف اعتبار</button>
+          <span v-else class="inv-muted">شما این مورد را ثبت یا ویرایش کرده‌اید؛ تأیید با کاربر دیگر است</span>
         </div>
       </template>
     </div>

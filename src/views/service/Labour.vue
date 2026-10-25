@@ -1,37 +1,22 @@
 <script setup lang="ts">
 // Protected-labour monthly aggregate (SvLabour): FINANCEMANAGER / CEO post the labour of closed service orders as one accounting event per ended Persian month.
-// The API has no history endpoint, so the page keeps the results of this browser (localStorage) as the history.
+// The history of posted months comes from GET service/labour/history.
 import { onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
-import { runSvLabourAggregate } from "@/api/ServiceAPIs";
+import { getSvLabourHistory, runSvLabourAggregate } from "@/api/ServiceAPIs";
 import { fail, ok } from "@/composables/inventory";
 import { dateTimeText, periodText, rialText } from "@/composables/service";
 
-const KEY = "sv-labour-history";
 const asOf = ref<string | null>(null);
 const busy = ref(false);
 const result = ref<any>(null);
 const history = ref<any[]>([]);
 const error = ref("");
 
-function readHistory() {
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    history.value = raw ? JSON.parse(raw) : [];
-  } catch {
-    history.value = [];
-  }
-}
-function remember(run: any) {
-  const ranAt = new Date().toISOString();
-  const rows = (run.periods || []).map((p: any) => ({ ...p, ranAt }));
-  if (!rows.length) return;
-  history.value = [...rows, ...history.value].slice(0, 200);
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(history.value));
-  } catch {
-    // history is a convenience only
-  }
+async function loadHistory() {
+  const [data, err] = await getSvLabourHistory();
+  if (err) return fail(err);
+  history.value = Array.isArray(data) ? data : [];
 }
 async function run() {
   busy.value = true;
@@ -43,10 +28,10 @@ async function run() {
     return fail(err);
   }
   result.value = data;
-  remember(data);
+  await loadHistory();
   ok(data?.periods?.length ? "ثبت ماهانه انجام شد." : "ماهی برای ثبت نبود.");
 }
-onMounted(readHistory);
+onMounted(loadHistory);
 </script>
 
 <template>
@@ -74,12 +59,12 @@ onMounted(readHistory);
         </table>
       </template>
 
-      <h3 class="inv-title mt-3 mb-2">سابقه (اجراهای این مرورگر)</h3>
+      <h3 class="inv-title mt-3 mb-2">سابقهٔ ماه‌های ثبت‌شده</h3>
       <table class="table table-sm">
-        <thead><tr><th>دوره</th><th>تعداد دستور</th><th>مبلغ رویداد (ریال)</th><th>مبلغ هزینه (ریال)</th><th>زمان اجرا</th></tr></thead>
+        <thead><tr><th>دوره</th><th>تعداد دستور</th><th>مبلغ رویداد (ریال)</th><th>مبلغ هزینه (ریال)</th><th>شناسهٔ رویداد حسابداری</th><th>زمان ثبت</th></tr></thead>
         <tbody>
-          <tr v-if="!history.length"><td colspan="5" class="text-center inv-muted">سابقه‌ای نیست.</td></tr>
-          <tr v-for="(h, i) in history" :key="i"><td>{{ h.periodText || periodText(h.period) }}</td><td>{{ h.orders }}</td><td>{{ rialText(h.eventAmount) }}</td><td>{{ rialText(h.costAmount) }}</td><td>{{ dateTimeText(h.ranAt) }}</td></tr>
+          <tr v-if="!history.length"><td colspan="6" class="text-center inv-muted">سابقه‌ای نیست.</td></tr>
+          <tr v-for="h in history" :key="h.period"><td>{{ h.periodText || periodText(h.period) }}</td><td>{{ h.orders }}</td><td>{{ rialText(h.eventAmount) }}</td><td>{{ rialText(h.costAmount) }}</td><td class="inv-ltr">{{ h.eventId ?? "-" }}</td><td>{{ dateTimeText(h.postedAt) }}</td></tr>
         </tbody>
       </table>
     </div>

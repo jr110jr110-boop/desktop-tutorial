@@ -40,11 +40,11 @@ export const saveSvSlaRule = (dto: { priority: number; responseHours: number; re
 
 // ---------------------------------------------------------------- installed units
 /**
- * params: SvUnitQuery { CustomerId, Status 1..4, NeedsConfirm (system drafts waiting for confirmation), AsOf } + paging.
+ * params: SvUnitQuery { CustomerId, Status 1..4, NeedsConfirm (system drafts waiting for confirmation), ProductType (SlProductType number 1..9), AsOf } + paging.
  * SvUnitDto { id, tag, title, serialUnitId, serialNumber, productType, productTypeText, customerId, customerName, siteId, siteTitle, contractId, contractCode, workOrderId, workOrderCode, shipmentId, shipmentNumber,
  * handoverDate(Text), commissioningDate(Text), warrantyMonths, warrantyStart(Text), warrantyEnd(Text), warrantySource (0 none, 1 months, 2 guarantee, 3 manual), status, statusText, inWarranty, runningHours,
  * runningHoursAt(Text), decommissioned, isConfirmed, confirmedAtText, note, spares: [{ id, itemId, itemCode, itemName, quantity, source (1 manual, 2 MDR list), note }], spareListDeliverableId,
- * spareListDocumentNumber, spareListDocumentId (guid), spareListSource, spareListSourceText, rowVersion }. Who: readers.
+ * spareListDocumentNumber, spareListDocumentId (guid), spareListSource, spareListSourceText, touchedByMe (the current user created or edited it: the backend refuses their confirm), rowVersion }. Who: readers.
  */
 export const getSvUnits = (params?: ServicePageParams) => get(sv + "units", params);
 /** One SvUnitDto as of AsOf (ISO date, optional; the status is computed from the dates). Who: readers. */
@@ -87,7 +87,7 @@ export const svRequestAction = (dto: { id: number; action: "assign" | "progress"
 
 // ---------------------------------------------------------------- service orders (api/v1/service/orders)
 /**
- * params: SvOrderQuery { Status 1..5, RequestId, UnitId, Decision 0..3 } + paging.
+ * params: SvOrderQuery { Status 1..5, RequestId, UnitId, ContractId (service orders of an LTSA contract), Decision 0..3 } + paging.
  * SvOrderDto { id, number, requestId, requestNumber, unitId, unitTag, customerId, customerName, contractId, ltsaContractId, ltsaNumber, kind (1 field, 2 workshop), status, statusText, title, plannedStart(Text), plannedEnd(Text),
  * travelNote, startedAt(Text), costCenterCode, decision (0 none, 1 warranty, 2 billable, 3 goodwill), decisionText, causeIsMisuse, decisionNote, decidedAtText, decidedByUserId, goodwillRequested, goodwillReason,
  * warrantyTestedOn(Text), reportDocumentId (guid; the signed report), findings, recommendations, runningHoursReading, closedAtText,
@@ -95,7 +95,7 @@ export const svRequestAction = (dto: { id: number; action: "assign" | "progress"
  * timeEntries: [{ id, employeeId, employeeName, workDate(Text), hours, kind (1 travel, 2 work, 3 waiting), kindText, note }], measurements: [{ id, name, value, unit, note }],
  * parts: [{ documentId, number, type, status, lines: [{ itemId, itemCode, itemName, quantity }] }], travelHours, workHours, waitingHours, totalHours,
  * labourHours, labourAmount (NULL when labourHidden), labourHidden, labourAggregatePending, labourAggregatePeriod (yyyymm), partsAmount, totalCost (null when labour is hidden), costPosted, billableLabourRateRial,
- * invoiceId, invoiceNumber, draftNote, rowVersion }. Who: readers.
+ * invoiceId, invoiceNumber, draftNote, touchedByMe (the current user created or edited it: the backend refuses their warranty / billable decision), rowVersion }. Who: readers.
  */
 export const getSvOrders = (params?: ServicePageParams) => get(sv + "orders", params);
 /** One SvOrderDto with engineers, tasks, time entries, measurements and parts. Who: readers. */
@@ -135,7 +135,7 @@ export const draftSvInvoice = (dto: { id: number; billableLabourRateRial?: numbe
 // ---------------------------------------------------------------- LTSA contracts
 /**
  * params: SvContractQuery { Status 1..4, CustomerId } + paging.
- * SvContractDto { id, number, title, customerId, customerName, status, statusText, startDate(Text), endDate(Text), scope, visitIntervalMonths, priceRial, nextVisitDate(Text), unitIds[], unitTags[], draftedVisits, rowVersion }.
+ * SvContractDto { id, number, title, customerId, customerName, status, statusText, startDate(Text), endDate(Text), scope, visitIntervalMonths, priceRial, nextVisitDate(Text), unitIds[], unitTags[], draftedVisits, touchedByMe (the current user created or edited it: the backend refuses their activation), rowVersion }.
  * Who: readers.
  */
 export const getSvContracts = (params?: ServicePageParams) => get(sv + "contracts", params);
@@ -155,9 +155,13 @@ export const svContractAction = (dto: { id: number; action: "activate" | "cancel
 export const runSvJobs = (asOf?: string | null) => post(sv + "jobs/run", { asOf: asOf || null });
 /**
  * SvJobsRunDto { asOf? }. Posts the protected labour of closed service orders as ONE accounting event per ended Persian month, without order numbers (idempotent: an order is taken once).
- * Returns SvLabourAggregateResultDto { asOf, periods: [{ period (yyyymm), periodText, orders, eventAmount, costAmount, eventId }] }. Who: ServiceRoles.labourRunners (FINANCEMANAGER, CEO).
+ * Returns SvLabourAggregateResultDto { asOf, periods: [{ period (yyyymm), periodText, orders, eventAmount, costAmount, eventId, postedAt (ISO) }] }. Who: ServiceRoles.labourRunners (FINANCEMANAGER, CEO).
  */
 export const runSvLabourAggregate = (asOf?: string | null) => post(sv + "labour/aggregate", { asOf: asOf || null });
+/**
+ * PLAIN ARRAY of SvLabourPeriodDto { period (yyyymm), periodText, orders, eventAmount, costAmount, eventId (the accounting event), postedAt (ISO) }: every month posted so far, newest first. Who: ServiceRoles.labourRunners (FINANCEMANAGER, CEO).
+ */
+export const getSvLabourHistory = () => get(sv + "labour/history");
 
 // ---------------------------------------------------------------- satisfaction surveys
 /**

@@ -8,7 +8,7 @@ import { rowsOf } from "@/api/ApiClient";
 import { camelize, usePagedList } from "@/composables/fn";
 import { fail, ok, today } from "@/composables/inventory";
 import { activityKinds, persianOf } from "@/composables/sales";
-import { SalesRoles, hasRole } from "@/composables/roles";
+import { SalesRoles, currentUserId, hasRole } from "@/composables/roles";
 import { blankToNull, customerLabel, inquiryLabel, inquirySearch, searchCustomers } from "./pipelineKit";
 
 // Customer activities (calls, meetings, ...). Each can point at an inquiry, a proposal or a service request; the next-action date feeds the follow-up list.
@@ -21,6 +21,10 @@ const formInquiry = ref<any>(null);
 const contacts = ref<any[]>([]);
 const busy = ref(false);
 const canEdit = hasRole(SalesRoles.activityWriters);
+// SALES may edit every activity; a SERVICE user only their own (the API refuses the rest). When the user id cannot be read from the token, the row stays editable and the API decides.
+const isSales = hasRole(["SALES"]);
+const me = currentUserId();
+const canEditRow = (r: any) => canEdit && (isSales || me === null || r.ownerUserId === me);
 const searchInquiries = inquirySearch();
 
 function pick(c: any) {
@@ -87,7 +91,7 @@ onMounted(list.load);
               <router-link v-if="r.serviceRequestId" :to="{ name: 'SvRequest', params: { id: r.serviceRequestId } }">درخواست خدمات</router-link>
             </td>
             <td>{{ r.ownerName || "-" }}</td>
-            <td><button v-if="canEdit" class="btn btn-sm btn-outline-primary" @click="edit(r)">ویرایش</button></td>
+            <td><button v-if="canEditRow(r)" class="btn btn-sm btn-outline-primary" @click="edit(r)">ویرایش</button></td>
           </tr>
         </tbody>
       </table>

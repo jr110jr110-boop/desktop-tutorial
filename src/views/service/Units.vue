@@ -22,10 +22,9 @@ const router = useRouter();
 const canWrite = hasRole(ServiceRoles.writers);
 
 const customer = ref<any>(null);
-const filters = ref<any>({ Status: null, NeedsConfirm: null, Contains: "" });
-const productType = ref<number | null>(null);
+const filters = ref<any>({ Status: null, NeedsConfirm: null, Contains: "", ProductType: null });
 const list = usePagedList(getSvUnits, computed(() => ({ ...filters.value, CustomerId: customer.value?.id ?? null })) as any);
-const rows = computed(() => (productType.value ? list.rows.value.filter((u: any) => u.productType === productType.value) : list.rows.value));
+const rows = list.rows;
 
 const unit = ref<any>(null);
 const asBuilt = ref<any>(null);
@@ -145,8 +144,8 @@ onMounted(() => {
           <div><label class="form-label small mb-0">مشتری</label><CustomerPick v-model="customer" /></div>
           <div><label class="form-label small mb-0">وضعیت</label>
             <select v-model="filters.Status" class="form-select form-select-sm"><option :value="null">همه</option><option v-for="(t, k) in unitStatuses" :key="k" :value="Number(k)">{{ t }}</option></select></div>
-          <div><label class="form-label small mb-0">نوع محصول (روی همین صفحه)</label>
-            <select v-model="productType" class="form-select form-select-sm"><option :value="null">همه</option><option v-for="(t, k) in productTypes" :key="k" :value="Number(k)">{{ t }}</option></select></div>
+          <div><label class="form-label small mb-0">نوع محصول</label>
+            <select v-model="filters.ProductType" class="form-select form-select-sm" @change="list.search"><option :value="null">همه</option><option v-for="(t, k) in productTypes" :key="k" :value="Number(k)">{{ t }}</option></select></div>
           <div><label class="form-label small mb-0">tag یا عنوان</label><input v-model="filters.Contains" class="form-control form-control-sm" @keyup.enter="list.search" /></div>
           <label class="form-check mb-0"><input v-model="filters.NeedsConfirm" class="form-check-input" type="checkbox" :true-value="true" :false-value="null" /> <span class="form-check-label">منتظر تایید</span></label>
           <button class="btn btn-sm btn-secondary" @click="list.search">جستجو</button>
@@ -230,7 +229,8 @@ onMounted(() => {
         </div>
         <div v-if="canWrite" class="d-flex gap-2 flex-wrap mb-3">
           <button v-if="!unit.decommissioned" class="btn btn-sm btn-outline-primary" @click="startEdit(unit)">ویرایش</button>
-          <button v-if="!unit.isConfirmed && !unit.decommissioned" :disabled="busy" class="btn btn-sm btn-success" @click="prompt = { action: 'confirm' }">تایید واحد</button>
+          <button v-if="!unit.isConfirmed && !unit.decommissioned && !unit.touchedByMe" :disabled="busy" class="btn btn-sm btn-success" @click="prompt = { action: 'confirm' }">تایید واحد</button>
+          <span v-else-if="!unit.isConfirmed && !unit.decommissioned" class="inv-muted align-self-center small">شما این مورد را ثبت یا ویرایش کرده‌اید؛ تأیید با کاربر دیگر است</span>
           <button v-if="!unit.decommissioned" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="prompt = { action: 'decommission' }">از رده خارج کردن</button>
           <button v-else :disabled="busy" class="btn btn-sm btn-outline-primary" @click="prompt = { action: 'reactivate' }">فعال‌سازی دوباره</button>
         </div>

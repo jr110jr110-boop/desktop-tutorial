@@ -228,6 +228,10 @@ onMounted(load);
         قرارداد پیش‌نویس ساخته شد:
         <router-link :to="{ name: 'ContractUpdate', params: { id: d.contractId } }">مشاهده قرارداد</router-link>.
         بازبینی قرارداد و آغاز پروژه به‌صورت پیش‌نویس در کنترل پروژه ایجاد شده است:
+        <router-link v-if="d.contractReviewId" :to="{ name: 'ProjectControlProject', query: { contract: String(d.contractId), tab: 'reviews', review: String(d.contractReviewId) } }">بازبینی قرارداد</router-link>
+        <span v-if="d.contractReviewId"> | </span>
+        <router-link :to="{ name: 'ProjectControlProject', query: { contract: String(d.contractId), tab: 'initiation' } }">آغاز پروژه</router-link>
+        <span> | </span>
         <router-link :to="{ name: 'ProjectControlPortfolio' }">پرتفوی کنترل پروژه</router-link>
       </div>
 
@@ -235,7 +239,8 @@ onMounted(load);
         <label class="form-label small mb-0">توضیح (برای تایید زیر بهای تمام‌شده و برای لغو الزامی است)</label>
         <textarea v-model="note" class="form-control form-control-sm mb-2" rows="2" />
         <div class="d-flex gap-2 flex-wrap">
-          <button v-if="canApprove" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید پیشنهاد</button>
+          <button v-if="canApprove && !d.touchedByMe" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید پیشنهاد</button>
+          <span v-else-if="canApprove" class="inv-muted align-self-center">شما این مورد را ثبت یا ویرایش کرده‌اید؛ تأیید با کاربر دیگر است</span>
           <button v-if="d.status === 3 && canApproveRole" :disabled="busy" class="btn btn-sm btn-primary" @click="showResult = true">ثبت نتیجه (برنده / بازنده)</button>
           <button v-if="canWrite && [1, 2, 3].includes(d.status)" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('cancel')">لغو پیشنهاد</button>
         </div>

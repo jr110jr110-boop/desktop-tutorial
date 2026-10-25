@@ -180,7 +180,8 @@ onMounted(() => {
         </div>
         <div v-if="canWrite" class="d-flex gap-2 flex-wrap mb-3">
           <button v-if="contract.status === 1" class="btn btn-sm btn-outline-primary" @click="startEdit(contract)">ویرایش</button>
-          <button v-if="contract.status === 1" :disabled="busy" class="btn btn-sm btn-success" @click="act('activate')">فعال‌سازی</button>
+          <button v-if="contract.status === 1 && !contract.touchedByMe" :disabled="busy" class="btn btn-sm btn-success" @click="act('activate')">فعال‌سازی</button>
+          <span v-else-if="contract.status === 1" class="inv-muted align-self-center small">شما این مورد را ثبت یا ویرایش کرده‌اید؛ تأیید با کاربر دیگر است</span>
           <button v-if="contract.status === 1 || contract.status === 2" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('cancel')">لغو قرارداد</button>
         </div>
         <p v-if="contract.status === 1 && canWrite" class="inv-muted">فعال‌سازی را نفر دیگری غیر از تنظیم‌کنندهٔ قرارداد انجام می‌دهد؛ قرارداد فعال ویرایش نمی‌شود.</p>

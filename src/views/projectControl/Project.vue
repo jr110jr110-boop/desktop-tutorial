@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
@@ -8,7 +9,7 @@ import InitiationTab from "@/components/pc/project/InitiationTab.vue";
 import CharterPlanTab from "@/components/pc/project/CharterPlanTab.vue";
 import ReviewsTab from "@/components/pc/project/ReviewsTab.vue";
 import AmendmentsTab from "@/components/pc/project/AmendmentsTab.vue";
-import { pcContractId } from "@/composables/projectControl";
+import { pcContractId, setPcContract } from "@/composables/projectControl";
 
 // Project (contract) workspace: terms and project code, start-up steps, charter, execution plan (PEP), contract reviews and amendments.
 const tab = ref("terms");
@@ -21,6 +22,20 @@ const tabs = [
   { key: "amendments", title: "الحاقیه‌ها" },
 ];
 const bump = ref(0);
+
+// Deep link from sales (proposal page): /project-control/project?contract=<id>&tab=reviews|initiation&review=<id>
+const route = useRoute();
+const openReviewId = ref<number | null>(null);
+function applyQuery() {
+  const c = Number(route.query.contract);
+  if (c > 0) setPcContract(c);
+  const t = String(route.query.tab || "");
+  if (tabs.some((x) => x.key === t)) tab.value = t;
+  const rv = Number(route.query.review);
+  openReviewId.value = rv > 0 ? rv : null;
+}
+onMounted(applyQuery);
+watch(() => route.query, applyQuery);
 </script>
 
 <template>
@@ -37,7 +52,7 @@ const bump = ref(0);
         <InitiationTab v-else-if="tab === 'initiation'" :key="'i' + bump" :contract-id="pcContractId" @goto="tab = $event" />
         <CharterPlanTab v-else-if="tab === 'charter'" kind="charter" :contract-id="pcContractId" @changed="bump++" />
         <CharterPlanTab v-else-if="tab === 'plan'" kind="plan" :contract-id="pcContractId" @changed="bump++" />
-        <ReviewsTab v-else-if="tab === 'reviews'" :contract-id="pcContractId" />
+        <ReviewsTab v-else-if="tab === 'reviews'" :contract-id="pcContractId" :open-id="openReviewId" />
         <AmendmentsTab v-else-if="tab === 'amendments'" :contract-id="pcContractId" />
       </template>
     </div>

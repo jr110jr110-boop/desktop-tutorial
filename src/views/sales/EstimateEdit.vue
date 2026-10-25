@@ -38,7 +38,8 @@ function fill(x: any) {
     guaranteeAmount: x.guaranteeAmount !== null && x.guaranteeAmount !== undefined ? groupDigits(x.guaranteeAmount) : "", guaranteeMonths: txt(x.guaranteeMonths), guaranteeRatePercentPerMonth: txt(x.guaranteeRatePercentPerMonth),
     financingAmount: x.financingAmount !== null && x.financingAmount !== undefined ? groupDigits(x.financingAmount) : "", financingMonths: txt(x.financingMonths), financingRatePercentPerMonth: txt(x.financingRatePercentPerMonth),
   };
-  lines.value = (x.lines || []).map((l: any) => ({ ...l, unitCost: l.unitCost === null || l.unitCost === undefined ? "" : groupDigits(l.unitCost), quantity: txt(l.quantity) }));
+  // edited: the user typed a unit cost on this line; an unedited line keeps its system source (average cost, last purchase, work-centre rate) because it is sent back as null
+  lines.value = (x.lines || []).map((l: any) => ({ ...l, edited: false, unitCost: l.unitCost === null || l.unitCost === undefined ? "" : groupDigits(l.unitCost), quantity: txt(l.quantity) }));
   risks.value = (x.risks || []).map((r: any) => ({ ...r, impactAmount: groupDigits(r.impactAmount), probabilityPercent: txt(r.probabilityPercent) }));
   dirty.value = false;
 }
@@ -55,7 +56,7 @@ async function load() {
 watch(id, load);
 
 function addLine(kind: number) {
-  lines.value.push({ id: null, kind, description: "", equipmentId: null, equipmentBomId: null, itemId: null, workCenterId: null, unit: kind === 3 ? "ساعت" : kind === 2 ? "ساعت" : "", quantity: "1", unitCost: "", costSource: 0, amount: null, note: "" });
+  lines.value.push({ id: null, kind, description: "", equipmentId: null, equipmentBomId: null, itemId: null, workCenterId: null, unit: kind === 3 ? "ساعت" : kind === 2 ? "ساعت" : "", quantity: "1", unitCost: "", costSource: 0, edited: true, amount: null, note: "" });
   dirty.value = true;
 }
 function removeLine(l: any) {
@@ -65,6 +66,8 @@ function removeLine(l: any) {
 function pickItem(l: any, item: any) {
   l.itemId = item ? item.id : null;
   if (item) {
+    l.itemCode = item.code || "";
+    l.itemName = item.title || "";
     if (!l.description) l.description = item.title || "";
     if (!l.unit) l.unit = item.unit || item.unitTitle || "";
   }
@@ -83,7 +86,7 @@ function payload() {
     overheadPercent: numOrNull(v.overheadPercent), contingencyPercent: numOrNull(v.contingencyPercent), targetMarginPercent: numOrNull(v.targetMarginPercent),
     guaranteeAmount: numOrNull(v.guaranteeAmount), guaranteeMonths: numOrNull(v.guaranteeMonths), guaranteeRatePercentPerMonth: numOrNull(v.guaranteeRatePercentPerMonth),
     financingAmount: numOrNull(v.financingAmount), financingMonths: numOrNull(v.financingMonths), financingRatePercentPerMonth: numOrNull(v.financingRatePercentPerMonth),
-    lines: lines.value.map((l) => ({ kind: l.kind, description: String(l.description || "").trim(), equipmentId: l.equipmentId, equipmentBomId: l.equipmentBomId, itemId: l.itemId, workCenterId: l.workCenterId, unit: String(l.unit || "").trim(), quantity: numOrNull(l.quantity) ?? 0, unitCost: numOrNull(l.unitCost), note: String(l.note || "").trim() || null })),
+    lines: lines.value.map((l) => ({ kind: l.kind, description: String(l.description || "").trim(), equipmentId: l.equipmentId, equipmentBomId: l.equipmentBomId, itemId: l.itemId, workCenterId: l.workCenterId, unit: String(l.unit || "").trim(), quantity: numOrNull(l.quantity) ?? 0, unitCost: l.id && !l.edited && l.costSource !== 0 ? null : numOrNull(l.unitCost), note: String(l.note || "").trim() || null })),
     risks: risks.value.map((r) => ({ title: String(r.title || "").trim(), probabilityPercent: numOrNull(r.probabilityPercent) ?? 0, impactAmount: numOrNull(r.impactAmount) ?? 0 })),
     rowVersion: d.value.rowVersion,
   };
@@ -164,12 +167,12 @@ onMounted(load);
                 <tr v-if="!linesOf(kind).length"><td :colspan="9" class="text-center inv-muted">ردیفی نیست.</td></tr>
                 <tr v-for="(l, i) in linesOf(kind)" :key="l.id ?? 'n' + i">
                   <td><input v-model="l.description" :disabled="!editable" class="form-control form-control-sm" @input="dirty = true" /></td>
-                  <td v-if="kind === 1"><LookupBox :model-value="null" :fetch="searchItems" :label="itemLabel" :disabled="!editable" :fallback-text="l.itemId ? 'کالای انتخاب‌شده' : ''" placeholder="کالا" @pick="(it: any) => pickItem(l, it)" /></td>
-                  <td v-if="kind === 2"><select v-model="l.workCenterId" :disabled="!editable" class="form-select form-select-sm" @change="dirty = true"><option :value="null">-</option><option v-for="w in workCenters" :key="w.id" :value="w.id">{{ w.code }} - {{ w.title }}</option></select></td>
+                  <td v-if="kind === 1"><LookupBox :model-value="null" :fetch="searchItems" :label="itemLabel" :disabled="!editable" :fallback-text="l.itemId ? (l.itemCode ? l.itemCode + ' – ' + (l.itemName || '') : l.itemName || '#' + l.itemId) : ''" placeholder="کالا" @pick="(it: any) => pickItem(l, it)" /></td>
+                  <td v-if="kind === 2"><select v-model="l.workCenterId" :disabled="!editable" class="form-select form-select-sm" @change="dirty = true"><option :value="null">-</option><option v-if="l.workCenterId && !workCenters.find((w) => w.id === l.workCenterId)" :value="l.workCenterId">{{ l.workCenterName || "#" + l.workCenterId }}</option><option v-for="w in workCenters" :key="w.id" :value="w.id">{{ w.code }} - {{ w.title }}</option></select></td>
                   <td><input v-model="l.unit" :disabled="!editable" class="form-control form-control-sm" style="width: 80px" @input="dirty = true" /></td>
                   <td><input v-model="l.quantity" :disabled="!editable" class="form-control form-control-sm inv-ltr" style="width: 90px" inputmode="decimal" @input="dirty = true" /></td>
-                  <td><input v-model="l.unitCost" :disabled="!editable" class="form-control form-control-sm inv-ltr" style="width: 140px" inputmode="numeric" placeholder="خالی = از منابع" @input="dirty = true" @blur="l.unitCost = groupDigits(l.unitCost)" /></td>
-                  <td><span v-if="l.id" :class="l.unitCost === '' ? 'warn' : 'info'" class="inv-badge">{{ l.unitCost === "" ? "نامشخص" : costSources[l.costSource] }}</span><span v-else class="inv-badge">{{ l.unitCost === "" ? "از منابع" : "دستی" }}</span></td>
+                  <td><input v-model="l.unitCost" :disabled="!editable" class="form-control form-control-sm inv-ltr" style="width: 140px" inputmode="numeric" placeholder="خالی = از منابع" @input="dirty = true; l.edited = true" @blur="l.unitCost = groupDigits(l.unitCost)" /></td>
+                  <td><span v-if="l.id && !l.edited" :class="l.unitCost === '' ? 'warn' : 'info'" class="inv-badge">{{ l.unitCost === "" ? "نامشخص" : costSources[l.costSource] }}</span><span v-else-if="l.id" class="inv-badge">{{ l.unitCost === "" ? "از منابع" : "دستی" }}</span><span v-else class="inv-badge">{{ l.unitCost === "" ? "از منابع" : "دستی" }}</span></td>
                   <td class="inv-ltr">{{ l.id ? rialText(l.amount) : "-" }}</td>
                   <td><button v-if="editable" class="btn btn-sm btn-outline-danger" @click="removeLine(l)">حذف</button></td>
                 </tr>

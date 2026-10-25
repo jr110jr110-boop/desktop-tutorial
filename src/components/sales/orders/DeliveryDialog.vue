@@ -7,9 +7,8 @@ import { fail, ok } from "@/composables/inventory";
 import { InventoryRoles, hasRole } from "@/composables/roles";
 import { qtyText } from "@/composables/sales";
 
-// Customer-delivery document of a sales order. The existing inventory document page does not carry SalesOrderId / SalesOrderLineId
-// (its save drops them), so the draft is created here with the fields the API takes, and the QC loading approval and the confirm are
-// done here too. Items with lot or serial tracking need the lot / serial details the API asks for; the API message is shown if they are missing.
+// Customer-delivery document of a sales order. The draft is created here with the fields the API takes (SalesOrderId and SalesOrderLineId per line), and the QC loading
+// approval and the confirm are done here too; the inventory document page can also open a new delivery already linked to the order (link below). Items with lot or serial tracking need the lot / serial details the API asks for; the API message is shown if they are missing.
 const props = defineProps<{ order: any }>();
 const emit = defineEmits(["close", "changed"]);
 
@@ -101,6 +100,10 @@ async function confirm_() {
           </div>
           <p v-if="!canCreate" class="small text-danger">ساخت سند انبار نقش انباردار، سرپرست انبار یا PMO را لازم دارد.</p>
         </template>
+        <p v-if="canCreate" class="small mt-2 mb-0">
+          <router-link :to="{ name: 'InventoryDocumentEdit', params: { id: 'new' }, query: { type: '11', salesOrder: String(order.id) } }">باز کردن در صفحه سند انبار</router-link>
+          <span class="inv-muted"> (سند تحویل جدید با پیوند به این سفارش؛ ردیف‌ها را آنجا انتخاب کنید)</span>
+        </p>
         <div class="d-flex gap-2 justify-content-end mt-3">
           <button class="btn btn-sm btn-outline-secondary" @click="emit('close')">بستن</button>
           <button v-if="rows.length" :disabled="busy || !canCreate" class="btn btn-sm btn-primary" @click="create">ساخت پیش‌نویس سند تحویل</button>
@@ -119,7 +122,9 @@ async function confirm_() {
           <button v-if="canCreate" :disabled="busy" class="btn btn-sm btn-success" @click="confirm_">تایید سند تحویل</button>
         </div>
         <p v-else class="text-success">سند تایید شد.</p>
-        <p class="small inv-muted mt-2">این سند را از صفحهٔ اسناد انبار ویرایش نکنید؛ ذخیرهٔ آن صفحه پیوند سفارش فروش را نگه نمی‌دارد.</p>
+        <p class="small mt-2">
+          <router-link :to="{ name: 'InventoryDocumentEdit', params: { id: created.id } }">باز کردن در صفحه سند انبار</router-link>
+        </p>
         <div class="d-flex justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="emit('close'); emit('changed')">بستن</button></div>
       </template>
     </div>

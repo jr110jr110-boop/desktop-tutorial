@@ -17,7 +17,9 @@ const reason = ref("");
 const loaded = ref(false);
 const canWrite = hasRole(SalesRoles.writers);
 const canDecide = hasRole(SalesRoles.bidDeciders);
-const editable = computed(() => canWrite && (!d.value || d.value.status === 1));
+// the checklist can change only while the inquiry is Received (1) or UnderReview (2)
+const inquiryOpen = computed(() => [1, 2].includes(props.inquiryStatus));
+const editable = computed(() => canWrite && inquiryOpen.value && (!d.value || d.value.status === 1));
 
 function blank() {
   return { technicalCapabilityOk: null as boolean | null, technicalNote: "", capacityNote: "", commercialRiskReviewed: false, commercialRiskNote: "", paymentTermsReviewed: false, paymentTermsNote: "",
@@ -54,7 +56,10 @@ async function save(silent = false) {
     return false;
   }
   fill(x);
-  if (!silent) ok("چک‌لیست ذخیره شد.");
+  if (!silent) {
+    ok("چک‌لیست ذخیره شد.");
+    emit("changed"); // the first save moves the inquiry to UnderReview: the parent reloads status and rowVersion
+  }
   return true;
 }
 async function submit() {
@@ -133,10 +138,11 @@ onMounted(load);
     <div v-if="d && d.status === 2 && canDecide" class="border-top mt-3 pt-3">
       <label class="form-label small mb-0">دلیل (برای عدم شرکت الزامی است)</label>
       <textarea v-model="reason" class="form-control form-control-sm mb-2" rows="2" />
-      <div class="d-flex gap-2">
+      <div v-if="!d.touchedByMe" class="d-flex gap-2">
         <button :disabled="busy" class="btn btn-sm btn-success" @click="decide('bid')">شرکت در مناقصه</button>
         <button :disabled="busy" class="btn btn-sm btn-danger" @click="decide('nobid')">عدم شرکت</button>
       </div>
+      <p v-else class="small inv-muted mb-0">شما این مورد را ثبت یا ویرایش کرده‌اید؛ تأیید با کاربر دیگر است</p>
     </div>
     <p v-else-if="d && d.status === 2" class="small text-muted mt-2">منتظر تصمیم مدیرعامل. ارسال‌شده در {{ persianOf(d.submittedAtText, d.submittedAt, true) }}.</p>
 

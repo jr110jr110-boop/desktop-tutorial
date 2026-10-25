@@ -9,8 +9,10 @@ import DocAttach from "@/components/quality/DocAttach.vue";
 import OrderPrint from "@/components/service/OrderPrint.vue";
 import { isoDay, todayIso, typedNumber, useEmployees } from "@/components/service/svKit";
 import { decideSvOrder, draftSvInvoice, getSvOrder, getSvUnit, removeSvMeasurement, removeSvTimeEntry, requestSvGoodwill, saveSvMeasurement, saveSvOrder, saveSvTimeEntry, svOrderAction } from "@/api/ServiceAPIs";
+import { getDocuments } from "@/api/InventoryAPIs";
+import { rowsOf } from "@/api/InventoryAPIs";
 import { printSheet } from "@/composables/fn";
-import { documentStatuses, documentTypes, fail, ok, rial } from "@/composables/inventory";
+import { documentStatuses, documentTypes, fail, jalali, ok, rial } from "@/composables/inventory";
 import { hasRole, ServiceRoles } from "@/composables/roles";
 import { badgeOfDecision, badgeOfServiceOrder, hoursText, labourText, orderKinds, orderStatuses, periodText, qtyText, rialText, serviceActionTitles, timeKinds, warrantyDecisions } from "@/composables/service";
 
@@ -37,6 +39,7 @@ const editable = computed(() => canWrite && open.value);
 const hasTimeSheet = computed(() => open.value && order.value.status !== 1);
 const goodwillLocked = computed(() => order.value?.decision === 3 && !isCeo);
 const warrantyPossible = computed(() => !!unit.value?.inWarranty);
+const touchedHint = "شما این مورد را ثبت یا ویرایش کرده‌اید؛ تأیید با کاربر دیگر است";
 const nameOf = (eid: number) => employees.value.find((e) => e.id === eid)?.name || order.value?.engineers?.find((e: any) => e.employeeId === eid)?.name || "#" + eid;
 
 function toForm(o: any) {
@@ -47,9 +50,10 @@ function toForm(o: any) {
     engineers: (o.engineers || []).map((e: any) => e.employeeId), tasks: (o.tasks || []).map((t: any) => ({ description: t.description, isDone: t.isDone })),
   };
 }
-async function take(o: any) {
+/** Takes the fresh order from the server. A row action (time, measurement, decision, goodwill, invoice) keeps the user's unsaved form fields; only an explicit save / load rebuilds the whole form. */
+async function take(o: any, keepForm = false) {
   order.value = o;
-  toForm(o);
+  if (!keepForm) toForm(o);
   decision.value = { causeIsMisuse: !!o.causeIsMisuse, note: o.decisionNote || "" };
   invoiceRate.value = o.billableLabourRateRial ? String(o.billableLabourRateRial) : "";
 }
@@ -57,6 +61,7 @@ async function load() {
   const [data, error] = await getSvOrder(id.value);
   if (error) return fail(error);
   await take(data);
+  loadDocuments();
   // the warranty is judged on the day the request came in (warrantyTestedOn)
   const [u] = await getSvUnit(data.unitId, isoDay(data.warrantyTestedOn));
   unit.value = u || null;
@@ -92,17 +97,28 @@ async function reportAttached(guid: string | null) {
   if (guid && editable.value) await save();
 }
 
-/** A row action that answers the fresh order. */
-async function run(call: () => Promise<any>, message: string) {
+/** Warehouse documents linked to this order (GET inventory/documents?ServiceOrderId=). Roles without warehouse access just see no list. */
+const documents = ref<any[]>([]);
+async function loadDocuments() {
+  const [data] = await getDocuments({ ServiceOrderId: id.value, PageSize: 100 });
+  documents.value = data ? rowsOf(data) : [];
+}
+
+/** A row action that answers the fresh order. keepForm (default) leaves unsaved form fields alone; the order object, its rows and rowVersion always come from the server. */
+async function run(call: () => Promise<any>, message: string, keepForm = true) {
   busy.value = true;
   const [data, error] = await call();
   busy.value = false;
   if (error) {
     fail(error);
-    await load();
+    if (keepForm) {
+      // refresh rows and rowVersion only, so a stale version does not stick, but do not wipe the edits
+      const [fresh] = await getSvOrder(id.value);
+      if (fresh) await take(fresh, true);
+    } else await load();
     return false;
   }
-  await take(data);
+  await take(data, keepForm);
   ok(message);
   return true;
 }
@@ -118,7 +134,7 @@ async function act(action: "confirm" | "start" | "cancel" | "close", reason?: st
     rowVersion = saved.rowVersion;
   }
   busy.value = false;
-  if (await run(() => svOrderAction({ id: order.value.id, action, reason: reason || null, rowVersion }), serviceActionTitles[action] + " انجام شد.")) await load();
+  if (await run(() => svOrderAction({ id: order.value.id, action, reason: reason || null, rowVersion }), serviceActionTitles[action] + " انجام شد.", false)) await load();
 }
 const decide = (d: number) => run(() => decideSvOrder({ orderId: order.value.id, decision: d, causeIsMisuse: decision.value.causeIsMisuse, note: decision.value.note, rowVersion: order.value.rowVersion }), "تصمیم ثبت شد.");
 const askGoodwill = (reason: string) => run(() => requestSvGoodwill({ orderId: order.value.id, reason }), "درخواست حسن نیت برای مدیرعامل ارسال شد.");
@@ -253,8 +269,11 @@ onMounted(() => {
             </div>
             <div class="d-flex gap-2 flex-wrap">
               <template v-if="canWrite">
-                <button :disabled="busy || !warrantyPossible || decision.causeIsMisuse" class="btn btn-sm btn-outline-success" :title="warrantyPossible ? '' : 'واحد در روز بررسی در گارانتی نبوده است'" @click="decide(1)">گارانتی</button>
-                <button :disabled="busy" class="btn btn-sm btn-outline-primary" @click="decide(2)">قابل‌فاکتور</button>
+                <template v-if="!order.touchedByMe">
+                  <button :disabled="busy || !warrantyPossible || decision.causeIsMisuse" class="btn btn-sm btn-outline-success" :title="warrantyPossible ? '' : 'واحد در روز بررسی در گارانتی نبوده است'" @click="decide(1)">گارانتی</button>
+                  <button :disabled="busy" class="btn btn-sm btn-outline-primary" @click="decide(2)">قابل‌فاکتور</button>
+                </template>
+                <span v-else class="inv-muted">{{ touchedHint }}</span>
                 <button v-if="!order.goodwillRequested" :disabled="busy" class="btn btn-sm btn-outline-warning" @click="prompt = 'goodwill'">درخواست حسن نیت از مدیرعامل</button>
               </template>
               <button v-if="isCeo && order.goodwillRequested" :disabled="busy" class="btn btn-sm btn-warning" @click="decide(3)">تصمیم حسن نیت (مدیرعامل)</button>
@@ -305,11 +324,24 @@ onMounted(() => {
           </tbody>
         </table>
       </div>
-      <p class="small mb-4">
-        حواله یا سند تحویل به مشتری را در انبار بسازید و آن را به این دستور وصل کنید:
-        <a href="#" @click.prevent="router.push('/inventory/documents')">اسناد انبار</a>
-        <span class="inv-muted"> (شماره دستور: <span class="inv-ltr">{{ order.number }}</span>)</span>
+      <p v-if="canWrite" class="small mb-2">
+        سند جدید انبار برای این دستور (به دستور وصل می‌شود):
+        <router-link :to="{ name: 'InventoryDocumentEdit', params: { id: 'new' }, query: { type: '4', serviceOrder: String(order.id) } }">حواله مصرف قطعات (درخواست مواد تأییدشده را در صفحهٔ سند انتخاب کنید)</router-link>
+        <span class="mx-1">|</span>
+        <router-link :to="{ name: 'InventoryDocumentEdit', params: { id: 'new' }, query: { type: '11', serviceOrder: String(order.id) } }">تحویل به مشتری (قطعات باقی‌مانده در محل)</router-link>
       </p>
+      <div class="table-responsive mb-4">
+        <table class="table table-sm">
+          <thead><tr><th>اسناد انبار این دستور</th><th>نوع</th><th>وضعیت</th><th>تاریخ</th><th></th></tr></thead>
+          <tbody>
+            <tr v-if="!documents.length"><td colspan="5" class="text-center inv-muted">سند انباری برای این دستور ثبت نشده است.</td></tr>
+            <tr v-for="d in documents" :key="d.id">
+              <td class="inv-ltr">{{ d.number || "(پیش‌نویس)" }}</td><td>{{ documentTypes[d.type] }}</td><td>{{ documentStatuses[d.status] }}</td><td>{{ jalali(d.documentDate) }}</td>
+              <td><router-link :to="{ name: 'InventoryDocumentEdit', params: { id: d.id } }">باز کردن</router-link></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <!-- measurements -->
       <h3 class="inv-title mb-2">اندازه‌گیری‌ها</h3>

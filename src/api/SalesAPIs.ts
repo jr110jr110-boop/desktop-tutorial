@@ -28,7 +28,7 @@ export type SalesPageParams = { PageNumber?: number; PageSize?: number; Contains
 /**
  * params: SlCustomerQuery { Status 1..3, Type 1..4, OwnerUserId } + paging.
  * SlCustomerDto { id, name, economicCode, nationalId, postalCode, address, phone, employerName, isActive, profileId, type?, industry?, country, city, status, ownerUserId, ownerName,
- * creditLimitRial (null for roles outside creditViewers), paymentTermDays, note, contactCount, siteCount, rowVersion }.
+ * creditLimitRial (null for roles outside creditViewers), paymentTermDays, note, contactCount, siteCount, hasPostedInvoices (name and codes then change only by finance), rowVersion }.
  * Who: SalesRoles.readers.
  */
 export const getSlCustomers = (params?: SalesPageParams) => get(sl + "customers", params);
@@ -118,7 +118,7 @@ export const inquiryAction = (dto: { id: number; action: "review" | "cancel"; re
  * params: SlBidDecisionQuery { Status 1..4, InquiryId } + paging. SlBidDecisionDto { id, inquiryId, inquiryNumber, inquiryTitle, customerName, status (1 draft, 2 waiting decision, 3 bid, 4 no-bid),
  * technicalCapabilityOk?, technicalNote, capacityOverloadWeeks (read from the production load), capacityCheckedUntil(Text), capacityNote, commercialRiskReviewed, commercialRiskNote,
  * paymentTermsReviewed, paymentTermsNote, guaranteesReviewed, guaranteesNote, sanctionCheck (0 not checked, 1 clear, 2 concern), sanctionNote, expectedMarginPercent, submittedAt(Text),
- * decidedAt(Text), decidedByUserId, decidedByName, decisionReason, tenderId (the system drafts a Tender when the decision is bid), rowVersion }. Who: readers.
+ * decidedAt(Text), decidedByUserId, decidedByName, decisionReason, tenderId (the system drafts a Tender when the decision is bid), touchedByMe (the current user created or edited it: the backend refuses their approval, so the screen hides the button), rowVersion }. Who: readers.
  */
 export const getSlBidDecisions = (params?: SalesPageParams) => get(sl + "bid-decisions", params);
 /** One SlBidDecisionDto by the INQUIRY id (not the decision id). Who: readers. */
@@ -145,7 +145,7 @@ export const decideSlBid = (dto: { inquiryId: number; decision: "bid" | "nobid";
  * materialCost, labourCost, engineeringCost, subcontractCost, packingTransportCost, directCost, guaranteeCost, financingCost, riskCost, contingencyCost, costBeforeOverhead, overheadCost, totalCost,
  * price (null while an input is missing), missingCostLines, missingInputs (text), finalizedAt(Text),
  * equipments: [{ equipmentId, equipmentName, count }],
- * lines: [{ id, rowNumber, kind (1..5), description, equipmentId, equipmentBomId, itemId, workCenterId, unit, quantity, unitCost (null = missing), costSource (0..4), amount, note }],
+ * lines: [{ id, rowNumber, kind (1..5), description, equipmentId, equipmentBomId, itemId, itemCode, itemName, workCenterId, workCenterName, unit, quantity, unitCost (null = missing; send null on save to keep a system-sourced cost, a number makes it Manual), costSource (0 manual, 1 average cost, 2 last purchase, 3 last purchase order, 4 work-centre rate), amount, note }],
  * risks: [{ id, title, probabilityPercent, impactAmount, expectedCost }], rowVersion }. Every percentage is an input (nothing is seeded). Who: SalesRoles.commercialReaders.
  */
 export const getSlEstimates = (params?: SalesPageParams) => get(sl + "estimates", params);
@@ -174,7 +174,7 @@ export const estimateAction = (dto: { id: number; action: "finalize" | "revise";
  * SlProposalDto { id, number, revision, inquiryId, inquiryNumber, inquiryTitle, customerId, customerName, productType, estimateId, technicalDocumentId (guid), commercialDocumentId (guid), validityDays, price (rial, before VAT),
  * deliveryWeeks, paymentTermsText, guaranteesText, deviationsText, vatPercent, advancePercent, retentionPercent, latePenaltyPercentPerWeek, penaltyCapPercent, clientReviewDays, status, statusText,
  * estimateTotalCost, belowCost, needsCeo, approvedAt(Text), approvedByUserId, approvedByName, approvalNote, submittedAt(Text), customerReference, resultAt(Text), resultReasonId, resultReason, competitor,
- * competitorPrice, lessonsLearned, contractId (set when Won), rowVersion }. Who: SalesRoles.commercialReaders.
+ * competitorPrice, lessonsLearned, contractId (set when Won), contractReviewId (the contract review drafted in project control when Won), touchedByMe (the current user created or edited it: the backend refuses their approval, so the screen hides the button), rowVersion }. Who: SalesRoles.commercialReaders.
  */
 export const getSlProposals = (params?: SalesPageParams) => get(sl + "proposals", params);
 /** One SlProposalDto. Who: commercialReaders. */
@@ -209,7 +209,7 @@ export const getSlWinLoss = (params?: { From?: string | null; To?: string | null
 // ---------------------------------------------------------------- price lists
 /**
  * params: SlPriceListQuery { Status 1 draft / 2 approved / 3 retired } + paging.
- * SlPriceListDto { id, number, title, validFrom(Text), validTo(Text), status, note, approvedByUserId, approvedAt(Text), lines: [{ id, itemId, itemCode, itemName, unitPrice, minQuantity }], rowVersion }. Who: readers.
+ * SlPriceListDto { id, number, title, validFrom(Text), validTo(Text), status, note, approvedByUserId, approvedAt(Text), lines: [{ id, itemId, itemCode, itemName, unitPrice, minQuantity }], touchedByMe (the current user created or edited it: the backend refuses their approval, so the screen hides the button), rowVersion }. Who: readers.
  */
 export const getSlPriceLists = (params?: SalesPageParams) => get(sl + "price-lists", params);
 /** One SlPriceListDto with lines. Who: readers. */
@@ -253,7 +253,7 @@ export const slQuotationToOrder = (dto: { quotationId: number; customerOrderNumb
  * params: SlOrderQuery { Status 1..7, CustomerId, CreditPending } + paging.
  * SlOrderDto { id, number, orderDate(Text), customerId, customerName, contactId, quotationId, customerOrderNumber, requestedDeliveryDate(Text), status, statusText, netAmount, creditApprovalRequired, creditReason,
  * creditExcess, creditApprovedByUserId, creditApprovedAt(Text), creditApprovedNetAmount, creditApprovalNote, confirmedAt(Text), cancelReason, lines: SlDocLineDto[],
- * deliveries: [{ id, documentId, documentNumber, invoiceId, invoiceNumber, draftNote, reversed }], rowVersion }. Who: readers.
+ * deliveries: [{ id, documentId, documentNumber, invoiceId, invoiceNumber, draftNote, reversed }], touchedByMe (the current user created or edited it: the backend refuses their credit approval, so the screen hides the button), rowVersion }. Who: readers.
  */
 export const getSlOrders = (params?: SalesPageParams) => get(sl + "orders", params);
 /** One SlOrderDto with lines and deliveries. Who: readers. */
