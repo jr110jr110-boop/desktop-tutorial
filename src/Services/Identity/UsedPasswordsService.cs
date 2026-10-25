@@ -45,6 +45,8 @@ namespace Services.Identity
 
         public async Task AddToUsedPasswordsListAsync(User user)
         {
+            // a user without a password (the locked AI seat users) has nothing to remember; the column does not allow nulls
+            if (string.IsNullOrEmpty(user?.PasswordHash)) return;
             await _userUsedPasswords.AddAsync(new UserUsedPassword
             {
                 UserId = user.Id,

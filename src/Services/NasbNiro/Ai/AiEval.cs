@@ -444,7 +444,8 @@ namespace Services.NasbNiro.Ai
         public async Task<ResponseDto<List<AiEvalCaseDto>>> GetCasesAsync(CancellationToken ct)
         {
             if (!_user.IsInRole(AiRoles.Readers)) return AiText.Bad<List<AiEvalCaseDto>>(AiText.NotAllowed);
-            if (_user.IsInRole(AiRoles.Admins)) await EnsureCasesAsync(ct);
+            // the catalogue is fixed in code: seed it whoever reads first (it does not depend on the reader)
+            await EnsureCasesAsync(ct);
             List<AiEvalCaseDto> cases = await _uow.Set<AiEvalCase>().AsNoTracking().OrderBy(c => c.Code)
                 .Select(c => new AiEvalCaseDto { Id = c.Id, Code = c.Code, Question = c.Question, ExpectedTools = c.ExpectedTools, ExpectedFacts = c.ExpectedFacts, Enabled = c.Enabled }).ToListAsync(ct);
             return ResponseDtoHelper.Ok(cases);
