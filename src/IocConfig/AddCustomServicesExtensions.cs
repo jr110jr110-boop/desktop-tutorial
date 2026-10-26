@@ -255,7 +255,18 @@ namespace IocConfig
 
             services.AddScoped<IInventoryQualityService, InventoryQualityService>();
             services.AddScoped<IInventoryWorkflowService, InventoryWorkflowService>();
+            services.AddCeoDrills();
             return services;
+        }
+
+        /// <summary>Release D1 part A2: the drills of the CEO dashboard and the analysis.</summary>
+        private static void AddCeoDrills(this IServiceCollection services)
+        {
+            services.AddScoped<Services.NasbNiro.Ceo.Drills.ICeoDrillService, Services.NasbNiro.Ceo.Drills.CeoDrillService>();
+            services.AddScoped<Services.NasbNiro.Ceo.Drills.ICeoSectionNumbersProvider, Services.NasbNiro.Ceo.Drills.CeoDashboardSectionNumbersProvider>();
+            services.AddScoped<Services.NasbNiro.Ceo.Drills.ICeoAnalysisService, Services.NasbNiro.Ceo.Drills.CeoAnalysisService>();
+            // the chat service of this request also runs the analysis (one instance per scope)
+            services.AddScoped<Services.NasbNiro.Ai.IAiAnalysisRunner>(sp => (Services.NasbNiro.Ai.IAiAnalysisRunner)sp.GetRequiredService<Services.NasbNiro.Ai.IAiChatService>());
         }
     }
 }
