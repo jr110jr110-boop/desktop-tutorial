@@ -59,6 +59,18 @@ TOKEN=$(login Admin 'Ci#Adm1n-Build-2026')
 [ -n "$TOKEN" ] && ok "login admin (PMO)" || bad "login admin (PMO)"
 ADMIN_TOKEN=$TOKEN
 
+as() { local t=$TOKEN; TOKEN=$1; shift; call "$@"; TOKEN=$t; } # as TOKEN METHOD PATH [JSON]
+# refused(): the last call did not succeed (the services answer 200 + success=false for role and rule violations)
+refused() { jq -e '.success == false' "$B" >/dev/null 2>&1; }
+no() { if refused; then ok "$1"; else bad "$1"; fi; }
+# nomsg NAME FRAGMENT : refused, and the reason names the rule (so a check cannot pass for an unrelated reason)
+nomsg() { if jq -e --arg f "$2" '.success == false and ((.message // "") | contains($f))' "$B" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+# r403 NAME : R1a, the last call was turned away by a role attribute: HTTP 403 and the standard refusal body (success=false and a message with «مجوز»),
+# the same JSON shape the services answer, so one filter reads both kinds of refusal
+r403() { if [ "$CODE" = "403" ]; then nomsg "$1" "مجوز"; else bad "$1 (got HTTP $CODE)"; fi; }
+uid() { as "$1" GET Accounts/get-current-user-info; jq -r '.data.id // .data.userId // empty' "$B"; }
+user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
+
 # users of the other roles (approvals must come from different people)
 user() { # user NAME ROLEID PASSWORD N
   call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"0912000000$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"001234567$4\"}"
@@ -71,7 +83,20 @@ user sec.ci 10 'Ci#Sec-User-2026' 5
 user sup.ci 12 'Ci#Sup-User-2026' 6
 user plan.ci 11 'Ci#Plan-User-2026' 7
 user com.ci 2 'Ci#Com-User-2026' 9
+# the second PMO user: R1a gives a sensitive role (FINANCEMANAGER, PAYROLL, CEO, AUDITOR, HR, SECRETARIAT) only after a PMO user other than the one who
+# registered the person approves it. The helper below lets pmo2.ci approve the open requests of the named users; sign in AFTER it runs (a token keeps the roles it was issued with).
+user pmo2.ci 1 'Ci#Pmo2-User-2026' 6
+PMO2_TOKEN=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$PMO2_TOKEN" ] && ok "login second planning user" || bad "login second planning user"
+approve_grants() { # approve_grants USERNAME... : the second PMO user approves every open request for a sensitive role of these users
+  local names g
+  names=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
+  as "$PMO2_TOKEN" GET Accounts/role-grants
+  for g in $(jq -r --argjson n "$names" '.data[]? | select(.canApprove and (.userName as $u | $n | index($u) != null)) | .id' "$B"); do
+    as "$PMO2_TOKEN" POST "Accounts/role-grants/$g/approve"
+  done
+}
 call POST Accounts/register-user "{\"userName\":\"ceo.ci\",\"name\":\"ceo.ci\",\"lastName\":\"آزمون\",\"email\":\"ceo.ci@example.com\",\"roleIds\":[13],\"password\":\"Ci#Ceo-User-2026\",\"phoneNumber\":\"09120000019\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"0012345619\"}"
+approve_grants ceo.ci
 COM_TOKEN=$(login com.ci 'Ci#Com-User-2026'); CEO_TOKEN=$(login ceo.ci 'Ci#Ceo-User-2026')
 [ -n "$COM_TOKEN" ] && [ -n "$CEO_TOKEN" ] && ok "login commercial and CEO users" || bad "login commercial and CEO users"
 SUP_TOKEN=$(login sup.ci 'Ci#Sup-User-2026'); PLAN_TOKEN=$(login plan.ci 'Ci#Plan-User-2026')
@@ -79,13 +104,109 @@ SUP_TOKEN=$(login sup.ci 'Ci#Sup-User-2026'); PLAN_TOKEN=$(login plan.ci 'Ci#Pla
 WH_TOKEN=$(login wh.ci 'Ci#Wh-User-2026'); PROD_TOKEN=$(login prod.ci 'Ci#Prod-User-2026'); QC_TOKEN=$(login qc.ci 'Ci#Qc-User-2026')
 ENG_TOKEN=$(login eng.ci 'Ci#Eng-User-2026'); SEC_TOKEN=$(login sec.ci 'Ci#Sec-User-2026')
 [ -n "$WH_TOKEN" ] && [ -n "$PROD_TOKEN" ] && [ -n "$QC_TOKEN" ] && [ -n "$ENG_TOKEN" ] && [ -n "$SEC_TOKEN" ] && ok "login warehouse, production, QC, engineering, security users" || bad "login warehouse, production, QC, engineering, security users"
-as() { local t=$TOKEN; TOKEN=$1; shift; call "$@"; TOKEN=$t; } # as TOKEN METHOD PATH [JSON]
 
 # --- no endpoint answers without a token (every controller is protected; the only anonymous routes are login, logout, the API settings and the device push with its own key)
-for p in ProviderCategories Providers Contracts/contracts Tenders inventory/items procurement/requests finance/ceo-dashboard quality/dashboard office/letters inventory/quality/ncr production/orders sales/customers service/requests ai/conversations; do
+# (R1a: the list names the route of the provider controller, Provider; "Providers" is no route and answered 404 instead of 401)
+for p in ProviderCategories Provider Contracts/contracts Tenders inventory/items procurement/requests finance/ceo-dashboard quality/dashboard office/letters inventory/quality/ncr production/orders sales/customers service/requests ai/conversations; do
   ANON=$(curl -s -o "$B" -w '%{http_code}' "$API/$p")
   if [ "$ANON" = "401" ]; then ok "anonymous request to $p is refused (401)"; else echo "{\"httpCode\":\"$ANON\"}" > "$B"; bad "anonymous request to $p is refused (401)"; fi
 done
+# R1a: the 401 of the bearer handler (no token, or a token that is not valid) and the 403 of a role attribute carry the same JSON as the refusals of the services
+# (success=false, a Persian message, data=null, httpStatusCode), not an empty body that the status-code pages turn into plain text
+ANON=$(curl -s -o "$B" -w '%{http_code}' "$API/Contracts")
+if [ "$ANON" = "401" ] && jq -e '.success == false and .httpStatusCode == 401 and .data == null and (.message|contains("وارد سامانه شوید"))' "$B" >/dev/null 2>&1; then ok "r1a: a request without a token is refused with 401 and the standard refusal body"; else bad "r1a: a request without a token is refused with 401 and the standard refusal body (got HTTP $ANON)"; fi
+ANON=$(curl -s -o "$B" -w '%{http_code}' "$API/Contracts" -H 'Authorization: Bearer not-a-token')
+if [ "$ANON" = "401" ] && jq -e '.success == false and .httpStatusCode == 401 and (.message|contains("وارد سامانه شوید"))' "$B" >/dev/null 2>&1; then ok "r1a: a token that is not valid is refused with 401 and the standard refusal body"; else bad "r1a: a token that is not valid is refused with 401 and the standard refusal body (got HTTP $ANON)"; fi
+
+# ---------------------------------------------------------------- R1a: user administration, passwords, sensitive roles, role attributes of the legacy write actions
+# Throwaway users, removed again at the end of the block: iam.ci (own password, lock-out, temporary password) and iam2.ci (asks for a sensitive role).
+user2 iam.ci 6 'Ci#Iam-User-2026' 09120000090 0012345690
+check "r1a identity: the PMO registers a throwaway user (warehouse role)" '.success and .data.id > 0'; IAMID=$(val .data.id)
+user2 iam2.ci 17 'Ci#Iam2-User-2026' 09120000091 0012345691
+check "r1a identity: a user registered with a sensitive role (FINANCEMANAGER) is created without it; the answer says the role waits for a second PMO user" '.success and .data.id > 0 and (.message|contains("FINANCEMANAGER")) and ((.data.roles // [])|length) == 0'; IAM2ID=$(val .data.id)
+IAMADM=$(uid "$ADMIN_TOKEN"); IAMPMO2=$(uid "$PMO2_TOKEN")
+[ -n "$IAMADM" ] && [ -n "$IAMPMO2" ] && ok "r1a identity: the ids of the two PMO users are resolved" || bad "r1a identity: the ids of the two PMO users are resolved"
+
+# iam_refused TOKEN WHO : a signed-in user without the PMO role is turned away from every user-administration call by the role attribute (HTTP 403, standard refusal body)
+iam_refused() {
+  as "$1" POST Accounts/edit-user-roles "{\"userId\":$IAMID,\"roleIds\":[6]}"; r403 "r1a identity: $2 cannot edit the roles of a user (403)"
+  as "$1" POST Accounts/register-user '{"userName":"iam.nobody","name":"x","lastName":"x","email":"iam.nobody@example.com","roleIds":[6],"password":"Ci#Nobody-User-2026","phoneNumber":"09120000099","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345699"}'; r403 "r1a identity: $2 cannot register a user (403)"
+  as "$1" GET "Accounts/get-all-users?PageSize=5"; r403 "r1a identity: $2 cannot read the full user list (403)"
+  as "$1" PUT Accounts/update-user "{\"id\":$IAMID,\"name\":\"x\"}"; r403 "r1a identity: $2 cannot update a user (403)"
+  as "$1" DELETE "Accounts/delete-user/$IAMID"; r403 "r1a identity: $2 cannot delete a user (403)"
+  as "$1" DELETE Accounts/delete-user-collection "[$IAMID]"; r403 "r1a identity: $2 cannot delete users in bulk (403)"
+  as "$1" POST Accounts/admin-reset-password "{\"userId\":$IAMID}"; r403 "r1a identity: $2 cannot reset the password of a user (403)"
+  as "$1" GET Accounts/role-grants; r403 "r1a identity: $2 cannot read the requests for sensitive roles (403)"
+  as "$1" POST Accounts/role-grants/1/approve; r403 "r1a identity: $2 cannot approve a sensitive role (403)"
+}
+iam_refused "$WH_TOKEN" "a storekeeper"
+as "$WH_TOKEN" GET "Accounts/users/lookup?Contains=iam.ci"
+check "r1a identity: every signed-in user can read the slim user list for pickers: id and names, no national code, phone, e-mail, birth date or roles" '.success and ([.data.data[]|select(.userName == "iam.ci")]|length) == 1 and ([.data.data[]|keys[]]|unique|map(select(. == "nationalCode" or . == "phoneNumber" or . == "email" or . == "birthDate" or . == "roles"))|length) == 0'
+as "$WH_TOKEN" GET "Accounts/users/lookup?Role=PMO"; check "r1a identity: who holds the PMO role is not for everybody to ask (the role filter of the slim list gives nothing)" '.success and (.data.data|length) == 0'
+as "$WH_TOKEN" GET "Accounts/get-user-info?Id=$IAMID"; nomsg "r1a identity: the record of another user (national code, phone, birth date) is not readable by an ordinary user" "اطلاعات و عکس خودتان"
+
+# --- passwords: only the owner changes a password, with the current one; five wrong passwords lock the account for everybody; the PMO sets a temporary password
+IAM_TOKEN=$(login iam.ci 'Ci#Iam-User-2026'); [ -n "$IAM_TOKEN" ] && ok "r1a identity: the throwaway user signs in" || bad "r1a identity: the throwaway user signs in"
+as "$IAM_TOKEN" POST Accounts/change-password "{\"userId\":$IAM2ID,\"currentPassword\":\"Ci#Iam-User-2026\",\"newPassword\":\"Ci#Hijack-Pass-2026\"}"
+nomsg "r1a identity: change-password refuses the id of another user (a password is changed only by its owner)" "رمز عبور خودتان"
+[ -n "$(login iam2.ci 'Ci#Iam2-User-2026')" ] && ok "r1a identity: the password of the other user is unchanged" || bad "r1a identity: the password of the other user is unchanged"
+as "$IAM_TOKEN" POST Accounts/change-password '{"newPassword":"Ci#Iam-Next-2026"}'; nomsg "r1a identity: changing the own password needs the current password" "رمز عبور فعلی را وارد کنید"
+as "$IAM_TOKEN" POST Accounts/change-password '{"currentPassword":"Ci#Iam-User-2026","newPassword":"Ci#Iam-Next-2026"}'
+check "r1a identity: the own password is changed with the current password and fresh tokens come back" '.success and (.data.accessToken|length) > 20'
+IAM_TOKEN=$(val .data.accessToken)
+login iam.ci 'Ci#Iam-User-2026' >/dev/null; nomsg "r1a identity: the old password no longer signs in" "نام کاربری یا رمزعبور معتبر نیست"
+[ -n "$(login iam.ci 'Ci#Iam-Next-2026')" ] && ok "r1a identity: the new password signs in" || bad "r1a identity: the new password signs in"
+for _ in 1 2 3 4 5; do login iam.ci 'Wrong#Pass-0001' >/dev/null; done
+nomsg "r1a identity: the fifth wrong password locks the account and the answer says so (the lock-out applies to every account)" "تعلیق شده"
+login iam.ci 'Ci#Iam-Next-2026' >/dev/null; nomsg "r1a identity: a locked account is refused even with the right password" "تعلیق شده"
+call POST Accounts/admin-reset-password "{\"userId\":$IAMID}"
+check "r1a identity: a PMO user sets a temporary password (made by the system, shown once) and that lifts the lock-out" '.success and .data.mustChangePassword == true and (.data.temporaryPassword|length) >= 10'
+IAMTMP=$(val .data.temporaryPassword)
+login iam.ci "$IAMTMP" >/dev/null
+check "r1a identity: the temporary password gives no tokens; the answer asks for a new password (MUST_CHANGE_PASSWORD)" '.success == false and .data.code == "MUST_CHANGE_PASSWORD" and .data.mustChangePassword == true and ((.data.accessToken // "")|length) == 0'
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/Accounts/change-temporary-password" -H 'Content-Type: application/json' --data-binary "{\"userName\":\"iam.ci\",\"temporaryPassword\":\"$IAMTMP\",\"newPassword\":\"Ci#Iam-Final-2026\"}")
+check "r1a identity: the temporary password is replaced by a new one without a token (anonymous call) and the user is signed in" '.success and (.data.accessToken|length) > 20'
+IAM_TOKEN=$(val .data.accessToken)
+
+# --- roles: a sensitive role needs a second PMO user; nobody changes his or her own roles
+call GET Accounts/role-grants
+check "r1a identity: the request for the sensitive role is listed; the PMO user who made it cannot approve it" '.success and ([.data[]|select(.userName == "iam2.ci" and .role == "FINANCEMANAGER" and .canApprove == false)]|length) == 1'
+IAMG=$(jq -r '[.data[]|select(.userName == "iam2.ci")][0].id' "$B")
+call POST "Accounts/role-grants/$IAMG/approve"; nomsg "r1a identity: the PMO user who asked cannot approve the own request" "(PMO) دیگری باید"
+as "$PMO2_TOKEN" GET Accounts/role-grants; check "r1a identity: the second PMO user may approve it" ".success and ([.data[]|select(.id == $IAMG and .canApprove == true)]|length) == 1"
+as "$PMO2_TOKEN" POST "Accounts/role-grants/$IAMG/approve"; check "r1a identity: the second PMO user approves and the role is given" '.success and .data.role == "FINANCEMANAGER"'
+call GET "Accounts/get-user-info?Id=$IAM2ID"; check "r1a identity: after the approval the user holds the sensitive role" '.success and ([.data.roles[].name]|index("FINANCEMANAGER")) != null'
+call POST Accounts/edit-user-roles "{\"userId\":$IAMADM,\"roleIds\":[1]}"; nomsg "r1a identity: nobody changes his or her own roles (another PMO user has to do it)" "خودتان مجاز نیست"
+call POST Accounts/edit-user-roles "{\"userId\":$IAM2ID,\"roleIds\":[6]}"; check "r1a identity: taking a role away is immediate" '.success and .data == "WAREHOUSE"'
+
+# --- the end of the throwaway users: deleted, their token stops working at once, they cannot sign in
+call DELETE "Accounts/delete-user/$IAM2ID"; check "r1a identity: the PMO deletes the second throwaway user" '.success'
+call DELETE "Accounts/delete-user/$IAMID"; check "r1a identity: the PMO deletes the first throwaway user" '.success'
+as "$IAM_TOKEN" GET Accounts/get-current-user-info
+if [ "$CODE" = "401" ] && jq -e '.success == false and (.message|contains("وارد سامانه شوید"))' "$B" >/dev/null 2>&1; then ok "r1a identity: the token of a deleted user stops working at once (401, standard refusal body)"; else bad "r1a identity: the token of a deleted user stops working at once (401, standard refusal body) got HTTP $CODE"; fi
+login iam.ci 'Ci#Iam-Final-2026' >/dev/null; nomsg "r1a identity: a deleted user cannot sign in" "حذف شده است"
+
+# --- legacy write actions (R1a role matrix): a signed-in user outside the lists gets 403 and the standard refusal body; reads stay open to every signed-in user
+call POST Contracts '{"code":"R1A-CT-1","title":"قرارداد آزمون دسترسی","status":1,"employer":"کارفرمای آزمون"}'; check "r1a legacy: a throwaway contract is created (PMO)" '.success and .data.id > 0'; R1ACT=$(val .data.id)
+# legacy_refused TOKEN WHO CONTRACTID : the legacy write actions of the matrix, tried by a user who is in none of their lists
+legacy_refused() {
+  as "$1" POST Contracts '{"code":"R1A-X","title":"x","status":1}'; r403 "r1a legacy: $2 cannot create a contract (403)"
+  as "$1" PUT Contracts "{\"id\":$3,\"code\":\"R1A-X\",\"title\":\"x\",\"status\":1}"; r403 "r1a legacy: $2 cannot update a contract (403)"
+  as "$1" DELETE "Contracts/$3"; r403 "r1a legacy: $2 cannot delete a contract (403)"
+  as "$1" DELETE WorkOrders/0; r403 "r1a legacy: $2 cannot delete a work order (403)"
+  as "$1" POST Provider '{"name":"R1A-X"}'; r403 "r1a legacy: $2 cannot create a provider (403)"
+  as "$1" POST Tenders '{"code":"R1A-X"}'; r403 "r1a legacy: $2 cannot create a tender (403)"
+  as "$1" POST Boms '{}'; r403 "r1a legacy: $2 cannot create a BOM line (403)"
+  as "$1" POST Holidays/add-date-to-holidays '{}'; r403 "r1a legacy: $2 cannot add a holiday (403)"
+  as "$1" POST AdminSettings '{}'; r403 "r1a legacy: $2 cannot change the administration settings (403)"
+}
+legacy_refused "$WH_TOKEN" "a storekeeper" "$R1ACT"
+as "$PLAN_TOKEN" PUT Contracts "{\"id\":$R1ACT,\"code\":\"R1A-CT-1\",\"title\":\"قرارداد آزمون دسترسی (ویرایش)\",\"status\":1,\"employer\":\"کارفرمای آزمون\"}"; check "r1a legacy: planning is a contract writer and updates the contract" ".success and .data.id == $R1ACT"
+as "$PLAN_TOKEN" DELETE "Contracts/$R1ACT"; r403 "r1a legacy: planning edits contracts but only the PMO deletes one (403)"
+as "$COM_TOKEN" DELETE Contracts/delete-contract-collection "[$R1ACT]"; r403 "r1a legacy: commercial cannot delete contracts in bulk either (403)"
+call GET "Contracts/contracts?Id=$R1ACT"; check "r1a legacy: the refused deletes left the contract in place" ".success and .data.id == $R1ACT"
+call DELETE "Contracts/$R1ACT"; call GET "Contracts/contracts?Id=$R1ACT"
+nomsg "r1a legacy: the PMO deletes an empty contract (afterwards the contract is gone)" "قرارداد یافت نشد"
 
 # item codes per WI-WH-002 (material, part, MESC standard part, product)
 C_RAW=01001025120101; C_SHAFT=02130001010003; C_BOLT=50.10.12.024.1; C_ROTOR=031TS250PB1405
@@ -270,9 +391,6 @@ fi
 TOKEN=$ADMIN_TOKEN
 
 # ================================================================ phase 2: standard warehouse flows
-TOKEN=$ADMIN_TOKEN
-user pmo2.ci 1 'Ci#Pmo2-User-2026' 6
-PMO2_TOKEN=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$PMO2_TOKEN" ] && ok "login second planning user" || bad "login second planning user"
 TOKEN=$ADMIN_TOKEN
 
 # ---------------------------------------------------------------- coding (WI-WH-002)
@@ -514,12 +632,12 @@ as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SINV,\"amo
 PAY=$(val .data.id)
 as "$COM_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"approve\"}"; check "buyer cannot approve the payment" '.success == false'
 call POST procurement/payments/action "{\"id\":$PAY,\"action\":\"approve\"}"; check "payment approved by PMO" '.success and .data.status == 1'
-user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
 user2 fin2.ci 3 'Ci#Fin2-User-2026' 09120000024 0012345624
 user2 fm.ci 17 'Ci#Fm-User-2026' 09120000025 0012345625
 user2 fm2.ci 17 'Ci#Fm2-User-2026' 09120000031 0012345631
 user2 pay.ci 18 'Ci#Pay-User-2026' 09120000026 0012345626
 user2 tr.ci 19 'Ci#Tr-User-2026' 09120000027 0012345627
+approve_grants fm.ci fm2.ci pay.ci
 FIN2_TOKEN=$(login fin2.ci 'Ci#Fin2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026'); FM2_TOKEN=$(login fm2.ci 'Ci#Fm2-User-2026'); PAYR_TOKEN=$(login pay.ci 'Ci#Pay-User-2026'); TR_TOKEN=$(login tr.ci 'Ci#Tr-User-2026')
 as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\"}"; check "payment needs the bank or Sepidar reference" '.success == false'
 as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":1}"; nomsg "r1: the old pay action is for treasury or the finance manager only" "خزانه"
@@ -560,14 +678,9 @@ call POST Accounts/register-user '{"userName":"qa.ci","name":"qa.ci","lastName":
 call POST Accounts/register-user '{"userName":"qc2.ci","name":"qc2.ci","lastName":"آزمون","email":"qc2.ci@example.com","roleIds":[5],"password":"Ci#Qc2-User-2026","phoneNumber":"09120000021","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345621"}'
 QA_TOKEN=$(login qa.ci 'Ci#Qa-User-2026'); QC2_TOKEN=$(login qc2.ci 'Ci#Qc2-User-2026')
 [ -n "$QA_TOKEN" ] && [ -n "$QC2_TOKEN" ] && ok "quality: login QA (role 14) and second QC user" || bad "quality: login QA (role 14) and second QC user"
-uid() { as "$1" GET Accounts/get-current-user-info; jq -r '.data.id // .data.userId // empty' "$B"; }
 QAID=$(uid "$QA_TOKEN"); QCID=$(uid "$QC_TOKEN"); QC2ID=$(uid "$QC2_TOKEN"); ENGID=$(uid "$ENG_TOKEN"); PRODID=$(uid "$PROD_TOKEN"); WHID=$(uid "$WH_TOKEN")
 [ -n "$QAID" ] && [ -n "$QCID" ] && [ -n "$QC2ID" ] && [ -n "$ENGID" ] && [ -n "$PRODID" ] && [ -n "$WHID" ] && ok "quality: user ids resolved" || bad "quality: user ids resolved"
-# refused(): the last call did not succeed (the services answer 200 + success=false for role and rule violations)
-refused() { jq -e '.success == false' "$B" >/dev/null 2>&1; }
-no() { if refused; then ok "$1"; else bad "$1"; fi; }
-# nomsg NAME FRAGMENT : refused, and the reason names the rule (so a check cannot pass for an unrelated reason)
-nomsg() { if jq -e --arg f "$2" '.success == false and ((.message // "") | contains($f))' "$B" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+# (as, uid, refused, no, nomsg, r403 and user2 are defined at the top of the script)
 
 # --- contract, pump equipment, two work orders (the pump template has 6 activities)
 call POST Contracts '{"code":"QA-CT-01","title":"قرارداد آزمون ماژول کیفیت","status":1,"employer":"کارفرمای آزمون"}'; check "quality: contract created" '.success and .data.id > 0'
@@ -1031,6 +1144,10 @@ PCTERMS="{\"contractId\":$PCT,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000
 as "$WH_TOKEN" POST $PC/terms "$PCTERMS"; no "pc: warehouse cannot write contract terms"
 as "$PLAN_TOKEN" POST $PC/terms "$PCTERMS"; check "pc: contract terms saved (value, penalty, calendar, start)" '.success and .data.valueExVat == 1000000000 and .data.dataDateWeekday == 3 and .data.clientReportShowsIndices == false'
 as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.vatPercent = 101')"; no "pc: percentage above 100 rejected"
+# R1a: a contract that project control works on is not deleted, even by the PMO (the answer names what is in the way); only the PMO deletes a contract at all
+call DELETE "Contracts/$PCT"; check "r1a legacy: the PMO cannot delete a contract that has project control records; the answer names them" '.success == false and (.message|contains("حذف قرارداد ممکن نیست")) and (.message|contains("شرایط قرارداد در کنترل پروژه"))'
+as "$PLAN_TOKEN" DELETE "Contracts/$PCT"; r403 "r1a legacy: planning cannot delete a contract (403)"
+call GET "Contracts/contracts?Id=$PCT"; check "r1a legacy: the contract of the project is still there" ".success and .data.id == $PCT"
 
 # --- initiation (WI-PL-009 sections 3-8) and the 9-character project code
 as "$PLAN_TOKEN" POST $PC/initiation/start/$PCT; check "pc: initiation started: 10 steps" '.success and (.data.steps|length) == 10'
@@ -1042,11 +1159,38 @@ as "$CEO_TOKEN" POST $PC/initiation/action "{\"contractId\":$PCT,\"step\":4,\"pr
 call GET "$PC/terms/$PCT"; check "pc: terms show the manager and the code" ".success and .data.projectManagerUserId == $PMID and .data.projectCode != null"
 as "$PLAN_TOKEN" GET "$PC/claims?ContractId=$PCT"; check "pc: claims file opened with the initiation (read)" '.success'
 
+# --- claims (R1a): a claim is notified only after two different people approved it: the PMO deputy and the design and manufacturing side (engineering or the project manager)
+user2 dual.ci 1,4 'Ci#Dual-User-2026' 09120000092 0012345692
+DUAL_TOKEN=$(login dual.ci 'Ci#Dual-User-2026'); [ -n "$DUAL_TOKEN" ] && ok "r1a pc: login of a user who holds two roles, PMO and engineering" || bad "r1a pc: login of a user who holds two roles, PMO and engineering"
+as "$PLAN_TOKEN" POST $PC/claims "{\"contractId\":$PCT,\"direction\":1,\"issue\":\"تاخیر کارفرما در تایید نقشه‌ها\",\"basis\":\"بند ۱۲ قرارداد\"}"; check "r1a pc: claim saved" '.success and .data.id > 0 and .data.status == 0'
+CL1=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL1,\"action\":\"quantify\",\"days\":10,\"amount\":50000000}"; check "r1a pc: claim quantified: 10 days and 50,000,000 rial" '.success and .data.status == 1 and .data.daysQuantified == 10 and .data.amountQuantified == 50000000'
+as "$WH_TOKEN" POST $PC/claims/action "{\"id\":$CL1,\"action\":\"approve-pmo\"}"; nomsg "r1a pc: a storekeeper cannot approve a claim for the PMO" "مجوز"
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL1,\"action\":\"approve-pmo\"}"; nomsg "r1a pc: planning cannot approve a claim for the PMO" "مجوز"
+call POST $PC/claims/action "{\"id\":$CL1,\"action\":\"approve-design\"}"; nomsg "r1a pc: the PMO deputy does not approve for the design and manufacturing side (engineering or the project manager does)" "مدیر مهندسی یا مدیر پروژه"
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL1,\"action\":\"notify\"}"; nomsg "r1a pc: a claim cannot be notified before both approvals" "ابلاغ ادعا نیازمند تایید"
+call POST $PC/claims/action "{\"id\":$CL1,\"action\":\"approve-pmo\",\"note\":\"تایید معاون PMO\"}"; check "r1a pc: the PMO approves the claim" '.success and .data.pmoApproved == true and .data.designManufacturingApproved == false'
+call POST $PC/claims/action "{\"id\":$CL1,\"action\":\"approve-pmo\"}"; nomsg "r1a pc: the PMO approval is given once" "تایید PMO برای این ادعا"
+as "$ENG_TOKEN" POST $PC/claims/action "{\"id\":$CL1,\"action\":\"approve-design\",\"note\":\"تایید مدیر مهندسی\"}"; check "r1a pc: engineering approves the claim for the design and manufacturing side" '.success and .data.pmoApproved == true and .data.designManufacturingApproved == true'
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL1,\"action\":\"notify\"}"; check "r1a pc: after the two approvals the claim is notified" '.success and .data.status == 2'
+as "$PLAN_TOKEN" POST $PC/claims "{\"contractId\":$PCT,\"direction\":1,\"issue\":\"ادعای دوم برای آزمون تفکیک وظایف\"}"; check "r1a pc: second claim saved" '.success and .data.id > 0'
+CL2=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL2,\"action\":\"quantify\",\"days\":3}"; check "r1a pc: second claim quantified (3 days)" '.success and .data.status == 1'
+as "$DUAL_TOKEN" POST $PC/claims/action "{\"id\":$CL2,\"action\":\"approve-pmo\"}"; check "r1a pc: the user with both roles approves as the PMO deputy" '.success and .data.pmoApproved == true'
+as "$DUAL_TOKEN" POST $PC/claims/action "{\"id\":$CL2,\"action\":\"approve-design\"}"; nomsg "r1a pc: the same person cannot give the second approval (the two approvals come from two different people)" "دو نفر مختلف"
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL2,\"action\":\"notify\"}"; nomsg "r1a pc: so the claim cannot be notified yet" "ابلاغ ادعا نیازمند تایید"
+as "$ENG_TOKEN" POST $PC/claims/action "{\"id\":$CL2,\"action\":\"approve-design\"}"; check "r1a pc: another person (engineering) gives the second approval" '.success and .data.designManufacturingApproved == true'
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL2,\"action\":\"notify\"}"; check "r1a pc: the second claim is notified after two different approvers" '.success and .data.status == 2'
+
 # --- equipment code and MDR/MDL from the template
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PCW1,\"contractId\":$PCT,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"25\"}"; check "pc: equipment project code PU1002501" '.success and .data.equipmentProjectCode == "PU1002501"'
 as "$QC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; no "pc: QC cannot draft the MDR"
 as "$DCC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; check "pc: MDR drafted from the pump template" '.success and .data.linesDrafted == 12'
 as "$DCC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; no "pc: the MDR is drafted once per work order"
+# R1a: a work order that has engineering documents (the MDR above) is not deleted, even by the PMO; the answer names what is in the way. Only the PMO deletes a work order at all.
+call DELETE WorkOrders/delete-workOrder-collection "[$PCW1]"; check "r1a legacy: the PMO cannot delete a work order that has engineering documents; the answer for that work order names them" '.success and (.data|length) == 1 and .data[0].success == false and (.data[0].message|contains("حذف دستور ساخت ممکن نیست")) and (.data[0].message|contains("مدارک مهندسی"))'
+as "$PLAN_TOKEN" DELETE WorkOrders/delete-workOrder-collection "[$PCW1]"; r403 "r1a legacy: planning cannot delete work orders (403)"
+call GET "WorkOrders/get-workorder?Id=$PCW1&ContractId=$PCT"; check "r1a legacy: the work order is still there" ".success and .data.id == $PCW1"
 as "$DCC_TOKEN" GET "$PC/mdr?WorkOrderId=$PCW1&PageSize=0"
 check "pc: MDR has 12 lines, 11 on the client list (MDL subset), each with a standard source" '(.data.data|length) == 12 and ([.data.data[]|select(.clientSubmittal)]|length) == 11 and ([.data.data[]|select(.standardSource != null)]|length) == 12'
 check "pc: template standard sources are marked to be verified" '[.data.data[]|select((.standardSource // "")|contains("to be verified"))]|length >= 1'
@@ -1080,6 +1224,16 @@ actp "{\"contractId\":$PCT,\"code\":\"PC-D\",\"title\":\"تامین ورق ب\",
 check "pc: activity D (supply receipt, 40 plates)" '.success and .data.id > 0'; PCD=$(val .data.id)
 actp "{\"contractId\":$PCT,\"code\":\"PC-X\",\"title\":\"x\",\"sourceType\":6,\"durationDays\":1,\"progressMethod\":2}"; no "pc: supply activity without an order line rejected"
 as "$WH_TOKEN" POST $PC/activities "{\"contractId\":$PCT,\"code\":\"PC-Y\",\"title\":\"y\",\"durationDays\":1}"; no "pc: warehouse cannot write activities"
+# R1a: starting, holding and resuming an activity belongs to the unit that owns it (ResponsibleUnit), planning and the PMO; the manager of another unit is turned away.
+# Only refusals and one hold-and-resume round trip (back to "not started") run here, so the exact schedule figures below are not touched.
+as "$WH_TOKEN" POST $PC/activities/action "{\"id\":$PCC,\"action\":\"start\"}"; nomsg "r1a pc: the warehouse manager cannot start an activity of the construction unit" "شروع و توقف فعالیت"
+as "$ENG_TOKEN" POST $PC/activities/action "{\"id\":$PCC,\"action\":\"hold\",\"reason\":\"x\"}"; nomsg "r1a pc: the engineering manager cannot hold an activity of the construction unit" "شروع و توقف فعالیت"
+as "$PM_TOKEN" POST $PC/activities/action "{\"id\":$PCA,\"action\":\"hold\",\"reason\":\"x\"}"; nomsg "r1a pc: the project manager cannot hold an activity of the engineering unit" "شروع و توقف فعالیت"
+as "$ENG_TOKEN" POST $PC/activities/action "{\"id\":$PCA,\"action\":\"hold\",\"reason\":\"انتظار تایید مشخصات\"}"; check "r1a pc: the responsible unit (engineering) holds its own activity" '.success and .data.status == 3'
+as "$WH_TOKEN" POST $PC/activities/action "{\"id\":$PCA,\"action\":\"resume\"}"; nomsg "r1a pc: the warehouse manager cannot resume it" "شروع و توقف فعالیت"
+as "$ENG_TOKEN" POST $PC/activities/action "{\"id\":$PCA,\"action\":\"resume\"}"; check "r1a pc: the responsible unit resumes it (not started again)" '.success and .data.status == 0'
+as "$PLAN_TOKEN" POST $PC/activities/action "{\"id\":$PCC,\"action\":\"hold\",\"reason\":\"انتظار مواد\"}"; check "r1a pc: planning may hold the activity of any unit" '.success and .data.status == 3'
+call POST $PC/activities/action "{\"id\":$PCC,\"action\":\"resume\"}"; check "r1a pc: the PMO resumes it (not started again)" '.success and .data.status == 0'
 
 pcdep() { as "$PLAN_TOKEN" POST $PC/dependencies "{\"contractId\":$PCT,\"predecessorId\":$1,\"successorId\":$2,\"type\":1,\"lagDays\":0}"; }
 pcdep $PCA $PCB; check "pc: dependency A to B" '.success'
@@ -1229,6 +1383,9 @@ as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"پرداخ
 PCMS1=$(val .data.id)
 as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"پرداخت تاریخ‌دار\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd -1)T00:00:00\",\"amount\":10000000}"; check "pc: payment milestone on a date" '.success'
 as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"پرداخت پیشرفت\",\"kind\":2,\"trigger\":2,\"triggerPercent\":100,\"amount\":10000000}"
+# R1a: the evaluation moves milestones to "due" (it starts the invoicing flow): PMO, planning, commercial and financial only; the role attribute answers 403 with the standard refusal body
+as "$WH_TOKEN" POST $PC/milestones/evaluate/$QCT; r403 "r1a pc: the storekeeper cannot evaluate payment milestones (403)"
+as "$QC_TOKEN" POST $PC/milestones/evaluate/$QCT; r403 "r1a pc: QC cannot evaluate payment milestones (403)"
 as "$COM_TOKEN" POST $PC/milestones/evaluate/$QCT; check "pc: released note and a past date make two milestones due; progress one stays planned" '.success and .data.becameDue == 2 and ([.data.milestones[]|select(.status == 1)]|length) == 2'
 as "$QC_TOKEN" POST $PC/milestones "{\"contractId\":$QCT,\"title\":\"x\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 1)T00:00:00\",\"amount\":1}"; no "pc: QC cannot define payment milestones"
 as "$COM_TOKEN" POST $PC/milestones/action "{\"id\":$PCMS1,\"action\":\"paid\"}"; no "pc: a milestone that is only due cannot be marked paid"
@@ -1238,6 +1395,30 @@ as "$COM_TOKEN" POST $PC/guarantees/parse; check "pc: legacy guarantees parsed i
 as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "pc: guarantee amount parsed to 500,000,000, expiry in 10 days" '.success and ([.data.data[]|select(.no=="PC-G-1")][0]|(.amountDecimal == 500000000 and .parseFailed == false and .daysToExpiry == 10))'
 as "$COM_TOKEN" GET "$PC/guarantees/alerts?contractId=$PCT"; check "pc: guarantee alert listed at the 14-day level" '(if type == "array" then . else .data end) | ([.[]|select(.no=="PC-G-1")][0]|(.alertLevel == 14 and .daysToExpiry == 10))'
 as "$QC_TOKEN" POST $PC/guarantees/parse; no "pc: QC cannot parse guarantees"
+
+# --- guarantee release (R1a): a second guarantee (PC-G-2, expiry far away, so the alert figures of PC-G-1 stay as they are) is released through its own action
+# (date not in the future and a note are required; commercial, finance manager and PMO sign it); a direct "Released" or "Expired" through the other calls is refused,
+# because the release must leave a dated event with its note and the expiry is written by the daily job (covered by the unit tests, there is no HTTP route to run it)
+call POST ContractGuaranty "{\"title\":\"ضمانت‌نامه پیش‌پرداخت\",\"bank\":\"ملی\",\"no\":\"PC-G-2\",\"price\":\"200,000,000\",\"regDate\":\"$(dd -100)T00:00:00\",\"dueDate\":\"$(dd 200)T00:00:00\",\"contractEntityId\":$PCT}"; check "r1a pc: second legacy guaranty created" '.success'
+as "$COM_TOKEN" POST $PC/guarantees/parse; check "r1a pc: the second guaranty is parsed into typed side data" '.success and .data.created >= 1'
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "r1a pc: the second guarantee is active with the amount 200,000,000 and no release event" '.success and ([.data.data[]|select(.no=="PC-G-2")][0]|(.status == 3 and .amountDecimal == 200000000 and (.events|length) == 0))'
+PCG2=$(jq -r '[.data.data[]|select(.no=="PC-G-2")][0].id' "$B"); PCG2BODY=$(jq -c '[.data.data[]|select(.no=="PC-G-2")][0]|del(.events)' "$B")
+as "$COM_TOKEN" POST $PC/guarantees "$(jq -c '.status = 6' <<< "$PCG2BODY")"; nomsg "r1a pc: Released cannot be set through the save call (only the release action does it)" "از این مسیر"
+as "$COM_TOKEN" POST $PC/guarantees "$(jq -c '.status = 5' <<< "$PCG2BODY")"; nomsg "r1a pc: Expired cannot be set by hand either (the expiry is automatic: correct the date or extend)" "تمدید کنید"
+as "$COM_TOKEN" POST $PC/guarantees/events "{\"guaranteeId\":$PCG2,\"kind\":4,\"eventDate\":\"$(dd 0)T00:00:00\"}"; nomsg "r1a pc: a release event cannot be added through the events call" "guarantees/release"
+as "$COM_TOKEN" POST $PC/guarantees/events "{\"guaranteeId\":$PCG2,\"kind\":5,\"eventDate\":\"$(dd 0)T00:00:00\"}"; nomsg "r1a pc: an expiry event cannot be added by hand" "خودکار ثبت"
+RELBODY="{\"guaranteeId\":$PCG2,\"releaseDate\":\"$(dd 0)T00:00:00\",\"note\":\"نامه کارفرما شماره ۱۲۳\"}"
+as "$WH_TOKEN" POST $PC/guarantees/release "$RELBODY"; r403 "r1a pc: the storekeeper cannot release a guarantee (403)"
+as "$FIN_TOKEN" POST $PC/guarantees/release "$RELBODY"; r403 "r1a pc: the accountant cannot release a guarantee either (403)"
+as "$COM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG2,\"note\":\"نامه کارفرما\"}"; nomsg "r1a pc: a release needs a date" "تاریخ آزادسازی را وارد کنید"
+as "$COM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG2,\"releaseDate\":\"$(dd 3)T00:00:00\",\"note\":\"نامه کارفرما\"}"; nomsg "r1a pc: a release date in the future is refused" "در آینده"
+as "$COM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG2,\"releaseDate\":\"$(dd 0)T00:00:00\"}"; nomsg "r1a pc: a release needs a note (the letter of the client or the bank)" "توضیح"
+as "$FM_TOKEN" POST $PC/guarantees/release "$RELBODY"
+check "r1a pc: the finance manager releases the guarantee; the release event carries the date and the note" '.success and .data.status == 6 and ([.data.events[]|select(.kind == 4)]|length) == 1 and ([.data.events[]|select(.kind == 4)][0].note|contains("نامه کارفرما"))'
+as "$COM_TOKEN" POST $PC/guarantees/release "$RELBODY"; nomsg "r1a pc: a released guarantee is not released twice" "قبلاً آزاد شده"
+as "$COM_TOKEN" POST $PC/guarantees "$(jq -c '.status = 3' <<< "$PCG2BODY")"; nomsg "r1a pc: a released guarantee is not opened again" "دوباره باز نمی"
+as "$COM_TOKEN" POST $PC/guarantees/events "{\"guaranteeId\":$PCG2,\"kind\":3,\"eventDate\":\"$(dd 0)T00:00:00\"}"; nomsg "r1a pc: no event is added to a closed guarantee" "بسته شده"
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "r1a pc: the register shows the released guarantee; PC-G-1 is untouched (active)" '.success and ([.data.data[]|select(.no=="PC-G-2")][0].status == 6) and ([.data.data[]|select(.no=="PC-G-1")][0].status == 3)'
 
 call POST Contracts '{"code":"PC-CT-P","title":"قرارداد آزمون جریمه","status":1,"employer":"کارفرمای آزمون"}'; PCP=$(val .data.id)
 as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PCP,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"contractDeliveryDate\":\"$(dd -14)T00:00:00\",\"dataDateWeekday\":3,\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "pc: penalty contract terms saved" '.success'
@@ -1790,6 +1971,7 @@ TOKEN=$ADMIN_TOKEN
 TOKEN=$ADMIN_TOKEN
 FE=finance/entities; FM2=finance/migration; FAU=finance/audit; FSX=finance/sepidar-export
 user2 aud.ci 28 'Ci#Aud-User-2026' 09120000032 0012345632
+approve_grants aud.ci
 AUD_TOKEN=$(login aud.ci 'Ci#Aud-User-2026')
 [ -n "$FM2_TOKEN" ] && [ -n "$AUD_TOKEN" ] && ok "f3: login second finance manager and the auditor (role 28)" || bad "f3: login second finance manager and the auditor (role 28)"
 
@@ -1893,6 +2075,27 @@ as "$AUD_TOKEN" GET $FP/employees; [ "$CODE" = "403" ] && ok "f3 audit: the audi
 as "$AUD_TOKEN" GET $FP/payslips; [ "$CODE" = "403" ] && ok "f3 audit: the auditor cannot read payslips (403)" || bad "f3 audit: the auditor cannot read payslips (403) got $CODE"
 as "$AUD_TOKEN" GET $FP/runs; [ "$CODE" = "403" ] && ok "f3 audit: the auditor cannot read payroll runs (403)" || bad "f3 audit: the auditor cannot read payroll runs (403) got $CODE"
 as "$FIN_TOKEN" GET "$FAU?PageSize=10"; [ "$CODE" = "403" ] && ok "f3 audit: the accountant has no access to the trail (403)" || bad "f3 audit: the accountant has no access to the trail (403) got $CODE"
+# R1a: the identity events (requests and approvals of sensitive roles, lock-outs, password changes) and the delete of a legacy contract are in the same append-only trail
+as "$AUD_TOKEN" GET "$FAU?EntityType=Identity.Roles&Action=GrantApproved&PageSize=0"
+check "r1a identity: every approval of a sensitive role is in the audit trail with the role, the person who received it and the PMO user who approved it" '.success and ([.data.data[]|select((.summary|contains("FINANCEMANAGER")) and (.userName|length) > 0)]|length) >= 3 and ([.data.data[]|select(.summary|contains("CEO"))]|length) >= 1'
+as "$AUD_TOKEN" GET "$FAU?EntityType=Identity.Roles&Action=GrantRequested&PageSize=0"
+check "r1a identity: every request for a sensitive role is in the audit trail too, with the PMO user who asked" '.success and ([.data.data[]|select(.summary|contains("CEO"))]|length) >= 1 and ([.data.data[]|select((.userName|length) > 0)]|length) == (.data.data|length)'
+as "$AUD_TOKEN" GET "$FAU?EntityType=Identity.SignIn&Action=LockedOut&PageSize=0"
+check "r1a identity: the lock-out of the throwaway user is in the audit trail" '.success and ([.data.data[]|select(.summary|contains("iam.ci"))]|length) >= 1'
+as "$AUD_TOKEN" GET "$FAU?EntityType=Identity.Password&PageSize=0"
+check "r1a identity: the own password change, the refused change of another user's password, the reset by the PMO and the temporary password change are in the audit trail" '.success and ([.data.data[]|select(.action == "Changed")]|length) >= 1 and ([.data.data[]|select(.action == "ChangeRefused")]|length) >= 1 and ([.data.data[]|select(.action == "AdminReset")]|length) >= 1 and ([.data.data[]|select(.action == "TempChanged")]|length) >= 1'
+check "r1a identity: no password (not the old, the new nor the temporary one) is written to the audit trail" ".success and ([.data.data[]|((.summary // \"\") + (.beforeJson // \"\") + (.afterJson // \"\"))]|join(\" \")|(contains(\"Ci#Iam\") or contains(\"$IAMTMP\"))|not)"
+as "$AUD_TOKEN" GET "$FAU?EntityType=User&Action=Added&PageSize=0"
+check "r1a identity: a registered user is in the audit trail with the national code masked and without any password data" '.success and ([.data.data[]|select(((.afterJson // "{}")|fromjson|.UserName) == "iam.ci")]|length) == 1 and ([.data.data[]|select(((.afterJson // "{}")|fromjson|.UserName) == "iam.ci")][0].afterJson|(contains("PasswordHash")|not) and (contains("0012345690")|not) and contains("****5690"))'
+as "$AUD_TOKEN" GET "$FAU?EntityType=ContractEntity&EntityId=$R1ACT&PageSize=0"
+check "r1a legacy: the delete of the throwaway contract by the PMO is in the audit trail with the user" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.Deleted) == true and (.userName|length) > 0)]|length) == 1"
+# the two approvals of a claim and the release of a guarantee leave a row each, with the person who did it (the ids are read before the trail is, the check reads the last answer)
+ENGUID=$(uid "$ENG_TOKEN"); FMUID=$(uid "$FM_TOKEN")
+[ -n "$ENGUID" ] && [ -n "$FMUID" ] && ok "r1a pc: the ids of the engineering user and the finance manager are resolved" || bad "r1a pc: the ids of the engineering user and the finance manager are resolved"
+as "$AUD_TOKEN" GET "$FAU?EntityType=PcClaim&EntityId=$CL1&PageSize=0"
+check "r1a pc: both approvals of the first claim are in the audit trail, the PMO approval by the PMO user and the design approval by the engineering user, then the notification" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.PmoApproved) == true and .userId == $IAMADM)]|length) == 1 and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.DesignManufacturingApproved) == true and .userId == $ENGUID)]|length) == 1 and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.Status) == \"Notified\")]|length) == 1"
+as "$AUD_TOKEN" GET "$FAU?EntityType=PcGuaranteeInfo&EntityId=$PCG2&PageSize=0"
+check "r1a pc: the release of the guarantee is in the audit trail with the finance manager who signed it (active before, released after)" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.beforeJson // \"{}\")|fromjson|.Status) == \"Active\" and ((.afterJson // \"{}\")|fromjson|.Status) == \"Released\" and .userId == $FMUID)]|length) == 1"
 
 # --- period-close checklist
 # a sandbox period of the main company (fiscal year 1396) holds one final and one draft voucher for the close-checklist and export tests
@@ -2828,6 +3031,7 @@ user2 secr.ci 26 'Ci#Secr-User-2026' 09120000042 0012345642
 user2 emp.ci 4 'Ci#Emp-User-2026' 09120000043 0012345643
 user2 mgr.ci 4 'Ci#Mgr-User-2026' 09120000044 0012345644
 user2 chk.ci 4 'Ci#Chk-User-2026' 09120000045 0012345645
+approve_grants hr.ci secr.ci
 OHR_TOKEN=$(login hr.ci 'Ci#Hr-User-2026'); OSEC_TOKEN=$(login secr.ci 'Ci#Secr-User-2026'); OEMP_TOKEN=$(login emp.ci 'Ci#Emp-User-2026')
 OMGR_TOKEN=$(login mgr.ci 'Ci#Mgr-User-2026'); OCHK_TOKEN=$(login chk.ci 'Ci#Chk-User-2026')
 [ -n "$OHR_TOKEN" ] && [ -n "$OSEC_TOKEN" ] && [ -n "$OEMP_TOKEN" ] && [ -n "$OMGR_TOKEN" ] && [ -n "$OCHK_TOKEN" ] && ok "office: login of the new roles SECRETARIAT (26), HR (27) and three ordinary users" || bad "office: login of the new roles SECRETARIAT (26), HR (27) and three ordinary users"
@@ -3499,6 +3703,10 @@ MPM_TOKEN=$(login mf.pm.ci 'Ci#Mfpm-User-2026'); MSV_TOKEN=$(login mf.sv.ci 'Ci#
 MOP_TOKEN=$(login mf.op.ci 'Ci#Mfop-User-2026'); MMT_TOKEN=$(login mf.mt.ci 'Ci#Mfmt-User-2026')
 [ -n "$MPM_TOKEN" ] && [ -n "$MSV_TOKEN" ] && [ -n "$MOP_TOKEN" ] && [ -n "$MMT_TOKEN" ] && ok "mes: login production manager (20), shop supervisor (21), operator (22), maintenance (23)" || bad "mes: login production manager (20), shop supervisor (21), operator (22), maintenance (23)"
 MOPID=$(uid "$MOP_TOKEN")
+# R1a: the same matrix for the floor operator, who is signed in but listed nowhere: no user administration, no legacy write action (HTTP 403 and the standard refusal body).
+# The contract id is the throwaway contract that was deleted at the start (a regression would find nothing to change).
+iam_refused "$MOP_TOKEN" "an operator"
+legacy_refused "$MOP_TOKEN" "an operator" "$R1ACT"
 as "$PAYR_TOKEN" POST $FP/employees "$(EJ MF01 اپراتور آزمون 0084575948 IR270170000000100324200001 | jq -c --argjson u "$MOPID" '. + {userId:$u}')"; check "mes: personnel record of the operator is linked to the operator user" ".success and .data.id > 0 and .data.userId == $MOPID"
 MFEMP=$(val .data.id)
 

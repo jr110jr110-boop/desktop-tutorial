@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Production;
 using ViewModels.NasbNiro.ProductionDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -14,6 +15,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/production")]
+    [RolesCheckedInService]
     public class ProductionCostController : ControllerBase
     {
         private readonly IMfCostService _cost;
@@ -37,6 +39,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/production")]
+    [RolesCheckedInService]
     public class ProductionScheduleController : ControllerBase
     {
         private readonly IMfScheduleService _schedule;
@@ -60,6 +63,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/production")]
+    [RolesCheckedInService]
     public class ProductionMaintenanceController : ControllerBase
     {
         private readonly IMfMaintenanceService _maintenance;

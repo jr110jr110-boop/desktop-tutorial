@@ -15,6 +15,8 @@ using WebApi.Extensions;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write (engineering definitions): PMO, ENGINEERING, ENGINEER
     [Authorize]
     public class EquipmentProcessController : BaseApiController
     {
@@ -26,6 +28,7 @@ namespace WebApi.Controllers
                 ?? throw new System.ArgumentNullException(nameof(EquipmentProcessService));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseEquipmentProcessDto>>>
@@ -48,6 +51,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentProcessService.GetProcessesFileStatusByEquipmentIdAsync(equipmentId, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("finalizeFile")]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async Task<ActionResult<string>> FinalizeFileAsync([FromBody] FinalizeEquipmentProcessFileDto dto, CancellationToken cancellationToken)
@@ -55,6 +59,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentProcessService.FinalizeDocumentAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<EquipmentProcessUpdateResponseDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<EquipmentProcessUpdateResponseDto>>>
@@ -63,6 +68,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentProcessService.UpdateEquipmentProcessAsync(updateEquipmentProcessDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("{equipmentProcessId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseEquipmentProcessDto>>> DeleteEquipmentProcessAsync(
@@ -87,6 +93,7 @@ namespace WebApi.Controllers
             return Ok((await _equipmentProcessService.GetAllResponseEquipmentProcessDtoAsync(EquipmentProcessPaginationParams, cancellationToken)).ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("delete-equipmentProcess-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteEquipmentProcessResultDto>>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<IEnumerable<DeleteEquipmentProcessResultDto>>>>
@@ -95,6 +102,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentProcessService.DeleteEquipmentProcessCollectionAsync(equipmentProcessIds, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost("attach-file-to-equipmentProcess")]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<string>>> AttachFileToEquipmentProcessAsync(
@@ -103,6 +111,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentProcessService.AttachFileAsync(attachFileDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("detach-file-from-equipmentProcess")]
         [ProducesResponseType(typeof(ResponseDto<bool>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromEquipmentProcessAsync(
@@ -111,6 +120,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentProcessService.DetachFileAsync(equipmentProcessId, documentId: fileId, cancellationToken: cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("update-sort")]
         [ProducesResponseType(typeof(ResponseDto<UpdateEquipmentProcessSortResponseDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<UpdateEquipmentProcessSortResponseDto>>>

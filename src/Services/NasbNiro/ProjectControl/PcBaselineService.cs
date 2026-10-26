@@ -583,12 +583,20 @@ namespace Services.NasbNiro.ProjectControl
                     if ((dto.Days ?? 0) <= 0 && (dto.Amount ?? 0m) <= 0m) return Bad<PcClaimDto>("زمان یا مبلغ برآورد را وارد کنید.");
                     c.DaysQuantified = dto.Days; c.AmountQuantified = dto.Amount; c.Status = PcClaimStatus.Quantified;
                     break;
+                // R1a (finding H9): a claim is notified only after two different people approved it, the PMO deputy and the design and manufacturing side.
+                // The entity keeps one reviewer id: while one approval exists it is that approver's id, so the second approver is compared with it; a repeated
+                // approval is refused so the id is never overwritten before the second approval (the audit trail keeps both approvals).
                 case "approve-pmo":
                     if (!_user.IsInRole(ProjectControlRoles.Pmo)) return Bad<PcClaimDto>(PcText.NotAllowed);
+                    if (c.PmoApproved) return Bad<PcClaimDto>("تایید PMO برای این ادعا قبلاً ثبت شده است.");
+                    if (c.DesignManufacturingApproved && c.ReviewedByUserId == Me) return Bad<PcClaimDto>(PcText.SameUser + " (تایید PMO و تایید طراحی/ساخت باید از دو نفر مختلف باشد)");
                     c.PmoApproved = true; c.ReviewedByUserId = Me; c.ReviewedAt = now; c.ReviewNote = Clean(dto.Note) ?? c.ReviewNote;
                     break;
                 case "approve-design":
-                    if (!_user.IsInRole("ENGINEERING,CONSTRUCTION,PMO")) return Bad<PcClaimDto>(PcText.NotAllowed);
+                    // the PMO deputy does not approve for the design side: the design and manufacturing deputy is engineering (or the project manager) ★ to be confirmed by the company
+                    if (!_user.IsInRole("ENGINEERING,PROJECTMANAGER")) return Bad<PcClaimDto>(PcText.NotAllowed + " (تایید طراحی/ساخت با مدیر مهندسی یا مدیر پروژه است)");
+                    if (c.DesignManufacturingApproved) return Bad<PcClaimDto>("تایید طراحی/ساخت برای این ادعا قبلاً ثبت شده است.");
+                    if (c.PmoApproved && c.ReviewedByUserId == Me) return Bad<PcClaimDto>(PcText.SameUser + " (تایید PMO و تایید طراحی/ساخت باید از دو نفر مختلف باشد)");
                     c.DesignManufacturingApproved = true; c.ReviewedByUserId = Me; c.ReviewedAt = now; c.ReviewNote = Clean(dto.Note) ?? c.ReviewNote;
                     break;
                 case "notify":

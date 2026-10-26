@@ -10,6 +10,8 @@ using ViewModels.NasbNiro.Pagination;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write: PMO, HR, PLANNING
     [Authorize]
     public class HolidaysController : BaseApiController
     {
@@ -20,6 +22,7 @@ namespace WebApi.Controllers
             _holidaysService = holidaysService ?? throw new System.ArgumentNullException(nameof(holidaysService));
         }
 
+        [Authorize(Roles = LegacyRoles.HolidayWriters)]
         [HttpPost("add-day-of-week-to-holidays")]
         [ProducesResponseType(typeof(ResponseDto<ResponseHolidayDayDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseHolidayDayDto>>> AddDayOfWeekToHolidaysAsync(
@@ -28,6 +31,7 @@ namespace WebApi.Controllers
             return Ok(await _holidaysService.AddHolidayAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.HolidayWriters)]
         [HttpPost("add-date-to-holidays")]
         [ProducesResponseType(typeof(ResponseDto<ResponseHolidayDayDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseHolidayDateDto>>> AddDateToHolidaysAsync(
@@ -36,6 +40,7 @@ namespace WebApi.Controllers
             return Ok(await _holidaysService.AddHolidayAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.HolidayWriters)]
         [HttpDelete("delete-day-of-week-from-holidays")]
         [ProducesResponseType(typeof(ResponseDto<ResponseHolidayDayDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseHolidayDayDto>>> DeleteDayOfWeekFromHolidaysAsync(
@@ -44,6 +49,7 @@ namespace WebApi.Controllers
             return Ok(await _holidaysService.DeleteHolidayAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.HolidayWriters)]
         [HttpDelete("delete-date-from-holidays")]
         [ProducesResponseType(typeof(ResponseDto<ResponseHolidayDateDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseHolidayDateDto>>> DeleteDateFromHolidaysAsync(
@@ -52,6 +58,7 @@ namespace WebApi.Controllers
             return Ok(await _holidaysService.DeleteHolidayAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.HolidayWriters)]
         [HttpDelete("delete-holidates")]
         [ProducesResponseType(typeof(ResponseDto<ResponseHolidayDateDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseHolidayDateDto>>> DeleteHolidatesAsync(

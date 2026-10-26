@@ -8,6 +8,7 @@ using Services.NasbNiro.ProjectControl;
 using ViewModels.NasbNiro.Pagination;
 using ViewModels.NasbNiro.ProjectControlDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers.ProjectControl
 {
@@ -17,6 +18,7 @@ namespace WebApi.Controllers.ProjectControl
     [ApiController]
     [Authorize]
     [Route("api/v1/projectcontrol")]
+    [RolesCheckedInService]
     public class ProjectControlSetupController : ControllerBase
     {
         private readonly IPcProjectService _project;
@@ -106,6 +108,7 @@ namespace WebApi.Controllers.ProjectControl
     [ApiController]
     [Authorize]
     [Route("api/v1/projectcontrol")]
+    [RolesCheckedInService]
     public class ProjectControlScheduleController : ControllerBase
     {
         private readonly IPcScheduleService _schedule;
@@ -200,6 +203,7 @@ namespace WebApi.Controllers.ProjectControl
     [ApiController]
     [Authorize]
     [Route("api/v1/projectcontrol")]
+    [RolesCheckedInService]
     public class ProjectControlProgressController : ControllerBase
     {
         private readonly IPcProgressService _progress;
@@ -264,6 +268,7 @@ namespace WebApi.Controllers.ProjectControl
     [ApiController]
     [Authorize]
     [Route("api/v1/projectcontrol")]
+    [RolesCheckedInService]
     public class ProjectControlCommercialController : ControllerBase
     {
         private readonly IPcCommercialService _commercial;
@@ -283,7 +288,10 @@ namespace WebApi.Controllers.ProjectControl
         [HttpPost("milestones/action")]
         public async Task<IActionResult> MilestoneActionAsync([FromBody] PcMilestoneActionDto dto, CancellationToken ct) => Ok(await _commercial.MilestoneActionAsync(dto, ct));
 
+        // R1a: the evaluation moves payment milestones to "due" (it starts the invoicing flow), so it is not open to every signed-in user.
+        // PMO, planning (it owns the schedule the triggers read), commercial and financial (they invoice and collect) ★ to be confirmed by the company.
         [HttpPost("milestones/evaluate/{contractId:int}")]
+        [Authorize(Roles = "PMO,PLANNING,COMMERCIAL,FINANCIAL")]
         public async Task<IActionResult> EvaluateMilestonesAsync(int contractId, CancellationToken ct) => Ok(await _commercial.EvaluateMilestonesAsync(contractId, ct));
 
         [HttpGet("guarantees")]
@@ -298,6 +306,11 @@ namespace WebApi.Controllers.ProjectControl
 
         [HttpPost("guarantees/events")]
         public async Task<IActionResult> AddGuaranteeEventAsync([FromBody] PcGuaranteeEventSaveDto dto, CancellationToken ct) => Ok(await _commercial.AddGuaranteeEventAsync(dto, ct));
+
+        // R1a: the release has its own roles (the money side signs it too) and needs a date and a note; the expiry is automatic (daily job)
+        [HttpPost("guarantees/release")]
+        [Authorize(Roles = "COMMERCIAL,FINANCEMANAGER,PMO")]
+        public async Task<IActionResult> ReleaseGuaranteeAsync([FromBody] PcGuaranteeReleaseDto dto, CancellationToken ct) => Ok(await _commercial.ReleaseGuaranteeAsync(dto, ct));
 
         [HttpGet("guarantees/alerts")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
@@ -328,6 +341,7 @@ namespace WebApi.Controllers.ProjectControl
     [ApiController]
     [Authorize]
     [Route("api/v1/projectcontrol")]
+    [RolesCheckedInService]
     public class ProjectControlDocumentsController : ControllerBase
     {
         private readonly IPcMdrService _mdr;
@@ -387,6 +401,7 @@ namespace WebApi.Controllers.ProjectControl
     [ApiController]
     [Authorize]
     [Route("api/v1/projectcontrol")]
+    [RolesCheckedInService]
     public class ProjectControlChangeController : ControllerBase
     {
         private readonly IPcBaselineService _baseline;
@@ -453,6 +468,7 @@ namespace WebApi.Controllers.ProjectControl
     [ApiController]
     [Authorize]
     [Route("api/v1/projectcontrol")]
+    [RolesCheckedInService]
     public class ProjectControlReportController : ControllerBase
     {
         private readonly IPcReportService _report;

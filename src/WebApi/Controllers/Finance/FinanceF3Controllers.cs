@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Finance;
 using ViewModels.NasbNiro.FinanceDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -29,6 +30,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/gl")]
+    [RolesCheckedInService]
     public class GlControlsController : ControllerBase
     {
         private readonly IGlControlsService _controls;
@@ -92,6 +94,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/entities")]
+    [RolesCheckedInService]
     public class LegalEntitiesController : ControllerBase
     {
         private readonly ILegalEntityService _entities;
@@ -126,6 +129,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/migration")]
+    [RolesCheckedInService]
     public class FinanceMigrationController : ControllerBase
     {
         private readonly IMigrationService _migration;
@@ -174,6 +178,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/sepidar-export")]
+    [RolesCheckedInService]
     public class SepidarFullExportController : ControllerBase
     {
         private readonly ISepidarFullExportService _export;
@@ -228,6 +233,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/fx")]
+    [RolesCheckedInService]
     public class FxController : ControllerBase
     {
         private readonly IFxService _fx;
@@ -283,6 +289,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/budgets")]
+    [RolesCheckedInService]
     public class BudgetsController : ControllerBase
     {
         private readonly IBudgetService _budgets;
@@ -333,6 +340,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/costing")]
+    [RolesCheckedInService]
     public class CostingCompletenessController : ControllerBase
     {
         private readonly ICostingCompletenessService _costing;
@@ -384,6 +392,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/receivables/revenue-recognition")]
+    [RolesCheckedInService]
     public class RevenueRecognitionController : ControllerBase
     {
         private readonly ICostingCompletenessService _costing;
@@ -404,6 +413,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/deferrals")]
+    [RolesCheckedInService]
     public class DeferralsController : ControllerBase
     {
         private readonly IDeferralService _deferrals;
@@ -450,6 +460,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/loans")]
+    [RolesCheckedInService]
     public class LoansController : ControllerBase
     {
         private readonly ILoanService _loans;
@@ -527,6 +538,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/tax")]
+    [RolesCheckedInService]
     public class TaxCompletenessController : ControllerBase
     {
         private readonly ITaxCompletenessService _tax;
@@ -558,6 +570,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/collections")]
+    [RolesCheckedInService]
     public class CollectionsController : ControllerBase
     {
         private readonly ICollectionsService _c;

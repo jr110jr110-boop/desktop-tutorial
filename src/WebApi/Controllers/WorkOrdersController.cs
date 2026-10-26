@@ -13,6 +13,9 @@ using WebApi.Extensions;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   create / update / start date / condition: PMO, PLANNING, COMMERCIAL, PROJECTMANAGER
+    //   delete (one or many): PMO only
     [Authorize]
     public class WorkOrdersController : BaseApiController
     {
@@ -24,6 +27,7 @@ namespace WebApi.Controllers
                 ?? throw new System.ArgumentNullException(nameof(WorkOrderService));
         }
 
+        [Authorize(Roles = LegacyRoles.ContractWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseWorkOrderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseWorkOrderDto>>> AddWorkOrderAsync(
@@ -32,6 +36,7 @@ namespace WebApi.Controllers
             return Ok(await _workOrderService.AddWorkOrderAsync(addWorkOrderDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.ContractWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseWorkOrderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseWorkOrderDto>>> UpdateWorkOrderAsync(
@@ -40,6 +45,7 @@ namespace WebApi.Controllers
             return Ok(await _workOrderService.UpdateWorkOrderAsync(updateWorkOrderDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.ContractWriters)]
         [HttpPut("set-start-date")]
         [ProducesResponseType(typeof(ResponseDto<ResponseWorkOrderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseWorkOrderDto>>> SetStartDateAsync(
@@ -48,6 +54,7 @@ namespace WebApi.Controllers
             return Ok(await _workOrderService.SetStartDateAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.ContractWriters)]
         [HttpPut("change-condition")]
         [ProducesResponseType(typeof(ResponseDto<ResponseWorkOrderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseWorkOrderDto>>> ChangeConditionAsync(
@@ -56,6 +63,7 @@ namespace WebApi.Controllers
             return Ok(await _workOrderService.ChangeConditionAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpDelete("{workOrderId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseWorkOrderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseWorkOrderDto>>> DeleteWorkOrderAsync(
@@ -80,6 +88,7 @@ namespace WebApi.Controllers
             return Ok((await _workOrderService.GetAllResponseWorkOrderDtosAsync(WorkOrderPaginationParams, cancellationToken)).ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpDelete("delete-workOrder-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteWorkOrderResultDto>>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<IEnumerable<DeleteWorkOrderResultDto>>>> DeleteWorkOrderCollectionAsync(

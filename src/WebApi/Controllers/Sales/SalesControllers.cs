@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Sales;
 using ViewModels.NasbNiro.SalesDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -16,6 +17,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/sales")]
+    [RolesCheckedInService]
     public class SalesCrmController : ControllerBase
     {
         private readonly ISlCrmService _crm;
@@ -84,6 +86,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/sales")]
+    [RolesCheckedInService]
     public class SalesPipelineController : ControllerBase
     {
         private readonly ISlPipelineService _pipeline;
@@ -162,6 +165,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/sales")]
+    [RolesCheckedInService]
     public class SalesOrdersController : ControllerBase
     {
         private readonly ISlOrderService _orders;

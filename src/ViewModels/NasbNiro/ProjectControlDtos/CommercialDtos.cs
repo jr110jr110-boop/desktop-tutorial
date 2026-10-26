@@ -85,6 +85,15 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int GuaranteeId { get; set; }
     }
 
+    /// <summary>R1a: the release of a guarantee. The date (not in the future) and the note (the letter of the client or the bank) are required.</summary>
+    public class PcGuaranteeReleaseDto
+    {
+        public int GuaranteeId { get; set; }
+        public DateTime ReleaseDate { get; set; }
+        public string Note { get; set; }
+        public Guid? DocumentId { get; set; }
+    }
+
     public class PcGuaranteeQuery : PaginationParams
     {
         public int? ContractId { get; set; }

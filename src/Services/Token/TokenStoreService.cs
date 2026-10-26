@@ -135,15 +135,16 @@ namespace Services.Token
 
         public Task<CustomUserToken> FindTokenAsync(string refreshTokenValue)
         {
+            // R1a: these used to return a null Task, so awaiting the answer for a malformed refresh token threw a NullReferenceException (an HTTP 500).
             if (string.IsNullOrWhiteSpace(refreshTokenValue))
             {
-                return null;
+                return Task.FromResult<CustomUserToken>(null);
             }
 
             var refreshTokenSerial = _tokenFactoryService.GetRefreshTokenSerial(refreshTokenValue);
             if (string.IsNullOrWhiteSpace(refreshTokenSerial))
             {
-                return null;
+                return Task.FromResult<CustomUserToken>(null);
             }
 
             var refreshTokenIdHash = _securityService.GetSha256Hash(refreshTokenSerial);

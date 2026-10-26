@@ -30,6 +30,12 @@ namespace Services.NasbNiro.ProjectControl
         Task<ResponseDto<PcGuaranteeParseResultDto>> ParseGuaranteesAsync(CancellationToken cancellationToken);
         Task<ResponseDto<PcGuaranteeDto>> SaveGuaranteeAsync(PcGuaranteeDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PcGuaranteeDto>> AddGuaranteeEventAsync(PcGuaranteeEventSaveDto dto, CancellationToken cancellationToken);
+
+        /// <summary>R1a: the release of a guarantee (COMMERCIAL, FINANCEMANAGER, PMO); the date and the note are required.</summary>
+        Task<ResponseDto<PcGuaranteeDto>> ReleaseGuaranteeAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken);
+
+        /// <summary>R1a: marks the guarantees whose expiry date has passed as Expired; the daily job calls it. Returns how many were marked.</summary>
+        Task<int> ExpireGuaranteesAsync(CancellationToken cancellationToken);
         Task<List<PcGuaranteeAlertDto>> GuaranteeAlertsAsync(int? contractId, CancellationToken cancellationToken);
 
         Task<ResponseDto<List<PcPenaltyDto>>> ComputePenaltiesAsync(int contractId, CancellationToken cancellationToken);
@@ -353,6 +359,9 @@ namespace Services.NasbNiro.ProjectControl
             PcGuaranteeInfo info;
             if (dto.Id.HasValue) info = await _uow.Set<PcGuaranteeInfo>().FirstOrDefaultAsync(i => i.Id == dto.Id.Value && !i.Deleted, cancellationToken);
             else info = await _uow.Set<PcGuaranteeInfo>().FirstOrDefaultAsync(i => i.SourceKind == dto.SourceKind && i.SourceId == dto.SourceId && !i.Deleted, cancellationToken);
+            // R1a (finding M7): Released and Expired are never set from here; the release has its own action and the expiry is automatic
+            string statusProblem = StatusChangeProblem(info?.Status ?? PcGuaranteeStatus.Requested, dto.Status);
+            if (statusProblem != null) return Bad<PcGuaranteeDto>(statusProblem);
             if (info == null)
             {
                 bool exists = dto.SourceKind == PcGuaranteeSource.ContractGuaranty
@@ -366,7 +375,7 @@ namespace Services.NasbNiro.ProjectControl
             }
             info.GuaranteeType = dto.GuaranteeType; info.AmountDecimal = dto.AmountDecimal; info.CurrencyCode = PcText.Upper(dto.CurrencyCode) ?? "IRR"; info.IssuerKind = dto.IssuerKind;
             info.ValidFrom = dto.ValidFrom?.Date; info.ExpiryDate = dto.ExpiryDate?.Date; info.ReleaseTrigger = dto.ReleaseTrigger;
-            if (Enum.IsDefined(typeof(PcGuaranteeStatus), dto.Status) && dto.Status != 0) info.Status = dto.Status;
+            if (Enum.IsDefined(typeof(PcGuaranteeStatus), dto.Status) && dto.Status != 0) info.Status = dto.Status;   // only a status the rule above allowed (or the current one)
             if (dto.AmountDecimal.HasValue) { info.ParseFailed = false; info.ParseNote = null; }
             info.ModifyDate = now; info.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
@@ -374,10 +383,26 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First());
         }
 
+        /// <summary>
+        /// The status a person may ask for through the save call. A status that does not change is always accepted (the form sends the current one back);
+        /// Released comes only from the release action, Expired only from the daily job, and a released guarantee is not opened again.
+        /// </summary>
+        internal static string StatusChangeProblem(PcGuaranteeStatus current, PcGuaranteeStatus requested)
+        {
+            if (requested == 0 || !Enum.IsDefined(typeof(PcGuaranteeStatus), requested) || requested == current) return null;
+            if (requested == PcGuaranteeStatus.Released) return "آزادسازی ضمانت‌نامه از این مسیر ثبت نمی‌شود؛ از عمل «آزادسازی» (با تاریخ و توضیح) استفاده کنید.";
+            if (requested == PcGuaranteeStatus.Expired) return "انقضای ضمانت‌نامه پس از گذشتن تاریخ انقضا به‌صورت خودکار ثبت می‌شود؛ تاریخ انقضا را اصلاح یا ضمانت‌نامه را تمدید کنید.";
+            if (current == PcGuaranteeStatus.Released) return "ضمانت‌نامه آزادشده دوباره باز نمی‌شود.";
+            return null;
+        }
+
         public async Task<ResponseDto<PcGuaranteeDto>> AddGuaranteeEventAsync(PcGuaranteeEventSaveDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || !Enum.IsDefined(typeof(PcGuaranteeEventKind), dto.Kind)) return Bad<PcGuaranteeDto>(PcText.InvalidData);
             if (!_user.IsInRole("COMMERCIAL,FINANCIAL,PMO")) return Bad<PcGuaranteeDto>(PcText.NotAllowed);
+            // R1a: these two have their own paths (the release action with its date and note, and the daily expiry job); here they would only leave a row without a state change
+            if (dto.Kind == PcGuaranteeEventKind.Release) return Bad<PcGuaranteeDto>("آزادسازی ضمانت‌نامه با عمل «آزادسازی» (guarantees/release) ثبت می‌شود.");
+            if (dto.Kind == PcGuaranteeEventKind.Expiry) return Bad<PcGuaranteeDto>("انقضای ضمانت‌نامه به‌صورت خودکار ثبت می‌شود.");
             PcGuaranteeInfo info = await _uow.Set<PcGuaranteeInfo>().FirstOrDefaultAsync(i => i.Id == dto.GuaranteeId && !i.Deleted, cancellationToken);
             if (info == null) return PcText.NotFound<PcGuaranteeDto>("اطلاعات ضمانت‌نامه پیدا نشد.");
             if (info.Status == PcGuaranteeStatus.Cancelled || info.Status == PcGuaranteeStatus.Released) return Bad<PcGuaranteeDto>("ضمانت‌نامه بسته شده است.");
@@ -407,6 +432,57 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First());
         }
 
+        public async Task<ResponseDto<PcGuaranteeDto>> ReleaseGuaranteeAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return Bad<PcGuaranteeDto>(PcText.InvalidData);
+            // the money side signs the release too, so this list differs from the other guarantee actions (★ to be confirmed by the company)
+            if (!_user.IsInRole("COMMERCIAL,FINANCEMANAGER,PMO")) return Bad<PcGuaranteeDto>(PcText.NotAllowed + " (آزادسازی ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)");
+            if (dto.ReleaseDate == default) return Bad<PcGuaranteeDto>("تاریخ آزادسازی را وارد کنید.");
+            if (dto.ReleaseDate.Date > DateTime.Today) return Bad<PcGuaranteeDto>("تاریخ آزادسازی نمی‌تواند در آینده باشد.");
+            string note = Clean(dto.Note);
+            if (note == null) return Bad<PcGuaranteeDto>("برای آزادسازی ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه کارفرما یا بانک) را بنویسید.");
+            PcGuaranteeInfo info = await _uow.Set<PcGuaranteeInfo>().FirstOrDefaultAsync(i => i.Id == dto.GuaranteeId && !i.Deleted, cancellationToken);
+            if (info == null) return PcText.NotFound<PcGuaranteeDto>("اطلاعات ضمانت‌نامه پیدا نشد.");
+            if (info.Status == PcGuaranteeStatus.Released) return Bad<PcGuaranteeDto>("این ضمانت‌نامه قبلاً آزاد شده است.");
+            if (info.Status == PcGuaranteeStatus.Cancelled) return Bad<PcGuaranteeDto>("ضمانت‌نامه ابطال‌شده آزاد نمی‌شود.");
+            if (info.Status == PcGuaranteeStatus.Requested) return Bad<PcGuaranteeDto>("ضمانت‌نامه‌ای که هنوز صادر نشده آزاد نمی‌شود.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            info.Status = PcGuaranteeStatus.Released;
+            info.ModifyDate = now; info.ModifierUserId = Me;
+            _uow.Set<PcGuaranteeEvent>().Add(new PcGuaranteeEvent
+            {
+                GuaranteeInfoId = info.Id, Kind = PcGuaranteeEventKind.Release, EventDate = dto.ReleaseDate.Date, DocumentId = dto.DocumentId, Note = note, CreatedAt = now, CreatedByUserId = Me,
+            });
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateConcurrencyException) { return Bad<PcGuaranteeDto>(PcText.Concurrency); }
+            return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First());
+        }
+
+        public async Task<int> ExpireGuaranteesAsync(CancellationToken cancellationToken)
+        {
+            // the server job calls this without a user; a person needs one of the guarantee roles (the result is the same for everybody: a date has passed)
+            if (Me != 0 && !_user.IsInRole("COMMERCIAL,FINANCIAL,FINANCEMANAGER,PMO")) return 0;
+            DateTime today = DateTime.Today;
+            List<PcGuaranteeInfo> due = await _uow.Set<PcGuaranteeInfo>()
+                .Where(i => !i.Deleted && i.ExpiryDate != null && i.ExpiryDate < today
+                    && (i.Status == PcGuaranteeStatus.Issued || i.Status == PcGuaranteeStatus.Active || i.Status == PcGuaranteeStatus.ExtensionPending))
+                .ToListAsync(cancellationToken);
+            if (due.Count == 0) return 0;
+            DateTimeOffset now = DateTimeOffset.Now;
+            foreach (PcGuaranteeInfo info in due)
+            {
+                info.Status = PcGuaranteeStatus.Expired;
+                info.ModifyDate = now; info.ModifierUserId = Me;
+                _uow.Set<PcGuaranteeEvent>().Add(new PcGuaranteeEvent
+                {
+                    GuaranteeInfoId = info.Id, Kind = PcGuaranteeEventKind.Expiry, EventDate = info.ExpiryDate.Value.Date, Note = "انقضای خودکار: تاریخ انقضا گذشته است.", CreatedAt = now, CreatedByUserId = Me,
+                });
+            }
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateConcurrencyException) { return 0; }   // somebody changed one of them at the same time; the next run takes what is left
+            return due.Count;
+        }
+
         public async Task<List<PcGuaranteeAlertDto>> GuaranteeAlertsAsync(int? contractId, CancellationToken cancellationToken)
         {
             Dictionary<string, decimal> settings = await PcSettingKeys.LoadAsync(_uow, cancellationToken);
@@ -415,7 +491,7 @@ namespace Services.NasbNiro.ProjectControl
             DateTime today = DateTime.Today;
             DateTime limit = today.AddDays(widest);
             IQueryable<PcGuaranteeInfo> q = _uow.Set<PcGuaranteeInfo>().AsNoTracking().Where(i => !i.Deleted && i.ExpiryDate != null && i.ExpiryDate <= limit
-                && (i.Status == PcGuaranteeStatus.Active || i.Status == PcGuaranteeStatus.Issued || i.Status == PcGuaranteeStatus.ExtensionPending));
+                && (i.Status == PcGuaranteeStatus.Active || i.Status == PcGuaranteeStatus.Issued || i.Status == PcGuaranteeStatus.ExtensionPending || i.Status == PcGuaranteeStatus.Expired));   // R1a: an expired guarantee that was not released or extended stays an alert (level 0)
             if (contractId.HasValue) q = q.Where(i => i.ContractId == contractId.Value);
             List<PcGuaranteeInfo> infos = await q.OrderBy(i => i.ExpiryDate).ToListAsync(cancellationToken);
             List<PcGuaranteeDto> dtos = await GuaranteeDtosAsync(infos, false, cancellationToken);

@@ -263,6 +263,13 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.BadRequest<ResponseAssemblyDto>(NasbNiroMessages.AssemblyAlreadyIsDeleted);
             }
 
+            // R1a: an assembly whose BOMs a production order or a project control WBS node refers to is not deleted
+            string blocked = await LegacyDeleteGuard.AssemblyAsync(_unitOfWork, assemblyId, cancellationToken);
+            if (blocked != null)
+            {
+                return ResponseDtoHelper.BadRequest<ResponseAssemblyDto>(blocked);
+            }
+
             assemblyToDelete.Delete();
 
             if (assemblyToDelete.Boms != null)

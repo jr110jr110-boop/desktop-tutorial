@@ -14,6 +14,8 @@ using WebApi.Extensions;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write (tender, its files and its guarantees): PMO, COMMERCIAL, SALES
     [Authorize]
     public class TendersController : BaseApiController
     {
@@ -24,6 +26,7 @@ namespace WebApi.Controllers
             _tenderService = tenderService ?? throw new System.ArgumentNullException(nameof(tenderService));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseTenderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseTenderDto>>> RegisterTenderAsync(
@@ -48,6 +51,7 @@ namespace WebApi.Controllers
             return Ok((await _tenderService.GetAllResponseTenderDtosAsync(tenderPaginationParams, cancellationToken)).ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseTenderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseTenderDto>>> UpdateTenderAsync(
@@ -56,6 +60,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.UpdateTenderAsync(updateTenderDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpPost("attach-file-to-tender")]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<string>>> AttachFileToTenderAsync(
@@ -64,6 +69,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.AttachFileToTenderAsync(attachFileDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpPut("edit-file-to-tender")]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<string>>> UpdateFileToTenderAsync(
@@ -72,6 +78,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.UpdateFileToTenderAsync(updateFileDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpDelete("detach-file-from-tender")]
         [ProducesResponseType(typeof(ResponseDto<bool>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromTenderAsync(
@@ -80,6 +87,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.DetachFileFromTenderAsync(tenderId, documentId: fileId, cancellationToken: cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpDelete("{tenderId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseTenderDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseTenderDto>>> DeleteTenderAsync(
@@ -88,6 +96,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.DeleteTenderAsync(tenderId, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpDelete("delete-tender-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteTenderResultDto>>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<IEnumerable<DeleteTenderResultDto>>>> DeleteTenderCollectionAsync(
@@ -96,6 +105,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.DeleteTenderCollectionAsync(tenderIds, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpPost("add-guaranty-to-tender")]
         [ProducesResponseType(typeof(ResponseDto<ResponseTenderGuarantyDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseTenderGuarantyDto>>> AddTenderAsync(
@@ -104,6 +114,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.AddGuarantyToTenderAsync(guarantyTenderDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpPut("edit-guaranty-in-tender")]
         [ProducesResponseType(typeof(ResponseDto<ResponseTenderGuarantyDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseTenderGuarantyDto>>> UpdateTenderGuarantyAsync(
@@ -112,6 +123,7 @@ namespace WebApi.Controllers
             return Ok(await _tenderService.UpdateTenderGuarantyAsync(responseTenderGuarantyDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.TenderWriters)]
         [HttpDelete("delete-guaranty-from-tender")]
         [ProducesResponseType(typeof(ResponseDto<ResponseTenderGuarantyDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseTenderGuarantyDto>>> UpdateTenderGuarantyAsync(

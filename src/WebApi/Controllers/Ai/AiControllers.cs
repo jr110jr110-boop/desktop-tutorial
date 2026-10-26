@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Ai;
 using ViewModels.NasbNiro.AiDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -58,6 +59,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/ai")]
+    [RolesCheckedInService]
     public class AiAdminController : ControllerBase
     {
         private readonly IAiAdminService _admin;
@@ -108,6 +110,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/ai")]
+    [RolesCheckedInService]
     public class AiNotesController : ControllerBase
     {
         private readonly IAiNoteService _notes;
@@ -144,6 +147,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/ai")]
+    [RolesCheckedInService]
     public class AiSeatsController : ControllerBase
     {
         private readonly IAiSeatAdminService _seats;

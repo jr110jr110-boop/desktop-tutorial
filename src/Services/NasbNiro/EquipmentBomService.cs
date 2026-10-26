@@ -265,6 +265,11 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper
                     .BadRequest<ResponseEquipmentBomDto>(NasbNiroMessages.EquipmentBomAlreadyIsDeleted);
 
+            // R1a: a BOM line that a work order BOM or a sales estimate was made from is not deleted
+            string blocked = await LegacyDeleteGuard.EquipmentBomAsync(_unitOfWork, equipmentBomId, cancellationToken);
+            if (blocked != null)
+                return ResponseDtoHelper.BadRequest<ResponseEquipmentBomDto>(blocked);
+
             equipmentBom.Delete();
 
             if (equipmentBom.EquipmentProcesses != null)

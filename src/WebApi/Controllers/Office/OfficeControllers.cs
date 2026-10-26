@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Office;
 using ViewModels.NasbNiro.OfficeDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -21,6 +22,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/office")]
+    [RolesCheckedInService]
     public class OfficeOrgController : ControllerBase
     {
         private readonly IOrgService _org;
@@ -68,6 +70,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/office/inbox")]
+    [RolesCheckedInService]
     public class OfficeInboxController : ControllerBase
     {
         private readonly IInboxService _inbox;
@@ -87,6 +90,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/office")]
+    [RolesCheckedInService]
     public class OfficeLettersController : ControllerBase
     {
         private readonly ILetterService _letters;
@@ -180,6 +184,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/office")]
+    [RolesCheckedInService]
     public class OfficeMeetingsController : ControllerBase
     {
         private readonly IMeetingService _meetings;
@@ -213,6 +218,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/office/attendance")]
+    [RolesCheckedInService]
     public class OfficeAttendanceController : ControllerBase
     {
         private readonly IAttendanceService _attendance;
@@ -342,6 +348,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/office")]
+    [RolesCheckedInService]
     public class OfficeLeavesController : ControllerBase
     {
         private readonly ILeaveService _leaves;
@@ -367,6 +374,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/office")]
+    [RolesCheckedInService]
     public class OfficeRequestsController : ControllerBase
     {
         private readonly IRequestService _requests;

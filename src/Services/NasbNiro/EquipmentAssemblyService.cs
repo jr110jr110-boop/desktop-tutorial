@@ -239,6 +239,13 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<ResponseEquipmentAssemblyDto>(NasbNiroMessages.EquipmentAssemblyNotFound);
             }
 
+            // R1a: an assembly whose BOM lines are used by work orders or sales estimates is not deleted
+            string blocked = await LegacyDeleteGuard.EquipmentAssemblyAsync(_unitOfWork, equipmentAssemblyId, cancellationToken);
+            if (blocked != null)
+            {
+                return ResponseDtoHelper.BadRequest<ResponseEquipmentAssemblyDto>(blocked);
+            }
+
             equipmentAssemblyToRemove.Delete();
 
             if (equipmentAssemblyToRemove.EquipmentBoms != null)

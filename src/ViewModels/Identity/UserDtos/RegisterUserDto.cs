@@ -21,8 +21,9 @@ namespace ViewModels.Identity.UserDtos
         [Required]
         public int[] RoleIds { get; set; }
 
+        // password policy (R1a): at least 10 characters with a letter and a digit (the rest is checked by the password validator)
         [Required]
-        [MinLength(8)]
+        [MinLength(10)]
         public string Password { get; set; }
 
         [Required]

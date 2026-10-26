@@ -25,6 +25,8 @@ using PaginatedEqupmentAssemlies = System.Threading.Tasks.ValueTask
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write (engineering definitions): PMO, ENGINEERING, ENGINEER
     [Authorize]
     public class EquipmentAssembliesController : BaseApiController
     {
@@ -36,6 +38,7 @@ namespace WebApi.Controllers
                 ?? throw new System.ArgumentNullException(nameof(EquipmentAssemblyService));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentAssemblyDto>), (int)HttpStatusCode.OK)]
         public async EquipmentAssemblyResult AddEquipmentAssemblyAsync([FromBody] AddEquipmentAssemblyDto dto, CancellationToken cancellationToken)
@@ -43,6 +46,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentAssemblyService.AddEquipmentAssemblyAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentAssemblyDto>), (int)HttpStatusCode.OK)]
         public async EquipmentAssemblyResult UpdateEquipmentAssemblyAsync([FromBody] UpdateEquipmentAssemblyDto dto, CancellationToken cancellationToken)
@@ -50,6 +54,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentAssemblyService.UpdateEquipmentAssemblyAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("set-predecessor")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentAssemblyDto>), (int)HttpStatusCode.OK)]
         public async EquipmentAssemblyResult SetPredecessorAsync([FromBody] UpdateEquipmentAssemblySetPredecessordDto dto, CancellationToken cancellationToken)
@@ -57,6 +62,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentAssemblyService.SetPredecessorAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("delete-predecessor")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentAssemblyDto>), (int)HttpStatusCode.OK)]
         public async EquipmentAssemblyResult DeletePredecessorAsync(int assemblyId, CancellationToken cancellationToken)
@@ -64,6 +70,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentAssemblyService.DeletePredecessorAsync(assemblyId, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("{equipmentAssemblyId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentAssemblyDto>), (int)HttpStatusCode.OK)]
         public async EquipmentAssemblyResult DeleteEquipmentAssemblyAsync(int equipmentAssemblyId, CancellationToken cancellationToken)
@@ -85,6 +92,7 @@ namespace WebApi.Controllers
             return Ok((await _equipmentAssemblyService.GetAllResponseEquipmentAssemblyDtoAsync(paginationParams, cancellationToken)).ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("delete-equipmentAssembly-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteEquipmentAssemblyResultDto>>), (int)HttpStatusCode.OK)]
         public async DeleteEquipmentAssembliesResult DeleteEquipmentAssemblyCollectionAsync(int[] equipmentAssemblyIds, CancellationToken cancellationToken)

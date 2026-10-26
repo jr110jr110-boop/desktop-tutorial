@@ -2,6 +2,8 @@ api/v1/Accounts/get-all-users
 api/v1/Accounts/get-current-user-info
 api/v1/Accounts/get-engineer-users
 api/v1/Accounts/get-user-info
+api/v1/Accounts/role-grants
+api/v1/Accounts/users/lookup
 api/v1/AdminSettings
 api/v1/ApiSettings
 api/v1/Assemblies

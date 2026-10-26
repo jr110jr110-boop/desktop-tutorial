@@ -745,9 +745,15 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.UnitManagers + ",PMO")) return Bad<PcActivityDto>(PcText.NotAllowed);
             PcActivity a = await _uow.Set<PcActivity>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
             if (a == null) return PcText.NotFound<PcActivityDto>("فعالیت پیدا نشد.");
+            // R1a (finding M17): the gate above lets every unit manager in, but starting, holding or resuming an activity belongs to the unit that owns it
+            // (ResponsibleUnit is the role of that unit's manager) and to planning and the PMO.
+            string requested = dto.Action.Trim().ToLowerInvariant();
+            if ((requested == "start" || requested == "hold" || requested == "resume") && !_user.IsInRole(ProjectControlRoles.Planning)
+                && !(Clean(a.ResponsibleUnit) != null && _user.IsInRole(a.ResponsibleUnit)))
+                return Bad<PcActivityDto>(PcText.NotAllowed + " (شروع و توقف فعالیت با واحد مسئول آن، برنامه‌ریزی یا PMO است)");
             DateTime date = (dto.Date ?? DateTime.Today).Date;
             DateTimeOffset now = DateTimeOffset.Now;
-            switch (dto.Action.Trim().ToLowerInvariant())
+            switch (requested)
             {
                 case "start":
                     if (a.ActualStart.HasValue) return Bad<PcActivityDto>("فعالیت قبلاً شروع شده است.");

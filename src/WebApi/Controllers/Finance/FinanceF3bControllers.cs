@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Finance;
 using ViewModels.NasbNiro.FinanceDtos;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -14,6 +15,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/completeness")]
+    [RolesCheckedInService]
     public class FinanceCompletenessController : ControllerBase
     {
         private readonly IFinanceCompletenessService _s;

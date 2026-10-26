@@ -7,6 +7,7 @@ using Entities.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Services.Contracts.Identity;
+using Services.Identity.AccountServices;
 using ViewModels.Identity.Settings;
 
 namespace Services.Identity
@@ -64,6 +65,32 @@ namespace Services.Identity
             // First use the built-in validator
             var result = await base.ValidateAsync(manager, user, password);
             errors = result.Succeeded ? new List<IdentityError>() : result.Errors.ToList();
+
+            // R1a: the company password rule does not depend on the settings file alone: at least 10 characters with a letter and a digit
+            if (password.Length < PasswordPolicy.MinimumLength && !errors.Any(e => e.Code == nameof(IdentityErrorDescriber.PasswordTooShort)))
+            {
+                errors.Add(new IdentityError
+                {
+                    Code = nameof(IdentityErrorDescriber.PasswordTooShort),
+                    Description = "کلمه‌ی عبور باید دست‌کم ۱۰ نویسه باشد."
+                });
+            }
+            if (!PasswordPolicy.HasLetter(password))
+            {
+                errors.Add(new IdentityError
+                {
+                    Code = "PasswordRequiresLetter",
+                    Description = "کلمه‌ی عبور باید دست‌کم یک حرف داشته باشد."
+                });
+            }
+            if (!PasswordPolicy.HasDigit(password) && !errors.Any(e => e.Code == nameof(IdentityErrorDescriber.PasswordRequiresDigit)))
+            {
+                errors.Add(new IdentityError
+                {
+                    Code = nameof(IdentityErrorDescriber.PasswordRequiresDigit),
+                    Description = "کلمه‌ی عبور باید دست‌کم یک رقم داشته باشد."
+                });
+            }
 
             // Extending the built-in validator
             if (password.ToLower().Contains(user.UserName.ToLower()))

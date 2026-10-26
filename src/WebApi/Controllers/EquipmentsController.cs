@@ -25,6 +25,8 @@ using PaginatedEquipmentsResult = System.Threading.Tasks.ValueTask
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write (engineering definitions): PMO, ENGINEERING, ENGINEER
     [Authorize]
     public class EquipmentsController : BaseApiController
     {
@@ -35,6 +37,7 @@ namespace WebApi.Controllers
             _equipmentService = equipmentService ?? throw new System.ArgumentNullException(nameof(equipmentService));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentDto>), (int)HttpStatusCode.OK)]
         public async EquipmentResult AddEquipmentAsync(
@@ -43,6 +46,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentService.AddEquipmentAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentDto>), (int)HttpStatusCode.OK)]
         public async EquipmentResult UpdateEquipmentAsync(
@@ -51,6 +55,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentService.UpdateEquipmentAsync(updateEquipmentDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("{equipmentId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentDto>), (int)HttpStatusCode.OK)]
         public async EquipmentResult DeleteEquipmentAsync(int equipmentId, CancellationToken cancellationToken)
@@ -74,6 +79,7 @@ namespace WebApi.Controllers
             return Ok((await _equipmentService.GetAllResponseEquipmentDtoAsync(paginationParams, cancellationToken)).ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("delete-equipment-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteEquipmentResultDto>>), (int)HttpStatusCode.OK)]
         public async DeleteEquipmentsResult DeleteEquipmentCollectionAsync(

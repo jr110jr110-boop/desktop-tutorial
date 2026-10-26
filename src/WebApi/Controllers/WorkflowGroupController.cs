@@ -14,6 +14,8 @@ using WebApi.Extensions;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write: PMO only
     [Route("api/v1/[controller]")]
     [ApiController]
     [Authorize]
@@ -26,6 +28,7 @@ namespace WebApi.Controllers
             _workflowGroupService = workflowGroupService;
         }
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpPost]
         public async Task<ActionResult> Add(WorkflowGroupInfoViewModel group)
         {
@@ -62,6 +65,7 @@ namespace WebApi.Controllers
             });
         }
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpPut]
         public async Task<ActionResult> Edit(WorkflowGroupViewModel workflowGroup)
         {

@@ -32,6 +32,8 @@ using PaginatedSimpleProcesses = System.Threading.Tasks.ValueTask
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   create / update / delete: PMO, COMMERCIAL
     [Authorize]
     public class BuyOrderProcessesController : BaseApiController
     {
@@ -44,6 +46,7 @@ namespace WebApi.Controllers
                 throw new System.ArgumentNullException(nameof(buyOrderProcessService));
         }
 
+        [Authorize(Roles = LegacyRoles.Purchasing)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseBuyOrderProcessesDto>), (int)HttpStatusCode.OK)]
         public async BuyOrderProcessesResult AddBuyOrderProcessesAsync([FromBody] AddBuyOrderProcessesDto dto, CancellationToken cancellationToken)
@@ -71,6 +74,7 @@ namespace WebApi.Controllers
             return Ok((await _buyOrderProcessesService.GetAllResponseBuyOrderProcessesDtosAsync(paginationParams, cancellationToken)).ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.Purchasing)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseBuyOrderProcessesDto>), (int)HttpStatusCode.OK)]
         public async BuyOrderProcessesResult UpdateBuyOrderProcessesAsync(
@@ -100,6 +104,7 @@ namespace WebApi.Controllers
             });
         }
 
+        [Authorize(Roles = LegacyRoles.Purchasing)]
         [HttpDelete]
         [ProducesResponseType(typeof(ResponseDto<ResponseBuyOrderProcessesDto>), (int)HttpStatusCode.OK)]
         public async BuyOrderProcessesResult DeleteBuyOrderProcessesAsync(
@@ -108,6 +113,7 @@ namespace WebApi.Controllers
             return Ok(await _buyOrderProcessesService.DeleteBuyOrderProcessesAsync(deleteBuyOrderProcessesDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.Purchasing)]
         [HttpDelete("delete-buyOrder-process-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteBuyOrderProcessesResultDto>>), (int)HttpStatusCode.OK)]
         public async DeleteBuyOrderProcessesResult DeleteBuyOrderProcessesCollectionAsync(

@@ -56,8 +56,10 @@ namespace WebApi
                     exception = context.Exception;
                 }
 
+                // R1a: outside development the caller gets a general text (the details are in the log written above)
+                string message = this.env.IsDevelopment() ? context.Exception.Message : Startup.GenericServerErrorText;
                 context.Result = new OkObjectResult(
-                    ResponseDtoHelper.InternalServerErrosObject(context.Exception.Message, exception));
+                    ResponseDtoHelper.InternalServerErrosObject(message, exception));
                 context.HttpContext.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
             }
             context.ExceptionHandled = true;

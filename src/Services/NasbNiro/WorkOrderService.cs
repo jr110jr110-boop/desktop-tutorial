@@ -523,6 +523,13 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.BadRequest<ResponseWorkOrderDto>(NasbNiroMessages.WorkOrderAlreadyIsDeleted);
             }
 
+            // R1a: a work order with production orders, inventory documents, cost entries or other downstream records is not deleted
+            string blocked = await LegacyDeleteGuard.WorkOrderAsync(_unitOfWork, workOrderId, cancellationToken);
+            if (blocked != null)
+            {
+                return ResponseDtoHelper.BadRequest<ResponseWorkOrderDto>(blocked);
+            }
+
             workOrder.Delete();
 
 
