@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Services.NasbNiro.Ai;
 using Services.NasbNiro.Inventory;
+using ViewModels.NasbNiro.AiDtos;
 using ViewModels.NasbNiro.CeoDtos;
 
 namespace Services.NasbNiro.Ceo
@@ -23,6 +24,9 @@ namespace Services.NasbNiro.Ceo
         public const string Headline = "headline";
         public const string Section = "section";
         public const string Alerts = "alerts";
+
+        /// <summary>The latest daily report of the CEO (a note of the CEO brief seat): the CEO only, it is written with the CEO's data.</summary>
+        public const string Brief = "brief";
     }
 
     /// <summary>
@@ -95,6 +99,7 @@ namespace Services.NasbNiro.Ceo
         /// <summary>
         /// One figure: its name and value with the unit ("نقد و بانک ۴۸٬۲۰۰٬۰۰۰٬۰۰۰ ریال"), the change against the previous month when it is known
         /// ("، ۲٬۹۰۰٬۰۰۰٬۰۰۰ بیشتر از ماه پیش") and a word when it is in danger or needs attention. A masked figure is said to be confidential.
+        /// Rial values and changes are said with three significant digits (۴۸٬۲۳۴٬۵۶۷٬۸۹۰ is "forty-eight billion two hundred million"): nobody listens to eleven digits.
         /// </summary>
         public static string Kpi(CeoKpiDto kpi)
         {
@@ -113,17 +118,49 @@ namespace Services.NasbNiro.Ceo
         /// <summary>The title as it is said: a Latin note in brackets ("(backlog)", "(OEE)", "(H)") is left out, a speech engine would spell it or garble it.</summary>
         public static string SpokenTitle(string title) => LatinNote.Replace(title ?? string.Empty, string.Empty).Trim();
 
-        /// <summary>The value with its unit: the display text of the KPI, and "مورد" after a plain count (the survey score keeps its own text "۴٫۲ از ۵").</summary>
+        /// <summary>
+        /// The value with its unit. A rial value is rounded to three significant digits (see <see cref="SpokenRial"/>); the survey score is said with one decimal ("۴٫۳ از ۵");
+        /// any other value is the display text of the KPI, with "مورد" after a plain count.
+        /// </summary>
         public static string ValuePhrase(CeoKpiDto kpi)
         {
+            if (kpi.Value.HasValue)
+            {
+                if (kpi.Key == CeoKeys.ServiceSurveyScore) return CeoText.Number(kpi.Value.Value, 1) + " از " + CeoText.Number(5);
+                if (kpi.Unit == CeoUnit.Rial) return CeoText.Rial(SpokenRial(kpi.Value.Value));
+            }
             string text = string.IsNullOrWhiteSpace(kpi.ValueText) ? CeoText.ValueText(kpi.Value, kpi.Unit) : kpi.ValueText;
             if (kpi.Unit == CeoUnit.Count && text == CeoText.ValueText(kpi.Value, CeoUnit.Count)) text += " مورد";
             return text;
         }
 
         /// <summary>
-        /// The change against the previous month in words, without a sign. A rial change has no unit word (the value just said it): "۲٬۹۰۰٬۰۰۰٬۰۰۰ بیشتر از ماه پیش";
-        /// the other units keep theirs: "۳ مورد کمتر از ماه پیش", "۲٫۵٪ بیشتر از ماه پیش".
+        /// A rial amount rounded to three significant digits, half away from zero: ۴۸٬۲۳۴٬۵۶۷٬۸۹۰ becomes ۴۸٬۲۰۰٬۰۰۰٬۰۰۰, ۹۵۰ stays ۹۵۰. Used for what is said aloud;
+        /// the screen keeps every digit.
+        /// </summary>
+        public static decimal SpokenRial(decimal value, int digits = 3)
+        {
+            if (value == 0m || digits < 1) return 0m;
+            decimal abs = Math.Abs(value);
+            int integerDigits = decimal.Truncate(abs).ToString(CultureInfo.InvariantCulture).Length;
+            int decimals = digits - integerDigits;
+            decimal rounded;
+            if (decimals >= 0)
+            {
+                rounded = Math.Round(abs, Math.Min(decimals, 6), MidpointRounding.AwayFromZero);
+            }
+            else
+            {
+                decimal scale = 1m;
+                for (int i = 0; i < -decimals; i++) scale *= 10m;
+                rounded = Math.Round(abs / scale, 0, MidpointRounding.AwayFromZero) * scale;
+            }
+            return value < 0m ? -rounded : rounded;
+        }
+
+        /// <summary>
+        /// The change against the previous month in words, without a sign. A rial change has no unit word (the value just said it) and, like the value, three significant digits:
+        /// "۲٬۹۰۰٬۰۰۰٬۰۰۰ بیشتر از ماه پیش"; the other units keep theirs: "۳ مورد کمتر از ماه پیش", "۲٫۵٪ بیشتر از ماه پیش".
         /// </summary>
         public static string DeltaPhrase(decimal delta, string unit)
         {
@@ -135,13 +172,21 @@ namespace Services.NasbNiro.Ceo
             string text;
             switch (unit)
             {
-                case CeoUnit.Rial: text = CeoText.Number(amount); break;
+                case CeoUnit.Rial: text = CeoText.Number(SpokenRial(amount)); break;
                 case CeoUnit.Percent: text = CeoText.Percent(amount); break;
                 case CeoUnit.Days: text = CeoText.Number(amount) + " روز"; break;
                 case CeoUnit.Hours: text = CeoText.Number(amount, 1) + " ساعت"; break;
                 default: text = CeoText.Number(amount, decimals) + " مورد"; break;
             }
             return text + (delta > 0 ? " بیشتر از " : " کمتر از ") + PreviousMonth;
+        }
+
+        /// <summary>The latest daily report of the CEO: its date, then the text as the brief seat wrote it.</summary>
+        public static string Brief(AiBriefDto brief)
+        {
+            string text = (brief?.Text ?? string.Empty).Trim();
+            string title = string.IsNullOrWhiteSpace(brief?.DateText) ? "گزارش روزانه‌ی مدیرعامل" : "گزارش روزانه‌ی مدیرعامل در " + brief.DateText.Trim();
+            return Join(new[] { title, text });
         }
 
         private static IEnumerable<string> PulseSentences(IEnumerable<CeoPulseDto> pulse)
@@ -175,41 +220,46 @@ namespace Services.NasbNiro.Ceo
 
     public interface ICeoSpeechService
     {
-        /// <param name="what">headline, section or alerts.</param>
+        /// <param name="what">headline, section, alerts or brief (the CEO only).</param>
         /// <param name="sectionKey">The section to read (finance ... office); needed when <paramref name="what"/> is section.</param>
         Task<ResponseDto<CeoSpeechDto>> GetAsync(string what, string sectionKey, CancellationToken ct);
     }
 
     /// <summary>
     /// api/v1/ceo/speech: the sentences of <see cref="CeoSpeechScript"/> for the figures the overview shows, their numbers in words (the speech normaliser of the AI module),
-    /// and the audio of the text-to-speech endpoint when one answers. When none does the answer is still complete: no audio and degraded = true. CEO and PMO.
+    /// and the audio of the text-to-speech endpoint when one answers within Ceo:SpeechTimeoutSeconds (default 20). When none does the answer is still complete: no audio and degraded = true.
+    /// CEO and PMO; the brief (what = brief) is for the CEO only. A section is read from the cached overview when there is one, so the voice says what the screen shows.
     /// </summary>
     public sealed class CeoSpeechService : ICeoSpeechService
     {
         private readonly IInventoryUserContext _user;
         private readonly ICeoOverviewService _overview;
+        private readonly IAiNoteService _notes;
         private readonly IPersianNumberWords _words;
         private readonly ITextToSpeech _tts;
         private readonly IConfiguration _configuration;
         private readonly ILogger<CeoSpeechService> _logger;
 
-        public CeoSpeechService(IInventoryUserContext user, ICeoOverviewService overview, IPersianNumberWords words, ITextToSpeech tts, IConfiguration configuration, ILogger<CeoSpeechService> logger)
+        public CeoSpeechService(IInventoryUserContext user, ICeoOverviewService overview, IAiNoteService notes, IPersianNumberWords words, ITextToSpeech tts, IConfiguration configuration, ILogger<CeoSpeechService> logger)
         {
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _overview = overview ?? throw new ArgumentNullException(nameof(overview));
+            _notes = notes ?? throw new ArgumentNullException(nameof(notes));
             _words = words ?? throw new ArgumentNullException(nameof(words));
             _tts = tts ?? throw new ArgumentNullException(nameof(tts));
             _configuration = configuration;
             _logger = logger;
         }
 
-        /// <summary>The text-to-speech call shares the budget of the other voice requests (Ai:VoiceTimeoutSeconds, default 90).</summary>
+        /// <summary>Seconds the text-to-speech call may take (Ceo:SpeechTimeoutSeconds, default 20): a summary is short, and a slow endpoint must not make the CEO wait for a screen that already has the text.</summary>
+        internal const int DefaultBudgetSeconds = 20;
+
         private int BudgetSeconds
         {
             get
             {
-                string text = _configuration?[AiConfigKeys.VoiceTimeoutSeconds];
-                return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int s) && s > 0 ? s : 90;
+                string text = _configuration?[CeoConfigKeys.SpeechTimeoutSeconds];
+                return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int s) && s > 0 ? s : DefaultBudgetSeconds;
             }
         }
 
@@ -240,6 +290,15 @@ namespace Services.NasbNiro.Ceo
                     ResponseDto<CeoSectionDto> answer = await _overview.GetSectionAsync(sectionKey, ct);
                     if (answer == null || !answer.Success || answer.Data == null) return Failed(answer?.Message, answer?.HttpStatusCode);
                     script = CeoSpeechScript.Section(answer.Data);
+                    break;
+                }
+                case CeoSpeechKinds.Brief:
+                {
+                    // the brief is written with the data only the CEO sees: the PMO, who reads the rest, does not read this
+                    if (!_user.IsInRole(AiNoteTypes.Roles(AiNoteTypes.CeoBrief))) return ResponseDtoHelper.BadRequest<CeoSpeechDto>(CeoText.NotAllowed);
+                    ResponseDto<AiBriefDto> answer = await _notes.LatestBriefAsync(ct);
+                    if (answer == null || !answer.Success || answer.Data == null) return Failed(answer?.Message, answer?.HttpStatusCode);
+                    script = CeoSpeechScript.Brief(answer.Data);
                     break;
                 }
                 default:

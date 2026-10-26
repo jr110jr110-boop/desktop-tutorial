@@ -17,29 +17,28 @@ namespace Services.NasbNiro.Ceo
     {
         private async Task<CeoSectionDto> ServiceAsync(CeoContext ctx, CancellationToken ct)
         {
-            CeoDashboardDto b = await BaseAsync(ctx, ct);
+            CeoDashboardDto b = (await PartsAsync(ctx, ct)).Dashboard;
 
             var section = new CeoSectionDto();
-            section.Kpis.Add(Trended(ctx, Kpi(CeoKeys.ServiceSlaBreaches, "درخواست‌های خارج از SLA", b.ServiceSlaBreaches, CeoUnit.Count, CeoRules.DangerIfAny(b.ServiceSlaBreaches), CeoLinks.ServiceRequests, CeoDrillRef.SvSlaBreaches,
+            section.Kpis.Add(Trended(ctx, Kpi(ctx, CeoKeys.ServiceSlaBreaches, b.ServiceSlaBreaches, CeoRules.DangerIfAny(b.ServiceSlaBreaches),
                 "درخواست‌های بازی که مهلت پاسخ یا مهلت حل آن‌ها گذشته است."), higherIsBetter: false));
-            section.Kpis.Add(Kpi("serviceOpenRequests", "درخواست‌های خدمات باز", b.ServiceOpenRequests, CeoUnit.Count, null, CeoLinks.ServiceRequests, CeoDrillRef.SvRequestsOpen,
+            section.Kpis.Add(Kpi(ctx, "serviceOpenRequests", b.ServiceOpenRequests, null,
                 "باز، واگذارشده، در حال انجام یا منتظر مشتری"));
-            section.Kpis.Add(Kpi("serviceUnitsInWarranty", "تجهیزات نصب‌شده در دوره‌ی گارانتی", b.ServiceUnitsInWarranty, CeoUnit.Count, null, CeoLinks.ServiceUnits, CeoDrillRef.SvUnitsByCustomer,
+            section.Kpis.Add(Kpi(ctx, "serviceUnitsInWarranty", b.ServiceUnitsInWarranty, null,
                 "تجهیزات فعال مشتریان که گارانتی آن‌ها هنوز تمام نشده است."));
-            const string warrantyTitle = "هزینه‌ی گارانتی از ابتدای سال";
             if (b.ServiceWarrantyCostHidden)
-                section.Kpis.Add(HiddenKpi("serviceWarrantyCostYtd", warrantyTitle, CeoUnit.Rial, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
+                section.Kpis.Add(HiddenKpi(ctx, "serviceWarrantyCostYtd",
                     "هزینه‌ی نیروی کار برخی سفارش‌ها حقوق یک یا دو نفر است و فقط برای مدیرعامل، مدیر مالی و حقوق و دستمزد نمایش داده می‌شود."));
             else
-                section.Kpis.Add(Kpi("serviceWarrantyCostYtd", warrantyTitle, b.ServiceWarrantyCostYtd, CeoUnit.Rial, null, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
+                section.Kpis.Add(Kpi(ctx, "serviceWarrantyCostYtd", b.ServiceWarrantyCostYtd, null,
                     "سفارش‌های گارانتی بسته‌شده از ابتدای سال شمسی؛ نیروی کار و قطعات"));
-            section.Kpis.Add(Kpi("serviceGoodwillWaiting", "درخواست‌های حسن نیت منتظر تصمیم", b.ServiceGoodwillWaiting, CeoUnit.Count, CeoRules.WarnIfAny(b.ServiceGoodwillWaiting), CeoLinks.ServiceOrders, CeoDrillRef.SvOrdersOpen,
+            section.Kpis.Add(Kpi(ctx, "serviceGoodwillWaiting", b.ServiceGoodwillWaiting, CeoRules.WarnIfAny(b.ServiceGoodwillWaiting),
                 "سفارش‌های خارج از گارانتی که مشتری حسن نیت خواسته و تصمیم مدیرعامل لازم است."));
             decimal? score = b.ServiceSurveyAverageScore;
-            section.Kpis.Add(Kpi("serviceSurveyScore", "میانگین رضایت مشتریان", score, CeoUnit.Count, score.HasValue ? CeoRules.Satisfaction(score.Value) : CeoStatus.Neutral, CeoLinks.ServiceSurveys, CeoDrillRef.SvSurveyByMonth,
+            section.Kpis.Add(Kpi(ctx, CeoKeys.ServiceSurveyScore, score, score.HasValue ? CeoRules.Satisfaction(score.Value) : CeoStatus.Neutral,
                 "میانگین امتیاز نظرسنجی‌های پاسخ‌داده‌شده از پنج؛ بدون نظرسنجی مقداری ندارد.", score.HasValue ? CeoText.Number(score.Value, 2) + " از " + CeoText.Number(5) : null));
 
-            // chart 1: requests received and requests resolved, by month
+            // chart 1: requests received and requests resolved, by month. The drill behind it lists the open requests and has no month filter, so it carries no period.
             var received = await _uow.Set<SvServiceRequest>().AsNoTracking()
                 .Where(r => !r.Deleted && r.ReceivedAt >= ctx.From && r.ReceivedAt < ctx.End)
                 .GroupBy(r => r.ReceivedAt.Date).Select(g => new { Day = g.Key, Count = g.Count() }).ToListAsync(ct);
@@ -64,10 +63,10 @@ namespace Services.NasbNiro.Ceo
             }
             else
             {
-                section.Charts.Add(Chart("warrantyCostByMonth", costTitle, CeoKind.StackedBar, CeoUnit.Rial, ctx.Labels, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
+                section.Charts.Add(WithDrillParams(Chart("warrantyCostByMonth", costTitle, CeoKind.StackedBar, CeoUnit.Rial, ctx.Labels, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
                     "سفارش‌های گارانتی بسته‌شده بر پایه‌ی زمان بستن.",
                     Series("قطعات", CeoTrends.SumByMonth(ctx.Window, warranty.Select(o => (o.ClosedAt.Value.LocalDateTime.Date, o.PartsAmount))), CeoRole.Primary),
-                    Series("نیروی کار", CeoTrends.SumByMonth(ctx.Window, warranty.Select(o => (o.ClosedAt.Value.LocalDateTime.Date, o.LabourAmount))), CeoRole.Secondary)));
+                    Series("نیروی کار", CeoTrends.SumByMonth(ctx.Window, warranty.Select(o => (o.ClosedAt.Value.LocalDateTime.Date, o.LabourAmount))), CeoRole.Secondary)), ctx.LatestMonth()));
             }
 
             // chart 3: the average score of the surveys answered in each month (months without an answer are left out)
@@ -83,9 +82,9 @@ namespace Services.NasbNiro.Ceo
                 months.Add(ctx.Labels[i]);
                 averages.Add(Math.Round(scores.Average(), 2, MidpointRounding.AwayFromZero));
             }
-            section.Charts.Add(Chart("surveyScoreByMonth", "میانگین رضایت مشتریان به تفکیک ماه", CeoKind.Line, CeoUnit.Count, months, CeoLinks.ServiceSurveys, CeoDrillRef.SvSurveyByMonth,
+            section.Charts.Add(WithDrillParams(Chart("surveyScoreByMonth", "میانگین رضایت مشتریان به تفکیک ماه", CeoKind.Line, CeoUnit.Count, months, CeoLinks.ServiceSurveys, CeoDrillRef.SvSurveyByMonth,
                 "میانگین امتیاز از پنج بر پایه‌ی ماه پاسخ؛ ماه‌های بدون پاسخ نمایش داده نمی‌شوند.",
-                Series("میانگین امتیاز", averages)));
+                Series("میانگین امتیاز", averages)), ctx.LatestMonth()));
             return section;
         }
     }

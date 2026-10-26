@@ -16,19 +16,19 @@ namespace Services.NasbNiro.Ceo
     {
         private async Task<CeoSectionDto> OfficeAsync(CeoContext ctx, CancellationToken ct)
         {
-            CeoDashboardDto b = await BaseAsync(ctx, ct);
+            CeoDashboardDto b = (await PartsAsync(ctx, ct)).Dashboard;
             int lettersWaiting = await _uow.Set<OfLetter>().AsNoTracking().CountAsync(l => !l.Deleted && l.Status == OfLetterStatus.InApproval, ct);
             int leavesWaiting = await _uow.Set<OfLeaveRequest>().AsNoTracking().CountAsync(r => !r.Deleted && r.Status == OfLeaveStatus.Submitted, ct);
 
             var section = new CeoSectionDto();
-            section.Kpis.Add(Kpi("overdueDecisions", "مصوبات جلسه‌ی معوق", b.OverdueDecisions, CeoUnit.Count, CeoRules.WarnIfAny(b.OverdueDecisions), CeoLinks.OfficeDecisions, CeoDrillRef.OfDecisionsOverdue,
+            section.Kpis.Add(Kpi(ctx, "overdueDecisions", b.OverdueDecisions, CeoRules.WarnIfAny(b.OverdueDecisions),
                 "مصوبه‌های باز صورت‌جلسه‌های تأییدشده که موعدشان گذشته است."));
-            section.Kpis.Add(Kpi("lettersWaiting", "نامه‌های منتظر تأیید و امضا", lettersWaiting, CeoUnit.Count, CeoRules.ByCount(lettersWaiting, 5, 15), CeoLinks.OfficeLetters, CeoDrillRef.OfLettersWaiting,
+            section.Kpis.Add(Kpi(ctx, "lettersWaiting", lettersWaiting, CeoRules.ByCount(lettersWaiting, 5, 15),
                 "نامه‌های صادره و داخلی که در زنجیره‌ی تأیید هستند."));
-            section.Kpis.Add(Kpi("leaveRequestsPending", "درخواست‌های مرخصی و ماموریت منتظر تصمیم", leavesWaiting, CeoUnit.Count, CeoRules.ByCount(leavesWaiting, 5, 15), CeoLinks.OfficeLeaves, CeoDrillRef.OfLeaveRequestsPending,
+            section.Kpis.Add(Kpi(ctx, "leaveRequestsPending", leavesWaiting, CeoRules.ByCount(leavesWaiting, 5, 15),
                 "ارسال‌شده و در انتظار تأیید مسئول"));
 
-            // chart: how many people were present, absent, on leave or on mission on each working day of the Persian month so far
+            // chart: how many people were present, absent, on leave or on mission on each working day of the Persian month so far (the drill takes the same month so far)
             DateTime monthStart = CeoTrends.MonthStart(ctx.Today);
             int dayCount = (int)(ctx.Today - monthStart).TotalDays + 1;
             var rows = await _uow.Set<OfAttendanceDay>().AsNoTracking()
@@ -44,11 +44,11 @@ namespace Services.NasbNiro.Ceo
                 }
                 return values;
             }
-            section.Charts.Add(Chart("attendanceMonth", "حضور و غیاب ماه جاری به تفکیک روز", CeoKind.StackedBar, CeoUnit.Count,
+            section.Charts.Add(WithDrillParams(Chart("attendanceMonth", "حضور و غیاب ماه جاری به تفکیک روز", CeoKind.StackedBar, CeoUnit.Count,
                 Enumerable.Range(1, dayCount).Select(d => CeoText.Number(d)), CeoLinks.OfficeAttendance, CeoDrillRef.OfAttendanceMonth,
                 "تعداد افراد در هر روز کاری " + CeoText.MonthLabel(ctx.Today) + " تا امروز؛ فقط شمارش و بدون نام و حقوق.",
                 Series("حاضر", Counts(OfDayStatus.Present), CeoRole.Positive), Series("غایب", Counts(OfDayStatus.Absent), CeoRole.Negative),
-                Series("مرخصی", Counts(OfDayStatus.Leave), CeoRole.Neutral), Series("ماموریت", Counts(OfDayStatus.Mission), CeoRole.Accent)));
+                Series("مرخصی", Counts(OfDayStatus.Leave), CeoRole.Neutral), Series("ماموریت", Counts(OfDayStatus.Mission), CeoRole.Accent)), ctx.LatestMonth()));
             return section;
         }
     }

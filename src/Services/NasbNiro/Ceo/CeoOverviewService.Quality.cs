@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Common.Results;
 using Entities.Model.NasbNiro.Inventory;
 using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Finance;
 using ViewModels.NasbNiro.CeoDtos;
 using ViewModels.NasbNiro.FinanceDtos;
 using ViewModels.NasbNiro.QualityDtos;
@@ -18,26 +18,26 @@ namespace Services.NasbNiro.Ceo
     {
         private async Task<CeoSectionDto> QualityAsync(CeoContext ctx, CancellationToken ct)
         {
-            CeoDashboardDto b = await BaseAsync(ctx, ct);
-            ResponseDto<QualityDashboardDto> answer = await _quality.GetDashboardAsync(ct);
-            if (answer == null || !answer.Success || answer.Data == null) throw new InvalidOperationException("The quality dashboard is not available: " + answer?.Message);
-            QualityDashboardDto q = answer.Data;
+            CeoDashboardParts parts = await PartsAsync(ctx, ct);
+            CeoDashboardDto b = parts.Dashboard;
+            // the quality dashboard was read for the CEO dashboard (its counts are the base part of it): the same result, not a second read of the quality module
+            QualityDashboardDto q = parts.Quality ?? throw new InvalidOperationException("The quality dashboard is not available.");
 
             var section = new CeoSectionDto();
-            section.Kpis.Add(Trended(ctx, Kpi(CeoKeys.OpenNcrs, "گزارش‌های عدم انطباق باز", b.OpenNcrs, CeoUnit.Count, CeoRules.ByCount(b.OpenNcrs, 5, 15), CeoLinks.Ncr, CeoDrillRef.QcNcrOpen,
-                "همه‌ی گزارش‌های بسته‌نشده؛ عمده: " + CeoText.Number(q.Ncrs.Major) + "؛ طبقه‌بندی‌نشده: " + CeoText.Number(q.Ncrs.NotClassified)), higherIsBetter: false));
-            section.Kpis.Add(Kpi("overdueNcrs", "عدم انطباق‌های گذشته از مهلت تصمیم", q.OverdueNcrs, CeoUnit.Count, CeoRules.ByAny(q.OverdueNcrs, 3), CeoLinks.Ncr, CeoDrillRef.QcNcrOpen,
+            section.Kpis.Add(Trended(ctx, Kpi(ctx, CeoKeys.OpenNcrs, b.OpenNcrs, CeoRules.ByCount(b.OpenNcrs, 5, 15),
+                "گزارش‌های بسته‌نشده و لغونشده (لغوشده‌ها شمرده نمی‌شوند)؛ عمده: " + CeoText.Number(q.Ncrs.Major) + "؛ طبقه‌بندی‌نشده: " + CeoText.Number(q.Ncrs.NotClassified)), higherIsBetter: false));
+            section.Kpis.Add(Kpi(ctx, "overdueNcrs", q.OverdueNcrs, CeoRules.ByAny(q.OverdueNcrs, 3),
                 "مهلت تصمیم: هفت روز برای جزئی و چهارده روز برای عمده (تنظیم شرکت)"));
-            section.Kpis.Add(Kpi("overdueCapas", "اقدام‌های اصلاحی و پیشگیرانه‌ی عقب‌افتاده", b.OverdueCapas, CeoUnit.Count, CeoRules.DangerIfAny(b.OverdueCapas), CeoLinks.Capa, CeoDrillRef.QcCapaOverdue,
+            section.Kpis.Add(Kpi(ctx, "overdueCapas", b.OverdueCapas, CeoRules.DangerIfAny(b.OverdueCapas),
                 "همه‌ی اقدام‌های باز: " + CeoText.Number(q.CapaOpen)));
-            section.Kpis.Add(Kpi("calibrationOverdue", "تجهیزات اندازه‌گیری با کالیبراسیون سررسیدگذشته", b.CalibrationOverdue, CeoUnit.Count, CeoRules.DangerIfAny(b.CalibrationOverdue), CeoLinks.Calibration, CeoDrillRef.QcCalibrationDue,
+            section.Kpis.Add(Kpi(ctx, "calibrationOverdue", b.CalibrationOverdue, CeoRules.DangerIfAny(b.CalibrationOverdue),
                 "تا سی روز آینده سررسید می‌شوند: " + CeoText.Number(b.CalibrationDue30)));
-            section.Kpis.Add(Kpi("complaintsOpen", "شکایت‌های باز مشتریان", q.ComplaintsOpen, CeoUnit.Count, CeoRules.DangerIfAny(q.ComplaintsOverdue), CeoLinks.Complaints, CeoDrillRef.QcComplaintsOpen,
+            section.Kpis.Add(Kpi(ctx, "complaintsOpen", q.ComplaintsOpen, CeoRules.DangerIfAny(q.ComplaintsOverdue),
                 "از مهلت پاسخ گذشته: " + CeoText.Number(q.ComplaintsOverdue)));
-            section.Kpis.Add(Kpi("pendingHPoints", "نقاط توقف (H) منتظر رهاسازی", b.PendingHPoints, CeoUnit.Count, CeoRules.WarnIfAny(b.PendingHPoints), CeoLinks.QualityDashboard, CeoDrillRef.QcHPointsPending,
+            section.Kpis.Add(Kpi(ctx, "pendingHPoints", b.PendingHPoints, CeoRules.WarnIfAny(b.PendingHPoints),
                 "در برنامه‌های بازرسی و آزمون تأییدشده"));
 
-            // chart 1: NCRs opened (report date) and closed (closing time) by month
+            // chart 1: NCRs opened (report date) and closed (closing time) by month. The drill behind it lists the open NCRs and has no month filter, so it carries no period.
             DateTimeOffset from = new DateTimeOffset(ctx.From);
             var ncrs = await _uow.Set<NonConformance>().AsNoTracking()
                 .Where(n => !n.Deleted && n.Status != NcrStatus.Cancelled && (n.ReportDate >= ctx.From || (n.ClosedAt != null && n.ClosedAt >= from)))
@@ -47,7 +47,7 @@ namespace Services.NasbNiro.Ceo
                 Series("ثبت‌شده", CountByMonth(ctx, ncrs.Select(n => n.ReportDate)), CeoRole.Negative),
                 Series("بسته‌شده", CountByMonth(ctx, ncrs.Where(n => n.ClosedAt.HasValue).Select(n => n.ClosedAt.Value.LocalDateTime.Date)), CeoRole.Positive)));
 
-            // chart 2: the age of the open NCRs as the quality dashboard counts them (cancelled ones are not open there)
+            // chart 2: the age of the open NCRs as the quality dashboard counts them: the same open NCRs as the KPI above (neither closed nor cancelled)
             section.Charts.Add(Chart("ncrAge", "سن عدم انطباق‌های باز", CeoKind.Donut, CeoUnit.Count, new[] { "تا ۷ روز", "۸ تا ۳۰ روز", "بیش از ۳۰ روز" }, CeoLinks.Ncr, CeoDrillRef.QcNcrOpen,
                 "از تاریخ گزارش تا امروز؛ لغوشده‌ها شمرده نمی‌شوند.",
                 Series("گزارش‌ها", new decimal[] { q.Ncrs.Age0To7, q.Ncrs.Age8To30, q.Ncrs.Age31Plus })));

@@ -7,29 +7,32 @@ using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
-using Entities.Model.NasbNiro.Procurement;
 using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Sales;
 using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Finance;
 using ViewModels.NasbNiro.FinanceDtos;
 
 namespace Services.NasbNiro.Ceo
 {
-    /// <summary>One approved supplier invoice that is unpaid and past the payment term.</summary>
+    /// <summary>One supplier and what the company owes him for more than <see cref="CeoFigures.PayableTermDays"/> days: a row of the payables ageing of the general ledger.</summary>
     public sealed class CeoOverduePayable
     {
-        public int InvoiceId { get; set; }
-        public int ProviderId { get; set; }
-        public string InvoiceNumber { get; set; }
-        public DateTime InvoiceDate { get; set; }
+        /// <summary>The name of the supplier (the title of his detail account in the ledger).</summary>
+        public string Supplier { get; set; }
+
+        /// <summary>Owed for up to 30 days from the date of the document: not overdue.</summary>
+        public decimal Current { get; set; }
+
+        public decimal Days31To60 { get; set; }
+        public decimal Days61To90 { get; set; }
+        public decimal Over90 { get; set; }
+
+        /// <summary>What is overdue: the three buckets older than 30 days.</summary>
+        public decimal Overdue => Days31To60 + Days61To90 + Over90;
+
+        /// <summary>Everything owed to the supplier, overdue or not.</summary>
         public decimal Total { get; set; }
-        public decimal Paid { get; set; }
-
-        /// <summary>Total less what was paid on the invoice (never below zero).</summary>
-        public decimal Balance { get; set; }
-
-        /// <summary>Days past the payment term.</summary>
-        public int DaysOverdue { get; set; }
     }
 
     /// <summary>The value of the company-owned stock in one warehouse.</summary>
@@ -62,44 +65,29 @@ namespace Services.NasbNiro.Ceo
     public static class CeoFigures
     {
         /// <summary>
-        /// ★ Payment term of a supplier invoice when nothing else is known: 30 days from the invoice date (the procurement module keeps the term only as free text).
+        /// ★ Payment term when nothing else is known: 30 days from the date of the document (the procurement module keeps the term only as free text, and the notes schedule
+        /// of the financial statements ages the payables in buckets of 30 days).
         /// </summary>
         public const int PayableTermDays = 30;
 
         /// <summary>
-        /// ★ Overdue payables: approved supplier invoices whose invoice date plus <see cref="PayableTermDays"/> days is before today and whose balance
-        /// (invoice total less the paid payment requests on it, the same rule as the open payables of the CEO dashboard) is above zero; one row per invoice.
+        /// ★ Overdue payables, from the payables ageing of the general ledger (the one in the notes of the financial statements, see <see cref="IPayableAgeingService"/>):
+        /// per supplier, what is owed for more than <see cref="PayableTermDays"/> days (the buckets 31-60, 61-90 and over 90) on <paramref name="today"/>; suppliers with nothing overdue are left out,
+        /// the biggest overdue amount first. Payments and returns are matched against the oldest documents first. An advance (or a progress payment made without an invoice) sits in the supplier advance
+        /// account, not in the payable account, so it reduces the debt only after a payment request has recovered it. This is the single function behind the KPI and the snapshot of
+        /// <c>payablesOverdue</c> and the drill <c>fin.payables_overdue</c>; it does not check roles (the caller does).
         /// </summary>
-        public static async Task<List<CeoOverduePayable>> OverduePayablesAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        public static async Task<List<CeoOverduePayable>> OverduePayablesAsync(IPayableAgeingService ageing, DateTime today, CancellationToken ct)
         {
-            DateTime cutoff = today.Date.AddDays(-PayableTermDays);
-            var invoices = await uow.Set<SupplierInvoice>().AsNoTracking()
-                .Where(i => !i.Deleted && i.Status == SupplierInvoiceStatus.Approved && i.InvoiceDate < cutoff)
-                .Select(i => new { i.Id, i.ProviderId, i.InvoiceNumber, i.InvoiceDate, i.TotalAmount }).ToListAsync(ct);
-            var result = new List<CeoOverduePayable>();
-            if (invoices.Count == 0) return result;
-            List<int> ids = invoices.Select(i => i.Id).ToList();
-            var paid = await uow.Set<PaymentRequest>().AsNoTracking()
-                .Where(p => !p.Deleted && p.Status == PaymentRequestStatus.Paid && p.InvoiceId != null && ids.Contains(p.InvoiceId.Value))
-                .GroupBy(p => p.InvoiceId.Value).Select(g => new { g.Key, Amount = g.Sum(p => p.Amount) }).ToListAsync(ct);
-            Dictionary<int, decimal> paidBy = paid.ToDictionary(p => p.Key, p => p.Amount);
-            foreach (var i in invoices.OrderBy(i => i.InvoiceDate).ThenBy(i => i.Id))
-            {
-                decimal amountPaid = paidBy.TryGetValue(i.Id, out decimal v) ? v : 0m;
-                decimal balance = Math.Max(0m, i.TotalAmount - amountPaid);
-                if (balance <= 0m) continue;
-                result.Add(new CeoOverduePayable
-                {
-                    InvoiceId = i.Id, ProviderId = i.ProviderId, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate.Date, Total = i.TotalAmount, Paid = amountPaid, Balance = balance,
-                    DaysOverdue = (int)(today.Date - i.InvoiceDate.Date.AddDays(PayableTermDays)).TotalDays,
-                });
-            }
-            return result;
+            List<FnNoteAgeingDto> rows = await ageing.PayableAgeingAsync(today.Date, ct) ?? new List<FnNoteAgeingDto>();
+            return rows.Select(r => new CeoOverduePayable { Supplier = r.Name, Current = r.Current, Days31To60 = r.Days31To60, Days61To90 = r.Days61To90, Over90 = r.Over90, Total = r.Total })
+                .Where(r => r.Overdue > 0m)
+                .OrderByDescending(r => r.Overdue).ThenBy(r => r.Supplier, StringComparer.Ordinal).ToList();
         }
 
-        /// <summary>The sum of <see cref="OverduePayablesAsync"/>.</summary>
-        public static async Task<decimal> PayablesOverdueAsync(IUnitOfWork uow, DateTime today, CancellationToken ct) =>
-            (await OverduePayablesAsync(uow, today, ct)).Sum(r => r.Balance);
+        /// <summary>The sum of the overdue amounts of <see cref="OverduePayablesAsync"/>.</summary>
+        public static async Task<decimal> PayablesOverdueAsync(IPayableAgeingService ageing, DateTime today, CancellationToken ct) =>
+            (await OverduePayablesAsync(ageing, today, ct)).Sum(r => r.Overdue);
 
         /// <summary>
         /// ★ Sales backlog = (A) for the confirmed and partly delivered sales orders: each line's amount times the share of its quantity not yet invoiced,

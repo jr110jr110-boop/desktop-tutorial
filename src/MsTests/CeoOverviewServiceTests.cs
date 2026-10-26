@@ -24,6 +24,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Ai;
 using Services.NasbNiro.Ceo;
@@ -35,6 +36,7 @@ using Services.NasbNiro.Sales;
 using ViewModels.NasbNiro.CeoDtos;
 using ViewModels.NasbNiro.FinanceDtos;
 using ViewModels.NasbNiro.Pagination;
+using ViewModels.NasbNiro.ProductionDtos;
 using ViewModels.NasbNiro.ProjectControlDtos;
 using ViewModels.NasbNiro.QualityDtos;
 using ViewModels.NasbNiro.SalesDtos;
@@ -66,7 +68,7 @@ namespace MsTests
             }
         }
 
-        private static T Proxy<T>(params (string Name, Delegate Handler)[] handlers) where T : class
+        internal static T Proxy<T>(params (string Name, Delegate Handler)[] handlers) where T : class
         {
             T proxy = DispatchProxy.Create<T, Stub>();
             foreach ((string name, Delegate handler) in handlers) ((Stub)(object)proxy).Handlers[name] = handler;
@@ -74,14 +76,103 @@ namespace MsTests
         }
 
         /// <summary>The signed-in user with the given roles (comma separated).</summary>
-        private static IInventoryUserContext User(string roles) => Proxy<IInventoryUserContext>(
+        internal static IInventoryUserContext User(string roles) => Proxy<IInventoryUserContext>(
             ("get_UserId", (Func<int>)(() => 7)),
             ("IsInRole", (Func<string, bool>)(wanted => (wanted ?? string.Empty).Split(',').Select(r => r.Trim()).Any(r => roles.Split(',').Contains(r)))));
 
-        private static ICeoDashboardService DashboardService(CeoDashboardDto dashboard) => Proxy<ICeoDashboardService>(
-            ("GetAsync", (Func<CancellationToken, DateTime?, Task<ResponseDto<CeoDashboardDto>>>)((ct, asOf) => Task.FromResult(ResponseDtoHelper.Ok(dashboard)))));
+        /// <summary>
+        /// The stubbed modules behind the overview: how each one behaves (works, fails) and how often it was asked, so that a test can say "the CEO dashboard was computed once"
+        /// or "the receivables module was not asked at all".
+        /// </summary>
+        internal sealed class Modules
+        {
+            /// <summary>The CEO dashboard cannot be computed (the quality module is down): no section can be built.</summary>
+            public bool DashboardFails { get; set; }
 
-        private class RecordingLogger<T> : ILogger<T>
+            /// <summary>The receivables module answers with a failure: the finance section cannot be built.</summary>
+            public bool ReceivablesFail { get; set; }
+
+            /// <summary>The project portfolio throws: the projects section cannot be built.</summary>
+            public bool PortfolioFails { get; set; }
+
+            /// <summary>The load report the CEO dashboard hands over (null: the production section loads it itself).</summary>
+            public LoadReportDto ProductionLoad { get; set; }
+
+            public AgeingDto Ageing { get; set; } = new AgeingDto { Current = 10, Days31To60 = 20, Days61To90 = 30, Over90 = 40, Total = 100 };
+
+            public List<PcPortfolioRowDto> Portfolio { get; set; } = new List<PcPortfolioRowDto>
+            {
+                new PcPortfolioRowDto { ContractId = 1, ContractTitle = "green", ProjectCode = "P1", SpiStatus = "green", CpiStatus = "green", Spi = 1.0m, PlannedPercent = 50, PhysicalPercent = 50 },
+                new PcPortfolioRowDto { ContractId = 2, ContractTitle = "amber", ProjectCode = "P2", SpiStatus = "amber", CpiStatus = "green", Spi = 0.9m, PlannedPercent = 60, PhysicalPercent = 54 },
+                new PcPortfolioRowDto { ContractId = 3, ContractTitle = "red", ProjectCode = null, SpiStatus = "green", CpiStatus = "red", Spi = 0.7m, PlannedPercent = 80, PhysicalPercent = 56 },
+            };
+
+            /// <summary>What the payables ageing of the ledger answers (per supplier, in buckets).</summary>
+            public List<FnNoteAgeingDto> Payables { get; } = new List<FnNoteAgeingDto>();
+
+            public int PartsCalls { get; set; }
+            public int DashboardCalls { get; set; }
+            public int AgeingCalls { get; set; }
+            public int PortfolioCalls { get; set; }
+            public int PayableCalls { get; set; }
+            public List<DateTime> AgeingDays { get; } = new List<DateTime>();
+            public List<DateTime> PayableDays { get; } = new List<DateTime>();
+        }
+
+        /// <summary>The module results the CEO dashboard hands over with itself (quality, sales, the load of production).</summary>
+        private static CeoDashboardParts Parts(CeoDashboardDto dashboard, Modules modules = null) => new CeoDashboardParts
+        {
+            Dashboard = dashboard,
+            Quality = new QualityDashboardDto { OverdueNcrs = 2, CapaOpen = 5, ComplaintsOpen = 3, ComplaintsOverdue = 1, Ncrs = new NcrAgeDto { Major = 1, NotClassified = 2, Age0To7 = 3, Age8To30 = 2, Age31Plus = 1 } },
+            Sales = new SlCeoCountsDto
+            {
+                Won = 6, Lost = 4,
+                PipelineByStage = new List<SlStageValueDto> { new SlStageValueDto { Name = "بررسی", Count = 2, Value = 100 }, new SlStageValueDto { Name = "پیشنهاد", Count = 3, Value = 200 } },
+            },
+            ProductionLoad = modules?.ProductionLoad,
+        };
+
+        private static ICeoDashboardService DashboardService(CeoDashboardDto dashboard, Modules modules = null) => Proxy<ICeoDashboardService>(
+            ("GetAsync", (Func<CancellationToken, DateTime?, Task<ResponseDto<CeoDashboardDto>>>)((ct, asOf) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                if (modules != null) modules.DashboardCalls++;
+                if (modules != null && modules.DashboardFails) throw new InvalidOperationException("the quality module is down");
+                return Task.FromResult(ResponseDtoHelper.Ok(dashboard));
+            })),
+            ("GetPartsAsync", (Func<CancellationToken, Task<CeoDashboardParts>>)(ct =>
+            {
+                ct.ThrowIfCancellationRequested();
+                if (modules != null) modules.PartsCalls++;
+                if (modules != null && modules.DashboardFails) throw new InvalidOperationException("the quality module is down");
+                return Task.FromResult(Parts(dashboard, modules));
+            })));
+
+        internal static IPayableAgeingService PayableAgeing(Modules modules) => Proxy<IPayableAgeingService>(
+            ("PayableAgeingAsync", (Func<DateTime, CancellationToken, Task<List<FnNoteAgeingDto>>>)((day, ct) =>
+            {
+                modules.PayableCalls++;
+                modules.PayableDays.Add(day);
+                return Task.FromResult(modules.Payables.ToList());
+            })));
+
+        private static IReceivablesService Receivables(Modules modules) => Proxy<IReceivablesService>(
+            ("GetAgeingAsync", (Func<DateTime?, CancellationToken, Task<ResponseDto<AgeingDto>>>)((asOf, ct) =>
+            {
+                modules.AgeingCalls++;
+                modules.AgeingDays.Add(asOf ?? DateTime.MinValue);
+                return Task.FromResult(modules.ReceivablesFail ? ResponseDtoHelper.BadRequest<AgeingDto>("the receivables module is down") : ResponseDtoHelper.Ok(modules.Ageing));
+            })));
+
+        private static IPcReportService Portfolio(Modules modules) => Proxy<IPcReportService>(
+            ("GetPortfolioAsync", (Func<PaginationParams, CancellationToken, Task<ResponseDto<PagedList<PcPortfolioRowDto>>>>)((query, ct) =>
+            {
+                modules.PortfolioCalls++;
+                if (modules.PortfolioFails) throw new InvalidOperationException("the project control module is down");
+                return Task.FromResult(ResponseDtoHelper.Ok(PagedList<PcPortfolioRowDto>.CreateAsync(modules.Portfolio, 1, 0, ct).GetAwaiter().GetResult()));
+            })));
+
+        internal class RecordingLogger<T> : ILogger<T>
         {
             public List<string> Problems { get; } = new List<string>();
 
@@ -92,6 +183,51 @@ namespace MsTests
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
             {
                 if (logLevel >= LogLevel.Warning) Problems.Add(logLevel + ": " + formatter(state, exception) + (exception == null ? string.Empty : "  =>  " + exception.GetType().Name + ": " + exception.Message));
+            }
+        }
+
+        /// <summary>A memory cache that remembers for how long each entry was stored, so that a test can tell the 120 seconds of a complete overview from the 10 seconds of one with a failed section.</summary>
+        private sealed class RecordingCache : IMemoryCache
+        {
+            private readonly MemoryCache _inner = new MemoryCache(new MemoryCacheOptions());
+
+            public Dictionary<string, TimeSpan?> Lifetimes { get; } = new Dictionary<string, TimeSpan?>();
+
+            public ICacheEntry CreateEntry(object key) => new Entry(this, key, _inner.CreateEntry(key));
+
+            public bool TryGetValue(object key, out object value) => _inner.TryGetValue(key, out value);
+
+            public void Remove(object key) => _inner.Remove(key);
+
+            public void Dispose() => _inner.Dispose();
+
+            private sealed class Entry : ICacheEntry
+            {
+                private readonly RecordingCache _owner;
+                private readonly ICacheEntry _entry;
+
+                public Entry(RecordingCache owner, object key, ICacheEntry entry)
+                {
+                    _owner = owner;
+                    Key = key;
+                    _entry = entry;
+                }
+
+                public object Key { get; }
+                public object Value { get => _entry.Value; set => _entry.Value = value; }
+                public DateTimeOffset? AbsoluteExpiration { get => _entry.AbsoluteExpiration; set => _entry.AbsoluteExpiration = value; }
+                public TimeSpan? AbsoluteExpirationRelativeToNow { get => _entry.AbsoluteExpirationRelativeToNow; set => _entry.AbsoluteExpirationRelativeToNow = value; }
+                public TimeSpan? SlidingExpiration { get => _entry.SlidingExpiration; set => _entry.SlidingExpiration = value; }
+                public IList<IChangeToken> ExpirationTokens => _entry.ExpirationTokens;
+                public IList<PostEvictionCallbackRegistration> PostEvictionCallbacks => _entry.PostEvictionCallbacks;
+                public CacheItemPriority Priority { get => _entry.Priority; set => _entry.Priority = value; }
+                public long? Size { get => _entry.Size; set => _entry.Size = value; }
+
+                public void Dispose()
+                {
+                    _owner.Lifetimes[Convert.ToString(Key)] = _entry.AbsoluteExpirationRelativeToNow;
+                    _entry.Dispose();
+                }
             }
         }
 
@@ -203,6 +339,8 @@ namespace MsTests
                 if (Regex.IsMatch(sql, @"^SELECT COUNT(_BIG)?\(\*\)")) return new FakeReader(FakeReader.Shape.Scalar, 0);
                 if (sql.StartsWith("SELECT CASE WHEN EXISTS", StringComparison.Ordinal)) return new FakeReader(FakeReader.Shape.Scalar, false);
                 if (sql.StartsWith("SELECT COALESCE(SUM(", StringComparison.Ordinal)) return new FakeReader(FakeReader.Shape.Scalar, 0m);
+                // the earliest record of a sample table is a day in the past, so that the queries that wait for it (the history of a key) run too
+                if (sql.StartsWith("SELECT MIN(", StringComparison.Ordinal) && SampleTables.Any(t => sql.Contains("FROM [" + t + "]"))) return new FakeReader(FakeReader.Shape.Scalar, new DateTime(2025, 1, 1));
                 if (Regex.IsMatch(sql, @"^SELECT (SUM|AVG|MIN|MAX)\(")) return new FakeReader(FakeReader.Shape.Scalar, DBNull.Value);
                 if (SampleTables.Any(t => sql.Contains("FROM [" + t + "]"))) return new FakeReader(FakeReader.Shape.Sample);
                 return new FakeReader(FakeReader.Shape.NoRows);
@@ -256,7 +394,7 @@ namespace MsTests
 
         // ==================================================================================== what the collaborators answer
 
-        private static CeoDashboardDto Dashboard(bool warrantyHidden = false)
+        internal static CeoDashboardDto Dashboard(bool warrantyHidden = false)
         {
             var dashboard = new CeoDashboardDto
             {
@@ -280,41 +418,13 @@ namespace MsTests
             return dashboard;
         }
 
-        private static CeoOverviewService Overview(IUnitOfWork uow, string roles, CeoDashboardDto dashboard, IMemoryCache cache, ILogger<CeoOverviewService> logger, bool qualityFails = false)
+        internal static CeoOverviewService Overview(IUnitOfWork uow, string roles, CeoDashboardDto dashboard, IMemoryCache cache, ILogger<CeoOverviewService> logger, Modules modules = null)
         {
-            var receivables = Proxy<IReceivablesService>(
-                ("GetAgeingAsync", (Func<DateTime?, CancellationToken, Task<ResponseDto<AgeingDto>>>)((asOf, ct) =>
-                    Task.FromResult(ResponseDtoHelper.Ok(new AgeingDto { Current = 10, Days31To60 = 20, Days61To90 = 30, Over90 = 40, Total = 100 })))));
-            var sales = Proxy<ISlDashboardService>(
-                ("GetAsync", (Func<DateTime?, CancellationToken, Task<ResponseDto<SlDashboardDto>>>)((asOf, ct) =>
-                {
-                    var dto = new SlDashboardDto { Won = 6, Lost = 4 };
-                    dto.PipelineByStage.Add(new SlStageValueDto { Name = "بررسی", Count = 2, Value = 100 });
-                    dto.PipelineByStage.Add(new SlStageValueDto { Name = "پیشنهاد", Count = 3, Value = 200 });
-                    return Task.FromResult(ResponseDtoHelper.Ok(dto));
-                })));
-            var projects = Proxy<IPcReportService>(
-                ("GetPortfolioAsync", (Func<ViewModels.NasbNiro.Pagination.PaginationParams, CancellationToken, Task<ResponseDto<PagedList<PcPortfolioRowDto>>>>)((query, ct) =>
-                {
-                    var rows = new List<PcPortfolioRowDto>
-                    {
-                        new PcPortfolioRowDto { ContractId = 1, ContractTitle = "green", ProjectCode = "P1", SpiStatus = "green", CpiStatus = "green", Spi = 1.0m, PlannedPercent = 50, PhysicalPercent = 50 },
-                        new PcPortfolioRowDto { ContractId = 2, ContractTitle = "amber", ProjectCode = "P2", SpiStatus = "amber", CpiStatus = "green", Spi = 0.9m, PlannedPercent = 60, PhysicalPercent = 54 },
-                        new PcPortfolioRowDto { ContractId = 3, ContractTitle = "red", ProjectCode = null, SpiStatus = "green", CpiStatus = "red", Spi = 0.7m, PlannedPercent = 80, PhysicalPercent = 56 },
-                    };
-                    return Task.FromResult(ResponseDtoHelper.Ok(PagedList<PcPortfolioRowDto>.CreateAsync(rows, 1, 0, ct).GetAwaiter().GetResult()));
-                })));
-            var quality = Proxy<IQualityDashboardService>(
-                ("GetDashboardAsync", (Func<CancellationToken, Task<ResponseDto<QualityDashboardDto>>>)(ct =>
-                {
-                    if (qualityFails) throw new InvalidOperationException("the quality module is down");
-                    var dto = new QualityDashboardDto { OverdueNcrs = 2, CapaOpen = 5, ComplaintsOpen = 3, ComplaintsOverdue = 1, Ncrs = new NcrAgeDto { Major = 1, NotClassified = 2, Age0To7 = 3, Age8To30 = 2, Age31Plus = 1 } };
-                    return Task.FromResult(ResponseDtoHelper.Ok(dto));
-                })));
-            return new CeoOverviewService(uow, User(roles), DashboardService(dashboard), receivables, sales, projects, quality, cache, logger);
+            modules ??= new Modules();
+            return new CeoOverviewService(uow, User(roles), DashboardService(dashboard, modules), Receivables(modules), PayableAgeing(modules), Portfolio(modules), cache, logger);
         }
 
-        private static CeoKpiDto Kpi(CeoOverviewDto overview, string key) => overview.Sections.SelectMany(s => s.Kpis).First(k => k.Key == key);
+        internal static CeoKpiDto Kpi(CeoOverviewDto overview, string key) => overview.Sections.SelectMany(s => s.Kpis).First(k => k.Key == key);
 
         // ==================================================================================== the overview on the SQL Server provider
 
@@ -323,15 +433,26 @@ namespace MsTests
         {
             ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
             using (scope)
-            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            using (var cache = new RecordingCache())
             {
                 var log = new RecordingLogger<CeoOverviewService>();
-                CeoOverviewService service = Overview(context, "CEO", Dashboard(), cache, log);
+                var modules = new Modules();
+                CeoOverviewService service = Overview(context, "CEO", Dashboard(), cache, log, modules);
 
                 ResponseDto<CeoOverviewDto> answer = await service.GetOverviewAsync(true, CancellationToken.None);
 
                 Assert.IsTrue(answer.Success, answer.Message);
                 Assert.AreEqual(0, log.Problems.Count, "a query or a section failed:" + Environment.NewLine + string.Join(Environment.NewLine, log.Problems));
+                Assert.AreEqual(CeoCache.Lifetime, cache.Lifetimes[CeoCache.Key(true)], "a complete overview is kept for the full lifetime");
+
+                // review item 5: one computation asks each module once, however many sections draw on it
+                Assert.AreEqual(1, modules.PartsCalls, "the CEO dashboard with its parts (quality, sales, production load) is computed once for the nine sections");
+                Assert.AreEqual(0, modules.DashboardCalls, "... and the sections do not ask the plain dashboard again");
+                Assert.AreEqual(1, modules.PortfolioCalls, "the project portfolio is read once");
+                Assert.AreEqual(1, modules.PayableCalls, "the payables ageing is read once");
+                Assert.AreEqual(1, modules.AgeingCalls, "the receivables ageing is read once (an empty company has no history to derive)");
+                Assert.AreEqual(DateTime.Today, modules.AgeingDays.Single());
+                Assert.AreEqual(DateTime.Today, modules.PayableDays.Single(), "the payables are aged on today");
                 CeoOverviewDto overview = answer.Data;
                 Assert.IsFalse(overview.Cached);
                 Assert.AreEqual(DateTime.Today, overview.AsOf);
@@ -358,6 +479,87 @@ namespace MsTests
                 }
                 Assert.AreEqual(12, overview.Sections[0].Charts[0].Labels.Count, "revenue chart covers twelve months");
                 Assert.IsTrue(empty.Commands.Count > 20, "the sections ran their queries: " + empty.Commands.Count);
+
+                // review item 17: from the first day the trend of a snapshot key shows one point, the live value of the current Persian month
+                List<CeoKpiDto> trended = overview.Sections.SelectMany(s => s.Kpis).Where(k => k.Trend != null).ToList();
+                CollectionAssert.AreEquivalent(CeoKeys.Snapshot, trended.Select(k => k.Key).ToArray(), "the twelve snapshot keys carry a trend, no other key does");
+                foreach (CeoKpiDto kpi in trended)
+                {
+                    CollectionAssert.AreEqual(new[] { kpi.Value.Value }, kpi.Trend, kpi.Key + ": an empty company has no history, only the live point");
+                    CollectionAssert.AreEqual(new[] { CeoText.MonthLabel(DateTime.Today) }, kpi.TrendLabels, kpi.Key);
+                    Assert.IsNull(kpi.Delta, kpi.Key + ": nothing to compare the live value with");
+                    Assert.IsNull(kpi.DeltaGood, kpi.Key);
+                }
+                foreach (CeoKpiDto headline in overview.Headline) Assert.IsNotNull(headline.Trend, headline.Key + ": the headline figures all have a sparkline");
+            }
+        }
+
+        [TestMethod]
+        public async Task Every_Section_Builds_Exactly_The_KPIs_Of_The_Spec_Table_In_Its_Order()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+                foreach (CeoSectionDto section in overview.Sections)
+                {
+                    List<CeoKpiSpec> specs = CeoKpiSpecs.Of(section.Key).ToList();
+                    CollectionAssert.AreEqual(specs.Select(s => s.Key).ToArray(), section.Kpis.Select(k => k.Key).ToArray(), section.Key + ": the KPIs are the specs, in order");
+                    foreach (CeoKpiDto kpi in section.Kpis)
+                    {
+                        CeoKpiSpec spec = specs.Single(s => s.Key == kpi.Key);
+                        Assert.AreEqual(spec.Title, kpi.Title, kpi.Key);
+                        Assert.AreEqual(spec.Unit, kpi.Unit, kpi.Key);
+                        Assert.AreEqual(spec.Link, kpi.Link, kpi.Key);
+                        Assert.AreEqual(spec.DrillKey, kpi.DrillKey, kpi.Key);
+                        Assert.AreEqual(spec.DrillParams == null, kpi.DrillParams == null, kpi.Key + ": drill parameters come from the spec");
+                        if (spec.DrillParams != null) CollectionAssert.AreEqual(spec.DrillParams(DateTime.Today).OrderBy(p => p.Key).ToList(), kpi.DrillParams.OrderBy(p => p.Key).ToList(), kpi.Key);
+                    }
+                }
+                Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+            }
+        }
+
+        [TestMethod]
+        public void The_Spec_Table_Is_Complete_Unique_And_Points_At_Real_Drills_And_Front_Routes()
+        {
+            Assert.AreEqual(48, CeoKpiSpecs.All.Count);
+            Assert.AreEqual(48, CeoKpiSpecs.All.Select(s => s.Key).Distinct().Count(), "every key once");
+            CollectionAssert.AreEqual(new[] { 6, 6, 6, 5, 6, 4, 6, 6, 3 }, CeoKeys.Sections.Select(s => CeoKpiSpecs.Of(s).Count()).ToArray());
+            CollectionAssert.AreEqual(CeoKeys.Sections, CeoKpiSpecs.All.Select(s => s.Section).Distinct().ToArray(), "the specs are grouped in the order of the sections");
+            foreach (string key in CeoKeys.Headline) Assert.IsNotNull(CeoKpiSpecs.Get(key), key);
+            foreach (string key in CeoKeys.Snapshot) Assert.IsNotNull(CeoKpiSpecs.Get(key), key);
+
+            HashSet<string> drills = typeof(CeoDrillRef).GetFields(BindingFlags.Public | BindingFlags.Static).Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()).ToHashSet();
+            foreach (CeoKpiSpec spec in CeoKpiSpecs.All)
+            {
+                Assert.IsTrue(drills.Contains(spec.DrillKey), spec.Key + " drill key " + spec.DrillKey + " is not in the drill catalogue");
+                Assert.IsTrue(spec.Link != null && spec.Link.StartsWith("/"), spec.Key + " link " + spec.Link);
+                Assert.IsFalse(spec.Link.StartsWith("/finance/"), spec.Key + " uses a route of the finance module the front does not have: " + spec.Link);
+                Assert.IsTrue(new[] { CeoUnit.Rial, CeoUnit.Count, CeoUnit.Percent, CeoUnit.Days, CeoUnit.Hours }.Contains(spec.Unit), spec.Key + " unit " + spec.Unit);
+                Assert.IsFalse(string.IsNullOrWhiteSpace(spec.Title), spec.Key);
+            }
+            Assert.AreEqual("درخواست‌های خارج از مهلت (SLA)", CeoKpiSpecs.Get("serviceSlaBreaches").Title, "the bracket of the SLA title is dropped by the speech");
+        }
+
+        [TestMethod]
+        public void Placeholders_Keep_The_Spec_Of_Their_KPI_Without_A_Value()
+        {
+            DateTime today = new DateTime(2026, 10, 25);
+            foreach (CeoKpiSpec spec in CeoKpiSpecs.All)
+            {
+                CeoKpiDto placeholder = CeoKpiSpecs.Placeholder(spec, today);
+
+                Assert.AreEqual(spec.Key, placeholder.Key);
+                Assert.AreEqual(spec.Title, placeholder.Title);
+                Assert.AreEqual(spec.DrillKey, placeholder.DrillKey);
+                Assert.IsNull(placeholder.Value, spec.Key);
+                Assert.AreEqual(CeoStatus.Neutral, placeholder.Status, spec.Key);
+                Assert.AreEqual(CeoText.NoValue, placeholder.ValueText, spec.Key);
+                Assert.AreEqual(spec.DrillParams != null, placeholder.DrillParams != null, spec.Key);
             }
         }
 
@@ -437,28 +639,130 @@ namespace MsTests
         }
 
         [TestMethod]
-        public async Task A_Section_That_Fails_Is_Reported_Empty_And_The_Others_Are_Unchanged()
+        public async Task A_Section_That_Cannot_Be_Computed_Keeps_The_Shape_Of_The_Contract_With_Placeholders_A_Note_And_A_Neutral_Pulse()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new RecordingCache())
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                var modules = new Modules { ReceivablesFail = true };   // the finance section needs the ageing of the receivables module
+                CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log, modules).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+                // review item 12: the failed section is not an empty box. Its KPIs are placeholders with their keys, titles, units and links, no value, status neutral; no charts; a note says why
+                CeoSectionDto finance = overview.Sections.First(s => s.Key == "finance");
+                CollectionAssert.AreEqual(CeoKpiSpecs.Of("finance").Select(s => s.Key).ToArray(), finance.Kpis.Select(k => k.Key).ToArray(), "the six KPIs keep their keys and their order");
+                foreach (CeoKpiDto placeholder in finance.Kpis)
+                {
+                    CeoKpiSpec spec = CeoKpiSpecs.Get(placeholder.Key);
+                    Assert.AreEqual(spec.Title, placeholder.Title, placeholder.Key);
+                    Assert.AreEqual(spec.Unit, placeholder.Unit, placeholder.Key);
+                    Assert.AreEqual(spec.Link, placeholder.Link, placeholder.Key);
+                    Assert.AreEqual(spec.DrillKey, placeholder.DrillKey, placeholder.Key);
+                    Assert.IsNull(placeholder.Value, placeholder.Key);
+                    Assert.AreEqual(CeoText.NoValue, placeholder.ValueText, placeholder.Key);
+                    Assert.AreEqual(CeoStatus.Neutral, placeholder.Status, placeholder.Key);
+                    Assert.IsNull(placeholder.Trend, placeholder.Key);
+                    Assert.IsNull(placeholder.Delta, placeholder.Key);
+                    Assert.IsFalse(placeholder.Hidden, placeholder.Key);
+                }
+                Assert.AreEqual(0, finance.Charts.Count, "no charts for a section that could not be computed");
+                Assert.AreEqual(CeoText.SectionUnavailable, finance.Note);
+                Assert.AreEqual("مالی", finance.Title);
+                Assert.AreEqual(CeoLinks.FinanceDashboard, finance.Link);
+                Assert.IsTrue(finance.AnalysisPrompt.Contains("تحلیل"));
+                Assert.AreEqual(0, finance.AlertCount);
+
+                CeoPulseDto pulse = overview.Pulse.First(p => p.Key == "finance");
+                Assert.AreEqual(CeoStatus.Neutral, pulse.Status, "a section without figures is neutral, not green");
+                Assert.AreEqual(0, pulse.DangerCount);
+                Assert.AreEqual(0, pulse.WarnCount);
+
+                // the other eight sections are built and untouched
+                Assert.AreEqual(8, overview.Sections.Count(s => string.IsNullOrEmpty(s.Note)));
+                CollectionAssert.AreEqual(new[] { 6, 6, 6, 5, 6, 4, 6, 6, 3 }, overview.Sections.Select(s => s.Kpis.Count).ToArray(), "every section keeps its number of KPIs");
+                Assert.IsTrue(overview.Sections.Where(s => s.Key != "finance").All(s => s.Charts.Count > 0));
+                Assert.AreEqual(CeoStatus.Danger, overview.Pulse.First(p => p.Key == "production").Status);
+
+                // the headline keeps its eight places: the three finance figures are placeholders, the other five have a value
+                Assert.AreEqual(8, overview.Headline.Count);
+                CollectionAssert.AreEqual(CeoKeys.Headline, overview.Headline.Select(k => k.Key).ToArray());
+                CollectionAssert.AreEqual(new[] { "cash", "receivablesOpen", "payablesOverdue" }, overview.Headline.Where(k => !k.Value.HasValue).Select(k => k.Key).ToArray());
+                Assert.IsTrue(overview.Headline.Where(k => !k.Value.HasValue).All(k => k.Status == CeoStatus.Neutral && k.ValueText == CeoText.NoValue));
+                Assert.AreEqual(1, log.Problems.Count(p => p.StartsWith("Error", StringComparison.Ordinal)), string.Join(Environment.NewLine, log.Problems));
+
+                // review item 4: an overview with a failed section is kept for ten seconds only, so a module that comes back shows up quickly
+                Assert.AreEqual(CeoCache.FailedLifetime, cache.Lifetimes[CeoCache.Key(true)]);
+                Assert.IsTrue(CeoCache.FailedLifetime <= TimeSpan.FromSeconds(10));
+            }
+        }
+
+        [TestMethod]
+        public async Task When_The_Ceo_Dashboard_Cannot_Be_Computed_Every_Section_Is_Reported_At_Once_Without_Trying_Nine_Times()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new RecordingCache())
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                var modules = new Modules { DashboardFails = true };
+                CeoOverviewService service = Overview(context, "CEO", Dashboard(), cache, log, modules);
+
+                CeoOverviewDto overview = (await service.GetOverviewAsync(true, CancellationToken.None)).Data;
+
+                // review item 4: the failure is remembered for the whole computation, the dashboard (and the modules behind it) is asked once, not once per section
+                Assert.AreEqual(1, modules.PartsCalls, "the CEO dashboard was tried once");
+                Assert.AreEqual(0, modules.AgeingCalls + modules.PortfolioCalls + modules.PayableCalls, "no section went on to ask a module");
+                Assert.AreEqual(0, empty.Commands.Count, "... or the database");
+                Assert.AreEqual(1, log.Problems.Count(p => p.StartsWith("Error", StringComparison.Ordinal)), "one error in the log, not nine: " + string.Join(Environment.NewLine, log.Problems));
+
+                CollectionAssert.AreEqual(CeoKeys.Sections, overview.Sections.Select(s => s.Key).ToArray());
+                CollectionAssert.AreEqual(new[] { 6, 6, 6, 5, 6, 4, 6, 6, 3 }, overview.Sections.Select(s => s.Kpis.Count).ToArray(), "the shape of the contract is kept");
+                foreach (CeoSectionDto section in overview.Sections)
+                {
+                    Assert.AreEqual(CeoText.DashboardUnavailable, section.Note, section.Key);
+                    Assert.AreEqual(0, section.Charts.Count, section.Key);
+                    Assert.IsTrue(section.Kpis.All(k => !k.Value.HasValue && k.Status == CeoStatus.Neutral && k.Trend == null), section.Key);
+                    Assert.IsFalse(string.IsNullOrWhiteSpace(section.Title), section.Key);
+                    Assert.IsFalse(string.IsNullOrWhiteSpace(section.Link), section.Key);
+                }
+                Assert.IsTrue(overview.Pulse.All(p => p.Status == CeoStatus.Neutral && p.DangerCount == 0 && p.WarnCount == 0), "every light is neutral");
+                Assert.AreEqual(8, overview.Headline.Count);
+                Assert.IsTrue(overview.Headline.All(k => !k.Value.HasValue && k.Status == CeoStatus.Neutral));
+                Assert.AreEqual(0, overview.Alerts.Count, "there is no dashboard to take the alerts from");
+                Assert.AreEqual(CeoCache.FailedLifetime, cache.Lifetimes[CeoCache.Key(true)], "an overview that failed is kept for ten seconds at most");
+
+                // the dashboard comes back: a refresh computes everything again and the complete overview is kept for the full 120 seconds
+                modules.DashboardFails = false;
+                CeoOverviewDto stillFailed = (await service.GetOverviewAsync(false, CancellationToken.None)).Data;
+                Assert.IsTrue(stillFailed.Cached, "within the ten seconds the failed copy is served");
+                CeoOverviewDto recovered = (await service.GetOverviewAsync(true, CancellationToken.None)).Data;
+                Assert.IsFalse(recovered.Cached);
+                Assert.IsTrue(recovered.Sections.All(s => string.IsNullOrEmpty(s.Note)), "all nine sections are built again");
+                Assert.AreEqual(CeoCache.Lifetime, cache.Lifetimes[CeoCache.Key(true)]);
+                Assert.AreEqual(TimeSpan.FromSeconds(120), CeoCache.Lifetime);
+            }
+        }
+
+        [TestMethod]
+        public async Task A_Section_Asked_For_On_Its_Own_Reports_A_Dashboard_Failure_The_Same_Way()
         {
             ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
             using (scope)
             using (var cache = new MemoryCache(new MemoryCacheOptions()))
             {
                 var log = new RecordingLogger<CeoOverviewService>();
-                CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log, qualityFails: true).GetOverviewAsync(true, CancellationToken.None)).Data;
+                var modules = new Modules { DashboardFails = true };
 
-                CeoSectionDto quality = overview.Sections.First(s => s.Key == "quality");
-                Assert.AreEqual(0, quality.Kpis.Count);
-                Assert.AreEqual(0, quality.Charts.Count);
-                Assert.IsFalse(string.IsNullOrWhiteSpace(quality.Note));
-                Assert.AreEqual("کیفیت", quality.Title);
-                Assert.AreEqual(8, overview.Sections.Count(s => s.Kpis.Count > 0), "the other eight sections are built");
-                CeoKpiDto ncrs = overview.Headline.First(k => k.Key == "openNcrs");
-                Assert.IsNull(ncrs.Value, "the headline figure of a failed section has no value");
-                Assert.AreEqual(CeoText.NoValue, ncrs.ValueText);
-                Assert.AreEqual(CeoStatus.Neutral, ncrs.Status);
-                Assert.AreEqual(8, overview.Headline.Count, "the headline keeps its eight places");
-                Assert.AreEqual(7, overview.Headline.Count(k => k.Value.HasValue), "... and seven of them have a value");
-                Assert.AreEqual(1, log.Problems.Count(p => p.StartsWith("Error", StringComparison.Ordinal)), string.Join(Environment.NewLine, log.Problems));
+                ResponseDto<CeoSectionDto> quality = await Overview(context, "CEO", Dashboard(), cache, log, modules).GetSectionAsync("quality", CancellationToken.None);
+
+                Assert.IsTrue(quality.Success, quality.Message);
+                Assert.AreEqual(CeoText.DashboardUnavailable, quality.Data.Note);
+                Assert.AreEqual(6, quality.Data.Kpis.Count);
+                Assert.AreEqual(0, quality.Data.Charts.Count);
+                Assert.AreEqual(1, modules.PartsCalls);
+                Assert.AreEqual(1, log.Problems.Count(p => p.StartsWith("Error", StringComparison.Ordinal)));
+                Assert.IsFalse(cache.TryGetValue(CeoCache.Key(true), out object _), "a section computed on its own is not stored");
             }
         }
 
@@ -478,7 +782,7 @@ namespace MsTests
                 Assert.AreEqual("مالی", finance.Data.Title);
                 Assert.AreEqual(6, finance.Data.Kpis.Count);
                 Assert.AreEqual(3, finance.Data.Charts.Count);
-                Assert.IsFalse(cache.TryGetValue(CeoCache.Key(true), out object _), "a section is never cached");
+                Assert.IsFalse(cache.TryGetValue(CeoCache.Key(true), out object _), "a section computed on its own is not stored in the cache");
 
                 ResponseDto<CeoSectionDto> unknown = await ceo.GetSectionAsync("nothing", CancellationToken.None);
                 Assert.IsFalse(unknown.Success);
@@ -501,26 +805,161 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task A_Section_Is_Served_From_The_Cached_Overview_And_Computed_Only_On_Refresh_Or_When_There_Is_No_Cache()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                var modules = new Modules();
+                CeoDashboardDto dashboard = Dashboard();
+                CeoOverviewService ceo = Overview(context, "CEO", dashboard, cache, log, modules);
+
+                // no overview in the cache yet: the section is computed (and, being on its own, not stored)
+                CeoSectionDto first = (await ceo.GetSectionAsync("finance", CancellationToken.None)).Data;
+                Assert.AreEqual(1, modules.PartsCalls);
+                Assert.AreEqual(48_200_000_000m, first.Kpis.First(k => k.Key == "cash").Value);
+                Assert.IsFalse(cache.TryGetValue(CeoCache.Key(true), out object _));
+
+                // the screen loads the overview; from then on the section endpoint (and the voice) say what the screen shows
+                await ceo.GetOverviewAsync(false, CancellationToken.None);
+                Assert.AreEqual(2, modules.PartsCalls);
+                dashboard.Finance.CashAndBank = 1_000m;
+                CeoSectionDto cached = (await ceo.GetSectionAsync(" Finance ", CancellationToken.None)).Data;
+                Assert.AreEqual(2, modules.PartsCalls, "served from the cached overview: no module was asked");
+                Assert.AreEqual(48_200_000_000m, cached.Kpis.First(k => k.Key == "cash").Value, "... so it is the figure of the screen");
+
+                // refresh=true computes the section now
+                CeoSectionDto fresh = (await ceo.GetSectionAsync("finance", true, CancellationToken.None)).Data;
+                Assert.AreEqual(3, modules.PartsCalls);
+                Assert.AreEqual(1_000m, fresh.Kpis.First(k => k.Key == "cash").Value);
+                CeoSectionDto stillCached = (await ceo.GetSectionAsync("finance", CancellationToken.None)).Data;
+                Assert.AreEqual(48_200_000_000m, stillCached.Kpis.First(k => k.Key == "cash").Value, "a section refreshed on its own does not replace the cached overview");
+
+                // the cached overview of the CEO is not served to a reader who sees other figures: the PMO computes its own
+                var pmoModules = new Modules();
+                CeoSectionDto pmo = (await Overview(context, "PMO", Dashboard(true), cache, log, pmoModules).GetSectionAsync("service", CancellationToken.None)).Data;
+                Assert.AreEqual(1, pmoModules.PartsCalls, "the masked variant has its own cache entry");
+                Assert.IsTrue(pmo.Kpis.First(k => k.Key == "serviceWarrantyCostYtd").Hidden);
+                Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+            }
+        }
+
+        [TestMethod]
+        public async Task The_Cache_Keeps_Its_Own_Copy_So_A_Caller_Who_Changes_What_It_Got_Changes_Nothing_For_The_Next_Reader()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                CeoOverviewService ceo = Overview(context, "CEO", Dashboard(), cache, log);
+
+                // review item 18: what the first (computed) answer holds is a copy of what is cached, and so is every cached answer
+                CeoOverviewDto computed = (await ceo.GetOverviewAsync(true, CancellationToken.None)).Data;
+                decimal cash = computed.Sections[0].Kpis[0].Value.Value;
+                int cashTrend = computed.Sections[0].Kpis[0].Trend.Count;
+                int headlineTrend = computed.Headline[0].Trend.Count;
+                int alerts = computed.Alerts.Count;
+                Scribble(computed);
+
+                CeoOverviewDto cached = (await ceo.GetOverviewAsync(false, CancellationToken.None)).Data;
+                Assert.IsTrue(cached.Cached);
+                Assert.AreEqual(cash, cached.Sections[0].Kpis[0].Value.Value, "the value of the cached copy is the computed one");
+                Assert.AreEqual(cashTrend, cached.Sections[0].Kpis[0].Trend.Count);
+                Assert.AreEqual(headlineTrend, cached.Headline[0].Trend.Count);
+                Assert.AreEqual(alerts, cached.Alerts.Count);
+                Assert.AreEqual("مالی", cached.Sections[0].Title);
+                Assert.IsNull(cached.Sections[0].Note);
+                Assert.IsFalse(cached.Sections[0].Charts[0].Series[0].Values.Contains(-99m));
+                Assert.IsTrue(cached.Sections.SelectMany(s => s.Kpis).Where(k => k.DrillParams != null).All(k => !k.DrillParams.ContainsKey("scribble")));
+                Assert.IsTrue(cached.Sections.SelectMany(s => s.Charts).Where(c => c.DrillParams != null).All(c => !c.DrillParams.ContainsKey("scribble")));
+
+                Scribble(cached);
+                CeoOverviewDto again = (await ceo.GetOverviewAsync(false, CancellationToken.None)).Data;
+                Assert.AreEqual(cash, again.Sections[0].Kpis[0].Value.Value, "a second reader gets an untouched copy too");
+                Assert.AreEqual(alerts, again.Alerts.Count);
+                Assert.IsFalse(object.ReferenceEquals(cached, again));
+                Assert.IsFalse(object.ReferenceEquals(cached.Sections[0], again.Sections[0]));
+
+                // and the same for a section read from the cache
+                CeoSectionDto section = (await ceo.GetSectionAsync("finance", CancellationToken.None)).Data;
+                section.Kpis.Clear();
+                section.Charts.Clear();
+                section.Note = "changed";
+                CeoSectionDto sectionAgain = (await ceo.GetSectionAsync("finance", CancellationToken.None)).Data;
+                Assert.AreEqual(6, sectionAgain.Kpis.Count);
+                Assert.AreEqual(3, sectionAgain.Charts.Count);
+                Assert.IsNull(sectionAgain.Note);
+            }
+        }
+
+        /// <summary>What a careless caller might do with an overview it was given: edit figures, trends, charts, alerts and drill parameters in place.</summary>
+        private static void Scribble(CeoOverviewDto overview)
+        {
+            foreach (CeoKpiDto kpi in overview.Headline.Concat(overview.Sections.SelectMany(s => s.Kpis)))
+            {
+                kpi.Value = -99m;
+                kpi.Status = CeoStatus.Danger;
+                kpi.Trend?.Add(-99m);
+                kpi.TrendLabels?.Add("x");
+                if (kpi.DrillParams != null) kpi.DrillParams["scribble"] = "1";
+            }
+            foreach (CeoChartDto chart in overview.Sections.SelectMany(s => s.Charts))
+            {
+                foreach (CeoChartSeriesDto series in chart.Series) for (int i = 0; i < series.Values.Count; i++) series.Values[i] = -99m;
+                chart.Labels.Add("x");
+                if (chart.DrillParams != null) chart.DrillParams["scribble"] = "1";
+            }
+            overview.Alerts.Clear();
+            overview.Sections[0].Title = "changed";
+            overview.Sections[0].Note = "changed";
+        }
+
+        [TestMethod]
         public async Task The_Figures_The_Overview_Defines_Run_All_Their_Queries_On_SqlServer()
         {
             ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
             using (scope)
             {
                 // one sample row in the first query of each figure makes the follow-up queries run too
-                empty.SampleTables.Add(TableOf(context, typeof(SupplierInvoice)));
                 empty.SampleTables.Add(TableOf(context, typeof(PcContractTerms)));
                 empty.SampleTables.Add(TableOf(context, typeof(StockBalance)));
                 empty.SampleTables.Add(TableOf(context, typeof(Warehouse)));
 
-                List<CeoOverduePayable> payables = await CeoFigures.OverduePayablesAsync(context, new DateTime(2026, 10, 25), CancellationToken.None);
                 CeoBacklog backlog = await CeoFigures.SalesBacklogAsync(context, CancellationToken.None);
                 List<CeoWarehouseValue> warehouses = await CeoFigures.StockValueByWarehouseAsync(context, CancellationToken.None);
 
-                Assert.AreEqual(1, payables.Count, "the sample invoice has no payment");
                 Assert.IsTrue(backlog.Contracts > 0m, "the sample contract has a value and no invoice");
                 Assert.AreEqual(1, warehouses.Count, "the sample balance has a value");
-                string[] followUps = { TableOf(context, typeof(PaymentRequest)), TableOf(context, typeof(FnSalesInvoice)), TableOf(context, typeof(Warehouse)) };
+                string[] followUps = { TableOf(context, typeof(FnSalesInvoice)), TableOf(context, typeof(Warehouse)) };
                 foreach (string table in followUps) Assert.IsTrue(empty.Commands.Any(c => c.Contains("[" + table + "]")), "the follow-up query on " + table + " did not run");
+            }
+        }
+
+        [TestMethod]
+        public async Task The_History_Queries_Of_The_Four_Backfilled_Keys_Translate_To_SqlServer()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            {
+                // a sample row in the first query of each key makes the queries that follow it run
+                empty.SampleTables.Add(TableOf(context, typeof(FnSalesInvoice)));
+                empty.SampleTables.Add(TableOf(context, typeof(NonConformance)));
+                empty.SampleTables.Add(TableOf(context, typeof(SvServiceRequest)));
+                empty.SampleTables.Add(TableOf(context, typeof(AccountingEventLine)));
+                var log = new RecordingLogger<CeoOverviewService>();
+                List<DateTime> months = CeoHistory.PastMonths(DateTime.Today);
+                Func<DateTime, CancellationToken, Task<decimal?>> receivables = (day, ct) => Task.FromResult<decimal?>(1m);
+
+                foreach (string key in CeoHistory.Keys)
+                {
+                    List<CeoTrendPoint> points = await CeoHistory.DeriveKeyAsync(context, key, receivables, months, log, CancellationToken.None);
+                    Assert.IsNotNull(points, key + ": the derivation failed:" + Environment.NewLine + string.Join(Environment.NewLine, log.Problems));
+                }
+                Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+                Assert.IsTrue(empty.Commands.Count >= 4, "each key ran its queries: " + empty.Commands.Count);
             }
         }
 
@@ -544,48 +983,22 @@ namespace MsTests
 
         // ==================================================================================== the figures with a few records (in-memory provider)
 
-        private static ServiceProvider InMemory()
+        internal static ServiceProvider InMemory(Action<IServiceCollection> configure = null)
         {
             ServiceCollection services = BaseServices();
             services.AddMemoryCache();
             string name = "ceo-" + Guid.NewGuid();
             services.AddDbContext<ApplicationDbContext>(o => o.UseInMemoryDatabase(name));
             services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<ApplicationDbContext>());
+            configure?.Invoke(services);
             return services.BuildServiceProvider();
         }
 
-        /// <summary>Records for the three figures; every date is relative to <paramref name="today"/>.</summary>
+        /// <summary>Records for the two figures read from the records (the sales backlog and the stock value by warehouse); every date is relative to <paramref name="today"/>.</summary>
         private static async Task SeedFiguresAsync(ServiceProvider provider, DateTime today)
         {
             using IServiceScope scope = provider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-            // overdue payables: the term is 30 days from the invoice date
-            SupplierInvoice Invoice(int id, SupplierInvoiceStatus status, int ageDays, decimal total, bool deleted = false)
-            {
-                var invoice = new SupplierInvoice { Id = id, Number = "SI-" + id, Status = status, ProviderId = 1, PurchaseOrderId = 1, InvoiceNumber = "INV-" + id, InvoiceDate = today.AddDays(-ageDays), NetAmount = total, TotalAmount = total };
-                if (deleted) invoice.Delete();
-                return invoice;
-            }
-            PaymentRequest Payment(int id, int invoiceId, PaymentRequestStatus status, decimal amount, bool deleted = false)
-            {
-                var payment = new PaymentRequest { Id = id, Number = "PR-" + id, Status = status, ProviderId = 1, InvoiceId = invoiceId, Amount = amount, RequestDate = today };
-                if (deleted) payment.Delete();
-                return payment;
-            }
-            db.Set<SupplierInvoice>().AddRange(
-                Invoice(1, SupplierInvoiceStatus.Approved, 85, 1000),    // overdue, 300 paid -> 700
-                Invoice(2, SupplierInvoiceStatus.Approved, 15, 800),     // inside the term
-                Invoice(3, SupplierInvoiceStatus.Approved, 116, 500),    // fully paid
-                Invoice(4, SupplierInvoiceStatus.Draft, 116, 700),       // not approved
-                Invoice(5, SupplierInvoiceStatus.Approved, 116, 900, deleted: true),
-                Invoice(6, SupplierInvoiceStatus.Approved, 30, 600),     // exactly at the end of the term: not overdue yet
-                Invoice(7, SupplierInvoiceStatus.Approved, 31, 400));    // one day past the term -> 400
-            db.Set<PaymentRequest>().AddRange(
-                Payment(1, 1, PaymentRequestStatus.Paid, 300),
-                Payment(2, 1, PaymentRequestStatus.Approved, 200),       // approved is not paid
-                Payment(3, 1, PaymentRequestStatus.Paid, 100, deleted: true),
-                Payment(4, 3, PaymentRequestStatus.Paid, 500));
 
             // sales backlog: orders
             SlSalesOrder Order(int id, SlOrderStatus status, bool deleted, params (decimal Amount, decimal Quantity, decimal Invoiced)[] lines)
@@ -644,26 +1057,79 @@ namespace MsTests
             await db.SaveChangesAsync();
         }
 
+        private static FnNoteAgeingDto AgeingRow(string name, decimal current, decimal d31, decimal d61, decimal over90) =>
+            new FnNoteAgeingDto { Name = name, Current = current, Days31To60 = d31, Days61To90 = d61, Over90 = over90, Total = current + d31 + d61 + over90 };
+
         [TestMethod]
-        public async Task Overdue_Payables_Are_The_Unpaid_Balance_Of_Approved_Invoices_Past_The_Thirty_Day_Term()
+        public async Task Overdue_Payables_Are_The_Buckets_Older_Than_Thirty_Days_Of_The_Payables_Ageing_Of_The_Ledger()
         {
-            using ServiceProvider provider = InMemory();
+            // review item 3: the figure is the finance module's own payables ageing (the notes of the financial statements), not an approximation from procurement invoices
+            var modules = new Modules();
+            modules.Payables.Add(AgeingRow("تأمین‌کننده الف", 100, 300, 200, 0));        // 500 overdue
+            modules.Payables.Add(AgeingRow("تأمین‌کننده ب", 500, 0, 0, 0));              // all current: left out
+            modules.Payables.Add(AgeingRow("تأمین‌کننده ج", 0, 50, 0, 900));             // 950 overdue, the biggest
+            modules.Payables.Add(AgeingRow("تأمین‌کننده د", 10, 700, 0, 0));             // 700 overdue
+            modules.Payables.Add(AgeingRow("تأمین‌کننده ه", 0, 0, 0, 0));                // owes nothing
+            IPayableAgeingService ageing = PayableAgeing(modules);
             DateTime today = new DateTime(2026, 10, 25);
-            await SeedFiguresAsync(provider, today);
-            using IServiceScope scope = provider.CreateScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-            List<CeoOverduePayable> rows = await CeoFigures.OverduePayablesAsync(uow, today, CancellationToken.None);
+            List<CeoOverduePayable> rows = await CeoFigures.OverduePayablesAsync(ageing, today.AddHours(13), CancellationToken.None);
 
-            CollectionAssert.AreEqual(new[] { 1, 7 }, rows.Select(r => r.InvoiceId).ToArray(), "oldest first; the invoice at exactly 30 days is not overdue");
-            Assert.AreEqual(700m, rows[0].Balance, "1000 less the 300 paid (an approved request is not a payment, a deleted one does not count)");
-            Assert.AreEqual(300m, rows[0].Paid);
-            Assert.AreEqual(55, rows[0].DaysOverdue);
-            Assert.AreEqual(400m, rows[1].Balance);
-            Assert.AreEqual(1, rows[1].DaysOverdue);
-            Assert.AreEqual(1100m, await CeoFigures.PayablesOverdueAsync(uow, today, CancellationToken.None));
-            Assert.AreEqual(700m, await CeoFigures.PayablesOverdueAsync(uow, today.AddDays(-50), CancellationToken.None), "judged on an earlier day only the invoice that was already past its term counts");
-            Assert.AreEqual(0m, await CeoFigures.PayablesOverdueAsync(uow, today.AddDays(-200), CancellationToken.None));
+            CollectionAssert.AreEqual(new[] { "تأمین‌کننده ج", "تأمین‌کننده د", "تأمین‌کننده الف" }, rows.Select(r => r.Supplier).ToArray(), "suppliers with something overdue, the biggest overdue amount first");
+            CollectionAssert.AreEqual(new[] { 950m, 700m, 500m }, rows.Select(r => r.Overdue).ToArray(), "overdue = 31-60 + 61-90 + over 90 days");
+            Assert.AreEqual(10m, rows[1].Current, "the current bucket is carried but is not overdue");
+            Assert.AreEqual(710m, rows[1].Total, "the total is everything owed to the supplier");
+            Assert.AreEqual(50m, rows[0].Days31To60);
+            Assert.AreEqual(0m, rows[0].Days61To90);
+            Assert.AreEqual(900m, rows[0].Over90);
+            Assert.AreEqual(today, modules.PayableDays.Single(), "the ageing is asked for the day without the time");
+
+            Assert.AreEqual(2150m, await CeoFigures.PayablesOverdueAsync(ageing, today, CancellationToken.None), "the KPI is the sum of the overdue amounts");
+            Assert.AreEqual(2, modules.PayableCalls, "one call of the ageing per figure");
+        }
+
+        [TestMethod]
+        public async Task Overdue_Payables_Of_Equal_Amounts_Are_Ordered_By_Supplier_Name_And_No_Ageing_Is_Zero()
+        {
+            var modules = new Modules();
+            modules.Payables.Add(AgeingRow("ب", 0, 100, 0, 0));
+            modules.Payables.Add(AgeingRow("الف", 0, 0, 100, 0));
+            IPayableAgeingService ageing = PayableAgeing(modules);
+
+            List<CeoOverduePayable> rows = await CeoFigures.OverduePayablesAsync(ageing, new DateTime(2026, 10, 25), CancellationToken.None);
+
+            CollectionAssert.AreEqual(new[] { "الف", "ب" }, rows.Select(r => r.Supplier).ToArray(), "a tie is broken by the name, so the list never changes order between two reads");
+
+            IPayableAgeingService nothing = Proxy<IPayableAgeingService>(("PayableAgeingAsync", (Func<DateTime, CancellationToken, Task<List<FnNoteAgeingDto>>>)((day, ct) => Task.FromResult<List<FnNoteAgeingDto>>(null))));
+            Assert.AreEqual(0, (await CeoFigures.OverduePayablesAsync(nothing, new DateTime(2026, 10, 25), CancellationToken.None)).Count, "no payable account or no fiscal year: nothing is owed");
+            Assert.AreEqual(0m, await CeoFigures.PayablesOverdueAsync(nothing, new DateTime(2026, 10, 25), CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task The_Payables_KPI_Of_The_Overview_Is_The_Ageing_Figure_And_Its_Note_Says_What_Is_Not_In_It()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                var modules = new Modules();
+                modules.Payables.Add(AgeingRow("تأمین‌کننده الف", 100, 300, 200, 0));
+                modules.Payables.Add(AgeingRow("تأمین‌کننده ج", 0, 50, 0, 900));
+                CeoDashboardDto dashboard = Dashboard();
+                dashboard.Finance.CashAndBank = 1_000m;
+
+                CeoOverviewDto overview = (await Overview(context, "CEO", dashboard, cache, log, modules).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+                CeoKpiDto payables = overview.Headline.First(k => k.Key == "payablesOverdue");
+                Assert.AreEqual(1450m, payables.Value);
+                Assert.AreEqual(CeoStatus.Danger, payables.Status, "1450 overdue is more than the 1000 in the bank");
+                Assert.AreEqual(CeoDrillRef.FinPayablesOverdue, payables.DrillKey);
+                Assert.IsTrue(payables.Note.Contains("۲ تأمین‌کننده"), payables.Note);
+                Assert.IsTrue(payables.Note.Contains("پیش‌پرداخت") && payables.Note.Contains("علی‌الحساب"), "advances and progress payments are mentioned: " + payables.Note);
+                Assert.AreEqual(CeoLinks.TreasuryPayments, payables.Link);
+                Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+            }
         }
 
         [TestMethod]
@@ -752,7 +1218,7 @@ namespace MsTests
             await db.SaveChangesAsync();
         }
 
-        private static CeoChartDto ChartOf(CeoOverviewDto overview, string section, string chart) => overview.Sections.First(s => s.Key == section).Charts.First(c => c.Key == chart);
+        internal static CeoChartDto ChartOf(CeoOverviewDto overview, string section, string chart) => overview.Sections.First(s => s.Key == section).Charts.First(c => c.Key == chart);
 
         [TestMethod]
         public async Task The_Service_Charts_Put_Each_Record_In_The_Persian_Month_Of_Its_Own_Day()
@@ -826,6 +1292,19 @@ namespace MsTests
             return await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().Set<CeoKpiSnapshot>().AsNoTracking().OrderBy(s => s.Date).ThenBy(s => s.Key).ToListAsync();
         }
 
+        /// <summary>Stubbed modules whose payables ageing shows <paramref name="overdue"/> rial past thirty days (and one supplier that is current).</summary>
+        private static Modules ModulesWithOverduePayables(decimal overdue)
+        {
+            var modules = new Modules();
+            modules.Payables.Add(AgeingRow("تأمین‌کننده الف", 0, overdue - 400m, 0, 0));
+            modules.Payables.Add(AgeingRow("تأمین‌کننده ب", 0, 0, 0, 400m));
+            modules.Payables.Add(AgeingRow("تأمین‌کننده ج", 250m, 0, 0, 0));
+            return modules;
+        }
+
+        private static CeoSnapshotService Snapshots(IUnitOfWork uow, string roles, CeoDashboardDto dashboard, Modules modules, ServiceProvider provider, IMemoryCache cache)
+            => new CeoSnapshotService(uow, User(roles), DashboardService(dashboard, modules), PayableAgeing(modules), provider.GetRequiredService<IServiceScopeFactory>(), cache, null);
+
         [TestMethod]
         public async Task A_Snapshot_Stores_One_Row_Per_Day_And_Key_A_Second_Run_Replaces_The_Values_And_The_Cache_Is_Cleared()
         {
@@ -837,8 +1316,10 @@ namespace MsTests
             cache.Set(CeoCache.Key(true), new CeoOverviewDto(), TimeSpan.FromMinutes(5));
             cache.Set(CeoCache.Key(false), new CeoOverviewDto(), TimeSpan.FromMinutes(5));
             using IServiceScope scope = provider.CreateScope();
-            var service = new CeoSnapshotService(scope.ServiceProvider.GetRequiredService<IUnitOfWork>(), User("PMO"), DashboardService(dashboard), provider.GetRequiredService<IServiceScopeFactory>(), cache, null);
+            Modules modules = ModulesWithOverduePayables(1100m);
+            var service = Snapshots(scope.ServiceProvider.GetRequiredService<IUnitOfWork>(), "PMO", dashboard, modules, provider, cache);
 
+            // "snapshot now" stays on today (the night job stores the day that ended, see the hosted service tests)
             ResponseDto<CeoSnapshotResultDto> first = await service.TakeNowAsync(CancellationToken.None);
 
             Assert.IsTrue(first.Success, first.Message);
@@ -851,7 +1332,8 @@ namespace MsTests
             CollectionAssert.AreEquivalent(CeoKeys.Snapshot, rows.Select(r => r.Key).ToArray());
             Assert.IsTrue(rows.All(r => r.Date == today), "the date is the day without a time");
             Assert.AreEqual(48_200_000_000m, rows.First(r => r.Key == "cash").Value);
-            Assert.AreEqual(1100m, rows.First(r => r.Key == "payablesOverdue").Value, "the overdue payables are the figure of the overview");
+            Assert.AreEqual(1100m, rows.First(r => r.Key == "payablesOverdue").Value, "the overdue payables are the figure of the overview: what the ledger ageing shows past thirty days");
+            Assert.AreEqual(today, modules.PayableDays.Last(), "... aged on the day that is stored");
             Assert.AreEqual(6600m, rows.First(r => r.Key == "salesBacklog").Value, "the backlog is the figure of the overview");
             Assert.AreEqual(7m, rows.First(r => r.Key == "lateProductionOrders").Value);
 
@@ -880,16 +1362,111 @@ namespace MsTests
             using IServiceScope scope = provider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var cache = provider.GetRequiredService<IMemoryCache>();
-            var scopes = provider.GetRequiredService<IServiceScopeFactory>();
 
-            ResponseDto<CeoSnapshotResultDto> refused = await new CeoSnapshotService(uow, User("WAREHOUSE"), DashboardService(Dashboard()), scopes, cache, null).TakeNowAsync(CancellationToken.None);
+            ResponseDto<CeoSnapshotResultDto> refused = await Snapshots(uow, "WAREHOUSE", Dashboard(), new Modules(), provider, cache).TakeNowAsync(CancellationToken.None);
             Assert.IsFalse(refused.Success);
             Assert.AreEqual(CeoText.NotAllowed, refused.Message);
             Assert.AreEqual(0, (await StoredAsync(provider)).Count, "nothing was stored");
 
-            ResponseDto<CeoSnapshotResultDto> ceo = await new CeoSnapshotService(uow, User("CEO"), DashboardService(Dashboard()), scopes, cache, null).TakeNowAsync(CancellationToken.None);
+            ResponseDto<CeoSnapshotResultDto> ceo = await Snapshots(uow, "CEO", Dashboard(), new Modules(), provider, cache).TakeNowAsync(CancellationToken.None);
             Assert.IsTrue(ceo.Success, ceo.Message);
             Assert.AreEqual(12, ceo.Data.Keys);
+        }
+
+        [TestMethod]
+        public async Task The_Night_Job_Stores_The_Day_That_Ended_So_The_Last_Snapshot_Of_A_Persian_Month_Is_Its_True_Month_End()
+        {
+            // review item 6: the job runs at 00:30 of the next day; the figures are those of the end of the day that has just ended and are stored under that day
+            Assert.AreEqual(new DateTime(2026, 10, 25), CeoHostedService.SnapshotDay(new DateTime(2026, 10, 26, 0, 30, 0)));
+            Assert.AreEqual(new DateTime(2026, 12, 31), CeoHostedService.SnapshotDay(new DateTime(2027, 1, 1, 0, 30, 0)), "across the Gregorian year");
+            Assert.AreEqual(new DateTime(2026, 11, 21), CeoHostedService.SnapshotDay(new DateTime(2026, 11, 22, 0, 30, 0)), "00:30 of 1405/09/01 stores 1405/08/30, the last day of Aban");
+
+            using ServiceProvider provider = InMemory(services =>
+            {
+                services.AddScoped(_ => User("CEO"));
+                services.AddScoped(_ => DashboardService(Dashboard(), new Modules()));
+                services.AddScoped(_ => PayableAgeing(new Modules()));
+                services.AddScoped<ICeoSnapshotService, CeoSnapshotService>();
+            });
+            var log = new RecordingLogger<CeoHostedService>();
+            var job = new CeoHostedService(provider.GetRequiredService<IServiceScopeFactory>(), new ConfigurationBuilder().Build(), log);
+
+            // Aban 1405 runs from 2026-10-23 to 2026-11-21; Azar starts on 2026-11-22. The job of the first night of Azar stores the last day of Aban.
+            Assert.AreEqual(12, await job.StoreAsync(new DateTime(2026, 11, 22, 0, 30, 0), catchUp: false, CancellationToken.None));
+            Assert.AreEqual(12, await job.StoreAsync(new DateTime(2026, 10, 24, 0, 30, 0), catchUp: false, CancellationToken.None));
+
+            List<CeoKpiSnapshot> rows = await StoredAsync(provider);
+            CollectionAssert.AreEqual(new[] { new DateTime(2026, 10, 23), new DateTime(2026, 11, 21) }, rows.Select(r => r.Date).Distinct().ToArray(), "the days that ended, not the days the job ran");
+            List<CeoTrendPoint> points = CeoTrends.MonthEnds(rows.Where(r => r.Key == "cash").Select(r => (r.Date, r.Value)), new DateTime(2026, 11, 22));
+            Assert.AreEqual(1, points.Count, "both days are in Aban");
+            Assert.AreEqual(new DateTime(2026, 11, 21), points[0].Date, "the point of Aban is its last day");
+            Assert.AreEqual("آبان ۱۴۰۵", CeoText.MonthLabel(points[0].Month));
+            Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+        }
+
+        [TestMethod]
+        public async Task At_Start_Up_A_Missing_Row_For_Yesterday_Is_Caught_Up_Once_And_A_Present_One_Is_Left_Alone()
+        {
+            // review item 19: when the server was down at 00:30, the first start stores yesterday once (with the figures of that moment)
+            CeoDashboardDto dashboard = Dashboard();
+            using ServiceProvider provider = InMemory(services =>
+            {
+                services.AddScoped(_ => User("CEO"));
+                services.AddScoped(_ => DashboardService(dashboard, new Modules()));
+                services.AddScoped(_ => PayableAgeing(new Modules()));
+                services.AddScoped<ICeoSnapshotService, CeoSnapshotService>();
+            });
+            var log = new RecordingLogger<CeoHostedService>();
+            var job = new CeoHostedService(provider.GetRequiredService<IServiceScopeFactory>(), new ConfigurationBuilder().Build(), log);
+            DateTime now = new DateTime(2026, 10, 26, 8, 0, 0);
+
+            Assert.AreEqual(12, await job.StoreAsync(now, catchUp: true, CancellationToken.None), "yesterday had no row: it is stored");
+            List<CeoKpiSnapshot> rows = await StoredAsync(provider);
+            Assert.IsTrue(rows.All(r => r.Date == new DateTime(2026, 10, 25)), "under yesterday, not today");
+            Assert.AreEqual(48_200_000_000m, rows.First(r => r.Key == "cash").Value);
+
+            dashboard.Finance.CashAndBank = 1_000m;
+            Assert.AreEqual(0, await job.StoreAsync(now.AddHours(1), catchUp: true, CancellationToken.None), "yesterday has rows now: nothing to do");
+            rows = await StoredAsync(provider);
+            Assert.AreEqual(12, rows.Count);
+            Assert.AreEqual(48_200_000_000m, rows.First(r => r.Key == "cash").Value, "the catch-up never overwrites a row the night job wrote");
+
+            // the night job itself replaces the day's values (it is the better figure: the end of the day)
+            Assert.AreEqual(12, await job.StoreAsync(new DateTime(2026, 10, 26, 0, 30, 0), catchUp: false, CancellationToken.None));
+            rows = await StoredAsync(provider);
+            Assert.AreEqual(1_000m, rows.First(r => r.Key == "cash").Value);
+            Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+        }
+
+        [TestMethod]
+        public async Task A_Failed_Night_Job_Is_Logged_As_An_Error_With_The_Persian_Date_And_Stops_Nothing()
+        {
+            var modules = new Modules { DashboardFails = true };
+            using ServiceProvider provider = InMemory(services =>
+            {
+                services.AddScoped(_ => User("CEO"));
+                services.AddScoped(_ => DashboardService(Dashboard(), modules));
+                services.AddScoped(_ => PayableAgeing(modules));
+                services.AddScoped<ICeoSnapshotService, CeoSnapshotService>();
+            });
+            var log = new RecordingLogger<CeoHostedService>();
+            var job = new CeoHostedService(provider.GetRequiredService<IServiceScopeFactory>(), new ConfigurationBuilder().Build(), log);
+            DateTime now = new DateTime(2026, 10, 26, 0, 30, 0);
+
+            Assert.AreEqual(0, await job.StoreAsync(now, catchUp: false, CancellationToken.None), "a failure is reported as nothing stored, not thrown");
+            Assert.AreEqual(0, await job.StoreAsync(now, catchUp: true, CancellationToken.None));
+
+            Assert.AreEqual(2, log.Problems.Count(p => p.StartsWith("Error", StringComparison.Ordinal)), string.Join(Environment.NewLine, log.Problems));
+            Assert.IsTrue(log.Problems.All(p => p.Contains(CeoText.Date(new DateTime(2026, 10, 25)))), "the log line names the day in Shamsi: " + string.Join(Environment.NewLine, log.Problems));
+            Assert.AreEqual(0, (await StoredAsync(provider)).Count);
+
+            // cancellation is not a failure: it propagates so that the host can stop
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            bool cancelled = false;
+            try { await job.StoreAsync(now, catchUp: false, cts.Token); }
+            catch (OperationCanceledException) { cancelled = true; }
+            Assert.IsTrue(cancelled);
         }
 
         // ==================================================================================== the spoken summaries on the real overview (in-memory provider)
@@ -908,19 +1485,21 @@ namespace MsTests
             // the snapshot of a day of the previous Persian month: the cash was 2.9 billion rial lower than it is now
             DateTime lastMonthDay = CeoTrends.AddMonths(CeoTrends.MonthStart(today), -1).AddDays(10);
             dashboard.Finance.CashAndBank = 45_300_000_000m;
-            var snapshots = new CeoSnapshotService(uow, User("PMO"), DashboardService(dashboard), provider.GetRequiredService<IServiceScopeFactory>(), cache, null);
+            var snapshots = Snapshots(uow, "PMO", dashboard, new Modules(), provider, cache);
             Assert.AreEqual(12, await snapshots.RunAsync(lastMonthDay, CancellationToken.None));
             dashboard.Finance.CashAndBank = 48_200_000_000m;
 
             var log = new RecordingLogger<CeoOverviewService>();
-            CeoOverviewService overview = Overview(uow, "CEO", dashboard, cache, log);
+            var modules = new Modules();
+            CeoOverviewService overview = Overview(uow, "CEO", dashboard, cache, log, modules);
             var asked = new List<string>();
             ITextToSpeech tts = Proxy<ITextToSpeech>(("SynthesizeAsync", (Func<string, CancellationToken, Task<TtsResult>>)((text, ct) =>
             {
                 asked.Add(text);
                 return Task.FromResult(new TtsResult { Ok = true, Audio = new byte[3244], Model = "mock" });
             })));
-            var speech = new CeoSpeechService(User("CEO"), overview, new PersianNumberWords(), tts, null, null);
+            IAiNoteService notes = Proxy<IAiNoteService>();   // the headline, a section and the alerts do not read a note
+            var speech = new CeoSpeechService(User("CEO"), overview, notes, new PersianNumberWords(), tts, null, null);
 
             ResponseDto<CeoSpeechDto> headline = await speech.GetAsync("headline", null, CancellationToken.None);
 
@@ -939,6 +1518,7 @@ namespace MsTests
             Assert.IsTrue(finance.Success, finance.Message);
             Assert.IsTrue(finance.Data.Text.StartsWith("بخش مالی. "), finance.Data.Text);
             Assert.IsTrue(finance.Data.Text.Contains("نقد و بانک چهل و هشت میلیارد و دویست میلیون ریال، دو میلیارد و نهصد میلیون بیشتر از ماه پیش"));
+            Assert.AreEqual(1, modules.PartsCalls, "the headline computed the overview, the section was spoken from that cached overview: no figure was computed again");
             CeoSectionDto financeSection = (await overview.GetSectionAsync("finance", CancellationToken.None)).Data;
             Assert.AreEqual(6, financeSection.Kpis.Count);
             int last = -1;
@@ -965,12 +1545,192 @@ namespace MsTests
             Assert.AreEqual(new DateTime(2026, 10, 26, 0, 30, 0), CeoHostedService.NextRun(new DateTime(2026, 10, 25, 23, 59, 0)));
             Assert.AreEqual(new DateTime(2027, 1, 1, 0, 30, 0), CeoHostedService.NextRun(new DateTime(2026, 12, 31, 12, 0, 0)));
 
+            Assert.AreEqual("Ceo:Jobs", CeoConfigKeys.Jobs);
             IConfiguration Config(string value) => new ConfigurationBuilder().AddInMemoryCollection(value == null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["Ceo:Jobs"] = value }).Build();
             Assert.IsTrue(CeoHostedService.Enabled(Config(null)), "on by default");
             Assert.IsTrue(CeoHostedService.Enabled(Config("true")));
             Assert.IsFalse(CeoHostedService.Enabled(Config("false")));
             Assert.IsFalse(CeoHostedService.Enabled(Config("False")));
             Assert.IsTrue(CeoHostedService.Enabled(null));
+            Assert.AreEqual(TimeSpan.FromSeconds(30), CeoHostedService.CatchUpDelay, "the start-up catch-up waits for the application to settle");
+        }
+
+        // ==================================================================================== drill parameters, the colours of the projects and the notes of the charts
+
+        private static Dictionary<string, string> Params(params string[] pairs)
+        {
+            var result = new Dictionary<string, string>();
+            for (int i = 0; i < pairs.Length; i += 2) result[pairs[i]] = pairs[i + 1];
+            return result;
+        }
+
+        private static void AssertParams(Dictionary<string, string> expected, Dictionary<string, string> actual, string what)
+        {
+            if (expected == null)
+            {
+                Assert.IsNull(actual, what + ": the drill has no filter for this figure, so it carries no parameters");
+                return;
+            }
+            Assert.IsNotNull(actual, what);
+            CollectionAssert.AreEqual(expected.OrderBy(p => p.Key).ToList(), actual.OrderBy(p => p.Key).ToList(), what);
+        }
+
+        [TestMethod]
+        public async Task Drill_Parameters_Open_The_Drill_On_The_Figure_On_The_Screen_And_Only_Where_The_Drill_Can_Filter_By_It()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                DateTime today = DateTime.Today;
+                string day = CeoText.Iso(today), monthStart = CeoText.Iso(CeoTrends.MonthStart(today)), yearStart = CeoText.Iso(FinanceSeed.YearStart(FinanceSeed.PersianYearOf(today)));
+
+                CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+                // review item 16, the figures: the red and the amber projects, the open sales orders, and the two figures of the year so far; every other figure opens its drill unfiltered
+                var kpis = new Dictionary<string, Dictionary<string, string>>
+                {
+                    ["projectsRed"] = Params("status", "danger"),
+                    ["projectsAmber"] = Params("status", "warn"),
+                    ["salesBacklog"] = Params("status", "open"),
+                    ["netProfitYtd"] = Params("from", yearStart, "to", day),
+                    ["serviceWarrantyCostYtd"] = Params("from", yearStart, "to", day),
+                };
+                foreach (CeoKpiDto kpi in overview.Sections.SelectMany(s => s.Kpis)) AssertParams(kpis.TryGetValue(kpi.Key, out Dictionary<string, string> expected) ? expected : null, kpi.DrillParams, "KPI " + kpi.Key);
+                AssertParams(kpis["salesBacklog"], overview.Headline.First(k => k.Key == "salesBacklog").DrillParams, "the headline copy of salesBacklog");
+                Assert.AreEqual(CeoDrillRef.PcPortfolio, Kpi(overview, "projectsRed").DrillKey);
+                Assert.AreEqual(CeoDrillRef.PcPortfolio, Kpi(overview, "projectsAmber").DrillKey);
+                Assert.AreEqual(CeoDrillRef.SlOrdersOpen, Kpi(overview, "salesBacklog").DrillKey);
+
+                // the charts by month open the drill on the latest month so far (the first day of the Persian month to today) when the drill has a period; the five whose drills have none keep the open drill
+                string[] withPeriod = { "revenueCost", "proposalResults", "oeeByWorkCenter", "stockFlowByMonth", "warrantyCostByMonth", "surveyScoreByMonth", "attendanceMonth" };
+                string[] withoutPeriod = { "ordersByMonth", "ncrByMonth", "ordersAndPayments", "requestsByMonth", "cashFlow" };
+                List<CeoChartDto> charts = overview.Sections.SelectMany(s => s.Charts).ToList();
+                Assert.AreEqual(21, charts.Count);
+                foreach (CeoChartDto chart in charts) AssertParams(withPeriod.Contains(chart.Key) ? Params("from", monthStart, "to", day) : null, chart.DrillParams, "chart " + chart.Key);
+                CollectionAssert.AreEquivalent(withPeriod, charts.Where(c => c.DrillParams != null).Select(c => c.Key).ToArray());
+                foreach (string key in withoutPeriod) Assert.IsNotNull(charts.FirstOrDefault(c => c.Key == key), key + " is a chart of the overview");
+                Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+            }
+        }
+
+        private static PcPortfolioRowDto ProjectRow(int id, string spi, string cpi, decimal? index = 1m) => new PcPortfolioRowDto
+        {
+            ContractId = id, ContractTitle = "project " + id, ProjectCode = "P" + id, SpiStatus = spi, CpiStatus = cpi, Spi = index, PlannedPercent = 50, PhysicalPercent = 40,
+        };
+
+        [TestMethod]
+        public async Task The_Project_Donut_Gives_Every_Project_One_Colour_Red_Before_Amber_And_Its_Slices_Add_Up_To_The_Projects()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                var modules = new Modules();
+                modules.Portfolio = new List<PcPortfolioRowDto>
+                {
+                    ProjectRow(1, "red", "green"),        // red
+                    ProjectRow(2, "amber", "red"),        // red: one red index decides, it is not counted as amber too
+                    ProjectRow(3, "green", "amber"),      // amber
+                    ProjectRow(4, "amber", "amber"),      // amber
+                    ProjectRow(5, "green", "green"),      // green
+                    ProjectRow(6, "none", "none"),        // no index yet: green
+                };
+
+                CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log, modules).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+                CeoChartDto donut = ChartOf(overview, "projects", "projectStatus");
+                CollectionAssert.AreEqual(new[] { "سبز", "زرد", "قرمز" }, donut.Labels.ToArray());
+                CollectionAssert.AreEqual(new[] { 2m, 2m, 2m }, donut.Series[0].Values.ToArray(), "two green, two amber, two red");
+                Assert.AreEqual((decimal)modules.Portfolio.Count, donut.Series[0].Values.Sum(), "every project once: the slices add up to the number of projects");
+                Assert.AreEqual(modules.Portfolio.Count(PcReportService.IsRed), (int)donut.Series[0].Values[2], "the red slice is the red projects of the project control module");
+                Assert.AreEqual(modules.Portfolio.Count(PcReportService.IsAmber), (int)donut.Series[0].Values[1]);
+                Assert.IsTrue(donut.Note.Contains("هر پروژه یک بار") && donut.Note.Contains("قرمز نباشد"), donut.Note);
+                Assert.IsTrue(Kpi(overview, "projectsAmber").Note.Contains("هیچ‌کدام قرمز نیست"), "the KPI says the same: " + Kpi(overview, "projectsAmber").Note);
+
+                // the weakest projects by schedule index come first in the progress chart
+                CeoChartDto progress = ChartOf(overview, "projects", "progressByProject");
+                Assert.AreEqual(6, progress.Labels.Count);
+                Assert.AreEqual(1, modules.PortfolioCalls);
+                Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+            }
+        }
+
+        [TestMethod]
+        public async Task The_Note_Of_The_Load_Chart_Counts_The_Weeks_Without_Capacity_That_The_Chart_Can_Only_Show_As_Zero()
+        {
+            ApplicationDbContext context = SqlServerContext(out EmptyDatabase empty, out IServiceScope scope);
+            using (scope)
+            using (var cache = new MemoryCache(new MemoryCacheOptions()))
+            {
+                var log = new RecordingLogger<CeoOverviewService>();
+                LoadCellDto Cell(decimal? percent, bool overloaded) => new LoadCellDto { LoadPercent = percent, Overloaded = overloaded };
+                var modules = new Modules
+                {
+                    ProductionLoad = new LoadReportDto
+                    {
+                        Weeks = 4, Threshold = 110,
+                        Rows =
+                        {
+                            new LoadRowDto { WorkCenterId = 1, Code = "CNC", Cells = { Cell(120m, true), Cell(null, true), Cell(null, true), Cell(40m, false) } },    // two weeks with load and no capacity
+                            new LoadRowDto { WorkCenterId = 2, Code = "WELD", Cells = { Cell(null, false), Cell(30m, false) } },                                      // no capacity and no load: nothing to say
+                            new LoadRowDto { WorkCenterId = 3, Code = "PAINT" },
+                        },
+                    },
+                };
+
+                CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log, modules).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+                CeoChartDto load = ChartOf(overview, "production", "workCenterLoad");
+                CollectionAssert.AreEqual(new[] { "CNC", "WELD", "PAINT" }, load.Labels.ToArray());
+                CollectionAssert.AreEqual(new[] { 120m, 30m, 0m }, load.Series[0].Values.ToArray(), "the highest percentage of each work centre; a week without capacity has none and counts as zero");
+                Assert.IsTrue(load.Note.Contains(CeoText.Number(2) + " هفته‌ی مرکز کار ظرفیت ندارد ولی بار دارد"), load.Note);
+                Assert.IsTrue(load.Note.Contains("در شمارش هفته‌های اضافه‌بار آمده است"), "the KPI counts them: " + load.Note);
+                Assert.IsTrue(Kpi(overview, "overloadWeeks").Note.Contains("هفته‌ی بدون ظرفیت"), Kpi(overview, "overloadWeeks").Note);
+                Assert.AreEqual(1, modules.PartsCalls);
+                Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
+
+                // no such week: the note is the plain one
+                modules.ProductionLoad = new LoadReportDto { Rows = { new LoadRowDto { WorkCenterId = 1, Code = "CNC", Cells = { Cell(120m, true), Cell(40m, false) } } } };
+                CeoChartDto plain = ChartOf((await Overview(context, "CEO", Dashboard(), cache, log, modules).GetOverviewAsync(true, CancellationToken.None)).Data, "production", "workCenterLoad");
+                Assert.IsFalse(plain.Note.Contains("ظرفیت ندارد"), plain.Note);
+            }
+        }
+
+        [TestMethod]
+        public async Task The_Notes_Of_The_Ageing_And_The_Warehouse_Charts_Name_The_Difference_From_The_Figure_Beside_Them_Only_When_There_Is_One()
+        {
+            using ServiceProvider provider = InMemory();
+            await SeedFiguresAsync(provider, DateTime.Today);
+            using IServiceScope scope = provider.CreateScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var log = new RecordingLogger<CeoOverviewService>();
+            var modules = new Modules();           // the ageing totals 100
+            CeoDashboardDto dashboard = Dashboard();
+            dashboard.Finance.ReceivablesOpen = 100m;      // the same as the ageing
+            dashboard.StockValue = 1260m;                  // the same as the warehouses: 1000 + 250 + 10
+
+            CeoOverviewDto same = (await Overview(uow, "CEO", dashboard, new MemoryCache(new MemoryCacheOptions()), log, modules).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+            CeoChartDto ageingChart = ChartOf(same, "finance", "receivablesAgeing");
+            CollectionAssert.AreEqual(new[] { 10m, 20m, 30m, 40m }, ageingChart.Series[0].Values.ToArray());
+            Assert.IsFalse(ageingChart.Note.Contains("اختلاف"), "the ageing and the open receivables agree: " + ageingChart.Note);
+            CeoChartDto warehouseChart = ChartOf(same, "inventory", "stockValueByWarehouse");
+            CollectionAssert.AreEqual(new[] { 1000m, 250m, 10m }, warehouseChart.Series[0].Values.ToArray());
+            Assert.IsFalse(warehouseChart.Note.Contains("اختلاف"), "the warehouses add up to the stock value: " + warehouseChart.Note);
+
+            // an invoice or a receipt dated after today is not in the ageing of today and is in the open receivables; a negative balance or an item without a cost is not in the warehouses
+            dashboard.Finance.ReceivablesOpen = 175m;
+            dashboard.StockValue = 1500m;
+            CeoOverviewDto different = (await Overview(uow, "CEO", dashboard, new MemoryCache(new MemoryCacheOptions()), log, modules).GetOverviewAsync(true, CancellationToken.None)).Data;
+
+            ageingChart = ChartOf(different, "finance", "receivablesAgeing");
+            Assert.IsTrue(ageingChart.Note.Contains("اختلاف دارد") && ageingChart.Note.Contains(CeoText.ShortRial(75m)) && ageingChart.Note.Contains("بعد از امروز"), ageingChart.Note);
+            warehouseChart = ChartOf(different, "inventory", "stockValueByWarehouse");
+            Assert.IsTrue(warehouseChart.Note.Contains("اختلاف دارد") && warehouseChart.Note.Contains(CeoText.ShortRial(240m)) && warehouseChart.Note.Contains("موجودی منفی"), warehouseChart.Note);
+            Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
         }
     }
 }

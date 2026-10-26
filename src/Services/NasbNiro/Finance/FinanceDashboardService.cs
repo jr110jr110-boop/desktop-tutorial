@@ -168,10 +168,10 @@ namespace Services.NasbNiro.Finance
 
             void Alert(bool when, string level, string text, string link) { if (when) dto.Alerts.Add(new DashboardAlertDto { Level = level, Text = text, Link = link }); }
             foreach (GrossMarginRowDto m in dto.GrossMargins.Where(m => m.Revenue > 0 && m.MarginPercent < 0))
-                Alert(true, "danger", $"قرارداد {m.ContractCode}: هزینه از درآمد فاکتورشده بیشتر است", "/finance/dashboard");
-            Alert(dto.IssuedChequesDue7Amount > dto.CashAndBank, "danger", "چک‌های صادره ۷ روز آینده از نقد و بانک بیشتر است", "/finance/treasury/cash-position");
-            Alert(dto.ReceivablesOverdue > 0, "warning", $"مطالبات سررسیدگذشته {dto.ReceivablesOverdue:0} ریال", "/finance/receivables/ageing");
-            Alert(dto.FinanceSetupProblems > 0, "warning", $"{dto.FinanceSetupProblems} مورد تنظیمات مالی ناقص است", "/finance/gl/setup-check");
+                Alert(true, "danger", $"قرارداد {m.ContractCode}: هزینه از درآمد فاکتورشده بیشتر است", "/fn/dashboard");
+            Alert(dto.IssuedChequesDue7Amount > dto.CashAndBank, "danger", "چک‌های صادره ۷ روز آینده از نقد و بانک بیشتر است", "/fn/treasury/cash-position");
+            Alert(dto.ReceivablesOverdue > 0, "warning", $"مطالبات سررسیدگذشته {dto.ReceivablesOverdue:0} ریال", "/fn/receivables/ageing");
+            Alert(dto.FinanceSetupProblems > 0, "warning", $"{dto.FinanceSetupProblems} مورد تنظیمات مالی ناقص است", "/fn/setup-check");
             return dto;
         }
     }

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Entities.Model.NasbNiro.Procurement;
 using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Finance;
 using ViewModels.NasbNiro.CeoDtos;
 using ViewModels.NasbNiro.FinanceDtos;
 
@@ -19,20 +20,20 @@ namespace Services.NasbNiro.Ceo
 
         private async Task<CeoSectionDto> ProcurementAsync(CeoContext ctx, CancellationToken ct)
         {
-            CeoDashboardDto b = await BaseAsync(ctx, ct);
+            CeoDashboardDto b = (await PartsAsync(ctx, ct)).Dashboard;
 
             var section = new CeoSectionDto();
-            section.Kpis.Add(Trended(ctx, Kpi(CeoKeys.OpenPurchaseOrdersAmount, "ارزش سفارش‌های خرید باز", b.OpenPurchaseOrdersAmount, CeoUnit.Rial, null, CeoLinks.ProcurementOrders, CeoDrillRef.PrOrdersOpen,
+            section.Kpis.Add(Trended(ctx, Kpi(ctx, CeoKeys.OpenPurchaseOrdersAmount, b.OpenPurchaseOrdersAmount, null,
                 CeoText.Number(b.OpenPurchaseOrders) + " سفارش تأییدشده، صادرشده یا نیمه‌تحویل"), higherIsBetter: null));
-            section.Kpis.Add(Kpi("lateOrderLines", "ردیف‌های سفارش خرید دارای تأخیر", b.LateOrderLines, CeoUnit.Count, CeoRules.ByAny(b.LateOrderLines, 10), CeoLinks.ProcurementOrders, CeoDrillRef.PrLateLines,
+            section.Kpis.Add(Kpi(ctx, "lateOrderLines", b.LateOrderLines, CeoRules.ByAny(b.LateOrderLines, 10),
                 "سفارش‌های صادرشده که تاریخ تحویل ردیف آن‌ها گذشته و کامل تحویل نشده است."));
-            section.Kpis.Add(Kpi("purchaseRequestsWaiting", "درخواست‌های خرید منتظر تأیید", b.PurchaseRequestsWaitingApproval, CeoUnit.Count, CeoRules.ByCount(b.PurchaseRequestsWaitingApproval, 5, 15), CeoLinks.ProcurementRequests, CeoDrillRef.PrRequestsOpen,
+            section.Kpis.Add(Kpi(ctx, "purchaseRequestsWaiting", b.PurchaseRequestsWaitingApproval, CeoRules.ByCount(b.PurchaseRequestsWaitingApproval, 5, 15),
                 "همه‌ی درخواست‌های باز (ارسال‌شده یا تأییدشده): " + CeoText.Number(b.OpenPurchaseRequests)));
-            section.Kpis.Add(Kpi("invoicesWaiting", "فاکتورهای تأمین‌کننده منتظر تأیید", b.InvoicesWaitingApproval, CeoUnit.Count, CeoRules.ByCount(b.InvoicesWaitingApproval, 5, 15), CeoLinks.ProcurementInvoices, CeoDrillRef.PrInvoicesWaiting,
+            section.Kpis.Add(Kpi(ctx, "invoicesWaiting", b.InvoicesWaitingApproval, CeoRules.ByCount(b.InvoicesWaitingApproval, 5, 15),
                 "دریافت‌شده و هنوز فاکتورنشده: " + CeoText.ShortRial(b.ReceivedNotInvoiced)));
-            section.Kpis.Add(Kpi("paymentsWaiting", "درخواست‌های پرداخت منتظر تأیید یا پرداخت", b.PaymentsWaitingApproval, CeoUnit.Count, CeoRules.ByCount(b.PaymentsWaitingApproval, 5, 15), CeoLinks.ProcurementPayments, CeoDrillRef.PrPaymentsWaiting,
+            section.Kpis.Add(Kpi(ctx, "paymentsWaiting", b.PaymentsWaitingApproval, CeoRules.ByCount(b.PaymentsWaitingApproval, 5, 15),
                 "مبلغ خالص: " + CeoText.ShortRial(b.PaymentsWaitingAmount)));
-            section.Kpis.Add(Kpi("blockedSuppliers", "تأمین‌کنندگان مسدود", b.BlockedSuppliers, CeoUnit.Count, CeoRules.WarnIfAny(b.BlockedSuppliers), CeoLinks.ProcurementSuppliers, CeoDrillRef.PrBlockedSuppliers,
+            section.Kpis.Add(Kpi(ctx, "blockedSuppliers", b.BlockedSuppliers, CeoRules.WarnIfAny(b.BlockedSuppliers),
                 "ارزیابی دوره‌ای سررسیدشده: " + CeoText.Number(b.SupplierEvaluationsDue)));
 
             // chart 1: the biggest suppliers by the value of the purchase orders of the last twelve months (not drafts, not cancelled)
@@ -45,7 +46,7 @@ namespace Services.NasbNiro.Ceo
                 "ارزش سفارش‌های خرید تأییدشده تا بسته‌شده؛ حداکثر " + CeoText.Number(SupplierChartCount) + " تأمین‌کننده.",
                 Series("ارزش سفارش‌ها", spend.Select(s => s.Amount))));
 
-            // chart 2: the value ordered by order month against the net value paid by payment month
+            // chart 2: the value ordered by order month against the net value paid by payment month. The drill behind it lists the payments still waiting and has no month filter, so it carries no period.
             var orders = await _uow.Set<PurchaseOrder>().AsNoTracking()
                 .Where(o => !o.Deleted && o.OrderDate >= ctx.From && o.OrderDate < ctx.End && o.Status != PurchaseOrderStatus.Draft && o.Status != PurchaseOrderStatus.Cancelled)
                 .Select(o => new { o.OrderDate, o.TotalAmount }).ToListAsync(ct);

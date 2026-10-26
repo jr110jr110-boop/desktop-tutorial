@@ -11,8 +11,21 @@ using static Services.NasbNiro.Finance.LedgerMath;
 
 namespace Services.NasbNiro.Finance
 {
+    /// <summary>The ageing of what the company owes its suppliers, from the general ledger (the payables note of the financial statements).</summary>
+    public interface IPayableAgeingService
+    {
+        /// <summary>
+        /// What is owed to each supplier on a day, in the buckets of the notes schedule: up to 30 days, 31 to 60, 61 to 90 and over 90 days from the date of the document.
+        /// The books of the main entity up to the day are read (drafts left out); payments, returns and notes are matched against the oldest documents first (FIFO).
+        /// A supplier advance is kept in the advance account, not in the payable account, so it does not reduce what is owed until a payment request recovers it.
+        /// Suppliers owed nothing are not listed; the biggest debt comes first. Empty when there is no payable account or no fiscal year holds the day.
+        /// There is no role check here: the caller (a finance report or the CEO overview) decides who may see the figures.
+        /// </summary>
+        Task<List<FnNoteAgeingDto>> PayableAgeingAsync(DateTime asOf, CancellationToken ct);
+    }
+
     // Finance release F3b: comparative statements (this year against the previous one) and the notes schedules that go with the statements.
-    public partial class GlService
+    public partial class GlService : IPayableAgeingService
     {
         private async Task<(FnFiscalYear Current, FnFiscalYear Prior, string Error)> YearPairAsync(int? fiscalYearId, CancellationToken ct)
         {
@@ -73,7 +86,7 @@ namespace Services.NasbNiro.Finance
 
         // ------------------------------------------------------------------------------------------ notes schedules
 
-        private async Task<List<FnNoteAgeingDto>> PayableAgeingAsync(DateTime asOf, CancellationToken ct)
+        public async Task<List<FnNoteAgeingDto>> PayableAgeingAsync(DateTime asOf, CancellationToken ct)
         {
             FnAccount payable = await RoleAccountAsync(AccountRoles.AccountsPayable, "30101", ct);
             var list = new List<FnNoteAgeingDto>();

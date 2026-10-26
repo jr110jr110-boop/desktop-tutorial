@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Ceo;
+using Services.NasbNiro.ProjectControl;
 using ViewModels.NasbNiro.CeoDtos;
+using ViewModels.NasbNiro.ProjectControlDtos;
 
 namespace MsTests
 {
@@ -82,6 +84,19 @@ namespace MsTests
         }
 
         [TestMethod]
+        public void Issued_Cheques_Are_Ok_When_Nothing_Falls_Due_Whatever_The_Cash_Is()
+        {
+            // review item 10: a negative cash with no cheque due is judged by the cash figure, not by the cheques figure
+            Assert.AreEqual(CeoStatus.Ok, CeoRules.IssuedCheques(0m, 0m, -5m), "nothing is due in 7 or 30 days");
+            Assert.AreEqual(CeoStatus.Ok, CeoRules.IssuedCheques(0m, 0m, 0m));
+            Assert.AreEqual(CeoStatus.Ok, CeoRules.IssuedCheques(0m, 0m, 1_000m));
+            Assert.AreEqual(CeoStatus.Warn, CeoRules.IssuedCheques(0m, 10m, -5m), "something is due within thirty days and there is no cash");
+            Assert.AreEqual(CeoStatus.Danger, CeoRules.IssuedCheques(10m, 10m, -5m), "something is due within seven days and there is no cash");
+            Assert.AreEqual(CeoStatus.Ok, CeoRules.IssuedCheques(500m, 500m, 500m), "exactly the cash is covered");
+            Assert.AreEqual(CeoStatus.Danger, CeoRules.Cash(-5m), "the negative cash itself is still a danger on its own figure");
+        }
+
+        [TestMethod]
         public void Projects_Light_Follows_The_Worst_Project()
         {
             Assert.AreEqual(CeoStatus.Danger, CeoRules.Projects(1, 3));
@@ -123,7 +138,7 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void Apply_Sets_Delta_Against_The_Last_Snapshot_Of_The_Previous_Persian_Month_Only()
+        public void Apply_Ends_The_Trend_With_The_Live_Value_And_Sets_Delta_Against_The_Previous_Persian_Month_Only()
         {
             // today is in Aban 1405; Mehr 1405 starts on 2026-09-23
             var points = new List<CeoTrendPoint>
@@ -133,27 +148,120 @@ namespace MsTests
             };
             var kpi = new CeoKpiDto { Key = "openNcrs", Unit = CeoUnit.Count, Value = 150m };
             CeoTrends.Apply(kpi, points, Today, higherIsBetter: false);
-            CollectionAssert.AreEqual(new decimal[] { 100m, 120m }, kpi.Trend);
-            CollectionAssert.AreEqual(new[] { "شهریور ۱۴۰۵", "مهر ۱۴۰۵" }, kpi.TrendLabels);
+            CollectionAssert.AreEqual(new decimal[] { 100m, 120m, 150m }, kpi.Trend, "the live value is the point of the current month");
+            CollectionAssert.AreEqual(new[] { "شهریور ۱۴۰۵", "مهر ۱۴۰۵", "آبان ۱۴۰۵" }, kpi.TrendLabels);
             Assert.AreEqual(30m, kpi.Delta);
             Assert.AreEqual("۳۰ مورد بیشتر از ماه قبل", kpi.DeltaText);
             Assert.AreEqual(false, kpi.DeltaGood, "more open NCRs is not good");
 
-            // the previous month has no snapshot: no delta, the points still show
+            // the previous month has no point: no delta, the points still show (the older month and the live value)
             var older = new List<CeoTrendPoint> { points[0] };
             var kpi2 = new CeoKpiDto { Key = "cash", Unit = CeoUnit.Rial, Value = 5m };
             CeoTrends.Apply(kpi2, older, Today, higherIsBetter: true);
             Assert.IsNull(kpi2.Delta);
             Assert.IsNull(kpi2.DeltaText);
             Assert.IsNull(kpi2.DeltaGood);
-            Assert.AreEqual(1, kpi2.Trend.Count);
+            CollectionAssert.AreEqual(new decimal[] { 100m, 5m }, kpi2.Trend);
 
-            // no snapshot at all: no trend
+            // no snapshot at all (go-live): the sparkline still shows one point, the live value; there is nothing to compare with
             var kpi3 = new CeoKpiDto { Key = "cash", Unit = CeoUnit.Rial, Value = 5m };
             CeoTrends.Apply(kpi3, new List<CeoTrendPoint>(), Today, true);
-            Assert.IsNull(kpi3.Trend);
-            Assert.IsNull(kpi3.TrendLabels);
+            CollectionAssert.AreEqual(new decimal[] { 5m }, kpi3.Trend);
+            CollectionAssert.AreEqual(new[] { "آبان ۱۴۰۵" }, kpi3.TrendLabels);
             Assert.IsNull(kpi3.Delta);
+            Assert.IsNull(kpi3.DeltaText);
+            Assert.IsNull(kpi3.DeltaGood);
+
+            // a figure that has no value now (nothing to show) and no history has no trend either
+            var kpi4 = new CeoKpiDto { Key = "cash", Unit = CeoUnit.Rial, Value = null };
+            CeoTrends.Apply(kpi4, new List<CeoTrendPoint>(), Today, true);
+            Assert.IsNull(kpi4.Trend);
+            Assert.IsNull(kpi4.TrendLabels);
+            Assert.IsNull(kpi4.Delta);
+        }
+
+        [TestMethod]
+        public void A_Snapshot_Of_The_Current_Month_Never_Shows_Twice_The_Live_Value_Replaces_It()
+        {
+            var points = new List<CeoTrendPoint>
+            {
+                new CeoTrendPoint { Month = new DateTime(2026, 9, 23), Date = new DateTime(2026, 10, 22), Value = 120m },
+                new CeoTrendPoint { Month = new DateTime(2026, 10, 23), Date = new DateTime(2026, 10, 24), Value = 999m },   // "snapshot now" of this month
+            };
+            var kpi = new CeoKpiDto { Key = "openNcrs", Unit = CeoUnit.Count, Value = 150m };
+
+            CeoTrends.Apply(kpi, points, Today, higherIsBetter: false);
+
+            CollectionAssert.AreEqual(new decimal[] { 120m, 150m }, kpi.Trend);
+            Assert.AreEqual(30m, kpi.Delta, "the change is against the end of last month, not against the snapshot of this one");
+        }
+
+        [TestMethod]
+        public void The_Change_Is_Rounded_To_The_Display_Precision_Of_The_Unit_Before_It_Is_Judged()
+        {
+            var previous = new List<CeoTrendPoint> { new CeoTrendPoint { Month = new DateTime(2026, 9, 23), Date = new DateTime(2026, 10, 22), Value = 1000m } };
+
+            // rials are whole rials: 0.4 of a rial is no change
+            var rial = new CeoKpiDto { Key = "cash", Unit = CeoUnit.Rial, Value = 1000.4m };
+            CeoTrends.Apply(rial, previous, Today, higherIsBetter: true);
+            Assert.AreEqual(0m, rial.Delta);
+            Assert.AreEqual("بدون تغییر نسبت به ماه قبل", rial.DeltaText);
+            Assert.IsNull(rial.DeltaGood, "a change that rounds to nothing has no opinion");
+
+            var rialMore = new CeoKpiDto { Key = "cash", Unit = CeoUnit.Rial, Value = 1000.5m };
+            CeoTrends.Apply(rialMore, previous, Today, higherIsBetter: true);
+            Assert.AreEqual(1m, rialMore.Delta, "half away from zero: one rial");
+            Assert.AreEqual(true, rialMore.DeltaGood);
+
+            var rialLess = new CeoKpiDto { Key = "cash", Unit = CeoUnit.Rial, Value = 999.5m };
+            CeoTrends.Apply(rialLess, previous, Today, higherIsBetter: true);
+            Assert.AreEqual(-1m, rialLess.Delta);
+            Assert.AreEqual(false, rialLess.DeltaGood);
+
+            // percentages are tenths
+            var percentSame = new CeoKpiDto { Key = "oee", Unit = CeoUnit.Percent, Value = 1000.04m };
+            CeoTrends.Apply(percentSame, previous, Today, higherIsBetter: true);
+            Assert.AreEqual(0m, percentSame.Delta);
+            Assert.AreEqual("بدون تغییر نسبت به ماه قبل", percentSame.DeltaText);
+            Assert.IsNull(percentSame.DeltaGood);
+
+            var percentMore = new CeoKpiDto { Key = "oee", Unit = CeoUnit.Percent, Value = 1000.06m };
+            CeoTrends.Apply(percentMore, previous, Today, higherIsBetter: true);
+            Assert.AreEqual(0.1m, percentMore.Delta);
+            Assert.AreEqual("۰٫۱٪ بیشتر از ماه قبل", percentMore.DeltaText);
+
+            // days are whole, counts keep two decimals
+            var days = new CeoKpiDto { Key = "lateDays", Unit = CeoUnit.Days, Value = 1000.4m };
+            CeoTrends.Apply(days, previous, Today, higherIsBetter: false);
+            Assert.AreEqual(0m, days.Delta);
+            Assert.IsNull(days.DeltaGood);
+
+            var count = new CeoKpiDto { Key = "openNcrs", Unit = CeoUnit.Count, Value = 1000.004m };
+            CeoTrends.Apply(count, previous, Today, higherIsBetter: false);
+            Assert.AreEqual(0m, count.Delta);
+            Assert.IsNull(count.DeltaGood);
+
+            CollectionAssert.AreEqual(new[] { 0, 0, 1, 1, 2 }, new[] { CeoTrends.Precision(CeoUnit.Rial), CeoTrends.Precision(CeoUnit.Days), CeoTrends.Precision(CeoUnit.Percent), CeoTrends.Precision(CeoUnit.Hours), CeoTrends.Precision(CeoUnit.Count) });
+        }
+
+        // ------------------------------------------------------------------ red and amber projects: one definition
+
+        private static PcPortfolioRowDto Project(string spi, string cpi) => new PcPortfolioRowDto { SpiStatus = spi, CpiStatus = cpi };
+
+        [TestMethod]
+        public void A_Project_Is_Red_When_Any_Index_Is_Red_Amber_When_None_Is_Red_And_Any_Is_Amber_And_Never_Both()
+        {
+            PcPortfolioRowDto[] rows =
+            {
+                Project("red", "red"), Project("red", "amber"), Project("amber", "red"), Project("red", "green"), Project("green", "red"), Project(null, "red"),
+                Project("amber", "amber"), Project("amber", "green"), Project("green", "amber"), Project("amber", null),
+                Project("green", "green"), Project(null, null),
+            };
+
+            Assert.AreEqual(6, rows.Count(PcReportService.IsRed));
+            Assert.AreEqual(4, rows.Count(PcReportService.IsAmber), "a red project that also has an amber index is not counted twice");
+            Assert.AreEqual(0, rows.Count(r => PcReportService.IsRed(r) && PcReportService.IsAmber(r)), "no project has two colours");
+            Assert.AreEqual(2, rows.Length - rows.Count(PcReportService.IsRed) - rows.Count(PcReportService.IsAmber), "the rest are green");
         }
 
         // ------------------------------------------------------------------ Persian months

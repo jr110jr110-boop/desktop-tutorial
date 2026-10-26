@@ -14,6 +14,16 @@ namespace Services.NasbNiro.Ceo
         public const string Readers = "CEO,PMO";
     }
 
+    /// <summary>Configuration keys of the CEO dashboard.</summary>
+    public static class CeoConfigKeys
+    {
+        /// <summary>The nightly snapshot job (and its catch-up at start); "false" switches it off.</summary>
+        public const string Jobs = "Ceo:Jobs";
+
+        /// <summary>Seconds the text-to-speech call of a spoken summary may take before the answer is returned as text only (degraded); default 20.</summary>
+        public const string SpeechTimeoutSeconds = "Ceo:SpeechTimeoutSeconds";
+    }
+
     /// <summary>The fixed keys of the overview (the front and the tests rely on this order).</summary>
     public static class CeoKeys
     {
@@ -30,6 +40,9 @@ namespace Services.NasbNiro.Ceo
         public const string ItemsBelowMinimum = "itemsBelowMinimum";
         public const string OpenPurchaseOrdersAmount = "openPurchaseOrdersAmount";
         public const string SalesPipelineValue = "salesPipelineValue";
+
+        /// <summary>The customer satisfaction KPI of the service section (its spoken form has one decimal).</summary>
+        public const string ServiceSurveyScore = "serviceSurveyScore";
 
         public const string Finance = "finance";
         public const string Sales = "sales";
@@ -66,6 +79,7 @@ namespace Services.NasbNiro.Ceo
         public const string ReceivablesAgeing = "/fn/receivables/ageing";
         public const string ReceivableInvoices = "/fn/receivables/invoices";
         public const string Cheques = "/fn/treasury/cheques";
+        public const string TreasuryPayments = "/fn/treasury/payments";
         public const string IncomeStatement = "/fn/reports/income-statement";
         public const string Vouchers = "/fn/vouchers";
 
@@ -224,8 +238,14 @@ namespace Services.NasbNiro.Ceo
         public const string NotAllowed = "شما مجوز این کار را ندارید.";
         public const string UnknownSection = "بخش داشبورد پیدا نشد.";
 
-        /// <summary>The "what" of a spoken summary is not headline, section or alerts.</summary>
-        public const string UnknownSpeech = "نوع خلاصه‌ی صوتی معتبر نیست؛ یکی از headline، section یا alerts را بفرستید.";
+        /// <summary>The "what" of a spoken summary is not headline, section, alerts or brief.</summary>
+        public const string UnknownSpeech = "نوع خلاصه‌ی صوتی معتبر نیست؛ یکی از headline، section، alerts یا brief را بفرستید.";
+
+        /// <summary>The note of a section whose own figures could not be computed (the other sections are fine).</summary>
+        public const string SectionUnavailable = "اطلاعات این بخش اکنون در دسترس نیست؛ بخش‌های دیگر بدون تغییر نمایش داده می‌شوند.";
+
+        /// <summary>The note of every section when the CEO dashboard they are drawn from could not be computed.</summary>
+        public const string DashboardUnavailable = "داشبورد مدیرعامل اکنون محاسبه نشد و اطلاعات این بخش در دسترس نیست؛ چند ثانیه‌ی دیگر دوباره امتحان کنید.";
 
         /// <summary>A spoken summary of a section needs the section key.</summary>
         public const string SpeechNeedsSection = "برای خلاصه‌ی صوتی یک بخش، کلید بخش را بفرستید.";
@@ -346,6 +366,9 @@ namespace Services.NasbNiro.Ceo
 
         /// <summary>The Shamsi date as the other modules print it ("1405/08/03").</summary>
         public static string Date(DateTime day) => string.Format(CultureInfo.InvariantCulture, "{0:0000}/{1:00}/{2:00}", Calendar.GetYear(day), Calendar.GetMonth(day), Calendar.GetDayOfMonth(day));
+
+        /// <summary>The ISO date of the JSON and of the drill parameters ("2026-10-25").</summary>
+        public static string Iso(DateTime day) => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -399,11 +422,11 @@ namespace Services.NasbNiro.Ceo
             return overdue > cash ? CeoStatus.Danger : CeoStatus.Warn;
         }
 
-        /// <summary>Issued cheques: danger when the next seven days exceed the cash, warn when the next thirty days do.</summary>
+        /// <summary>Issued cheques: danger when the next seven days exceed the cash, warn when the next thirty days do; ok when nothing falls due, whatever the cash is (a negative cash is judged by <see cref="Cash"/>).</summary>
         public static string IssuedCheques(decimal due7, decimal due30, decimal cash)
         {
-            if (due7 > cash) return CeoStatus.Danger;
-            if (due30 > cash) return CeoStatus.Warn;
+            if (due7 > 0m && due7 > cash) return CeoStatus.Danger;
+            if (due30 > 0m && due30 > cash) return CeoStatus.Warn;
             return CeoStatus.Ok;
         }
 

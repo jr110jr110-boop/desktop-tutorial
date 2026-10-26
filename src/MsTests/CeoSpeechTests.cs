@@ -12,13 +12,16 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Ai;
 using Services.NasbNiro.Ceo;
 using Services.NasbNiro.Inventory;
+using ViewModels.NasbNiro.AiDtos;
 using ViewModels.NasbNiro.CeoDtos;
+using ViewModels.NasbNiro.Pagination;
 
 namespace MsTests
 {
     /// <summary>
     /// The spoken summaries of the CEO dashboard (voice mode, contract 7.2): the sentence lists are fixed templates filled with the figures, their numbers are turned into words
     /// by the speech normaliser of the AI module, and the audio comes from the text-to-speech endpoint when one answers. No language model is involved.
+    /// Rial amounts are said with three significant digits; the daily report of the CEO (what = brief) is read as the brief seat wrote it, for the CEO only.
     /// </summary>
     [TestClass]
     public class CeoSpeechTests
@@ -61,6 +64,24 @@ namespace MsTests
             }
         }
 
+        /// <summary>The notes of the AI module: only the latest brief is read by the speech service.</summary>
+        private sealed class FakeNotes : IAiNoteService
+        {
+            public ResponseDto<AiBriefDto> Brief { get; set; }
+            public int BriefReads { get; private set; }
+
+            public Task<ResponseDto<AiBriefDto>> LatestBriefAsync(CancellationToken ct)
+            {
+                BriefReads++;
+                return Task.FromResult(Brief ?? ResponseDtoHelper.NotFound<AiBriefDto>("هنوز گزارش روزانه‌ای نوشته نشده است"));
+            }
+
+            public Task<ResponseDto<PagedList<AiNoteDto>>> GetNotesAsync(AiNoteQuery query, CancellationToken ct) => throw new NotSupportedException();
+            public Task<ResponseDto<AiNoteDto>> GetNoteAsync(int id, CancellationToken ct) => throw new NotSupportedException();
+            public Task<ResponseDto<AiNoteDto>> DecideAsync(AiDecideNoteDto dto, CancellationToken ct) => throw new NotSupportedException();
+            public Task<ResponseDto<byte[]>> LatestBriefAudioAsync(CancellationToken ct) => throw new NotSupportedException();
+        }
+
         private sealed class FakeTts : ITextToSpeech
         {
             public Func<string, CancellationToken, Task<TtsResult>> Handler { get; set; } = (text, ct) => Task.FromResult(new TtsResult { Ok = true, Audio = new byte[] { 1, 2, 3 }, Model = "fake" });
@@ -97,7 +118,7 @@ namespace MsTests
             overview.Headline.Add(Kpi("activeProjects", "پروژه‌های فعال", 9m, CeoUnit.Count));
             overview.Headline.Add(Kpi("lateProductionOrders", "دستورهای تولید دارای تأخیر", 7m, CeoUnit.Count, CeoStatus.Danger, delta: -3m));
             overview.Headline.Add(Kpi("openNcrs", "عدم انطباق‌های باز", 4m, CeoUnit.Count));
-            overview.Headline.Add(Kpi("serviceSlaBreaches", "درخواست‌های خارج از SLA", 2m, CeoUnit.Count, CeoStatus.Warn));
+            overview.Headline.Add(Kpi("serviceSlaBreaches", "درخواست‌های خارج از مهلت (SLA)", 2m, CeoUnit.Count, CeoStatus.Warn));
             overview.Pulse.AddRange(pulse);
             return overview;
         }
@@ -109,8 +130,10 @@ namespace MsTests
             return section;
         }
 
-        private static CeoSpeechService Service(FakeOverview overview, FakeTts tts, string roles = "CEO", IConfiguration configuration = null)
-            => new CeoSpeechService(new FakeUser(roles), overview, Words, tts, configuration, null);
+        private static CeoSpeechService Service(FakeOverview overview, FakeTts tts, string roles = "CEO", IConfiguration configuration = null, FakeNotes notes = null)
+            => new CeoSpeechService(new FakeUser(roles), overview, notes ?? new FakeNotes(), Words, tts, configuration, null);
+
+        private static IConfiguration Config(string key, string value) => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string> { [key] = value }).Build();
 
         private static readonly Regex AnyDigit = new Regex(@"[0-9٠-٩۰-۹]");
 
@@ -144,6 +167,39 @@ namespace MsTests
         }
 
         [TestMethod]
+        public void A_Rial_Amount_And_Its_Change_Are_Said_With_Three_Significant_Digits()
+        {
+            // review item 14: nobody listens to eleven digits; the screen keeps every one of them
+            Assert.AreEqual("نقد و بانک چهل و هشت میلیارد و دویست میلیون ریال",
+                Spoken(CeoSpeechScript.Kpi(Kpi("cash", "نقد و بانک", 48_234_567_890m, CeoUnit.Rial))), "۴۸٬۲۳۴٬۵۶۷٬۸۹۰ is said as forty-eight billion two hundred million");
+            Assert.AreEqual("نقد و بانک چهل و هشت میلیارد و دویست میلیون ریال، دو میلیارد و نهصد و ده میلیون بیشتر از ماه پیش",
+                Spoken(CeoSpeechScript.Kpi(Kpi("cash", "نقد و بانک", 48_234_567_890m, CeoUnit.Rial, delta: 2_912_345_678m))), "the change is rounded like the value");
+            Assert.AreEqual("نقد و بانک چهل و هشت میلیارد و دویست میلیون ریال، دو میلیارد و نهصد میلیون بیشتر از ماه پیش",
+                Spoken(CeoSpeechScript.Kpi(Kpi("cash", "نقد و بانک", 48_200_000_000m, CeoUnit.Rial, delta: 2_900_000_000m))), "an amount that is round already is said as it is");
+            Assert.AreEqual("بدهی نهصد و پنجاه ریال", Spoken(CeoSpeechScript.Kpi(Kpi("p", "بدهی", 950m, CeoUnit.Rial))), "three digits or fewer are said whole");
+
+            Assert.AreEqual(48_200_000_000m, CeoSpeechScript.SpokenRial(48_234_567_890m));
+            Assert.AreEqual(48_300_000_000m, CeoSpeechScript.SpokenRial(48_250_000_000m), "half away from zero");
+            Assert.AreEqual(-1_230_000m, CeoSpeechScript.SpokenRial(-1_234_567m), "a negative amount keeps its sign");
+            Assert.AreEqual(1_000_000m, CeoSpeechScript.SpokenRial(999_500m), "the rounding may carry into the next digit");
+            Assert.AreEqual(1_230m, CeoSpeechScript.SpokenRial(1_234m));
+            Assert.AreEqual(950m, CeoSpeechScript.SpokenRial(950m));
+            Assert.AreEqual(0m, CeoSpeechScript.SpokenRial(0m));
+            Assert.AreEqual(0.5m, CeoSpeechScript.SpokenRial(0.5m), "less than a rial keeps its digits");
+            Assert.AreEqual(48_000_000_000m, CeoSpeechScript.SpokenRial(48_234_567_890m, 2), "the number of digits is a parameter");
+        }
+
+        [TestMethod]
+        public void The_Survey_Score_Is_Said_With_One_Decimal()
+        {
+            CeoKpiDto score = Kpi(CeoKeys.ServiceSurveyScore, "میانگین رضایت مشتریان", 4.25m, CeoUnit.Count, valueText: "۴٫۲۵ از ۵");
+
+            Assert.AreEqual("میانگین رضایت مشتریان چهار ممیز سه از پنج", Spoken(CeoSpeechScript.Kpi(score)), "the screen shows 4.25, the voice says 4.3");
+            Assert.AreEqual("میانگین رضایت مشتریان چهار از پنج", Spoken(CeoSpeechScript.Kpi(Kpi(CeoKeys.ServiceSurveyScore, "میانگین رضایت مشتریان", 4m, CeoUnit.Count, valueText: "۴ از ۵"))));
+            Assert.AreEqual("میانگین رضایت مشتریان در دسترس نیست", Spoken(CeoSpeechScript.Kpi(Kpi(CeoKeys.ServiceSurveyScore, "میانگین رضایت مشتریان", null, CeoUnit.Count))), "no survey, no score");
+        }
+
+        [TestMethod]
         public void A_Figure_In_Danger_Or_Needing_Attention_Says_So_A_Hidden_Or_Missing_One_Does_Not_Show_A_Number()
         {
             Assert.AreEqual("مطالبات باز سی میلیارد ریال؛ در وضعیت خطر", Spoken(CeoSpeechScript.Kpi(Kpi("r", "مطالبات باز", 30_000_000_000m, CeoUnit.Rial, CeoStatus.Danger))));
@@ -160,6 +216,8 @@ namespace MsTests
             Assert.AreEqual("بهره‌وری کلی تجهیزات", CeoSpeechScript.SpokenTitle("بهره‌وری کلی تجهیزات (OEE)"));
             Assert.AreEqual("نقاط توقف منتظر رهاسازی", CeoSpeechScript.SpokenTitle("نقاط توقف (H) منتظر رهاسازی"));
             Assert.AreEqual("درخواست‌های خارج از SLA", CeoSpeechScript.SpokenTitle("درخواست‌های خارج از SLA"), "a Latin word outside brackets is kept");
+            Assert.AreEqual("درخواست‌های خارج از مهلت", CeoSpeechScript.SpokenTitle("درخواست‌های خارج از مهلت (SLA)"), "the title of the SLA figure is said without its bracket");
+            Assert.AreEqual("درخواست‌های خارج از مهلت دو مورد؛ نیازمند توجه", Spoken(CeoSpeechScript.Kpi(Kpi("serviceSlaBreaches", "درخواست‌های خارج از مهلت (SLA)", 2m, CeoUnit.Count, CeoStatus.Warn))));
             Assert.AreEqual("جریمه (تأخیر) دو", CeoSpeechScript.SpokenTitle("جریمه (تأخیر) دو"), "Persian words in brackets are kept");
             Assert.AreEqual(string.Empty, CeoSpeechScript.SpokenTitle(null));
             Assert.AreEqual("سفارش‌های در جریان صد میلیون ریال", Spoken(CeoSpeechScript.Kpi(Kpi("b", "سفارش‌های در جریان (backlog)", 100_000_000m, CeoUnit.Rial))));
@@ -183,7 +241,7 @@ namespace MsTests
                 "پروژه‌های فعال نه مورد",
                 "دستورهای تولید دارای تأخیر هفت مورد، سه مورد کمتر از ماه پیش؛ در وضعیت خطر",
                 "عدم انطباق‌های باز چهار مورد",
-                "درخواست‌های خارج از SLA دو مورد؛ نیازمند توجه",
+                "درخواست‌های خارج از مهلت دو مورد؛ نیازمند توجه",
                 "بخش‌های در وضعیت خطر: مالی و تولید",
                 "بخش‌های نیازمند توجه: کیفیت، خدمات پس از فروش و دفتر",
             }, sentences);
@@ -345,17 +403,46 @@ namespace MsTests
         {
             var overview = new FakeOverview { Overview = SampleOverview() };
             var tts = new FakeTts { Handler = async (text, ct) => { await Task.Delay(Timeout.Infinite, ct); return null; } };
-            IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string> { [AiConfigKeys.VoiceTimeoutSeconds] = "1" }).Build();
+            // review item 15: the CEO speech has its own budget, Ceo:SpeechTimeoutSeconds; the (long) voice budget of the AI module does not apply to it
+            IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+            {
+                [CeoConfigKeys.SpeechTimeoutSeconds] = "1",
+                [AiConfigKeys.VoiceTimeoutSeconds] = "600",
+            }).Build();
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
             ResponseDto<CeoSpeechDto> answer = await Service(overview, tts, configuration: configuration).GetAsync("headline", null, CancellationToken.None);
             watch.Stop();
 
             Assert.IsTrue(answer.Success, answer.Message);
-            Assert.IsTrue(answer.Data.Degraded);
+            Assert.IsTrue(answer.Data.Degraded, "on a timeout the text is returned with degraded = true");
             Assert.IsNull(answer.Data.AudioBase64);
             Assert.IsFalse(string.IsNullOrWhiteSpace(answer.Data.Text));
             Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(30), "the budget of one second ended the wait (" + watch.Elapsed + ")");
+        }
+
+        [TestMethod]
+        public void The_Speech_Budget_Is_Twenty_Seconds_Unless_Configured_And_The_Key_Is_Its_Own()
+        {
+            Assert.AreEqual("Ceo:SpeechTimeoutSeconds", CeoConfigKeys.SpeechTimeoutSeconds);
+            Assert.AreEqual(20, CeoSpeechService.DefaultBudgetSeconds);
+            Assert.AreNotEqual(AiConfigKeys.VoiceTimeoutSeconds, CeoConfigKeys.SpeechTimeoutSeconds, "the two modules do not share a budget");
+        }
+
+        [TestMethod]
+        public async Task A_Speech_Endpoint_That_Answers_Within_The_Budget_Gives_The_Audio_Even_When_The_Budget_Is_Not_A_Number()
+        {
+            foreach (string value in new[] { null, "", "abc", "0", "-5" })
+            {
+                var overview = new FakeOverview { Overview = SampleOverview() };
+                var tts = new FakeTts();
+
+                ResponseDto<CeoSpeechDto> answer = await Service(overview, tts, configuration: Config(CeoConfigKeys.SpeechTimeoutSeconds, value)).GetAsync("headline", null, CancellationToken.None);
+
+                Assert.IsTrue(answer.Success, value);
+                Assert.IsFalse(answer.Data.Degraded, "a wrong setting falls back to the default of twenty seconds (" + value + ")");
+                Assert.AreEqual(Convert.ToBase64String(new byte[] { 1, 2, 3 }), answer.Data.AudioBase64);
+            }
         }
 
         [TestMethod]
@@ -374,7 +461,7 @@ namespace MsTests
         }
 
         [TestMethod]
-        public async Task A_Section_Is_Spoken_From_A_Fresh_Read_Of_That_Section_Only()
+        public async Task A_Section_Is_Spoken_From_That_Section_Only()
         {
             var overview = new FakeOverview { Overview = SampleOverview() };
             overview.Sections["quality"] = SampleSection("quality", "کیفیت", Kpi("openNcrs", "عدم انطباق‌های باز", 16m, CeoUnit.Count, CeoStatus.Danger));
@@ -384,7 +471,7 @@ namespace MsTests
 
             Assert.IsTrue(answer.Success, answer.Message);
             Assert.AreEqual("بخش کیفیت. یک شاخص در وضعیت خطر است. عدم انطباق‌های باز شانزده مورد؛ در وضعیت خطر.", answer.Data.Text);
-            CollectionAssert.AreEqual(new[] { "section:Quality" }, overview.Calls, "the section is read on its own, the overview is not computed");
+            CollectionAssert.AreEqual(new[] { "section:Quality" }, overview.Calls, "the section is read on its own (the overview service takes it from its cache when there is one), the whole overview is not asked for");
             Assert.IsFalse(answer.Data.Degraded);
             Assert.AreEqual(Convert.ToBase64String(new byte[] { 1, 2, 3 }), answer.Data.AudioBase64);
         }
@@ -410,7 +497,7 @@ namespace MsTests
             var tts = new FakeTts();
             CeoSpeechService service = Service(overview, tts);
 
-            ResponseDto<CeoSpeechDto> unknownKind = await service.GetAsync("brief", null, CancellationToken.None);
+            ResponseDto<CeoSpeechDto> unknownKind = await service.GetAsync("nonsense", null, CancellationToken.None);
             ResponseDto<CeoSpeechDto> noKind = await service.GetAsync(null, null, CancellationToken.None);
             ResponseDto<CeoSpeechDto> noSection = await service.GetAsync("section", "  ", CancellationToken.None);
 
@@ -468,11 +555,102 @@ namespace MsTests
             Assert.AreEqual(0, tts.Texts.Count);
         }
 
+        // ==================================================================================== what = brief
+
+        private static ResponseDto<AiBriefDto> BriefOf(string text) => ResponseDtoHelper.Ok(new AiBriefDto { Date = new DateTime(2026, 10, 25), DateText = "1405/08/03", Text = text, Verified = true, NoteId = 31 });
+
         [TestMethod]
-        public void The_Kinds_Are_The_Three_Of_The_Contract()
+        public async Task The_Daily_Report_Of_The_CEO_Is_Read_As_The_Brief_Seat_Wrote_It_With_Its_Audio()
         {
-            // contract 7.2: what = headline | section | alerts; the front sends them as they are
-            CollectionAssert.AreEqual(new[] { "headline", "section", "alerts" }, new[] { CeoSpeechKinds.Headline, CeoSpeechKinds.Section, CeoSpeechKinds.Alerts });
+            // the front's "read brief" button has this one endpoint: the text of the latest brief note, numbers in words, and the audio of exactly that text
+            var notes = new FakeNotes { Brief = BriefOf("طبق نتایج سامانه: 4 عدم انطباق باز و 2 درخواست خارج از مهلت داریم. نقد و بانک 48200000000 ریال است.") };
+            var overview = new FakeOverview { Overview = SampleOverview() };
+            var tts = new FakeTts { Handler = (text, ct) => Task.FromResult(new TtsResult { Ok = true, Audio = new byte[3244], Model = "mock" }) };
+
+            ResponseDto<CeoSpeechDto> answer = await Service(overview, tts, "CEO", notes: notes).GetAsync(" Brief ", null, CancellationToken.None);
+
+            Assert.IsTrue(answer.Success, answer.Message);
+            Assert.IsFalse(answer.Data.Degraded);
+            Assert.IsTrue(answer.Data.Text.StartsWith("گزارش روزانه‌ی مدیرعامل در روز سوم آبان سال هزار و چهارصد و پنج."), answer.Data.Text);
+            Assert.IsTrue(answer.Data.Text.Contains("طبق نتایج سامانه: چهار عدم انطباق باز و دو درخواست خارج از مهلت داریم."), answer.Data.Text);
+            Assert.IsTrue(answer.Data.Text.Contains("چهل و هشت میلیارد و دویست میلیون ریال"), answer.Data.Text);
+            Assert.IsFalse(AnyDigit.IsMatch(answer.Data.Text), "no digit is left for the speech engine to spell");
+            Assert.AreEqual(1, tts.Texts.Count);
+            Assert.AreEqual(answer.Data.Text, tts.Texts[0], "the audio is the audio of the returned text");
+            Assert.AreEqual(4328, answer.Data.AudioBase64.Length);
+            Assert.AreEqual(1, notes.BriefReads);
+            Assert.AreEqual(0, overview.Calls.Count, "the brief is a note, not a figure of the dashboard: the overview is not computed for it");
+        }
+
+        [TestMethod]
+        public async Task The_Brief_Is_For_The_CEO_Only_The_PMO_Who_Reads_The_Rest_Is_Refused_Before_Anything_Is_Read()
+        {
+            foreach (string roles in new[] { "PMO", "FINANCEMANAGER", "WAREHOUSE", "PMO,PLANNING" })
+            {
+                var notes = new FakeNotes { Brief = BriefOf("متن گزارش") };
+                var tts = new FakeTts();
+
+                ResponseDto<CeoSpeechDto> answer = await Service(new FakeOverview { Overview = SampleOverview() }, tts, roles, notes: notes).GetAsync("brief", null, CancellationToken.None);
+
+                Assert.IsFalse(answer.Success, roles);
+                Assert.AreEqual(CeoText.NotAllowed, answer.Message, roles);
+                Assert.AreEqual(0, notes.BriefReads, roles + ": the note is not read for a reader who may not hear it");
+                Assert.AreEqual(0, tts.Texts.Count, roles);
+            }
+
+            // the other kinds stay open to the PMO
+            ResponseDto<CeoSpeechDto> headline = await Service(new FakeOverview { Overview = SampleOverview() }, new FakeTts(), "PMO").GetAsync("headline", null, CancellationToken.None);
+            Assert.IsTrue(headline.Success, headline.Message);
+        }
+
+        [TestMethod]
+        public async Task A_Brief_That_Does_Not_Exist_Yet_Is_Passed_On_And_Nothing_Is_Spoken()
+        {
+            var tts = new FakeTts();
+            var notes = new FakeNotes();   // the default answer: not found
+
+            ResponseDto<CeoSpeechDto> missing = await Service(new FakeOverview { Overview = SampleOverview() }, tts, "CEO", notes: notes).GetAsync("brief", null, CancellationToken.None);
+
+            Assert.IsFalse(missing.Success);
+            Assert.AreEqual("هنوز گزارش روزانه‌ای نوشته نشده است", missing.Message, "the message of the AI module is forwarded");
+            Assert.AreEqual(HttpStatusCode.NotFound, missing.HttpStatusCode);
+            Assert.AreEqual(1, notes.BriefReads);
+            Assert.AreEqual(0, tts.Texts.Count);
+
+            notes.Brief = ResponseDtoHelper.BadRequest<AiBriefDto>("خطا در خواندن گزارش");
+            ResponseDto<CeoSpeechDto> failed = await Service(new FakeOverview { Overview = SampleOverview() }, tts, "CEO", notes: notes).GetAsync("brief", null, CancellationToken.None);
+            Assert.IsFalse(failed.Success);
+            Assert.AreEqual("خطا در خواندن گزارش", failed.Message);
+            Assert.AreEqual(HttpStatusCode.BadRequest, failed.HttpStatusCode);
+        }
+
+        [TestMethod]
+        public async Task Without_A_Speech_Endpoint_The_Brief_Is_Still_Returned_As_Text()
+        {
+            var notes = new FakeNotes { Brief = BriefOf("طبق نتایج سامانه: 4 مورد") };
+            var tts = new FakeTts { Handler = (text, ct) => Task.FromResult(new TtsResult { Ok = false }) };
+
+            ResponseDto<CeoSpeechDto> answer = await Service(new FakeOverview { Overview = SampleOverview() }, tts, "CEO", notes: notes).GetAsync("brief", null, CancellationToken.None);
+
+            Assert.IsTrue(answer.Success, answer.Message);
+            Assert.IsTrue(answer.Data.Degraded);
+            Assert.IsNull(answer.Data.AudioBase64);
+            Assert.IsTrue(answer.Data.Text.Contains("طبق نتایج سامانه: چهار مورد"), answer.Data.Text);
+        }
+
+        [TestMethod]
+        public void The_Brief_Script_Names_The_Day_Then_Gives_The_Text_And_Copes_With_Missing_Parts()
+        {
+            Assert.AreEqual("گزارش روزانه‌ی مدیرعامل در 1405/08/03. متن گزارش.", CeoSpeechScript.Brief(new AiBriefDto { DateText = "1405/08/03", Text = " متن گزارش. " }));
+            Assert.AreEqual("گزارش روزانه‌ی مدیرعامل. متن گزارش.", CeoSpeechScript.Brief(new AiBriefDto { Text = "متن گزارش" }), "no date text, no «در»");
+            Assert.AreEqual("گزارش روزانه‌ی مدیرعامل.", CeoSpeechScript.Brief(null));
+        }
+
+        [TestMethod]
+        public void The_Kinds_Are_The_Three_Of_The_Contract_And_The_Brief()
+        {
+            // contract 7.2: what = headline | section | alerts; the front sends them as they are. Contract 8 adds brief (the CEO only).
+            CollectionAssert.AreEqual(new[] { "headline", "section", "alerts", "brief" }, new[] { CeoSpeechKinds.Headline, CeoSpeechKinds.Section, CeoSpeechKinds.Alerts, CeoSpeechKinds.Brief });
             Assert.AreEqual(10, CeoSpeechScript.MaxAlerts);
         }
     }

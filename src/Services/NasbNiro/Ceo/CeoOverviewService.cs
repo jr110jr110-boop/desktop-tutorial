@@ -26,6 +26,12 @@ namespace Services.NasbNiro.Ceo
     {
         public static readonly TimeSpan Lifetime = TimeSpan.FromSeconds(120);
 
+        /// <summary>An overview with a section that could not be computed is kept only this long, so that a module that comes back shows up quickly.</summary>
+        public static readonly TimeSpan FailedLifetime = TimeSpan.FromSeconds(10);
+
+        /// <summary>The history derived from the records (see <see cref="CeoHistory"/>) is kept this long; it changes only when an old record is back-dated.</summary>
+        public static readonly TimeSpan HistoryLifetime = TimeSpan.FromMinutes(30);
+
         public static string Key(bool seesPayroll) => seesPayroll ? "ceo:overview:payroll" : "ceo:overview:masked";
 
         /// <summary>Drops both variants (a new snapshot changes the trends).</summary>
@@ -39,14 +45,24 @@ namespace Services.NasbNiro.Ceo
 
     public interface ICeoOverviewService
     {
-        /// <param name="refresh">True skips the 120-second cache and stores the fresh answer in it.</param>
+        /// <param name="refresh">True skips the cache and stores the fresh answer in it.</param>
+        /// <returns>A copy: the caller may change it without changing the cached overview.</returns>
         Task<ResponseDto<CeoOverviewDto>> GetOverviewAsync(bool refresh, CancellationToken ct);
 
-        /// <summary>One section computed now (never cached). The key is one of <see cref="CeoKeys.Sections"/>.</summary>
+        /// <summary>One section. It is taken from the cached overview when there is one (a copy), and computed now otherwise (never cached on its own). The key is one of <see cref="CeoKeys.Sections"/>.</summary>
         Task<ResponseDto<CeoSectionDto>> GetSectionAsync(string key, CancellationToken ct);
+
+        /// <summary>One section; <paramref name="refresh"/> true computes it now even when the overview is cached.</summary>
+        Task<ResponseDto<CeoSectionDto>> GetSectionAsync(string key, bool refresh, CancellationToken ct) => GetSectionAsync(key, ct);
     }
 
-    /// <summary>What one computation of the overview shares between its sections: the day, the twelve-month window, the snapshots and the CEO dashboard.</summary>
+    /// <summary>The CEO dashboard could not be computed: the sections that are drawn from it are reported unavailable without trying again.</summary>
+    internal sealed class CeoDashboardUnavailableException : Exception
+    {
+        public CeoDashboardUnavailableException(Exception inner) : base("The CEO dashboard is not available.", inner) { }
+    }
+
+    /// <summary>What one computation of the overview shares between its sections: the day, the twelve-month window, the history of the trends and the CEO dashboard with its parts.</summary>
     internal sealed class CeoContext
     {
         public CeoContext(DateTime today, bool seesPayroll)
@@ -74,16 +90,24 @@ namespace Services.NasbNiro.Ceo
         /// <summary>The day after today: the exclusive end of every "up to today" range.</summary>
         public DateTime End => Today.AddDays(1);
 
-        public CeoDashboardDto Base { get; set; }
+        /// <summary>The CEO dashboard and the module results it was made from, read once for the whole computation.</summary>
+        public CeoDashboardParts Parts { get; set; }
 
-        /// <summary>Month-end points of the nightly snapshots by KPI key.</summary>
-        public Dictionary<string, List<CeoTrendPoint>> Snapshots { get; } = new Dictionary<string, List<CeoTrendPoint>>();
+        /// <summary>Why the CEO dashboard could not be read; once set, no section tries again.</summary>
+        public Exception BaseFailure { get; set; }
+
+        /// <summary>Month-end points of the trends by KPI key: the nightly snapshots, with the months before them filled from the records (see <see cref="CeoHistory"/>).</summary>
+        public Dictionary<string, List<CeoTrendPoint>> History { get; } = new Dictionary<string, List<CeoTrendPoint>>();
+
+        /// <summary>The drill parameters of a chart or a figure of the latest month so far (first day of the Persian month to today).</summary>
+        public Dictionary<string, string> LatestMonth() => new Dictionary<string, string> { ["from"] = CeoText.Iso(CeoTrends.MonthStart(Today)), ["to"] = CeoText.Iso(Today) };
     }
 
     /// <summary>
     /// The CEO overview: the headline, the nine sections, the alerts and the pulse lights. Every figure is read from the module that owns it
-    /// (the CEO dashboard and the module dashboards, or the records themselves), so it is the same number the module shows.
-    /// The sections are built in the partial files of this class; a section that fails is reported empty and does not stop the others.
+    /// (the CEO dashboard and the results it was made from, the module services, or the records themselves), so it is the same number the module shows.
+    /// The sections are built in the partial files of this class; a section that fails is reported with placeholder figures and a note and does not stop the others;
+    /// when the CEO dashboard itself fails, every section is reported at once without trying again.
     /// </summary>
     public sealed partial class CeoOverviewService : ICeoOverviewService
     {
@@ -91,22 +115,20 @@ namespace Services.NasbNiro.Ceo
         private readonly IInventoryUserContext _user;
         private readonly ICeoDashboardService _dashboard;
         private readonly IReceivablesService _receivables;
-        private readonly ISlDashboardService _sales;
+        private readonly IPayableAgeingService _payables;
         private readonly IPcReportService _projects;
-        private readonly IQualityDashboardService _quality;
         private readonly IMemoryCache _cache;
         private readonly ILogger<CeoOverviewService> _logger;
 
-        public CeoOverviewService(IUnitOfWork uow, IInventoryUserContext user, ICeoDashboardService dashboard, IReceivablesService receivables, ISlDashboardService sales,
-            IPcReportService projects, IQualityDashboardService quality, IMemoryCache cache, ILogger<CeoOverviewService> logger)
+        public CeoOverviewService(IUnitOfWork uow, IInventoryUserContext user, ICeoDashboardService dashboard, IReceivablesService receivables, IPayableAgeingService payables,
+            IPcReportService projects, IMemoryCache cache, ILogger<CeoOverviewService> logger)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _dashboard = dashboard ?? throw new ArgumentNullException(nameof(dashboard));
             _receivables = receivables ?? throw new ArgumentNullException(nameof(receivables));
-            _sales = sales ?? throw new ArgumentNullException(nameof(sales));
+            _payables = payables ?? throw new ArgumentNullException(nameof(payables));
             _projects = projects ?? throw new ArgumentNullException(nameof(projects));
-            _quality = quality ?? throw new ArgumentNullException(nameof(quality));
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
             _logger = logger;
         }
@@ -117,74 +139,143 @@ namespace Services.NasbNiro.Ceo
         {
             if (!_user.IsInRole(CeoRoles.Readers)) return ResponseDtoHelper.BadRequest<CeoOverviewDto>(CeoText.NotAllowed);
             bool seesPayroll = SeesPayroll();
-            string cacheKey = CeoCache.Key(seesPayroll);
-            if (!refresh && _cache.TryGetValue(cacheKey, out CeoOverviewDto hit) && hit != null && hit.AsOf == DateTime.Today)
-                return ResponseDtoHelper.Ok(AsCached(hit));
+            if (!refresh && TryCached(seesPayroll, out CeoOverviewDto hit)) return ResponseDtoHelper.Ok(AsCached(hit));
 
             var watch = Stopwatch.StartNew();
             var ctx = new CeoContext(DateTime.Today, seesPayroll);
-            await LoadSnapshotsAsync(ctx, ct);
+            await PrepareAsync(ctx, null, ct);
             var dto = new CeoOverviewDto { AsOf = ctx.Today, AsOfText = CeoText.Date(ctx.Today), GeneratedAt = DateTimeOffset.Now };
             foreach (string key in CeoKeys.Sections) dto.Sections.Add(await SectionAsync(ctx, key, ct));
-            dto.Headline = CeoKeys.Headline.Select(k => HeadlineOf(dto.Sections, k)).ToList();
-            dto.Alerts = AlertsOf(ctx.Base);
+            dto.Headline = CeoKeys.Headline.Select(k => HeadlineOf(dto.Sections, k, ctx.Today)).ToList();
+            dto.Alerts = AlertsOf(ctx.Parts?.Dashboard);
             dto.Pulse = dto.Sections.Select(PulseOf).ToList();
             watch.Stop();
             dto.GeneratedInMs = (int)Math.Min(int.MaxValue, watch.ElapsedMilliseconds);
-            _cache.Set(cacheKey, dto, CeoCache.Lifetime);
+
+            // an overview with a section that failed is kept only briefly: the module may be back in a moment
+            bool complete = dto.Sections.All(s => string.IsNullOrEmpty(s.Note));
+            _cache.Set(CeoCache.Key(seesPayroll), CeoCopy.Of(dto), complete ? CeoCache.Lifetime : CeoCache.FailedLifetime);
             return ResponseDtoHelper.Ok(dto);
         }
 
-        public async Task<ResponseDto<CeoSectionDto>> GetSectionAsync(string key, CancellationToken ct)
+        public Task<ResponseDto<CeoSectionDto>> GetSectionAsync(string key, CancellationToken ct) => GetSectionAsync(key, false, ct);
+
+        public async Task<ResponseDto<CeoSectionDto>> GetSectionAsync(string key, bool refresh, CancellationToken ct)
         {
             if (!_user.IsInRole(CeoRoles.Readers)) return ResponseDtoHelper.BadRequest<CeoSectionDto>(CeoText.NotAllowed);
             string section = (key ?? string.Empty).Trim().ToLowerInvariant();
             if (!CeoKeys.Sections.Contains(section)) return ResponseDtoHelper.NotFound<CeoSectionDto>(CeoText.UnknownSection);
-            var ctx = new CeoContext(DateTime.Today, SeesPayroll());
-            await LoadSnapshotsAsync(ctx, ct);
+            bool seesPayroll = SeesPayroll();
+
+            // the section of the overview the screen shows (and the voice reads): only a refresh, or no overview at all, computes it again
+            if (!refresh && TryCached(seesPayroll, out CeoOverviewDto hit))
+            {
+                CeoSectionDto cached = hit.Sections.FirstOrDefault(s => s.Key == section);
+                if (cached != null) return ResponseDtoHelper.Ok(CeoCopy.Of(cached));
+            }
+
+            var ctx = new CeoContext(DateTime.Today, seesPayroll);
+            await PrepareAsync(ctx, section, ct);
             return ResponseDtoHelper.Ok(await SectionAsync(ctx, section, ct));
         }
 
         /// <summary>CEO, finance manager and payroll see pay-based figures; a PMO reader does not, and neither does an AI seat acting as one of them.</summary>
         private bool SeesPayroll() => SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
 
-        private static CeoOverviewDto AsCached(CeoOverviewDto source) => new CeoOverviewDto
+        private bool TryCached(bool seesPayroll, out CeoOverviewDto hit) =>
+            _cache.TryGetValue(CeoCache.Key(seesPayroll), out hit) && hit != null && hit.AsOf == DateTime.Today;
+
+        private static CeoOverviewDto AsCached(CeoOverviewDto source)
         {
-            AsOf = source.AsOf, AsOfText = source.AsOfText, GeneratedAt = source.GeneratedAt, GeneratedInMs = source.GeneratedInMs, Cached = true,
-            Headline = source.Headline, Sections = source.Sections, Alerts = source.Alerts, Pulse = source.Pulse,
-        };
+            CeoOverviewDto copy = CeoCopy.Of(source);
+            copy.Cached = true;
+            return copy;
+        }
 
         // ================================================================================== shared data
 
         /// <summary>
-        /// The CEO dashboard of this moment, read once per computation (it is the source of most of the counts). It is read exactly as the dashboard endpoint reads it
-        /// (no "as of" day: production counts are for today and the SLA is judged now), so the numbers are the ones the module shows.
+        /// Reads what the sections need, once: the CEO dashboard with its parts, then the history of the trends (of the one section when only one is asked for).
+        /// When the dashboard fails nothing else is tried; the failure is remembered in the context and each section reports itself unavailable without another attempt.
         /// </summary>
-        private async Task<CeoDashboardDto> BaseAsync(CeoContext ctx, CancellationToken ct)
+        private async Task PrepareAsync(CeoContext ctx, string section, CancellationToken ct)
         {
-            if (ctx.Base != null) return ctx.Base;
-            ResponseDto<CeoDashboardDto> answer = await _dashboard.GetAsync(ct);
-            if (answer == null || !answer.Success || answer.Data == null) throw new InvalidOperationException("The CEO dashboard is not available: " + answer?.Message);
-            ctx.Base = answer.Data;
-            return ctx.Base;
+            try { await PartsAsync(ctx, ct); }
+            catch (CeoDashboardUnavailableException) { return; }
+            await LoadHistoryAsync(ctx, section, ct);
         }
 
-        /// <summary>The month-end points of the nightly snapshots of the last twelve months. A missing table or any read problem only means "no trend yet".</summary>
-        private async Task LoadSnapshotsAsync(CeoContext ctx, CancellationToken ct)
+        /// <summary>
+        /// The CEO dashboard of this moment together with the module results it was made from (quality dashboard, production load, sales pipeline and results), read once per computation.
+        /// It is read exactly as the dashboard endpoint reads it (no "as of" day: production counts are for today and the SLA is judged now), so the numbers are the ones the module shows.
+        /// </summary>
+        private async Task<CeoDashboardParts> PartsAsync(CeoContext ctx, CancellationToken ct)
         {
+            if (ctx.Parts != null) return ctx.Parts;
+            if (ctx.BaseFailure != null) throw new CeoDashboardUnavailableException(ctx.BaseFailure);
+            try
+            {
+                CeoDashboardParts parts = await _dashboard.GetPartsAsync(ct);
+                if (parts?.Dashboard == null) throw new InvalidOperationException("The CEO dashboard is not available.");
+                ctx.Parts = parts;
+                return parts;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                ctx.BaseFailure = ex;
+                _logger?.LogError(ex, "CEO overview: the CEO dashboard could not be computed; every section is reported unavailable.");
+                throw new CeoDashboardUnavailableException(ex);
+            }
+        }
+
+        /// <summary>
+        /// The month-end points of the last twelve months for the KPI keys: the nightly snapshots, and for the four ★ keys of <see cref="CeoHistory"/> the months no snapshot covers yet,
+        /// derived from the records (kept 30 minutes per key). A missing table or any read problem only means "no trend yet".
+        /// </summary>
+        /// <param name="section">The section whose keys are needed, or null for all of them.</param>
+        private async Task LoadHistoryAsync(CeoContext ctx, string section, CancellationToken ct)
+        {
+            HashSet<string> wanted = (section == null ? CeoKpiSpecs.All : CeoKpiSpecs.Of(section)).Select(k => k.Key).ToHashSet();
             try
             {
                 var rows = await _uow.Set<CeoKpiSnapshot>().AsNoTracking().Where(s => s.Date >= ctx.From && s.Date <= ctx.Today)
                     .Select(s => new { s.Key, s.Date, s.Value }).ToListAsync(ct);
-                foreach (var group in rows.GroupBy(r => r.Key))
-                    ctx.Snapshots[group.Key] = CeoTrends.MonthEnds(group.Select(r => (r.Date, r.Value)), ctx.Today);
+                foreach (var group in rows.Where(r => wanted.Contains(r.Key)).GroupBy(r => r.Key))
+                    ctx.History[group.Key] = CeoTrends.MonthEnds(group.Select(r => (r.Date, r.Value)), ctx.Today);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "CEO overview: the snapshots could not be read; the trends stay empty.");
-                ctx.Snapshots.Clear();
+                ctx.History.Clear();
             }
+
+            // the months before the snapshots: derived from the records, for the keys that can be (a real snapshot always wins)
+            foreach (string key in CeoHistory.Keys.Where(wanted.Contains))
+            {
+                HashSet<DateTime> covered = ctx.History.TryGetValue(key, out List<CeoTrendPoint> have) ? have.Select(p => p.Month).ToHashSet() : new HashSet<DateTime>();
+                List<DateTime> missing = CeoHistory.MissingMonths(ctx.Today, covered);
+                if (missing.Count == 0) continue;
+                string cacheKey = "ceo:history:" + key + ":" + CeoText.Iso(ctx.Today) + ":" + string.Join(",", missing.Select(CeoText.Iso));
+                if (!_cache.TryGetValue(cacheKey, out List<CeoTrendPoint> derived))
+                {
+                    derived = await CeoHistory.DeriveKeyAsync(_uow, key, ReceivablesOpenOnAsync, missing, _logger, ct);
+                    if (derived == null) continue;     // could not be read: not remembered, the next request tries again
+                    _cache.Set(cacheKey, derived, CeoCache.HistoryLifetime);
+                }
+                if (derived.Count == 0) continue;
+                List<CeoTrendPoint> merged = have != null ? new List<CeoTrendPoint>(have) : new List<CeoTrendPoint>();
+                merged.AddRange(derived.Where(p => !covered.Contains(p.Month)));
+                ctx.History[key] = merged.OrderBy(p => p.Month).ToList();
+            }
+        }
+
+        /// <summary>The open receivables on a day: the total of the as-of ageing of the receivables module, or null when it cannot be read.</summary>
+        private async Task<decimal?> ReceivablesOpenOnAsync(DateTime day, CancellationToken ct)
+        {
+            ResponseDto<AgeingDto> ageing = await _receivables.GetAgeingAsync(day, ct);
+            return ageing != null && ageing.Success && ageing.Data != null ? ageing.Data.Total : (decimal?)null;
         }
 
         // ================================================================================== sections
@@ -215,21 +306,44 @@ namespace Services.NasbNiro.Ceo
         {
             (string title, string link, string prompt) = SectionInfo[key];
             CeoSectionDto section;
-            try
+            if (ctx.BaseFailure != null)
             {
-                section = await BuildSectionAsync(ctx, key, ct);
+                // the CEO dashboard failed once in this computation: no section tries it (and the modules behind it) again
+                section = Unavailable(ctx, key, CeoText.DashboardUnavailable);
             }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
+            else
             {
-                _logger?.LogError(ex, "CEO overview: the section '{Section}' could not be computed.", key);
-                section = new CeoSectionDto { Note = "اطلاعات این بخش اکنون در دسترس نیست؛ بخش‌های دیگر بدون تغییر نمایش داده می‌شوند." };
+                try
+                {
+                    section = await BuildSectionAsync(ctx, key, ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (CeoDashboardUnavailableException)
+                {
+                    section = Unavailable(ctx, key, CeoText.DashboardUnavailable);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "CEO overview: the section '{Section}' could not be computed.", key);
+                    section = Unavailable(ctx, key, CeoText.SectionUnavailable);
+                }
             }
             section.Key = key;
             section.Title = title;
             section.Link = link;
             section.AnalysisPrompt = prompt;
             section.AlertCount = section.Kpis.Count(k => k.Status == CeoStatus.Warn || k.Status == CeoStatus.Danger);
+            return section;
+        }
+
+        /// <summary>
+        /// A section that could not be computed keeps the shape of the contract: every KPI of the section as a placeholder (key, title, unit, link and drill kept, value null, status neutral, no trend),
+        /// no charts, and a note that says why. Its pulse light is neutral.
+        /// </summary>
+        private static CeoSectionDto Unavailable(CeoContext ctx, string key, string note)
+        {
+            var section = new CeoSectionDto { Note = note };
+            foreach (CeoKpiSpec spec in CeoKpiSpecs.Of(key)) section.Kpis.Add(CeoKpiSpecs.Placeholder(spec, ctx.Today));
             return section;
         }
 
@@ -252,45 +366,12 @@ namespace Services.NasbNiro.Ceo
 
         // ================================================================================== headline, alerts, pulse
 
-        private static readonly Dictionary<string, string> HeadlineTitles = new Dictionary<string, string>
-        {
-            [CeoKeys.Cash] = "نقد و بانک",
-            [CeoKeys.ReceivablesOpen] = "مطالبات باز",
-            [CeoKeys.PayablesOverdue] = "بدهی سررسیدگذشته",
-            [CeoKeys.SalesBacklog] = "سفارش‌های در جریان (backlog)",
-            [CeoKeys.ActiveProjects] = "پروژه‌های فعال",
-            [CeoKeys.LateProductionOrders] = "دستورهای تولید دارای تأخیر",
-            [CeoKeys.OpenNcrs] = "عدم انطباق‌های باز",
-            [CeoKeys.ServiceSlaBreaches] = "درخواست‌های خارج از SLA",
-        };
-
-        private static readonly Dictionary<string, string> HeadlineUnits = new Dictionary<string, string>
-        {
-            [CeoKeys.Cash] = CeoUnit.Rial,
-            [CeoKeys.ReceivablesOpen] = CeoUnit.Rial,
-            [CeoKeys.PayablesOverdue] = CeoUnit.Rial,
-            [CeoKeys.SalesBacklog] = CeoUnit.Rial,
-            [CeoKeys.ActiveProjects] = CeoUnit.Count,
-            [CeoKeys.LateProductionOrders] = CeoUnit.Count,
-            [CeoKeys.OpenNcrs] = CeoUnit.Count,
-            [CeoKeys.ServiceSlaBreaches] = CeoUnit.Count,
-        };
-
         /// <summary>The headline figure of a key: a copy of the KPI of the same key in its section (a placeholder without a value when the section could not be computed).</summary>
-        private static CeoKpiDto HeadlineOf(IEnumerable<CeoSectionDto> sections, string key)
+        private static CeoKpiDto HeadlineOf(IEnumerable<CeoSectionDto> sections, string key, DateTime today)
         {
             CeoKpiDto kpi = sections.SelectMany(s => s.Kpis).FirstOrDefault(k => k.Key == key);
-            if (kpi != null) return Clone(kpi);
-            string unit = HeadlineUnits[key];
-            return new CeoKpiDto { Key = key, Title = HeadlineTitles[key], Value = null, Unit = unit, ValueText = CeoText.NoValue, Status = CeoStatus.Neutral };
+            return kpi != null ? CeoCopy.Of(kpi) : CeoKpiSpecs.Placeholder(CeoKpiSpecs.Get(key), today);
         }
-
-        private static CeoKpiDto Clone(CeoKpiDto k) => new CeoKpiDto
-        {
-            Key = k.Key, Title = k.Title, Value = k.Value, Unit = k.Unit, ValueText = k.ValueText, ShortText = k.ShortText, Delta = k.Delta, DeltaText = k.DeltaText, DeltaGood = k.DeltaGood,
-            Trend = k.Trend == null ? null : new List<decimal>(k.Trend), TrendLabels = k.TrendLabels == null ? null : new List<string>(k.TrendLabels),
-            Status = k.Status, Hidden = k.Hidden, Link = k.Link, DrillKey = k.DrillKey, Note = k.Note,
-        };
 
         /// <summary>The alerts of the existing CEO dashboard, worst first (the order inside one severity is the dashboard's own).</summary>
         private static List<CeoAlertDto> AlertsOf(CeoDashboardDto dashboard)
@@ -305,32 +386,50 @@ namespace Services.NasbNiro.Ceo
                 .Select(x => x.Alert).ToList();
         }
 
-        private static CeoPulseDto PulseOf(CeoSectionDto section) => new CeoPulseDto
+        /// <summary>The light of a section. A section that could not be computed is neutral (it has no figures to judge), not green.</summary>
+        private static CeoPulseDto PulseOf(CeoSectionDto section)
         {
-            Key = section.Key, Title = section.Title, Link = section.Link,
-            Status = CeoRules.Pulse(section.Kpis.Select(k => k.Status)),
-            DangerCount = section.Kpis.Count(k => k.Status == CeoStatus.Danger),
-            WarnCount = section.Kpis.Count(k => k.Status == CeoStatus.Warn),
-        };
+            bool failed = !string.IsNullOrEmpty(section.Note);
+            return new CeoPulseDto
+            {
+                Key = section.Key, Title = section.Title, Link = section.Link,
+                Status = failed ? CeoStatus.Neutral : CeoRules.Pulse(section.Kpis.Select(k => k.Status)),
+                DangerCount = failed ? 0 : section.Kpis.Count(k => k.Status == CeoStatus.Danger),
+                WarnCount = failed ? 0 : section.Kpis.Count(k => k.Status == CeoStatus.Warn),
+            };
+        }
 
         // ================================================================================== builders shared by the sections
 
-        /// <summary>One KPI; the value text and the short text are derived from the value and the unit unless a text is given.</summary>
-        private static CeoKpiDto Kpi(string key, string title, decimal? value, string unit, string status = null, string link = null, string drillKey = null, string note = null, string valueText = null)
-            => new CeoKpiDto
+        /// <summary>
+        /// One KPI. Its title, unit, front link, drill key and drill parameters come from its spec (<see cref="CeoKpiSpecs"/>: the one definition shared with the placeholder of a failed section);
+        /// the value text and the short text are derived from the value and the unit unless a text is given.
+        /// </summary>
+        private static CeoKpiDto Kpi(CeoContext ctx, string key, decimal? value, string status = null, string note = null, string valueText = null)
+        {
+            CeoKpiSpec spec = CeoKpiSpecs.Get(key);
+            return new CeoKpiDto
             {
-                Key = key, Title = title, Value = value, Unit = unit, ValueText = valueText ?? CeoText.ValueText(value, unit), ShortText = CeoText.ShortText(value, unit),
-                Status = status ?? CeoStatus.Neutral, Link = link, DrillKey = drillKey, Note = note,
+                Key = spec.Key, Title = spec.Title, Value = value, Unit = spec.Unit, ValueText = valueText ?? CeoText.ValueText(value, spec.Unit), ShortText = CeoText.ShortText(value, spec.Unit),
+                Status = status ?? CeoStatus.Neutral, Link = spec.Link, DrillKey = spec.DrillKey, DrillParams = spec.DrillParams?.Invoke(ctx.Today), Note = note,
             };
+        }
 
         /// <summary>A KPI the reader may not see (payroll privacy): no value, the fixed text, no status.</summary>
-        private static CeoKpiDto HiddenKpi(string key, string title, string unit, string link, string drillKey, string note = null)
-            => new CeoKpiDto { Key = key, Title = title, Value = null, Unit = unit, ValueText = CeoText.HiddenPayroll, Status = CeoStatus.Neutral, Hidden = true, Link = link, DrillKey = drillKey, Note = note };
+        private static CeoKpiDto HiddenKpi(CeoContext ctx, string key, string note = null)
+        {
+            CeoKpiSpec spec = CeoKpiSpecs.Get(key);
+            return new CeoKpiDto
+            {
+                Key = spec.Key, Title = spec.Title, Value = null, Unit = spec.Unit, ValueText = CeoText.HiddenPayroll, Status = CeoStatus.Neutral, Hidden = true,
+                Link = spec.Link, DrillKey = spec.DrillKey, DrillParams = spec.DrillParams?.Invoke(ctx.Today), Note = note,
+            };
+        }
 
-        /// <summary>Puts the snapshot trend of the KPI's key on it (see <see cref="CeoTrends.Apply"/>); returns the KPI.</summary>
+        /// <summary>Puts the trend of the KPI's key on it (see <see cref="CeoTrends.Apply"/>): the month-end history and, as the last point, the live value; returns the KPI.</summary>
         private static CeoKpiDto Trended(CeoContext ctx, CeoKpiDto kpi, bool? higherIsBetter)
         {
-            ctx.Snapshots.TryGetValue(kpi.Key, out List<CeoTrendPoint> points);
+            ctx.History.TryGetValue(kpi.Key, out List<CeoTrendPoint> points);
             CeoTrends.Apply(kpi, points, ctx.Today, higherIsBetter);
             return kpi;
         }
@@ -340,6 +439,13 @@ namespace Services.NasbNiro.Ceo
             {
                 Key = key, Title = title, Kind = kind, Unit = unit, Labels = labels?.ToList() ?? new List<string>(), Series = series.ToList(), Link = link, DrillKey = drillKey, Note = note,
             };
+
+        /// <summary>Sets the drill parameters of a chart (see <see cref="CeoChartDto.DrillParams"/>); returns the chart.</summary>
+        private static CeoChartDto WithDrillParams(CeoChartDto chart, Dictionary<string, string> drillParams)
+        {
+            chart.DrillParams = drillParams;
+            return chart;
+        }
 
         private static CeoChartSeriesDto Series(string name, IEnumerable<decimal> values, string role = CeoRole.Primary)
             => new CeoChartSeriesDto { Name = name, Values = values?.ToList() ?? new List<decimal>(), Role = role };

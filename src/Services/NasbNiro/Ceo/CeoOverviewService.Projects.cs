@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
+using Services.NasbNiro.ProjectControl;
 using ViewModels.NasbNiro.CeoDtos;
 using ViewModels.NasbNiro.FinanceDtos;
 using ViewModels.NasbNiro.Pagination;
@@ -20,31 +21,30 @@ namespace Services.NasbNiro.Ceo
 
         private async Task<CeoSectionDto> ProjectsAsync(CeoContext ctx, CancellationToken ct)
         {
-            CeoDashboardDto b = await BaseAsync(ctx, ct);
+            CeoDashboardDto b = (await PartsAsync(ctx, ct)).Dashboard;
             ResponseDto<PagedList<PcPortfolioRowDto>> answer = await _projects.GetPortfolioAsync(new PaginationParams { PageNumber = 1, PageSize = 0 }, ct);
             if (answer == null || !answer.Success || answer.Data == null) throw new InvalidOperationException("The portfolio is not available: " + answer?.Message);
             List<PcPortfolioRowDto> rows = answer.Data.ToList();
 
             var section = new CeoSectionDto();
-            section.Kpis.Add(Trended(ctx, Kpi(CeoKeys.ActiveProjects, "پروژه‌های فعال", b.PcActiveProjects, CeoUnit.Count, null, CeoLinks.Portfolio, CeoDrillRef.PcPortfolio,
+            section.Kpis.Add(Trended(ctx, Kpi(ctx, CeoKeys.ActiveProjects, b.PcActiveProjects, null,
                 "پروژه‌هایی که شرایط قراردادشان در کنترل پروژه ثبت شده است."), higherIsBetter: null));
-            section.Kpis.Add(Kpi("projectsRed", "پروژه‌های قرمز", b.PcProjectsRed, CeoUnit.Count, CeoRules.DangerIfAny(b.PcProjectsRed), CeoLinks.Portfolio, CeoDrillRef.PcPortfolio,
-                "شاخص برنامه (SPI) یا هزینه (CPI) در وضعیت قرمز"));
-            section.Kpis.Add(Kpi("projectsAmber", "پروژه‌های زرد", b.PcProjectsAmber, CeoUnit.Count, CeoRules.WarnIfAny(b.PcProjectsAmber), CeoLinks.Portfolio, CeoDrillRef.PcPortfolio,
-                "شاخص برنامه (SPI) یا هزینه (CPI) در وضعیت زرد"));
-            section.Kpis.Add(Kpi("pcLateActivities", "فعالیت‌های دارای تأخیر", b.PcLateActivities, CeoUnit.Count, CeoRules.ByCount(b.PcLateActivities, 1, 10), CeoLinks.PcActivities, CeoDrillRef.PcLateActivities,
+            section.Kpis.Add(Kpi(ctx, "projectsRed", b.PcProjectsRed, CeoRules.DangerIfAny(b.PcProjectsRed),
+                "پروژه‌ای که شاخص برنامه (SPI) یا هزینه (CPI) آن قرمز است"));
+            section.Kpis.Add(Kpi(ctx, "projectsAmber", b.PcProjectsAmber, CeoRules.WarnIfAny(b.PcProjectsAmber),
+                "پروژه‌ای که یکی از دو شاخص برنامه (SPI) یا هزینه (CPI) آن زرد است و هیچ‌کدام قرمز نیست؛ هر پروژه فقط یک رنگ دارد"));
+            section.Kpis.Add(Kpi(ctx, "pcLateActivities", b.PcLateActivities, CeoRules.ByCount(b.PcLateActivities, 1, 10),
                 "مراحل پرداخت عقب‌افتاده: " + CeoText.Number(b.PcOverdueMilestones) + "؛ درخواست‌های تغییر باز: " + CeoText.Number(b.PcOpenChangeRequests)));
-            section.Kpis.Add(Kpi("pcPenaltyExposure", "مواجهه‌ی جریمه‌ی تأخیر", b.PcPenaltyExposure, CeoUnit.Rial, CeoRules.WarnIfAny(b.PcPenaltyExposure), CeoLinks.PcPenalties, CeoDrillRef.PcPenaltyExposure,
+            section.Kpis.Add(Kpi(ctx, "pcPenaltyExposure", b.PcPenaltyExposure, CeoRules.WarnIfAny(b.PcPenaltyExposure),
                 "جریمه‌ی محاسبه‌شده‌ی قراردادها تا امروز"));
-            section.Kpis.Add(Kpi("pcGuaranteeAlerts", "ضمانت‌نامه‌های نزدیک به سررسید", b.PcGuaranteeAlerts, CeoUnit.Count, CeoRules.WarnIfAny(b.PcGuaranteeAlerts), CeoLinks.PcGuarantees, CeoDrillRef.PcGuaranteesExpiring,
+            section.Kpis.Add(Kpi(ctx, "pcGuaranteeAlerts", b.PcGuaranteeAlerts, CeoRules.WarnIfAny(b.PcGuaranteeAlerts),
                 "سی روز یا کمتر تا سررسید"));
 
-            // chart 1: each project once: red when one of its indexes is red, amber when none is red and one is amber
-            bool Red(PcPortfolioRowDto r) => r.SpiStatus == "red" || r.CpiStatus == "red";
-            bool Amber(PcPortfolioRowDto r) => !Red(r) && (r.SpiStatus == "amber" || r.CpiStatus == "amber");
-            int red = rows.Count(Red), amber = rows.Count(Amber), green = rows.Count - red - amber;
+            // chart 1: each project once, with the same definition as the red and amber figures above (PcReportService.IsRed / IsAmber): red when one of its indexes is red,
+            // amber when none is red and one is amber, green otherwise; so red + amber + green is the number of projects and the donut agrees with the two KPIs
+            int red = rows.Count(PcReportService.IsRed), amber = rows.Count(PcReportService.IsAmber), green = rows.Count - red - amber;
             section.Charts.Add(Chart("projectStatus", "وضعیت پروژه‌ها", CeoKind.Donut, CeoUnit.Count, new[] { "سبز", "زرد", "قرمز" }, CeoLinks.Portfolio, CeoDrillRef.PcPortfolio,
-                "هر پروژه یک بار شمرده می‌شود؛ قرمز اگر یکی از دو شاخص برنامه و هزینه قرمز باشد.",
+                "هر پروژه یک بار شمرده می‌شود؛ قرمز اگر یکی از دو شاخص برنامه و هزینه قرمز باشد و زرد اگر قرمز نباشد و یکی زرد باشد.",
                 Series("پروژه‌ها", new decimal[] { green, amber, red })));
 
             // chart 2: planned against physical progress of the projects with the weakest schedule index

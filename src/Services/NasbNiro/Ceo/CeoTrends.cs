@@ -20,7 +20,8 @@ namespace Services.NasbNiro.Ceo
 
     /// <summary>
     /// Monthly windows and trends. Months are Persian months. A figure with no transactional history (a balance, an open count)
-    /// is drawn from the nightly snapshots: the point of a month is the last snapshot taken in it, and a month without a snapshot has no point.
+    /// is drawn from the nightly snapshots: the point of a month is the last snapshot taken in it (the job stores the figures of the day that ended, so the last
+    /// one of a month is the true month end), and a month without a snapshot has no point unless <see cref="CeoHistory"/> can derive it from the records.
     /// </summary>
     public static class CeoTrends
     {
@@ -70,27 +71,46 @@ namespace Services.NasbNiro.Ceo
                 .ToList();
         }
 
+        /// <summary>The decimals a figure of a unit is shown with: whole rials and days, tenths of a percent and of an hour, hundredths for any other number.</summary>
+        public static int Precision(string unit)
+        {
+            switch (unit)
+            {
+                case CeoUnit.Rial:
+                case CeoUnit.Days: return 0;
+                case CeoUnit.Percent:
+                case CeoUnit.Hours: return 1;
+                default: return 2;
+            }
+        }
+
         /// <summary>
-        /// Puts a snapshot trend on a KPI: the points and their labels (null when there is none), and the change of the KPI value against
-        /// the point of the previous Persian month (empty when that month has no snapshot).
+        /// Puts the monthly trend on a KPI. The points before the current Persian month come from <paramref name="points"/> (the month-end values of the snapshots,
+        /// plus the values derived from the records for the months before the first snapshot); the last point is always the live value of the KPI, so a trend shows
+        /// something from the first day. The change is the live value against the point of the previous Persian month (empty when that month has no point), rounded to the
+        /// precision the unit is shown in before it is judged: a change that rounds to nothing is "no change" in the number, the text and the good/bad flag alike.
         /// </summary>
         /// <param name="higherIsBetter">True when a rise is favourable, false when a fall is, null when the figure has no preferred direction.</param>
         public static void Apply(CeoKpiDto kpi, IReadOnlyList<CeoTrendPoint> points, DateTime today, bool? higherIsBetter)
         {
             if (kpi == null) return;
-            if (points == null || points.Count == 0)
+            DateTime thisMonth = MonthStart(today);
+            var series = (points ?? Array.Empty<CeoTrendPoint>()).Where(p => p.Month < thisMonth).OrderBy(p => p.Month).Select(p => (p.Month, p.Value)).ToList();
+            if (kpi.Value.HasValue) series.Add((thisMonth, kpi.Value.Value));
+            if (series.Count == 0)
             {
                 kpi.Trend = null;
                 kpi.TrendLabels = null;
                 return;
             }
-            kpi.Trend = points.Select(p => p.Value).ToList();
-            kpi.TrendLabels = points.Select(p => CeoText.MonthLabel(p.Month)).ToList();
+            kpi.Trend = series.Select(p => p.Value).ToList();
+            kpi.TrendLabels = series.Select(p => CeoText.MonthLabel(p.Month)).ToList();
             if (!kpi.Value.HasValue) return;
-            DateTime previousMonth = AddMonths(MonthStart(today), -1);
-            CeoTrendPoint previous = points.FirstOrDefault(p => p.Month == previousMonth);
-            if (previous == null) return;
-            decimal delta = kpi.Value.Value - previous.Value;
+
+            DateTime previousMonth = AddMonths(thisMonth, -1);
+            int previous = series.FindIndex(p => p.Month == previousMonth);
+            if (previous < 0) return;
+            decimal delta = Math.Round(kpi.Value.Value - series[previous].Value, Precision(kpi.Unit), MidpointRounding.AwayFromZero);
             kpi.Delta = delta;
             kpi.DeltaText = CeoText.DeltaText(delta, kpi.Unit);
             kpi.DeltaGood = CeoRules.DeltaGood(delta, higherIsBetter);

@@ -322,5 +322,13 @@ namespace ViewModels.NasbNiro.SalesDtos
         public int BelowCostProposals { get; set; }
         public int OrdersWaitingCredit { get; set; }
         public decimal? HitRatePercent { get; set; }
+
+        /// <summary>Proposals won and lost (the hit rate is made of them).</summary>
+        public int Won { get; set; }
+
+        public int Lost { get; set; }
+
+        /// <summary>The open inquiries by stage, as the sales dashboard shows them; the CEO overview draws its pipeline chart from it.</summary>
+        public List<SlStageValueDto> PipelineByStage { get; set; } = new List<SlStageValueDto>();
     }
 }
