@@ -74,6 +74,24 @@ namespace Services.NasbNiro.Inventory
         public const string RoleManufacturing = "CONSTRUCTION,PRODUCTIONMANAGER";
         public const string RoleQuality = "QC";
         public const string RoleEngineering = "ENGINEERING";
+
+        /// <summary>
+        /// R1q D3 ★: the QC signature of an NCR comes from a QC user or the QA manager. The person who raised or edited the NCR cannot give it, so
+        /// a company with one QC user is not stuck: QA can sign.
+        /// </summary>
+        public const string RoleQualitySigner = "QC,QA";
+
+        /// <summary>Close or cancel an NCR (QC and QA; who may do which is decided inside, with the maker-checker rule).</summary>
+        public const string QcOrQa = "PMO,QC,QA";
+
+        /// <summary>The NCR approval endpoint: the approvers of the module and the QA manager, who may give the QC signature.</summary>
+        public const string NcrApprovers = Approvers + ",QA";
+
+        /// <summary>
+        /// R1q D11: the quality fields of an item (inspection, certificate, shelf life) are changed by QC, QA or PMO only; the storekeepers and planners
+        /// who maintain the master data cannot switch a quality gate off.
+        /// </summary>
+        public const string ItemQuality = "PMO,QC,QA";
     }
 
     public static class InventoryDocumentRules

@@ -60,8 +60,38 @@ namespace Entities.Model.NasbNiro.Inventory
         public int? ReleaseDocumentId { get; set; }
         public int? NcrId { get; set; }
 
+        /// <summary>
+        /// The NCR (rework or repair) this inspection re-inspects: the system makes the inspection task when the reworked product arrives in the QC-hold warehouse,
+        /// and an accepted result links the inspection back to the NCR (R1q D4).
+        /// </summary>
+        public int? ReinspectionOfNcrId { get; set; }
+
+        /// <summary>Measuring instruments used by the inspector, ids separated by commas ("3,5"); each had to be usable on the day (R1q D16).</summary>
+        public string EquipmentIds { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>
+    /// A request to relax a quality gate of an item (incoming inspection off, a lower certificate type, a longer shelf life) while approved purchase orders
+    /// for the item are still open: a second person (QA) must approve it before it applies (R1q D11, provisional).
+    /// </summary>
+    public class ItemQualityChange : BaseEntity
+    {
+        public int ItemId { get; set; }
+        public InventoryItem Item { get; set; }
+
+        public bool RequiresIncomingInspection { get; set; }
+        public CertificateType? RequiredCertificateType { get; set; }
+        public int? ShelfLifeDays { get; set; }
+
+        public string Reason { get; set; }
+
+        public ItemQualityChangeStatus Status { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public string DecisionNote { get; set; }
     }
 
     /// <summary>Non-conformance report (گزارش عدم انطباق) per PR-QC-002 and form FO-QC-013.</summary>
@@ -166,6 +196,29 @@ namespace Entities.Model.NasbNiro.Inventory
 
         /// <summary>Record or report the system drafted this NCR from (QIR-/TR- number).</summary>
         public string SourceRecordNumber { get; set; }
+
+        // ----- R1q: maker-checker, evidence of execution, re-inspection
+        /// <summary>Every user who edited the NCR, ids between commas (",5,7,"): none of them may sign for QC or close it (R1q D3).</summary>
+        public string EditorUserIds { get; set; }
+
+        /// <summary>What the re-inspection after a rework or repair is: QcInspection (product in the QC-hold warehouse), QcRecord or TestReport (R1q D4).</summary>
+        public string ReinspectionKind { get; set; }
+
+        /// <summary>The accepted re-inspection; closing a rework or repair NCR needs it.</summary>
+        public int? ReinspectionRecordId { get; set; }
+
+        /// <summary>Scrap evidence: the confirmed warehouse document that took the product to scrap (R1q D5).</summary>
+        public int? ScrapDocumentId { get; set; }
+
+        /// <summary>Scrap evidence for a serial item: the serial unit whose status is Scrapped (first unit of the NCR).</summary>
+        public int? ScrappedSerialUnitId { get; set; }
+
+        /// <summary>Production rework operation (MfOperation, IsRework) that did the rework; filled by the production module.</summary>
+        public int? ReworkOperationId { get; set; }
+
+        public string CancelReason { get; set; }
+        public DateTimeOffset? CancelledAt { get; set; }
+        public int? CancelledByUserId { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }

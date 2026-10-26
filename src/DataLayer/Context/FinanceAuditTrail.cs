@@ -73,6 +73,18 @@ namespace DataLayer.Context
             { typeof(FnTermination), new[] { "Status", "VoucherId", "TerminationDate" } },
             { typeof(FnBonusRun), new[] { "Status", "Year", "TotalGross", "TotalNet", "VoucherId" } },
             { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Iban" } },
+            // quality and inventory (R1q): the decisions that release, scrap, waive or relax something; the quality settings; the item quality gates; the calibration waiver
+            { typeof(Entities.Model.NasbNiro.Inventory.NonConformance), new[] { "Status", "Severity", "Disposition", "CancelReason", "CancelledByUserId", "QualityApprovedByUserId", "EngineeringApprovedByUserId", "ManufacturingApprovedByUserId", "ConcessionApprovedByUserId", "ExecutedByUserId", "ClosedByUserId", "ScrapDocumentId", "ScrappedSerialUnitId", "ReworkOperationId", "ReinspectionKind", "ReinspectionRecordId", "CapaId", "ResultDocumentId" } },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryItem), new[] { "Code", "RequiresIncomingInspection", "RequiredCertificateType", "ShelfLifeDays" } },
+            { typeof(Entities.Model.NasbNiro.Inventory.ItemQualityChange), null },
+            { typeof(Entities.Model.NasbNiro.Quality.QualitySetting), null },
+            { typeof(Entities.Model.NasbNiro.Quality.MeasuringEquipment), new[] { "Code", "RequiresCalibration", "CalibrationWaiverReason", "CalibrationWaivedByUserId", "Status", "OutOfServiceReason" } },
+            { typeof(Entities.Model.NasbNiro.Quality.Capa), new[] { "Number", "Status", "OwnerUserId", "CloseNote", "ClosedByUserId", "Iteration", "EscalationLevel", "CancelReason", "CancelledByUserId" } },
+            { typeof(Entities.Model.NasbNiro.Quality.Itp), new[] { "Number", "Status", "Revision", "NoticeDays", "ClientApprovalReference" } },
+            { typeof(Entities.Model.NasbNiro.Quality.ItpActivity), new[] { "Status", "NotApplicableReference", "NotificationSentAt", "NotificationLetterId", "StatusNote", "EvidenceNote", "EvidenceDocumentId" } },
+            { typeof(Entities.Model.NasbNiro.Quality.ReleaseNote), new[] { "Number", "Status", "ReleasedByUserId", "CancelReason", "CertificateOfConformityNumber" } },
+            { typeof(Entities.Model.NasbNiro.Quality.DocumentRevisionRecord), new[] { "Revision", "Status", "ApprovedByUserId", "EffectiveDate" } },
+            { typeof(Entities.Model.NasbNiro.Quality.ManagementReviewDecision), new[] { "Status", "ResponsibleUserId", "DueDate", "DoneByUserId", "DoneNote" } },
             // office automation, review 1 (M7): who may act for a position, who sits in it, the numbering rules, the attendance policy, manual and imported clock events and the payroll attendance input
             { typeof(OfDelegation), null },
             { typeof(OfPosition), new[] { "Title", "UnitId", "UserId", "EmployeeId", "IsManager", "CanSign", "IsActive" } },
@@ -159,6 +171,8 @@ namespace DataLayer.Context
                     if (entry.Entity is OfClockEvent ce && ce.Source == OfClockSource.Device) continue;
                     // operations and terminal bookings are made by the system or by the floor in bulk; their changes and supervisor edits are the trail
                     if (entry.Entity is MfOperation) continue;
+                    // items (imports) and ITP activities (copied from a template) are made in bulk; only the changes of their gates are listed
+                    if (entry.Entity is Entities.Model.NasbNiro.Inventory.InventoryItem || entry.Entity is Entities.Model.NasbNiro.Quality.ItpActivity) continue;
                     if (entry.Entity is MfTimeBooking tb && tb.Source == MfBookingSource.Terminal) continue;
                     // the one-off linker of legacy contracts and tenders links them in bulk; a person's manual link is listed
                     if (entry.Entity is SlCustomerLink link && link.Method == SlLinkMethod.LegacyMatch) continue;

@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
+using Common.Results;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -153,6 +154,10 @@ namespace WebApi.Controllers
         [HttpPost("out-of-tolerance/assess")]
         public async Task<IActionResult> AssessAsync([FromBody] AssessOutOfToleranceDto dto, CancellationToken ct) => Ok(await _service.AssessAsync(dto, ct));
 
+        /// <summary>R1q D40: links the accepted new inspection that re-inspected a document assessed as "re-inspect".</summary>
+        [HttpPost("out-of-tolerance/reinspection")]
+        public async Task<IActionResult> LinkReinspectionAsync([FromBody] LinkOotReinspectionDto dto, CancellationToken ct) => Ok(await _service.LinkReinspectionAsync(dto, ct));
+
         [HttpPost("out-of-tolerance/close")]
         public async Task<IActionResult> CloseCaseAsync([FromBody] CloseOutOfToleranceDto dto, CancellationToken ct) => Ok(await _service.CloseCaseAsync(dto, ct));
     }
@@ -264,18 +269,20 @@ namespace WebApi.Controllers
             _audit = audit;
         }
 
-        // CAPA
+        // CAPA. R1q D13: any signed-in user may call the reads; the service shows the readers of the module everything and everybody else only the CAPAs he owns or has an action in
         [HttpGet("capas")]
-        [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> CapasAsync([FromQuery] CapaQuery query, CancellationToken ct) => Ok((await _capa.GetCapasAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpGet("capas/overdue")]
-        [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> OverdueAsync([FromQuery] CapaQuery query, CancellationToken ct) => Ok((await _capa.GetOverdueAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpGet("capas/{id:int}")]
-        [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> CapaAsync(int id, CancellationToken ct) => Ok(await _capa.GetCapaAsync(id, ct));
+
+        /// <summary>Runs the nightly late-CAPA escalation now (QA, PMO); the same method the 04:00 job calls.</summary>
+        [HttpPost("capas/escalate")]
+        [Authorize(Roles = "QA,PMO")]
+        public async Task<IActionResult> EscalateAsync(CancellationToken ct) => Ok(ResponseDtoHelper.Ok(await _capa.EscalateAsync(ct)));
 
         [HttpPost("capas")]
         public async Task<IActionResult> SaveCapaAsync([FromBody] SaveCapaDto dto, CancellationToken ct) => Ok(await _capa.SaveCapaAsync(dto, ct));
@@ -343,6 +350,10 @@ namespace WebApi.Controllers
 
         [HttpPost("management-reviews/action")]
         public async Task<IActionResult> ReviewActionAsync([FromBody] ReviewActionDto dto, CancellationToken ct) => Ok(await _audit.ReviewActionAsync(dto, ct));
+
+        /// <summary>R1q D23: done, cancel or reopen one decision of a closed review (the responsible person may report it done).</summary>
+        [HttpPost("management-reviews/decision/action")]
+        public async Task<IActionResult> DecisionActionAsync([FromBody] ReviewDecisionActionDto dto, CancellationToken ct) => Ok(await _audit.DecisionActionAsync(dto, ct));
     }
 
     /// <summary>Release notes and the final data book (ISO 8.6).</summary>

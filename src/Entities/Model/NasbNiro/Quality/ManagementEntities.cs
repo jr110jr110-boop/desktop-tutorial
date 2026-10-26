@@ -51,6 +51,21 @@ namespace Entities.Model.NasbNiro.Quality
         public string CloseNote { get; set; }
         public bool AutoDrafted { get; set; }
 
+        // ----- R1q
+        /// <summary>1 for the first round of actions; a failed effectiveness check re-opens the CAPA with the next number (R1q D20).</summary>
+        public int Iteration { get; set; } = 1;
+
+        /// <summary>0 = none, 1 = QA told it is late, 2 = the CEO told (the nightly job of R1q D13).</summary>
+        public int EscalationLevel { get; set; }
+
+        public DateTimeOffset? EscalatedAt { get; set; }
+
+        /// <summary>A mandatory CAPA can only be cancelled by the QA manager, with a reason (R1q D21).</summary>
+        public string CancelReason { get; set; }
+
+        public DateTimeOffset? CancelledAt { get; set; }
+        public int? CancelledByUserId { get; set; }
+
         public ICollection<CapaAction> Actions { get; set; }
 
         [Timestamp]
@@ -70,6 +85,9 @@ namespace Entities.Model.NasbNiro.Quality
         public DateTime? DoneAt { get; set; }
         public Guid? EvidenceDocumentId { get; set; }
         public string EvidenceNote { get; set; }
+
+        /// <summary>The round of the CAPA this action belongs to (<see cref="Capa.Iteration"/>).</summary>
+        public int Iteration { get; set; } = 1;
     }
 
     public class CustomerComplaint : BaseEntity
@@ -126,8 +144,33 @@ namespace Entities.Model.NasbNiro.Quality
         public string CancelReason { get; set; }
         public string Note { get; set; }
 
+        /// <summary>Everybody who saved the note, ids between commas: none of them may release it (R1q D22).</summary>
+        public string EditorUserIds { get; set; }
+
+        /// <summary>The products and serial numbers released: a customer delivery of the work order may only carry these (R1q D10).</summary>
+        public ICollection<ReleaseNoteLine> Lines { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>One released product of a release note: the item with its quantity and, for a serial item, the serial numbers.</summary>
+    public class ReleaseNoteLine
+    {
+        public int Id { get; set; }
+
+        public int ReleaseNoteId { get; set; }
+        public ReleaseNote ReleaseNote { get; set; }
+
+        public int RowNumber { get; set; }
+
+        public int ItemId { get; set; }
+        public InventoryItem Item { get; set; }
+
+        public decimal Quantity { get; set; }
+
+        /// <summary>Serial numbers, one per line of text (serial items only).</summary>
+        public string SerialNumbers { get; set; }
     }
 
     public class ControlledDocument : BaseEntity
@@ -288,6 +331,12 @@ namespace Entities.Model.NasbNiro.Quality
 
         public int? CapaId { get; set; }
         public Capa Capa { get; set; }
+
+        // ----- R1q D23: a decision is followed up until it is done
+        public ReviewDecisionStatus Status { get; set; }
+        public DateTimeOffset? DoneAt { get; set; }
+        public int? DoneByUserId { get; set; }
+        public string DoneNote { get; set; }
     }
 
     /// <summary>Numbers the company can change (days, months): see <c>QualitySettingKeys</c>.</summary>

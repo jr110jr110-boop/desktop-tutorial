@@ -53,6 +53,55 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>EN 10204 certificate type (2.2, 3.1, 3.2) the lot must have, verified by QC, before incoming inspection can accept it.</summary>
         public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+
+        /// <summary>Why a quality control is reduced (R1q D11); needed when inspection, certificate or shelf life is weakened. Only QC, QA and PMO change these fields.</summary>
+        public string QualityChangeReason { get; set; }
+    }
+
+    /// <summary>QC or QA changes the quality fields of an item (inspection on receipt, required certificate, shelf life).</summary>
+    public class SaveItemQualityDto
+    {
+        public int ItemId { get; set; }
+        public bool RequiresIncomingInspection { get; set; } = true;
+        public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+        public int? ShelfLifeDays { get; set; }
+
+        /// <summary>Required when a control is reduced.</summary>
+        public string Reason { get; set; }
+    }
+
+    public class ItemQualityChangeQuery : PaginationParams
+    {
+        public ItemQualityChangeStatus? Status { get; set; }
+        public int? ItemId { get; set; }
+    }
+
+    public class ItemQualityChangeDto
+    {
+        public int Id { get; set; }
+        public int ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public string ItemTitle { get; set; }
+        public bool RequiresIncomingInspection { get; set; }
+        public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+        public int? ShelfLifeDays { get; set; }
+        public bool CurrentRequiresIncomingInspection { get; set; }
+        public Entities.Model.NasbNiro.Quality.CertificateType? CurrentRequiredCertificateType { get; set; }
+        public int? CurrentShelfLifeDays { get; set; }
+        public string Reason { get; set; }
+        public ItemQualityChangeStatus Status { get; set; }
+        public string RequestedByName { get; set; }
+        public DateTimeOffset RequestedAt { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecidedByName { get; set; }
+        public string DecisionNote { get; set; }
+    }
+
+    public class DecideItemQualityChangeDto
+    {
+        public int Id { get; set; }
+        public bool Approve { get; set; }
+        public string Note { get; set; }
     }
 
     public class InventoryItemDto
@@ -83,6 +132,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public bool RequiresIncomingInspection { get; set; }
         public int? ShelfLifeDays { get; set; }
         public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+
+        /// <summary>A change that reduces a quality control is waiting for the second approval of QA (open approved purchase orders exist).</summary>
+        public int? PendingQualityChangeId { get; set; }
     }
 
     public class InventoryItemQuery : PaginationParams
@@ -505,6 +557,42 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ParentItemCode { get; set; }
         public bool IsCustomerProperty { get; set; }
         public decimal OnHand { get; set; }
+    }
+
+    /// <summary>The expiry report (R1q D32).</summary>
+    public class LotExpiryQuery : PaginationParams
+    {
+        /// <summary>Lots expiring within this many days are listed; empty = the company setting ExpiryWarnDays.</summary>
+        public int? WithinDays { get; set; }
+
+        public int? ItemId { get; set; }
+
+        /// <summary>Only lots that already expired.</summary>
+        public bool OnlyExpired { get; set; }
+    }
+
+    public class LotExpiryDto
+    {
+        public int LotId { get; set; }
+        public int ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public string ItemTitle { get; set; }
+        public string Unit { get; set; }
+        public string LotNumber { get; set; }
+        public string HeatNumber { get; set; }
+        public DateTime ExpiryDate { get; set; }
+
+        /// <summary>Days to the expiry date; negative = expired.</summary>
+        public int DaysLeft { get; set; }
+
+        public bool Expired { get; set; }
+        public decimal OnHand { get; set; }
+
+        /// <summary>Warehouse/location (quantity) of the stock of the lot.</summary>
+        public string Locations { get; set; }
+
+        /// <summary>The approved concession NCR with which the use of the lot after its expiry was allowed.</summary>
+        public string ConcessionNcrNumber { get; set; }
     }
 
     public class SerialQuery : PaginationParams

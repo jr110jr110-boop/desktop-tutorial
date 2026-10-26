@@ -17,6 +17,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public Guid? EvidenceDocumentId { get; set; }
         public string EvidenceNote { get; set; }
         public bool Overdue { get; set; }
+
+        /// <summary>The round of the CAPA this action belongs to; a failed effectiveness check starts the next round.</summary>
+        public int Iteration { get; set; } = 1;
     }
 
     public class CapaListDto
@@ -50,7 +53,29 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string ClosedByName { get; set; }
         public string CloseNote { get; set; }
         public string RowVersion { get; set; }
+
+        /// <summary>1 for the first round; 2 and up after a failed effectiveness check.</summary>
+        public int Iteration { get; set; } = 1;
+
+        /// <summary>0 on time, 1 QA was told it is late, 2 the CEO was told as well.</summary>
+        public int EscalationLevel { get; set; }
+
+        public string CancelReason { get; set; }
+        public DateTimeOffset? CancelledAt { get; set; }
+
+        /// <summary>The first day the effectiveness may be judged (implementation date + the waiting days).</summary>
+        public DateTime? EffectivenessEarliest { get; set; }
+
         public List<CapaActionDto> Actions { get; set; } = new List<CapaActionDto>();
+    }
+
+    public class CapaEscalationResultDto
+    {
+        /// <summary>CAPAs that moved up a level now.</summary>
+        public int Escalated { get; set; }
+
+        /// <summary>Of them, those the CEO was told about.</summary>
+        public int CeoNotified { get; set; }
     }
 
     public class CapaQuery : PaginationParams

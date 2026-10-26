@@ -78,6 +78,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.DocumentProduced).HasMaxLength(Title);
                 b.Property(x => x.Remark).HasMaxLength(Text);
                 b.Property(x => x.StatusNote).HasMaxLength(Text);
+                b.Property(x => x.NotApplicableReference).HasMaxLength(Title);
+                b.Property(x => x.EvidenceNote).HasMaxLength(Text);
                 b.HasIndex(x => new { x.ItpId, x.Status });
                 b.HasOne(x => x.Itp).WithMany(x => x.Activities).HasForeignKey(x => x.ItpId).OnDelete(DeleteBehavior.Cascade);
             });
@@ -203,6 +205,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.Range).HasMaxLength(Name);
                 b.Property(x => x.Accuracy).HasMaxLength(Name);
                 b.Property(x => x.OutOfServiceReason).HasMaxLength(Text);
+                b.Property(x => x.CalibrationWaiverReason).HasMaxLength(Text);
                 b.Property(x => x.Note).HasMaxLength(Text);
                 b.HasIndex(x => x.NextDue);
             });
@@ -238,6 +241,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.SourceKind).HasMaxLength(Code).IsRequired();
                 b.Property(x => x.SourceNumber).HasMaxLength(Code);
                 b.Property(x => x.AssessmentNote).HasMaxLength(Text);
+                b.Property(x => x.ReinspectionKind).HasMaxLength(Code);
                 b.HasOne(x => x.Case).WithMany(x => x.Items).HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.Cascade);
             });
 
@@ -344,12 +348,15 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.EffectivenessCriteria).HasMaxLength(Text);
                 b.Property(x => x.EffectivenessResult).HasMaxLength(LongText);
                 b.Property(x => x.CloseNote).HasMaxLength(Text);
+                b.Property(x => x.CancelReason).HasMaxLength(Text);
+                b.Property(x => x.Iteration).HasDefaultValue(1);
             });
             builder.Entity<CapaAction>(b =>
             {
                 b.ToTable("QaCapaActions");
                 b.Property(x => x.Description).HasMaxLength(Text).IsRequired();
                 b.Property(x => x.EvidenceNote).HasMaxLength(Text);
+                b.Property(x => x.Iteration).HasDefaultValue(1);
                 b.HasOne(x => x.Capa).WithMany(x => x.Actions).HasForeignKey(x => x.CapaId).OnDelete(DeleteBehavior.Cascade);
             });
             builder.Entity<CustomerComplaint>(b =>
@@ -378,7 +385,17 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.CertificateOfConformityNumber).HasMaxLength(Code);
                 b.Property(x => x.CancelReason).HasMaxLength(Text);
                 b.Property(x => x.Note).HasMaxLength(Text);
+                b.Property(x => x.EditorUserIds).HasMaxLength(Text);
                 b.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<ReleaseNoteLine>(b =>
+            {
+                b.ToTable("QaReleaseNoteLines");
+                b.Property(x => x.Quantity).HasPrecision(18, 4);
+                b.Property(x => x.SerialNumbers).HasMaxLength(LongText);
+                b.HasIndex(x => x.ReleaseNoteId);
+                b.HasOne(x => x.ReleaseNote).WithMany(x => x.Lines).HasForeignKey(x => x.ReleaseNoteId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ------------------------------------------------------------------ document control
@@ -457,6 +474,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
             {
                 b.ToTable("QaReviewDecisions");
                 b.Property(x => x.Text).HasMaxLength(LongText).IsRequired();
+                b.Property(x => x.DoneNote).HasMaxLength(Text);
                 b.HasOne(x => x.Review).WithMany(x => x.Decisions).HasForeignKey(x => x.ReviewId).OnDelete(DeleteBehavior.Cascade);
                 b.HasOne(x => x.Capa).WithMany().HasForeignKey(x => x.CapaId).OnDelete(DeleteBehavior.Restrict);
             });

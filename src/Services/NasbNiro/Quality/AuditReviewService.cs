@@ -31,6 +31,9 @@ namespace Services.NasbNiro.Quality
         Task<ResponseDto<ReviewDto>> SaveInputAsync(SaveReviewInputDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<ReviewDto>> SaveDecisionAsync(SaveReviewDecisionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<ReviewDto>> ReviewActionAsync(ReviewActionDto dto, CancellationToken cancellationToken);
+
+        /// <summary>Follow-up of one decision of a review: done, cancel, reopen (R1q D23).</summary>
+        Task<ResponseDto<ReviewDto>> DecisionActionAsync(ReviewDecisionActionDto dto, CancellationToken cancellationToken);
     }
 
     /// <summary>Internal audits (ISO 9001 9.2) and management review (9.3). The system drafts the review inputs from the records.</summary>
@@ -41,12 +44,14 @@ namespace Services.NasbNiro.Quality
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly ICapaService _capa;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
-        public AuditReviewService(IUnitOfWork uow, IInventoryUserContext user, ICapaService capa)
+        public AuditReviewService(IUnitOfWork uow, IInventoryUserContext user, ICapaService capa, global::Services.NasbNiro.Office.INotificationService notify)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _capa = capa ?? throw new ArgumentNullException(nameof(capa));
+            _notify = notify;
         }
 
         private int Me => _user.UserId;
@@ -272,7 +277,8 @@ namespace Services.NasbNiro.Quality
             DateTime from = today.AddYears(-1);
             var drafts = new Dictionary<ReviewInputCategory, string>();
 
-            int overdueDecisions = await _uow.Set<ManagementReviewDecision>().CountAsync(d => d.Review.Status != ReviewStatus.Draft && d.DueDate < today &&
+            // R1q D23: a decision counts as late only while it is open; "done" and "cancelled" ones are followed up
+            int overdueDecisions = await _uow.Set<ManagementReviewDecision>().CountAsync(d => d.Review.Status != ReviewStatus.Draft && d.Status == ReviewDecisionStatus.Open && d.DueDate < today &&
                 (d.CapaId == null || (d.Capa.Status != CapaStatus.Closed && d.Capa.Status != CapaStatus.Cancelled)), cancellationToken);
             drafts[ReviewInputCategory.PreviousActions] = $"تصمیم‌های جلسه‌های قبل با موعد گذشته و بسته‌نشده: {overdueDecisions}";
 
@@ -312,8 +318,9 @@ namespace Services.NasbNiro.Quality
 
         private async Task<ReviewDto> BuildReviewAsync(ManagementReview r, CancellationToken cancellationToken)
         {
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, r.Decisions.Select(d => d.ResponsibleUserId), cancellationToken);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, r.Decisions.Select(d => d.ResponsibleUserId).Concat(r.Decisions.Select(d => d.DoneByUserId)), cancellationToken);
             List<int> capaIds = r.Decisions.Where(d => d.CapaId.HasValue).Select(d => d.CapaId.Value).ToList();
+            DateTime today = DateTime.Today;
             Dictionary<int, string> capas = await _uow.Set<Capa>().Where(c => capaIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Number, cancellationToken);
             return new ReviewDto
             {
@@ -323,6 +330,8 @@ namespace Services.NasbNiro.Quality
                 {
                     Id = d.Id, Text = d.Text, ResponsibleUserId = d.ResponsibleUserId, ResponsibleName = names.Name(d.ResponsibleUserId), DueDate = d.DueDate, CapaId = d.CapaId,
                     CapaNumber = d.CapaId.HasValue && capas.TryGetValue(d.CapaId.Value, out string n) ? n : null,
+                    Status = d.Status, DoneAt = d.DoneAt, DoneByName = names.Name(d.DoneByUserId), DoneNote = d.DoneNote,
+                    Overdue = d.Status == ReviewDecisionStatus.Open && d.DueDate.HasValue && d.DueDate.Value.Date < today,
                 }).ToList(),
             };
         }
@@ -434,6 +443,65 @@ namespace Services.NasbNiro.Quality
             }
             r.ModifyDate = now; r.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncDecisionTasksAsync(r, cancellationToken);
+            return ResponseDtoHelper.Ok(await BuildReviewAsync(r, cancellationToken));
+        }
+
+        /// <summary>Each open decision of a closed review is a task in the inbox of its responsible person until it is done or cancelled.</summary>
+        private async Task SyncDecisionTasksAsync(ManagementReview r, CancellationToken cancellationToken)
+        {
+            foreach (ManagementReviewDecision d in r.Decisions)
+            {
+                bool waiting = r.Status == ReviewStatus.Closed && d.Status == ReviewDecisionStatus.Open && d.ResponsibleUserId.HasValue;
+                await _notify.GateAsync("review-decision:" + d.Id, waiting, new global::Services.NasbNiro.Office.NotifyRequest
+                {
+                    SourceKey = "review-decision:" + d.Id, Module = "quality", SourceType = "review-decision", SourceId = d.Id,
+                    Title = "تصمیم بازنگری مدیریت: " + (d.Text != null && d.Text.Length > 120 ? d.Text.Substring(0, 120) + "…" : d.Text),
+                    Link = "/quality/management-reviews/" + r.Id, Kind = global::Entities.Model.NasbNiro.Office.OfInboxKind.Task, DueDate = d.DueDate,
+                    UserIds = d.ResponsibleUserId.HasValue ? new List<int> { d.ResponsibleUserId.Value } : new List<int>(),
+                }, cancellationToken);
+            }
+        }
+
+        public async Task<ResponseDto<ReviewDto>> DecisionActionAsync(ReviewDecisionActionDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null || Clean(dto.Action) == null) return Bad<ReviewDto>(QualityText.InvalidData);
+            ManagementReviewDecision d = await _uow.Set<ManagementReviewDecision>().Include(x => x.Capa).FirstOrDefaultAsync(x => x.Id == dto.DecisionId, cancellationToken);
+            if (d == null) return QualityText.NotFound<ReviewDto>("تصمیم پیدا نشد.");
+            ManagementReview r = await FullReview().FirstOrDefaultAsync(x => x.Id == d.ReviewId && !x.Deleted, cancellationToken);
+            if (r == null) return QualityText.NotFound<ReviewDto>("جلسه بازنگری مدیریت پیدا نشد.");
+            if (r.Status != ReviewStatus.Closed) return Bad<ReviewDto>("پیگیری تصمیم‌ها پس از بسته‌شدن جلسه آغاز می‌شود.");
+            string note = Clean(dto.Note);
+            DateTimeOffset now = DateTimeOffset.Now;
+            switch (dto.Action.Trim().ToLowerInvariant())
+            {
+                case "done":
+                    // the responsible person reports the work done; the reviewers (QA, PMO, CEO) may do it for anybody
+                    if (d.ResponsibleUserId != Me && !_user.IsInRole(ReviewRoles)) return Bad<ReviewDto>(QualityText.NotAllowed);
+                    if (d.Status != ReviewDecisionStatus.Open) return Bad<ReviewDto>("این تصمیم دیگر باز نیست.");
+                    if (note == null) return Bad<ReviewDto>("شرح اقدام انجام‌شده (یا مرجع مدرک) را بنویسید.");
+                    if (d.CapaId.HasValue && d.Capa != null && d.Capa.Status != CapaStatus.Closed)
+                        return Bad<ReviewDto>($"CAPA مرتبط ({d.Capa.Number}) هنوز بسته نشده است؛ تصمیم پس از بستن آن انجام‌شده ثبت می‌شود.");
+                    d.Status = ReviewDecisionStatus.Done; d.DoneAt = now; d.DoneByUserId = Me; d.DoneNote = note;
+                    break;
+                case "cancel":
+                    if (!_user.IsInRole(ReviewRoles)) return Bad<ReviewDto>(QualityText.NotAllowed + " (لغو تصمیم بازنگری با QA، مدیرعامل یا PMO است)");
+                    if (d.Status != ReviewDecisionStatus.Open) return Bad<ReviewDto>("این تصمیم دیگر باز نیست.");
+                    if (note == null) return Bad<ReviewDto>("دلیل لغو تصمیم را بنویسید.");
+                    d.Status = ReviewDecisionStatus.Cancelled; d.DoneAt = now; d.DoneByUserId = Me; d.DoneNote = note;
+                    break;
+                case "reopen":
+                    if (!_user.IsInRole(ReviewRoles)) return Bad<ReviewDto>(QualityText.NotAllowed);
+                    if (d.Status == ReviewDecisionStatus.Open) return Bad<ReviewDto>("این تصمیم باز است.");
+                    if (note == null) return Bad<ReviewDto>("دلیل بازگشایی تصمیم را بنویسید.");
+                    d.Status = ReviewDecisionStatus.Open; d.DoneAt = null; d.DoneByUserId = null; d.DoneNote = null;
+                    break;
+                default:
+                    return Bad<ReviewDto>("عملیات نامعتبر است.");
+            }
+            r.ModifyDate = now; r.ModifierUserId = Me;
+            await _uow.SaveChangesAsync(cancellationToken);
+            await SyncDecisionTasksAsync(r, cancellationToken);
             return ResponseDtoHelper.Ok(await BuildReviewAsync(r, cancellationToken));
         }
     }

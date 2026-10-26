@@ -97,6 +97,19 @@ namespace ViewModels.NasbNiro.QualityDtos
         public DateTimeOffset? DoneAt { get; set; }
         public string StatusNote { get; set; }
 
+        /// <summary>The signed outgoing letter that carried the witness notice (its signing date is the notification date).</summary>
+        public int? NotificationLetterId { get; set; }
+
+        public string NotificationLetterNumber { get; set; }
+
+        /// <summary>The client's letter that agreed a hold or witness point of the client or the third party is not applicable.</summary>
+        public string NotApplicableReference { get; set; }
+
+        /// <summary>Proof an activity without a required report was done.</summary>
+        public Guid? EvidenceDocumentId { get; set; }
+
+        public string EvidenceNote { get; set; }
+
         /// <summary>The activity has a hold point and is not finished.</summary>
         public bool HoldPending { get; set; }
 
@@ -223,10 +236,21 @@ namespace ViewModels.NasbNiro.QualityDtos
     {
         public int Id { get; set; }
 
-        /// <summary>notify, done, not-applicable, waive.</summary>
+        /// <summary>notify, plan, done, not-applicable.</summary>
         public string Action { get; set; }
+
+        /// <summary>plan: the planned date. notify: only today or empty; the notification date is the server time or the signing day of <see cref="LetterId"/>.</summary>
         public DateTime? Date { get; set; }
         public string Note { get; set; }
+
+        /// <summary>notify: a signed, registered or sent outgoing letter (Office) that told the parties about the test.</summary>
+        public int? LetterId { get; set; }
+
+        /// <summary>not-applicable on a client or third-party hold/witness point: the client's letter (number or reference) that agreed.</summary>
+        public string Reference { get; set; }
+
+        /// <summary>done, for an activity without a required report: the document that proves the work was done (when no accepted inspection record is linked).</summary>
+        public Guid? EvidenceDocumentId { get; set; }
     }
 
     public class SaveItpReleaseDto

@@ -120,6 +120,16 @@ namespace ViewModels.NasbNiro.QualityDtos
         public DateTime? DueDate { get; set; }
         public int? CapaId { get; set; }
         public string CapaNumber { get; set; }
+
+        /// <summary>Follow-up status (R1q D23): open until it is done or cancelled.</summary>
+        public ReviewDecisionStatus Status { get; set; }
+
+        public DateTimeOffset? DoneAt { get; set; }
+        public string DoneByName { get; set; }
+        public string DoneNote { get; set; }
+
+        /// <summary>Open and past its due date.</summary>
+        public bool Overdue { get; set; }
     }
 
     public class ReviewListDto
@@ -173,6 +183,17 @@ namespace ViewModels.NasbNiro.QualityDtos
 
         /// <summary>The system drafts a CAPA (source: management review) for QA to assign.</summary>
         public bool CreateCapa { get; set; }
+    }
+
+    public class ReviewDecisionActionDto
+    {
+        public int DecisionId { get; set; }
+
+        /// <summary>done, cancel, reopen</summary>
+        public string Action { get; set; }
+
+        /// <summary>done: what was done (or the evidence reference); cancel and reopen: the reason.</summary>
+        public string Note { get; set; }
     }
 
     public class ReviewActionDto

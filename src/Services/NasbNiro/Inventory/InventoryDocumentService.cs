@@ -504,6 +504,11 @@ namespace Services.NasbNiro.Inventory
 
             if (source.Kind == WarehouseKind.Quarantine && takesOut && !fromQc && !adjustment)
                 return "کالای انبار قرنطینه فقط با نتیجه بازرسی کنترل کیفیت یا تصمیم NCR خارج می‌شود.";
+            // R1q D31: a decrease adjustment out of quarantine, scrap or a contractor warehouse paired with an increase adjustment in a usable warehouse
+            // would move the goods without inspection; such a decrease is only the result of a stock count or of a quality decision
+            if (type == InventoryDocumentType.AdjustmentDecrease && !fromQc && system?.StockCountId == null &&
+                (source.Kind == WarehouseKind.Quarantine || source.Kind == WarehouseKind.Scrap || source.Kind == WarehouseKind.Subcontractor))
+                return "کاهش موجودی انبار قرنطینه، ضایعات یا پیمانکار با سند تعدیل دستی مجاز نیست (با تعدیل کاهشی و افزایشی کالای قرنطینه بدون بازرسی وارد انبار قابل‌مصرف می‌شود)؛ کالا فقط با نتیجه بازرسی، تصمیم NCR یا نتیجه شمارش انبار کم می‌شود.";
             if (source.Kind == WarehouseKind.Scrap && takesOut && type != InventoryDocumentType.ScrapSale && !adjustment)
                 return "از انبار ضایعات فقط با سند فروش ضایعات خارج می‌شود.";
             if ((type == InventoryDocumentType.ScrapReceipt || type == InventoryDocumentType.ScrapSale) && source.Kind != WarehouseKind.Scrap)
@@ -807,9 +812,11 @@ namespace Services.NasbNiro.Inventory
                 string salesError = await Sales.SlFulfilment.CheckConfirmAsync(_uow, document, cancellationToken);
                 if (salesError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesError);
             }
-            else if (document.Type == InventoryDocumentType.CustomerDelivery && !document.ServiceOrderId.HasValue)
+            else if (document.Type == InventoryDocumentType.CustomerDelivery && Quality.ReleaseCoverage.GateApplies(document.SalesOrderId.HasValue, document.ServiceOrderId.HasValue, document.WorkOrderId.HasValue))
             {
-                string releaseError = await _release.CheckDeliveryAsync(document.WorkOrderId, cancellationToken);
+                // R1q D10 ★: only a delivery of spare parts against a service order (no work order) skips the release note; the lines of every other
+                // delivery must be covered by a released note of the work order, and no non-conformance may be open on it
+                string releaseError = await _release.CheckDeliveryAsync(document, cancellationToken);
                 if (releaseError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(releaseError);
             }
 
@@ -851,6 +858,19 @@ namespace Services.NasbNiro.Inventory
             var errors = new List<string>();
             DateTimeOffset now = DateTimeOffset.Now;
 
+            // R1q D32: an expired lot is not issued, delivered or sent out; it may be used only under an approved concession NCR on that very lot (QC/QA signature, engineering, manufacturing and the concession permit)
+            HashSet<int> concessionLots = null;
+            async Task<string> ExpiredLotAsync(InventoryLot lot, InventoryItem lotItem)
+            {
+                if (lot == null || !Quality.LotExpiryRules.Consumes(type) || !Quality.LotExpiryRules.IsExpired(lot.ExpiryDate, DateTime.Today)) return null;
+                concessionLots ??= (await _uow.Set<NonConformance>()
+                    .Where(n => !n.Deleted && n.LotId != null && n.Disposition == NcrDisposition.Concession && n.ConcessionApprovedAt != null &&
+                                (n.Status == NcrStatus.Approved || n.Status == NcrStatus.Executed || n.Status == NcrStatus.Closed))
+                    .Select(n => n.LotId.Value).ToListAsync(cancellationToken)).ToHashSet();
+                if (concessionLots.Contains(lot.Id)) return null;
+                return $"بچ {lot.LotNumber} کالای {lotItem.Code} در {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(lot.ExpiryDate.Value))} منقضی شده است؛ مصرف، تحویل یا ارسال آن فقط با گزارش عدم انطباق دارای مجوز ارفاقی تاییدشده برای همین بچ ممکن است (یا کالا را به قرنطینه/ضایعات منتقل کنید).";
+            }
+
             foreach (InventoryDocumentLine line in document.Lines.OrderBy(l => l.RowNumber))
             {
                 string row = $"ردیف {line.RowNumber}: ";
@@ -875,6 +895,11 @@ namespace Services.NasbNiro.Inventory
                     {
                         InventoryLot lot = itemLots.FirstOrDefault(l => l.Id == line.LotId.Value && l.ItemId == item.Id);
                         if (lot == null) { errors.Add(row + "بچ این ردیف پیدا نشد."); continue; }
+                        if (!lineIn)
+                        {
+                            string expired = await ExpiredLotAsync(lot, item);
+                            if (expired != null) { errors.Add(row + expired); continue; }
+                        }
                         lotId = lot.Id;
                     }
                     else if (lineIn)
@@ -1043,6 +1068,11 @@ namespace Services.NasbNiro.Inventory
                                 errors.Add(row + label + " در این انبار موجود نیست.");
                                 continue;
                             }
+                            if (unit.LotId.HasValue)
+                            {
+                                string expiredUnit = await ExpiredLotAsync(itemLots.FirstOrDefault(l => l.Id == unit.LotId.Value), item);
+                                if (expiredUnit != null) { errors.Add(row + label + ": " + expiredUnit); continue; }
+                            }
                             if (line.LocationId.HasValue && unit.LocationId != line.LocationId)
                             {
                                 errors.Add(row + label + " در محل انتخاب‌شده نیست.");
@@ -1136,8 +1166,13 @@ namespace Services.NasbNiro.Inventory
                 posted.Add(transaction);
             }
 
+            // R1q D4: goods sent to rework or repair arrive in quarantine and wait for an inspection that is linked to the NCR
+            NonConformance linkedNcr = document.NcrId.HasValue ? await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == document.NcrId.Value, cancellationToken) : null;
+            bool reworkArrival = linkedNcr != null && transfer && inWarehouse.Kind == WarehouseKind.Quarantine &&
+                                 (linkedNcr.Disposition == NcrDisposition.Rework || linkedNcr.Disposition == NcrDisposition.Repair);
+
             // receipts into quarantine wait for incoming inspection, one inspection per line
-            if (document.NcrId == null && document.StockCountId == null && type != InventoryDocumentType.QcRelease && inWarehouse.Kind == WarehouseKind.Quarantine)
+            if ((document.NcrId == null || reworkArrival) && document.StockCountId == null && type != InventoryDocumentType.QcRelease && inWarehouse.Kind == WarehouseKind.Quarantine)
             {
                 foreach (InventoryDocumentLine line in document.Lines.Where(l => incoming || transfer || l.Direction == DocumentLineDirection.In).OrderBy(l => l.RowNumber))
                 {
@@ -1154,6 +1189,7 @@ namespace Services.NasbNiro.Inventory
                         Quantity = line.Quantity,
                         SerialNumbers = line.Serials == null || line.Serials.Count == 0 ? null : string.Join("\n", line.Serials.OrderBy(x => x.Id).Select(x => x.SerialNumber)),
                         TargetWarehouseId = incoming ? document.DestinationWarehouseId : null,
+                        ReinspectionOfNcrId = reworkArrival ? linkedNcr.Id : (int?)null,
                         Status = InspectionStatus.Pending,
                         CreateDate = now,
                         CreatorUserId = _user.UserId,
@@ -1183,16 +1219,14 @@ namespace Services.NasbNiro.Inventory
                 }
             }
 
-            if (document.NcrId.HasValue)
+            if (linkedNcr != null && linkedNcr.Status == NcrStatus.Approved)
             {
-                NonConformance ncr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == document.NcrId.Value, cancellationToken);
-                if (ncr != null && ncr.Status == NcrStatus.Approved)
-                {
-                    ncr.Status = NcrStatus.Executed;
-                    ncr.ResultDocumentId = document.Id;
-                    ncr.ExecutedAt = now;
-                    ncr.ExecutedByUserId = _user.UserId;
-                }
+                linkedNcr.Status = NcrStatus.Executed;
+                linkedNcr.ResultDocumentId = document.Id;
+                // R1q D5: the document that moved the goods into the scrap warehouse is the proof of the scrap decision
+                if (linkedNcr.Disposition == NcrDisposition.Scrap) linkedNcr.ScrapDocumentId = document.Id;
+                linkedNcr.ExecutedAt = now;
+                linkedNcr.ExecutedByUserId = _user.UserId;
             }
 
             document.Number = await NextNumberAsync(type, document.DocumentDate, cancellationToken);
@@ -1552,6 +1586,7 @@ namespace Services.NasbNiro.Inventory
                 {
                     ncr.Status = NcrStatus.Approved;
                     ncr.ResultDocumentId = null;
+                    if (ncr.ScrapDocumentId == document.Id) ncr.ScrapDocumentId = null;
                     ncr.ExecutedAt = null;
                     ncr.ExecutedByUserId = null;
                 }

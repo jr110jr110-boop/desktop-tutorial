@@ -604,7 +604,7 @@ namespace Services.NasbNiro.Inventory
                     Specification = request.Specification,
                     MescCode = request.MescCode,
                     IsActive = true,
-                    RequiresIncomingInspection = request.GroupCode != "05",
+                    RequiresIncomingInspection = Quality.ItemQualityRules.DefaultInspection(request.GroupCode),
                 }, cancellationToken);
                 if (!created.Success) return ResponseDtoHelper.BadRequest<ItemRequestDto>(created.Message);
                 request.Status = ItemRequestStatus.Approved;

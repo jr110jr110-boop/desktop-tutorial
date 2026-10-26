@@ -53,6 +53,11 @@ namespace ViewModels.NasbNiro.QualityDtos
         public Guid? CorrectionTableDocumentId { get; set; }
         public string Note { get; set; }
         public string RowVersion { get; set; }
+
+        /// <summary>Why QA agreed this instrument needs no calibration (empty when it does).</summary>
+        public string CalibrationWaiverReason { get; set; }
+
+        public DateTimeOffset? CalibrationWaivedAt { get; set; }
         public List<CalibrationEventDto> Events { get; set; } = new List<CalibrationEventDto>();
     }
 
@@ -86,6 +91,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public int? IntervalMonths { get; set; }
         public Guid? CorrectionTableDocumentId { get; set; }
         public string Note { get; set; }
+
+        /// <summary>Needed when <see cref="RequiresCalibration"/> is false (a decision of the QA manager).</summary>
+        public string CalibrationWaiverReason { get; set; }
     }
 
     public class EquipmentActionDto
@@ -129,6 +137,22 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string AssessmentNote { get; set; }
         public int? NcrId { get; set; }
         public string NcrNumber { get; set; }
+
+        /// <summary>For "re-inspect": the accepted new inspection that was linked ("QcRecord", "TestReport" or "QcInspection").</summary>
+        public string ReinspectionKind { get; set; }
+
+        public int? ReinspectionRecordId { get; set; }
+        public string ReinspectionNumber { get; set; }
+    }
+
+    public class LinkOotReinspectionDto
+    {
+        public int ItemId { get; set; }
+
+        /// <summary>QcRecord, TestReport or QcInspection.</summary>
+        public string Kind { get; set; }
+
+        public int RecordId { get; set; }
     }
 
     public class OutOfToleranceListDto

@@ -55,6 +55,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.ApplyConfiguration(new ItemRequestConfiguration());
             builder.ApplyConfiguration(new QcInspectionConfiguration());
             builder.ApplyConfiguration(new NonConformanceConfiguration());
+            builder.ApplyConfiguration(new ItemQualityChangeConfiguration());
             builder.ApplyConfiguration(new MaterialRequestConfiguration());
             builder.ApplyConfiguration(new MaterialRequestLineConfiguration());
             builder.ApplyConfiguration(new StockCountConfiguration());
@@ -418,14 +419,28 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Property(x => x.RejectedSerialNumbers).HasMaxLength(InventoryColumns.LongText);
             builder.Property(x => x.ReportNumber).HasMaxLength(100);
             builder.Property(x => x.Note).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.EquipmentIds).HasMaxLength(200);
             builder.HasIndex(x => x.Number).IsUnique().HasFilter("[Number] IS NOT NULL");
             builder.HasIndex(x => new { x.Status, x.WarehouseId });
             builder.HasIndex(x => x.ReceiptDocumentId);
+            builder.HasIndex(x => x.ReinspectionOfNcrId);
             builder.HasOne(x => x.ReceiptDocument).WithMany().HasForeignKey(x => x.ReceiptDocumentId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.Lot).WithMany().HasForeignKey(x => x.LotId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.Warehouse).WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.TargetWarehouse).WithMany().HasForeignKey(x => x.TargetWarehouseId).OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+
+    public class ItemQualityChangeConfiguration : IEntityTypeConfiguration<ItemQualityChange>
+    {
+        public void Configure(EntityTypeBuilder<ItemQualityChange> builder)
+        {
+            builder.ToTable("InvItemQualityChanges");
+            builder.Property(x => x.Reason).HasMaxLength(InventoryColumns.Text);
+            builder.Property(x => x.DecisionNote).HasMaxLength(InventoryColumns.Text);
+            builder.HasIndex(x => new { x.ItemId, x.Status });
+            builder.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
         }
     }
 
@@ -451,6 +466,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Property(x => x.CostImpact).HasPrecision(22, 2);
             builder.Property(x => x.CustomerReturnRef).HasMaxLength(200);
             builder.Property(x => x.SourceRecordNumber).HasMaxLength(50);
+            builder.Property(x => x.EditorUserIds).HasMaxLength(500);
+            builder.Property(x => x.ReinspectionKind).HasMaxLength(30);
+            builder.Property(x => x.CancelReason).HasMaxLength(InventoryColumns.Text);
             builder.HasOne(x => x.Capa).WithMany().HasForeignKey(x => x.CapaId).OnDelete(DeleteBehavior.Restrict);
             builder.HasIndex(x => x.Number).IsUnique();
             builder.HasIndex(x => new { x.Status, x.ReportDate });

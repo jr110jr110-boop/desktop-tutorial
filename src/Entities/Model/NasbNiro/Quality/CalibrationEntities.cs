@@ -32,6 +32,12 @@ namespace Entities.Model.NasbNiro.Quality
         public Guid? CorrectionTableDocumentId { get; set; }
         public string Note { get; set; }
 
+        /// <summary>Why QA agreed the instrument needs no calibration (switching RequiresCalibration off needs QA and a reason, R1q D14).</summary>
+        public string CalibrationWaiverReason { get; set; }
+
+        public int? CalibrationWaivedByUserId { get; set; }
+        public DateTimeOffset? CalibrationWaivedAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -115,5 +121,10 @@ namespace Entities.Model.NasbNiro.Quality
         public int? NcrId { get; set; }
         public DateTimeOffset? AssessedAt { get; set; }
         public int? AssessedByUserId { get; set; }
+
+        /// <summary>For "Reinspect": the new record that re-inspected the work ("QcRecord" or "TestReport"); the case cannot close without it (R1q D40).</summary>
+        public string ReinspectionKind { get; set; }
+
+        public int? ReinspectionRecordId { get; set; }
     }
 }

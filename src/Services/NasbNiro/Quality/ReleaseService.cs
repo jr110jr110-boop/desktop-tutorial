@@ -8,6 +8,7 @@ using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Inventory;
+using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
@@ -25,8 +26,11 @@ namespace Services.NasbNiro.Quality
         Task<ResponseDto<ReleaseChecksDto>> GetChecksAsync(int workOrderId, CancellationToken cancellationToken);
         Task<ResponseDto<DataBookDto>> GetDataBookAsync(int workOrderId, string variant, CancellationToken cancellationToken);
 
-        /// <summary>Null when a Released note exists for the work order, otherwise the Persian reason (customer delivery gate, ISO 8.6).</summary>
-        Task<string> CheckDeliveryAsync(int? workOrderId, CancellationToken cancellationToken);
+        /// <summary>
+        /// The customer delivery gate (ISO 8.6, R1q D10): null when a Released note of the work order covers every line of the delivery (item, serial numbers,
+        /// quantity left) and no non-conformance is open on the work order or on the delivered serial numbers; otherwise the Persian reason.
+        /// </summary>
+        Task<string> CheckDeliveryAsync(InventoryDocument document, CancellationToken cancellationToken);
     }
 
     /// <summary>Product release (ISO 8.6): the checks and the final data book index are computed from the records, never typed.</summary>
@@ -48,11 +52,52 @@ namespace Services.NasbNiro.Quality
         private static string Clean(string s) => QualityText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => QualityText.Bad<T>(m);
 
-        public async Task<string> CheckDeliveryAsync(int? workOrderId, CancellationToken cancellationToken)
+        public async Task<string> CheckDeliveryAsync(InventoryDocument document, CancellationToken cancellationToken)
         {
-            if (!workOrderId.HasValue) return "تحویل به مشتری باید به دستور کار مرتبط باشد تا برگه ترخیص کیفی بررسی شود.";
-            bool released = await _uow.Set<ReleaseNote>().AnyAsync(r => r.WorkOrderId == workOrderId.Value && r.Status == ReleaseNoteStatus.Released && !r.Deleted, cancellationToken);
-            return released ? null : "برای این دستور کار «برگه ترخیص کیفی» صادرشده وجود ندارد؛ تحویل به مشتری بدون ترخیص QC مجاز نیست.";
+            if (document == null || !document.WorkOrderId.HasValue) return "تحویل به مشتری باید به دستور کار مرتبط باشد تا برگه ترخیص کیفی بررسی شود.";
+            int workOrderId = document.WorkOrderId.Value;
+            List<ReleaseNote> released = await _uow.Set<ReleaseNote>().Include(r => r.Lines)
+                .Where(r => r.WorkOrderId == workOrderId && r.Status == ReleaseNoteStatus.Released && !r.Deleted).ToListAsync(cancellationToken);
+            if (released.Count == 0) return "برای این دستور کار «برگه ترخیص کیفی» صادرشده وجود ندارد؛ تحویل به مشتری بدون ترخیص QC مجاز نیست.";
+
+            List<InventoryDocumentLine> lines = document.Lines?.ToList() ?? new List<InventoryDocumentLine>();
+            List<int> itemIds = lines.Select(l => l.ItemId).Distinct().ToList();
+            Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, cancellationToken);
+            var delivery = lines.Select(l =>
+            {
+                items.TryGetValue(l.ItemId, out InventoryItem item);
+                return new CoverageLine
+                {
+                    ItemId = l.ItemId, ItemCode = item?.Code, Quantity = l.Quantity, IsSerial = item != null && item.TrackingMode == ItemTrackingMode.Serial,
+                    Serials = (l.Serials ?? new List<InventoryDocumentLineSerial>()).Select(x => x.SerialNumber).ToList(),
+                };
+            }).ToList();
+
+            // the NCRs are looked at again now: one may have been raised after the release, on the work order or on a delivered serial number
+            List<string> deliveredSerials = delivery.SelectMany(d => d.Serials).Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+            List<NonConformance> open = await _uow.Set<NonConformance>()
+                .Where(n => !n.Deleted && n.Status != NcrStatus.Closed && n.Status != NcrStatus.Cancelled &&
+                            (n.WorkOrderId == workOrderId || (n.SerialNumbers != null && itemIds.Contains(n.ItemId)))).ToListAsync(cancellationToken);
+            List<string> blocking = open.Where(n => !IsConcessionApproved(n) &&
+                    (n.WorkOrderId == workOrderId || (n.SerialNumbers ?? string.Empty).Split('\n').Select(x => x.Trim()).Any(x => deliveredSerials.Contains(x, StringComparer.OrdinalIgnoreCase))))
+                .Select(n => n.Number).ToList();
+            if (blocking.Count > 0)
+                return "تا بسته‌شدن عدم انطباق‌های باز (یا صدور مجوز ارفاقی) تحویل به مشتری مجاز نیست: " + string.Join("، ", blocking.Take(8)) + ".";
+
+            var releasedLines = released.SelectMany(r => r.Lines ?? new List<ReleaseNoteLine>()).Select(l => new CoverageLine
+            {
+                ItemId = l.ItemId, Quantity = l.Quantity, IsSerial = !string.IsNullOrWhiteSpace(l.SerialNumbers),
+                Serials = (l.SerialNumbers ?? string.Empty).Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(),
+            }).ToList();
+            Dictionary<int, decimal> already = (await _uow.Set<InventoryDocumentLine>()
+                .Where(l => itemIds.Contains(l.ItemId) && l.Document.Id != document.Id && l.Document.Type == InventoryDocumentType.CustomerDelivery &&
+                            l.Document.Status == InventoryDocumentStatus.Confirmed && !l.Document.Deleted && l.Document.WorkOrderId == workOrderId)
+                .Select(l => new { l.ItemId, l.Quantity }).ToListAsync(cancellationToken))
+                .GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+            List<string> uncovered = ReleaseCoverage.Uncovered(delivery, releasedLines, already);
+            return uncovered.Count == 0
+                ? null
+                : "تحویل با برگه ترخیص کیفی این دستور کار نمی‌خواند: " + string.Join(" | ", uncovered.Take(8)) + (uncovered.Count > 8 ? "…" : string.Empty);
         }
 
         // -------------------------------------------------------------------------------- data book
@@ -275,8 +320,10 @@ namespace Services.NasbNiro.Quality
                 Code = "REPORTS_APPROVED", Title = "برای هر فعالیت دارای گزارش الزامی، گزارش تاییدشده و قبول موجود است", Passed = itp != null && noReport.Count == 0,
                 Detail = itp == null ? "-" : noReport.Count == 0 ? "-" : "بدون گزارش: " + string.Join("، ", noReport.Take(10)),
             });
-            // out-of-tolerance impact assessments still pending for documents of this work order
-            var pending = await _uow.Set<OutOfToleranceItem>().Where(i => i.Assessment == OotAssessment.Pending && i.Case.Status == OotStatus.Open && !i.Case.Deleted)
+            // out-of-tolerance impact assessments still pending for documents of this work order; R1q D40: a document assessed as "re-inspect" stays pending until the
+            // accepted new inspection is linked to it
+            var pending = await _uow.Set<OutOfToleranceItem>().Where(i => (i.Assessment == OotAssessment.Pending || (i.Assessment == OotAssessment.Reinspect && i.ReinspectionRecordId == null)) &&
+                    i.Case.Status == OotStatus.Open && !i.Case.Deleted)
                 .Select(i => new { i.SourceKind, i.SourceId }).ToListAsync(cancellationToken);
             int ootPending = 0;
             if (pending.Count > 0)
@@ -289,7 +336,23 @@ namespace Services.NasbNiro.Quality
             checks.Add(new ReleaseCheckDto
             {
                 Code = "OOT_ASSESSED", Title = "اثر تجهیز خارج از تلرانس روی اسناد این دستور کار ارزیابی شده است", Passed = ootPending == 0,
-                Detail = ootPending == 0 ? "-" : $"{ootPending} سند در انتظار ارزیابی اثر است.",
+                Detail = ootPending == 0 ? "-" : $"{ootPending} سند در انتظار ارزیابی اثر یا بازرسی مجدد است.",
+            });
+            // R1q D22: the production orders of the work order are finished and the last final inspection accepted the product
+            List<string> unfinished = await _uow.Set<MfProductionOrder>()
+                .Where(o => o.WorkOrderId == wo.Id && !o.Deleted && o.Status != MfOrderStatus.Cancelled && o.Status != MfOrderStatus.Completed && o.Status != MfOrderStatus.Closed)
+                .OrderBy(o => o.Id).Select(o => o.Number).ToListAsync(cancellationToken);
+            checks.Add(new ReleaseCheckDto
+            {
+                Code = "PRODUCTION_COMPLETE", Title = "همه دستورهای تولید این دستور کار تکمیل شده‌اند", Passed = unfinished.Count == 0,
+                Detail = unfinished.Count == 0 ? "-" : "ناتمام: " + string.Join("، ", unfinished.Take(8)),
+            });
+            QcResult? lastFinal = await _uow.Set<QcRecord>().Where(r => r.WorkOrderId == wo.Id && !r.Deleted && r.Type == QcRecordType.Final)
+                .OrderByDescending(r => r.Id).Select(r => (QcResult?)r.Result).FirstOrDefaultAsync(cancellationToken);
+            checks.Add(new ReleaseCheckDto
+            {
+                Code = "FINAL_INSPECTION", Title = "آخرین بازرسی نهایی محصول با نتیجه «قبول» ثبت شده است", Passed = lastFinal == QcResult.Accept,
+                Detail = lastFinal == null ? "بازرسی نهایی ثبت نشده است." : lastFinal == QcResult.Accept ? "-" : "نتیجه آخرین بازرسی نهایی: " + lastFinal,
             });
             DataBookDto book = await BuildBookAsync(wo, cancellationToken);
             var missing = book.Sections.Where(s => s.No != 10 && s.No != 11).SelectMany(s => s.Entries.Where(e => e.Mandatory && e.Missing).Select(e => s.No + ": " + (e.Number ?? e.Title))).ToList();
@@ -314,7 +377,14 @@ namespace Services.NasbNiro.Quality
         private async Task<ReleaseNoteDto> ToDtoAsync(ReleaseNote r, CancellationToken cancellationToken)
         {
             WorkOrder wo = await _uow.Set<WorkOrder>().FirstAsync(w => w.Id == r.WorkOrderId, cancellationToken);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { r.ReleasedByUserId }, cancellationToken);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { r.ReleasedByUserId, r.CreatorUserId }, cancellationToken);
+            List<ReleaseNoteLineDto> lines = (await _uow.Set<ReleaseNoteLine>().Where(l => l.ReleaseNoteId == r.Id).OrderBy(l => l.RowNumber)
+                .Select(l => new { l.RowNumber, l.ItemId, l.Item.Code, l.Item.Title, l.Item.Unit, l.Quantity, l.SerialNumbers }).ToListAsync(cancellationToken))
+                .Select(l => new ReleaseNoteLineDto
+                {
+                    RowNumber = l.RowNumber, ItemId = l.ItemId, ItemCode = l.Code, ItemTitle = l.Title, Unit = l.Unit, Quantity = l.Quantity,
+                    SerialNumbers = (l.SerialNumbers ?? string.Empty).Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(),
+                }).ToList();
             List<ReleaseCheckDto> checks;
             if (r.Status == ReleaseNoteStatus.Draft) checks = await ComputeChecksAsync(wo, cancellationToken);
             else checks = string.IsNullOrWhiteSpace(r.ChecksSnapshot) ? new List<ReleaseCheckDto>() : JsonSerializer.Deserialize<List<ReleaseCheckDto>>(r.ChecksSnapshot);
@@ -322,8 +392,9 @@ namespace Services.NasbNiro.Quality
             {
                 Id = r.Id, Number = r.Number, WorkOrderId = r.WorkOrderId, WorkOrderCode = wo.Code, Status = r.Status, ReleasedAt = r.ReleasedAt,
                 CertificateOfConformityNumber = r.CertificateOfConformityNumber, ContractId = r.ContractId, ItemsText = r.ItemsText, Note = r.Note,
-                CancelReason = r.CancelReason, ReleasedByName = names.Name(r.ReleasedByUserId), RowVersion = r.RowVersion == null ? null : Convert.ToBase64String(r.RowVersion),
-                Checks = checks, CanRelease = r.Status == ReleaseNoteStatus.Draft && checks.All(c => c.Passed),
+                CancelReason = r.CancelReason, ReleasedByName = names.Name(r.ReleasedByUserId), DraftedByName = names.Name(r.CreatorUserId),
+                RowVersion = r.RowVersion == null ? null : Convert.ToBase64String(r.RowVersion), Lines = lines,
+                Checks = checks, CanRelease = r.Status == ReleaseNoteStatus.Draft && lines.Count > 0 && checks.All(c => c.Passed),
             };
         }
 
@@ -349,6 +420,39 @@ namespace Services.NasbNiro.Quality
             return r == null ? QualityText.NotFound<ReleaseNoteDto>("برگه ترخیص پیدا نشد.") : ResponseDtoHelper.Ok(await ToDtoAsync(r, cancellationToken));
         }
 
+        /// <summary>The lines of a release note: existing items, a positive quantity and, for a serial item, one serial number per piece.</summary>
+        private async Task<(List<ReleaseNoteLine> Lines, string Error)> BuildLinesAsync(List<SaveReleaseNoteLineDto> input, CancellationToken cancellationToken)
+        {
+            if (input == null || input.Count == 0)
+                return (null, "فهرست اقلام برگه ترخیص (کالا، مقدار و سریال‌ها) را وارد کنید؛ تحویل به مشتری فقط تا سقف همین فهرست مجاز است.");
+            List<int> ids = input.Select(l => l.ItemId).Distinct().ToList();
+            Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>().Where(i => ids.Contains(i.Id) && !i.Deleted).ToDictionaryAsync(i => i.Id, cancellationToken);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var rows = new List<ReleaseNoteLine>();
+            int number = 1;
+            foreach (SaveReleaseNoteLineDto line in input)
+            {
+                string row = $"ردیف {number}: ";
+                if (line == null || !items.TryGetValue(line.ItemId, out InventoryItem item)) return (null, row + "کالا پیدا نشد.");
+                if (line.Quantity <= 0) return (null, row + "مقدار باید بیشتر از صفر باشد.");
+                List<string> serials = (line.SerialNumbers ?? new List<string>()).Select(Clean).Where(x => x != null).ToList();
+                if (item.TrackingMode == ItemTrackingMode.Serial)
+                {
+                    if (line.Quantity != decimal.Truncate(line.Quantity)) return (null, row + "کالای سریالی با عدد صحیح ترخیص می‌شود.");
+                    if (serials.Count != (int)line.Quantity) return (null, row + $"سریال قطعات {item.Code} را وارد کنید (تعداد سریال‌ها برابر مقدار).");
+                    foreach (string serial in serials)
+                        if (!seen.Add(item.Id + "|" + serial)) return (null, row + $"سریال {serial} تکراری است.");
+                }
+                else
+                {
+                    if (!seen.Add(item.Id + "|")) return (null, row + $"کالای {item.Code} دو بار آمده است؛ مقدارها را در یک ردیف جمع کنید.");
+                    serials.Clear();
+                }
+                rows.Add(new ReleaseNoteLine { RowNumber = number++, ItemId = item.Id, Quantity = line.Quantity, SerialNumbers = serials.Count == 0 ? null : string.Join("\n", serials) });
+            }
+            return (rows, null);
+        }
+
         public async Task<ResponseDto<ReleaseNoteDto>> SaveNoteAsync(SaveReleaseNoteDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return Bad<ReleaseNoteDto>(QualityText.InvalidData);
@@ -365,15 +469,32 @@ namespace Services.NasbNiro.Quality
             }
             else
             {
-                if (await _uow.Set<ReleaseNote>().AnyAsync(x => x.WorkOrderId == wo.Id && !x.Deleted && x.Status != ReleaseNoteStatus.Cancelled, cancellationToken))
+                // a released note that lists no items (made before the lists existed) covers nothing and does not stop a new, complete note
+                if (await _uow.Set<ReleaseNote>().AnyAsync(x => x.WorkOrderId == wo.Id && !x.Deleted && x.Status != ReleaseNoteStatus.Cancelled &&
+                                                                 (x.Status != ReleaseNoteStatus.Released || x.Lines.Any()), cancellationToken))
                     return Bad<ReleaseNoteDto>("برای این دستور کار برگه ترخیص فعال وجود دارد.");
+                r = null;
+            }
+            (List<ReleaseNoteLine> lines, string lineError) = await BuildLinesAsync(dto.Lines, cancellationToken);
+            if (lineError != null) return Bad<ReleaseNoteDto>(lineError);
+            if (r == null)
+            {
                 r = new ReleaseNote
                 {
                     Number = await InventoryNumbers.NextNumberAsync(_uow, QualityNumbers.ReleaseNote, "RN", DateTime.Today, cancellationToken),
                     WorkOrderId = wo.Id, ContractId = wo.ContractId, Status = ReleaseNoteStatus.Draft, CreateDate = now, CreatorUserId = Me,
+                    Lines = new List<ReleaseNoteLine>(),
                 };
                 _uow.Set<ReleaseNote>().Add(r);
             }
+            else
+            {
+                _uow.Set<ReleaseNoteLine>().RemoveRange(await _uow.Set<ReleaseNoteLine>().Where(l => l.ReleaseNoteId == r.Id).ToListAsync(cancellationToken));
+                r.Lines = new List<ReleaseNoteLine>();
+            }
+            foreach (ReleaseNoteLine line in lines) r.Lines.Add(line);
+            // R1q D22: everybody who saved the draft is remembered; none of them releases it
+            r.EditorUserIds = global::Services.NasbNiro.Finance.LedgerMath.WithEditor(r.EditorUserIds, Me);
             r.ItemsText = Clean(dto.ItemsText); r.Note = Clean(dto.Note); r.ModifyDate = now; r.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "release:" + r.Id, r.Status == ReleaseNoteStatus.Draft, "quality", "release-note", r.Id,
@@ -392,6 +513,11 @@ namespace Services.NasbNiro.Quality
                 case "release":
                     if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<ReleaseNoteDto>(QualityText.NotAllowed + " (برگه ترخیص و گواهی انطباق را مدیر QC امضا می‌کند)");
                     if (r.Status != ReleaseNoteStatus.Draft) return Bad<ReleaseNoteDto>("فقط برگه پیش‌نویس صادر می‌شود.");
+                    // R1q D22: the person who drafted or edited the note cannot release it (maker-checker)
+                    if (global::Services.NasbNiro.Finance.LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me))
+                        return Bad<ReleaseNoteDto>(QualityText.SameUser + " (برگه را کسی که آن را تنظیم یا ویرایش کرده نمی‌تواند صادر کند؛ مدیر QC دیگری امضا کند)");
+                    if (!await _uow.Set<ReleaseNoteLine>().AnyAsync(l => l.ReleaseNoteId == r.Id, cancellationToken))
+                        return Bad<ReleaseNoteDto>("فهرست اقلام برگه ترخیص خالی است؛ کالا، مقدار و سریال‌های ترخیص‌شده را ثبت کنید.");
                     WorkOrder wo = await _uow.Set<WorkOrder>().FirstAsync(w => w.Id == r.WorkOrderId, cancellationToken);
                     List<ReleaseCheckDto> checks = await ComputeChecksAsync(wo, cancellationToken);
                     List<ReleaseCheckDto> failed = checks.Where(c => !c.Passed).ToList();

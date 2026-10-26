@@ -161,6 +161,18 @@ namespace Entities.Model.NasbNiro.Quality
         public int? DoneByUserId { get; set; }
         public string StatusNote { get; set; }
 
+        // ----- R1q
+        /// <summary>The client's (or third party's) letter that agrees the hold or witness point is not applicable (R1q D9).</summary>
+        public string NotApplicableReference { get; set; }
+
+        /// <summary>The signed outgoing letter (OfLetter) that told the parties about the witness point; its signing date is the notification date (R1q D9).</summary>
+        public int? NotificationLetterId { get; set; }
+
+        /// <summary>Proof that an activity without a required report was done: a document or a written note (R1q D18).</summary>
+        public Guid? EvidenceDocumentId { get; set; }
+
+        public string EvidenceNote { get; set; }
+
         public ICollection<ItpActivityParameter> Parameters { get; set; }
         public ICollection<ItpPointRelease> Releases { get; set; }
     }

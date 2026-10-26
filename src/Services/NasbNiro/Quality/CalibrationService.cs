@@ -28,6 +28,7 @@ namespace Services.NasbNiro.Quality
         Task<ResponseDto<PagedList<OutOfToleranceListDto>>> GetCasesAsync(OutOfToleranceQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<OutOfToleranceDto>> GetCaseAsync(int id, CancellationToken cancellationToken);
         Task<ResponseDto<OutOfToleranceDto>> AssessAsync(AssessOutOfToleranceDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<OutOfToleranceDto>> LinkReinspectionAsync(LinkOotReinspectionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<OutOfToleranceDto>> CloseCaseAsync(CloseOutOfToleranceDto dto, CancellationToken cancellationToken);
     }
 
@@ -36,11 +37,13 @@ namespace Services.NasbNiro.Quality
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
-        public CalibrationService(IUnitOfWork uow, IInventoryUserContext user)
+        public CalibrationService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _notify = notify;
         }
 
         private int Me => _user.UserId;
@@ -164,6 +167,7 @@ namespace Services.NasbNiro.Quality
                 Status = l.Status, IntervalMonths = l.IntervalMonths, LastCalibrated = l.LastCalibrated, NextDue = l.NextDue, DaysToDue = l.DaysToDue,
                 Maker = e.Maker, Model = e.Model, OwnerUnit = e.OwnerUnit, Range = e.Range, Accuracy = e.Accuracy, OutOfServiceReason = e.OutOfServiceReason,
                 CorrectionTableDocumentId = e.CorrectionTableDocumentId, Note = e.Note, RowVersion = e.RowVersion == null ? null : Convert.ToBase64String(e.RowVersion),
+                CalibrationWaiverReason = e.CalibrationWaiverReason, CalibrationWaivedAt = e.CalibrationWaivedAt,
                 Events = events.Select(x => new CalibrationEventDto
                 {
                     Id = x.Id, EquipmentId = x.EquipmentId, EquipmentCode = e.Code, EventDate = x.EventDate, LabName = x.LabName, LabAccredited = x.LabAccredited,
@@ -174,18 +178,33 @@ namespace Services.NasbNiro.Quality
             });
         }
 
+        private string WaiverProblem(SaveEquipmentDto dto, bool waives)
+        {
+            if (!waives) return null;
+            if (!_user.IsInRole(QualityRoles.QaManager))
+                return "اعلام اینکه تجهیز نیاز به کالیبراسیون ندارد تصمیم مدیر QA است و با ثبت دلیل انجام می‌شود؛ QC نمی‌تواند آن را خاموش کند.";
+            if (Clean(dto.CalibrationWaiverReason) == null) return "دلیل بی‌نیازی تجهیز به کالیبراسیون را بنویسید.";
+            return null;
+        }
+
         public async Task<ResponseDto<EquipmentDto>> SaveEquipmentAsync(SaveEquipmentDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || Clean(dto.Name) == null || !Enum.IsDefined(typeof(EquipmentType), dto.Type)) return Bad<EquipmentDto>(QualityText.InvalidData);
-            if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<EquipmentDto>(QualityText.NotAllowed + " (تجهیزات اندازه‌گیری را QC ثبت می‌کند)");
+            if (!_user.IsInRole(QualityRoles.Inspectors + "," + QualityRoles.QaManager)) return Bad<EquipmentDto>(QualityText.NotAllowed + " (تجهیزات اندازه‌گیری را QC ثبت می‌کند)");
             if (dto.IntervalMonths.HasValue && (dto.IntervalMonths.Value < 1 || dto.IntervalMonths.Value > 60)) return Bad<EquipmentDto>("فاصله کالیبراسیون باید بین ۱ تا ۶۰ ماه باشد.");
             await EnsureIntervalsAsync(cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
             MeasuringEquipment e;
+            // R1q D14: an instrument that needs no calibration is usable even when it was never calibrated, so declaring that (when registering it or later)
+            // is a decision of the QA manager with a reason
+            bool waives = !dto.RequiresCalibration;
             if (dto.Id.HasValue)
             {
                 e = await _uow.Set<MeasuringEquipment>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (e == null) return QualityText.NotFound<EquipmentDto>("تجهیز اندازه‌گیری پیدا نشد.");
+                waives = !dto.RequiresCalibration && e.RequiresCalibration;
+                string waiverProblem = WaiverProblem(dto, waives);
+                if (waiverProblem != null) return Bad<EquipmentDto>(waiverProblem);
                 if (Clean(dto.RowVersion) != null)
                 {
                     try { _uow.Entry(e).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); }
@@ -194,6 +213,8 @@ namespace Services.NasbNiro.Quality
             }
             else
             {
+                string waiverProblem = WaiverProblem(dto, waives);
+                if (waiverProblem != null) return Bad<EquipmentDto>(waiverProblem);
                 int interval = dto.IntervalMonths ?? await _uow.Set<CalibrationIntervalDefault>().Where(i => i.EquipmentType == dto.Type).Select(i => i.Months).FirstOrDefaultAsync(cancellationToken);
                 int number = await InventoryNumbers.NextAsync(_uow, QualityNumbers.Equipment, 0, cancellationToken);
                 e = new MeasuringEquipment
@@ -202,6 +223,15 @@ namespace Services.NasbNiro.Quality
                     Status = dto.RequiresCalibration ? EquipmentStatus.Overdue : EquipmentStatus.NotRequired, CreateDate = now, CreatorUserId = Me,
                 };
                 _uow.Set<MeasuringEquipment>().Add(e);
+            }
+            // the reason, the person and the date are kept on the instrument and in the audit log
+            if (waives)
+            {
+                e.CalibrationWaiverReason = Clean(dto.CalibrationWaiverReason); e.CalibrationWaivedByUserId = Me; e.CalibrationWaivedAt = now;
+            }
+            else if (dto.RequiresCalibration)
+            {
+                e.CalibrationWaiverReason = null; e.CalibrationWaivedByUserId = null; e.CalibrationWaivedAt = null;
             }
             e.Name = Clean(dto.Name); e.Type = dto.Type; e.Maker = Clean(dto.Maker); e.Model = Clean(dto.Model); e.SerialNumber = Clean(dto.SerialNumber);
             e.OwnerUnit = Clean(dto.OwnerUnit); e.Location = Clean(dto.Location); e.Range = Clean(dto.Range); e.Accuracy = Clean(dto.Accuracy);
@@ -321,6 +351,17 @@ namespace Services.NasbNiro.Quality
             var reports = await used.Select(x => new { x.ReportId, x.Report.Number, x.Report.ReportDate }).Distinct().ToListAsync(cancellationToken);
             foreach (var r in reports)
                 kase.Items.Add(new OutOfToleranceItem { SourceKind = "TestReport", SourceId = r.ReportId, SourceNumber = r.Number, SourceDate = r.ReportDate, Assessment = OotAssessment.Pending });
+            // R1q D16: incoming inspections now record the instruments used; they are part of the impact too
+            var inspections = await _uow.Set<QcInspection>().Where(q => !q.Deleted && q.EquipmentIds != null && q.InspectedAt != null)
+                .Select(q => new { q.Id, q.Number, q.EquipmentIds, q.InspectedAt }).ToListAsync(cancellationToken);
+            string mark = equipmentId.ToString();
+            foreach (var q in inspections)
+            {
+                DateTime day = q.InspectedAt.Value.Date;
+                if (day > to.Date || (from.HasValue && day < from.Value.Date)) continue;
+                if (!q.EquipmentIds.Split(',').Any(x => x.Trim() == mark)) continue;
+                kase.Items.Add(new OutOfToleranceItem { SourceKind = "Inspection", SourceId = q.Id, SourceNumber = q.Number, SourceDate = day, Assessment = OotAssessment.Pending });
+            }
         }
 
         // -------------------------------------------------------------------------------- out-of-tolerance cases
@@ -346,6 +387,9 @@ namespace Services.NasbNiro.Quality
             if (c == null) return QualityText.NotFound<OutOfToleranceDto>("پرونده خارج از تلرانس پیدا نشد.");
             List<int> ncrIds = c.Items.Where(i => i.NcrId.HasValue).Select(i => i.NcrId.Value).ToList();
             Dictionary<int, string> ncrs = await _uow.Set<NonConformance>().Where(n => ncrIds.Contains(n.Id)).ToDictionaryAsync(n => n.Id, n => n.Number, cancellationToken);
+            var reinspections = new Dictionary<int, string>();
+            foreach (OutOfToleranceItem linked in c.Items.Where(i => i.ReinspectionRecordId.HasValue))
+                reinspections[linked.Id] = await ReinspectionNumberAsync(linked.ReinspectionKind, linked.ReinspectionRecordId.Value, cancellationToken);
             return ResponseDtoHelper.Ok(new OutOfToleranceDto
             {
                 Id = c.Id, Number = c.Number, EquipmentId = c.EquipmentId, EquipmentCode = c.Equipment.Code, FromDate = c.FromDate, ToDate = c.ToDate, Status = c.Status,
@@ -355,6 +399,8 @@ namespace Services.NasbNiro.Quality
                 {
                     Id = i.Id, SourceKind = i.SourceKind, SourceId = i.SourceId, SourceNumber = i.SourceNumber, SourceDate = i.SourceDate, Assessment = i.Assessment,
                     AssessmentNote = i.AssessmentNote, NcrId = i.NcrId, NcrNumber = i.NcrId.HasValue && ncrs.TryGetValue(i.NcrId.Value, out string n) ? n : null,
+                    ReinspectionKind = i.ReinspectionKind, ReinspectionRecordId = i.ReinspectionRecordId,
+                    ReinspectionNumber = i.ReinspectionRecordId.HasValue ? reinspections.GetValueOrDefault(i.Id) : null,
                 }).ToList(),
             });
         }
@@ -383,6 +429,11 @@ namespace Services.NasbNiro.Quality
                         var r = await _uow.Set<QcRecord>().Where(x => x.Id == item.SourceId).Select(x => new { x.ItemId, x.WorkOrderId, x.LotId, x.SerialNumber }).FirstOrDefaultAsync(cancellationToken);
                         itemId = r?.ItemId; workOrderId = r?.WorkOrderId; lotId = r?.LotId; serial = r?.SerialNumber;
                     }
+                    else if (item.SourceKind == "Inspection")
+                    {
+                        var r = await _uow.Set<QcInspection>().Where(x => x.Id == item.SourceId).Select(x => new { x.ItemId, x.LotId }).FirstOrDefaultAsync(cancellationToken);
+                        itemId = r?.ItemId; lotId = r?.LotId;
+                    }
                     else
                     {
                         var r = await _uow.Set<TestReport>().Where(x => x.Id == item.SourceId).Select(x => new { x.ItemId, x.WorkOrderId, x.SerialNumber }).FirstOrDefaultAsync(cancellationToken);
@@ -399,8 +450,115 @@ namespace Services.NasbNiro.Quality
             }
             item.Assessment = dto.Assessment; item.AssessmentNote = Clean(dto.Note); item.NcrId = ncrId;
             item.AssessedAt = DateTimeOffset.Now; item.AssessedByUserId = Me;
+            // R1q D40: "re-inspect" is a task, not a tick: QC gets an inbox item and the case cannot close until the new inspection is linked
+            if (dto.Assessment != OotAssessment.Reinspect) { item.ReinspectionKind = null; item.ReinspectionRecordId = null; }
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncReinspectionGateAsync(item, cancellationToken);
+            if (ncrId.HasValue && !dto.NcrId.HasValue)
+            {
+                NonConformance drafted = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == ncrId.Value, cancellationToken);
+                await NcrGates.SyncAsync(_notify, drafted, cancellationToken);
+            }
             return await GetCaseAsync(item.CaseId, cancellationToken);
+        }
+
+        private Task SyncReinspectionGateAsync(OutOfToleranceItem item, CancellationToken cancellationToken) =>
+            global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "oot-reinspect:" + item.Id, item.Assessment == OotAssessment.Reinspect && !item.ReinspectionRecordId.HasValue,
+                "quality", "oot-reinspection", item.Id, $"بازرسی مجدد سند {item.SourceNumber} (تجهیز خارج از تلرانس)", "/quality/out-of-tolerance/" + item.CaseId,
+                QualityRoles.Inspectors, cancellationToken, DateTime.Today.AddDays(7));
+
+        private async Task<string> ReinspectionNumberAsync(string kind, int id, CancellationToken cancellationToken)
+        {
+            switch (kind)
+            {
+                case NcrReinspection.Record: return await _uow.Set<QcRecord>().Where(x => x.Id == id).Select(x => x.Number).FirstOrDefaultAsync(cancellationToken);
+                case NcrReinspection.Report: return await _uow.Set<TestReport>().Where(x => x.Id == id).Select(x => x.Number).FirstOrDefaultAsync(cancellationToken);
+                case NcrReinspection.Inspection: return await _uow.Set<QcInspection>().Where(x => x.Id == id).Select(x => x.Number).FirstOrDefaultAsync(cancellationToken);
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// Links the new, accepted inspection that re-inspected a document assessed as "re-inspect" (R1q D40). The new one must be of the same product, made after the
+        /// calibration that found the instrument out of tolerance, and must not be one of the documents of the case itself.
+        /// </summary>
+        public async Task<ResponseDto<OutOfToleranceDto>> LinkReinspectionAsync(LinkOotReinspectionDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null || Clean(dto.Kind) == null) return Bad<OutOfToleranceDto>(QualityText.InvalidData);
+            if (!_user.IsInRole(QualityRoles.QualityManagers)) return Bad<OutOfToleranceDto>(QualityText.NotAllowed);
+            OutOfToleranceItem item = await _uow.Set<OutOfToleranceItem>().Include(i => i.Case).ThenInclude(c => c.Items).FirstOrDefaultAsync(i => i.Id == dto.ItemId, cancellationToken);
+            if (item == null) return QualityText.NotFound<OutOfToleranceDto>("ردیف پرونده پیدا نشد.");
+            if (item.Case.Status == OotStatus.Closed) return Bad<OutOfToleranceDto>("پرونده بسته شده است.");
+            if (item.Assessment != OotAssessment.Reinspect) return Bad<OutOfToleranceDto>("بازرسی مجدد فقط برای ردیفی ثبت می‌شود که ارزیابی آن «بازرسی مجدد» است.");
+            string problem = await CheckReinspectionAsync(item, dto.Kind, dto.RecordId, cancellationToken);
+            if (problem != null) return Bad<OutOfToleranceDto>(problem);
+            item.ReinspectionKind = dto.Kind; item.ReinspectionRecordId = dto.RecordId;
+            await _uow.SaveChangesAsync(cancellationToken);
+            await SyncReinspectionGateAsync(item, cancellationToken);
+            return await GetCaseAsync(item.CaseId, cancellationToken);
+        }
+
+        private async Task<string> CheckReinspectionAsync(OutOfToleranceItem item, string kind, int recordId, CancellationToken cancellationToken)
+        {
+            if (item.Case.Items.Any(i => i.SourceKind == kind && i.SourceId == recordId))
+                return "این سند خودش از اسناد پرونده است (با همان تجهیز انجام شده)، بازرسی مجدد نیست.";
+            // what the original document was about
+            int? workOrderId = null; int? itemId = null; string serial = null;
+            if (item.SourceKind == "QcRecord")
+            {
+                var o = await _uow.Set<QcRecord>().Where(x => x.Id == item.SourceId).Select(x => new { x.WorkOrderId, x.ItemId, x.SerialNumber }).FirstOrDefaultAsync(cancellationToken);
+                workOrderId = o?.WorkOrderId; itemId = o?.ItemId; serial = o?.SerialNumber;
+            }
+            else if (item.SourceKind == "TestReport")
+            {
+                var o = await _uow.Set<TestReport>().Where(x => x.Id == item.SourceId).Select(x => new { x.WorkOrderId, x.ItemId, x.SerialNumber }).FirstOrDefaultAsync(cancellationToken);
+                workOrderId = o?.WorkOrderId; itemId = o?.ItemId; serial = o?.SerialNumber;
+            }
+            else
+            {
+                itemId = await _uow.Set<QcInspection>().Where(x => x.Id == item.SourceId).Select(x => (int?)x.ItemId).FirstOrDefaultAsync(cancellationToken);
+            }
+            DateTime since = item.Case.ToDate.Date;
+            DateTimeOffset created = item.Case.CreateDate;
+            switch (kind)
+            {
+                case NcrReinspection.Record:
+                    {
+                        QcRecord r = await _uow.Set<QcRecord>().FirstOrDefaultAsync(x => x.Id == recordId && !x.Deleted, cancellationToken);
+                        if (r == null) return "گزارش بازرسی مجدد پیدا نشد.";
+                        if (r.Result != QcResult.Accept) return "بازرسی مجدد باید با نتیجه «قبول» ثبت شده باشد.";
+                        if (r.RecordDate.Date < since || r.CreateDate < created) return "بازرسی مجدد باید بعد از کالیبراسیونی انجام شده باشد که تجهیز را خارج از تلرانس نشان داد.";
+                        return Matches(workOrderId, itemId, serial, r.WorkOrderId, r.ItemId, r.SerialNumber);
+                    }
+                case NcrReinspection.Report:
+                    {
+                        TestReport r = await _uow.Set<TestReport>().FirstOrDefaultAsync(x => x.Id == recordId && !x.Deleted, cancellationToken);
+                        if (r == null) return "گزارش آزمون مجدد پیدا نشد.";
+                        if (r.Status != TestReportStatus.Approved || r.Result != ReportResult.Pass) return "آزمون مجدد باید تاییدشده و با نتیجه «قبول» باشد.";
+                        if (r.ReportDate.Date < since || r.CreateDate < created) return "آزمون مجدد باید بعد از کالیبراسیونی انجام شده باشد که تجهیز را خارج از تلرانس نشان داد.";
+                        return Matches(workOrderId, itemId, serial, r.WorkOrderId, r.ItemId, r.SerialNumber);
+                    }
+                case NcrReinspection.Inspection:
+                    {
+                        QcInspection r = await _uow.Set<QcInspection>().FirstOrDefaultAsync(x => x.Id == recordId && !x.Deleted, cancellationToken);
+                        if (r == null) return "بازرسی مجدد پیدا نشد.";
+                        if (r.Status != InspectionStatus.Done || r.AcceptedQuantity <= 0) return "بازرسی مجدد هنوز با نتیجه «قبول» ثبت نشده است.";
+                        if (r.InspectedAt.HasValue && r.InspectedAt.Value < created) return "بازرسی مجدد باید بعد از کالیبراسیونی انجام شده باشد که تجهیز را خارج از تلرانس نشان داد.";
+                        return Matches(null, itemId, null, null, r.ItemId, null);
+                    }
+                default:
+                    return "نوع بازرسی مجدد نامعتبر است (گزارش بازرسی، گزارش آزمون یا بازرسی ورودی).";
+            }
+        }
+
+        /// <summary>The new document must be about the same product: the same work order, item and serial number where the original names them.</summary>
+        private static string Matches(int? workOrderId, int? itemId, string serial, int? newWorkOrderId, int? newItemId, string newSerial)
+        {
+            if (workOrderId.HasValue && newWorkOrderId != workOrderId) return "بازرسی مجدد مربوط به دستور کار سند اصلی نیست.";
+            if (itemId.HasValue && newItemId != itemId) return "بازرسی مجدد مربوط به کالای سند اصلی نیست.";
+            if (!string.IsNullOrWhiteSpace(serial) && !string.Equals(serial.Trim(), newSerial?.Trim(), StringComparison.OrdinalIgnoreCase))
+                return "سریال بازرسی مجدد با سریال سند اصلی نمی‌خواند.";
+            return null;
         }
 
         public async Task<ResponseDto<OutOfToleranceDto>> CloseCaseAsync(CloseOutOfToleranceDto dto, CancellationToken cancellationToken)
@@ -412,6 +570,8 @@ namespace Services.NasbNiro.Quality
             if (c.Status == OotStatus.Closed) return Bad<OutOfToleranceDto>("پرونده قبلاً بسته شده است.");
             int pending = c.Items.Count(i => i.Assessment == OotAssessment.Pending);
             if (pending > 0) return Bad<OutOfToleranceDto>($"برای {pending} سند هنوز ارزیابی اثر (بدون اثر / بازرسی مجدد / عدم انطباق) ثبت نشده است.");
+            int waitingReinspection = c.Items.Count(i => i.Assessment == OotAssessment.Reinspect && !i.ReinspectionRecordId.HasValue);
+            if (waitingReinspection > 0) return Bad<OutOfToleranceDto>($"برای {waitingReinspection} سند با ارزیابی «بازرسی مجدد» هنوز بازرسی مجدد قبول‌شده‌ای پیوند نشده است؛ ابتدا بازرسی مجدد را انجام و ثبت کنید.");
             c.Status = OotStatus.Closed; c.ClosedAt = DateTimeOffset.Now; c.ClosedByUserId = Me; c.Note = Clean(dto.Note) ?? c.Note;
             c.ModifyDate = DateTimeOffset.Now; c.ModifierUserId = Me;
             // an instrument held out of service only because of this case may now return once it has a valid calibration

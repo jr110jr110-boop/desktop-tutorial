@@ -55,6 +55,20 @@ namespace WebApi.Controllers
         [Authorize(Roles = InventoryRoles.MasterData)]
         public async Task<IActionResult> SaveAsync([FromBody] SaveInventoryItemDto dto, CancellationToken ct) => Ok(await _service.SaveItemAsync(dto, ct));
 
+        /// <summary>R1q D11: the quality gates of an item (inspection, certificate type, shelf life) are changed here by QC, QA or PMO only.</summary>
+        [HttpPost("quality")]
+        [Authorize(Roles = InventoryRoles.ItemQuality)]
+        public async Task<IActionResult> SaveQualityAsync([FromBody] SaveItemQualityDto dto, CancellationToken ct) => Ok(await _service.SaveItemQualityAsync(dto, ct));
+
+        [HttpGet("quality-changes")]
+        public async Task<IActionResult> GetQualityChangesAsync([FromQuery] ItemQualityChangeQuery query, CancellationToken ct) =>
+            Ok((await _service.GetQualityChangesAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>The second approval (QA manager, never the person who asked) of a quality-gate change on an item with open purchase orders.</summary>
+        [HttpPost("quality-changes/decide")]
+        [Authorize(Roles = "QA")]
+        public async Task<IActionResult> DecideQualityChangeAsync([FromBody] DecideItemQualityChangeDto dto, CancellationToken ct) => Ok(await _service.DecideQualityChangeAsync(dto, ct));
+
         [HttpPost("import")]
         [Authorize(Roles = InventoryRoles.MasterData)]
         [RequestSizeLimit(50_000_000)]
@@ -104,7 +118,7 @@ namespace WebApi.Controllers
 
         /// <summary>Opening stock from the cleaned old warehouse data: one draft per warehouse (needs the two approvals).</summary>
         [HttpPost("import-opening")]
-        [Authorize(Roles = InventoryRoles.Documents)]
+        [Authorize(Roles = InventoryRoles.Documents + ",FINANCEMANAGER")] // the finance manager alone may allow zero-priced rows (R1q D35); the drafts still need the two approvals
         [RequestSizeLimit(50_000_000)]
         public async Task<IActionResult> ImportOpeningAsync([FromBody] OpeningImportDto dto, CancellationToken ct) => Ok(await _opening.ImportAsync(dto, ct));
 
@@ -203,15 +217,16 @@ namespace WebApi.Controllers
 
         /// <summary>QC, engineering and manufacturing managers sign; engineering issues the concession. The role is checked inside.</summary>
         [HttpPost("ncr/approve")]
-        [Authorize(Roles = InventoryRoles.Approvers)]
+        [Authorize(Roles = InventoryRoles.NcrApprovers)]
         public async Task<IActionResult> ApproveNcrAsync([FromBody] ApproveNcrDto dto, CancellationToken ct) => Ok(await _service.ApproveNcrAsync(dto, ct));
 
         [HttpPost("ncr/execute")]
         [Authorize(Roles = "PMO,QC,WAREHOUSE")]
         public async Task<IActionResult> ExecuteNcrAsync([FromBody] ExecuteNcrDto dto, CancellationToken ct) => Ok(await _service.ExecuteNcrAsync(dto, ct));
 
+        /// <summary>Closes the executed report, or cancels an open one (the QA manager may cancel; a QC user only a report he did not raise or edit; closing is never done by the person who raised or edited it).</summary>
         [HttpPost("ncr/close")]
-        [Authorize(Roles = InventoryRoles.Qc)]
+        [Authorize(Roles = InventoryRoles.QcOrQa)]
         public async Task<IActionResult> CloseNcrAsync([FromBody] CloseNcrDto dto, CancellationToken ct) => Ok(await _service.CloseNcrAsync(dto, ct));
 
         [HttpGet("ncr/{id:int}/supplier-return")]
@@ -297,6 +312,11 @@ namespace WebApi.Controllers
         [HttpGet("lots")]
         public async Task<IActionResult> GetLotsAsync([FromQuery] LotQuery query, CancellationToken ct) =>
             Ok((await _service.GetLotsAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>R1q D32: the lots on hand that are expired or about to expire.</summary>
+        [HttpGet("expiry")]
+        public async Task<IActionResult> GetExpiringLotsAsync([FromQuery] LotExpiryQuery query, CancellationToken ct) =>
+            Ok((await _service.GetExpiringLotsAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpPost("lots")]
         [Authorize(Roles = InventoryRoles.Production)]

@@ -34,35 +34,32 @@ namespace Services.NasbNiro.Quality
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IItpService _itp;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
-        public InspectionService(IUnitOfWork uow, IInventoryUserContext user, IItpService itp)
+        public InspectionService(IUnitOfWork uow, IInventoryUserContext user, IItpService itp, global::Services.NasbNiro.Office.INotificationService notify)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _itp = itp ?? throw new ArgumentNullException(nameof(itp));
+            _notify = notify;
         }
 
         private int Me => _user.UserId;
         private static string Clean(string s) => QualityText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => QualityText.Bad<T>(m);
 
-        // -------------------------------------------------------------------------------- equipment check
+        // -------------------------------------------------------------------------------- equipment and inspector checks
 
-        private async Task<string> CheckEquipmentAsync(IEnumerable<int> equipmentIds, DateTime on, CancellationToken cancellationToken)
-        {
-            List<int> ids = equipmentIds.Distinct().ToList();
-            if (ids.Count == 0) return null;
-            Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
-            int warn = (int)settings[QualitySettingKeys.CalibrationWarnDays];
-            List<MeasuringEquipment> rows = await _uow.Set<MeasuringEquipment>().Where(e => ids.Contains(e.Id) && !e.Deleted).ToListAsync(cancellationToken);
-            if (rows.Count != ids.Count) return "تجهیز اندازه‌گیری انتخاب‌شده پیدا نشد.";
-            foreach (MeasuringEquipment e in rows)
-            {
-                string problem = CalibrationRules.CheckUsable(e, on, warn);
-                if (problem != null) return problem;
-            }
-            return null;
-        }
+        /// <summary>The calibration must be valid on the entry day and on the record date (R1q D15); see <see cref="QualityChecks.EquipmentAsync"/>.</summary>
+        private Task<string> CheckEquipmentAsync(IEnumerable<int> equipmentIds, DateTime recordDate, CancellationToken cancellationToken) =>
+            QualityChecks.EquipmentAsync(_uow, equipmentIds, recordDate, cancellationToken);
+
+        /// <summary>
+        /// R1q D17 ★: once the company keeps "Inspector" qualifications, a QC inspector records an inspection only with a valid one of his own, on the
+        /// record date and on the entry day. Before any is registered the register is not in use and nothing is refused.
+        /// </summary>
+        private Task<string> CheckInspectorAsync(DateTime recordDate, CancellationToken cancellationToken) =>
+            QualityChecks.InspectorAsync(_uow, Me, recordDate, "ثبت بازرسی بدون گواهی صلاحیت معتبر مجاز نیست.", cancellationToken);
 
         // -------------------------------------------------------------------------------- inspection records
 
@@ -118,7 +115,8 @@ namespace Services.NasbNiro.Quality
             if (dto == null) return Bad<QcRecordDto>(QualityText.InvalidData);
             if (!Enum.IsDefined(typeof(QcRecordType), dto.Type) || !Enum.IsDefined(typeof(QcResult), dto.Result)) return Bad<QcRecordDto>(QualityText.InvalidData);
             DateTime date = (dto.RecordDate ?? DateTime.Today).Date;
-            if (date > DateTime.Today.AddDays(1)) return Bad<QcRecordDto>("تاریخ بازرسی نمی‌تواند در آینده باشد.");
+            string dateProblem = await QualityChecks.RecordDateAsync(_uow, date, "بازرسی", cancellationToken);
+            if (dateProblem != null) return Bad<QcRecordDto>(dateProblem);
 
             // ITP-linked inspections are done by QC only; operators may check their own work on activities that are not on the ITP
             ItpActivity activity = null;
@@ -133,6 +131,11 @@ namespace Services.NasbNiro.Quality
                 if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<QcRecordDto>(QualityText.NotAllowed + " (بازرسی فعالیت‌های برنامه بازرسی فقط توسط بازرس QC ثبت می‌شود)");
             }
             else if (!_user.IsInRole(QualityRoles.RecordWriters)) return Bad<QcRecordDto>(QualityText.NotAllowed);
+            if (_user.IsInRole(QualityRoles.Inspectors))
+            {
+                string competence = await CheckInspectorAsync(date, cancellationToken);
+                if (competence != null) return Bad<QcRecordDto>(competence);
+            }
             if (!dto.WorkOrderId.HasValue && !dto.ItemId.HasValue) return Bad<QcRecordDto>("دستور کار یا کالا را مشخص کنید.");
 
             if (dto.WorkOrderId.HasValue && !await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId.Value && !w.Deleted, cancellationToken))
@@ -150,6 +153,8 @@ namespace Services.NasbNiro.Quality
             {
                 if (Clean(m.Characteristic) == null) return Bad<QcRecordDto>("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
                 if (m.TolPlus < 0 || m.TolMinus < 0) return Bad<QcRecordDto>("تلرانس‌ها را به صورت مقدار مثبت وارد کنید (+ و −).");
+                // R1q D16: a measured value without the instrument that measured it cannot be traced to a calibration (ISO 9001 7.1.5.2)
+                if (!m.EquipmentId.HasValue) return Bad<QcRecordDto>($"برای اندازه‌گیری «{Clean(m.Characteristic)}» تجهیز اندازه‌گیری (ابزار) را انتخاب کنید؛ مقدار بدون ابزار قابل پذیرش نیست.");
                 measurements.Add(new QcMeasurement
                 {
                     Characteristic = Clean(m.Characteristic), Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured,
@@ -182,6 +187,7 @@ namespace Services.NasbNiro.Quality
                 CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             _uow.Set<QcRecord>().Add(record);
+            NonConformance drafted = null;
             if (opensNcr)
             {
                 string failed = string.Join("، ", measurements.Where(m => !m.Pass).Select(m => $"{m.Characteristic}: {m.Measured}"));
@@ -191,8 +197,11 @@ namespace Services.NasbNiro.Quality
                     $"{(dto.Result == QcResult.Rework ? "دوباره‌کاری" : "رد")} در بازرسی {record.Number}: {Clean(dto.Note) ?? failed}" + (failed.Length > 0 && Clean(dto.Note) != null ? $" ({failed})" : string.Empty),
                     record.Number, measurements.FirstOrDefault(m => !m.Pass && m.EquipmentId.HasValue)?.EquipmentId, cancellationToken);
                 record.Ncr = ncr;
+                drafted = ncr;
             }
             await _uow.SaveChangesAsync(cancellationToken);
+            // R1q D34: the QC people get an inbox item with the due date as soon as the report is drafted
+            if (drafted != null) await NcrGates.SyncAsync(_notify, drafted, cancellationToken);
             return await GetRecordAsync(record.Id, cancellationToken);
         }
 
@@ -347,7 +356,10 @@ namespace Services.NasbNiro.Quality
             if (q.Person != null && q.Person.UserId.HasValue && q.Person.UserId.Value != r.ExaminerUserId)
                 return "گواهی انتخاب‌شده متعلق به بازرس ثبت‌کننده این گزارش نیست.";
             QualificationState state = QualificationRules.State(q, r.ReportDate, null, 6, 0);
-            return QualificationRules.Usable(state) ? null : $"گواهی صلاحیت در تاریخ گزارش معتبر نیست: {QualificationRules.StateText(state)}.";
+            if (!QualificationRules.Usable(state)) return $"گواهی صلاحیت در تاریخ گزارش معتبر نیست: {QualificationRules.StateText(state)}.";
+            // R1q D15: a certificate that lapsed after the report date but before today cannot sign the report today either
+            QualificationState today = QualificationRules.State(q, DateTime.Today, null, 6, 0);
+            return QualificationRules.Usable(today) ? null : $"گواهی صلاحیت امروز معتبر نیست: {QualificationRules.StateText(today)}.";
         }
 
         private async Task<List<string>> SubmitProblemsAsync(TestReport r, CancellationToken cancellationToken)
@@ -363,6 +375,9 @@ namespace Services.NasbNiro.Quality
             }
             string examiner = await CheckExaminerAsync(r, r.ExaminerQualificationId, cancellationToken);
             if (examiner != null) problems.Add(examiner);
+            // R1q D16: measured values need the instruments that measured them
+            if (r.Values.Any(v => v.Measured.HasValue) && r.Equipment.Count == 0)
+                problems.Add("برای گزارش آزمون با مقدار اندازه‌گیری‌شده، حداقل یک تجهیز اندازه‌گیری (ابزار) انتخاب کنید.");
             string equipment = await CheckEquipmentAsync(r.Equipment.Select(e => e.EquipmentId), r.ReportDate, cancellationToken);
             if (equipment != null) problems.Add(equipment);
             if (Compute(r) == ReportResult.Fail && !r.NcrId.HasValue && !r.ItemId.HasValue)
@@ -375,7 +390,8 @@ namespace Services.NasbNiro.Quality
             if (dto == null || !Enum.IsDefined(typeof(TestReportType), dto.Type)) return Bad<TestReportDto>(QualityText.InvalidData);
             if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<TestReportDto>(QualityText.NotAllowed + " (گزارش آزمون را بازرس QC ثبت می‌کند)");
             DateTime date = (dto.ReportDate ?? DateTime.Today).Date;
-            if (date > DateTime.Today.AddDays(1)) return Bad<TestReportDto>("تاریخ گزارش نمی‌تواند در آینده باشد.");
+            string dateProblem = await QualityChecks.RecordDateAsync(_uow, date, "گزارش آزمون", cancellationToken);
+            if (dateProblem != null) return Bad<TestReportDto>(dateProblem);
 
             TestReport report = null;
             if (dto.Id.HasValue)
@@ -471,6 +487,7 @@ namespace Services.NasbNiro.Quality
             if (report == null) return QualityText.NotFound<TestReportDto>("گزارش آزمون پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             int? completeActivity = null;
+            NonConformance drafted = null;
             switch (dto.Action.Trim().ToLowerInvariant())
             {
                 case "submit":
@@ -486,6 +503,7 @@ namespace Services.NasbNiro.Quality
                             report.WorkOrderId, report.ProcedureRef, $"مردود شدن آزمون {report.Number} ({report.Type}): {failed}", report.Number,
                             report.Equipment.FirstOrDefault()?.EquipmentId, cancellationToken);
                         report.Ncr = ncr;
+                        drafted = ncr;
                     }
                     report.Status = TestReportStatus.Submitted; report.SubmittedAt = now;
                     break;
@@ -513,6 +531,7 @@ namespace Services.NasbNiro.Quality
             {
                 return Bad<TestReportDto>(QualityText.Concurrency);
             }
+            if (drafted != null) await NcrGates.SyncAsync(_notify, drafted, cancellationToken);
             // approving the last required report finishes the ITP activity when its control points are released
             if (completeActivity.HasValue) await _itp.TryCompleteActivityAsync(completeActivity.Value, cancellationToken);
             return await GetReportAsync(report.Id, cancellationToken);

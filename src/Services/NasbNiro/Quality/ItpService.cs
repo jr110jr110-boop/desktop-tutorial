@@ -8,6 +8,7 @@ using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Equipments;
+using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
@@ -168,8 +169,8 @@ namespace Services.NasbNiro.Quality
                 else if (point == ItpPoint.W)
                 {
                     if (rows.Count > 0) continue;
-                    DateTime? deadline = a.NotificationSentAt?.Date.AddDays(itp.NoticeDays);
-                    if (deadline.HasValue && deadline.Value <= today) waiveParties.Add(party);
+                    DateTime? deadline = ItpNoticeRules.Deadline(a.NotificationSentAt, itp.NoticeDays);
+                    if (ItpNoticeRules.WaivedByNotice(a.NotificationSentAt, itp.NoticeDays, today)) waiveParties.Add(party);
                     else if (!a.NotificationSentAt.HasValue) blockers.Add($"نقطه شاهد (W): اعلام زمان آزمون به {PartyName(party)} ثبت نشده است.");
                     else blockers.Add($"نقطه شاهد (W): مهلت اعلام {PartyName(party)} تا {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(deadline.Value))} است.");
                 }
@@ -188,6 +189,10 @@ namespace Services.NasbNiro.Quality
         {
             List<ReportInfo> reports = await ReportsAsync(itp.Activities.Select(a => a.Id), cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, itp.Revisions.Select(r => (int?)r.ChangedByUserId), cancellationToken);
+            List<int> letterIds = itp.Activities.Where(a => a.NotificationLetterId.HasValue).Select(a => a.NotificationLetterId.Value).Distinct().ToList();
+            Dictionary<int, string> letterNumbers = letterIds.Count == 0
+                ? new Dictionary<int, string>()
+                : await _uow.Set<OfLetter>().Where(l => letterIds.Contains(l.Id)).Select(l => new { l.Id, l.Number }).ToDictionaryAsync(l => l.Id, l => l.Number, cancellationToken);
             DateTime today = DateTime.Today;
             var dto = new ItpDto
             {
@@ -207,7 +212,10 @@ namespace Services.NasbNiro.Quality
                     AcceptanceReference = a.AcceptanceReference, PointVendor = a.PointVendor, PointTpi = a.PointTpi, PointClient = a.PointClient,
                     DocumentProduced = a.DocumentProduced, RequiredReportType = a.RequiredReportType, Remark = a.Remark, GatesRelease = a.GatesRelease,
                     Status = a.Status, PlannedDate = a.PlannedDate, NotificationSentAt = a.NotificationSentAt,
-                    WitnessDeadline = a.NotificationSentAt?.Date.AddDays(itp.NoticeDays), DoneAt = a.DoneAt, StatusNote = a.StatusNote,
+                    WitnessDeadline = ItpNoticeRules.Deadline(a.NotificationSentAt, itp.NoticeDays), DoneAt = a.DoneAt, StatusNote = a.StatusNote,
+                    NotificationLetterId = a.NotificationLetterId,
+                    NotificationLetterNumber = a.NotificationLetterId.HasValue && letterNumbers.TryGetValue(a.NotificationLetterId.Value, out string letterNumber) ? letterNumber : null,
+                    NotApplicableReference = a.NotApplicableReference, EvidenceDocumentId = a.EvidenceDocumentId, EvidenceNote = a.EvidenceNote,
                     HoldPending = !terminal && HasPoint(a, ItpPoint.H),
                     Blockers = terminal ? new List<string>() : Evaluate(itp, a, reports, today, waive),
                     Parameters = a.Parameters.OrderBy(p => p.Id).Select(p => ToDto(p.Id, p.Name, p.Unit, p.Min, p.Max, p.Source, p.RequiresLimits)).ToList(),
@@ -365,6 +373,10 @@ namespace Services.NasbNiro.Quality
             if (itp == null) return QualityText.NotFound<ItpDto>("برنامه بازرسی و آزمون پیدا نشد.");
             if (itp.Status == ItpStatus.Closed) return Bad<ItpDto>("برنامه بسته‌شده قابل ویرایش نیست.");
             if (dto.NoticeDays < 0 || dto.NoticeDays > 365) return Bad<ItpDto>("مهلت اعلام نقطه شاهد باید بین ۰ تا ۳۶۵ روز باشد.");
+            // R1q D9: the notice period is part of what the client approved; shortening it afterwards would let the vendor waive the client's witness sooner.
+            // Changing it needs a revision of the plan (revise), which the client approves again.
+            if ((itp.Status == ItpStatus.ClientApproved || itp.Status == ItpStatus.InUse) && dto.NoticeDays != itp.NoticeDays)
+                return Bad<ItpDto>("مهلت اعلام نقطه شاهد پس از تایید کارفرما قفل است؛ برای تغییر آن برنامه را با دلیل بازنگری کنید تا کارفرما دوباره تایید کند.");
             itp.NoticeDays = dto.NoticeDays;
             itp.Note = Clean(dto.Note);
             return await SaveAsync(itp, cancellationToken);
@@ -516,7 +528,13 @@ namespace Services.NasbNiro.Quality
                 case "notify":
                     if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<ItpDto>(QualityText.NotAllowed);
                     if (IsTerminal(activity.Status)) return Bad<ItpDto>("فعالیت پایان یافته است.");
-                    activity.NotificationSentAt = date;
+                    // R1q D9: the notice date is the server day, or the signing day of the outgoing letter that carried the notice; never a typed past date
+                    string dateProblem = ItpNoticeRules.CheckTypedDate(dto.Date, DateTime.Today);
+                    if (dateProblem != null) return Bad<ItpDto>(dateProblem);
+                    (DateTime? noticeDate, string letterProblem) = await NotificationDateAsync(itp, dto.LetterId, cancellationToken);
+                    if (letterProblem != null) return Bad<ItpDto>(letterProblem);
+                    activity.NotificationSentAt = noticeDate;
+                    activity.NotificationLetterId = dto.LetterId;
                     activity.Status = ItpActivityStatus.Notified;
                     activity.StatusNote = Clean(dto.Note) ?? activity.StatusNote;
                     break;
@@ -527,7 +545,10 @@ namespace Services.NasbNiro.Quality
                     break;
                 case "done":
                     if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<ItpDto>(QualityText.NotAllowed + " (فقط بازرس QC فعالیت را انجام‌شده ثبت می‌کند)");
-                    ResponseDto<ItpDto> refused = await MarkDoneAsync(itp, activity, cancellationToken);
+                    // R1q D17 ★: as for an inspection record, the QC inspector who signs an activity off holds a valid inspector qualification once the register is in use
+                    string competence = await QualityChecks.InspectorAsync(_uow, Me, DateTime.Today, "ثبت انجام‌شدن فعالیت برنامه بازرسی بدون گواهی صلاحیت معتبر مجاز نیست.", cancellationToken);
+                    if (competence != null) return Bad<ItpDto>(competence);
+                    ResponseDto<ItpDto> refused = await MarkDoneAsync(itp, activity, dto.EvidenceDocumentId, Clean(dto.Note), cancellationToken);
                     if (refused != null) return refused;
                     activity.StatusNote = Clean(dto.Note) ?? activity.StatusNote;
                     break;
@@ -535,6 +556,16 @@ namespace Services.NasbNiro.Quality
                     if (!_user.IsInRole(QualityRoles.QualityManagers)) return Bad<ItpDto>(QualityText.NotAllowed);
                     if (IsTerminal(activity.Status)) return Bad<ItpDto>("فعالیت پایان یافته است.");
                     if (Clean(dto.Note) == null) return Bad<ItpDto>("دلیل غیرقابل‌اجرا بودن فعالیت را بنویسید.");
+                    if (ItpNoticeRules.ThirdPartyControlled(activity.PointTpi, activity.PointClient))
+                    {
+                        // R1q D9: a hold or witness point of the client or the third party is removed only with the client's letter and a revision of the plan,
+                        // which the client approves again; the vendor cannot drop it alone
+                        if (Clean(dto.Reference) == null)
+                            return Bad<ItpDto>("نقطه توقف یا شاهد کارفرما/بازرس شخص ثالث را فقط با نامه موافقت کارفرما می‌توان غیرقابل‌اجرا کرد؛ شماره یا مرجع نامه کارفرما (مرجع) را وارد کنید.");
+                        ResponseDto<ItpDto> revision = OpenRevision(itp, $"غیرقابل‌اجرا شدن فعالیت {activity.ItemNo ?? activity.Seq.ToString()}: {Clean(dto.Note)} (نامه کارفرما: {Clean(dto.Reference)})");
+                        if (revision != null) return revision;
+                        activity.NotApplicableReference = Clean(dto.Reference);
+                    }
                     activity.Status = ItpActivityStatus.NotApplicable; activity.StatusNote = Clean(dto.Note);
                     activity.DoneAt = DateTimeOffset.Now; activity.DoneByUserId = Me;
                     break;
@@ -549,10 +580,30 @@ namespace Services.NasbNiro.Quality
         /// <summary>Office inbox: an activity with a hold point (H) that was notified waits for the QC inspector until it is done, waived or not applicable.</summary>
         private Task SyncHoldPointAsync(Itp itp, ItpActivity activity, CancellationToken cancellationToken) =>
             global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "itp-h:" + activity.Id, activity.Status == ItpActivityStatus.Notified && HasPoint(activity, ItpPoint.H), "quality", "itp-hold-point", activity.Id,
-                "نقطه توقف (H) آماده بازرسی: " + (activity.Activity ?? activity.ItemNo), "/quality/itps/" + itp.Id, QualityRoles.Inspectors, cancellationToken, activity.PlannedDate);
+                "نقطه توقف (H) آماده بازرسی: " + (activity.Activity ?? activity.ItemNo), "/quality/itp/" + itp.Id, QualityRoles.Inspectors, cancellationToken, activity.PlannedDate);
+
+        /// <summary>
+        /// The date a witness notice counts from (R1q D9): the signing day of the quoted outgoing letter, or the server day. The letter must be a signed outgoing
+        /// letter of this system (not an archive import) that belongs to the contract of the plan when it names one.
+        /// </summary>
+        private async Task<(DateTime? Date, string Problem)> NotificationDateAsync(Itp itp, int? letterId, CancellationToken cancellationToken)
+        {
+            DateTime today = DateTime.Today;
+            if (!letterId.HasValue) return (today, null);
+            OfLetter letter = await _uow.Set<OfLetter>().AsNoTracking().FirstOrDefaultAsync(l => l.Id == letterId.Value && !l.Deleted, cancellationToken);
+            if (letter == null) return (null, "نامه انتخاب‌شده پیدا نشد.");
+            if (letter.Kind != OfLetterKind.Outgoing || letter.Imported)
+                return (null, "فقط نامه صادره ثبت‌شده در این سامانه به‌عنوان مرجع اعلام پذیرفته می‌شود (نه نامه وارده، داخلی یا بایگانی وارداتی).");
+            if (letter.Status != OfLetterStatus.Signed && letter.Status != OfLetterStatus.Registered && letter.Status != OfLetterStatus.Sent)
+                return (null, "نامه انتخاب‌شده هنوز امضا نشده یا باطل شده است؛ فقط نامه امضاشده، ثبت‌شده یا ارسال‌شده مرجع اعلام است.");
+            if (letter.ContractId.HasValue && letter.ContractId != itp.ContractId)
+                return (null, "نامه انتخاب‌شده مربوط به پروژه/قرارداد دیگری است.");
+            DateTime signed = (letter.SignedAt?.Date ?? letter.Date).Date;
+            return (signed > today ? today : signed, null);
+        }
 
         /// <summary>Applies Done to the activity (adds the waived-by-notice rows). Returns an error response, or null when done.</summary>
-        private async Task<ResponseDto<ItpDto>> MarkDoneAsync(Itp itp, ItpActivity activity, CancellationToken cancellationToken)
+        private async Task<ResponseDto<ItpDto>> MarkDoneAsync(Itp itp, ItpActivity activity, Guid? evidenceDocumentId, string evidenceNote, CancellationToken cancellationToken)
         {
             if (IsTerminal(activity.Status)) return Bad<ItpDto>("فعالیت قبلاً پایان یافته است.");
             if ((itp.Status == ItpStatus.Draft || itp.Status == ItpStatus.Submitted) && (HasPoint(activity, ItpPoint.H) || HasPoint(activity, ItpPoint.W)))
@@ -561,6 +612,18 @@ namespace Services.NasbNiro.Quality
             var waive = new List<ReleaseParty>();
             List<string> blockers = Evaluate(itp, activity, reports, DateTime.Today, waive);
             if (blockers.Count > 0) return Bad<ItpDto>(string.Join(" ", blockers));
+            // R1q D18 ★: an activity that no test report completes needs proof it was done: an accepted inspection record on it, or a document
+            if (!activity.RequiredReportType.HasValue)
+            {
+                // a document counts only when the file really is in the document store (a made-up id is not proof)
+                if (evidenceDocumentId.HasValue && !await _uow.Set<Entities.Model.Document>().AnyAsync(d => d.Id == evidenceDocumentId.Value, cancellationToken))
+                    return Bad<ItpDto>("فایل مدرک در مخزن اسناد پیدا نشد؛ ابتدا فایل را بارگذاری کنید.");
+                bool accepted = await _uow.Set<QcRecord>().AnyAsync(r => !r.Deleted && r.ItpActivityId == activity.Id && r.Result == QcResult.Accept, cancellationToken);
+                if (!ItpNoticeRules.HasEvidence(accepted, evidenceDocumentId))
+                    return Bad<ItpDto>("برای انجام‌شده ثبت‌کردن این فعالیت مدرک لازم است: یک بازرسی قبول‌شده روی همین فعالیت ثبت کنید یا مدرک انجام کار (گواهی، صورت‌جلسه یا سند بازبینی) را ضمیمه کنید.");
+                activity.EvidenceDocumentId = evidenceDocumentId;
+                activity.EvidenceNote = evidenceNote;
+            }
             DateTimeOffset now = DateTimeOffset.Now;
             foreach (ReleaseParty party in waive)
                 activity.Releases.Add(new ItpPointRelease
@@ -610,7 +673,7 @@ namespace Services.NasbNiro.Quality
             ItpActivity activity = itp.Activities.First(a => a.Id == activityId);
             if (IsTerminal(activity.Status) || !activity.RequiredReportType.HasValue) return false;
             if (itp.Status != ItpStatus.ClientApproved && itp.Status != ItpStatus.InUse) return false;
-            ResponseDto<ItpDto> refused = await MarkDoneAsync(itp, activity, cancellationToken);
+            ResponseDto<ItpDto> refused = await MarkDoneAsync(itp, activity, null, null, cancellationToken);
             if (refused != null) return false;
             itp.ModifyDate = DateTimeOffset.Now; itp.ModifierUserId = Me;
             try
@@ -644,7 +707,7 @@ namespace Services.NasbNiro.Quality
                 ItpId = a.ItpId, ItpNumber = a.ItpNumber, WorkOrderId = a.WorkOrderId, WorkOrderCode = a.WorkOrderCode, ActivityId = a.Id,
                 ItemNo = a.ItemNo, Activity = a.Activity, Status = a.Status, PlannedDate = a.PlannedDate,
                 Points = $"V:{a.PointVendor} T:{a.PointTpi} C:{a.PointClient}",
-                WitnessDeadline = a.NotificationSentAt?.Date.AddDays(a.NoticeDays),
+                WitnessDeadline = ItpNoticeRules.Deadline(a.NotificationSentAt, a.NoticeDays),
             }).ToList();
             return ResponseDtoHelper.Ok(await PagedList<PendingPointDto>.CreateAsync(list, query.PageNumber, query.PageSize, cancellationToken));
         }
