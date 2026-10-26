@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Ai;
 using Services.NasbNiro.Ceo.Drills;
+using Services.NasbNiro.ProjectControl;
 using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.AiDtos;
 using ViewModels.NasbNiro.ProjectControlDtos;
@@ -318,14 +319,15 @@ namespace MsTests
             };
             List<string> Names(string status) => rows.Where(r => ProjectDrills.InStatus(r.Value, status)).Select(r => r.Key).ToList();
 
-            // danger and warn are the two counters of the project dashboard (a red or an amber index), so a project that is red on one index and amber on the other is in both
+            // one colour per project, the rule of the project dashboard and the CEO overview (PcReportService.IsRed / IsAmber): a project that is red on one index and amber on the other is red only
             CollectionAssert.AreEqual(new[] { "red/green", "red/amber" }, Names("danger"));
-            CollectionAssert.AreEqual(new[] { "amber/amber", "green/amber", "red/amber" }, Names("warn"));
+            CollectionAssert.AreEqual(new[] { "amber/amber", "green/amber" }, Names("warn"));
             CollectionAssert.AreEqual(new[] { "green/none", "green/green" }, Names("ok"));
             Assert.AreEqual(rows.Count, Names(null).Count, "no status: every project");
             Assert.AreEqual(rows.Count, Names("").Count);
-            Assert.AreEqual(rows.Values.Count(r => r.SpiStatus == "red" || r.CpiStatus == "red"), Names("danger").Count);
-            Assert.AreEqual(rows.Values.Count(r => r.SpiStatus == "amber" || r.CpiStatus == "amber"), Names("warn").Count);
+            Assert.AreEqual(rows.Values.Count(PcReportService.IsRed), Names("danger").Count);
+            Assert.AreEqual(rows.Values.Count(PcReportService.IsAmber), Names("warn").Count);
+            Assert.AreEqual(0, Names("danger").Intersect(Names("warn")).Count(), "no project is in two lists");
 
             // the light of a row: the worse of the two indices; "none" (the module's word for no value) is not green
             Assert.AreEqual("قرمز", ProjectDrills.Traffic("red", "amber"));

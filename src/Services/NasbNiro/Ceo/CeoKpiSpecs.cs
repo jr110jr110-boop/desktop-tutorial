@@ -49,7 +49,7 @@ namespace Services.NasbNiro.Ceo
             S(CeoKeys.Finance, "vouchersWaiting", "اسناد حسابداری منتظر بررسی یا قطعی‌شدن", CeoUnit.Count, CeoLinks.Vouchers, CeoDrillRef.FinVouchersWaiting),
 
             // sales
-            S(CeoKeys.Sales, CeoKeys.SalesBacklog, "سفارش‌های در جریان (backlog)", CeoUnit.Rial, CeoLinks.SalesOrders, CeoDrillRef.SlOrdersOpen, Only("status", "open")),
+            S(CeoKeys.Sales, CeoKeys.SalesBacklog, "سفارش‌های در جریان (backlog)", CeoUnit.Rial, CeoLinks.SalesOrders, CeoDrillRef.SlOrdersOpen), // the drill lists the open orders by itself (it declares no status parameter)
             S(CeoKeys.Sales, CeoKeys.SalesPipelineValue, "ارزش خط لوله‌ی فروش", CeoUnit.Rial, CeoLinks.SalesDashboard, CeoDrillRef.SlPipelineByStage),
             S(CeoKeys.Sales, "salesHitRate", "نرخ برد پیشنهادها", CeoUnit.Percent, CeoLinks.SalesProposals, CeoDrillRef.SlHitRateByMonth),
             S(CeoKeys.Sales, "salesProposalsDueSoon", "پیشنهادهای نزدیک به مهلت ارسال", CeoUnit.Count, CeoLinks.SalesInquiries, CeoDrillRef.SlProposalsDue),

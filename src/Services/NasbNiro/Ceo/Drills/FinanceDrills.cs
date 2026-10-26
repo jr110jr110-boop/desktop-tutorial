@@ -159,26 +159,26 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition PayablesOverdue() => new DrillDefinition
         {
-            Key = "fin.payables_overdue", Module = M, Title = "بدهی‌های سررسید و درخواست‌های پرداخت منتظر",
-            Description = "درخواست‌های پرداخت تأییدشده‌ای که هنوز پرداخت نشده است (بدهی سررسیدشده‌ی در انتظار خزانه)؛ قدیمی‌ترین اول. جمع مبلغ خالص هم‌پایه با «بدهی سررسید ۳۰ روز آینده» داشبورد مالی است.",
-            Link = "/fn/treasury/payments", RecordType = "PaymentRequest", RecordLabel = "درخواست پرداخت",
+            Key = "fin.payables_overdue", Module = M, Title = "بدهی سررسیدگذشته به تأمین‌کنندگان (سن بدهی)",
+            Description = "سن بدهی به تأمین‌کنندگان از دفتر کل به تاریخ امروز، یک ردیف برای هر تأمین‌کننده: جاری (تا ۳۰ روز)، ۳۱ تا ۶۰، ۶۱ تا ۹۰ و بیش از ۹۰ روز. «سررسیدگذشته» جمع سه ستون بالای ۳۰ روز است و همان رقم سرفصل «بدهی سررسیدگذشته» داشبورد مدیرعامل است (جدول یادداشت‌های صورت‌های مالی)؛ پیش‌پرداخت و علی‌الحساب تا وصول با فاکتور در این رقم نیستند. بیشترین سررسیدگذشته اول.",
+            Link = "/fn/financial-statements", RecordType = "SupplierAgeing", RecordLabel = "تأمین‌کننده",
             Columns = new[]
             {
-                Col.Text("number", "شماره"), Col.Text("providerName", "تأمین‌کننده"), Col.Text("invoiceNumber", "فاکتور"), Col.Date("requestDate", "تاریخ درخواست"),
-                Col.Num("daysWaiting", "روز انتظار"), Col.Rial("netAmount", "مبلغ خالص"), Col.Status("state", "وضعیت"), Col.Link(),
+                Col.Text("supplier", "تأمین‌کننده"), Col.Rial("current", "جاری (تا ۳۰ روز)"), Col.Rial("days31To60", "۳۱ تا ۶۰ روز"), Col.Rial("days61To90", "۶۱ تا ۹۰ روز"),
+                Col.Rial("over90", "بیش از ۹۰ روز"), Col.Rial("overdue", "سررسیدگذشته"), Col.Rial("total", "جمع بدهی"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, FinanceRoles.Readers);
-                PagedList<PayableRequestDto> waiting = Take(await c.Get<ITreasuryService>().GetPayableRequestsAsync(new TreasuryQuery { PageNumber = 1, PageSize = 0 }, ct));
-                DateTime today = c.Today;
-                List<Row> rows = waiting.OrderBy(r => r.RequestDate).ThenBy(r => r.Id).Select(r => new Row("/fn/treasury/payments")
+                // the one function behind the headline figure (CeoFigures): the payables ageing of the general ledger as of today
+                List<CeoOverduePayable> ageing = await CeoFigures.OverduePayablesAsync(c.Get<IPayableAgeingService>(), c.Today, ct);
+                List<Row> rows = ageing.Select(r => new Row("/fn/financial-statements")
                 {
-                    ["id"] = r.Id, ["number"] = r.Number, ["providerName"] = r.ProviderName, ["invoiceNumber"] = r.InvoiceNumber, ["requestDate"] = DrillDates.Text(r.RequestDate),
-                    ["daysWaiting"] = Math.Max(0, (int)(today - r.RequestDate.Date).TotalDays), ["netAmount"] = r.NetAmount, ["state"] = r.PaymentId.HasValue ? "سند پرداخت در خزانه ساخته شده" : "منتظر پرداخت",
+                    ["supplier"] = r.Supplier, ["current"] = r.Current, ["days31To60"] = r.Days31To60, ["days61To90"] = r.Days61To90, ["over90"] = r.Over90,
+                    ["overdue"] = r.Overdue, ["total"] = r.Total,
                 }).ToList();
-                return DrillResult.Slice(rows, c, "در داده‌ی درخواست پرداخت سررسید جدا ثبت نمی‌شود؛ درخواست‌های تأییدشده‌ی پرداخت‌نشده از قدیمی‌ترین نشان داده می‌شود.",
-                    new Dictionary<string, object> { ["netAmount"] = waiting.Sum(r => r.NetAmount) });
+                return DrillResult.Slice(rows, c, "سن بدهی از دفتر کل به تاریخ امروز؛ «سررسیدگذشته» = ۳۱ تا ۶۰ + ۶۱ تا ۹۰ + بیش از ۹۰ روز، هم‌پایه با رقم سرفصل داشبورد.",
+                    new Dictionary<string, object> { ["overdue"] = ageing.Sum(r => r.Overdue), ["total"] = ageing.Sum(r => r.Total) });
             },
         };
 

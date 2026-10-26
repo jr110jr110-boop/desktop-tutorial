@@ -1588,17 +1588,17 @@ namespace MsTests
 
                 CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log).GetOverviewAsync(true, CancellationToken.None)).Data;
 
-                // review item 16, the figures: the red and the amber projects, the open sales orders, and the two figures of the year so far; every other figure opens its drill unfiltered
+                // review item 16, the figures: the red and the amber projects and the two figures of the year so far; every other figure opens its drill unfiltered
+                // (the backlog opens sl.orders_open without parameters: that drill lists the open orders by itself and declares no status parameter)
                 var kpis = new Dictionary<string, Dictionary<string, string>>
                 {
                     ["projectsRed"] = Params("status", "danger"),
                     ["projectsAmber"] = Params("status", "warn"),
-                    ["salesBacklog"] = Params("status", "open"),
                     ["netProfitYtd"] = Params("from", yearStart, "to", day),
                     ["serviceWarrantyCostYtd"] = Params("from", yearStart, "to", day),
                 };
                 foreach (CeoKpiDto kpi in overview.Sections.SelectMany(s => s.Kpis)) AssertParams(kpis.TryGetValue(kpi.Key, out Dictionary<string, string> expected) ? expected : null, kpi.DrillParams, "KPI " + kpi.Key);
-                AssertParams(kpis["salesBacklog"], overview.Headline.First(k => k.Key == "salesBacklog").DrillParams, "the headline copy of salesBacklog");
+                AssertParams(null, overview.Headline.First(k => k.Key == "salesBacklog").DrillParams, "the headline copy of salesBacklog");
                 Assert.AreEqual(CeoDrillRef.PcPortfolio, Kpi(overview, "projectsRed").DrillKey);
                 Assert.AreEqual(CeoDrillRef.PcPortfolio, Kpi(overview, "projectsAmber").DrillKey);
                 Assert.AreEqual(CeoDrillRef.SlOrdersOpen, Kpi(overview, "salesBacklog").DrillKey);

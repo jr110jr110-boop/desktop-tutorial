@@ -78,11 +78,12 @@ namespace Services.NasbNiro.Ceo.Drills
         internal static string Traffic(string spi, string cpi) => spi == "red" || cpi == "red" ? "قرمز" : spi == "amber" || cpi == "amber" ? "زرد" : !HasValue(spi) && !HasValue(cpi) ? "بدون داده" : "سبز";
 
         /// <summary>The filter of the portfolio drill: danger = SPI or CPI red, warn = SPI or CPI amber (the same test as the counters of the project dashboard, so a project can be on both lists), ok = no red and no amber and at least one value.</summary>
+        /// <summary>One colour per project, the rule of the portfolio dashboard and the overview (PcReportService.IsRed / IsAmber): red when an index is red, amber when one is amber and none is red, else ok.</summary>
         internal static bool InStatus(PcPortfolioRowDto r, string status) => status switch
         {
-            "danger" => r.SpiStatus == "red" || r.CpiStatus == "red",
-            "warn" => r.SpiStatus == "amber" || r.CpiStatus == "amber",
-            "ok" => r.SpiStatus != "red" && r.CpiStatus != "red" && r.SpiStatus != "amber" && r.CpiStatus != "amber" && (HasValue(r.SpiStatus) || HasValue(r.CpiStatus)),
+            "danger" => PcReportService.IsRed(r),
+            "warn" => PcReportService.IsAmber(r),
+            "ok" => !PcReportService.IsRed(r) && !PcReportService.IsAmber(r) && (HasValue(r.SpiStatus) || HasValue(r.CpiStatus)),
             _ => true,
         };
 
@@ -93,7 +94,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition Portfolio() => new DrillDefinition
         {
             Key = "pc.portfolio", Module = M, Title = "سبد پروژه‌ها",
-            Description = "همه‌ی پروژه‌های فعال با پیشرفت فیزیکی و برنامه‌ای، شاخص‌های SPI و CPI، وضعیت (قرمز/زرد/سبز)، تاخیرها و هشدارها؛ بدترین SPI اول (هم‌پایه با داشبورد پروژه‌ها). با status فقط پروژه‌های یک وضعیت: danger (SPI یا CPI قرمز)، warn (SPI یا CPI زرد؛ شمارش هم‌پایه با داشبورد، پس ممکن است پروژه‌ای در هر دو فهرست باشد) یا ok (نه قرمز و نه زرد).",
+            Description = "همه‌ی پروژه‌های فعال با پیشرفت فیزیکی و برنامه‌ای، شاخص‌های SPI و CPI، وضعیت (قرمز/زرد/سبز)، تاخیرها و هشدارها؛ بدترین SPI اول (هم‌پایه با داشبورد پروژه‌ها). با status فقط پروژه‌های یک وضعیت: danger (SPI یا CPI قرمز)، warn (SPI یا CPI زرد و هیچ‌کدام قرمز) یا ok (نه قرمز و نه زرد)؛ هر پروژه یک رنگ دارد، پس قرمز + زرد + سبز = شمار پروژه‌ها (هم‌پایه با سرفصل «پروژه‌های قرمز/زرد» داشبورد مدیرعامل).",
             Link = "/project-control/portfolio", RecordType = "Project", RecordLabel = "پروژه",
             Parameters = new[]
             {
@@ -118,7 +119,7 @@ namespace Services.NasbNiro.Ceo.Drills
                 }).ToList();
                 return DrillResult.Slice(rows, c, "SPI و CPI کمتر از یک یعنی عقب از برنامه / بیش از بودجه؛ رنگ از آستانه‌های تنظیمات پروژه می‌آید. شمارنده‌های خلاصه همیشه برای همه‌ی پروژه‌های فعال است، نه فقط وضعیت انتخاب‌شده.", new Dictionary<string, object>
                 {
-                    ["activeProjects"] = portfolio.Count, ["red"] = portfolio.Count(r => r.SpiStatus == "red" || r.CpiStatus == "red"), ["amber"] = portfolio.Count(r => r.SpiStatus == "amber" || r.CpiStatus == "amber"),
+                    ["activeProjects"] = portfolio.Count, ["red"] = portfolio.Count(PcReportService.IsRed), ["amber"] = portfolio.Count(PcReportService.IsAmber),
                     ["lateActivities"] = portfolio.Sum(r => r.LateActivities), ["penaltyExposure"] = portfolio.Sum(r => r.PenaltyExposure),
                 });
             },
