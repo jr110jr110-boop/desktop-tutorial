@@ -5259,6 +5259,426 @@ fi
 TOKEN=$ADMIN_TOKEN
 rm -f "$OUT/ai-voice.wav" "$OUT/ai-voice.txt" "$OUT/ai-brief.wav"
 
+# ===== ceo overview (release D1 part A1: api/v1/ceo overview, section/{key}, snapshot, speech)
+# api/v1/ceo: overview, section/{key}, speech (voice mode), snapshot. The job at 00:30 is off here (Ceo__Jobs=false), so the snapshots are taken by hand.
+# Every figure of the headline is compared with the dashboard of the module that owns it, read right after the overview (nothing writes in between).
+CEO=ceo; CEOOV="$OUT/ceo-overview.tmp"; CEOJQ='def r2: (. * 100 | round);'
+CEOZW=$'\xe2\x80\x8c'   # the zero-width non-joiner (the half-space of Persian words), written as bytes so that no editor and no locale can lose it
+# ceoc NAME JQ : a check against the overview saved in $CEOOV (the body file $B is shared with the next requests)
+ceoc() { cp "$CEOOV" "$B"; check "$1" "$2"; }
+# ceohk KEY : jq path of a headline figure; ceosk SECTION KEY : of a KPI of a section; ceoany KEY : of a headline figure or a KPI of any section
+ceohk() { echo "(.data.headline[]|select(.key == \"$1\"))"; }
+ceosk() { echo "(.data.sections[]|select(.key == \"$1\")|.kpis[]|select(.key == \"$2\"))"; }
+ceoany() { echo "([.data.headline[], .data.sections[].kpis[]]|map(select(.key == \"$1\"))|.[0])"; }
+# ceoworst STATUS... : the worst of the statuses given (danger, then warn, else ok)
+ceoworst() { local w=ok s; for s in "$@"; do if [ "$s" = danger ]; then echo danger; return; fi; [ "$s" = warn ] && w=warn; done; echo "$w"; }
+# ceowords N [s3|d1] : the Persian words of a number by the rules of the speech normaliser of the API (PersianNumberWords.ToWords); the phrases below are built apart from the API.
+# s3 : N is first rounded half away from zero to three significant digits, as every rial value and change is said (CeoSpeechScript.SpokenRial); d1 : one decimal, as the survey score is said («سه ممیز نه»)
+ceowords() {
+python3 -I - "$1" "${2:-}" <<'PYW'
+import sys
+from decimal import Decimal, ROUND_HALF_UP
+U = ["", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "نه"]
+T = ["ده", "یازده", "دوازده", "سیزده", "چهارده", "پانزده", "شانزده", "هفده", "هجده", "نوزده"]
+D = ["", "", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود"]
+H = ["", "صد", "دویست", "سیصد", "چهارصد", "پانصد", "ششصد", "هفتصد", "هشتصد", "نهصد"]
+def below(n):
+    p = []
+    if n >= 100: p.append(H[n // 100])
+    r = n % 100
+    if r >= 20:
+        p.append(D[r // 10])
+        if r % 10: p.append(U[r % 10])
+    elif r >= 10: p.append(T[r - 10])
+    elif r > 0: p.append(U[r])
+    return " و ".join(p)
+def pos(n):
+    p = []
+    if n // 10**9: p.append(pos(n // 10**9) + " میلیارد")
+    if n // 10**6 % 1000: p.append(below(n // 10**6 % 1000) + " میلیون")
+    t = n // 1000 % 1000
+    if t: p.append("هزار" if t == 1 else below(t) + " هزار")
+    if n % 1000: p.append(below(n % 1000))
+    return " و ".join(p)
+def words(n):
+    return "صفر" if n == 0 else ("منفی " + pos(-n) if n < 0 else pos(n))
+def significant(v, digits):
+    # CeoSpeechScript.SpokenRial: half away from zero to the given number of significant digits (3 by default); below 1000 the amount keeps its digits
+    if v == 0: return v
+    a = abs(v)
+    left = digits - len(str(int(a)))
+    if left >= 0:
+        r = a.quantize(Decimal(1).scaleb(-min(left, 6)), rounding=ROUND_HALF_UP)
+    else:
+        scale = Decimal(10) ** (-left)
+        r = (a / scale).quantize(Decimal(1), rounding=ROUND_HALF_UP) * scale
+    return -r if v < 0 else r
+value = Decimal(sys.argv[1])
+mode = sys.argv[2]
+if mode == "d1":
+    q = abs(value).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    whole = int(q)
+    tenth = int((q - whole) * 10)
+    print(words(whole) + ((" ممیز " + U[tenth]) if tenth else ""))
+else:
+    if mode == "s3": value = significant(value, 3)
+    print(words(int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))))
+PYW
+}
+
+# ceoshort N : the short text of a rial amount as the API prints it (CeoText.ShortRial): «۴۸٫۲ میلیارد ریال», «۳۵۰ میلیون ریال», «۹۰۰ هزار ریال», below 1000 the amount as it is
+ceoshort() {
+python3 -I - "$1" <<'PYS'
+import sys
+from decimal import Decimal, ROUND_HALF_UP
+def localize(text):
+    return text.translate(str.maketrans("0123456789,.", "۰۱۲۳۴۵۶۷۸۹٬٫"))
+def number(v, decimals):
+    q = v.quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)
+    if q == 0: return localize("0")
+    text = "{:,.{d}f}".format(q, d=decimals)
+    if decimals > 0: text = text.rstrip("0").rstrip(".")
+    return localize(text)
+v = Decimal(sys.argv[1])
+a = abs(v)
+if a.quantize(Decimal(1), rounding=ROUND_HALF_UP) == 0:
+    print(localize("0") + " ریال")
+elif a < 1000:
+    print(("-" if v < 0 else "") + number(a, 0) + " ریال")
+else:
+    scales = [(Decimal(1000), "هزار ریال"), (Decimal(10) ** 6, "میلیون ریال"), (Decimal(10) ** 9, "میلیارد ریال")]
+    index = 0 if a < 10 ** 6 else 1 if a < 10 ** 9 else 2
+    scaled = (a / scales[index][0]).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    if scaled >= 1000 and index < 2:
+        index += 1
+        scaled = (a / scales[index][0]).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    print(("-" if v < 0 else "") + number(scaled, 1) + " " + scales[index][1])
+PYS
+}
+CEODRILLS='["fin.cash_accounts","fin.receivables_by_customer","fin.receivable_invoices_overdue","fin.payables_by_supplier","fin.payables_overdue","fin.cheques_due","fin.revenue_by_month","fin.cost_by_month","fin.project_profitability","fin.bank_unreconciled","fin.vouchers_waiting","sl.pipeline_by_stage","sl.inquiries_open","sl.proposals_waiting","sl.proposals_due","sl.quotations_expiring","sl.orders_open","sl.orders_waiting_credit","sl.customers_top","sl.hit_rate_by_month","sl.lost_by_reason","pc.portfolio","pc.late_activities","pc.milestones_next","pc.change_requests_open","pc.guarantees_expiring","pc.penalty_exposure","pc.initiation_overdue","pc.client_responses_overdue","mf.orders_late","mf.orders_by_status","mf.work_center_load","mf.machines_down","mf.maintenance_overdue","mf.oee_by_work_center","qc.ncr_open","qc.capa_overdue","qc.calibration_due","qc.complaints_open","qc.h_points_pending","qc.documents_waiting","inv.items_below_minimum","inv.stock_value_by_warehouse","inv.slow_moving","inv.top_movements","inv.quarantine","inv.material_requests_open","pr.requests_open","pr.orders_open","pr.late_lines","pr.supplier_on_time","pr.spend_by_supplier","pr.invoices_waiting","pr.payments_waiting","pr.blocked_suppliers","sv.requests_open","sv.sla_breaches","sv.orders_open","sv.warranty_cost_by_month","sv.units_by_customer","sv.survey_by_month","sv.ltsa_expiring","of.decisions_overdue","of.letters_waiting","of.attendance_month","of.leave_requests_pending"]'
+
+# --- who may open it: the CEO and the PMO only
+as "$WH_TOKEN" GET $CEO/overview; nomsg "ceo overview: a storekeeper cannot open the overview" "مجوز"
+as "$WH_TOKEN" GET $CEO/section/finance; nomsg "ceo overview: a storekeeper cannot open a section" "مجوز"
+as "$WH_TOKEN" POST $CEO/snapshot; nomsg "ceo overview: a storekeeper cannot take a snapshot" "مجوز"
+as "$FM_TOKEN" GET $CEO/overview; nomsg "ceo overview: the finance manager is not a reader of the CEO overview (CEO and PMO only)" "مجوز"
+as "$CEO_TOKEN" GET $CEO/section/nothing; nomsg "ceo overview: an unknown section is refused" "پیدا نشد"
+
+# --- structure of the overview, computed fresh (refresh=true bypasses the cache)
+as "$CEO_TOKEN" GET "$CEO/overview?refresh=true"
+check "ceo overview: computed fresh, not from the cache, dated today in Shamsi" '.success and .data.cached == false and (.data.asOfText|test("^14[0-9]{2}/[0-9]{2}/[0-9]{2}$"))'
+check "ceo overview: exactly 8 headline figures in the agreed order" '.success and (.data.headline|map(.key)) == ["cash","receivablesOpen","payablesOverdue","salesBacklog","activeProjects","lateProductionOrders","openNcrs","serviceSlaBreaches"]'
+check "ceo overview: the headline units (4 rial amounts, 4 counts) and the drill keys they point to" '(.data.headline|map(.unit)) == ["rial","rial","rial","rial","count","count","count","count"] and (.data.headline|map(.drillKey)) == ["fin.cash_accounts","fin.receivables_by_customer","fin.payables_overdue","sl.orders_open","pc.portfolio","mf.orders_late","qc.ncr_open","sv.sla_breaches"]'
+check "ceo overview: rial headline figures carry a short text, counts do not" '(.data.headline|map(.shortText|type)) == ["string","string","string","string","null","null","null","null"] and (.data.headline|map(.valueText|type)|unique) == ["string"]'
+check "ceo overview: exactly 9 sections in the agreed order, each with the question of its analysis button" '(.data.sections|map(.key)) == ["finance","sales","projects","production","quality","inventory","procurement","service","office"] and (.data.sections|map(.analysisPrompt|contains("تحلیل"))|unique) == [true] and (.data.sections|map(.note // "")|unique) == [""]'
+check "ceo overview: the KPIs of every section (6, 6, 6, 5, 6, 4, 6, 6, 3)" '[.data.sections[]|[.kpis[].key]] == [
+ ["cash","receivablesOpen","payablesOverdue","issuedChequesDue7","netProfitYtd","vouchersWaiting"],
+ ["salesBacklog","salesPipelineValue","salesHitRate","salesProposalsDueSoon","salesProposalsWaiting","salesOrdersWaitingCredit"],
+ ["activeProjects","projectsRed","projectsAmber","pcLateActivities","pcPenaltyExposure","pcGuaranteeAlerts"],
+ ["lateProductionOrders","machinesDown","maintenanceOverdue","overloadWeeks","oee"],
+ ["openNcrs","overdueNcrs","overdueCapas","calibrationOverdue","complaintsOpen","pendingHPoints"],
+ ["stockValue","itemsBelowMinimum","quarantineLines","openMaterialRequests"],
+ ["openPurchaseOrdersAmount","lateOrderLines","purchaseRequestsWaiting","invoicesWaiting","paymentsWaiting","blockedSuppliers"],
+ ["serviceSlaBreaches","serviceOpenRequests","serviceUnitsInWarranty","serviceWarrantyCostYtd","serviceGoodwillWaiting","serviceSurveyScore"],
+ ["overdueDecisions","lettersWaiting","leaveRequestsPending"]]'
+check "ceo overview: the charts of every section (3, 3, 2, 3, 2, 2, 2, 3, 1)" '[.data.sections[]|[.charts[].key]] == [
+ ["revenueCost","receivablesAgeing","cashFlow"],
+ ["pipelineByStage","ordersByMonth","proposalResults"],
+ ["projectStatus","progressByProject"],
+ ["ordersByState","workCenterLoad","oeeByWorkCenter"],
+ ["ncrByMonth","ncrAge"],
+ ["stockValueByWarehouse","stockFlowByMonth"],
+ ["spendBySupplier","ordersAndPayments"],
+ ["requestsByMonth","warrantyCostByMonth","surveyScoreByMonth"],
+ ["attendanceMonth"]]'
+check "ceo overview: every KPI and every chart points to a key of the drill catalogue" "([.data.sections[]|(.kpis[],.charts[])|.drillKey] - $CEODRILLS) == []"
+check "ceo overview: a chart that is shown has as many values in every series as it has labels" '[.data.sections[].charts[]|select(.hidden|not)|select(((.series|map(.values|length)|unique) - [(.labels|length)]) != [])|.key] == []'
+check "ceo overview: the monthly revenue and cost chart covers twelve Persian months" '(.data.sections[0].charts[0]|.key == "revenueCost" and (.labels|length) == 12 and (.series|map(.name)) == ["درآمد","هزینه"] and (.series|map(.values|length)) == [12,12])'
+check "ceo overview: one pulse light per section, in the order of the sections" '(.data.pulse|map(.key)) == ["finance","sales","projects","production","quality","inventory","procurement","service","office"]'
+cp "$B" "$CEOOV"
+
+# --- the cache: the second answer is the first one; refresh=true computes again. The time budget of the contract is 2 seconds on the production server; the CI runner is slower, so 5 seconds are allowed here and the measure is printed
+as "$CEO_TOKEN" GET $CEO/overview; check "ceo overview: the second answer comes from the cache (120 seconds)" '.success and .data.cached == true and (.data.headline|length) == 8 and (.data.sections|length) == 9'
+as "$CEO_TOKEN" GET "$CEO/overview?refresh=true"; cp "$B" "$CEOOV"
+check "ceo overview: refresh=true computes again, not from the cache" '.success and .data.cached == false'
+CEOMS=$(val .data.generatedInMs)
+check "ceo overview: computed in at most 5 seconds on the CI data (measured: ${CEOMS} ms; the contract's budget of 2 seconds is for the production server)" '.data.generatedInMs <= 5000'
+
+# --- the dashboards of the modules, read once each
+as "$FM_TOKEN" GET finance/dashboard
+CASH=$(val '.data.cashTotal + .data.bankTotal'); RECV=$(val .data.receivablesOpen); RECVOVER=$(val .data.receivablesOverdue); CHQ7=$(val .data.issuedChequesDue7DaysAmount); NETP=$(val .data.netProfitYtd); VWAIT=$(val '.data.vouchersWaitingCheck + .data.vouchersWaitingFinalize')
+as "$CEO_TOKEN" GET finance/ceo-dashboard
+CEOLATE=$(val .data.productionLateOrders); CEONCR=$(val .data.openNcrs); CEOSLA=$(val .data.serviceSlaBreaches); CEOACT=$(val .data.pcActiveProjects); CEOMD=$(val .data.productionMachinesDown)
+CEOSTOCK=$(val .data.stockValue); CEOBELOW=$(val .data.itemsBelowMinimum); CEOPIPE=$(val .data.salesPipelineValue); CEOOPENPO=$(val .data.openPurchaseOrdersAmount); CEOWARR=$(val .data.serviceWarrantyCostYtd)
+CEOCAPA=$(val .data.overdueCapas); CEOCAL=$(val .data.calibrationOverdue); CEOPRED=$(val .data.pcProjectsRed); CEOPAMB=$(val .data.pcProjectsAmber)
+CEOALERTS=$(jq -c '[.data.alerts[]|.text]|sort' "$B"); CEOALERTLINKS=$(jq -c '[.data.alerts[]|.link]|sort' "$B")
+sva GET "$SVC/dashboard"; SVSLA=$(val .data.slaBreaches)
+# the service dashboard as the PMO gets it: the PMO is no payroll reader, so the warranty cost is hidden from it exactly when the labour of an order is one or two people's pay
+as "$ADMIN_TOKEN" GET "$SVC/dashboard"; SVPMOHID=$(val .data.warrantyCostHidden); SVPMOCOST=$(val .data.warrantyCostYtd)
+# the supplier payables over 30 days: the payables ageing of the general ledger, the schedule of the notes of the financial statements for today (finance/completeness/notes)
+as "$FM_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"; PAYASOF=$(val '.data.asOf[0:10]'); PAYOVER=$(val '[.data.payables[]|.days31To60 + .days61To90 + .over90]|add // 0')
+# the open NCRs: every report of the NCR list that is neither closed (3) nor cancelled (4)
+as "$QC_TOKEN" GET "inventory/quality/ncr?PageSize=0"; CEONCRLIST=$(val '[.data.data[]|select(.status != 3 and .status != 4)]|length')
+# the sales-order part of the backlog, recomputed from the sales orders: confirmed (2) and partly delivered (3) orders, the amount of each line times the share of its quantity not yet invoiced, rounded to the rial.
+# The list pages at 500 rows at most (PageSize=0 means the default 25 here); a database with more orders than one page leaves CEOBACK empty on purpose, which fails the check below instead of comparing with a part
+as "$CEO_TOKEN" GET "$SL/orders?PageSize=500"
+CEOBACK=$(python3 -I - "$B" <<'PYB'
+import json, sys
+from decimal import Decimal, ROUND_HALF_UP
+page = json.load(open(sys.argv[1]), parse_float=Decimal, parse_int=Decimal)["data"]
+rows = page["data"]
+if page["totalItems"] > len(rows):
+    sys.exit(1)
+total = Decimal(0)
+for order in rows:
+    if order["status"] not in (2, 3):
+        continue
+    for line in order["lines"]:
+        quantity = line["quantity"]
+        if quantity <= 0:
+            continue
+        total += line["amount"] * max(Decimal(0), quantity - line["invoicedQuantity"]) / quantity
+print(total.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+PYB
+)
+as "$MPM_TOKEN" GET "$MF/dashboard"; TODAYFA=$(val .data.asOfText)
+# the current Persian month as the trends label it («آبان ۱۴۰۵»)
+CEOMONTHLABEL=$(python3 -I - "$TODAYFA" <<'PYM'
+import sys
+year, month, day = sys.argv[1].split("/")
+names = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
+print(names[int(month) - 1] + " " + year.translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")))
+PYM
+)
+
+# --- the headline equals the dashboards of the modules that own the figures
+ceoc "ceo overview: today in Shamsi is the day of the production dashboard ($TODAYFA)" ".data.asOfText == \"$TODAYFA\""
+ceoc "ceo overview: cash equals the finance dashboard (cash boxes + bank accounts)" "$CEOJQ ($(ceohk cash)|.value|r2) == ($CASH|r2)"
+ceoc "ceo overview: receivablesOpen equals the finance dashboard" "$CEOJQ ($(ceohk receivablesOpen)|.value|r2) == ($RECV|r2)"
+[ "$PAYASOF" = "$TODAY" ] && ok "ceo overview: the payables schedule of the finance notes is as of today ($TODAY), the day of the overview" || bad "ceo overview: the payables schedule of the finance notes is as of today ($TODAY) (got '$PAYASOF')"
+ceoc "ceo overview: payablesOverdue equals the supplier payables over 30 days of the payables ageing of the general ledger (the finance notes schedule: 31-60 + 61-90 + over 90 days)" "$CEOJQ ($(ceohk payablesOverdue)|.value|r2) == ($PAYOVER|r2)"
+ceoc "ceo overview: the note of payablesOverdue names the ledger ageing as its source and says that an advance and a progress payment stay out of it until an invoice recovers them" "$(ceohk payablesOverdue)|.note|(contains(\"پیش${CEOZW}پرداخت\") and contains(\"علی${CEOZW}الحساب\") and contains(\"دفتر کل\"))"
+ceoc "ceo overview: activeProjects equals the CEO dashboard" "$(ceohk activeProjects)|.value == $CEOACT"
+ceoc "ceo overview: lateProductionOrders equals productionLateOrders of the CEO dashboard" "$(ceohk lateProductionOrders)|.value == $CEOLATE"
+ceoc "ceo overview: openNcrs equals openNcrs of the CEO dashboard" "$(ceohk openNcrs)|.value == $CEONCR"
+ceoc "ceo overview: serviceSlaBreaches equals slaBreaches of the service dashboard" "$(ceohk serviceSlaBreaches)|.value == $SVSLA"
+ceoc "ceo overview: the issued cheques of the next 7 days equal the finance dashboard" "$CEOJQ ($(ceosk finance issuedChequesDue7)|.value|r2) == ($CHQ7|r2)"
+ceoc "ceo overview: the net profit of the year equals the finance dashboard" "$CEOJQ ($(ceosk finance netProfitYtd)|.value|r2) == ($NETP|r2)"
+ceoc "ceo overview: the vouchers waiting equal draft + checked vouchers of the finance dashboard" "$(ceosk finance vouchersWaiting)|.value == $VWAIT"
+ceoc "ceo overview: the stock value, the items below the minimum, the open purchase orders and the pipeline equal the CEO dashboard" "$CEOJQ ($(ceosk inventory stockValue)|.value|r2) == ($CEOSTOCK|r2) and ($(ceosk inventory itemsBelowMinimum)|.value) == $CEOBELOW and ($(ceosk procurement openPurchaseOrdersAmount)|.value|r2) == ($CEOOPENPO|r2) and ($(ceosk sales salesPipelineValue)|.value|r2) == ($CEOPIPE|r2)"
+ceoc "ceo overview: the alerts are the alerts of the CEO dashboard (same texts, worst first)" "([.data.alerts[]|.text]|sort) == $CEOALERTS"
+ceoc "ceo overview: the alert links are the links of the CEO dashboard" "([.data.alerts[]|.link]|sort) == $CEOALERTLINKS"
+ceoc "ceo overview: no finance alert still points to an old /finance/ path (the front routes are /fn/...)" '[.data.alerts[]|select(.link == "/finance/dashboard" or .link == "/finance/treasury/cash-position" or .link == "/finance/receivables/ageing" or .link == "/finance/gl/setup-check")]|length == 0'
+if [ "$(jq -nr "$RECVOVER > 0")" = true ]; then ceoc "ceo overview: the overdue receivables raise one alert and it points to /fn/receivables/ageing" '[.data.alerts[]|select(.link == "/fn/receivables/ageing")]|length == 1'; fi
+ceoc "ceo overview: the SLA figure is titled with its acronym in brackets (the voice leaves it out)" "$(ceohk serviceSlaBreaches)|.title|(startswith(\"درخواست\") and endswith(\"(SLA)\"))"
+RECVST=$(jq -nr --argjson o "$RECVOVER" --argjson t "$RECV" 'if $o <= 0 then "ok" elif $t > 0 and $o * 100 >= $t * 30 then "danger" else "warn" end')
+CASHST=$(jq -nr --argjson c "$CASH" 'if $c < 0 then "danger" else "ok" end')
+LATEST=$(jq -nr --argjson v "$CEOLATE" 'if $v >= 5 then "danger" elif $v >= 1 then "warn" else "ok" end')
+MDST=$(jq -nr --argjson v "$CEOMD" 'if $v >= 1 then "danger" else "ok" end')
+NCRST=$(jq -nr --argjson v "$CEONCR" 'if $v >= 15 then "danger" elif $v >= 5 then "warn" else "ok" end')
+SLAST=$(jq -nr --argjson v "$CEOSLA" 'if $v >= 1 then "danger" else "ok" end')
+PAYST=$(jq -nr --argjson o "$PAYOVER" --argjson c "$CASH" 'if $o <= 0 then "ok" elif $o > $c then "danger" else "warn" end')
+CAPAST=$(jq -nr --argjson v "$CEOCAPA" 'if $v >= 1 then "danger" else "ok" end')
+CALST=$(jq -nr --argjson v "$CEOCAL" 'if $v >= 1 then "danger" else "ok" end')
+PROJST=$(jq -nr --argjson r "$CEOPRED" --argjson a "$CEOPAMB" 'if $r >= 1 then "danger" elif $a >= 1 then "warn" else "ok" end')
+ceoc "ceo overview: the status of the receivables follows the rule (danger from 30 percent overdue): $RECVST" "$(ceohk receivablesOpen)|.status == \"$RECVST\""
+ceoc "ceo overview: the status of the cash follows the rule (danger when negative): $CASHST" "$(ceohk cash)|.status == \"$CASHST\""
+ceoc "ceo overview: the status of the late production orders follows the rule (warn from 1, danger from 5): $LATEST" "$(ceohk lateProductionOrders)|.status == \"$LATEST\""
+ceoc "ceo overview: the status of the machines down follows the rule (danger from 1): $MDST" "$(ceosk production machinesDown)|.status == \"$MDST\""
+ceoc "ceo overview: the status of the open NCRs follows the rule (warn from 5, danger from 15): $NCRST" "$(ceohk openNcrs)|.status == \"$NCRST\""
+ceoc "ceo overview: the status of the SLA breaches follows the rule (danger from 1): $SLAST" "$(ceohk serviceSlaBreaches)|.status == \"$SLAST\""
+ceoc "ceo overview: the status of the overdue payables follows the rule (danger when they exceed the cash): $PAYST" "$(ceohk payablesOverdue)|.status == \"$PAYST\""
+
+# --- the pulse lights: each is the worst status of its section's KPIs (danger, then warn, else ok) with the section's own danger and warn counts, and at least what the module dashboards say about the figures they own
+PFIN=$(ceoworst "$RECVST" "$CASHST" "$PAYST"); PPRJ=$PROJST; PPRD=$(ceoworst "$LATEST" "$MDST"); PQLT=$(ceoworst "$NCRST" "$CAPAST" "$CALST"); PSVC=$SLAST
+ceoc "ceo overview: every pulse light is the worst status of its section's KPIs, and its danger and warn counts are the section's own" '.data.sections as $S | .data.pulse | length == 9 and all(. as $p | ($S[]|select(.key == $p.key)) as $s | ($s.kpis|map(.status)) as $st | $p.status == (if ($st|index("danger")) != null then "danger" elif ($st|index("warn")) != null then "warn" elif ($st|index("ok")) != null then "ok" else "neutral" end) and $p.dangerCount == ($st|map(select(. == "danger"))|length) and $p.warnCount == ($st|map(select(. == "warn"))|length) and $s.alertCount == ($p.dangerCount + $p.warnCount))'
+for CPK in finance:$PFIN projects:$PPRJ production:$PPRD quality:$PQLT service:$PSVC; do
+  ceoc "ceo overview: the light of ${CPK%%:*} is at least ${CPK#*:}, the worst status the module dashboards give for its figures" "(.data.pulse[]|select(.key == \"${CPK%%:*}\")|.status) as \$s | [\"ok\",\"warn\",\"danger\"] | (index(\$s) // -1) >= index(\"${CPK#*:}\")"
+done
+
+# --- the backlog: the sales-order part is recomputed from the sales orders API; the contracts in progress make up the rest, and the list behind the figure holds the orders only (the note says so)
+CEOBACKV=$(jq -r "$(ceohk salesBacklog)|.value" "$CEOOV"); CEOBACKSH=$(ceoshort "$CEOBACK")
+ceoc "ceo overview: salesBacklog ($CEOBACKV) is at least the sales orders not yet invoiced, recomputed here from the sales orders API: $CEOBACK rials (confirmed and partly delivered orders, the amount of each line times the quantity left to invoice)" "($(ceohk salesBacklog)|.value) >= $CEOBACK"
+ceoc "ceo overview: the note of salesBacklog states that sales-order part ($CEOBACKSH) and says that the contracts are in the figure but not in the list" "$(ceohk salesBacklog)|.note|((split(\": \")[1]|startswith(\"$CEOBACKSH؛\")) and contains(\"قراردادها در رقم هستند\"))"
+# with no contract in the figure (the note gives «۰ ریال» for them) the backlog is the sales-order part exactly, to the rial
+if [ "$(jq -r "$(ceohk salesBacklog)|.note|(split(\": \")[2]|startswith(\"۰ ریال؛\"))" "$CEOOV")" = true ]; then
+  ceoc "ceo overview: the note counts no contract, so salesBacklog is exactly the sales orders not yet invoiced: $CEOBACK rials" "$CEOJQ ($(ceohk salesBacklog)|.value|r2) == ($CEOBACK|r2)"
+fi
+
+# --- the donuts and the notes of the charts agree with the figures beside them
+ceoc "ceo overview: openNcrs equals the NCR list without the closed and the cancelled reports ($CEONCRLIST), and the age donut counts the same reports" "($(ceohk openNcrs)|.value) == $CEONCRLIST and ((.data.sections[]|select(.key == \"quality\")|.charts[]|select(.key == \"ncrAge\")|.series[0].values|add) == $CEONCRLIST)"
+ceoc "ceo overview: the project donut gives every project one colour: green + amber + red is the active projects, and its amber and red slices are the amber and red figures beside it" "(.data.sections[]|select(.key == \"projects\")|.charts[]|select(.key == \"projectStatus\")|.series[0].values) as \$v | (\$v|length) == 3 and (\$v|add) == ($(ceosk projects activeProjects)|.value) and \$v[1] == ($(ceosk projects projectsAmber)|.value) and \$v[2] == ($(ceosk projects projectsRed)|.value)"
+ceoc "ceo overview: the ageing donut is the as-of-today ageing of the receivables module, and its note names the difference from the open receivables exactly when there is one" "(.data.sections[]|select(.key == \"finance\")|.charts[]|select(.key == \"receivablesAgeing\")) as \$c | (\$c.series[0].values|add) as \$sum | ($(ceohk receivablesOpen)|.value) as \$open | (((\$open - \$sum)|if . < 0 then -. else . end) >= 1) == (\$c.note|contains(\"اختلاف دارد\"))"
+ceoc "ceo overview: the notes of the charts name their rules: transfers between cash boxes and banks are no cash flow, returns are netted in the stock flow, the cancelled NCRs are not counted" "(.data.sections[]|select(.key == \"finance\")|.charts[]|select(.key == \"cashFlow\")|.note|contains(\"انتقال\")) and (.data.sections[]|select(.key == \"inventory\")|.charts[]|select(.key == \"stockFlowByMonth\")|.note|contains(\"برگشت\")) and (.data.sections[]|select(.key == \"quality\")|.charts[]|select(.key == \"ncrAge\")|.note|contains(\"لغوشده\"))"
+
+# --- the drill parameters (contract 8): a figure opens its drill with the filter that gives the number on the screen; a monthly chart opens the latest Persian month so far; a drill without a period filter keeps the open-records drill and carries none
+# the Persian year starts on 1 Farvardin: today less (day of the year - 1) days; the Persian month starts today less (day of the month - 1) days
+CEOFM=$((10#${TODAYFA:5:2})); CEOFD=$((10#${TODAYFA:8:2}))
+if [ "$CEOFM" -le 6 ]; then CEODOY=$(( (CEOFM - 1) * 31 + CEOFD )); else CEODOY=$(( 186 + (CEOFM - 7) * 30 + CEOFD )); fi
+CEOYTD="{\"from\":\"$(dd $(( 1 - CEODOY )))\",\"to\":\"$(dd 0)\"}"; CEOMTD="{\"from\":\"$(dd $(( 1 - CEOFD )))\",\"to\":\"$(dd 0)\"}"
+CEOMONTHLY='["revenueCost","proposalResults","oeeByWorkCenter","stockFlowByMonth","warrantyCostByMonth","surveyScoreByMonth","attendanceMonth"]'
+ceoc "ceo drill parameters: the red projects open pc.portfolio with status danger, the amber ones with status warn, the backlog opens sl.orders_open with status open (the list holds the orders)" "($(ceosk projects projectsRed)|.drillKey == \"pc.portfolio\" and .drillParams == {\"status\":\"danger\"}) and ($(ceosk projects projectsAmber)|.drillKey == \"pc.portfolio\" and .drillParams == {\"status\":\"warn\"}) and ($(ceohk salesBacklog)|.drillKey == \"sl.orders_open\" and .drillParams == {\"status\":\"open\"})"
+ceoc "ceo drill parameters: the profit of the year and the warranty cost of the year open their drill from the first day of the Persian year ($(dd $(( 1 - CEODOY )))) to today" "($(ceosk finance netProfitYtd)|.drillParams == $CEOYTD) and ($(ceosk service serviceWarrantyCostYtd)|.drillParams == $CEOYTD)"
+ceoc "ceo drill parameters: the seven monthly charts open the latest Persian month so far ($(dd $(( 1 - CEOFD ))) to today); no other chart and only those five figures carry parameters" "([.data.sections[].charts[]|select(.key as \$k | $CEOMONTHLY|index(\$k) != null)] as \$m | (\$m|length) == 7 and (\$m|all(.drillParams == $CEOMTD))) and ([.data.sections[].charts[]|select(.key as \$k | $CEOMONTHLY|index(\$k) == null)]|all(.drillParams == null)) and ([.data.sections[].kpis[]|select(.drillParams != null)|.key]|sort) == [\"netProfitYtd\",\"projectsAmber\",\"projectsRed\",\"salesBacklog\",\"serviceWarrantyCostYtd\"]"
+
+
+# --- payroll privacy: the CEO sees the warranty cost, the PMO sees the fixed text and no chart values
+ceoc "ceo overview: the CEO sees the warranty cost of the year (the figure of the CEO dashboard) and the chart of the cost by month" "$CEOJQ ($(ceosk service serviceWarrantyCostYtd)|.hidden == false and (.value|r2) == ($CEOWARR|r2)) and (.data.sections[]|select(.key == \"service\")|.charts[]|select(.key == \"warrantyCostByMonth\")|.hidden == false and (.series|length) == 2)"
+as "$ADMIN_TOKEN" GET "$CEO/overview?refresh=true"
+if [ "$SVPMOHID" = true ]; then
+  check "ceo overview: the service dashboard hides the warranty cost from the PMO (warrantyCostHidden: true), and so does the PMO's overview: hidden, no value, the fixed text «محرمانه (حقوق)»" "$(ceosk service serviceWarrantyCostYtd)|.hidden == true and .value == null and .valueText == \"محرمانه (حقوق)\""
+  check "ceo overview: ... and the warranty cost chart is hidden, without labels and series" '(.data.sections[]|select(.key == "service")|.charts[]|select(.key == "warrantyCostByMonth")|.hidden == true and (.labels|length) == 0 and (.series|length) == 0)'
+else
+  check "ceo overview: the service dashboard shows the warranty cost to the PMO (warrantyCostHidden: false, $SVPMOCOST), and so does the PMO's overview, with its chart" "$CEOJQ ($(ceosk service serviceWarrantyCostYtd)|.hidden == false and (.value|r2) == ($SVPMOCOST|r2)) and (.data.sections[]|select(.key == \"service\")|.charts[]|select(.key == \"warrantyCostByMonth\")|.hidden == false and (.series|length) == 2)"
+fi
+check "ceo overview: ... the PMO sees the same headline (the cash is the finance figure)" "$CEOJQ .success and .data.cached == false and ($(ceohk cash)|.value|r2) == ($CASH|r2) and (.data.headline|length) == 8"
+
+# --- the sections: each one alone. A section is the section of the overview in the cache (the numbers the screen shows) when there is one; only refresh=true computes it now, and a section is never cached on its own.
+# Proof: a fresh overview, then one more draft voucher: the section still says the vouchers waiting of the cached overview, and says one more only with refresh=true
+as "$CEO_TOKEN" GET "$CEO/overview?refresh=true"; cp "$B" "$CEOOV"
+CEOVW=$(jq -r "$(ceosk finance vouchersWaiting)|.value" "$CEOOV")
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند آزمون خلاصه‌ی بخش مدیرعامل\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":1234567,\"detail1Code\":\"$FXCUS\"},{\"accountCode\":\"60102\",\"credit\":1234567}]}"
+check "ceo section: one more draft voucher saved (the cached overview says $CEOVW vouchers waiting, a new computation says $((CEOVW + 1)))" '.success and (.data.id|type) == "number"'
+CSECK=(finance sales projects production quality inventory procurement service office)
+CSECN=(6 6 6 5 6 4 6 6 3)
+CSECM=(3 3 2 3 2 2 2 3 1)
+for CSI in 0 1 2 3 4 5 6 7 8; do
+  CEOSEC=$(jq -c ".data.sections[]|select(.key == \"${CSECK[$CSI]}\")" "$CEOOV")
+  as "$CEO_TOKEN" GET $CEO/section/${CSECK[$CSI]}
+  check "ceo section ${CSECK[$CSI]}: ${CSECN[$CSI]} KPIs and ${CSECM[$CSI]} charts, exactly the section of the overview in the cache" ".success and .data.key == \"${CSECK[$CSI]}\" and (.data.kpis|length) == ${CSECN[$CSI]} and (.data.charts|length) == ${CSECM[$CSI]} and (.data.note // \"\") == \"\" and .data == $CEOSEC"
+done
+as "$CEO_TOKEN" GET $CEO/section/finance; check "ceo section finance: the cash is the figure of the finance dashboard" "$CEOJQ (.data.kpis[]|select(.key == \"cash\")) | (.value|r2) == ($CASH|r2)"
+as "$CEO_TOKEN" GET "$CEO/section/finance?refresh=true"
+check "ceo section finance: with refresh=true it is computed now, and the new draft voucher is in it ($((CEOVW + 1)) vouchers waiting)" "(.data.kpis[]|select(.key == \"vouchersWaiting\")|.value) == $((CEOVW + 1))"
+as "$CEO_TOKEN" GET $CEO/overview
+check "ceo section: a section computed with refresh=true is not put in the cache: the overview in the cache still says $CEOVW vouchers waiting" ".success and .data.cached == true and ($(ceosk finance vouchersWaiting)|.value) == $CEOVW"
+
+# --- spoken summaries (voice mode, contract 7.2): api/v1/ceo/speech?what=headline|section|alerts|brief&sectionKey=
+# The text is a fixed sentence list built from the same figures as the overview, with every number in words (no language model: it works while the model server is down); a rial value and a rial change are said with three significant digits.
+# The headline, a section and the alerts are read from the overview in the cache, so the voice says what the screen shows. The brief is the latest daily report of the CEO, read as the seat wrote it, for the CEO only.
+# The audio is the answer of the text-to-speech endpoint of the AI section (kind 4; the mock answers a 3244 bytes WAV = 4328 base64 characters), or null with degraded = true.
+# ceoaudio NAME : the audio of the last speech answer. The mock speech server of the workflow answers /health while it runs; the section of the AI checks stops it only when it started it itself.
+ceoaudio() {
+  if [ "$CEOSPK_TTS" = 1 ]; then
+    check "$1: the audio is the 3244 bytes of the mock (4328 base64 characters) and the answer is not degraded" '.success and .data.degraded == false and (.data.audioBase64|length) == 4328'
+    jq -r '.data.audioBase64 // ""' "$B" | base64 -d 2>/dev/null | head -c 4 | grep -q '^RIFF$' && ok "$1: the audio is a WAV file" || bad "$1: the audio is a WAV file"
+  else
+    check "$1: no speech server answers, so the answer is the text alone: audio null, degraded true" '.success and .data.degraded == true and .data.audioBase64 == null'
+  fi
+}
+CEOSPK_TTS=0; [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5091/health)" = "200" ] && CEOSPK_TTS=1
+# the title as it is said: a Latin note in brackets ("(backlog)", "(OEE)") is left out (a speech engine would spell it)
+CEOSPK_ST='sub(" *\\([A-Za-z ]+\\)"; "")'
+as "$WH_TOKEN" GET "$CEO/speech?what=headline"; nomsg "ceo speech: a storekeeper cannot have the headline read" "مجوز"
+as "$FM_TOKEN" GET "$CEO/speech?what=alerts"; nomsg "ceo speech: the finance manager is not a reader of the CEO dashboard (CEO and PMO only)" "مجوز"
+as "$CEO_TOKEN" GET "$CEO/speech?what=nonsense"; nomsg "ceo speech: only headline, section, alerts and brief can be read" "معتبر نیست"
+check "ceo speech: ... and the refusal names the four kinds" '.data == null and (.message|contains("alerts یا brief"))' 
+as "$CEO_TOKEN" GET "$CEO/speech?what=section"; nomsg "ceo speech: a section is asked for with its key" "کلید بخش"
+as "$CEO_TOKEN" GET "$CEO/speech?what=section&sectionKey=nothing"; nomsg "ceo speech: an unknown section is refused" "پیدا نشد"
+
+# the headline: the date, the eight figures (the cash first, with its value in words), then the sections to look at
+as "$CEO_TOKEN" GET "$CEO/speech?what=headline"; CEOSPK_TEXT=$(val .data.text)
+CEOSPK_CASH=$(jq -r "$(ceohk cash)|.value" "$CEOOV"); CEOSPK_CASHT=$(jq -r "$(ceohk cash)|.title|$CEOSPK_ST" "$CEOOV"); CEOSPK_CASHW=$(ceowords "$CEOSPK_CASH" s3)
+CEOSPK_TITLES=$(jq -c "[.data.headline[].title|$CEOSPK_ST]" "$CEOOV")
+check "ceo speech: the headline is a Persian text of the day with every number, date and percent in words (no digit left)" '.success and (.data.text|startswith("خلاصه")) and (.data.text|test("[0-9٠-٩۰-۹]")|not)'
+check "ceo speech: ... it says the cash of the overview ($CEOSPK_CASH rial) in words with three significant digits: «$CEOSPK_CASHT $CEOSPK_CASHW ریال»" ".data.text|contains(\"$CEOSPK_CASHT $CEOSPK_CASHW ریال\")"
+check "ceo speech: ... and it reads the eight headline figures by their titles" ".data.text as \$x | $CEOSPK_TITLES | length == 8 and all(. as \$t | \$x | contains(\$t))"
+CEOSPK_SLAT=$(jq -r "$(ceohk serviceSlaBreaches)|.title|$CEOSPK_ST" "$CEOOV"); CEOSPK_SLAW=$(ceowords "$(jq -r "$(ceohk serviceSlaBreaches)|.value" "$CEOOV")")
+check "ceo speech: ... the SLA figure is read as «$CEOSPK_SLAT $CEOSPK_SLAW مورد», without the Latin letters of the acronym" ".data.text|(contains(\"$CEOSPK_SLAT $CEOSPK_SLAW مورد\") and (test(\"SLA\")|not))"
+CEOSPK_CDV=$(jq -r "$(ceohk cash)|.delta // empty" "$CEOOV")
+if [ -n "$CEOSPK_CDV" ]; then
+  CEOSPK_CDA=$(jq -nr "($CEOSPK_CDV) | if . < 0 then -. else . end")
+  if [ "$(jq -nr "($CEOSPK_CDV) == 0")" = true ]; then CEOSPK_CDP="بدون تغییر نسبت به ماه پیش"; else CEOSPK_CDP="$(ceowords "$CEOSPK_CDA" s3) $(jq -nr "if ($CEOSPK_CDV) > 0 then \"بیشتر\" else \"کمتر\" end") از ماه پیش"; fi
+  check "ceo speech: ... the change of the cash against last month ($CEOSPK_CDV rial) follows its value, rounded the same way: «$CEOSPK_CASHW ریال، $CEOSPK_CDP»" ".data.text|contains(\"$CEOSPK_CASHW ریال، $CEOSPK_CDP\")"
+fi
+ceoaudio "ceo speech: headline"
+
+# the speech endpoint of the AI section switched off: the same request still answers, with the same text and no audio; switched on again the audio is back
+if [ "$CEOSPK_TTS" = 1 ]; then
+  as "$CEO_TOKEN" GET $AI/admin/endpoints; CEOSPK_EP=$(jq -c '[.data[]|select(.kind == 4)][0] // empty|{id, name, kind, url, modelName, priority, timeoutSeconds}' "$B")
+  if [ -n "$CEOSPK_EP" ]; then
+    as "$ADMIN_TOKEN" POST $AI/admin/endpoints "$(jq -c '. + {enabled: false}' <<<"$CEOSPK_EP")"; check "ceo speech: the speech endpoint of the AI section is switched off" '.success and .data.enabled == false'
+    as "$CEO_TOKEN" GET "$CEO/speech?what=headline"
+    if jq -e --arg t "$CEOSPK_TEXT" '.success and .data.degraded == true and .data.audioBase64 == null and .data.text == $t' "$B" >/dev/null 2>&1; then ok "ceo speech: with the speech endpoint off the answer is the same text without audio (audio null, degraded true)"; else bad "ceo speech: with the speech endpoint off the answer is the same text without audio (audio null, degraded true)"; fi
+    as "$ADMIN_TOKEN" POST $AI/admin/endpoints "$(jq -c '. + {enabled: true}' <<<"$CEOSPK_EP")"; check "ceo speech: the speech endpoint of the AI section is switched on again" '.success and .data.enabled == true'
+    as "$CEO_TOKEN" GET "$CEO/speech?what=headline"; ceoaudio "ceo speech: headline with the endpoint back on"
+  else
+    bad "ceo speech: the speech endpoint (kind 4) registered by the AI section is listed"
+  fi
+fi
+
+# one section: its name, how many figures need attention, then its figures in the order of the screen
+CEOSPK_QT=$(jq -r '.data.sections[]|select(.key == "quality")|.title' "$CEOOV"); CEOSPK_QKT=$(jq -c "[.data.sections[]|select(.key == \"quality\")|.kpis[].title|$CEOSPK_ST]" "$CEOOV")
+CEOSPK_NCRT=$(jq -r "$(ceosk quality openNcrs)|.title|$CEOSPK_ST" "$CEOOV"); CEOSPK_NCRW=$(ceowords "$(jq -r "$(ceosk quality openNcrs)|.value" "$CEOOV")")
+as "$CEO_TOKEN" GET "$CEO/speech?what=section&sectionKey=quality"
+check "ceo speech: a section starts with its name («بخش $CEOSPK_QT») and has no digit left" ".success and (.data.text|startswith(\"بخش $CEOSPK_QT. \")) and (.data.text|test(\"[0-9٠-٩۰-۹]\")|not)"
+check "ceo speech: ... it reads the six figures of the section by their titles, in the order of the screen" ".data.text as \$x | $CEOSPK_QKT | length == 6 and (map(. as \$t | \$x | index(\$t)) | (all(. != null)) and . == (sort|unique))"
+check "ceo speech: ... the open NCRs of the overview are said in words: «$CEOSPK_NCRT $CEOSPK_NCRW مورد»" ".data.text|contains(\"$CEOSPK_NCRT $CEOSPK_NCRW مورد\")"
+ceoaudio "ceo speech: section"
+
+# a section is read from the overview in the cache, like the screen: the draft voucher saved above is not in it yet
+CEOSPK_VT=$(jq -r "$(ceosk finance vouchersWaiting)|.title|$CEOSPK_ST" "$CEOOV"); CEOSPK_VW=$(ceowords "$CEOVW")
+as "$CEO_TOKEN" GET "$CEO/speech?what=section&sectionKey=finance"
+check "ceo speech: a section is read from the overview in the cache: «$CEOSPK_VT $CEOSPK_VW مورد» ($CEOVW), not the $((CEOVW + 1)) of a new computation" ".success and (.data.text|contains(\"$CEOSPK_VT $CEOSPK_VW مورد\"))"
+
+# payroll privacy: the CEO hears the warranty cost, the PMO is only told it is confidential (when the service dashboard hides it from the PMO)
+CEOSPK_WT=$(jq -r "$(ceosk service serviceWarrantyCostYtd)|.title|$CEOSPK_ST" "$CEOOV"); CEOSPK_WW=$(ceowords "$(jq -r "$(ceosk service serviceWarrantyCostYtd)|.value" "$CEOOV")" s3)
+as "$CEO_TOKEN" GET "$CEO/speech?what=section&sectionKey=service"
+check "ceo speech: the CEO hears the warranty cost in words with three significant digits: «$CEOSPK_WT $CEOSPK_WW ریال»" ".success and (.data.text|contains(\"$CEOSPK_WT $CEOSPK_WW ریال\"))"
+CEOSPK_SS=$(jq -r "$(ceosk service serviceSurveyScore)|.value // empty" "$CEOOV"); CEOSPK_SST=$(jq -r "$(ceosk service serviceSurveyScore)|.title|$CEOSPK_ST" "$CEOOV")
+if [ -n "$CEOSPK_SS" ]; then CEOSPK_SSP="$CEOSPK_SST $(ceowords "$CEOSPK_SS" d1) از پنج"; else CEOSPK_SSP="$CEOSPK_SST در دسترس نیست"; fi
+check "ceo speech: the survey score is said with one decimal («$CEOSPK_SSP»; the screen shows $CEOSPK_SS)" ".success and (.data.text|contains(\"$CEOSPK_SSP\"))"
+as "$ADMIN_TOKEN" GET "$CEO/speech?what=section&sectionKey=service"
+if [ "$SVPMOHID" = true ]; then
+  check "ceo speech: the PMO is told the warranty cost is confidential and never hears its value" ".success and (.data.text|contains(\"$CEOSPK_WT محرمانه است\")) and ((.data.text|contains(\"$CEOSPK_WT $CEOSPK_WW ریال\"))|not)"
+else
+  check "ceo speech: the service dashboard shows the PMO the warranty cost, so the PMO hears it too: «$CEOSPK_WT $(ceowords "$SVPMOCOST" s3) ریال»" ".success and (.data.text|contains(\"$CEOSPK_WT $(ceowords "$SVPMOCOST" s3) ریال\"))"
+fi
+
+# the alerts: how many, in words, worst first
+CEOSPK_AN=$(jq -r '.data.alerts|length' "$CEOOV")
+if [ "$CEOSPK_AN" = 0 ]; then CEOSPK_AH="هشداری برای امروز ثبت نشده است"; else CEOSPK_AH="$(ceowords "$CEOSPK_AN") هشدار برای امروز ثبت شده است"; fi
+as "$CEO_TOKEN" GET "$CEO/speech?what=alerts"
+check "ceo speech: the alerts start with their count in words («$CEOSPK_AH») and have no digit left" ".success and (.data.text|startswith(\"$CEOSPK_AH\")) and (.data.text|test(\"[0-9٠-٩۰-۹]\")|not)"
+ceoaudio "ceo speech: alerts"
+
+# the brief: the latest daily report of the CEO (the note of the CEO-BRIEF seat), read as it was written with its date in words; the CEO only (it is written with the CEO's data)
+as "$WH_TOKEN" GET "$CEO/speech?what=brief"; nomsg "ceo speech: a storekeeper cannot have the brief read" "مجوز"
+as "$ADMIN_TOKEN" GET "$CEO/speech?what=brief"; nomsg "ceo speech: the PMO cannot have the brief read, though it reads the rest (the brief is written with the CEO's data)" "مجوز"
+as "$CEO_TOKEN" GET $AI/brief/latest
+if jq -e '.success' "$B" >/dev/null 2>&1; then
+  CEOSPK_BD=$(val .data.dateText)
+  as "$CEO_TOKEN" GET "$CEO/speech?what=brief"
+  check "ceo speech: the CEO has the latest daily report read: «گزارش روزانه${CEOZW}ی مدیرعامل» with its date ($CEOSPK_BD) in words, then the text of the note, no digit left" ".success and (.data.text|startswith(\"گزارش روزانه${CEOZW}ی مدیرعامل در روز \")) and (.data.text|contains(\"طبق نتایج سامانه\")) and (.data.text|test(\"[0-9٠-٩۰-۹]\")|not)"
+  ceoaudio "ceo speech: brief"
+else
+  as "$CEO_TOKEN" GET "$CEO/speech?what=brief"; nomsg "ceo speech: with no daily report written yet the brief says so" "هنوز گزارش روزانه${CEOZW}ای ساخته نشده است"
+fi
+
+# --- trends. The last point of every trend is the live value, so a sparkline exists from the first day; the points before it are the month-end values of the snapshots.
+# The nightly job stores the day that ended and "snapshot now" stores today: the current month is always the live value, so a snapshot of today adds no point. Four keys are ★ backfilled from the records for the months
+# that no snapshot covers (cash, receivablesOpen, openNcrs, serviceSlaBreaches); the other eight start with the live point alone and grow by one point a month.
+CEOSTAR='["cash","receivablesOpen","openNcrs","serviceSlaBreaches"]'
+CEOPLAIN='["payablesOverdue","salesBacklog","activeProjects","lateProductionOrders","stockValue","itemsBelowMinimum","openPurchaseOrdersAmount","salesPipelineValue"]'
+ceoc "ceo trend: before any snapshot twelve figures have a trend of one to twelve monthly points that ends with the live value, with one label per point and the current Persian month ($CEOMONTHLABEL) last" "[.data.sections[].kpis[]|select(.trend != null)] as \$t | (\$t|length) == 12 and (\$t|all((.trend|length) >= 1 and (.trend|length) <= 12 and (.trend|length) == (.trendLabels|length) and .trend[-1] == .value and .trendLabels[-1] == \"$CEOMONTHLABEL\"))"
+ceoc "ceo trend: the eight figures the records cannot give back (payables, backlog, projects, late orders, stock, items below the minimum, purchase orders, pipeline) have exactly one point, today's, and no change yet" "[.data.sections[].kpis[]|select(.key as \$k | $CEOPLAIN|index(\$k) != null)] as \$t | (\$t|length) == 8 and (\$t|all((.trend|length) == 1 and .trend[0] == .value and .delta == null and .deltaText == null and .deltaGood == null))"
+ceoc "ceo trend: the four ★ backfilled figures may carry earlier months derived from the records; a change, when there is one, is the live value less the point of the previous month, in whole rials for the amounts and to the hundredth for the counts, and a change of nothing has no opinion" "[.data.sections[].kpis[]|select(.key as \$k | $CEOSTAR|index(\$k) != null)] as \$t | (\$t|length) == 4 and (\$t|all(.delta == null or ((((.value - .trend[-2]) - .delta)|if . < 0 then -. else . end) <= (if .unit == \"rial\" then 0.5 else 0.005 end) and (.unit != \"rial\" or .delta == (.delta|round)) and (.delta != 0 or (.deltaGood == null and (.deltaText|startswith(\"بدون تغییر\")))))))"
+CEOTR1=$(jq -c '[.data.sections[].kpis[]|{key, trend, trendLabels, delta}]' "$CEOOV")
+
+# --- snapshots: the PMO and the CEO may take one now; it stores today's 12 figures (a second one on the same day replaces them) and clears the cache. It changes no trend: the current month is the live value.
+as "$ADMIN_TOKEN" POST $CEO/snapshot; check "ceo snapshot: the PMO takes the snapshot now: 12 figures for today ($TODAYFA)" ".success and .data.keys == 12 and .data.dateText == \"$TODAYFA\""
+as "$CEO_TOKEN" GET $CEO/overview
+check "ceo snapshot: the cache was cleared: the next overview is computed again, not served from the cache" '.success and .data.cached == false'
+as "$CEO_TOKEN" POST $CEO/snapshot; check "ceo snapshot: a second snapshot on the same day stores the same 12 keys" ".success and .data.keys == 12 and .data.dateText == \"$TODAYFA\""
+as "$CEO_TOKEN" GET "$CEO/overview?refresh=true"; cp "$B" "$CEOOV"
+ceoc "ceo snapshot: the snapshots of today add no point to any trend and change no change" "[.data.sections[].kpis[]|{key, trend, trendLabels, delta}] == $CEOTR1"
+for CKV in cash:$CASH receivablesOpen:$RECV payablesOverdue:$PAYOVER activeProjects:$CEOACT lateProductionOrders:$CEOLATE openNcrs:$CEONCR serviceSlaBreaches:$SVSLA stockValue:$CEOSTOCK itemsBelowMinimum:$CEOBELOW openPurchaseOrdersAmount:$CEOOPENPO salesPipelineValue:$CEOPIPE; do
+  ceoc "ceo trend: the trend of ${CKV%%:*} ends with the figure of its module (${CKV#*:})" "$CEOJQ ($(ceoany ${CKV%%:*})|(.trend[-1]|r2) == (${CKV#*:}|r2))"
+done
+ceoc "ceo trend: the trend of salesBacklog ends with the backlog of the overview" "$CEOJQ ($(ceohk salesBacklog)|(.trend[-1]|r2) == (.value|r2))"
+rm -f "$CEOOV"
+TOKEN=$ADMIN_TOKEN
+
 finished=1
 echo "--- inventory: $pass passed, $fail failed" | tee -a "$R"
 rm -f "$B"

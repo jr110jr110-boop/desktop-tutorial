@@ -126,6 +126,7 @@ namespace Services.NasbNiro.Production
                 && o.DueDate != null && o.DueDate < today, ct);
             LoadReportDto load = await MfScheduleService.LoadAsync(uow, today, 4, 110, null, ct);
             counts.OverloadWeeks = load.Overloads.Count;
+            counts.Load = load;
             return counts;
         }
     }
