@@ -516,7 +516,12 @@ namespace MsTests
             { "search_documents", new string[0] },
         };
 
-        private static readonly string[] SeatWords = { "گزارش روزانه", "روایت هفتگی", "یادداشت مقایسه", "پیشنهاد دسته‌بندی", "پیش‌نویس پاسخ", "خلاصه صورت‌جلسه", "تکرار", "اجبار", "جعل" };
+        // the keywords of the seats, and (release D1) of the drills of the CEO dashboard and of the UI actions: no evaluation question may hold one, so the mock keeps routing them as before
+        private static readonly string[] SeatWords =
+        {
+            "گزارش روزانه", "روایت هفتگی", "یادداشت مقایسه", "پیشنهاد دسته‌بندی", "پیش‌نویس پاسخ", "خلاصه صورت‌جلسه", "تکرار", "اجبار", "جعل",
+            "فهرست جزئیات", "ریز", "تحلیل", "باز کن", "بخوان هشدارها", "بیرون",
+        };
 
         private static string MockTool(string q)
         {

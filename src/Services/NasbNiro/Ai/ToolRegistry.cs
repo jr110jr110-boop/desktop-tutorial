@@ -34,6 +34,14 @@ namespace Services.NasbNiro.Ai
         }
     }
 
+    /// <summary>The request itself is refused (for example an unknown drill key): the model gets an error result and the call is recorded as not allowed.</summary>
+    public sealed class AiToolRejectedException : Exception
+    {
+        public AiToolRejectedException(string message) : base(message)
+        {
+        }
+    }
+
     /// <summary>Where the links and citations of the items of a list come from: the JSON property that holds the list, the record kind and the front-end path.</summary>
     public class AiItemLinkRule
     {
@@ -56,6 +64,9 @@ namespace Services.NasbNiro.Ai
     {
         public object Data { get; set; }
         public List<AiCitationDto> Citations { get; set; } = new List<AiCitationDto>();
+
+        /// <summary>A thing the front end should do after the answer (the ui_* tools): the registry puts it into the result of the call and the chat into the response.</summary>
+        public AiActionDto Action { get; set; }
     }
 
     public class AiToolContext
@@ -100,6 +111,9 @@ namespace Services.NasbNiro.Ai
         public int Chars { get; set; }
         public int DurationMs { get; set; }
         public List<AiCitationDto> Citations { get; set; } = new List<AiCitationDto>();
+
+        /// <summary>Set only by a ui_* tool that accepted its arguments; null for every other call and for a refused one.</summary>
+        public AiActionDto Action { get; set; }
     }
 
     public interface IToolRegistry
@@ -370,7 +384,8 @@ namespace Services.NasbNiro.Ai
 
     public class ToolRegistry : IToolRegistry
     {
-        private static readonly IReadOnlyList<AiToolDefinition> All = AiTools.Build();
+        // the A1 tools, the tools of the CEO dashboard and the UI action tools (release D1)
+        private static readonly IReadOnlyList<AiToolDefinition> All = AiTools.Build().Concat(AiCeoTools.Build()).Concat(AiUiTools.Build()).ToList();
 
         public const int MaxNameLength = 50;
 
@@ -421,7 +436,7 @@ namespace Services.NasbNiro.Ai
                     var context = new AiToolContext { Services = _services, Registry = this, User = _user };
                     object data = await tool.Run(context, args.RootElement, ct);
                     List<AiCitationDto> extra = null;
-                    if (data is AiToolOutput output) { extra = output.Citations; data = output.Data; }
+                    if (data is AiToolOutput output) { extra = output.Citations; result.Action = output.Action; data = output.Data; }
                     JsonNode node = AiToolShaper.Clean(AiToolShaper.ToNode(data));
                     json = AiToolShaper.Fit(node, citations, tool);
                     if (extra != null) foreach (AiCitationDto c in extra) if (citations.Count < 12 && !citations.Any(x => x.Link == c.Link && x.Type == c.Type && x.Id == c.Id)) citations.Add(c);
@@ -435,6 +450,11 @@ namespace Services.NasbNiro.Ai
                 {
                     json = AiToolShaper.ErrorJson(ex.Message);
                 }
+                catch (AiToolRejectedException ex)
+                {
+                    result.Allowed = false;
+                    json = AiToolShaper.ErrorJson(ex.Message);
+                }
                 catch (OperationCanceledException)
                 {
                     throw;
@@ -443,6 +463,7 @@ namespace Services.NasbNiro.Ai
                 {
                     json = AiToolShaper.ErrorJson("اجرای ابزار با خطا روبه‌رو شد.");
                     result.Title = tool.Title;
+                    result.Action = null;
                     result.Citations = new List<AiCitationDto>();
                     _logger?.LogError(ex, "AI tool {Tool} failed", name);
                 }

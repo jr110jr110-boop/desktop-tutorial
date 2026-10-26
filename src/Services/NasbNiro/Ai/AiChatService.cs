@@ -18,21 +18,47 @@ namespace Services.NasbNiro.Ai
 {
     public interface IAiChatService
     {
+        /// <summary>The answer to a typed question; when the request carries the context of the page the answer is also spoken (<see cref="AiChatResponseDto.AudioBase64"/>, null when the speech endpoint is down).</summary>
         Task<ResponseDto<AiChatResponseDto>> ChatAsync(AiChatRequestDto dto, CancellationToken ct);
 
         /// <param name="audio">webm or wav, at most 10 MB (the controller checks).</param>
-        Task<ResponseDto<AiVoiceResponseDto>> VoiceAsync(byte[] audio, string fileName, string contentType, int? conversationId, CancellationToken ct);
+        /// <param name="uiContext">Where the user is in the front end (optional).</param>
+        Task<ResponseDto<AiVoiceResponseDto>> VoiceAsync(byte[] audio, string fileName, string contentType, int? conversationId, CancellationToken ct, AiUiContextDto uiContext = null);
         Task<ResponseDto<PagedList<AiConversationListDto>>> GetConversationsAsync(AiConversationQuery query, CancellationToken ct);
         Task<ResponseDto<AiConversationDto>> GetConversationAsync(int id, CancellationToken ct);
+    }
+
+    /// <summary>A tool call made for the model before its first turn (its result is put into the conversation as if the model had asked for it).</summary>
+    public sealed class AiPreCall
+    {
+        public string Tool { get; set; }
+        public string ArgumentsJson { get; set; } = "{}";
+    }
+
+    /// <summary>An analysis for the CEO (release D1): the chat loop with the ANALYSIS prompt and the numbers of the section injected as tool results.</summary>
+    public sealed class AiAnalysisRequest
+    {
+        /// <summary>The section analysed (the audit says analysis:&lt;section&gt;), null for the whole company.</summary>
+        public string SectionKey { get; set; }
+        public string Question { get; set; }
+        public int? ConversationId { get; set; }
+        public List<AiPreCall> PreCalls { get; set; } = new List<AiPreCall>();
+    }
+
+    public interface IAiAnalysisRunner
+    {
+        /// <summary>Runs the chat loop as the signed-in user with the ANALYSIS prompt. Any signed-in user may call it; the caller (the CEO analysis service) checks the roles.</summary>
+        Task<ResponseDto<AiChatResponseDto>> RunAnalysisAsync(AiAnalysisRequest request, CancellationToken ct);
     }
 
     /// <summary>
     /// The assistant. It acts as the signed-in user: the tools call the existing services in this request scope. The model picks tools and writes Persian text;
     /// every number of the answer must come from a tool result of this turn (see <see cref="AnswerVerifier"/>).
     /// </summary>
-    public class AiChatService : IAiChatService
+    public class AiChatService : IAiChatService, IAiAnalysisRunner
     {
         public const string ChatPromptCode = "CHAT";
+        public const string AnalysisPromptCode = "ANALYSIS";
         public const int MaxToolRounds = 6;
         public const int MemoryTurns = 10;
         public const int MaxTextLength = 2000;
@@ -48,12 +74,29 @@ namespace Services.NasbNiro.Ai
             "۶. اگر نتیجه‌ی ابزار «forbidden» بود یا ابزار در دسترس نبود، فقط بگو کاربر به آن اطلاعات دسترسی ندارد و چیز دیگری حدس نزن.\n" +
             "۷. گذرواژه، شماره‌ی شبا و اطلاعات شخصی حقوق را نمی‌دانی و نمی‌نویسی.";
 
+        /// <summary>Version 1 of the prompt ANALYSIS (the analyst of the CEO dashboard).</summary>
+        public const string AnalysisSeedPromptText =
+            "تو «تحلیل‌گر ارشد مدیرعامل» شرکت هستی؛ از روی اعداد داشبورد مدیرعامل و جزئیات سامانه‌ی یکپارچه‌ی مدیریت پروژه و عملیات شرکت (PMIS) یک تحلیل کوتاه و دقیق برای مدیرعامل می‌نویسی.\n" +
+            "اعداد بخش مورد نظر در ابتدای گفتگو به‌صورت نتیجه‌ی ابزار ceo_overview در اختیار تو گذاشته شده است.\n" +
+            "اصول الزامی:\n" +
+            "۱. هر عدد، مبلغ، تعداد، درصد یا تاریخی که در پاسخ می‌نویسی باید عیناً از اعداد تزریق‌شده‌ی ابتدای گفتگو یا از نتیجه‌ی یکی از ابزارها در همین گفتگو آمده باشد. هرگز عدد از خودت نساز، حدس نزن و محاسبه‌ی تازه (جمع، تفاضل، درصد، میانگین) انجام نده؛ اگر عددی لازم است که نداری، ابزار جزئیات (ceo_drills و ceo_drill) را صدا بزن یا بگو اطلاعاتش در دسترس نیست.\n" +
+            "۲. اگر داده، تغییر نسبت به دوره‌ی قبل یا روند دارد، با دوره‌ی قبل مقایسه کن و جهت تغییر را بگو؛ اگر ندارد، مقایسه نساز.\n" +
+            "۳. ساختار پاسخ: یک جمله‌ی جمع‌بندی؛ سپس سه نکته‌ی مهم (هر کدام یک یا دو جمله، با عدد و منبع)؛ سپس ریسک‌های اصلی (حداکثر سه مورد)؛ در پایان اگر لازم بود بگو کدام جزئیات را باید دید.\n" +
+            "۴. پاسخ کوتاه، به فارسی روان و در بندهای کوتاه باشد. مبلغ‌ها را به ریال بنویس. تاریخ‌ها را همان‌طور که در داده آمده (شمسی) بنویس؛ هرگز تاریخ میلادی ننویس.\n" +
+            "۵. همیشه منبع هر نکته را نام ببر: عنوان شاخص یا شماره‌ی رکوردهایی که ابزار داده است؛ پیوندها به‌صورت خودکار نمایش داده می‌شود.\n" +
+            "۶. هرگز چیزی را تأیید، نهایی، پرداخت، آزاد یا حذف نمی‌کنی و نمی‌گویی که انجام داده‌ای؛ تصمیم با مدیرعامل و اقدام در خود سامانه است.\n" +
+            "۷. اگر نتیجه‌ی ابزار «forbidden» بود یا شاخصی محرمانه (hidden) بود، فقط بگو به آن اطلاعات دسترسی ندارد و چیزی حدس نزن. حقوق و دستمزد هر فرد، شماره‌ی شبا و گذرواژه را نمی‌دانی و نمی‌نویسی.";
+
+        /// <summary>The text of version 1 of a prompt code that is seeded on first use, or null for a code that is not seeded.</summary>
+        public static string SeedTextFor(string code) => code == ChatPromptCode ? SeedPromptText : code == AnalysisPromptCode ? AnalysisSeedPromptText : null;
+
         private sealed class Outcome
         {
             public int ConversationId;
             public string Answer;
             public List<AiCitationDto> Citations = new List<AiCitationDto>();
             public List<AiToolCallDto> ToolCalls = new List<AiToolCallDto>();
+            public List<AiActionDto> Actions = new List<AiActionDto>();
             public bool Verified;
             public bool Degraded;
             public string Model;
@@ -105,14 +148,15 @@ namespace Services.NasbNiro.Ai
             }
         }
 
-        /// <summary>The active prompt of a code; version 1 of CHAT is seeded on first use. Two requests that seed at the same time: the loser of the unique index re-reads the winner's row.</summary>
+        /// <summary>The active prompt of a code; version 1 of CHAT and of ANALYSIS is seeded on first use. Two requests that seed at the same time: the loser of the unique index re-reads the winner's row.</summary>
         public static async Task<AiPromptVersion> ActivePromptAsync(IUnitOfWork uow, string code, int userId, CancellationToken ct)
         {
             AiPromptVersion active = await uow.Set<AiPromptVersion>().Where(p => p.Code == code && p.IsActive).OrderByDescending(p => p.Version).FirstOrDefaultAsync(ct);
             if (active != null) return active;
-            if (code != ChatPromptCode || await uow.Set<AiPromptVersion>().AnyAsync(p => p.Code == code, ct)) return null;
+            string seed = SeedTextFor(code);
+            if (seed == null || await uow.Set<AiPromptVersion>().AnyAsync(p => p.Code == code, ct)) return null;
             DateTimeOffset now = DateTimeOffset.Now;
-            active = new AiPromptVersion { Code = code, Version = 1, Text = SeedPromptText, IsActive = true, CreatedAt = now, CreatedByUserId = userId, ActivatedAt = now, ActivatedByUserId = userId };
+            active = new AiPromptVersion { Code = code, Version = 1, Text = seed, IsActive = true, CreatedAt = now, CreatedByUserId = userId, ActivatedAt = now, ActivatedByUserId = userId };
             uow.Set<AiPromptVersion>().Add(active);
             try
             {
@@ -133,16 +177,56 @@ namespace Services.NasbNiro.Ai
             if (Me == 0) return AiText.Bad<AiChatResponseDto>(AiText.NotAllowed);
             string text = AiText.Clean(dto?.Text);
             if (text == null || text.Length > MaxTextLength) return AiText.Bad<AiChatResponseDto>("متن پرسش باید بین ۱ تا ۲۰۰۰ نویسه باشد.");
-            (Outcome outcome, string error) = await RunAsync(text, dto.ConversationId, ct);
+            (Outcome outcome, string error) = await RunAsync(text, dto.ConversationId, ct, null, dto.UiContext);
             if (error != null) return AiText.NotFound<AiChatResponseDto>(error);
-            return ResponseDtoHelper.Ok(new AiChatResponseDto
-            {
-                ConversationId = outcome.ConversationId, Answer = outcome.Answer, Citations = outcome.Citations, ToolCalls = outcome.ToolCalls,
-                Verified = outcome.Verified, Degraded = outcome.Degraded, Model = outcome.Model,
-            });
+            AiChatResponseDto response = ToResponse(outcome);
+            // release D1: a question typed on the voice-enabled page (the front end sent where the user is) is spoken too; a degraded answer is not, and a text to speech endpoint that is down leaves the audio empty
+            if (IsSpoken(dto.UiContext, outcome.Degraded)) response.AudioBase64 = await SpeakAsync(_tts, _words, outcome.Answer, VoiceTimeoutSeconds, ct);
+            return ResponseDtoHelper.Ok(response);
         }
 
-        private async Task<(Outcome Outcome, string Error)> RunAsync(string text, int? conversationId, CancellationToken ct)
+        /// <summary>A typed answer is spoken when the request carried the context of the page (even an empty one) and the answer is a real one, not the fixed degraded text.</summary>
+        internal static bool IsSpoken(AiUiContextDto uiContext, bool degraded) => uiContext != null && !degraded;
+
+        /// <summary>The answer read aloud as WAV in base64, or null when there is nothing to read or no speech endpoint answered in time (never an error: the text is the answer).</summary>
+        internal static async Task<string> SpeakAsync(ITextToSpeech tts, IPersianNumberWords words, string answer, int budgetSeconds, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(answer)) return null;
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(TimeSpan.FromSeconds(budgetSeconds));
+            try
+            {
+                TtsResult result = await tts.SynthesizeAsync(words.SpeechNormalize(answer), budget.Token);
+                return result != null && result.Ok && result.Audio != null && result.Audio.Length > 0 ? Convert.ToBase64String(result.Audio) : null;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+
+        private static AiChatResponseDto ToResponse(Outcome outcome) => new AiChatResponseDto
+        {
+            ConversationId = outcome.ConversationId, Answer = outcome.Answer, Citations = outcome.Citations, ToolCalls = outcome.ToolCalls, Actions = outcome.Actions,
+            Verified = outcome.Verified, Degraded = outcome.Degraded, Model = outcome.Model,
+        };
+
+        /// <summary>
+        /// The analysis of the CEO dashboard: the same loop as a chat (the same tools offered, at most six tool rounds, the same timeout and numeric check), with the prompt ANALYSIS
+        /// and the pre-calls (the numbers of the section) put into the conversation as tool results before the first model turn, so the verifier accepts the numbers of the answer.
+        /// </summary>
+        public async Task<ResponseDto<AiChatResponseDto>> RunAnalysisAsync(AiAnalysisRequest request, CancellationToken ct)
+        {
+            if (Me == 0) return AiText.Bad<AiChatResponseDto>(AiText.NotAllowed);
+            string text = AiText.Clean(request?.Question);
+            if (text == null || text.Length > MaxTextLength) return AiText.Bad<AiChatResponseDto>("متن پرسش باید بین ۱ تا ۲۰۰۰ نویسه باشد.");
+            (Outcome outcome, string error) = await RunAsync(text, request.ConversationId, ct, request);
+            if (error == AiText.NotAllowed) return AiText.Bad<AiChatResponseDto>(error);
+            if (error != null) return AiText.NotFound<AiChatResponseDto>(error);
+            return ResponseDtoHelper.Ok(ToResponse(outcome));
+        }
+
+        private async Task<(Outcome Outcome, string Error)> RunAsync(string text, int? conversationId, CancellationToken ct, AiAnalysisRequest analysis = null, AiUiContextDto uiContext = null)
         {
             var total = Stopwatch.StartNew();
             AiConversation conversation = null;
@@ -152,8 +236,12 @@ namespace Services.NasbNiro.Ai
                 if (conversation == null) return (null, "گفتگو پیدا نشد.");
             }
 
-            AiPromptVersion prompt = await ActivePromptAsync(_uow, ChatPromptCode, Me, ct);
-            string systemPrompt = prompt?.Text ?? SeedPromptText;
+            string promptCode = analysis != null ? AnalysisPromptCode : ChatPromptCode;
+            AiPromptVersion prompt = await ActivePromptAsync(_uow, promptCode, Me, ct);
+            // the UI action tools (release D1) and their paragraph are for a person at a screen: a seat or the evaluation neither gets the tools nor is told about them.
+            // The paragraph is added to whatever version of the prompt is active, so a database that was seeded earlier gets it too.
+            bool interactive = !AiActing.IsActing;
+            string systemPrompt = (prompt?.Text ?? SeedTextFor(promptCode)) + (interactive ? AiUiTools.PromptAddition(uiContext) : string.Empty);
             string promptHash = AiText.Sha256Hex(systemPrompt + text);
 
             var messages = new List<LlmMessage> { new LlmMessage { Role = "system", Content = systemPrompt } };
@@ -161,16 +249,28 @@ namespace Services.NasbNiro.Ai
             if (conversation != null) await LoadHistoryAsync(conversation.Id, messages, earlier, ct);
             messages.Add(new LlmMessage { Role = "user", Content = text });
 
-            IReadOnlyList<AiToolDefinition> offered = _tools.Offered();
+            IReadOnlyList<AiToolDefinition> offered = _tools.Offered().Where(t => interactive || !AiUiTools.IsUiTool(t.Name)).ToList();
             List<LlmToolSpec> specs = offered.Select(t => new LlmToolSpec { Name = t.Name, Description = t.Description, SchemaJson = t.SchemaJson }).ToList();
 
-            AiLoopResult loop = await AiChatLoop.RunAsync(_llm, _tools, _verifier, messages, specs, text, earlier, TimeoutSeconds, ct);
+            // the numbers of the section are read before the first model turn (through the registry, so they are shaped, hashed and cited like any tool result)
+            var injected = new List<(AiToolResult Result, string Arguments)>();
+            if (analysis != null)
+                foreach (AiPreCall pre in analysis.PreCalls ?? new List<AiPreCall>())
+                {
+                    AiToolResult preResult = await _tools.ExecuteAsync(pre.Tool, pre.ArgumentsJson, ct);
+                    if (!preResult.Allowed) return (null, AiText.NotAllowed);
+                    injected.Add((preResult, pre.ArgumentsJson ?? "{}"));
+                }
+
+            AiLoopResult loop = await AiChatLoop.RunAsync(_llm, _tools, _verifier, messages, specs, text, earlier, TimeoutSeconds, ct, injected);
             List<(AiToolResult Result, string Arguments)> results = loop.Results;
             string model = loop.Model;
             bool degraded = loop.Degraded;
 
             var outcome = new Outcome { Model = model, Answer = AiText.YeKe(loop.Answer), Verified = loop.Verified, Degraded = degraded };
             if (degraded) outcome.Model = null;
+            // what the front end does after the answer: the successful ui_* calls in the order they were made; nothing when the model failed
+            if (interactive && !degraded) outcome.Actions = AiUiTools.Collect(results.Select(x => x.Result));
             var now = DateTimeOffset.Now;
             foreach (var x in results)
             {
@@ -213,8 +313,10 @@ namespace Services.NasbNiro.Ai
             if (loop.Verification != null && !loop.Verification.Verified)
                 _audit.Add(AiAuditKinds.Unverified, "tokens: " + string.Join(" ", loop.Verification.OffendingTokens) + "; tools: " + tools, model, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
             // the question as asked (at most 2000 characters) and the SHA-256 of the stored answer (the answer itself is the AiMessage row)
+            string auditPrefix = (analysis == null ? string.Empty : $"analysis:{analysis.SectionKey ?? "all"}; ")
+                + (outcome.Actions.Count == 0 ? string.Empty : $"actions:{AiUiTools.AuditText(outcome.Actions)}; ");
             _audit.Add(AiAuditKinds.Chat,
-                $"tools: {(tools.Length == 0 ? "-" : tools)}; verified={(degraded ? "n/a" : outcome.Verified.ToString().ToLowerInvariant())}; degraded={degraded.ToString().ToLowerInvariant()}; answerSha256={AiText.Sha256Hex(outcome.Answer)}\nq: {AiText.Cut(text, MaxTextLength)}",
+                $"{auditPrefix}tools: {(tools.Length == 0 ? "-" : tools)}; verified={(degraded ? "n/a" : outcome.Verified.ToString().ToLowerInvariant())}; degraded={degraded.ToString().ToLowerInvariant()}; answerSha256={AiText.Sha256Hex(outcome.Answer)}\nq: {AiText.Cut(text, MaxTextLength)}",
                 model, (int)total.ElapsedMilliseconds, prompt?.Id, promptHash);
             await _uow.SaveChangesAsync(ct);
 
@@ -272,7 +374,7 @@ namespace Services.NasbNiro.Ai
 
         // ------------------------------------------------------------------------------------------ voice
 
-        public async Task<ResponseDto<AiVoiceResponseDto>> VoiceAsync(byte[] audio, string fileName, string contentType, int? conversationId, CancellationToken ct)
+        public async Task<ResponseDto<AiVoiceResponseDto>> VoiceAsync(byte[] audio, string fileName, string contentType, int? conversationId, CancellationToken ct, AiUiContextDto uiContext = null)
         {
             if (Me == 0) return AiText.Bad<AiVoiceResponseDto>(AiText.NotAllowed);
             if (audio == null || audio.Length == 0) return AiText.Bad<AiVoiceResponseDto>("فایل صوتی خالی است.");
@@ -298,12 +400,13 @@ namespace Services.NasbNiro.Ai
                 }
 
                 dto.Transcript = AiText.Cut(stt.Text.Trim(), MaxTextLength);
-                (Outcome outcome, string error) = await RunAsync(dto.Transcript, conversationId, budget.Token);
+                (Outcome outcome, string error) = await RunAsync(dto.Transcript, conversationId, budget.Token, null, uiContext);
                 if (error != null) return AiText.NotFound<AiVoiceResponseDto>(error);
                 dto.ConversationId = outcome.ConversationId;
                 dto.Answer = outcome.Answer;
                 dto.Citations = outcome.Citations;
                 dto.ToolCalls = outcome.ToolCalls;
+                dto.Actions = outcome.Actions;
                 dto.Verified = outcome.Verified;
                 dto.Degraded = outcome.Degraded;
                 dto.Model = outcome.Model;
@@ -381,11 +484,24 @@ namespace Services.NasbNiro.Ai
     /// </summary>
     public static class AiChatLoop
     {
+        /// <param name="injected">Tool results made before the first model turn (the analysis of the CEO dashboard): they are put into the conversation as a tool call and its result, and count as results of the turn.</param>
         public static async Task<AiLoopResult> RunAsync(ILlmClient llm, IToolRegistry tools, IAnswerVerifier verifier, List<LlmMessage> messages, List<LlmToolSpec> specs,
-            string question, IReadOnlyList<string> earlierResults, int timeoutSeconds, CancellationToken ct)
+            string question, IReadOnlyList<string> earlierResults, int timeoutSeconds, CancellationToken ct, IReadOnlyList<(AiToolResult Result, string Arguments)> injected = null)
         {
             var loop = new AiLoopResult();
             string final = null;
+            if (injected != null && injected.Count > 0)
+            {
+                var calls = new List<LlmToolCall>();
+                for (int i = 0; i < injected.Count; i++)
+                    calls.Add(new LlmToolCall { Id = "inj" + (i + 1).ToString(CultureInfo.InvariantCulture), Name = injected[i].Result.Name, ArgumentsJson = injected[i].Arguments ?? "{}" });
+                messages.Add(new LlmMessage { Role = "assistant", ToolCalls = calls });
+                for (int i = 0; i < injected.Count; i++)
+                {
+                    messages.Add(new LlmMessage { Role = "tool", ToolCallId = calls[i].Id, Content = injected[i].Result.Json });
+                    loop.Results.Add(injected[i]);
+                }
+            }
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));

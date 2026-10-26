@@ -202,6 +202,7 @@ namespace Services.NasbNiro.Ai
         {
             if (!_user.IsInRole(AiRoles.Readers)) return AiText.Bad<List<AiPromptVersionDto>>(AiText.NotAllowed);
             await AiChatService.ActivePromptAsync(_uow, AiChatService.ChatPromptCode, Me, ct);
+            await AiChatService.ActivePromptAsync(_uow, AiChatService.AnalysisPromptCode, Me, ct);
             IQueryable<AiPromptVersion> q = _uow.Set<AiPromptVersion>().AsNoTracking();
             if (AiText.Clean(code) != null) q = q.Where(p => p.Code == code.Trim());
             List<AiPromptVersion> list = await q.OrderBy(p => p.Code).ThenByDescending(p => p.Version).ToListAsync(ct);

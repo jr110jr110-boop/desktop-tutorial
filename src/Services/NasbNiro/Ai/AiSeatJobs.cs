@@ -104,7 +104,8 @@ namespace Services.NasbNiro.Ai
             string systemPrompt = prompt?.Text ?? AiChatService.SeedPromptText;
             string promptHash = AiText.Sha256Hex(systemPrompt + question);
             var messages = new List<LlmMessage> { new LlmMessage { Role = "system", Content = systemPrompt }, new LlmMessage { Role = "user", Content = question } };
-            List<LlmToolSpec> specs = withTools ? _tools.Offered().Select(t => new LlmToolSpec { Name = t.Name, Description = t.Description, SchemaJson = t.SchemaJson }).ToList() : new List<LlmToolSpec>();
+            // a seat writes a note: it is not offered the tools that move a person's screen
+            List<LlmToolSpec> specs = withTools ? _tools.Offered().Where(t => !AiUiTools.IsUiTool(t.Name)).Select(t => new LlmToolSpec { Name = t.Name, Description = t.Description, SchemaJson = t.SchemaJson }).ToList() : new List<LlmToolSpec>();
 
             AiLoopResult loop = await AiChatLoop.RunAsync(_llm, _tools, _verifier, messages, specs, question, new List<string>(), timeout, ct);
             foreach (var x in loop.Results)

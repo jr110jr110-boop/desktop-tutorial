@@ -13,6 +13,41 @@ namespace ViewModels.NasbNiro.AiDtos
 
         /// <summary>1..2000 characters.</summary>
         public string Text { get; set; }
+
+        /// <summary>Optional: where the user is in the front end (release D1, voice mode). The model is told the page and the sections it can act on.</summary>
+        public AiUiContextDto UiContext { get; set; }
+    }
+
+    /// <summary>What the front end shows right now, sent with a chat or voice request so that "open this", "read the alerts" or "analyse this section" can be understood.</summary>
+    public class AiUiContextDto
+    {
+        /// <summary>The route of the page, for example /ceo.</summary>
+        public string Page { get; set; }
+
+        /// <summary>The section keys of the page (finance, sales, projects, production, quality, inventory, procurement, service, office).</summary>
+        public List<string> Sections { get; set; } = new List<string>();
+
+        /// <summary>light or dark.</summary>
+        public string Theme { get; set; }
+    }
+
+    /// <summary>
+    /// A thing the front end does after the answer: the model asked for it by calling a ui_* tool (no server code ran, nothing was changed).
+    /// Type is navigate (Link), openDrill (DrillKey and Params), analyze (SectionKey, empty for the whole company), read (What, and SectionKey for a section) or scroll (SectionKey).
+    /// </summary>
+    public class AiActionDto
+    {
+        public string Type { get; set; }
+        public string Link { get; set; }
+        public string DrillKey { get; set; }
+        public Dictionary<string, string> Params { get; set; }
+        public string SectionKey { get; set; }
+
+        /// <summary>For read: section, alerts, brief or headline.</summary>
+        public string What { get; set; }
+
+        /// <summary>A short Persian text for the toast or the caption.</summary>
+        public string Title { get; set; }
     }
 
     public class AiCitationDto
@@ -38,6 +73,15 @@ namespace ViewModels.NasbNiro.AiDtos
         public string Answer { get; set; }
         public List<AiCitationDto> Citations { get; set; } = new List<AiCitationDto>();
         public List<AiToolCallDto> ToolCalls { get; set; } = new List<AiToolCallDto>();
+
+        /// <summary>The ui_* tool calls of the model that succeeded, in the order they were made (empty when the answer is degraded).</summary>
+        public List<AiActionDto> Actions { get; set; } = new List<AiActionDto>();
+
+        /// <summary>
+        /// WAV, base64: the answer spoken. Only set when the request carried a <see cref="AiChatRequestDto.UiContext"/> (a question typed on the voice-enabled page is spoken too);
+        /// null otherwise, for a degraded answer and when the text to speech endpoint is down (the front end then reads the text itself).
+        /// </summary>
+        public string AudioBase64 { get; set; }
         public bool Verified { get; set; }
         public bool Degraded { get; set; }
         public string Model { get; set; }
@@ -53,6 +97,9 @@ namespace ViewModels.NasbNiro.AiDtos
         public string AudioBase64 { get; set; }
         public List<AiCitationDto> Citations { get; set; } = new List<AiCitationDto>();
         public List<AiToolCallDto> ToolCalls { get; set; } = new List<AiToolCallDto>();
+
+        /// <summary>The ui_* tool calls of the model that succeeded, in the order they were made.</summary>
+        public List<AiActionDto> Actions { get; set; } = new List<AiActionDto>();
         public bool Verified { get; set; }
         public bool Degraded { get; set; }
         public string Model { get; set; }
