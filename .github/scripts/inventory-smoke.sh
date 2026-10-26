@@ -82,7 +82,7 @@ ENG_TOKEN=$(login eng.ci 'Ci#Eng-User-2026'); SEC_TOKEN=$(login sec.ci 'Ci#Sec-U
 as() { local t=$TOKEN; TOKEN=$1; shift; call "$@"; TOKEN=$t; } # as TOKEN METHOD PATH [JSON]
 
 # --- no endpoint answers without a token (every controller is protected; the only anonymous routes are login, logout, the API settings and the device push with its own key)
-for p in ProviderCategories Providers Contracts/contracts Tenders inventory/items procurement/requests finance/ceo-dashboard quality/dashboard office/letters inventory/quality/ncr production/orders sales/customers service/requests ai/conversations; do
+for p in ProviderCategories Provider Contracts/contracts Tenders inventory/items procurement/requests finance/ceo-dashboard quality/dashboard office/letters inventory/quality/ncr production/orders sales/customers service/requests ai/conversations; do
   ANON=$(curl -s -o "$B" -w '%{http_code}' "$API/$p")
   if [ "$ANON" = "401" ]; then ok "anonymous request to $p is refused (401)"; else echo "{\"httpCode\":\"$ANON\"}" > "$B"; bad "anonymous request to $p is refused (401)"; fi
 done
