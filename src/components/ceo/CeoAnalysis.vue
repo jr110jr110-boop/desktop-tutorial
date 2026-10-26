@@ -63,10 +63,12 @@ const chips = computed(() => (props.result?.citations || []).map((c) => ({ ...c,
 </template>
 
 <style scoped>
+/* an inner panel of its card: the soft cell fill, 10px corners, no shadow */
 .analysis {
-  border-top: 1px solid var(--ceo-line);
-  padding-top: 12px;
-  margin-top: 4px;
+  padding: 16px 20px;
+  border: 1px solid var(--ceo-line-soft);
+  border-radius: 10px;
+  background: var(--ceo-cell);
 }
 .analysis-busy,
 .analysis-error {
@@ -93,11 +95,12 @@ const chips = computed(() => (props.result?.citations || []).map((c) => ({ ...c,
   align-items: center;
   gap: 6px;
   font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   color: var(--ceo-primary);
 }
 .analysis-model {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ceo-muted);
 }
 .analysis-meta .ceo-icon-btn {
@@ -112,6 +115,7 @@ const chips = computed(() => (props.result?.citations || []).map((c) => ({ ...c,
   max-width: 72ch;
 }
 .analysis-unverified {
+  border-radius: 8px;
   border-right: 3px solid var(--ceo-danger);
   background: var(--ceo-danger-soft);
   color: var(--ceo-danger-ink);
@@ -121,6 +125,7 @@ const chips = computed(() => (props.result?.citations || []).map((c) => ({ ...c,
   line-height: 20px;
 }
 .analysis-degraded {
+  border-radius: 8px;
   border-right: 3px solid var(--ceo-warn);
   background: var(--ceo-warn-soft);
   color: var(--ceo-warn-ink);

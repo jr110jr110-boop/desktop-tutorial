@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // One chart of a section (ChartDto) drawn with Chart.js. Right to left: the time and category axes run from the right, the value axis sits at the right, horizontal bars grow to the left.
-// Marks follow the dataviz rules of the page: thin bars (≤ 24px, 4px rounded data end, square at the baseline), 2px lines, a 2px gap of the card colour between touching marks,
-// hairline solid gridlines, a legend for two or more series, one HTML tooltip that lists every series (value first, name second), and a table view of the same numbers.
+// Marks follow the dataviz rules of the page: thin bars (≤ 22px, 4px rounded data end, square at the baseline), 2px lines with a soft gradient area under the main one,
+// a 2px gap of the card colour between touching marks, hairline horizontal gridlines only (none along a horizontal bar: the value sits at its tip), a 60% donut with its total,
+// the legend as small chips under the plot (two or more series, and every donut), one tooltip card that lists every series (value first, name second), and a table view.
 // Colours come from the series role (composables/ceo.ts chartTokens); no colour is the only carrier of meaning (legend, line dash of the neutral series, table).
 // hidden=true (masked labour amounts) shows «محرمانه (حقوق)» instead of the chart. No animation: the page has a single load reveal, nothing else moves by itself.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -70,12 +71,11 @@ const colors = computed(() => {
     const ramp = t.sequential;
     return roles.map((_, i) => ramp[Math.round((i * (ramp.length - 1)) / Math.max(1, roles.length - 1))]);
   }
-  const hasPositive = roles.includes("positive");
+  // by role; a colour already taken in this chart moves to the next free categorical slot (so two series never share a colour)
   const used = new Set<string>();
   return roles.map((r) => {
     let c = t.roles[r] || t.categorical[0];
-    if (r === "secondary" && hasPositive) c = t.secondaryAlt; // teal and the positive green are too close
-    if (used.has(c) && (r === "primary" || r === "secondary")) c = t.categorical.find((x) => !used.has(x)) || c;
+    if (used.has(c) && r !== "neutral") c = t.categorical.find((x) => !used.has(x)) || c;
     used.add(c);
     return c;
   });
@@ -83,9 +83,9 @@ const colors = computed(() => {
 const donutColors = computed(() => donut.value.map((d, i) => (d.other ? tokens.value.other : tokens.value.categorical[i])));
 
 const legend = computed(() => {
-  if (props.chart.kind === "donut") return donut.value.map((d, i) => ({ name: d.label, color: donutColors.value[i], shape: "rect", value: valueText(d.value), share: donutTotal.value ? faNum((d.value / donutTotal.value) * 100, 0) + "٪" : "" }));
+  if (props.chart.kind === "donut") return donut.value.map((d, i) => ({ name: d.label, color: donutColors.value[i], shape: "dot", value: valueText(d.value), share: donutTotal.value ? faNum((d.value / donutTotal.value) * 100, 0) + "٪" : "" }));
   if (props.chart.series.length < 2) return [];
-  return props.chart.series.map((s, i) => ({ name: s.name, color: colors.value[i], shape: props.chart.kind === "line" ? (s.role === "neutral" ? "dash" : "line") : "rect", value: "", share: "" }));
+  return props.chart.series.map((s, i) => ({ name: s.name, color: colors.value[i], shape: props.chart.kind === "line" ? (s.role === "neutral" ? "dash" : "line") : "dot", value: "", share: "" }));
 });
 
 // ---------------------------------------------------------------- the HTML tooltip (labels are server data: textContent only)
@@ -164,7 +164,7 @@ const directLabels = {
     const ctx = c.ctx;
     const kind = props.chart.kind;
     ctx.save();
-    ctx.font = "500 11px IRANYekan, Tahoma, sans-serif";
+    ctx.font = "500 12px IRANYekan, Tahoma, sans-serif";
     ctx.fillStyle = tokens.value.ink;
     ctx.textBaseline = "middle";
     if (kind === "hbar" && props.chart.series.length === 1) {
@@ -191,11 +191,11 @@ const directLabels = {
       const arc = meta.data[0];
       if (arc) {
         ctx.textAlign = "center";
-        ctx.font = "500 18px IRANYekan, Tahoma, sans-serif";
-        ctx.fillText(unit.value === "rial" ? valueText(donutTotal.value).replace(" ریال", "") : faNum(donutTotal.value, 0), arc.x, arc.y - 6);
-        ctx.font = "400 11px IRANYekan, Tahoma, sans-serif";
+        ctx.font = "500 22px IRANYekan, Tahoma, sans-serif";
+        ctx.fillText(unit.value === "rial" ? valueText(donutTotal.value).replace(" ریال", "") : faNum(donutTotal.value, 0), arc.x, arc.y - 7);
+        ctx.font = "400 12px IRANYekan, Tahoma, sans-serif";
         ctx.fillStyle = tokens.value.muted;
-        ctx.fillText("مجموع", arc.x, arc.y + 14);
+        ctx.fillText("مجموع", arc.x, arc.y + 16);
       }
     }
     ctx.restore();
@@ -206,7 +206,7 @@ const directLabels = {
 function config(): any {
   const t = tokens.value;
   const kind = props.chart.kind;
-  const font = { family: "IRANYekan, Tahoma, sans-serif", size: 11 };
+  const font = { family: "IRANYekan, Tahoma, sans-serif", size: 12 };
   const tooltip = { enabled: false, external: renderTip };
   const base: any = {
     animation: false,
@@ -221,8 +221,8 @@ function config(): any {
   if (kind === "donut") {
     return {
       type: "doughnut",
-      data: { labels: donut.value.map((d) => d.label), datasets: [{ data: donut.value.map((d) => d.value), backgroundColor: donutColors.value, borderColor: t.card, borderWidth: 2, hoverOffset: 4, hoverBorderColor: t.card }] },
-      options: { ...base, cutout: "66%", layout: { padding: 6 }, interaction: { mode: "nearest", intersect: true } },
+      data: { labels: donut.value.map((d) => d.label), datasets: [{ data: donut.value.map((d) => d.value), backgroundColor: donutColors.value, borderColor: t.card, borderWidth: 2, borderRadius: 2, hoverOffset: 4, hoverBorderColor: t.card }] },
+      options: { ...base, cutout: "60%", layout: { padding: 6 }, interaction: { mode: "nearest", intersect: true } },
       plugins: [directLabels],
     };
   }
@@ -230,6 +230,8 @@ function config(): any {
   const stacked = kind === "stackedBar";
   const isLine = kind === "line";
   const n = props.chart.series.length;
+  // the main line (the first that is not a plan/reference) carries a soft area: its colour at 18% at the top, nothing at the baseline
+  const filled = props.chart.series.findIndex((s) => s.role !== "neutral");
   const datasets = props.chart.series.map((s, i) => {
     const c = colors.value[i];
     if (isLine) {
@@ -238,8 +240,8 @@ function config(): any {
         label: s.name,
         data: s.values,
         borderColor: c,
-        backgroundColor: n === 1 ? hexAlpha(c, 0.1) : c,
-        fill: n === 1 ? "origin" : false,
+        backgroundColor: i === filled ? areaFill(c) : c,
+        fill: i === filled ? "origin" : false,
         borderWidth: 2,
         borderDash: s.role === "neutral" ? [5, 4] : [],
         cubicInterpolationMode: "monotone",
@@ -262,7 +264,7 @@ function config(): any {
       borderWidth: stacked ? (horizontal ? { right: i === 0 ? 0 : 2 } : { bottom: i === 0 ? 0 : 2 }) : 0,
       borderSkipped: stacked ? false : "start",
       borderRadius: top ? (stacked ? { topLeft: 4, topRight: 4 } : 4) : 0,
-      maxBarThickness: 24,
+      maxBarThickness: 22,
       categoryPercentage: n > 1 && !stacked ? 0.72 : 0.62,
       barPercentage: n > 1 && !stacked ? 0.9 : 1,
     };
@@ -273,9 +275,11 @@ function config(): any {
     stacked,
     beginAtZero: !isLine,
     grace: isLine ? "8%" : 0,
-    grid: { color: t.grid, drawBorder: false, tickLength: 0, lineWidth: 1 },
+    // horizontal gridlines only: along a horizontal bar the value is written at its tip, so that axis has no grid
+    grid: { display: !horizontal, color: t.grid, drawBorder: false, tickLength: 0, lineWidth: 1 },
     border: { display: false },
-    ticks: { color: t.muted, font, padding: 8, maxTicksLimit: horizontal ? 4 : 5, precision: unit.value === "count" ? 0 : undefined, callback: (v: number) => tick(Number(v)) },
+    // a single horizontal series has its value at each bar's tip: no second scale under it
+    ticks: { display: !(horizontal && n === 1), color: t.muted, font, padding: 8, maxTicksLimit: horizontal ? 4 : 5, precision: unit.value === "count" ? 0 : undefined, callback: (v: number) => tick(Number(v)) },
   };
   const labels = props.chart.labels.map(String);
   const labelWidth = measure(labels, 11);
@@ -326,6 +330,18 @@ function measure(labels: string[], size: number): number {
   } catch {
     return 60;
   }
+}
+
+/** The soft area under the main line: a vertical gradient over the plot, recomputed when the plot size changes. */
+function areaFill(color: string) {
+  return (ctx: any) => {
+    const area = ctx.chart?.chartArea;
+    if (!area) return hexAlpha(color, 0.12);
+    const g = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+    g.addColorStop(0, hexAlpha(color, 0.18));
+    g.addColorStop(1, hexAlpha(color, 0));
+    return g;
+  };
 }
 
 function hexAlpha(hex: string, a: number) {
@@ -402,13 +418,11 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
         <span v-if="scale.caption && !chart.hidden" class="chart-unit">{{ scale.caption }}</span>
       </div>
       <div v-if="!chart.hidden && !isEmpty" class="chart-tools">
-        <button :aria-pressed="asTable" :title="asTable ? 'نمایش نمودار' : 'نمایش جدول اعداد'" class="ceo-tool" type="button" @click="asTable = !asTable">
+        <button :aria-label="asTable ? 'نمایش نمودار' : 'نمایش جدول اعداد'" :aria-pressed="asTable" :data-tip="asTable ? 'نمایش نمودار' : 'جدول اعداد'" class="ceo-icon-btn small" type="button" @click="asTable = !asTable">
           <CeoIcon :name="asTable ? 'chart' : 'table'" :size="16" />
-          <span>{{ asTable ? "نمودار" : "جدول" }}</span>
         </button>
-        <button v-if="chart.drillKey" class="ceo-tool" title="جدول جزئیات این نمودار" type="button" @click="emit('drill', chart.drillKey)">
+        <button v-if="chart.drillKey" aria-label="جدول جزئیات این نمودار" class="ceo-icon-btn small" data-tip="ریز رکوردها" type="button" @click="emit('drill', chart.drillKey)">
           <CeoIcon :size="16" name="list" />
-          <span>ریز</span>
         </button>
       </div>
     </figcaption>
@@ -423,13 +437,6 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
       <span v-if="chart.drillKey" class="chart-empty-hint">جدول جزئیات را باز کنید تا ببینید کدام رکوردها شمرده می‌شوند.</span>
     </div>
     <template v-else>
-      <ul v-if="legend.length" class="chart-legend" :class="{ donut: chart.kind === 'donut' }">
-        <li v-for="(l, i) in legend" :key="i">
-          <span :class="'key-' + l.shape" :style="'--key: ' + l.color" class="legend-key" />
-          <span class="legend-name">{{ l.name }}</span>
-          <span v-if="l.share" class="legend-share">{{ l.share }}</span>
-        </li>
-      </ul>
       <div v-if="asTable" class="chart-table-wrap">
         <table class="chart-table">
           <thead>
@@ -450,6 +457,13 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
         <canvas ref="canvas" :aria-label="chart.title + ' — برای دیدن اعداد، نمای جدول را باز کنید'" role="img" />
         <div ref="tip" class="chart-tip" dir="rtl" />
       </div>
+      <ul v-if="legend.length && !asTable" :class="{ donut: chart.kind === 'donut' }" class="chart-legend">
+        <li v-for="(l, i) in legend" :key="i">
+          <span :class="'key-' + l.shape" :style="'--key: ' + l.color" class="legend-key" />
+          <span class="legend-name">{{ l.name }}</span>
+          <span v-if="l.share" class="legend-share">{{ l.share }}</span>
+        </li>
+      </ul>
     </template>
     <p v-if="chart.note && !chart.hidden" class="chart-note">{{ chart.note }}</p>
   </figure>
@@ -465,47 +479,57 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 12px;
 }
 .chart-titles {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 8px;
+  gap: 0 8px;
   min-width: 0;
+  padding-top: 4px;
 }
 .chart-title {
   margin: 0;
   font-size: 14px;
-  line-height: 22px;
+  line-height: 20px;
   font-weight: 500;
   color: var(--ceo-ink);
 }
 .chart-unit {
   font-size: 12px;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--ceo-muted);
 }
 .chart-tools {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   flex: none;
+  margin-top: -2px;
 }
+/* the legend: small chips under the plot */
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: 6px;
   list-style: none;
-  margin: 0 0 6px;
+  margin: 12px 0 0;
   padding: 0;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--ceo-muted);
 }
 .chart-legend li {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 1px 10px;
+  border: 1px solid var(--ceo-line-soft);
+  border-radius: 999px;
+  background: var(--ceo-cell);
+}
+.chart-legend.donut {
+  justify-content: center;
 }
 .legend-name {
   color: var(--ceo-ink);
@@ -518,19 +542,20 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
   display: inline-block;
   flex: none;
 }
-.key-rect {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
+.key-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   background: var(--key);
 }
 .key-line {
-  width: 16px;
+  width: 14px;
   height: 0;
   border-top: 2px solid var(--key);
+  border-radius: 1px;
 }
 .key-dash {
-  width: 16px;
+  width: 14px;
   height: 0;
   border-top: 2px dashed var(--key);
 }
@@ -539,32 +564,34 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
   width: 100%;
 }
 .chart-canvas.is-donut {
-  max-width: 260px;
+  max-width: 248px;
   margin-inline: auto;
 }
 .chart-canvas canvas {
   display: block;
 }
+/* the tooltip card: the popover surface, a hairline, 10px corners and the floating shadow */
 .chart-tip {
   position: absolute;
   top: 0;
   left: 0;
   z-index: 3;
-  min-width: 132px;
-  max-width: 260px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--ceo-tip-bg);
-  color: var(--ceo-tip-ink);
-  box-shadow: 0 6px 18px rgba(12, 20, 28, 0.18);
+  min-width: 140px;
+  max-width: 264px;
+  padding: 10px 12px;
+  border: 1px solid var(--ceo-line);
+  border-radius: 10px;
+  background: var(--ceo-pop);
+  color: var(--ceo-ink);
+  box-shadow: var(--ceo-shadow-float);
   pointer-events: none;
   opacity: 0;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 20px;
   text-align: right;
 }
 .chart-tip :deep(.tip-title) {
-  color: var(--ceo-tip-muted);
+  color: var(--ceo-muted);
   margin-bottom: 4px;
 }
 .chart-tip :deep(.tip-row) {
@@ -576,21 +603,22 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
 .chart-tip :deep(.tip-row strong) {
   font-weight: 500;
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 .chart-tip :deep(.tip-name) {
-  color: var(--ceo-tip-muted);
+  color: var(--ceo-muted);
   white-space: normal;
 }
 .chart-tip :deep(.tip-key) {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   flex: none;
 }
 .chart-tip :deep(.tip-key.line) {
   height: 2px;
   width: 14px;
-  border-radius: 0;
+  border-radius: 1px;
 }
 .chart-masked,
 .chart-empty {
@@ -598,11 +626,12 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   text-align: center;
   padding: 16px;
-  border: 1px dashed var(--ceo-line);
-  border-radius: 6px;
+  border: 1px dashed var(--ceo-line-strong);
+  border-radius: 10px;
+  background: var(--ceo-cell);
   color: var(--ceo-muted);
   font-size: 13px;
   line-height: 20px;
@@ -615,27 +644,27 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
   font-size: 12px;
 }
 .chart-note {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--ceo-muted);
 }
 .chart-table-wrap {
-  max-height: 260px;
+  max-height: 264px;
   overflow: auto;
   border: 1px solid var(--ceo-line);
-  border-radius: 6px;
+  border-radius: 10px;
 }
 .chart-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 20px;
 }
 .chart-table th,
 .chart-table td {
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--ceo-line);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--ceo-line-soft);
   text-align: right;
   color: var(--ceo-ink);
   font-weight: 400;
@@ -643,9 +672,13 @@ const tableHeads = computed(() => (props.chart.kind === "donut" ? [props.chart.s
 .chart-table thead th {
   position: sticky;
   top: 0;
-  background: var(--ceo-surface);
+  background: var(--ceo-cell-alt);
   color: var(--ceo-muted);
   font-weight: 500;
+  font-size: 12px;
+}
+.chart-table tbody tr:nth-child(even) {
+  background: var(--ceo-cell);
 }
 .chart-table .num {
   text-align: left;

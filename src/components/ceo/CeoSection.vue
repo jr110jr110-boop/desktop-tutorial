@@ -1,9 +1,8 @@
 <script setup lang="ts">
-// One module of the company (SectionDto) as a quiet panel: the title with the module's status (shape + colour + words) and its alert count, the KPIs in a hairline strip,
-// 1-3 charts, and two actions: «جزئیات» opens the detail table of the section's main drill key (the other tables of the section are one click away in the panel)
-// and «تحلیل هوشمند» asks the AI for an analysis of exactly this section (POST ceo/analyze), shown at the bottom of the panel. The module's own page is reached from the
-// side column (module pages) and from the drill panel («باز کردن صفحه‌ی ماژول»), so the header keeps only these two actions — and the quiet «بخوان» (voice mode):
-// the section's spoken summary (GET ceo/speech, played by the page; «توقف» while it is read).
+// One module of the company (SectionDto) as a card: the module's icon in a tinted circle, the title, the status as a pill (shape + colour + word) and the alert count;
+// the KPIs as a soft grid of cells; 1-3 charts. Three icon actions with tooltips: «بخوان» (the spoken summary, GET ceo/speech, played by the page; a stop mark while
+// it is read), «جزئیات» (the detail table of the section's main drill key; the other tables of the section are one click away in the panel) and «تحلیل هوشمند»
+// (POST ceo/analyze for exactly this section, shown at the bottom of the card). The module's own page is reached from the side column and from the drill panel.
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import type { CeoKpi, CeoSection, CeoStatus } from "@/api/CeoAPIs";
@@ -11,6 +10,19 @@ import CeoAnalysisBox from "@/components/ceo/CeoAnalysis.vue";
 import CeoChart from "@/components/ceo/CeoChart.vue";
 import CeoIcon from "@/components/ceo/CeoIcon.vue";
 import { deltaOf, faNum, kpiFullValue, kpiValue, openableLink, splitValue, statusTitles, type AnalysisState, type CeoTheme } from "@/composables/ceo";
+
+/** the line icon of each module (CeoIcon names); an unknown section key falls back to the chart icon */
+const moduleIcons: Record<string, string> = {
+  finance: "mod-finance",
+  sales: "mod-sales",
+  projects: "mod-projects",
+  production: "mod-production",
+  quality: "mod-quality",
+  inventory: "mod-inventory",
+  procurement: "mod-procurement",
+  service: "mod-service",
+  office: "mod-office",
+};
 
 const props = defineProps({
   section: { type: Object as () => CeoSection, required: true },
@@ -41,65 +53,72 @@ function openKpi(k: CeoKpi) {
 const analysisLabel = computed(() => {
   const a = props.analysis;
   if (a?.busy) return "در حال تحلیل…";
-  if (a?.result && !a.open) return "نمایش تحلیل";
+  if (a?.result && !a.open) return "نمایش تحلیل هوشمند";
   if (a?.result && a.open) return "تحلیل دوباره";
-  return "تحلیل هوشمند";
+  return "تحلیل هوشمند این بخش";
 });
+const icon = computed(() => moduleIcons[props.section.key] || "chart");
 </script>
 
 <template>
   <section :id="'ceo-sec-' + section.key" :aria-labelledby="'ceo-sec-title-' + section.key" :class="'st-' + status" class="ceo-section">
     <header class="sec-head">
       <div class="sec-heading">
-        <span :title="statusTitles[status]" class="sec-lamp"><CeoIcon :name="status" :size="18" /></span>
+        <span aria-hidden="true" class="sec-icon"><CeoIcon :name="icon" :size="18" /></span>
         <h2 :id="'ceo-sec-title-' + section.key" class="sec-title" tabindex="-1">{{ section.title }}</h2>
-        <span class="visually-hidden">وضعیت: {{ statusTitles[status] }}</span>
-        <span v-if="section.alertCount > 0" class="sec-alerts">{{ faNum(section.alertCount, 0) }} هشدار</span>
+        <span class="sec-sub">
+          <span class="sec-status"><CeoIcon :name="status" :size="13" />{{ statusTitles[status] }}</span>
+          <span v-if="section.alertCount > 0" class="sec-alerts">{{ faNum(section.alertCount, 0) }} هشدار</span>
+        </span>
       </div>
       <div class="sec-actions">
         <button
           :aria-label="reading ? 'توقف خواندن' : 'خلاصه‌ی صوتی بخش ' + section.title"
           :aria-pressed="reading"
-          :title="reading ? 'توقف خواندن' : 'خلاصه‌ی صوتی این بخش'"
-          class="ceo-tool ceo-read"
+          :data-tip="reading ? 'توقف خواندن' : 'بخوان: خلاصه‌ی صوتی'"
+          class="ceo-icon-btn ceo-read"
           type="button"
           @click="emit('read')">
-          <CeoIcon :name="reading ? 'stop' : 'speaker'" :size="15" />
-          {{ reading ? "توقف" : "بخوان" }}
+          <CeoIcon :name="reading ? 'stop' : 'speaker'" :size="17" />
         </button>
-        <button :disabled="!mainDrill" class="ceo-btn ghost" type="button" @click="mainDrill && emit('drill', mainDrill)">
-          <CeoIcon :size="16" name="list" />
-          جزئیات
+        <button :aria-label="'جزئیات ' + section.title" :disabled="!mainDrill" class="ceo-icon-btn" data-tip="جزئیات" type="button" @click="mainDrill && emit('drill', mainDrill)">
+          <CeoIcon :size="17" name="list" />
         </button>
-        <button :aria-expanded="!!analysis && analysis.open" :disabled="!!analysis && analysis.busy" class="ceo-btn soft" type="button" @click="emit('analyze')">
-          <CeoIcon :size="16" name="analysis" />
-          {{ analysisLabel }}
+        <button
+          :aria-busy="!!analysis && analysis.busy"
+          :aria-expanded="!!analysis && analysis.open"
+          :aria-label="analysisLabel"
+          :class="{ on: !!analysis && analysis.open && !!analysis.result }"
+          :data-tip="analysisLabel"
+          :disabled="!!analysis && analysis.busy"
+          class="ceo-icon-btn sec-analyze"
+          type="button"
+          @click="emit('analyze')">
+          <CeoIcon :class="{ spinning: !!analysis && analysis.busy }" :name="analysis && analysis.busy ? 'refresh' : 'analysis'" :size="17" />
         </button>
       </div>
     </header>
 
     <div v-if="section.kpis.length" class="sec-kpis">
-      <div class="sec-kpis-row">
-        <component
-          :is="c.k.drillKey || c.k.link ? 'button' : 'div'"
-          v-for="c in kpiCells"
-          :key="c.k.key"
-          :class="['st-' + c.k.status, { clickable: c.k.drillKey || c.k.link, masked: c.k.hidden }]"
-          :title="kpiFullValue(c.k) + (c.k.note ? ' — ' + c.k.note : '')"
-          :type="c.k.drillKey || c.k.link ? 'button' : undefined"
-          class="sec-kpi"
-          @click="openKpi(c.k)">
-          <span class="sec-kpi-title">{{ c.k.title }}</span>
-          <span class="sec-kpi-value">
-            <CeoIcon v-if="c.k.hidden" :size="15" name="lock" />
-            <CeoIcon v-else-if="c.k.status === 'warn' || c.k.status === 'danger'" :name="c.k.status" :size="15" class="sec-kpi-lamp" />
-            <span v-if="c.value.num" class="sec-kpi-num">{{ c.value.num }}</span>
-            <span v-if="c.value.unit" class="sec-kpi-unit">{{ c.value.unit }}</span>
-          </span>
-          <span v-if="c.delta" :class="'tone-' + c.delta.tone" class="sec-kpi-delta"><span aria-hidden="true">{{ c.delta.arrow }}</span> {{ c.delta.text }}</span>
-          <span class="visually-hidden">وضعیت {{ statusTitles[c.k.status] }}{{ c.delta ? "، " + c.delta.label : "" }}</span>
-        </component>
-      </div>
+      <component
+        :is="c.k.drillKey || c.k.link ? 'button' : 'div'"
+        v-for="c in kpiCells"
+        :key="c.k.key"
+        :class="['st-' + c.k.status, { clickable: c.k.drillKey || c.k.link, masked: c.k.hidden }]"
+        :title="kpiFullValue(c.k) + (c.k.note ? ' — ' + c.k.note : '')"
+        :type="c.k.drillKey || c.k.link ? 'button' : undefined"
+        class="sec-kpi"
+        @click="openKpi(c.k)">
+        <span class="sec-kpi-title">{{ c.k.title }}</span>
+        <span class="sec-kpi-value">
+          <CeoIcon v-if="c.k.hidden" :size="15" name="lock" />
+          <CeoIcon v-else-if="c.k.status === 'warn' || c.k.status === 'danger'" :name="c.k.status" :size="14" class="sec-kpi-lamp" />
+          <span v-if="c.value.num" class="sec-kpi-num">{{ c.value.num }}</span>
+          <span v-if="c.value.unit" class="sec-kpi-unit">{{ c.value.unit }}</span>
+        </span>
+        <span v-if="c.delta" :class="'tone-' + c.delta.tone" class="sec-kpi-delta"><span aria-hidden="true">{{ c.delta.arrow }}</span> {{ c.delta.text }}</span>
+        <span class="visually-hidden">وضعیت {{ statusTitles[c.k.status] }}{{ c.delta ? "، " + c.delta.label : "" }}</span>
+      </component>
     </div>
 
     <div class="sec-charts">
@@ -114,123 +133,154 @@ const analysisLabel = computed(() => {
 .ceo-section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
   min-width: 0;
-  padding: 18px 20px 20px;
+  padding: 24px;
   background: var(--ceo-card);
   border: 1px solid var(--ceo-line);
-  border-radius: 8px;
-  scroll-margin-top: 72px;
+  border-radius: 16px;
+  box-shadow: var(--ceo-shadow);
+  scroll-margin-top: 76px;
 }
 .sec-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 12px;
+  gap: 12px;
 }
+/* the heading in two lines whatever the title's length: the icon beside both, the title, the status pill under it */
 .sec-heading {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  column-gap: 12px;
+  row-gap: 2px;
   min-width: 0;
+  flex: 1;
 }
-.sec-lamp {
+/* the module's icon in a tinted circle */
+.sec-icon {
+  grid-row: 1 / span 2;
   display: inline-flex;
-  color: var(--ceo-muted);
-}
-.ceo-section.st-ok .sec-lamp {
-  color: var(--ceo-ok);
-}
-.ceo-section.st-warn .sec-lamp {
-  color: var(--ceo-warn);
-}
-.ceo-section.st-danger .sec-lamp {
-  color: var(--ceo-danger);
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--ceo-primary-soft);
+  color: var(--ceo-primary);
 }
 .sec-title {
+  grid-column: 2;
   margin: 0;
   font-size: 18px;
   line-height: 26px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ceo-ink);
   outline: none;
 }
-.sec-alerts {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--ceo-muted);
-  padding-inline-start: 8px;
-  border-inline-start: 1px solid var(--ceo-line);
-}
-.ceo-section.st-danger .sec-alerts {
-  color: var(--ceo-danger-ink);
-}
-.ceo-section.st-warn .sec-alerts {
-  color: var(--ceo-warn-ink);
-}
-.sec-actions {
+/* under the title: the status as a pill (shape, colour and word), then the alert count */
+.sec-sub {
+  grid-column: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 10px;
 }
-.sec-kpis {
+.sec-alerts {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ceo-muted);
+}
+.sec-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 10px 1px 8px;
   border: 1px solid var(--ceo-line);
-  border-radius: 6px;
-  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ceo-neutral-soft);
+  color: var(--ceo-muted);
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
 }
-/* a flex strip: the cells of a short last row grow to fill it (no empty cells); each cell draws its end and bottom hairline, the outer ones are clipped */
-.sec-kpis-row {
+.st-ok .sec-status {
+  background: var(--ceo-ok-soft);
+  border-color: var(--ceo-ok-line);
+  color: var(--ceo-ok);
+}
+.st-warn .sec-status {
+  background: var(--ceo-warn-soft);
+  border-color: var(--ceo-warn-line);
+  color: var(--ceo-warn-ink);
+}
+.st-danger .sec-status {
+  background: var(--ceo-danger-soft);
+  border-color: var(--ceo-danger-line);
+  color: var(--ceo-danger-ink);
+}
+.sec-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+/* the KPIs: a soft grid of cells, no borders, fills alternating a shade; the cells of a short last row grow to fill it (no empty slot) */
+.sec-kpis {
   display: flex;
   flex-wrap: wrap;
-  margin-inline-end: -1px;
-  margin-bottom: -1px;
+  gap: 8px;
 }
 .sec-kpi {
-  flex: 1 1 128px;
+  flex: 1 1 148px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
-  padding: 10px 12px;
-  background: var(--ceo-card);
+  padding: 12px 16px;
+  background: var(--ceo-cell);
   border: 0;
-  border-inline-end: 1px solid var(--ceo-line);
-  border-bottom: 1px solid var(--ceo-line);
+  border-radius: 10px;
   font: inherit;
   text-align: right;
   color: var(--ceo-ink);
+  transition: background-color 120ms ease;
+}
+.sec-kpi:nth-child(even) {
+  background: var(--ceo-cell-alt);
 }
 .sec-kpi.clickable {
   cursor: pointer;
 }
 .sec-kpi.clickable:hover {
-  background: var(--ceo-card-hover);
+  background: var(--ceo-primary-soft);
 }
 .sec-kpi:focus-visible {
   outline: 2px solid var(--ceo-focus);
-  outline-offset: -3px;
+  outline-offset: 2px;
 }
 .sec-kpi-title {
   font-size: 12px;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--ceo-muted);
 }
 .sec-kpi-value {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  column-gap: 5px;
+  column-gap: 6px;
 }
 .sec-kpi-num {
-  font-size: 19px;
+  font-size: 20px;
   line-height: 28px;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .sec-kpi-unit {
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 12px;
+  line-height: 20px;
   color: var(--ceo-muted);
 }
 .sec-kpi-lamp,
@@ -251,25 +301,27 @@ const analysisLabel = computed(() => {
   color: var(--ceo-danger);
 }
 .sec-kpi-delta {
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 12px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
 }
 .tone-good {
   color: var(--ceo-ok);
 }
 .tone-bad {
-  color: var(--ceo-danger);
+  color: var(--ceo-danger-ink);
 }
 .tone-flat {
   color: var(--ceo-muted);
 }
-.ceo-section :deep(.ceo-btn.soft) {
-  min-width: 112px;
-  justify-content: center;
-}
 .sec-charts {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 32px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sec-kpi {
+    transition: none;
+  }
 }
 </style>

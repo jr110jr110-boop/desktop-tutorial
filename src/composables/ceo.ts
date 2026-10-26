@@ -303,35 +303,35 @@ export interface ChartTokens {
   axis: string;
   categorical: string[];
   roles: Record<CeoSeriesRole, string>;
-  /** the stand-in for «secondary» when a chart also has a positive or a neutral series (teal is too close to both) */
-  secondaryAlt: string;
   other: string;
   sequential: string[];
 }
-/** Categorical order (fixed, never cycled): steel, verdigris teal, khaki, rose, sky, violet. Adjacent pairs pass in both modes; the first three pass all-pairs. */
+/**
+ * Categorical order (fixed, never cycled): steel, verdigris, khaki, rose, sky, violet — the hues of the visual brief, snapped to the nearest steps that pass the validator
+ * (chroma floor, normal-vision floor), with their own dark steps validated on the dark card. Adjacent pairs pass in both modes. Verdigris and rose collapse for deuteranopes
+ * (all-pairs), so a chart never pairs them by role: receipts/payments (positive/negative) use the validated steel/verdigris pair, and a repeated colour takes the next free slot.
+ */
 export const chartTokens: Record<CeoTheme, ChartTokens> = {
   light: {
     card: "#FFFFFF",
-    ink: "#15202B",
-    muted: "#51606E",
-    grid: "#E6EAEE",
-    axis: "#C3CCD5",
-    categorical: ["#215D96", "#0A9A96", "#AEA048", "#BF5884", "#5CB2E2", "#7E5DB1"],
-    roles: { primary: "#215D96", secondary: "#0A9A96", positive: "#2B9D6C", negative: "#A1302B", neutral: "#8D99A6", accent: "#C2722B" },
-    secondaryAlt: "#5CB2E2",
-    other: "#98A3AE",
-    sequential: ["#8AB5E3", "#5B97D3", "#3D78B2", "#215D96", "#003368"],
+    ink: "#14202B",
+    muted: "#5B6877",
+    grid: "#EEF1F4",
+    axis: "#D3DAE2",
+    categorical: ["#235F94", "#008E7A", "#B9A24A", "#B35C7A", "#63A4DB", "#7D6BB0"],
+    roles: { primary: "#235F94", secondary: "#008E7A", positive: "#008E7A", negative: "#235F94", neutral: "#8D99A6", accent: "#C2722B" },
+    other: "#A3ADB8",
+    sequential: ["#8AB2DB", "#5E93C8", "#3B75AD", "#235F94", "#123F69"],
   },
   dark: {
-    card: "#1A2531",
-    ink: "#E8EEF3",
-    muted: "#9AA9B7",
-    grid: "#26333F",
-    axis: "#3A4957",
-    categorical: ["#407EC4", "#2DAA97", "#957F1B", "#D4618A", "#44A0C9", "#8151AD"],
-    roles: { primary: "#407EC4", secondary: "#2DAA97", positive: "#39AC6D", negative: "#B33832", neutral: "#9EA6AE", accent: "#D58B4B" },
-    secondaryAlt: "#B7BFC7",
-    other: "#B7BFC7",
-    sequential: ["#265B8D", "#3D72A6", "#558AC0", "#6DA3DA", "#85BCF5"],
+    card: "#171F29",
+    ink: "#E6ECF2",
+    muted: "#93A1B1",
+    grid: "#222C38",
+    axis: "#314051",
+    categorical: ["#2578BE", "#1C9F8A", "#AD9118", "#D36D90", "#429ADF", "#775EB5"],
+    roles: { primary: "#2578BE", secondary: "#1C9F8A", positive: "#1C9F8A", negative: "#2578BE", neutral: "#8C99A7", accent: "#E3A061" },
+    other: "#A9B3BE",
+    sequential: ["#255790", "#2F6CA8", "#4286C6", "#64A1DA", "#8EC0EC"],
   },
 };

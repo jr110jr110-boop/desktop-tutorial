@@ -1,6 +1,13 @@
+<script lang="ts">
+// one id per sparkline on the page (the gradient of each SVG is referenced by id)
+let sparkIds = 0;
+const nextSparkId = () => ++sparkIds;
+</script>
+
 <script setup lang="ts">
 // The trend of a headline KPI: up to 12 monthly points, oldest at the right and newest at the left (the page reads right to left, so time does too).
-// The line is in the de-emphasis steel; the current month is the dot in the primary steel with a ring of the card colour. A text summary is given to screen readers.
+// A 1.75px steel line over a soft gradient (18% at the line's top, nothing at the baseline); the current month is a crisp dot with a ring of the card colour.
+// A text summary is given to screen readers.
 import { computed } from "vue";
 import { faNum, rialShort } from "@/composables/ceo";
 
@@ -10,6 +17,7 @@ const props = defineProps({
   unit: { type: String, default: "count" },
 });
 
+const gradientId = `ceo-spark-${nextSparkId()}`;
 const W = 200;
 const H = 40;
 const PAD = 5;
@@ -38,7 +46,13 @@ const summary = computed(() => {
 <template>
   <div v-if="points.length" class="spark">
     <svg :viewBox="`0 0 ${W} ${H}`" aria-hidden="true" preserveAspectRatio="none">
-      <path :d="area" class="spark-area" />
+      <defs>
+        <linearGradient :id="gradientId" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stop-color="currentColor" stop-opacity="0.18" />
+          <stop offset="1" stop-color="currentColor" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+      <path :d="area" :fill="`url(#${gradientId})`" class="spark-area" />
       <path :d="line" class="spark-line" vector-effect="non-scaling-stroke" />
     </svg>
     <span :style="{ left: (last.x / W) * 100 + '%', top: (last.y / H) * 100 + '%' }" class="spark-dot" />
@@ -57,27 +71,26 @@ const summary = computed(() => {
   width: 100%;
   height: 100%;
   overflow: visible;
+  color: var(--ceo-spark, #235f94);
 }
 .spark-line {
   fill: none;
-  stroke: var(--ceo-spark, #8fa9c2);
-  stroke-width: 2;
+  stroke: currentColor;
+  stroke-width: 1.75;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 .spark-area {
-  fill: var(--ceo-spark, #8fa9c2);
-  opacity: 0.12;
   stroke: none;
 }
 /* the dot is HTML so it stays round when the SVG is stretched */
 .spark-dot {
   position: absolute;
-  width: 9px;
-  height: 9px;
-  margin: -4.5px 0 0 -4.5px;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
   border-radius: 50%;
-  background: var(--ceo-primary-mark, #215d96);
+  background: var(--ceo-spark, #235f94);
   box-shadow: 0 0 0 2px var(--ceo-card, #fff);
 }
 </style>

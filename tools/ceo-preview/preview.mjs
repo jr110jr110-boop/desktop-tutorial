@@ -4,6 +4,8 @@
 //   source /home/claude/netenv.sh && npx vite build     # build first (this script only serves dist/)
 //   node tools/ceo-preview/preview.mjs                  # all shots
 //   node tools/ceo-preview/preview.mjs 1440-light 390   # only the shots whose name contains one of the words
+//   CEO_PREVIEW_CSS=".kpi-cluster{--kpi-num-weight:500}" CEO_PREVIEW_SUFFIX=-w500 node tools/ceo-preview/preview.mjs 1440-light
+//                                                       # design A/B: extra CSS injected into the page, saved under a suffixed name
 //
 // Shots: ceo-1440-light, ceo-1440-dark (system dark, no stored choice), ceo-1024, ceo-390, and for the review ceo-1440-drill, ceo-1440-assistant,
 // ceo-1440-analysis, ceo-1440-pmo (payroll mask), ceo-print (print media) plus ceo-print.pdf (A4).
@@ -304,7 +306,7 @@ async function voiceChips(page) {
 async function runAnalysis(page) {
   // Bootstrap makes every scroll smooth; the review scrolls are instant so the shot is not taken mid-way
   await page.evaluate(() => document.getElementById("ceo-sec-projects").scrollIntoView({ block: "start", behavior: "instant" }));
-  await page.click("#ceo-sec-projects .sec-actions .ceo-btn:not(.ghost)");
+  await page.click("#ceo-sec-projects .sec-analyze");
   await page.waitForSelector("#ceo-sec-projects .analysis-text");
   await page.evaluate(() => document.querySelector("#ceo-sec-projects .analysis").scrollIntoView({ block: "center", behavior: "instant" }));
   await page.waitForTimeout(500);
@@ -384,6 +386,7 @@ for (const shot of list) {
   await page.route("**/api/v1/**", (route) => answer(route, role));
   await page.goto(base + "/ceo", { waitUntil: "networkidle" });
   await page.waitForSelector(".ceo-kpis", { timeout: 15000 });
+  if (process.env.CEO_PREVIEW_CSS) await page.addStyleTag({ content: process.env.CEO_PREVIEW_CSS });
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(1700); // the lamp test and the first chart draw
   if (shot.act) await shot.act(page);
@@ -393,8 +396,12 @@ for (const shot of list) {
     await page.pdf({ path: join(out, "ceo-print.pdf"), format: "A4", printBackground: true, margin: { top: "14mm", bottom: "16mm", left: "12mm", right: "12mm" } });
   }
   if (!shot.ownShots) {
-    await page.screenshot({ path: join(out, shot.name + ".png"), fullPage: shot.fullPage !== false });
-    console.log("saved", shot.name + ".png");
+    // two frames and a moment: every chart has finished its last redraw before the capture
+    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+    await page.waitForTimeout(400);
+    const file = shot.name + (process.env.CEO_PREVIEW_SUFFIX || "") + ".png";
+    await page.screenshot({ path: join(out, file), fullPage: shot.fullPage !== false });
+    console.log("saved", file);
   }
   await context.close();
 }

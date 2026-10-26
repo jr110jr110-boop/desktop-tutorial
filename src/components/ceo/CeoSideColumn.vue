@@ -2,7 +2,8 @@
 // The side column of the dashboard: the alerts of the whole company grouped by severity (each opens its page), the count of new AI notes, the catalogue of every detail table,
 // the module pages, and the "snapshot now" action of the KPI trends. layout: «column» beside the sections (stays in view while they scroll), «band» above them in two columns
 // (tablet), «stack» one column (phone). On a phone the warning and information groups start folded so the sections are reached quickly; the critical ones are always open.
-// «بخوان» beside the title: the alerts spoken (GET ceo/speech?what=alerts, played by the page).
+// «بخوان» beside the title: the alerts spoken (GET ceo/speech?what=alerts, played by the page). The alerts are the one card of the column (each severity group runs
+// along a 3px rail in its colour; a row shows its arrow when pointed at); the AI notes, the catalogue and the module pages are quiet lists on the page surface.
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import type { CeoAlert } from "@/api/CeoAPIs";
@@ -42,12 +43,11 @@ const groups = computed(() =>
           v-if="alerts.length"
           :aria-label="reading ? 'توقف خواندن' : 'خواندن هشدارها'"
           :aria-pressed="reading"
-          :title="reading ? 'توقف خواندن' : 'هشدارها را بخوان'"
-          class="ceo-tool ceo-read"
+          :data-tip="reading ? 'توقف خواندن' : 'بخوان: هشدارها'"
+          class="ceo-icon-btn ceo-read"
           type="button"
           @click="emit('read-alerts')">
-          <CeoIcon :name="reading ? 'stop' : 'speaker'" :size="15" />
-          {{ reading ? "توقف" : "بخوان" }}
+          <CeoIcon :name="reading ? 'stop' : 'speaker'" :size="17" />
         </button>
       </div>
       <p v-if="!alerts.length" class="side-empty">هشداری نیست؛ همه‌ی ماژول‌ها در وضعیت عادی‌اند.</p>
@@ -70,7 +70,7 @@ const groups = computed(() =>
       </details>
     </section>
 
-    <section class="side-block">
+    <section class="side-block quiet">
       <button class="side-row" type="button" @click="emit('notes')">
         <CeoIcon :size="18" name="note" />
         <span class="side-row-text">یادداشت‌های تازه‌ی هوش مصنوعی</span>
@@ -84,7 +84,7 @@ const groups = computed(() =>
       </button>
     </section>
 
-    <section v-if="quickLinks.length" aria-labelledby="ceo-links-title" class="side-block">
+    <section v-if="quickLinks.length" aria-labelledby="ceo-links-title" class="side-block quiet">
       <h2 id="ceo-links-title" class="side-title small">صفحه‌های ماژول‌ها</h2>
       <ul class="link-list">
         <li v-for="l in quickLinks" :key="l.to">
@@ -93,7 +93,7 @@ const groups = computed(() =>
       </ul>
     </section>
 
-    <section class="side-block quiet">
+    <section class="side-block quiet snap">
       <button :disabled="snapshotBusy" class="ceo-btn ghost small" title="نقطه‌ی امروز روندها را همین حالا ثبت می‌کند (کار شبانه هم هر شب ساعت ۰۰:۳۰ همین کار را می‌کند)" type="button" @click="emit('snapshot')">
         <CeoIcon :size="15" name="camera" />
         {{ snapshotBusy ? "در حال ثبت…" : "ثبت نقطه‌ی امروز روندها" }}
@@ -106,13 +106,15 @@ const groups = computed(() =>
 .side {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 24px;
 }
 .side.band {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   grid-template-rows: auto auto 1fr;
   align-items: start;
+  column-gap: 32px;
+  row-gap: 16px;
 }
 .side.band > :first-child {
   grid-row: span 3;
@@ -120,12 +122,16 @@ const groups = computed(() =>
 .side-block {
   background: var(--ceo-card);
   border: 1px solid var(--ceo-line);
-  border-radius: 8px;
-  padding: 14px 16px;
+  border-radius: 16px;
+  box-shadow: var(--ceo-shadow);
+  padding: 20px;
 }
+/* the quiet lists: no card, on the page surface */
 .side-block.quiet {
   background: transparent;
   border: 0;
+  border-radius: 0;
+  box-shadow: none;
   padding: 0 4px;
 }
 .side-head {
@@ -133,8 +139,8 @@ const groups = computed(() =>
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
-  scroll-margin-top: 72px;
+  margin: -4px 0 12px;
+  scroll-margin-top: 76px;
 }
 .side-head .side-title {
   margin: 0;
@@ -143,37 +149,46 @@ const groups = computed(() =>
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 16px;
   line-height: 24px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ceo-ink);
 }
 .side-title.small {
-  font-size: 14px;
-  line-height: 22px;
-  margin-bottom: 6px;
-}
-.side-count {
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   color: var(--ceo-muted);
 }
+.side-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--ceo-neutral-soft);
+  font-size: 12px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--ceo-muted);
+  font-variant-numeric: tabular-nums;
+}
 .side-empty {
   margin: 0;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 14px;
+  line-height: 22px;
   color: var(--ceo-muted);
 }
 .alert-group + .alert-group {
-  margin-top: 12px;
+  margin-top: 16px;
 }
 .alert-group-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 0 4px;
+  gap: 8px;
+  margin: 0 0 8px;
   font-size: 13px;
   line-height: 20px;
   font-weight: 500;
@@ -194,7 +209,7 @@ details:not([open]) .alert-fold {
 .alert-group-title:focus-visible {
   outline: 2px solid var(--ceo-focus);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: 4px;
 }
 .sev-danger .alert-group-title :deep(.ceo-icon) {
   color: var(--ceo-danger);
@@ -208,65 +223,88 @@ details:not([open]) .alert-fold {
 .alert-group-count {
   color: var(--ceo-muted);
   font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
+/* each group runs along a 3px rail in its severity colour, on the start (right) edge */
 .alert-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 12px 0 0;
+  position: relative;
+}
+.alert-list::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  right: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--ceo-line-strong);
+}
+.sev-danger .alert-list::before {
+  background: var(--ceo-danger);
+}
+.sev-warning .alert-list::before {
+  background: var(--ceo-warn);
+}
+.sev-info .alert-list::before {
+  background: var(--ceo-info);
 }
 .alert-item {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 7px 0 7px 2px;
-  border-top: 1px solid var(--ceo-line-soft);
+  padding: 6px 8px;
+  margin: 0 -8px 0 0;
+  border-radius: 8px;
   color: var(--ceo-ink);
   text-decoration: none;
-  font-size: 13px;
-  line-height: 21px;
+  font-size: 14px;
+  line-height: 22px;
+  transition: background-color 120ms ease;
 }
-li:first-child .alert-item {
-  border-top: 0;
-}
-.sev-danger .alert-item {
-  padding-inline-start: 10px;
-  box-shadow: inset -2px 0 0 var(--ceo-danger);
+a.alert-item:hover,
+a.alert-item:focus-visible {
+  background: var(--ceo-cell);
 }
 .alert-text {
   flex: 1;
   min-width: 0;
 }
+/* the arrow shows on the row being pointed at (or focused) */
 .alert-go {
   margin-top: 4px;
   color: var(--ceo-muted);
   transform: scaleX(-1);
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
-a.alert-item:hover .alert-text {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+a.alert-item:hover .alert-go,
+a.alert-item:focus-visible .alert-go {
+  opacity: 1;
 }
 a.alert-item:focus-visible {
   outline: 2px solid var(--ceo-focus);
-  outline-offset: 2px;
-  border-radius: 2px;
+  outline-offset: 0;
 }
 .side-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 8px 0;
+  padding: 10px 0;
   border: 0;
   background: none;
   color: var(--ceo-ink);
   font: inherit;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 14px;
+  line-height: 22px;
   text-align: right;
   cursor: pointer;
 }
 .side-row + .side-row {
-  border-top: 1px solid var(--ceo-line-soft);
+  border-top: 1px solid var(--ceo-line);
 }
 .side-row :deep(.ceo-icon) {
   color: var(--ceo-muted);
@@ -284,7 +322,7 @@ a.alert-item:focus-visible {
 .side-row-value.fresh {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .side-row-value.fresh::before {
   content: "";
@@ -297,8 +335,7 @@ a.alert-item:focus-visible {
   color: var(--ceo-muted);
 }
 .side-row:hover .side-row-text {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  color: var(--ceo-primary);
 }
 .side-row:focus-visible {
   outline: 2px solid var(--ceo-focus);
@@ -310,18 +347,26 @@ a.alert-item:focus-visible {
   padding: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2px 12px;
+  gap: 0 16px;
 }
 .link-list a {
   display: block;
   padding: 4px 0;
   font-size: 13px;
-  line-height: 20px;
-  color: var(--ceo-primary);
+  line-height: 22px;
+  color: var(--ceo-muted);
   text-decoration: none;
 }
 .link-list a:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  color: var(--ceo-primary);
+}
+.snap {
+  padding-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .alert-item,
+  .alert-go {
+    transition: none;
+  }
 }
 </style>
