@@ -25,6 +25,8 @@ using PaginatedEquipmentBomResult = System.Threading.Tasks.ValueTask
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write (engineering definitions): PMO, ENGINEERING, ENGINEER
     [Authorize]
     public class EquipmentBomsController : BaseApiController
     {
@@ -36,6 +38,7 @@ namespace WebApi.Controllers
                 ?? throw new System.ArgumentNullException(nameof(EquipmentBomService));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentBomDto>), (int)HttpStatusCode.OK)]
         public async EquipmentBomResult AddEquipmentBomAsync([FromBody] AddEquipmentBomWithEqueipmentProccessDto dto, CancellationToken cancellationToken)
@@ -43,6 +46,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentBomService.AddEquipmentBomAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentBomDto>), (int)HttpStatusCode.OK)]
         public async EquipmentBomResult UpdateEquipmentBomAsync([FromBody] UpdateEquipmentBomDto dto, CancellationToken cancellationToken)
@@ -50,6 +54,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentBomService.UpdateEquipmentBomAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("set-predecessor")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentBomDto>), (int)HttpStatusCode.OK)]
         public async EquipmentBomResult SetPredecessorAsync([FromBody] UpdateEquipmentBomSetPredecessorDto dto, CancellationToken cancellationToken)
@@ -57,6 +62,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentBomService.SetPredecessorAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("delete-predecessor")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentBomDto>), (int)HttpStatusCode.OK)]
         public async EquipmentBomResult DeletePredecessorAsync(int equipmentBomId, CancellationToken cancellationToken)
@@ -64,6 +70,7 @@ namespace WebApi.Controllers
             return Ok(await _equipmentBomService.DeletePredecessorAsync(equipmentBomId, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("{equipmentBomId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseEquipmentBomDto>), (int)HttpStatusCode.OK)]
         public async EquipmentBomResult DeleteEquipmentBomAsync(int equipmentBomId, CancellationToken cancellationToken)
@@ -93,6 +100,7 @@ namespace WebApi.Controllers
             return Ok((await _equipmentBomService.GetAllResponseEquipmentBomDtoAsync(paginationParams, cancellationToken)).ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("delete-equipmentBom-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteEquipmentBomResultDto>>), (int)HttpStatusCode.OK)]
         public async DeleteEquipmentBomsResult DeleteEquipmentBomCollectionAsync(

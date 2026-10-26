@@ -118,6 +118,11 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper
                 .BadRequest<ResponseProviderDto>(NasbNiroMessages.ProviderNotFound);
 
+            // R1a: a provider with purchase orders, invoices, payments or stock receipts is not deleted
+            string blocked = await LegacyDeleteGuard.ProviderAsync(_unitOfWork, providerId, cancellationToken);
+            if (blocked != null)
+                return ResponseDtoHelper.BadRequest<ResponseProviderDto>(blocked);
+
             provider.Delete();
 
             if (provider.ProviderContacts != null)

@@ -200,6 +200,13 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<ResponseContractDto>(NasbNiroMessages.ContractNotFound);
             }
 
+            // R1a: a contract that other modules still use (project control, procurement, finance, production, stock, service) is not deleted; the collection delete and the provider-contract route come through here too
+            string blocked = await LegacyDeleteGuard.ContractAsync(_uow, contractId, cancellationToken);
+            if (blocked != null)
+            {
+                return ResponseDtoHelper.BadRequest<ResponseContractDto>(blocked);
+            }
+
             contract.Delete();
 
             if (contract.ContractEquipments != null)

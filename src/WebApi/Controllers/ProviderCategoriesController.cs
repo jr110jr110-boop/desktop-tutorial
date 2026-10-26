@@ -13,6 +13,8 @@ using System.ComponentModel.DataAnnotations;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write: PMO, COMMERCIAL
     [Authorize]
     public class ProviderCategoriesController : BaseApiController
     {
@@ -23,6 +25,7 @@ namespace WebApi.Controllers
             _categories = categories ?? throw new System.ArgumentNullException(nameof(categories));
         }
 
+        [Authorize(Roles = LegacyRoles.Purchasing)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ProviderCategory>), (int)HttpStatusCode.OK)]
         public async ValueTask<ResponseDto<ProviderCategory>> AddProviderCategoryAsync([FromBody] AddProviderCategoryDto dto, CancellationToken cancellationToken)
@@ -32,6 +35,7 @@ namespace WebApi.Controllers
             return result;
         }
 
+        [Authorize(Roles = LegacyRoles.Purchasing)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ProviderCategory>), (int)HttpStatusCode.OK)]
         public async ValueTask<ResponseDto<ProviderCategory>> UpdateProviderCategoriesAsync(
@@ -61,6 +65,7 @@ namespace WebApi.Controllers
             return result;
         }
 
+        [Authorize(Roles = LegacyRoles.Purchasing)]
         [HttpDelete("{categoryId:int}")]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async ValueTask<ResponseDto<string>> DeleteProviderCategoryAsync([FromQuery] int categoryId, CancellationToken cancellationToken)

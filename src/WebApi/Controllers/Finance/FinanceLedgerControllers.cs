@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Finance;
 using ViewModels.NasbNiro.FinanceDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -13,6 +14,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/gl")]
+    [RolesCheckedInService]
     public class GlController : ControllerBase
     {
         private readonly IGlService _gl;
@@ -136,6 +138,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/treasury")]
+    [RolesCheckedInService]
     public class TreasuryController : ControllerBase
     {
         private readonly ITreasuryService _service;
@@ -282,6 +285,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/receivables")]
+    [RolesCheckedInService]
     public class ReceivablesController : ControllerBase
     {
         private readonly IReceivablesService _service;
@@ -325,6 +329,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/tax")]
+    [RolesCheckedInService]
     public class TaxController : ControllerBase
     {
         private readonly ITaxService _service;

@@ -10,6 +10,9 @@ using Entities.Model.NasbNiro.Sales;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using LegacyContracts = Entities.Model.NasbNiro.Contracts;
+using Pc = Entities.Model.NasbNiro.ProjectControl;
+using Proc = Entities.Model.NasbNiro.Procurement;
 
 namespace DataLayer.Context
 {
@@ -115,9 +118,89 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.AfterSales.SvContract), new[] { "Status", "StartDate", "EndDate", "VisitIntervalMonths", "PriceRial", "ActivatedByUserId" } },
             { typeof(Entities.Model.NasbNiro.AfterSales.SlSurvey), new[] { "Status", "Kind", "AverageScore" } },
             { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays" } },
+            // R1a: user administration. Created, changed and deleted users, their roles and the claims that carry the temporary-password flag and the requests for sensitive roles.
+            // Never listed: the password hash, the security stamp, the token serial, the confirmation codes and the birth date. The national code and the phone number are masked.
+            { typeof(Entities.Identity.User), new[] { "UserName", "Email", "EmailConfirmed", "PhoneNumber", "PhoneNumberConfirmed", "Name", "LastName", "NationalCode", "IsActive", "IsDeleted", "LockoutEnabled", "LockoutEnd" } },
+            { typeof(Entities.Identity.UserRole), new[] { "UserId", "RoleId" } },
+            { typeof(Entities.Identity.UserClaim), new[] { "UserId", "ClaimType", "ClaimValue" } },
+
+            // R1a (finding H7): the legacy contract, the project control records that move money, dates or authority, and the procurement headers.
+            // Fields that the system recomputes all the time (float, forecast, percent cache, snapshots) and long free text are not listed; "Deleted" is listed so a soft delete leaves a row.
+            { typeof(LegacyContracts.ContractEntity), null },
+            { typeof(Pc.PcSetting), null },
+            { typeof(Pc.PcApprovalAuthority), null },
+            { typeof(Pc.PcCalendar), null },
+            { typeof(Pc.PcCalendarException), null },
+            { typeof(Pc.PcContractTerms), new[] { "ContractId", "ProjectCode", "Category", "CurrencyCode", "ValueExVat", "VatPercent", "AdvancePercent", "RetentionPercent", "LatePenaltyPercentPerWeek", "PenaltyCapPercent", "GraceDays", "ChangeProcedureAgreed", "ProjectManagerUserId", "CalendarId", "CurrentBaselineId", "ScheduleStartDate", "ContractDeliveryDate", "AccrualMode", "ClientReviewDays", "ManagementReserve", "Deleted" } },
+            { typeof(Pc.PcProjectInitiation), new[] { "ContractId", "CurrentStep", "Completed", "Deleted" } },
+            { typeof(Pc.PcInitiationStepRecord), new[] { "InitiationId", "Step", "SlaDays", "DueDate", "DoneAt", "DoneByUserId" } },
+            { typeof(Pc.PcProjectCharter), new[] { "ContractId", "ManagerAcceptedAt", "ApprovedAt", "ApprovedByUserId", "Deleted" } },
+            { typeof(Pc.PcProjectPlan), new[] { "ContractId", "ApprovedAt", "ApprovedByUserId", "Deleted" } },
+            { typeof(Pc.PcContractReview), new[] { "ContractId", "TenderCode", "Kind", "Decision", "DecisionNote", "DecidedAt", "DecidedByUserId", "CapabilityCheckedByUserId", "Deleted" } },
+            { typeof(Pc.PcContractAmendment), new[] { "Number", "ContractId", "Type", "Origin", "PriceDelta", "DaysDelta", "CeoApprovedAt", "CeoApprovedByUserId", "CustomerApprovalReference", "CustomerApprovalDate", "Deleted" } },
+            { typeof(Pc.PcPaymentMilestone), new[] { "ContractId", "Seq", "Title", "Kind", "Trigger", "TriggerPercent", "WorkOrderId", "ActivityId", "PercentOfValue", "Amount", "PlannedDate", "Status", "DueAt", "PaidAt", "ProvisionalStatementId", "FinanceRef", "ClientLetterRef", "Deleted" } },
+            { typeof(Pc.PcGuaranteeInfo), new[] { "SourceKind", "SourceId", "ContractId", "GuaranteeType", "AmountDecimal", "CurrencyCode", "IssuerKind", "ValidFrom", "ExpiryDate", "ReleaseTrigger", "Status", "Deleted" } },
+            { typeof(Pc.PcPenaltyAssessment), new[] { "ContractId", "MilestoneId", "WorkOrderId", "Subject", "DueDate", "ActualDate", "LateDays", "GraceDays", "RatePercentPerWeek", "CapPercent", "BaseAmount", "Amount", "Status", "DecisionReason", "DecidedByUserId", "Deleted" } },
+            { typeof(Pc.PcVariationOrder), new[] { "Number", "ContractId", "ChangeRequestId", "AmendmentId", "PriceDelta", "DaysDelta", "ClientApprovalReference", "ClientApprovalDate", "Status", "Deleted" } },
+            { typeof(Pc.PcChangeRequest), new[] { "Number", "ContractId", "Origin", "Type", "RequesterUserId", "Status", "RegisteredAt", "DueDate", "Escalated", "RequestedPriceDelta", "RequestedDaysDelta", "ImpactDeltaDays", "ImpactDeltaCost", "ImpactOnCriticalPath", "Decision", "DecisionNote", "DecidedByUserId", "DecidedByRole", "DecidedAt", "BaselineId", "Deleted" } },
+            { typeof(Pc.PcChangeBoardMember), new[] { "ChangeRequestId", "Role", "UserId", "Vote", "VotedAt" } },
+            { typeof(Pc.PcClaim), new[] { "Number", "ContractId", "Direction", "DaysQuantified", "AmountQuantified", "Status", "IsCrossClaim", "PmoApproved", "DesignManufacturingApproved", "ReviewedByUserId", "ReviewedAt", "Deleted" } },
+            { typeof(Pc.PcManualProgress), new[] { "ActivityId", "Percent", "State", "ProposedByUserId", "DecidedByUserId", "DecidedAt", "DecisionNote" } },
+            { typeof(Pc.PcDailyReport), new[] { "ContractId", "Unit", "ReportDate", "State", "ConfirmedByUserId", "ConfirmedAt", "Deleted" } },
+            { typeof(Pc.PcShipment), new[] { "Number", "ContractId", "WorkOrderId", "ReleaseNoteId", "Status", "ShippedAt", "DeliveryReceiptNumber", "DeliveredAt", "HandoverMinutesNumber", "HandoverAt", "Deleted" } },
+            { typeof(Pc.PcBaseline), new[] { "ContractId", "Number", "Kind", "Status", "Reason", "ChangeRequestId", "ProjectStart", "ProjectFinish", "Bac", "ManagementReserve", "ApprovedAt", "ApprovedByUserId", "Deleted" } },
+            { typeof(Pc.PcBaselineSignature), new[] { "BaselineId", "UnitRole", "UserId", "SignedAt" } },
+            { typeof(Pc.PcCostBaselineLine), new[] { "ContractId", "BaselineId", "WbsNodeId", "ActivityId", "CostClass", "ResourceClass", "Amount", "Description" } },
+            // generated in bulk from the legacy BOM tree: the insert is not listed, a later change is
+            { typeof(Pc.PcWbsNode), new[] { "ContractId", "Code", "Title", "NodeType", "Weight", "BudgetAmount", "ResponsibleUnit", "ApprovedAt", "ApprovedByUserId", "Deleted" } },
+            { typeof(Pc.PcActivity), new[] { "ContractId", "Code", "Title", "DurationDays", "Weight", "BudgetAtCompletion", "ResponsibleUnit", "ConstraintType", "ConstraintDate", "ActualStart", "ActualFinish", "Status", "OnHoldReason", "Deleted" } },
+            { typeof(Proc.ProcurementSetting), null },
+            { typeof(Proc.PurchaseRequest), new[] { "Number", "Source", "Kind", "Status", "RequestDate", "WorkOrderId", "ContractId", "CostCenter", "EstimatedAmount", "SubmittedAt", "PlanningApprovedAt", "PlanningApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "BoardResolution", "RejectedAt", "RejectedByUserId", "RejectReason", "Deleted" } },
+            { typeof(Proc.PurchaseInquiry), new[] { "Number", "Status", "PurchaseRequestId", "RequiredQuotes", "FewerQuotesReason", "SelectedQuoteId", "SelectionReason", "SelectedAt", "SelectedByUserId", "FinancialApprovedAt", "FinancialApprovedByUserId", "CommercialApprovedAt", "CommercialApprovedByUserId", "TechnicalApprovedAt", "TechnicalApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "Deleted" } },
+            { typeof(Proc.PurchaseOrder), new[] { "Number", "Status", "Kind", "OrderDate", "ProviderId", "InquiryId", "WorkOrderId", "ContractId", "Currency", "ExchangeRate", "Incoterms", "PaymentTerms", "VatPercent", "AdvancePercent", "AdvanceGuarantee", "AdvanceGuaranteeExpiry", "PerformanceGuarantee", "RetentionPercent", "ContractNumber", "DeliveryDate", "LatePenaltyPercentPerWeek", "TotalAmount", "ApprovedAt", "ApprovedByUserId", "ReleasedAt", "ReleasedByUserId", "ClosedAt", "CancelledAt", "CancelReason", "Deleted" } },
+            { typeof(Proc.SupplierInvoice), new[] { "Number", "Status", "ProviderId", "PurchaseOrderId", "InvoiceNumber", "InvoiceDate", "IsOfficial", "NetAmount", "VatAmount", "TotalAmount", "NonRecoverableVatAmount", "PriceVariance", "MatchNote", "ApprovedAt", "ApprovedByUserId", "CancelledAt", "CancelReason", "Deleted" } },
+            { typeof(Proc.PaymentRequest), new[] { "Number", "Type", "Status", "RequestDate", "ProviderId", "PurchaseOrderId", "InvoiceId", "Amount", "Deductions", "DeductionNote", "QcApproved", "ApprovedAt", "ApprovedByUserId", "PaidAt", "PaidByUserId", "PaymentReference", "RejectedAt", "RejectReason", "Deleted" } },
         };
 
-        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban" };
+        /// <summary>Persian label of the record types added in R1a, put in front of the number or code in the summary of the trail row.</summary>
+        private static readonly Dictionary<Type, string> Labels = new Dictionary<Type, string>
+        {
+            { typeof(LegacyContracts.ContractEntity), "قرارداد" },
+            { typeof(Pc.PcSetting), "تنظیم کنترل پروژه" },
+            { typeof(Pc.PcApprovalAuthority), "اختیار تصمیم‌گیری کنترل پروژه" },
+            { typeof(Pc.PcCalendar), "تقویم کاری" },
+            { typeof(Pc.PcCalendarException), "استثنای تقویم کاری" },
+            { typeof(Pc.PcContractTerms), "شرایط قرارداد (کنترل پروژه)" },
+            { typeof(Pc.PcProjectInitiation), "راه‌اندازی پروژه" },
+            { typeof(Pc.PcInitiationStepRecord), "گام راه‌اندازی پروژه" },
+            { typeof(Pc.PcProjectCharter), "منشور پروژه" },
+            { typeof(Pc.PcProjectPlan), "برنامه پروژه" },
+            { typeof(Pc.PcContractReview), "بازنگری قرارداد" },
+            { typeof(Pc.PcContractAmendment), "الحاقیه قرارداد" },
+            { typeof(Pc.PcPaymentMilestone), "نقطه پرداخت" },
+            { typeof(Pc.PcGuaranteeInfo), "ضمانت‌نامه (کنترل پروژه)" },
+            { typeof(Pc.PcPenaltyAssessment), "ارزیابی جریمه" },
+            { typeof(Pc.PcVariationOrder), "دستور تغییر" },
+            { typeof(Pc.PcChangeRequest), "درخواست تغییر" },
+            { typeof(Pc.PcChangeBoardMember), "رأی هیئت تغییر" },
+            { typeof(Pc.PcClaim), "ادعا" },
+            { typeof(Pc.PcManualProgress), "پیشرفت دستی" },
+            { typeof(Pc.PcDailyReport), "گزارش روزانه" },
+            { typeof(Pc.PcShipment), "محموله" },
+            { typeof(Pc.PcBaseline), "خط‌مبنای برنامه" },
+            { typeof(Pc.PcBaselineSignature), "امضای خط‌مبنا" },
+            { typeof(Pc.PcCostBaselineLine), "سطر خط‌مبنای هزینه" },
+            { typeof(Pc.PcWbsNode), "گره WBS" },
+            { typeof(Pc.PcActivity), "فعالیت برنامه" },
+            { typeof(Proc.ProcurementSetting), "تنظیم تدارکات" },
+            { typeof(Proc.PurchaseRequest), "درخواست خرید" },
+            { typeof(Proc.PurchaseInquiry), "استعلام خرید" },
+            { typeof(Proc.PurchaseOrder), "سفارش خرید" },
+            { typeof(Proc.SupplierInvoice), "فاکتور تأمین‌کننده" },
+            { typeof(Proc.PaymentRequest), "درخواست پرداخت" },
+        };
+
+        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban", "NationalCode", "PhoneNumber" };
         private static readonly HashSet<string> Skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RowVersion" };
 
         public static void Capture(DbContext context, IHttpContextAccessor accessor)
@@ -160,6 +243,8 @@ namespace DataLayer.Context
                     // operations and terminal bookings are made by the system or by the floor in bulk; their changes and supervisor edits are the trail
                     if (entry.Entity is MfOperation) continue;
                     if (entry.Entity is MfTimeBooking tb && tb.Source == MfBookingSource.Terminal) continue;
+                    // the schedule and the WBS are generated in bulk from the legacy BOM tree; a later change of a node is listed
+                    if (entry.Entity is Pc.PcActivity || entry.Entity is Pc.PcWbsNode) continue;
                     // the one-off linker of legacy contracts and tenders links them in bulk; a person's manual link is listed
                     if (entry.Entity is SlCustomerLink link && link.Method == SlLinkMethod.LegacyMatch) continue;
                 }
@@ -258,6 +343,14 @@ namespace DataLayer.Context
                 if (!string.IsNullOrWhiteSpace(t)) { text = name == "TemporaryNumber" ? "موقت " + t : t; break; }
             }
             if (entry.Entity is FnEmployee) text = "کارمند (شماره حساب)";
+            if (entry.Entity is Entities.Identity.User)
+            {
+                PropertyEntry un = entry.Properties.FirstOrDefault(x => x.Metadata.Name == "UserName");
+                object name = entry.State == EntityState.Deleted ? un?.OriginalValue : un?.CurrentValue;
+                text = "کاربر " + name;
+            }
+            if (entry.Entity is Entities.Identity.UserRole) text = "نقش کاربر";
+            if (entry.Entity is Entities.Identity.UserClaim) text = "ادعای کاربر (رمز موقت یا درخواست نقش حساس)";
             if (entry.Entity is MfTimeBooking) text = "ثبت زمان کار";
             if (entry.Entity is MfOperation) text = "عملیات دستور تولید";
             if (entry.Entity is OfClockEvent) text = "تردد " + (entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Source")?.CurrentValue?.ToString() == "Manual" ? "دستی" : "واردشده");
@@ -269,6 +362,7 @@ namespace DataLayer.Context
             if (entry.Entity is OfDelegation) text = "نیابت سمت";
             if (entry.Entity is OfNumberingRule) text = "قاعده شماره‌گذاری نامه";
             if (entry.Entity is OfClockImportProfile) text = "الگوی ستون‌بندی فایل اکسل ترددها";
+            if (Labels.TryGetValue(entry.Entity.GetType(), out string label)) text = string.IsNullOrWhiteSpace(text) ? label : label + " " + text;
             if (text != null && text.Length > 280) text = text.Substring(0, 280);
             return text;
         }

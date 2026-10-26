@@ -13,6 +13,8 @@ using ViewModels.Dto;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write: PMO only
     [Route("api/v1/AdminSettings")]
     [EnableCors("CorsPolicy")]
     [ApiController]
@@ -42,6 +44,7 @@ namespace WebApi.Controllers
 
 
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseObjectDto), 200)]
         public async Task<ActionResult> CreateAdminSettingAsync([FromBody] AdminSettingVM model)
@@ -95,6 +98,7 @@ namespace WebApi.Controllers
         }
 
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseObjectDto), 200)]
         public async Task<ActionResult> EditAdminSettingAsync([FromBody] AdminSettingVM model)

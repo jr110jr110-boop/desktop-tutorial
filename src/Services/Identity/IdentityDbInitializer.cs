@@ -92,6 +92,13 @@ namespace Services.Identity
                             context.SaveChanges();
                         }
                     }
+
+                    // R1a: the sign-in lock-out applies to every account, the administrator included. An installation made before this
+                    // release has the Admin account without it (and the seat users are locked out for good by their own setup), so it is switched on here.
+                    // The list is tiny (normally only Admin), and the filter keeps this safe to run at every start.
+                    var withoutLockout = context.Users.Where(u => !u.LockoutEnabled).ToList();
+                    foreach (User u in withoutLockout) u.LockoutEnabled = true;
+                    if (withoutLockout.Count > 0) context.SaveChanges();
                 }
             }
         }
@@ -146,12 +153,8 @@ namespace Services.Identity
                 return IdentityResult.Failed();
             }
 
-            var setLockoutResult = await _applicationUserManager.SetLockoutEnabledAsync(adminUser, enabled: false);
-            if (setLockoutResult == IdentityResult.Failed())
-            {
-                _logger.LogError($"{thisMethodName}: adminUser SetLockoutEnabledAsync failed. {setLockoutResult.DumpErrors()}");
-                return IdentityResult.Failed();
-            }
+            // R1a: the administrator is no longer exempt from the sign-in lock-out (it used to be switched off here); five wrong passwords lock the account for a few minutes.
+            // LockoutEnabled = true above is enough.
 
             var addToRoleResult = await _applicationUserManager.AddToRoleAsync(adminUser, adminRole.Name);
             if (addToRoleResult == IdentityResult.Failed())

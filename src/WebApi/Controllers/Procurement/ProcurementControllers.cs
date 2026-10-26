@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Procurement;
 using ViewModels.NasbNiro.ProcurementDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -13,6 +14,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/procurement")]
+    [RolesCheckedInService]
     public class ProcurementController : ControllerBase
     {
         private const string Readers = ProcurementRoles.Readers + ",ASSEMBLER,ENGINEER";

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Quality;
 using ViewModels.NasbNiro.QualityDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -15,6 +16,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/quality")]
+    [RolesCheckedInService]
     public class QualityPlanController : ControllerBase
     {
         private readonly IItpService _itp;
@@ -108,6 +110,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/quality")]
+    [RolesCheckedInService]
     public class QualityCalibrationController : ControllerBase
     {
         private readonly ICalibrationService _service;
@@ -161,6 +164,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/quality")]
+    [RolesCheckedInService]
     public class QualityPersonnelController : ControllerBase
     {
         private readonly IPersonnelService _service;
@@ -228,6 +232,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/quality")]
+    [RolesCheckedInService]
     public class QualityMaterialController : ControllerBase
     {
         private readonly IMaterialService _service;
@@ -253,6 +258,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/quality")]
+    [RolesCheckedInService]
     public class QualityImprovementController : ControllerBase
     {
         private readonly ICapaService _capa;
@@ -349,6 +355,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/quality")]
+    [RolesCheckedInService]
     public class QualityReleaseController : ControllerBase
     {
         private readonly IReleaseService _service;
@@ -382,6 +389,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/quality")]
+    [RolesCheckedInService]
     public class QualityControlController : ControllerBase
     {
         private readonly IDocumentControlService _documents;

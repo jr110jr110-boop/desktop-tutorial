@@ -15,6 +15,8 @@ using WebApi.Extensions;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write: PMO, FINANCIAL, FINANCEMANAGER, PROJECTMANAGER
     [Authorize]
     public class ContractProvisionalStatementsController : BaseApiController
     {
@@ -25,6 +27,7 @@ namespace WebApi.Controllers
             _proStatService = proStatService ?? throw new ArgumentNullException(nameof(proStatService));
         }
 
+        [Authorize(Roles = LegacyRoles.ProvisionalStatementWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseProStatDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ResponseDto<ResponseProStatDto>> AddProStatAsync(
@@ -58,6 +61,7 @@ namespace WebApi.Controllers
             return result.ToPaginatedResult();
         }
 
+        [Authorize(Roles = LegacyRoles.ProvisionalStatementWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseProStatDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ResponseDto<ResponseProStatDto>> UpdateProStatAsync(
@@ -69,6 +73,7 @@ namespace WebApi.Controllers
             return result;
         }
 
+        [Authorize(Roles = LegacyRoles.ProvisionalStatementWriters)]
         [HttpDelete]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async ValueTask<ResponseDto<string>> DeleteProStatAsync(

@@ -38,5 +38,12 @@ namespace Common.Results
             return Create(false, message, default(T))
                 .HasHttpStatusCode(HttpStatusCode.Unauthorized);
         }
+
+        /// <summary>The caller is signed in but the role or the rule does not allow the action (the HTTP answer stays 200, the code is in the body like the other helpers).</summary>
+        public static ResponseDto<T> Forbidden<T>(string message)
+        {
+            return Create(false, message, default(T))
+                .HasHttpStatusCode(HttpStatusCode.Forbidden);
+        }
     }
 }

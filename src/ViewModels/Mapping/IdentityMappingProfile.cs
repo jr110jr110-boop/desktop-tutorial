@@ -11,7 +11,10 @@ namespace ViewModels.Mapping
         {
             CreateMap<User, ResponseUserDto>()
                 .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.Roles))
-                .ForMember(dest => dest.ProfilePhoto, opt => opt.MapFrom(src => src.ProfilePhoto));
+                .ForMember(dest => dest.ProfilePhoto, opt => opt.MapFrom(src => src.ProfilePhoto))
+                // secrets of the account: the token serial and the SMS confirmation code are never sent to a screen
+                .ForMember(dest => dest.SerialNumber, opt => opt.Ignore())
+                .ForMember(dest => dest.MobileConfirmCode, opt => opt.Ignore());
 
             CreateMap<User, ResponseDashboardUserDto>()
                 .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => src.Name + " " + src.LastName))

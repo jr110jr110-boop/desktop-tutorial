@@ -119,6 +119,11 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper
                     .BadRequest<ResponseEquipmentDto>(NasbNiroMessages.EquipmentAlreadyIsDeleted);
 
+            // R1a: an equipment used by a contract, a work order or a sales estimate (or whose BOM lines are used) is not deleted
+            string blocked = await LegacyDeleteGuard.EquipmentAsync(_unitOfWork, equipmentId, cancellationToken);
+            if (blocked != null)
+                return ResponseDtoHelper.BadRequest<ResponseEquipmentDto>(blocked);
+
             equipment.Delete();
 
             //delete children

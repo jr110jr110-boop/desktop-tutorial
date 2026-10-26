@@ -126,7 +126,8 @@ namespace Services.Token
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to validate refreshTokenValue: `{refreshTokenValue}`.");
+                // R1a: the token itself is a credential and is never written to the log
+                _logger.LogWarning(ex, "A refresh token could not be validated (expired, tampered or malformed).");
             }
 
             return decodedRefreshTokenPrincipal?.Claims?.FirstOrDefault(c => c.Type == ClaimTypes.SerialNumber)?.Value;

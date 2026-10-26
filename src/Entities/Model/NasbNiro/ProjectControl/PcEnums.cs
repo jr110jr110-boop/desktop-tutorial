@@ -32,7 +32,8 @@ namespace Entities.Model.NasbNiro.ProjectControl
     public enum PcGuaranteeStatus { Requested = 1, Issued = 2, Active = 3, ExtensionPending = 4, Expired = 5, Released = 6, Cancelled = 7 }
     public enum PcGuaranteeRelease { FinalDelivery = 1, EndOfWarranty = 2, ClientLetter = 3 }
     public enum PcGuaranteeIssuer { Bank = 1, Fund = 2 }
-    public enum PcGuaranteeEventKind { Issue = 1, Extension = 2, Cancellation = 3 }
+    /// <summary>Release and Expiry are written only by the release action and the daily expiry job (R1a), never through the generic event call.</summary>
+    public enum PcGuaranteeEventKind { Issue = 1, Extension = 2, Cancellation = 3, Release = 4, Expiry = 5 }
     public enum PcGuaranteeSource { ContractGuaranty = 1, TenderGuaranty = 2 }
 
     public enum PcPenaltyStatus { Computed = 0, Waived = 1, Negotiated = 2 }

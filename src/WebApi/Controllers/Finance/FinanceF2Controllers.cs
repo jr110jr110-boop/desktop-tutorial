@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.Finance;
 using ViewModels.NasbNiro.FinanceDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -18,6 +19,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/finance/assets")]
+    [RolesCheckedInService]
     public class AssetsController : ControllerBase
     {
         private readonly IAssetService _assets;

@@ -14,6 +14,10 @@ using WebApi.Extensions;
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   definitions, files, sort, engineer-accept-documents, delete: PMO, ENGINEERING, ENGINEER
+    //   gates and overrides an individual engineer must not use on his own work (engineering-accept / not-accept-documents, change-user, process-has-been-assigned-to-user, revert-process-status, update-full-parameters): PMO, ENGINEERING
+    //   pmo-accept-process, master-accept-process: PMO only
     [Authorize]
     public class ProcessesController : BaseApiController
     {
@@ -24,6 +28,7 @@ namespace WebApi.Controllers
             _processService = ProcessService ?? throw new System.ArgumentNullException(nameof(ProcessService));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> AddProcessAsync(
@@ -32,6 +37,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.AddProcessAsync(addProcessDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("finalizeFile")]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async Task<ActionResult<string>> FinalizeFileAsync([FromBody] FinalizeProcessFileDto dto, CancellationToken cancellationToken)
@@ -47,6 +53,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.GetProcessesFileStatusAsync(bomId, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> UpdateProcessAsync(
@@ -55,6 +62,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.UpdateProcessAsync(updateProcessDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringManagers)]
         [HttpPut("revert-process-status")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> UpdateProcessRevertStatusAsync(
@@ -63,6 +71,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.RevertStatusAsync(revertProcessDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringManagers)]
         [HttpPut("change-user")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> ChangeUserAsync(
@@ -71,6 +80,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.ChangeUserAsync(updateProcessSelectUserDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringManagers)]
         [HttpPut("update-full-parameters")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> UpdateProcessFullParametersAsync(
@@ -79,6 +89,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.UpdateProcessFullParametersAsync(updateProcessFullParametersDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpPut("pmo-accept-process")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> PmoAcceptProcessAsync(
@@ -87,6 +98,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.PmoAcceptProcessAsync(updateProcessMasterAcceptDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringManagers)]
         [HttpPut("process-has-been-assigned-to-user")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> ProcessAssignedToUserAsync(
@@ -95,6 +107,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.AssignedToUserAsync(updateProcessAssignedToUserDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.Pmo)]
         [HttpPut("master-accept-process")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> MasterAcceptProcessAsync(
@@ -103,6 +116,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.MasterAcceptProcessAsync(updateProcessMasterAcceptDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("engineer-accept-documents")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> AcceptDocumentsAsync(
@@ -111,6 +125,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.EngineerAcceptDocumentsAsync(updateProcessEngineerAcceptDocumentsDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringManagers)]
         [HttpPut("engineering-accept-documents")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> AcceptDocumentsAsync(
@@ -119,6 +134,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.EngineeringAcceptDocumentsAsync(updateProcessAcceptDocumentsDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringManagers)]
         [HttpPut("engineering-not-accept-documents")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> NotAcceptDocumentsAsync(
@@ -127,6 +143,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.EngineeringNotAcceptDocumentsAsync(updateProcessAcceptDocumentsDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("{processId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseProcessDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<ResponseProcessDto>>> DeleteProcessAsync(
@@ -154,6 +171,7 @@ namespace WebApi.Controllers
             return Ok(x.ToPaginatedResult());
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("delete-process-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteProcessResultDto>>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<IEnumerable<DeleteProcessResultDto>>>> DeleteProcessCollectionAsync(
@@ -162,6 +180,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.DeleteProcessCollectionAsync(processIds, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost("attach-file-to-process")]
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<string>>> AttachFileToProcessAsync(
@@ -170,6 +189,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.AttachFileToProcessAsync(attachFileDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("detach-file-from-process")]
         [ProducesResponseType(typeof(ResponseDto<bool>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromProcessAsync(
@@ -178,6 +198,7 @@ namespace WebApi.Controllers
             return Ok(await _processService.DetachFileFromProcessAsync(processId, documentId: fileId, cancellationToken: cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("update-sort")]
         [ProducesResponseType(typeof(ResponseDto<UpdateProcessSortResponseDto>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<UpdateProcessSortResponseDto>>> UpdateSortAsync(

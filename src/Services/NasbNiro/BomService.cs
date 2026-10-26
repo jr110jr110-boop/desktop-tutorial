@@ -218,6 +218,13 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<ResponseBomDto>(NasbNiroMessages.BomNotFound);
             }
 
+            // R1a: a BOM that a production order or a project control WBS node refers to is not deleted
+            string blocked = await LegacyDeleteGuard.BomAsync(_unitOfWork, bomId, cancellationToken);
+            if (blocked != null)
+            {
+                return ResponseDtoHelper.BadRequest<ResponseBomDto>(blocked);
+            }
+
             bom.Delete();
 
             if (bom.Processes != null)

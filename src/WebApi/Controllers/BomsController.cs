@@ -20,6 +20,8 @@ using BomResult = System.Threading.Tasks.ValueTask
 
 namespace WebApi.Controllers
 {
+    // R1a role matrix ★ to be confirmed by the company (write actions only; reads stay [Authorize] for every signed-in user; the CEO is not a writer):
+    //   every write (engineering definitions): PMO, ENGINEERING, ENGINEER
     [Authorize]
     public class BomsController : BaseApiController
     {
@@ -31,6 +33,7 @@ namespace WebApi.Controllers
                 ?? throw new System.ArgumentNullException(nameof(BomService));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPost]
         [ProducesResponseType(typeof(ResponseDto<ResponseBomDto>), (int)HttpStatusCode.OK)]
         public async BomResult AddBomAsync([FromBody] AddBomDto addBomDto, CancellationToken cancellationToken)
@@ -38,6 +41,7 @@ namespace WebApi.Controllers
             return Ok(await _bomService.AddBomAsync(addBomDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut]
         [ProducesResponseType(typeof(ResponseDto<ResponseBomDto>), (int)HttpStatusCode.OK)]
         public async BomResult UpdateBomAsync([FromBody] UpdateBomDto updateBomDto, CancellationToken cancellationToken)
@@ -45,6 +49,7 @@ namespace WebApi.Controllers
             return Ok(await _bomService.UpdateBomAsync(updateBomDto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("set-predecessor")]
         [ProducesResponseType(typeof(ResponseDto<ResponseBomDto>), (int)HttpStatusCode.OK)]
         public async BomResult SetPredecessorAsync([FromBody] UpdateBomSetPredecessorDto dto, CancellationToken cancellationToken)
@@ -52,6 +57,7 @@ namespace WebApi.Controllers
             return Ok(await _bomService.SetPredecessorAsync(dto, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpPut("delete-predecessor")]
         [ProducesResponseType(typeof(ResponseDto<ResponseBomDto>), (int)HttpStatusCode.OK)]
         public async BomResult DeletePredecessorAsync(int bomId, CancellationToken cancellationToken)
@@ -59,6 +65,7 @@ namespace WebApi.Controllers
             return Ok(await _bomService.DeletePredecessorAsync(bomId, cancellationToken));
         }
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("{bomId:int}")]
         [ProducesResponseType(typeof(ResponseDto<ResponseBomDto>), (int)HttpStatusCode.OK)]
         public async BomResult DeleteBomAsync(int bomId, CancellationToken cancellationToken)
@@ -77,6 +84,7 @@ namespace WebApi.Controllers
         }
 
 
+        [Authorize(Roles = LegacyRoles.EngineeringWriters)]
         [HttpDelete("delete-bom-collection")]
         [ProducesResponseType(typeof(ResponseDto<IEnumerable<DeleteBomResultDto>>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<IEnumerable<DeleteBomResultDto>>>> DeleteBomCollectionAsync(int[] bomIds, CancellationToken cancellationToken)

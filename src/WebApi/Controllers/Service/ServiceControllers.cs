@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.NasbNiro.AfterSales;
 using ViewModels.NasbNiro.ServiceDtos;
 using WebApi.Extensions;
+using WebApi.Filters;
 
 namespace WebApi.Controllers
 {
@@ -15,6 +16,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/service")]
+    [RolesCheckedInService]
     public class ServiceRequestsController : ControllerBase
     {
         private readonly ISvRequestService _requests;
@@ -70,6 +72,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/service/orders")]
+    [RolesCheckedInService]
     public class ServiceOrdersController : ControllerBase
     {
         private readonly ISvOrderService _orders;
@@ -117,6 +120,7 @@ namespace WebApi.Controllers
     [ApiController]
     [Authorize]
     [Route("api/v1/service")]
+    [RolesCheckedInService]
     public class ServiceAgreementsController : ControllerBase
     {
         private readonly ISvContractService _contracts;
