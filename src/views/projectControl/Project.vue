@@ -23,11 +23,11 @@ const tabs = [
 ];
 const bump = ref(0);
 
-// Deep link from sales (proposal page): /project-control/project?contract=<id>&tab=reviews|initiation&review=<id>
+// Deep link from sales (proposal page): /project-control/project?contract=<id>&tab=reviews|initiation&review=<id> (the AI item links write contractId)
 const route = useRoute();
 const openReviewId = ref<number | null>(null);
 function applyQuery() {
-  const c = Number(route.query.contract);
+  const c = Number(route.query.contract ?? route.query.contractId);
   if (c > 0) setPcContract(c);
   const t = String(route.query.tab || "");
   if (tabs.some((x) => x.key === t)) tab.value = t;

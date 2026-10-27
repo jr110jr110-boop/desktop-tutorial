@@ -8,7 +8,9 @@ import { useRoute, useRouter } from "vue-router";
 import showSuccessNotification from "@/composables/showSuccessNotification";
 import showErrorNotification from "@/composables/showErrorNotification";
 import showWarnNotification from "@/composables/showWarnNotification";
-import axios from "axios";
+import { absoluteHttp } from "@/api/ApiClient";
+import { apiErrorText } from "@/composables/apiMessage";
+import { collectIds, legacyDeleteReport } from "@/composables/legacyDelete";
 
 import KsTable from "@/components/common/KsTable.vue";
 import KsInput from "@/components/common/KsInput.vue";
@@ -169,6 +171,7 @@ const state = reactive({
   deletingItems: [],
   imagePreviewModalVisible: false,
   modalImagePreviewSrc: null as string | null,
+  isDeleting: false,
 });
 
 // ITEMS SELECTION
@@ -278,36 +281,58 @@ function onDeleteButton(singleSelectedItem) {
   state.deleteModalVisible = true;
 }
 
-const deleteItems = async () => {
-  await axios
-    .delete(apiBaseUrl + props.apiDeleteUrl, {
-      data: state.deletingItems,
-      headers: {
-        Authorization: "Bearer " + localStorage.getItem("token"),
-      },
-    })
-    .then((response) => {
-      showSuccessNotification("درخواست حذف با موفقیت انجام شد");
-      fetchData(false).then(() => {
-        if (state.fetchedData.length <= 0)
-          if (state.activePage >= 1) {
-            state.activePage -= 1;
-            fetchData(false);
-          }
-      });
-      state.selectedItems = [];
-      state.deletingItems = [];
-    })
-    .catch((e) => {
-      state.isLoading = false;
-      showErrorNotification(e.response.data.message || e.error);
-      console.log(e);
-    });
+/** Reads the list again after a delete; when the page became empty the previous page is shown. Answers false when the list could not be read. */
+async function reloadAfterDelete(): Promise<boolean> {
+  let read = await fetchData(false);
+  if (read && !state.fetchedData.length && state.activePage > 1) {
+    state.activePage -= 1;
+    read = await fetchData(false);
+  }
+  return read;
+}
 
+/**
+ * Deletes the selected rows and tells the user what happened (see composables/legacyDelete.ts for the answers of the API).
+ * The list is always read again before the answer is judged: a row that is gone was deleted, a row that is still there was refused
+ * and the text the API wrote for it (what is in the way) is shown. Nothing is ever reported with a generic "error".
+ */
+const deleteItems = async () => {
+  if (state.isDeleting) return;
+  state.isDeleting = true;
+  const ids = [...state.deletingItems];
+  let answer: any = null;
+  let failure: any = null;
+  try {
+    const response = await absoluteHttp.delete(apiBaseUrl + props.apiDeleteUrl, { data: ids });
+    answer = response.data;
+  } catch (e) {
+    failure = e;
+    console.log(e);
+  }
   state.deleteModalVisible = false;
+
+  // the API may have deleted some rows even when it refused or failed on others, so the list is always read again
+  const listRead = await reloadAfterDelete();
+  state.selectedItems = [];
+  state.deletingItems = [];
+  state.isDeleting = false;
+
+  if (failure) {
+    showErrorNotification(apiErrorText(failure));
+    return;
+  }
+
+  const report = legacyDeleteReport(ids, answer, listRead ? collectIds(state.fetchedData, props.nodePropName) : null);
+  if (!report.errors.length) {
+    showSuccessNotification("درخواست حذف با موفقیت انجام شد");
+    return;
+  }
+  if (report.deleted > 0) showSuccessNotification(report.deleted + " مورد حذف شد.");
+  report.errors.forEach((message) => showErrorNotification(message));
 };
 
-async function fetchData(resetActivePage: boolean) {
+/** Reads the list. Answers false when it could not be read (the old rows stay on screen). */
+async function fetchData(resetActivePage: boolean): Promise<boolean> {
   state.isLoading = true;
 
   if (resetActivePage) state.activePage = 1;
@@ -332,26 +357,30 @@ async function fetchData(resetActivePage: boolean) {
     for (let i = 0; i < filteredTerms.value.length; i++)
       formParams[filteredTerms.value[i].propName] = filteredTerms.value[i].val;
 
-  await axios
-    .get(apiBaseUrl + props.apiFetchUrl, {
+  try {
+    const response = await absoluteHttp.get(apiBaseUrl + props.apiFetchUrl, {
       params: formParams,
-      headers: {
-        Authorization: "Bearer " + localStorage.getItem("token"),
-      },
-    })
-    .then((response) => {
-      state.isLoading = false;
-      if (props.hasPagination) {
-        state.fetchedData = response.data.data.data;
-        state.totalPage = response.data.data.totalPages;
-      } else state.fetchedData = response.data.data;
-      emits("onListDataChange", response.data.data.data);
-    })
-    .catch((e) => {
-      state.isLoading = false;
-      showErrorNotification(e.response.data.message || e.error);
-      console.log(e);
     });
+    // the API answers HTTP 200 with success=false (and no rows) when it refuses the list, for example for a role without the right
+    const body = response.data;
+    if (body?.success === false && !(props.hasPagination ? body?.data?.data : body?.data)) {
+      state.isLoading = false;
+      showErrorNotification(body.message || "خواندن فهرست انجام نشد.");
+      return false;
+    }
+    state.isLoading = false;
+    if (props.hasPagination) {
+      state.fetchedData = response.data.data.data;
+      state.totalPage = response.data.data.totalPages;
+    } else state.fetchedData = response.data.data;
+    emits("onListDataChange", response.data.data.data);
+    return true;
+  } catch (e) {
+    state.isLoading = false;
+    showErrorNotification(apiErrorText(e));
+    console.log(e);
+    return false;
+  }
 }
 
 function onEntriesQntOptionClick(data: { title: number; val: number }) {
@@ -724,6 +753,7 @@ onMounted(() => {
 
       <div class="d-flex gap-2 mt-3 justify-content-end">
         <KsButton
+          :loading="state.isDeleting"
           color="danger"
           theme="flat"
           title="تایید"

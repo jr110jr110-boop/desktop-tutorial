@@ -13,6 +13,19 @@
       </button>
     </div>
     <div class="d-flex gap-0 gap-md-3 align-items-center">
+      <KsButton
+        color="transparent"
+        tooltip="تغییر رمز عبور"
+        @click="router.push({ name: 'AccountPassword' })">
+        <template #content>
+          <div class="d-flex align-items-center gap-2">
+            <span class="color-primary-light text-small d-none d-md-inline">
+              رمز عبور
+            </span>
+            <LockIcon :fill="Colors.primaryLight" width="16" />
+          </div>
+        </template>
+      </KsButton>
       <KsButton color="transparent" @click="logout">
         <template #content>
           <div class="d-flex align-items-center gap-2">
@@ -54,6 +67,9 @@ import MoonIcon from "@/components/icons/MoonIcon.vue";
 import SunIcon from "@/components/icons/SunIcon.vue";
 import KsButton from "@/components/common/KsButton.vue";
 import UserIcon from "@/components/icons/UserIcon.vue";
+import LockIcon from "@/components/icons/LockIcon.vue";
+import { logoutUser } from "@/api/LoginAPIs";
+import { clearSession } from "@/composables/session";
 
 defineProps({
   screenWidth: Number,
@@ -76,7 +92,12 @@ function toggleTheme() {
 }
 
 function logout() {
-  window.localStorage.removeItem("token");
+  // The whole session goes (not only the access token), and the server forgets the refresh token so a copy of it cannot be used later.
+  // The server call is best effort: the user does not wait for it and the browser session is over in every case.
+  const refresh = window.localStorage.getItem("refreshToken");
+  const access = window.localStorage.getItem("token");
+  clearSession();
+  void logoutUser(refresh, access);
   router.push({ name: "Login" });
 }
 </script>

@@ -1,10 +1,8 @@
 <script lang="ts">
 import { defineComponent } from "vue";
-import { refreshToken } from "@/api/LoginAPIs";
+import { refreshSession, sessionNeedsRefresh } from "@/api/ApiClient";
 import { getCurrentUserData } from "@/api/UserAPIs";
 import { getDocument } from "@/api/DocumentAPIs";
-import useNotification
-  from "@/components/common/KsNotification/useNotification";
 
 export default defineComponent({
   data() {
@@ -36,34 +34,13 @@ export default defineComponent({
         await this.getCurrentUserProfilePhoto(data.data.profilePhotoId);
     },
 
-    async refreshJwtToken() {
-      const [data, error] = await refreshToken();
-      if (!data?.success) {
-        localStorage.clear();
-        await this.$router.push({ name: "Login" });
-        useNotification.addNotification({
-          title: "انقضای مهلت دسترسی",
-          text: "لطفا دوباره به سیستم وارد شوید",
-          color: "primary",
-          duration: 3000
-        });
-        this.onAppReady();
-      } else {
-        localStorage.setItem("token", data.data.accessToken);
-        localStorage.setItem("refreshToken", data.data.refreshToken);
-      }
-    },
-
-    checkLoginValidation() {
-      if (
-        Date.now() >=
-        parseInt(localStorage.getItem("tokenExpireDate")) * 1000
-      ) {
-        this.refreshJwtToken();
-      } else {
-        this.onAppReady();
-        this.fetchCurrentUserData();
-      }
+    // Start-up check: an access token that has ended (or ends within five minutes) is renewed with the refresh token before the pages ask for data.
+    // When the API refuses the refresh token, refreshSession() ends the session (storage cleared, login page, the "انقضای مهلت دسترسی" notice).
+    // The app is shown in every case; while it runs the tokens are renewed silently by the API client (see src/api/ApiClient.ts).
+    async checkLoginValidation() {
+      if (sessionNeedsRefresh()) await refreshSession();
+      this.onAppReady();
+      if (localStorage.getItem("token")) this.fetchCurrentUserData();
     },
 
     onAppReady() {

@@ -48,7 +48,7 @@ const tiles = computed(() => {
 const sorted = computed(() => [...rows.value].sort((a, b) => (a.spi ?? 9) - (b.spi ?? 9)));
 const levelBadge = (l: number) => (l === 0 ? "bad" : l <= 7 ? "bad" : l <= 14 ? "warn" : "info");
 
-function open(contractId: number, name = "PcProject") {
+function open(contractId: number, name = "ProjectControlProject") {
   setPcContract(contractId);
   router.push({ name });
 }

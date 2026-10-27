@@ -2,7 +2,7 @@ import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
-import { AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -117,13 +117,14 @@ const routes: Array<RouteRecordRaw> = [
     },
   },
 
-  // User
+  // User administration: PMO only (the API answers 403 to everybody else, see AccountRoles); the own password page is open to every signed-in user
   {
     path: "/user/list",
     name: "UserList",
     component: () => import("@/views/user/List.vue"),
     meta: {
       access: "user",
+      roles: AccountRoles.admins,
     },
   },
   {
@@ -133,8 +134,10 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import("@/views/user/Update.vue"),
     meta: {
       access: "user",
+      roles: AccountRoles.admins,
     },
   },
+  { path: "/account/password", name: "AccountPassword", component: () => import("@/views/user/Password.vue") },
 
   // Provider
   {
@@ -432,6 +435,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/procurement/orders/:id", name: "ProcurementOrderEdit", component: () => import("@/views/procurement/OrderEdit.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/invoices", name: "ProcurementInvoices", component: () => import("@/views/procurement/Invoices.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/payments", name: "ProcurementPayments", component: () => import("@/views/procurement/Payments.vue"), meta: { roles: ProcurementRoles.readers } },
+  // inbox links of older API versions were /procurement/payments/:id; the page reads ?id=
+  { path: "/procurement/payments/:id(\\d+)", redirect: (to) => ({ name: "ProcurementPayments", query: { ...to.query, id: to.params.id } }) },
   { path: "/procurement/suppliers", name: "ProcurementSuppliers", component: () => import("@/views/procurement/Suppliers.vue"), meta: { roles: ProcurementRoles.readers } },
   // the old CEO dashboard address (links and bookmarks) opens the CEO home page (release D1)
   { path: "/finance/ceo-dashboard", name: "FinanceCeoDashboard", redirect: { name: "CeoHome" } },
@@ -558,6 +563,15 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/claims", name: "ProjectControlClaims", component: () => import("@/views/projectControl/Claims.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/shipments", name: "ProjectControlShipments", component: () => import("@/views/projectControl/Shipments.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/reports", name: "ProjectControlReports", component: () => import("@/views/projectControl/Reports.vue"), meta: { roles: ProjectControlRoles.readers } },
+  // inbox links of older API versions were /project-control/{baselines|changes|transmittals}/:id; the pages read ?id= (guarantees and the others already use it)
+  { path: "/project-control/baselines/:id(\\d+)", redirect: (to) => ({ name: "ProjectControlBaselines", query: { ...to.query, id: to.params.id } }) },
+  { path: "/project-control/changes/:id(\\d+)", redirect: (to) => ({ name: "ProjectControlChanges", query: { ...to.query, id: to.params.id } }) },
+  { path: "/project-control/transmittals/:id(\\d+)", redirect: (to) => ({ name: "ProjectControlTransmittals", query: { ...to.query, id: to.params.id } }) },
+  // inbox links of the quality and payroll modules that the API writes with another path than the page has: the page of the record (payroll: the list of runs)
+  { path: "/quality/capas/:id(\\d+)", redirect: (to) => ({ name: "QualityCapaEdit", params: { id: to.params.id }, query: to.query }) },
+  { path: "/quality/itps/:id(\\d+)", redirect: (to) => ({ name: "QualityItpEdit", params: { id: to.params.id }, query: to.query }) },
+  { path: "/quality/ncrs/:id(\\d+)", redirect: (to) => ({ name: "InventoryNcrEdit", params: { id: to.params.id }, query: to.query }) },
+  { path: "/finance/payroll/runs/:id(\\d+)", redirect: (to) => ({ name: "FnPayrollRuns", query: { ...to.query, id: to.params.id } }) },
   // Office automation (اتوماسیون اداری). Open pages have no meta.roles (every signed-in user); the paths /office/letters/:id, /office/leaves/:id, /office/meetings/:id, /office/requests/:id,
   // /office/delegations and /office/me are the links written into inbox items by the API.
   { path: "/office/inbox", name: "OfInbox", component: () => import("@/views/office/Inbox.vue") },

@@ -84,6 +84,18 @@ export const roleTitles: Record<string, string> = {
 
 const list = (csv: string) => csv.split(",");
 
+/**
+ * User administration (IdentityRules.Pmo in the API): register, update, delete, roles, the full user list, temporary password and the approval of
+ * sensitive roles are for the PMO only; everybody else gets 403, so the menu items and pages are hidden from them.
+ * The slim user list for pickers (Accounts/users/lookup) and the own password change are open to every signed-in user.
+ */
+export const AccountRoles = {
+  admins: ["PMO"],
+};
+
+/** Roles that a second PMO user must approve before they are given (IdentityRules.SensitiveRoles in the API). */
+export const SensitiveRoles: string[] = ["FINANCEMANAGER", "PAYROLL", "CEO", "AUDITOR", "HR", "SECRETARIAT"];
+
 /** Warehouse (InventoryRoles in the API). */
 export const InventoryRoles = {
   masterData: list("PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING"),
@@ -425,7 +437,10 @@ export const ProjectControlRoles = {
   reportGenerate: list("PLANNING,PROJECTMANAGER,PMO,CEO"),
   claims: list("PLANNING,PROJECTMANAGER,PMO,COMMERCIAL"),
   claimSettle: list("COMMERCIAL,PMO,CEO"),
-  claimDesign: list("ENGINEERING,CONSTRUCTION,PMO"),
+  /** the design and manufacturing approval of a claim: the engineering manager or the project manager (approve-design); the PMO deputy approves for the PMO side only */
+  claimDesign: list("ENGINEERING,PROJECTMANAGER"),
+  /** release of a guarantee (guarantees/release): the money side signs it too, so FINANCEMANAGER is on the list */
+  guaranteeRelease: list("COMMERCIAL,FINANCEMANAGER,PMO"),
 };
 
 /**

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
@@ -68,7 +69,14 @@ async function record() {
   show(id);
   load();
 }
-onMounted(load);
+// the link /project-control/transmittals?id=N (an inbox item: the client's answer is due) opens that transmittal, whatever project is chosen
+const route = useRoute();
+function openFromLink() {
+  const id = Number(route.query.id);
+  if (Number.isInteger(id) && id > 0) show(id);
+}
+onMounted(() => { load(); openFromLink(); });
+watch(() => route.query.id, openFromLink);
 watch(pcContractId, load);
 </script>
 

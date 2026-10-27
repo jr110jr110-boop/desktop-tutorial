@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { getBankAccounts } from "@/api/FnAPIs";
@@ -108,10 +108,38 @@ async function confirmDialog() {
   await act(d.action, d.value);
 }
 
+// The link /procurement/payments?id=N (an inbox item: a payment waits for approval) opens that request. The API has no call for a single payment and
+// no id filter, so the list is read newest first (200 at a time) until the request is found; the list is sorted by id, so the search stops at an older id.
+async function findPayment(id: number): Promise<any | null> {
+  const here = rows.value.find((r) => r.id === id);
+  if (here) return here;
+  const size = 200;
+  for (let number = 1; number <= 25; number++) {
+    const [data, error] = await getPaymentRequests({ PageNumber: number, PageSize: size });
+    if (error) {
+      fail(error);
+      return null;
+    }
+    const list: any[] = data?.data || [];
+    const hit = list.find((r) => r.id === id);
+    if (hit) return hit;
+    if (list.length < size || list[list.length - 1].id < id) return null;
+  }
+  return null;
+}
+async function openFromLink() {
+  const id = Number(route.query.id);
+  if (!Number.isInteger(id) || id <= 0) return;
+  const found = await findPayment(id);
+  if (found) detail.value = found;
+  else fail("درخواست پرداخت پیدا نشد؛ ممکن است حذف شده باشد.");
+}
+
 onMounted(async () => {
   await load();
-  if (route.query.id) detail.value = rows.value.find((r) => r.id === Number(route.query.id)) || null;
+  await openFromLink();
 });
+watch(() => route.query.id, openFromLink);
 </script>
 
 <template>

@@ -283,7 +283,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -381,7 +381,9 @@ const links = {
     {
       title: "کاربران",
       routeName: "UserList",
-      disabled: !accessList.includes("Account"),
+      // user administration is for the PMO only (the API answers 403 to everybody else), so the item is not shown to them
+      disabled: !accessList.includes("Account") || !hasRole(AccountRoles.admins),
+      hidden: !hasRole(AccountRoles.admins),
     },
     {
       title: "دستگردان مدارک",

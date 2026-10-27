@@ -118,6 +118,8 @@ export const getGuarantees = (params: any) => call("get", base + "guarantees", u
 export const parseGuarantees = () => call("post", base + "guarantees/parse");
 export const saveGuarantee = (dto: any) => call("post", base + "guarantees", dto);
 export const addGuaranteeEvent = (dto: any) => call("post", base + "guarantees/events", dto);
+/** POST guarantees/release { guaranteeId, releaseDate (not in the future), note (the letter of the client or the bank), documentId? }: COMMERCIAL, FINANCEMANAGER, PMO. */
+export const releaseGuarantee = (dto: any) => call("post", base + "guarantees/release", dto);
 export const getGuaranteeAlerts = (contractId?: number | null) => call("get", base + "guarantees/alerts", undefined, clean({ contractId }));
 export const computePenalties = (contractId: number) => call("post", base + "penalties/compute/" + contractId);
 export const getPenalties = (params: any) => call("get", base + "penalties", undefined, clean({ PageSize: 0, ...params }));

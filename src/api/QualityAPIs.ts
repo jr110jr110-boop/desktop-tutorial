@@ -9,8 +9,9 @@ export const getQualityDashboard = () => call("get", base + "dashboard");
 export const getQualitySettings = () => call("get", base + "settings");
 export const saveQualitySetting = (key: string, value: number) => call("post", base + "settings", { key, value });
 
-// users for the owner / auditor / recipient lists (existing accounts endpoint)
-export const getUsers = (contains?: string) => call("get", "Accounts/get-all-users", undefined, clean({ Contains: contains, PageNumber: 1, PageSize: 200, IsDeleted: false }));
+// users for the owner / auditor / recipient lists: the slim picker list (id, userName, name, lastName) that every signed-in user may read.
+// The full user list (Accounts/get-all-users) is for the PMO only.
+export const getUsers = (contains?: string) => call("get", "Accounts/users/lookup", undefined, clean({ Contains: contains, PageNumber: 1, PageSize: 200 }));
 
 // ITP
 export const getItpTemplates = (params: any) => call("get", base + "itp-templates", undefined, clean(params));

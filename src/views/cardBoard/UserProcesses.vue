@@ -13,7 +13,7 @@ import {
   processMasterApproved,
   processPMOAccept,
 } from "@/api/ProcessAPIs";
-import { getUserList } from "@/api/UserAPIs";
+import { getUserLookup } from "@/api/UserAPIs";
 import { useRouter } from "vue-router";
 import { downloadFile } from "@/composables/downloadFile";
 import { addDocument, getDocument, getDocumentFileInfo } from "@/api/Document";
@@ -591,7 +591,7 @@ async function downloadProcessAttachFile(file, index: number) {
 
 const fetchEngineerList = async () => {
   state.engineerListLoading = true;
-  const [data, error] = await getUserList(null, null, null, "ENGINEER");
+  const [data, error] = await getUserLookup(null, null, null, "ENGINEER");
   if (!data?.success) showErrorNotification(data?.message || error.message);
   else engineerList.value = data.data.data;
   state.engineerListLoading = false;

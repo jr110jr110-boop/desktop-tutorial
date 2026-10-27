@@ -3,7 +3,10 @@ import type TableValue from "@/types/TableValue";
 import { ref } from "vue";
 import { convertToJalaliDate } from "@/composables/ConvertToJalaliDate";
 
+import { roleTitles } from "@/composables/roles";
+
 import KsList from "@/components/common/KsList.vue";
+import RoleGrants from "@/components/account/RoleGrants.vue";
 import KsModal from "@/components/common/KsModal.vue";
 import KsButton from "@/components/common/KsButton.vue";
 import UsersIcon from "@/components/icons/UsersIcon.vue";
@@ -36,6 +39,16 @@ const userDataModal = ref({
   data: null,
 });
 
+// The list is read again after a sensitive role was approved or rejected (the roles of that user changed).
+const listKey = ref(0);
+
+/** The roles of a user with their Persian titles; a user can have no role (for example while a sensitive role waits for approval). */
+const rolesOf = (user: any): { id: number | string; title: string }[] =>
+  (user?.roles || []).map((role: any) => ({
+    id: role.id,
+    title: roleTitles[String(role.name || "").toUpperCase()] || role.description || role.name,
+  }));
+
 const showUserData = (data) => {
   userDataModal.value.data = data;
   userDataModal.value.visible = true;
@@ -49,7 +62,9 @@ const removeUserDataModal = () => {
 
 <template>
   <div>
+    <RoleGrants @changed="listKey++" />
     <KsList
+      :key="listKey"
       :table-heads="tableHeads"
       :table-values="tableValues"
       api-delete-url="api/v1/Accounts/delete-user-collection"
@@ -103,11 +118,18 @@ const removeUserDataModal = () => {
               </div>
               <div class="d-flex gap-2 flex-1 align-items-sm-center">
                 <span class="text-small fw-light row-title"> سمت: </span>
-                <KsButton
-                  :title="userDataModal.data.roles[0].name"
-                  color="primary"
-                  custom-padding="5px 12px"
-                  theme="flat" />
+                <div class="d-flex flex-wrap gap-2">
+                  <KsButton
+                    v-for="role in rolesOf(userDataModal.data)"
+                    :key="role.id"
+                    :title="role.title"
+                    color="primary"
+                    custom-padding="5px 12px"
+                    theme="flat" />
+                  <span v-if="!rolesOf(userDataModal.data).length" class="text-small">
+                    بدون نقش
+                  </span>
+                </div>
               </div>
               <div class="d-flex gap-2 flex-1 align-items-center">
                 <div class="d-flex gap-2 flex-1 align-items-md-center">

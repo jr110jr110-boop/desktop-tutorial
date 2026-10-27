@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { addGuaranteeEvent, getGuarantees, parseGuarantees, saveGuarantee } from "@/api/ProjectControlAPIs";
+import { addGuaranteeEvent, getGuarantees, parseGuarantees, releaseGuarantee, saveGuarantee } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import JDate from "@/components/pc/JDate.vue";
 import { fail, jalali, ok, rial, today } from "@/composables/inventory";
-import { guaranteeEventKinds, guaranteeIssuers, guaranteeReleases, guaranteeSources, guaranteeStatuses, guaranteeTypes } from "@/composables/projectControl";
+import { guaranteeEventKinds, guaranteeEventKindsManual, guaranteeIssuers, guaranteeReleasable, guaranteeReleases, guaranteeSources, guaranteeStatuses, guaranteeStatusesFromActions, guaranteeTypes } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Guarantees of the contract: the legacy free-text amount is read once («parse»); then type, issuer, validity, release condition and events (issue, extension, cancellation) are kept here.
+// «آزاد شد» (released) comes only from the release action (guarantees/release: date not in the future + note) and «منقضی» (expired) is set automatically after the
+// expiry date, so neither can be picked in the form and the event form offers only issue, extension and cancellation (R1a).
 const emit = defineEmits(["print"]);
 const props = defineProps({ contractId: { type: Number, required: true } });
 const route = useRoute();
@@ -17,8 +19,12 @@ const status = ref<number | null>(null);
 const onlyUnparsed = ref(false);
 const form = ref<any>(null);
 const ev = ref<any>(null);
+const rel = ref<any>(null);
 const busy = ref(false);
 const canEdit = hasRole(ProjectControlRoles.commercialFinance);
+const canRelease = hasRole(ProjectControlRoles.guaranteeRelease);
+// the form lists the statuses a person may set; a status the row already has (released, expired) stays visible but is not offered to others
+const statusOptions = computed(() => Object.keys(guaranteeStatuses).map(Number).filter((k) => !guaranteeStatusesFromActions.includes(k) || k === form.value?.status));
 
 async function load() {
   const [d, e] = await getGuarantees({ ContractId: props.contractId, Status: status.value, OnlyUnparsed: onlyUnparsed.value || null });
@@ -42,6 +48,22 @@ async function save() {
   if (e) return fail(e);
   ok("ذخیره شد.");
   form.value = null;
+  load();
+}
+function openRelease(r: any) {
+  rel.value = { guaranteeId: r.id, title: r.title, no: r.no, releaseDate: today(), note: "" };
+}
+async function saveRelease() {
+  const f = rel.value;
+  if (!f.releaseDate) return fail(new Error("تاریخ آزادسازی را وارد کنید."));
+  if (f.releaseDate > today()) return fail(new Error("تاریخ آزادسازی نمی‌تواند در آینده باشد."));
+  if (!String(f.note || "").trim()) return fail(new Error("برای آزادسازی ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه کارفرما یا بانک) را بنویسید."));
+  busy.value = true;
+  const [, e] = await releaseGuarantee({ guaranteeId: f.guaranteeId, releaseDate: f.releaseDate, note: String(f.note).trim() });
+  busy.value = false;
+  if (e) return fail(e);
+  ok("ضمانت‌نامه آزاد شد.");
+  rel.value = null;
   load();
 }
 async function saveEvent() {
@@ -81,9 +103,10 @@ watch(() => props.contractId, load);
             <td>{{ jalali(r.expiryDate) }} <span v-if="r.daysToExpiry != null" :class="level(r.daysToExpiry)" class="inv-badge">{{ r.daysToExpiry < 0 ? "منقضی" : r.daysToExpiry + " روز" }}</span></td>
             <td>{{ guaranteeReleases[r.releaseTrigger] }}</td>
             <td>{{ guaranteeStatuses[r.status] }}</td>
-            <td class="d-print-none text-nowrap" v-if="canEdit">
-              <button class="btn btn-sm btn-outline-secondary me-1" @click="form = { ...r }">ویرایش</button>
-              <button class="btn btn-sm btn-outline-primary" @click="ev = { guaranteeId: r.id, kind: 2, eventDate: today(), newExpiryDate: null, fee: null, note: '' }">رویداد</button>
+            <td class="d-print-none text-nowrap" v-if="canEdit || canRelease">
+              <button v-if="canEdit" class="btn btn-sm btn-outline-secondary me-1" @click="form = { ...r }">ویرایش</button>
+              <button v-if="canEdit && r.status !== 6 && r.status !== 7" class="btn btn-sm btn-outline-primary me-1" @click="ev = { guaranteeId: r.id, kind: 2, eventDate: today(), newExpiryDate: null, fee: null, note: '' }">رویداد</button>
+              <button v-if="canRelease && guaranteeReleasable.includes(r.status)" class="btn btn-sm btn-outline-success" @click="openRelease(r)">آزادسازی</button>
             </td>
           </tr>
           <tr v-if="r.events?.length"><td colspan="8" class="small inv-muted py-0">رویدادها: <span v-for="x in r.events" :key="x.id" class="me-3">{{ guaranteeEventKinds[x.kind] }} {{ jalali(x.eventDate) }}<span v-if="x.newExpiryDate"> (تا {{ jalali(x.newExpiryDate) }})</span><span v-if="x.fee"> کارمزد {{ rial(x.fee) }}</span></span></td></tr>
@@ -98,7 +121,8 @@ watch(() => props.contractId, load);
           <div class="col-6"><label class="form-label small mb-0">نوع</label><select v-model.number="form.guaranteeType" class="form-select form-select-sm"><option v-for="(n, k) in guaranteeTypes" :key="k" :value="Number(k)">{{ n }}</option></select></div>
           <div class="col-6"><label class="form-label small mb-0">صادرکننده</label><select v-model.number="form.issuerKind" class="form-select form-select-sm"><option v-for="(n, k) in guaranteeIssuers" :key="k" :value="Number(k)">{{ n }}</option></select></div>
           <div class="col-6"><label class="form-label small mb-0">مبلغ (ریال)</label><input v-model.number="form.amountDecimal" class="form-control form-control-sm" type="number" min="0" /></div>
-          <div class="col-6"><label class="form-label small mb-0">وضعیت</label><select v-model.number="form.status" class="form-select form-select-sm"><option v-for="(n, k) in guaranteeStatuses" :key="k" :value="Number(k)">{{ n }}</option></select></div>
+          <div class="col-6"><label class="form-label small mb-0">وضعیت</label><select v-model.number="form.status" :disabled="form.status === 6" class="form-select form-select-sm"><option v-for="k in statusOptions" :key="k" :value="k">{{ guaranteeStatuses[k] }}</option></select>
+            <div class="inv-muted small">{{ form.status === 6 ? "ضمانت‌نامه آزادشده دوباره باز نمی‌شود." : "«آزاد شد» با دکمه «آزادسازی» ثبت می‌شود و «منقضی» پس از گذشتن تاریخ انقضا خودکار می‌شود." }}</div></div>
           <div class="col-6"><label class="form-label small mb-0">شروع اعتبار</label><JDate v-model="form.validFrom" /></div>
           <div class="col-6"><label class="form-label small mb-0">پایان اعتبار</label><JDate v-model="form.expiryDate" /></div>
           <div class="col-12"><label class="form-label small mb-0">شرط آزادسازی</label><select v-model.number="form.releaseTrigger" class="form-select form-select-sm"><option v-for="(n, k) in guaranteeReleases" :key="k" :value="Number(k)">{{ n }}</option></select></div>
@@ -110,13 +134,24 @@ watch(() => props.contractId, load);
       <div class="inv-modal">
         <h3 class="h6">رویداد ضمانت‌نامه</h3>
         <div class="row g-2">
-          <div class="col-6"><label class="form-label small mb-0">نوع</label><select v-model.number="ev.kind" class="form-select form-select-sm"><option v-for="(n, k) in guaranteeEventKinds" :key="k" :value="Number(k)">{{ n }}</option></select></div>
+          <div class="col-6"><label class="form-label small mb-0">نوع</label><select v-model.number="ev.kind" class="form-select form-select-sm"><option v-for="(n, k) in guaranteeEventKindsManual" :key="k" :value="Number(k)">{{ n }}</option></select></div>
           <div class="col-6"><label class="form-label small mb-0">تاریخ</label><JDate v-model="ev.eventDate" /></div>
           <div v-if="ev.kind === 2" class="col-6"><label class="form-label small mb-0">تاریخ جدید انقضا</label><JDate v-model="ev.newExpiryDate" /></div>
           <div class="col-6"><label class="form-label small mb-0">کارمزد (ریال)</label><input v-model.number="ev.fee" class="form-control form-control-sm" type="number" min="0" /></div>
           <div class="col-12"><label class="form-label small mb-0">توضیح</label><input v-model="ev.note" class="form-control form-control-sm" /></div>
         </div>
         <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-secondary" @click="ev = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="saveEvent">ثبت</button></div>
+      </div>
+    </div>
+    <div v-if="rel" class="inv-modal-backdrop" @click.self="rel = null">
+      <div class="inv-modal">
+        <h3 class="h6">آزادسازی ضمانت‌نامه — {{ rel.title }} <span class="inv-ltr">{{ rel.no }}</span></h3>
+        <p class="inv-muted">آزادسازی پس از ثبت برگشت‌پذیر نیست. تاریخ نمی‌تواند در آینده باشد و توضیح (شماره و تاریخ نامه کارفرما یا بانک) الزامی است.</p>
+        <div class="row g-2">
+          <div class="col-6"><label class="form-label small mb-0">تاریخ آزادسازی</label><JDate v-model="rel.releaseDate" :max="today()" /></div>
+          <div class="col-12"><label class="form-label small mb-0">توضیح (نامه کارفرما یا بانک)</label><textarea v-model="rel.note" class="form-control form-control-sm" rows="2"></textarea></div>
+        </div>
+        <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-secondary" @click="rel = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-success" @click="saveRelease">آزادسازی</button></div>
       </div>
     </div>
   </div>

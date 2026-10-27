@@ -1,5 +1,6 @@
 import type { AxiosError, AxiosRequestConfig } from "axios";
 import axios from "axios";
+import { installAuth } from "@/api/ApiClient";
 import type Equipment from "@/types/Equipment";
 import type EquipmentAssembly from "@/types/EquipmentAssembly";
 import type EquipmentBom from "@/types/EquipmentBom";
@@ -11,6 +12,8 @@ const authToken = "Bearer " + window.localStorage.getItem("token");
 const axiosInstance = axios.create({
   baseURL: apiUrl + "api/v1/",
 });
+// the bearer token is set on every request and the session is renewed silently (see ApiClient.ts); a token frozen in this file is replaced
+installAuth(axiosInstance);
 
 export async function getEquipmentList(
   pageSize = -1

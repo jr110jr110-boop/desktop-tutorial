@@ -1,4 +1,5 @@
 import axios from "axios";
+import { installAuth } from "@/api/ApiClient";
 
 // @ts-ignore
 const apiUrl = import.meta.env.VITE_API_URL;
@@ -6,6 +7,8 @@ const apiUrl = import.meta.env.VITE_API_URL;
 const axiosInstance = axios.create({
   baseURL: apiUrl + "api/v1/",
 });
+// the bearer token is set on every request and the session is renewed silently (see ApiClient.ts); a token frozen in this file is replaced
+installAuth(axiosInstance);
 
 const token = localStorage.getItem("token");
 

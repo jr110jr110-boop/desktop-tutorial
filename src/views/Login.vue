@@ -2,7 +2,14 @@
 import type Login from "@/types/Login";
 import type { Ref } from "vue";
 import { ref } from "vue";
-import { loginUser } from "@/api/LoginAPIs";
+import { changeTemporaryPassword, loginUser } from "@/api/LoginAPIs";
+import {
+  MUST_CHANGE_PASSWORD,
+  passwordProblem,
+  passwordRulesText,
+  storeSession,
+} from "@/composables/session";
+import { failureText } from "@/composables/apiMessage";
 import showErrorNotification from "@/composables/showErrorNotification";
 import showSuccessNotification from "@/composables/showSuccessNotification";
 import showWarnNotification from "@/composables/showWarnNotification";
@@ -17,57 +24,51 @@ const loginInfo: Ref<Login> = ref({
   rememberMe: true,
 });
 
+// "login": user name + password. "mustChange": the password is a temporary one set by an administrator, so the user chooses a new one first.
+const mode: Ref<"login" | "mustChange"> = ref("login");
+
+const newPasswordInfo = ref({
+  temporaryPassword: "",
+  newPassword: "",
+  repeatPassword: "",
+});
+
 const submitButtonLoading: Ref<boolean> = ref(false);
 
-const parseJwtToken = (token) => {
-  const base64Url = token.split(".")[1];
-  const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-  const jsonPayload = decodeURIComponent(
-    atob(base64)
-      .split("")
-      .map((c) => {
-        return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
-      })
-      .join("")
-  );
+/** The sign-in answer for a temporary password: success=false, no tokens, data.code = MUST_CHANGE_PASSWORD (HTTP 200; a real 428 is read the same way). */
+const needsNewPassword = (body: any): boolean =>
+  body?.data?.code === MUST_CHANGE_PASSWORD || body?.data?.mustChangePassword === true;
 
-  const finalPayload = JSON.parse(jsonPayload);
-
-  return {
-    tokenExpireDate: finalPayload["exp"],
-    userRole:
-      finalPayload[
-        "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
-      ],
-  };
-};
-
-const onLoginSuccess = (data) => {
-  const parsedJwtToken: { tokenExpireDate: string; userRole: string } =
-    parseJwtToken(data.accessToken);
-  window.localStorage.setItem("token", data.accessToken);
-  window.localStorage.setItem("refreshToken", data.refreshToken);
-  window.localStorage.setItem(
-    "tokenExpireDate",
-    parsedJwtToken.tokenExpireDate
-  );
-  window.localStorage.setItem("userRole", parsedJwtToken.userRole);
-  window.localStorage.setItem("accessList", data.accessList);
+/** Keeps the tokens of a sign-in (normal, or after the new password) and opens the application. */
+const finishSignIn = (tokens: any) => {
+  storeSession({
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    accessList: tokens.accessList,
+  });
+  showSuccessNotification("شما با موفقیت وارد حساب کاربری خود شدید!");
+  window.history.go(0);
 };
 
 async function sendLoginRequest() {
+  if (submitButtonLoading.value) return;
   if (!validateForm()) return;
   submitButtonLoading.value = true;
-  const [data, error] = await loginUser(loginInfo.value);
-  const isSuccess = !error && data?.success;
-  if (!isSuccess)
-    showErrorNotification((data && data.message) || error.message);
-  else if (data.data.accessToken) {
-    await onLoginSuccess(data.data);
-    showSuccessNotification("شما با موفقیت وارد حساب کاربری خود شدید!");
-    await window.history.go(0);
+  try {
+    const [data, error] = await loginUser(loginInfo.value);
+    if (needsNewPassword(data ?? error?.response?.data)) {
+      startPasswordChange();
+      return;
+    }
+    if (error || !data?.success) {
+      showErrorNotification(failureText(data, error, "ورود انجام نشد."));
+      return;
+    }
+    if (data.data?.accessToken) finishSignIn(data.data);
+    else showErrorNotification("ورود انجام نشد؛ پاسخ سرور کامل نبود.");
+  } finally {
+    submitButtonLoading.value = false;
   }
-  submitButtonLoading.value = false;
 }
 
 const validateForm = () => {
@@ -77,13 +78,71 @@ const validateForm = () => {
     return false;
   }
 };
+
+// ---------------------------------------------------------------- temporary password: choose a new one
+
+/** The password just typed is the temporary one; it is offered again in the form (and can be corrected) next to the new password. */
+function startPasswordChange() {
+  newPasswordInfo.value = {
+    temporaryPassword: loginInfo.value.password,
+    newPassword: "",
+    repeatPassword: "",
+  };
+  mode.value = "mustChange";
+}
+
+function backToLogin() {
+  newPasswordInfo.value = { temporaryPassword: "", newPassword: "", repeatPassword: "" };
+  loginInfo.value.password = "";
+  mode.value = "login";
+}
+
+/** Persian text of the first problem of the form, or null when it can be sent (the API checks the same rules again). */
+function newPasswordProblem(): string | null {
+  const form = newPasswordInfo.value;
+  if (!form.temporaryPassword) return "رمز موقت را وارد کنید.";
+  const rule = passwordProblem(form.newPassword);
+  if (rule) return rule;
+  if (form.newPassword !== form.repeatPassword) return "رمز جدید و تکرار آن یکسان نیستند.";
+  if (form.newPassword === form.temporaryPassword) return "رمز جدید نباید با رمز موقت یکی باشد.";
+  return null;
+}
+
+async function sendNewPassword() {
+  if (submitButtonLoading.value) return;
+  const problem = newPasswordProblem();
+  if (problem) {
+    showWarnNotification(problem);
+    return;
+  }
+  submitButtonLoading.value = true;
+  try {
+    const [data, error] = await changeTemporaryPassword({
+      userName: loginInfo.value.username,
+      temporaryPassword: newPasswordInfo.value.temporaryPassword,
+      newPassword: newPasswordInfo.value.newPassword,
+    });
+    if (error || !data?.success) {
+      showErrorNotification(failureText(data, error, "تغییر رمز انجام نشد."));
+      return;
+    }
+    // the answer is a sign-in: the user is inside with the new password
+    if (data.data?.accessToken) finishSignIn(data.data);
+    else showErrorNotification("رمز تغییر کرد، اما ورود انجام نشد؛ دوباره وارد شوید.");
+  } finally {
+    submitButtonLoading.value = false;
+  }
+}
+
+const onEnter = () => (mode.value === "login" ? sendLoginRequest() : sendNewPassword());
 </script>
 
 <template>
   <div
     class="vh-100 vw-100 login-wrapper bg-dark d-flex align-items-center justify-content-center"
-    @keyup.enter="sendLoginRequest">
+    @keyup.enter="onEnter">
     <div
+      v-if="mode === 'login'"
       class="login-box background-color d-flex flex-column gap-3 p-4 shadow-lg">
       <KsInput
         v-model="loginInfo.username"
@@ -105,6 +164,43 @@ const validateForm = () => {
         title="ورود"
         @click="sendLoginRequest" />
     </div>
+
+    <div
+      v-else
+      class="login-box change-box background-color d-flex flex-column gap-3 p-4 shadow-lg">
+      <div class="fw-bold fs-6 text-center">تعیین رمز عبور جدید</div>
+      <p class="mb-0 small">
+        رمز عبور حساب «{{ loginInfo.username }}» را مدیر سامانه به‌صورت موقت تعیین کرده است.
+        برای ادامه، یک رمز عبور جدید برای خودتان انتخاب کنید.
+      </p>
+      <KsInput
+        v-model="newPasswordInfo.temporaryPassword"
+        input-type="password"
+        placeholder="رمز موقت"
+        simple-placeholder />
+      <KsInput
+        v-model="newPasswordInfo.newPassword"
+        input-type="password"
+        placeholder="رمز عبور جدید"
+        simple-placeholder />
+      <KsInput
+        v-model="newPasswordInfo.repeatPassword"
+        input-type="password"
+        placeholder="تکرار رمز عبور جدید"
+        simple-placeholder />
+      <p class="mb-0 small rules">{{ passwordRulesText }}</p>
+      <KsButton
+        :loading="submitButtonLoading"
+        color="primary"
+        title="ذخیره و ورود"
+        @click="sendNewPassword" />
+      <KsButton
+        :disabled="submitButtonLoading"
+        color="secondary"
+        theme="flat"
+        title="بازگشت"
+        @click="backToLogin" />
+    </div>
   </div>
 </template>
 
@@ -116,6 +212,14 @@ const validateForm = () => {
   .login-box {
     border-radius: 12px;
     min-width: 320px;
+  }
+
+  .change-box {
+    max-width: 380px;
+  }
+
+  .rules {
+    opacity: 0.8;
   }
 }
 </style>

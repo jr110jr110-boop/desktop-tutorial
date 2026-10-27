@@ -27,7 +27,14 @@ export const guaranteeTypes: Record<number, string> = { 1: "شرکت در منا
 export const guaranteeStatuses: Record<number, string> = { 1: "درخواست شد", 2: "صادر شد", 3: "فعال", 4: "در انتظار تمدید", 5: "منقضی", 6: "آزاد شد", 7: "ابطال" };
 export const guaranteeReleases: Record<number, string> = { 1: "تحویل نهایی", 2: "پایان دوره تضمین", 3: "نامه کارفرما" };
 export const guaranteeIssuers: Record<number, string> = { 1: "بانک", 2: "صندوق" };
-export const guaranteeEventKinds: Record<number, string> = { 1: "صدور", 2: "تمدید", 3: "ابطال" };
+/** All event kinds of a guarantee (the list under a row): release and expiry rows are written by the release action and by the daily job. */
+export const guaranteeEventKinds: Record<number, string> = { 1: "صدور", 2: "تمدید", 3: "ابطال", 4: "آزادسازی", 5: "انقضای خودکار" };
+/** The kinds a person adds by hand (guarantees/events refuses release and expiry): the release has its own action. */
+export const guaranteeEventKindsManual: Record<number, string> = { 1: "صدور", 2: "تمدید", 3: "ابطال" };
+/** Statuses that cannot be chosen in the guarantee form: «آزاد شد» comes only from the release action and «منقضی» is set after the expiry date passes. */
+export const guaranteeStatusesFromActions = [5, 6];
+/** Statuses from which a guarantee can be released: issued, active, extension pending, expired (not requested, released or cancelled). */
+export const guaranteeReleasable = [2, 3, 4, 5];
 export const guaranteeSources: Record<number, string> = { 1: "ضمانت‌نامه قرارداد", 2: "ضمانت‌نامه مناقصه" };
 export const penaltyStatuses: Record<number, string> = { 0: "محاسبه‌شده", 1: "بخشوده", 2: "مصالحه‌شده" };
 export const variationStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "ارسال‌شده", 2: "تایید کارفرما", 3: "ردشده" };

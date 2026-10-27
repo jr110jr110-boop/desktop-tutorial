@@ -1,4 +1,5 @@
 import axios, { type AxiosError, type AxiosRequestConfig } from "axios";
+import { installAuth } from "@/api/ApiClient";
 import type BuyOrder from "@/types/BuyOrder";
 import type Assembler from "@/types/Assembler";
 import type Constructor from "@/types/Constructor";
@@ -11,6 +12,8 @@ const authToken = "Bearer " + window.localStorage.getItem("token");
 const axiosInstance = axios.create({
   baseURL: apiUrl + "api/v1/",
 });
+// the bearer token is set on every request and the session is renewed silently (see ApiClient.ts); a token frozen in this file is replaced
+installAuth(axiosInstance);
 
 export async function getBuyOrderList(
   WorkOrderId: number | string

@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
-import { baselineAction, createBaseline, deleteCostLine, getActivities, getBaselines, getCostLines, getTerms, getWbs, saveCostLine } from "@/api/ProjectControlAPIs";
+import { baselineAction, createBaseline, deleteCostLine, getActivities, getBaseline, getBaselines, getCostLines, getTerms, getWbs, saveCostLine } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import BaselinePrint from "@/components/pc/print/BaselinePrint.vue";
 import { fail, jalali, ok, printPage, rial } from "@/composables/inventory";
-import { baselineKinds, baselineStatuses, costClasses, pcContractId, resourceClasses, sumOf, unitTitle, usePcPrint } from "@/composables/projectControl";
+import { baselineKinds, baselineStatuses, costClasses, pcContractId, resourceClasses, setPcContract, sumOf, unitTitle, usePcPrint } from "@/composables/projectControl";
 import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Baselines (WI-PL-009 17): created from the calculated plan by planning, signed by the manager of every unit that owns activities,
@@ -95,7 +96,26 @@ async function removeLine(l: any) {
 const nodeText = (id: number | null) => nodes.value.find((n) => n.id === id)?.code || "";
 const actText = (id: number | null) => acts.value.find((n) => n.id === id)?.code || "";
 
-onMounted(() => { load(); loadCost(); });
+// the link /project-control/baselines?id=N (an inbox item) opens that baseline; when another project is chosen, the project of the baseline becomes the chosen one
+const route = useRoute();
+async function openFromLink() {
+  const id = Number(route.query.id);
+  if (!Number.isInteger(id) || id <= 0) return;
+  const [b, e] = await getBaseline(id);
+  if (e) return fail(e);
+  tab.value = "baselines";
+  if (b.contractId && b.contractId !== pcContractId.value) {
+    setPcContract(b.contractId);
+    await nextTick(); // the watcher below clears the selection when the project changes
+  }
+  sel.value = b;
+}
+onMounted(async () => {
+  await openFromLink();
+  load();
+  loadCost();
+});
+watch(() => route.query.id, openFromLink);
 watch(pcContractId, () => { sel.value = null; load(); loadCost(); });
 </script>
 

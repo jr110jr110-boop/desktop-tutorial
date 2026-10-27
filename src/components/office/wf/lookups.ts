@@ -1,16 +1,18 @@
 import { getEmployeeDirectory } from "@/api/FnAPIs";
 import { getPositions, getUnits } from "@/api/OfficeAPIs";
-import { getUserList } from "@/api/UserAPIs";
+import { getUserLookup } from "@/api/UserAPIs";
 import { camelize } from "@/composables/fn";
 
 // Local pickers' data for the workflow pages (inbox, org, meetings, decisions, requests). Nothing here is shared with the other office pages.
 export const rowsOf = (d: any): any[] => (Array.isArray(d) ? d : d?.data || []);
 
-/** Users (Accounts/get-all-users, the existing user list API); the label is the full name. */
+/** Users (Accounts/users/lookup: id, userName, name, lastName, open to every signed-in user); the label is the full name. */
 export async function searchUsers(text: string): Promise<any[]> {
-  const result = await getUserList((text || null) as any, 1 as any, 15 as any, null);
+  const result = await getUserLookup(text || null, 1, 15, null);
   if (!result || result[1]) return [];
-  return rowsOf(camelize(result[0]));
+  // the API answers { success, data: { data: [...], totalItems, ... } }
+  const answer = camelize(result[0]);
+  return rowsOf(answer?.data ?? answer);
 }
 export const userLabel = (u: any) => `${u?.name || ""} ${u?.lastName || ""}`.trim() || u?.userName || "";
 

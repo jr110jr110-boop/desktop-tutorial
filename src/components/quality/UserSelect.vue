@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Picks a user of the system by name. When the account list cannot be read (no permission), the user id can be typed.
+// Picks a user of the system by name (Accounts/users/lookup, open to every signed-in user). When the list cannot be read, the user id can be typed.
 import { onMounted, ref } from "vue";
 import { getUsers } from "@/api/QualityAPIs";
 import { rowsOf } from "@/api/ApiClient";

@@ -1,5 +1,6 @@
 import type { AxiosError, AxiosRequestConfig } from "axios";
 import axios from "axios";
+import { installAuth } from "@/api/ApiClient";
 import type Contract from "@/types/Contract";
 import type ContractEquipment from "@/types/ContractEquipment";
 import type ContractProvisionalStatement from "@/types/ContractProvisionalStatement";
@@ -11,6 +12,8 @@ const authToken = "Bearer " + window.localStorage.getItem("token");
 const axiosInstance = axios.create({
   baseURL: apiUrl + "api/v1/",
 });
+// the bearer token is set on every request and the session is renewed silently (see ApiClient.ts); a token frozen in this file is replaced
+installAuth(axiosInstance);
 
 export async function getContractList(
   pageSize = -1
