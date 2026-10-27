@@ -164,6 +164,16 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ReleaseDocumentNumber { get; set; }
         public int? NcrId { get; set; }
         public string NcrNumber { get; set; }
+
+        /// <summary>Instruments used for the measurements (calibration checked on the day of the inspection).</summary>
+        public List<int> EquipmentIds { get; set; } = new List<int>();
+
+        /// <summary>The measured values recorded with the result (empty for a visual or document check).</summary>
+        public List<InspectionMeasurementDto> Measurements { get; set; } = new List<InspectionMeasurementDto>();
+
+        /// <summary>The inspection of goods that came back from a rework decision of this NCR (the NCR closes only after this inspection accepts them).</summary>
+        public int? ReinspectionOfNcrId { get; set; }
+        public string ReinspectionOfNcrNumber { get; set; }
     }
 
     public class RecordInspectionDto
@@ -183,6 +193,34 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>Description of the non-conformity, copied to the NCR of the rejected quantity.</summary>
         public string RejectReason { get; set; }
+
+        /// <summary>Ignored since review M12: whether the inspection is "measured" follows from <see cref="Measurements"/>, never from a flag the client sets.</summary>
+        public bool Measured { get; set; }
+
+        /// <summary>Instruments used (calibration checked on the day). Every measurement names its own instrument as well.</summary>
+        public List<int> EquipmentIds { get; set; } = new List<int>();
+
+        /// <summary>The measured values (dimensions, thickness, hardness...). Any value makes the inspection a measured one: each needs its instrument, and a value out of tolerance needs a rejected quantity.</summary>
+        public List<InspectionMeasurementDto> Measurements { get; set; } = new List<InspectionMeasurementDto>();
+    }
+
+    public class InspectionMeasurementDto
+    {
+        public string Characteristic { get; set; }
+        public decimal Nominal { get; set; }
+
+        /// <summary>Upper deviation allowed (positive number).</summary>
+        public decimal TolPlus { get; set; }
+
+        /// <summary>Lower deviation allowed (positive number).</summary>
+        public decimal TolMinus { get; set; }
+
+        public decimal Measured { get; set; }
+        public string Unit { get; set; }
+        public int? EquipmentId { get; set; }
+
+        /// <summary>Computed by the server.</summary>
+        public bool Pass { get; set; }
     }
 
     public class NcrQuery : PaginationParams
@@ -248,6 +286,25 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public DateTime? DocumentDate { get; set; }
         public int? TargetWarehouseId { get; set; }
         public int? TargetLocationId { get; set; }
+
+        // evidence for a product that is not held in a warehouse (found in the workshop); R1q D5
+
+        /// <summary>Rework or repair: the finished rework operation of the production order (it is also found by itself when the production module linked it to the NCR).</summary>
+        public int? ReworkOperationId { get; set; }
+
+        /// <summary>Rework or repair done outside a production order: QcRecord or TestReport, and the accepted re-inspection record.</summary>
+        public string ReinspectionKind { get; set; }
+
+        public int? ReinspectionRecordId { get; set; }
+
+        /// <summary>Scrap: the confirmed scrap receipt document of the product.</summary>
+        public int? ScrapDocumentId { get; set; }
+
+        /// <summary>Scrap of a serial item: the serial unit whose status is now Scrapped.</summary>
+        public int? ScrappedSerialUnitId { get; set; }
+
+        /// <summary>Return to the supplier of a product that is not in a warehouse: the confirmed supplier-return document.</summary>
+        public int? ReturnDocumentId { get; set; }
     }
 
     public class CloseNcrDto
@@ -256,6 +313,11 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string EffectivenessCheck { get; set; }
         public bool Cancel { get; set; }
         public string Reason { get; set; }
+
+        /// <summary>Rework and repair close only with an accepted re-inspection; when it is not linked yet: QcInspection, QcRecord or TestReport and its id.</summary>
+        public string ReinspectionKind { get; set; }
+
+        public int? ReinspectionRecordId { get; set; }
     }
 
     public class NcrListItemDto
@@ -333,6 +395,19 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string CustomerReturnRef { get; set; }
         public int? AffectedEquipmentId { get; set; }
         public string SourceRecordNumber { get; set; }
+
+        // R1q D4, D5, D3
+        public string ReinspectionKind { get; set; }
+        public int? ReinspectionRecordId { get; set; }
+        public int? ScrapDocumentId { get; set; }
+        public int? ScrappedSerialUnitId { get; set; }
+
+        /// <summary>The finished rework operation of the production order; filled when the NCR is executed.</summary>
+        public int? ReworkOperationId { get; set; }
+
+        public string CancelReason { get; set; }
+        public DateTimeOffset? CancelledAt { get; set; }
+        public string CancelledByName { get; set; }
     }
 
     /// <summary>Everything the commercial unit needs to follow a return to the supplier.</summary>
@@ -488,7 +563,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
     {
         public int Id { get; set; }
 
-        /// <summary>submit, approve-warehouse, approve-planning, post, cancel</summary>
+        /// <summary>
+        /// submit, approve-warehouse, approve-planning, approve-quality (QC or QA; only for a count in a quarantine, scrap or contractor warehouse, review M10), post, cancel.
+        /// </summary>
         public string Action { get; set; }
     }
 
@@ -516,6 +593,11 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string WarehouseApprovedByName { get; set; }
         public DateTimeOffset? PlanningApprovedAt { get; set; }
         public string PlanningApprovedByName { get; set; }
+
+        /// <summary>A count in a quarantine, scrap or contractor warehouse also needs the approval of quality control (QC or QA, review M10).</summary>
+        public bool QualityApprovalRequired { get; set; }
+        public DateTimeOffset? QualityApprovedAt { get; set; }
+        public string QualityApprovedByName { get; set; }
         public DateTimeOffset? PostedAt { get; set; }
         public int? IncreaseDocumentId { get; set; }
         public string IncreaseDocumentNumber { get; set; }
@@ -560,6 +642,12 @@ namespace ViewModels.NasbNiro.InventoryDtos
         /// <summary>When some rows have errors: still bring in the rows without errors.</summary>
         public bool ImportValidRows { get; set; }
 
+        /// <summary>
+        /// R1q D35: rows without a unit price are refused (stock without a price is valued at zero). The finance manager can allow them knowingly; the import is then audited
+        /// and the result lists the zero-priced lines.
+        /// </summary>
+        public bool AllowZeroPrice { get; set; }
+
         public List<OpeningImportRowDto> Rows { get; set; } = new List<OpeningImportRowDto>();
     }
 
@@ -588,5 +676,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int LocationsCreated { get; set; }
         public int Skipped { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
+
+        /// <summary>Lines that came in without a price (value zero); only filled when the finance manager allowed it.</summary>
+        public List<string> ZeroPricedLines { get; set; } = new List<string>();
     }
 }

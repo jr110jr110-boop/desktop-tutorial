@@ -51,6 +51,30 @@ namespace Entities.Model.NasbNiro.Quality
         public string CloseNote { get; set; }
         public bool AutoDrafted { get; set; }
 
+        // ----- R1q
+        /// <summary>1 for the first round of actions; a failed effectiveness check re-opens the CAPA with the next number (R1q D20).</summary>
+        public int Iteration { get; set; } = 1;
+
+        /// <summary>0 = none, 1 = QA told it is late, 2 = the CEO told (the nightly job of R1q D13).</summary>
+        public int EscalationLevel { get; set; }
+
+        public DateTimeOffset? EscalatedAt { get; set; }
+
+        /// <summary>
+        /// Required by a rule when it was created (drafted by the system, from a non-conformance or from an audit finding): fixed at creation, so editing the source cannot
+        /// turn it into an optional CAPA; only the QA manager cancels it (R1q D21, review M11).
+        /// </summary>
+        public bool Mandatory { get; set; }
+
+        /// <summary>Everybody who edited the CAPA or finished an action for another person, ids between commas: none of them judges the effectiveness, closes or cancels it (review M11).</summary>
+        public string EditorUserIds { get; set; }
+
+        /// <summary>The reason a CAPA was cancelled (R1q D21).</summary>
+        public string CancelReason { get; set; }
+
+        public DateTimeOffset? CancelledAt { get; set; }
+        public int? CancelledByUserId { get; set; }
+
         public ICollection<CapaAction> Actions { get; set; }
 
         [Timestamp]
@@ -70,6 +94,9 @@ namespace Entities.Model.NasbNiro.Quality
         public DateTime? DoneAt { get; set; }
         public Guid? EvidenceDocumentId { get; set; }
         public string EvidenceNote { get; set; }
+
+        /// <summary>The round of the CAPA this action belongs to (<see cref="Capa.Iteration"/>).</summary>
+        public int Iteration { get; set; } = 1;
     }
 
     public class CustomerComplaint : BaseEntity
@@ -126,8 +153,33 @@ namespace Entities.Model.NasbNiro.Quality
         public string CancelReason { get; set; }
         public string Note { get; set; }
 
+        /// <summary>Everybody who saved the note, ids between commas: none of them may release it (R1q D22).</summary>
+        public string EditorUserIds { get; set; }
+
+        /// <summary>The products and serial numbers released: a customer delivery of the work order may only carry these (R1q D10).</summary>
+        public ICollection<ReleaseNoteLine> Lines { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>One released product of a release note: the item with its quantity and, for a serial item, the serial numbers.</summary>
+    public class ReleaseNoteLine
+    {
+        public int Id { get; set; }
+
+        public int ReleaseNoteId { get; set; }
+        public ReleaseNote ReleaseNote { get; set; }
+
+        public int RowNumber { get; set; }
+
+        public int ItemId { get; set; }
+        public InventoryItem Item { get; set; }
+
+        public decimal Quantity { get; set; }
+
+        /// <summary>Serial numbers, one per line of text (serial items only).</summary>
+        public string SerialNumbers { get; set; }
     }
 
     public class ControlledDocument : BaseEntity
@@ -288,6 +340,19 @@ namespace Entities.Model.NasbNiro.Quality
 
         public int? CapaId { get; set; }
         public Capa Capa { get; set; }
+
+        // ----- R1q D23: a decision is followed up until it is done
+        public ReviewDecisionStatus Status { get; set; }
+        public DateTimeOffset? DoneAt { get; set; }
+        public int? DoneByUserId { get; set; }
+        public string DoneNote { get; set; }
+
+        // ----- review M17: the responsible person reports the work done; QA or PMO (not he himself) confirms it
+        /// <summary>The responsible person reported the decision done (the status stays Open until a reviewer confirms).</summary>
+        public DateTimeOffset? DoneRequestedAt { get; set; }
+
+        public int? DoneRequestedByUserId { get; set; }
+        public string DoneRequestNote { get; set; }
     }
 
     /// <summary>Numbers the company can change (days, months): see <c>QualitySettingKeys</c>.</summary>

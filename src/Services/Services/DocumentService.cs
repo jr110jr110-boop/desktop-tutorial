@@ -3,10 +3,12 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Common.GuardToolkit;
+using Common.IdentityToolkit;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model;
 using Entities.Model.NasbNiro.Office;
+using Entities.Model.NasbNiro.Quality;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -25,11 +27,14 @@ namespace Services.Services
         private readonly IUnitOfWork _uow;
         private readonly ILogger<DocumentService> _logger;
         readonly DbSet<Document> _documents;
+        private readonly IHttpContextAccessor _httpContextAccessor;
         public DocumentService(
             IUnitOfWork uow,
             IWebHostEnvironment hostingEnvironment,
-            ILogger<DocumentService> logger)
+            ILogger<DocumentService> logger,
+            IHttpContextAccessor httpContextAccessor = null)
         {
+            _httpContextAccessor = httpContextAccessor;
             this._hostingEnvironment = (hostingEnvironment == null) ?
                 throw new RepositoryInvalidException(nameof(hostingEnvironment))
                 : hostingEnvironment;
@@ -78,7 +83,8 @@ namespace Services.Services
             var documentModel = new Document(path: string.Empty, mimType: Path.GetExtension(uploadFileDto.File.FileName))
                 .SetCode(uploadFileDto.Code)
                 .SetDescription(uploadFileDto.Description)
-                .SetName(uploadFileDto.Name);
+                .SetName(uploadFileDto.Name)
+                .SetUploader(int.TryParse(_httpContextAccessor?.HttpContext?.User?.Identity?.GetUserId(), out int uploader) ? uploader : (int?)null);
 
             EntityEntry<Document> entityEntry = await _documents.AddAsync(documentModel); // the Guid key is generated here, before the save
 
@@ -226,7 +232,10 @@ namespace Services.Services
             bool locked = await _uow.Set<OfLetterAttachment>().AnyAsync(a => a.DocumentId == documentId && a.Letter.Status != OfLetterStatus.Draft)
                 || await _uow.Set<OfLetter>().AnyAsync(l => l.SignatureDocumentId == documentId || l.DeliveryReceiptDocumentId == documentId)
                 || await _uow.Set<OfUserSignature>().AnyAsync(s => s.ImageDocumentId == documentId);
-            return locked ? "این فایل بخشی از یک نامه ارسال‌شده یا امضای ثبت‌شده است و تغییر یا حذف آن مجاز نیست." : null;
+            if (locked) return "این فایل بخشی از یک نامه ارسال‌شده یا امضای ثبت‌شده است و تغییر یا حذف آن مجاز نیست.";
+            // R1q M16: a file that proves an inspection and test plan activity was done must not be replaced or deleted afterwards
+            return await _uow.Set<ItpActivity>().AnyAsync(a => a.EvidenceDocumentId == documentId)
+                ? "این فایل مدرک انجام یک فعالیت برنامه بازرسی و آزمون است و تغییر یا حذف آن مجاز نیست." : null;
         }
 
         public async Task<bool> IsLetterFileAsync(Guid documentId) =>

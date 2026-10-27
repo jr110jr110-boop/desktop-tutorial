@@ -31,7 +31,11 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string Note { get; set; }
         public string CancelReason { get; set; }
         public string ReleasedByName { get; set; }
+        public string DraftedByName { get; set; }
         public string RowVersion { get; set; }
+
+        /// <summary>The products, quantities and serial numbers this note releases: a customer delivery of the work order may only carry these.</summary>
+        public List<ReleaseNoteLineDto> Lines { get; set; } = new List<ReleaseNoteLineDto>();
 
         /// <summary>Computed now while the note is a draft; the stored snapshot once it is released.</summary>
         public List<ReleaseCheckDto> Checks { get; set; } = new List<ReleaseCheckDto>();
@@ -51,6 +55,27 @@ namespace ViewModels.NasbNiro.QualityDtos
         public int WorkOrderId { get; set; }
         public string ItemsText { get; set; }
         public string Note { get; set; }
+
+        /// <summary>At least one line: the item, the quantity and, for a serial item, the serial numbers.</summary>
+        public List<SaveReleaseNoteLineDto> Lines { get; set; } = new List<SaveReleaseNoteLineDto>();
+    }
+
+    public class SaveReleaseNoteLineDto
+    {
+        public int ItemId { get; set; }
+        public decimal Quantity { get; set; }
+        public List<string> SerialNumbers { get; set; } = new List<string>();
+    }
+
+    public class ReleaseNoteLineDto
+    {
+        public int RowNumber { get; set; }
+        public int ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public string ItemTitle { get; set; }
+        public string Unit { get; set; }
+        public decimal Quantity { get; set; }
+        public List<string> SerialNumbers { get; set; } = new List<string>();
     }
 
     public class ReleaseNoteActionDto

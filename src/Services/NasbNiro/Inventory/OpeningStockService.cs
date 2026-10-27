@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
+using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
 using Microsoft.EntityFrameworkCore;
 using ViewModels.NasbNiro.InventoryDtos;
@@ -16,6 +17,8 @@ namespace Services.NasbNiro.Inventory
         /// <summary>
         /// Turns cleaned rows of the old warehouse data into one draft "opening balance" document per warehouse.
         /// The drafts then need the warehouse supervisor and the planning manager before they are confirmed.
+        /// R1q D35: every row needs a unit price; a row without one is refused unless the finance manager sets <c>AllowZeroPrice</c> (the stock is then valued at zero in the books,
+        /// the import is audited and the result lists the zero-priced lines).
         /// </summary>
         Task<ResponseDto<OpeningImportResultDto>> ImportAsync(OpeningImportDto dto, CancellationToken cancellationToken);
     }
@@ -25,6 +28,9 @@ namespace Services.NasbNiro.Inventory
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IInventoryDocumentService _documents;
+
+        /// <summary>Who may let an opening balance come in without a price (R1q D35).</summary>
+        public const string OpeningZeroPriceRole = "FINANCEMANAGER";
 
         public OpeningStockService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents)
         {
@@ -40,6 +46,9 @@ namespace Services.NasbNiro.Inventory
             if (rows.Count == 0) return ResponseDtoHelper.BadRequest<OpeningImportResultDto>("فایل هیچ ردیفی ندارد.");
             if (rows.Count > 20000) return ResponseDtoHelper.BadRequest<OpeningImportResultDto>("حداکثر ۲۰٬۰۰۰ ردیف در هر بار.");
             DateTime date = dto.DocumentDate == default ? DateTime.Today : dto.DocumentDate.Date;
+            // R1q D35: stock without a price is valued at zero; only the finance manager may accept that, knowingly
+            if (dto.AllowZeroPrice && !_user.IsInRole(OpeningZeroPriceRole))
+                return ResponseDtoHelper.BadRequest<OpeningImportResultDto>("ورود موجودی بدون قیمت (ارزش صفر) فقط با مجوز صریح مدیر مالی ممکن است؛ قیمت واحد را در فایل بنویسید یا از مدیر مالی بخواهید ورود را انجام دهد.");
 
             List<InventoryItem> items = await _uow.Set<InventoryItem>().Where(i => !i.Deleted).ToListAsync(cancellationToken);
             var byCode = items.GroupBy(i => i.Code, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
@@ -49,6 +58,7 @@ namespace Services.NasbNiro.Inventory
 
             var lines = new Dictionary<int, List<SaveDocumentLineDto>>();
             var serialsSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var zeroPriced = new List<string>();
             var locationCodes = new Dictionary<long, string>(); // (warehouse, line index) -> location code
             for (int index = 0; index < rows.Count; index++)
             {
@@ -88,6 +98,13 @@ namespace Services.NasbNiro.Inventory
                     serials.Clear();
                 }
                 if (quantity <= 0) { result.Skipped++; continue; } // zero balance: nothing to bring in
+                if (row.UnitPrice.HasValue && row.UnitPrice.Value < 0) { result.Errors.Add(label + $"قیمت واحد کالای {item.Code} منفی است."); continue; }
+                bool zeroPrice = !row.UnitPrice.HasValue || row.UnitPrice.Value <= 0;
+                if (zeroPrice && !dto.AllowZeroPrice)
+                {
+                    result.Errors.Add(label + $"قیمت واحد کالای {item.Code} نوشته نشده است؛ موجودی اول دوره بدون قیمت در دفتر با ارزش صفر ثبت می‌شود. قیمت را بنویسید، یا مدیر مالی ورود بدون قیمت را صریحاً مجاز کند.");
+                    continue;
+                }
                 string lot = InventoryText.Clean(row.LotNumber);
                 if (item.TrackingMode == ItemTrackingMode.Lot && lot == null)
                 {
@@ -96,6 +113,7 @@ namespace Services.NasbNiro.Inventory
                     if (lot == null) { result.Errors.Add(label + $"کالای {item.Code} بچ‌دار است؛ شماره بچ یا برچسب را بنویسید."); continue; }
                 }
 
+                if (zeroPrice) zeroPriced.Add($"{label}{item.Code} ({quantity.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}) در انبار {warehouse.Code}");
                 if (!lines.TryGetValue(warehouse.Id, out List<SaveDocumentLineDto> list)) lines[warehouse.Id] = list = new List<SaveDocumentLineDto>();
                 locationCodes[list.Count + warehouse.Id * 1_000_000L] = locationCode;
                 list.Add(new SaveDocumentLineDto
@@ -148,7 +166,9 @@ namespace Services.NasbNiro.Inventory
                         new SaveDocumentLineDto
                         {
                             ItemId = g.Key.ItemId, LocationId = g.Key.LocationId, LotNumber = g.Key.LotNumber, Quantity = g.Sum(l => l.Quantity),
-                            HeatNumber = g.First().HeatNumber, CertificateNumber = g.First().CertificateNumber, UnitPrice = g.First().UnitPrice,
+                            // the merged line keeps the value of all its rows: the price is the average weighted by quantity
+                            HeatNumber = g.First().HeatNumber, CertificateNumber = g.First().CertificateNumber,
+                            UnitPrice = g.Sum(l => l.Quantity) > 0 ? Math.Round(g.Sum(l => l.Quantity * (l.UnitPrice ?? 0m)) / g.Sum(l => l.Quantity), 4) : g.First().UnitPrice,
                             Description = string.Join("، ", g.Select(l => l.Description).Where(d => d != null).Distinct().Take(5)),
                         },
                     }).ToList();
@@ -162,12 +182,27 @@ namespace Services.NasbNiro.Inventory
                         WarehouseId = warehouse.Id,
                         ReferenceNumber = InventoryText.Clean(dto.Reference) ?? "موجودی اول دوره",
                         Description = $"ورود موجودی اول دوره از داده انبار قبلی ({warehouse.Title})",
+                        // the finance manager's explicit decision is stored on each draft (review M9); the document service checks the role again
+                        AllowZeroPrice = dto.AllowZeroPrice,
                         Lines = merged.Skip(start).Take(500).ToList(),
                     }, cancellationToken);
                     if (!saved.Success) { result.Errors.Add($"انبار {warehouse.Code}: {saved.Message}"); continue; }
                     result.DocumentIds.Add(saved.Data.Id);
                     result.Lines += saved.Data.Lines.Count;
                 }
+            }
+
+            if (zeroPriced.Count > 0 && result.DocumentIds.Count > 0)
+            {
+                // the lines come in at zero value: the list goes to the result and the decision is written to the audit trail
+                result.ZeroPricedLines = zeroPriced;
+                _uow.Set<FnAuditLog>().Add(new FnAuditLog
+                {
+                    EntityType = "OpeningImport", EntityId = result.DocumentIds[0], Action = "ZeroPriceAllowed",
+                    Summary = $"ورود موجودی اول دوره بدون قیمت (ارزش صفر) با مجوز مدیر مالی: {zeroPriced.Count} ردیف؛ اسناد پیش‌نویس {string.Join("، ", result.DocumentIds)}؛ مرجع: {InventoryText.Clean(dto.Reference) ?? "-"}",
+                    UserId = _user.UserId, At = DateTimeOffset.Now,
+                });
+                await _uow.SaveChangesAsync(cancellationToken);
             }
             return ResponseDtoHelper.Ok(result);
         }

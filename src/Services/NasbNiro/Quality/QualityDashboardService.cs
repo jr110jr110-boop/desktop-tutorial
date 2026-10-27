@@ -46,7 +46,8 @@ namespace Services.NasbNiro.Quality
             return ResponseDtoHelper.Ok(QualitySettingKeys.Defaults().Select(d =>
             {
                 QualitySetting row = stored.FirstOrDefault(s => s.Key == d.Key);
-                return new QualitySettingDto { Key = d.Key, Title = d.Title, Value = row?.Value ?? d.Value, Source = d.Source, IsDefault = row == null };
+                QualitySettingRules.TryGetBounds(d.Key, out int min, out int max);
+                return new QualitySettingDto { Key = d.Key, Title = d.Title, Value = row == null ? d.Value : QualitySettingRules.Clamp(d.Key, row.Value), Source = d.Source, IsDefault = row == null, Min = min, Max = max };
             }).ToList());
         }
 
@@ -55,7 +56,9 @@ namespace Services.NasbNiro.Quality
             QualitySetting def = dto == null ? null : QualitySettingKeys.Defaults().FirstOrDefault(d => d.Key == dto.Key);
             if (def == null) return QualityText.Bad<List<QualitySettingDto>>("تنظیم نامعتبر است.");
             if (!_user.IsInRole(QualityRoles.Audit + ",CEO")) return QualityText.Bad<List<QualitySettingDto>>(QualityText.NotAllowed);
-            if (dto.Value < 0 || dto.Value > 3650) return QualityText.Bad<List<QualitySettingDto>>("مقدار باید بین ۰ تا ۳۶۵۰ باشد.");
+            // R1q D30: every setting has its own range (welder continuity 1..12 months, a committee of at least two, whole numbers only)
+            string rangeError = QualitySettingRules.Check(def.Key, def.Title, dto.Value);
+            if (rangeError != null) return QualityText.Bad<List<QualitySettingDto>>(rangeError);
             QualitySetting row = await _uow.Set<QualitySetting>().FirstOrDefaultAsync(s => s.Key == dto.Key, cancellationToken);
             if (row == null)
             {
@@ -80,7 +83,15 @@ namespace Services.NasbNiro.Quality
             public bool HasW { get; set; }
         }
 
-        private async Task<List<PointRow>> PointsAsync(CancellationToken cancellationToken) =>
+        private async Task<List<PointRow>> PointsAsync(CancellationToken cancellationToken)
+        {
+            int minNotice = (int)(await QualitySettingKeys.LoadAsync(_uow, cancellationToken))[QualitySettingKeys.MinNoticeDays];
+            List<PointRow> rows = await PointRowsAsync(cancellationToken);
+            foreach (PointRow row in rows) row.NoticeDays = ItpNoticeRules.EffectiveDays(row.NoticeDays, minNotice); // a plan saved before the minimum existed
+            return rows;
+        }
+
+        private async Task<List<PointRow>> PointRowsAsync(CancellationToken cancellationToken) =>
             await _uow.Set<ItpActivity>().Where(a => !a.Itp.Deleted && (a.Itp.Status == ItpStatus.ClientApproved || a.Itp.Status == ItpStatus.InUse) &&
                     (a.Status == ItpActivityStatus.Planned || a.Status == ItpActivityStatus.Notified) &&
                     (a.PointVendor == ItpPoint.H || a.PointTpi == ItpPoint.H || a.PointClient == ItpPoint.H || a.PointVendor == ItpPoint.W || a.PointTpi == ItpPoint.W || a.PointClient == ItpPoint.W))

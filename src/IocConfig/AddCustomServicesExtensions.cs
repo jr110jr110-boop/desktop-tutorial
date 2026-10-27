@@ -183,6 +183,8 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Quality.IDocumentControlService, Services.NasbNiro.Quality.DocumentControlService>();
             services.AddScoped<Services.NasbNiro.Quality.IAuditReviewService, Services.NasbNiro.Quality.AuditReviewService>();
             services.AddScoped<Services.NasbNiro.Quality.IQualityDashboardService, Services.NasbNiro.Quality.QualityDashboardService>();
+            // nightly quality job at 04:00 (late CAPA escalation, scheduled document revisions); switch Quality:Jobs=false (R1q D13, D41)
+            services.AddHostedService<Services.NasbNiro.Quality.QualityHostedService>();
             // production / shop floor (MES), release P1
             services.AddScoped<Services.NasbNiro.Production.IMfMasterService, Services.NasbNiro.Production.MfMasterService>();
             services.AddScoped<Services.NasbNiro.Production.IMfDraftingService, Services.NasbNiro.Production.MfDraftingService>();

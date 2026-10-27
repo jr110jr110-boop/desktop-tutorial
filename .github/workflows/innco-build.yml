@@ -167,6 +167,7 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Development
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
+          Quality__Jobs: 'false'  # the 04:00 quality jobs (CAPA escalation, scheduled document revisions) must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
@@ -183,6 +184,7 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Development
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
+          Quality__Jobs: 'false'  # the 04:00 quality jobs (CAPA escalation, scheduled document revisions) must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
@@ -198,6 +200,7 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Development
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
+          Quality__Jobs: 'false'  # the 04:00 quality jobs (CAPA escalation, scheduled document revisions) must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)

@@ -53,6 +53,65 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>EN 10204 certificate type (2.2, 3.1, 3.2) the lot must have, verified by QC, before incoming inspection can accept it.</summary>
         public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+
+        /// <summary>Why a quality control is reduced (R1q D11); needed when inspection, certificate or shelf life is weakened. Only QC, QA and PMO change these fields.</summary>
+        public string QualityChangeReason { get; set; }
+    }
+
+    /// <summary>QC or QA changes the quality fields of an item (inspection on receipt, required certificate, shelf life).</summary>
+    public class SaveItemQualityDto
+    {
+        public int ItemId { get; set; }
+        public bool RequiresIncomingInspection { get; set; } = true;
+        public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+        public int? ShelfLifeDays { get; set; }
+
+        /// <summary>Required when a control is reduced.</summary>
+        public string Reason { get; set; }
+    }
+
+    public class ItemQualityChangeQuery : PaginationParams
+    {
+        public ItemQualityChangeStatus? Status { get; set; }
+        public int? ItemId { get; set; }
+    }
+
+    public class ItemQualityChangeDto
+    {
+        public int Id { get; set; }
+        public int ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public string ItemTitle { get; set; }
+        public bool RequiresIncomingInspection { get; set; }
+        public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+        public int? ShelfLifeDays { get; set; }
+        public bool CurrentRequiresIncomingInspection { get; set; }
+        public Entities.Model.NasbNiro.Quality.CertificateType? CurrentRequiredCertificateType { get; set; }
+        public int? CurrentShelfLifeDays { get; set; }
+
+        /// <summary>The gates of the item when the request was made; the request can be approved only while the item still has them.</summary>
+        public bool OldRequiresIncomingInspection { get; set; }
+
+        public Entities.Model.NasbNiro.Quality.CertificateType? OldRequiredCertificateType { get; set; }
+        public int? OldShelfLifeDays { get; set; }
+
+        /// <summary>The item's gates changed after the request: it cannot be approved any more (reject it and ask again).</summary>
+        public bool Stale { get; set; }
+
+        public string Reason { get; set; }
+        public ItemQualityChangeStatus Status { get; set; }
+        public string RequestedByName { get; set; }
+        public DateTimeOffset RequestedAt { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecidedByName { get; set; }
+        public string DecisionNote { get; set; }
+    }
+
+    public class DecideItemQualityChangeDto
+    {
+        public int Id { get; set; }
+        public bool Approve { get; set; }
+        public string Note { get; set; }
     }
 
     public class InventoryItemDto
@@ -83,6 +142,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public bool RequiresIncomingInspection { get; set; }
         public int? ShelfLifeDays { get; set; }
         public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
+
+        /// <summary>A change that reduces a quality control is waiting for the second approval of QA; the item keeps its gates until then.</summary>
+        public int? PendingQualityChangeId { get; set; }
     }
 
     public class InventoryItemQuery : PaginationParams
@@ -214,6 +276,17 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>Cost centre code (an issue without a work order, for example spare parts of the maintenance cost centre).</summary>
         public string CostCenter { get; set; }
+
+        /// <summary>
+        /// Opening balance only (R1q D35, review M9): every line needs a price above zero; the finance manager (and nobody else) can set this to let lines without a price
+        /// come in valued at zero. The approval is stored on the document and is lost when someone else changes the draft.
+        /// </summary>
+        public bool AllowZeroPrice { get; set; }
+
+        /// <summary>
+        /// An adjustment that writes off serial pieces (review M10): the scrap NCR (decision scrap, approved or executed) that lists those serial numbers. Not used by other documents.
+        /// </summary>
+        public int? WriteOffNcrId { get; set; }
         public List<SaveDocumentLineDto> Lines { get; set; } = new List<SaveDocumentLineDto>();
     }
 
@@ -351,6 +424,13 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string PriceQuotes { get; set; }
         public DateTimeOffset? FinanceApprovedAt { get; set; }
         public string FinanceApprovedByName { get; set; }
+
+        /// <summary>The finance manager's approval of an opening balance with lines that have no price (review M9).</summary>
+        public DateTimeOffset? ZeroPriceApprovedAt { get; set; }
+        public string ZeroPriceApprovedByName { get; set; }
+
+        /// <summary>The scrap NCR a serial write-off by adjustment is made against (review M10).</summary>
+        public int? WriteOffNcrId { get; set; }
         public List<DocumentLineDto> Lines { get; set; } = new List<DocumentLineDto>();
     }
 
@@ -505,6 +585,42 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ParentItemCode { get; set; }
         public bool IsCustomerProperty { get; set; }
         public decimal OnHand { get; set; }
+    }
+
+    /// <summary>The expiry report (R1q D32).</summary>
+    public class LotExpiryQuery : PaginationParams
+    {
+        /// <summary>Lots expiring within this many days are listed; empty = the company setting ExpiryWarnDays.</summary>
+        public int? WithinDays { get; set; }
+
+        public int? ItemId { get; set; }
+
+        /// <summary>Only lots that already expired.</summary>
+        public bool OnlyExpired { get; set; }
+    }
+
+    public class LotExpiryDto
+    {
+        public int LotId { get; set; }
+        public int ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public string ItemTitle { get; set; }
+        public string Unit { get; set; }
+        public string LotNumber { get; set; }
+        public string HeatNumber { get; set; }
+        public DateTime ExpiryDate { get; set; }
+
+        /// <summary>Days to the expiry date; negative = expired.</summary>
+        public int DaysLeft { get; set; }
+
+        public bool Expired { get; set; }
+        public decimal OnHand { get; set; }
+
+        /// <summary>Warehouse/location (quantity) of the stock of the lot.</summary>
+        public string Locations { get; set; }
+
+        /// <summary>The valid concession NCR (all signatures, permit given on or after the expiry date) with which the use of the lot after its expiry was allowed.</summary>
+        public string ConcessionNcrNumber { get; set; }
     }
 
     public class SerialQuery : PaginationParams

@@ -18,7 +18,14 @@ namespace Services.NasbNiro.Quality
 
         public const string QualityManagers = "QC,QA,PMO";
         public const string Engineering = "ENGINEERING,ENGINEER";
-        public const string Readers = "PMO,CEO,QC,QA,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,PLANNING,WAREHOUSE,WHSUPERVISOR,COMMERCIAL";
+        /// <summary>
+        /// Everybody who may read the quality records. R1q D27 added the auditor, the production and shop managers, maintenance, service,
+        /// the project manager and the document controller: they work with controlled documents, NCRs and calibration every day.
+        /// </summary>
+        public const string Readers = "PMO,CEO,QC,QA,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,PLANNING,WAREHOUSE,WHSUPERVISOR,COMMERCIAL,AUDITOR,PRODUCTIONMANAGER,SHOPSUPERVISOR,MAINTENANCE,SERVICE,PROJECTMANAGER,DCC";
+
+        /// <summary>The QA manager: approves what is relaxed (calibration waiver, cancelling a mandatory CAPA) and may cancel an NCR.</summary>
+        public const string QaManager = "QA";
 
         /// <summary>Plans and documents are prepared by quality and engineering.</summary>
         public const string Planners = "QC,QA,PMO,ENGINEERING,ENGINEER";
@@ -40,6 +47,9 @@ namespace Services.NasbNiro.Quality
 
         public const string Audit = "QA,PMO";
         public const string Complaints = "QA,QC,PMO,COMMERCIAL";
+
+        /// <summary>Who may upload the file that proves an inspection and test plan activity without a test report was done (review M16).</summary>
+        public const string EvidenceUploaders = "QC,QA,ENGINEERING";
     }
 
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (the quality module uses 401..420).</summary>
@@ -70,6 +80,31 @@ namespace Services.NasbNiro.Quality
         public const string ContinuityWarnDays = "ContinuityWarnDays";
         public const string MajorNcrCommitteeMin = "MajorNcrCommitteeMin";
 
+        // ----- R1q
+        /// <summary>How many days back an inspection record, test report or weld log may be dated (D15).</summary>
+        public const string MaxBackdateDays = "MaxBackdateDays";
+
+        /// <summary>Days after a CAPA was implemented before its effectiveness may be judged (D20).</summary>
+        public const string EffectivenessWaitDays = "EffectivenessWaitDays";
+
+        /// <summary>Decision deadline of an NCR raised by an incoming inspection (D34).</summary>
+        public const string IncomingNcrDueDays = "IncomingNcrDueDays";
+
+        /// <summary>Days a CAPA is late before the CEO is told, after QA was told on the first late day (D13).</summary>
+        public const string CapaCeoEscalationDays = "CapaCeoEscalationDays";
+
+        /// <summary>Lots expiring within this many days are on the expiry report (D32).</summary>
+        public const string ExpiryWarnDays = "ExpiryWarnDays";
+
+        /// <summary>The shortest witness notice (days) an ITP may be given (D9, review H6): a notice of 0 days would let the client's witness be waived at once.</summary>
+        public const string MinNoticeDays = "MinNoticeDays";
+
+        /// <summary>
+        /// Not a setting of the company: a marker the nightly CAPA job writes after its first run (review M11). Until it exists the job records the escalation level of the CAPAs
+        /// that were already late without telling anybody, so that the first night after the upgrade does not flood QA and the CEO with the whole backlog.
+        /// </summary>
+        public const string CapaEscalationBootstrapped = "CapaEscalationBootstrapped";
+
         public static IEnumerable<QualitySetting> Defaults()
         {
             yield return new QualitySetting { Key = NcrMinorDays, Value = 7, Title = "مهلت تصمیم عدم انطباق جزئی (روز)", Source = "★ تصمیم موقت" };
@@ -82,14 +117,23 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = CalibrationWarnDays, Value = 30, Title = "هشدار سررسید کالیبراسیون (روز)", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = ContinuityWarnDays, Value = 30, Title = "هشدار انقضای تداوم جوشکار (روز)", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = MajorNcrCommitteeMin, Value = 3, Title = "حداقل اعضای کمیته برای عدم انطباق عمده", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = MaxBackdateDays, Value = 7, Title = "حداکثر تاخیر مجاز در ثبت بازرسی، گزارش آزمون و گزارش جوشکاری (روز)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = EffectivenessWaitDays, Value = 30, Title = "حداقل فاصله اجرای اقدام اصلاحی تا بررسی اثربخشی (روز)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = IncomingNcrDueDays, Value = 3, Title = "مهلت تصمیم عدم انطباق بازرسی ورودی (روز)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = CapaCeoEscalationDays, Value = 14, Title = "دیرکرد CAPA تا اطلاع به مدیرعامل (روز)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = ExpiryWarnDays, Value = 30, Title = "هشدار انقضای بچ‌ها (روز)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = MinNoticeDays, Value = 1, Title = "حداقل روزهای اعلام نقطه شاهد در برنامه بازرسی (روز)", Source = "★ تصمیم موقت" };
         }
 
-        /// <summary>Stored values over the defaults. Reading never writes, so it is safe in the middle of an operation.</summary>
+        /// <summary>
+        /// Stored values over the defaults, each forced into its range (review M14). Reading never writes, so it is safe in the middle of an operation.
+        /// </summary>
         public static async Task<Dictionary<string, decimal>> LoadAsync(IUnitOfWork uow, CancellationToken cancellationToken)
         {
             Dictionary<string, decimal> result = Defaults().ToDictionary(d => d.Key, d => d.Value);
             List<QualitySetting> rows = await uow.Set<QualitySetting>().AsNoTracking().ToListAsync(cancellationToken);
-            foreach (QualitySetting row in rows) result[row.Key] = row.Value;
+            foreach (QualitySetting row in rows)
+                if (result.ContainsKey(row.Key)) result[row.Key] = QualitySettingRules.Clamp(row.Key, row.Value);
             return result;
         }
     }

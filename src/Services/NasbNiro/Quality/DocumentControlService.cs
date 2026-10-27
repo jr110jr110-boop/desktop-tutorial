@@ -25,6 +25,12 @@ namespace Services.NasbNiro.Quality
         Task<ResponseDto<ControlledDocumentDto>> RevisionActionAsync(RevisionActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<List<RetentionRuleDto>>> GetRetentionAsync(CancellationToken cancellationToken);
         Task<ResponseDto<List<RetentionRuleDto>>> SaveRetentionAsync(SaveRetentionRuleDto dto, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// R1q D41: the revisions approved with a future effective date become effective on that day (the old revision becomes obsolete then, not before).
+        /// Called by the nightly quality job and by every read of the documents, so the master list is right even if the server was off at night. Returns the number promoted.
+        /// </summary>
+        Task<int> PromoteScheduledAsync(CancellationToken cancellationToken);
     }
 
     /// <summary>Controlled documents and records retention (ISO 9001 7.5, ISO 15489). A revision needs three different people.</summary>
@@ -128,18 +134,94 @@ namespace Services.NasbNiro.Quality
             return ResponseDtoHelper.Ok(await PagedList<ControlledDocumentListDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
         }
 
-        public Task<ResponseDto<PagedList<ControlledDocumentListDto>>> GetDocumentsAsync(ControlledDocumentQuery query, CancellationToken cancellationToken) =>
-            PageAsync(Filter(query ??= new ControlledDocumentQuery()), query, cancellationToken);
+        // Reading never writes (review L26): a revision whose day has come is shown as the one in force at once (below), but it is saved as effective by the nightly job only,
+        // in a system context, not under the name of whoever opened the page.
+
+        /// <summary>For the documents given, the scheduled revision whose effective day has come (the earliest one), which a reader sees as the revision in force.</summary>
+        private async Task<Dictionary<int, DocumentRevisionRecord>> DueRevisionsAsync(IEnumerable<int> documentIds, CancellationToken cancellationToken)
+        {
+            DateTime today = DateTime.Today;
+            List<int> ids = documentIds.Distinct().ToList();
+            if (ids.Count == 0) return new Dictionary<int, DocumentRevisionRecord>();
+            List<DocumentRevisionRecord> due = await _uow.Set<DocumentRevisionRecord>().AsNoTracking()
+                .Where(r => ids.Contains(r.DocumentId) && !r.Deleted && r.Status == ControlledDocumentStatus.Scheduled && r.EffectiveDate != null && r.EffectiveDate <= today)
+                .ToListAsync(cancellationToken);
+            return due.Where(r => RevisionRules.TakesEffectNow(r.EffectiveDate.Value, today)).GroupBy(r => r.DocumentId)
+                .ToDictionary(g => g.Key, g => g.OrderBy(r => r.EffectiveDate).ThenBy(r => r.Id).First());
+        }
+
+        private async Task ShowDueRevisionsAsync(IEnumerable<ControlledDocumentListDto> rows, CancellationToken cancellationToken)
+        {
+            List<ControlledDocumentListDto> list = rows.ToList();
+            Dictionary<int, DocumentRevisionRecord> due = await DueRevisionsAsync(list.Select(d => d.Id), cancellationToken);
+            foreach (ControlledDocumentListDto row in list)
+                if (due.TryGetValue(row.Id, out DocumentRevisionRecord rev))
+                {
+                    row.CurrentRevision = rev.Revision; row.Status = ControlledDocumentStatus.Effective; row.EffectiveDate = rev.EffectiveDate;
+                }
+        }
+
+        public async Task<ResponseDto<PagedList<ControlledDocumentListDto>>> GetDocumentsAsync(ControlledDocumentQuery query, CancellationToken cancellationToken)
+        {
+            ResponseDto<PagedList<ControlledDocumentListDto>> page = await PageAsync(Filter(query ??= new ControlledDocumentQuery()), query, cancellationToken);
+            if (page.Success) await ShowDueRevisionsAsync(page.Data, cancellationToken);
+            return page;
+        }
 
         /// <summary>The master list: documents with an effective revision (the only ones to be used on the floor).</summary>
-        public Task<ResponseDto<PagedList<ControlledDocumentListDto>>> GetMasterListAsync(ControlledDocumentQuery query, CancellationToken cancellationToken) =>
-            PageAsync(Filter(query ??= new ControlledDocumentQuery()).Where(d => d.Status == ControlledDocumentStatus.Effective), query, cancellationToken);
+        public async Task<ResponseDto<PagedList<ControlledDocumentListDto>>> GetMasterListAsync(ControlledDocumentQuery query, CancellationToken cancellationToken)
+        {
+            DateTime today = DateTime.Today;
+            IQueryable<ControlledDocument> rows = Filter(query ??= new ControlledDocumentQuery()).Where(d => d.Status == ControlledDocumentStatus.Effective ||
+                d.Revisions.Any(r => !r.Deleted && r.Status == ControlledDocumentStatus.Scheduled && r.EffectiveDate != null && r.EffectiveDate <= today));
+            ResponseDto<PagedList<ControlledDocumentListDto>> page = await PageAsync(rows, query, cancellationToken);
+            if (page.Success) await ShowDueRevisionsAsync(page.Data, cancellationToken);
+            return page;
+        }
+
+        /// <summary>Saves the scheduled revisions whose day has come as effective (and the revision they replace as obsolete). The nightly job calls it; no read does (review L26).</summary>
+        public async Task<int> PromoteScheduledAsync(CancellationToken cancellationToken)
+        {
+            DateTime today = DateTime.Today;
+            List<int> documentIds = await _uow.Set<DocumentRevisionRecord>()
+                .Where(r => !r.Deleted && r.Status == ControlledDocumentStatus.Scheduled && r.EffectiveDate != null && r.EffectiveDate <= today)
+                .Select(r => r.DocumentId).Distinct().ToListAsync(cancellationToken);
+            if (documentIds.Count == 0) return 0;
+            DateTimeOffset now = DateTimeOffset.Now;
+            int promoted = 0;
+            foreach (ControlledDocument doc in await _uow.Set<ControlledDocument>().Include(d => d.Revisions).Where(d => documentIds.Contains(d.Id)).AsSplitQuery().ToListAsync(cancellationToken))
+            {
+                // a document has at most one scheduled revision (approval and new drafts are refused otherwise); the earliest one wins if data say otherwise
+                DocumentRevisionRecord rev = doc.Revisions.Where(r => !r.Deleted && r.Status == ControlledDocumentStatus.Scheduled && r.EffectiveDate.HasValue && RevisionRules.TakesEffectNow(r.EffectiveDate.Value, today))
+                    .OrderBy(r => r.EffectiveDate).ThenBy(r => r.Id).FirstOrDefault();
+                if (rev == null) continue;
+                foreach (DocumentRevisionRecord old in doc.Revisions.Where(r => r.Id != rev.Id && r.Status == ControlledDocumentStatus.Effective))
+                {
+                    old.Status = ControlledDocumentStatus.Obsolete; old.ModifyDate = now;
+                }
+                rev.Status = ControlledDocumentStatus.Effective; rev.ModifyDate = now;
+                doc.CurrentRevision = rev.Revision; doc.Status = ControlledDocumentStatus.Effective; doc.EffectiveDate = rev.EffectiveDate; doc.ModifyDate = now;
+                promoted++;
+            }
+            if (promoted > 0) await _uow.SaveChangesAsync(cancellationToken);
+            return promoted;
+        }
 
         public async Task<ResponseDto<ControlledDocumentDto>> GetDocumentAsync(int id, CancellationToken cancellationToken)
         {
-            ControlledDocument d = await _uow.Set<ControlledDocument>().Include(x => x.Revisions).ThenInclude(r => r.Distributions)
+            // untracked: the effective view below changes the loaded copy only, it is never saved
+            ControlledDocument d = await _uow.Set<ControlledDocument>().AsNoTracking().Include(x => x.Revisions).ThenInclude(r => r.Distributions)
                 .AsSplitQuery().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
             if (d == null) return QualityText.NotFound<ControlledDocumentDto>("سند پیدا نشد.");
+            DateTime today = DateTime.Today;
+            DocumentRevisionRecord due = d.Revisions.Where(r => !r.Deleted && r.Status == ControlledDocumentStatus.Scheduled && r.EffectiveDate.HasValue && RevisionRules.TakesEffectNow(r.EffectiveDate.Value, today))
+                .OrderBy(r => r.EffectiveDate).ThenBy(r => r.Id).FirstOrDefault();
+            if (due != null)
+            {
+                foreach (DocumentRevisionRecord old in d.Revisions.Where(r => r.Id != due.Id && r.Status == ControlledDocumentStatus.Effective)) old.Status = ControlledDocumentStatus.Obsolete;
+                due.Status = ControlledDocumentStatus.Effective;
+                d.CurrentRevision = due.Revision; d.Status = ControlledDocumentStatus.Effective; d.EffectiveDate = due.EffectiveDate;
+            }
             var userIds = new List<int?>();
             foreach (DocumentRevisionRecord r in d.Revisions)
             {
@@ -211,6 +293,9 @@ namespace Services.NasbNiro.Quality
             if (d.Revisions.Any(r => r.Revision == revision && !r.Deleted)) return Bad<ControlledDocumentDto>("این شماره بازنگری قبلاً ثبت شده است.");
             if (d.Revisions.Any(r => !r.Deleted && (r.Status == ControlledDocumentStatus.Draft || r.Status == ControlledDocumentStatus.InReview)))
                 return Bad<ControlledDocumentDto>("یک بازنگری در جریان تایید دارد؛ ابتدا آن را تکمیل کنید.");
+            DocumentRevisionRecord waiting = d.Revisions.FirstOrDefault(r => !r.Deleted && r.Status == ControlledDocumentStatus.Scheduled);
+            if (waiting != null)
+                return Bad<ControlledDocumentDto>($"بازنگری {waiting.Revision} برای تاریخ {(waiting.EffectiveDate.HasValue ? global::Services.NasbNiro.Finance.FiscalCalendars.Text(waiting.EffectiveDate.Value) : "-")} برنامه‌ریزی شده است؛ تا اجرای آن (یا لغو آن با «منسوخ») بازنگری تازه‌ای ثبت نمی‌شود.");
             DateTimeOffset now = DateTimeOffset.Now;
             d.Revisions.Add(new DocumentRevisionRecord
             {
@@ -243,16 +328,37 @@ namespace Services.NasbNiro.Quality
                     if (rev.Status != ControlledDocumentStatus.InReview) return Bad<ControlledDocumentDto>("ابتدا بازنگری باید بررسی شود.");
                     if (rev.PreparedByUserId == Me || rev.ReviewedByUserId == Me) return Bad<ControlledDocumentDto>(QualityText.SameUser + " (تهیه، بررسی و تایید باید توسط سه نفر متفاوت باشد)");
                     if (rev.FileDocumentId == null) return Bad<ControlledDocumentDto>("فایل بازنگری را پیوست کنید.");
-                    foreach (DocumentRevisionRecord old in doc.Revisions.Where(r => r.Id != rev.Id && r.Status == ControlledDocumentStatus.Effective))
                     {
-                        old.Status = ControlledDocumentStatus.Obsolete; old.ModifyDate = now; old.ModifierUserId = Me;
+                        DateTime effectiveDate = (dto.EffectiveDate ?? DateTime.Today).Date;
+                        rev.ApprovedByUserId = Me; rev.ApprovedAt = now; rev.EffectiveDate = effectiveDate;
+                        if (RevisionRules.TakesEffectNow(effectiveDate, DateTime.Today))
+                        {
+                            foreach (DocumentRevisionRecord old in doc.Revisions.Where(r => r.Id != rev.Id && r.Status == ControlledDocumentStatus.Effective))
+                            {
+                                old.Status = ControlledDocumentStatus.Obsolete; old.ModifyDate = now; old.ModifierUserId = Me;
+                            }
+                            rev.Status = ControlledDocumentStatus.Effective;
+                            doc.CurrentRevision = rev.Revision; doc.Status = ControlledDocumentStatus.Effective; doc.EffectiveDate = rev.EffectiveDate;
+                        }
+                        else
+                        {
+                            // R1q D41: a future effective date does not switch the floor to the new revision today: the current revision stays in force
+                            // (and stays on the master list) until that day; the nightly job promotes the new one then (a reader sees it as in force from that day).
+                            rev.Status = ControlledDocumentStatus.Scheduled;
+                            if (doc.CurrentRevision == null) doc.Status = ControlledDocumentStatus.Scheduled;
+                        }
                     }
-                    rev.Status = ControlledDocumentStatus.Effective; rev.ApprovedByUserId = Me; rev.ApprovedAt = now; rev.EffectiveDate = (dto.EffectiveDate ?? DateTime.Today).Date;
-                    doc.CurrentRevision = rev.Revision; doc.Status = ControlledDocumentStatus.Effective; doc.EffectiveDate = rev.EffectiveDate;
                     break;
                 case "obsolete":
                     if (!_user.IsInRole(QualityRoles.DocumentApprovers)) return Bad<ControlledDocumentDto>(QualityText.NotAllowed);
-                    if (rev.Status != ControlledDocumentStatus.Effective) return Bad<ControlledDocumentDto>("فقط بازنگری معتبر منسوخ می‌شود.");
+                    if (rev.Status == ControlledDocumentStatus.Scheduled)
+                    {
+                        // withdrawing a revision that never took effect: the current revision (if any) simply stays
+                        rev.Status = ControlledDocumentStatus.Obsolete;
+                        if (doc.CurrentRevision == null) doc.Status = ControlledDocumentStatus.Obsolete;
+                        break;
+                    }
+                    if (rev.Status != ControlledDocumentStatus.Effective) return Bad<ControlledDocumentDto>("فقط بازنگری معتبر (یا برنامه‌ریزی‌شده) منسوخ می‌شود.");
                     rev.Status = ControlledDocumentStatus.Obsolete; doc.Status = ControlledDocumentStatus.Obsolete;
                     break;
                 case "distribute":

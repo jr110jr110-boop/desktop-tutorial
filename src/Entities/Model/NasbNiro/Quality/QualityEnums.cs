@@ -304,6 +304,9 @@ namespace Entities.Model.NasbNiro.Quality
         Approved = 2,
         Effective = 3,
         Obsolete = 4,
+
+        /// <summary>Approved with an effective date in the future: the current revision stays in force until that day (R1q D41).</summary>
+        Scheduled = 5,
     }
 
     public enum AuditStatus
@@ -326,6 +329,14 @@ namespace Entities.Model.NasbNiro.Quality
         Draft = 0,
         Held = 1,
         Closed = 2,
+    }
+
+    /// <summary>Follow-up of one management review decision (R1q D23).</summary>
+    public enum ReviewDecisionStatus
+    {
+        Open = 0,
+        Done = 1,
+        Cancelled = 2,
     }
 
     /// <summary>Inputs of a management review (ISO 9001:2015 9.3.2 a-f and the additions of spec gap G-16).</summary>

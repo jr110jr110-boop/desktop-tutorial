@@ -97,6 +97,27 @@ namespace ViewModels.NasbNiro.QualityDtos
         public DateTimeOffset? DoneAt { get; set; }
         public string StatusNote { get; set; }
 
+        /// <summary>The outgoing letter, sent to the client of the contract, that carried the witness notice (its sent date is the notification date).</summary>
+        public int? NotificationLetterId { get; set; }
+
+        public string NotificationLetterNumber { get; set; }
+
+        /// <summary>The client's letter that agreed a hold or witness point of the client or the third party is not applicable.</summary>
+        public string NotApplicableReference { get; set; }
+
+        /// <summary>The registered incoming letter of the client behind the not-applicable decision, and its number.</summary>
+        public int? NotApplicableLetterId { get; set; }
+
+        public string NotApplicableLetterNumber { get; set; }
+
+        /// <summary>The client's letter is recorded but the activity stays open until the client approves the revised plan (client-approve turns it into NotApplicable).</summary>
+        public bool NotApplicablePending { get; set; }
+
+        /// <summary>Proof an activity without a required report was done.</summary>
+        public Guid? EvidenceDocumentId { get; set; }
+
+        public string EvidenceNote { get; set; }
+
         /// <summary>The activity has a hold point and is not finished.</summary>
         public bool HoldPending { get; set; }
 
@@ -177,7 +198,10 @@ namespace ViewModels.NasbNiro.QualityDtos
     {
         public int Id { get; set; }
 
-        /// <summary>submit, client-approve, in-use, close, revise.</summary>
+        /// <summary>
+        /// submit, client-approve, use, close, revise. client-approve is recorded by somebody who did not prepare, edit, revise or submit the plan; its date is not in the future and
+        /// within the back-date window; it also turns the not-applicable requests of the revision (pending) into NotApplicable.
+        /// </summary>
         public string Action { get; set; }
         public string Reference { get; set; }
         public DateTime? Date { get; set; }
@@ -223,10 +247,27 @@ namespace ViewModels.NasbNiro.QualityDtos
     {
         public int Id { get; set; }
 
-        /// <summary>notify, done, not-applicable, waive.</summary>
+        /// <summary>notify, plan, done, not-applicable.</summary>
         public string Action { get; set; }
+
+        /// <summary>plan: the planned date. notify: only today or empty; the notification date is the server day or the day <see cref="LetterId"/> was sent.</summary>
         public DateTime? Date { get; set; }
         public string Note { get; set; }
+
+        /// <summary>
+        /// notify: an outgoing letter of the Office, connected to the contract of the plan, addressed to the client and marked SENT; the notice counts from its sent date.
+        /// not-applicable on a client or third-party hold/witness point: the registered incoming letter of the client (connected to the same contract) that agreed.
+        /// </summary>
+        public int? LetterId { get; set; }
+
+        /// <summary>not-applicable: optional free reference of the client's letter (at most 300 characters); the number of the incoming letter is used when empty.</summary>
+        public string Reference { get; set; }
+
+        /// <summary>
+        /// done, for an activity without a required report: the document that proves the work was done (when no accepted inspection record is linked). The file must have been
+        /// uploaded within the back-date window by a QC, QA or engineering user and may prove one activity only.
+        /// </summary>
+        public Guid? EvidenceDocumentId { get; set; }
     }
 
     public class SaveItpReleaseDto

@@ -98,6 +98,11 @@ namespace ViewModels.NasbNiro.QualityDtos
         public decimal Value { get; set; }
         public string Source { get; set; }
         public bool IsDefault { get; set; }
+
+        /// <summary>The range the value may take (R1q D30); the screen shows it and refuses a value outside it.</summary>
+        public int Min { get; set; }
+
+        public int Max { get; set; }
     }
 
     public class SaveQualitySettingDto

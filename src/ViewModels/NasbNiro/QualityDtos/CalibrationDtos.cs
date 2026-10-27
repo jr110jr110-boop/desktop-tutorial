@@ -53,6 +53,18 @@ namespace ViewModels.NasbNiro.QualityDtos
         public Guid? CorrectionTableDocumentId { get; set; }
         public string Note { get; set; }
         public string RowVersion { get; set; }
+
+        /// <summary>Why QA agreed this instrument needs no calibration (empty when it does).</summary>
+        public string CalibrationWaiverReason { get; set; }
+
+        public DateTimeOffset? CalibrationWaivedAt { get; set; }
+
+        /// <summary>A pending request of QA to waive the calibration (review M14): another QA or QC user approves it with the action "approve-waiver" (or "reject-waiver").</summary>
+        public bool WaiverPending { get; set; }
+
+        public string CalibrationWaiverRequestReason { get; set; }
+        public DateTimeOffset? CalibrationWaiverRequestedAt { get; set; }
+        public string CalibrationWaiverRequestedByName { get; set; }
         public List<CalibrationEventDto> Events { get; set; } = new List<CalibrationEventDto>();
     }
 
@@ -86,8 +98,12 @@ namespace ViewModels.NasbNiro.QualityDtos
         public int? IntervalMonths { get; set; }
         public Guid? CorrectionTableDocumentId { get; set; }
         public string Note { get; set; }
+
+        /// <summary>Kept for old clients and ignored: switching the calibration off is the two-step waiver (actions "request-waiver" and "approve-waiver"), never part of a save.</summary>
+        public string CalibrationWaiverReason { get; set; }
     }
 
+    /// <summary>Actions: out-of-service, return-to-service (QC); request-waiver (QA, with a reason), approve-waiver and reject-waiver (another QA or QC user).</summary>
     public class EquipmentActionDto
     {
         public int Id { get; set; }
@@ -129,6 +145,22 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string AssessmentNote { get; set; }
         public int? NcrId { get; set; }
         public string NcrNumber { get; set; }
+
+        /// <summary>For "re-inspect": the accepted new inspection that was linked ("QcRecord", "TestReport" or "QcInspection").</summary>
+        public string ReinspectionKind { get; set; }
+
+        public int? ReinspectionRecordId { get; set; }
+        public string ReinspectionNumber { get; set; }
+    }
+
+    public class LinkOotReinspectionDto
+    {
+        public int ItemId { get; set; }
+
+        /// <summary>QcRecord, TestReport or QcInspection.</summary>
+        public string Kind { get; set; }
+
+        public int RecordId { get; set; }
     }
 
     public class OutOfToleranceListDto

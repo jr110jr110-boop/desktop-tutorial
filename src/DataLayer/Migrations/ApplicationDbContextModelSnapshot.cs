@@ -1685,6 +1685,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTimeOffset>("RegisterDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("UploadedByUserId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.ToTable("Documents");
@@ -11556,6 +11559,15 @@ namespace DataLayer.Migrations
                     b.Property<int?>("WorkOrderId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("WriteOffNcrId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ZeroPriceApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ZeroPriceApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("BuyOrderId");
@@ -11962,6 +11974,74 @@ namespace DataLayer.Migrations
                     b.ToTable("InvItemGroups", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.ItemQualityChange", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("OldRequiredCertificateType")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("OldRequiresIncomingInspection")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("OldShelfLifeDays")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("RequiredCertificateType")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("RequiresIncomingInspection")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ShelfLifeDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId", "Status");
+
+                    b.ToTable("InvItemQualityChanges", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.ItemRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -12205,6 +12285,16 @@ namespace DataLayer.Migrations
                     b.Property<int?>("AffectedEquipmentId")
                         .HasColumnType("int");
 
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CancelledByUserId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("CapaId")
                         .HasColumnType("int");
 
@@ -12287,6 +12377,10 @@ namespace DataLayer.Migrations
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<string>("EffectivenessCheck")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
@@ -12351,6 +12445,13 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ReceiptDocumentId")
                         .HasColumnType("int");
 
+                    b.Property<string>("ReinspectionKind")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int?>("ReinspectionRecordId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("ReportDate")
                         .HasColumnType("datetime2");
 
@@ -12359,6 +12460,9 @@ namespace DataLayer.Migrations
                         .HasColumnType("nvarchar(1000)");
 
                     b.Property<int?>("ResultDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ReworkOperationId")
                         .HasColumnType("int");
 
                     b.Property<string>("RootCause")
@@ -12372,6 +12476,12 @@ namespace DataLayer.Migrations
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<int?>("ScrapDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ScrappedSerialUnitId")
+                        .HasColumnType("int");
 
                     b.Property<string>("SerialNumbers")
                         .HasMaxLength(4000)
@@ -12639,6 +12749,10 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("EquipmentIds")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<DateTimeOffset?>("InspectedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -12653,6 +12767,9 @@ namespace DataLayer.Migrations
 
                     b.Property<int?>("LotId")
                         .HasColumnType("int");
+
+                    b.Property<string>("MeasurementsJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("ModifierUserId")
                         .HasColumnType("int");
@@ -12679,6 +12796,9 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.Property<int>("ReceiptLineId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ReinspectionOfNcrId")
                         .HasColumnType("int");
 
                     b.Property<decimal>("RejectedQuantity")
@@ -12731,6 +12851,8 @@ namespace DataLayer.Migrations
                         .HasFilter("[Number] IS NOT NULL");
 
                     b.HasIndex("ReceiptDocumentId");
+
+                    b.HasIndex("ReinspectionOfNcrId");
 
                     b.HasIndex("TargetWarehouseId");
 
@@ -12963,6 +13085,12 @@ namespace DataLayer.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int?>("PostedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("QualityApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("QualityApprovedByUserId")
                         .HasColumnType("int");
 
                     b.Property<byte[]>("RowVersion")
@@ -20777,6 +20905,16 @@ namespace DataLayer.Migrations
                     b.Property<bool>("AutoDrafted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CancelledByUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("CloseNote")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -20803,6 +20941,10 @@ namespace DataLayer.Migrations
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("EffectivenessCriteria")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -20814,8 +20956,22 @@ namespace DataLayer.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
+                    b.Property<DateTimeOffset?>("EscalatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EscalationLevel")
+                        .HasColumnType("int");
+
                     b.Property<DateTime?>("ImplementedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<int>("Iteration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<bool>("Mandatory")
+                        .HasColumnType("bit");
 
                     b.Property<int>("ModifierUserId")
                         .HasColumnType("int");
@@ -20895,6 +21051,11 @@ namespace DataLayer.Migrations
                     b.Property<string>("EvidenceNote")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Iteration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<int?>("OwnerUserId")
                         .HasColumnType("int");
@@ -21208,6 +21369,10 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<int>("ModifierUserId")
                         .HasColumnType("int");
 
@@ -21295,6 +21460,13 @@ namespace DataLayer.Migrations
                     b.Property<int?>("DoneByUserId")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("EvidenceDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EvidenceNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<bool>("GatesRelease")
                         .HasColumnType("bit");
 
@@ -21303,6 +21475,19 @@ namespace DataLayer.Migrations
                         .HasColumnType("nvarchar(50)");
 
                     b.Property<int>("ItpId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("NotApplicableLetterId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("NotApplicablePending")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("NotApplicableReference")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int?>("NotificationLetterId")
                         .HasColumnType("int");
 
                     b.Property<DateTime?>("NotificationSentAt")
@@ -21345,6 +21530,8 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("EvidenceDocumentId");
 
                     b.HasIndex("ItpId", "Status");
 
@@ -21701,6 +21888,26 @@ namespace DataLayer.Migrations
                     b.Property<int?>("CapaId")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("DoneAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DoneByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DoneNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("DoneRequestNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("DoneRequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DoneRequestedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("datetime2");
 
@@ -21708,6 +21915,9 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.Property<int>("ReviewId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
                         .HasColumnType("int");
 
                     b.Property<string>("Text")
@@ -21828,6 +22038,26 @@ namespace DataLayer.Migrations
                     b.Property<string>("Accuracy")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("CalibrationWaivedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CalibrationWaivedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CalibrationWaiverReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CalibrationWaiverRequestReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("CalibrationWaiverRequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CalibrationWaiverRequestedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -22016,6 +22246,13 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.Property<int?>("NcrId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReinspectionKind")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("ReinspectionRecordId")
                         .HasColumnType("int");
 
                     b.Property<DateTime>("SourceDate")
@@ -22457,6 +22694,10 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("ItemsText")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
@@ -22502,6 +22743,40 @@ namespace DataLayer.Migrations
                     b.HasIndex("WorkOrderId", "Status");
 
                     b.ToTable("QaReleaseNotes", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.ReleaseNoteLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ReleaseNoteId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SerialNumbers")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("ReleaseNoteId");
+
+                    b.ToTable("QaReleaseNoteLines", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.RetentionRule", b =>
@@ -26881,6 +27156,17 @@ namespace DataLayer.Migrations
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.ItemQualityChange", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.ItemRequest", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
@@ -29081,6 +29367,25 @@ namespace DataLayer.Migrations
                     b.Navigation("WorkOrder");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.ReleaseNoteLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Quality.ReleaseNote", "ReleaseNote")
+                        .WithMany("Lines")
+                        .HasForeignKey("ReleaseNoteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+
+                    b.Navigation("ReleaseNote");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.TestReport", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Quality.Qualification", "ExaminerQualification")
@@ -30193,6 +30498,11 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QualifiedPerson", b =>
                 {
                     b.Navigation("Qualifications");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.ReleaseNote", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.TestReport", b =>

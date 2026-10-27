@@ -17,6 +17,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public Guid? EvidenceDocumentId { get; set; }
         public string EvidenceNote { get; set; }
         public bool Overdue { get; set; }
+
+        /// <summary>The round of the CAPA this action belongs to; a failed effectiveness check starts the next round.</summary>
+        public int Iteration { get; set; } = 1;
     }
 
     public class CapaListDto
@@ -39,6 +42,9 @@ namespace ViewModels.NasbNiro.QualityDtos
 
     public class CapaDto : CapaListDto
     {
+        /// <summary>Required by a rule (system-drafted, non-conformance or audit finding source): only the QA manager can cancel it.</summary>
+        public bool Mandatory { get; set; }
+
         public string SourceNumber { get; set; }
         public string Containment { get; set; }
         public RootCauseMethod RootCauseMethod { get; set; }
@@ -50,7 +56,41 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string ClosedByName { get; set; }
         public string CloseNote { get; set; }
         public string RowVersion { get; set; }
+
+        /// <summary>1 for the first round; 2 and up after a failed effectiveness check.</summary>
+        public int Iteration { get; set; } = 1;
+
+        /// <summary>0 on time, 1 QA was told it is late, 2 the CEO was told as well.</summary>
+        public int EscalationLevel { get; set; }
+
+        public string CancelReason { get; set; }
+        public DateTimeOffset? CancelledAt { get; set; }
+
+        /// <summary>The first day the effectiveness may be judged (implementation date + the waiting days).</summary>
+        public DateTime? EffectivenessEarliest { get; set; }
+
         public List<CapaActionDto> Actions { get; set; } = new List<CapaActionDto>();
+    }
+
+    public class CapaEscalationResultDto
+    {
+        /// <summary>CAPAs that moved up a level now.</summary>
+        public int Escalated { get; set; }
+
+        /// <summary>Of them, those the CEO was told about.</summary>
+        public int CeoNotified { get; set; }
+
+        /// <summary>
+        /// True for the very first run: the levels of the CAPAs that were already late were only recorded (<see cref="Recorded"/>) and nobody was told, so that the first night
+        /// after the upgrade does not flood QA and the CEO with the whole backlog.
+        /// </summary>
+        public bool FirstRun { get; set; }
+
+        /// <summary>CAPAs whose level was recorded without telling anybody (first run only).</summary>
+        public int Recorded { get; set; }
+
+        /// <summary>CAPAs that could not be handled now (somebody changed them at the same moment, or the notice failed); the next run tries again.</summary>
+        public int Skipped { get; set; }
     }
 
     public class CapaQuery : PaginationParams
@@ -97,6 +137,12 @@ namespace ViewModels.NasbNiro.QualityDtos
 
         /// <summary>For effectiveness: the check passed.</summary>
         public bool Passed { get; set; }
+
+        /// <summary>
+        /// For complete-action: the day the action was really done (today when empty). Not in the future and not older than the back-date window (setting MaxBackdateDays); the
+        /// CAPA counts as implemented on the day of its last action of the round, and the waiting period of the effectiveness check runs from that day.
+        /// </summary>
+        public DateTime? Date { get; set; }
     }
 
     // ------------------------------------------------------------------ customer complaints

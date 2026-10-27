@@ -188,6 +188,14 @@ namespace Entities.Model.NasbNiro.Inventory
         Done = 1,
     }
 
+    /// <summary>Decision on a request to relax a quality gate of an item (R1q D11).</summary>
+    public enum ItemQualityChangeStatus
+    {
+        Pending = 0,
+        Approved = 1,
+        Rejected = 2,
+    }
+
     public enum NcrSource
     {
         /// <summary>بازرسی ورودی</summary>

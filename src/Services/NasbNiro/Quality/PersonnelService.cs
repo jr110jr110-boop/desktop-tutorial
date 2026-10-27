@@ -467,7 +467,8 @@ namespace Services.NasbNiro.Quality
             if (dto == null || Clean(dto.JointNo) == null) return Bad<WeldLogDto>("شماره اتصال جوش را وارد کنید.");
             if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<WeldLogDto>(QualityText.NotAllowed + " (گزارش جوشکاری را بازرس QC ثبت می‌کند)");
             DateTime date = (dto.WeldDate ?? DateTime.Today).Date;
-            if (date > DateTime.Today) return Bad<WeldLogDto>("تاریخ جوشکاری نمی‌تواند در آینده باشد.");
+            string dateProblem = await QualityChecks.RecordDateAsync(_uow, date, "جوشکاری", cancellationToken, allowTomorrow: false);
+            if (dateProblem != null) return Bad<WeldLogDto>(dateProblem);
             if (!Enum.IsDefined(typeof(VtResult), dto.Vt)) return Bad<WeldLogDto>(QualityText.InvalidData);
             if (!await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId && !w.Deleted, cancellationToken)) return Bad<WeldLogDto>("دستور کار پیدا نشد.");
             Wps wps = await _uow.Set<Wps>().FirstOrDefaultAsync(w => w.Id == dto.WpsId && !w.Deleted, cancellationToken);
@@ -482,6 +483,14 @@ namespace Services.NasbNiro.Quality
             List<UseKey> uses = await LastUsesAsync(date, cancellationToken);
             QualificationState state = QualificationRules.State(q, date, LastUse(uses, q), months, warn);
             if (!QualificationRules.Usable(state)) return Bad<WeldLogDto>($"گواهی جوشکار در تاریخ {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(date))} قابل استفاده نیست: {QualificationRules.StateText(state)}.");
+            // R1q D15: the qualification must also be valid on the day of entry (a back-dated log cannot hide a welder who lapsed since)
+            if (date != DateTime.Today)
+            {
+                List<UseKey> allUses = await LastUsesAsync(null, cancellationToken);
+                QualificationState entryState = QualificationRules.State(q, DateTime.Today, LastUse(allUses, q), months, warn);
+                if (!QualificationRules.Usable(entryState))
+                    return Bad<WeldLogDto>($"گواهی جوشکار امروز قابل استفاده نیست: {QualificationRules.StateText(entryState)}؛ ثبت جوشکاری با تاریخ قبل مجاز نیست.");
+            }
             if (dto.PreheatC.HasValue && wps.PreheatMinC.HasValue && dto.PreheatC.Value < wps.PreheatMinC.Value) return Bad<WeldLogDto>($"دمای پیش‌گرم ({dto.PreheatC}) کمتر از حداقل WPS ({wps.PreheatMinC}) است.");
             if (dto.InterpassC.HasValue && wps.InterpassMaxC.HasValue && dto.InterpassC.Value > wps.InterpassMaxC.Value) return Bad<WeldLogDto>($"دمای بین‌پاسی ({dto.InterpassC}) بیشتر از حداکثر WPS ({wps.InterpassMaxC}) است.");
             List<int> reportIds = (dto.ReportIds ?? new List<int>()).Distinct().ToList();

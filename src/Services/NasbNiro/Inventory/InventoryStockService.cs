@@ -21,6 +21,9 @@ namespace Services.NasbNiro.Inventory
         Task<ResponseDto<PagedList<LotDto>>> GetLotsAsync(LotQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<LotDto>> SaveLotAsync(SaveLotDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PagedList<SerialUnitDto>>> GetSerialsAsync(SerialQuery query, CancellationToken cancellationToken);
+
+        /// <summary>R1q D32: lots on hand that are expired or expire within the warning days (company setting ExpiryWarnDays), oldest expiry first.</summary>
+        Task<ResponseDto<PagedList<LotExpiryDto>>> GetExpiringLotsAsync(LotExpiryQuery query, CancellationToken cancellationToken);
     }
 
     public class InventoryStockService : IInventoryStockService
@@ -240,6 +243,50 @@ namespace Services.NasbNiro.Inventory
 
             LotDto saved = await LotProjection(_uow.Set<InventoryLot>().Where(l => l.Id == lot.Id), _uow.Set<StockBalance>()).FirstAsync(cancellationToken);
             return ResponseDtoHelper.Ok(saved);
+        }
+
+        public async Task<ResponseDto<PagedList<LotExpiryDto>>> GetExpiringLotsAsync(LotExpiryQuery query, CancellationToken cancellationToken)
+        {
+            query ??= new LotExpiryQuery();
+            Dictionary<string, decimal> settings = await Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+            int within = query.WithinDays ?? (int)settings[Quality.QualitySettingKeys.ExpiryWarnDays];
+            if (within < 0 || within > 3650) return ResponseDtoHelper.BadRequest<PagedList<LotExpiryDto>>("تعداد روز باید بین ۰ تا ۳۶۵۰ باشد.");
+            DateTime today = DateTime.Today;
+            DateTime cutoff = today.AddDays(within);
+
+            // goods already in the scrap warehouse are no longer a risk; customer property is not company stock
+            IQueryable<StockBalance> balances = _uow.Set<StockBalance>().Where(b => b.Quantity > 0 && b.LotId != null && b.Warehouse.Kind != WarehouseKind.Scrap &&
+                !b.Lot.Deleted && !b.Lot.IsCustomerProperty && b.Lot.ExpiryDate != null && b.Lot.ExpiryDate <= cutoff);
+            if (query.ItemId.HasValue) balances = balances.Where(b => b.ItemId == query.ItemId.Value);
+            if (query.OnlyExpired) balances = balances.Where(b => b.Lot.ExpiryDate < today);
+            var rows = await balances.Select(b => new
+            {
+                LotId = b.LotId.Value, b.ItemId, ItemCode = b.Item.Code, ItemTitle = b.Item.Title, b.Item.Unit,
+                b.Lot.LotNumber, b.Lot.HeatNumber, Expiry = b.Lot.ExpiryDate.Value, Warehouse = b.Warehouse.Code, Location = b.Location.Code, b.Quantity,
+            }).ToListAsync(cancellationToken);
+
+            // a lot allowed for use after its expiry by a valid concession NCR on that lot (all signatures, the permit after the QC signature, approved on or after the expiry date)
+            // is marked, not hidden: the same rule the documents apply (review M13)
+            List<int> lotIds = rows.Select(r => r.LotId).Distinct().ToList();
+            var concessionRows = (await Quality.ConcessionRules.Valid(_uow.Set<NonConformance>().Where(n => n.LotId != null && lotIds.Contains(n.LotId.Value)), true)
+                .Select(n => new { LotId = n.LotId.Value, n.Number, At = n.ConcessionApprovedAt }).ToListAsync(cancellationToken))
+                .Where(x => x.At.HasValue).ToList();
+
+            List<LotExpiryDto> list = rows.GroupBy(r => r.LotId).Select(g =>
+            {
+                var first = g.First();
+                return new LotExpiryDto
+                {
+                    LotId = first.LotId, ItemId = first.ItemId, ItemCode = first.ItemCode, ItemTitle = first.ItemTitle, Unit = first.Unit,
+                    LotNumber = first.LotNumber, HeatNumber = first.HeatNumber, ExpiryDate = first.Expiry,
+                    DaysLeft = (int)(first.Expiry.Date - today).TotalDays, Expired = first.Expiry.Date < today,
+                    OnHand = g.Sum(x => x.Quantity),
+                    Locations = string.Join("، ", g.OrderBy(x => x.Warehouse).ThenBy(x => x.Location).Select(x => $"{x.Warehouse}{(x.Location != null ? "/" + x.Location : string.Empty)} ({x.Quantity.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)})")),
+                    ConcessionNcrNumber = concessionRows.Where(c => c.LotId == first.LotId && Quality.LotExpiryRules.ConcessionCovers(first.Expiry, c.At.Value))
+                        .OrderBy(c => c.Number).Select(c => c.Number).FirstOrDefault(),
+                };
+            }).OrderBy(x => x.ExpiryDate).ThenBy(x => x.ItemCode).ThenBy(x => x.LotNumber).ToList();
+            return ResponseDtoHelper.Ok(await PagedList<LotExpiryDto>.CreateAsync(list, query.PageNumber, query.PageSize, cancellationToken));
         }
 
         internal static IQueryable<SerialUnitDto> SerialProjection(IQueryable<SerialUnit> units) =>
