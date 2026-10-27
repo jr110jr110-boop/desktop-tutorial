@@ -48,7 +48,8 @@ namespace Services.NasbNiro.Ceo
                 Series("ارزش موجودی", values)));
 
             // chart 2: purchase receipts (net of the returns to the supplier) against the material consumed by production (net of the returns from production), by month,
-            // valued at the cost of the movements. The drill behind it lists the items moved most in a period; it takes the month so far.
+            // valued at the cost of the movements. The drill behind it lists the items moved most in a period; it takes the month so far, and its kind is receipt
+            // (the first series: its netValue is the figure of the chart); the consumption is the kind issue of the same drill.
             var flow = await _uow.Set<StockTransaction>().AsNoTracking()
                 .Where(t => t.TransactionDate >= ctx.From && t.TransactionDate < ctx.End &&
                     (t.Document.Type == InventoryDocumentType.PurchaseReceipt || t.Document.Type == InventoryDocumentType.SupplierReturn ||
@@ -60,9 +61,11 @@ namespace Services.NasbNiro.Ceo
             bool IsReceipt(InventoryDocumentType type) => type == InventoryDocumentType.PurchaseReceipt || type == InventoryDocumentType.SupplierReturn;
             decimal[] received = CeoTrends.SumByMonth(ctx.Window, flow.Where(f => IsReceipt(f.Type)).Select(f => (f.Day, f.Amount)));
             decimal[] consumed = CeoTrends.SumByMonth(ctx.Window, flow.Where(f => !IsReceipt(f.Type)).Select(f => (f.Day, -f.Amount)));
+            Dictionary<string, string> flowParams = ctx.LatestMonth();
+            flowParams["kind"] = "receipt";
             section.Charts.Add(WithDrillParams(Chart("stockFlowByMonth", "رسید خرید و مصرف مواد در تولید به تفکیک ماه", CeoKind.Bar, CeoUnit.Rial, ctx.Labels, CeoLinks.Kardex, CeoDrillRef.InvTopMovements,
-                "ارزش حرکت‌های انبار به بهای ثبت‌شده؛ رسید خرید خالص از برگشت به تأمین‌کننده است و مصرف، خالص از برگشت از تولید؛ حرکت‌های ابطال‌شده کم می‌شوند.",
-                Series("رسید خرید", received, CeoRole.Primary), Series("مصرف تولید", consumed, CeoRole.Secondary)), ctx.LatestMonth()));
+                "ارزش حرکت‌های انبار به بهای ثبت‌شده؛ رسید خرید خالص از برگشت به تأمین‌کننده است و مصرف، خالص از برگشت از تولید؛ حرکت‌های ابطال‌شده کم می‌شوند. فهرست جزئیات رسیدهای خرید را نشان می‌دهد و مصرف تولید را هم می‌شود از همان فهرست خواست.",
+                Series("رسید خرید", received, CeoRole.Primary), Series("مصرف تولید", consumed, CeoRole.Secondary)), flowParams));
             return section;
         }
 

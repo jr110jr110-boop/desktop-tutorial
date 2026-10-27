@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Services.NasbNiro.Ceo;
 using Services.NasbNiro.Ceo.Drills;
 using ViewModels.NasbNiro.AiDtos;
 
@@ -14,6 +17,8 @@ namespace Services.NasbNiro.Ai
     /// The UI action tools of the voice mode (release D1): the assistant asks the front end to open a page, a detail table or an analysis, to read something aloud or to scroll to a section.
     /// They run no server code and change no data: a tool checks its arguments, hands the action to the registry (it ends up in <see cref="AiChatResponseDto.Actions"/> in the order the model
     /// called the tools) and answers {"ok":true,"message":...}; a refused call answers {"ok":false,"message":...} and records no action.
+    /// The message never repeats the link or an argument of the call (only the title of a module or a section), and the numeric check of the answer ignores the results of these tools:
+    /// a number the model put into a link must not become a number the answer may quote.
     /// Approving, finalising, paying and deleting are never actions: a person does them on the page of the gate, which the assistant may only open.
     /// Every signed-in user is offered the tools; the ones that belong to the CEO dashboard tell anyone but CEO and PMO that they cannot be used.
     /// </summary>
@@ -31,7 +36,7 @@ namespace Services.NasbNiro.Ai
         public const string ReadAction = "read";
         public const string ScrollAction = "scroll";
 
-        public const int MaxLinkLength = 300;
+        public const int MaxLinkLength = 120;
 
         /// <summary>The actions of one answer; more are dropped.</summary>
         public const int MaxActions = 8;
@@ -55,31 +60,42 @@ namespace Services.NasbNiro.Ai
 
         // ------------------------------------------------------------------------------------------ the allow-list
 
+        /// <summary>The part of a link after its path: an optional query and an optional fragment, each of letters, digits and = &amp; _ . - only.</summary>
+        private static readonly Regex QueryAndFragment = new Regex(@"^(\?[A-Za-z0-9=&_.\-]*)?(#[A-Za-z0-9=&_.\-]*)?$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         /// <summary>
         /// True when <paramref name="link"/> is a route of the front end the assistant may open: one slash and a path that is a prefix of the allow-list or continues it after a slash
-        /// (so /ceo, /ceo/ and /ceo?x=1 pass; /ceox, //evil.com, http://evil, javascript:alert(1) and paths with .. do not). <paramref name="clean"/> is the trimmed link.
+        /// (so /ceo, /ceo/ and /ceo?x=1 pass; /ceox, //evil.com, http://evil, javascript:alert(1) and paths with .. do not). At most <see cref="MaxLinkLength"/> characters; the query and the fragment
+        /// hold letters, digits and = &amp; _ . - only; no control, white-space or invisible formatting character (a zero-width non-joiner, a right-to-left override ...) anywhere.
+        /// <paramref name="clean"/> is the trimmed link, <paramref name="module"/> the Persian name of the part of the system and <paramref name="prefix"/> the entry of the allow-list it matched.
         /// </summary>
-        public static bool TryCheckLink(string link, out string clean, out string module)
+        public static bool TryCheckLink(string link, out string clean, out string module, out string prefix)
         {
             clean = null;
             module = null;
+            prefix = null;
             string text = link?.Trim();
             if (string.IsNullOrEmpty(text) || text.Length > MaxLinkLength || text[0] != '/') return false;
             if (text.Length > 1 && (text[1] == '/' || text[1] == '\\')) return false;
             foreach (char ch in text)
-                if (char.IsControl(ch) || char.IsWhiteSpace(ch) || ch == '\\' || ch == '<' || ch == '>' || ch == '"' || ch == '\'' || ch == '`') return false;
+                if (char.IsControl(ch) || char.IsWhiteSpace(ch) || CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.Format
+                    || ch == '\\' || ch == '<' || ch == '>' || ch == '"' || ch == '\'' || ch == '`') return false;
             int cut = text.IndexOfAny(new[] { '?', '#' });
             string path = cut < 0 ? text : text.Substring(0, cut);
+            if (cut >= 0 && !QueryAndFragment.IsMatch(text.Substring(cut))) return false;
             if (path.IndexOf('%') >= 0 || path.Split('/').Any(segment => segment == "." || segment == "..")) return false;
-            foreach ((string prefix, string title) in Routes)
-                if (path.Equals(prefix, StringComparison.OrdinalIgnoreCase) || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase))
+            foreach ((string known, string title) in Routes)
+                if (path.Equals(known, StringComparison.OrdinalIgnoreCase) || path.StartsWith(known + "/", StringComparison.OrdinalIgnoreCase))
                 {
                     clean = text;
                     module = title;
+                    prefix = known;
                     return true;
                 }
             return false;
         }
+
+        public static bool TryCheckLink(string link, out string clean, out string module) => TryCheckLink(link, out clean, out module, out _);
 
         /// <summary>The section key in lower case when it is one of the nine sections, else null.</summary>
         public static string Section(string key)
@@ -127,7 +143,7 @@ namespace Services.NasbNiro.Ai
                     string link = AiTools.Str(a, "link");
                     if (!TryCheckLink(link, out string clean, out string module))
                         return Task.FromResult<object>(Refuse("این مسیر در فهرست صفحه‌های مجاز نیست؛ مسیر باید با یکی از این‌ها شروع شود: " + string.Join("، ", Routes.Select(r => r.Prefix)) + "."));
-                    return Task.FromResult<object>(Done(new AiActionDto { Type = NavigateAction, Link = clean, Title = "باز کردن صفحه‌ی " + module }, "صفحه‌ی " + module + " (" + clean + ") باز می‌شود."));
+                    return Task.FromResult<object>(Done(new AiActionDto { Type = NavigateAction, Link = clean, Title = "باز کردن صفحه‌ی " + module }, "صفحه‌ی " + module + " باز می‌شود."));
                 },
             });
 
@@ -155,10 +171,10 @@ namespace Services.NasbNiro.Ai
                 SchemaJson = Schema(new[] { ("sectionKey", "string", "کلید بخش: " + SectionList + "؛ خالی = کل شرکت", false) }),
                 Run = (c, a, ct) =>
                 {
-                    if (!c.User.IsInRole(CeoDrillRoles.Readers)) return Task.FromResult<object>(Refuse(NotDashboardUser));
+                    if (!c.User.IsInRole(CeoRoles.Readers)) return Task.FromResult<object>(Refuse(NotDashboardUser));
                     string given = AiTools.Str(a, "sectionKey");
                     string section = given == null || string.Equals(given, "all", StringComparison.OrdinalIgnoreCase) ? null : Section(given);
-                    if (given != null && section == null && !string.Equals(given, "all", StringComparison.OrdinalIgnoreCase)) return Task.FromResult<object>(Refuse(UnknownSection));
+                    if (given != null && section == null && !string.Equals(given, "all", StringComparison.OrdinalIgnoreCase)) return Task.FromResult<object>(Refuse(CeoText.UnknownSection));
                     string what = section == null ? "کل شرکت" : "بخش " + CeoModules.Title(section);
                     return Task.FromResult<object>(Done(new AiActionDto { Type = AnalyzeAction, SectionKey = section, Title = "تحلیل " + what }, "تحلیل " + what + " اجرا می‌شود."));
                 },
@@ -175,7 +191,7 @@ namespace Services.NasbNiro.Ai
                 }),
                 Run = (c, a, ct) =>
                 {
-                    if (!c.User.IsInRole(CeoDrillRoles.Readers)) return Task.FromResult<object>(Refuse(NotDashboardUser));
+                    if (!c.User.IsInRole(CeoRoles.Readers)) return Task.FromResult<object>(Refuse(NotDashboardUser));
                     string what = AiTools.Str(a, "what")?.ToLowerInvariant();
                     if (what == null || !ReadKinds.Contains(what)) return Task.FromResult<object>(Refuse("مقدار what باید یکی از این‌ها باشد: " + string.Join("، ", ReadKinds) + "."));
                     if (what == "brief" && !c.User.IsInRole("CEO")) return Task.FromResult<object>(Refuse(NotCeo));
@@ -183,7 +199,7 @@ namespace Services.NasbNiro.Ai
                     if (what == "section")
                     {
                         section = Section(AiTools.Str(a, "sectionKey"));
-                        if (section == null) return Task.FromResult<object>(Refuse(UnknownSection));
+                        if (section == null) return Task.FromResult<object>(Refuse(CeoText.UnknownSection));
                     }
                     string title = what switch
                     {
@@ -203,22 +219,20 @@ namespace Services.NasbNiro.Ai
                 SchemaJson = Schema(new[] { ("sectionKey", "string", "کلید بخش: " + SectionList, true) }),
                 Run = (c, a, ct) =>
                 {
-                    if (!c.User.IsInRole(CeoDrillRoles.Readers)) return Task.FromResult<object>(Refuse(NotDashboardUser));
+                    if (!c.User.IsInRole(CeoRoles.Readers)) return Task.FromResult<object>(Refuse(NotDashboardUser));
                     string section = Section(AiTools.Str(a, "sectionKey"));
-                    if (section == null) return Task.FromResult<object>(Refuse(UnknownSection));
+                    if (section == null) return Task.FromResult<object>(Refuse(CeoText.UnknownSection));
                     return Task.FromResult<object>(Done(new AiActionDto { Type = ScrollAction, SectionKey = section, Title = "رفتن به بخش " + CeoModules.Title(section) }, "صفحه به بخش " + CeoModules.Title(section) + " می‌رود."));
                 },
             });
             return tools;
         }
 
-        private static string UnknownSection => "کلید بخش ناشناخته است؛ یکی از این‌ها را بدهید: " + string.Join("، ", CeoModules.Sections) + ".";
-
         // ------------------------------------------------------------------------------------------ ui_open_drill
 
         private static AiToolOutput OpenDrill(AiToolContext c, JsonElement a)
         {
-            if (!c.User.IsInRole(CeoDrillRoles.Readers)) return Refuse(NotDashboardUser);
+            if (!c.User.IsInRole(CeoRoles.Readers)) return Refuse(NotDashboardUser);
             string key = AiTools.Str(a, "key");
             if (key == null) return Refuse(CeoDrillText.KeyRequired);
             DrillDefinition drill = CeoDrillCatalog.Find(key);
@@ -227,7 +241,7 @@ namespace Services.NasbNiro.Ai
             Dictionary<string, string> given = DrillParameters(a);
             var declared = drill.Parameters.Select(p => p.Name).Concat(new[] { "top", "page" }).ToList();
             string unknown = given.Keys.FirstOrDefault(k => !declared.Contains(k, StringComparer.OrdinalIgnoreCase));
-            if (unknown != null) return Refuse("پارامتر «" + unknown + "» برای این جزئیات تعریف نشده است؛ پارامترها: " + string.Join("، ", declared) + ".");
+            if (unknown != null) return Refuse("یکی از پارامترها برای این جزئیات تعریف نشده است؛ پارامترهای مجاز: " + string.Join("، ", declared) + ".");
             given.TryGetValue("top", out string top);
             given.TryGetValue("page", out string page);
             string error = DrillBinder.BindPaging(top, page, DrillBinder.DefaultTop, out _, out _) ?? DrillBinder.Bind(drill.Parameters, given, DateTime.Today, out _);
@@ -301,7 +315,7 @@ namespace Services.NasbNiro.Ai
 
         // ------------------------------------------------------------------------------------------ the system prompt
 
-        /// <summary>The paragraph added to the system prompt of the chat and of the analysis (whatever version of the prompt is active), so a database that was seeded earlier gets it too.</summary>
+        /// <summary>The paragraph added to the system prompt of the chat (typed or spoken; whatever version of the prompt is active), so a database that was seeded earlier gets it too. The analysis, the seats and the evaluation do not get it.</summary>
         public const string PromptParagraph =
             "کارهای روی صفحه: اگر کاربر خواست صفحه‌ای را باز کنی، به جایی بروی، جزئیاتی را نشان بدهی، تحلیلی را اجرا کنی یا بخشی، هشدارها یا گزارش روزانه را بخوانی، ابزار مناسب را صدا بزن "
             + "(ui_navigate برای باز کردن صفحه، ui_open_drill برای جدول جزئیات، ui_analyze برای تحلیل، ui_read برای خواندن با صدا، ui_scroll برای رفتن به یک بخش) "
@@ -318,15 +332,14 @@ namespace Services.NasbNiro.Ai
             return sb.ToString();
         }
 
+        /// <summary>
+        /// The line about the page of the user. Only values the backend knows reach the prompt: the entry of the allow-list the page matched with its Persian name (never the path as sent, nor its
+        /// query or ids), the section keys of the dashboard and the theme.
+        /// </summary>
         public static string ContextLine(AiUiContextDto ui)
         {
             if (ui == null) return string.Empty;
-            string page = null;
-            if (TryCheckLink(ui.Page, out string clean, out _))
-            {
-                int cut = clean.IndexOfAny(new[] { '?', '#' });
-                page = cut < 0 ? clean : clean.Substring(0, cut);
-            }
+            string page = TryCheckLink(ui.Page, out _, out string module, out string prefix) ? prefix + " (" + module + ")" : null;
             List<string> sections = (ui.Sections ?? new List<string>()).Select(Section).Where(s => s != null).Distinct().ToList();
             string theme = ui.Theme?.Trim().ToLowerInvariant();
             theme = theme == "dark" || theme == "light" ? theme : null;

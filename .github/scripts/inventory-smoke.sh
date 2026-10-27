@@ -5517,7 +5517,8 @@ CEOYTD="{\"from\":\"$(dd $(( 1 - CEODOY )))\",\"to\":\"$(dd 0)\"}"; CEOMTD="{\"f
 CEOMONTHLY='["revenueCost","proposalResults","oeeByWorkCenter","stockFlowByMonth","warrantyCostByMonth","surveyScoreByMonth","attendanceMonth"]'
 ceoc "ceo drill parameters: the red projects open pc.portfolio with status danger, the amber ones with status warn, the backlog opens sl.orders_open without parameters (the drill lists the open orders by itself)" "($(ceosk projects projectsRed)|.drillKey == \"pc.portfolio\" and .drillParams == {\"status\":\"danger\"}) and ($(ceosk projects projectsAmber)|.drillKey == \"pc.portfolio\" and .drillParams == {\"status\":\"warn\"}) and ($(ceohk salesBacklog)|.drillKey == \"sl.orders_open\" and .drillParams == null)"
 ceoc "ceo drill parameters: the profit of the year and the warranty cost of the year open their drill from the first day of the Persian year ($(dd $(( 1 - CEODOY )))) to today" "($(ceosk finance netProfitYtd)|.drillParams == $CEOYTD) and ($(ceosk service serviceWarrantyCostYtd)|.drillParams == $CEOYTD)"
-ceoc "ceo drill parameters: the seven monthly charts open the latest Persian month so far ($(dd $(( 1 - CEOFD ))) to today); no other chart and only those five figures carry parameters" "([.data.sections[].charts[]|select(.key as \$k | $CEOMONTHLY|index(\$k) != null)] as \$m | (\$m|length) == 7 and (\$m|all(.drillParams == $CEOMTD))) and ([.data.sections[].charts[]|select(.key as \$k | $CEOMONTHLY|index(\$k) == null)]|all(.drillParams == null)) and ([.data.sections[].kpis[]|select(.drillParams != null)|.key]|sort) == [\"netProfitYtd\",\"projectsAmber\",\"projectsRed\",\"salesBacklog\",\"serviceWarrantyCostYtd\"]"
+ceoc "ceo drill parameters: the five counts that are only a part of what their drill lists by default open it filtered to the same records: the purchase requests waiting approval open pr.requests_open with status submitted, the letters in approval of.letters_waiting with stage approval, the goodwill requests sv.orders_open with goodwillOnly true, the overdue NCRs qc.ncr_open with onlyOverdue true, the overdue calibrations qc.calibration_due with days 0" "($(ceosk procurement purchaseRequestsWaiting)|.drillKey == \"pr.requests_open\" and .drillParams == {\"status\":\"submitted\"}) and ($(ceosk office lettersWaiting)|.drillKey == \"of.letters_waiting\" and .drillParams == {\"stage\":\"approval\"}) and ($(ceosk service serviceGoodwillWaiting)|.drillKey == \"sv.orders_open\" and .drillParams == {\"goodwillOnly\":\"true\"}) and ($(ceosk quality overdueNcrs)|.drillKey == \"qc.ncr_open\" and .drillParams == {\"onlyOverdue\":\"true\"}) and ($(ceosk quality calibrationOverdue)|.drillKey == \"qc.calibration_due\" and .drillParams == {\"days\":\"0\"})"
+ceoc "ceo drill parameters: the six monthly charts open the latest Persian month so far ($(dd $(( 1 - CEOFD ))) to today), the stock flow chart opens inv.top_movements on the receipts of that month (kind receipt); no other chart and only the nine figures above carry parameters" "([.data.sections[].charts[]|select(.key as \$k | $CEOMONTHLY|index(\$k) != null and \$k != \"stockFlowByMonth\")] as \$m | (\$m|length) == 6 and (\$m|all(.drillParams == $CEOMTD))) and ([.data.sections[].charts[]|select(.key == \"stockFlowByMonth\")] as \$f | (\$f|length) == 1 and (\$f[0]|.drillKey == \"inv.top_movements\" and .drillParams == ($CEOMTD + {\"kind\":\"receipt\"}))) and ([.data.sections[].charts[]|select(.key as \$k | $CEOMONTHLY|index(\$k) == null)]|all(.drillParams == null)) and ([.data.sections[].kpis[]|select(.drillParams != null)|.key]|sort) == [\"calibrationOverdue\",\"lettersWaiting\",\"netProfitYtd\",\"overdueNcrs\",\"projectsAmber\",\"projectsRed\",\"purchaseRequestsWaiting\",\"serviceGoodwillWaiting\",\"serviceWarrantyCostYtd\"]"
 
 
 # --- payroll privacy: the CEO sees the warranty cost, the PMO sees the fixed text and no chart values
@@ -5693,7 +5694,8 @@ CDKEYS='["ai.notes_new","ai.seat_runs","fin.bank_unreconciled","fin.cash_account
 as "$CEO_TOKEN" GET $CD/drills
 check "ceo drills: the CEO reads the catalogue: exactly the 68 keys of the contract, once each" ".success and (.data|length) == 68 and ([.data[].key]|sort) == $CDKEYS"
 check "ceo drills: 11 finance, 10 sales, 8 project, 6 production, 6 quality, 6 inventory, 8 procurement, 7 service, 4 office and 2 AI drills, all for CEO,PMO, each titled and described in Persian" '([.data[]|.module]|group_by(.)|map({(.[0]):length})|add) == {"finance":11,"sales":10,"projects":8,"production":6,"quality":6,"inventory":6,"procurement":8,"service":7,"office":4,"ai":2} and ([.data[].roles]|unique) == ["CEO,PMO"] and ([.data[]|select((.title|length) == 0 or (.description|length) == 0)]|length) == 0'
-check "ceo drills: 49 parameters in all; the portfolio takes status, the NCR list severity, the revenue months from and to, nothing else is required" '([.data[].parameters[]]|length) == 49 and ([.data[].parameters[]|select(.required)]|length) == 0 and ([.data[]|select(.key == "pc.portfolio")|.parameters[]|[.name,.type]]) == [["status","string"]] and ([.data[]|select(.key == "qc.ncr_open")|.parameters[]|[.name,.type]]) == [["severity","string"]] and ([.data[]|select(.key == "fin.revenue_by_month")|.parameters[]|[.name,.type]]) == [["from","date"],["to","date"]] and ([.data[]|select(.key == "fin.cheques_due")|.parameters[]|[.name,.type]]) == [["kind","string"],["days","int"]]'
+check "ceo drills: 54 parameters in all; the portfolio takes status, the NCR list severity and onlyOverdue, the revenue months from and to, nothing else is required" '([.data[].parameters[]]|length) == 54 and ([.data[].parameters[]|select(.required)]|length) == 0 and ([.data[]|select(.key == "pc.portfolio")|.parameters[]|[.name,.type]]) == [["status","string"]] and ([.data[]|select(.key == "qc.ncr_open")|.parameters[]|[.name,.type]]) == [["severity","string"],["onlyOverdue","bool"]] and ([.data[]|select(.key == "fin.revenue_by_month")|.parameters[]|[.name,.type]]) == [["from","date"],["to","date"]] and ([.data[]|select(.key == "fin.cheques_due")|.parameters[]|[.name,.type]]) == [["kind","string"],["days","int"]]'
+check "ceo drills: the drills behind the counts of the overview take the parameter that gives the same records: pr.requests_open status, of.letters_waiting stage and mineOnly, of.leave_requests_pending status, sv.orders_open goodwillOnly, qc.calibration_due days, inv.top_movements from, to and kind" '([.data[]|select(.key == "pr.requests_open")|.parameters[]|[.name,.type]]) == [["status","string"]] and ([.data[]|select(.key == "of.letters_waiting")|.parameters[]|[.name,.type]]) == [["stage","string"],["mineOnly","bool"]] and ([.data[]|select(.key == "of.leave_requests_pending")|.parameters[]|[.name,.type]]) == [["status","string"]] and ([.data[]|select(.key == "sv.orders_open")|.parameters[]|[.name,.type]]) == [["goodwillOnly","bool"]] and ([.data[]|select(.key == "qc.calibration_due")|.parameters[]|[.name,.type]]) == [["days","int"]] and ([.data[]|select(.key == "inv.top_movements")|.parameters[]|[.name,.type]]) == [["from","date"],["to","date"],["kind","string"]]'
 as "$ADMIN_TOKEN" GET $CD/drills
 check "ceo drills: the PMO reads the same 68 keys" ".success and (.data|length) == 68 and ([.data[].key]|sort) == $CDKEYS"
 as "$WH_TOKEN" GET $CD/drills; cdmsg "ceo drills: a storekeeper cannot read the catalogue" "$CDNOTALLOWED"
@@ -5707,12 +5709,14 @@ CODE=$(curl -s -o "$B" -w '%{http_code}' "$API/$CD/drill?key=fin.cash_accounts")
 # --- the key and the parameters are checked before anything is read
 cdrill ""; cdmsg "ceo drill: a call without a key is refused" "کلید جزئیات را بدهید."
 cdrill no.such.key; check "ceo drill: an unknown key is refused, not found" '.success == false and .message == "کلید جزئیات ناشناخته است" and .httpStatusCode == 404'
-cdrill fin.cash_accounts "top=0"; cdmsg "ceo drill: top=0 is refused" "مقدار top باید عددی بین 1 و 200 باشد."
-cdrill fin.cash_accounts "top=201"; cdmsg "ceo drill: top=201 is refused" "مقدار top باید عددی بین 1 و 200 باشد."
-cdrill fin.cash_accounts "top=abc"; cdmsg "ceo drill: top=abc is refused" "مقدار top باید عددی بین 1 و 200 باشد."
-cdrill fin.cash_accounts "page=0"; cdmsg "ceo drill: page=0 is refused" "مقدار page باید عدد صحیح بزرگ‌تر از صفر باشد."
+cdrill fin.cash_accounts "top=0"; cdmsg "ceo drill: top=0 is refused" "مقدار «تعداد» باید عددی بین 1 و 200 باشد."
+cdrill fin.cash_accounts "top=201"; cdmsg "ceo drill: top=201 is refused" "مقدار «تعداد» باید عددی بین 1 و 200 باشد."
+cdrill fin.cash_accounts "top=abc"; cdmsg "ceo drill: top=abc is refused" "مقدار «تعداد» باید عددی بین 1 و 200 باشد."
+cdrill fin.cash_accounts "page=0"; cdmsg "ceo drill: page=0 is refused" "مقدار «صفحه» باید عدد صحیح بین 1 و 10000 باشد."
+cdrill fin.cash_accounts "page=10001"; cdmsg "ceo drill: page=10001 is refused (the largest page is 10000)" "مقدار «صفحه» باید عدد صحیح بین 1 و 10000 باشد."
+cdrill fin.cash_accounts "page=abc"; cdmsg "ceo drill: page=abc is refused" "مقدار «صفحه» باید عدد صحیح بین 1 و 10000 باشد."
 cdrill fin.revenue_by_month "from=2026-10-01&to=2026-09-01"; cdmsg "ceo drill: a range that ends before it starts is refused" "تاریخ شروع (from) نباید بعد از تاریخ پایان (to) باشد."
-cdrill fin.revenue_by_month "from=xx"; nomsg "ceo drill: a date that is neither Gregorian nor Persian is refused" "تاریخ معتبر نیست"
+cdrill fin.revenue_by_month "from=xx"; cdmsg "ceo drill: a date that is neither Gregorian nor Persian is refused with the example of both" "مقدار «from» تاریخ معتبر نیست (نمونه: 2026-10-25 یا 1405/08/03)."
 cdrill qc.ncr_open "severity=Huge"; cdmsg "ceo drill: a severity outside the list is refused with the list" "مقدار «severity» باید یکی از این‌ها باشد: Major، Minor، NotClassified."
 cdrill pc.portfolio "status=red"; cdmsg "ceo drill: a portfolio status outside danger, warn and ok is refused" "مقدار «status» باید یکی از این‌ها باشد: danger، warn، ok."
 cdrill inv.slow_moving "days=0"; cdmsg "ceo drill: days=0 is refused with the range" "مقدار «days» باید بین 1 و 3650 باشد."
@@ -5825,6 +5829,10 @@ cdstampmap() {
 }
 # cdq TEXT : the text as a JSON string (to put it in a jq expression)
 cdq() { jq -nc --arg s "$1" '$s'; }
+# cdnonempty NAME N : the module list (or figure) an expectation is computed from is not empty (N is its count or its amount): an exact comparison with it is then a real one, never two empty lists
+cdnonempty() { if [ -n "${2:-}" ] && [ "${2:-}" != 0 ] && [ "${2:-}" != null ]; then ok "$1"; else bad "$1 (the module answered ${2:-nothing})"; fi; }
+# cdpage NAME : the list read just now is one complete page (the lists of sales and production give 500 rows at most, and 25 when the size is 0)
+cdpage() { check "ceo drills setup: $1: the list is one complete page" '.success and .data.totalItems == (.data.data|length)'; }
 # cdpmap [JSON] : a JSON object of every date (YYYY-MM-DD) in the JSON (default: the last answer, $B) to its Persian text, for the expectations that show the dates of a list
 cdpmap() { local o='{}' d; for d in $( { if [ $# -gt 0 ]; then printf '%s' "$1"; else cat "$B"; fi; } | jq -r '[.. | strings | select(test("^(19|20)[0-9]{2}-[0-9]{2}-[0-9]{2}(T|$)")) | .[0:10]] | unique | .[]'); do o=$(jq -c --arg d "$d" --arg p "$(pdate "$d")" '. + {($d): $p}' <<<"$o"); done; printf '%s' "$o"; }
 
@@ -5836,10 +5844,13 @@ cdv() { # a manual voucher through the whole cycle (prepared, checked by a secon
   as "$FM_TOKEN" POST finance/gl/vouchers/action "{\"id\":$id,\"action\":\"finalize\"}"
   check "ceo drills setup: voucher $id finalised" '.success and .data.status == 2'
 }
+# The three finalised vouchers below stay in the ledger (a finalised voucher cannot be deleted); a second run on the same database adds three more. No expectation of this section is a typed figure: each one is read from the module a moment before the drill is read.
 call POST Contracts '{"code":"CD-CT-01","title":"قرارداد آزمون جزئیات مدیرعامل","status":1,"employer":"کارفرمای آزمون"}'; check "ceo drills setup: a contract for the profitability drill" '.success and .data.id > 0'
-CDCT=$(val .data.id)
+CDCT=$(val .data.id); CDCTT=$(val .data.title)
 cdv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"درآمد پروژه‌ی آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":90000000,\"detail1Code\":\"${FXCUS:-}\"},{\"accountCode\":\"60101\",\"credit\":90000000,\"contractId\":$CDCT}]}"
 cdv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"هزینه‌ی پروژه‌ی آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"70104\",\"debit\":35000000,\"contractId\":$CDCT},{\"accountCode\":\"10101\",\"credit\":35000000}]}"
+# a supplier balance of this year (the credit of the 2024 voucher of the finance section is the other one): it is overdue (older than 30 days) from the second Persian month of the year on
+cdv "{\"date\":\"${CDYS}T00:00:00\",\"description\":\"خرید اعتباری آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"70101\",\"debit\":80000000},{\"accountCode\":\"30101\",\"credit\":80000000,\"detail1Code\":\"${FXSUP:-}\"}]}"
 
 # --- fin.cash_accounts: the accounts of the treasury; the totals are the cash position and the finance dashboard
 as "$CEO_TOKEN" GET finance/dashboard
@@ -5847,6 +5858,7 @@ CDFD=$(jq -c '.data|{cashTotal,bankTotal,pettyCashTotal,receivablesOpen,receivab
 as "$CEO_TOKEN" GET finance/treasury/cash-position
 CDTP=$(cdx '.data|{cash,banks,pettyCash,total,n:(.accounts|length),max:([.accounts[].balance]|max),rows:([.accounts[]|"\(.kind)-\(.id)|\({"Bank":"حساب بانکی","CashBox":"صندوق","PettyCash":"تنخواه"}[.kind])|\(.title)|\(.balance|n)"]|sort)}')
 cdrill fin.cash_accounts "top=200"
+cdnonempty "ceo drill fin.cash_accounts: the treasury of the scenario has accounts" "$(jq -r '.n' <<<"$CDTP")"
 cdcheck "ceo drill fin.cash_accounts: one row per account of the treasury (id, kind, title, balance), the same set as the cash position" '.success and .data.totalCount == ('"$CDTP"').n and ([.data.rows[]|"\(.id)|\(.kind)|\(.title)|\(.balance|n)"]|sort) == ('"$CDTP"').rows'
 cdcheck "ceo drill fin.cash_accounts: cash, banks, petty cash and total are the cash position and the figures of the finance dashboard; cash and bank is cash plus banks" '.success and .data.totals.cash == ('"$CDTP"').cash and .data.totals.banks == ('"$CDTP"').banks and .data.totals.pettyCash == ('"$CDTP"').pettyCash and .data.totals.total == ('"$CDTP"').total and .data.totals.cash == ('"$CDFD"').cashTotal and .data.totals.banks == ('"$CDFD"').bankTotal and .data.totals.pettyCash == ('"$CDFD"').pettyCashTotal and .data.totals.cashAndBank == (('"$CDTP"').cash + ('"$CDTP"').banks)'
 cdcheck "ceo drill fin.cash_accounts: the biggest balance first, and the drill is dated today ($PT)" '.success and .data.rows[0].balance == ('"$CDTP"').max and ([.data.rows[].balance] as $b | $b == ($b|sort|reverse)) and .data.asOfText == "'"$PT"'"'
@@ -5855,6 +5867,7 @@ cdcheck "ceo drill fin.cash_accounts: the biggest balance first, and the drill i
 as "$CEO_TOKEN" GET finance/receivables/ageing
 CDAG=$(cdx '.data|{current,days31To60,days61To90,over90,total,n:(.rows|length),max:([.rows[].total]|max),rows:([.rows[]|"\(.customerId)|\(.customerName)|\(.current|n)|\(.days31To60|n)|\(.days61To90|n)|\(.over90|n)|\(.total|n)"]|sort)}')
 cdrill fin.receivables_by_customer "top=200"
+cdnonempty "ceo drill fin.receivables_by_customer: the ageing of the scenario has a customer (the invoice of the finance section is open)" "$(jq -r '.n' <<<"$CDAG")"
 cdcheck "ceo drill fin.receivables_by_customer: one row per customer with the four age buckets and the total, the same as the ageing report" '.success and .data.totalCount == ('"$CDAG"').n and ([.data.rows[]|"\(.id)|\(.customerName)|\(.current|n)|\(.days31To60|n)|\(.days61To90|n)|\(.over90|n)|\(.total|n)"]|sort) == ('"$CDAG"').rows'
 cdcheck "ceo drill fin.receivables_by_customer: the totals are the ageing totals and the open receivables of the finance dashboard; the biggest balance first" '.success and .data.totals.current == ('"$CDAG"').current and .data.totals.days31To60 == ('"$CDAG"').days31To60 and .data.totals.days61To90 == ('"$CDAG"').days61To90 and .data.totals.over90 == ('"$CDAG"').over90 and .data.totals.total == ('"$CDAG"').total and .data.totals.total == ('"$CDFD"').receivablesOpen and .data.rows[0].total == ('"$CDAG"').max'
 
@@ -5864,6 +5877,7 @@ CDOI=$(jq -c '[.data.data[]|select(.openAmount > 0 and ((.dueDate // .date)[0:10
 CDOIX=$(printf '%s' "$CDOI" | jq -c "$CDJQ"'{n:length,sum:(map(.openAmount)|add // 0),due:(.[0].due),rows:(map("\(.id)|\(.number)|\(.customerName)|\(.openAmount|n)")|sort)}')
 CDOID=$(printf '%s' "$CDOIX" | jq -r '.due // empty')
 cdrill fin.receivable_invoices_overdue "top=200"
+cdnonempty "ceo drill fin.receivable_invoices_overdue: the scenario has an open sales invoice past its due date (the invoice of the finance section fell due 45 days ago)" "$(jq -r '.n' <<<"$CDOIX")"
 cdcheck "ceo drill fin.receivable_invoices_overdue: the rows are the open sales invoices past their due date (number, customer, open amount)" '.success and .data.totalCount == ('"$CDOIX"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.openAmount|n)"]|sort) == ('"$CDOIX"').rows'
 cdcheck "ceo drill fin.receivable_invoices_overdue: the open amount is the overdue receivables of the finance dashboard; the oldest first, with its due date and days" '.success and .data.totals.openAmount == ('"$CDOIX"').sum and .data.totals.openAmount == ('"$CDFD"').receivablesOverdue and .data.rows[0].dueDate == '"$(cdpd "$CDOID")"' and .data.rows[0].daysOverdue == '"$(cdlate "$CDOID")"
 
@@ -5875,6 +5889,7 @@ CDPX=$(jq -nc --argjson i "$CDPI" --argjson p "$CDPY" "$CDJQ"'([$i[].k] + [$p[].
      | {k:$k, name:(($ii[0].name) // ($pp[0].name)), count:($ii|length), inv:([$ii[].a]|add // 0), paid:([$pp[].p]|add // 0)} | . + {open:(.inv - .paid)} | select(.open != 0)]
   | {n:length, invoiced:(map(.inv)|add // 0), paid:(map(.paid)|add // 0), open:(map(.open)|add // 0), max:(map(.open)|max), rows:(map("\(.k)|\(.name)|\(.count)|\(.inv|n)|\(.paid|n)|\(.open|n)")|sort)}')
 cdrill fin.payables_by_supplier "top=200"
+cdnonempty "ceo drill fin.payables_by_supplier: the scenario has a supplier with an open balance" "$(jq -r '.n' <<<"$CDPX")"
 cdcheck "ceo drill fin.payables_by_supplier: one row per supplier with invoices, invoiced, paid against an invoice and the open balance, as the invoice and payment lists of procurement" '.success and .data.totalCount == ('"$CDPX"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.invoices)|\(.invoiced|n)|\(.paid|n)|\(.open|n)"]|sort) == ('"$CDPX"').rows'
 cdcheck "ceo drill fin.payables_by_supplier: the totals are the sums of the lists, and the open total is the open payables of the finance dashboard; the biggest balance first" '.success and .data.totals.invoiced == ('"$CDPX"').invoiced and .data.totals.paid == ('"$CDPX"').paid and .data.totals.open == ('"$CDPX"').open and .data.totals.open == ('"$CDFD"').payablesOpen and .data.rows[0].open == ('"$CDPX"').max'
 
@@ -5882,9 +5897,11 @@ cdcheck "ceo drill fin.payables_by_supplier: the totals are the sums of the list
 as "$FM_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"
 CDPA=$(cdx '.data.payables|{n:length,overdue:(map(.days31To60 + .days61To90 + .over90)|add // 0),total:(map(.total)|add // 0),max:(map(.days31To60 + .days61To90 + .over90)|max // 0),rows:(map("\(.name)|\(.current|n)|\(.days31To60|n)|\(.days61To90|n)|\(.over90|n)|\((.days31To60 + .days61To90 + .over90)|n)|\(.total|n)")|sort)}')
 cdrill fin.payables_overdue "top=200"
+cdnonempty "ceo drill fin.payables_overdue: the ledger ageing of the scenario has a supplier (the credits of the 2024 voucher and of the voucher of this section)" "$(jq -r '.n' <<<"$CDPA")"
+cdnonempty "ceo drill fin.payables_overdue: ... and the supplier balance is overdue (older than 30 days)" "$(jq -r '.overdue' <<<"$CDPA")"
 cdcheck "ceo drill fin.payables_overdue: one row per supplier of the ledger payables ageing as of today (current, 31-60, 61-90, over 90, overdue, total), as the notes schedule of the financial statements" '.success and .data.totalCount == ('"$CDPA"').n and ([.data.rows[]|"\(.supplier)|\(.current|n)|\(.days31To60|n)|\(.days61To90|n)|\(.over90|n)|\(.overdue|n)|\(.total|n)"]|sort) == ('"$CDPA"').rows'
-cdcheck "ceo drill fin.payables_overdue: the overdue total is the sum of the buckets over 30 days and the headline payablesOverdue of the overview; the biggest overdue first; the link is the financial statements page" '.success and .data.totals.overdue == ('"$CDPA"').overdue and .data.totals.total == ('"$CDPA"').total and (if .data.totalCount == 0 then true else .data.rows[0].overdue == ('"$CDPA"').max and .data.rows[0].link == "/fn/financial-statements" end)'
-as "$CEO_TOKEN" GET "$CD/overview"; CDOVPAY=$(val '[.data.headline[]|select(.key == "payablesOverdue")][0].value')
+cdcheck "ceo drill fin.payables_overdue: the overdue total is the sum of the buckets over 30 days and the headline payablesOverdue of the overview; the biggest overdue first; the link is the financial statements page" '.success and .data.totals.overdue == ('"$CDPA"').overdue and .data.totals.total == ('"$CDPA"').total and .data.rows[0].overdue == ('"$CDPA"').max and .data.rows[0].link == "/fn/financial-statements"'
+as "$CEO_TOKEN" GET "$CD/overview?refresh=true"; CDOVPAY=$(val '[.data.headline[]|select(.key == "payablesOverdue")][0].value')
 cdrill fin.payables_overdue "top=200"
 cdcheck "ceo drill fin.payables_overdue: the overdue total ($CDOVPAY) is the headline figure payablesOverdue of the overview, to the rial" ".success and (.data.totals.overdue|r2) == ($CDOVPAY|r2)"
 
@@ -5897,7 +5914,14 @@ cdcheq() { # cdcheq DAYS : the issued and the received cheques against the two l
   CDCQR=$(cdx '[.data.data[]|select(.dueDate[0:10] <= "'"$lim"'")]|{n:length,sum:(map(.amount)|add // 0),due:(map(.dueDate[0:10])|min),rows:(map("\(.id)|\(.serial)|\(.bankName)|\(.customerName // .accountHolder)|\(.amount|n)")|sort)}')
   CDCQID=$(printf '%s' "$CDCQI" | jq -r '.due // empty'); CDCQRD=$(printf '%s' "$CDCQR" | jq -r '.due // empty')
 }
+# a received cheque in the box that falls due in three days (the cheque of the finance section is cleared, so the received list would be empty without it)
+CDRSAY=$(date +%s%N | cut -c1-16)
+as "$TR_TOKEN" POST $FT/receipts "{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CU1,\"description\":\"چک دریافتی آزمون جزئیات مدیرعامل\",\"lines\":[{\"instrument\":3,\"amount\":3000000,\"chequeSayadId\":\"$CDRSAY\",\"chequeSerial\":\"7790\",\"chequeBank\":\"ملی\",\"chequeDueDate\":\"$(dd 3)T00:00:00\"}]}"; CDRCP=$(val .data.id)
+as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$CDRCP,\"action\":\"approve\"}"
+as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$CDRCP,\"action\":\"post\"}"; check "ceo drills setup: the receipt with a cheque that falls due in three days is posted" '.success and .data.status == 2'
 cdcheq 7
+cdnonempty "ceo drill fin.cheques_due: the scenario has issued cheques due within seven days or past (the leaves 501 and 901 fall due today)" "$(jq -r '.n' <<<"$CDCQI")"
+cdnonempty "ceo drill fin.cheques_due: the scenario has a received cheque in the box that falls due within seven days (the cheque of the setup)" "$(jq -r '.n' <<<"$CDCQR")"
 cdrill fin.cheques_due "top=200"
 cdcheck "ceo drill fin.cheques_due: the issued cheques due within seven days or past are the cheques of the treasury list (leaf, bank account, payee, amount)" '.success and .data.totalCount == ('"$CDCQI"').n and ([.data.rows[]|"\(.id)|\(.serial)|\(.bank)|\(.party)|\(.amount|n)"]|sort) == ('"$CDCQI"').rows and .data.totals.amount == ('"$CDCQI"').sum'
 cdcheck "ceo drill fin.cheques_due: the nearest due date first, with its date and the days to it" '.success and .data.rows[0].dueDate == '"$(cdpd "$CDCQID")"' and .data.rows[0].daysToDue == '"$(cdday "$CDCQID")"
@@ -5917,9 +5941,12 @@ cdrill fin.revenue_by_month "from=$CDYS&to=$TODAY&top=200"
 CDREV=$(val '.data.totals.total')
 cdcheck "ceo drill fin.revenue_by_month: one row for each Persian month of the year so far ($CDMN), and the total is the sum of the months" ".success and .data.totalCount == $CDMN and (.data.rows|length) == $CDMN and ([.data.rows[].amount]|add) == .data.totals.total"
 cdcheck "ceo drill fin.revenue_by_month: the revenue of the year to date is the revenue of the income statement of the ledger" '.success and .data.totals.total == ('"$CDIS"').rev'
+CDREVR=$(jq -c '[.data.rows[]|{month,amount,profit}]' "$B")
+cdcheck "ceo drill fin.revenue_by_month: the profit of the year to date (totals.profit) is the net profit of the income statement, of the CEO dashboard and of the finance dashboard, and it is the sum of the months" '.success and .data.totals.profit == ('"$CDIS"').net and .data.totals.profit == '"$CDNP"' and .data.totals.profit == ('"$CDFD"').netProfitYtd and ([.data.rows[].profit]|add) == .data.totals.profit'
 cdrill fin.cost_by_month "from=$CDYS&to=$TODAY&top=200"
 cdcheck "ceo drill fin.cost_by_month: one row for each Persian month of the year so far ($CDMN), and the total is the sum of the months" ".success and .data.totalCount == $CDMN and (.data.rows|length) == $CDMN and ([.data.rows[].amount]|add) == .data.totals.total"
 cdcheck "ceo drill fin.cost_by_month: revenue less cost of the year to date is the net profit of the income statement and the net profit of the CEO dashboard and of the finance dashboard" '.success and ('"$CDREV"' - .data.totals.total) == ('"$CDIS"').net and ('"$CDREV"' - .data.totals.total) == '"$CDNP"' and ('"$CDREV"' - .data.totals.total) == ('"$CDFD"').netProfitYtd'
+cdcheck "ceo drill fin.cost_by_month: the profit of every month is the one of the revenue drill, which is that month's revenue less its cost; the total is the net profit of the year" '.success and ([.data.rows[]|{month,profit}]) == ('"$CDREVR"'|map({month,profit})) and ([range(0; (.data.rows|length)) as $i | ('"$CDREVR"'[$i].amount) - .data.rows[$i].amount]) == [.data.rows[].profit] and .data.totals.profit == ('"$CDIS"').net'
 as "$CEO_TOKEN" GET "finance/gl/reports/income-statement?From=$CDMS&To=$TODAY"
 CDISM=$(cdx '.data|{rev:([.lines[]|select(.code == "IS.REV" or .code == "IS.OOI" or .code == "IS.NONOPI")|.amount]|add // 0),net:([.lines[]|select(.code == "NET")|.amount]|add // 0)}')
 cdrill fin.revenue_by_month "from=$CDMS&to=$TODAY"
@@ -5944,16 +5971,25 @@ cdcheck "ceo drill fin.bank_unreconciled: the rows are the reconciliations that 
 cdcheck "ceo drill fin.bank_unreconciled: the count is the unapproved reconciliations of the finance dashboard; the totals are the sums of the list" '.success and .data.totalCount == ('"$CDFD"').unapprovedReconciliations and .data.totals.difference == ('"$CDBR"').diff and .data.totals.unmatchedLines == ('"$CDBR"').unmatched'
 
 # --- fin.vouchers_waiting: the draft vouchers (to check) and the checked ones (to finalise), oldest first
+# the paging check needs three waiting vouchers: the scenario prepares three drafts of its own and deletes them after the checks (a draft can be deleted, a finalised voucher cannot)
+CDDV=""
+for CDI in 1 2 3; do
+  as "$FIN_TOKEN" POST finance/gl/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"پیش‌نویس آزمون جزئیات مدیرعامل $CDI\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":1000000},{\"accountCode\":\"10102\",\"credit\":1000000}]}"
+  CDDV="$CDDV $(val .data.id)"
+  check "ceo drills setup: draft voucher $CDI prepared" '.success and .data.status == 0'
+done
 as "$CEO_TOKEN" GET "finance/gl/vouchers?Status=0&PageSize=0"; CDV0=$(jq -c '.data.data|map({id,date:.date[0:10],st:"منتظر بررسی",amount:.totalAmount,no:(if .number != null then (.number|tostring) else "پیش‌نویس \(.temporaryNumber)" end),by:.creatorName})' "$B")
 as "$CEO_TOKEN" GET "finance/gl/vouchers?Status=1&PageSize=0"; CDV1=$(jq -c '.data.data|map({id,date:.date[0:10],st:"منتظر قطعی‌سازی",amount:.totalAmount,no:(if .number != null then (.number|tostring) else "پیش‌نویس \(.temporaryNumber)" end),by:.creatorName})' "$B")
-CDVW=$(jq -nc --argjson a "$CDV0" --argjson b "$CDV1" "$CDJQ"'($a + $b | sort_by(.date, .id)) as $all | {n:($all|length),drafts:($a|length),checked:($b|length),sum:($all|map(.amount)|add // 0),ids:($all|map(.id)),page2:($all|map(.id)|.[5:10]),first:$all[0],rows:($all|map("\(.id)|\(.st)|\(.no)|\(.amount|n)|\(.by)")|sort)}')
+CDVW=$(jq -nc --argjson a "$CDV0" --argjson b "$CDV1" "$CDJQ"'($a + $b | sort_by(.date, .id)) as $all | {n:($all|length),drafts:($a|length),checked:($b|length),sum:($all|map(.amount)|add // 0),ids:($all|map(.id)),page2:($all|map(.id)|.[2:4]),first:$all[0],rows:($all|map("\(.id)|\(.st)|\(.no)|\(.amount|n)|\(.by)")|sort)}')
 CDVD=$(printf '%s' "$CDVW" | jq -r '.first.date // empty')
 cdrill fin.vouchers_waiting "top=200"
+cdnonempty "ceo drill fin.vouchers_waiting: three or more vouchers wait (the three drafts of the scenario), so page 2 of two per page is not empty" "$(jq -r '.page2|length' <<<"$CDVW")"
 cdcheck "ceo drill fin.vouchers_waiting: the rows are the draft and the checked vouchers of the ledger (number, state, amount, who prepared it)" '.success and .data.totalCount == ('"$CDVW"').n and ([.data.rows[]|"\(.id)|\(.state)|\(.number)|\(.amount|n)|\(.creatorName)"]|sort) == ('"$CDVW"').rows'
 cdcheck "ceo drill fin.vouchers_waiting: oldest first (by voucher date, then id), the waiting counts and the amount are those of the two lists" '.success and [.data.rows[].id] == ('"$CDVW"').ids and .data.totals.waitingCheck == ('"$CDVW"').drafts and .data.totals.waitingFinalize == ('"$CDVW"').checked and .data.totals.amount == ('"$CDVW"').sum'
 cdcheck "ceo drill fin.vouchers_waiting: the oldest voucher shows its Persian date and the days it has been waiting" '.success and .data.rows[0].date == '"$(cdpd "$CDVD")"' and .data.rows[0].daysWaiting == '"$(cdlate "$CDVD")"
-cdrill fin.vouchers_waiting "top=5&page=2"
-cdcheck "ceo drill fin.vouchers_waiting: page 2 of 5 is the sixth to the tenth voucher of the order, and the paging is told" '.success and .data.page == 2 and .data.pageSize == 5 and .data.totalCount == ('"$CDVW"').n and [.data.rows[].id] == ('"$CDVW"').page2'
+cdrill fin.vouchers_waiting "top=2&page=2"
+cdcheck "ceo drill fin.vouchers_waiting: page 2 of two per page is the third and the fourth voucher of the order, and the paging is told" '.success and .data.page == 2 and .data.pageSize == 2 and .data.totalCount == ('"$CDVW"').n and [.data.rows[].id] == ('"$CDVW"').page2'
+for CDI in $CDDV; do as "$FIN_TOKEN" DELETE "finance/gl/vouchers/$CDI"; check "ceo drills setup: draft voucher $CDI deleted again" '.success and .data == true'; done
 
 # ===================================================================================== sales
 as "$CEO_TOKEN" GET finance/ceo-dashboard
@@ -5969,28 +6005,34 @@ cdrill sl.pipeline_by_stage "by=product"
 cdcheck "ceo drill sl.pipeline_by_stage: by product the rows are the products of the sales dashboard, with the number and the value of each" '.success and [.data.rows[]|"\(.name)|\(.count)|\(.value|n)"] == ('"$CDSD"').product'
 
 # --- sl.inquiries_open: the inquiries of the four open stages with the value of each
-as "$CEO_TOKEN" GET "sales/inquiries?PageSize=0"
+as "$CEO_TOKEN" GET "sales/inquiries?PageSize=500"
+cdpage "sales inquiries"
 CDIQ=$(cdx '.data.data|map(select(.status == 1 or .status == 2 or .status == 4 or .status == 5))|{n:length,rows:(map("\(.id)|\(.number)|\(.customerName)|\(.productTypeText)|\(.statusText)|\(.receivedDateText)|\(.proposalDueDateText)|\(dd(.proposalDueDate))")|sort)}')
 cdrill sl.inquiries_open "top=200"
+cdnonempty "ceo drill sl.inquiries_open: the scenario has open inquiries (I5 is under review, I6 is being bid on)" "$(jq -r '.n' <<<"$CDIQ")"
 cdcheck "ceo drill sl.inquiries_open: the rows are the inquiries of the four open stages (number, customer, product, stage, dates, days to the deadline), the same as the inquiry list" '.success and .data.totalCount == ('"$CDIQ"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.product)|\(.status)|\(.receivedDate)|\(.proposalDueDate)|\(.daysToDue)"]|sort) == ('"$CDIQ"').rows'
 cdcheck "ceo drill sl.inquiries_open: the value of the rows is the pipeline value, stage by stage as the sales dashboard; the most valuable first" '.success and .data.totals.value == ('"$CDSD"').value and (.data.rows|group_by(.status)|map({key:.[0].status,value:{count:length,value:(map(.value)|add)}})|from_entries) == ('"$CDSD"').stageObj and ([.data.rows[].value] as $v | $v == ($v|sort|reverse))'
 
 # --- sl.proposals_waiting: the draft proposals (below cost and the ones the CEO must approve first)
-as "$CEO_TOKEN" GET "sales/proposals?Status=1&PageSize=0"
+as "$CEO_TOKEN" GET "sales/proposals?Status=1&PageSize=500"
+cdpage "sales proposals"
 CDPW=$(cdx '.data.data|{n:length,price:(map(.price)|add // 0),below:(map(select(.belowCost))|length),ceo:(map(select(.needsCeo))|length),first:(sort_by([(if .belowCost then 0 else 1 end),(if .needsCeo then 0 else 1 end),(0 - .price),.number])|.[0].id),rows:(map("\(.id)|\(.number)|\(.revision)|\(.inquiryNumber)|\(.customerName)|\(.price|n)|\(.estimateTotalCost|n)|\(if .belowCost then "زیر قیمت تمام‌شده" elif .needsCeo then "نیازمند تأیید مدیرعامل" else "عادی" end)")|sort)}')
 cdrill sl.proposals_waiting "top=200"
+cdnonempty "ceo drill sl.proposals_waiting: the scenario has a draft proposal (P6, below cost)" "$(jq -r '.n' <<<"$CDPW")"
 cdcheck "ceo drill sl.proposals_waiting: the rows are the draft proposals (number, revision, inquiry, customer, price, estimated cost, warning), the same as the proposal list" '.success and .data.totalCount == ('"$CDPW"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.revision)|\(.inquiryNumber)|\(.customerName)|\(.price|n)|\(.estimateTotalCost|n)|\(.flags)"]|sort) == ('"$CDPW"').rows'
 cdcheck "ceo drill sl.proposals_waiting: the count and the below-cost count are those of the sales dashboards; below cost first, then the CEO's, then the biggest price" '.success and .data.totalCount == ('"$CDSD"').waiting and .data.totalCount == ('"$CDCS"').salesProposalsWaitingApproval and .data.totals.belowCost == ('"$CDCS"').salesBelowCostProposals and .data.totals.belowCost == ('"$CDPW"').below and .data.totals.needsCeo == ('"$CDPW"').ceo and .data.totals.price == ('"$CDPW"').price and .data.rows[0].id == ('"$CDPW"').first'
 
 # --- sl.proposals_due: the inquiries still being prepared whose deadline is within the days (or past)
 cdpdue() { # cdpdue DAYS : the expectation from the inquiry list (received, under review and bidding stages)
   local lim; lim=$(dd "$1")
-  as "$CEO_TOKEN" GET "sales/inquiries?PageSize=0"
+  as "$CEO_TOKEN" GET "sales/inquiries?PageSize=500"
+  cdpage "sales inquiries"
   CDPD=$(cdx '.data.data|map(select((.status == 1 or .status == 2 or .status == 4) and .proposalDueDate != null and .proposalDueDate[0:10] <= "'"$lim"'"))|{n:length,overdue:(map(select(.proposalDueDate[0:10] < "'"$TODAY"'"))|length),due:(map(.proposalDueDate[0:10])|min),rows:(map("\(.id)|\(.number)|\(.customerName)|\(.statusText)|\(.proposalDueDateText)|\(dd(.proposalDueDate))")|sort)}')
   CDPDD=$(printf '%s' "$CDPD" | jq -r '.due // empty')
 }
 cdpdue 3
 cdrill sl.proposals_due "top=200"
+cdnonempty "ceo drill sl.proposals_due: the scenario has an inquiry in preparation whose deadline is within three days (I5)" "$(jq -r '.n' <<<"$CDPD")"
 cdcheck "ceo drill sl.proposals_due: with the default three days the rows are the inquiries in preparation whose deadline is within three days or past, and the count is the CEO dashboard's" '.success and .data.totalCount == ('"$CDPD"').n and .data.totalCount == ('"$CDCS"').salesProposalsDueSoon and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.status)|\(.proposalDueDate)|\(.daysToDue)"]|sort) == ('"$CDPD"').rows'
 cdcheck "ceo drill sl.proposals_due: the overdue count is that of the list and the nearest deadline comes first" '.success and .data.totals.overdue == ('"$CDPD"').overdue and .data.rows[0].proposalDueDate == '"$(cdpd "$CDPDD")"
 cdpdue 30
@@ -6000,29 +6042,63 @@ cdcheck "ceo drill sl.proposals_due: with 30 days the rows are those of the list
 # --- sl.quotations_expiring: the sent quotations whose validity ends within the days
 cdquo() { # cdquo DAYS
   local lim; lim=$(dd "$1")
-  as "$CEO_TOKEN" GET "sales/quotations?Status=2&PageSize=0"
+  as "$CEO_TOKEN" GET "sales/quotations?Status=2&PageSize=500"
+  cdpage "sales quotations"
   CDQU=$(cdx '.data.data|map(select(.validUntil[0:10] >= "'"$TODAY"'" and .validUntil[0:10] <= "'"$lim"'"))|{n:length,sum:(map(.netAmount)|add // 0),until:(map(.validUntil[0:10])|min),rows:(map("\(.id)|\(.number)|\(.customerName)|\(.netAmount|n)|\(dd(.validUntil))")|sort)}')
   CDQUD=$(printf '%s' "$CDQU" | jq -r '.until // empty')
 }
 cdquo 7
 cdrill sl.quotations_expiring "top=200"
+cdnonempty "ceo drill sl.quotations_expiring: the scenario has a sent quotation that expires within seven days (Q3)" "$(jq -r '.n' <<<"$CDQU")"
 cdcheck "ceo drill sl.quotations_expiring: the rows are the sent quotations that expire within seven days (number, customer, amount, days left), the same as the quotation list" '.success and .data.totalCount == ('"$CDQU"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.netAmount|n)|\(.daysLeft)"]|sort) == ('"$CDQU"').rows'
 cdcheck "ceo drill sl.quotations_expiring: the count and the amount are those of the sales dashboard; the nearest expiry first" '.success and .data.totalCount == ('"$CDSD"').quoN and .data.totals.netAmount == ('"$CDSD"').quoSum and .data.totals.netAmount == ('"$CDQU"').sum and .data.rows[0].validUntil == '"$(cdpd "$CDQUD")"
 cdquo 60
 cdrill sl.quotations_expiring "days=60&top=200"
 cdcheck "ceo drill sl.quotations_expiring: with 60 days the rows are those of the list that expire within 60 days" '.success and .data.totalCount == ('"$CDQU"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.netAmount|n)|\(.daysLeft)"]|sort) == ('"$CDQU"').rows and .data.totals.netAmount == ('"$CDQU"').sum'
 
+# cdbacklog : reads the sales orders ($B = sales/orders?PageSize=500) and prints {"total":N,"rows":{"ID":N}}: what is not invoiced yet on the confirmed (2) and partly delivered (3) orders, worked out here the way the sales backlog of the overview is
+# (each line: its amount times the share of its quantity not yet invoiced; the total is rounded once, each order alone to the rial); it prints nothing when the list is longer than one page
+cdbacklog() {
+python3 -I - "$B" <<'PYK'
+import json, sys
+from decimal import Decimal, ROUND_HALF_UP
+page = json.load(open(sys.argv[1]), parse_float=Decimal, parse_int=Decimal)["data"]
+rows = page["data"]
+if page["totalItems"] > len(rows):
+    sys.exit(1)
+total = Decimal(0)
+each = {}
+for order in rows:
+    if order["status"] not in (2, 3):
+        continue
+    left = Decimal(0)
+    for line in order["lines"]:
+        quantity = line["quantity"]
+        if quantity <= 0:
+            continue
+        left += line["amount"] * max(Decimal(0), quantity - line["invoicedQuantity"]) / quantity
+    total += left
+    each[str(order["id"])] = int(left.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+print(json.dumps({"total": int(total.quantize(Decimal(1), rounding=ROUND_HALF_UP)), "rows": each}))
+PYK
+}
+
 # --- sl.orders_open: confirmed and partly delivered orders with the percent delivered (by the amount of the lines)
-as "$CEO_TOKEN" GET "sales/orders?PageSize=0"
-CDSO=$(cdx '.data.data|map(select(.status == 2 or .status == 3))|{n:length,sum:(map(.netAmount)|add // 0),rows:(map("\(.id)|\(.number)|\(.customerName)|\(.statusText)|\(.netAmount|n)|\(dd(.requestedDeliveryDate))|\((([.lines[].amount]|add // 0) as $t | if $t <= 0 then 0 else ((([.lines[]|if .quantity > 0 then .amount * ([.deliveredQuantity,.quantity]|min) / .quantity else 0 end]|add) * 1000 / $t) | round) / 10 end)|n)")|sort)}')
+as "$CEO_TOKEN" GET "sales/orders?PageSize=500"
+cdpage "sales orders"
+CDBL=$(cdbacklog)
+cdnonempty "ceo drill sl.orders_open: the amount not yet invoiced of the open orders is worked out here from the order lines" "$(jq -r '.total' <<<"${CDBL:-null}")"
+CDSO=$(cdx '.data.data|map(select(.status == 2 or .status == 3))|{n:length,sum:(map(.netAmount)|add // 0),rows:(map("\(.id)|\(.number)|\(.customerName)|\(.statusText)|\(.netAmount|n)|\(dd(.requestedDeliveryDate))|\((([.lines[].amount]|add // 0) as $t | if $t <= 0 then 0 else ((([.lines[]|if .quantity > 0 then .amount * ([.deliveredQuantity,.quantity]|min) / .quantity else 0 end]|add) * 1000 / $t) | round) / 10 end)|n)|\('"$CDBL"'.rows[(.id|tostring)]|n)")|sort)}')
 cdrill sl.orders_open "top=200"
-cdcheck "ceo drill sl.orders_open: the rows are the confirmed and partly delivered orders (number, customer, state, amount, days to delivery, percent delivered), the same as the order list" '.success and .data.totalCount == ('"$CDSO"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.status)|\(.netAmount|n)|\(.daysToDelivery)|\(.deliveredPercent|n)"]|sort) == ('"$CDSO"').rows'
-cdcheck "ceo drill sl.orders_open: the count is the open orders of the sales dashboard and the amount is the sum of the list" '.success and .data.totalCount == ('"$CDSD"').orders and .data.totals.netAmount == ('"$CDSO"').sum'
+cdcheck "ceo drill sl.orders_open: the rows are the confirmed and partly delivered orders (number, customer, state, amount, days to delivery, percent delivered, amount not yet invoiced), the same as the order list" '.success and .data.totalCount == ('"$CDSO"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.status)|\(.netAmount|n)|\(.daysToDelivery)|\(.deliveredPercent|n)|\(.remainingAmount|n)"]|sort) == ('"$CDSO"').rows'
+cdcheck "ceo drill sl.orders_open: the count is the open orders of the sales dashboard, the amount is the sum of the list, and the amount not yet invoiced (in total and of each order) is the one worked out from the order lines" '.success and .data.totalCount == ('"$CDSD"').orders and .data.totals.netAmount == ('"$CDSO"').sum and .data.totals.remainingAmount == '"$CDBL"'.total and ([.data.rows[]|{(.id|tostring): .remainingAmount}]|add) == '"$CDBL"'.rows'
 
 # --- sl.orders_waiting_credit: the draft orders whose credit the finance manager must approve
-as "$CEO_TOKEN" GET "sales/orders?CreditPending=true&PageSize=0"
+as "$CEO_TOKEN" GET "sales/orders?CreditPending=true&PageSize=500"
+cdpage "sales orders waiting for credit"
 CDWC=$(cdx '.data.data|{n:length,sum:(map(.netAmount)|add // 0),first:(sort_by([(0 - (.creditExcess // 0)),(0 - .netAmount),.number])|.[0].id),rows:(map("\(.id)|\(.number)|\(.customerName)|\(.netAmount|n)|\(.creditExcess|m)|\(.creditReason[0:160])")|sort)}')
 cdrill sl.orders_waiting_credit "top=200"
+cdnonempty "ceo drill sl.orders_waiting_credit: the scenario has an order waiting for the credit approval (O3)" "$(jq -r '.n' <<<"$CDWC")"
 cdcheck "ceo drill sl.orders_waiting_credit: the rows are the orders waiting for the credit approval (number, customer, amount, excess over the limit, reason), the same as the order list" '.success and .data.totalCount == ('"$CDWC"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.netAmount|n)|\(.creditExcess|m)|\(.creditReason)"]|sort) == ('"$CDWC"').rows'
 cdcheck "ceo drill sl.orders_waiting_credit: the count is that of the sales dashboard and of the CEO dashboard; the biggest excess first" '.success and .data.totalCount == ('"$CDSD"').credit and .data.totalCount == ('"$CDCS"').salesOrdersWaitingCredit and .data.totals.netAmount == ('"$CDWC"').sum and .data.rows[0].id == ('"$CDWC"').first'
 
@@ -6031,6 +6107,7 @@ as "$CEO_TOKEN" GET "finance/receivables/invoices?PageSize=0"; CDSI=$(jq -c '.da
 as "$CEO_TOKEN" GET finance/receivables/ageing; CDOP=$(jq -c '.data.rows|map({key:(.customerId|tostring),value:.total})|from_entries' "$B")
 CDCU=$(jq -nc --argjson i "$CDSI" --argjson o "$CDOP" "$CDJQ"'[$i[].k] | unique | map(. as $k | ([$i[]|select(.k == $k)]) as $x | {k:$k, name:$x[0].name, count:([$x[]|select(.credit|not)]|length), net:([$x[]|if .credit then (0 - .net) else .net end]|add)} | select(.net != 0)) | {n:length, sales:(map(.net)|add // 0), max:(map(.net)|max), rows:(map("\(.k)|\(.name)|\(.count)|\(.net|n)|\($o[(.k|tostring)]|n)")|sort)}')
 cdrill sl.customers_top "from=$CDYS&to=$TODAY&top=200"
+cdnonempty "ceo drill sl.customers_top: the scenario has a customer with net sales this year (the posted invoice of D1 is dated today)" "$(jq -r '.n' <<<"$CDCU")"
 cdcheck "ceo drill sl.customers_top: the rows are the customers with net sales (posted invoices less credit notes), the invoice count and the open receivables, as the invoice list and the ageing report" '.success and .data.totalCount == ('"$CDCU"').n and ([.data.rows[]|"\(.id)|\(.customerName)|\(.invoices)|\(.sales|n)|\(.openAmount|n)"]|sort) == ('"$CDCU"').rows'
 cdcheck "ceo drill sl.customers_top: the total sales and the number of customers are those of the list; the best customer first" '.success and .data.totals.sales == ('"$CDCU"').sales and .data.totals.customers == ('"$CDCU"').n and .data.rows[0].sales == ('"$CDCU"').max'
 
@@ -6038,6 +6115,8 @@ cdcheck "ceo drill sl.customers_top: the total sales and the number of customers
 as "$CEO_TOKEN" GET "sales/statistics/win-loss?From=${CDYS}T00:00:00&To=${TODAY}T00:00:00"
 CDWL=$(cdx '.data|{won,lost,hit:.hitRatePercent,wonValue:([.byProduct[].wonValue]|add // 0),lostValue:([.byProduct[].lostValue]|add // 0),reasons:(.byReason|map(select(.lost > 0))|sort_by([(0 - .lost),(0 - .lostValue),.name])|map("\(.name)|\(.lost)|\(.lostValue|n)")),noReason:(.lost - ([.byReason[]|select(.lost > 0)|.lost]|add // 0)),noReasonValue:(([.byProduct[].lostValue]|add // 0) - ([.byReason[]|select(.lost > 0)|.lostValue]|add // 0))}')
 cdrill sl.hit_rate_by_month "from=$CDYS&to=$TODAY&top=200"
+cdnonempty "ceo drill sl.hit_rate_by_month: the scenario has a won proposal (P1)" "$(jq -r '.won' <<<"$CDWL")"
+cdnonempty "ceo drill sl.lost_by_reason: the scenario has a lost proposal with its reason (P2)" "$(jq -r '.reasons|length' <<<"$CDWL")"
 cdcheck "ceo drill sl.hit_rate_by_month: one row for each Persian month of the year so far ($CDMN); the totals are the win / loss statistics of the same days" ".success and .data.totalCount == $CDMN and .data.totals.won == ($CDWL).won and .data.totals.lost == ($CDWL).lost and .data.totals.hitRatePercent == ($CDWL).hit and .data.totals.wonValue == ($CDWL).wonValue and .data.totals.lostValue == ($CDWL).lostValue and ([.data.rows[].won]|add) == ($CDWL).won and ([.data.rows[].lost]|add) == ($CDWL).lost"
 as "$CEO_TOKEN" GET "sales/statistics/win-loss?From=${CDMS}T00:00:00&To=${TODAY}T00:00:00"
 CDWM=$(cdx '.data|{won,lost,hit:.hitRatePercent,wonValue:([.byProduct[].wonValue]|add // 0),lostValue:([.byProduct[].lostValue]|add // 0)}')
@@ -6047,6 +6126,14 @@ cdrill sl.lost_by_reason "from=$CDYS&to=$TODAY&top=200"
 cdcheck "ceo drill sl.lost_by_reason: the lost proposals by reason, most first (reason, number, value) and the rest without a recorded reason last, as the win / loss statistics" '.success and ([.data.rows[]|select(.reason != "بدون دلیل ثبت‌شده")|"\(.reason)|\(.lost)|\(.lostValue|n)"]) == ('"$CDWL"').reasons and ([.data.rows[]|select(.reason == "بدون دلیل ثبت‌شده")|.lost]|add // 0) == ('"$CDWL"').noReason and .data.totals.lost == ('"$CDWL"').lost and .data.totals.won == ('"$CDWL"').won and .data.totals.lostValue == ('"$CDWL"').lostValue and .data.totals.hitRatePercent == ('"$CDWL"').hit'
 
 # ===================================================================================== projects
+# --- setup: the project of the finance setup gets contract terms (it joins the portfolio, with no schedule and no indices) and a late-delivery penalty that nobody waives (the one of the project-control section was waived);
+# the project of the project-control section gets a change request that waits for its analysis (the one of that section is closed)
+as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$CDCT,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"contractDeliveryDate\":\"$(dd -14)T00:00:00\",\"dataDateWeekday\":3,\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "ceo drills setup: contract terms of the setup project (it joins the portfolio)" '.success'
+as "$COM_TOKEN" POST $PC/penalties/compute/$CDCT; check "ceo drills setup: late penalty of the setup project: 14 days x 1 percent per week of 1,000,000,000 = 20,000,000, computed and not waived" '.success and (.data|length) == 1 and .data[0].lateDays == 14 and .data[0].amount == 20000000 and .data[0].baseAmount == 1000000000 and .data[0].status == 0'
+CDPEN=$(val '.data[0].id')
+as "$PLAN_TOKEN" POST $PC/changes "$PCCH"; check "ceo drills setup: a change request of the project-control project is drafted" '.success and .data.status == 0'
+CDCHG=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/changes/action "{\"id\":$CDCHG,\"action\":\"register\"}"; check "ceo drills setup: ... and registered, so it waits for the analysis" '.success and .data.status == 1'
 as "$CEO_TOKEN" GET projectcontrol/dashboard
 CDPC=$(cdx '.data|{active:.activeProjects,red:.projectsRed,amber:.projectsAmber,late:.lateActivities,penalty:.penaltyExposure,docs:.overdueClientResponses,steps:.overdueInitiationSteps}')
 
@@ -6057,35 +6144,38 @@ CDPF=$(cdx 'def tr: if . == "red" then "قرمز" elif . == "amber" then "زرد
   def st: if .spiStatus == "red" or .cpiStatus == "red" then "قرمز" elif .spiStatus == "amber" or .cpiStatus == "amber" then "زرد" elif ((.spiStatus|has)|not) and ((.cpiStatus|has)|not) then "بدون داده" else "سبز" end;
   def danger: .spiStatus == "red" or .cpiStatus == "red";
   def warn: (danger|not) and (.spiStatus == "amber" or .cpiStatus == "amber");
-  def ok: (danger|not) and (warn|not) and ((.spiStatus|has) or (.cpiStatus|has));
+  def ok: (danger|not) and (warn|not);
   def rk: "\(.contractId)|\(.projectCode)|\(.contractTitle)|\(st)|\(.physicalPercent|n)|\(.plannedPercent|n)|\(.spi|m)|\(.spiStatus|tr)|\(.cpi|m)|\(.cpiStatus|tr)|\(.lateActivities)|\(.openChanges)|\(.guaranteeAlerts)|\(.overdueMilestones)|\(.penaltyExposure|n)";
-  .data.data | {n:length,late:(map(.lateActivities)|add // 0),penalty:(map(.penaltyExposure)|add // 0),red:(map(select(danger))|length),amber:(map(select(warn))|length),
+  .data.data | {n:length,late:(map(.lateActivities)|add // 0),penalty:(map(.penaltyExposure)|add // 0),red:(map(select(danger))|length),amber:(map(select(warn))|length),okN:(map(select(ok))|length),ids:(map(.contractId)|sort),
     all:(map(rk)|sort),order:(sort_by([(.spi // 9),.projectCode])|map(.contractId)),
     danger:(map(select(danger))|map(rk)|sort),warn:(map(select(warn))|map(rk)|sort),ok:(map(select(ok))|map(rk)|sort),
     dangerOrder:(map(select(danger))|sort_by([(.spi // 9),.projectCode])|map(.contractId)),withForecast:(map(select(.forecastFinish != null))|.[0]|{id:.contractId,date:.forecastFinish[0:10]})}')
 CDPFD=$(printf '%s' "$CDPF" | jq -r '.withForecast.date // empty'); CDPFI=$(printf '%s' "$CDPF" | jq -r '.withForecast.id // empty')
+CDPFIDS=$(printf '%s' "$CDPF" | jq -c '.ids')
+cdnonempty "ceo drill pc.portfolio: the portfolio of the scenario has projects" "$(printf '%s' "$CDPF" | jq -r '.n')"
 CDPFK='"\(.id)|\(.projectCode)|\(.projectTitle)|\(.status)|\(.physicalPercent|n)|\(.plannedPercent|n)|\(.spi|m)|\(.spiStatus)|\(.cpi|m)|\(.cpiStatus)|\(.lateActivities)|\(.openChanges)|\(.guaranteeAlerts)|\(.overdueMilestones)|\(.penaltyExposure|n)"'
 cdrill pc.portfolio "top=200"
 cdcheck "ceo drill pc.portfolio: one row per active project with the progress, the indices and their lights (status, SPI, CPI) and the counts, the same as the portfolio report; the worst SPI first" '.success and .data.totalCount == ('"$CDPF"').n and ([.data.rows[]|'"$CDPFK"']|sort) == ('"$CDPF"').all and [.data.rows[].id] == ('"$CDPF"').order'
-cdcheck "ceo drill pc.portfolio: the summary is of the whole portfolio and is the project dashboard's: projects, red, amber, late activities, penalty exposure" '.success and .data.totals.activeProjects == ('"$CDPC"').active and .data.totals.activeProjects == ('"$CDPF"').n and .data.totals.red == ('"$CDPC"').red and .data.totals.amber == ('"$CDPC"').amber and .data.totals.red == ('"$CDPF"').red and .data.totals.amber == ('"$CDPF"').amber and .data.totals.lateActivities == ('"$CDPC"').late and .data.totals.penaltyExposure == ('"$CDPC"').penalty'
-if [ -n "$CDPFD" ]; then
-  cdcheck "ceo drill pc.portfolio: the forecast finish of project $CDPFI is shown as the Persian date $(pdate "$CDPFD")" '.success and ([.data.rows[]|select(.id == '"$CDPFI"')|.forecastFinish]) == ['"$(cdpd "$CDPFD")"']'
-fi
+cdcheck "ceo drill pc.portfolio: the summary is of the whole portfolio and is the project dashboard's: projects, red, amber, late activities, penalty exposure; red + amber + ok is the number of the projects (one colour for each project)" '.success and .data.totals.activeProjects == ('"$CDPC"').active and .data.totals.activeProjects == ('"$CDPF"').n and .data.totals.red == ('"$CDPC"').red and .data.totals.amber == ('"$CDPC"').amber and .data.totals.red == ('"$CDPF"').red and .data.totals.amber == ('"$CDPF"').amber and .data.totals.ok == ('"$CDPF"').okN and (.data.totals.red + .data.totals.amber + .data.totals.ok) == .data.totals.activeProjects and .data.totals.lateActivities == ('"$CDPC"').late and .data.totals.penaltyExposure == ('"$CDPC"').penalty'
+[ -n "$CDPFD" ] && ok "ceo drill pc.portfolio: the portfolio has a project with a forecast finish (the project of the project-control section was run with a forecast)" || bad "ceo drill pc.portfolio: the portfolio has a project with a forecast finish (the project of the project-control section was run with a forecast)"
+CDPFT=$([ -n "$CDPFD" ] && pdate "$CDPFD")
+cdcheck "ceo drill pc.portfolio: the forecast finish of project ${CDPFI:-0} is shown as the Persian date $CDPFT" '.success and ([.data.rows[]|select(.id == '"${CDPFI:-0}"')|.forecastFinish]) == ['"$(cdpd "$CDPFD")"']'
 cdrill pc.portfolio "status=danger&top=200"
 cdcheck "ceo drill pc.portfolio: status=danger lists the projects whose SPI or CPI is red (the red counter of the dashboard), and the summary still counts the whole portfolio" '.success and .data.totalCount == ('"$CDPC"').red and ([.data.rows[]|'"$CDPFK"']|sort) == ('"$CDPF"').danger and [.data.rows[].id] == ('"$CDPF"').dangerOrder and .data.totals.activeProjects == ('"$CDPF"').n'
 cdrill pc.portfolio "status=warn&top=200"
 cdcheck "ceo drill pc.portfolio: status=warn lists the projects whose SPI or CPI is amber and none is red (one colour per project; the amber counter of the dashboard)" '.success and .data.totalCount == ('"$CDPC"').amber and ([.data.rows[]|'"$CDPFK"']|sort) == ('"$CDPF"').warn and .data.totals.activeProjects == ('"$CDPF"').n'
 cdrill pc.portfolio "status=ok&top=200"
-cdcheck "ceo drill pc.portfolio: status=ok lists the projects with no red and no amber light and at least one index" '.success and ([.data.rows[]|'"$CDPFK"']|sort) == ('"$CDPF"').ok and .data.totals.activeProjects == ('"$CDPF"').n'
+cdcheck "ceo drill pc.portfolio: status=ok lists the projects with no red and no amber light and a project without index values is green too" '.success and .data.totalCount == ('"$CDPF"').okN and ([.data.rows[]|'"$CDPFK"']|sort) == ('"$CDPF"').ok and .data.totals.activeProjects == ('"$CDPF"').n'
+cdcheck "ceo drill pc.portfolio: the setup project has no schedule and no index, so it has no light and is in the ok list" '.success and ([.data.rows[]|select(.id == '"$CDCT"')|[.status,.spi,.cpi,.spiStatus,.cpiStatus]]) == [["بدون داده",null,null,"بدون داده","بدون داده"]]'
 cdrill pc.portfolio "status=OK&top=200"
 cdcheck "ceo drill pc.portfolio: the status is read without case (OK is ok)" '.success and ([.data.rows[]|'"$CDPFK"']|sort) == ('"$CDPF"').ok'
 
 # --- pc.late_activities: the activities of projects whose forecast finish is after the planned finish
 as "$CEO_TOKEN" GET "projectcontrol/activities?OnlyLate=true&PageSize=0"
-CDLA=$(cdx '.data.data|{n:length,crit:(map(select(.isCritical))|length),projects:(map(.contractId)|unique|length),rows:(map("\(.id)|\(.code)|\(.title[0:120])|\(if .status == 0 then "شروع‌نشده" elif .status == 1 then "در حال انجام" elif .status == 2 then "انجام‌شده" else "متوقف" end)|\(.percentCache|n)|\(if .forecastFinish != null and .earlyFinish != null then ([0, (dd(.forecastFinish) - dd(.earlyFinish))]|max) else 0 end)|\(if .isCritical then "بحرانی" else "غیر بحرانی" end)")|sort)}')
+CDLA=$(cdx '.data.data|map(select([.contractId]|inside('"$CDPFIDS"')))|{n:length,crit:(map(select(.isCritical))|length),projects:(map(.contractId)|unique|length),rows:(map("\(.id)|\(.code)|\(.title[0:120])|\(if .status == 0 then "شروع‌نشده" elif .status == 1 then "در حال انجام" elif .status == 2 then "انجام‌شده" else "متوقف" end)|\(.percentCache|n)|\(if .forecastFinish != null and .earlyFinish != null then ([0, (dd(.forecastFinish) - dd(.earlyFinish))]|max) else 0 end)|\(if .isCritical then "بحرانی" else "غیر بحرانی" end)")|sort)}')
 cdrill pc.late_activities "top=200"
 cdcheck "ceo drill pc.late_activities: the rows are the late activities (code, title, state, percent, days late, critical), the same as the activity list" '.success and .data.totalCount == ('"$CDLA"').n and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.status)|\(.percent|n)|\(.lateDays)|\(.critical)"]|sort) == ('"$CDLA"').rows and .data.totals.critical == ('"$CDLA"').crit and .data.totals.projects == ('"$CDLA"').projects'
-as "$CEO_TOKEN" GET "projectcontrol/activities?OnlyLate=true&OnlyCritical=true&PageSize=0"; CDLC=$(cdx '.data.data|{n:length,ids:(map(.id)|sort)}')
+as "$CEO_TOKEN" GET "projectcontrol/activities?OnlyLate=true&OnlyCritical=true&PageSize=0"; CDLC=$(cdx '.data.data|map(select([.contractId]|inside('"$CDPFIDS"')))|{n:length,ids:(map(.id)|sort)}')
 cdrill pc.late_activities "onlyCritical=true&top=200"
 cdcheck "ceo drill pc.late_activities: onlyCritical=true lists the critical late activities of the activity list" '.success and .data.totalCount == ('"$CDLC"').n and ([.data.rows[].id]|sort) == ('"$CDLC"').ids'
 
@@ -6097,6 +6187,7 @@ cdmil() { # cdmil DAYS
 }
 cdmil 30
 cdrill pc.milestones_next "top=200"
+cdnonempty "ceo drill pc.milestones_next: the scenario has payment milestones that are due or planned within 30 days or past (the project of the quality section)" "$(jq -r '.n' <<<"$CDML")"
 cdcheck "ceo drill pc.milestones_next: with the default 30 days the rows are the planned or due milestones whose date is within 30 days or past (title, kind, state, days, amount), the same as the milestone list" '.success and .data.totalCount == ('"$CDML"').n and ([.data.rows[]|"\(.id)|\(.seq)|\(.title)|\(.kind)|\(.status)|\(.daysTo)|\(.amount|n)"]|sort) == ('"$CDML"').rows and .data.totals.amount == ('"$CDML"').sum and .data.totals.overdue == ('"$CDML"').overdue'
 cdmil 365
 cdrill pc.milestones_next "days=365&top=200"
@@ -6106,22 +6197,28 @@ cdcheck "ceo drill pc.milestones_next: with 365 days the rows are those of the l
 as "$CEO_TOKEN" GET "projectcontrol/changes?PageSize=0"
 CDCR=$(cdx '.data.data|map(select(.status == 1 or .status == 2))|{n:length,overdue:(map(select(.dueDate != null and .dueDate[0:10] < "'"$TODAY"'"))|length),projects:(map(select(.dueDate != null and .dueDate[0:10] < "'"$TODAY"'")|.contractId)|unique|length),delta:(map(.requestedPriceDelta)|add // 0),rows:(map("\(.id)|\(.number)|\(.description[0:120])|\(if .status == 1 then "ثبت‌شده" else "در تحلیل" end)|\(dd(.dueDate))|\(.requestedPriceDelta|n)|\(.requestedDaysDelta|n)")|sort)}')
 cdrill pc.change_requests_open "top=200"
+cdnonempty "ceo drill pc.change_requests_open: the scenario has a registered change request (the one of the setup)" "$(jq -r '.n' <<<"$CDCR")"
 cdcheck "ceo drill pc.change_requests_open: the rows are the registered and in-analysis change requests (number, description, state, days to the deadline, price and time effect), the same as the change list" '.success and .data.totalCount == ('"$CDCR"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.description)|\(.status)|\(.daysToDue)|\(.priceDelta|n)|\(.daysDelta|n)"]|sort) == ('"$CDCR"').rows'
 cdcheck "ceo drill pc.change_requests_open: the overdue requests, the projects they belong to and the price effect are those of the list" '.success and .data.totals.overdue == ('"$CDCR"').overdue and .data.totals.overdueProjects == ('"$CDCR"').projects and .data.totals.priceDelta == ('"$CDCR"').delta'
 
 # --- pc.guarantees_expiring: the guarantees whose expiry is within the last alert step of the settings, or past
 as "$CEO_TOKEN" GET "projectcontrol/guarantees?PageSize=0"; CDGD=$(jq -c '.data.data|map({key:(.id|tostring),value:{amount:(.amountDecimal // 0)}})|from_entries' "$B")
 as "$CEO_TOKEN" GET projectcontrol/guarantees/alerts
-CDGA=$(jq -c --argjson d "$CDGD" "$CDJQ"'.data|{n:length,expired:(map(select(.alertLevel == 0))|length),sum:(map($d[(.guaranteeId|tostring)].amount // 0)|add // 0),first:(sort_by([.expiryDate,.guaranteeId])|.[0].expiryDate[0:10]),rows:(map("\(.guaranteeId)|\(.no)|\(.title[0:120])|\(dd(.expiryDate))|\(.daysToExpiry)|\(if .alertLevel == 0 then "منقضی‌شده" else "هشدار \(.alertLevel) روزه" end)")|sort)}' "$B")
+CDGPM=$(cdpmap)
+CDGA=$(jq -c --argjson d "$CDGD" --argjson pm "$CDGPM" "$CDJQ"'.data|map(select(.contractId != null and ([.contractId]|inside('"$CDPFIDS"'))))|{n:length,expired:(map(select(.alertLevel == 0))|length),sum:(map($d[(.guaranteeId|tostring)].amount // 0)|add // 0),first:(sort_by([.expiryDate,.guaranteeId])|.[0].expiryDate[0:10]),rows:(map("\(.guaranteeId)|\(.no)|\(.title[0:120])|\($pm[.expiryDate[0:10]])|\(dd(.expiryDate))|\(.daysToExpiry)|\(if .alertLevel == 0 then "منقضی‌شده" else "هشدار \(.alertLevel) روزه" end)")|sort)}' "$B")
 CDGAD=$(printf '%s' "$CDGA" | jq -r '.first // empty')
 cdrill pc.guarantees_expiring "top=200"
-cdcheck "ceo drill pc.guarantees_expiring: the rows are the guarantees of the alert list (number, title, days to the expiry, alert step), the same as the guarantee alerts of the module" '.success and .data.totalCount == ('"$CDGA"').n and ([.data.rows[]|"\(.id)|\(.no)|\(.title)|\(.daysToExpiry)|\(.daysToExpiry)|\(.alert)"]|sort) == ('"$CDGA"').rows'
+cdnonempty "ceo drill pc.guarantees_expiring: the scenario has a guarantee in its alert steps (PC-G-1 of the project-control section expires within 14 days)" "$(jq -r '.n' <<<"$CDGA")"
+cdcheck "ceo drill pc.guarantees_expiring: the guarantee PC-G-1 is listed in the alert step of 14 days" '.success and ([.data.rows[]|select(.no == "PC-G-1")|.alert]) == ["هشدار 14 روزه"]'
+cdcheck "ceo drill pc.guarantees_expiring: the rows are the guarantees of the alert list (number, title, days to the expiry, alert step), the same as the guarantee alerts of the module" '.success and .data.totalCount == ('"$CDGA"').n and ([.data.rows[]|"\(.id)|\(.no)|\(.title)|\(.expiryDate)|\(.daysToExpiry)|\(.daysToExpiry)|\(.alert)"]|sort) == ('"$CDGA"').rows'
 cdcheck "ceo drill pc.guarantees_expiring: the expired count and the amount are those of the module; the nearest expiry first with its Persian date" '.success and .data.totals.expired == ('"$CDGA"').expired and .data.totals.amount == ('"$CDGA"').sum and .data.rows[0].expiryDate == '"$(cdpd "$CDGAD")"
 
 # --- pc.penalty_exposure: the computed late-delivery penalties that were not waived or negotiated
 as "$CEO_TOKEN" GET "projectcontrol/penalties?PageSize=0"
-CDPN=$(cdx '.data.data|map(select(.status == 0))|{n:(map(select(.amount > 0))|length),sum:(map(.amount)|add // 0),projects:(map(select(.amount > 0)|.contractId)|unique|length),max:(map(.amount)|max),rows:(map(select(.amount > 0)|"\(.id)|\(.subject[0:120])|\(.lateDays)|\(.ratePercentPerWeek|n)|\(.baseAmount|n)|\(.amount|n)")|sort)}')
+CDPN=$(cdx '.data.data|map(select(.status == 0 and ([.contractId]|inside('"$CDPFIDS"'))))|{n:(map(select(.amount > 0))|length),sum:(map(.amount)|add // 0),projects:(map(select(.amount > 0)|.contractId)|unique|length),max:(map(.amount)|max),rows:(map(select(.amount > 0)|"\(.id)|\(.subject[0:120])|\(.lateDays)|\(.ratePercentPerWeek|n)|\(.baseAmount|n)|\(.amount|n)")|sort)}')
 cdrill pc.penalty_exposure "top=200"
+cdnonempty "ceo drill pc.penalty_exposure: the scenario has a computed penalty that nobody waived (the one of the setup)" "$(jq -r '.n' <<<"$CDPN")"
+cdcheck "ceo drill pc.penalty_exposure: the penalty of the setup project is listed with its 14 late days, the weekly rate 1, the base 1,000,000,000 and the amount 20,000,000, under the title of the project" '.success and ([.data.rows[]|select(.id == '"$CDPEN"')|[.lateDays,.ratePercentPerWeek,.baseAmount,.amount,.projectCode,.link]]) == [[14,1,1000000000,20000000,"'"$CDCTT"'","/project-control/penalties"]]'
 cdcheck "ceo drill pc.penalty_exposure: the rows are the computed penalties with an amount (subject, late days, weekly rate, base, amount), the same as the penalty list" '.success and .data.totalCount == ('"$CDPN"').n and ([.data.rows[]|"\(.id)|\(.subject)|\(.lateDays)|\(.ratePercentPerWeek|n)|\(.baseAmount|n)|\(.amount|n)"]|sort) == ('"$CDPN"').rows'
 cdcheck "ceo drill pc.penalty_exposure: the exposure and the number of projects are those of the list; the biggest penalty first" '.success and .data.totals.penaltyExposure == ('"$CDPN"').sum and .data.totals.projects == ('"$CDPN"').projects and .data.rows[0].amount == ('"$CDPN"').max'
 
@@ -6137,6 +6234,7 @@ as "$CEO_TOKEN" GET "projectcontrol/transmittals?OnlyOverdue=true&PageSize=0"
 CDTR=$(cdx '.data.data|map({id,number,due:.responseDue,reference,open:([.lines[]|select(.purpose == 1 and .responseCode == null)]|length)})|map(select(.open > 0 and .due != null))|{n:length,docs:(map(.open)|add // 0),first:(sort_by([.due,.number])|.[0].due[0:10]),rows:(map("\(.id)|\(.number)|\(late(.due))|\(.open)|\(.reference[0:60])")|sort)}')
 CDTRD=$(printf '%s' "$CDTR" | jq -r '.first // empty')
 cdrill pc.client_responses_overdue "top=200"
+cdnonempty "ceo drill pc.client_responses_overdue: the scenario has a transmittal with unanswered documents past the deadline (T1 was due on 2026-10-15)" "$(jq -r '.n' <<<"$CDTR")"
 cdcheck "ceo drill pc.client_responses_overdue: the rows are the transmittals with documents still unanswered past the deadline (number, days late, documents, reference), the same as the transmittal list" '.success and .data.totalCount == ('"$CDTR"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.daysOverdue)|\(.overdueDocuments)|\(.reference)"]|sort) == ('"$CDTR"').rows'
 cdcheck "ceo drill pc.client_responses_overdue: the unanswered documents are the dashboard's overdue client responses; the longest wait first with its Persian deadline" '.success and .data.totals.overdueDocuments == ('"$CDTR"').docs and .data.totals.overdueDocuments == ('"$CDPC"').docs and .data.totals.transmittals == ('"$CDTR"').n and .data.rows[0].responseDue == '"$(cdpd "$CDTRD")"
 
@@ -6145,15 +6243,19 @@ as "$CEO_TOKEN" GET finance/ceo-dashboard
 CDCD=$(cdx '.data|{late:.productionLateOrders,down:.productionMachinesDown,over:.productionOverloadWeeks,maint:.productionMaintenanceOverdue}')
 
 # --- mf.orders_late: the released and in-progress orders that the last scheduler run finishes after their need date
-as "$CEO_TOKEN" GET "production/orders?LateOnly=true&PageSize=0"
+as "$CEO_TOKEN" GET "production/orders?LateOnly=true&PageSize=500"
+cdpage "production late orders"
 CDLO=$(cdx '.data.data|map(select((.status == 1 or .status == 2) and .isLate))|{n:length,days:(map(.daysLate)|add // 0),order:(sort_by([-.daysLate,.number])|map(.id)),rows:(map("\(.id)|\(.number)|\(.workOrderCode)|\(.itemCode)|\(.itemTitle)|\(.quantity|n)|\(if .status == 1 then "آزادشده" else "در حال تولید" end)|\(.needDateText)|\(.plannedFinishText)|\(.daysLate)|\(.operationsDone)|\(.operationCount)")|sort)}')
+cdnonempty "ceo drill mf.orders_late: the scenario has late released or in-progress orders (the last scheduler run of the MES section finishes four orders after their need date)" "$(jq -r '.n' <<<"$CDLO")"
 cdrill mf.orders_late "top=200"
 cdcheck "ceo drill mf.orders_late: the rows are the late released and in-progress orders of the order list (number, work order, item, quantity, state, need date, planned finish, days late, operations), the longest delay first, and the days are summed" '.success and .data.totalCount == ('"$CDLO"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.workOrderCode)|\(.itemCode)|\(.itemTitle)|\(.quantity|n)|\(.status)|\(.needDate)|\(.plannedFinish)|\(.daysLate)|\(.operationsDone)|\(.operationCount)"]|sort) == ('"$CDLO"').rows and [.data.rows[].id] == ('"$CDLO"').order and .data.totals.daysLate == ('"$CDLO"').days'
 cdcheck "ceo drill mf.orders_late: the number of rows is the late orders of the CEO dashboard" '.success and .data.totalCount == ('"$CDCD"').late'
 
 # --- mf.orders_by_status: one row per state of the life cycle
-as "$CEO_TOKEN" GET "production/orders?PageSize=0"
+as "$CEO_TOKEN" GET "production/orders?PageSize=500"
+cdpage "production orders"
 CDOS=$(cdx '.data.data as $o | ($o|length) as $t | {t:$t,open:($o|map(select(.status == 1 or .status == 2))|length),late:($o|map(select((.status == 1 or .status == 2) and .isLate))|length),rows:([["پیش‌نویس",0],["آزادشده",1],["در حال تولید",2],["تکمیل‌شده",3],["بسته‌شده",4],["لغوشده",5]]|map(. as [$name,$s] | ($o|map(select(.status == $s))|length) as $c | ($o|map(select(.status == $s and .isLate))|length) as $l | "\($name)|\($c)|\(if $s == 1 or $s == 2 then $l else 0 end)|\(if $t == 0 then 0 else pc($c;$t) end|n)"))}')
+cdnonempty "ceo drill mf.orders_by_status: the scenario has production orders" "$(jq -r '.t' <<<"$CDOS")"
 cdrill mf.orders_by_status
 cdcheck "ceo drill mf.orders_by_status: six rows in the order of the life cycle with the count, the late ones of the open states and the share of all orders; the total, the open and the late ones are the sums" '.success and .data.totalCount == 6 and ([.data.rows[]|"\(.status)|\(.count)|\(.late)|\(.sharePercent|n)"]) == ('"$CDOS"').rows and .data.totals.total == ('"$CDOS"').t and .data.totals.open == ('"$CDOS"').open and .data.totals.late == ('"$CDOS"').late'
 cdcheck "ceo drill mf.orders_by_status: the late orders are those of the CEO dashboard" '.success and .data.totals.late == ('"$CDCD"').late'
@@ -6164,6 +6266,7 @@ cdwl() { # cdwl WEEKS THRESHOLD
   CDWL=$(cdx '.data|{over:(.overloads|length),items:(.rows|map(. as $r | ($r.cells|map(.capacityHours)|add // 0) as $cap | ($r.cells|map(.loadHours)|add // 0) as $ld | ($r.cells|map(select(.loadPercent != null))|sort_by([-.loadPercent,.weekStart])|.[0]) as $p | {id:$r.workCenterId,code:$r.code,title:$r.title,cap:$cap,load:$ld,pct:(if $cap > 0 then pc(($ld*100|round);($cap*100|round)) else null end),peak:$p.loadPercent,week:$p.weekStartText,over:($r.cells|map(select(.overloaded))|length)})|sort_by([-.over,-(.peak // 0),.code]))}|{over:.over,ids:(.items|map(.id)),caps:(.items|map(.cap)|add // 0|r2),loads:(.items|map(.load)|add // 0|r2),rows:(.items|map("\(.id)|\(.code)|\(.title)|\(.cap|r2|n)|\(.load|r2|n)|\(.pct|m)|\(.peak|m)|\(.week)|\(.over)"))}')
 }
 cdwl 4 110
+cdnonempty "ceo drill mf.work_center_load: the load report of the plant has work centres" "$(jq -r '.ids|length' <<<"$CDWL")"
 cdrill mf.work_center_load "top=200"
 cdcheck "ceo drill mf.work_center_load: per work centre the capacity, the load, the load percent, the peak week and the overloaded weeks of the next 4 weeks at 110 percent, as the load report of the module; the most overloaded first, and the totals are the sums" '.success and .data.totalCount == (.data.rows|length) and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.capacityHours|n)|\(.loadHours|n)|\(.loadPercent|m)|\(.peakPercent|m)|\(.peakWeek)|\(.overloadedWeeks)"]) == ('"$CDWL"').rows and .data.totals.overloadWeeks == ('"$CDWL"').over and .data.totals.capacityHours == ('"$CDWL"').caps and .data.totals.loadHours == ('"$CDWL"').loads'
 cdcheck "ceo drill mf.work_center_load: the overloaded weeks are those of the CEO dashboard" '.success and .data.totals.overloadWeeks == ('"$CDCD"').over'
@@ -6174,23 +6277,29 @@ cdrill mf.work_center_load "weeks=27"; cdmsg "ceo drill mf.work_center_load: 27 
 cdrill mf.work_center_load "threshold=49"; cdmsg "ceo drill mf.work_center_load: a threshold of 49 is refused with the range" "مقدار «threshold» باید بین 50 و 500 باشد."
 
 # --- mf.machines_down: the machines whose state is down, with the open breakdown order that tells since when
-as "$CEO_TOKEN" GET "production/machines?Status=2&PageSize=0"; CDMM=$(jq -c '.data.data' "$B")
-as "$CEO_TOKEN" GET "production/maintenance/orders?Kind=2&OpenOnly=true&PageSize=0"
+as "$CEO_TOKEN" GET "production/machines?Status=2&PageSize=500"
+cdpage "production machines that are down"
+CDMM=$(jq -c '.data.data' "$B")
+as "$CEO_TOKEN" GET "production/maintenance/orders?Kind=2&OpenOnly=true&PageSize=500"
+cdpage "production breakdown orders that are open"
 CDMD=$(cdx '.data.data as $o | '"$CDMM"' as $m | ($o|group_by(.machineId)|map(sort_by(.id)|last)|map({key:(.machineId|tostring),value:.})|from_entries) as $last | ($m|map(. as $x | $last[($x.machineId|tostring)] as $w | {id:$x.machineId,title:$x.title,wc:$x.workCenterCode,model:([$x.maker,$x.model]|map(select(. != null and . != ""))|join(" ")),since:$w.downtimeStartText,days:(if $w.downtimeStart != null then late($w.downtimeStart) else null end),order:$w.number,task:$w.task})|sort_by([-(.days // -1),.title])) as $items | {n:($items|length),ids:($items|map(.id)),rows:($items|map("\(.id)|\(.title)|\(.wc)|\(.model)|\(.since)|\(.days)|\(.order)|\(.task)"))}')
+cdnonempty "ceo drill mf.machines_down: the scenario has a machine that is down (the CNC machine of the MES section stopped again and its breakdown order is still open)" "$(jq -r '.n' <<<"$CDMD")"
 cdrill mf.machines_down "top=200"
 cdcheck "ceo drill mf.machines_down: the machines that are down with their work centre, the start of the breakdown, the days down, the open breakdown order and its task, the longest breakdown first" '.success and .data.totalCount == ('"$CDMD"').n and ([.data.rows[]|"\(.id)|\(.title)|\(.workCenterCode)|\(.model)|\(.downSince)|\(.daysDown)|\(.maintenanceOrder)|\(.task)"]) == ('"$CDMD"').rows and [.data.rows[].id] == ('"$CDMD"').ids'
 cdcheck "ceo drill mf.machines_down: the number of rows is the machines down of the CEO dashboard" '.success and .data.totalCount == ('"$CDCD"').down'
+cdcheck "ceo drill mf.machines_down: the CNC machine of the MES section is in the list with its work centre MF-CNC and the task of its open breakdown order" '.success and ([.data.rows[]|select(.id == '"${MBM:-0}"')|[.workCenterCode,.task]]) == [["MF-CNC","توقف مجدد ماشین فرز"]]'
 
 # --- mf.maintenance_overdue: the open and in-progress maintenance orders whose due date is past
-as "$CEO_TOKEN" GET "production/maintenance/orders?OpenOnly=true&PageSize=0"
+as "$CEO_TOKEN" GET "production/maintenance/orders?OpenOnly=true&PageSize=500"
+cdpage "production maintenance orders that are open"
 CDMO=$(cdx '.data.data|map(select(.dueDate != null and .dueDate[0:10] < "'"$TODAY"'"))|{n:length,hours:(map(.estimatedHours)|add // 0),first:(sort_by([.dueDate[0:10],.number])|.[0].dueDate[0:10]),order:(sort_by([.dueDate[0:10],.number])|map(.id)),rows:(map("\(.id)|\(.number)|\(.machineTitle)|\(if .kind == 1 then "پیشگیرانه" else "خرابی" end)|\(.task[0:120])|\(if .status == 0 then "باز" else "در حال انجام" end)|\(.dueDateText)|\(late(.dueDate))|\(.estimatedHours|n)"))}')
 CDMOF=$(printf '%s' "$CDMO" | jq -r '.first // empty')
+cdnonempty "ceo drill mf.maintenance_overdue: the scenario has an open maintenance order past its due date (the day-plan order of the MES section, due 2026-08-09, stays open)" "$(jq -r '.n' <<<"$CDMO")"
 cdrill mf.maintenance_overdue "top=200"
 cdcheck "ceo drill mf.maintenance_overdue: the open and in-progress orders past their due date (machine, kind, task, state, due date, days late, estimated hours), the oldest first; the hours are summed" '.success and .data.totalCount == ('"$CDMO"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.machine)|\(.kind)|\(.task)|\(.status)|\(.dueDate)|\(.daysOverdue)|\(.estimatedHours|n)"]) == ('"$CDMO"').rows and [.data.rows[].id] == ('"$CDMO"').order and .data.totals.estimatedHours == ('"$CDMO"').hours'
 cdcheck "ceo drill mf.maintenance_overdue: the number of rows is the overdue maintenance of the CEO dashboard" '.success and .data.totalCount == ('"$CDCD"').maint'
-if [ -n "$CDMOF" ]; then
-  cdcheck "ceo drill mf.maintenance_overdue: the oldest due date is shown as the Persian date $(pdate "$CDMOF")" '.success and .data.rows[0].dueDate == '"$(cdpd "$CDMOF")"
-fi
+cdnonempty "ceo drill mf.maintenance_overdue: the oldest overdue order has a due date" "$CDMOF"
+cdcheck "ceo drill mf.maintenance_overdue: the oldest due date is shown as the Persian date $(pdate "${CDMOF:-$TODAY}")" '.success and .data.rows[0].dueDate == '"$(cdpd "${CDMOF:-$TODAY}")"
 
 # --- mf.oee_by_work_center: availability, performance, quality and OEE of every work centre in the range
 cdoee() { # cdoee FROM TO
@@ -6201,6 +6310,7 @@ cdoecheck() { # cdoecheck NAME : the last drill answer against the expectation C
   cdcheck "$1" '.success and .data.totalCount == ('"$CDOE"').n and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.plannedHours|n)|\(.downtimeHours|n)|\(.bookedRunHours|n)|\(.goodQty|n)|\(.scrapQty|n)|\(.availabilityPercent|m)|\(.performancePercent|m)|\(.qualityPercent|m)|\(.oeePercent|m)"]|sort) == ('"$CDOE"').rows and [.data.rows[].id] == ('"$CDOE"').order and .data.totals.availabilityPercent == ('"$CDOE"').av and .data.totals.performancePercent == ('"$CDOE"').pf and .data.totals.qualityPercent == ('"$CDOE"').ql and .data.totals.oeePercent == ('"$CDOE"').oee'
 }
 cdoee "$CDYS" "$TODAY"
+cdnonempty "ceo drill mf.oee_by_work_center: the OEE report of the plant has work centres" "$(jq -r '.n' <<<"$CDOE")"
 cdrill mf.oee_by_work_center "from=$CDYS&to=$TODAY&top=200"
 cdoecheck "ceo drill mf.oee_by_work_center: from the start of the Persian year to today every work centre shows the hours, the quantities and the four percents of the OEE report, the lowest OEE first, and the totals are those of the sums"
 cdoee "$CDMS" "$TODAY"
@@ -6210,6 +6320,9 @@ cdoecheck "ceo drill mf.oee_by_work_center: without a range it is the Persian mo
 cdcheck "ceo drill mf.oee_by_work_center: the OEE of the month so far is the OEE of the production dashboard" '.success and .data.totals.oeePercent == ('"$CDOD"').oee'
 
 # ===================================================================================== quality
+# an open minor report whose decision deadline is five days past (reported 20 days ago, the deadline set by QC) makes the list of the overdue reports non-empty; a report cannot be deleted, it stays in the database
+as "$QC_TOKEN" POST inventory/quality/ncr "{\"reportDate\":\"$(dd -20)T00:00:00\",\"dueDate\":\"$(dd -5)T00:00:00\",\"source\":1,\"severity\":1,\"disposition\":3,\"itemId\":$RAW,\"quantity\":1,\"description\":\"گزارش عدم انطباق آزمون جزئیات مدیرعامل\"}"; CDNCRO=$(val .data.id)
+check "ceo drills setup: an open minor report whose decision deadline is five days past is made for the overdue list" '.success and .data.status == 0 and .data.severity == 1 and .data.dueDate[0:10] == "'"$(dd -5)"'"'
 as "$CEO_TOKEN" GET quality/dashboard
 CDQD=$(cdx '.data|{ncrOver:.overdueNcrs,capaOver:.overdueCapas,calOver:.calibrationOverdue,complOpen:.complaintsOpen,complOver:.complaintsOverdue,hp:.pendingHPoints}')
 as "$CEO_TOKEN" GET finance/ceo-dashboard
@@ -6226,9 +6339,9 @@ done
 CDNP=$(cdpmap "$(jq -nc --argjson l "$CDNL" --argjson d "$CDND" '[$l,$d]')")
 cdncrx() { # cdncrx FILTER : the expectation for the open reports that pass the jq filter
   CDNX=$(jq -nc --argjson l "$CDNL" --argjson d "$CDND" --argjson p "$CDNP" "$CDJQ"'def sev: if .severity == 2 then "عمده" elif .severity == 1 then "جزئی" else "طبقه‌بندی‌نشده" end;
-    def stt: if .status == 0 then "باز" elif .status == 1 then "تصمیم تاییدشده" else "تصمیم اجراشده" end;
+    def stt: if .status == 0 then "باز" elif .status == 1 then "تصمیم تأییدشده" else "تصمیم اجراشده" end;
     def src: ["","بازرسی ورودی","حین ساخت","بازرسی نهایی","مشتری","پیمانکار"][.source];
-    def dsp: ["تعیین‌نشده","استفاده با مجوز ارفاقی","دوباره‌کاری","تعمیر","ضایعات","مرجوعی به تامین‌کننده"][.disposition];
+    def dsp: ["تعیین‌نشده","استفاده با مجوز ارفاقی","دوباره‌کاری","تعمیر","ضایعات","مرجوعی به تأمین‌کننده"][.disposition];
     def due: $d[(.id|tostring)];
     def lt: if .status == 0 and due != null and due < "'"$TODAY"'" then late(due) else 0 end;
     $l | map(select('"$1"')) | sort_by([-.severity,.reportDate[0:19],.number]) as $s
@@ -6239,6 +6352,7 @@ cdncrcheck() { # cdncrcheck NAME : the last drill answer against the expectation
   cdcheck "$1" '.success and .data.totalCount == ('"$CDNX"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.reportDate)|\(.ageDays)|\(.severity)|\(.status)|\(.source)|\(.disposition)|\(.itemCode)|\(.itemTitle)|\(.quantity|n)|\(.providerName)|\(.workOrderCode)|\(.dueDate)|\(.daysOverdue)"]) == ('"$CDNX"').rows and [.data.rows[].id] == ('"$CDNX"').order and .data.totals.overdue == ('"$CDNX"').overdue and .data.totals.major == ('"$CDNX"').major and .data.totals.minor == ('"$CDNX"').minor and .data.totals.notClassified == ('"$CDNX"').nc'
 }
 cdncrx true
+cdnonempty "ceo drill qc.ncr_open: the scenario has open reports (the ones of the NCR sections that are not closed, and the one of the setup)" "$(jq -r '.n' <<<"$CDNX")"
 cdrill qc.ncr_open "top=200"
 cdncrcheck "ceo drill qc.ncr_open: the open reports (not closed, not cancelled) with the date, the age, the severity, the state, the source, the decision, the item, the quantity, the provider, the work order, the decision deadline and the days past it, as the NCR list and the reports themselves; the worst and oldest first"
 cdcheck "ceo drill qc.ncr_open: the reports past their decision deadline are the overdue NCRs of the quality dashboard" '.success and .data.totals.overdue == ('"$CDQD"').ncrOver'
@@ -6251,6 +6365,12 @@ cdncrcheck "ceo drill qc.ncr_open: severity=minor (without case) lists only the 
 cdncrx '.severity == 0'
 cdrill qc.ncr_open "severity=NotClassified&top=200"
 cdncrcheck "ceo drill qc.ncr_open: severity=NotClassified lists only the reports that are not classified yet"
+cdncrx 'lt != 0'
+cdrill qc.ncr_open "onlyOverdue=true&top=200"
+cdncrcheck "ceo drill qc.ncr_open: onlyOverdue=true lists only the reports past their decision deadline, with the counts of the severities of that list"
+cdnonempty "ceo drill qc.ncr_open: the scenario has an open report past its decision deadline (the report of the setup, five days past)" "$(jq -r '.n' <<<"$CDNX")"
+cdcheck "ceo drill qc.ncr_open: onlyOverdue=true opens exactly the overdue NCRs of the quality dashboard, the figure the KPI shows" '.success and .data.totalCount == ('"$CDQD"').ncrOver and .data.totals.overdue == ('"$CDQD"').ncrOver'
+cdcheck "ceo drill qc.ncr_open: the report of the setup is listed with its 20 days of age, its 5 days past the deadline and the Persian date of the deadline" '.success and ([.data.rows[]|select(.id == '"${CDNCRO:-0}"')|[.ageDays,.daysOverdue,.dueDate,.severity,.status]]) == [[20,5,"'"$(pdate "$(dd -5)")"'","جزئی","باز"]]'
 
 # --- qc.capa_overdue: the actions past their due date (an implemented one past its effectiveness deadline)
 as "$CEO_TOKEN" GET "quality/capas/overdue?PageSize=0"
@@ -6261,29 +6381,36 @@ CDCP=$(cdx "$(cdpmap)"' as $P | def pp($x): if $x == null then null else $P[$x[0
   .data.data | sort_by([-lt,.number]) as $s
   | {n:($s|length),order:($s|map(.id)),eff:($s|map(select(.status == 2))|length),noOwner:($s|map(select(.ownerUserId == null))|length),
      rows:($s|map("\(.id)|\(.number)|\(src)|\(.problem[0:120])|\(stt)|\(.ownerName)|\(pp(.dueDate))|\(pp(.effectivenessDueDate))|\(lt)|\(if .autoDrafted then "بله" else "خیر" end)"))}')
+cdnonempty "ceo drill qc.capa_overdue: the scenario has an overdue action (the late action of the CAPA section, due five days ago)" "$(jq -r '.n' <<<"$CDCP")"
 cdrill qc.capa_overdue "top=200"
 cdcheck "ceo drill qc.capa_overdue: the overdue actions (source, problem, state, owner, due date, effectiveness deadline, days late, auto-drafted), the longest delay first, as the overdue list of the module" '.success and .data.totalCount == ('"$CDCP"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.source)|\(.problem)|\(.status)|\(.ownerName)|\(.dueDate)|\(.effectivenessDueDate)|\(.daysOverdue)|\(.autoDrafted)"]) == ('"$CDCP"').rows and [.data.rows[].id] == ('"$CDCP"').order and .data.totals.effectivenessLate == ('"$CDCP"').eff and .data.totals.withoutOwner == ('"$CDCP"').noOwner'
 cdcheck "ceo drill qc.capa_overdue: the number of rows is the overdue actions of the quality dashboard" '.success and .data.totalCount == ('"$CDQD"').capaOver'
 
 # --- qc.calibration_due: the equipment that is overdue, has no date, or falls due within the days
-cdcal() { # cdcal DAYS
-  as "$CEO_TOKEN" GET "quality/equipment/due?Days=$1&PageSize=0"
+cdcal() { # cdcal DAYS : the equipment due within DAYS days; 0 is the overdue and the never calibrated equipment only (the module reads a limit of 0 as its 30 days, so the list of 30 days is read and cut here)
+  as "$CEO_TOKEN" GET "quality/equipment/due?Days=$(( $1 == 0 ? 30 : $1 ))&PageSize=0"
   CDCL=$(cdx "$(cdpmap)"' as $P | def pp($x): if $x == null then null else $P[$x[0:10]] end;
     def ty: {"1":"ابزار ابعادی","2":"گیج","3":"فشارسنج","4":"دماسنج","5":"ابزار الکتریکی","6":"تجهیز NDT","7":"ابزار پایه‌ی تست"}[(.type|tostring)] // "سایر";
     def stt: ["کالیبره","نزدیک سررسید","سررسیدگذشته","از رده خارج"][.status] // "بدون نیاز به کالیبراسیون";
-    .data.data | {n:length,overdue:(map(select(.nextDue == null or .daysToDue < 0))|length),never:(map(select(.nextDue == null))|length),soon:(map(select(.nextDue != null and .daysToDue >= 0))|length),ids:(map(.id)),
+    .data.data | (if '"$1"' == 0 then map(select(.nextDue == null or .daysToDue < 0)) else . end) | {n:length,overdue:(map(select(.nextDue == null or .daysToDue < 0))|length),never:(map(select(.nextDue == null))|length),soon:(map(select(.nextDue != null and .daysToDue >= 0))|length),ids:(map(.id)),
       rows:(map("\(.id)|\(.code)|\(.name)|\(ty)|\(.location)|\(stt)|\(pp(.lastCalibrated))|\(pp(.nextDue))|\(.daysToDue)"))}')
 }
 cdcalcheck() { # cdcalcheck NAME
   cdcheck "$1" '.success and .data.totalCount == ('"$CDCL"').n and ([.data.rows[]|"\(.id)|\(.code)|\(.name)|\(.type)|\(.location)|\(.status)|\(.lastCalibrated)|\(.nextDue)|\(.daysToDue)"]) == ('"$CDCL"').rows and [.data.rows[].id] == ('"$CDCL"').ids and .data.totals.overdue == ('"$CDCL"').overdue and .data.totals.neverCalibrated == ('"$CDCL"').never and .data.totals.dueSoon == ('"$CDCL"').soon'
 }
 cdcal 30
+cdnonempty "ceo drill qc.calibration_due: the scenario has equipment in the due list (the instrument that falls due within 30 days and the overdue ones)" "$(jq -r '.n' <<<"$CDCL")"
 cdrill qc.calibration_due "top=200"
 cdcalcheck "ceo drill qc.calibration_due: with the default 30 days the equipment is that of the due list (type, place, state, last calibration, next due, days to it), the oldest due date first; overdue, never calibrated and due soon are counted"
 cdcheck "ceo drill qc.calibration_due: the overdue equipment is that of the quality dashboard" '.success and .data.totals.overdue == ('"$CDQD"').calOver'
 cdcal 365
 cdrill qc.calibration_due "days=365&top=200"
 cdcalcheck "ceo drill qc.calibration_due: days=365 lists the equipment due within a year"
+cdcal 0
+cdrill qc.calibration_due "days=0&top=200"
+cdcalcheck "ceo drill qc.calibration_due: days=0 lists only the equipment that is overdue or has no date"
+cdnonempty "ceo drill qc.calibration_due: the scenario has overdue equipment (the micrometer whose certificate expired)" "$(jq -r '.n' <<<"$CDCL")"
+cdcheck "ceo drill qc.calibration_due: days=0 opens exactly the overdue equipment of the quality dashboard, the figure the KPI shows" '.success and .data.totalCount == ('"$CDQD"').calOver and .data.totals.overdue == ('"$CDQD"').calOver'
 
 # --- qc.complaints_open: the complaints that are not closed; the late ones first
 cdcomp() { # cdcomp ONLYOVERDUE (true or false)
@@ -6302,10 +6429,12 @@ cdcompcheck() { # cdcompcheck NAME
   cdcheck "$1" '.success and .data.totalCount == ('"$CDQC2"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.workOrderCode)|\(.receivedDate)|\(.severity)|\(.status)|\(.responseDue)|\(.daysOverdue)|\(.ncr)|\(.capa)"]) == ('"$CDQC2"').rows and [.data.rows[].id] == ('"$CDQC2"').order and .data.totals.overdue == ('"$CDQC2"').late and .data.totals.open == ('"$CDQC2"').n'
 }
 cdcomp false
+cdnonempty "ceo drill qc.complaints_open: the scenario has a complaint that is not closed (the second complaint of the quality section is left open)" "$(jq -r '.n' <<<"$CDQC2")"
 cdrill qc.complaints_open "top=200"
 cdcompcheck "ceo drill qc.complaints_open: the complaints that are not closed (received, under review, answered) with the dates, the severity, the state, the deadline, the days late and the links to a report and an action; the late ones first, then by deadline"
 cdcheck "ceo drill qc.complaints_open: the open and the late complaints are those of the quality dashboard" '.success and .data.totals.overdue == ('"$CDQD"').complOver and .data.totalCount == ('"$CDQD"').complOpen'
 cdcomp true
+cdnonempty "ceo drill qc.complaints_open: the scenario has a complaint past its deadline (received 20 days ago, answered within 10)" "$(jq -r '.n' <<<"$CDQC2")"
 cdrill qc.complaints_open "overdueOnly=true&top=200"
 cdcompcheck "ceo drill qc.complaints_open: overdueOnly=true lists only the complaints past the deadline, and the late count still counts all of them"
 
@@ -6320,6 +6449,7 @@ CDHP=$(cdx "$(cdpmap)"' as $P | '"$CDIT"' as $ok | def pp($x): if $x == null the
   .data.data | map(select(hold and ([.itpId] | inside($ok)))) | sort_by([(if .plannedDate == null then 1 else 0 end),.plannedDate[0:19],.itpNumber,.itemNo]) as $s
   | {n:($s|length),order:($s|map(.activityId)),wos:($s|map(.workOrderId)|unique|length),late:($s|map(select(lt > 0))|length),
      rows:($s|map("\(.activityId)|\(.itpNumber)|\(.workOrderCode)|\(.itemNo)|\(.activity[0:120])|\(pts)|\(stt)|\(pp(.plannedDate))|\(lt)|\(pp(.witnessDeadline))"))}')
+cdnonempty "ceo drill qc.h_points_pending: the scenario has activities with a hold point that are not done (the plan of the pump work order)" "$(jq -r '.n' <<<"$CDHP")"
 cdrill qc.h_points_pending "top=200"
 cdcheck "ceo drill qc.h_points_pending: the activities with a hold point (H) of the approved or running plans that are not done, with the plan, the work order, the item, the parties and their points in Persian, the state, the planned date, the days late and the witness deadline; planned ones first" '.success and .data.totalCount == ('"$CDHP"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.workOrderCode)|\(.itemNo)|\(.activity)|\(.points)|\(.status)|\(.plannedDate)|\(.daysLate)|\(.witnessDeadline)"]) == ('"$CDHP"').rows and [.data.rows[].id] == ('"$CDHP"').order and .data.totals.workOrders == ('"$CDHP"').wos and .data.totals.late == ('"$CDHP"').late'
 cdcheck "ceo drill qc.h_points_pending: the number of rows is the pending hold points of the quality dashboard" '.success and .data.totalCount == ('"$CDQD"').hp'
@@ -6345,17 +6475,18 @@ done
 CDDP=$(cdpmap "$(jq -nc --argjson i "$CDDI" --argjson r "$CDDR" '[$i,$r]')")
 cdqdx() { # cdqdx WITHINVENTORY WITHCONTROLLED (true or false)
   CDDX=$(jq -nc --argjson i "$CDDI" --argjson r "$CDDR" --argjson p "$CDDP" "$CDJQ"'def tt: {"7":"تعدیل افزایشی","8":"تعدیل کاهشی","14":"فروش ضایعات","15":"موجودی اول دوره"}[(.type|tostring)];
-    ($i|map("inv-\(.id)|سند انبار|\(.number)|\(tt + (if (.warehouseTitle // "") == "" then "" else " — " + .warehouseTitle end))|پیش‌نویس، منتظر تایید|\($p[.documentDate[0:10]])|\(late(.documentDate))")) as $inv
-    | ($r|map("rev-\(.id)|سند کنترل‌شده|\(.code) / \(.revision)|\(.title)|\(if .status == 1 then "بررسی‌شده، منتظر تایید" else "پیش‌نویس، منتظر بررسی" end)|\(if .status == 1 and .reviewedAt != null then "\($p[.reviewedAt[0:10]])|\(late(.reviewedAt))" else "?" end)")) as $rev
+    ($i|map("inv-\(.id)|سند انبار|\(.number)|\(tt + (if (.warehouseTitle // "") == "" then "" else " — " + .warehouseTitle end))|پیش‌نویس، منتظر تأیید|\($p[.documentDate[0:10]])|\(late(.documentDate))")) as $inv
+    | ($r|map("rev-\(.id)|سند کنترل‌شده|\(.code) / \(.revision)|\(.title)|\(if .status == 1 then "بررسی‌شده، منتظر تأیید" else "پیش‌نویس، منتظر بررسی" end)|\(if .status == 1 and .reviewedAt != null then "\($p[.reviewedAt[0:10]])|\(late(.reviewedAt))" else "?" end)")) as $rev
     | (if '"$1"' then $inv else [] end) + (if '"$2"' then $rev else [] end) | {n:length,rows:sort,inv:(if '"$1"' then ($inv|length) else 0 end),rev:(if '"$2"' then ($rev|length) else 0 end)}')
 }
 cdqdcheck() { # cdqdcheck NAME : the rows (the draft revisions without their date, which the module does not show), the counts and the order by the days waited
   cdcheck "$1" '.success and .data.totalCount == ('"$CDDX"').n and ([.data.rows[]|"\(.id)|\(.kind)|\(.number)|\(.title)|\(.status)|\(if .status == "پیش‌نویس، منتظر بررسی" then "?" else "\(.since)|\(.waitingDays)" end)"]|sort) == ('"$CDDX"').rows and .data.totals.inventoryDocuments == ('"$CDDX"').inv and .data.totals.controlledRevisions == ('"$CDDX"').rev and ([.data.rows[].waitingDays]) == ([.data.rows[].waitingDays]|sort|reverse)'
 }
 cdqdx true true
+cdnonempty "ceo drill qc.documents_waiting: the scenario has documents that wait (the two drafts of the setup)" "$(jq -r '.n' <<<"$CDDX")"
 cdrill qc.documents_waiting "top=200"
 cdqdcheck "ceo drill qc.documents_waiting: all the documents that wait are the draft stock documents that need an approval and the draft or reviewed revisions of the controlled documents, the longest wait first"
-cdcheck "ceo drill qc.documents_waiting: the two new drafts are in the rows with their Persian title, state and the days they waited (9 and 3), the older first" '.success and ([.data.rows[]|select(.id == "inv-'"$CDDA"'" or .id == "inv-'"$CDDB"'")|"\(.id)|\(.kind)|\(.title)|\(.status)|\(.waitingDays)"]) == ["inv-'"$CDDA"'|سند انبار|تعدیل افزایشی — انبار مواد و قطعات|پیش‌نویس، منتظر تایید|9","inv-'"$CDDB"'|سند انبار|موجودی اول دوره — انبار مواد و قطعات|پیش‌نویس، منتظر تایید|3"]'
+cdcheck "ceo drill qc.documents_waiting: the two new drafts are in the rows with their Persian title, state and the days they waited (9 and 3), the older first" '.success and ([.data.rows[]|select(.id == "inv-'"$CDDA"'" or .id == "inv-'"$CDDB"'")|"\(.id)|\(.kind)|\(.title)|\(.status)|\(.waitingDays)"]) == ["inv-'"$CDDA"'|سند انبار|تعدیل افزایشی — انبار مواد و قطعات|پیش‌نویس، منتظر تأیید|9","inv-'"$CDDB"'|سند انبار|موجودی اول دوره — انبار مواد و قطعات|پیش‌نویس، منتظر تأیید|3"]'
 cdcheck "ceo drill qc.documents_waiting: the Persian dates of the two new drafts are '$(pdate "$(dd -9)")' and '$(pdate "$(dd -3)")'" '.success and ([.data.rows[]|select(.id == "inv-'"$CDDA"'" or .id == "inv-'"$CDDB"'")|.since]) == ["'"$(pdate "$(dd -9)")"'","'"$(pdate "$(dd -3)")"'"]'
 cdqdx true false
 cdrill qc.documents_waiting "source=inventory&top=200"
@@ -6369,25 +6500,37 @@ as "$CEO_TOKEN" GET finance/ceo-dashboard
 check "ceo drills: the two drafts are deleted again and the documents waiting for approval are what they were" ".success and .data.documentsWaitingApproval == $CDQ0"
 
 # ===================================================================================== inventory
+# --- setup: an item of its own (minimum 40) with a purchase receipt of 30 pieces at 250,000, an issue of 4 to production and a scrap receipt of 20, all dated today, so that the money of the movements and the scrap rule of the minimum are known exactly;
+# a second request for the item is left submitted, so that the list of the open requests is not empty. The purchase-order rule is off only while the receipt is made
+item CDTI "{\"code\":\"77.30.00.901.1\",\"title\":\"قطعه‌ی آزمون جزئیات مدیرعامل\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":40,\"requiresIncomingInspection\":false}" "ceo drills setup: the item of the warehouse drills (minimum stock 40)"
+as "$ADMIN_TOKEN" POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "ceo drills setup: the purchase-order rule is switched off for the receipt" '.success and .data.value == 0'
+as "$ADMIN_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$CDTI,\"quantity\":30,\"unitPrice\":250000}]}"; CDTRC=$(val .data.id)
+as "$ADMIN_TOKEN" POST "inventory/documents/$CDTRC/confirm"; check "ceo drills setup: the receipt of 30 pieces at 250,000 is confirmed" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "ceo drills setup: the purchase-order rule is switched on again" '.success and .data.value == 1'
+as "$ADMIN_TOKEN" POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"آزمون جزئیات مدیرعامل\",\"lines\":[{\"itemId\":$CDTI,\"quantity\":4}]}"; CDTMR=$(val .data.id)
+as "$ADMIN_TOKEN" POST inventory/material-requests/action "{\"id\":$CDTMR,\"action\":\"submit\"}"
+as "$ADMIN_TOKEN" POST inventory/material-requests/action "{\"id\":$CDTMR,\"action\":\"approve-planning\"}"
+as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$CDTMR,\"action\":\"approve-manufacturing\"}"; check "ceo drills setup: the request for 4 pieces is approved by planning and by manufacturing" '.success and .data.status == 2'
+as "$ADMIN_TOKEN" POST inventory/documents "{\"type\":4,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$CDTMR,\"lines\":[{\"itemId\":$CDTI,\"quantity\":4}]}"; CDTIS=$(val .data.id)
+as "$ADMIN_TOKEN" POST "inventory/documents/$CDTIS/confirm"; check "ceo drills setup: the issue of 4 pieces to production is confirmed" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" POST inventory/documents "{\"type\":13,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$WS,\"lines\":[{\"itemId\":$CDTI,\"quantity\":20}]}"; CDTSC=$(val .data.id)
+as "$ADMIN_TOKEN" POST "inventory/documents/$CDTSC/confirm"; check "ceo drills setup: the scrap receipt of 20 pieces is confirmed" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"درخواست باز آزمون جزئیات مدیرعامل\",\"lines\":[{\"itemId\":$CDTI,\"quantity\":1}]}"; CDTMR2=$(val .data.id)
+as "$ADMIN_TOKEN" POST inventory/material-requests/action "{\"id\":$CDTMR2,\"action\":\"submit\"}"; check "ceo drills setup: a second request for the item is submitted and left open" '.success and .data.status == 1'
 as "$CEO_TOKEN" GET finance/ceo-dashboard
-CDID=$(cdx '.data|{quar:.quarantineLines,mr:.openMaterialRequests,stock:.stockValue}')
-
-# --- inv.items_below_minimum: the stock list of the module, only the items that have a minimum
-as "$CEO_TOKEN" GET "inventory/stock/items?LowStockOnly=true&PageSize=0"
-CDIM=$(cdx '.data.data|map(select(.minStock > 0))|map(. + {cover:pc((([.onHand,0]|max)*1000|round);(.minStock*1000|round))})|sort_by([.cover,-(.minStock - .onHand),.itemCode]) as $s|{n:($s|length),out:($s|map(select(.onHand <= 0))|length),order:($s|map(.itemId)),rows:($s|map("\(.itemId)|\(.itemCode)|\(.itemTitle)|\(.itemGroupTitle)|\(.unit)|\(.onHand|n)|\(.minStock|n)|\(((.minStock - .onHand)*1000|round)/1000|n)|\(.cover|n)"))}')
-cdrill inv.items_below_minimum "top=200"
-cdcheck "ceo drill inv.items_below_minimum: the items with a minimum whose total stock is below it (code, title, group, unit, stock, minimum, shortage, cover percent), the lowest cover first, as the stock list of the module; the items out of stock are counted" '.success and .data.totalCount == ('"$CDIM"').n and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.group)|\(.unit)|\(.onHand|n)|\(.minStock|n)|\(.shortage|n)|\(.coverPercent|n)"]) == ('"$CDIM"').rows and [.data.rows[].id] == ('"$CDIM"').order and .data.totals.outOfStock == ('"$CDIM"').out'
+CDID=$(cdx '.data|{quar:.quarantineLines,mr:.openMaterialRequests,stock:.stockValue,below:.itemsBelowMinimum}')
 
 # --- the stock of every warehouse, the value list and the movements of every item, read once for the next drills (the movements of a reversed document are left out: the document is cancelled)
 as "$CEO_TOKEN" GET inventory/warehouses; CDWHL=$(jq -c '.data|map({id,code,title,kind})' "$B")
 CDSB='{}'
-for CDW in $(jq -r '.[]|select(.kind != 8)|.id' <<<"$CDWHL"); do
+for CDW in $(jq -r '.[].id' <<<"$CDWHL"); do
   as "$CEO_TOKEN" GET "inventory/stock?WarehouseId=$CDW&PageSize=0"
   CDSB=$(jq -c --arg w "$CDW" --slurpfile x "$B" '. + {($w): $x[0].data.data}' <<<"$CDSB")
 done
 as "$CEO_TOKEN" GET finance/valuation
 CDVAL=$(jq -c '.data|{total:.totalValue,cost:(.items|map({key:(.itemId|tostring),value:.averageCost})|from_entries),stock:(.items|map(select(.quantity > 0)|{itemId,quantity,value}))}' "$B")
-as "$CEO_TOKEN" GET "inventory/items?PageSize=0"; CDITM=$(jq -c '.data.data|map({id,code,title,unit,group:.itemGroupTitle})' "$B")
+as "$CEO_TOKEN" GET "inventory/lots?PageSize=0"; CDCPL=$(jq -c '[.data.data[]|select(.isCustomerProperty)|.id]' "$B")
+as "$CEO_TOKEN" GET "inventory/items?PageSize=0"; CDITM=$(jq -c '.data.data|map({id,code,title,unit,group:.itemGroupTitle,min:.minStock,active:.isActive})' "$B")
 CDKX='[]'
 for CDI in $(jq -r '.[].id' <<<"$CDITM"); do
   as "$CEO_TOKEN" GET "inventory/stock/kardex?ItemId=$CDI"
@@ -6395,14 +6538,29 @@ for CDI in $(jq -r '.[].id' <<<"$CDITM"); do
 done
 CDKP=$(cdpmap "$CDKX")
 
-# --- inv.stock_value_by_warehouse: quantity of every item in the warehouse times its average cost (the value list of the finance module)
-CDSV=$(jq -nc --argjson w "$CDWHL" --argjson b "$CDSB" --argjson v "$CDVAL" "$CDJQ"'def kt: ["عمومی","مواد اولیه","قطعات","در جریان ساخت","کالای ساخته‌شده","قرنطینه","ضایعات","نزد پیمانکار","اموال مشتری","مدل‌های ریخته‌گری"][.];
-  ($w|map(select(.kind != 8)|. as $x|(($b[($x.id|tostring)] // [])|map(select(.quantity != 0))|group_by(.itemId)|map({i:.[0].itemId,q:(map(.quantity)|add)})) as $g|{id:$x.id,code:$x.code,title:$x.title,kind:($x.kind|kt),items:($g|length),value:($g|map(.q * ($v.cost[(.i|tostring)] // 0))|add // 0)})|map(select(.items > 0))|sort_by([-.value,.code])) as $s
+# --- inv.items_below_minimum: the active items with a minimum whose stock, the scrap warehouses left out, is below it (the rule of the counter of the dashboard); the stock is that of every warehouse read above
+CDIM=$(jq -nc --argjson it "$CDITM" --argjson b "$CDSB" --argjson w "$CDWHL" "$CDJQ"'($w|map(select(.kind != 6)|(.id|tostring))) as $ok
+  | ($ok|map($b[.] // [])|add // []|group_by(.itemId)|map({key:(.[0].itemId|tostring),value:(((map(.quantity)|add)*1000|round)/1000)})|from_entries) as $on
+  | ($it|map(select(.active and .min > 0)|. + {onHand:($on[(.id|tostring)] // 0)})|map(select(.onHand < .min))|map(. + {cover:pc((([.onHand,0]|max)*1000|round);(.min*1000|round))})|sort_by([.cover,-(.min - .onHand),.code])) as $s
+  | {n:($s|length),out:($s|map(select(.onHand <= 0))|length),order:($s|map(.id)),rows:($s|map("\(.id)|\(.code)|\(.title)|\(.group)|\(.unit)|\(.onHand|n)|\(.min|n)|\(((.min - .onHand)*1000|round)/1000|n)|\(.cover|n)"))}')
+cdrill inv.items_below_minimum "top=200"
+cdnonempty "ceo drill inv.items_below_minimum: the scenario has items below their minimum (the bolts, the items of the AI seats and the item of the setup)" "$(jq -r '.n' <<<"$CDIM")"
+cdcheck "ceo drill inv.items_below_minimum: the active items with a minimum whose stock without the scrap warehouses is below it (code, title, group, unit, stock, minimum, shortage, cover percent), the lowest cover first, worked out from the stock of every warehouse; the items out of stock are counted" '.success and .data.totalCount == ('"$CDIM"').n and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.group)|\(.unit)|\(.onHand|n)|\(.minStock|n)|\(.shortage|n)|\(.coverPercent|n)"]) == ('"$CDIM"').rows and [.data.rows[].id] == ('"$CDIM"').order and .data.totals.outOfStock == ('"$CDIM"').out'
+cdcheck "ceo drill inv.items_below_minimum: the number of items is the items below the minimum of the CEO dashboard, the figure the KPI shows" '.success and .data.totalCount == ('"$CDID"').below'
+cdcheck "ceo drill inv.items_below_minimum: the item of the setup has 26 pieces outside the scrap warehouse (20 more lie in it, so all its stock is above the minimum of 40): shortage 14, cover 65 percent" '.success and ([.data.rows[]|select(.id == '"${CDTI:-0}"')|[.onHand,.minStock,.shortage,.coverPercent]]) == [[26,40,14,65]]'
+
+# --- inv.stock_value_by_warehouse: the positive balances of every warehouse (the lots of customer property left out) times the average cost of the item of the value list, the way the chart of the dashboard works it out
+CDSV=$(jq -nc --argjson w "$CDWHL" --argjson b "$CDSB" --argjson v "$CDVAL" --argjson cp "$CDCPL" "$CDJQ"'def kt: ["عمومی","مواد اولیه","قطعات","در جریان ساخت","کالای ساخته‌شده","قرنطینه","ضایعات","نزد پیمانکار","اموال مشتری","مدل‌های ریخته‌گری"][.];
+  ($w|map(. as $x|(($b[($x.id|tostring)] // [])|map(select(.quantity > 0 and ((.lotId == null) or (([.lotId]|inside($cp))|not)) and ($v.cost[(.itemId|tostring)] != null)))) as $g
+    | (($g|map(.quantity * $v.cost[(.itemId|tostring)])|add // 0)) as $raw | select($raw > 0)
+    | {id:$x.id,code:$x.code,title:(if ($x.title // "") == "" then $x.code else $x.title end),kind:($x.kind|kt),items:($g|map(.itemId)|unique|length),value:($raw|round)})
+    |sort_by([-.value,.id])) as $s
   | ($s|map(.value)|add // 0) as $alloc
-  | {order:($s|map(.id)),total:($v.total|round),alloc:($alloc|round),diff:(($v.total - $alloc)|round),rows:($s|map("\(.id)|\(.code)|\(.title)|\(.kind)|\(.items)|\(.value|round|n)|\(pc((.value*100|round);($alloc*100|round))|n)"))}')
+  | {order:($s|map(.id)),total:($v.total|round),alloc:$alloc,diff:(($v.total - $alloc)|round),rows:($s|map("\(.id)|\(.code)|\(.title)|\(.kind)|\(.items)|\(.value|n)|\(pc((.value*100|round);($alloc*100|round))|n)"))}')
 cdrill inv.stock_value_by_warehouse "top=200"
-cdcheck "ceo drill inv.stock_value_by_warehouse: the warehouses that hold stock (customer property left out) with their kind, the number of items, the value (quantity times the average cost of the value list) and the share, the most valuable first; the totals are the value list and the allocated value" '.success and .data.totalCount == (.data.rows|length) and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.kind)|\(.items)|\(.value|n)|\(.sharePercent|n)"]) == ('"$CDSV"').rows and [.data.rows[].id] == ('"$CDSV"').order and .data.totals.totalValue == ('"$CDSV"').total and .data.totals.allocatedValue == ('"$CDSV"').alloc and .data.totals.difference == ('"$CDSV"').diff'
-cdcheck "ceo drill inv.stock_value_by_warehouse: the total value is the stock value of the CEO dashboard" '.success and .data.totals.totalValue == ('"$CDID"').stock'
+cdnonempty "ceo drill inv.stock_value_by_warehouse: the scenario has warehouses that hold stock with a value" "$(jq -r '.order|length' <<<"$CDSV")"
+cdcheck "ceo drill inv.stock_value_by_warehouse: the warehouses that hold valued stock (customer property left out) with their kind, the number of items, the value (the positive quantity times the average cost of the value list) and the share, the most valuable first; the totals are the value list, the allocated value and their difference" '.success and .data.totalCount == (.data.rows|length) and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.kind)|\(.items)|\(.value|n)|\(.sharePercent|n)"]) == ('"$CDSV"').rows and [.data.rows[].id] == ('"$CDSV"').order and .data.totals.totalValue == ('"$CDSV"').total and .data.totals.allocatedValue == ('"$CDSV"').alloc and .data.totals.difference == ('"$CDSV"').diff and ([.data.rows[].value]|add // 0) == .data.totals.allocatedValue'
+cdcheck "ceo drill inv.stock_value_by_warehouse: the total value is the stock value of the CEO dashboard, the figure the KPI shows" '.success and .data.totals.totalValue == ('"$CDID"').stock'
 
 # --- inv.slow_moving: the items in stock whose last confirmed movement is at least DAYS days old (or that never moved)
 cdslowx() { # cdslowx DAYS
@@ -6419,29 +6577,56 @@ cdslowx 180
 cdrill inv.slow_moving "top=200"
 cdslowcheck "ceo drill inv.slow_moving: with the default 180 days the items in stock without a movement for half a year (code, title, group, unit, quantity, value, last movement and the days since), the most capital first, as the value list and the movements of the module"
 cdslowx 1
+cdnonempty "ceo drill inv.slow_moving: the scenario has items in stock that did not move today (the receipts of the scenario are older)" "$(jq -r '.n' <<<"$CDSX")"
 cdrill inv.slow_moving "days=1&top=200"
 cdslowcheck "ceo drill inv.slow_moving: days=1 lists the items in stock that did not move today"
 cdslowx 20
 cdrill inv.slow_moving "days=20&top=200"
 cdslowcheck "ceo drill inv.slow_moving: days=20 lists the items in stock without a movement for 20 days"
+# the age of the item in stock that moved least recently: a list for exactly that many days holds that item, so this comparison is never between two empty lists (the lists of 180 and 20 days may be empty in a young database)
+CDSLD=$(jq -nr --argjson v "$CDVAL" --argjson k "$CDKX" "$CDJQ"'($k|map({key:(.itemId|tostring),value:(.rows|map(.date)|max)})|from_entries) as $last | [$v.stock[]|$last[(.itemId|tostring)]|select(. != null)] as $d | if ($d|length) == 0 then 1 else ([([late($d|min),1]|max),3650]|min) end')
+cdslowx "$CDSLD"
+cdrill inv.slow_moving "days=$CDSLD&top=200"
+cdnonempty "ceo drill inv.slow_moving: days=$CDSLD, the age of the item in stock that moved least recently, lists at least that item" "$(jq -r '.n' <<<"$CDSX")"
+cdslowcheck "ceo drill inv.slow_moving: days=$CDSLD lists the items in stock without a movement for as long as the least recently moved one"
 
-# --- inv.top_movements: receipts and issues per item in the range (transfers and stage conversions left out), from the movements of the module
-cdtopx() { # cdtopx FROM TO
-  CDTX=$(jq -nc --argjson k "$CDKX" "$CDJQ"'$k|map(. as $i|($i.rows|map(select(.type != 6 and .type != 12 and .date >= "'"$1"'" and .date <= "'"$2"'"))) as $r|select(($r|length) > 0)|{id:$i.itemId,code:$i.code,title:$i.title,unit:$i.unit,rin:($r|map(.qin)|add),rout:($r|map(.qout)|add),docs:($r|map(.doc)|unique|length)}) as $s
+# --- inv.top_movements: receipts and issues per item in the range (transfers and stage conversions left out), from the movements of the module;
+# kind receipt keeps the purchase receipts and the returns to the supplier, kind issue the issues to production and the returns from it. The money of a movement is the average cost of its day, which the module does not show: it is checked on the item of the setup, whose cost is known exactly
+cdtopx() { # cdtopx FROM TO [KIND]
+  local f='.type != 6 and .type != 12'
+  [ "${3:-all}" = receipt ] && f='.type == 1 or .type == 5'
+  [ "${3:-all}" = issue ] && f='.type == 4 or .type == 3'
+  CDTX=$(jq -nc --argjson k "$CDKX" "$CDJQ"'$k|map(. as $i|($i.rows|map(select(('"$f"') and .date >= "'"$1"'" and .date <= "'"$2"'"))) as $r|select(($r|length) > 0)|{id:$i.itemId,code:$i.code,title:$i.title,unit:$i.unit,rin:($r|map(.qin)|add),rout:($r|map(.qout)|add),docs:($r|map(.doc)|unique|length)}) as $s
     | {n:($s|length),rows:($s|map("\(.id)|\(.code)|\(.title)|\(.unit)|\(.rin|n)|\(.rout|n)|\(.docs)")|sort)}')
 }
-cdtopcheck() { # cdtopcheck NAME : the items, their quantities and documents; the value is the average cost of the day, so the order is checked by the values themselves
-  cdcheck "$1" '.success and .data.totalCount == ('"$CDTX"').n and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.unit)|\(.receivedQuantity|n)|\(.issuedQuantity|n)|\(.documents)"]|sort) == ('"$CDTX"').rows and ([.data.rows[].totalValue]) == ([.data.rows[].totalValue]|sort|reverse)'
+cdtopcheck() { # cdtopcheck NAME : the items, their quantities and documents are those of the movements; the value of a row is the value in plus the value out, the totals are the sums, and the biggest movement comes first
+  cdcheck "$1" '.success and .data.totalCount == ('"$CDTX"').n and ([.data.rows[]|"\(.id)|\(.code)|\(.title)|\(.unit)|\(.receivedQuantity|n)|\(.issuedQuantity|n)|\(.documents)"]|sort) == ('"$CDTX"').rows and ([.data.rows[].totalValue]) == ([.data.rows[].totalValue]|sort|reverse) and ([.data.rows[]|.receivedValue + .issuedValue == .totalValue]|all) and .data.totals.receivedValue == ([.data.rows[].receivedValue]|add // 0) and .data.totals.issuedValue == ([.data.rows[].issuedValue]|add // 0)'
 }
 cdtopx "$(dd -30)" "$TODAY"
 cdrill inv.top_movements "top=200"
+cdnonempty "ceo drill inv.top_movements: the scenario has items that moved in the last 30 days" "$(jq -r '.n' <<<"$CDTX")"
 cdtopcheck "ceo drill inv.top_movements: the items that moved in the last 30 days with the quantities received and issued and the number of documents, as the movements of the module; the most valuable movement first"
+cdcheck "ceo drill inv.top_movements: the item of the setup moved 50 pieces in and 4 out in 3 documents: 7,500,000 rial in (the receipt of 30 at 250,000; the scrap receipt has no value) and 1,000,000 out (4 pieces at the average cost of 250,000), 8,500,000 in all" '.success and ([.data.rows[]|select(.id == '"${CDTI:-0}"')|[.receivedQuantity,.issuedQuantity,.receivedValue,.issuedValue,.totalValue,.documents]]) == [[50,4,7500000,1000000,8500000,3]]'
+cdtopx "$(dd -30)" "$TODAY" receipt
+cdrill inv.top_movements "kind=receipt&top=200"
+cdnonempty "ceo drill inv.top_movements: the scenario has purchase receipts in the last 30 days" "$(jq -r '.n' <<<"$CDTX")"
+cdtopcheck "ceo drill inv.top_movements: kind=receipt lists the items of the purchase receipts and of the returns to the supplier only, with the quantities and documents of the movements of the module"
+cdcheck "ceo drill inv.top_movements: kind=receipt gives the net value of the chart (the receipts less the returns to the supplier) in the totals, and the item of the setup has its one receipt of 30 pieces worth 7,500,000" '.success and .data.totals.netValue == (.data.totals.receivedValue - .data.totals.issuedValue) and ([.data.rows[]|select(.id == '"${CDTI:-0}"')|[.receivedQuantity,.issuedQuantity,.receivedValue,.issuedValue,.totalValue,.documents]]) == [[30,0,7500000,0,7500000,1]]'
+cdtopx "$(dd -30)" "$TODAY" issue
+cdrill inv.top_movements "kind=issue&top=200"
+cdnonempty "ceo drill inv.top_movements: the scenario has issues to production in the last 30 days" "$(jq -r '.n' <<<"$CDTX")"
+cdtopcheck "ceo drill inv.top_movements: kind=issue lists the items of the issues to production and of the returns from it only, with the quantities and documents of the movements of the module"
+cdcheck "ceo drill inv.top_movements: kind=issue gives the net value of the chart (the consumption less the returns from production) in the totals, and the item of the setup has its one issue of 4 pieces worth 1,000,000" '.success and .data.totals.netValue == (.data.totals.issuedValue - .data.totals.receivedValue) and ([.data.rows[]|select(.id == '"${CDTI:-0}"')|[.receivedQuantity,.issuedQuantity,.receivedValue,.issuedValue,.totalValue,.documents]]) == [[0,4,0,1000000,1000000,1]]'
+cdrill inv.top_movements "kind=sideways"; cdmsg "ceo drill inv.top_movements: a kind outside receipt, issue and all is refused with the list" "مقدار «kind» باید یکی از این‌ها باشد: receipt، issue، all."
 cdtopx "$CDYS" "$TODAY"
 cdrill inv.top_movements "from=$CDYS&to=$TODAY&top=200"
 cdtopcheck "ceo drill inv.top_movements: from the start of the Persian year to today the items, quantities and documents are those of the movements of the module"
 cdtopx "$TODAY" "$TODAY"
 cdrill inv.top_movements "from=$TODAY&to=$TODAY&top=200"
+cdnonempty "ceo drill inv.top_movements: the scenario has items that moved today (the item of the setup)" "$(jq -r '.n' <<<"$CDTX")"
 cdtopcheck "ceo drill inv.top_movements: a range of one day (today) lists the items that moved today"
+cdrill inv.top_movements "from=$(dd -365)&to=$TODAY&top=1"; check "ceo drill inv.top_movements: a range of exactly 366 days is allowed" '.success'
+cdrill inv.top_movements "from=$(dd -366)&to=$TODAY"; cdmsg "ceo drill inv.top_movements: a range of 367 days is refused, the movements of the range are grouped in memory" "بازه‌ی گزارش نباید بیش از 366 روز باشد؛ بازه‌ی کوتاه‌تری بدهید."
 cdrill inv.top_movements "top=200"; CDTOP=$(jq -c '{n:.data.totalCount,ids:[.data.rows[].id]}' "$B")
 cdrill inv.top_movements "top=2&page=2"
 check "ceo drill inv.top_movements: the second page of 2 rows holds rows 3 and 4 of the full list and the full count" ".success and .data.page == 2 and .data.pageSize == 2 and .data.totalCount == ($CDTOP).n and [.data.rows[].id] == (($CDTOP).ids[2:4])"
@@ -6451,6 +6636,7 @@ CDQUX=$(jq -nc --argjson w "$CDWHL" --argjson b "$CDSB" --argjson k "$CDKX" --ar
   | [($w|map(select(.kind == 5)|.id))[]|($b[(.|tostring)] // [])[]|select(.quantity > 0)] as $lines
   | ($lines|map(. as $l|(($kr[($l.itemId|tostring)] // [])|map(select(.qin > 0 and .wh == $l.warehouseTitle and .lot == $l.lotNumber))|map(.date)|max) as $since|. + {since:$since})|sort_by([(if .since == null then 1 else 0 end),.since,.itemCode])) as $s
   | {n:($s|length),items:($s|map(.itemId)|unique|length),ids:($s|map("\(.itemId)-\(.warehouseId)-\(.lotId // 0)")),rows:($s|map("\(.itemId)-\(.warehouseId)-\(.lotId // 0)|\(.warehouseTitle)|\(.itemCode)|\(.itemTitle)|\(.unit)|\(.lotNumber)|\(.heatNumber)|\(.locationCode)|\(.quantity|n)|\(if .since == null then null else $p[.since] end)|\(if .since == null then null else late(.since) end)"))}')
+cdnonempty "ceo drill inv.quarantine: the scenario has stock lines in quarantine (the receipts of the 3.1 plate and of the project-control plates wait there)" "$(jq -r '.n' <<<"$CDQUX")"
 cdrill inv.quarantine "top=200"
 cdcheck "ceo drill inv.quarantine: the positive stock lines of the quarantine warehouses (warehouse, item, lot, heat, place, quantity) with the day of the last receipt of the item and lot and the days waiting, the oldest first" '.success and .data.totalCount == ('"$CDQUX"').n and ([.data.rows[]|"\(.id)|\(.warehouse)|\(.code)|\(.title)|\(.unit)|\(.lot)|\(.heat)|\(.location)|\(.quantity|n)|\(.since)|\(.daysWaiting)"]) == ('"$CDQUX"').rows and .data.totals.items == ('"$CDQUX"').items'
 cdcheck "ceo drill inv.quarantine: the number of lines is the quarantine lines of the CEO dashboard" '.success and .data.totalCount == ('"$CDID"').quar'
@@ -6458,27 +6644,38 @@ cdcheck "ceo drill inv.quarantine: the number of lines is the quarantine lines o
 # --- inv.material_requests_open: the submitted and the approved requests (not yet closed), the oldest first
 as "$CEO_TOKEN" GET "inventory/material-requests?Status=1&PageSize=0"; CDM1=$(jq -c '.data.data' "$B")
 as "$CEO_TOKEN" GET "inventory/material-requests?Status=2&PageSize=0"
-CDMRX=$(cdx "$(cdpmap "$(jq -nc --argjson a "$CDM1" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$CDM1"' as $one | def stt: if .status == 1 then "ارسال‌شده، منتظر تایید" else "تاییدشده، منتظر صدور حواله" end; def yn($b): if $b then "بله" else "خیر" end;
+CDMRX=$(cdx "$(cdpmap "$(jq -nc --argjson a "$CDM1" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$CDM1"' as $one | def stt: if .status == 1 then "ارسال‌شده، منتظر تأیید" else "تأییدشده، منتظر صدور حواله" end; def yn($b): if $b then "بله" else "خیر" end;
   ($one + .data.data)|sort_by([.requestDate[0:19],.number]) as $s
   | {n:($s|length),order:($s|map(.id)),sub:($s|map(select(.status == 1))|length),app:($s|map(select(.status == 2))|length),rows:($s|map("\(.id)|\(.number)|\($P[.requestDate[0:10]])|\(stt)|\(.workOrderCode)|\(.warehouseTitle)|\(.purpose[0:120])|\(.linesCount)|\(yn(.planningApproved))|\(yn(.manufacturingApproved))|\(late(.requestDate))"))}')
+cdnonempty "ceo drill inv.material_requests_open: the scenario has open material requests (the second request of the setup is submitted)" "$(jq -r '.n' <<<"$CDMRX")"
 cdrill inv.material_requests_open "top=200"
 cdcheck "ceo drill inv.material_requests_open: the submitted and approved requests (date, state, work order, warehouse, purpose, lines, approvals, days waiting), the oldest first, as the request list of the module" '.success and .data.totalCount == ('"$CDMRX"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.requestDate)|\(.status)|\(.workOrderCode)|\(.warehouse)|\(.purpose)|\(.lines)|\(.planningApproved)|\(.manufacturingApproved)|\(.waitingDays)"]) == ('"$CDMRX"').rows and [.data.rows[].id] == ('"$CDMRX"').order and .data.totals.submitted == ('"$CDMRX"').sub and .data.totals.approved == ('"$CDMRX"').app'
 cdcheck "ceo drill inv.material_requests_open: the number of requests is the open material requests of the CEO dashboard" '.success and .data.totalCount == ('"$CDID"').mr'
 
 # ===================================================================================== procurement
+# --- setup: two small purchase requests of the section, one left waiting for approval and one approved by planning alone and left waiting for an order, so that the status filter of pr.requests_open is never read from an empty list;
+# a request cannot be deleted, both stay in the database
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"${TODAY}T00:00:00\",\"description\":\"درخواست منتظر تأیید آزمون جزئیات مدیرعامل\",\"submit\":true,\"lines\":[{\"itemId\":${BOLT:-0},\"quantity\":1,\"estimatedUnitPrice\":100000,\"technicalRequirements\":\"آزمون\"}]}"
+check "ceo drills setup: a small purchase request is submitted and left waiting for approval" '.success and .data.status == 1'
+CDRQS=$(val .data.id)
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"${TODAY}T00:00:00\",\"description\":\"درخواست تأییدشده آزمون جزئیات مدیرعامل\",\"submit\":true,\"lines\":[{\"itemId\":${BOLT:-0},\"quantity\":1,\"estimatedUnitPrice\":100000,\"technicalRequirements\":\"آزمون\"}]}"
+CDRQA=$(val .data.id)
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$CDRQA,\"action\":\"approve-planning\"}"
+check "ceo drills setup: another small request is approved by planning alone and left waiting for an order" '.success and .data.status == 2'
 as "$CEO_TOKEN" GET finance/ceo-dashboard
 CDPD=$(cdx '.data|{reqs:.openPurchaseRequests,orders:.openPurchaseOrders,amount:.openPurchaseOrdersAmount,late:.lateOrderLines,inv:.invoicesWaitingApproval,pays:.paymentsWaitingApproval,payAmount:.paymentsWaitingAmount,blocked:.blockedSuppliers,evals:.supplierEvaluationsDue}')
 
 # --- pr.requests_open: the submitted and the approved purchase requests
-cdprreq() {
-  local one; as "$CEO_TOKEN" GET "procurement/requests?Status=1&PageSize=0"; one=$(jq -c '.data.data' "$B")
+cdprreq() { # cdprreq [STATUS] : the submitted (1) and approved (2) requests of the module list; STATUS submitted or approved keeps one of the two, all (the default) both
+  local one keep=true; [ "${1:-all}" = submitted ] && keep='.status == 1'; [ "${1:-all}" = approved ] && keep='.status == 2'
+  as "$CEO_TOKEN" GET "procurement/requests?Status=1&PageSize=0"; one=$(jq -c '.data.data' "$B")
   as "$CEO_TOKEN" GET "procurement/requests?Status=2&PageSize=0"
-  CDPRQ=$(cdx "$(cdpmap "$(jq -nc --argjson a "$one" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$one"' as $one | def stt: if .status == 1 then "ارسال‌شده، منتظر تایید" else "تاییدشده، منتظر سفارش" end;
+  CDPRQ=$(cdx "$(cdpmap "$(jq -nc --argjson a "$one" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$one"' as $one | def stt: if .status == 1 then "ارسال‌شده، منتظر تأیید" else "تأییدشده، منتظر سفارش" end;
     def kd: ["","کالا","خدمات","پیمانکاری"][.kind];
     def sr: {"1":"از BOM","2":"نقطه‌ی سفارش","4":"کمبود مواد"}[(.source|tostring)] // "موردی";
     def ap: if .needsBoard then "هیئت‌مدیره" elif .needsManagement then "مدیریت" else "برنامه‌ریزی" end;
     def nb: (.lines|map(.neededBy)|map(select(. != null))|min) as $m | if $m == null then null else $P[$m[0:10]] end;
-    ($one + .data.data)|map(. + {w:(if .submittedAt != null then late(.submittedAt) else late(.requestDate) end)})|sort_by([-.w,.number]) as $s
+    ($one + .data.data)|map(select('"$keep"'))|map(. + {w:(if .submittedAt != null then late(.submittedAt) else late(.requestDate) end)})|sort_by([-.w,.number]) as $s
     | {n:($s|length),order:($s|map(.id)),sub:($s|map(select(.status == 1))|length),app:($s|map(select(.status == 2))|length),est:($s|map(.estimatedAmount)|add // 0),
        rows:($s|map("\(.id)|\(.number)|\($P[.requestDate[0:10]])|\(stt)|\(kd)|\(sr)|\(.contractCode // .workOrderCode)|\(.description[0:120])|\(.lines|length)|\(.estimatedAmount|n)|\(nb)|\(ap)|\(.w)"))}')
 }
@@ -6489,6 +6686,22 @@ cdprreq
 cdrill pr.requests_open "top=200"
 cdprreqcheck "ceo drill pr.requests_open: the submitted and approved purchase requests (date, state, kind, source, project, description, lines, estimate, needed by, approval level, days waiting), the longest wait first, as the request list of the module; the states and the estimate are summed"
 cdcheck "ceo drill pr.requests_open: the number of requests is the open purchase requests of the CEO dashboard" '.success and .data.totalCount == ('"$CDPD"').reqs'
+cdnonempty "ceo drill pr.requests_open: the scenario has open purchase requests (the two of the setup)" "$(jq -r '.n' <<<"$CDPRQ")"
+cdprreq submitted
+as "$CEO_TOKEN" GET finance/ceo-dashboard; CDPRW=$(jq -r '.data.purchaseRequestsWaitingApproval' "$B")
+cdrill pr.requests_open "status=submitted&top=200"
+cdnonempty "ceo drill pr.requests_open: the scenario has a request waiting for approval (the first of the setup)" "$(jq -r '.n' <<<"$CDPRQ")"
+cdprreqcheck "ceo drill pr.requests_open: status=submitted lists only the requests waiting for approval, as the request list of the module (state 1)"
+cdcheck "ceo drill pr.requests_open: status=submitted opens exactly the requests waiting for approval of the CEO dashboard, the figure the KPI shows; none is approved and the first request of the setup is in the rows" '.success and .data.totalCount == '"$CDPRW"' and .data.totals.approved == 0 and .data.totals.waitingApproval == .data.totalCount and ([.data.rows[]|select(.id == '"${CDRQS:-0}"')|.status]) == ["ارسال‌شده، منتظر تأیید"]'
+cdprreq approved
+cdrill pr.requests_open "status=approved&top=200"
+cdnonempty "ceo drill pr.requests_open: the scenario has an approved request waiting for an order (the second of the setup)" "$(jq -r '.n' <<<"$CDPRQ")"
+cdprreqcheck "ceo drill pr.requests_open: status=approved lists only the approved requests waiting for an order, as the request list of the module (state 2)"
+cdcheck "ceo drill pr.requests_open: status=approved has none waiting for approval and the second request of the setup is in the rows" '.success and .data.totals.waitingApproval == 0 and .data.totals.approved == .data.totalCount and ([.data.rows[]|select(.id == '"${CDRQA:-0}"')|.status]) == ["تأییدشده، منتظر سفارش"]'
+cdprreq all
+cdrill pr.requests_open "status=all&top=200"
+cdprreqcheck "ceo drill pr.requests_open: status=all lists both states, as without the parameter"
+cdrill pr.requests_open "status=sideways"; cdmsg "ceo drill pr.requests_open: a status outside submitted, approved and all is refused with the list" "مقدار «status» باید یکی از این‌ها باشد: submitted، approved، all."
 
 # --- the orders that are open (approved, released, partly received), their late lines, the supplier lists and the invoices and payments that wait
 cdprord() {
@@ -6496,7 +6709,7 @@ cdprord() {
   for s in 1 2 3; do as "$CEO_TOKEN" GET "procurement/orders?Status=$s&PageSize=0"; all=$(jq -c --argjson a "$all" '$a + .data.data' "$B"); done
   local p; p=$(cdpmap "$all")
   CDPRO=$(jq -nc --argjson o "$all" --argjson p "$p" "$CDJQ"'def gr: ["ارزیابی‌نشده","A","B","C","D"][.grade] // "ارزیابی‌نشده";
-    def stt: {"1":"تاییدشده، ابلاغ‌نشده","2":"ابلاغ‌شده","3":"تحویل بخشی"}[(.status|tostring)];
+    def stt: {"1":"تأییدشده، ابلاغ‌نشده","2":"ابلاغ‌شده","3":"تحویل بخشی"}[(.status|tostring)];
     def r2s: ((. * 100 | round) / 100);
     ($o|map(. as $x|. + {pct:(if $x.totalAmount == 0 then 0 else pc(($x.receivedAmount*100|round);($x.totalAmount*100|round)) end),unin:([($x.receivedAmount - $x.invoicedAmount|r2s),0]|max),lateLines:($x.lines|map(select(.late))|length),
          days:([$x.lines[]|select(.late)|(.deliveryDate // $x.deliveryDate)|select(. != null)|late(.)]|max // 0)})|sort_by([-.totalAmount,.number])) as $s
@@ -6529,7 +6742,7 @@ cdprsup() {
     | ($a|map(select(.blocked))|sort_by([-.orderedAmount,.providerName])) as $b
     | {n:($d|length),order:($d|map(.providerId)),lines:$ln,late:$lt,pct:(if $ln == 0 then null else pc($ln - $lt;$ln) end),evals:($a|map(select((.blocked|not) and .evaluationDue))|length),
        rows:($d|map("\(.providerId)|\(.providerName)|\(gr)|\(.score|m)|\(.orders)|\(.receiptLines)|\(.lateReceiptLines)|\(.onTimePercent|m)|\(.ncrs)|\(.returns)|\(yn(.blocked))|\(yn(.evaluationDue))")),
-       bn:($b|length),border:($b|map(.providerId)),bamount:($b|map(.orderedAmount)|add // 0),
+       bn:($b|length),border:($b|map(.providerId)),bamount:($b|map(.orderedAmount)|add // 0),by:($a|map({key:(.providerId|tostring),value:{orders,receiptLines,lateReceiptLines,ncrs,returns,warnings,orderedAmount,grade,score}})|from_entries),
        brows:($b|map("\(.providerId)|\(.providerName)|\(gr)|\(.score|m)|\(.warnings)|\(.blockReason[0:120])|\(.orders)|\(.orderedAmount|n)|\(.ncrs)|\(.returns)"))}')
 }
 cdprsup
@@ -6538,33 +6751,11 @@ cdcheck "ceo drill pr.supplier_on_time: the suppliers that delivered at least on
 cdrill pr.blocked_suppliers "top=200"
 cdcheck "ceo drill pr.blocked_suppliers: the blocked suppliers (grade, score, warnings, reason, orders, ordered amount, reports, returns), the biggest orderer first, as the supplier list of the module; the number is the blocked suppliers of the CEO dashboard" '.success and .data.totalCount == ('"$CDPRS"').bn and ([.data.rows[]|"\(.id)|\(.providerName)|\(.grade)|\(.score|m)|\(.warnings)|\(.blockReason)|\(.orders)|\(.orderedAmount|n)|\(.ncrs)|\(.returns)"]) == ('"$CDPRS"').brows and [.data.rows[].id] == ('"$CDPRS"').border and .data.totals.orderedAmount == ('"$CDPRS"').bamount and .data.totalCount == ('"$CDPD"').blocked'
 
-# --- pr.spend_by_supplier: the approved invoices by their date and the paid requests by the day of payment
-as "$CEO_TOKEN" GET "procurement/invoices?Status=3&PageSize=0"; CDSI=$(jq -c '.data.data|map({providerId,providerName,date:.invoiceDate[0:10],total:.totalAmount})' "$B")
-as "$CEO_TOKEN" GET "procurement/payments?Status=2&PageSize=0"; CDSP=$(jq -c '.data.data|map(select(.paidAt != null)|{providerId,providerName,date:.paidAt[0:10],net:.netAmount})' "$B")
-cdspendx() { # cdspendx FROM TO
-  CDSX2=$(jq -nc --argjson i "$CDSI" --argjson p "$CDSP" "$CDJQ"'($i|map(select(.date >= "'"$1"'" and .date <= "'"$2"'"))) as $inv | ($p|map(select(.date >= "'"$1"'" and .date <= "'"$2"'"))) as $pay
-    | ([$inv[]|.providerId]+[$pay[]|.providerId]|unique) as $ids
-    | ($ids|map(. as $id|{id:$id,name:(([$inv[]|select(.providerId == $id)|.providerName][0]) // ([$pay[]|select(.providerId == $id)|.providerName][0])),count:([$inv[]|select(.providerId == $id)]|length),inv:([$inv[]|select(.providerId == $id)|.total]|add // 0),paid:([$pay[]|select(.providerId == $id)|.net]|add // 0)})|sort_by([-.inv,-.paid,.name])) as $s
-    | ($s|map(.inv)|add // 0) as $tot
-    | {n:($s|length),order:($s|map(.id)),inv:$tot,paid:($s|map(.paid)|add // 0),rows:($s|map("\(.id)|\(.name)|\(.count)|\(.inv|n)|\(if $tot == 0 then 0 else pc((.inv*100|round);($tot*100|round)) end|n)|\(.paid|n)"))}')
-}
-cdspendcheck() { # cdspendcheck NAME
-  cdcheck "$1" '.success and .data.totalCount == ('"$CDSX2"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.invoices)|\(.invoiced|n)|\(.sharePercent|n)|\(.paid|n)"]) == ('"$CDSX2"').rows and [.data.rows[].id] == ('"$CDSX2"').order and .data.totals.invoiced == ('"$CDSX2"').inv and .data.totals.paid == ('"$CDSX2"').paid and .data.totals.suppliers == ('"$CDSX2"').n'
-}
-cdspendx "$CDM12" "$TODAY"
-cdrill pr.spend_by_supplier "top=200"
-cdspendcheck "ceo drill pr.spend_by_supplier: with the default range (the 12 Persian months up to today, from $CDM12) every supplier shows the approved invoices, their total, the share and the payments made in the range"
-cdspendx "$(dd -3)" "$TODAY"
-cdrill pr.spend_by_supplier "from=$(dd -3)&to=$TODAY&top=200"
-cdspendcheck "ceo drill pr.spend_by_supplier: a range of the last 3 days lists the invoices and the payments of those days"
-cdspendx "$TODAY" "$(dd -1)"
-cdrill pr.spend_by_supplier "from=$TODAY&to=$(dd -1)"; cdmsg "ceo drill pr.spend_by_supplier: a range that ends before it starts is refused" "تاریخ شروع (from) نباید بعد از تاریخ پایان (to) باشد."
-
 # --- pr.invoices_waiting: the matched invoices and those with a difference
 cdprinv() {
   local one; as "$CEO_TOKEN" GET "procurement/invoices?Status=1&PageSize=0"; one=$(jq -c '.data.data' "$B")
   as "$CEO_TOKEN" GET "procurement/invoices?Status=2&PageSize=0"
-  CDPRI=$(cdx "$(cdpmap "$(jq -nc --argjson a "$one" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$one"' as $one | def stt: if .status == 1 then "مطابق، منتظر تایید" else "مغایرت دارد، منتظر تایید مدیریت" end;
+  CDPRI=$(cdx "$(cdpmap "$(jq -nc --argjson a "$one" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$one"' as $one | def stt: if .status == 1 then "مطابق، منتظر تأیید" else "مغایرت دارد، منتظر تأیید مدیریت" end;
     ($one + .data.data)|map(. + {w:late(.createDate)})|sort_by([-.w,.number]) as $s
     | {n:($s|length),order:($s|map(.id)),na:($s|map(select(.status == 2))|length),total:($s|map(.totalAmount)|add // 0),rows:($s|map("\(.id)|\(.number)|\(.providerName)|\(.invoiceNumber)|\($P[.invoiceDate[0:10]])|\(.purchaseOrderNumber)|\(stt)|\(.netAmount|n)|\(.vatAmount|n)|\(.totalAmount|n)|\(.priceVariance|n)|\(.matchNote[0:120])|\(.w)"))}')
 }
@@ -6576,7 +6767,7 @@ cdcheck "ceo drill pr.invoices_waiting: the matched invoices and those with a di
 cdprpay() {
   local one; as "$CEO_TOKEN" GET "procurement/payments?Status=0&PageSize=0"; one=$(jq -c '.data.data' "$B")
   as "$CEO_TOKEN" GET "procurement/payments?Status=1&PageSize=0"
-  CDPRP=$(cdx "$(cdpmap "$(jq -nc --argjson a "$one" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$one"' as $one | def stt: if .status == 0 then "پیش‌نویس، منتظر تایید" else "تاییدشده، منتظر پرداخت" end;
+  CDPRP=$(cdx "$(cdpmap "$(jq -nc --argjson a "$one" --slurpfile b "$B" '[$a,$b[0]]')")"' as $P | '"$one"' as $one | def stt: if .status == 0 then "پیش‌نویس، منتظر تأیید" else "تأییدشده، منتظر پرداخت" end;
     def ty: ["","پیش‌پرداخت","صورت‌وضعیت","فاکتور"][.type] // "تسویه‌ی نهایی"; def yn($b): if $b then "بله" else "خیر" end;
     ($one + .data.data)|map(. + {w:late(.requestDate)})|sort_by([-.w,.number]) as $s
     | {n:($s|length),order:($s|map(.id)),net:($s|map(.netAmount)|add // 0),dr:($s|map(select(.status == 0))|length),ap:($s|map(select(.status == 1))|length),rows:($s|map("\(.id)|\(.number)|\(ty)|\(.providerName)|\(.purchaseOrderNumber)|\(.invoiceNumber)|\($P[.requestDate[0:10]])|\(stt)|\(.amount|n)|\(.deductions|n)|\(.netAmount|n)|\(yn(.qcApproved))|\(.w)"))}')
@@ -6598,6 +6789,8 @@ cdprord; CDPRO0=$CDPRO; CDPRL0=$CDPRL
 cdprsup; CDPRS0=$CDPRS
 cdprinv; CDPRI0=$CDPRI
 cdprpay; CDPRP0=$CDPRP
+cdrill pr.spend_by_supplier "from=$TODAY&to=$TODAY&top=200"; CDSPT0=$(jq -c '{ordered:.data.totals.ordered,invoiced:.data.totals.invoiced,paid:.data.totals.paid,pb:([.data.rows[]|select(.id == '"${PB:-0}"')|.ordered]|add // 0)}' "$B")
+check "ceo drills setup: the spend of today before the scenario is read" '.success'
 CDPTODAY=$(pdate "$TODAY"); CDD4=$(dd -4); CDD2=$(dd -2); CDD5=$(dd 5); CDN1=$(dd 10); CDN2=$(dd 7)
 
 # --- the purchase request: submitted, then approved by planning
@@ -6606,13 +6799,13 @@ check "ceo drills procurement scenario: a purchase request of three lines (5,500
 CDRQ=$(val .data.id); CDRL1=$(val '.data.lines[0].id'); CDRL2=$(val '.data.lines[1].id'); CDRL3=$(val '.data.lines[2].id')
 cdprreq; cdprdash; cdrill pr.requests_open "top=200"
 cdprreqcheck "ceo drill pr.requests_open: with a new submitted request the list is still the request list of the module"
-cdcheck "ceo drill pr.requests_open: the new request shows its state, kind, source, description, lines, estimate, the earliest date needed, the approval level and no wait" '.success and (([.data.rows[]|select(.id == '"$CDRQ"')]|.[0]) as $r | $r.status == "ارسال‌شده، منتظر تایید" and $r.kind == "کالا" and $r.source == "نقطه‌ی سفارش" and $r.projectCode == null and $r.description == "خرید آزمون داشبورد مدیرعامل" and $r.lines == 3 and $r.estimatedAmount == 5500000 and $r.neededBy == "'"$(pdate "$CDN2")"'" and $r.approval == "برنامه‌ریزی" and $r.waitingDays == 0 and $r.requestDate == "'"$CDPTODAY"'") and .data.totals.waitingApproval == ('"$CDPRQ0"').sub + 1 and .data.totals.approved == ('"$CDPRQ0"').app and .data.totals.estimatedAmount == ('"$CDPRQ0"').est + 5500000 and .data.totalCount == ('"$CDPD"').reqs'
+cdcheck "ceo drill pr.requests_open: the new request shows its state, kind, source, description, lines, estimate, the earliest date needed, the approval level and no wait" '.success and (([.data.rows[]|select(.id == '"$CDRQ"')]|.[0]) as $r | $r.status == "ارسال‌شده، منتظر تأیید" and $r.kind == "کالا" and $r.source == "نقطه‌ی سفارش" and $r.projectCode == null and $r.description == "خرید آزمون داشبورد مدیرعامل" and $r.lines == 3 and $r.estimatedAmount == 5500000 and $r.neededBy == "'"$(pdate "$CDN2")"'" and $r.approval == "برنامه‌ریزی" and $r.waitingDays == 0 and $r.requestDate == "'"$CDPTODAY"'") and .data.totals.waitingApproval == ('"$CDPRQ0"').sub + 1 and .data.totals.approved == ('"$CDPRQ0"').app and .data.totals.estimatedAmount == ('"$CDPRQ0"').est + 5500000 and .data.totalCount == ('"$CDPD"').reqs'
 cdprdelta "ceo dashboard: one more open purchase request" '$a.reqs == $b.reqs + 1 and $a == ($b | .reqs += 1)'
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$CDRQ,\"action\":\"approve-planning\"}"
 check "ceo drills procurement scenario: planning approves the small request alone" '.success and .data.status == 2'
 cdprreq; cdprdash; cdrill pr.requests_open "top=200"
 cdprreqcheck "ceo drill pr.requests_open: once approved the request is listed as waiting for an order, as in the request list of the module"
-cdcheck "ceo drill pr.requests_open: the approved request is counted under approved, no longer under waiting for approval" '.success and (([.data.rows[]|select(.id == '"$CDRQ"')]|.[0]).status) == "تاییدشده، منتظر سفارش" and .data.totals.waitingApproval == ('"$CDPRQ0"').sub and .data.totals.approved == ('"$CDPRQ0"').app + 1 and .data.totalCount == ('"$CDPD"').reqs'
+cdcheck "ceo drill pr.requests_open: the approved request is counted under approved, no longer under waiting for approval" '.success and (([.data.rows[]|select(.id == '"$CDRQ"')]|.[0]).status) == "تأییدشده، منتظر سفارش" and .data.totals.waitingApproval == ('"$CDPRQ0"').sub and .data.totals.approved == ('"$CDPRQ0"').app + 1 and .data.totalCount == ('"$CDPD"').reqs'
 
 # --- the order: a draft, approved, released; a line of its own date and a line that is not due yet
 as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"orderDate\":\"${TODAY}T00:00:00\",\"providerId\":${PB:-0},\"vatPercent\":10,\"requirements\":\"آزمون\",\"deliveryDate\":\"${CDD4}T00:00:00\",\"lines\":[{\"requestLineId\":$CDRL1,\"itemId\":${BOLT:-0},\"quantity\":4,\"unitPrice\":500000},{\"requestLineId\":$CDRL2,\"itemId\":${BOLT:-0},\"quantity\":3,\"unitPrice\":1000000,\"deliveryDate\":\"${CDD2}T00:00:00\"},{\"requestLineId\":$CDRL3,\"itemId\":${BOLT:-0},\"quantity\":2,\"unitPrice\":250000,\"deliveryDate\":\"${CDD5}T00:00:00\"}]}"
@@ -6625,7 +6818,7 @@ as "$ADMIN_TOKEN" POST procurement/orders/action "{\"id\":$CDPO,\"action\":\"app
 check "ceo drills procurement scenario: the order is approved by the PMO" '.success and .data.status == 1'
 cdprord; cdprdash; cdrill pr.orders_open "top=200"
 cdprordcheck "ceo drill pr.orders_open: with the approved order the list is still the order list of the module"
-cdcheck "ceo drill pr.orders_open: the approved order shows its supplier (not graded), state, amount, nothing received, the delivery date and two late lines of 4 days at the most" '.success and (([.data.rows[]|select(.id == '"$CDPO"')]|.[0]) as $r | $r.number == '"$(cdq "$CDPON")"' and $r.orderDate == "'"$CDPTODAY"'" and $r.providerName == '"$(cdq "$CDPOPN")"' and $r.grade == "ارزیابی‌نشده" and $r.status == "تاییدشده، ابلاغ‌نشده" and $r.projectCode == null and $r.amount == 5500000 and $r.receivedPercent == 0 and $r.uninvoiced == 0 and $r.paid == 0 and $r.deliveryDate == "'"$(pdate "$CDD4")"'" and $r.lateLines == 2 and $r.daysLate == 4) and .data.totalCount == ('"$CDPRO0"').n + 1 and .data.totals.amount == ('"$CDPRO0"').amount + 5500000 and .data.totals.lateLines == ('"$CDPRO0"').late + 2 and .data.totalCount == ('"$CDPD"').orders and .data.totals.amount == ('"$CDPD"').amount'
+cdcheck "ceo drill pr.orders_open: the approved order shows its supplier (not graded), state, amount, nothing received, the delivery date and two late lines of 4 days at the most" '.success and (([.data.rows[]|select(.id == '"$CDPO"')]|.[0]) as $r | $r.number == '"$(cdq "$CDPON")"' and $r.orderDate == "'"$CDPTODAY"'" and $r.providerName == '"$(cdq "$CDPOPN")"' and $r.grade == "ارزیابی‌نشده" and $r.status == "تأییدشده، ابلاغ‌نشده" and $r.projectCode == null and $r.amount == 5500000 and $r.receivedPercent == 0 and $r.uninvoiced == 0 and $r.paid == 0 and $r.deliveryDate == "'"$(pdate "$CDD4")"'" and $r.lateLines == 2 and $r.daysLate == 4) and .data.totalCount == ('"$CDPRO0"').n + 1 and .data.totals.amount == ('"$CDPRO0"').amount + 5500000 and .data.totals.lateLines == ('"$CDPRO0"').late + 2 and .data.totalCount == ('"$CDPD"').orders and .data.totals.amount == ('"$CDPD"').amount'
 cdrill pr.late_lines "top=200"
 cdprlatecheck "ceo drill pr.late_lines: an order that is only approved has no late lines yet (only sent orders count), as in the order list of the module"
 cdcheck "ceo drill pr.late_lines: none of the lines of the approved order is listed" '.success and ([.data.rows[]|select(.number == '"$(cdq "$CDPON")"')]|length) == 0 and .data.totalCount == ('"$CDPRL0"').n'
@@ -6659,7 +6852,7 @@ cdprlatecheck "ceo drill pr.late_lines: with a part received the late lines are 
 cdcheck "ceo drill pr.late_lines: the late lines now show 1 received, 3 and 2 still open, and 1,500,000 and 2,000,000 rial open" '.success and (([.data.rows[]|select(.number == '"$(cdq "$CDPON")"')]) as $r | ($r|length) == 2 and $r[0].received == 1 and $r[0].openQuantity == 3 and $r[0].openAmount == 1500000 and $r[0].daysLate == 4 and $r[1].received == 1 and $r[1].openQuantity == 2 and $r[1].openAmount == 2000000 and $r[1].daysLate == 2) and .data.totals.openAmount == ('"$CDPRL0"').amount + 3500000 and .data.totalCount == ('"$CDPD"').late'
 cdrill pr.supplier_on_time "top=200"
 cdcheck "ceo drill pr.supplier_on_time: the supplier list of the module with the new supplier included" '.success and .data.totalCount == ('"$CDPRS"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.grade)|\(.score|m)|\(.orders)|\(.receiptLines)|\(.lateReceiptLines)|\(.onTimePercent|m)|\(.ncrs)|\(.returns)|\(.blocked)|\(.evaluationDue)"]) == ('"$CDPRS"').rows and [.data.rows[].id] == ('"$CDPRS"').order and .data.totals.receiptLines == ('"$CDPRS"').lines and .data.totals.lateReceiptLines == ('"$CDPRS"').late and .data.totals.onTimePercent == ('"$CDPRS"').pct and .data.totals.evaluationsDue == ('"$CDPD"').evals'
-cdcheck "ceo drill pr.supplier_on_time: the new supplier delivered two lines, both after their date (0 percent on time), and the totals count them" '.success and (([.data.rows[]|select(.id == '"${PB:-0}"')]|.[0]) as $r | $r.grade == "ارزیابی‌نشده" and $r.score == null and $r.orders == 1 and $r.receiptLines == 2 and $r.lateReceiptLines == 2 and $r.onTimePercent == 0 and $r.ncrs == 0 and $r.returns == 0 and $r.blocked == "خیر" and $r.evaluationDue == "خیر") and .data.totals.suppliers == ('"$CDPRS0"').n + 1 and .data.totals.receiptLines == ('"$CDPRS0"').lines + 2 and .data.totals.lateReceiptLines == ('"$CDPRS0"').late + 2'
+cdcheck "ceo drill pr.supplier_on_time: the new supplier delivered two more lines, both after their date, and the totals count them; the rest of its record is what it was before the scenario (the snapshot of the block)" '.success and ((('"$CDPRS0"').by["'"${PB:-0}"'"]) as $z | ([.data.rows[]|select(.id == '"${PB:-0}"')]|.[0]) as $r | $r.orders == $z.orders + 1 and $r.receiptLines == $z.receiptLines + 2 and $r.lateReceiptLines == $z.lateReceiptLines + 2 and $r.onTimePercent == pc($z.receiptLines + 2 - ($z.lateReceiptLines + 2);$z.receiptLines + 2) and $r.score == $z.score and $r.ncrs == $z.ncrs and $r.returns == $z.returns and $r.blocked == "خیر" and $r.evaluationDue == "خیر" and .data.totals.suppliers == ('"$CDPRS0"').n + (if ($z.receiptLines // 0) == 0 then 1 else 0 end)) and .data.totals.receiptLines == ('"$CDPRS0"').lines + 2 and .data.totals.lateReceiptLines == ('"$CDPRS0"').late + 2'
 cdprdelta "ceo dashboard: still one more open order and two late lines after the part is received" '$a == ($b | .orders += 1 | .amount += 5500000 | .late += 2)'
 
 # --- two invoices for the received units: one at the order price, one above it
@@ -6671,7 +6864,7 @@ check "ceo drills procurement scenario: an invoice above the order price needs a
 CDIB=$(val .data.id); CDIBN=$(val .data.number); CDIBM=$(val .data.matchNote)
 cdprinv; cdprdash; cdrill pr.invoices_waiting "top=200"
 cdcheck "ceo drill pr.invoices_waiting: with the two new invoices the list is the invoice list of the module, the oldest first" '.success and .data.totalCount == ('"$CDPRI"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.providerName)|\(.invoiceNumber)|\(.invoiceDate)|\(.orderNumber)|\(.status)|\(.netAmount|n)|\(.vatAmount|n)|\(.totalAmount|n)|\(.priceVariance|n)|\(.matchNote)|\(.waitingDays)"]) == ('"$CDPRI"').rows and [.data.rows[].id] == ('"$CDPRI"').order and .data.totals.needsApproval == ('"$CDPRI"').na and .data.totals.totalAmount == ('"$CDPRI"').total and .data.totalCount == ('"$CDPD"').inv'
-cdcheck "ceo drill pr.invoices_waiting: the matched invoice and the one with a difference show their state, amounts, price difference and match note" '.success and (([.data.rows[]|select(.id == '"$CDIA"')]|.[0]) as $a | ([.data.rows[]|select(.id == '"$CDIB"')]|.[0]) as $b | $a.number == '"$(cdq "$CDIAN")"' and $a.providerName == '"$(cdq "$CDPOPN")"' and $a.invoiceNumber == "CD-A" and $a.invoiceDate == "'"$CDPTODAY"'" and $a.orderNumber == '"$(cdq "$CDPON")"' and $a.status == "مطابق، منتظر تایید" and $a.netAmount == 500000 and $a.vatAmount == 50000 and $a.totalAmount == 550000 and $a.priceVariance == 0 and $a.matchNote == '"$(cdq "$CDIAM")"' and $a.waitingDays == 0 and $b.number == '"$(cdq "$CDIBN")"' and $b.invoiceNumber == "CD-B" and $b.status == "مغایرت دارد، منتظر تایید مدیریت" and $b.netAmount == 1300000 and $b.vatAmount == 130000 and $b.totalAmount == 1430000 and $b.priceVariance == 300000 and $b.matchNote == '"$(cdq "$CDIBM")"' and $b.waitingDays == 0) and .data.totals.needsApproval == ('"$CDPRI0"').na + 1 and .data.totals.totalAmount == ('"$CDPRI0"').total + 1980000 and .data.totalCount == ('"$CDPRI0"').n + 2'
+cdcheck "ceo drill pr.invoices_waiting: the matched invoice and the one with a difference show their state, amounts, price difference and match note" '.success and (([.data.rows[]|select(.id == '"$CDIA"')]|.[0]) as $a | ([.data.rows[]|select(.id == '"$CDIB"')]|.[0]) as $b | $a.number == '"$(cdq "$CDIAN")"' and $a.providerName == '"$(cdq "$CDPOPN")"' and $a.invoiceNumber == "CD-A" and $a.invoiceDate == "'"$CDPTODAY"'" and $a.orderNumber == '"$(cdq "$CDPON")"' and $a.status == "مطابق، منتظر تأیید" and $a.netAmount == 500000 and $a.vatAmount == 50000 and $a.totalAmount == 550000 and $a.priceVariance == 0 and $a.matchNote == '"$(cdq "$CDIAM")"' and $a.waitingDays == 0 and $b.number == '"$(cdq "$CDIBN")"' and $b.invoiceNumber == "CD-B" and $b.status == "مغایرت دارد، منتظر تأیید مدیریت" and $b.netAmount == 1300000 and $b.vatAmount == 130000 and $b.totalAmount == 1430000 and $b.priceVariance == 300000 and $b.matchNote == '"$(cdq "$CDIBM")"' and $b.waitingDays == 0) and .data.totals.needsApproval == ('"$CDPRI0"').na + 1 and .data.totals.totalAmount == ('"$CDPRI0"').total + 1980000 and .data.totalCount == ('"$CDPRI0"').n + 2'
 cdprdelta "ceo dashboard: two more invoices wait for approval" '$a == ($b | .orders += 1 | .amount += 5500000 | .late += 2 | .inv += 2)'
 cdcheck "ceo drill pr.invoices_waiting: the note of the differing invoice names the invoiced and the ordered price" '.success and (([.data.rows[]|select(.id == '"$CDIB"')]|.[0].matchNote) == "ردیف 2: قیمت فاکتور 1300000 با قیمت سفارش 1000000 فرق دارد.")'
 
@@ -6681,7 +6874,7 @@ check "ceo drills procurement scenario: a progress payment request of 1,200,000 
 CDPY=$(val .data.id); CDPYN=$(val .data.number)
 cdprpay; cdprdash; cdrill pr.payments_waiting "top=200"
 cdcheck "ceo drill pr.payments_waiting: with the new draft the list is the payment list of the module, the oldest first" '.success and .data.totalCount == ('"$CDPRP"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.type)|\(.providerName)|\(.orderNumber)|\(.invoiceNumber)|\(.requestDate)|\(.status)|\(.amount|n)|\(.deductions|n)|\(.netAmount|n)|\(.qcApproved)|\(.waitingDays)"]) == ('"$CDPRP"').rows and [.data.rows[].id] == ('"$CDPRP"').order and .data.totals.netAmount == ('"$CDPRP"').net and .data.totals.draft == ('"$CDPRP"').dr and .data.totals.approved == ('"$CDPRP"').ap and .data.totalCount == ('"$CDPD"').pays and .data.totals.netAmount == ('"$CDPD"').payAmount'
-cdcheck "ceo drill pr.payments_waiting: the new draft shows its type, supplier, order, state, amount, deductions, net and the quality approval" '.success and (([.data.rows[]|select(.id == '"$CDPY"')]|.[0]) as $r | $r.number == '"$(cdq "$CDPYN")"' and $r.type == "صورت‌وضعیت" and $r.providerName == '"$(cdq "$CDPOPN")"' and $r.orderNumber == '"$(cdq "$CDPON")"' and $r.invoiceNumber == null and $r.requestDate == "'"$CDPTODAY"'" and $r.status == "پیش‌نویس، منتظر تایید" and $r.amount == 1200000 and $r.deductions == 200000 and $r.netAmount == 1000000 and $r.qcApproved == "بله" and $r.waitingDays == 0) and .data.totals.netAmount == ('"$CDPRP0"').net + 1000000 and .data.totals.draft == ('"$CDPRP0"').dr + 1 and .data.totals.approved == ('"$CDPRP0"').ap and .data.totalCount == ('"$CDPRP0"').n + 1'
+cdcheck "ceo drill pr.payments_waiting: the new draft shows its type, supplier, order, state, amount, deductions, net and the quality approval" '.success and (([.data.rows[]|select(.id == '"$CDPY"')]|.[0]) as $r | $r.number == '"$(cdq "$CDPYN")"' and $r.type == "صورت‌وضعیت" and $r.providerName == '"$(cdq "$CDPOPN")"' and $r.orderNumber == '"$(cdq "$CDPON")"' and $r.invoiceNumber == null and $r.requestDate == "'"$CDPTODAY"'" and $r.status == "پیش‌نویس، منتظر تأیید" and $r.amount == 1200000 and $r.deductions == 200000 and $r.netAmount == 1000000 and $r.qcApproved == "بله" and $r.waitingDays == 0) and .data.totals.netAmount == ('"$CDPRP0"').net + 1000000 and .data.totals.draft == ('"$CDPRP0"').dr + 1 and .data.totals.approved == ('"$CDPRP0"').ap and .data.totalCount == ('"$CDPRP0"').n + 1'
 cdprdelta "ceo dashboard: one more payment request waits, for a net of 1,000,000 rial" '$a == ($b | .orders += 1 | .amount += 5500000 | .late += 2 | .inv += 2 | .pays += 1 | .payAmount += 1000000)'
 
 # --- the supplier is blocked (the profile is read first and written back unchanged but for the block)
@@ -6692,7 +6885,7 @@ as "$COM_TOKEN" POST procurement/suppliers "$CDBLK"
 check "ceo drills procurement scenario: the supplier is blocked with a reason" '.success and .data.blocked == true and .data.blockReason == "کیفیت نامناسب در آزمون داشبورد مدیرعامل"'
 cdprsup; cdprdash; cdrill pr.blocked_suppliers "top=200"
 cdcheck "ceo drill pr.blocked_suppliers: with the blocked supplier the list is the supplier list of the module, the biggest orderer first" '.success and .data.totalCount == ('"$CDPRS"').bn and ([.data.rows[]|"\(.id)|\(.providerName)|\(.grade)|\(.score|m)|\(.warnings)|\(.blockReason)|\(.orders)|\(.orderedAmount|n)|\(.ncrs)|\(.returns)"]) == ('"$CDPRS"').brows and [.data.rows[].id] == ('"$CDPRS"').border and .data.totals.orderedAmount == ('"$CDPRS"').bamount and .data.totalCount == ('"$CDPD"').blocked'
-cdcheck "ceo drill pr.blocked_suppliers: the blocked supplier shows no grade, no score, no warnings, its reason, its order of 5,500,000 rial and no reports or returns" '.success and (([.data.rows[]|select(.id == '"${PB:-0}"')]|.[0]) as $r | $r.providerName == '"$(cdq "$CDPOPN")"' and $r.grade == "ارزیابی‌نشده" and $r.score == null and $r.warnings == 0 and $r.blockReason == "کیفیت نامناسب در آزمون داشبورد مدیرعامل" and $r.orders == 1 and $r.orderedAmount == 5500000 and $r.ncrs == 0 and $r.returns == 0) and .data.totalCount == ('"$CDPRS0"').bn + 1 and .data.totals.orderedAmount == ('"$CDPRS0"').bamount + 5500000'
+cdcheck "ceo drill pr.blocked_suppliers: the blocked supplier shows its grade, score and warnings as before the scenario (the snapshot of the block), its reason, its one more order of 5,500,000 rial and the reports and returns it had" '.success and ((('"$CDPRS0"').by["'"${PB:-0}"'"]) as $z | ([.data.rows[]|select(.id == '"${PB:-0}"')]|.[0]) as $r | $r.providerName == '"$(cdq "$CDPOPN")"' and $r.grade == (["ارزیابی‌نشده","A","B","C","D"][$z.grade // 0] // "ارزیابی‌نشده") and $r.score == $z.score and $r.warnings == $z.warnings and $r.blockReason == "کیفیت نامناسب در آزمون داشبورد مدیرعامل" and $r.orders == $z.orders + 1 and $r.orderedAmount == $z.orderedAmount + 5500000 and $r.ncrs == $z.ncrs and $r.returns == $z.returns) and .data.totalCount == ('"$CDPRS0"').bn + 1 and .data.totals.orderedAmount == ('"$CDPRS0"').bamount + 5500000'
 cdprdelta "ceo dashboard: one more blocked supplier, and the evaluations due are unchanged" '$a == ($b | .orders += 1 | .amount += 5500000 | .late += 2 | .inv += 2 | .pays += 1 | .payAmount += 1000000 | .blocked += 1)'
 cdrill pr.supplier_on_time "top=200"
 cdcheck "ceo drill pr.supplier_on_time: the blocked supplier is shown as blocked" '.success and (([.data.rows[]|select(.id == '"${PB:-0}"')]|.[0].blocked) == "بله") and .data.totals.evaluationsDue == ('"$CDPD"').evals'
@@ -6713,6 +6906,42 @@ cdrill pr.blocked_suppliers "top=200"; cdcheck "ceo drill pr.blocked_suppliers: 
 cdrill pr.requests_open "top=200"; cdprreqcheck "ceo drill pr.requests_open: after the scenario the request list is that of the module"
 cdprdelta "ceo dashboard: after the scenario the procurement counters are back where they were" '$a == $b'
 
+# --- pr.spend_by_supplier: the orders by their date, the approved invoices by their date and the paid requests by the day of payment; the three lists of the module are read again for every range.
+# The scenario above left an order dated today (closed, 5,500,000 rial) and the first finance section recorded a payment today, so every range that ends today holds rows whatever the date of the run
+cdspendx() { # cdspendx FROM TO
+  as "$CEO_TOKEN" GET "procurement/orders?PageSize=0"; CDPSO=$(jq -c '.data.data|map(select(.status != 0 and .status != 9)|{providerId,providerName,date:.orderDate[0:10],total:.totalAmount})' "$B")
+  as "$CEO_TOKEN" GET "procurement/invoices?Status=3&PageSize=0"; CDPSI=$(jq -c '.data.data|map({providerId,providerName,date:.invoiceDate[0:10],total:.totalAmount})' "$B")
+  as "$CEO_TOKEN" GET "procurement/payments?Status=2&PageSize=0"; CDPSP=$(jq -c '.data.data|map(select(.paidAt != null)|{providerId,providerName,date:.paidAt[0:10],net:.netAmount})' "$B")
+  CDSX2=$(jq -nc --argjson o "$CDPSO" --argjson i "$CDPSI" --argjson p "$CDPSP" "$CDJQ"'($o|map(select(.date >= "'"$1"'" and .date <= "'"$2"'"))) as $ord | ($i|map(select(.date >= "'"$1"'" and .date <= "'"$2"'"))) as $inv | ($p|map(select(.date >= "'"$1"'" and .date <= "'"$2"'"))) as $pay
+    | ([$ord[]|.providerId]+[$inv[]|.providerId]+[$pay[]|.providerId]|unique) as $ids
+    | ($ids|map(. as $id|{id:$id,name:(([$ord[]|select(.providerId == $id)|.providerName][0]) // ([$inv[]|select(.providerId == $id)|.providerName][0]) // ([$pay[]|select(.providerId == $id)|.providerName][0])),ordered:([$ord[]|select(.providerId == $id)|.total]|add // 0),count:([$inv[]|select(.providerId == $id)]|length),inv:([$inv[]|select(.providerId == $id)|.total]|add // 0),paid:([$pay[]|select(.providerId == $id)|.net]|add // 0)})|sort_by([-.ordered,-.inv,-.paid,.name])) as $s
+    | ($s|map(.inv)|add // 0) as $tot
+    | {n:($s|length),order:($s|map(.id)),ordered:($s|map(.ordered)|add // 0),inv:$tot,paid:($s|map(.paid)|add // 0),rows:($s|map("\(.id)|\(.name)|\(.ordered|n)|\(.count)|\(.inv|n)|\(if $tot == 0 then 0 else pc((.inv*100|round);($tot*100|round)) end|n)|\(.paid|n)"))}')
+}
+cdspendcheck() { # cdspendcheck NAME
+  cdcheck "$1" '.success and .data.totalCount == ('"$CDSX2"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.ordered|n)|\(.invoices)|\(.invoiced|n)|\(.sharePercent|n)|\(.paid|n)"]) == ('"$CDSX2"').rows and [.data.rows[].id] == ('"$CDSX2"').order and .data.totals.ordered == ('"$CDSX2"').ordered and .data.totals.invoiced == ('"$CDSX2"').inv and .data.totals.paid == ('"$CDSX2"').paid and .data.totals.suppliers == ('"$CDSX2"').n'
+}
+cdspendx "$CDM12" "$TODAY"
+cdrill pr.spend_by_supplier "top=200"
+cdnonempty "ceo drill pr.spend_by_supplier: the 12 Persian months up to today hold orders, invoices or payments (the order of the scenario is dated today)" "$(jq -r '.n' <<<"$CDSX2")"
+cdspendcheck "ceo drill pr.spend_by_supplier: with the default range (the 12 Persian months up to today, from $CDM12) every supplier shows the value of its orders, its approved invoices, their total, the share and the payments made in the range"
+cdspendx "$(dd -3)" "$TODAY"
+cdrill pr.spend_by_supplier "from=$(dd -3)&to=$TODAY&top=200"
+cdnonempty "ceo drill pr.spend_by_supplier: the last 3 days hold orders, invoices or payments (the order of the scenario is dated today)" "$(jq -r '.n' <<<"$CDSX2")"
+cdspendcheck "ceo drill pr.spend_by_supplier: a range of the last 3 days lists the orders, the invoices and the payments of those days"
+cdspendx "$TODAY" "$TODAY"
+cdrill pr.spend_by_supplier "from=$TODAY&to=$TODAY&top=200"
+cdnonempty "ceo drill pr.spend_by_supplier: today holds a payment (the one recorded by the first finance section)" "$(jq -r '.paid' <<<"$CDSX2")"
+cdspendcheck "ceo drill pr.spend_by_supplier: a range of one day (today) lists the orders, the invoices and the payments of that day"
+cdcheck "ceo drill pr.spend_by_supplier: the closed order of the scenario adds 5,500,000 rial to the value ordered today and its supplier shows exactly that; its cancelled invoices and its rejected payment request add nothing" '.success and .data.totals.ordered == ('"$CDSPT0"').ordered + 5500000 and .data.totals.invoiced == ('"$CDSPT0"').invoiced and .data.totals.paid == ('"$CDSPT0"').paid and ([.data.rows[]|select(.id == '"${PB:-0}"')|.ordered]) == [('"$CDSPT0"').pb + 5500000]'
+cdnonempty "ceo drill pr.spend_by_supplier: the finance sections approved supplier invoices" "$(jq -r 'length' <<<"$CDPSI")"
+CDSPD=$(jq -r 'map(.date)|max' <<<"$CDPSI")
+cdspendx "$CDSPD" "$TODAY"
+cdrill pr.spend_by_supplier "from=$CDSPD&to=$TODAY&top=200"
+cdnonempty "ceo drill pr.spend_by_supplier: the range that starts on the day of the latest approved invoice holds an invoiced amount" "$(jq -r '.inv' <<<"$CDSX2")"
+cdspendcheck "ceo drill pr.spend_by_supplier: a range that starts on the day of the latest approved invoice lists that invoice with the share, and the orders and payments of the range"
+cdrill pr.spend_by_supplier "from=$TODAY&to=$(dd -1)"; cdmsg "ceo drill pr.spend_by_supplier: a range that ends before it starts is refused" "تاریخ شروع (from) نباید بعد از تاریخ پایان (to) باشد."
+
 # ===================================================================================== after-sales service
 # The service dashboard (read as the same user) and the module's own lists are the references; the SLA hours over grow with the clock, so that table is checked against the hours at the two seconds around the call.
 cdsvdash() { # cdsvdash [TOKEN] : the figures of the service dashboard as that user (default: the CEO)
@@ -6732,12 +6961,15 @@ cdsvreqcheck() { # cdsvreqcheck NAME
   cdcheck "$1" '.success and .data.totalCount == ('"$CDSVR"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.unitTag)|\(.type)|\(.priority)|\(.status)|\(.receivedAt)|\(.ageDays)|\(.responseDue)|\(.resolutionDue)|\(.sla)|\(.assignedTo)|\(.description)"]) == ('"$CDSVR"').rows and [.data.rows[].id] == ('"$CDSVR"').order and .data.totals.open == ('"$CDSVR"').open and .data.totals.breached == ('"$CDSVR"').breached and [.data.totals.critical,.data.totals.high,.data.totals.normal,.data.totals.low] == ('"$CDSVR"').pri'
 }
 cdsvdash; cdsvreq; cdrill sv.requests_open "top=200"
+cdnonempty "ceo drill sv.requests_open: the scenario has open requests (R3 normal and R4 high of the service section are still open)" "$(jq -r '.n' <<<"$CDSVR")"
 cdsvreqcheck "ceo drill sv.requests_open: the open requests (customer, unit, type, priority, state, received, age, due times, SLA, assignee, description) are those of the request list of the module, the breached first"
 cdcheck "ceo drill sv.requests_open: the open requests, the breached ones and the requests per priority are those of the service dashboard" '.success and .data.totals.open == ('"$CDSVD"').open and .data.totals.breached == ('"$CDSVD"').breached and [.data.totals.critical,.data.totals.high,.data.totals.normal,.data.totals.low] == ('"$CDSVD"').pri'
 cdsvreq 2; cdrill sv.requests_open "priority=High&top=200"
+cdnonempty "ceo drill sv.requests_open: the scenario has an open high-priority request (R4, never answered)" "$(jq -r '.n' <<<"$CDSVR")"
 cdsvreqcheck "ceo drill sv.requests_open: priority=High lists only the open requests of that priority, and the totals still count all priorities"
-cdsvreq 1; cdrill sv.requests_open "priority=critical"
-cdsvreqcheck "ceo drill sv.requests_open: priority=critical (any case) lists only the critical requests"
+cdsvreq 3; cdrill sv.requests_open "priority=NORMAL&top=200"
+cdnonempty "ceo drill sv.requests_open: the scenario has an open normal-priority request (R3, in progress)" "$(jq -r '.n' <<<"$CDSVR")"
+cdsvreqcheck "ceo drill sv.requests_open: priority=NORMAL (any case) lists only the normal requests"
 cdrill sv.requests_open "priority=Urgent"; cdmsg "ceo drill sv.requests_open: a priority outside the list is refused with the list" "مقدار «priority» باید یکی از این‌ها باشد: Critical، High، Normal، Low."
 
 # --- sv.sla_breaches: the open requests past a due time, with the hours over (the hours of an open request grow with the clock)
@@ -6754,6 +6986,7 @@ cdsvbcheck() { # cdsvbcheck NAME E0 E1 : the table is the expectation at the sec
   cdcheck "$1" 'def okfor($E): .success and .data.totalCount == $E.n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.unitTag)|\(.priority)|\(.status)|\(.breachKind)|\(.responseDue)|\(.resolutionDue)|\(.hoursOver|n)|\(.assignedTo)"]) == $E.rows and [.data.rows[].id] == $E.order and .data.totals.breached == $E.n and .data.totals.responseBreaches == $E.resp and .data.totals.resolutionBreaches == $E.reso and .data.totals.critical == $E.crit and .data.totals.unassigned == $E.un; okfor('"$2"') or okfor('"$3"')'
 }
 cdsvdash; as "$CEO_TOKEN" GET "service/requests?Breached=true&PageSize=500"; CDSVB=$(jq -c '.data.data' "$B")
+cdnonempty "ceo drill sv.sla_breaches: the scenario has a breached request (R4 was never answered)" "$(jq -r 'length' <<<"$CDSVB")"
 CDT0=$(date +%s); cdrill sv.sla_breaches "top=200"; CDT1=$(( $(date +%s) + 1 ))
 cdsvbcheck "ceo drill sv.sla_breaches: the breached requests (customer, unit, priority, state, where it was breached, due times, hours over, assignee) are those of the module, the longest over first" "$(cdsvbx $CDT0)" "$(cdsvbx $CDT1)"
 cdcheck "ceo drill sv.sla_breaches: the number of requests is the SLA breaches of the service dashboard" '.success and .data.totals.breached == ('"$CDSVD"').breached and .data.totalCount == ('"$CDSVD"').breached'
@@ -6774,6 +7007,7 @@ cdsvordcheck "ceo drill sv.orders_open: the draft, planned and running orders (r
 cdcheck "ceo drill sv.orders_open: the open orders and the goodwill decisions waiting are those of the service dashboard" '.success and .data.totals.open == ('"$CDSVD"').orders and .data.totals.goodwillWaiting == ('"$CDSVD"').gw'
 cdsvord true; cdrill sv.orders_open "goodwillOnly=true&top=200"
 cdsvordcheck "ceo drill sv.orders_open: goodwillOnly=true lists only the orders whose goodwill request waits for a decision"
+cdcheck "ceo drill sv.orders_open: goodwillOnly=true opens exactly the goodwill decisions waiting of the service dashboard, the figure the KPI shows" '.success and .data.totalCount == ('"$CDSVD"').gw'
 
 # --- the scenario: an order that should have ended 3 days ago and asks for goodwill (cancelled again at the end)
 sva POST "$SVC/orders" "{\"unitId\":${SVUA:-0},\"kind\":1,\"title\":\"دستور آزمون داشبورد مدیرعامل\",\"plannedStart\":\"$(dd -5)T00:00:00\",\"plannedEnd\":\"$(dd -3)T00:00:00\"}"
@@ -6786,6 +7020,7 @@ cdsvordcheck "ceo drill sv.orders_open: with the late order the table is still t
 cdcheck "ceo drill sv.orders_open: the new order is first with 3 days late, the planned state, the undecided warranty decision and the goodwill decision waiting for the CEO" '.success and (([.data.rows[]|select(.id == '"$CDSVX"')]|.[0]) as $r | .data.rows[0].id == '"$CDSVX"' and $r.number == '"$(cdq "$CDSVXN")"' and $r.status == "برنامه‌ریزی‌شده" and $r.decision == "تصمیم‌گیری نشده" and $r.plannedStart == "'"$(pdate "$(dd -5)")"'" and $r.plannedEnd == "'"$(pdate "$(dd -3)")"'" and $r.daysLate == 3 and $r.goodwill == "منتظر تصمیم مدیرعامل" and $r.totalHours == 0) and .data.totals.open == ('"$CDSVD"').orders and .data.totals.goodwillWaiting == ('"$CDSVD"').gw and .data.totals.late == ('"$CDSVO"').late'
 cdsvord true; cdrill sv.orders_open "goodwillOnly=true"
 cdsvordcheck "ceo drill sv.orders_open: goodwillOnly=true now lists the new order too"
+cdcheck "ceo drill sv.orders_open: goodwillOnly=true opens exactly the goodwill decisions waiting of the service dashboard, the figure the KPI shows, and the new order is one of them" '.success and .data.totalCount == ('"$CDSVD"').gw and ([.data.rows[]|select(.id == '"$CDSVX"')]|length) == 1'
 sva POST "$SVC/orders/action" "{\"id\":$CDSVX,\"action\":\"cancel\",\"reason\":\"آزمون داشبورد مدیرعامل\"}"; check "ceo drills service scenario: the order is cancelled again" '.success and .data.status == 5'
 cdsvdash; cdsvord; cdrill sv.orders_open "top=200"
 cdsvordcheck "ceo drill sv.orders_open: after the cancellation the cancelled order has left the list, as in the order lists of the module"
@@ -6800,7 +7035,7 @@ cdsvwc() { # cdsvwc TOKEN : the expectation from the closed service orders as th
     | ($w|map(select(.closedAtText[0:10] >= "'"${PT:0:4}"'/01/01" and .closedAtText[0:10] <= "'"$PT"'"))) as $yr
     | ([range(0;12)|. as $i|('"$CDM12Y"' * 12 + '"$CDM12M"' - 1 + $i) as $k|{y:($k/12|floor),m:($k%12 + 1)}]) as $ms
     | ($ms|map(. as $mo|($win|map(select(.closedAtText[0:7] == mk($mo.y;$mo.m)))) as $in|($in|map(.labourHidden)|any) as $h
-        | {label:(mname[$mo.m - 1] + " " + ($mo.y|tostring)),n:($in|length),parts:($in|map(.partsAmount)|add // 0),total:(if $h then null else ($in|map(cost)|add // 0) end),hidden:$h})) as $rows
+        | {label:(mname[$mo.m - 1] + " " + ($mo.y|tostring|explode|map(. + 1728)|implode)),n:($in|length),parts:($in|map(.partsAmount)|add // 0),total:(if $h then null else ($in|map(cost)|add // 0) end),hidden:$h})) as $rows
     | {n:($rows|length),rows:($rows|map("\(.label)|\(.n)|\(.parts|n)|\(.total|m)|\(if .hidden then "محرمانه (حقوق)" else "نمایان" end)")),
        orders:($win|length),parts:($win|map(.partsAmount)|add // 0),total:(if ($rows|map(.hidden)|any) then null else ($win|map(cost)|add // 0) end),
        yorders:($yr|length),ycost:(if ($yr|map(.labourHidden)|any) then null else ($yr|map(cost)|add // 0) end),hidden:((($rows|map(.hidden)|any)) or ($yr|map(.labourHidden)|any))}')
@@ -6809,6 +7044,7 @@ cdsvwccheck() { # cdsvwccheck NAME
   cdcheck "$1" '.success and .data.totalCount == ('"$CDSVW"').n and ([.data.rows[]|"\(.month)|\(.orders)|\(.partsAmount|n)|\(.totalCost|m)|\(.visibility)"]) == ('"$CDSVW"').rows and .data.totals.orders == ('"$CDSVW"').orders and (.data.totals.partsAmount|n) == (('"$CDSVW"').parts|n) and (.data.totals.totalCost|m) == (('"$CDSVW"').total|m) and .data.totals.ytdOrders == ('"$CDSVW"').yorders and (.data.totals.ytdCost|m) == (('"$CDSVW"').ycost|m) and .data.hidden == ('"$CDSVW"').hidden'
 }
 cdsvdash; cdsvwc "$CEO_TOKEN"; cdrill sv.warranty_cost_by_month "top=200"
+cdnonempty "ceo drill sv.warranty_cost_by_month: the scenario has warranty orders closed in the last 12 months (O1 and O4 of the service section)" "$(jq -r '.orders' <<<"$CDSVW")"
 cdsvwccheck "ceo drill sv.warranty_cost_by_month: the CEO sees one row for each of the 12 Persian months up to today with the warranty orders closed in it, their parts and the whole cost, as the closed orders of the module"
 cdcheck "ceo drill sv.warranty_cost_by_month: the year to date (orders and cost) is the warranty orders and cost of the service dashboard" '.success and .data.totals.ytdOrders == ('"$CDSVD"').worders and (.data.totals.ytdCost|m) == (('"$CDSVD"').wcost|m) and .data.hidden == ('"$CDSVD"').whidden'
 cdsvdash "$PMO2_TOKEN"; cdsvwc "$PMO2_TOKEN"; cdrill sv.warranty_cost_by_month "top=200" "$PMO2_TOKEN"
@@ -6826,6 +7062,7 @@ cdsvunits() {
        rows:($g|map("\(.id)|\(.name)|\(.units)|\(.inw)|\(.ltsa)|\(.out)|\(.conf)|\(if .next == null then null else $P[.next] end)"))}')
 }
 cdsvdash; cdsvunits; cdrill sv.units_by_customer "top=200"
+cdnonempty "ceo drill sv.units_by_customer: the scenario has installed units (A, B and the condenser of the service section)" "$(jq -r '.n' <<<"$CDSVU")"
 cdcheck "ceo drill sv.units_by_customer: each customer shows its installed units by state (in warranty, under an agreement, out of warranty), the units to confirm and the nearest end of warranty, the biggest first, as the unit list of the module (decommissioned units left out)" '.success and .data.totalCount == ('"$CDSVU"').n and ([.data.rows[]|"\(.id)|\(.customerName)|\(.units)|\(.inWarranty)|\(.underLtsa)|\(.outOfWarranty)|\(.toConfirm)|\(.nextWarrantyEnd)"]) == ('"$CDSVU"').rows and [.data.rows[].id] == ('"$CDSVU"').order and .data.totals.units == ('"$CDSVU"').units and .data.totals.inWarranty == ('"$CDSVU"').inw and .data.totals.underLtsa == ('"$CDSVU"').ltsa and .data.totals.outOfWarranty == ('"$CDSVU"').out and .data.totals.toConfirm == ('"$CDSVU"').conf and .data.totals.customers == ('"$CDSVU"').n'
 cdcheck "ceo drill sv.units_by_customer: the units in warranty, under an agreement, out of warranty and to confirm are those of the service dashboard" '.success and .data.totals.inWarranty == ('"$CDSVD"').inw and .data.totals.underLtsa == ('"$CDSVD"').ltsa and .data.totals.outOfWarranty == ('"$CDSVD"').out and .data.totals.toConfirm == ('"$CDSVD"').conf'
 
@@ -6838,7 +7075,7 @@ cdsvsurv() { # cdsvsurv FROM-PERSIAN TO-PERSIAN FIRST-YEAR FIRST-MONTH MONTHS
     | ($ans|map(select(.answeredAtText != null and .answeredAtText[0:10] >= "'"$1"'" and .answeredAtText[0:10] <= "'"$2"'"))) as $win
     | ([range(0;'"$5"')|. as $i|('"$3"' * 12 + '"$4"' - 1 + $i) as $k|{y:($k/12|floor),m:($k%12 + 1)}]) as $ms
     | ($ms|map(. as $mo|($win|map(select(.answeredAtText[0:7] == mk($mo.y;$mo.m)))) as $in
-        | {label:(mname[$mo.m - 1] + " " + ($mo.y|tostring)),n:($in|length),a:($in|avg),d:($in|map(select(.kind == 1))|avg),s:($in|map(select(.kind == 2))|avg),low:($in|map(select(.averageScore < 3))|length)})) as $rows
+        | {label:(mname[$mo.m - 1] + " " + ($mo.y|tostring|explode|map(. + 1728)|implode)),n:($in|length),a:($in|avg),d:($in|map(select(.kind == 1))|avg),s:($in|map(select(.kind == 2))|avg),low:($in|map(select(.averageScore < 3))|length)})) as $rows
     | {n:($rows|length),rows:($rows|map("\(.label)|\(.n)|\(.a|m)|\(.d|m)|\(.s|m)|\(.low)")),answered:($win|length),avg:($win|avg),low:($win|map(select(.averageScore < 3))|length),avgAll:($ans|avg),answeredAll:($ans|length),
        drafted:($all|map(select(.status == 1))|length),sent:($all|map(select(.status == 2))|length)}')
 }
@@ -6846,9 +7083,11 @@ cdsvsurvcheck() { # cdsvsurvcheck NAME
   cdcheck "$1" '.success and .data.totalCount == ('"$CDSVS"').n and ([.data.rows[]|"\(.month)|\(.answered)|\(.averageScore|m)|\(.deliveryAverage|m)|\(.serviceAverage|m)|\(.lowScores)"]) == ('"$CDSVS"').rows and .data.totals.answered == ('"$CDSVS"').answered and (.data.totals.averageScore|m) == (('"$CDSVS"').avg|m) and .data.totals.lowScores == ('"$CDSVS"').low and (.data.totals.averageAll|m) == (('"$CDSVS"').avgAll|m) and .data.totals.answeredAll == ('"$CDSVS"').answeredAll and .data.totals.drafted == ('"$CDSVS"').drafted and .data.totals.sent == ('"$CDSVS"').sent'
 }
 cdsvdash; cdsvsurv "$CDM12T" "$PT" "$CDM12Y" "$CDM12M" 12; cdrill sv.survey_by_month "top=200"
+cdnonempty "ceo drill sv.survey_by_month: the scenario has answered surveys in the last 12 months (three were answered by the service section)" "$(jq -r '.answered' <<<"$CDSVS")"
 cdsvsurvcheck "ceo drill sv.survey_by_month: one row for each of the 12 Persian months up to today with the answered surveys, the average score (all, delivery, service) and the scores below 3, as the survey list of the module"
 cdcheck "ceo drill sv.survey_by_month: the average of all answered surveys and the surveys still drafts are those of the service dashboard" '.success and (.data.totals.averageAll|m) == (('"$CDSVD"').avg|m) and .data.totals.drafted == ('"$CDSVD"').drafted'
 cdsvsurv "${PT:0:4}/01/01" "$PT" "${PT:0:4}" 1 "$((10#${PT:5:2}))"; cdrill sv.survey_by_month "from=$CDYS&to=$TODAY&top=200"
+cdnonempty "ceo drill sv.survey_by_month: the scenario has answered surveys in the year so far (they were answered today)" "$(jq -r '.answered' <<<"$CDSVS")"
 cdsvsurvcheck "ceo drill sv.survey_by_month: from the start of the Persian year to today there is one row for each month of the year so far"
 cdrill sv.survey_by_month "from=$TODAY&to=$(dd -1)"; cdmsg "ceo drill sv.survey_by_month: a range that ends before it starts is refused" "تاریخ شروع (from) نباید بعد از تاریخ پایان (to) باشد."
 
@@ -6874,6 +7113,9 @@ svb POST "$SVC/contracts/action" "{\"id\":$CDSVLT,\"action\":\"activate\"}"; che
 cdsvltsa 60; cdrill sv.ltsa_expiring "top=200"
 cdsvltsacheck "ceo drill sv.ltsa_expiring: with the new agreement the table is that of the active agreements of the module"
 cdcheck "ceo drill sv.ltsa_expiring: the new agreement ends in 20 days, has one unit and the price of 12,000,000 rial and is the nearest to end" '.success and (([.data.rows[]|select(.id == '"$CDSVLT"')]|.[0]) as $r | $r.number == '"$(cdq "$CDSVLN")"' and $r.endDate == "'"$(pdate "$(dd 20)")"'" and $r.daysLeft == 20 and $r.units == 1 and $r.priceRial == 12000000 and $r.title == "قرارداد آزمون داشبورد مدیرعامل") and .data.totals.expiring == ('"$CDSVL"').n'
+cdsvltsa 730; cdrill sv.ltsa_expiring "days=730&top=200"
+cdnonempty "ceo drill sv.ltsa_expiring: the scenario has an active agreement that ends within two years (the new one)" "$(jq -r '.n' <<<"$CDSVL")"
+cdsvltsacheck "ceo drill sv.ltsa_expiring: with the new agreement days=730 lists the active agreements ending within two years, as the active agreements of the module"
 cdsvltsa 10; cdrill sv.ltsa_expiring "days=10&top=200"
 cdsvltsacheck "ceo drill sv.ltsa_expiring: days=10 leaves out the agreement that ends in 20 days"
 cdcheck "ceo drill sv.ltsa_expiring: the agreement is not in the 10-day table" '.success and ([.data.rows[]|select(.id == '"$CDSVLT"')]|length) == 0'
@@ -6915,49 +7157,84 @@ cdofdeccheck "ceo drill of.decisions_overdue: once the decision is done it has l
 cdcheck "ceo drill of.decisions_overdue: the overdue decisions are back at the count before the scenario and are those of the CEO dashboard" '.success and .data.totals.overdue == ('"$CDOFD"').dec and ('"$CDOFD"').dec == ('"$CDOFD0"').dec'
 
 # --- of.letters_waiting: the letters stopped at a step (in approval or signature, signed and waiting for the secretariat, registered and waiting to be sent), the most urgent and oldest first
-cdoflet() { # cdoflet [mine] : the expectation from the letter lists of the module as the CEO
-  local all='[]' s
+cdoflet() { # cdoflet [approval|signature|registered|all|mine] : the expectation from the letter lists of the module as the CEO (the three steps unless one is named)
+  local all='[]' s st
+  case "${1:-all}" in approval) st="1";; signature) st="2";; registered) st="3";; *) st="1 2 3";; esac
   if [ "${1:-}" = mine ]; then as "$CEO_TOKEN" GET "office/letters?WaitingForMe=true&PageSize=500"; all=$(jq -c '.data.data' "$B")
-  else for s in 1 2 3; do as "$CEO_TOKEN" GET "office/letters?Status=$s&PageSize=500"; all=$(jq -c --argjson a "$all" '$a + .data.data' "$B"); done; fi
+  else for s in $st; do as "$CEO_TOKEN" GET "office/letters?Status=$s&PageSize=500"; all=$(jq -c --argjson a "$all" '$a + .data.data' "$B"); done; fi
   as "$CEO_TOKEN" GET "office/letters?WaitingForMe=true&PageSize=1"; CDOLM=$(val .data.totalItems)
   CDOL=$(jq -nc --argjson l "$all" --argjson me "$CDOLM" "$CDJQ"'
     def kind: {"1":"وارده","2":"صادره"}[(.kind|tostring)] // "داخلی";
-    def st: {"0":"پیش‌نویس","1":"در جریان تایید یا امضا","2":"امضاشده، منتظر ثبت دبیرخانه","3":"ثبت‌شده، منتظر ارسال","4":"ارسال‌شده","5":"دریافت‌شده","6":"بایگانی"}[(.status|tostring)] // "لغوشده";
+    def st: {"0":"پیش‌نویس","1":"در جریان تأیید یا امضا","2":"امضاشده، منتظر ثبت دبیرخانه","3":"ثبت‌شده، منتظر ارسال","4":"ارسال‌شده","5":"دریافت‌شده","6":"بایگانی"}[(.status|tostring)] // "لغوشده";
     def cls: {"0":"عادی","1":"محرمانه"}[(.classification|tostring)] // "سری";
     def urg: {"0":"عادی","1":"فوری"}[(.urgency|tostring)] // "آنی";
     ($l|sort_by([-.urgency,.date[0:19],.id])) as $s
     | {n:($s|length),order:($s|map(.id)),inApproval:($s|map(select(.status == 1))|length),reg:($s|map(select(.status == 2))|length),disp:($s|map(select(.status == 3))|length),me:$me,urgent:($s|map(select(.urgency != 0))|length),
        rows:($s|map("\(.id)|\(.number)|\(.subject[0:100])|\(kind)|\(st)|\(cls)|\(urg)|\(.senderName)|\(.recipientNames[0:100])|\(.dateText)|\(late(.date))"))}')
 }
-cdoflcheck() { # cdoflcheck NAME
-  cdcheck "$1" '.success and .data.totalCount == ('"$CDOL"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.title)|\(.kind)|\(.status)|\(.classification)|\(.urgency)|\(.senderName)|\(.recipientNames)|\(.date)|\(.ageDays)"]) == ('"$CDOL"').rows and [.data.rows[].id] == ('"$CDOL"').order and .data.totals.waiting == ('"$CDOL"').n and .data.totals.inApproval == ('"$CDOL"').inApproval and .data.totals.awaitingRegistration == ('"$CDOL"').reg and .data.totals.awaitingDispatch == ('"$CDOL"').disp and .data.totals.waitingForMe == ('"$CDOL"').me and .data.totals.urgent == ('"$CDOL"').urgent'
+cdoflcheck() { # cdoflcheck NAME [NOTVISIBLE] : NOTVISIBLE is the number of letters in approval that the CEO may not read (0 where the drill does not count them)
+  cdcheck "$1" '.success and .data.totalCount == ('"$CDOL"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.title)|\(.kind)|\(.status)|\(.classification)|\(.urgency)|\(.senderName)|\(.recipientNames)|\(.date)|\(.ageDays)"]) == ('"$CDOL"').rows and [.data.rows[].id] == ('"$CDOL"').order and .data.totals.waiting == ('"$CDOL"').n and .data.totals.inApproval == ('"$CDOL"').inApproval and .data.totals.awaitingRegistration == ('"$CDOL"').reg and .data.totals.awaitingDispatch == ('"$CDOL"').disp and .data.totals.waitingForMe == ('"$CDOL"').me and .data.totals.urgent == ('"$CDOL"').urgent and .data.totals.notVisible == '"${2:-0}"
 }
+# the letters in approval that the CEO may not read (only the writer and the approval chain read them) are in the figure of the overview but not in the list: the drill names their number in totals.notVisible
+as "$CEO_TOKEN" GET "$CEO/overview?refresh=true"; CDOLK=$(jq -r '([.data.sections[].kpis[]|select(.key == "lettersWaiting")][0].value) // 0' "$B")
+cdoflet approval; CDOLNV=$(jq -nr --argjson k "${CDOLK:-0}" --argjson v "$(jq -c '.n' <<<"$CDOL")" '[$k - $v, 0]|max')
 cdoflet; cdrill of.letters_waiting "top=200"
-cdoflcheck "ceo drill of.letters_waiting: the letters waiting at a step (number, subject, kind, state, classification, urgency, sender, recipients, date, age) are those of the letter lists of the module, the most urgent first"
+cdoflcheck "ceo drill of.letters_waiting: the letters waiting at a step (number, subject, kind, state, classification, urgency, sender, recipients, date, age) are those of the letter lists of the module, the most urgent first" "$CDOLNV"
 cdoflet mine; cdrill of.letters_waiting "mineOnly=true&top=200"
 cdoflcheck "ceo drill of.letters_waiting: mineOnly=true lists the letters that wait for the CEO's own approval or signature"
+# the steps: the secretariat registers the first outgoing letter of the numbering section (signed, then registered: it waits to be sent); the second one and the confidential one stay signed
+as "$OSEC_TOKEN" POST "$OF/letters/action" "{\"id\":${OR1:-0},\"action\":\"register\"}"; check "ceo drills office scenario: the secretariat registers the first outgoing letter: it waits to be sent" '.success and .data.status == 3'
+cdoflet approval; cdrill of.letters_waiting "stage=approval&top=200"
+cdoflcheck "ceo drill of.letters_waiting: stage=approval lists only the letters in the chain of approval and signature, the figure of the KPI; the letters the CEO may not read are only counted" "$CDOLNV"
+cdoflet signature; cdrill of.letters_waiting "stage=signature&top=200"
+cdnonempty "ceo drill of.letters_waiting: the scenario has signed letters that wait for the secretariat (the second outgoing letter and the confidential one of the numbering section)" "$(jq -r '.n' <<<"$CDOL")"
+cdoflcheck "ceo drill of.letters_waiting: stage=signature lists only the signed letters that wait for the secretariat to register them"
+cdoflet registered; cdrill of.letters_waiting "stage=registered&top=200"
+cdnonempty "ceo drill of.letters_waiting: the scenario has a registered letter that waits to be sent (the first outgoing letter, registered above)" "$(jq -r '.n' <<<"$CDOL")"
+cdoflcheck "ceo drill of.letters_waiting: stage=registered lists only the registered letters that wait to be sent"
+cdcheck "ceo drill of.letters_waiting: the first outgoing letter is among them, in the state «ثبت‌شده، منتظر ارسال», and so is every other row" '.success and ([.data.rows[]|select(.id == '"${OR1:-0}"')]|length) == 1 and ([.data.rows[]|select(.status != "ثبت‌شده، منتظر ارسال")]|length) == 0'
+cdoflet; cdrill of.letters_waiting "top=200"
+cdoflcheck "ceo drill of.letters_waiting: without a stage the three steps are listed together" "$CDOLNV"
+cdrill of.letters_waiting "stage=sideways"; cdmsg "ceo drill of.letters_waiting: a stage outside approval, signature, registered and all is refused with the list" "مقدار «stage» باید یکی از این‌ها باشد: approval، signature، registered، all."
 # the scenario: an urgent internal letter written by the administration waits for the CEO's signature
 as "$OHR_TOKEN" POST "$OF/letters" "{\"kind\":3,\"subject\":\"نامه آزمون داشبورد مدیرعامل\",\"bodyHtml\":\"<p>آزمون</p>\",\"urgency\":1,\"senderPositionId\":${OP_HR:-0},\"signerPositionId\":${OP_CEO:-0},\"recipients\":[{\"type\":1,\"positionId\":${OP_CHK:-0}}]}"
 check "ceo drills office scenario: an urgent internal letter is drafted by the administration for the CEO to sign" '.success and .data.status == 0 and .data.urgency == 1'
 CDOLID=$(val .data.id)
 as "$OHR_TOKEN" POST "$OF/letters/action" "{\"id\":${CDOLID:-0},\"action\":\"submit\"}"; check "ceo drills office scenario: the letter is submitted: it waits for the CEO's signature" '.success and .data.status == 1'
 cdoflet; cdrill of.letters_waiting "top=200"
-cdoflcheck "ceo drill of.letters_waiting: with the new letter the table is still that of the letter lists of the module"
-cdcheck "ceo drill of.letters_waiting: the new letter is first (urgent), in approval, internal, normal classification, dated today, and waits for the CEO" '.success and .data.rows[0].id == '"$CDOLID"' and (.data.rows[0]|.title == "نامه آزمون داشبورد مدیرعامل" and .kind == "داخلی" and .status == "در جریان تایید یا امضا" and .classification == "عادی" and .urgency == "فوری" and .date == "'"$(pdate "$TODAY")"'" and .ageDays == 0) and .data.totals.inApproval == ('"$CDOL"').inApproval and .data.totals.waitingForMe == ('"$CDOL"').me'
+cdoflcheck "ceo drill of.letters_waiting: with the new letter the table is still that of the letter lists of the module" "$CDOLNV"
+cdcheck "ceo drill of.letters_waiting: the new letter is first (urgent), in approval, internal, normal classification, dated today, and waits for the CEO" '.success and .data.rows[0].id == '"$CDOLID"' and (.data.rows[0]|.title == "نامه آزمون داشبورد مدیرعامل" and .kind == "داخلی" and .status == "در جریان تأیید یا امضا" and .classification == "عادی" and .urgency == "فوری" and .date == "'"$(pdate "$TODAY")"'" and .ageDays == 0) and .data.totals.inApproval == ('"$CDOL"').inApproval and .data.totals.waitingForMe == ('"$CDOL"').me'
+cdoflet approval; cdrill of.letters_waiting "stage=approval&top=200"
+cdoflcheck "ceo drill of.letters_waiting: stage=approval lists the new letter, and only letters in the chain of approval and signature" "$CDOLNV"
+cdcheck "ceo drill of.letters_waiting: stage=approval has the new letter and no letter that waits for the secretariat" '.success and ([.data.rows[]|select(.id == '"$CDOLID"')]|length) == 1 and .data.totals.awaitingRegistration == 0 and .data.totals.awaitingDispatch == 0 and .data.totals.waiting == .data.totals.inApproval'
+cdoflet signature; cdrill of.letters_waiting "stage=signature&top=200"
+cdoflcheck "ceo drill of.letters_waiting: stage=signature does not list the letter that is still in approval"
+cdcheck "ceo drill of.letters_waiting: the new letter is not among the letters that wait for the secretariat" '.success and ([.data.rows[]|select(.id == '"$CDOLID"')]|length) == 0'
 cdoflet mine; cdrill of.letters_waiting "mineOnly=true&top=200"
 cdoflcheck "ceo drill of.letters_waiting: mineOnly=true now lists exactly the new letter"
 cdcheck "ceo drill of.letters_waiting: mineOnly=true shows one letter that waits for the CEO" '.success and .data.totalCount == 1 and .data.rows[0].id == '"$CDOLID"' and .data.totals.waitingForMe == 1 and .data.totals.waiting == 1 and .data.totals.inApproval == 1'
-as "$OHR_TOKEN" POST "$OF/letters/action" "{\"id\":${CDOLID:-0},\"action\":\"cancel\",\"comment\":\"آزمون داشبورد مدیرعامل\"}"; check "ceo drills office scenario: the letter is cancelled again" '.success and .data.status == 7'
+# the scenario: a letter that the employee wrote for the manager's signature is in approval too; the CEO is not in its chain, so he cannot read it and the drill only counts it
+as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه خارج از زنجیره آزمون داشبورد مدیرعامل\",\"bodyHtml\":\"<p>آزمون</p>\",\"senderPositionId\":${OP_EMP:-0},\"signerPositionId\":${OP_MGR:-0},\"recipients\":[{\"type\":1,\"positionId\":${OP_CHK:-0}}]}"
+check "ceo drills office scenario: the employee drafts an internal letter for the manager's signature" '.success and .data.status == 0'
+CDOLHID=$(val .data.id)
+as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":${CDOLHID:-0},\"action\":\"submit\"}"; check "ceo drills office scenario: the letter is submitted: it waits for the manager's signature" '.success and .data.status == 1'
+as "$CEO_TOKEN" GET "$OF/letters/${CDOLHID:-0}"; no "ceo drills office scenario: the CEO cannot read a letter in approval that he is not part of"
 cdoflet; cdrill of.letters_waiting "top=200"
-cdoflcheck "ceo drill of.letters_waiting: after the cancellation the letter has left the table, as in the letter lists of the module"
+cdoflcheck "ceo drill of.letters_waiting: the letter outside the chain of the CEO is not listed, the table is still that of the letter lists of the module, and the hidden letter is counted in notVisible (one more than before)" "$((CDOLNV + 1))"
+cdcheck "ceo drill of.letters_waiting: the letter outside the chain of the CEO is not in the table" '.success and ([.data.rows[]|select(.id == '"${CDOLHID:-0}"')]|length) == 0'
+as "$OHR_TOKEN" POST "$OF/letters/action" "{\"id\":${CDOLID:-0},\"action\":\"cancel\",\"comment\":\"آزمون داشبورد مدیرعامل\"}"; check "ceo drills office scenario: the letter is cancelled again" '.success and .data.status == 7'
+as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":${CDOLHID:-0},\"action\":\"cancel\",\"comment\":\"آزمون داشبورد مدیرعامل\"}"; check "ceo drills office scenario: the employee cancels the letter outside the chain again" '.success and .data.status == 7'
+cdoflet; cdrill of.letters_waiting "top=200"
+cdoflcheck "ceo drill of.letters_waiting: after the cancellation the letter has left the table, as in the letter lists of the module" "$CDOLNV"
 
 # --- of.leave_requests_pending: leave, mission, overtime and forgotten-clock requests waiting for the manager or for HR, the earliest start first
-cdoflv() { # the expectation from the two lists of the module (submitted, approved) as the CEO
-  local all='[]' s
-  for s in 1 2; do as "$CEO_TOKEN" GET "office/leaves?Status=$s&PageSize=500"; all=$(jq -c --argjson a "$all" '$a + .data.data' "$B"); done
+cdoflv() { # cdoflv [submitted|approved|all] : the expectation from the lists of the module as the CEO (the requests waiting for the manager unless a state is named)
+  local all='[]' s st
+  case "${1:-submitted}" in approved) st="2";; all) st="1 2";; *) st="1";; esac
+  for s in $st; do as "$CEO_TOKEN" GET "office/leaves?Status=$s&PageSize=500"; all=$(jq -c --argjson a "$all" '$a + .data.data' "$B"); done
   CDOV=$(jq -nc --argjson l "$all" "$CDJQ"'
     def kind: {"1":"مرخصی روزانه","2":"مرخصی ساعتی","3":"مرخصی استعلاجی","4":"مرخصی بدون حقوق","5":"ماموریت","6":"اضافه‌کار"}[(.kind|tostring)] // "فراموشی تردد";
-    def st: if .status == 1 then "منتظر تایید مدیر" else "تاییدشده، منتظر ثبت منابع انسانی" end;
+    def st: if .status == 1 then "منتظر تأیید مدیر" else "تأییدشده، منتظر ثبت منابع انسانی" end;
     ($l|sort_by([.fromDate[0:19],.number])) as $s
     | {n:($s|length),order:($s|map(.id)),mgr:($s|map(select(.status == 1))|length),hr:($s|map(select(.status == 2))|length),days:($s|map(.days)|add // 0),started:($s|map(select(dd(.fromDate) < 0))|length),
        rows:($s|map("\(.id)|\(.number)|\(.employeeName)|\(kind)|\(st)|\(.fromDateText)|\(.toDateText)|\(.days|n)|\(.approverPositionTitle)|\(dd(.fromDate))"))}')
@@ -6966,18 +7243,26 @@ cdoflvcheck() { # cdoflvcheck NAME
   cdcheck "$1" '.success and .data.totalCount == ('"$CDOV"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.employeeName)|\(.kind)|\(.status)|\(.fromDate)|\(.toDate)|\(.days|n)|\(.approver)|\(.daysToStart)"]) == ('"$CDOV"').rows and [.data.rows[].id] == ('"$CDOV"').order and .data.totals.pending == ('"$CDOV"').n and .data.totals.waitingManager == ('"$CDOV"').mgr and .data.totals.waitingHr == ('"$CDOV"').hr and (.data.totals.days|n) == (('"$CDOV"').days|n) and .data.totals.alreadyStarted == ('"$CDOV"').started'
 }
 cdoflv; cdrill of.leave_requests_pending "top=200"
-cdoflvcheck "ceo drill of.leave_requests_pending: the requests waiting for the manager or for HR (employee, kind, state, dates, days, approver, days to start) are those of the leave lists of the module, the earliest start first"
+cdoflvcheck "ceo drill of.leave_requests_pending: the requests waiting for the manager (employee, kind, state, dates, days, approver, days to start; status=submitted is the default, the figure of the KPI) are those of the leave lists of the module, the earliest start first"
+cdoflv all; cdrill of.leave_requests_pending "status=all&top=200"
+cdoflvcheck "ceo drill of.leave_requests_pending: status=all lists the requests waiting for the manager and those waiting for HR together, as in the leave lists of the module"
+cdrill of.leave_requests_pending "status=sideways"; cdmsg "ceo drill of.leave_requests_pending: a state outside submitted, approved and all is refused with the list" "مقدار «status» باید یکی از این‌ها باشد: submitted، approved، all."
 # the scenario: a one-day mission 9 days ahead is submitted, approved by the manager and then cancelled by the employee
 as "$OEMP_TOKEN" POST "$OF/leaves" "{\"kind\":5,\"fromDate\":\"$(dd 9)T00:00:00\",\"reason\":\"ماموریت آزمون داشبورد مدیرعامل\",\"submit\":true}"
 check "ceo drills office scenario: the employee submits a one-day mission nine days ahead" '.success and .data.status == 1 and .data.kind == 5'
 CDOLV=$(val .data.id); CDOLVN=$(val .data.number); CDOLVA=$(val .data.approverPositionTitle)
 cdoflv; cdrill of.leave_requests_pending "top=200"
 cdoflvcheck "ceo drill of.leave_requests_pending: with the new mission the table is still that of the leave lists of the module"
-cdcheck "ceo drill of.leave_requests_pending: the new mission waits for the manager, starts in 9 days, is shown with its employee and approver, and the reason is not shown" '.success and (([.data.rows[]|select(.id == '"$CDOLV"')]|.[0]) as $r | $r.number == '"$(cdq "$CDOLVN")"' and $r.kind == "ماموریت" and $r.status == "منتظر تایید مدیر" and $r.fromDate == "'"$(pdate "$(dd 9)")"'" and $r.daysToStart == 9 and $r.approver == '"$(cdq "$CDOLVA")"' and ($r|has("reason")|not)) and .data.totals.waitingManager == ('"$CDOV"').mgr'
+cdcheck "ceo drill of.leave_requests_pending: the new mission waits for the manager, starts in 9 days, is shown with its employee and approver, and the reason is not shown" '.success and (([.data.rows[]|select(.id == '"$CDOLV"')]|.[0]) as $r | $r.number == '"$(cdq "$CDOLVN")"' and $r.kind == "ماموریت" and $r.status == "منتظر تأیید مدیر" and $r.fromDate == "'"$(pdate "$(dd 9)")"'" and $r.daysToStart == 9 and $r.approver == '"$(cdq "$CDOLVA")"' and ($r|has("reason")|not)) and .data.totals.waitingManager == ('"$CDOV"').mgr'
 as "$OMGR_TOKEN" POST "$OF/leaves/action" "{\"id\":${CDOLV:-0},\"action\":\"approve\"}"; check "ceo drills office scenario: the manager approves the mission" '.success and .data.status == 2'
 cdoflv; cdrill of.leave_requests_pending "top=200"
-cdoflvcheck "ceo drill of.leave_requests_pending: after the approval the mission waits for HR, as in the leave lists of the module"
-cdcheck "ceo drill of.leave_requests_pending: the approved mission is shown as waiting for HR recording" '.success and (([.data.rows[]|select(.id == '"$CDOLV"')]|.[0]).status == "تاییدشده، منتظر ثبت منابع انسانی") and .data.totals.waitingHr == ('"$CDOV"').hr'
+cdoflvcheck "ceo drill of.leave_requests_pending: after the approval the default (status=submitted) no longer lists the mission: it waits for HR, not for the manager"
+cdcheck "ceo drill of.leave_requests_pending: the approved mission is not among the requests waiting for the manager" '.success and ([.data.rows[]|select(.id == '"$CDOLV"')]|length) == 0 and .data.totals.waitingHr == 0'
+cdoflv approved; cdrill of.leave_requests_pending "status=approved&top=200"
+cdoflvcheck "ceo drill of.leave_requests_pending: status=approved lists the requests that the manager approved and HR has not recorded yet, as in the leave lists of the module"
+cdcheck "ceo drill of.leave_requests_pending: the approved mission is shown as waiting for HR recording" '.success and (([.data.rows[]|select(.id == '"$CDOLV"')]|.[0]).status == "تأییدشده، منتظر ثبت منابع انسانی") and .data.totals.waitingHr == ('"$CDOV"').hr and .data.totals.waitingManager == 0'
+cdoflv all; cdrill of.leave_requests_pending "status=all&top=200"
+cdoflvcheck "ceo drill of.leave_requests_pending: status=all lists the approved mission too, with the requests waiting for the manager"
 as "$OEMP_TOKEN" POST "$OF/leaves/action" "{\"id\":${CDOLV:-0},\"action\":\"cancel\"}"; check "ceo drills office scenario: the employee cancels the mission before it starts" '.success and .data.status == 5'
 cdoflv; cdrill of.leave_requests_pending "top=200"
 cdoflvcheck "ceo drill of.leave_requests_pending: after the cancellation the mission has left the table, as in the leave lists of the module"
@@ -6991,29 +7276,40 @@ cdofatt() { # cdofatt FROM TO : reads the days of the range (HR), the positions 
   as "$CEO_TOKEN" GET "office/positions?PageSize=500"; CDOPOS=$(jq -c '[.data.data[]|{employeeId,unitId,isActive}]' "$B")
   as "$CEO_TOKEN" GET "office/units?PageSize=500"; CDOUNI=$(jq -c '[.data.data[]|{id,title}]' "$B")
 }
-cdofattx() { # cdofattx BY PEOPLE(true|false) : the expectation of the table (rows, total) from the variables of cdofatt
+cdofattx() { # cdofattx BY PEOPLE(true|false) : the expectation of the table (rows, total, and the counts that show the privacy rules were exercised) from the variables of cdofatt
   jq -nc --argjson f "$CDOAF" --argjson pos "$CDOPOS" --argjson uni "$CDOUNI" --argjson P "$CDOPM" --argjson people "$2" --arg by "$1" "$CDJQ"'
     def wh($m): ((10 * $m + 3) / 6 | floor) / 100;
-    def summ: {employees:(map(.e)|unique|length),present:(map(select(.s == 1))|length),absent:(map(select(.s == 2))|length),leave:(map(select(.s == 3))|length),mission:(map(select(.s == 4))|length),rest:(map(select(.s == 5))|length),
+    def emp: (map(.e)|unique|length);
+    def summ: {employees:emp,present:(map(select(.s == 1))|length),absent:(map(select(.s == 2))|length),leave:(map(select(.s == 3))|length),mission:(map(select(.s == 4))|length),rest:(map(select(.s == 5))|length),
                incomplete:(map(select(.s == 6))|length),late:(map(select(.dm > 0))|length),lateMinutes:(map(.dm)|add // 0),worked:(map(.wm)|add // 0),days:(map(.d)|unique|length)};
     def pct($s): ($s.present + $s.absent + $s.leave + $s.mission + $s.incomplete) as $w | (pc($s.present;$w)|m);
-    def line($l;$g): ($g|summ) as $s | "\($l)|\($s.employees)|\($s.present)|\($s.absent)|\($s.leave)|\($s.mission)|\($s.rest)|\($s.incomplete)|\($s.late)|\($s.lateMinutes)|\(wh($s.worked)|n)|\(pct($s))";
+    # a role that may not read people sees minutes of delay and hours worked only for a group of 3 people or more
+    def detail($g): $people or (($g|emp) >= 3);
+    def line($l;$g): ($g|summ) as $s | detail($g) as $d | "\($l)|\($s.employees)|\($s.present)|\($s.absent)|\($s.leave)|\($s.mission)|\($s.rest)|\($s.incomplete)|\($s.late)|\(if $d then ($s.lateMinutes|m) else "-" end)|\(if $d then (wh($s.worked)|m) else "-" end)|\(pct($s))";
     def entry($l;$g): ($g|summ) as $s | {key:[-($s.absent + $s.late),$l],line:line($l;$g)};
+    # the units of fewer than 3 people are joined; while the joined group holds fewer than 3 people the smallest remaining unit joins it (fewest people first, then by title)
+    def absorb($big;$merged): if ($merged|emp) < 3 and ($big|length) > 0 then absorb($big[1:];$merged + $big[0].f) else {big:$big,merged:$merged} end;
     ($pos|map(select(.isActive and .employeeId != null))|group_by(.employeeId)|map({key:(.[0].employeeId|tostring),value:(map(.unitId)|min)})|from_entries) as $unitOf
     | ($uni|map({key:(.id|tostring),value:.title})|from_entries) as $titles
     | def lab($e): ($unitOf[($e|tostring)]) as $u | if $u == null then "بدون واحد سازمانی" else ($titles[($u|tostring)] // "بدون واحد سازمانی") end;
     ($f|group_by(lab(.e))|map({label:lab(.[0].e),f:.})) as $groups
-    | ($groups|map(select($people or ((.f|map(.e)|unique|length) >= 3)))) as $shown
-    | ($groups|map(select(($people|not) and ((.f|map(.e)|unique|length) < 3)))|map(.f)|add) as $small
+    | ($groups|map(select((.f|emp) >= 3))|sort_by([(.f|emp),.label])) as $big
+    | ($groups|map(select((.f|emp) < 3))|map(.f)|add // []) as $small
+    | (if ($small|length) == 0 then {big:$big,merged:[]} else absorb($big;$small) end) as $ab
+    | (if ($ab.merged|length) > 0 and ($ab.merged|emp) >= 3 then [{label:"سایر واحدها",f:$ab.merged}] else [] end) as $other
+    | (if $people then $groups else ($other + $ab.big) end) as $shown
     | (if $by == "day" then ($f|group_by(.d)|map({key:[.[0].d],line:line($P[.[0].d];.)}))
-       elif $by == "unit" then (($shown + (if ($small|length) > 0 then [{label:"سایر واحدها (کمتر از ۳ نفر)",f:$small}] else [] end))|map(entry(.label;.f)))
+       elif $by == "unit" then ($shown|map(entry(.label;.f)))
        else ($f|group_by(.e)|map(entry((if (.[0].name|length) > 0 then .[0].name else .[0].code end);.))) end) as $unsorted
     | ($f|summ) as $t
-    | {n:($unsorted|length),rows:($unsorted|sort_by(.key)|map(.line)),total:"\($t.employees)|\($t.present)|\($t.absent)|\($t.leave)|\($t.mission)|\($t.rest)|\($t.incomplete)|\($t.late)|\($t.lateMinutes)|\(wh($t.worked)|n)|\(pct($t))|\($t.days)"}'
+    | detail($f) as $dt
+    | {n:($unsorted|length),rows:($unsorted|sort_by(.key)|map(.line)),
+       total:"\($t.employees)|\($t.present)|\($t.absent)|\($t.leave)|\($t.mission)|\($t.rest)|\($t.incomplete)|\($t.late)|\(if $dt then ($t.lateMinutes|m) else "-" end)|\(if $dt then (wh($t.worked)|m) else "-" end)|\(pct($t))|\($t.days)",
+       smallDays:($f|group_by(.d)|map(select(emp < 3))|length),smallUnits:($groups|map(select((.f|emp) < 3))|length),other:(if ($other|length) > 0 then ($other[0].f|emp) else 0 end)}'
 }
-cdofattcheck() { # cdofattcheck NAME BY PEOPLE : the last answer is the expectation from the variables of cdofatt
-  local e; e=$(cdofattx "$2" "$3")
-  cdcheck "$1" '.success and .data.totalCount == ('"$e"').n and ([.data.rows[]|"\(.label)|\(.employees)|\(.present)|\(.absent)|\(.leave)|\(.mission)|\(.rest)|\(.incomplete)|\(.late)|\(.lateMinutes)|\(.workedHours|n)|\(.presentPercent|m)"]) == ('"$e"').rows and (.data.totals|"\(.employees)|\(.present)|\(.absent)|\(.leave)|\(.mission)|\(.rest)|\(.incomplete)|\(.late)|\(.lateMinutes)|\(.workedHours|n)|\(.presentPercent|m)|\(.days)") == ('"$e"').total'
+cdofattcheck() { # cdofattcheck NAME BY PEOPLE : the last answer is the expectation from the variables of cdofatt (kept in CDOAE for the checks that follow)
+  CDOAE=$(cdofattx "$2" "$3")
+  cdcheck "$1" '.success and .data.totalCount == ('"$CDOAE"').n and ([.data.rows[]|"\(.label)|\(.employees)|\(.present)|\(.absent)|\(.leave)|\(.mission)|\(.rest)|\(.incomplete)|\(.late)|\(.lateMinutes|m)|\(.workedHours|m)|\(.presentPercent|m)"]) == ('"$CDOAE"').rows and (.data.totals|"\(.employees)|\(.present)|\(.absent)|\(.leave)|\(.mission)|\(.rest)|\(.incomplete)|\(.late)|\(.lateMinutes|m)|\(.workedHours|m)|\(.presentPercent|m)|\(.days)") == ('"$CDOAE"').total'
 }
 # the range of the days the module holds
 as "$OHR_TOKEN" GET "office/attendance/days?PageSize=1000"
@@ -7033,15 +7329,120 @@ cdofattcheck "ceo drill of.attendance_month: by=person lists every employee by n
 # a range inside the module's days
 cdofatt "$CDAMID1" "$CDAMID2"; cdrill of.attendance_month "from=$CDAMID1&to=$CDAMID2&top=200"
 cdofattcheck "ceo drill of.attendance_month: a range of 30 days inside the module's days counts only the days of that range" day true
-# the planning user (PMO) is not HR: the counts are the same, small units are joined, and the people are refused
+# the planning user (PMO) is not HR and may not read people: a day or a unit of fewer than 3 people shows counts only (no minutes of delay, no hours worked), the units of fewer than 3 people are joined into «سایر واحدها» until the group holds 3 people (or it is left out of the rows), and the people are refused
 cdofatt "$CDAMIN" "$CDAMAX"; cdrill of.attendance_month "from=$CDAMIN&to=$CDAMAX&top=200" "$PMO2_TOKEN"
-cdofattcheck "ceo drill of.attendance_month: the planning user (PMO) gets the same counts by day" day false
+cdofattcheck "ceo drill of.attendance_month: the planning user (PMO) gets the counts by day; a day of fewer than 3 people shows no minutes of delay and no hours worked, a day of 3 people or more shows them as for HR" day false
+cdnonempty "ceo drill of.attendance_month: the module holds days of fewer than 3 people (the computed months of one employee), so the masking of the day view is exercised" "$(jq -r '.smallDays' <<<"$CDOAE")"
+cdcheck "ceo drill of.attendance_month: every day row of fewer than 3 people carries counts only" '.success and all(.data.rows[]|select(.employees < 3); .lateMinutes == null and .workedHours == null)'
 cdrill of.attendance_month "from=$CDAMIN&to=$CDAMAX&by=unit&top=200" "$PMO2_TOKEN"
-cdofattcheck "ceo drill of.attendance_month: by=unit for a role that may not read people joins the units of fewer than 3 people into «سایر واحدها (کمتر از ۳ نفر)»" unit false
+cdofattcheck "ceo drill of.attendance_month: by=unit for a role that may not read people joins the units of fewer than 3 people into «سایر واحدها» and adds the smallest other unit while the group holds fewer than 3 people" unit false
+cdnonempty "ceo drill of.attendance_month: the module has a unit of fewer than 3 people (the operations unit holds one expert), so the joining is exercised" "$(jq -r '.smallUnits' <<<"$CDOAE")"
+cdnonempty "ceo drill of.attendance_month: and the joined group «سایر واحدها» is shown, with 3 people or more" "$(jq -r '.other' <<<"$CDOAE")"
+cdcheck "ceo drill of.attendance_month: no row of the unit view for this role holds fewer than 3 people" '.success and ([.data.rows[]|select(.employees < 3)]|length) == 0'
+# one day of one employee: for this role the unit view has no row at all (the group cannot reach 3 people) and the totals hold counts only; the CEO reads the same day in full
+cdofatt 2026-06-27 2026-06-27; cdrill of.attendance_month "from=2026-06-27&to=2026-06-27&by=unit&top=200" "$PMO2_TOKEN"
+cdofattcheck "ceo drill of.attendance_month: a day of one employee has no unit row for the planning user (a group that cannot reach 3 people is left out)" unit false
+cdnonempty "ceo drill of.attendance_month: the day 2026-06-27 of the attendance section holds the day of fewer than 3 employees" "$(jq -r '.smallDays' <<<"$CDOAE")"
+cdcheck "ceo drill of.attendance_month: for the planning user the totals of that day hold counts without minutes of delay and hours worked" '.success and .data.totalCount == 0 and (.data.rows|length) == 0 and .data.totals.lateMinutes == null and .data.totals.workedHours == null'
+cdrill of.attendance_month "from=2026-06-27&to=2026-06-27&top=200" "$PMO2_TOKEN"
+cdofattcheck "ceo drill of.attendance_month: the same day by day for the planning user: counts only" day false
+cdrill of.attendance_month "from=2026-06-27&to=2026-06-27&top=200"
+cdofattcheck "ceo drill of.attendance_month: the CEO reads the same day by day with the minutes of delay and the hours worked" day true
 cdrill of.attendance_month "from=$CDAMIN&to=$CDAMAX&by=person" "$PMO2_TOKEN"; cdmsg "ceo drill of.attendance_month: by=person is refused for a role that may not read people" "نمایش حضور و غیاب به تفکیک پرسنل فقط برای منابع انسانی و مدیرعامل مجاز است؛ به تفکیک روز یا واحد بخواهید."
 cdrill of.attendance_month "from=2025-01-01&to=$TODAY"; cdmsg "ceo drill of.attendance_month: a range of more than a year is refused" "بازه‌ی حضور و غیاب نباید از یک سال بیشتر باشد."
 cdrill of.attendance_month "from=$TODAY&to=$(dd -1)"; cdmsg "ceo drill of.attendance_month: a range that ends before it starts is refused" "تاریخ شروع (from) نباید بعد از تاریخ پایان (to) باشد."
 cdrill of.attendance_month "by=week"; cdmsg "ceo drill of.attendance_month: a division outside day, unit and person is refused with the list" "مقدار «by» باید یکی از این‌ها باشد: day، unit، person."
+
+# ===================================================================================== the figures of the overview and the drills behind them
+# Every figure of the overview that has a count or a sum in its drill is checked against that drill, opened with the key and the parameters the figure carries (drillKey, drillParams).
+# The overview is read here afresh (refresh=true) and nothing is written until the last drill has been read, so a difference is a real disagreement between a figure and its list.
+CDAOV="$OUT/ceo-overview-agree.tmp"
+as "$CEO_TOKEN" GET "$CEO/overview?refresh=true"; cp "$B" "$CDAOV"
+check "ceo overview and drills: the overview is computed afresh for the agreement checks (nine sections)" '.success and .data.cached == false and (.data.sections|length) == 9'
+# cdakpi KEY : sets CDAK to the figure KEY (headline or section) and opens the drill the figure carries with the parameters it carries; cdacheck NAME CONDITION : K in the condition is the figure
+cdakpi() {
+  local q
+  CDAK=$(jq -c --arg k "$1" '[.data.headline[], .data.sections[].kpis[]]|map(select(.key == $k))|.[0]' "$CDAOV")
+  q=$(jq -r '(.drillParams // {})|to_entries|map("\(.key)=\(.value)")|join("&")' <<<"$CDAK")
+  cdrill "$(jq -r '.drillKey' <<<"$CDAK")" "${q:+$q&}top=200"
+}
+cdacheck() { cdcheck "$1" 'def K: '"$CDAK"'; '"$2"; }
+# cdachart KEY [QUERY] : sets CDAC to the chart KEY and opens its drill, with QUERY or else with the parameters the chart carries; cdachk NAME CONDITION : C in the condition is the chart
+cdachart() {
+  local q
+  CDAC=$(jq -c --arg k "$1" '[.data.sections[].charts[]|select(.key == $k)]|.[0]' "$CDAOV")
+  q=${2:-$(jq -r '(.drillParams // {})|to_entries|map("\(.key)=\(.value)")|join("&")' <<<"$CDAC")}
+  cdrill "$(jq -r '.drillKey' <<<"$CDAC")" "${q:+$q&}top=200"
+}
+cdachk() { cdcheck "$1" 'def C: '"$CDAC"'; '"$2"; }
+
+# --- counts: the figure is the number of records its drill lists
+cdakpi purchaseRequestsWaiting
+cdnonempty "ceo overview and drills: the scenario has purchase requests waiting for approval (the first request of the setup)" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: purchaseRequestsWaiting is the number of requests pr.requests_open lists with status submitted" '.success and .data.totalCount == K.value'
+cdakpi lettersWaiting
+cdacheck "ceo overview and drills: lettersWaiting is the letters in approval: those of.letters_waiting lists with stage approval and those it counts as outside the chain of the CEO (notVisible)" '.success and (.data.totalCount + .data.totals.notVisible) == K.value'
+cdakpi leaveRequestsPending
+cdacheck "ceo overview and drills: leaveRequestsPending is the number of requests of.leave_requests_pending lists (status submitted, the default)" '.success and .data.totalCount == K.value'
+cdakpi serviceGoodwillWaiting
+cdacheck "ceo overview and drills: serviceGoodwillWaiting is the number of orders sv.orders_open lists with goodwillOnly" '.success and .data.totalCount == K.value'
+cdakpi overdueNcrs
+cdnonempty "ceo overview and drills: the scenario has a report past its decision deadline (the report of the setup)" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: overdueNcrs is the number of reports qc.ncr_open lists with onlyOverdue" '.success and .data.totalCount == K.value'
+cdakpi calibrationOverdue
+cdnonempty "ceo overview and drills: the scenario has equipment whose calibration is overdue (the micrometer whose certificate expired)" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: calibrationOverdue is the number of instruments qc.calibration_due lists with days 0 (overdue only)" '.success and .data.totalCount == K.value'
+cdakpi vouchersWaiting
+cdnonempty "ceo overview and drills: the scenario has vouchers that wait (the drafts of the finance section)" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: vouchersWaiting is the number of vouchers fin.vouchers_waiting lists (every legal entity, as the figure counts them)" '.success and .data.totalCount == K.value'
+cdakpi itemsBelowMinimum
+cdnonempty "ceo overview and drills: the scenario has items below their minimum" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: itemsBelowMinimum is the number of items inv.items_below_minimum lists (the scrap warehouses left out)" '.success and .data.totalCount == K.value'
+cdakpi activeProjects
+cdacheck "ceo overview and drills: activeProjects is the number of projects pc.portfolio lists" '.success and .data.totalCount == K.value'
+cdakpi projectsRed
+cdacheck "ceo overview and drills: projectsRed is the number of projects pc.portfolio lists with status danger" '.success and .data.totalCount == K.value'
+cdakpi projectsAmber
+cdacheck "ceo overview and drills: projectsAmber is the number of projects pc.portfolio lists with status warn" '.success and .data.totalCount == K.value'
+cdakpi pcLateActivities
+cdacheck "ceo overview and drills: pcLateActivities is the number of activities pc.late_activities lists (the projects of the portfolio)" '.success and .data.totalCount == K.value'
+cdakpi pcGuaranteeAlerts
+cdnonempty "ceo overview and drills: the scenario has a guarantee in its alert steps (PC-G-1 of the project-control section)" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: pcGuaranteeAlerts is the number of guarantees pc.guarantees_expiring lists (the projects of the portfolio)" '.success and .data.totalCount == K.value'
+
+# --- sums: the figure is the total its drill gives
+cdakpi netProfitYtd
+cdacheck "ceo overview and drills: netProfitYtd is the profit fin.revenue_by_month totals for the year so far (from and to are the parameters of the figure)" '.success and (.data.totals.profit|r2) == (K.value|r2)'
+cdakpi serviceWarrantyCostYtd
+cdacheck "ceo overview and drills: serviceWarrantyCostYtd is the cost sv.warranty_cost_by_month totals for the year so far" '.success and (.data.totals.totalCost|r2) == (K.value|r2)'
+cdakpi pcPenaltyExposure
+cdnonempty "ceo overview and drills: the scenario has a computed penalty that nobody waived (the one of the setup)" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: pcPenaltyExposure is the penalty exposure pc.penalty_exposure totals (the projects of the portfolio)" '.success and (.data.totals.penaltyExposure|r2) == (K.value|r2)'
+cdakpi stockValue
+cdnonempty "ceo overview and drills: the scenario holds stock with a value" "$(jq -r '.value' <<<"$CDAK")"
+cdacheck "ceo overview and drills: stockValue is the value inv.stock_value_by_warehouse totals" '.success and .data.totals.totalValue == (K.value|round)'
+# the backlog: the drill lists the open orders; the contracts are in the figure but not in the list, so the sales-order part the note names is the amount not yet invoiced that the drill totals
+cdakpi salesBacklog
+CDABSH=$(ceoshort "$(jq -r '.data.totals.remainingAmount' "$B")")
+cdacheck "ceo overview and drills: the sales-order part named in the note of salesBacklog ($CDABSH) is the amount not yet invoiced that sl.orders_open totals (remainingAmount)" '.success and (K.note|split(": ")[1]|startswith("'"$CDABSH"'؛"))'
+
+# --- charts: the numbers of a chart are those of the drill behind it
+cdachart projectStatus "status=ok"
+cdnonempty "ceo overview and drills: the project donut has projects" "$(jq -r '.series[0].values|add' <<<"$CDAC")"
+cdachk "ceo overview and drills: the green slice of the project donut is the number of projects pc.portfolio lists with status ok, and the three slices add up to the projects of the portfolio" '.success and .data.totalCount == C.series[0].values[0] and (C.series[0].values|add) == .data.totals.activeProjects'
+cdachart stockValueByWarehouse
+cdnonempty "ceo overview and drills: the warehouse chart has warehouses" "$(jq -r '.series[0].values|length' <<<"$CDAC")"
+cdachk "ceo overview and drills: the warehouse chart (the biggest eight warehouses and the rest together) adds up to the value inv.stock_value_by_warehouse allocates to the warehouses" '.success and (C.series[0].values|add|round) == .data.totals.allocatedValue'
+cdachart stockFlowByMonth
+cdnonempty "ceo overview and drills: the latest month of the stock flow chart has purchase receipts (the scenario receives goods today)" "$(jq -r '.series[0].values[-1]' <<<"$CDAC")"
+cdachk "ceo overview and drills: the receipts of the latest month of the stock flow chart are the net value inv.top_movements totals for that month with kind receipt (the parameters the chart carries)" '.success and .data.totals.netValue == (C.series[0].values[-1]|round)'
+cdachart stockFlowByMonth "$(jq -r '"from=\(.drillParams.from)&to=\(.drillParams.to)&kind=issue"' <<<"$CDAC")"
+cdnonempty "ceo overview and drills: the latest month of the stock flow chart has issues to production (the scenario issues material today)" "$(jq -r '.series[1].values[-1]' <<<"$CDAC")"
+cdachk "ceo overview and drills: the consumption of the latest month of the stock flow chart is the net value inv.top_movements totals for the same month with kind issue" '.success and .data.totals.netValue == (C.series[1].values[-1]|round)'
+cdachart spendBySupplier "from=$CDM12&to=$TODAY"
+cdnonempty "ceo overview and drills: the supplier chart has suppliers (the order of the procurement scenario is dated today)" "$(jq -r '.series[0].values|length' <<<"$CDAC")"
+cdachk "ceo overview and drills: the supplier chart (the six biggest suppliers by the value of their purchase orders in the twelve Persian months so far) adds up to the six biggest ordered values pr.spend_by_supplier lists for the same months" '.success and (C.series[0].values|add|round) == ([.data.rows[0:6][].ordered]|add // 0|round)'
+rm -f "$CDAOV"
 
 # ===================================================================================== the AI seats
 # The notes and the runs of the seats are compared with the lists of the AI module (read as the same user); no note or run is made here.
@@ -7053,7 +7454,7 @@ cdainotes() { # cdainotes [TYPE [SEAT]] : the expectation from the list of new n
   [ -n "${1:-}" ] && ty=$(cdq "$1")
   [ -n "${2:-}" ] && se=$(cdq "$2")
   as "$CEO_TOKEN" GET "ai/notes?Status=1&PageSize=200"
-  CDAN=$(cdx 'def ty: {"QualityNcr":"عدم انطباق کیفیت","FinanceJournal":"سند مالی","BankLine":"ردیف صورت‌حساب بانک","SupplierIbanChange":"تغییر حساب تامین‌کننده","PurchaseRfq":"استعلام خرید","OfficeLetter":"نامه","OfficeMeeting":"جلسه","PcWeeklyReport":"گزارش هفتگی پروژه","CeoBrief":"گزارش روزانه‌ی مدیرعامل"}[.targetType] // .targetType;
+  CDAN=$(cdx 'def ty: {"QualityNcr":"عدم انطباق کیفیت","FinanceJournal":"سند مالی","BankLine":"ردیف صورت‌حساب بانک","SupplierIbanChange":"تغییر حساب تأمین‌کننده","PurchaseRfq":"استعلام خرید","OfficeLetter":"نامه","OfficeMeeting":"جلسه","PcWeeklyReport":"گزارش هفتگی پروژه","CeoBrief":"گزارش روزانه‌ی مدیرعامل"}[.targetType] // .targetType;
     '"$ty"' as $t | '"$se"' as $s
     | (.data.data|map(select(.status == 1 and ($t == null or .targetType == $t) and ($s == null or .seatCode == $s)))|sort_by([.createdAt[0:19],.id])|reverse) as $n
     | {n:($n|length),order:($n|map(.id)),ver:($n|map(select(.verified))|length),
@@ -7121,6 +7522,7 @@ cdrill ai.seat_runs "status=Crashed"; cdmsg "ceo drill ai.seat_runs: a state out
 # The mock model (.github/ci-tools/mock-llm) answers by keyword: a question that starts with «باز کن» opens the production orders, «بخوان هشدارها» reads the alerts, «بیرون» asks for a page outside the allow-list
 # (the backend must refuse it), «فهرست جزئیات» calls ceo_drills, «ریز» calls ceo_drill (qc.ncr_open, five rows), «اجبار» with «ریز» calls ceo_drill even where it is not offered, «تحلیل» calls ceo_overview where it is offered;
 # an uploaded file whose name starts with ui-open is "said" as «باز کن سفارش‌های تولید». Every answer is a fixed sentence or «طبق نتایج سامانه: » and the first three numbers of the tool result.
+# «باز کن» with «پیوند عددی» opens /ceo?x=987654321 (a page of the allow-list whose link holds a number) and «جعل» makes the model quote that number (the backend must not take it as evidence).
 # The audit is checked on the newest event after each call, and by the number of chat events this section adds (one per answered question, none for a refused call).
 # =====================================================================================================================
 if [ "$AIOK" = 1 ]; then
@@ -7183,10 +7585,10 @@ as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=chat&PageSize=0"; CDAU0=$(val '.data.d
 cdchat "$CEO_TOKEN" "$CDQ_OPEN"; CDC=$(val .data.conversationId)
 check "ceo assistant: «open the production orders» calls ui_navigate and answers with one navigate action (/production/orders, titled in Persian, nothing else set), the confirmation sentence, verified, no citation, no audio (no page context was sent)" '.success and .data.verified == true and .data.degraded == false and .data.model == "mock-primary" and .data.toolCalls == [{"name":"ui_navigate","allowed":true}] and (.data.actions|length) == 1 and .data.actions[0].type == "navigate" and .data.actions[0].link == "/production/orders" and .data.actions[0].title == "باز کردن صفحه‌ی تولید" and ([.data.actions[0]|del(.type,.link,.title)|.[]|select(. != null)]|length) == 0 and .data.answer == "'"$CDA_OPEN"'" and .data.citations == [] and .data.audioBase64 == null'
 cdchatrow "ceo assistant: the audit event of the question names the action (navigate:/production/orders), the tool, the hash of the answer and the question" "actions:navigate:/production/orders; " ui_navigate "$CDQ_OPEN" "$CDA_OPEN"
-cdconv "$CEO_TOKEN" "$CDC"; CDTL=$(val '.data.messageList[1].text|length')
-check "ceo assistant: the conversation holds the question, the tool result {ok true} that names the page, and the answer" '.success and (.data.messageList|map(.role)) == ["User","Tool","Assistant"] and .data.messageList[0].text == "'"$CDQ_OPEN"'" and .data.messageList[1].toolName == "ui_navigate" and (.data.messageList[1].text|fromjson) == {"ok":true,"message":"صفحه‌ی تولید (/production/orders) باز می‌شود."} and .data.messageList[2].text == "'"$CDA_OPEN"'"'
+cdconv "$CEO_TOKEN" "$CDC"; CDTL=$(val '.data.messageList[1].text|length'); CDTH=$(cdsha "$(val '.data.messageList[1].text')")
+check "ceo assistant: the conversation holds the question, the tool result {ok true} that names the part of the system and holds neither the link nor its arguments, and the answer" '.success and (.data.messageList|map(.role)) == ["User","Tool","Assistant"] and .data.messageList[0].text == "'"$CDQ_OPEN"'" and .data.messageList[1].toolName == "ui_navigate" and (.data.messageList[1].text|fromjson) == {"ok":true,"message":"صفحه‌ی تولید باز می‌شود."} and .data.messageList[2].text == "'"$CDA_OPEN"'"'
 as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=tool&PageSize=1"
-check "ceo assistant: the tool event of the audit holds the tool, its arguments (the link), allowed=True and the size of the result" '.success and (.data.data[0].detail|test("^ui_navigate \\{\"link\": ?\"/production/orders\"\\} allowed=True chars='"$CDTL"' hash=[0-9a-f]{64}$"))'
+check "ceo assistant: the tool event of the audit is exactly the tool, its arguments (the link), allowed=True, the size and the SHA-256 of the stored result" '.success and .data.data[0].detail == '"$(cdq "ui_navigate {\"link\": \"/production/orders\"} allowed=True chars=$CDTL hash=$CDTH")"
 
 # --- ui_navigate: a page outside the allow-list is refused by the backend (the model asked for http://evil)
 cdchat "$CEO_TOKEN" "$CDQ_OUT"; CDC=$(val .data.conversationId)
@@ -7194,6 +7596,15 @@ check "ceo assistant: a page outside the allow-list: the tool ran (allowed) but 
 cdchatrow "ceo assistant: the audit event of the refused call has no actions part" "" ui_navigate "$CDQ_OUT" "$CDA_REFUSED"
 cdconv "$CEO_TOKEN" "$CDC"
 check "ceo assistant: the tool result of the refused call is {ok false} with the twelve prefixes of the allow-list" '.success and .data.messageList[1].toolName == "ui_navigate" and (.data.messageList[1].text|fromjson) == {"ok":false,"message":"این مسیر در فهرست صفحه‌های مجاز نیست؛ مسیر باید با یکی از این‌ها شروع شود: /ceo، /finance، /fn، /sales، /service، /production، /project-control، /quality، /inventory، /procurement، /office، /ai."}'
+
+# --- ui_navigate: a number that came with the link is no evidence (the model asks for /ceo?x=987654321 and then quotes 987654321): the tool answers with the name of the page only and the numeric check does not take it
+CDQ_LAUNDER="باز کن پیوند عددی جعل"
+cdchat "$CEO_TOKEN" "$CDQ_LAUNDER"; CDC=$(val .data.conversationId)
+check "ceo assistant: a number that came only with the link of the page to open (/ceo?x=987654321) is no evidence: the answer that quotes it is replaced by the fixed text, unverified, without the number; the page is still opened" '.success and .data.verified == false and .data.degraded == false and .data.toolCalls == [{"name":"ui_navigate","allowed":true}] and .data.answer == "پاسخ مدل قابل راستی‌آزمایی نبود؛ نتایج مستقیم سامانه:\nنتیجه‌ای از ابزارها در دسترس نیست." and (.data.actions|length) == 1 and .data.actions[0].type == "navigate" and .data.actions[0].link == "/ceo?x=987654321"'
+cdconv "$CEO_TOKEN" "$CDC"
+check "ceo assistant: the tool result of the page with the number in its link holds the name of the part of the system only: neither the link nor a digit" '.success and .data.messageList[1].toolName == "ui_navigate" and (.data.messageList[1].text|fromjson) == {"ok":true,"message":"صفحه‌ی داشبورد مدیرعامل باز می‌شود."}'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=unverified&PageSize=1"
+check "ceo assistant: the audit holds the unverified answer with the offending number and the tool that was called" '.success and .data.data[0].detail == "tokens: 987654321; tools: ui_navigate"'
 
 # --- ui_read: read the alerts aloud
 cdchat "$CEO_TOKEN" "$CDQ_READ"; CDC=$(val .data.conversationId)
@@ -7233,10 +7644,12 @@ cdchat "$WH_TOKEN" "$CDQ_DRILL"
 check "ceo assistant: the detail tool is not offered to a storekeeper: no tool call, the no-tool sentence" '.success and .data.verified == true and .data.toolCalls == [] and .data.actions == [] and .data.answer == "'"$CDA_NOTOOL"'"'
 cdchat "$WH_TOKEN" "$CDQ_ANALYSE"
 check "ceo assistant: the overview tool is not offered to a storekeeper either: no tool call (the mock only analyses where it is offered), the greeting" '.success and .data.toolCalls == [] and .data.actions == [] and .data.answer == "'"$CDA_GREETING"'"'
-cdchat "$WH_TOKEN" "$CDQ_FORCE"
+cdchat "$WH_TOKEN" "$CDQ_FORCE"; CDC=$(val .data.conversationId)
 check "ceo assistant: a model that calls the detail tool for a storekeeper anyway is refused by the registry: allowed false, the no-access sentence, no action, no citation" '.success and .data.verified == true and .data.toolCalls == [{"name":"ceo_drill","allowed":false}] and .data.actions == [] and .data.citations == [] and .data.answer == "'"$CDA_FORBIDDEN"'"'
+cdconv "$WH_TOKEN" "$CDC"; CDFL=$(val '.data.messageList[1].text|length'); CDFH=$(cdsha "$(val '.data.messageList[1].text')")
+check "ceo assistant: the stored result of the refused call is the sentence of the refusal (forbidden true), not a table" '.success and .data.messageList[1].toolName == "ceo_drill" and (.data.messageList[1].text|fromjson) == {"forbidden":true,"message":"'"$CDA_FORBIDDEN"'"}'
 as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=tool&PageSize=1"
-check "ceo assistant: the audit holds the refused call with allowed=False" '.success and (.data.data[0].detail|test("^ceo_drill \\{.*\\} allowed=False chars=[0-9]+ hash=[0-9a-f]{64}$"))'
+check "ceo assistant: the audit holds the refused call exactly: the tool, its arguments, allowed=False, the size and the SHA-256 of the stored refusal" '.success and .data.data[0].detail == '"$(cdq "ceo_drill {\"key\": \"qc.ncr_open\", \"top\": 5} allowed=False chars=$CDFL hash=$CDFH")"
 cdchat "$FM_TOKEN" "$CDQ_FORCE"
 check "ceo assistant: the finance manager (who reads the finance module) is refused the CEO detail tool too" '.success and .data.toolCalls == [{"name":"ceo_drill","allowed":false}] and .data.answer == "'"$CDA_FORBIDDEN"'"'
 
@@ -7256,14 +7669,33 @@ cdanchk() {
   cdcheck "$1: the conversation holds the question as asked, the numbers of the overview and the answer, and the answer is the first three numbers of those stored numbers" '.success and (.data.messageList|map(.role)) == ["User","Tool","Assistant"] and .data.messageList[0].text == '"$(cdq "$3")"' and .data.messageList[1].toolName == "ceo_overview" and .data.messageList[2].text == '"$(cdq "$ans")"' and .data.messageList[2].text == '"$CDF3"
   cdchatrow "$1: the audit event of the analysis names the section" "$4" ceo_overview "$3" "$ans"
 }
+# the shapes of the numbers the AI reads (tool ceo_overview), built from the overview of the same moment: F leaves out the properties that are null (the tool does not write them), FULL is a figure of one section, BRIEF a figure of the whole-company answer,
+# CHART the totals of a chart of one section (only a chart of rial or count that is not a line has them; they are compared to the hundredth), NORM leaves out the drill parameters of a chart (their dates are Shamsi in the tool result and are checked apart)
+CDNUMJQ='def F: with_entries(select(.value != null));
+def RT: if . == null then null else map({name, total: (.total * 100 | round)}) end;
+def NORM: del(.drillParams) | if has("totals") then .totals |= RT else . end;
+def FULL: {key,title,value,unit,status,deltaText,drillKey,drillParams,note}|F;
+def BRIEF: {key,title,value,unit,status,deltaText}|F;
+def CHART: {key,title,unit,drillKey,note,totals: (if ((.unit == "rial" or .unit == "count") and .kind != "line") then (.series|map({name, total: (.values|add // 0)})) else null end)}|F|NORM;
+'
 CDQ_AN1="تحلیل بخش تولید"
 cdanalyze "$CEO_TOKEN" "{\"sectionKey\":\"production\",\"question\":\"$CDQ_AN1\"}"; CDC=$(val .data.conversationId)
-check "ceo analyze: the production analysis reads the overview once (before the model answers), nothing else, no action, no audio, answered by the primary model, verified" '.success and .data.verified == true and .data.degraded == false and .data.model == "mock-primary" and .data.toolCalls == [{"name":"ceo_overview","allowed":true}] and .data.actions == [] and .data.audioBase64 == null'
+check "ceo analyze: the production analysis reads the overview once (before the model answers), nothing else, no action, no audio, answered by the primary model, verified" '.success and .data.verified == true and .data.degraded == false and .data.model == "mock-primary" and .data.toolCalls == [{"name":"ceo_overview","allowed":true}] and .data.actions == [] and .data.audioBase64 == null and .data.citations == [{"type":"Dashboard","id":"ceo_overview","title":"نمای کلی مدیرعامل","link":"/ceo"}]'
 cdanchk "ceo analyze: production" "$CEO_TOKEN" "$CDQ_AN1" "analysis:production; "
-cdconv "$CEO_TOKEN" "$CDC"; CDOL=$(val '.data.messageList[1].text|length')
-check "ceo analyze: the stored numbers are those of the section production (its key is in the result)" '.success and (.data.messageList[1].text|fromjson|.section // .key) == "production"'
+# the prompt of the analysis is the active version of the prompt ANALYSIS and the question, nothing more: the paragraph about the actions on the page and the line about the page are for the typed or spoken chat only
+CDPH1=$(jq -r '.data.data[0].promptHash' "$B"); CDPV1=$(jq -r '.data.data[0].promptVersionId' "$B")
+as "$CEO_TOKEN" GET "$AI/admin/prompts?code=ANALYSIS"
+CDPAT=$(jq -r '[.data[]|select(.isActive)][0].text' "$B")
+check "ceo analyze: the prompt ANALYSIS has exactly one active version, the one the event of the analysis in the audit names" '.success and ([.data[]|select(.isActive)]|length) == 1 and [.data[]|select(.isActive)][0].id == '"$CDPV1"
+[ "$CDPH1" = "$(cdsha "$CDPAT$CDQ_AN1")" ] && ok "ceo analyze: the prompt hash of the analysis is the SHA-256 of the active ANALYSIS prompt and the question: no paragraph about the actions on the page, no line about the page" || bad "ceo analyze: the prompt hash of the analysis is the SHA-256 of the active ANALYSIS prompt and the question ($CDPH1)"
+cdconv "$CEO_TOKEN" "$CDC"; CDOT=$(val '.data.messageList[1].text'); CDOL=$(val '.data.messageList[1].text|length'); CDOH=$(cdsha "$CDOT")
+# the figures of the section are compared with the overview read right after (the same cache, the same day): the result is the section with the day of its figures, all its figures in full and the totals of its charts
+as "$CEO_TOKEN" GET "$CEO/overview"
+CDOEE=$(jq -c '.data.sections[]|select(.key == "production")|.charts[]|select(.key == "oeeByWorkCenter")|.drillParams' "$B")
+CDOEEF=$(pdate "$(jq -r '.from' <<<"$CDOEE")"); CDOEET=$(pdate "$(jq -r '.to' <<<"$CDOEE")")
+check "ceo analyze: the stored numbers are the section production as the overview has it: the key, title, the day (today, Shamsi), the link of the dashboard, the five figures in full (key, title, value, unit, status, change, drill key, note) and the three charts with their drill keys and notes, the totals only on the chart of the orders by state, and the Shamsi month of the OEE chart" "$CDNUMJQ"'def R: '"$CDOT"'; .success and ((.data.sections|map(select(.key == "production"))|.[0]) as $p | (R|keys) == ["asOfText","charts","items","link","section","title"] and R.section == "production" and R.title == $p.title and R.asOfText == "'"$CDPTODAY"'" and R.link == "/ceo" and (R.items|length) == 5 and R.items == [$p.kpis[]|FULL] and (R.charts|length) == 3 and (R.charts|map(NORM)) == [$p.charts[]|CHART] and [R.charts[]|select(.totals != null)|.key] == ["ordersByState"] and [R.charts[]|select(.drillParams != null)|{key,drillParams}] == [{"key":"oeeByWorkCenter","drillParams":{"from":"'"$CDOEEF"'","to":"'"$CDOEET"'"}}])'
 as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=tool&PageSize=1"
-check "ceo analyze: the audit holds the reading of the numbers as a tool event (ceo_overview, section production, allowed, the size of the result)" '.success and (.data.data[0].detail|test("^ceo_overview \\{\"section\":\"production\"\\} allowed=True chars='"$CDOL"' hash=[0-9a-f]{64}$"))'
+check "ceo analyze: the audit holds the reading of the numbers exactly: ceo_overview, section production, allowed, the size and the SHA-256 of the stored result" '.success and .data.data[0].detail == '"$(cdq "ceo_overview {\"section\":\"production\"} allowed=True chars=$CDOL hash=$CDOH")"
 
 CDQ_AN2="وضعیت بخش «کیفیت» را تحلیل کن؛ با دوره‌ی قبل مقایسه کن و سه نکته‌ی مهم و ریسک‌های اصلی را بگو."
 cdanalyze "$CEO_TOKEN" '{"sectionKey":"Quality"}'
@@ -7271,9 +7703,16 @@ check "ceo analyze: a section without a question (any case) is analysed with the
 cdanchk "ceo analyze: quality without a question" "$CEO_TOKEN" "$CDQ_AN2" "analysis:quality; "
 
 CDQ_AN3="تحلیل کل شرکت"
-cdanalyze "$CEO_TOKEN" "{\"question\":\"$CDQ_AN3\"}"
-check "ceo analyze: without a section the whole company is analysed" '.success and .data.verified == true and .data.toolCalls == [{"name":"ceo_overview","allowed":true}] and .data.actions == []'
+cdanalyze "$CEO_TOKEN" "{\"question\":\"$CDQ_AN3\"}"; CDCALL=$(val .data.conversationId)
+check "ceo analyze: without a section the whole company is analysed" '.success and .data.verified == true and .data.toolCalls == [{"name":"ceo_overview","allowed":true}] and .data.actions == [] and .data.citations == [{"type":"Dashboard","id":"ceo_overview","title":"نمای کلی مدیرعامل","link":"/ceo"}]'
 cdanchk "ceo analyze: the whole company" "$CEO_TOKEN" "$CDQ_AN3" "analysis:all; "
+cdconv "$CEO_TOKEN" "$CDCALL"; CDAT=$(val '.data.messageList[1].text'); CDALEN=$(val '.data.messageList[1].text|length'); CDAH=$(cdsha "$CDAT")
+# the whole company: the first three figures of every section, each with key, title, value, unit, status and change only (so that the nine sections fit one tool result and none is cut)
+as "$CEO_TOKEN" GET "$CEO/overview"
+check "ceo analyze: the stored numbers of the whole company are the first three figures of the nine sections as the overview has them (headline figures first): key, title, value, unit, status and change only, no note and no drill key, the day once on the object, the link of the dashboard, nothing cut, and the eight headline figures of the screen are all there" "$CDNUMJQ"'def R: '"$CDAT"'; def KEYS: [["cash","receivablesOpen","payablesOverdue"],["salesBacklog","salesPipelineValue","salesHitRate"],["activeProjects","projectsRed","projectsAmber"],["lateProductionOrders","machinesDown","maintenanceOverdue"],["openNcrs","overdueNcrs","overdueCapas"],["stockValue","itemsBelowMinimum","quarantineLines"],["openPurchaseOrdersAmount","lateOrderLines","purchaseRequestsWaiting"],["serviceSlaBreaches","serviceOpenRequests","serviceUnitsInWarranty"],["overdueDecisions","lettersWaiting","leaveRequestsPending"]]; .success and ((R|keys) == ["asOfText","link","sections"] and R.asOfText == "'"$CDPTODAY"'" and R.link == "/ceo" and (R.sections|map(.section)) == ["finance","sales","projects","production","quality","inventory","procurement","service","office"] and (R.sections|map(keys)|unique) == [["items","section","title"]] and (R.sections|map(.title)) == (.data.sections|map(.title)) and (R.sections|map(.items|map(.key))) == KEYS and [R.sections[].items[]] == [(KEYS|flatten[]) as $k | (.data.sections[].kpis[]|select(.key == $k))|BRIEF] and ([.data.headline[].key] - [R.sections[].items[].key]) == [])'
+[ "$CDALEN" -le 6000 ] && ok "ceo analyze: the numbers of the whole company fit the 6000 characters of a tool result ($CDALEN): the shaper cut nothing" || bad "ceo analyze: the numbers of the whole company fit the 6000 characters of a tool result (got $CDALEN)"
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=tool&PageSize=1"
+check "ceo analyze: the audit holds the reading of the numbers of the whole company exactly: ceo_overview without arguments, allowed, the size and the SHA-256 of the stored result" '.success and .data.data[0].detail == '"$(cdq "ceo_overview {} allowed=True chars=$CDALEN hash=$CDAH")"
 
 CDQ_AN4="وضعیت کل شرکت را تحلیل کن؛ با دوره‌ی قبل مقایسه کن و سه نکته‌ی مهم و ریسک‌های اصلی را بگو."
 cdanalyze "$CEO_TOKEN" '{"sectionKey":"ALL"}'
@@ -7294,7 +7733,7 @@ check "ceo analyze: the conversation holds both analyses: question, numbers and 
 # who may analyse, and what is refused (a refused call writes nothing: the count of chat events at the end shows it)
 cdanalyze "$WH_TOKEN" '{"sectionKey":"production"}'; cdmsg "ceo analyze: a storekeeper cannot run the analysis" "$CDNOTALLOWED"
 cdanalyze "$FM_TOKEN" '{"sectionKey":"finance"}'; cdmsg "ceo analyze: the finance manager cannot run the analysis of the CEO dashboard" "$CDNOTALLOWED"
-cdanalyze "$CEO_TOKEN" '{"sectionKey":"nonsense","question":"تحلیل"}'; cdmsg "ceo analyze: an unknown section is refused with the nine keys" "بخش ناشناخته است؛ یکی از این‌ها را بدهید: finance، sales، projects، production، quality، inventory، procurement، service، office"
+cdanalyze "$CEO_TOKEN" '{"sectionKey":"nonsense","question":"تحلیل"}'; cdmsg "ceo analyze: an unknown section is refused: the section of the dashboard is not found" "بخش داشبورد پیدا نشد."
 cdanalyze "$CEO_TOKEN" "$(jq -nc --arg q "$(printf 'x%.0s' $(seq 1 2001))" '{sectionKey:"production",question:$q}')"; cdmsg "ceo analyze: a question of 2001 characters is refused" "متن پرسش باید بین ۱ تا ۲۰۰۰ نویسه باشد."
 as "$WH_TOKEN" GET "$AI/conversations"; CDWC=$(val '.data.data[0].id')
 cdanalyze "$CEO_TOKEN" "{\"sectionKey\":\"production\",\"conversationId\":$CDWC}"; check "ceo analyze: the conversation of another user cannot be continued (not found)" '.success == false and .message == "گفتگو پیدا نشد." and .httpStatusCode == 404'
@@ -7331,6 +7770,13 @@ CDH6=$(cdph)
 [ "$CDH3" != "$CDH0" ] && ok "ceo assistant: a known context (page, theme, sections) changes the prompt" || bad "ceo assistant: a known context (page, theme, sections) changes the prompt"
 [ "$CDH3" = "$CDH4" ] && ok "ceo assistant: the context in other letter case, with a query and a fragment on the page, a repeat and an unknown section is the same prompt as the clean one" || bad "ceo assistant: the context in other letter case, with a query and a fragment on the page, a repeat and an unknown section is the same prompt as the clean one ($CDH3 $CDH4)"
 [ "$CDH3" = "$CDH6" ] && ok "ceo assistant: the dotted form fields of the voice request bind to the same context as the JSON object of the chat: the same prompt" || bad "ceo assistant: the dotted form fields of the voice request bind to the same context as the JSON object of the chat: the same prompt ($CDH3 $CDH6)"
+# only the entry of the allow-list that the page matched (with its Persian name) reaches the prompt, never the path as sent: two pages of one module with other paths, ids and queries give one prompt
+cdchat "$CEO_TOKEN" "$CDQ_BRIEF" '{"page":"/production/orders/123","theme":"dark","sections":["production","quality"]}'
+CDH7=$(cdph)
+cdchat "$CEO_TOKEN" "$CDQ_BRIEF" '{"page":"/production/schedule?week=4#top","theme":"dark","sections":["production","quality"]}'
+CDH8=$(cdph)
+[ "$CDH7" = "$CDH8" ] && ok "ceo assistant: two pages of the production module with other paths, ids and queries (/production/orders/123 and /production/schedule?week=4#top) give the same prompt: only the matched entry /production and its name reach the model" || bad "ceo assistant: two pages of the production module with other paths, ids and queries give the same prompt (hashes $CDH7 $CDH8)"
+[ "$CDH7" != "$CDH3" ] && ok "ceo assistant: the page of another module (/production instead of /ceo) changes the prompt" || bad "ceo assistant: the page of another module (/production instead of /ceo) changes the prompt"
 
 # the voice request that asks for a page: the actions come back with the spoken answer
 cdvoice "$CEO_TOKEN" "$CDAUDIO" -F "uiContext.page=/ceo" -F "uiContext.sections[0]=production"

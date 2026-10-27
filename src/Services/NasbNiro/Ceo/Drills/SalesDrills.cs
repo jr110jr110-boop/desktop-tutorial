@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,18 +39,14 @@ namespace Services.NasbNiro.Ceo.Drills
             yield return LostByReason();
         }
 
-        private static string Id(int id) => id.ToString(CultureInfo.InvariantCulture);
-
         private static int? DaysTo(DateTime? date, DateTime today) => date.HasValue ? (int)(date.Value.Date - today).TotalDays : (int?)null;
-
-        private static string Short(string text, int length = 120) => text != null && text.Length > length ? text.Substring(0, length) : text;
 
         // ------------------------------------------------------------------------------------------ pipeline
 
         private static DrillDefinition PipelineByStage() => new DrillDefinition
         {
             Key = "sl.pipeline_by_stage", Module = M, Title = "خط لوله‌ی فروش به تفکیک مرحله",
-            Description = "استعلام‌های باز (دریافت‌شده، در حال بررسی، در حال تهیه پیشنهاد، ارسال‌شده) با تعداد و ارزش هر مرحله؛ ارزش هر استعلام آخرین پیشنهاد فعال و در نبود آن آخرین برآورد قیمت‌دار است (هم‌پایه با داشبورد فروش). با by=product به تفکیک نوع محصول.",
+            Description = "استعلام‌های باز (دریافت‌شده، در حال بررسی، در حال تهیه پیشنهاد، ارسال‌شده) با تعداد و ارزش هر مرحله؛ ارزش هر استعلام آخرین پیشنهاد فعال و در نبود آن آخرین برآورد قیمت‌دار است (هم‌پایه با داشبورد فروش). می‌شود به‌جای مرحله، به تفکیک نوع محصول هم خواست.",
             Link = "/sales/inquiries",
             Parameters = new[] { Prm.Str("by", "گروه‌بندی: stage (مرحله) یا product (نوع محصول)؛ پیش‌فرض stage", "stage", new[] { "stage", "product" }) },
             Columns = new[] { Col.Text("name", "گروه"), Col.Num("count", "تعداد استعلام"), Col.Rial("value", "ارزش"), Col.Pct("sharePercent", "سهم از ارزش") },
@@ -213,15 +208,19 @@ namespace Services.NasbNiro.Ceo.Drills
             return Percent(delivered, total);
         }
 
+        /// <summary>What is left to invoice on an order: the sum of the uninvoiced amounts of its lines (<see cref="CeoFigures.UninvoicedAmount"/>, the function of the sales backlog of the overview).</summary>
+        private static decimal Remaining(SlOrderDto order) => order.Lines.Sum(l => CeoFigures.UninvoicedAmount(l.Amount, l.Quantity, l.InvoicedQuantity));
+
         private static DrillDefinition OrdersOpen() => new DrillDefinition
         {
             Key = "sl.orders_open", Module = M, Title = "سفارش‌های فروش باز",
-            Description = "سفارش‌های فروش تأییدشده و در حال تحویل بخشی با درصد تحویل (بر پایه‌ی مبلغ ردیف‌ها)؛ نزدیک‌ترین تاریخ تحویل درخواستی اول.",
+            Description = "سفارش‌های فروش تأییدشده و در حال تحویل بخشی با درصد تحویل (بر پایه‌ی مبلغ ردیف‌ها) و مانده‌ی فاکتورنشده؛ نزدیک‌ترین تاریخ تحویل درخواستی اول. جمع مانده‌ی فاکتورنشده بخش سفارش‌ها در شاخص «سفارش‌های در جریان» داشبورد مدیرعامل است.",
             Link = "/sales/orders", RecordType = "SalesOrder", RecordLabel = "سفارش فروش",
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Text("customerName", "مشتری"), Col.Date("orderDate", "تاریخ سفارش"), Col.Date("requestedDeliveryDate", "تحویل درخواستی"),
-                Col.Num("daysToDelivery", "روز تا تحویل (منفی: گذشته)"), Col.Status("status", "وضعیت"), Col.Rial("netAmount", "مبلغ"), Col.Pct("deliveredPercent", "درصد تحویل"), Col.Link(),
+                Col.Num("daysToDelivery", "روز تا تحویل (منفی: گذشته)"), Col.Status("status", "وضعیت"), Col.Rial("netAmount", "مبلغ"), Col.Rial("remainingAmount", "مانده‌ی فاکتورنشده"),
+                Col.Pct("deliveredPercent", "درصد تحویل"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -233,9 +232,11 @@ namespace Services.NasbNiro.Ceo.Drills
                 List<Row> rows = open.OrderBy(o => o.RequestedDeliveryDate.HasValue ? 0 : 1).ThenBy(o => o.RequestedDeliveryDate).ThenBy(o => o.Number, StringComparer.Ordinal).Select(o => new Row("/sales/orders/" + Id(o.Id))
                 {
                     ["id"] = o.Id, ["number"] = o.Number, ["customerName"] = o.CustomerName, ["orderDate"] = o.OrderDateText, ["requestedDeliveryDate"] = o.RequestedDeliveryDateText,
-                    ["daysToDelivery"] = DaysTo(o.RequestedDeliveryDate, c.Today), ["status"] = o.StatusText, ["netAmount"] = o.NetAmount, ["deliveredPercent"] = DeliveredPercent(o),
+                    ["daysToDelivery"] = DaysTo(o.RequestedDeliveryDate, c.Today), ["status"] = o.StatusText, ["netAmount"] = o.NetAmount, ["remainingAmount"] = CeoFigures.RoundRial(Remaining(o)),
+                    ["deliveredPercent"] = DeliveredPercent(o),
                 }).ToList();
-                return DrillResult.Slice(rows, c, "باز یعنی «تأییدشده» یا «تحویل بخشی» (هم‌پایه با داشبورد فروش).", new Dictionary<string, object> { ["netAmount"] = open.Sum(o => o.NetAmount) });
+                return DrillResult.Slice(rows, c, "باز یعنی «تأییدشده» یا «تحویل بخشی» (هم‌پایه با داشبورد فروش). مانده‌ی فاکتورنشده: مبلغ هر ردیف ضرب در سهم مقدار فاکتورنشده‌ی آن؛ جمع آن یک بار گرد می‌شود و بخش سفارش‌های رقم «سفارش‌های در جریان» داشبورد است (بخش قراردادهای آن رقم در این فهرست نیست).",
+                    new Dictionary<string, object> { ["netAmount"] = open.Sum(o => o.NetAmount), ["remainingAmount"] = CeoFigures.RoundRial(open.Sum(Remaining)) });
             },
         };
 
@@ -327,7 +328,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     if (end > to) end = to;
                     SlWinLossDto result = Take(await proposals.GetWinLossAsync(new SlWinLossQuery { From = start, To = end }, ct));
                     decimal monthWon = result.ByProduct.Sum(x => x.WonValue), monthLost = result.ByProduct.Sum(x => x.LostValue);
-                    rows.Add(new Row { ["month"] = DrillDates.MonthLabel(month), ["won"] = result.Won, ["lost"] = result.Lost, ["hitRatePercent"] = result.HitRatePercent, ["wonValue"] = monthWon, ["lostValue"] = monthLost });
+                    rows.Add(new Row { ["month"] = CeoText.MonthLabel(month), ["won"] = result.Won, ["lost"] = result.Lost, ["hitRatePercent"] = result.HitRatePercent, ["wonValue"] = monthWon, ["lostValue"] = monthLost });
                     won += result.Won; lost += result.Lost; wonValue += monthWon; lostValue += monthLost;
                 }
                 return DrillResult.Slice(rows, c, "نرخ برد = برنده / (برنده + بازنده)؛ ماه بدون نتیجه نرخ ندارد.", new Dictionary<string, object>

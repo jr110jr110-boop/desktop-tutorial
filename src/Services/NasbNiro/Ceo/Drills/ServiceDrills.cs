@@ -46,7 +46,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition RequestsOpen() => new DrillDefinition
         {
             Key = "sv.requests_open", Module = M, Title = "درخواست‌های خدمات باز",
-            Description = "درخواست‌های خدمات پس از فروش که هنوز رفع نشده‌اند (باز، واگذارشده، در حال انجام، منتظر مشتری؛ هم‌پایه با «درخواست باز» داشبورد خدمات)؛ اول نقض‌شده‌های SLA، بعد بحرانی‌ترین و قدیمی‌ترین. با priority می‌شود به یک اولویت محدود کرد.",
+            Description = "درخواست‌های خدمات پس از فروش که هنوز رفع نشده‌اند (باز، واگذارشده، در حال انجام، منتظر مشتری؛ هم‌پایه با «درخواست باز» داشبورد خدمات)؛ اول نقض‌شده‌های SLA، بعد بحرانی‌ترین و قدیمی‌ترین. می‌شود به یک اولویت محدود کرد.",
             Link = "/service/requests", RecordType = "ServiceRequest", RecordLabel = "درخواست خدمات",
             Parameters = new[] { Prm.Str("priority", "فقط یک اولویت (Critical بحرانی، High بالا، Normal عادی، Low پایین)؛ پیش‌فرض همه‌ی اولویت‌ها", null, PriorityNames) },
             Columns = new[]
@@ -83,12 +83,12 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition SlaBreaches() => new DrillDefinition
         {
             Key = "sv.sla_breaches", Module = M, Title = "نقض SLA درخواست‌های خدمات",
-            Description = "درخواست‌های خدمات باز که مهلت پاسخ یا مهلت رفعشان گذشته یا دیر انجام شده (هم‌پایه با «نقض SLA» داشبورد خدمات)، با ساعت‌های تاخیر؛ بیشترین تاخیر اول.",
+            Description = "درخواست‌های خدمات باز که مهلت پاسخ یا مهلت رفعشان گذشته یا دیر انجام شده (هم‌پایه با «نقض SLA» داشبورد خدمات)، با ساعت‌های تأخیر؛ بیشترین تأخیر اول.",
             Link = "/service/requests", RecordType = "ServiceRequest", RecordLabel = "درخواست خدمات",
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Text("customerName", "مشتری"), Col.Text("unitTag", "واحد"), Col.Status("priority", "اولویت"), Col.Status("status", "وضعیت"), Col.Text("breachKind", "نقض در"),
-                Col.Date("responseDue", "مهلت پاسخ"), Col.Date("resolutionDue", "مهلت رفع"), Col.Num("hoursOver", "ساعت تاخیر"), Col.Text("assignedTo", "مسئول"), Col.Link(),
+                Col.Date("responseDue", "مهلت پاسخ"), Col.Date("resolutionDue", "مهلت رفع"), Col.Num("hoursOver", "ساعت تأخیر"), Col.Text("assignedTo", "مسئول"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -107,7 +107,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["breachKind"] = x.Response > 0m && x.Resolution > 0m ? "پاسخ و رفع" : x.Response > 0m ? "پاسخ" : "رفع",
                     ["responseDue"] = x.Request.ResponseDueText, ["resolutionDue"] = x.Request.ResolutionDueText, ["hoursOver"] = x.Over, ["assignedTo"] = x.Request.AssignedToName,
                 }).ToList();
-                return DrillResult.Slice(rows, c, "ساعت تاخیر تا همین لحظه حساب می‌شود؛ پاسخی که دیر داده شده یا رفعی که منتظر مانده هر دو نقض‌اند.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "ساعت تأخیر تا همین لحظه حساب می‌شود؛ پاسخی که دیر داده شده یا رفعی که منتظر مانده هر دو نقض‌اند.", new Dictionary<string, object>
                 {
                     ["breached"] = items.Count, ["responseBreaches"] = items.Count(x => x.Response > 0m), ["resolutionBreaches"] = items.Count(x => x.Resolution > 0m),
                     ["critical"] = items.Count(x => x.Request.Priority == SvPriority.Critical), ["unassigned"] = items.Count(x => !x.Request.AssignedToUserId.HasValue),
@@ -120,13 +120,13 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition OrdersOpen() => new DrillDefinition
         {
             Key = "sv.orders_open", Module = M, Title = "دستورهای خدمات باز",
-            Description = "دستورهای خدمات پس از فروش پیش‌نویس، برنامه‌ریزی‌شده و در حال انجام (هم‌پایه با «دستور خدمات باز» داشبورد)؛ اول دارای تاخیر نسبت به پایان برنامه. با goodwillOnly فقط دستورهایی که درخواست حسن نیتشان منتظر تصمیم مدیرعامل است. مبلغ دستمزد نمایش داده نمی‌شود.",
+            Description = "دستورهای خدمات پس از فروش پیش‌نویس، برنامه‌ریزی‌شده و در حال انجام (هم‌پایه با «دستور خدمات باز» داشبورد)؛ اول دارای تأخیر نسبت به پایان برنامه. می‌شود فقط دستورهایی را خواست که درخواست حسن نیتشان منتظر تصمیم مدیرعامل است (شاخص «درخواست‌های حسن نیت منتظر تصمیم»). مبلغ دستمزد نمایش داده نمی‌شود.",
             Link = "/service/orders", RecordType = "ServiceOrder", RecordLabel = "دستور خدمات",
             Parameters = new[] { Prm.Bool("goodwillOnly", "فقط دستورهایی که درخواست حسن نیت دارند و هنوز تصمیم‌گیری نشده؛ پیش‌فرض false") },
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Text("requestNumber", "درخواست"), Col.Text("unitTag", "واحد"), Col.Text("customerName", "مشتری"), Col.Text("title", "عنوان"), Col.Status("status", "وضعیت"),
-                Col.Status("decision", "تصمیم گارانتی"), Col.Date("plannedStart", "شروع برنامه"), Col.Date("plannedEnd", "پایان برنامه"), Col.Num("daysLate", "روز تاخیر"), Col.Status("goodwill", "حسن نیت"),
+                Col.Status("decision", "تصمیم گارانتی"), Col.Date("plannedStart", "شروع برنامه"), Col.Date("plannedEnd", "پایان برنامه"), Col.Num("daysLate", "روز تأخیر"), Col.Status("goodwill", "حسن نیت"),
                 Col.Num("totalHours", "ساعت ثبت‌شده"), Col.Link(),
             },
             Run = async (c, ct) =>
@@ -154,7 +154,7 @@ namespace Services.NasbNiro.Ceo.Drills
                         ["status"] = x.Order.StatusText, ["decision"] = x.Order.DecisionText, ["plannedStart"] = x.Order.PlannedStartText, ["plannedEnd"] = x.Order.PlannedEndText, ["daysLate"] = x.DaysLate,
                         ["goodwill"] = x.GoodwillWaiting ? "منتظر تصمیم مدیرعامل" : null, ["totalHours"] = x.Order.TotalHours,
                     }).ToList();
-                return DrillResult.Slice(rows, c, "تاخیر = گذشتن از پایان برنامه‌ی دستور باز؛ ساعت‌ها جمع ساعت‌های سفر، کار و انتظار ثبت‌شده است.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "تأخیر = گذشتن از پایان برنامه‌ی دستور باز؛ ساعت‌ها جمع ساعت‌های سفر، کار و انتظار ثبت‌شده است.", new Dictionary<string, object>
                 {
                     ["open"] = items.Count, ["inProgress"] = items.Count(x => x.Order.Status == SvOrderStatus.InProgress), ["late"] = items.Count(x => x.DaysLate > 0), ["goodwillWaiting"] = items.Count(x => x.GoodwillWaiting),
                 });
@@ -195,7 +195,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     anyHidden |= hidden;
                     rows.Add(new Row("/service/orders")
                     {
-                        ["month"] = DrillDates.MonthLabel(month), ["orders"] = inMonth.Count, ["partsAmount"] = inMonth.Sum(o => o.PartsAmount),
+                        ["month"] = CeoText.MonthLabel(month), ["orders"] = inMonth.Count, ["partsAmount"] = inMonth.Sum(o => o.PartsAmount),
                         ["totalCost"] = hidden ? (decimal?)null : inMonth.Sum(o => o.LabourAmount + o.PartsAmount), ["visibility"] = hidden ? "محرمانه (حقوق)" : "نمایان",
                     });
                 }
@@ -219,12 +219,12 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition UnitsByCustomer() => new DrillDefinition
         {
             Key = "sv.units_by_customer", Module = M, Title = "واحدهای نصب‌شده به تفکیک مشتری",
-            Description = "تعداد واحدهای نصب‌شده‌ی هر مشتری به تفکیک وضعیت (در گارانتی، تحت قرارداد خدمات، خارج از گارانتی) و واحدهای در انتظار تایید؛ واحد از رده خارج شمرده نمی‌شود و جمع‌ها با داشبورد خدمات هم‌پایه‌اند. بیشترین واحد اول.",
+            Description = "تعداد واحدهای نصب‌شده‌ی هر مشتری به تفکیک وضعیت (در گارانتی، تحت قرارداد خدمات، خارج از گارانتی) و واحدهای در انتظار تأیید؛ واحد از رده خارج شمرده نمی‌شود و جمع‌ها با داشبورد خدمات هم‌پایه‌اند. بیشترین واحد اول.",
             Link = "/service/units", RecordType = "Customer", RecordLabel = "مشتری",
             Columns = new[]
             {
                 Col.Text("customerName", "مشتری"), Col.Num("units", "واحد نصب‌شده"), Col.Num("inWarranty", "در گارانتی"), Col.Num("underLtsa", "تحت قرارداد خدمات"), Col.Num("outOfWarranty", "خارج از گارانتی"),
-                Col.Num("toConfirm", "در انتظار تایید"), Col.Date("nextWarrantyEnd", "نزدیک‌ترین پایان گارانتی"), Col.Link(),
+                Col.Num("toConfirm", "در انتظار تأیید"), Col.Date("nextWarrantyEnd", "نزدیک‌ترین پایان گارانتی"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -261,7 +261,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition SurveyByMonth() => new DrillDefinition
         {
             Key = "sv.survey_by_month", Module = M, Title = "رضایت مشتریان به تفکیک ماه",
-            Description = "تعداد نظرسنجی‌های پاسخ‌داده‌شده و میانگین امتیاز (۱ تا ۵) هر ماه شمسی (بر پایه‌ی تاریخ پاسخ)، به تفکیک نظرسنجی تحویل و خدمات و تعداد امتیازهای زیر ۳. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ میانگین داشبورد روی کل سابقه است (در جمع‌ها به نام averageAll).",
+            Description = "تعداد نظرسنجی‌های پاسخ‌داده‌شده و میانگین امتیاز (۱ تا ۵) هر ماه شمسی (بر پایه‌ی تاریخ پاسخ)، به تفکیک نظرسنجی تحویل و خدمات و تعداد امتیازهای زیر ۳. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ میانگین شاخص داشبورد روی کل سابقه است و جدا در جمع‌ها می‌آید.",
             Link = "/service/surveys", RecordType = "SurveyMonth", RecordLabel = "ماه",
             Parameters = Prm.Last12Months(" پاسخ"),
             Columns = new[]
@@ -274,11 +274,15 @@ namespace Services.NasbNiro.Ceo.Drills
                 Guard.Require(c, SvRoles.Readers);
                 DateTime from = c.Args.Date("from").Date, to = c.Args.Date("to").Date;
                 var uow = c.Get<IUnitOfWork>();
-                var answered = await uow.Set<SlSurvey>().AsNoTracking().Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.AverageScore != null)
-                    .Select(s => new { s.AnsweredAt, Score = s.AverageScore.Value, s.Kind }).ToListAsync(ct);
+                // the date filter is in the query; the average of the whole history (the figure of the dashboard) is the sum and the count of all answered surveys
+                IQueryable<SlSurvey> answeredAll = uow.Set<SlSurvey>().AsNoTracking().Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.AverageScore != null);
+                int answeredCount = await answeredAll.CountAsync(ct);
+                decimal answeredSum = await answeredAll.SumAsync(s => (decimal?)s.AverageScore, ct) ?? 0m;
+                DateTimeOffset fromAt = new DateTimeOffset(from), endAt = new DateTimeOffset(to.AddDays(1));
                 int drafted = await uow.Set<SlSurvey>().AsNoTracking().CountAsync(s => !s.Deleted && s.Status == SlSurveyStatus.Drafted, ct);
                 int sent = await uow.Set<SlSurvey>().AsNoTracking().CountAsync(s => !s.Deleted && s.Status == SlSurveyStatus.Sent, ct);
-                var inWindow = answered.Where(s => s.AnsweredAt.HasValue && s.AnsweredAt.Value.LocalDateTime.Date >= from && s.AnsweredAt.Value.LocalDateTime.Date <= to)
+                var inWindow = (await answeredAll.Where(s => s.AnsweredAt != null && s.AnsweredAt >= fromAt && s.AnsweredAt < endAt)
+                        .Select(s => new { s.AnsweredAt, Score = s.AverageScore.Value, s.Kind }).ToListAsync(ct))
                     .Select(s => new { Month = DrillDates.MonthStart(s.AnsweredAt.Value.LocalDateTime), s.Score, s.Kind }).ToList();
                 var rows = new List<Row>();
                 foreach (DateTime month in DrillDates.Months(from, to))
@@ -288,7 +292,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     var service = inMonth.Where(s => s.Kind == SlSurveyKind.Service).ToList();
                     rows.Add(new Row("/service/surveys")
                     {
-                        ["month"] = DrillDates.MonthLabel(month), ["answered"] = inMonth.Count, ["averageScore"] = inMonth.Count == 0 ? (decimal?)null : Round(inMonth.Average(s => s.Score)),
+                        ["month"] = CeoText.MonthLabel(month), ["answered"] = inMonth.Count, ["averageScore"] = inMonth.Count == 0 ? (decimal?)null : Round(inMonth.Average(s => s.Score)),
                         ["deliveryAverage"] = delivery.Count == 0 ? (decimal?)null : Round(delivery.Average(s => s.Score)), ["serviceAverage"] = service.Count == 0 ? (decimal?)null : Round(service.Average(s => s.Score)),
                         ["lowScores"] = inMonth.Count(s => s.Score < 3m),
                     });
@@ -296,7 +300,7 @@ namespace Services.NasbNiro.Ceo.Drills
                 return DrillResult.Slice(rows, c, "امتیاز هر نظرسنجی میانگین پاسخ‌های ۱ تا ۵ مشتری است؛ ماه بدون پاسخ میانگین ندارد.", new Dictionary<string, object>
                 {
                     ["answered"] = inWindow.Count, ["averageScore"] = inWindow.Count == 0 ? (decimal?)null : Round(inWindow.Average(s => s.Score)), ["lowScores"] = inWindow.Count(s => s.Score < 3m),
-                    ["averageAll"] = answered.Count == 0 ? (decimal?)null : Round(answered.Average(s => s.Score)), ["answeredAll"] = answered.Count, ["drafted"] = drafted, ["sent"] = sent,
+                    ["averageAll"] = answeredCount == 0 ? (decimal?)null : Round(answeredSum / answeredCount), ["answeredAll"] = answeredCount, ["drafted"] = drafted, ["sent"] = sent,
                 });
             },
         };

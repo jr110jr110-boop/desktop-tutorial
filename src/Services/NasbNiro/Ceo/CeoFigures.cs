@@ -90,6 +90,16 @@ namespace Services.NasbNiro.Ceo
             (await OverduePayablesAsync(ageing, today, ct)).Sum(r => r.Overdue);
 
         /// <summary>
+        /// The part of a sales-order line that is not invoiced yet: its amount times the share of its quantity still to be invoiced (zero for a line without a quantity, never negative).
+        /// The one function behind the order part of the sales backlog and the column <c>remainingAmount</c> of the drill <c>sl.orders_open</c>, so the two always agree.
+        /// </summary>
+        public static decimal UninvoicedAmount(decimal amount, decimal quantity, decimal invoicedQuantity) =>
+            quantity <= 0m ? 0m : amount * Math.Max(0m, quantity - invoicedQuantity) / quantity;
+
+        /// <summary>A rial amount rounded to the rial: the sum of <see cref="UninvoicedAmount"/> is rounded once, after adding the lines up.</summary>
+        public static decimal RoundRial(decimal value) => Math.Round(value, 0, MidpointRounding.AwayFromZero);
+
+        /// <summary>
         /// ★ Sales backlog = (A) for the confirmed and partly delivered sales orders: each line's amount times the share of its quantity not yet invoiced,
         /// plus (B) for the contracts in progress whose project-control terms carry a value (before VAT): that value less the net amount of their posted sales invoices
         /// (credit notes deducted; advance and retention-release invoices left out), never below zero.
@@ -101,12 +111,8 @@ namespace Services.NasbNiro.Ceo
             var lines = await uow.Set<SlSalesOrder>().AsNoTracking()
                 .Where(o => !o.Deleted && (o.Status == SlOrderStatus.Confirmed || o.Status == SlOrderStatus.PartlyDelivered))
                 .SelectMany(o => o.Lines).Select(l => new { l.Amount, l.Quantity, l.InvoicedQuantity }).ToListAsync(ct);
-            foreach (var l in lines)
-            {
-                if (l.Quantity <= 0m) continue;
-                backlog.Orders += l.Amount * Math.Max(0m, l.Quantity - l.InvoicedQuantity) / l.Quantity;
-            }
-            backlog.Orders = Math.Round(backlog.Orders, 0, MidpointRounding.AwayFromZero);
+            foreach (var l in lines) backlog.Orders += UninvoicedAmount(l.Amount, l.Quantity, l.InvoicedQuantity);
+            backlog.Orders = RoundRial(backlog.Orders);
 
             var terms = await uow.Set<PcContractTerms>().AsNoTracking()
                 .Where(t => !t.Deleted && t.ValueExVat != null && t.ValueExVat > 0 && !t.Contract.Deleted && t.Contract.Status == ContractStatus.Current)

@@ -22,7 +22,7 @@ namespace Services.NasbNiro.Ceo
 
             var section = new CeoSectionDto();
             section.Kpis.Add(Kpi(ctx, "overdueDecisions", b.OverdueDecisions, CeoRules.WarnIfAny(b.OverdueDecisions),
-                "مصوبه‌های باز صورت‌جلسه‌های تأییدشده که موعدشان گذشته است."));
+                "مصوبات باز صورت‌جلسه‌های تأییدشده که موعدشان گذشته است."));
             section.Kpis.Add(Kpi(ctx, "lettersWaiting", lettersWaiting, CeoRules.ByCount(lettersWaiting, 5, 15),
                 "نامه‌های صادره و داخلی که در زنجیره‌ی تأیید هستند."));
             section.Kpis.Add(Kpi(ctx, "leaveRequestsPending", leavesWaiting, CeoRules.ByCount(leavesWaiting, 5, 15),

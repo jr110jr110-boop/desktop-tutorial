@@ -28,7 +28,7 @@ namespace Services.NasbNiro.Ceo.Drills
             AiNoteTypes.QualityNcr => "عدم انطباق کیفیت",
             AiNoteTypes.FinanceJournal => "سند مالی",
             AiNoteTypes.BankLine => "ردیف صورت‌حساب بانک",
-            AiNoteTypes.SupplierIbanChange => "تغییر حساب تامین‌کننده",
+            AiNoteTypes.SupplierIbanChange => "تغییر حساب تأمین‌کننده",
             AiNoteTypes.PurchaseRfq => "استعلام خرید",
             AiNoteTypes.OfficeLetter => "نامه",
             AiNoteTypes.OfficeMeeting => "جلسه",
@@ -48,7 +48,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition NotesNew() => new DrillDefinition
         {
             Key = "ai.notes_new", Module = M, Title = "یادداشت‌های جدید هوش مصنوعی",
-            Description = "یادداشت‌هایی که صندلی‌های هوش مصنوعی گذاشته‌اند و هنوز کسی درباره‌شان تصمیم نگرفته است (پذیرش یا رد)؛ تازه‌ترین اول. هر نقش فقط یادداشت‌های ماژول‌های خودش را می‌بیند. با type به یک نوع و با seat به یک صندلی محدود می‌شود.",
+            Description = "یادداشت‌هایی که صندلی‌های هوش مصنوعی گذاشته‌اند و هنوز کسی درباره‌شان تصمیم نگرفته است (پذیرش یا رد)؛ تازه‌ترین اول. هر نقش فقط یادداشت‌های ماژول‌های خودش را می‌بیند. می‌شود فقط یک نوع یادداشت یا فقط یادداشت‌های یک صندلی را خواست.",
             Link = "/ai/notes", RecordType = "AiNote", RecordLabel = "یادداشت هوش مصنوعی",
             Parameters = new[]
             {
@@ -80,7 +80,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition SeatRuns() => new DrillDefinition
         {
             Key = "ai.seat_runs", Module = M, Title = "اجراهای صندلی‌های هوش مصنوعی",
-            Description = "اجراهای اخیر صندلی‌های هوش مصنوعی با وضعیت، زمان و خطا؛ تازه‌ترین اول. پیش‌فرض ۱۴ روز اخیر؛ با seat به یک صندلی و با status به یک وضعیت (Running، Succeeded، Failed، Skipped) محدود می‌شود. seatsFailing شمار صندلی‌های فعالی است که آخرین اجرایشان ناموفق بوده (هم‌پایه با هشدار داشبورد مدیرعامل).",
+            Description = "اجراهای اخیر صندلی‌های هوش مصنوعی با وضعیت، زمان و خطا؛ تازه‌ترین اول. پیش‌فرض ۱۴ روز اخیر؛ می‌شود فقط اجراهای یک صندلی یا فقط یک وضعیت (در حال اجرا، موفق، ناموفق، ردشده) را خواست. در جمع‌ها شمار صندلی‌های فعالی که آخرین اجرایشان ناموفق بوده هم می‌آید (هم‌پایه با هشدار داشبورد مدیرعامل).",
             Link = "/ai/admin/seats", RecordType = "AiSeatRun", RecordLabel = "اجرای صندلی",
             Parameters = new[]
             {
@@ -103,12 +103,15 @@ namespace Services.NasbNiro.Ceo.Drills
 
                 // the module lists newest first and has no date filter: read pages until a run is older than the window
                 var runs = new List<AiSeatRunDto>();
-                for (int number = 1; number <= DrillRead.MaxPages; number++)
+                bool complete = false;
+                for (int number = 1; number <= DrillRead.MaxPages && !complete; number++)
                 {
                     PagedList<AiSeatRunDto> page = Take(await seats.GetRunsAsync(new AiSeatRunQuery { Seat = seat, Status = status, PageNumber = number, PageSize = AiPageSize }, ct));
                     runs.AddRange(page.Where(r => r.StartedAt >= cutoff));
-                    if (page.Count == 0 || page.Any(r => r.StartedAt < cutoff) || number * AiPageSize >= page.TotalCount) break;
+                    complete = page.Count == 0 || page.Any(r => r.StartedAt < cutoff) || number * AiPageSize >= page.TotalCount;
                 }
+                // a window with more runs than the pages hold is refused, not cut silently
+                if (!complete) throw new DrillFailureException(CeoDrillText.TooManyRows);
                 int failing = Take(await seats.GetSeatsAsync(ct)).Count(s => s.Enabled && s.LastRun != null && s.LastRun.Status == AiSeatRunStatus.Failed);
                 List<Row> rows = runs.OrderByDescending(r => r.StartedAt).ThenByDescending(r => r.Id).Select(r => new Row("/ai/admin/seats")
                 {

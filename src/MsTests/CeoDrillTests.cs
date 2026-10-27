@@ -1,15 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Common.Results;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Ai;
+using Services.NasbNiro.Ceo;
 using Services.NasbNiro.Ceo.Drills;
 using Services.NasbNiro.ProjectControl;
 using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.AiDtos;
+using ViewModels.NasbNiro.Pagination;
 using ViewModels.NasbNiro.ProjectControlDtos;
 
 namespace MsTests
@@ -84,7 +90,7 @@ namespace MsTests
             Assert.AreEqual(ContractKeys.Length, ContractKeys.Distinct().Count());
             List<string> keys = CeoDrillCatalog.All.Select(d => d.Key).ToList();
             Assert.AreEqual(keys.Count, keys.Distinct(StringComparer.OrdinalIgnoreCase).Count(), "keys are unique");
-            Assert.IsTrue(keys.Count >= 60);
+            Assert.AreEqual(68, keys.Count, "the exact number of drills of the contract");
             CollectionAssert.AreEquivalent(ContractKeys, keys);
         }
 
@@ -241,10 +247,15 @@ namespace MsTests
             Assert.AreEqual(30, top);
             Assert.IsNull(DrillBinder.BindPaging("200", "1", 50, out top, out _));
             Assert.AreEqual(200, top);
+            // the refusals are Persian sentences that name the field in Persian and the limit (no English word reaches the user)
             foreach (string bad in new[] { "0", "-1", "201", "abc", "1.5" })
-                StringAssert.Contains(DrillBinder.BindPaging(bad, null, 50, out _, out _), "top");
-            foreach (string bad in new[] { "0", "-2", "x" })
-                StringAssert.Contains(DrillBinder.BindPaging(null, bad, 50, out _, out _), "page");
+                Assert.AreEqual("مقدار «تعداد» باید عددی بین 1 و 200 باشد.", DrillBinder.BindPaging(bad, null, 50, out _, out _), bad);
+            foreach (string bad in new[] { "0", "-2", "x", "10001", "99999999999" })
+                Assert.AreEqual("مقدار «صفحه» باید عدد صحیح بین 1 و 10000 باشد.", DrillBinder.BindPaging(null, bad, 50, out _, out _), bad);
+            // the last page that may be asked for
+            Assert.AreEqual(10000, DrillBinder.MaxPage);
+            Assert.IsNull(DrillBinder.BindPaging("1", "10000", 50, out _, out page));
+            Assert.AreEqual(10000, page);
             Assert.IsNull(DrillBinder.BindPaging("  ", " ", 20, out top, out page));
             Assert.AreEqual(20, top);
             Assert.AreEqual(1, page);
@@ -319,15 +330,19 @@ namespace MsTests
             };
             List<string> Names(string status) => rows.Where(r => ProjectDrills.InStatus(r.Value, status)).Select(r => r.Key).ToList();
 
-            // one colour per project, the rule of the project dashboard and the CEO overview (PcReportService.IsRed / IsAmber): a project that is red on one index and amber on the other is red only
+            // one colour per project, the rule of the project dashboard and the CEO overview (PcReportService.IsRed / IsAmber): a project that is red on one index and amber on the other is red only;
+            // green is every project that is neither red nor amber, the ones without an index value included (the green slice of the donut of the overview is the same count)
             CollectionAssert.AreEqual(new[] { "red/green", "red/amber" }, Names("danger"));
             CollectionAssert.AreEqual(new[] { "amber/amber", "green/amber" }, Names("warn"));
-            CollectionAssert.AreEqual(new[] { "green/none", "green/green" }, Names("ok"));
+            CollectionAssert.AreEqual(new[] { "none/none", "green/none", "green/green", "null/null" }, Names("ok"));
             Assert.AreEqual(rows.Count, Names(null).Count, "no status: every project");
             Assert.AreEqual(rows.Count, Names("").Count);
             Assert.AreEqual(rows.Values.Count(PcReportService.IsRed), Names("danger").Count);
             Assert.AreEqual(rows.Values.Count(PcReportService.IsAmber), Names("warn").Count);
             Assert.AreEqual(0, Names("danger").Intersect(Names("warn")).Count(), "no project is in two lists");
+            Assert.AreEqual(0, Names("ok").Intersect(Names("danger")).Concat(Names("ok").Intersect(Names("warn"))).Count());
+            Assert.AreEqual(rows.Count, Names("danger").Count + Names("warn").Count + Names("ok").Count, "red + amber + green is every project");
+            Assert.AreEqual(rows.Count - rows.Values.Count(PcReportService.IsRed) - rows.Values.Count(PcReportService.IsAmber), Names("ok").Count, "green is what is left, as the donut counts it");
 
             // the light of a row: the worse of the two indices; "none" (the module's word for no value) is not green
             Assert.AreEqual("قرمز", ProjectDrills.Traffic("red", "amber"));
@@ -336,6 +351,214 @@ namespace MsTests
             Assert.AreEqual("سبز", ProjectDrills.Traffic("green", "green"));
             Assert.AreEqual("بدون داده", ProjectDrills.Traffic("none", "none"));
             Assert.AreEqual("بدون داده", ProjectDrills.Traffic(null, null));
+        }
+
+        // ------------------------------------------------------------------------------------------ the figures of the dashboard and the drills behind them
+
+        private static DrillParam ParameterOf(string drillKey, string name) => CeoDrillCatalog.Find(drillKey).Parameters.Single(p => p.Name == name);
+
+        /// <summary>The arguments a figure of the overview gives its drill (what the front sends when the CEO clicks the figure).</summary>
+        private static DrillArgs ArgsOfFigure(string kpiKey)
+        {
+            CeoKpiSpec spec = CeoKpiSpecs.Get(kpiKey);
+            DrillDefinition drill = CeoDrillCatalog.Find(spec.DrillKey);
+            Assert.IsNotNull(spec.DrillParams, kpiKey + " carries parameters");
+            Assert.IsNull(DrillBinder.Bind(drill.Parameters, spec.DrillParams(Today), Today, out DrillArgs args), kpiKey);
+            return args;
+        }
+
+        /// <summary>The arguments of a drill called with no parameter at all (what the AI and the open drill give).</summary>
+        private static DrillArgs DefaultsOf(string drillKey)
+        {
+            Assert.IsNull(DrillBinder.Bind(CeoDrillCatalog.Find(drillKey).Parameters, new Dictionary<string, string>(), Today, out DrillArgs args), drillKey);
+            return args;
+        }
+
+        [TestMethod]
+        public void Every_Drill_Key_Of_The_Overview_Is_In_The_Catalogue_And_Every_Filter_Of_A_Figure_Is_Declared_By_Its_Drill()
+        {
+            // the keys the overview points at are the 66 keys of the modules; the two drills of the AI module are behind no figure
+            List<string> referred = typeof(CeoDrillRef).GetFields(BindingFlags.Public | BindingFlags.Static).Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()).ToList();
+            CollectionAssert.AreEquivalent(ContractKeys.Where(k => !k.StartsWith("ai.", StringComparison.Ordinal)).ToList(), referred);
+
+            var filtered = new List<string>();
+            foreach (CeoKpiSpec spec in CeoKpiSpecs.All)
+            {
+                DrillDefinition drill = CeoDrillCatalog.Find(spec.DrillKey);
+                Assert.IsNotNull(drill, spec.Key + " -> " + spec.DrillKey);
+                Dictionary<string, string> given = spec.DrillParams?.Invoke(Today);
+                if (given == null) continue;
+                filtered.Add(spec.Key);
+                foreach (string name in given.Keys)
+                    Assert.IsTrue(drill.Parameters.Any(p => p.Name == name), spec.Key + ": " + spec.DrillKey + " declares no parameter " + name);
+                Assert.IsNull(DrillBinder.Bind(drill.Parameters, given, Today, out _), spec.Key);
+            }
+            // the figures that count a narrower set than their drill lists by default, and the two of the year so far
+            CollectionAssert.AreEquivalent(
+                new[] { "netProfitYtd", "projectsRed", "projectsAmber", "overdueNcrs", "calibrationOverdue", "purchaseRequestsWaiting", "serviceWarrantyCostYtd", "serviceGoodwillWaiting", "lettersWaiting" }, filtered);
+        }
+
+        [TestMethod]
+        public void A_Figure_Opens_Its_Drill_On_Exactly_The_Records_The_Figure_Counts()
+        {
+            // purchase requests: the figure counts the submitted ones; the drill without a parameter lists the approved ones too
+            Assert.AreEqual("submitted", ArgsOfFigure("purchaseRequestsWaiting").Str("status"));
+            Assert.AreEqual("all", DefaultsOf("pr.requests_open").Str("status"));
+            CollectionAssert.AreEqual(new[] { "submitted", "approved", "all" }, ParameterOf("pr.requests_open", "status").Allowed);
+
+            // letters: the figure counts the letters in approval; the drill lists the signed and the registered ones too
+            Assert.AreEqual("approval", ArgsOfFigure("lettersWaiting").Str("stage"));
+            Assert.AreEqual("all", DefaultsOf("of.letters_waiting").Str("stage"));
+            CollectionAssert.AreEqual(new[] { "approval", "signature", "registered", "all" }, ParameterOf("of.letters_waiting", "stage").Allowed);
+            Assert.IsFalse(DefaultsOf("of.letters_waiting").Bool("mineOnly"));
+
+            // leave requests: the figure counts the ones waiting for the manager, which is the default of the drill, so the figure needs no parameter
+            Assert.IsNull(CeoKpiSpecs.Get("leaveRequestsPending").DrillParams);
+            Assert.AreEqual("submitted", DefaultsOf("of.leave_requests_pending").Str("status"));
+            CollectionAssert.AreEqual(new[] { "submitted", "approved", "all" }, ParameterOf("of.leave_requests_pending", "status").Allowed);
+
+            // service orders, NCRs, calibrations: a flag or a number of days that narrows the list to the figure
+            Assert.IsTrue(ArgsOfFigure("serviceGoodwillWaiting").Bool("goodwillOnly"));
+            Assert.IsFalse(DefaultsOf("sv.orders_open").Bool("goodwillOnly"));
+            Assert.IsTrue(ArgsOfFigure("overdueNcrs").Bool("onlyOverdue"));
+            Assert.IsFalse(DefaultsOf("qc.ncr_open").Bool("onlyOverdue"));
+            Assert.AreEqual(0, ArgsOfFigure("calibrationOverdue").Int("days"), "zero days: only the equipment whose calibration is overdue");
+            Assert.AreEqual(30, DefaultsOf("qc.calibration_due").Int("days"));
+
+            // projects: the red and the amber figures are the two statuses of the portfolio drill
+            Assert.AreEqual("danger", ArgsOfFigure("projectsRed").Str("status"));
+            Assert.AreEqual("warn", ArgsOfFigure("projectsAmber").Str("status"));
+            Assert.IsNull(DefaultsOf("pc.portfolio").Str("status"));
+
+            // the figures of the year so far: from the first day of the Persian year to today
+            DateTime yearStart = new PersianCalendar().ToDateTime(1405, 1, 1, 0, 0, 0, 0);
+            foreach (string key in new[] { "netProfitYtd", "serviceWarrantyCostYtd" })
+            {
+                DrillArgs year = ArgsOfFigure(key);
+                Assert.AreEqual(yearStart, year.Date("from"), key);
+                Assert.AreEqual(Today, year.Date("to"), key);
+            }
+
+            // the backlog lists the open orders by itself: no parameter
+            Assert.IsNull(CeoKpiSpecs.Get("salesBacklog").DrillParams);
+        }
+
+        [TestMethod]
+        public async Task The_Calibration_Drill_Takes_Zero_Days_The_Movement_Drill_Takes_A_Kind_And_At_Most_A_Year()
+        {
+            DrillParam days = ParameterOf("qc.calibration_due", "days");
+            Assert.AreEqual(0, days.Min);
+            Assert.AreEqual(365, days.Max);
+            foreach (string good in new[] { "0", "۰", "1", "30", "365" })
+                Assert.IsNull(DrillBinder.Bind(new[] { days }, new Dictionary<string, string> { ["days"] = good }, Today, out _), good);
+            foreach (string bad in new[] { "-1", "366", "x" })
+                Assert.IsNotNull(DrillBinder.Bind(new[] { days }, new Dictionary<string, string> { ["days"] = bad }, Today, out _), bad);
+
+            DrillParam kind = ParameterOf("inv.top_movements", "kind");
+            CollectionAssert.AreEqual(new[] { "receipt", "issue", "all" }, kind.Allowed);
+            Assert.AreEqual("all", DefaultsOf("inv.top_movements").Str("kind"));
+            Assert.IsNull(DrillBinder.Bind(new[] { kind }, new Dictionary<string, string> { ["kind"] = "Receipt" }, Today, out DrillArgs args));
+            Assert.AreEqual("receipt", args.Str("kind"));
+            StringAssert.Contains(DrillBinder.Bind(new[] { kind }, new Dictionary<string, string> { ["kind"] = "transfer" }, Today, out _), "receipt");
+
+            // a range of 367 days is refused with a Persian sentence before any record is read (the service has no database here)
+            var tooLong = new Dictionary<string, string> { ["from"] = "2025-10-24", ["to"] = "2026-10-25" };
+            var answer = await Service("CEO").DrillAsync("inv.top_movements", null, null, tooLong, CancellationToken.None);
+            Assert.IsFalse(answer.Success);
+            StringAssert.Contains(answer.Message, "366");
+            Assert.IsTrue(HasPersian(answer.Message));
+            // the attendance of more than a year is refused too
+            answer = await Service("CEO").DrillAsync("of.attendance_month", null, null, new Dictionary<string, string> { ["from"] = "2025-10-23", ["to"] = "2026-10-25" }, CancellationToken.None);
+            Assert.IsFalse(answer.Success);
+            Assert.IsTrue(HasPersian(answer.Message));
+        }
+
+        [TestMethod]
+        public void The_Backlog_Of_An_Order_Line_Is_The_Share_Of_Its_Amount_That_Is_Not_Invoiced_And_Never_Negative()
+        {
+            Assert.AreEqual(600m, CeoFigures.UninvoicedAmount(1000m, 10m, 4m));
+            Assert.AreEqual(0m, CeoFigures.UninvoicedAmount(500m, 5m, 5m), "fully invoiced");
+            Assert.AreEqual(300m, CeoFigures.UninvoicedAmount(300m, 3m, 0m));
+            Assert.AreEqual(0m, CeoFigures.UninvoicedAmount(150m, 1m, 3m), "over-invoiced: never below zero");
+            Assert.AreEqual(0m, CeoFigures.UninvoicedAmount(900m, 0m, 0m), "a line without a quantity has no share");
+            Assert.AreEqual(0m, CeoFigures.UninvoicedAmount(900m, -2m, 0m));
+            // the sum of the lines is rounded once, not each line
+            decimal sum = CeoFigures.UninvoicedAmount(100m, 3m, 1m) + CeoFigures.UninvoicedAmount(100m, 3m, 1m) + CeoFigures.UninvoicedAmount(100m, 3m, 1m);
+            Assert.AreEqual(200m, CeoFigures.RoundRial(sum));
+            Assert.AreEqual(67m, CeoFigures.RoundRial(CeoFigures.UninvoicedAmount(100m, 3m, 1m)));
+            Assert.AreEqual(2m, CeoFigures.RoundRial(1.5m));
+        }
+
+        // ------------------------------------------------------------------------------------------ reading a list of a module
+
+        private sealed class FakePage<T> : PagedList<T>
+        {
+            public FakePage(IEnumerable<T> items, int total) : base(items, total, 1, DrillRead.ModulePageSize)
+            {
+            }
+        }
+
+        /// <summary>The pages of a list of <paramref name="total"/> numbers as the module serves them (500 a page); the page numbers asked for are recorded.</summary>
+        private static Func<int, Task<ResponseDto<PagedList<int>>>> ModulePages(int total, List<int> asked) => number =>
+        {
+            asked.Add(number);
+            IEnumerable<int> page = Enumerable.Range(1, total).Skip((number - 1) * DrillRead.ModulePageSize).Take(DrillRead.ModulePageSize);
+            return Task.FromResult(ResponseDtoHelper.Ok<PagedList<int>>(new FakePage<int>(page, total)));
+        };
+
+        [TestMethod]
+        public async Task A_Module_List_Is_Read_Page_By_Page_And_A_List_Too_Long_For_The_Limit_Is_Refused_Not_Cut()
+        {
+            Assert.AreEqual(40, DrillRead.MaxPages);
+            Assert.AreEqual(500, DrillRead.ModulePageSize);
+
+            var asked = new List<int>();
+            List<int> read = await DrillRead.AllAsync(ModulePages(1100, asked));
+            CollectionAssert.AreEqual(Enumerable.Range(1, 1100).ToList(), read);
+            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, asked);
+
+            asked.Clear();
+            Assert.AreEqual(0, (await DrillRead.AllAsync(ModulePages(0, asked))).Count, "an empty list");
+            CollectionAssert.AreEqual(new[] { 1 }, asked);
+            asked.Clear();
+            Assert.AreEqual(500, (await DrillRead.AllAsync(ModulePages(500, asked))).Count, "exactly one page");
+            CollectionAssert.AreEqual(new[] { 1 }, asked);
+
+            // the longest list that is read: forty pages
+            asked.Clear();
+            int longest = DrillRead.MaxPages * DrillRead.ModulePageSize;
+            Assert.AreEqual(longest, (await DrillRead.AllAsync(ModulePages(longest, asked))).Count);
+            Assert.AreEqual(DrillRead.MaxPages, asked.Count);
+
+            // one row more: no silent cut, a Persian sentence that asks for a narrower range
+            asked.Clear();
+            DrillFailureException tooLong = await Assert.ThrowsAsync<DrillFailureException>(() => DrillRead.AllAsync(ModulePages(longest + 1, asked)));
+            Assert.AreEqual(CeoDrillText.TooManyRows, tooLong.Message);
+            Assert.IsTrue(HasPersian(tooLong.Message));
+            Assert.AreEqual(DrillRead.MaxPages, asked.Count, "the limit stops the reading");
+
+            // the refusal of the module becomes a failure with the module's own message
+            DrillFailureException refused = await Assert.ThrowsAsync<DrillFailureException>(() => DrillRead.AllAsync<int>(n => Task.FromResult(ResponseDtoHelper.BadRequest<PagedList<int>>(CeoText.NotAllowed))));
+            Assert.AreEqual(CeoText.NotAllowed, refused.Message);
+
+            // a page that comes back empty ends the reading although the total says more (no endless loop)
+            Assert.AreEqual(0, (await DrillRead.AllAsync<int>(n => Task.FromResult(ResponseDtoHelper.Ok<PagedList<int>>(new FakePage<int>(new int[0], 10))))).Count);
+        }
+
+        // ------------------------------------------------------------------------------------------ the words of the catalogue
+
+        [TestMethod]
+        public void Titles_And_Descriptions_Are_Persian_With_No_Latin_Word_Except_The_Standard_Acronyms()
+        {
+            string[] acronyms = { "CAPA", "CPI", "ITP", "KOM", "LTSA", "NCR", "OEE", "PEP", "SLA", "SPI" };
+            var latin = new Regex("[A-Za-z][A-Za-z0-9_]+");
+            foreach (DrillDefinition d in CeoDrillCatalog.All)
+                foreach ((string what, string text) in new[] { ("title", d.Title), ("description", d.Description) })
+                    foreach (Match m in latin.Matches(text))
+                        CollectionAssert.Contains(acronyms, m.Value, d.Key + " " + what + " holds the Latin word «" + m.Value + "»");
+            // the digits of a description are Persian or plain: no Arabic-Indic digit (they are not the ones the front end writes)
+            foreach (DrillDefinition d in CeoDrillCatalog.All)
+                Assert.IsFalse((d.Title + d.Description).Any(c => c >= '٠' && c <= '٩'), d.Key);
         }
 
         [TestMethod]
@@ -371,7 +594,7 @@ namespace MsTests
         {
             var denied = await Service("WAREHOUSE").DrillAsync("qc.ncr_open", null, null, new Dictionary<string, string>(), CancellationToken.None);
             Assert.IsFalse(denied.Success);
-            Assert.AreEqual(CeoDrillText.NotAllowed, denied.Message);
+            Assert.AreEqual(CeoText.NotAllowed, denied.Message);
             Assert.IsFalse((await Service("WAREHOUSE").GetCatalogueAsync(CancellationToken.None)).Success);
 
             var unknown = await Service("CEO").DrillAsync("qc.nothing", null, null, new Dictionary<string, string>(), CancellationToken.None);
@@ -381,7 +604,10 @@ namespace MsTests
 
             var badTop = await Service("PMO").DrillAsync("qc.ncr_open", "0", null, null, CancellationToken.None);
             Assert.IsFalse(badTop.Success);
-            StringAssert.Contains(badTop.Message, "top");
+            StringAssert.Contains(badTop.Message, "«تعداد»");
+            var badPage = await Service("PMO").DrillAsync("qc.ncr_open", "5", "10001", null, CancellationToken.None);
+            Assert.IsFalse(badPage.Success);
+            StringAssert.Contains(badPage.Message, "«صفحه»");
             var badValue = await Service("PMO").DrillAsync("qc.ncr_open", "5", "1", new Dictionary<string, string> { ["severity"] = "Huge" }, CancellationToken.None);
             Assert.IsFalse(badValue.Success);
             StringAssert.Contains(badValue.Message, "severity");

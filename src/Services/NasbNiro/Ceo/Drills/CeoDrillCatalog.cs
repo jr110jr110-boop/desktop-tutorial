@@ -44,7 +44,7 @@ namespace Services.NasbNiro.Ceo.Drills
             Title = d.Title,
             Description = d.Description,
             Module = d.Module,
-            Roles = CeoDrillRoles.Readers,
+            Roles = CeoRoles.Readers,
             Parameters = d.Parameters.Select(p => new DrillParameterDto { Name = p.Name, Type = p.Type, Required = p.Required, Description = p.Description }).ToList(),
         };
 

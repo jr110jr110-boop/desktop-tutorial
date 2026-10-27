@@ -19,7 +19,8 @@ FORGE_WORD = "جعل"
 FORCE_WORD = "اجبار"
 REPEAT_WORD = "تکرار"
 
-# release D1 part A2: the drills of the CEO dashboard (checked after every older keyword, so the older routes keep their meaning)
+# release D1 part A2: the drills of the CEO dashboard (checked after every older keyword, so the older routes keep their meaning).
+# «ریز» and «بیرون» are matched as whole words only (has_word below): «برنامه‌ریزی», «واریز» or «ریزش» do not call the drill.
 DRILLS_WORD = "فهرست جزئیات"
 DRILL_WORD = "ریز"
 ANALYSE_WORD = "تحلیل"
@@ -34,6 +35,9 @@ UI_READ_WORD = "بخوان هشدارها"
 UI_OUT_WORD = "بیرون"
 UI_OPEN_LINK = "/production/orders"
 UI_OUT_LINK = "http://evil"
+# «باز کن» with this phrase opens a page of the allow-list whose link carries a number (987654321): the backend must not take that number as evidence for an answer that quotes it
+UI_LAUNDER_WORD = "پیوند عددی"
+UI_LAUNDER_LINK = "/ceo?x=987654321"
 UI_OPEN_ANSWER = "سفارش\u200cهای تولید را باز می\u200cکنم."
 UI_READ_ANSWER = "هشدارها را می\u200cخوانم."
 UI_REFUSED_ANSWER = "این صفحه برای باز شدن مجاز نیست."
@@ -57,6 +61,11 @@ SEAT_ANSWERS = (
 )
 
 
+def has_word(text, word):
+    """True when the word stands alone: not inside a longer word (letters, digits, or the half-space that joins a compound), so «ریز» is not found in «برنامه‌ریزی» or «واریز»."""
+    return re.search(r"(?<![\w\u200c])" + re.escape(word) + r"(?![\w\u200c])", text) is not None
+
+
 def seat_answer(text):
     """The fixed text (without digits) a seat question is answered with, or None."""
     for word, answer in SEAT_ANSWERS:
@@ -67,10 +76,10 @@ def seat_answer(text):
 
 def pick_tool(text, offered=()):
     """Keyword routing of a user question: (tool name, arguments) or None."""
-    if UI_OUT_WORD in text:
+    if has_word(text, UI_OUT_WORD):
         return "ui_navigate", {"link": UI_OUT_LINK}
     if text.lstrip().startswith(UI_OPEN_WORD):
-        return "ui_navigate", {"link": UI_OPEN_LINK}
+        return "ui_navigate", {"link": UI_LAUNDER_LINK if UI_LAUNDER_WORD in text else UI_OPEN_LINK}
     if UI_READ_WORD in text:
         return "ui_read", {"what": "alerts"}
     if SEAT_BRIEF in text:
@@ -78,7 +87,7 @@ def pick_tool(text, offered=()):
     if SEAT_WEEKLY in text:
         return "project_portfolio", {}
     # the force word with the drill word calls the drill tool even when it is not offered (the backend must refuse it for a user without the role)
-    if FORCE_WORD in text and DRILL_WORD in text:
+    if FORCE_WORD in text and has_word(text, DRILL_WORD):
         return "ceo_drill", {"key": DRILL_KEY, "top": DRILL_TOP}
     if FORCE_WORD in text:
         return "cash_position", {}
@@ -95,7 +104,7 @@ def pick_tool(text, offered=()):
     # the CEO dashboard: the catalogue of drills, one drill (the open NCRs, five rows) and the analysis (only when the overview tool is offered)
     if DRILLS_WORD in text:
         return "ceo_drills", {}
-    if DRILL_WORD in text:
+    if has_word(text, DRILL_WORD):
         return "ceo_drill", {"key": DRILL_KEY, "top": DRILL_TOP}
     if ANALYSE_WORD in text and "ceo_overview" in offered:
         return "ceo_overview", {}

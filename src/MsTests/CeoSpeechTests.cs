@@ -213,7 +213,7 @@ namespace MsTests
         public void A_Latin_Note_In_Brackets_Is_Left_Out_Of_The_Spoken_Title()
         {
             Assert.AreEqual("سفارش‌های در جریان", CeoSpeechScript.SpokenTitle("سفارش‌های در جریان (backlog)"));
-            Assert.AreEqual("بهره‌وری کلی تجهیزات", CeoSpeechScript.SpokenTitle("بهره‌وری کلی تجهیزات (OEE)"));
+            Assert.AreEqual("اثربخشی کلی تجهیزات", CeoSpeechScript.SpokenTitle("اثربخشی کلی تجهیزات (OEE)"));
             Assert.AreEqual("نقاط توقف منتظر رهاسازی", CeoSpeechScript.SpokenTitle("نقاط توقف (H) منتظر رهاسازی"));
             Assert.AreEqual("درخواست‌های خارج از SLA", CeoSpeechScript.SpokenTitle("درخواست‌های خارج از SLA"), "a Latin word outside brackets is kept");
             Assert.AreEqual("درخواست‌های خارج از مهلت", CeoSpeechScript.SpokenTitle("درخواست‌های خارج از مهلت (SLA)"), "the title of the SLA figure is said without its bracket");

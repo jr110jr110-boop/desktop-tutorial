@@ -16,12 +16,6 @@ namespace Services.NasbNiro.Ceo.Drills
     // Release D1 part A2: the drill catalogue of the CEO dashboard. A drill is a read-only table behind a KPI or a chart. Every drill calls the existing module services in the
     // request scope, so the role checks and row filters of the modules apply to the caller (the AI tool is the same caller).
 
-    /// <summary>The roles of the CEO dashboard drills (the unified CEO roles of release D1 are set by the orchestrator).</summary>
-    public static class CeoDrillRoles
-    {
-        public const string Readers = "CEO,PMO";
-    }
-
     /// <summary>The nine sections of the dashboard (in the order of the overview) and the modules of the drills.</summary>
     public static class CeoModules
     {
@@ -60,12 +54,14 @@ namespace Services.NasbNiro.Ceo.Drills
 
     public static class CeoDrillText
     {
-        public const string NotAllowed = "شما مجوز این کار را ندارید.";
         public const string UnknownKey = "کلید جزئیات ناشناخته است";
         public const string KeyRequired = "کلید جزئیات را بدهید.";
         public const string Failed = "درخواست انجام نشد.";
         public const string PayrollHidden = "این گزارش شامل هزینه‌ی کارکرد پرسنل است و برای نقش شما محرمانه است (حقوق).";
         public const string DateExample = "نمونه: 2026-10-25 یا 1405/08/03";
+
+        /// <summary>A module list that does not fit in the pages one drill may read: asked to be narrower, never cut silently.</summary>
+        public const string TooManyRows = "تعداد رکوردها از حدی که یک جزئیات می‌تواند بخواند بیشتر است؛ بازه‌ی تاریخ یا فیلترها را محدودتر کنید.";
     }
 
     /// <summary>A module answered with a rule violation or a not-found message; the drill service turns it into a Persian answer.</summary>
@@ -214,7 +210,6 @@ namespace Services.NasbNiro.Ceo.Drills
         }
 
         public int Int(string name) => _values.TryGetValue(name, out object v) && v is int i ? i : 0;
-        public int? IntOrNull(string name) => _values.TryGetValue(name, out object v) && v is int i ? i : (int?)null;
         public DateTime Date(string name) => _values.TryGetValue(name, out object v) && v is DateTime d ? d : DateTime.Today;
         public DateTime? DateOrNull(string name) => _values.TryGetValue(name, out object v) && v is DateTime d ? d : (DateTime?)null;
         public string Str(string name) => _values.TryGetValue(name, out object v) ? v as string : null;
@@ -315,24 +310,6 @@ namespace Services.NasbNiro.Ceo.Drills
             return calendar.ToDateTime(year, month, calendar.GetDaysInMonth(year, month), 0, 0, 0, 0);
         }
 
-        public static int Year(DateTime date) => new PersianCalendar().GetYear(date);
-        public static int Month(DateTime date) => new PersianCalendar().GetMonth(date);
-
-        private static readonly string[] MonthNames =
-        {
-            "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
-        };
-
-        /// <summary>The Persian month as a label: "مهر 1405".</summary>
-        public static string MonthLabel(DateTime date)
-        {
-            var calendar = new PersianCalendar();
-            return MonthNames[calendar.GetMonth(date) - 1] + " " + calendar.GetYear(date).ToString(CultureInfo.InvariantCulture);
-        }
-
-        /// <summary>A sortable key of the Persian month: 140508.</summary>
-        public static int MonthKey(DateTime date) => Year(date) * 100 + Month(date);
-
         /// <summary>The first days of the Persian months from the month of <paramref name="from"/> to the month of <paramref name="to"/>.</summary>
         public static List<DateTime> Months(DateTime from, DateTime to)
         {
@@ -393,8 +370,6 @@ namespace Services.NasbNiro.Ceo.Drills
             return sb.ToString();
         }
 
-        public static string Money(decimal value) => value.ToString("#,##0", CultureInfo.InvariantCulture);
-
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
         /// <summary>A long text cut to its first characters (descriptions in the rows of a table).</summary>
@@ -428,7 +403,10 @@ namespace Services.NasbNiro.Ceo.Drills
         /// <summary>The largest number of pages one drill reads from one list (20 000 rows at most).</summary>
         public const int MaxPages = 40;
 
-        /// <summary>Calls the module page by page (page numbers from 1) until the list is complete; a refusal or a rule violation of the module becomes a <see cref="DrillFailureException"/>.</summary>
+        /// <summary>
+        /// Calls the module page by page (page numbers from 1) until the list is complete; a refusal or a rule violation of the module becomes a <see cref="DrillFailureException"/>.
+        /// A list that is still not complete after <see cref="MaxPages"/> pages is refused with a text that asks for a narrower range (<see cref="CeoDrillText.TooManyRows"/>), never cut silently.
+        /// </summary>
         public static async Task<List<T>> AllAsync<T>(Func<int, Task<ResponseDto<PagedList<T>>>> fetch)
         {
             var all = new List<T>();
@@ -436,9 +414,9 @@ namespace Services.NasbNiro.Ceo.Drills
             {
                 PagedList<T> page = DrillText.Take(await fetch(number));
                 all.AddRange(page);
-                if (page.Count == 0 || all.Count >= page.TotalCount) break;
+                if (page.Count == 0 || all.Count >= page.TotalCount) return all;
             }
-            return all;
+            throw new DrillFailureException(CeoDrillText.TooManyRows);
         }
     }
 
@@ -447,7 +425,7 @@ namespace Services.NasbNiro.Ceo.Drills
     {
         public static void Require(DrillContext c, string roles)
         {
-            if (!c.User.IsInRole(roles)) throw new DrillFailureException(CeoDrillText.NotAllowed);
+            if (!c.User.IsInRole(roles)) throw new DrillFailureException(CeoText.NotAllowed);
         }
     }
 
@@ -458,17 +436,20 @@ namespace Services.NasbNiro.Ceo.Drills
         public const int DefaultTop = 50;
         public const int MaxTop = 200;
 
-        /// <summary>The first error as a Persian text, or null when the page size and the page are fine.</summary>
+        /// <summary>The largest page number a request may ask for (a larger one is a mistake, and the rows skipped to reach it would be for nothing).</summary>
+        public const int MaxPage = 10000;
+
+        /// <summary>The first error as a Persian text, or null when the number of rows and the page are fine.</summary>
         public static string BindPaging(string topText, string pageText, int defaultTop, out int top, out int page)
         {
             top = defaultTop;
             page = 1;
             string t = DrillText.Clean(DrillText.Digits(topText));
             if (t != null && (!int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out top) || top < 1 || top > MaxTop))
-                return "مقدار top باید عددی بین 1 و " + MaxTop.ToString(CultureInfo.InvariantCulture) + " باشد.";
+                return "مقدار «تعداد» باید عددی بین 1 و " + MaxTop.ToString(CultureInfo.InvariantCulture) + " باشد.";
             string p = DrillText.Clean(DrillText.Digits(pageText));
-            if (p != null && (!int.TryParse(p, NumberStyles.Integer, CultureInfo.InvariantCulture, out page) || page < 1))
-                return "مقدار page باید عدد صحیح بزرگ‌تر از صفر باشد.";
+            if (p != null && (!int.TryParse(p, NumberStyles.Integer, CultureInfo.InvariantCulture, out page) || page < 1 || page > MaxPage))
+                return "مقدار «صفحه» باید عدد صحیح بین 1 و " + MaxPage.ToString(CultureInfo.InvariantCulture) + " باشد.";
             return null;
         }
 

@@ -40,13 +40,13 @@ namespace Services.NasbNiro.Ceo.Drills
 
         public Task<ResponseDto<List<DrillDescriptorDto>>> GetCatalogueAsync(CancellationToken ct)
         {
-            if (!_user.IsInRole(CeoDrillRoles.Readers)) return Task.FromResult(Bad<List<DrillDescriptorDto>>(CeoDrillText.NotAllowed));
+            if (!_user.IsInRole(CeoRoles.Readers)) return Task.FromResult(Bad<List<DrillDescriptorDto>>(CeoText.NotAllowed));
             return Task.FromResult(ResponseDtoHelper.Ok(CeoDrillCatalog.All.Select(CeoDrillCatalog.Describe).ToList()));
         }
 
         public async Task<ResponseDto<DrillTableDto>> DrillAsync(string key, string top, string page, IReadOnlyDictionary<string, string> parameters, CancellationToken ct, int defaultTop = DrillBinder.DefaultTop)
         {
-            if (!_user.IsInRole(CeoDrillRoles.Readers)) return Bad<DrillTableDto>(CeoDrillText.NotAllowed);
+            if (!_user.IsInRole(CeoRoles.Readers)) return Bad<DrillTableDto>(CeoText.NotAllowed);
             if (DrillText.Clean(key) == null) return Bad<DrillTableDto>(CeoDrillText.KeyRequired);
             DrillDefinition definition = CeoDrillCatalog.Find(key);
             if (definition == null) return ResponseDtoHelper.NotFound<DrillTableDto>(CeoDrillText.UnknownKey);

@@ -10,6 +10,7 @@ using DataLayer.Context;
 using Entities.Model.NasbNiro.Ai;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Services.NasbNiro.Ceo;
 using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.AiDtos;
 using ViewModels.NasbNiro.Pagination;
@@ -148,6 +149,19 @@ namespace Services.NasbNiro.Ai
             }
         }
 
+        /// <summary>
+        /// Seconds a typed answer may take to be read aloud (Ceo:SpeechTimeoutSeconds, default 20, the budget of the spoken summaries of the dashboard): the text is already on the screen,
+        /// so a slow speech endpoint must not keep the typed answer waiting for the 90 s of a whole voice turn.
+        /// </summary>
+        private int SpeechTimeoutSeconds
+        {
+            get
+            {
+                string text = _configuration?[CeoConfigKeys.SpeechTimeoutSeconds];
+                return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int s) && s > 0 ? s : CeoSpeechService.DefaultBudgetSeconds;
+            }
+        }
+
         /// <summary>The active prompt of a code; version 1 of CHAT and of ANALYSIS is seeded on first use. Two requests that seed at the same time: the loser of the unique index re-reads the winner's row.</summary>
         public static async Task<AiPromptVersion> ActivePromptAsync(IUnitOfWork uow, string code, int userId, CancellationToken ct)
         {
@@ -181,7 +195,7 @@ namespace Services.NasbNiro.Ai
             if (error != null) return AiText.NotFound<AiChatResponseDto>(error);
             AiChatResponseDto response = ToResponse(outcome);
             // release D1: a question typed on the voice-enabled page (the front end sent where the user is) is spoken too; a degraded answer is not, and a text to speech endpoint that is down leaves the audio empty
-            if (IsSpoken(dto.UiContext, outcome.Degraded)) response.AudioBase64 = await SpeakAsync(_tts, _words, outcome.Answer, VoiceTimeoutSeconds, ct);
+            if (IsSpoken(dto.UiContext, outcome.Degraded)) response.AudioBase64 = await SpeakAsync(_tts, _words, outcome.Answer, SpeechTimeoutSeconds, ct);
             return ResponseDtoHelper.Ok(response);
         }
 
@@ -212,8 +226,9 @@ namespace Services.NasbNiro.Ai
         };
 
         /// <summary>
-        /// The analysis of the CEO dashboard: the same loop as a chat (the same tools offered, at most six tool rounds, the same timeout and numeric check), with the prompt ANALYSIS
+        /// The analysis of the CEO dashboard: the same loop as a chat (the same data tools offered, at most six tool rounds, the same timeout and numeric check), with the prompt ANALYSIS
         /// and the pre-calls (the numbers of the section) put into the conversation as tool results before the first model turn, so the verifier accepts the numbers of the answer.
+        /// The UI action tools are not part of it: the button of the screen asked for the analysis, so the model gets no such tool and no paragraph about them, and the answer carries no actions.
         /// </summary>
         public async Task<ResponseDto<AiChatResponseDto>> RunAnalysisAsync(AiAnalysisRequest request, CancellationToken ct)
         {
@@ -238,9 +253,12 @@ namespace Services.NasbNiro.Ai
 
             string promptCode = analysis != null ? AnalysisPromptCode : ChatPromptCode;
             AiPromptVersion prompt = await ActivePromptAsync(_uow, promptCode, Me, ct);
-            // the UI action tools (release D1) and their paragraph are for a person at a screen: a seat or the evaluation neither gets the tools nor is told about them.
+            // the UI action tools (release D1) and their paragraph are for a person at a screen who typed or said a request: a seat, the evaluation and the analysis of the dashboard
+            // neither get the tools nor are told about them (the paragraph would make the model answer «تحلیل … اجرا می‌شود» to an analysis that is already running, and the front end would
+            // ask for the analysis again). A call of such a tool anyway is answered as a tool that does not exist.
             // The paragraph is added to whatever version of the prompt is active, so a database that was seeded earlier gets it too.
-            bool interactive = !AiActing.IsActing;
+            bool interactive = !AiActing.IsActing && analysis == null;
+            IToolRegistry registry = interactive ? _tools : new NonInteractiveTools(_tools);
             string systemPrompt = (prompt?.Text ?? SeedTextFor(promptCode)) + (interactive ? AiUiTools.PromptAddition(uiContext) : string.Empty);
             string promptHash = AiText.Sha256Hex(systemPrompt + text);
 
@@ -249,7 +267,7 @@ namespace Services.NasbNiro.Ai
             if (conversation != null) await LoadHistoryAsync(conversation.Id, messages, earlier, ct);
             messages.Add(new LlmMessage { Role = "user", Content = text });
 
-            IReadOnlyList<AiToolDefinition> offered = _tools.Offered().Where(t => interactive || !AiUiTools.IsUiTool(t.Name)).ToList();
+            IReadOnlyList<AiToolDefinition> offered = registry.Offered();
             List<LlmToolSpec> specs = offered.Select(t => new LlmToolSpec { Name = t.Name, Description = t.Description, SchemaJson = t.SchemaJson }).ToList();
 
             // the numbers of the section are read before the first model turn (through the registry, so they are shaped, hashed and cited like any tool result)
@@ -257,12 +275,12 @@ namespace Services.NasbNiro.Ai
             if (analysis != null)
                 foreach (AiPreCall pre in analysis.PreCalls ?? new List<AiPreCall>())
                 {
-                    AiToolResult preResult = await _tools.ExecuteAsync(pre.Tool, pre.ArgumentsJson, ct);
+                    AiToolResult preResult = await registry.ExecuteAsync(pre.Tool, pre.ArgumentsJson, ct);
                     if (!preResult.Allowed) return (null, AiText.NotAllowed);
                     injected.Add((preResult, pre.ArgumentsJson ?? "{}"));
                 }
 
-            AiLoopResult loop = await AiChatLoop.RunAsync(_llm, _tools, _verifier, messages, specs, text, earlier, TimeoutSeconds, ct, injected);
+            AiLoopResult loop = await AiChatLoop.RunAsync(_llm, registry, _verifier, messages, specs, text, earlier, TimeoutSeconds, ct, injected);
             List<(AiToolResult Result, string Arguments)> results = loop.Results;
             string model = loop.Model;
             bool degraded = loop.Degraded;
@@ -339,7 +357,8 @@ namespace Services.NasbNiro.Ai
             var window = new List<(AiMessage Message, string Arguments)>();
             for (int i = 0; i < allTools.Count; i++)
                 if (allTools[i].Id > minId) window.Add((allTools[i], paired ? argumentsByOrder[i] : "{}"));
-            foreach (var t in window) earlierResults.Add(t.Message.Text);
+            // the result of a UI action tool is no evidence for a number (an older conversation holds results that echoed the link the model gave)
+            foreach (var t in window) if (!AiUiTools.IsUiTool(t.Message.ToolName)) earlierResults.Add(t.Message.Text);
 
             var inContext = new HashSet<int>();
             int budget = ToolContextBudget;
@@ -537,7 +556,8 @@ namespace Services.NasbNiro.Ai
                 return loop;
             }
             string answer = string.IsNullOrWhiteSpace(final) ? "مدل پاسخی تولید نکرد؛ دوباره تلاش کنید." : final.Trim();
-            List<VerifierToolResult> input = loop.Results.Select(x => new VerifierToolResult { Name = x.Result.Name, Title = x.Result.Title, Json = x.Result.Json }).ToList();
+            // the results of the UI action tools are no evidence: they hold nothing of the company, and anything in them came from the model (a link with a number in its query)
+            List<VerifierToolResult> input = loop.Results.Where(x => !AiUiTools.IsUiTool(x.Result.Name)).Select(x => new VerifierToolResult { Name = x.Result.Name, Title = x.Result.Title, Json = x.Result.Json }).ToList();
             loop.Verification = verifier.Verify(answer, question, input, earlierResults);
             loop.Answer = loop.Verification.Answer;
             loop.Verified = loop.Verification.Verified;

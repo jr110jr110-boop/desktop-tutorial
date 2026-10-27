@@ -414,16 +414,12 @@ namespace Services.NasbNiro.Ai
         {
             name = SafeName(name);
             AiToolDefinition tool = Find(name);
-            var result = new AiToolResult { Name = name, Title = tool?.Title ?? name, Allowed = true };
+            if (tool == null) return UnknownResult(name);
+            var result = new AiToolResult { Name = name, Title = tool.Title, Allowed = true };
             var sw = Stopwatch.StartNew();
             string json;
             var citations = new List<AiCitationDto>();
-            if (tool == null)
-            {
-                result.Allowed = false;
-                json = AiToolShaper.ErrorJson(AiText.UnknownTool);
-            }
-            else if (!string.IsNullOrWhiteSpace(tool.RequiredRoles) && !_user.IsInRole(tool.RequiredRoles))
+            if (!string.IsNullOrWhiteSpace(tool.RequiredRoles) && !_user.IsInRole(tool.RequiredRoles))
             {
                 result.Allowed = false;
                 json = AiToolShaper.ForbiddenJson();
@@ -479,6 +475,14 @@ namespace Services.NasbNiro.Ai
             return result;
         }
 
+        /// <summary>The result of a call to a tool that does not exist (or is not available in this run): not allowed, with the fixed error text; hashed like any other result.</summary>
+        public static AiToolResult UnknownResult(string name)
+        {
+            string safe = SafeName(name);
+            string json = AiText.YeKe(AiToolShaper.ErrorJson(AiText.UnknownTool));
+            return new AiToolResult { Name = safe, Title = safe, Allowed = false, Json = json, Chars = json.Length, Hash = AiText.Sha256Hex(json), DurationMs = 0, Citations = new List<AiCitationDto>() };
+        }
+
         private static JsonDocument ParseArguments(string argumentsJson)
         {
             try
@@ -492,5 +496,26 @@ namespace Services.NasbNiro.Ai
             }
             return JsonDocument.Parse("{}");
         }
+    }
+
+    /// <summary>
+    /// The registry of a run that has no screen in front of it (the analysis of the CEO dashboard, a seat, the evaluation): the UI action tools are neither offered nor executed.
+    /// A model that calls one anyway gets the answer for a tool that does not exist, so it cannot ask the front end for anything and cannot claim it did.
+    /// </summary>
+    public sealed class NonInteractiveTools : IToolRegistry
+    {
+        private readonly IToolRegistry _inner;
+
+        public NonInteractiveTools(IToolRegistry inner)
+        {
+            _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        }
+
+        public IReadOnlyList<AiToolDefinition> Offered() => _inner.Offered().Where(t => !AiUiTools.IsUiTool(t.Name)).ToList();
+
+        public AiToolDefinition Find(string name) => AiUiTools.IsUiTool(ToolRegistry.SafeName(name)) ? null : _inner.Find(name);
+
+        public Task<AiToolResult> ExecuteAsync(string name, string argumentsJson, CancellationToken ct) =>
+            AiUiTools.IsUiTool(ToolRegistry.SafeName(name)) ? Task.FromResult(ToolRegistry.UnknownResult(name)) : _inner.ExecuteAsync(name, argumentsJson, ct);
     }
 }

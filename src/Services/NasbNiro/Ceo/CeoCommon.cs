@@ -74,6 +74,9 @@ namespace Services.NasbNiro.Ceo
     /// <summary>Front routes (they exist in the router of the front) that show the records behind a figure.</summary>
     public static class CeoLinks
     {
+        /// <summary>The CEO dashboard itself.</summary>
+        public const string Overview = "/ceo";
+
         public const string FinanceDashboard = "/fn/dashboard";
         public const string CashPosition = "/fn/treasury/cash-position";
         public const string ReceivablesAgeing = "/fn/receivables/ageing";

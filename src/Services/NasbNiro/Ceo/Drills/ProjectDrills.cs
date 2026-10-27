@@ -32,8 +32,6 @@ namespace Services.NasbNiro.Ceo.Drills
             yield return ClientResponsesOverdue();
         }
 
-        private static string Id(int id) => id.ToString(CultureInfo.InvariantCulture);
-
         private static string ProjectLink(int contractId) => "/project-control/project?contract=" + Id(contractId);
 
         private sealed class ProjectInfo
@@ -63,6 +61,13 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static ProjectInfo InfoOf(Dictionary<int, ProjectInfo> projects, int contractId) => projects.TryGetValue(contractId, out ProjectInfo info) ? info : new ProjectInfo();
 
+        /// <summary>
+        /// The contracts of the portfolio: the ones with project-control terms that are not deleted (the filter of PcReportService). The counters of the project dashboard add up these projects only,
+        /// so the drills behind them list nothing else.
+        /// </summary>
+        private static async Task<HashSet<int>> PortfolioIdsAsync(IUnitOfWork uow, CancellationToken ct) =>
+            (await uow.Set<PcContractTerms>().AsNoTracking().Where(t => !t.Deleted && t.Contract.Deleted == false).Select(t => t.ContractId).ToListAsync(ct)).ToHashSet();
+
         /// <summary>The module writes red, amber, green or none (no value yet).</summary>
         private static bool HasValue(string status) => !string.IsNullOrEmpty(status) && status != "none";
 
@@ -77,24 +82,24 @@ namespace Services.NasbNiro.Ceo.Drills
         /// <summary>The worse of the two lights; without a value on either index there is no light.</summary>
         internal static string Traffic(string spi, string cpi) => spi == "red" || cpi == "red" ? "قرمز" : spi == "amber" || cpi == "amber" ? "زرد" : !HasValue(spi) && !HasValue(cpi) ? "بدون داده" : "سبز";
 
-        /// <summary>The filter of the portfolio drill: danger = SPI or CPI red, warn = SPI or CPI amber (the same test as the counters of the project dashboard, so a project can be on both lists), ok = no red and no amber and at least one value.</summary>
-        /// <summary>One colour per project, the rule of the portfolio dashboard and the overview (PcReportService.IsRed / IsAmber): red when an index is red, amber when one is amber and none is red, else ok.</summary>
+        /// <summary>
+        /// The filter of the portfolio drill, one colour per project (the rule of PcReportService.IsRed and IsAmber, so the counters of the project dashboard and the donut of the overview agree with it):
+        /// danger = an index is red, warn = an index is amber and none is red, ok = all the others, so red + amber + ok is the number of the active projects (a project without index values is ok).
+        /// </summary>
         internal static bool InStatus(PcPortfolioRowDto r, string status) => status switch
         {
             "danger" => PcReportService.IsRed(r),
             "warn" => PcReportService.IsAmber(r),
-            "ok" => !PcReportService.IsRed(r) && !PcReportService.IsAmber(r) && (HasValue(r.SpiStatus) || HasValue(r.CpiStatus)),
+            "ok" => !PcReportService.IsRed(r) && !PcReportService.IsAmber(r),
             _ => true,
         };
-
-        private static string Short(string text, int length = 120) => text != null && text.Length > length ? text.Substring(0, length) : text;
 
         // ------------------------------------------------------------------------------------------ portfolio
 
         private static DrillDefinition Portfolio() => new DrillDefinition
         {
             Key = "pc.portfolio", Module = M, Title = "سبد پروژه‌ها",
-            Description = "همه‌ی پروژه‌های فعال با پیشرفت فیزیکی و برنامه‌ای، شاخص‌های SPI و CPI، وضعیت (قرمز/زرد/سبز)، تاخیرها و هشدارها؛ بدترین SPI اول (هم‌پایه با داشبورد پروژه‌ها). با status فقط پروژه‌های یک وضعیت: danger (SPI یا CPI قرمز)، warn (SPI یا CPI زرد و هیچ‌کدام قرمز) یا ok (نه قرمز و نه زرد)؛ هر پروژه یک رنگ دارد، پس قرمز + زرد + سبز = شمار پروژه‌ها (هم‌پایه با سرفصل «پروژه‌های قرمز/زرد» داشبورد مدیرعامل).",
+            Description = "همه‌ی پروژه‌های فعال با پیشرفت فیزیکی و برنامه‌ای، شاخص‌های SPI و CPI، وضعیت (قرمز/زرد/سبز)، تأخیرها و هشدارها؛ بدترین SPI اول (هم‌پایه با داشبورد پروژه‌ها). می‌شود فقط پروژه‌های یک وضعیت را خواست: قرمز (SPI یا CPI قرمز)، زرد (SPI یا CPI زرد و هیچ‌کدام قرمز نباشد) یا سبز (نه قرمز و نه زرد، شامل پروژه‌ی بدون داده‌ی شاخص)؛ هر پروژه یک رنگ دارد، پس قرمز + زرد + سبز = شمار پروژه‌ها (هم‌پایه با شاخص‌های «پروژه‌های قرمز/زرد» و نمودار «وضعیت پروژه‌ها» داشبورد مدیرعامل).",
             Link = "/project-control/portfolio", RecordType = "Project", RecordLabel = "پروژه",
             Parameters = new[]
             {
@@ -119,7 +124,7 @@ namespace Services.NasbNiro.Ceo.Drills
                 }).ToList();
                 return DrillResult.Slice(rows, c, "SPI و CPI کمتر از یک یعنی عقب از برنامه / بیش از بودجه؛ رنگ از آستانه‌های تنظیمات پروژه می‌آید. شمارنده‌های خلاصه همیشه برای همه‌ی پروژه‌های فعال است، نه فقط وضعیت انتخاب‌شده.", new Dictionary<string, object>
                 {
-                    ["activeProjects"] = portfolio.Count, ["red"] = portfolio.Count(PcReportService.IsRed), ["amber"] = portfolio.Count(PcReportService.IsAmber),
+                    ["activeProjects"] = portfolio.Count, ["red"] = portfolio.Count(PcReportService.IsRed), ["amber"] = portfolio.Count(PcReportService.IsAmber), ["ok"] = portfolio.Count(r => InStatus(r, "ok")),
                     ["lateActivities"] = portfolio.Sum(r => r.LateActivities), ["penaltyExposure"] = portfolio.Sum(r => r.PenaltyExposure),
                 });
             },
@@ -137,20 +142,22 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition LateActivities() => new DrillDefinition
         {
-            Key = "pc.late_activities", Module = M, Title = "فعالیت‌های دارای تاخیر",
-            Description = "فعالیت‌های پروژه‌هایی که پیش‌بینی پایانشان از پایان برنامه‌ریزی‌شده دیرتر است (فلگ تاخیر برنامه‌ریزی)؛ بیشترین روز تاخیر اول. با onlyCritical=true فقط فعالیت‌های مسیر بحرانی.",
+            Key = "pc.late_activities", Module = M, Title = "فعالیت‌های دارای تأخیر",
+            Description = "فعالیت‌های پروژه‌های سبد که پیش‌بینی پایانشان از پایان برنامه‌ریزی‌شده دیرتر است (فلگ تأخیر برنامه‌ریزی)؛ بیشترین روز تأخیر اول. می‌شود فقط فعالیت‌های مسیر بحرانی را خواست.",
             Link = "/project-control/activities", RecordType = "Activity", RecordLabel = "فعالیت",
             Parameters = new[] { Prm.Bool("onlyCritical", "فقط فعالیت‌های مسیر بحرانی؛ پیش‌فرض false") },
             Columns = new[]
             {
                 Col.Text("projectCode", "کد پروژه"), Col.Text("code", "کد فعالیت"), Col.Text("title", "عنوان"), Col.Status("status", "وضعیت"), Col.Pct("percent", "پیشرفت"),
-                Col.Date("plannedFinish", "پایان برنامه"), Col.Date("forecastFinish", "پیش‌بینی پایان"), Col.Num("lateDays", "روز تاخیر"), Col.Status("critical", "بحرانی"), Col.Link(),
+                Col.Date("plannedFinish", "پایان برنامه"), Col.Date("forecastFinish", "پیش‌بینی پایان"), Col.Num("lateDays", "روز تأخیر"), Col.Status("critical", "بحرانی"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProjectControlRoles.Readers);
-                PagedList<PcActivityDto> late = Take(await c.Get<IPcScheduleService>().GetActivitiesAsync(
-                    new PcActivityQuery { OnlyLate = true, OnlyCritical = c.Args.Bool("onlyCritical"), PageNumber = 1, PageSize = 0 }, ct));
+                HashSet<int> portfolio = await PortfolioIdsAsync(c.Get<IUnitOfWork>(), ct);
+                // the counter of the dashboard adds up the late activities of the projects of the portfolio: the activities of a contract outside it are not listed
+                List<PcActivityDto> late = Take(await c.Get<IPcScheduleService>().GetActivitiesAsync(
+                    new PcActivityQuery { OnlyLate = true, OnlyCritical = c.Args.Bool("onlyCritical"), PageNumber = 1, PageSize = 0 }, ct)).Where(a => portfolio.Contains(a.ContractId)).ToList();
                 Dictionary<int, ProjectInfo> projects = await ProjectsAsync(c.Get<IUnitOfWork>(), late.Select(a => a.ContractId), ct);
                 var items = late.Select(a => new { Activity = a, Days = a.ForecastFinish.HasValue && a.EarlyFinish.HasValue ? Math.Max(0, (int)(a.ForecastFinish.Value.Date - a.EarlyFinish.Value.Date).TotalDays) : 0 })
                     .OrderByDescending(x => x.Days).ThenByDescending(x => x.Activity.IsCritical).ThenBy(x => x.Activity.Code, StringComparer.Ordinal).ToList();
@@ -160,7 +167,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["percent"] = x.Activity.PercentCache, ["plannedFinish"] = DrillDates.Text(x.Activity.EarlyFinish), ["forecastFinish"] = DrillDates.Text(x.Activity.ForecastFinish), ["lateDays"] = x.Days,
                     ["critical"] = x.Activity.IsCritical ? "بحرانی" : "غیر بحرانی",
                 }).ToList();
-                return DrillResult.Slice(rows, c, "روز تاخیر = پیش‌بینی پایان منهای پایان برنامه‌ریزی‌شده (روز تقویمی).", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "روز تأخیر = پیش‌بینی پایان منهای پایان برنامه‌ریزی‌شده (روز تقویمی)؛ فقط پروژه‌های سبد، همان‌طور که شمارنده‌ی داشبورد می‌شمارد.", new Dictionary<string, object>
                 {
                     ["critical"] = items.Count(x => x.Activity.IsCritical), ["projects"] = items.Select(x => x.Activity.ContractId).Distinct().Count(),
                 });
@@ -201,11 +208,14 @@ namespace Services.NasbNiro.Ceo.Drills
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProjectControlRoles.Readers);
-                DateTime limit = c.Today.AddDays(c.Args.Int("days"));
-                PagedList<PcMilestoneDto> all = Take(await c.Get<IPcCommercialService>().GetMilestonesAsync(new PcContractQuery { PageNumber = 1, PageSize = 0 }, ct));
-                List<PcMilestoneDto> next = all.Where(m => (m.Status == PcMilestoneStatus.Planned || m.Status == PcMilestoneStatus.Due) && (m.PlannedDate.HasValue ? m.PlannedDate.Value.Date <= limit : m.Status == PcMilestoneStatus.Due))
-                    .OrderBy(m => m.PlannedDate.HasValue ? 0 : 1).ThenBy(m => m.PlannedDate).ThenBy(m => m.ContractId).ThenBy(m => m.Seq).ToList();
-                Dictionary<int, ProjectInfo> projects = await ProjectsAsync(c.Get<IUnitOfWork>(), next.Select(m => m.ContractId), ct);
+                DateTime beforeDay = c.Today.AddDays(c.Args.Int("days")).AddDays(1);
+                var uow = c.Get<IUnitOfWork>();
+                // the status and the date are filtered in the query: a milestone is listed while it is planned or due, with a planned date up to the limit (or without a date, when it is due)
+                var next = await uow.Set<PcPaymentMilestone>().AsNoTracking()
+                    .Where(m => !m.Deleted && (m.Status == PcMilestoneStatus.Planned || m.Status == PcMilestoneStatus.Due) && (m.PlannedDate != null ? m.PlannedDate < beforeDay : m.Status == PcMilestoneStatus.Due))
+                    .OrderBy(m => m.PlannedDate == null ? 1 : 0).ThenBy(m => m.PlannedDate).ThenBy(m => m.ContractId).ThenBy(m => m.Seq)
+                    .Select(m => new { m.Id, m.ContractId, m.Seq, m.Title, m.Kind, m.Status, m.PlannedDate, m.Amount }).ToListAsync(ct);
+                Dictionary<int, ProjectInfo> projects = await ProjectsAsync(uow, next.Select(m => m.ContractId), ct);
                 List<Row> rows = next.Select(m => new Row("/project-control/milestones")
                 {
                     ["id"] = m.Id, ["projectCode"] = InfoOf(projects, m.ContractId).Label, ["seq"] = m.Seq, ["title"] = Short(m.Title), ["kind"] = MilestoneKind(m.Kind), ["status"] = MilestoneStatus(m.Status),
@@ -288,7 +298,9 @@ namespace Services.NasbNiro.Ceo.Drills
             {
                 Guard.Require(c, ProjectControlRoles.Readers);
                 var commercial = c.Get<IPcCommercialService>();
-                List<PcGuaranteeAlertDto> alerts = await commercial.GuaranteeAlertsAsync(null, ct);
+                HashSet<int> portfolio = await PortfolioIdsAsync(c.Get<IUnitOfWork>(), ct);
+                // the counter of the dashboard adds up the alerts of the projects of the portfolio: the guarantees of a contract outside it are not listed
+                List<PcGuaranteeAlertDto> alerts = (await commercial.GuaranteeAlertsAsync(null, ct)).Where(a => a.ContractId.HasValue && portfolio.Contains(a.ContractId.Value)).ToList();
                 var details = new Dictionary<int, PcGuaranteeDto>();
                 foreach (PcGuaranteeStatus status in new[] { PcGuaranteeStatus.Issued, PcGuaranteeStatus.Active, PcGuaranteeStatus.ExtensionPending })
                     foreach (PcGuaranteeDto g in Take(await commercial.GetGuaranteesAsync(new PcGuaranteeQuery { Status = status, PageNumber = 1, PageSize = 0 }, ct)))
@@ -304,7 +316,7 @@ namespace Services.NasbNiro.Ceo.Drills
                         ["daysToExpiry"] = a.DaysToExpiry, ["alert"] = a.AlertLevel == 0 ? "منقضی‌شده" : "هشدار " + Id(a.AlertLevel) + " روزه",
                     };
                 }).ToList();
-                return DrillResult.Slice(rows, c, "شمارنده‌ی داشبورد فقط ضمانت‌نامه‌های وابسته به قرارداد پروژه‌های فعال را می‌شمارد.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "فقط ضمانت‌نامه‌های وابسته به قرارداد پروژه‌های فعال می‌آید، همان‌طور که شمارنده‌ی داشبورد می‌شمارد.", new Dictionary<string, object>
                 {
                     ["expired"] = alerts.Count(a => a.AlertLevel == 0), ["amount"] = alerts.Sum(a => details.TryGetValue(a.GuaranteeId, out PcGuaranteeDto d) ? d.AmountDecimal ?? 0m : 0m),
                 });
@@ -313,19 +325,21 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition PenaltyExposure() => new DrillDefinition
         {
-            Key = "pc.penalty_exposure", Module = M, Title = "ریسک جریمه‌ی تاخیر",
-            Description = "جریمه‌های تاخیر محاسبه‌شده‌ای که هنوز بخشوده یا توافق نشده‌اند (مجموع = «ریسک جریمه» داشبورد)؛ بیشترین مبلغ اول.",
+            Key = "pc.penalty_exposure", Module = M, Title = "ریسک جریمه‌ی تأخیر",
+            Description = "جریمه‌های تأخیر محاسبه‌شده‌ی پروژه‌های سبد که هنوز بخشوده یا توافق نشده‌اند (مجموع = «ریسک جریمه» داشبورد)؛ بیشترین مبلغ اول.",
             Link = "/project-control/penalties", RecordType = "Penalty", RecordLabel = "جریمه",
             Columns = new[]
             {
-                Col.Text("projectCode", "کد پروژه"), Col.Text("subject", "موضوع"), Col.Date("dueDate", "سررسید تعهد"), Col.Date("actualDate", "تاریخ تحقق"), Col.Num("lateDays", "روز تاخیر"),
+                Col.Text("projectCode", "کد پروژه"), Col.Text("subject", "موضوع"), Col.Date("dueDate", "سررسید تعهد"), Col.Date("actualDate", "تاریخ تحقق"), Col.Num("lateDays", "روز تأخیر"),
                 Col.Num("ratePercentPerWeek", "نرخ هفتگی (درصد)"), Col.Rial("baseAmount", "مبنای محاسبه"), Col.Rial("amount", "مبلغ جریمه"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProjectControlRoles.Readers);
+                HashSet<int> portfolio = await PortfolioIdsAsync(c.Get<IUnitOfWork>(), ct);
                 PagedList<PcPenaltyDto> all = Take(await c.Get<IPcCommercialService>().GetPenaltiesAsync(new PcContractQuery { PageNumber = 1, PageSize = 0 }, ct));
-                List<PcPenaltyDto> computed = all.Where(p => p.Status == PcPenaltyStatus.Computed).ToList();
+                // the figure of the dashboard adds up the computed penalties of the projects of the portfolio: the penalties of a contract outside it are not listed
+                List<PcPenaltyDto> computed = all.Where(p => p.Status == PcPenaltyStatus.Computed && portfolio.Contains(p.ContractId)).ToList();
                 List<PcPenaltyDto> shown = computed.Where(p => p.Amount > 0m).OrderByDescending(p => p.Amount).ThenBy(p => p.Id).ToList();
                 Dictionary<int, ProjectInfo> projects = await ProjectsAsync(c.Get<IUnitOfWork>(), shown.Select(p => p.ContractId), ct);
                 List<Row> rows = shown.Select(p => new Row("/project-control/penalties")
@@ -343,11 +357,11 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition InitiationOverdue() => new DrillDefinition
         {
             Key = "pc.initiation_overdue", Module = M, Title = "گام‌های راه‌اندازی پروژه‌ی عقب‌افتاده",
-            Description = "گام‌های راه‌اندازی پروژه (کدگذاری، انتخاب مدیر پروژه، منشور، PEP، جلسه‌ی KOM و ...) که مهلت سطح خدمت‌شان گذشته و انجام نشده‌اند؛ بیشترین تاخیر اول.",
+            Description = "گام‌های راه‌اندازی پروژه (کدگذاری، انتخاب مدیر پروژه، منشور، PEP، جلسه‌ی KOM و ...) که مهلت سطح خدمت‌شان گذشته و انجام نشده‌اند؛ بیشترین تأخیر اول.",
             Link = "/project-control/project", RecordType = "Project", RecordLabel = "پروژه",
             Columns = new[]
             {
-                Col.Text("projectCode", "کد پروژه"), Col.Text("step", "گام"), Col.Text("gateRole", "نقش مسئول"), Col.Num("slaDays", "مهلت (روز)"), Col.Date("dueDate", "مهلت انجام"), Col.Num("daysOverdue", "روز تاخیر"), Col.Link(),
+                Col.Text("projectCode", "کد پروژه"), Col.Text("step", "گام"), Col.Text("gateRole", "نقش مسئول"), Col.Num("slaDays", "مهلت (روز)"), Col.Date("dueDate", "مهلت انجام"), Col.Num("daysOverdue", "روز تأخیر"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -369,11 +383,11 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition ClientResponsesOverdue() => new DrillDefinition
         {
             Key = "pc.client_responses_overdue", Module = M, Title = "پاسخ‌های معوق کارفرما",
-            Description = "ترنسمیتال‌های ارسالی برای تأیید که مهلت پاسخ کارفرما گذشته و دست‌کم یک سندشان پاسخ نگرفته است؛ بیشترین تاخیر اول (مجموع اسناد بدون پاسخ = «پاسخ معوق کارفرما» داشبورد).",
+            Description = "ترنسمیتال‌های ارسالی برای تأیید که مهلت پاسخ کارفرما گذشته و دست‌کم یک سندشان پاسخ نگرفته است؛ بیشترین تأخیر اول (مجموع اسناد بدون پاسخ = «پاسخ معوق کارفرما» داشبورد).",
             Link = "/project-control/transmittals", RecordType = "Transmittal", RecordLabel = "ترنسمیتال",
             Columns = new[]
             {
-                Col.Text("number", "شماره"), Col.Text("projectCode", "کد پروژه"), Col.Date("transmittalDate", "تاریخ ارسال"), Col.Date("responseDue", "مهلت پاسخ"), Col.Num("daysOverdue", "روز تاخیر"),
+                Col.Text("number", "شماره"), Col.Text("projectCode", "کد پروژه"), Col.Date("transmittalDate", "تاریخ ارسال"), Col.Date("responseDue", "مهلت پاسخ"), Col.Num("daysOverdue", "روز تأخیر"),
                 Col.Num("overdueDocuments", "سند بدون پاسخ"), Col.Text("reference", "ارجاع"), Col.Link(),
             },
             Run = async (c, ct) =>

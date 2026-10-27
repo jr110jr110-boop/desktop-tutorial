@@ -49,7 +49,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static string NcrState(NcrStatus status) => status switch
         {
             NcrStatus.Open => "باز",
-            NcrStatus.Approved => "تصمیم تاییدشده",
+            NcrStatus.Approved => "تصمیم تأییدشده",
             NcrStatus.Executed => "تصمیم اجراشده",
             NcrStatus.Closed => "بسته‌شده",
             _ => "لغوشده",
@@ -70,7 +70,7 @@ namespace Services.NasbNiro.Ceo.Drills
             NcrDisposition.Rework => "دوباره‌کاری",
             NcrDisposition.Repair => "تعمیر",
             NcrDisposition.Scrap => "ضایعات",
-            NcrDisposition.ReturnToSupplier => "مرجوعی به تامین‌کننده",
+            NcrDisposition.ReturnToSupplier => "مرجوعی به تأمین‌کننده",
             _ => "تعیین‌نشده",
         };
 
@@ -169,14 +169,18 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition NcrOpen() => new DrillDefinition
         {
             Key = "qc.ncr_open", Module = M, Title = "گزارش‌های عدم انطباق باز",
-            Description = "گزارش‌های عدم انطباق (NCR) که هنوز بسته یا لغو نشده‌اند (باز، تصمیم‌تاییدشده، تصمیم‌اجراشده)؛ شدیدترین اول و در هر شدت قدیمی‌ترین اول، با سن گزارش، مهلت تصمیم و روز تاخیر. پارامتر severity: Major، Minor یا NotClassified؛ پیش‌فرض همه‌ی شدت‌ها.",
+            Description = "گزارش‌های عدم انطباق (NCR) که هنوز بسته یا لغو نشده‌اند (باز، تصمیم‌تأییدشده، تصمیم‌اجراشده)؛ شدیدترین اول و در هر شدت قدیمی‌ترین اول، با سن گزارش، مهلت تصمیم و روز تأخیر. می‌شود به یک شدت (عمده، جزئی، طبقه‌بندی‌نشده) یا فقط به گزارش‌های گذشته از مهلت تصمیم (هم‌پایه با شاخص «عدم انطباق‌های گذشته از مهلت تصمیم») محدود کرد؛ پیش‌فرض همه‌ی گزارش‌های باز.",
             Link = "/inventory/ncr", RecordType = "Ncr", RecordLabel = "گزارش عدم انطباق",
-            Parameters = new[] { Prm.Str("severity", "فقط یک شدت: Major (عمده)، Minor (جزئی) یا NotClassified (طبقه‌بندی‌نشده)؛ پیش‌فرض همه", null, new[] { "Major", "Minor", "NotClassified" }) },
+            Parameters = new[]
+            {
+                Prm.Str("severity", "فقط یک شدت: Major (عمده)، Minor (جزئی) یا NotClassified (طبقه‌بندی‌نشده)؛ پیش‌فرض همه", null, new[] { "Major", "Minor", "NotClassified" }),
+                Prm.Bool("onlyOverdue", "فقط گزارش‌هایی که مهلت تصمیمشان گذشته است؛ پیش‌فرض نه"),
+            },
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Date("reportDate", "تاریخ گزارش"), Col.Num("ageDays", "سن (روز)"), Col.Status("severity", "شدت"), Col.Status("status", "وضعیت"), Col.Text("source", "منبع"),
-                Col.Text("disposition", "تصمیم"), Col.Text("itemCode", "کد کالا"), Col.Text("itemTitle", "کالا"), Col.Num("quantity", "تعداد"), Col.Text("providerName", "تامین‌کننده"),
-                Col.Text("workOrderCode", "دستور کار"), Col.Date("dueDate", "مهلت تصمیم"), Col.Num("daysOverdue", "روز تاخیر"), Col.Link(),
+                Col.Text("disposition", "تصمیم"), Col.Text("itemCode", "کد کالا"), Col.Text("itemTitle", "کالا"), Col.Num("quantity", "تعداد"), Col.Text("providerName", "تأمین‌کننده"),
+                Col.Text("workOrderCode", "دستور کار"), Col.Date("dueDate", "مهلت تصمیم"), Col.Num("daysOverdue", "روز تأخیر"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -193,6 +197,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     .ToDictionary(x => x.Id, x => x.DueDate);
                 DateTime? DueOf(NcrListItemDto n) => due.TryGetValue(n.Id, out DateTime? d) ? d : null;
                 int Late(NcrListItemDto n) => n.Status == NcrStatus.Open && DueOf(n).HasValue && DueOf(n).Value.Date < c.Today ? DaysBetween(DueOf(n).Value, c.Today) : 0;
+                if (c.Args.Bool("onlyOverdue")) open = open.Where(n => Late(n) > 0).ToList();
 
                 List<NcrListItemDto> ordered = open.OrderByDescending(n => (int)n.Severity).ThenBy(n => n.ReportDate).ThenBy(n => n.Number, StringComparer.Ordinal).ToList();
                 List<Row> rows = ordered.Select(n => new Row("/inventory/ncr/" + Id(n.Id))
@@ -202,7 +207,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["itemCode"] = n.ItemCode, ["itemTitle"] = n.ItemTitle, ["quantity"] = n.Quantity, ["providerName"] = n.ProviderName, ["workOrderCode"] = n.WorkOrderCode,
                     ["dueDate"] = DrillDates.Text(DueOf(n)), ["daysOverdue"] = Late(n),
                 }).ToList();
-                return DrillResult.Slice(rows, c, "باز یعنی بسته یا لغو نشده؛ مهلت تصمیم و روز تاخیر فقط برای گزارش‌هایی است که هنوز تصمیم نگرفته‌اند (وضعیت «باز»).", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "باز یعنی بسته یا لغو نشده؛ مهلت تصمیم و روز تأخیر فقط برای گزارش‌هایی است که هنوز تصمیم نگرفته‌اند (وضعیت «باز»).", new Dictionary<string, object>
                 {
                     ["overdue"] = ordered.Count(n => Late(n) > 0), ["major"] = ordered.Count(n => n.Severity == NcrSeverity.Major),
                     ["minor"] = ordered.Count(n => n.Severity == NcrSeverity.Minor), ["notClassified"] = ordered.Count(n => n.Severity == NcrSeverity.NotClassified),
@@ -215,12 +220,12 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition CapaOverdue() => new DrillDefinition
         {
             Key = "qc.capa_overdue", Module = M, Title = "اقدام‌های اصلاحی و پیشگیرانه‌ی عقب‌افتاده",
-            Description = "اقدام‌های اصلاحی و پیشگیرانه (CAPA) که مهلتشان گذشته است: باز یا اقدام‌تعریف‌شده با مهلت اجرای گذشته، و اجراشده با مهلت بررسی اثربخشی گذشته (هم‌پایه با داشبورد کیفیت)؛ بیشترین روز تاخیر اول.",
+            Description = "اقدام‌های اصلاحی و پیشگیرانه (CAPA) که مهلتشان گذشته است: باز یا اقدام‌تعریف‌شده با مهلت اجرای گذشته، و اجراشده با مهلت بررسی اثربخشی گذشته (هم‌پایه با داشبورد کیفیت)؛ بیشترین روز تأخیر اول.",
             Link = "/quality/capa", RecordType = "Capa", RecordLabel = "اقدام اصلاحی",
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Text("source", "منبع"), Col.Text("problem", "مسئله"), Col.Status("status", "وضعیت"), Col.Text("ownerName", "مسئول"), Col.Date("dueDate", "مهلت اجرا"),
-                Col.Date("effectivenessDueDate", "مهلت بررسی اثربخشی"), Col.Num("daysOverdue", "روز تاخیر"), Col.Text("autoDrafted", "پیش‌نویس خودکار"), Col.Link(),
+                Col.Date("effectivenessDueDate", "مهلت بررسی اثربخشی"), Col.Num("daysOverdue", "روز تأخیر"), Col.Text("autoDrafted", "پیش‌نویس خودکار"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -235,7 +240,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["id"] = x.Id, ["number"] = x.Number, ["source"] = CapaSourceText(x.Source), ["problem"] = Short(x.Problem), ["status"] = CapaState(x.Status), ["ownerName"] = x.OwnerName,
                     ["dueDate"] = DrillDates.Text(x.DueDate), ["effectivenessDueDate"] = DrillDates.Text(x.EffectivenessDueDate), ["daysOverdue"] = Late(x), ["autoDrafted"] = YesNo(x.AutoDrafted),
                 }).ToList();
-                return DrillResult.Slice(rows, c, "روز تاخیر برای اقدام‌های اجراشده از مهلت بررسی اثربخشی و برای بقیه از مهلت اجرا شمرده می‌شود.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "روز تأخیر برای اقدام‌های اجراشده از مهلت بررسی اثربخشی و برای بقیه از مهلت اجرا شمرده می‌شود.", new Dictionary<string, object>
                 {
                     ["effectivenessLate"] = ordered.Count(x => x.Status == CapaStatus.Implemented), ["withoutOwner"] = ordered.Count(x => !x.OwnerUserId.HasValue),
                 });
@@ -247,9 +252,9 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition CalibrationDue() => new DrillDefinition
         {
             Key = "qc.calibration_due", Module = M, Title = "کالیبراسیون سررسیدشده و نزدیک به سررسید",
-            Description = "تجهیزهای اندازه‌گیری که کالیبراسیونشان سررسیدگذشته یا بدون تاریخ است، یا تا days روز آینده سررسید می‌شود (تجهیز از رده خارج و بدون نیاز به کالیبراسیون نمی‌آید)؛ قدیمی‌ترین سررسید اول. پیش‌فرض ۳۰ روز.",
+            Description = "تجهیزهای اندازه‌گیری که کالیبراسیونشان سررسیدگذشته یا بدون تاریخ است، یا تا چند روز آینده سررسید می‌شود (تجهیز از رده خارج و بدون نیاز به کالیبراسیون نمی‌آید)؛ قدیمی‌ترین سررسید اول. پیش‌فرض ۳۰ روز؛ صفر روز فقط سررسیدگذشته‌ها و بدون تاریخ‌ها را می‌دهد (هم‌پایه با شاخص «تجهیزات اندازه‌گیری با کالیبراسیون سررسیدگذشته»).",
             Link = "/quality/calibration", RecordType = "Equipment", RecordLabel = "تجهیز اندازه‌گیری",
-            Parameters = new[] { Prm.Days(30, 365, "تجهیزهایی که تا این تعداد روز آینده سررسید کالیبراسیون دارند") },
+            Parameters = new[] { Prm.Int("days", "تجهیزهایی که تا این تعداد روز آینده سررسید کالیبراسیون دارند؛ 0 فقط سررسیدگذشته‌ها و بدون تاریخ‌ها؛ پیش‌فرض 30 روز", 30, 0, 365) },
             Columns = new[]
             {
                 Col.Text("code", "کد"), Col.Text("name", "نام"), Col.Text("type", "نوع"), Col.Text("location", "محل"), Col.Status("status", "وضعیت"), Col.Date("lastCalibrated", "آخرین کالیبراسیون"),
@@ -259,7 +264,9 @@ namespace Services.NasbNiro.Ceo.Drills
             {
                 Guard.Require(c, QualityRoles.Readers);
                 int days = c.Args.Int("days");
-                List<EquipmentListDto> due = Take(await c.Get<ICalibrationService>().GetDueAsync(new DueQuery { Days = days, PageSize = 0 }, ct)).ToList();
+                // the module reads a limit of zero or less as its default of thirty days, so overdue only (days = 0) is taken from the equipment due within a day
+                List<EquipmentListDto> due = Take(await c.Get<ICalibrationService>().GetDueAsync(new DueQuery { Days = Math.Max(1, days), PageSize = 0 }, ct)).ToList();
+                if (days == 0) due = due.Where(e => !e.NextDue.HasValue || e.DaysToDue < 0).ToList();
                 List<Row> rows = due.Select(e => new Row("/quality/calibration/" + Id(e.Id))
                 {
                     ["id"] = e.Id, ["code"] = e.Code, ["name"] = e.Name, ["type"] = EquipmentTypeText(e.Type), ["location"] = e.Location, ["status"] = EquipmentState(e.Status),
@@ -278,13 +285,13 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition ComplaintsOpen() => new DrillDefinition
         {
             Key = "qc.complaints_open", Module = M, Title = "شکایت‌های مشتری باز",
-            Description = "شکایت‌های مشتری که هنوز بسته نشده‌اند (دریافت‌شده، در بررسی، پاسخ‌داده‌شده)؛ دارای تاخیر در پاسخ اول و سپس به ترتیب مهلت پاسخ. پارامتر overdueOnly=true فقط شکایت‌های از مهلت گذشته را می‌دهد؛ پیش‌فرض همه‌ی شکایت‌های باز.",
+            Description = "شکایت‌های مشتری که هنوز بسته نشده‌اند (دریافت‌شده، در بررسی، پاسخ‌داده‌شده)؛ دارای تأخیر در پاسخ اول و سپس به ترتیب مهلت پاسخ. می‌شود فقط شکایت‌های گذشته از مهلت پاسخ را خواست؛ پیش‌فرض همه‌ی شکایت‌های باز.",
             Link = "/quality/complaints", RecordType = "Complaint", RecordLabel = "شکایت",
             Parameters = new[] { Prm.Bool("overdueOnly", "فقط شکایت‌هایی که از مهلت پاسخ گذشته‌اند؛ پیش‌فرض نه") },
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Text("workOrderCode", "دستور کار"), Col.Date("receivedDate", "تاریخ دریافت"), Col.Status("severity", "شدت"), Col.Status("status", "وضعیت"),
-                Col.Date("responseDue", "مهلت پاسخ"), Col.Num("daysOverdue", "روز تاخیر"), Col.Text("ncr", "NCR مرتبط"), Col.Text("capa", "CAPA مرتبط"), Col.Link(),
+                Col.Date("responseDue", "مهلت پاسخ"), Col.Num("daysOverdue", "روز تأخیر"), Col.Text("ncr", "NCR مرتبط"), Col.Text("capa", "CAPA مرتبط"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -302,7 +309,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["status"] = ComplaintState(x.Status), ["responseDue"] = DrillDates.Text(x.ResponseDue), ["daysOverdue"] = x.Overdue ? Math.Max(0, DaysBetween(x.ResponseDue, c.Today)) : 0,
                     ["ncr"] = YesNo(x.NcrId.HasValue), ["capa"] = YesNo(x.CapaId.HasValue),
                 }).ToList();
-                return DrillResult.Slice(rows, c, "تاخیر یعنی هنوز پاسخ داده نشده و مهلت پاسخ گذشته است؛ شکایت پاسخ‌داده‌شده تا بسته شدن باز می‌ماند.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "تأخیر یعنی هنوز پاسخ داده نشده و مهلت پاسخ گذشته است؛ شکایت پاسخ‌داده‌شده تا بسته شدن باز می‌ماند.", new Dictionary<string, object>
                 {
                     ["overdue"] = lateAll, ["open"] = ordered.Count,
                 });
@@ -314,12 +321,12 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition HPointsPending() => new DrillDefinition
         {
             Key = "qc.h_points_pending", Module = M, Title = "نقاط توقف (H) منتظر رهاسازی",
-            Description = "فعالیت‌های برنامه‌ی بازرسی و آزمون (ITP) تاییدشده‌ی کارفرما یا در حال استفاده که نقطه‌ی توقف H دارند و هنوز انجام نشده‌اند (برنامه‌ریزی‌شده یا اعلام‌شده)؛ هم‌پایه با شمارنده‌ی «نقاط توقف» داشبورد؛ زودترین تاریخ برنامه اول.",
+            Description = "فعالیت‌های برنامه‌ی بازرسی و آزمون (ITP) تأییدشده‌ی کارفرما یا در حال استفاده که نقطه‌ی توقف H دارند و هنوز انجام نشده‌اند (برنامه‌ریزی‌شده یا اعلام‌شده)؛ هم‌پایه با شمارنده‌ی «نقاط توقف» داشبورد؛ زودترین تاریخ برنامه اول.",
             Link = "/quality/itp", RecordType = "ItpActivity", RecordLabel = "فعالیت بازرسی",
             Columns = new[]
             {
                 Col.Text("number", "شماره‌ی ITP"), Col.Text("workOrderCode", "دستور کار"), Col.Text("itemNo", "ردیف"), Col.Text("activity", "فعالیت"), Col.Text("points", "نقاط توقف و شاهد"),
-                Col.Status("status", "وضعیت"), Col.Date("plannedDate", "تاریخ برنامه"), Col.Num("daysLate", "روز تاخیر از برنامه"), Col.Date("witnessDeadline", "مهلت اعلام به شاهد"), Col.Link(),
+                Col.Status("status", "وضعیت"), Col.Date("plannedDate", "تاریخ برنامه"), Col.Num("daysLate", "روز تأخیر از برنامه"), Col.Date("witnessDeadline", "مهلت اعلام به شاهد"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -339,7 +346,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["id"] = p.ActivityId, ["number"] = p.ItpNumber, ["workOrderCode"] = p.WorkOrderCode, ["itemNo"] = p.ItemNo, ["activity"] = Short(p.Activity), ["points"] = PointsText(p.Points),
                     ["status"] = ActivityState(p.Status), ["plannedDate"] = DrillDates.Text(p.PlannedDate), ["daysLate"] = Late(p), ["witnessDeadline"] = DrillDates.Text(p.WitnessDeadline),
                 }).ToList();
-                return DrillResult.Slice(rows, c, "فقط برنامه‌های بازرسی تاییدشده‌ی کارفرما یا در حال استفاده شمرده می‌شوند؛ نقطه‌ی شاهد (W) بدون H در این جدول نمی‌آید.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "فقط برنامه‌های بازرسی تأییدشده‌ی کارفرما یا در حال استفاده شمرده می‌شوند؛ نقطه‌ی شاهد (W) بدون H در این جدول نمی‌آید.", new Dictionary<string, object>
                 {
                     ["workOrders"] = held.Select(p => p.WorkOrderId).Distinct().Count(), ["late"] = held.Count(p => Late(p) > 0),
                 });
@@ -350,8 +357,8 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition DocumentsWaiting() => new DrillDefinition
         {
-            Key = "qc.documents_waiting", Module = M, Title = "اسناد منتظر بررسی یا تایید",
-            Description = "اسنادی که منتظر تصمیم‌اند: اسناد انبار پیش‌نویس که تایید می‌خواهند (تعدیل افزایشی و کاهشی، موجودی اول دوره، فروش ضایعات؛ همان عدد «اسناد منتظر تایید» داشبورد) و بازنگری‌های اسناد کنترل‌شده‌ی کیفیت که پیش‌نویس یا در بررسی‌اند؛ قدیمی‌ترین اول. پارامتر source: all (پیش‌فرض)، inventory یا controlled.",
+            Key = "qc.documents_waiting", Module = M, Title = "اسناد منتظر بررسی یا تأیید",
+            Description = "اسنادی که منتظر تصمیم‌اند: اسناد انبار پیش‌نویس که تأیید می‌خواهند (تعدیل افزایشی و کاهشی، موجودی اول دوره، فروش ضایعات؛ همان عدد «اسناد منتظر تأیید» داشبورد) و بازنگری‌های اسناد کنترل‌شده‌ی کیفیت که پیش‌نویس یا در بررسی‌اند؛ قدیمی‌ترین اول. می‌شود فقط اسناد انبار یا فقط اسناد کنترل‌شده را خواست؛ پیش‌فرض هر دو.",
             Link = "/quality/documents", RecordType = "Document", RecordLabel = "سند",
             Parameters = new[] { Prm.Str("source", "منبع اسناد: all (هر دو)، inventory (اسناد انبار) یا controlled (اسناد کنترل‌شده‌ی کیفیت)؛ پیش‌فرض all", "all", new[] { "all", "inventory", "controlled" }) },
             Columns = new[]
@@ -375,7 +382,7 @@ namespace Services.NasbNiro.Ceo.Drills
                             string title = InventoryDocumentTypeText(d.Type) + (string.IsNullOrWhiteSpace(d.WarehouseTitle) ? string.Empty : " — " + d.WarehouseTitle);
                             items.Add((waiting, d.Number, new Row("/inventory/documents/" + Id(d.Id))
                             {
-                                ["id"] = "inv-" + Id(d.Id), ["kind"] = "سند انبار", ["number"] = d.Number, ["title"] = title, ["status"] = "پیش‌نویس، منتظر تایید",
+                                ["id"] = "inv-" + Id(d.Id), ["kind"] = "سند انبار", ["number"] = d.Number, ["title"] = title, ["status"] = "پیش‌نویس، منتظر تأیید",
                                 ["since"] = DrillDates.Text(d.DocumentDate), ["waitingDays"] = waiting,
                             }));
                         }
@@ -399,7 +406,7 @@ namespace Services.NasbNiro.Ceo.Drills
                         items.Add((waiting, r.DocumentCode, new Row("/quality/documents/" + Id(r.DocumentId))
                         {
                             ["id"] = "rev-" + Id(r.Id), ["kind"] = "سند کنترل‌شده", ["number"] = r.DocumentCode + " / " + r.Revision, ["title"] = r.DocumentTitle,
-                            ["status"] = r.Status == ControlledDocumentStatus.InReview ? "بررسی‌شده، منتظر تایید" : "پیش‌نویس، منتظر بررسی",
+                            ["status"] = r.Status == ControlledDocumentStatus.InReview ? "بررسی‌شده، منتظر تأیید" : "پیش‌نویس، منتظر بررسی",
                             ["since"] = DrillDates.Text(since), ["waitingDays"] = waiting,
                         }));
                     }
@@ -407,7 +414,7 @@ namespace Services.NasbNiro.Ceo.Drills
 
                 List<Row> rows = items.OrderByDescending(x => x.WaitingDays).ThenBy(x => x.Number, StringComparer.Ordinal).Select(x => x.Row).ToList();
                 return DrillResult.Slice(rows, c,
-                    "اسناد انبار پیش‌نویس‌اند و تایید می‌خواهند (source=inventory همان عدد داشبورد است)؛ اسناد کنترل‌شده بازنگری پیش‌نویس (منتظر بررسی) یا بررسی‌شده (منتظر تایید) دارند (source=controlled).",
+                    "اسناد انبار پیش‌نویس‌اند و تأیید می‌خواهند (source=inventory همان عدد داشبورد است)؛ اسناد کنترل‌شده بازنگری پیش‌نویس (منتظر بررسی) یا بررسی‌شده (منتظر تأیید) دارند (source=controlled).",
                     new Dictionary<string, object> { ["inventoryDocuments"] = inventoryCount, ["controlledRevisions"] = controlledCount });
             },
         };

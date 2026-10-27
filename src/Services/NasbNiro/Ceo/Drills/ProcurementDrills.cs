@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DataLayer.Context;
 using Entities.Model.NasbNiro.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Procurement;
 using ViewModels.NasbNiro.ProcurementDtos;
 using static Services.NasbNiro.Ceo.Drills.DrillText;
@@ -18,6 +20,9 @@ namespace Services.NasbNiro.Ceo.Drills
 
         /// <summary>Orders that were sent to the supplier and still have something to receive.</summary>
         private static readonly PurchaseOrderStatus[] ReleasedOrderStatuses = { PurchaseOrderStatus.Released, PurchaseOrderStatus.PartlyReceived };
+
+        /// <summary>The values of the status parameter of pr.requests_open: the requests waiting for approval, the approved ones waiting for an order, or both.</summary>
+        public static readonly string[] RequestFilters = { "submitted", "approved", "all" };
 
         public static IEnumerable<DrillDefinition> Build()
         {
@@ -51,8 +56,8 @@ namespace Services.NasbNiro.Ceo.Drills
         private static string RequestState(PurchaseRequestStatus status) => status switch
         {
             PurchaseRequestStatus.Draft => "پیش‌نویس",
-            PurchaseRequestStatus.Submitted => "ارسال‌شده، منتظر تایید",
-            PurchaseRequestStatus.Approved => "تاییدشده، منتظر سفارش",
+            PurchaseRequestStatus.Submitted => "ارسال‌شده، منتظر تأیید",
+            PurchaseRequestStatus.Approved => "تأییدشده، منتظر سفارش",
             PurchaseRequestStatus.Ordered => "سفارش‌داده‌شده",
             PurchaseRequestStatus.Closed => "بسته‌شده",
             _ => "ردشده",
@@ -61,7 +66,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static string OrderState(PurchaseOrderStatus status) => status switch
         {
             PurchaseOrderStatus.Draft => "پیش‌نویس",
-            PurchaseOrderStatus.Approved => "تاییدشده، ابلاغ‌نشده",
+            PurchaseOrderStatus.Approved => "تأییدشده، ابلاغ‌نشده",
             PurchaseOrderStatus.Released => "ابلاغ‌شده",
             PurchaseOrderStatus.PartlyReceived => "تحویل بخشی",
             PurchaseOrderStatus.Received => "تحویل کامل",
@@ -72,9 +77,9 @@ namespace Services.NasbNiro.Ceo.Drills
         private static string InvoiceState(SupplierInvoiceStatus status) => status switch
         {
             SupplierInvoiceStatus.Draft => "پیش‌نویس",
-            SupplierInvoiceStatus.Matched => "مطابق، منتظر تایید",
-            SupplierInvoiceStatus.NeedsApproval => "مغایرت دارد، منتظر تایید مدیریت",
-            SupplierInvoiceStatus.Approved => "تاییدشده",
+            SupplierInvoiceStatus.Matched => "مطابق، منتظر تأیید",
+            SupplierInvoiceStatus.NeedsApproval => "مغایرت دارد، منتظر تأیید مدیریت",
+            SupplierInvoiceStatus.Approved => "تأییدشده",
             _ => "لغوشده",
         };
 
@@ -88,8 +93,8 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static string PaymentState(PaymentRequestStatus status) => status switch
         {
-            PaymentRequestStatus.Draft => "پیش‌نویس، منتظر تایید",
-            PaymentRequestStatus.Approved => "تاییدشده، منتظر پرداخت",
+            PaymentRequestStatus.Draft => "پیش‌نویس، منتظر تأیید",
+            PaymentRequestStatus.Approved => "تأییدشده، منتظر پرداخت",
             PaymentRequestStatus.Paid => "پرداخت‌شده",
             _ => "ردشده",
         };
@@ -121,20 +126,24 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition RequestsOpen() => new DrillDefinition
         {
             Key = "pr.requests_open", Module = M, Title = "درخواست‌های خرید باز",
-            Description = "درخواست‌های خرید ارسال‌شده (منتظر تایید برنامه‌ریزی یا مدیریت) و تاییدشده (منتظر سفارش)؛ هم‌پایه با شمارنده‌ی «درخواست‌های خرید باز» داشبورد؛ قدیمی‌ترین اول.",
+            Description = "درخواست‌های خرید ارسال‌شده (منتظر تأیید برنامه‌ریزی یا مدیریت) و تأییدشده (منتظر سفارش)؛ پیش‌فرض هر دو، هم‌پایه با شمارنده‌ی «درخواست‌های خرید باز» داشبورد؛ می‌شود فقط منتظر تأیید را خواست (شاخص «درخواست‌های خرید منتظر تأیید»)؛ قدیمی‌ترین اول.",
             Link = "/procurement/requests", RecordType = "PurchaseRequest", RecordLabel = "درخواست خرید",
+            Parameters = new[] { Prm.Str("status", "submitted (ارسال‌شده، منتظر تأیید)، approved (تأییدشده، منتظر سفارش) یا all (هر دو)؛ پیش‌فرض all", "all", RequestFilters) },
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Date("requestDate", "تاریخ"), Col.Status("status", "وضعیت"), Col.Text("kind", "نوع"), Col.Text("source", "منبع"), Col.Text("projectCode", "پروژه / دستور کار"),
-                Col.Text("description", "شرح"), Col.Num("lines", "تعداد ردیف"), Col.Rial("estimatedAmount", "برآورد"), Col.Date("neededBy", "نیاز تا"), Col.Text("approval", "نیازمند تایید"),
+                Col.Text("description", "شرح"), Col.Num("lines", "تعداد ردیف"), Col.Rial("estimatedAmount", "برآورد"), Col.Date("neededBy", "نیاز تا"), Col.Text("approval", "نیازمند تأیید"),
                 Col.Num("waitingDays", "روز انتظار"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProcurementRoles.Readers);
                 var procurement = c.Get<IProcurementService>();
+                string filter = c.Args.Str("status") ?? "all";
+                PurchaseRequestStatus[] wanted = filter == "submitted" ? new[] { PurchaseRequestStatus.Submitted }
+                    : filter == "approved" ? new[] { PurchaseRequestStatus.Approved } : new[] { PurchaseRequestStatus.Submitted, PurchaseRequestStatus.Approved };
                 var open = new List<PurchaseRequestDto>();
-                foreach (PurchaseRequestStatus status in new[] { PurchaseRequestStatus.Submitted, PurchaseRequestStatus.Approved })
+                foreach (PurchaseRequestStatus status in wanted)
                     open.AddRange(Take(await procurement.GetRequestsAsync(new PurchaseRequestQuery { Status = status, PageSize = 0 }, ct)));
                 int Waiting(PurchaseRequestDto r) => Math.Max(0, DaysBetween(r.SubmittedAt.HasValue ? r.SubmittedAt.Value.LocalDateTime : r.RequestDate, c.Today));
                 List<PurchaseRequestDto> ordered = open.OrderByDescending(Waiting).ThenBy(r => r.Number, StringComparer.Ordinal).ToList();
@@ -158,13 +167,13 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition OrdersOpen() => new DrillDefinition
         {
             Key = "pr.orders_open", Module = M, Title = "سفارش‌های خرید باز",
-            Description = "سفارش‌های خرید تاییدشده، ابلاغ‌شده و در حال تحویل (هم‌پایه با شمارنده و مبلغ «سفارش‌های خرید باز» داشبورد)؛ بیشترین مبلغ اول، با درصد تحویل، مبلغ فاکتورنشده و ردیف‌های دارای تاخیر.",
+            Description = "سفارش‌های خرید تأییدشده، ابلاغ‌شده و در حال تحویل (هم‌پایه با شمارنده و مبلغ «سفارش‌های خرید باز» داشبورد)؛ بیشترین مبلغ اول، با درصد تحویل، مبلغ فاکتورنشده و ردیف‌های دارای تأخیر.",
             Link = "/procurement/orders", RecordType = "PurchaseOrder", RecordLabel = "سفارش خرید",
             Columns = new[]
             {
-                Col.Text("number", "شماره"), Col.Date("orderDate", "تاریخ"), Col.Text("providerName", "تامین‌کننده"), Col.Text("grade", "رتبه"), Col.Status("status", "وضعیت"), Col.Text("projectCode", "پروژه / دستور کار"),
+                Col.Text("number", "شماره"), Col.Date("orderDate", "تاریخ"), Col.Text("providerName", "تأمین‌کننده"), Col.Text("grade", "رتبه"), Col.Status("status", "وضعیت"), Col.Text("projectCode", "پروژه / دستور کار"),
                 Col.Rial("amount", "مبلغ"), Col.Pct("receivedPercent", "درصد تحویل"), Col.Rial("uninvoiced", "تحویل‌شده‌ی فاکتورنشده"), Col.Rial("paid", "پرداخت‌شده"), Col.Date("deliveryDate", "تحویل"),
-                Col.Num("lateLines", "ردیف دارای تاخیر"), Col.Num("daysLate", "بیشترین روز تاخیر"), Col.Link(),
+                Col.Num("lateLines", "ردیف دارای تأخیر"), Col.Num("daysLate", "بیشترین روز تأخیر"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -189,13 +198,13 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition LateLines() => new DrillDefinition
         {
-            Key = "pr.late_lines", Module = M, Title = "ردیف‌های سفارش خرید دارای تاخیر",
-            Description = "ردیف‌های سفارش‌های ابلاغ‌شده و در حال تحویل که تاریخ تحویل (ردیف یا سفارش) گذشته و هنوز کامل تحویل نشده‌اند (هم‌پایه با «ردیف‌های سفارش دارای تاخیر» داشبورد)؛ بیشترین روز تاخیر اول.",
+            Key = "pr.late_lines", Module = M, Title = "ردیف‌های سفارش خرید دارای تأخیر",
+            Description = "ردیف‌های سفارش‌های ابلاغ‌شده و در حال تحویل که تاریخ تحویل (ردیف یا سفارش) گذشته و هنوز کامل تحویل نشده‌اند (هم‌پایه با «ردیف‌های سفارش دارای تأخیر» داشبورد)؛ بیشترین روز تأخیر اول.",
             Link = "/procurement/orders", RecordType = "PurchaseOrder", RecordLabel = "سفارش خرید",
             Columns = new[]
             {
-                Col.Text("number", "سفارش"), Col.Text("providerName", "تامین‌کننده"), Col.Num("row", "ردیف"), Col.Text("item", "کالا یا خدمت"), Col.Text("unit", "واحد"), Col.Num("quantity", "سفارش"),
-                Col.Num("received", "تحویل‌شده"), Col.Num("openQuantity", "باقی‌مانده"), Col.Date("dueDate", "تاریخ تحویل"), Col.Num("daysLate", "روز تاخیر"), Col.Rial("openAmount", "مبلغ باقی‌مانده"), Col.Link(),
+                Col.Text("number", "سفارش"), Col.Text("providerName", "تأمین‌کننده"), Col.Num("row", "ردیف"), Col.Text("item", "کالا یا خدمت"), Col.Text("unit", "واحد"), Col.Num("quantity", "سفارش"),
+                Col.Num("received", "تحویل‌شده"), Col.Num("openQuantity", "باقی‌مانده"), Col.Date("dueDate", "تاریخ تحویل"), Col.Num("daysLate", "روز تأخیر"), Col.Rial("openAmount", "مبلغ باقی‌مانده"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
@@ -220,12 +229,12 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition SupplierOnTime() => new DrillDefinition
         {
-            Key = "pr.supplier_on_time", Module = M, Title = "تحویل به‌موقع تامین‌کنندگان",
-            Description = "درصد ردیف‌های تحویل‌شده‌ی هر تامین‌کننده که تا تاریخ تحویل رسیده‌اند (همه‌ی دوران)، با تعداد سفارش، عدم انطباق و مرجوعی؛ کم‌ترین درصد به‌موقع اول. فقط تامین‌کنندگانی که دست‌کم یک ردیف تحویل داده‌اند.",
-            Link = "/procurement/suppliers", RecordType = "Supplier", RecordLabel = "تامین‌کننده",
+            Key = "pr.supplier_on_time", Module = M, Title = "تحویل به‌موقع تأمین‌کنندگان",
+            Description = "درصد ردیف‌های تحویل‌شده‌ی هر تأمین‌کننده که تا تاریخ تحویل رسیده‌اند (همه‌ی دوران)، با تعداد سفارش، عدم انطباق و مرجوعی؛ کم‌ترین درصد به‌موقع اول. فقط تأمین‌کنندگانی که دست‌کم یک ردیف تحویل داده‌اند.",
+            Link = "/procurement/suppliers", RecordType = "Supplier", RecordLabel = "تأمین‌کننده",
             Columns = new[]
             {
-                Col.Text("providerName", "تامین‌کننده"), Col.Text("grade", "رتبه"), Col.Num("score", "امتیاز"), Col.Num("orders", "تعداد سفارش"), Col.Num("receiptLines", "ردیف تحویل‌شده"),
+                Col.Text("providerName", "تأمین‌کننده"), Col.Text("grade", "رتبه"), Col.Num("score", "امتیاز"), Col.Num("orders", "تعداد سفارش"), Col.Num("receiptLines", "ردیف تحویل‌شده"),
                 Col.Num("lateReceiptLines", "ردیف دیرکرد"), Col.Pct("onTimePercent", "درصد به‌موقع"), Col.Num("ncrs", "عدم انطباق"), Col.Num("returns", "مرجوعی"), Col.Text("blocked", "مسدود"),
                 Col.Text("evaluationDue", "ارزیابی سررسید"), Col.Link(),
             },
@@ -240,7 +249,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["lateReceiptLines"] = s.LateReceiptLines, ["onTimePercent"] = s.OnTimePercent, ["ncrs"] = s.Ncrs, ["returns"] = s.Returns, ["blocked"] = YesNo(s.Blocked), ["evaluationDue"] = YesNo(s.EvaluationDue),
                 }).ToList();
                 int lines = delivered.Sum(s => s.ReceiptLines), lateLines = delivered.Sum(s => s.LateReceiptLines);
-                return DrillResult.Slice(rows, c, "دیرکرد یعنی تاریخ آخرین تحویل ردیف از تاریخ تحویل مقرر گذشته است؛ ارزیابی سررسید شده فقط برای تامین‌کنندگان مسدودنشده در شمارنده‌ی داشبورد می‌آید.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "دیرکرد یعنی تاریخ آخرین تحویل ردیف از تاریخ تحویل مقرر گذشته است؛ ارزیابی سررسید شده فقط برای تأمین‌کنندگان مسدودنشده در شمارنده‌ی داشبورد می‌آید.", new Dictionary<string, object>
                 {
                     ["suppliers"] = delivered.Count, ["receiptLines"] = lines, ["lateReceiptLines"] = lateLines, ["onTimePercent"] = lines == 0 ? (decimal?)null : Percent(lines - lateLines, lines),
                     ["evaluationsDue"] = all.Count(s => !s.Blocked && s.EvaluationDue),
@@ -250,57 +259,66 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition SpendBySupplier() => new DrillDefinition
         {
-            Key = "pr.spend_by_supplier", Module = M, Title = "خرید به تفکیک تامین‌کننده",
-            Description = "جمع فاکتورهای تاییدشده‌ی هر تامین‌کننده (با مالیات ارزش افزوده) با تاریخ فاکتور در بازه، و مبلغ خالص پرداخت‌های انجام‌شده در همان بازه؛ بیشترین خرید اول. پیش‌فرض ۱۲ ماه شمسی اخیر.",
-            Link = "/procurement/invoices", RecordType = "Supplier", RecordLabel = "تامین‌کننده",
+            Key = "pr.spend_by_supplier", Module = M, Title = "خرید به تفکیک تأمین‌کننده",
+            Description = "ارزش سفارش‌های خرید هر تأمین‌کننده با تاریخ سفارش در بازه (مبنای نمودار «بیشترین خرید از تأمین‌کنندگان»؛ بدون پیش‌نویس و لغوشده)، جمع فاکتورهای تأییدشده‌ی او (با مالیات ارزش افزوده) با تاریخ فاکتور در بازه، و مبلغ خالص پرداخت‌های انجام‌شده در همان بازه؛ بیشترین سفارش اول. پیش‌فرض ۱۲ ماه شمسی اخیر.",
+            Link = "/procurement/invoices", RecordType = "Supplier", RecordLabel = "تأمین‌کننده",
             Parameters = Prm.Last12Months(),
             Columns = new[]
             {
-                Col.Text("providerName", "تامین‌کننده"), Col.Num("invoices", "تعداد فاکتور"), Col.Rial("invoiced", "جمع فاکتورهای تاییدشده"), Col.Pct("sharePercent", "سهم از کل"), Col.Rial("paid", "پرداخت‌شده در بازه"), Col.Link(),
+                Col.Text("providerName", "تأمین‌کننده"), Col.Rial("ordered", "ارزش سفارش‌ها"), Col.Num("invoices", "تعداد فاکتور"), Col.Rial("invoiced", "جمع فاکتورهای تأییدشده"), Col.Pct("sharePercent", "سهم از جمع فاکتورها"),
+                Col.Rial("paid", "پرداخت‌شده در بازه"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProcurementRoles.Readers);
-                DateTime from = c.Args.Date("from").Date, to = c.Args.Date("to").Date;
-                var payables = c.Get<IPayablesService>();
-                var invoices = Take(await payables.GetInvoicesAsync(new ProcurementListQuery { Status = (int)SupplierInvoiceStatus.Approved, PageSize = 0 }, ct))
-                    .Where(i => i.InvoiceDate.Date >= from && i.InvoiceDate.Date <= to).ToList();
-                var paid = Take(await payables.GetPaymentsAsync(new ProcurementListQuery { Status = (int)PaymentRequestStatus.Paid, PageSize = 0 }, ct))
-                    .Where(p => p.PaidAt.HasValue && p.PaidAt.Value.LocalDateTime.Date >= from && p.PaidAt.Value.LocalDateTime.Date <= to).ToList();
+                DateTime from = c.Args.Date("from").Date, to = c.Args.Date("to").Date, end = to.AddDays(1);
+                DateTimeOffset fromAt = new DateTimeOffset(from), endAt = new DateTimeOffset(end);
+                var uow = c.Get<IUnitOfWork>();
+                // summed in the database, one row per supplier; the date filters are in the queries
+                var orders = await uow.Set<PurchaseOrder>().AsNoTracking()
+                    .Where(o => !o.Deleted && o.OrderDate >= from && o.OrderDate < end && o.Status != PurchaseOrderStatus.Draft && o.Status != PurchaseOrderStatus.Cancelled)
+                    .GroupBy(o => new { o.ProviderId, o.Provider.Name }).Select(g => new { g.Key.ProviderId, g.Key.Name, Amount = g.Sum(o => o.TotalAmount) }).ToListAsync(ct);
+                var invoices = await uow.Set<SupplierInvoice>().AsNoTracking()
+                    .Where(i => !i.Deleted && i.Status == SupplierInvoiceStatus.Approved && i.InvoiceDate >= from && i.InvoiceDate < end)
+                    .GroupBy(i => new { i.ProviderId, i.Provider.Name }).Select(g => new { g.Key.ProviderId, g.Key.Name, Count = g.Count(), Amount = g.Sum(i => i.TotalAmount) }).ToListAsync(ct);
+                var payments = await uow.Set<PaymentRequest>().AsNoTracking()
+                    .Where(p => !p.Deleted && p.Status == PaymentRequestStatus.Paid && p.PaidAt != null && p.PaidAt >= fromAt && p.PaidAt < endAt)
+                    .GroupBy(p => new { p.ProviderId, p.Provider.Name }).Select(g => new { g.Key.ProviderId, g.Key.Name, Amount = g.Sum(p => p.Amount - p.Deductions) }).ToListAsync(ct);
 
-                var bySupplier = new Dictionary<int, (string Name, int Invoices, decimal Invoiced, decimal Paid)>();
-                foreach (SupplierInvoiceDto i in invoices)
+                var bySupplier = new Dictionary<int, (string Name, decimal Ordered, int Invoices, decimal Invoiced, decimal Paid)>();
+                foreach (var o in orders) bySupplier[o.ProviderId] = (o.Name, o.Amount, 0, 0m, 0m);
+                foreach (var i in invoices)
                 {
                     bySupplier.TryGetValue(i.ProviderId, out var v);
-                    bySupplier[i.ProviderId] = (i.ProviderName, v.Invoices + 1, v.Invoiced + i.TotalAmount, v.Paid);
+                    bySupplier[i.ProviderId] = (v.Name ?? i.Name, v.Ordered, i.Count, i.Amount, v.Paid);
                 }
-                foreach (PaymentRequestDto p in paid)
+                foreach (var p in payments)
                 {
                     bySupplier.TryGetValue(p.ProviderId, out var v);
-                    bySupplier[p.ProviderId] = (v.Name ?? p.ProviderName, v.Invoices, v.Invoiced, v.Paid + p.NetAmount);
+                    bySupplier[p.ProviderId] = (v.Name ?? p.Name, v.Ordered, v.Invoices, v.Invoiced, p.Amount);
                 }
                 decimal total = bySupplier.Values.Sum(v => v.Invoiced);
-                List<Row> rows = bySupplier.Select(kv => new { Id = kv.Key, kv.Value.Name, kv.Value.Invoices, kv.Value.Invoiced, kv.Value.Paid })
-                    .OrderByDescending(x => x.Invoiced).ThenByDescending(x => x.Paid).ThenBy(x => x.Name, StringComparer.Ordinal)
+                List<Row> rows = bySupplier.Select(kv => new { Id = kv.Key, kv.Value.Name, kv.Value.Ordered, kv.Value.Invoices, kv.Value.Invoiced, kv.Value.Paid })
+                    .OrderByDescending(x => x.Ordered).ThenByDescending(x => x.Invoiced).ThenByDescending(x => x.Paid).ThenBy(x => x.Name, StringComparer.Ordinal)
                     .Select(x => new Row("/procurement/suppliers")
                     {
-                        ["id"] = x.Id, ["providerName"] = x.Name, ["invoices"] = x.Invoices, ["invoiced"] = x.Invoiced, ["sharePercent"] = Percent(x.Invoiced, total), ["paid"] = x.Paid,
+                        ["id"] = x.Id, ["providerName"] = x.Name, ["ordered"] = x.Ordered, ["invoices"] = x.Invoices, ["invoiced"] = x.Invoiced, ["sharePercent"] = Percent(x.Invoiced, total), ["paid"] = x.Paid,
                     }).ToList();
-                return DrillResult.Slice(rows, c, "فاکتور بر پایه‌ی تاریخ فاکتور تامین‌کننده و پرداخت بر پایه‌ی تاریخ پرداخت شمرده می‌شود؛ پرداخت پیش‌پرداخت و صورت‌وضعیت هم در «پرداخت‌شده» می‌آید.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "سفارش بر پایه‌ی تاریخ سفارش، فاکتور بر پایه‌ی تاریخ فاکتور تأمین‌کننده و پرداخت بر پایه‌ی تاریخ پرداخت شمرده می‌شود؛ پرداخت پیش‌پرداخت و صورت‌وضعیت هم در «پرداخت‌شده» می‌آید.", new Dictionary<string, object>
                 {
-                    ["invoiced"] = total, ["paid"] = bySupplier.Values.Sum(v => v.Paid), ["suppliers"] = rows.Count,
+                    ["ordered"] = bySupplier.Values.Sum(v => v.Ordered), ["invoiced"] = total, ["paid"] = bySupplier.Values.Sum(v => v.Paid), ["suppliers"] = rows.Count,
                 });
             },
         };
 
         private static DrillDefinition BlockedSuppliers() => new DrillDefinition
         {
-            Key = "pr.blocked_suppliers", Module = M, Title = "تامین‌کنندگان مسدود",
-            Description = "تامین‌کنندگانی که از فهرست تامین‌کنندگان تاییدشده مسدود شده‌اند (هم‌پایه با شمارنده‌ی داشبورد)، با علت مسدودی، رتبه، هشدارها و میزان سفارش‌های گذشته؛ بیشترین مبلغ سفارش اول.",
-            Link = "/procurement/suppliers", RecordType = "Supplier", RecordLabel = "تامین‌کننده",
+            Key = "pr.blocked_suppliers", Module = M, Title = "تأمین‌کنندگان مسدود",
+            Description = "تأمین‌کنندگانی که از فهرست تأمین‌کنندگان تأییدشده مسدود شده‌اند (هم‌پایه با شمارنده‌ی داشبورد)، با علت مسدودی، رتبه، هشدارها و میزان سفارش‌های گذشته؛ بیشترین مبلغ سفارش اول.",
+            Link = "/procurement/suppliers", RecordType = "Supplier", RecordLabel = "تأمین‌کننده",
             Columns = new[]
             {
-                Col.Text("providerName", "تامین‌کننده"), Col.Text("grade", "رتبه"), Col.Num("score", "امتیاز"), Col.Num("warnings", "هشدار"), Col.Text("blockReason", "علت مسدودی"), Col.Num("orders", "تعداد سفارش"),
+                Col.Text("providerName", "تأمین‌کننده"), Col.Text("grade", "رتبه"), Col.Num("score", "امتیاز"), Col.Num("warnings", "هشدار"), Col.Text("blockReason", "علت مسدودی"), Col.Num("orders", "تعداد سفارش"),
                 Col.Rial("orderedAmount", "جمع سفارش‌ها"), Col.Num("ncrs", "عدم انطباق"), Col.Num("returns", "مرجوعی"), Col.Link(),
             },
             Run = async (c, ct) =>
@@ -313,7 +331,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["id"] = s.ProviderId, ["providerName"] = s.ProviderName, ["grade"] = GradeText(s.Grade), ["score"] = s.Score, ["warnings"] = s.Warnings, ["blockReason"] = Short(s.BlockReason),
                     ["orders"] = s.Orders, ["orderedAmount"] = s.OrderedAmount, ["ncrs"] = s.Ncrs, ["returns"] = s.Returns,
                 }).ToList();
-                return DrillResult.Slice(rows, c, "رفع مسدودی تامین‌کننده‌ی رتبه‌ی D یا هشدارداده‌شده با مدیرعامل است.", new Dictionary<string, object> { ["orderedAmount"] = blocked.Sum(s => s.OrderedAmount) });
+                return DrillResult.Slice(rows, c, "رفع مسدودی تأمین‌کننده‌ی رتبه‌ی D یا هشدارداده‌شده با مدیرعامل است.", new Dictionary<string, object> { ["orderedAmount"] = blocked.Sum(s => s.OrderedAmount) });
             },
         };
 
@@ -321,12 +339,12 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition InvoicesWaiting() => new DrillDefinition
         {
-            Key = "pr.invoices_waiting", Module = M, Title = "فاکتورهای تامین‌کننده منتظر تایید",
-            Description = "فاکتورهای تامین‌کننده که با سفارش و رسید تطبیق داده شده‌اند (مطابق یا دارای مغایرت) و منتظر تایید مالی یا مدیریت‌اند (هم‌پایه با «فاکتورهای منتظر تایید» داشبورد)؛ قدیمی‌ترین اول.",
-            Link = "/procurement/invoices", RecordType = "SupplierInvoice", RecordLabel = "فاکتور تامین‌کننده",
+            Key = "pr.invoices_waiting", Module = M, Title = "فاکتورهای تأمین‌کننده منتظر تأیید",
+            Description = "فاکتورهای تأمین‌کننده که با سفارش و رسید تطبیق داده شده‌اند (مطابق یا دارای مغایرت) و منتظر تأیید مالی یا مدیریت‌اند (هم‌پایه با «فاکتورهای منتظر تأیید» داشبورد)؛ قدیمی‌ترین اول.",
+            Link = "/procurement/invoices", RecordType = "SupplierInvoice", RecordLabel = "فاکتور تأمین‌کننده",
             Columns = new[]
             {
-                Col.Text("number", "شماره"), Col.Text("providerName", "تامین‌کننده"), Col.Text("invoiceNumber", "شماره‌ی فاکتور تامین‌کننده"), Col.Date("invoiceDate", "تاریخ فاکتور"), Col.Text("orderNumber", "سفارش"),
+                Col.Text("number", "شماره"), Col.Text("providerName", "تأمین‌کننده"), Col.Text("invoiceNumber", "شماره‌ی فاکتور تأمین‌کننده"), Col.Date("invoiceDate", "تاریخ فاکتور"), Col.Text("orderNumber", "سفارش"),
                 Col.Status("status", "وضعیت"), Col.Rial("netAmount", "مبلغ"), Col.Rial("vatAmount", "مالیات"), Col.Rial("totalAmount", "جمع"), Col.Rial("priceVariance", "مغایرت قیمت"), Col.Text("matchNote", "یادداشت تطبیق"),
                 Col.Num("waitingDays", "روز انتظار"), Col.Link(),
             },
@@ -355,12 +373,12 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition PaymentsWaiting() => new DrillDefinition
         {
             Key = "pr.payments_waiting", Module = M, Title = "درخواست‌های پرداخت منتظر",
-            Description = "درخواست‌های پرداخت به تامین‌کننده که پیش‌نویس‌اند (منتظر تایید) یا تایید شده‌اند و پرداخت نشده‌اند (هم‌پایه با تعداد و مبلغ «پرداخت‌های منتظر» داشبورد)؛ قدیمی‌ترین اول. مبلغ خالص = مبلغ منهای کسورات.",
+            Description = "درخواست‌های پرداخت به تأمین‌کننده که پیش‌نویس‌اند (منتظر تأیید) یا تأیید شده‌اند و پرداخت نشده‌اند (هم‌پایه با تعداد و مبلغ «پرداخت‌های منتظر» داشبورد)؛ قدیمی‌ترین اول. مبلغ خالص = مبلغ منهای کسورات.",
             Link = "/procurement/payments", RecordType = "PaymentRequest", RecordLabel = "درخواست پرداخت",
             Columns = new[]
             {
-                Col.Text("number", "شماره"), Col.Text("type", "نوع"), Col.Text("providerName", "تامین‌کننده"), Col.Text("orderNumber", "سفارش"), Col.Text("invoiceNumber", "فاکتور"), Col.Date("requestDate", "تاریخ درخواست"),
-                Col.Status("status", "وضعیت"), Col.Rial("amount", "مبلغ"), Col.Rial("deductions", "کسورات"), Col.Rial("netAmount", "مبلغ خالص"), Col.Text("qcApproved", "تایید کنترل کیفیت"),
+                Col.Text("number", "شماره"), Col.Text("type", "نوع"), Col.Text("providerName", "تأمین‌کننده"), Col.Text("orderNumber", "سفارش"), Col.Text("invoiceNumber", "فاکتور"), Col.Date("requestDate", "تاریخ درخواست"),
+                Col.Status("status", "وضعیت"), Col.Rial("amount", "مبلغ"), Col.Rial("deductions", "کسورات"), Col.Rial("netAmount", "مبلغ خالص"), Col.Text("qcApproved", "تأیید کنترل کیفیت"),
                 Col.Num("waitingDays", "روز انتظار"), Col.Link(),
             },
             Run = async (c, ct) =>

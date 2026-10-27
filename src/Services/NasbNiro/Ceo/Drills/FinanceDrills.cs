@@ -7,6 +7,7 @@ using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Procurement;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Finance;
+using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Procurement;
 using ViewModels.NasbNiro.FinanceDtos;
 using ViewModels.NasbNiro.Pagination;
@@ -28,9 +29,9 @@ namespace Services.NasbNiro.Ceo.Drills
             yield return PayablesBySupplier();
             yield return PayablesOverdue();
             yield return ChequesDue();
-            yield return LedgerByMonth("fin.revenue_by_month", "درآمد به تفکیک ماه", "درآمد ثبت‌شده در دفتر کل (حساب‌های درآمد، اسناد قطعی، بدون اسناد بستن حساب‌ها) در هر ماه شمسی؛ مجموع سال جاری با سود خالص داشبورد مالی هم‌پایه است.",
+            yield return LedgerByMonth("fin.revenue_by_month", "درآمد به تفکیک ماه", "درآمد ثبت‌شده در دفتر کل (حساب‌های درآمد، اسناد قطعی، بدون اسناد بستن حساب‌ها) در هر ماه شمسی، با ستون «سود خالص ماه» (درآمد منهای هزینه‌ی همان ماه)؛ جمع سود خالص بازه‌ی «از ابتدای سال مالی تا امروز» همان سود خالص داشبورد مالی است.",
                 FnAccountType.Revenue, "درآمد");
-            yield return LedgerByMonth("fin.cost_by_month", "هزینه به تفکیک ماه", "هزینه‌ی ثبت‌شده در دفتر کل (حساب‌های هزینه، اسناد قطعی، بدون اسناد بستن حساب‌ها) در هر ماه شمسی.",
+            yield return LedgerByMonth("fin.cost_by_month", "هزینه به تفکیک ماه", "هزینه‌ی ثبت‌شده در دفتر کل (حساب‌های هزینه، اسناد قطعی، بدون اسناد بستن حساب‌ها) در هر ماه شمسی، با ستون «سود خالص ماه» (درآمد منهای هزینه‌ی همان ماه).",
                 FnAccountType.Expense, "هزینه");
             yield return ProjectProfitability();
             yield return BankUnreconciled();
@@ -133,22 +134,23 @@ namespace Services.NasbNiro.Ceo.Drills
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProcurementRoles.Readers);
-                var payables = c.Get<IPayablesService>();
-                PagedList<SupplierInvoiceDto> invoices = Take(await payables.GetInvoicesAsync(new ProcurementListQuery { Status = (int)SupplierInvoiceStatus.Approved, PageNumber = 1, PageSize = 0 }, ct));
-                PagedList<PaymentRequestDto> paid = Take(await payables.GetPaymentsAsync(new ProcurementListQuery { Status = (int)PaymentRequestStatus.Paid, PageNumber = 1, PageSize = 0 }, ct));
+                var uow = c.Get<IUnitOfWork>();
+                // summed in the database, one row per supplier (not the invoices and payments of the whole company in memory)
+                var invoiced = await uow.Set<SupplierInvoice>().AsNoTracking().Where(i => !i.Deleted && i.Status == SupplierInvoiceStatus.Approved)
+                    .GroupBy(i => new { i.ProviderId, i.Provider.Name })
+                    .Select(g => new { g.Key.ProviderId, g.Key.Name, Invoices = g.Count(), Amount = g.Sum(i => i.TotalAmount) }).ToListAsync(ct);
+                var paid = await uow.Set<PaymentRequest>().AsNoTracking().Where(p => !p.Deleted && p.Status == PaymentRequestStatus.Paid && p.InvoiceId != null)
+                    .GroupBy(p => new { p.ProviderId, p.Provider.Name })
+                    .Select(g => new { g.Key.ProviderId, g.Key.Name, Amount = g.Sum(p => p.Amount) }).ToListAsync(ct);
                 var bySupplier = new Dictionary<int, (string Name, int Invoices, decimal Invoiced, decimal Paid)>();
-                foreach (SupplierInvoiceDto i in invoices)
-                {
-                    bySupplier.TryGetValue(i.ProviderId, out var v);
-                    bySupplier[i.ProviderId] = (i.ProviderName, v.Invoices + 1, v.Invoiced + i.TotalAmount, v.Paid);
-                }
-                foreach (PaymentRequestDto p in paid.Where(p => p.InvoiceId.HasValue))
+                foreach (var i in invoiced) bySupplier[i.ProviderId] = (i.Name, i.Invoices, i.Amount, 0m);
+                foreach (var p in paid)
                 {
                     bySupplier.TryGetValue(p.ProviderId, out var v);
-                    bySupplier[p.ProviderId] = (v.Name ?? p.ProviderName, v.Invoices, v.Invoiced, v.Paid + p.Amount);
+                    bySupplier[p.ProviderId] = (v.Name ?? p.Name, v.Invoices, v.Invoiced, v.Paid + p.Amount);
                 }
                 List<Row> rows = bySupplier.Select(kv => new { Id = kv.Key, kv.Value.Name, kv.Value.Invoices, kv.Value.Invoiced, kv.Value.Paid, Open = kv.Value.Invoiced - kv.Value.Paid })
-                    .Where(x => x.Open != 0).OrderByDescending(x => x.Open).ThenBy(x => x.Name)
+                    .Where(x => x.Open != 0).OrderByDescending(x => x.Open).ThenBy(x => x.Name, StringComparer.Ordinal)
                     .Select(x => new Row("/procurement/suppliers") { ["id"] = x.Id, ["providerName"] = x.Name, ["invoices"] = x.Invoices, ["invoiced"] = x.Invoiced, ["paid"] = x.Paid, ["open"] = x.Open }).ToList();
                 return DrillResult.Slice(rows, c, "پرداخت بابت فاکتور فقط درخواست‌های پرداخت «پرداخت‌شده»ی دارای فاکتور است.", new Dictionary<string, object>
                 {
@@ -232,28 +234,38 @@ namespace Services.NasbNiro.Ceo.Drills
             Key = key, Module = M, Title = title, Description = description,
             Link = "/fn/reports/income-statement", RecordType = "LedgerMonth", RecordLabel = "ماه",
             Parameters = Prm.Last12Months(),
-            Columns = new[] { Col.Text("month", "ماه"), Col.Rial("amount", amountTitle), Col.Pct("changePercent", "تغییر نسبت به ماه قبل") },
+            Columns = new[] { Col.Text("month", "ماه"), Col.Rial("amount", amountTitle), Col.Rial("profit", "سود خالص ماه"), Col.Pct("changePercent", "تغییر نسبت به ماه قبل") },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, FinanceRoles.Readers);
                 DateTime from = c.Args.Date("from").Date, to = c.Args.Date("to").Date;
+                // revenue and expense of the final vouchers in one query (the filters of NetProfitAsync of the finance dashboard); Net = credit less debit, so a revenue is positive and an expense negative
                 var daily = await c.Get<IUnitOfWork>().Set<FnVoucherLine>().AsNoTracking()
                     .Where(l => l.Voucher.Date >= from && l.Voucher.Date <= to && l.Voucher.Status == FnVoucherStatus.Final &&
                                 l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose &&
-                                l.Voucher.FiscalYear.LegalEntityId == FinanceSeed.MainEntityId && l.Account.Type == type)
-                    .GroupBy(l => l.Voucher.Date)
-                    .Select(g => new { Date = g.Key, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) }).ToListAsync(ct);
-                Dictionary<DateTime, decimal> byMonth = daily.GroupBy(d => DrillDates.MonthStart(d.Date))
-                    .ToDictionary(g => g.Key, g => type == FnAccountType.Revenue ? g.Sum(x => x.Credit - x.Debit) : g.Sum(x => x.Debit - x.Credit));
+                                l.Voucher.FiscalYear.LegalEntityId == FinanceSeed.MainEntityId && (l.Account.Type == FnAccountType.Revenue || l.Account.Type == FnAccountType.Expense))
+                    .GroupBy(l => new { l.Voucher.Date, l.Account.Type })
+                    .Select(g => new { g.Key.Date, g.Key.Type, Net = g.Sum(x => x.Credit - x.Debit) }).ToListAsync(ct);
+                Dictionary<DateTime, decimal> revenues = daily.Where(d => d.Type == FnAccountType.Revenue).GroupBy(d => DrillDates.MonthStart(d.Date)).ToDictionary(g => g.Key, g => g.Sum(x => x.Net));
+                Dictionary<DateTime, decimal> expenses = daily.Where(d => d.Type == FnAccountType.Expense).GroupBy(d => DrillDates.MonthStart(d.Date)).ToDictionary(g => g.Key, g => -g.Sum(x => x.Net));
                 var rows = new List<Row>();
                 decimal? previous = null;
+                decimal profitTotal = 0m;
                 foreach (DateTime month in DrillDates.Months(from, to))
                 {
-                    decimal amount = byMonth.TryGetValue(month, out decimal v) ? v : 0m;
-                    rows.Add(new Row { ["month"] = DrillDates.MonthLabel(month), ["amount"] = amount, ["changePercent"] = previous.HasValue && previous.Value != 0m ? Percent(amount - previous.Value, Math.Abs(previous.Value)) : (decimal?)null });
+                    decimal revenue = revenues.TryGetValue(month, out decimal r) ? r : 0m;
+                    decimal expense = expenses.TryGetValue(month, out decimal e) ? e : 0m;
+                    decimal amount = type == FnAccountType.Revenue ? revenue : expense;
+                    profitTotal += revenue - expense;
+                    rows.Add(new Row
+                    {
+                        ["month"] = CeoText.MonthLabel(month), ["amount"] = amount, ["profit"] = revenue - expense,
+                        ["changePercent"] = previous.HasValue && previous.Value != 0m ? Percent(amount - previous.Value, Math.Abs(previous.Value)) : (decimal?)null,
+                    });
                     previous = amount;
                 }
-                return DrillResult.Slice(rows, c, "ماه‌ها به‌ترتیب زمان؛ ماه ناقص (اول بازه یا امروز) فقط روزهای بازه را دارد.", new Dictionary<string, object> { ["total"] = rows.Sum(r => (decimal)r["amount"]) });
+                return DrillResult.Slice(rows, c, "ماه‌ها به‌ترتیب زمان؛ ماه ناقص (اول بازه یا امروز) فقط روزهای بازه را دارد. سود خالص ماه = درآمد منهای هزینه.",
+                    new Dictionary<string, object> { ["total"] = rows.Sum(r => (decimal)r["amount"]), ["profit"] = profitTotal });
             },
         };
 
@@ -316,7 +328,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition VouchersWaiting() => new DrillDefinition
         {
             Key = "fin.vouchers_waiting", Module = M, Title = "اسناد حسابداری منتظر",
-            Description = "اسناد پیش‌نویس (منتظر بررسی) و بررسی‌شده (منتظر قطعی‌سازی)؛ قدیمی‌ترین اول.",
+            Description = "اسناد پیش‌نویس (منتظر بررسی) و بررسی‌شده (منتظر قطعی‌سازی) در همه‌ی واحدهای حقوقی، همان شمارنده‌ی داشبورد مالی و داشبورد مدیرعامل؛ قدیمی‌ترین اول.",
             Link = "/fn/vouchers", RecordType = "Voucher", RecordLabel = "سند",
             Columns = new[]
             {
@@ -326,19 +338,30 @@ namespace Services.NasbNiro.Ceo.Drills
             Run = async (c, ct) =>
             {
                 Guard.Require(c, FinanceRoles.Readers);
-                var gl = c.Get<IGlService>();
-                PagedList<VoucherDto> drafts = Take(await gl.GetVouchersAsync(new VoucherQuery { Status = FnVoucherStatus.Draft, PageNumber = 1, PageSize = 0 }, ct));
-                PagedList<VoucherDto> checkedVouchers = Take(await gl.GetVouchersAsync(new VoucherQuery { Status = FnVoucherStatus.Checked, PageNumber = 1, PageSize = 0 }, ct));
+                var uow = c.Get<IUnitOfWork>();
+                // all legal entities, as the counters of the finance dashboard and of the CEO overview count them (the voucher list of the finance module shows the entity of the user only)
+                IQueryable<FnVoucher> waiting = uow.Set<FnVoucher>().AsNoTracking().Where(v => v.Status == FnVoucherStatus.Draft || v.Status == FnVoucherStatus.Checked);
+                int total = await waiting.CountAsync(ct);
+                int drafts = await waiting.CountAsync(v => v.Status == FnVoucherStatus.Draft, ct);
+                decimal amount = await waiting.SumAsync(v => (decimal?)v.TotalAmount, ct) ?? 0m;
+                var page = await waiting.OrderBy(v => v.Date).ThenBy(v => v.Id).Skip(Math.Max(0, c.Page - 1) * c.Top).Take(c.Top)
+                    .Select(v => new { v.Id, v.Number, v.TemporaryNumber, v.Date, v.Status, v.Description, v.TotalAmount, v.CreatedByUserId }).ToListAsync(ct);
+                Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(uow, page.Select(v => (int?)v.CreatedByUserId), ct);
                 DateTime today = c.Today;
-                List<Row> rows = drafts.Concat(checkedVouchers).OrderBy(v => v.Date).ThenBy(v => v.Id).Select(v => new Row("/fn/vouchers/" + v.Id.ToString(CultureInfo.InvariantCulture))
+                var rows = page.Select(v => (Dictionary<string, object>)new Row("/fn/vouchers/" + Id(v.Id))
                 {
-                    ["id"] = v.Id, ["number"] = v.Number.HasValue ? v.Number.Value.ToString(CultureInfo.InvariantCulture) : "پیش‌نویس " + v.TemporaryNumber.ToString(CultureInfo.InvariantCulture),
+                    ["id"] = v.Id, ["number"] = v.Number.HasValue ? Id(v.Number.Value) : "پیش‌نویس " + Id(v.TemporaryNumber),
                     ["date"] = DrillDates.Text(v.Date), ["state"] = v.Status == FnVoucherStatus.Draft ? "منتظر بررسی" : "منتظر قطعی‌سازی",
-                    ["description"] = v.Description != null && v.Description.Length > 80 ? v.Description.Substring(0, 80) : v.Description, ["amount"] = v.TotalAmount, ["creatorName"] = v.CreatorName,
-                    ["daysWaiting"] = Math.Max(0, (int)(today - v.Date.Date).TotalDays),
+                    ["description"] = Short(v.Description, 80), ["amount"] = v.TotalAmount, ["creatorName"] = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId),
+                    ["daysWaiting"] = Math.Max(0, DaysBetween(v.Date, today)),
                 }).ToList();
-                return DrillResult.Slice(rows, c, "روز انتظار از تاریخ سند حساب می‌شود.",
-                    new Dictionary<string, object> { ["waitingCheck"] = drafts.TotalCount, ["waitingFinalize"] = checkedVouchers.TotalCount, ["amount"] = drafts.Concat(checkedVouchers).Sum(v => v.TotalAmount) });
+                return new DrillResult
+                {
+                    Rows = rows,
+                    TotalCount = total,
+                    Note = "روز انتظار از تاریخ سند حساب می‌شود.",
+                    Totals = new Dictionary<string, object> { ["waitingCheck"] = drafts, ["waitingFinalize"] = total - drafts, ["amount"] = amount },
+                };
             },
         };
     }

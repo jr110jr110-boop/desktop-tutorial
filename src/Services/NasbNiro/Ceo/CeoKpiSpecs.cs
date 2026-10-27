@@ -49,7 +49,7 @@ namespace Services.NasbNiro.Ceo
             S(CeoKeys.Finance, "vouchersWaiting", "اسناد حسابداری منتظر بررسی یا قطعی‌شدن", CeoUnit.Count, CeoLinks.Vouchers, CeoDrillRef.FinVouchersWaiting),
 
             // sales
-            S(CeoKeys.Sales, CeoKeys.SalesBacklog, "سفارش‌های در جریان (backlog)", CeoUnit.Rial, CeoLinks.SalesOrders, CeoDrillRef.SlOrdersOpen), // the drill lists the open orders by itself (it declares no status parameter)
+            S(CeoKeys.Sales, CeoKeys.SalesBacklog, "سفارش‌های در جریان (backlog)", CeoUnit.Rial, CeoLinks.SalesOrders, CeoDrillRef.SlOrdersOpen), // the drill lists the open orders by itself; the total of its remainingAmount is the sales-order part of the figure (the contracts are not in the list)
             S(CeoKeys.Sales, CeoKeys.SalesPipelineValue, "ارزش خط لوله‌ی فروش", CeoUnit.Rial, CeoLinks.SalesDashboard, CeoDrillRef.SlPipelineByStage),
             S(CeoKeys.Sales, "salesHitRate", "نرخ برد پیشنهادها", CeoUnit.Percent, CeoLinks.SalesProposals, CeoDrillRef.SlHitRateByMonth),
             S(CeoKeys.Sales, "salesProposalsDueSoon", "پیشنهادهای نزدیک به مهلت ارسال", CeoUnit.Count, CeoLinks.SalesInquiries, CeoDrillRef.SlProposalsDue),
@@ -61,7 +61,7 @@ namespace Services.NasbNiro.Ceo
             S(CeoKeys.Projects, "projectsRed", "پروژه‌های قرمز", CeoUnit.Count, CeoLinks.Portfolio, CeoDrillRef.PcPortfolio, Only("status", "danger")),
             S(CeoKeys.Projects, "projectsAmber", "پروژه‌های زرد", CeoUnit.Count, CeoLinks.Portfolio, CeoDrillRef.PcPortfolio, Only("status", "warn")),
             S(CeoKeys.Projects, "pcLateActivities", "فعالیت‌های دارای تأخیر", CeoUnit.Count, CeoLinks.PcActivities, CeoDrillRef.PcLateActivities),
-            S(CeoKeys.Projects, "pcPenaltyExposure", "مواجهه‌ی جریمه‌ی تأخیر", CeoUnit.Rial, CeoLinks.PcPenalties, CeoDrillRef.PcPenaltyExposure),
+            S(CeoKeys.Projects, "pcPenaltyExposure", "ریسک جریمه‌ی تأخیر", CeoUnit.Rial, CeoLinks.PcPenalties, CeoDrillRef.PcPenaltyExposure),
             S(CeoKeys.Projects, "pcGuaranteeAlerts", "ضمانت‌نامه‌های نزدیک به سررسید", CeoUnit.Count, CeoLinks.PcGuarantees, CeoDrillRef.PcGuaranteesExpiring),
 
             // production
@@ -69,13 +69,13 @@ namespace Services.NasbNiro.Ceo
             S(CeoKeys.Production, "machinesDown", "ماشین‌های خراب", CeoUnit.Count, CeoLinks.ProductionMaintenance, CeoDrillRef.MfMachinesDown),
             S(CeoKeys.Production, "maintenanceOverdue", "نگهداری سررسیدگذشته", CeoUnit.Count, CeoLinks.ProductionMaintenance, CeoDrillRef.MfMaintenanceOverdue),
             S(CeoKeys.Production, "overloadWeeks", "هفته‌های بیش از ۱۱۰٪ ظرفیت", CeoUnit.Count, CeoLinks.ProductionSchedule, CeoDrillRef.MfWorkCenterLoad),
-            S(CeoKeys.Production, "oee", "بهره‌وری کلی تجهیزات (OEE)", CeoUnit.Percent, CeoLinks.ProductionOee, CeoDrillRef.MfOeeByWorkCenter),
+            S(CeoKeys.Production, "oee", "اثربخشی کلی تجهیزات (OEE)", CeoUnit.Percent, CeoLinks.ProductionOee, CeoDrillRef.MfOeeByWorkCenter),
 
             // quality
             S(CeoKeys.Quality, CeoKeys.OpenNcrs, "گزارش‌های عدم انطباق باز", CeoUnit.Count, CeoLinks.Ncr, CeoDrillRef.QcNcrOpen),
-            S(CeoKeys.Quality, "overdueNcrs", "عدم انطباق‌های گذشته از مهلت تصمیم", CeoUnit.Count, CeoLinks.Ncr, CeoDrillRef.QcNcrOpen),
+            S(CeoKeys.Quality, "overdueNcrs", "عدم انطباق‌های گذشته از مهلت تصمیم", CeoUnit.Count, CeoLinks.Ncr, CeoDrillRef.QcNcrOpen, Only("onlyOverdue", "true")),
             S(CeoKeys.Quality, "overdueCapas", "اقدام‌های اصلاحی و پیشگیرانه‌ی عقب‌افتاده", CeoUnit.Count, CeoLinks.Capa, CeoDrillRef.QcCapaOverdue),
-            S(CeoKeys.Quality, "calibrationOverdue", "تجهیزات اندازه‌گیری با کالیبراسیون سررسیدگذشته", CeoUnit.Count, CeoLinks.Calibration, CeoDrillRef.QcCalibrationDue),
+            S(CeoKeys.Quality, "calibrationOverdue", "تجهیزات اندازه‌گیری با کالیبراسیون سررسیدگذشته", CeoUnit.Count, CeoLinks.Calibration, CeoDrillRef.QcCalibrationDue, Only("days", "0")),
             S(CeoKeys.Quality, "complaintsOpen", "شکایت‌های باز مشتریان", CeoUnit.Count, CeoLinks.Complaints, CeoDrillRef.QcComplaintsOpen),
             S(CeoKeys.Quality, "pendingHPoints", "نقاط توقف (H) منتظر رهاسازی", CeoUnit.Count, CeoLinks.QualityDashboard, CeoDrillRef.QcHPointsPending),
 
@@ -88,7 +88,7 @@ namespace Services.NasbNiro.Ceo
             // procurement
             S(CeoKeys.Procurement, CeoKeys.OpenPurchaseOrdersAmount, "ارزش سفارش‌های خرید باز", CeoUnit.Rial, CeoLinks.ProcurementOrders, CeoDrillRef.PrOrdersOpen),
             S(CeoKeys.Procurement, "lateOrderLines", "ردیف‌های سفارش خرید دارای تأخیر", CeoUnit.Count, CeoLinks.ProcurementOrders, CeoDrillRef.PrLateLines),
-            S(CeoKeys.Procurement, "purchaseRequestsWaiting", "درخواست‌های خرید منتظر تأیید", CeoUnit.Count, CeoLinks.ProcurementRequests, CeoDrillRef.PrRequestsOpen),
+            S(CeoKeys.Procurement, "purchaseRequestsWaiting", "درخواست‌های خرید منتظر تأیید", CeoUnit.Count, CeoLinks.ProcurementRequests, CeoDrillRef.PrRequestsOpen, Only("status", "submitted")),
             S(CeoKeys.Procurement, "invoicesWaiting", "فاکتورهای تأمین‌کننده منتظر تأیید", CeoUnit.Count, CeoLinks.ProcurementInvoices, CeoDrillRef.PrInvoicesWaiting),
             S(CeoKeys.Procurement, "paymentsWaiting", "درخواست‌های پرداخت منتظر تأیید یا پرداخت", CeoUnit.Count, CeoLinks.ProcurementPayments, CeoDrillRef.PrPaymentsWaiting),
             S(CeoKeys.Procurement, "blockedSuppliers", "تأمین‌کنندگان مسدود", CeoUnit.Count, CeoLinks.ProcurementSuppliers, CeoDrillRef.PrBlockedSuppliers),
@@ -98,12 +98,12 @@ namespace Services.NasbNiro.Ceo
             S(CeoKeys.Service, "serviceOpenRequests", "درخواست‌های خدمات باز", CeoUnit.Count, CeoLinks.ServiceRequests, CeoDrillRef.SvRequestsOpen),
             S(CeoKeys.Service, "serviceUnitsInWarranty", "تجهیزات نصب‌شده در دوره‌ی گارانتی", CeoUnit.Count, CeoLinks.ServiceUnits, CeoDrillRef.SvUnitsByCustomer),
             S(CeoKeys.Service, "serviceWarrantyCostYtd", "هزینه‌ی گارانتی از ابتدای سال", CeoUnit.Rial, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth, YearToDate),
-            S(CeoKeys.Service, "serviceGoodwillWaiting", "درخواست‌های حسن نیت منتظر تصمیم", CeoUnit.Count, CeoLinks.ServiceOrders, CeoDrillRef.SvOrdersOpen),
+            S(CeoKeys.Service, "serviceGoodwillWaiting", "درخواست‌های حسن نیت منتظر تصمیم", CeoUnit.Count, CeoLinks.ServiceOrders, CeoDrillRef.SvOrdersOpen, Only("goodwillOnly", "true")),
             S(CeoKeys.Service, CeoKeys.ServiceSurveyScore, "میانگین رضایت مشتریان", CeoUnit.Count, CeoLinks.ServiceSurveys, CeoDrillRef.SvSurveyByMonth),
 
             // office
             S(CeoKeys.Office, "overdueDecisions", "مصوبات جلسه‌ی معوق", CeoUnit.Count, CeoLinks.OfficeDecisions, CeoDrillRef.OfDecisionsOverdue),
-            S(CeoKeys.Office, "lettersWaiting", "نامه‌های منتظر تأیید و امضا", CeoUnit.Count, CeoLinks.OfficeLetters, CeoDrillRef.OfLettersWaiting),
+            S(CeoKeys.Office, "lettersWaiting", "نامه‌های منتظر تأیید و امضا", CeoUnit.Count, CeoLinks.OfficeLetters, CeoDrillRef.OfLettersWaiting, Only("stage", "approval")),
             S(CeoKeys.Office, "leaveRequestsPending", "درخواست‌های مرخصی و ماموریت منتظر تصمیم", CeoUnit.Count, CeoLinks.OfficeLeaves, CeoDrillRef.OfLeaveRequestsPending),
         };
 

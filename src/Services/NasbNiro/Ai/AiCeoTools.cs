@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using Microsoft.Extensions.DependencyInjection;
+using Services.NasbNiro.Ceo;
 using Services.NasbNiro.Ceo.Drills;
 using ViewModels.NasbNiro.AiDtos;
 using ViewModels.NasbNiro.CeoDtos;
@@ -27,8 +28,8 @@ namespace Services.NasbNiro.Ai
         /// <summary>The rows the tool asks for when the model gives no <c>top</c>.</summary>
         public const int DefaultTop = 20;
 
-        /// <summary>The page of the overview in the front end (the same as the existing CEO dashboard).</summary>
-        public const string OverviewLink = "/finance/ceo-dashboard";
+        /// <summary>The page of the CEO dashboard in the front end.</summary>
+        public const string OverviewLink = CeoLinks.Overview;
 
         /// <summary>Every parameter name a drill declares, with its JSON type and a Persian description for the model (a test checks that the catalogue uses no other name).</summary>
         public static readonly IReadOnlyDictionary<string, (string Type, string Description)> ParameterSchema = new Dictionary<string, (string, string)>
@@ -37,8 +38,8 @@ namespace Services.NasbNiro.Ai
             ["page"] = ("integer", "شماره‌ی صفحه (پیش‌فرض 1)"),
             ["from"] = ("string", "از تاریخ (شمسی 1405/08/01 یا میلادی 2026-10-23) برای کلیدهایی که بازه دارند"),
             ["to"] = ("string", "تا تاریخ (شمسی یا میلادی) برای کلیدهایی که بازه دارند"),
-            ["days"] = ("integer", "تعداد روز برای کلیدهایی که سررسید، مهلت یا پنجره‌ی روزانه دارند (مثلا fin.cheques_due، qc.calibration_due، inv.slow_moving، sv.ltsa_expiring، ai.seat_runs)"),
-            ["kind"] = ("string", "فقط برای fin.cheques_due: issued (صادرشده) یا received (دریافتی)"),
+            ["days"] = ("integer", "تعداد روز برای کلیدهایی که سررسید، مهلت یا پنجره‌ی روزانه دارند (مثلا fin.cheques_due، qc.calibration_due که با 0 فقط سررسیدگذشته‌ها را می‌آورد، inv.slow_moving، sv.ltsa_expiring، ai.seat_runs)"),
+            ["kind"] = ("string", "برای fin.cheques_due: issued (صادرشده) یا received (دریافتی)؛ برای inv.top_movements: receipt (رسید خرید)، issue (مصرف تولید) یا all (همه)"),
             ["by"] = ("string", "گروه‌بندی؛ برای sl.pipeline_by_stage: stage یا product، برای of.attendance_month: day یا unit یا person"),
             ["onlyCritical"] = ("boolean", "فقط برای pc.late_activities: فقط فعالیت‌های مسیر بحرانی"),
             ["weeks"] = ("integer", "فقط برای mf.work_center_load: تعداد هفته‌های پیش‌رو (پیش‌فرض 4)"),
@@ -48,10 +49,12 @@ namespace Services.NasbNiro.Ai
             ["source"] = ("string", "فقط برای qc.documents_waiting: all، inventory یا controlled"),
             ["priority"] = ("string", "فقط برای sv.requests_open: Critical، High، Normal یا Low"),
             ["goodwillOnly"] = ("boolean", "فقط برای sv.orders_open: فقط دستورهای منتظر تصمیم حسن نیت"),
-            ["mineOnly"] = ("boolean", "فقط برای of.letters_waiting: فقط نامه‌های منتظر تایید یا امضای خود کاربر"),
+            ["onlyOverdue"] = ("boolean", "فقط برای qc.ncr_open: فقط گزارش‌هایی که مهلت تصمیمشان گذشته است"),
+            ["stage"] = ("string", "فقط برای of.letters_waiting: approval (در جریان تأیید یا امضا)، signature (امضاشده، منتظر ثبت دبیرخانه)، registered (ثبت‌شده، منتظر ارسال) یا all (هر سه)"),
+            ["mineOnly"] = ("boolean", "فقط برای of.letters_waiting: فقط نامه‌های منتظر تأیید یا امضای خود کاربر"),
             ["type"] = ("string", "فقط برای ai.notes_new: نوع یادداشت، مثلا OfficeLetter، QualityNcr، CeoBrief"),
             ["seat"] = ("string", "برای ai.notes_new و ai.seat_runs: کد صندلی هوش مصنوعی"),
-            ["status"] = ("string", "فقط برای ai.seat_runs: Running، Succeeded، Failed یا Skipped"),
+            ["status"] = ("string", "برای pc.portfolio: danger، warn یا ok؛ برای pr.requests_open: submitted، approved یا all؛ برای of.leave_requests_pending: submitted، approved یا all؛ برای ai.seat_runs: Running، Succeeded، Failed یا Skipped"),
         };
 
         private static string Schema(IEnumerable<(string Name, string Type, string Description, bool Required)> properties)
@@ -74,28 +77,27 @@ namespace Services.NasbNiro.Ai
 
             tools.Add(new AiToolDefinition
             {
-                Name = OverviewTool, Title = "نمای کلی مدیرعامل", RequiredRoles = CeoDrillRoles.Readers, CitationType = "Dashboard", PageLink = OverviewLink,
+                Name = OverviewTool, Title = "نمای کلی مدیرعامل", RequiredRoles = CeoRoles.Readers, CitationType = "Dashboard", PageLink = OverviewLink,
                 Description = "اعداد کلیدی داشبورد مدیرعامل به تفکیک بخش‌ها (مالی، فروش، پروژه‌ها، تولید، کیفیت، انبار، تدارکات، خدمات پس از فروش، دفتر): عنوان فارسی، مقدار، واحد و پیوند هر شاخص؛ بدون پارامتر همه‌ی بخش‌ها.",
                 SchemaJson = Schema(new[] { ("section", "string", "کلید بخش: " + string.Join(", ", CeoModules.Sections) + "؛ اگر نیامد همه‌ی بخش‌ها", false) }),
                 Run = async (c, a, ct) =>
                 {
                     string section = AiTools.Str(a, "section")?.ToLowerInvariant();
-                    if (section != null && !CeoModules.Sections.Contains(section))
-                        throw new AiToolFailureException("بخش ناشناخته است؛ یکی از این‌ها را بدهید: " + string.Join("، ", CeoModules.Sections));
+                    if (section != null && !CeoModules.Sections.Contains(section)) throw new AiToolFailureException(CeoText.UnknownSection);
                     return await c.Get<ICeoSectionNumbersProvider>().GetAsync(section, ct);
                 },
             });
 
             tools.Add(new AiToolDefinition
             {
-                Name = DrillsTool, Title = "فهرست جزئیات داشبورد", RequiredRoles = CeoDrillRoles.Readers, CitationType = "Dashboard", PageLink = null,
+                Name = DrillsTool, Title = "فهرست جزئیات داشبورد", RequiredRoles = CeoRoles.Readers, CitationType = "Dashboard", PageLink = null,
                 Description = "فهرست جزئیات (drill) داشبورد مدیرعامل: کلید، عنوان فارسی و نام پارامترهای هر جدول جزئیات به تفکیک ماژول؛ کلید را به ceo_drill بدهید.",
                 Run = (c, a, ct) => Task.FromResult<object>(CeoDrillCatalog.Compact()),
             });
 
             tools.Add(new AiToolDefinition
             {
-                Name = DrillTool, Title = "جزئیات داشبورد", RequiredRoles = CeoDrillRoles.Readers, CitationType = "Dashboard", PageLink = null,
+                Name = DrillTool, Title = "جزئیات داشبورد", RequiredRoles = CeoRoles.Readers, CitationType = "Dashboard", PageLink = null,
                 Description = "جدول جزئیات پشت یک شاخص داشبورد مدیرعامل (مثلاً qc.ncr_open گزارش‌های عدم انطباق باز، fin.receivables_by_customer مطالبات به تفکیک مشتری، mf.orders_late دستورهای تولید دارای تأخیر): ردیف‌های برتر، تعداد کل و پیوند هر رکورد. کلیدها را از ceo_drills بگیرید؛ top تعداد ردیف است.",
                 SchemaJson = Schema(new[] { ("key", "string", "کلید جزئیات، مثلاً qc.ncr_open", true) }
                     .Concat(ParameterSchema.Select(p => (p.Key, p.Value.Type, p.Value.Description, false)))),

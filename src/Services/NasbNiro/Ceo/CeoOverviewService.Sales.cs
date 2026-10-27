@@ -32,7 +32,7 @@ namespace Services.NasbNiro.Ceo
                 CountText(b.SalesOpenInquiries) + " استعلام باز؛ ارزش هر استعلام: پیشنهاد زنده یا برآورد قیمت"), higherIsBetter: true));
             decimal? hitRate = b.SalesHitRatePercent;
             section.Kpis.Add(Kpi(ctx, "salesHitRate", hitRate, hitRate.HasValue ? CeoRules.HitRate(hitRate.Value) : CeoStatus.Neutral,
-                "برده: " + CeoText.Number(sales.Won) + "؛ باخته: " + CeoText.Number(sales.Lost)));
+                "برنده: " + CeoText.Number(sales.Won) + "؛ بازنده: " + CeoText.Number(sales.Lost)));
             section.Kpis.Add(Kpi(ctx, "salesProposalsDueSoon", b.SalesProposalsDueSoon, CeoRules.ByAny(b.SalesProposalsDueSoon, 3),
                 "مهلت تا سه روز آینده (یا گذشته) و هنوز ارسال نشده"));
             section.Kpis.Add(Kpi(ctx, "salesProposalsWaiting", b.SalesProposalsWaitingApproval, CeoRules.ByCount(b.SalesProposalsWaitingApproval, 1, 5),
@@ -61,8 +61,8 @@ namespace Services.NasbNiro.Ceo
                 .Select(p => new { p.Status, p.ResultAt }).ToListAsync(ct);
             IEnumerable<DateTime> Days(SlProposalStatus status) => results.Where(r => r.Status == status).Select(r => r.ResultAt.Value.LocalDateTime.Date);
             section.Charts.Add(WithDrillParams(Chart("proposalResults", "نتیجه‌ی پیشنهادها به تفکیک ماه", CeoKind.StackedBar, CeoUnit.Count, ctx.Labels, CeoLinks.SalesProposals, CeoDrillRef.SlHitRateByMonth,
-                "ماهِ ثبت نتیجه؛ نرخ برد = برده تقسیم بر مجموع برده و باخته.",
-                Series("برده", CountByMonth(ctx, Days(SlProposalStatus.Won)), CeoRole.Positive), Series("باخته", CountByMonth(ctx, Days(SlProposalStatus.Lost)), CeoRole.Negative)), ctx.LatestMonth()));
+                "ماهِ ثبت نتیجه؛ نرخ برد = برنده تقسیم بر مجموع برنده و بازنده.",
+                Series("برنده", CountByMonth(ctx, Days(SlProposalStatus.Won)), CeoRole.Positive), Series("بازنده", CountByMonth(ctx, Days(SlProposalStatus.Lost)), CeoRole.Negative)), ctx.LatestMonth()));
             return section;
         }
     }

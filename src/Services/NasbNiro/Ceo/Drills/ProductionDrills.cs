@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using Entities.Model.NasbNiro.Production;
 using Services.NasbNiro.Production;
@@ -26,8 +25,6 @@ namespace Services.NasbNiro.Ceo.Drills
             yield return OeeByWorkCenter();
         }
 
-        private static string Id(int id) => id.ToString(CultureInfo.InvariantCulture);
-
         private static string OrderStatus(MfOrderStatus status) => status switch
         {
             MfOrderStatus.Draft => "پیش‌نویس",
@@ -42,13 +39,13 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static DrillDefinition OrdersLate() => new DrillDefinition
         {
-            Key = "mf.orders_late", Module = M, Title = "دستورهای تولید دارای تاخیر",
-            Description = "دستورهای تولید آزادشده و در حال تولید که آخرین اجرای زمان‌بند پایان پیش‌بینی‌شده‌شان را دیرتر از تاریخ نیاز یافته است (هم‌پایه با داشبورد تولید)؛ بیشترین روز تاخیر اول.",
+            Key = "mf.orders_late", Module = M, Title = "دستورهای تولید دارای تأخیر",
+            Description = "دستورهای تولید آزادشده و در حال تولید که آخرین اجرای زمان‌بند پایان پیش‌بینی‌شده‌شان را دیرتر از تاریخ نیاز یافته است (هم‌پایه با داشبورد تولید)؛ بیشترین روز تأخیر اول.",
             Link = "/production/orders", RecordType = "ProductionOrder", RecordLabel = "دستور تولید",
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Text("workOrderCode", "دستور کار"), Col.Text("itemCode", "کد کالا"), Col.Text("itemTitle", "کالا"), Col.Num("quantity", "تعداد"), Col.Status("status", "وضعیت"),
-                Col.Date("needDate", "تاریخ نیاز"), Col.Date("plannedFinish", "پایان پیش‌بینی"), Col.Num("daysLate", "روز تاخیر"), Col.Num("operationsDone", "عملیات انجام‌شده"), Col.Num("operationCount", "کل عملیات"),
+                Col.Date("needDate", "تاریخ نیاز"), Col.Date("plannedFinish", "پایان پیش‌بینی"), Col.Num("daysLate", "روز تأخیر"), Col.Num("operationsDone", "عملیات انجام‌شده"), Col.Num("operationCount", "کل عملیات"),
                 Col.Link(),
             },
             Run = async (c, ct) =>
@@ -62,16 +59,16 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["id"] = o.Id, ["number"] = o.Number, ["workOrderCode"] = o.WorkOrderCode, ["itemCode"] = o.ItemCode, ["itemTitle"] = o.ItemTitle, ["quantity"] = o.Quantity, ["status"] = OrderStatus(o.Status),
                     ["needDate"] = o.NeedDateText, ["plannedFinish"] = o.PlannedFinishText, ["daysLate"] = o.DaysLate, ["operationsDone"] = o.OperationsDone, ["operationCount"] = o.OperationCount,
                 }).ToList();
-                return DrillResult.Slice(rows, c, "تاخیر نتیجه‌ی آخرین اجرای زمان‌بند ظرفیت محدود است.", new Dictionary<string, object> { ["daysLate"] = late.Sum(o => o.DaysLate) });
+                return DrillResult.Slice(rows, c, "تأخیر نتیجه‌ی آخرین اجرای زمان‌بند ظرفیت محدود است.", new Dictionary<string, object> { ["daysLate"] = late.Sum(o => o.DaysLate) });
             },
         };
 
         private static DrillDefinition OrdersByStatus() => new DrillDefinition
         {
             Key = "mf.orders_by_status", Module = M, Title = "دستورهای تولید به تفکیک وضعیت",
-            Description = "تعداد دستورهای تولید در هر وضعیت (پیش‌نویس، آزادشده، در حال تولید، تکمیل‌شده، بسته‌شده، لغوشده) و تعداد دارای تاخیر در وضعیت‌های باز.",
+            Description = "تعداد دستورهای تولید در هر وضعیت (پیش‌نویس، آزادشده، در حال تولید، تکمیل‌شده، بسته‌شده، لغوشده) و تعداد دارای تأخیر در وضعیت‌های باز.",
             Link = "/production/orders",
-            Columns = new[] { Col.Status("status", "وضعیت"), Col.Num("count", "تعداد"), Col.Num("late", "دارای تاخیر"), Col.Pct("sharePercent", "سهم از کل") },
+            Columns = new[] { Col.Status("status", "وضعیت"), Col.Num("count", "تعداد"), Col.Num("late", "دارای تأخیر"), Col.Pct("sharePercent", "سهم از کل") },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProductionRoles.MasterReaders);
@@ -85,7 +82,7 @@ namespace Services.NasbNiro.Ceo.Drills
                 }
                 int total = counts.Sum(x => x.Count);
                 List<Row> rows = counts.Select(x => new Row { ["status"] = OrderStatus(x.Status), ["count"] = x.Count, ["late"] = x.Late, ["sharePercent"] = Percent(x.Count, total) }).ToList();
-                return DrillResult.Slice(rows, c, "تاخیر فقط برای دستورهای آزادشده و در حال تولید شمرده می‌شود.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "تأخیر فقط برای دستورهای آزادشده و در حال تولید شمرده می‌شود.", new Dictionary<string, object>
                 {
                     ["total"] = total, ["open"] = counts.Where(x => OpenStatuses.Contains(x.Status)).Sum(x => x.Count), ["late"] = counts.Sum(x => x.Late),
                 });
@@ -170,12 +167,12 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition MaintenanceOverdue() => new DrillDefinition
         {
             Key = "mf.maintenance_overdue", Module = M, Title = "سفارش‌های نگهداری معوق",
-            Description = "سفارش‌های نگهداری باز یا در حال انجام که سررسیدشان گذشته است (هم‌پایه با «نگهداری معوق» داشبورد)؛ بیشترین تاخیر اول.",
+            Description = "سفارش‌های نگهداری باز یا در حال انجام که سررسیدشان گذشته است (هم‌پایه با «نگهداری معوق» داشبورد)؛ بیشترین تأخیر اول.",
             Link = "/production/maintenance", RecordType = "MaintenanceOrder", RecordLabel = "سفارش نگهداری",
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Text("machine", "ماشین"), Col.Text("kind", "نوع"), Col.Text("task", "شرح کار"), Col.Status("status", "وضعیت"), Col.Date("dueDate", "سررسید"),
-                Col.Num("daysOverdue", "روز تاخیر"), Col.Num("estimatedHours", "ساعت برآوردی"), Col.Link(),
+                Col.Num("daysOverdue", "روز تأخیر"), Col.Num("estimatedHours", "ساعت برآوردی"), Col.Link(),
             },
             Run = async (c, ct) =>
             {

@@ -326,7 +326,7 @@ namespace MsTests
         /// Answers every query as an empty database does: no rows, and the one row of a scalar query (a count is 0, an existence test is false, a sum or a maximum is null).
         /// The queries of the tables in <see cref="SampleTables"/> get one row of sample values, so that the follow-up queries that depend on a first result run too.
         /// </summary>
-        private sealed class EmptyDatabase : DbCommandInterceptor
+        internal sealed class EmptyDatabase : DbCommandInterceptor
         {
             public List<string> Commands { get; } = new List<string>();
 
@@ -371,7 +371,7 @@ namespace MsTests
         private static ServiceProvider _sqlServer;
         private static EmptyDatabase _empty;
 
-        private static ApplicationDbContext SqlServerContext(out EmptyDatabase empty, out IServiceScope scope)
+        internal static ApplicationDbContext SqlServerContext(out EmptyDatabase empty, out IServiceScope scope)
         {
             lock (FixtureLock)
             {
@@ -1588,14 +1588,21 @@ namespace MsTests
 
                 CeoOverviewDto overview = (await Overview(context, "CEO", Dashboard(), cache, log).GetOverviewAsync(true, CancellationToken.None)).Data;
 
-                // review item 16, the figures: the red and the amber projects and the two figures of the year so far; every other figure opens its drill unfiltered
-                // (the backlog opens sl.orders_open without parameters: that drill lists the open orders by itself and declares no status parameter)
+                // the figures whose drill has to be filtered to list the records the figure counts (review item 6 of part A2): the red and the amber projects, the two figures of the year so far
+                // and the five counts that are a part of what their drill lists by default (the purchase requests waiting for approval and not the approved ones too, the letters in approval,
+                // the goodwill orders, the overdue NCRs, the instruments whose calibration is overdue and not only due soon); every other figure opens its drill unfiltered
+                // (the backlog opens sl.orders_open without parameters: that drill lists the open orders by itself, and the total of its remainingAmount is the sales-order part of the figure)
                 var kpis = new Dictionary<string, Dictionary<string, string>>
                 {
                     ["projectsRed"] = Params("status", "danger"),
                     ["projectsAmber"] = Params("status", "warn"),
                     ["netProfitYtd"] = Params("from", yearStart, "to", day),
                     ["serviceWarrantyCostYtd"] = Params("from", yearStart, "to", day),
+                    ["purchaseRequestsWaiting"] = Params("status", "submitted"),
+                    ["lettersWaiting"] = Params("stage", "approval"),
+                    ["serviceGoodwillWaiting"] = Params("goodwillOnly", "true"),
+                    ["overdueNcrs"] = Params("onlyOverdue", "true"),
+                    ["calibrationOverdue"] = Params("days", "0"),
                 };
                 foreach (CeoKpiDto kpi in overview.Sections.SelectMany(s => s.Kpis)) AssertParams(kpis.TryGetValue(kpi.Key, out Dictionary<string, string> expected) ? expected : null, kpi.DrillParams, "KPI " + kpi.Key);
                 AssertParams(null, overview.Headline.First(k => k.Key == "salesBacklog").DrillParams, "the headline copy of salesBacklog");
@@ -1603,12 +1610,14 @@ namespace MsTests
                 Assert.AreEqual(CeoDrillRef.PcPortfolio, Kpi(overview, "projectsAmber").DrillKey);
                 Assert.AreEqual(CeoDrillRef.SlOrdersOpen, Kpi(overview, "salesBacklog").DrillKey);
 
-                // the charts by month open the drill on the latest month so far (the first day of the Persian month to today) when the drill has a period; the five whose drills have none keep the open drill
+                // the charts by month open the drill on the latest month so far (the first day of the Persian month to today) when the drill has a period; the five whose drills have none keep the open drill.
+                // The stock flow chart draws the receipts and the issues of the month, and its drill lists the receipts only when it is told so (kind=receipt): the chart opens the list of what it shows first
                 string[] withPeriod = { "revenueCost", "proposalResults", "oeeByWorkCenter", "stockFlowByMonth", "warrantyCostByMonth", "surveyScoreByMonth", "attendanceMonth" };
                 string[] withoutPeriod = { "ordersByMonth", "ncrByMonth", "ordersAndPayments", "requestsByMonth", "cashFlow" };
                 List<CeoChartDto> charts = overview.Sections.SelectMany(s => s.Charts).ToList();
                 Assert.AreEqual(21, charts.Count);
-                foreach (CeoChartDto chart in charts) AssertParams(withPeriod.Contains(chart.Key) ? Params("from", monthStart, "to", day) : null, chart.DrillParams, "chart " + chart.Key);
+                foreach (CeoChartDto chart in charts)
+                    AssertParams(chart.Key == "stockFlowByMonth" ? Params("from", monthStart, "to", day, "kind", "receipt") : withPeriod.Contains(chart.Key) ? Params("from", monthStart, "to", day) : null, chart.DrillParams, "chart " + chart.Key);
                 CollectionAssert.AreEquivalent(withPeriod, charts.Where(c => c.DrillParams != null).Select(c => c.Key).ToArray());
                 foreach (string key in withoutPeriod) Assert.IsNotNull(charts.FirstOrDefault(c => c.Key == key), key + " is a chart of the overview");
                 Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));

@@ -10,11 +10,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Routing;
+using DataLayer.Context;
+using Entities.Model.NasbNiro.Ai;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Ai;
 using Services.NasbNiro.Ceo.Drills;
+using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.AiDtos;
 
 namespace MsTests
@@ -74,6 +77,7 @@ namespace MsTests
             {
                 "/ceo", "/ceo/", "/production/orders", "/finance/ceo-dashboard", "/project-control/portfolio", "/sales/orders/12?tab=lines", "/AI/notes", "/fn/ledger",
                 "/office/letters#top", "/quality/ncr/5", "/inventory", "/procurement/requests", "/service/requests/3", "  /ceo/drill  ", "/ceo\t",
+                "/ceo?tab=1&x=a.b-c_d", "/ceo#section-2", "/ceo?a=1#b", "/ceo?", "/ceo/" + new string('a', 115),
             })
             {
                 Assert.IsTrue(AiUiTools.TryCheckLink(link, out string clean, out string module), link);
@@ -96,6 +100,9 @@ namespace MsTests
                 null, "", "   ", "/", "ceo", "http://evil", "https://evil.com/ceo", "//evil.com", "//ceo", "/\\evil.com", "javascript:alert(1)", "data:text/html,x", "mailto:a@b.c", "file:///etc/passwd",
                 "/ceox", "/ceo-secret", "/finances", "/admin", "/login", "/Accounts/login", "/ceo/../admin", "/ceo/./x", "/production/%2e%2e/admin", "/ceo x", "/ceo\n/x", "/ce\to", "/ceo<script>",
                 "/ceo\"x", "/ceo'x", "/ceo`x", "\\ceo", "../ceo", "/ceo/..", new string('a', 400), "/ceo/" + new string('a', 400),
+                // review item 11: a query or a fragment of letters, digits and = & _ . - only; at most 120 characters; no invisible formatting character anywhere
+                "/ceo/" + new string('a', 116), "/ceo?x=\u0661\u0662\u0663", "/ceo?x=%41", "/ceo?x=a b", "/ceo?q=\u0628", "/ceo#a/b", "/ceo?a=b?c", "/ceo?a=b#c#d", "/ceo?x=(1)", "/ceo?x=1;2", "/ceo?x=\u06F1",
+                "/ceo\u200c", "/ceo/x\u200c", "/ceo\u200b", "/ceo\u200e", "/ceo\u202e/x", "/c\u200ceo", "/ceo?x=1\u200c", "/ceo#\u2066", "/ceo\u00ad",
             })
                 Assert.IsFalse(AiUiTools.TryCheckLink(link, out string clean, out string module), "[" + link + "]");
             Assert.IsFalse(AiUiTools.TryCheckLink("http://evil", out string c, out string m));
@@ -150,7 +157,19 @@ namespace MsTests
             var (result, json) = await Call(registry, "ui_navigate", "{\"link\":\"/production/orders\"}");
             AssertDone(result, json, "navigate");
             Assert.AreEqual("/production/orders", result.Action.Link);
-            StringAssert.Contains(json.GetProperty("message").GetString(), "/production/orders");
+            // the message names the part of the system and repeats neither the link nor anything in it
+            string message = json.GetProperty("message").GetString();
+            StringAssert.Contains(message, "تولید");
+            Assert.IsFalse(message.Contains("/") || message.Contains("production") || message.Contains("orders"), message);
+
+            // a link with a query or an id: the front end gets it whole, the model gets the module title only
+            (result, json) = await Call(registry, "ui_navigate", "{\"link\":\"/ceo?x=48200000000\"}");
+            AssertDone(result, json, "navigate");
+            Assert.AreEqual("/ceo?x=48200000000", result.Action.Link);
+            Assert.AreEqual("داشبورد مدیرعامل", AiUiTools.Routes.First(r => r.Prefix == "/ceo").Title);
+            StringAssert.Contains(json.GetProperty("message").GetString(), "داشبورد مدیرعامل");
+            Assert.IsFalse(result.Json.Any(char.IsDigit), "no argument of the call is repeated to the model: " + result.Json);
+            Assert.IsFalse(result.Json.Contains("?") || result.Json.Contains("="), result.Json);
 
             foreach (string evil in new[] { "http://evil", "//evil.com", "/admin", "javascript:alert(1)", "/ceo/../x", "" })
             {
@@ -329,7 +348,7 @@ namespace MsTests
 
         private static LlmResult Say(string text) => new LlmResult { Ok = true, Model = "fake", Content = text };
 
-        private static Task<AiLoopResult> Run(ILlmClient llm, ToolRegistry registry, string question) =>
+        private static Task<AiLoopResult> Run(ILlmClient llm, IToolRegistry registry, string question) =>
             AiChatLoop.RunAsync(llm, registry, new AnswerVerifier(), new List<LlmMessage> { new LlmMessage { Role = "user", Content = question } }, new List<LlmToolSpec>(), question,
                 new List<string>(), 30, CancellationToken.None);
 
@@ -389,8 +408,9 @@ namespace MsTests
                 Theme = " Dark ",
             };
             string line = AiUiTools.ContextLine(ui);
-            StringAssert.Contains(line, "/ceo.");
+            StringAssert.Contains(line, "مسیر /ceo (داشبورد مدیرعامل).");
             Assert.IsFalse(line.Contains("tab=1"), "the query of the page is not told to the model");
+            Assert.IsFalse(line.Contains("#x"));
             StringAssert.Contains(line, "finance (مالی)");
             StringAssert.Contains(line, "quality (کیفیت)");
             Assert.AreEqual(1, line.Split(new[] { "finance (" }, StringSplitOptions.None).Length - 1, "a section once");
@@ -399,10 +419,203 @@ namespace MsTests
             StringAssert.Contains(line, "تیره");
 
             Assert.IsFalse(AiUiTools.ContextLine(new AiUiContextDto { Page = "http://evil/ceo" }).Contains("evil"));
+
+            // review item 11: only the entry of the allow-list the page matched and its Persian title reach the prompt, never the path as sent, nor the ids in it
+            string deep = AiUiTools.ContextLine(new AiUiContextDto { Page = "/production/orders/12345?id=777&tab=lines#top" });
+            StringAssert.Contains(deep, "مسیر /production (تولید).");
+            foreach (string leak in new[] { "12345", "777", "orders", "tab", "lines", "top" }) Assert.IsFalse(deep.Contains(leak), leak + " in " + deep);
+            // a page with an invisible character or a query outside the alphabet is no page at all
+            foreach (string page in new[] { "/ceo\u200c", "/ceo\u202e", "/ceo?x=\u0661", "/ceo?x=%41", "/ceo " + new string('a', 130), "/ceo/" + new string('a', 120) })
+                Assert.AreEqual(string.Empty, AiUiTools.ContextLine(new AiUiContextDto { Page = page }), page);
+            Assert.IsFalse(AiUiTools.PromptAddition(new AiUiContextDto { Page = "/ceo\u202eevil" }).Contains("evil"));
             Assert.AreEqual(string.Empty, AiUiTools.ContextLine(new AiUiContextDto { Page = "http://evil/ceo", Sections = new List<string> { "x" }, Theme = "pink" }));
             StringAssert.Contains(AiUiTools.ContextLine(new AiUiContextDto { Theme = "light" }), "روشن");
             StringAssert.Contains(AiUiTools.PromptAddition(ui), AiUiTools.PromptParagraph);
             StringAssert.EndsWith(AiUiTools.PromptAddition(ui), line);
+        }
+
+        // ------------------------------------------------------------------------------------------ review items 1 and 3: the analysis and the numbers in links
+
+        /// <summary>A model that records what it was offered and what it saw at each turn.</summary>
+        private sealed class RecordingLlm : ILlmClient
+        {
+            private readonly Queue<LlmResult> _answers;
+            public readonly List<IReadOnlyList<LlmToolSpec>> Offered = new List<IReadOnlyList<LlmToolSpec>>();
+            public readonly List<List<LlmMessage>> Seen = new List<List<LlmMessage>>();
+
+            public RecordingLlm(params LlmResult[] answers)
+            {
+                _answers = new Queue<LlmResult>(answers);
+            }
+
+            public Task<LlmResult> CompleteAsync(IReadOnlyList<LlmMessage> messages, IReadOnlyList<LlmToolSpec> tools, CancellationToken ct)
+            {
+                Offered.Add(tools);
+                Seen.Add(messages.Select(m => new LlmMessage { Role = m.Role, Content = m.Content, ToolCallId = m.ToolCallId, ToolCalls = m.ToolCalls }).ToList());
+                return Task.FromResult(_answers.Dequeue());
+            }
+        }
+
+        private sealed class NoSpeechToText : ISpeechToText
+        {
+            public Task<SttResult> TranscribeAsync(byte[] audio, string fileName, string contentType, CancellationToken ct) => Task.FromResult(new SttResult { Ok = false });
+        }
+
+        private static AiChatService ChatService(IUnitOfWork uow, CeoFakeUser user, ILlmClient llm) =>
+            new AiChatService(uow, user, llm, new ToolRegistry(new CeoOneService(), user), new AnswerVerifier(), new AiAudit(uow, user), new NoSpeechToText(),
+                new FakeTts { Handler = (text, ct) => Task.FromResult(new TtsResult { Ok = true, Audio = WavBytes }) }, new PersianNumberWords(), null);
+
+        [TestMethod]
+        public async Task The_Analysis_Of_The_Dashboard_Gets_No_UI_Tool_No_UI_Paragraph_And_Returns_No_Action()
+        {
+            using ServiceProvider provider = CeoOverviewServiceTests.InMemory();
+            using IServiceScope scope = provider.CreateScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var ceo = new CeoFakeUser("CEO");
+
+            // the default question of the analysis button says «... را تحلیل کن»; a model that is told about ui_analyze answers it by asking for the analysis again
+            var llm = new RecordingLlm(Calls(("ui_analyze", "{\"sectionKey\":\"quality\"}")), Say("تحلیل بخش کیفیت انجام شد."));
+            var answer = await ChatService(uow, ceo, llm).RunAnalysisAsync(new AiAnalysisRequest { SectionKey = "quality", Question = CeoAnalysisService.DefaultQuestion("quality") }, CancellationToken.None);
+            Assert.IsTrue(answer.Success, answer.Message);
+            AiChatResponseDto response = answer.Data;
+            Assert.IsFalse(response.Degraded);
+            Assert.AreEqual(0, response.Actions.Count, "the analysis returns no action: the front end would run the analysis again, endlessly");
+
+            // the model was offered the data tools of the dashboard and none of the UI tools, and its prompt does not speak of them
+            Assert.AreEqual(2, llm.Offered.Count);
+            List<string> offered = llm.Offered[0].Select(t => t.Name).ToList();
+            CollectionAssert.Contains(offered, "ceo_overview");
+            CollectionAssert.Contains(offered, "ceo_drill");
+            Assert.IsFalse(offered.Any(AiUiTools.IsUiTool), string.Join(",", offered));
+            string system = llm.Seen[0][0].Content;
+            Assert.AreEqual("system", llm.Seen[0][0].Role);
+            Assert.AreEqual(AiChatService.AnalysisSeedPromptText, system, "the prompt of the analysis, with no paragraph added");
+            Assert.IsFalse(system.Contains("ui_analyze") || system.Contains(AiUiTools.PromptParagraph));
+
+            // the call the model made anyway was answered as a call of a tool that does not exist
+            LlmMessage toolMessage = llm.Seen[1].Last();
+            Assert.AreEqual("tool", toolMessage.Role);
+            Assert.AreEqual(ToolRegistry.UnknownResult("ui_analyze").Json, toolMessage.Content);
+            Assert.AreEqual(1, response.ToolCalls.Count);
+            Assert.AreEqual("ui_analyze", response.ToolCalls[0].Name);
+            Assert.IsFalse(response.ToolCalls[0].Allowed);
+
+            // the same call in the chat is an interactive one: five tools, the paragraph and the action
+            var chatLlm = new RecordingLlm(Calls(("ui_analyze", "{\"sectionKey\":\"quality\"}")), Say("تحلیل بخش کیفیت اجرا می‌شود."));
+            var chat = await ChatService(uow, ceo, chatLlm).ChatAsync(new AiChatRequestDto { Text = "تحلیل بخش کیفیت را اجرا کن" }, CancellationToken.None);
+            Assert.IsTrue(chat.Success, chat.Message);
+            Assert.AreEqual(1, chat.Data.Actions.Count);
+            Assert.AreEqual("analyze", chat.Data.Actions[0].Type);
+            Assert.AreEqual("quality", chat.Data.Actions[0].SectionKey);
+            CollectionAssert.IsSubsetOf(Names, chatLlm.Offered[0].Select(t => t.Name).ToList());
+            StringAssert.EndsWith(chatLlm.Seen[0][0].Content, AiUiTools.PromptParagraph);
+        }
+
+        [TestMethod]
+        public async Task A_Run_Without_A_Screen_Neither_Offers_Nor_Executes_A_UI_Tool()
+        {
+            var ceo = new CeoFakeUser("CEO");
+            var inner = new ToolRegistry(new CeoOneService(), ceo);
+            var quiet = new NonInteractiveTools(inner);
+            CollectionAssert.AreEquivalent(inner.Offered().Where(t => !AiUiTools.IsUiTool(t.Name)).Select(t => t.Name).ToList(), quiet.Offered().Select(t => t.Name).ToList());
+            Assert.IsTrue(inner.Offered().Any(t => AiUiTools.IsUiTool(t.Name)));
+            Assert.IsFalse(quiet.Offered().Any(t => AiUiTools.IsUiTool(t.Name)));
+            foreach (string name in Names)
+            {
+                Assert.IsNotNull(inner.Find(name), name);
+                Assert.IsNull(quiet.Find(name), name);
+                AiToolResult result = await quiet.ExecuteAsync(name, "{\"link\":\"/ceo\",\"sectionKey\":\"quality\",\"what\":\"alerts\",\"key\":\"qc.ncr_open\"}", CancellationToken.None);
+                Assert.IsFalse(result.Allowed, name);
+                Assert.IsNull(result.Action, name);
+                Assert.AreEqual(ToolRegistry.UnknownResult(name).Json, result.Json, name);
+            }
+            // a data tool passes through
+            AiToolResult drills = await quiet.ExecuteAsync("ceo_drills", "{}", CancellationToken.None);
+            Assert.IsTrue(drills.Allowed);
+            StringAssert.Contains(drills.Json, "qc.ncr_open");
+            Assert.IsNotNull(quiet.Find("ceo_drill"));
+        }
+
+        /// <summary>A registry whose tools answer with a prepared JSON (the name of the tool and its arguments in, the JSON out).</summary>
+        private sealed class CannedRegistry : IToolRegistry
+        {
+            private readonly Func<string, string, string> _json;
+
+            public CannedRegistry(Func<string, string, string> json)
+            {
+                _json = json;
+            }
+
+            public IReadOnlyList<AiToolDefinition> Offered() => AiUiTools.Build();
+
+            public AiToolDefinition Find(string name) => AiUiTools.Build().FirstOrDefault(t => t.Name == name);
+
+            public Task<AiToolResult> ExecuteAsync(string name, string argumentsJson, CancellationToken ct) =>
+                Task.FromResult(new AiToolResult { Name = name, Title = name, Allowed = true, Json = _json(name, argumentsJson) });
+        }
+
+        [TestMethod]
+        public async Task A_Number_Put_Into_A_Link_Is_No_Evidence_For_An_Answer()
+        {
+            // the model opens a page whose link carries a number and then answers with that number: the tool repeats nothing of the link, so the number is the model's own
+            var llm = new ScriptedLlm(Calls(("ui_navigate", "{\"link\":\"/ceo?x=48200000000\"}")), Say("نقدینگی شرکت 48200000000 ریال است."));
+            AiLoopResult loop = await Run(llm, Registry("CEO"), "نقدینگی شرکت چقدر است؟");
+            Assert.AreEqual(1, loop.Results.Count);
+            Assert.IsTrue(loop.Results[0].Result.Allowed);
+            Assert.IsNotNull(loop.Results[0].Result.Action, "the page is opened");
+            Assert.IsFalse(loop.Results[0].Result.Json.Any(char.IsDigit), loop.Results[0].Result.Json);
+            Assert.IsFalse(loop.Verified, "the number is not in any result of a data tool");
+            CollectionAssert.Contains(loop.Verification.OffendingTokens, "48200000000");
+            Assert.AreNotEqual("نقدینگی شرکت 48200000000 ریال است.", loop.Answer, "the fixed text replaces the answer");
+
+            // even when a result of a UI tool does hold the number (another implementation, an older version of the tool), it is no evidence
+            var echo = new CannedRegistry((name, args) => "{\"ok\":true,\"message\":\"صفحه " + args.Replace("\"", "'") + " باز می‌شود\"}");
+            llm = new ScriptedLlm(Calls(("ui_navigate", "{\"link\":\"/ceo?x=48200000000\"}")), Say("نقدینگی شرکت 48200000000 ریال است."));
+            loop = await Run(llm, echo, "نقدینگی شرکت چقدر است؟");
+            StringAssert.Contains(loop.Results[0].Result.Json, "48200000000");
+            Assert.IsFalse(loop.Verified);
+            CollectionAssert.Contains(loop.Verification.OffendingTokens, "48200000000");
+
+            // the control: the same number in the result of a data tool is evidence
+            var data = new CannedRegistry((name, args) => "{\"cash\":48200000000}");
+            llm = new ScriptedLlm(Calls(("cash_position", "{}")), Say("نقدینگی شرکت 48200000000 ریال است."));
+            loop = await Run(llm, data, "نقدینگی شرکت چقدر است؟");
+            Assert.IsTrue(loop.Verified);
+            Assert.AreEqual(0, loop.Verification.OffendingTokens.Count);
+        }
+
+        [TestMethod]
+        public async Task The_Result_Of_A_UI_Tool_In_An_Earlier_Turn_Is_No_Evidence_Either()
+        {
+            using ServiceProvider provider = CeoOverviewServiceTests.InMemory();
+            using IServiceScope scope = provider.CreateScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var ceo = new CeoFakeUser("CEO");
+
+            // an older conversation: a UI tool result that echoed the link (as the first version of the tool did) and the result of a data tool
+            DateTimeOffset now = DateTimeOffset.Now;
+            var conversation = new AiConversation { UserId = ceo.UserId, Title = "t", CreatedAt = now, LastAt = now };
+            uow.Set<AiConversation>().Add(conversation);
+            uow.Set<AiMessage>().AddRange(
+                new AiMessage { Conversation = conversation, Role = AiMessageRole.User, Text = "صفحه را باز کن", CreatedAt = now },
+                new AiMessage { Conversation = conversation, Role = AiMessageRole.Tool, ToolName = "ui_navigate", Text = "{\"ok\":true,\"message\":\"صفحه /ceo?x=48200000000 باز می‌شود\"}", CreatedAt = now },
+                new AiMessage { Conversation = conversation, Role = AiMessageRole.Tool, ToolName = "cash_position", Text = "{\"cash\":777000}", CreatedAt = now },
+                new AiMessage { Conversation = conversation, Role = AiMessageRole.Assistant, Text = "باز شد.", CreatedAt = now });
+            await uow.SaveChangesAsync();
+
+            var llm = new RecordingLlm(Say("اعداد: 48200000000 و 777000."));
+            var answer = await ChatService(uow, ceo, llm).ChatAsync(new AiChatRequestDto { Text = "اعداد را بگو", ConversationId = conversation.Id }, CancellationToken.None);
+            Assert.IsTrue(answer.Success, answer.Message);
+            Assert.IsFalse(answer.Data.Verified, "48200000000 came from a link, not from the company");
+            AiAuditEvent unverified = uow.Set<AiAuditEvent>().Single(e => e.Kind == AiAuditKinds.Unverified);
+            StringAssert.Contains(unverified.Detail, "48200000000");
+            Assert.IsFalse(unverified.Detail.Contains("777000"), "the result of the data tool in the same window is evidence: " + unverified.Detail);
+
+            // the control: the number of the data tool alone is fine
+            llm = new RecordingLlm(Say("نقدینگی 777000 ریال بود."));
+            answer = await ChatService(uow, ceo, llm).ChatAsync(new AiChatRequestDto { Text = "نقدینگی را دوباره بگو", ConversationId = conversation.Id }, CancellationToken.None);
+            Assert.IsTrue(answer.Success, answer.Message);
+            Assert.IsTrue(answer.Data.Verified);
         }
 
         /// <summary>The shape of the voice form of the controller (the same two properties; the controller lives in the web project).</summary>

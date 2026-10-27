@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Finance;
@@ -46,8 +47,8 @@ namespace Services.NasbNiro.Ceo.Drills
 
         private static string RequestState(MaterialRequestStatus status) => status switch
         {
-            MaterialRequestStatus.Submitted => "ارسال‌شده، منتظر تایید",
-            MaterialRequestStatus.Approved => "تاییدشده، منتظر صدور حواله",
+            MaterialRequestStatus.Submitted => "ارسال‌شده، منتظر تأیید",
+            MaterialRequestStatus.Approved => "تأییدشده، منتظر صدور حواله",
             MaterialRequestStatus.Draft => "پیش‌نویس",
             MaterialRequestStatus.Rejected => "ردشده",
             _ => "بسته‌شده",
@@ -60,7 +61,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition ItemsBelowMinimum() => new DrillDefinition
         {
             Key = "inv.items_below_minimum", Module = M, Title = "کالاهای زیر حداقل موجودی",
-            Description = "کالاهای فعالی که حداقل موجودی دارند و موجودی کل‌شان از آن کمتر است (هم‌پایه با شمارنده‌ی داشبورد)؛ کمترین پوشش اول. کمبود = حداقل منهای موجودی؛ پوشش = موجودی به حداقل.",
+            Description = "کالاهای فعالی که حداقل موجودی دارند و موجودی کل‌شان بدون انبار ضایعات از آن کمتر است (هم‌پایه با شمارنده‌ی داشبورد)؛ کمترین پوشش اول. کمبود = حداقل منهای موجودی؛ پوشش = موجودی به حداقل.",
             Link = "/inventory/stock", RecordType = "Item", RecordLabel = "کالا",
             Columns = new[]
             {
@@ -69,15 +70,24 @@ namespace Services.NasbNiro.Ceo.Drills
             },
             Run = async (c, ct) =>
             {
-                List<ItemStockDto> low = Take(await c.Get<IInventoryStockService>().GetItemStocksAsync(new StockQuery { LowStockOnly = true, PageSize = 0 }, ct)).Where(i => i.MinStock > 0).ToList();
+                var uow = c.Get<IUnitOfWork>();
+                // the rule of the counter of the dashboard (CeoDashboardService): the active items with a minimum whose stock, scrap warehouses left out, is below it
+                IQueryable<StockBalance> balances = uow.Set<StockBalance>().AsNoTracking().Where(b => b.Warehouse.Kind != WarehouseKind.Scrap);
+                var low = await uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted && i.IsActive && i.MinStock > 0)
+                    .Select(i => new
+                    {
+                        i.Id, i.Code, i.Title, i.Unit, Group = i.ItemGroup.Title, i.MinStock,
+                        OnHand = balances.Where(b => b.ItemId == i.Id).Sum(b => (decimal?)b.Quantity) ?? 0m,
+                    })
+                    .Where(x => x.OnHand < x.MinStock).ToListAsync(ct);
                 var ordered = low.Select(i => new { Item = i, Cover = Percent(Math.Max(i.OnHand, 0m), i.MinStock) })
-                    .OrderBy(x => x.Cover).ThenByDescending(x => x.Item.MinStock - x.Item.OnHand).ThenBy(x => x.Item.ItemCode, StringComparer.Ordinal).ToList();
-                List<Row> rows = ordered.Select(x => new Row(KardexLink(x.Item.ItemId))
+                    .OrderBy(x => x.Cover).ThenByDescending(x => x.Item.MinStock - x.Item.OnHand).ThenBy(x => x.Item.Code, StringComparer.Ordinal).ToList();
+                List<Row> rows = ordered.Select(x => new Row(KardexLink(x.Item.Id))
                 {
-                    ["id"] = x.Item.ItemId, ["code"] = x.Item.ItemCode, ["title"] = x.Item.ItemTitle, ["group"] = x.Item.ItemGroupTitle, ["unit"] = x.Item.Unit, ["onHand"] = x.Item.OnHand,
+                    ["id"] = x.Item.Id, ["code"] = x.Item.Code, ["title"] = x.Item.Title, ["group"] = x.Item.Group, ["unit"] = x.Item.Unit, ["onHand"] = x.Item.OnHand,
                     ["minStock"] = x.Item.MinStock, ["shortage"] = x.Item.MinStock - x.Item.OnHand, ["coverPercent"] = x.Cover,
                 }).ToList();
-                return DrillResult.Slice(rows, c, "موجودی، جمع همه‌ی انبارهاست؛ کالای بدون حداقل موجودی تعریف‌شده نمی‌آید.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "موجودی، جمع همه‌ی انبارها به‌جز انبار ضایعات است؛ کالای غیرفعال یا بدون حداقل موجودی تعریف‌شده نمی‌آید.", new Dictionary<string, object>
                 {
                     ["outOfStock"] = ordered.Count(x => x.Item.OnHand <= 0m),
                 });
@@ -89,7 +99,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition StockValueByWarehouse() => new DrillDefinition
         {
             Key = "inv.stock_value_by_warehouse", Module = M, Title = "ارزش موجودی به تفکیک انبار",
-            Description = "ارزش ریالی موجودی هر انبار = مقدار هر کالا در آن انبار × بهای میانگین موزون کالا (همان بهایی که ارزش کل موجودی داشبورد از آن می‌آید)؛ بیشترین ارزش اول. اموال مشتری ارزش‌گذاری نمی‌شود و نمی‌آید.",
+            Description = "ارزش ریالی موجودی هر انبار = مقدار مثبت هر کالا در آن انبار × بهای میانگین موزون کالا (همان تابعی که نمودار «ارزش موجودی به تفکیک انبار» داشبورد از آن می‌آید)؛ بیشترین ارزش اول. اموال مشتری ارزش‌گذاری نمی‌شود و نمی‌آید.",
             Link = "/inventory/stock", RecordType = "Warehouse", RecordLabel = "انبار",
             Columns = new[]
             {
@@ -99,24 +109,23 @@ namespace Services.NasbNiro.Ceo.Drills
             {
                 Guard.Require(c, FinanceRoles.Readers);
                 var uow = c.Get<IUnitOfWork>();
-                List<WarehouseDto> warehouses = Take(await c.Get<IInventoryMasterService>().GetWarehousesAsync(ct)).Where(w => w.Kind != WarehouseKind.CustomerProperty).ToList();
-                Dictionary<int, decimal> unitCost = await uow.Set<ItemCost>().AsNoTracking().ToDictionaryAsync(x => x.ItemId, x => x.AverageCost, ct);
+                // the single function behind the chart of the dashboard: positive balances only, customer property left out, the biggest warehouse first
+                List<CeoWarehouseValue> values = await CeoFigures.StockValueByWarehouseAsync(uow, ct);
+                List<int> ids = values.Select(v => v.WarehouseId).ToList();
+                Dictionary<int, WarehouseKind> kinds = await uow.Set<Warehouse>().AsNoTracking().Where(w => ids.Contains(w.Id)).ToDictionaryAsync(w => w.Id, w => w.Kind, ct);
+                var itemPairs = await uow.Set<StockBalance>().AsNoTracking().Where(b => ids.Contains(b.WarehouseId) && b.Quantity > 0 && (b.LotId == null || !b.Lot.IsCustomerProperty))
+                    .Join(uow.Set<ItemCost>().AsNoTracking(), b => b.ItemId, x => x.ItemId, (b, x) => new { b.WarehouseId, b.ItemId })
+                    .GroupBy(x => new { x.WarehouseId, x.ItemId }).Select(g => new { g.Key.WarehouseId, g.Key.ItemId }).ToListAsync(ct);
+                Dictionary<int, int> itemCounts = itemPairs.GroupBy(x => x.WarehouseId).ToDictionary(g => g.Key, g => g.Count());
                 decimal dashboardValue = await uow.Set<ItemCost>().AsNoTracking().SumAsync(x => (decimal?)x.Value, ct) ?? 0m;
-                var balances = await uow.Set<StockBalance>().AsNoTracking().Where(b => b.Quantity != 0)
-                    .GroupBy(b => new { b.WarehouseId, b.ItemId }).Select(g => new { g.Key.WarehouseId, g.Key.ItemId, Quantity = g.Sum(b => b.Quantity) }).ToListAsync(ct);
 
-                var perWarehouse = warehouses.Select(w =>
+                decimal allocated = values.Sum(v => v.Value);
+                List<Row> rows = values.Select(v => new Row
                 {
-                    var mine = balances.Where(b => b.WarehouseId == w.Id).ToList();
-                    return new { Warehouse = w, Items = mine.Count, Value = mine.Sum(b => b.Quantity * (unitCost.TryGetValue(b.ItemId, out decimal cost) ? cost : 0m)) };
-                }).Where(x => x.Items > 0).OrderByDescending(x => x.Value).ThenBy(x => x.Warehouse.Code, StringComparer.Ordinal).ToList();
-                decimal allocated = perWarehouse.Sum(x => x.Value);
-                List<Row> rows = perWarehouse.Select(x => new Row
-                {
-                    ["id"] = x.Warehouse.Id, ["code"] = x.Warehouse.Code, ["title"] = x.Warehouse.Title, ["kind"] = WarehouseKindText(x.Warehouse.Kind), ["items"] = x.Items, ["value"] = Round(x.Value, 0),
-                    ["sharePercent"] = Percent(x.Value, allocated),
+                    ["id"] = v.WarehouseId, ["code"] = v.Code, ["title"] = v.Title, ["kind"] = kinds.TryGetValue(v.WarehouseId, out WarehouseKind kind) ? WarehouseKindText(kind) : null,
+                    ["items"] = itemCounts.TryGetValue(v.WarehouseId, out int count) ? count : 0, ["value"] = Round(v.Value, 0), ["sharePercent"] = Percent(v.Value, allocated),
                 }).ToList();
-                return DrillResult.Slice(rows, c, "ارزش هر انبار با بهای میانگین موزون کالا حساب می‌شود؛ تفاوت با ارزش کل دفتر موجودی (گرد کردن، موجودی منفی یا کالای بدون بها) در «تفاوت» می‌آید.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "ارزش هر انبار با بهای میانگین موزون کالا حساب می‌شود؛ تفاوت با ارزش کل دفتر موجودی (موجودی منفی یا کالای بدون بها) در «تفاوت» می‌آید.", new Dictionary<string, object>
                 {
                     ["totalValue"] = Round(dashboardValue, 0), ["allocatedValue"] = Round(allocated, 0), ["difference"] = Round(dashboardValue - allocated, 0),
                 });
@@ -128,7 +137,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition SlowMoving() => new DrillDefinition
         {
             Key = "inv.slow_moving", Module = M, Title = "کالاهای کم‌گردش",
-            Description = "کالاهایی که موجودی دارند ولی دست‌کم days روز هیچ گردشی (ورود یا خروج) نداشته‌اند؛ بیشترین سرمایه‌ی خوابیده اول. پیش‌فرض ۱۸۰ روز.",
+            Description = "کالاهایی که موجودی دارند ولی دست‌کم به تعداد روز داده‌شده هیچ گردشی (ورود یا خروج) نداشته‌اند؛ بیشترین سرمایه‌ی خوابیده اول. پیش‌فرض ۱۸۰ روز.",
             Link = "/inventory/stock", RecordType = "Item", RecordLabel = "کالا",
             Parameters = new[] { Prm.Days(180, 3650, "کالاهایی که دست‌کم این تعداد روز گردش نداشته‌اند") },
             Columns = new[]
@@ -140,37 +149,48 @@ namespace Services.NasbNiro.Ceo.Drills
             {
                 Guard.Require(c, FinanceRoles.Readers);
                 int days = c.Args.Int("days");
-                DateTime cutoff = c.Today.AddDays(-days);
+                // the movements of the last <days> days exist or not: a last movement before the day after the cutoff day is a slow item
+                DateTime beforeDay = c.Today.AddDays(-days).AddDays(1);
                 var uow = c.Get<IUnitOfWork>();
-                var stock = await uow.Set<ItemCost>().AsNoTracking().Where(x => x.Quantity > 0)
-                    .Select(x => new { x.ItemId, Code = x.Item.Code, Title = x.Item.Title, Unit = x.Item.Unit, Group = x.Item.ItemGroup.Title, x.Quantity, x.Value }).ToListAsync(ct);
-                Dictionary<int, DateTime> last = (await uow.Set<StockTransaction>().AsNoTracking().Where(t => !t.IsReversal && t.Document.Status == InventoryDocumentStatus.Confirmed)
-                        .GroupBy(t => t.ItemId).Select(g => new { ItemId = g.Key, Last = g.Max(t => t.TransactionDate) }).ToListAsync(ct))
-                    .ToDictionary(x => x.ItemId, x => x.Last);
+                IQueryable<StockTransaction> moves = uow.Set<StockTransaction>().AsNoTracking().Where(t => !t.IsReversal && t.Document.Status == InventoryDocumentStatus.Confirmed);
+                var slow = (await uow.Set<ItemCost>().AsNoTracking().Where(x => x.Quantity > 0)
+                        .Select(x => new
+                        {
+                            x.ItemId, Code = x.Item.Code, Title = x.Item.Title, Unit = x.Item.Unit, Group = x.Item.ItemGroup.Title, x.Quantity, x.Value,
+                            Last = moves.Where(t => t.ItemId == x.ItemId).Max(t => (DateTime?)t.TransactionDate),
+                        })
+                        .Where(x => x.Last == null || x.Last < beforeDay).ToListAsync(ct))
+                    .OrderByDescending(x => x.Value).ThenBy(x => x.Code, StringComparer.Ordinal).ToList();
 
-                var slow = stock.Select(s => new { Stock = s, Last = last.TryGetValue(s.ItemId, out DateTime d) ? d : (DateTime?)null })
-                    .Where(x => !x.Last.HasValue || x.Last.Value.Date <= cutoff)
-                    .OrderByDescending(x => x.Stock.Value).ThenBy(x => x.Stock.Code, StringComparer.Ordinal).ToList();
-                List<Row> rows = slow.Select(x => new Row(KardexLink(x.Stock.ItemId))
+                List<Row> rows = slow.Select(x => new Row(KardexLink(x.ItemId))
                 {
-                    ["id"] = x.Stock.ItemId, ["code"] = x.Stock.Code, ["title"] = x.Stock.Title, ["group"] = x.Stock.Group, ["unit"] = x.Stock.Unit, ["quantity"] = x.Stock.Quantity,
-                    ["value"] = Round(x.Stock.Value, 0), ["lastMovement"] = DrillDates.Text(x.Last), ["daysSince"] = x.Last.HasValue ? DaysBetween(x.Last.Value, c.Today) : (int?)null,
+                    ["id"] = x.ItemId, ["code"] = x.Code, ["title"] = x.Title, ["group"] = x.Group, ["unit"] = x.Unit, ["quantity"] = x.Quantity,
+                    ["value"] = Round(x.Value, 0), ["lastMovement"] = DrillDates.Text(x.Last), ["daysSince"] = x.Last.HasValue ? DaysBetween(x.Last.Value, c.Today) : (int?)null,
                 }).ToList();
-                return DrillResult.Slice(rows, c, "گردش یعنی هر ورود یا خروج تاییدشده‌ی انبار (سند لغوشده شمرده نمی‌شود)؛ کالای بدون هیچ گردش ثبت‌شده هم می‌آید.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "گردش یعنی هر ورود یا خروج تأییدشده‌ی انبار (سند لغوشده شمرده نمی‌شود)؛ کالای بدون هیچ گردش ثبت‌شده هم می‌آید.", new Dictionary<string, object>
                 {
-                    ["value"] = Round(slow.Sum(x => x.Stock.Value), 0),
+                    ["value"] = Round(slow.Sum(x => x.Value), 0),
                 });
             },
         };
 
         // ------------------------------------------------------------------------------------------ the busiest items
 
+        /// <summary>The longest range of inv.top_movements (the movements of the range are grouped in memory).</summary>
+        public const int MaxMovementDays = 366;
+
+        /// <summary>The kinds of movement of inv.top_movements: the purchase receipts with their returns, the issues to production with their returns, or all but transfers and stage conversions.</summary>
+        public static readonly string[] MovementKinds = { "receipt", "issue", "all" };
+
         private static DrillDefinition TopMovements() => new DrillDefinition
         {
             Key = "inv.top_movements", Module = M, Title = "پرگردش‌ترین کالاها",
-            Description = "کالاهایی که در بازه بیشترین ارزش گردش انبار (ورود + خروج به بهای میانگین موزون) را داشته‌اند؛ انتقال بین انبارها و تبدیل مرحله شمرده نمی‌شود. پیش‌فرض ۳۰ روز اخیر.",
+            Description = "کالاهایی که در بازه بیشترین ارزش گردش انبار (ورود + خروج به بهای میانگین موزون) را داشته‌اند؛ انتقال بین انبارها و تبدیل مرحله شمرده نمی‌شود. می‌شود فقط ورودها (رسید خرید و برگشت به تأمین‌کننده؛ همان «رسید خرید» نمودار جریان موجودی داشبورد) یا فقط خروج‌ها (خروج برای مصرف و برگشت از تولید؛ همان «مصرف تولید» نمودار) را خواست. بازه حداکثر ۳۶۶ روز؛ پیش‌فرض ۳۰ روز اخیر.",
             Link = "/inventory/kardex", RecordType = "Item", RecordLabel = "کالا",
-            Parameters = Prm.Last30Days(),
+            Parameters = Prm.Last30Days().Concat(new[]
+            {
+                Prm.Str("kind", "نوع حرکت: receipt (رسید خرید)، issue (مصرف تولید) یا all (همه)؛ پیش‌فرض all", "all", MovementKinds),
+            }).ToArray(),
             Columns = new[]
             {
                 Col.Text("code", "کد کالا"), Col.Text("title", "کالا"), Col.Text("unit", "واحد"), Col.Num("receivedQuantity", "ورود"), Col.Num("issuedQuantity", "خروج"), Col.Rial("receivedValue", "ارزش ورود"),
@@ -180,10 +200,17 @@ namespace Services.NasbNiro.Ceo.Drills
             {
                 Guard.Require(c, FinanceRoles.Readers);
                 DateTime from = c.Args.Date("from").Date, to = c.Args.Date("to").Date, end = to.AddDays(1);
+                if ((to - from).TotalDays + 1 > MaxMovementDays)
+                    throw new DrillFailureException("بازه‌ی گزارش نباید بیش از " + MaxMovementDays.ToString(CultureInfo.InvariantCulture) + " روز باشد؛ بازه‌ی کوتاه‌تری بدهید.");
+                string kind = c.Args.Str("kind") ?? "all";
                 var uow = c.Get<IUnitOfWork>();
-                var perDocument = await uow.Set<StockTransaction>().AsNoTracking()
+                IQueryable<StockTransaction> moves = uow.Set<StockTransaction>().AsNoTracking()
                     .Where(t => !t.IsReversal && t.TransactionDate >= from && t.TransactionDate < end && t.Document.Status == InventoryDocumentStatus.Confirmed &&
-                                t.Document.Type != InventoryDocumentType.Transfer && t.Document.Type != InventoryDocumentType.StageConversion)
+                                t.Document.Type != InventoryDocumentType.Transfer && t.Document.Type != InventoryDocumentType.StageConversion);
+                if (kind == "receipt") moves = moves.Where(t => t.Document.Type == InventoryDocumentType.PurchaseReceipt || t.Document.Type == InventoryDocumentType.SupplierReturn);
+                else if (kind == "issue") moves = moves.Where(t => t.Document.Type == InventoryDocumentType.Issue || t.Document.Type == InventoryDocumentType.ProductionReturn);
+
+                var perDocument = await moves
                     .GroupBy(t => new { t.ItemId, t.DocumentId })
                     .Select(g => new
                     {
@@ -212,12 +239,18 @@ namespace Services.NasbNiro.Ceo.Drills
                         ["receivedValue"] = Round(x.InValue, 0), ["issuedValue"] = Round(x.OutValue, 0), ["totalValue"] = Round(x.InValue + x.OutValue, 0), ["documents"] = x.Documents,
                     });
                 }
+                decimal receivedValue = perItem.Sum(x => x.InValue), issuedValue = perItem.Sum(x => x.OutValue);
+                var totals = new Dictionary<string, object> { ["receivedValue"] = Round(receivedValue, 0), ["issuedValue"] = Round(issuedValue, 0) };
+                // the figure of the chart: receipts net of the returns to the supplier, or the consumption net of the returns from production
+                if (kind == "receipt") totals["netValue"] = Round(receivedValue - issuedValue, 0);
+                else if (kind == "issue") totals["netValue"] = Round(issuedValue - receivedValue, 0);
                 return new DrillResult
                 {
                     Rows = rows,
                     TotalCount = perItem.Count,
-                    Note = "ارزش هر حرکت همان بهای میانگین موزون ثبت‌شده در حرکت است؛ حرکت‌های قبل از هزینه‌یابی ارزش صفر دارند.",
-                    Totals = new Dictionary<string, object> { ["receivedValue"] = Round(perItem.Sum(x => x.InValue), 0), ["issuedValue"] = Round(perItem.Sum(x => x.OutValue), 0) },
+                    Note = "ارزش هر حرکت همان بهای میانگین موزون ثبت‌شده در حرکت است؛ حرکت‌های قبل از هزینه‌یابی ارزش صفر دارند." +
+                           (kind == "all" ? string.Empty : " «ارزش خالص» در جمع‌ها = " + (kind == "receipt" ? "ورود منهای برگشت به تأمین‌کننده" : "خروج منهای برگشت از تولید") + "، همان عدد نمودار."),
+                    Totals = totals,
                 };
             },
         };
@@ -272,12 +305,12 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition MaterialRequestsOpen() => new DrillDefinition
         {
             Key = "inv.material_requests_open", Module = M, Title = "درخواست‌های مواد باز",
-            Description = "درخواست‌های مواد انبار که ارسال یا تایید شده‌اند و هنوز بسته نشده‌اند (منتظر تایید برنامه‌ریزی و ساخت، یا منتظر صدور حواله)؛ قدیمی‌ترین اول.",
+            Description = "درخواست‌های مواد انبار که ارسال یا تأیید شده‌اند و هنوز بسته نشده‌اند (منتظر تأیید برنامه‌ریزی و ساخت، یا منتظر صدور حواله)؛ قدیمی‌ترین اول.",
             Link = "/inventory/material-requests", RecordType = "MaterialRequest", RecordLabel = "درخواست مواد",
             Columns = new[]
             {
                 Col.Text("number", "شماره"), Col.Date("requestDate", "تاریخ"), Col.Status("status", "وضعیت"), Col.Text("workOrderCode", "دستور کار"), Col.Text("warehouse", "انبار"), Col.Text("purpose", "هدف"),
-                Col.Num("lines", "تعداد ردیف"), Col.Text("planningApproved", "تایید برنامه‌ریزی"), Col.Text("manufacturingApproved", "تایید ساخت"), Col.Num("waitingDays", "روز انتظار"), Col.Link(),
+                Col.Num("lines", "تعداد ردیف"), Col.Text("planningApproved", "تأیید برنامه‌ریزی"), Col.Text("manufacturingApproved", "تأیید ساخت"), Col.Num("waitingDays", "روز انتظار"), Col.Link(),
             },
             Run = async (c, ct) =>
             {

@@ -77,7 +77,7 @@ namespace Services.NasbNiro.Ceo
 
             // chart 3: OEE of the work centres that booked run time and pieces this month (the drill takes the same month so far)
             List<OeeDto> measured = oee.Where(o => o.OeePercent.HasValue).ToList();
-            section.Charts.Add(WithDrillParams(Chart("oeeByWorkCenter", "بهره‌وری کلی تجهیزات به تفکیک مرکز کار", CeoKind.HBar, CeoUnit.Percent, measured.Select(o => o.WorkCenterCode), CeoLinks.ProductionOee, CeoDrillRef.MfOeeByWorkCenter,
+            section.Charts.Add(WithDrillParams(Chart("oeeByWorkCenter", "اثربخشی کلی تجهیزات به تفکیک مرکز کار", CeoKind.HBar, CeoUnit.Percent, measured.Select(o => o.WorkCenterCode), CeoLinks.ProductionOee, CeoDrillRef.MfOeeByWorkCenter,
                 "ماه شمسی جاری تا امروز؛ فقط مراکزی که زمان تولید و قطعه ثبت کرده‌اند.",
                 Series("OEE", measured.Select(o => o.OeePercent.Value))), ctx.LatestMonth()));
             return section;
