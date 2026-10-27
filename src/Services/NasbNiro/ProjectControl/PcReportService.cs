@@ -99,6 +99,7 @@ namespace Services.NasbNiro.ProjectControl
                 _uow.Set<PcShipment>().Add(s);
             }
             s.PackingList = Clean(dto.PackingList); s.ModifyDate = now; s.ModifierUserId = Me;
+            DropPortfolioRows();
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcShipmentDto>(PcText.Concurrency); }
             return ResponseDtoHelper.Ok(ToDto(s, wo.Code));
@@ -155,6 +156,7 @@ namespace Services.NasbNiro.ProjectControl
                     return Bad<PcShipmentDto>("عملیات نامعتبر است.");
             }
             s.ModifyDate = now; s.ModifierUserId = Me;
+            DropPortfolioRows();
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcShipmentDto>(PcText.Concurrency); }
             return ResponseDtoHelper.Ok(ToDto(s, s.WorkOrder?.Code));
@@ -218,6 +220,7 @@ namespace Services.NasbNiro.ProjectControl
                 Content = content, Hash = PcText.Sha256(dto.ContractId + "|" + dto.Kind + "|" + asOf.ToString("yyyy-MM-dd") + "|" + content),
             };
             _uow.Set<PcReportIssue>().Add(issue);
+            DropPortfolioRows();
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(ToDto(issue, true));
         }
@@ -229,6 +232,7 @@ namespace Services.NasbNiro.ProjectControl
             if (r == null) return PcText.NotFound<PcReportDto>("گزارش پیدا نشد.");
             if (r.ReleasedAt.HasValue) return Bad<PcReportDto>("گزارش قبلاً منتشر شده است.");
             r.ReleasedAt = DateTimeOffset.Now; r.ReleasedByUserId = Me;
+            DropPortfolioRows();
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(ToDto(r, true));
         }
@@ -252,11 +256,12 @@ namespace Services.NasbNiro.ProjectControl
 
         // ============================================================================ portfolio and dashboard
 
-        private async Task<PcPortfolioRowDto> RowAsync(int contractId, string title, PcContractTerms terms, DateTime asOf, CancellationToken cancellationToken)
+        /// <param name="overdueInitiationContracts">The contracts with an overdue initiation step (a query over all the projects): the portfolio asks it once and hands it in; a single row asks for itself.</param>
+        private async Task<PcPortfolioRowDto> RowAsync(int contractId, string title, PcContractTerms terms, DateTime asOf, CancellationToken cancellationToken, List<int> overdueInitiationContracts = null)
         {
             PcEvmDto evm = await _progress.ComputeEvmAsync(contractId, asOf, cancellationToken);
             List<PcGuaranteeAlertDto> alerts = await _commercial.GuaranteeAlertsAsync(contractId, cancellationToken);
-            List<int> overdueInit = await _project.OverdueContractIdsAsync(cancellationToken);
+            List<int> overdueInit = overdueInitiationContracts ?? await _project.OverdueContractIdsAsync(cancellationToken);
             return new PcPortfolioRowDto
             {
                 ContractId = contractId, ContractTitle = title, ProjectCode = terms?.ProjectCode, PhysicalPercent = evm.PhysicalPercent, PlannedPercent = evm.PlannedPercent, Spi = evm.Spi, Cpi = evm.Cpi, SpiStatus = evm.SpiStatus, CpiStatus = evm.CpiStatus,
@@ -271,16 +276,45 @@ namespace Services.NasbNiro.ProjectControl
             };
         }
 
+        // The rows of the whole portfolio are computed project by project (earned value, late activities, guarantees ...). The CEO dashboard and the CEO overview both ask for them
+        // inside one request, so this service instance keeps the last answer for a few seconds. It keeps its own rows and hands out copies: a caller that changes what it was given
+        // (a sort, a mask, a corrected field) changes nothing for the next reader, and the rows are dropped whenever this instance saves anything.
+        private const long PortfolioRowsLifetimeMs = 10_000;
+        private List<PcPortfolioRowDto> _portfolioRows;
+        private long _portfolioRowsAt;
+        private DateTime _portfolioRowsDay;
+
+        private void DropPortfolioRows() => _portfolioRows = null;
+
+        private static PcPortfolioRowDto Copy(PcPortfolioRowDto r) => new PcPortfolioRowDto
+        {
+            ContractId = r.ContractId, ContractTitle = r.ContractTitle, ProjectCode = r.ProjectCode, PhysicalPercent = r.PhysicalPercent, PlannedPercent = r.PlannedPercent, Spi = r.Spi, Cpi = r.Cpi,
+            SpiStatus = r.SpiStatus, CpiStatus = r.CpiStatus, ForecastFinish = r.ForecastFinish, LateActivities = r.LateActivities, OpenChanges = r.OpenChanges, GuaranteeAlerts = r.GuaranteeAlerts,
+            OverdueMilestones = r.OverdueMilestones, OverdueInitiationSteps = r.OverdueInitiationSteps, OverdueClientResponses = r.OverdueClientResponses, PenaltyExposure = r.PenaltyExposure,
+        };
+
+        /// <summary>A project is red when one of its two indexes (schedule, cost) is red.</summary>
+        public static bool IsRed(PcPortfolioRowDto r) => r.SpiStatus == "red" || r.CpiStatus == "red";
+
+        /// <summary>A project is amber when one of its indexes is amber and none is red: each project has one colour, so red + amber + green is the number of projects.</summary>
+        public static bool IsAmber(PcPortfolioRowDto r) => !IsRed(r) && (r.SpiStatus == "amber" || r.CpiStatus == "amber");
+
         private async Task<List<PcPortfolioRowDto>> AllRowsAsync(CancellationToken cancellationToken)
         {
+            if (_portfolioRows != null && _portfolioRowsDay == DateTime.Today && Environment.TickCount64 - _portfolioRowsAt < PortfolioRowsLifetimeMs) return _portfolioRows.Select(Copy).ToList();
             List<int> ids = await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => !t.Deleted && t.Contract.Deleted == false).OrderBy(t => t.ContractId).Select(t => t.ContractId).ToListAsync(cancellationToken);
             var rows = new List<PcPortfolioRowDto>();
+            // one query for all the projects, not one per project
+            List<int> overdueInit = ids.Count == 0 ? new List<int>() : await _project.OverdueContractIdsAsync(cancellationToken);
             foreach (int id in ids)
             {
                 var c = await _uow.Set<ContractEntity>().AsNoTracking().Where(x => x.Id == id).Select(x => x.Title).FirstOrDefaultAsync(cancellationToken);
                 PcContractTerms terms = await PcContext.TermsAsync(_uow, id, false, cancellationToken);
-                rows.Add(await RowAsync(id, c, terms, DateTime.Today, cancellationToken));
+                rows.Add(await RowAsync(id, c, terms, DateTime.Today, cancellationToken, overdueInit));
             }
+            _portfolioRows = rows.Select(Copy).ToList();
+            _portfolioRowsDay = DateTime.Today;
+            _portfolioRowsAt = Environment.TickCount64;
             return rows;
         }
 
@@ -299,7 +333,7 @@ namespace Services.NasbNiro.ProjectControl
             List<PcPortfolioRowDto> rows = await AllRowsAsync(cancellationToken);
             return new PcDashboardDto
             {
-                ActiveProjects = rows.Count, ProjectsRed = rows.Count(r => r.SpiStatus == "red" || r.CpiStatus == "red"), ProjectsAmber = rows.Count(r => r.SpiStatus == "amber" || r.CpiStatus == "amber"),
+                ActiveProjects = rows.Count, ProjectsRed = rows.Count(IsRed), ProjectsAmber = rows.Count(IsAmber),
                 LateActivities = rows.Sum(r => r.LateActivities), OpenChangeRequests = rows.Sum(r => r.OpenChanges), OverdueChangeRequests = (await _baseline.OverdueChangeContractIdsAsync(cancellationToken)).Count,
                 GuaranteeAlerts = rows.Sum(r => r.GuaranteeAlerts), OverdueMilestones = rows.Sum(r => r.OverdueMilestones), OverdueInitiationSteps = rows.Sum(r => r.OverdueInitiationSteps),
                 OverdueClientResponses = rows.Sum(r => r.OverdueClientResponses), PenaltyExposure = rows.Sum(r => r.PenaltyExposure),

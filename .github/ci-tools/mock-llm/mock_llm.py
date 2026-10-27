@@ -19,6 +19,33 @@ FORGE_WORD = "جعل"
 FORCE_WORD = "اجبار"
 REPEAT_WORD = "تکرار"
 
+# release D1 part A2: the drills of the CEO dashboard (checked after every older keyword, so the older routes keep their meaning).
+# «ریز» and «بیرون» are matched as whole words only (has_word below): «برنامه‌ریزی», «واریز» or «ریزش» do not call the drill.
+DRILLS_WORD = "فهرست جزئیات"
+DRILL_WORD = "ریز"
+ANALYSE_WORD = "تحلیل"
+DRILLS_ANSWER = "ابزارهای جزئیات در دسترس است."
+DRILL_KEY = "qc.ncr_open"
+DRILL_TOP = 5
+
+# release D1 voice mode: the UI action tools. «باز کن» at the start opens the production orders, «بخوان هشدارها» reads the alerts, «بیرون» asks for a page outside the allow-list
+# (the backend must refuse it). They are checked before every older keyword: no older question starts with or holds these words.
+UI_OPEN_WORD = "باز کن"
+UI_READ_WORD = "بخوان هشدارها"
+UI_OUT_WORD = "بیرون"
+UI_OPEN_LINK = "/production/orders"
+UI_OUT_LINK = "http://evil"
+# «باز کن» with this phrase opens a page of the allow-list whose link carries a number (987654321): the backend must not take that number as evidence for an answer that quotes it
+UI_LAUNDER_WORD = "پیوند عددی"
+UI_LAUNDER_LINK = "/ceo?x=987654321"
+UI_OPEN_ANSWER = "سفارش\u200cهای تولید را باز می\u200cکنم."
+UI_READ_ANSWER = "هشدارها را می\u200cخوانم."
+UI_REFUSED_ANSWER = "این صفحه برای باز شدن مجاز نیست."
+# voice mode: an uploaded file whose name starts with this word is the spoken request to open the production orders (any other file says the dashboard summary)
+UI_OPEN_FILE = b"ui-open"
+UI_OPEN_TRANSCRIPT = "باز کن سفارش\u200cهای تولید"
+DEFAULT_TRANSCRIPT = "خلاصه داشبورد مدیرعامل"
+
 # release A1 part B: the questions of the seats (they are checked before every other keyword)
 SEAT_BRIEF = "گزارش روزانه"
 SEAT_WEEKLY = "روایت هفتگی"
@@ -34,6 +61,11 @@ SEAT_ANSWERS = (
 )
 
 
+def has_word(text, word):
+    """True when the word stands alone: not inside a longer word (letters, digits, or the half-space that joins a compound), so «ریز» is not found in «برنامه‌ریزی» or «واریز»."""
+    return re.search(r"(?<![\w\u200c])" + re.escape(word) + r"(?![\w\u200c])", text) is not None
+
+
 def seat_answer(text):
     """The fixed text (without digits) a seat question is answered with, or None."""
     for word, answer in SEAT_ANSWERS:
@@ -42,12 +74,21 @@ def seat_answer(text):
     return None
 
 
-def pick_tool(text):
+def pick_tool(text, offered=()):
     """Keyword routing of a user question: (tool name, arguments) or None."""
+    if has_word(text, UI_OUT_WORD):
+        return "ui_navigate", {"link": UI_OUT_LINK}
+    if text.lstrip().startswith(UI_OPEN_WORD):
+        return "ui_navigate", {"link": UI_LAUNDER_LINK if UI_LAUNDER_WORD in text else UI_OPEN_LINK}
+    if UI_READ_WORD in text:
+        return "ui_read", {"what": "alerts"}
     if SEAT_BRIEF in text:
         return "ceo_dashboard", {}
     if SEAT_WEEKLY in text:
         return "project_portfolio", {}
+    # the force word with the drill word calls the drill tool even when it is not offered (the backend must refuse it for a user without the role)
+    if FORCE_WORD in text and has_word(text, DRILL_WORD):
+        return "ceo_drill", {"key": DRILL_KEY, "top": DRILL_TOP}
     if FORCE_WORD in text:
         return "cash_position", {}
     if FORGE_WORD in text:
@@ -60,6 +101,13 @@ def pick_tool(text):
         return "items_below_minimum", {}
     if "سند" in text or "روش" in text:
         return "search_documents", {"query": text}
+    # the CEO dashboard: the catalogue of drills, one drill (the open NCRs, five rows) and the analysis (only when the overview tool is offered)
+    if DRILLS_WORD in text:
+        return "ceo_drills", {}
+    if has_word(text, DRILL_WORD):
+        return "ceo_drill", {"key": DRILL_KEY, "top": DRILL_TOP}
+    if ANALYSE_WORD in text and "ceo_overview" in offered:
+        return "ceo_overview", {}
     return None
 
 
@@ -118,7 +166,7 @@ def decide(messages, tools):
                 if m.get("role") == "tool":
                     return "طبق نتایج سامانه: " + "، ".join(plain(v) for v in first_numbers(message_text(m), 3)), None
             return GREETING, None
-        tool = pick_tool(text)
+        tool = pick_tool(text, offered)
         if tool is None:
             return GREETING, None
         name, args = tool
@@ -144,6 +192,16 @@ def decide(messages, tools):
         return FORBIDDEN, None
     if FORGE_WORD in question:
         return FORGED_ANSWER, None
+    # the UI action tools answer {"ok":true,...} or {"ok":false,...}: one fixed sentence each, without digits
+    if any(t.lstrip().startswith('{"ok":false') for t in tool_msgs):
+        return UI_REFUSED_ANSWER, None
+    if question.lstrip().startswith(UI_OPEN_WORD):
+        return UI_OPEN_ANSWER, None
+    if UI_READ_WORD in question:
+        return UI_READ_ANSWER, None
+    if DRILLS_WORD in question:
+        # the catalogue holds no number worth quoting: a fixed sentence without digits
+        return DRILLS_ANSWER, None
     values = []
     for t in reversed(tool_msgs):
         try:
@@ -227,7 +285,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"object": "list", "model": MODEL,
                              "data": [{"object": "embedding", "index": i, "embedding": embed(str(t))} for i, t in enumerate(inputs)]})
         elif path == "/v1/audio/transcriptions":
-            self._send(200, {"text": "خلاصه داشبورد مدیرعامل"})
+            # the name of the uploaded file decides what was "said" (the audio itself is silence)
+            spoken = UI_OPEN_TRANSCRIPT if re.search(rb'filename="?' + re.escape(UI_OPEN_FILE), raw) else DEFAULT_TRANSCRIPT
+            self._send(200, {"text": spoken})
         elif path == "/v1/audio/speech":
             self._send(200, wav_bytes(), "audio/wav")
         else:

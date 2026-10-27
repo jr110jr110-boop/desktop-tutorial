@@ -26,6 +26,16 @@ namespace IocConfig
 {
     public static class AddCustomServicesExtensions
     {
+        /// <summary>Release D1 part A1: the overview of the CEO dashboard, its nightly snapshot and the job at 00:30 (switch Ceo:Jobs=false).</summary>
+        private static void AddCeoOverview(this IServiceCollection services)
+        {
+            services.AddMemoryCache();
+            services.AddScoped<Services.NasbNiro.Ceo.ICeoOverviewService, Services.NasbNiro.Ceo.CeoOverviewService>();
+            services.AddScoped<Services.NasbNiro.Ceo.ICeoSnapshotService, Services.NasbNiro.Ceo.CeoSnapshotService>();
+            services.AddScoped<Services.NasbNiro.Ceo.ICeoSpeechService, Services.NasbNiro.Ceo.CeoSpeechService>();
+            services.AddHostedService<Services.NasbNiro.Ceo.CeoHostedService>();
+        }
+
         public static IServiceCollection AddCustomServices(this IServiceCollection services)
         {
             #region Identity
@@ -145,6 +155,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.ITaxCompletenessService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.ICollectionsService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.IFinanceCompletenessService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
+            services.AddScoped<Services.NasbNiro.Finance.IPayableAgeingService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.ISepidarFullExportService, Services.NasbNiro.Finance.SepidarFullExportService>();
             services.AddScoped<Services.NasbNiro.Finance.ITreasuryService, Services.NasbNiro.Finance.TreasuryService>();
             services.AddScoped<Services.NasbNiro.Finance.IReceivablesService, Services.NasbNiro.Finance.ReceivablesService>();
@@ -252,10 +263,22 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Office.ILeaveService, Services.NasbNiro.Office.LeaveService>();
             services.AddScoped<Services.NasbNiro.Office.IRequestService, Services.NasbNiro.Office.RequestService>();
             services.AddHostedService<Services.NasbNiro.Office.OfficeHostedService>();
+            services.AddCeoOverview();
 
             services.AddScoped<IInventoryQualityService, InventoryQualityService>();
             services.AddScoped<IInventoryWorkflowService, InventoryWorkflowService>();
+            services.AddCeoDrills();
             return services;
+        }
+
+        /// <summary>Release D1 part A2: the drills of the CEO dashboard and the analysis.</summary>
+        private static void AddCeoDrills(this IServiceCollection services)
+        {
+            services.AddScoped<Services.NasbNiro.Ceo.Drills.ICeoDrillService, Services.NasbNiro.Ceo.Drills.CeoDrillService>();
+            services.AddScoped<Services.NasbNiro.Ceo.Drills.ICeoSectionNumbersProvider, Services.NasbNiro.Ceo.Drills.CeoOverviewSectionNumbersProvider>(); // the real overview (part A1)
+            services.AddScoped<Services.NasbNiro.Ceo.Drills.ICeoAnalysisService, Services.NasbNiro.Ceo.Drills.CeoAnalysisService>();
+            // the chat service of this request also runs the analysis (one instance per scope)
+            services.AddScoped<Services.NasbNiro.Ai.IAiAnalysisRunner>(sp => (Services.NasbNiro.Ai.IAiAnalysisRunner)sp.GetRequiredService<Services.NasbNiro.Ai.IAiChatService>());
         }
     }
 }

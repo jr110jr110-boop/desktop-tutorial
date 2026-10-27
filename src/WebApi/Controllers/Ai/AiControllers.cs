@@ -45,7 +45,7 @@ namespace WebApi.Controllers
             await file.CopyToAsync(stream, ct);
             byte[] audio = stream.ToArray();
             if (!AiAudioCheck.IsAllowed(file.ContentType, audio)) return Ok(ResponseDtoHelper.BadRequest<AiVoiceResponseDto>(AiAudioCheck.Message));
-            return Ok(await _chat.VoiceAsync(audio, Path.GetFileName(file.FileName), file.ContentType, conversationId, ct));
+            return Ok(await _chat.VoiceAsync(audio, Path.GetFileName(file.FileName), file.ContentType, conversationId, ct, form.UiContext));
         }
 
         [HttpGet("conversations")]
@@ -101,6 +101,12 @@ namespace WebApi.Controllers
         public IFormFile File { get; set; }
 
         public int? ConversationId { get; set; }
+
+        /// <summary>
+        /// Optional: where the user is in the front end, as dotted form fields (<c>uiContext.page=/ceo</c>, <c>uiContext.theme=dark</c>, <c>uiContext.sections[0]=finance</c>, <c>uiContext.sections[1]=sales</c>);
+        /// the chat request carries the same object as JSON. Only known routes, section keys and themes reach the model.
+        /// </summary>
+        public AiUiContextDto UiContext { get; set; }
     }
 
     /// <summary>

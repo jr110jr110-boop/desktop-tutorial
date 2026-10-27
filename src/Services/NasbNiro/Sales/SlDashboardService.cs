@@ -54,6 +54,12 @@ namespace Services.NasbNiro.Sales
             return result;
         }
 
+        /// <summary>The open inquiries by stage (count and value), in the order of the stages: the pipeline of the sales dashboard and of the CEO overview.</summary>
+        private static List<SlStageValueDto> StagesOf(List<SlInquiry> open, Dictionary<int, decimal> values) => OpenStages.Select(s => new SlStageValueDto
+        {
+            Name = SlText.InquiryStatus(s), Count = open.Count(i => i.Status == s), Value = open.Where(i => i.Status == s).Sum(i => values[i.Id]),
+        }).ToList();
+
         private static async Task<(int Won, int Lost)> ResultsAsync(IUnitOfWork uow, CancellationToken ct)
         {
             int won = await uow.Set<SlProposal>().AsNoTracking().CountAsync(p => !p.Deleted && p.Status == SlProposalStatus.Won, ct);
@@ -71,10 +77,7 @@ namespace Services.NasbNiro.Sales
             Dictionary<int, decimal> values = await ValuesAsync(_uow, open.Select(i => i.Id).ToList(), ct);
             dto.OpenInquiries = open.Count;
             dto.PipelineValue = values.Values.Sum();
-            dto.PipelineByStage = OpenStages.Select(s => new SlStageValueDto
-            {
-                Name = SlText.InquiryStatus(s), Count = open.Count(i => i.Status == s), Value = open.Where(i => i.Status == s).Sum(i => values[i.Id]),
-            }).ToList();
+            dto.PipelineByStage = StagesOf(open, values);
             dto.PipelineByProduct = open.GroupBy(i => i.ProductType).OrderBy(g => (int)g.Key).Select(g => new SlStageValueDto
             {
                 Name = SlText.Product(g.Key), Count = g.Count(), Value = g.Sum(i => values[i.Id]),
@@ -137,6 +140,9 @@ namespace Services.NasbNiro.Sales
             c.OrdersWaitingCredit = await WaitingCreditAsync(uow, ct);
             var (won, lost) = await ResultsAsync(uow, ct);
             c.HitRatePercent = SlProposalService.Percent(won, lost);
+            c.Won = won;
+            c.Lost = lost;
+            c.PipelineByStage = StagesOf(open, values);
             return c;
         }
     }

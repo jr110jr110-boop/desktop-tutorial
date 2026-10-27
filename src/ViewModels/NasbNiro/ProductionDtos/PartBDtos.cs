@@ -591,5 +591,8 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int OverloadWeeks { get; set; }
 
         public int MaintenanceOverdue { get; set; }
+
+        /// <summary>The load report of the next four weeks that the overload count was made from; the CEO overview draws its chart from it instead of loading the schedule a second time.</summary>
+        public LoadReportDto Load { get; set; }
     }
 }
