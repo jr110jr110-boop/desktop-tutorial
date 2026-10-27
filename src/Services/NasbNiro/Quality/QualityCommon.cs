@@ -47,6 +47,9 @@ namespace Services.NasbNiro.Quality
 
         public const string Audit = "QA,PMO";
         public const string Complaints = "QA,QC,PMO,COMMERCIAL";
+
+        /// <summary>Who may upload the file that proves an inspection and test plan activity without a test report was done (review M16).</summary>
+        public const string EvidenceUploaders = "QC,QA,ENGINEERING";
     }
 
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (the quality module uses 401..420).</summary>
@@ -93,6 +96,15 @@ namespace Services.NasbNiro.Quality
         /// <summary>Lots expiring within this many days are on the expiry report (D32).</summary>
         public const string ExpiryWarnDays = "ExpiryWarnDays";
 
+        /// <summary>The shortest witness notice (days) an ITP may be given (D9, review H6): a notice of 0 days would let the client's witness be waived at once.</summary>
+        public const string MinNoticeDays = "MinNoticeDays";
+
+        /// <summary>
+        /// Not a setting of the company: a marker the nightly CAPA job writes after its first run (review M11). Until it exists the job records the escalation level of the CAPAs
+        /// that were already late without telling anybody, so that the first night after the upgrade does not flood QA and the CEO with the whole backlog.
+        /// </summary>
+        public const string CapaEscalationBootstrapped = "CapaEscalationBootstrapped";
+
         public static IEnumerable<QualitySetting> Defaults()
         {
             yield return new QualitySetting { Key = NcrMinorDays, Value = 7, Title = "مهلت تصمیم عدم انطباق جزئی (روز)", Source = "★ تصمیم موقت" };
@@ -110,14 +122,18 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = IncomingNcrDueDays, Value = 3, Title = "مهلت تصمیم عدم انطباق بازرسی ورودی (روز)", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = CapaCeoEscalationDays, Value = 14, Title = "دیرکرد CAPA تا اطلاع به مدیرعامل (روز)", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = ExpiryWarnDays, Value = 30, Title = "هشدار انقضای بچ‌ها (روز)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = MinNoticeDays, Value = 1, Title = "حداقل روزهای اعلام نقطه شاهد در برنامه بازرسی (روز)", Source = "★ تصمیم موقت" };
         }
 
-        /// <summary>Stored values over the defaults. Reading never writes, so it is safe in the middle of an operation.</summary>
+        /// <summary>
+        /// Stored values over the defaults, each forced into its range (review M14). Reading never writes, so it is safe in the middle of an operation.
+        /// </summary>
         public static async Task<Dictionary<string, decimal>> LoadAsync(IUnitOfWork uow, CancellationToken cancellationToken)
         {
             Dictionary<string, decimal> result = Defaults().ToDictionary(d => d.Key, d => d.Value);
             List<QualitySetting> rows = await uow.Set<QualitySetting>().AsNoTracking().ToListAsync(cancellationToken);
-            foreach (QualitySetting row in rows) result[row.Key] = row.Value;
+            foreach (QualitySetting row in rows)
+                if (result.ContainsKey(row.Key)) result[row.Key] = QualitySettingRules.Clamp(row.Key, row.Value);
             return result;
         }
     }

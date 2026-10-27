@@ -78,7 +78,7 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryItem), new[] { "Code", "RequiresIncomingInspection", "RequiredCertificateType", "ShelfLifeDays" } },
             { typeof(Entities.Model.NasbNiro.Inventory.ItemQualityChange), null },
             { typeof(Entities.Model.NasbNiro.Quality.QualitySetting), null },
-            { typeof(Entities.Model.NasbNiro.Quality.MeasuringEquipment), new[] { "Code", "RequiresCalibration", "CalibrationWaiverReason", "CalibrationWaivedByUserId", "Status", "OutOfServiceReason" } },
+            { typeof(Entities.Model.NasbNiro.Quality.MeasuringEquipment), new[] { "Code", "RequiresCalibration", "CalibrationWaiverReason", "CalibrationWaivedByUserId", "CalibrationWaiverRequestReason", "CalibrationWaiverRequestedByUserId", "Status", "OutOfServiceReason" } },
             { typeof(Entities.Model.NasbNiro.Quality.Capa), new[] { "Number", "Status", "OwnerUserId", "CloseNote", "ClosedByUserId", "Iteration", "EscalationLevel", "CancelReason", "CancelledByUserId" } },
             { typeof(Entities.Model.NasbNiro.Quality.Itp), new[] { "Number", "Status", "Revision", "NoticeDays", "ClientApprovalReference" } },
             { typeof(Entities.Model.NasbNiro.Quality.ItpActivity), new[] { "Status", "NotApplicableReference", "NotificationSentAt", "NotificationLetterId", "StatusNote", "EvidenceNote", "EvidenceDocumentId" } },

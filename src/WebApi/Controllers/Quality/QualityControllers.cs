@@ -335,8 +335,8 @@ namespace WebApi.Controllers
         [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> ReviewsAsync([FromQuery] ReviewQuery query, CancellationToken ct) => Ok((await _audit.GetReviewsAsync(query, ct)).ToPaginatedResultSafe());
 
+        /// <summary>Quality readers read any review; the person responsible for a decision of a closed review reads that review (the service filters it to his own decisions).</summary>
         [HttpGet("management-reviews/{id:int}")]
-        [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> ReviewAsync(int id, CancellationToken ct) => Ok(await _audit.GetReviewAsync(id, ct));
 
         [HttpPost("management-reviews")]

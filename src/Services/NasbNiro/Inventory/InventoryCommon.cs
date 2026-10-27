@@ -81,8 +81,8 @@ namespace Services.NasbNiro.Inventory
         /// </summary>
         public const string RoleQualitySigner = "QC,QA";
 
-        /// <summary>Close or cancel an NCR (QC and QA; who may do which is decided inside, with the maker-checker rule).</summary>
-        public const string QcOrQa = "PMO,QC,QA";
+        /// <summary>Close or cancel an NCR (QC and QA only, review L24: PMO reads NCRs but does not close them; who may do which is decided inside, with the maker-checker rule).</summary>
+        public const string QcOrQa = "QC,QA";
 
         /// <summary>The NCR approval endpoint: the approvers of the module and the QA manager, who may give the QC signature.</summary>
         public const string NcrApprovers = Approvers + ",QA";

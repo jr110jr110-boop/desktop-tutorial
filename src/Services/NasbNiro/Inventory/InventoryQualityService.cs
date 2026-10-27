@@ -116,6 +116,8 @@ namespace Services.NasbNiro.Inventory
             List<int> rowIds = rows.Select(r => r.Id).ToList();
             Dictionary<int, string> equipment = await Inspections.Where(q => rowIds.Contains(q.Id) && q.EquipmentIds != null)
                 .ToDictionaryAsync(q => q.Id, q => q.EquipmentIds, cancellationToken);
+            Dictionary<int, string> measured = await Inspections.Where(q => rowIds.Contains(q.Id) && q.MeasurementsJson != null)
+                .ToDictionaryAsync(q => q.Id, q => q.MeasurementsJson, cancellationToken);
             Dictionary<int, string> releases = await _uow.Set<InventoryDocument>().Where(d => releaseIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, d => d.Number, cancellationToken);
             Dictionary<int, string> ncrs = await Ncrs.Where(n => ncrIds.Contains(n.Id)).ToDictionaryAsync(n => n.Id, n => n.Number, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => r.InspectedByUserId), cancellationToken);
@@ -130,8 +132,16 @@ namespace Services.NasbNiro.Inventory
                     ? e.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => int.TryParse(x, out int v) ? v : 0).Where(v => v > 0).ToList()
                     : new List<int>();
                 row.InspectedByName = names.Name(row.InspectedByUserId);
+                row.Measurements = ParseMeasurements(measured.TryGetValue(row.Id, out string json) ? json : null);
             }
             return rows;
+        }
+
+        private static List<InspectionMeasurementDto> ParseMeasurements(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return new List<InspectionMeasurementDto>();
+            try { return System.Text.Json.JsonSerializer.Deserialize<List<InspectionMeasurementDto>>(json) ?? new List<InspectionMeasurementDto>(); }
+            catch (System.Text.Json.JsonException) { return new List<InspectionMeasurementDto>(); }
         }
 
         public async Task<ResponseDto<PagedList<InspectionDto>>> GetInspectionsAsync(InspectionQuery query, CancellationToken cancellationToken)
@@ -163,6 +173,13 @@ namespace Services.NasbNiro.Inventory
                 .FirstOrDefaultAsync(q => q.Id == dto.Id && !q.Deleted, cancellationToken);
             if (inspection == null) return ResponseDtoHelper.NotFound<InspectionDto>(InventoryMessages.NotFound);
             if (inspection.Status != InspectionStatus.Pending) return ResponseDtoHelper.BadRequest<InspectionDto>("نتیجه این بازرسی قبلاً ثبت شده است.");
+            // R1q D17 and review M12: incoming inspections and the re-inspection of reworked goods are inspections like any other: once the company keeps inspector
+            // qualifications, a QC inspector records them only with a valid one of his own
+            if (_user.IsInRole(Quality.QualityRoles.Inspectors))
+            {
+                string competence = await Quality.QualityChecks.InspectorAsync(_uow, _user.UserId, DateTime.Today, "ثبت نتیجه بازرسی ورودی بدون گواهی صلاحیت معتبر مجاز نیست.", cancellationToken);
+                if (competence != null) return ResponseDtoHelper.BadRequest<InspectionDto>(competence);
+            }
             InventoryItem item = await _uow.Set<InventoryItem>().FirstAsync(i => i.Id == inspection.ItemId, cancellationToken);
 
             if (dto.AcceptedQuantity < 0 || dto.RejectedQuantity < 0) return ResponseDtoHelper.BadRequest<InspectionDto>("مقدار قبول یا رد نمی‌تواند منفی باشد.");
@@ -194,10 +211,28 @@ namespace Services.NasbNiro.Inventory
                 if (certificateProblem != null) return ResponseDtoHelper.BadRequest<InspectionDto>(certificateProblem);
             }
 
-            // R1q D16: a decision that rests on measured values names the instruments, and their calibration is valid today (ISO 9001 7.1.5)
-            List<int> equipmentIds = (dto.EquipmentIds ?? new List<int>()).Where(i => i > 0).Distinct().ToList();
-            if (dto.Measured && equipmentIds.Count == 0)
-                return ResponseDtoHelper.BadRequest<InspectionDto>("بازرسی بر پایه اندازه‌گیری است؛ ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید.");
+            // R1q D16 and review M12: whether the inspection is "measured" follows from the measured values on it, never from a flag of the client. Every value names the
+            // instrument that measured it (calibration valid today, ISO 9001 7.1.5), and a value out of tolerance cannot be accepted.
+            var measurements = new List<InspectionMeasurementDto>();
+            foreach (InspectionMeasurementDto m in dto.Measurements ?? new List<InspectionMeasurementDto>())
+            {
+                string name = InventoryText.Clean(m?.Characteristic);
+                if (name == null) return ResponseDtoHelper.BadRequest<InspectionDto>("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
+                if (name.Length > 200 || (InventoryText.Clean(m.Unit)?.Length ?? 0) > 30) return ResponseDtoHelper.BadRequest<InspectionDto>("نام مشخصه یا واحد اندازه‌گیری بیش از حد طولانی است.");
+                if (m.TolPlus < 0 || m.TolMinus < 0) return ResponseDtoHelper.BadRequest<InspectionDto>("تلرانس‌ها را به صورت مقدار مثبت وارد کنید (+ و −).");
+                if (!m.EquipmentId.HasValue || m.EquipmentId.Value <= 0)
+                    return ResponseDtoHelper.BadRequest<InspectionDto>($"برای اندازه‌گیری «{name}» ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید؛ مقدار بدون ابزار قابل پذیرش نیست.");
+                measurements.Add(new InspectionMeasurementDto
+                {
+                    Characteristic = name, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured, Unit = InventoryText.Clean(m.Unit), EquipmentId = m.EquipmentId,
+                    Pass = m.Measured >= m.Nominal - m.TolMinus && m.Measured <= m.Nominal + m.TolPlus,
+                });
+            }
+            if (measurements.Any(m => !m.Pass) && dto.RejectedQuantity <= 0)
+                return ResponseDtoHelper.BadRequest<InspectionDto>("اندازه‌گیری خارج از تلرانس ثبت شده است؛ کل مقدار نمی‌تواند قبول شود، مقدار مردود را مشخص کنید.");
+            List<int> equipmentIds = (dto.EquipmentIds ?? new List<int>()).Concat(measurements.Select(m => m.EquipmentId.Value)).Where(i => i > 0).Distinct().ToList();
+            if (string.Join(",", equipmentIds).Length > 200) return ResponseDtoHelper.BadRequest<InspectionDto>("تعداد ابزارهای اندازه‌گیری انتخاب‌شده بیش از حد است.");
+            string measurementsJson = measurements.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(measurements);
             string equipmentProblem = await Quality.QualityChecks.EquipmentAsync(_uow, equipmentIds, DateTime.Today, cancellationToken);
             if (equipmentProblem != null) return ResponseDtoHelper.BadRequest<InspectionDto>(equipmentProblem);
 
@@ -299,6 +334,7 @@ namespace Services.NasbNiro.Inventory
             }
 
             inspection.EquipmentIds = equipmentIds.Count == 0 ? null : string.Join(",", equipmentIds);
+            inspection.MeasurementsJson = measurementsJson;
             inspection.Status = InspectionStatus.Done;
             inspection.AcceptedQuantity = dto.AcceptedQuantity;
             inspection.RejectedQuantity = dto.RejectedQuantity;
@@ -514,10 +550,22 @@ namespace Services.NasbNiro.Inventory
             if (ncr.Status == NcrStatus.Open)
             {
                 bool severityChanged = ncr.Severity != dto.Severity;
-                bool decisionChanged = ncr.Severity != dto.Severity || ncr.Disposition != dto.Disposition ||
-                                       ncr.CustomerApprovalRequired != dto.CustomerApprovalRequired;
-                ncr.ReportDate = dto.ReportDate == default ? ncr.ReportDate == default ? DateTime.Today : ncr.ReportDate : dto.ReportDate.Date;
-                ncr.Source = Enum.IsDefined(typeof(NcrSource), dto.Source) ? dto.Source : NcrSource.InProcess;
+                NcrSource source = Enum.IsDefined(typeof(NcrSource), dto.Source) ? dto.Source : NcrSource.InProcess;
+                // review H7: a signature is a signature of the content it saw. Any change of what the signers read (the facts, the decision, the committee, the permit number, the
+                // customer's condition, the holder, the parties) clears them all, not only a change of the severity, the decision or the customer flag. The reference of the
+                // customer's letter is evidence for the permit, which is given after the signatures: adding it does not change what the signers read, so it keeps them. The analysis
+                // and corrective action fields below stay open until the report is closed.
+                bool decisionChanged = ncr.Severity != dto.Severity || ncr.Disposition != dto.Disposition || ncr.Source != source ||
+                                       ncr.CustomerApprovalRequired != dto.CustomerApprovalRequired || ncr.OwnedByContractor != dto.OwnedByContractor ||
+                                       ncr.Requirement != InventoryText.Clean(dto.Requirement) || ncr.Description != InventoryText.Clean(dto.Description) ||
+                                       ncr.DispositionNote != InventoryText.Clean(dto.DispositionNote) || ncr.CommitteeMinutesNumber != InventoryText.Clean(dto.CommitteeMinutesNumber) ||
+                                       ncr.CommitteeMembers != InventoryText.Clean(dto.CommitteeMembers) || ncr.ConcessionNumber != InventoryText.Clean(dto.ConcessionNumber) ||
+                                       ncr.TargetWarehouseId != dto.TargetWarehouseId ||
+                                       (dto.ProviderId.HasValue && dto.ProviderId != ncr.ProviderId) || (dto.WorkOrderId.HasValue && dto.WorkOrderId != ncr.WorkOrderId) ||
+                                       (dto.ContractId.HasValue && dto.ContractId != ncr.ContractId);
+                // the report date is the date of the event, set when the report is made: it is the line that records made afterwards are measured against (review H3)
+                if (ncr.ReportDate == default) ncr.ReportDate = dto.ReportDate == default ? DateTime.Today : dto.ReportDate.Date;
+                ncr.Source = source;
                 ncr.Severity = dto.Severity;
                 ncr.Disposition = dto.Disposition;
                 ncr.OwnedByContractor = dto.OwnedByContractor;
@@ -598,11 +646,18 @@ namespace Services.NasbNiro.Inventory
             int me = _user.UserId;
             DateTimeOffset now = DateTimeOffset.Now;
             var signers = new[] { ncr.QualityApprovedByUserId, ncr.EngineeringApprovedByUserId, ncr.ManufacturingApprovedByUserId };
+            // R1q D3 and review H7: whoever raised or edited the report (the inspector, the examiner, the engineer or operator whose record drafted it, the QC user who classified
+            // it) is its maker; the maker gives none of the signatures and not the permit. The checker is somebody who never touched it.
+            bool maker = global::Services.NasbNiro.Finance.LedgerMath.Touched(ncr.CreatorUserId, ncr.EditorUserIds, me);
+            const string makerMessage = " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند آن را امضا کند؛ کاربر دیگری از همین نقش امضا کند)";
 
             if (dto.Concession)
             {
                 if (!NeedsConcession(ncr.Disposition)) return ResponseDtoHelper.BadRequest<NcrDto>("این تصمیم مجوز ارفاقی لازم ندارد.");
                 if (!_user.IsInRole(InventoryRoles.RoleEngineering)) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.NotAllowed + " (مجوز ارفاقی را معاونت طراحی و ساخت صادر می‌کند)");
+                if (maker) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + makerMessage);
+                // the permit is the last act on a decision the quality department has already signed (review H4): never before the QC signature
+                if (!ncr.QualityApprovedAt.HasValue) return ResponseDtoHelper.BadRequest<NcrDto>("مجوز ارفاقی پس از امضای کنترل کیفیت صادر می‌شود؛ ابتدا QC تصمیم را امضا کند.");
                 if (ncr.ConcessionNumber == null) return ResponseDtoHelper.BadRequest<NcrDto>("شماره مجوز ارفاقی را وارد کنید.");
                 if (ncr.CustomerApprovalRequired && ncr.CustomerApprovalReference == null)
                     return ResponseDtoHelper.BadRequest<NcrDto>("قرارداد تایید انحراف توسط مشتری را لازم دارد؛ شماره نامه/تایید مشتری را وارد کنید.");
@@ -618,9 +673,10 @@ namespace Services.NasbNiro.Inventory
                 if (role == null) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.InvalidData);
                 if (!_user.IsInRole(role)) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.NotAllowed);
                 if (signers.Contains(me)) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser);
-                // R1q D3: the person who raised or edited the report cannot give the QC signature
-                if (dto.Kind == ApprovalKind.Quality && global::Services.NasbNiro.Finance.LedgerMath.Touched(ncr.CreatorUserId, ncr.EditorUserIds, me))
-                    return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند امضای کنترل کیفیت را بدهد؛ کاربر دیگری از QC یا مدیر QA امضا کند)");
+                if (maker)
+                    return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + (dto.Kind == ApprovalKind.Quality
+                        ? " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند امضای کنترل کیفیت را بدهد؛ کاربر دیگری از QC یا مدیر QA امضا کند)"
+                        : makerMessage));
                 if (dto.Kind == ApprovalKind.Quality) { ncr.QualityApprovedAt = now; ncr.QualityApprovedByUserId = me; }
                 else if (dto.Kind == ApprovalKind.Engineering) { ncr.EngineeringApprovedAt = now; ncr.EngineeringApprovedByUserId = me; }
                 else { ncr.ManufacturingApprovedAt = now; ncr.ManufacturingApprovedByUserId = me; }
@@ -656,6 +712,8 @@ namespace Services.NasbNiro.Inventory
             {
                 string evidenceProblem = await ApplyShopFloorEvidenceAsync(ncr, dto, cancellationToken);
                 if (evidenceProblem != null) return ResponseDtoHelper.BadRequest<NcrDto>(evidenceProblem);
+                // review H7: the person who carried the decision out is a maker of the outcome; he cannot close the report
+                ncr.EditorUserIds = global::Services.NasbNiro.Finance.LedgerMath.WithEditor(ncr.EditorUserIds, _user.UserId);
                 ncr.Status = NcrStatus.Executed;
                 ncr.ExecutedAt = now;
                 ncr.ExecutedByUserId = _user.UserId;
@@ -738,6 +796,7 @@ namespace Services.NasbNiro.Inventory
 
             // the confirm of the document marks the NCR as executed; a return waits for the warehouse
             NonConformance reloaded = await Ncrs.FirstAsync(n => n.Id == ncr.Id, cancellationToken);
+            reloaded.EditorUserIds = global::Services.NasbNiro.Finance.LedgerMath.WithEditor(reloaded.EditorUserIds, _user.UserId);
             reloaded.TargetWarehouseId = target?.Id;
             if (!confirm) reloaded.ResultDocumentId = made.Data.Id;
             await _uow.SaveChangesAsync(cancellationToken);
@@ -771,8 +830,12 @@ namespace Services.NasbNiro.Inventory
                             if (operation.NcrId != ncr.Id) return "عملیات انتخاب‌شده دوباره‌کاری همین گزارش عدم انطباق نیست.";
                             if (operation.Status != MfOperationStatus.Done) return "عملیات دوباره‌کاری هنوز پایان نیافته است.";
                             if (!operation.QcAccepted || !operation.QcRecordId.HasValue) return "عملیات دوباره‌کاری هنوز بازرسی QC قبول‌شده ندارد.";
-                            QcResult? result = await _uow.Set<QcRecord>().Where(r => r.Id == operation.QcRecordId.Value).Select(r => (QcResult?)r.Result).FirstOrDefaultAsync(cancellationToken);
-                            if (result != QcResult.Accept) return "بازرسی عملیات دوباره‌کاری با نتیجه «قبول» ثبت نشده است.";
+                            var proof = await _uow.Set<QcRecord>().Where(r => r.Id == operation.QcRecordId.Value).Select(r => new { r.Result, r.CreateDate }).FirstOrDefaultAsync(cancellationToken);
+                            if (proof == null || proof.Result != QcResult.Accept) return "بازرسی عملیات دوباره‌کاری با نتیجه «قبول» ثبت نشده است.";
+                            // review H3: the inspection must be made after the report, and one inspection closes one report
+                            if (proof.CreateDate < ncr.CreateDate) return "بازرسی عملیات دوباره‌کاری پیش از ثبت گزارش عدم انطباق انجام شده است.";
+                            if (await Ncrs.AnyAsync(n => n.Id != ncr.Id && !n.Deleted && n.ReinspectionKind == Quality.NcrReinspection.Record && n.ReinspectionRecordId == operation.QcRecordId.Value, cancellationToken))
+                                return "بازرسی این عملیات دوباره‌کاری قبلاً برای گزارش عدم انطباق دیگری ثبت شده است.";
                             ncr.ReworkOperationId = operation.Id;
                             ncr.ReinspectionKind = Quality.NcrReinspection.Record;
                             ncr.ReinspectionRecordId = operation.QcRecordId.Value;
@@ -781,7 +844,7 @@ namespace Services.NasbNiro.Inventory
                         // work done outside a production order (a repair in the field): the accepted re-inspection record
                         if (dto.ReinspectionRecordId.HasValue)
                         {
-                            string problem = await Quality.QualityNcrFactory.CheckReinspectionAsync(_uow, ncr, dto.ReinspectionKind, dto.ReinspectionRecordId.Value, cancellationToken);
+                            string problem = await Quality.QualityNcrFactory.CheckReinspectionAsync(_uow, ncr, dto.ReinspectionKind, dto.ReinspectionRecordId.Value, 0, cancellationToken);
                             if (problem != null) return problem;
                             ncr.ReinspectionKind = dto.ReinspectionKind;
                             ncr.ReinspectionRecordId = dto.ReinspectionRecordId.Value;
@@ -861,6 +924,7 @@ namespace Services.NasbNiro.Inventory
                 if (ncr.Status != NcrStatus.Open) return ResponseDtoHelper.BadRequest<NcrDto>("فقط گزارش باز ابطال می‌شود.");
                 string reason = InventoryText.Clean(dto.Reason);
                 if (reason == null) return ResponseDtoHelper.BadRequest<NcrDto>("علت ابطال را بنویسید.");
+                if (reason.Length > 1000) return ResponseDtoHelper.BadRequest<NcrDto>("علت ابطال نباید بیش از ۱۰۰۰ نویسه باشد.");
                 // the QA manager may cancel any report (always with a reason, and the cancellation is recorded); a QC user only a report he did not raise or edit
                 if (maker && !_user.IsInRole("QA")) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند آن را ابطال کند؛ مدیر QA یا کاربر دیگری از QC ابطال کند)");
                 string blocked = await Quality.QualityNcrFactory.CancelBlockAsync(_uow, ncr, cancellationToken);
@@ -879,6 +943,7 @@ namespace Services.NasbNiro.Inventory
                     return ResponseDtoHelper.BadRequest<NcrDto>("پیش از بستن، دسته علت ریشه‌ای، شرح علت و اقدام اصلاحی را ثبت کنید.");
                 string effectiveness = InventoryText.Clean(dto.EffectivenessCheck);
                 if (effectiveness == null) return ResponseDtoHelper.BadRequest<NcrDto>("نتیجه بررسی اثربخشی اقدام اصلاحی را بنویسید.");
+                if (effectiveness.Length > 4000) return ResponseDtoHelper.BadRequest<NcrDto>("شرح اثربخشی نباید بیش از ۴۰۰۰ نویسه باشد.");
                 // R1q D4: a rework or repair is closed only with the accepted inspection of the reworked product
                 if (ncr.Disposition == NcrDisposition.Rework || ncr.Disposition == NcrDisposition.Repair)
                 {
@@ -887,7 +952,8 @@ namespace Services.NasbNiro.Inventory
                     if (!recordId.HasValue && dto.ReinspectionRecordId.HasValue) { kind = dto.ReinspectionKind; recordId = dto.ReinspectionRecordId; }
                     if (!recordId.HasValue)
                         return ResponseDtoHelper.BadRequest<NcrDto>("دوباره‌کاری یا تعمیر بدون بازرسی مجدد قبول‌شده بسته نمی‌شود؛ بازرسی مجدد (یا گزارش بازرسی / آزمون مجدد قبول‌شده) را ثبت و به گزارش وصل کنید.");
-                    string problem = await Quality.QualityNcrFactory.CheckReinspectionAsync(_uow, ncr, kind, recordId.Value, cancellationToken);
+                    // the closer is the checker: the re-inspection he relies on is never his own record (review H7)
+                    string problem = await Quality.QualityNcrFactory.CheckReinspectionAsync(_uow, ncr, kind, recordId.Value, me, cancellationToken);
                     if (problem != null) return ResponseDtoHelper.BadRequest<NcrDto>(problem);
                     ncr.ReinspectionKind = kind;
                     ncr.ReinspectionRecordId = recordId;

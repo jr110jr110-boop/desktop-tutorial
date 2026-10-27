@@ -80,6 +80,27 @@ WH_TOKEN=$(login wh.ci 'Ci#Wh-User-2026'); PROD_TOKEN=$(login prod.ci 'Ci#Prod-U
 ENG_TOKEN=$(login eng.ci 'Ci#Eng-User-2026'); SEC_TOKEN=$(login sec.ci 'Ci#Sec-User-2026')
 [ -n "$WH_TOKEN" ] && [ -n "$PROD_TOKEN" ] && [ -n "$QC_TOKEN" ] && [ -n "$ENG_TOKEN" ] && [ -n "$SEC_TOKEN" ] && ok "login warehouse, production, QC, engineering, security users" || bad "login warehouse, production, QC, engineering, security users"
 as() { local t=$TOKEN; TOKEN=$1; shift; call "$@"; TOKEN=$t; } # as TOKEN METHOD PATH [JSON]
+# the QA manager (role 14) and a second QC user: the QC signature and the closing of an NCR come from somebody who did not raise or edit it (R1q D3), the QA manager gives the
+# second approval of a reduced item quality gate (R1q D11), and the finance manager is the only one who may let an opening balance come in without a price (R1q D35)
+user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
+user2 qa.ci 14 'Ci#Qa-User-2026' 09120000020 0012345620
+user2 qc2.ci 5 'Ci#Qc2-User-2026' 09120000021 0012345621
+user2 fm.ci 17 'Ci#Fm-User-2026' 09120000025 0012345625
+QA_TOKEN=$(login qa.ci 'Ci#Qa-User-2026'); QC2_TOKEN=$(login qc2.ci 'Ci#Qc2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026')
+[ -n "$QA_TOKEN" ] && [ -n "$QC2_TOKEN" ] && [ -n "$FM_TOKEN" ] && ok "quality: login QA (role 14), second QC user and the finance manager" || bad "quality: login QA (role 14), second QC user and the finance manager"
+# a third QC user: the closing of a CAPA, the second QC signature and the closing of an NCR come from people who did not touch the record (R1q review H7, M11)
+user2 qc3.ci 5 'Ci#Qc3-User-2026' 09120000028 0012345628
+QC3_TOKEN=$(login qc3.ci 'Ci#Qc3-User-2026')
+[ -n "$QC3_TOKEN" ] && ok "quality: login the third QC user" || bad "quality: login the third QC user"
+# upload_as TOKEN NAME : uploads a small text file as that user and leaves the id of the stored document in UPLOADED. The file that proves an inspection and test plan activity must have been
+# uploaded lately by a QC, QA or engineering user (review M16), so the evidence of the quality scenarios is uploaded with the token of the user who owns the activity.
+upload_as() {
+  printf 'evidence %s %s\n' "$2" "$(date +%s%N)" > "$OUT/$2.txt"
+  curl -s -o "$B" -X POST "$API/Documents?Description=$2&Name=$2&Code=QUA" -H "Authorization: Bearer $1" -F "File=@$OUT/$2.txt"
+  UPLOADED=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+}
+LONGREF=$(printf 'R%.0s' $(seq 1 301)); LONG1001=$(printf 'R%.0s' $(seq 1 1001))
+
 # refused(): the last call did not succeed (the services answer 200 + success=false for role and rule violations)
 refused() { jq -e '.success == false' "$B" >/dev/null 2>&1; }
 no() { if refused; then ok "$1"; else bad "$1"; fi; }
@@ -106,8 +127,18 @@ G2=$(val .data.id)
 call POST inventory/groups "{\"id\":$G1,\"code\":\"TRB\",\"title\":\"توربین\",\"parentId\":$G2}"; check "group cycle rejected" '.success == false'
 
 # item VAR JSON LABEL : creates the item and stores its id in VAR (no subshell, so the counters stay right)
-# a new item that starts without the incoming inspection of its group is a reduced quality gate and needs its reason (R1q D11); the helper writes it for every test item
-item() { call POST inventory/items "$(jq -c 'if has("qualityChangeReason") then . else . + {qualityChangeReason:"آزمون: کالای آزمایشی بدون بازرسی ورودی"} end' <<< "$2")"; check "item $3" '.success and .data.id > 0'; printf -v "$1" '%s' "$(val .data.id)"; }
+# a new item that starts without the incoming inspection of its group is a reduced quality gate: it needs its reason (R1q D11) and the second approval of the QA manager before the gate
+# applies (review M8); the helper writes the reason and lets the QA manager approve, so the test items start with the gates the scenarios expect (the response of the creation stays in $B)
+item() {
+  call POST inventory/items "$(jq -c 'if has("qualityChangeReason") then . else . + {qualityChangeReason:"آزمون: کالای آزمایشی بدون بازرسی ورودی"} end' <<< "$2")"
+  check "item $3" '.success and .data.id > 0'; printf -v "$1" '%s' "$(val .data.id)"
+  local pending; pending=$(val '.data.pendingQualityChangeId // empty')
+  if [ -n "$pending" ]; then
+    cp "$B" "$B.item"
+    as "$QA_TOKEN" POST inventory/items/quality-changes/decide "{\"id\":$pending,\"approve\":true,\"note\":\"آزمون: کالای آزمایشی\"}"; check "item $3: the QA manager approves its start gates" '.success and .data.status == 1'
+    cp "$B.item" "$B"
+  fi
+}
 item RAW "{\"code\":\"$C_RAW\",\"title\":\"میلگرد فورج 26NiCrMoV\",\"itemGroupId\":$G2,\"unit\":\"kg\",\"trackingMode\":1,\"material\":\"26NiCrMoV14-5\",\"minStock\":100,\"sepidarCode\":\"5001\",\"requiresIncomingInspection\":false}" "material (lot)"
 item SHAFT "{\"code\":\"$C_SHAFT\",\"title\":\"شفت روتور\",\"itemGroupId\":$G2,\"unit\":\"عدد\",\"trackingMode\":2,\"technicalCode\":\"130010100\",\"requiresIncomingInspection\":false}" "part (serial)"
 item BOLT "{\"code\":\"$C_BOLT\",\"title\":\"پیچ M24\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":500,\"requiresIncomingInspection\":false}" "MESC standard part (none)"
@@ -283,14 +314,6 @@ TOKEN=$ADMIN_TOKEN
 user pmo2.ci 1 'Ci#Pmo2-User-2026' 6
 PMO2_TOKEN=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$PMO2_TOKEN" ] && ok "login second planning user" || bad "login second planning user"
 TOKEN=$ADMIN_TOKEN
-# the QA manager (role 14) and a second QC user: the QC signature and the closing of an NCR come from somebody who did not raise or edit it (R1q D3), and the finance
-# manager is the only one who may let an opening balance come in without a price (R1q D35)
-user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
-user2 qa.ci 14 'Ci#Qa-User-2026' 09120000020 0012345620
-user2 qc2.ci 5 'Ci#Qc2-User-2026' 09120000021 0012345621
-user2 fm.ci 17 'Ci#Fm-User-2026' 09120000025 0012345625
-QA_TOKEN=$(login qa.ci 'Ci#Qa-User-2026'); QC2_TOKEN=$(login qc2.ci 'Ci#Qc2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026')
-[ -n "$QA_TOKEN" ] && [ -n "$QC2_TOKEN" ] && [ -n "$FM_TOKEN" ] && ok "quality: login QA (role 14), second QC user and the finance manager" || bad "quality: login QA (role 14), second QC user and the finance manager"
 
 # ---------------------------------------------------------------- coding (WI-WH-002)
 call GET "inventory/coding/values?scheme=PartStatus"; check "coding tables seeded: 42 part statuses, 5 stockable (★)" '(.data|length) == 42 and ([.data[]|select(.isStockable)]|length) == 5'
@@ -339,7 +362,8 @@ as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI_P,\"acceptedQuant
 check "plate inspection: 45 released, 5 to NCR" '.success and .data.status == 1 and (.data.releaseDocumentNumber|startswith("QR-")) and (.data.ncrNumber|startswith("NCR-"))'
 NCR1=$(val .data.ncrId)
 call GET "inventory/quality/ncr/$NCR1"; check "r1q D34: the NCR of an incoming inspection has its decision due date three days ahead (company setting)" ".success and .data.status == 0 and .data.severity == 0 and (.data.dueDate[0:10]) == \"$(dd 3)\""
-as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR1"; check "r1q D34: QC has an inbox item to classify and decide, with the same due date" ".success and (.data.data|length) == 1 and .data.data[0].recipientRole == \"QC\" and (.data.data[0].dueDate[0:10]) == \"$(dd 3)\" and (.data.data[0].title|contains(\"طبقه‌بندی\")) and .data.data[0].link == \"/inventory/ncr/$NCR1\""
+as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR1:classify"; check "r1q D34: QC has an inbox item to classify and decide, with the same due date (review L20: its own key, one item per phase)" ".success and (.data.data|length) == 1 and .data.data[0].recipientRole == \"QC\" and (.data.data[0].dueDate[0:10]) == \"$(dd 3)\" and (.data.data[0].title|contains(\"طبقه‌بندی\")) and .data.data[0].link == \"/inventory/ncr/$NCR1\""
+as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR1"; check "r1q L20: ... and no signing item exists yet under the key of the signatures" '.success and (.data.data|length) == 0'
 as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI_C,\"acceptedQuantity\":2,\"rejectedQuantity\":1,\"rejectedSerialNumbers\":[\"C-3\"],\"rejectReason\":\"تخلخل در فلنج\"}"
 check "casting inspection: C-3 rejected" '.success and .data.rejectedSerialNumbers == ["C-3"]'
 NCR2=$(val .data.ncrId)
@@ -349,9 +373,10 @@ call POST "inventory/documents/$RQ/cancel" '{"reason":"test"}'; check "receipt w
 # ---------------------------------------------------------------- NCR (PR-QC-002)
 ncr() { as "$QC_TOKEN" POST inventory/quality/ncr "$1"; }
 ncr "{\"id\":$NCR1,\"severity\":1,\"disposition\":4,\"source\":1,\"causeCategory\":2,\"rootCause\":\"ورق معیوب از تامین‌کننده\"}"; check "NCR1 classified: minor, scrap" '.success and .data.severity == 1 and .data.disposition == 4'
+as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR1:classify"; check "r1q L20: once classified, nothing is open under the classify key any more (the title cannot go stale)" '.success and (.data.data|length) == 0'
+as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR1"; check "r1q L20: the signing item has its own title (to confirm the decision, not to classify), the due date of a minor decision (7 days from the report) and the same link" ".success and (.data.data|length) == 1 and .data.data[0].recipientRole == \"QC\" and (.data.data[0].title|startswith(\"تایید تصمیم عدم انطباق\")) and (.data.data[0].title|contains(\"طبقه‌بندی\")|not) and (.data.data[0].dueDate[0:10]) == \"$(dd 7)\" and .data.data[0].link == \"/inventory/ncr/$NCR1\""
 as "$QC_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":4}"; nomsg "r1q D3: the QC user who raised and classified the NCR cannot give the QC signature" "ثبت‌کننده یا ویرایشگر"
 as "$QC2_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":4}"; check "NCR1 signed by a second QC user" '.success and .data.qualityApprovedAt != null and .data.qualityApprovedByName != null and .data.status == 0'
-as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR1"; check "r1q D34: after the decision the inbox item no longer asks QC to classify (the engineering and manufacturing signatures are still waited for)" '.success and ([.data.data[]|select(.title|contains("طبقه‌بندی"))]|length) == 0'
 as "$QC_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":5}"; check "QC cannot sign for engineering" '.success == false'
 as "$ENG_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":5}"; check "NCR1 signed by engineering" '.success'
 as "$PROD_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR1,\"kind\":3}"; check "NCR1 signed by manufacturing -> approved" '.success and .data.status == 1'
@@ -467,9 +492,9 @@ call GET "inventory/stock/expiry?ItemId=$RAW&OnlyExpired=true"; check "r1q D32: 
 call GET "inventory/stock/expiry?ItemId=$RAW&WithinDays=5"; check "r1q D32: ... and a horizon of 5 days leaves out the lot that expires in 10" '.success and (.data.data|length) == 1 and .data.data[0].lotNumber == "EXP-1"'
 ncr "{\"source\":2,\"severity\":1,\"itemId\":$RAW,\"lotId\":$EXLOT,\"quantity\":20,\"warehouseId\":$W1,\"disposition\":1,\"concessionNumber\":\"CN-EXP-1\",\"description\":\"Shelf life of lot EXP-1 is over; the bar was re-tested and is fit for the forging\",\"causeCategory\":2,\"rootCause\":\"Slow consumption of the lot\",\"correctiveAction\":\"Order smaller lots of the bar\"}"; check "r1q D32: an NCR with the concession decision is raised on the expired lot" '.success and .data.disposition == 1 and .data.status == 0'
 EXNCR=$(val .data.id); EXNCRNUM=$(val .data.number)
-call POST "inventory/documents/$EXD/confirm"; nomsg "r1q D32: a raised NCR is not yet a permit: the lot is still refused" "منقضی شده است"
+call POST "inventory/documents/$EXD/confirm"; check "r1q D32 + M18: a raised NCR is not yet a permit: the lot is still refused (the open report holds its goods; the report is named)" ".success == false and (.message|contains(\"نگهداری می‌شود\")) and (.message|contains(\"$EXNCRNUM\"))"
 approve3 "$EXNCR"
-call POST "inventory/documents/$EXD/confirm"; nomsg "r1q D32: the signatures without the concession permit do not allow the lot either" "منقضی شده است"
+call POST "inventory/documents/$EXD/confirm"; check "r1q D32 + M18: the signatures without the concession permit do not allow the lot either (still held by the report)" ".success == false and (.message|contains(\"نگهداری می‌شود\")) and (.message|contains(\"$EXNCRNUM\"))"
 as "$ENG_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$EXNCR,\"concession\":true}"; check "r1q D32: engineering issues the concession permit: the NCR is approved" '.success and .data.status == 1 and .data.concessionApprovedAt != null'
 call POST "inventory/documents/$EXD/confirm"; check "r1q D32: with the approved concession on that lot the same document is confirmed" '.success and (.data.number|startswith("SI-"))'
 call GET "inventory/stock/expiry?ItemId=$RAW&OnlyExpired=true"; check "r1q D32: the expiry report marks the lot with the concession NCR (it stays on the list: 15 kg here, 5 kg at the contractor)" ".success and (.data.data|length) == 1 and .data.data[0].concessionNcrNumber == \"$EXNCRNUM\" and .data.data[0].onHand == 20"
@@ -529,6 +554,14 @@ as "$FM_TOKEN" POST inventory/documents/import-opening "{\"documentDate\":\"2026
 check "r1q D35: the finance manager lets the row in at zero value; the result lists the zero-priced line" ".success and (.data.documentIds|length) == 1 and .data.lines == 1 and (.data.zeroPricedLines|length) == 1 and (.data.zeroPricedLines[0]|contains(\"$BOLT_CODE (2) در انبار WH-RM\"))"
 OBZ=$(val '.data.documentIds[0]')
 as "$FM_TOKEN" GET "finance/audit?EntityType=OpeningImport&EntityId=$OBZ&PageSize=0"; check "r1q D35: the zero-price decision is in the audit trail with the user" '.success and ([.data.data[]|select(.action == "ZeroPriceAllowed" and (.userName|length) > 0 and (.summary|contains("آزمون قیمت صفر")))]|length) == 1'
+# review M9: an opening balance typed on the document form follows the same rule (a price above zero on every line, at save and at confirm); the finance manager's zero-price approval
+# is stored on the draft, and a draft saved again by somebody else loses it
+call POST inventory/documents "{\"type\":15,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; nomsg "r1q M9: an opening balance typed on the document form without a unit price is refused at the draft" "قیمت واحد ندارد"
+call POST inventory/documents "{\"type\":15,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":2,\"unitPrice\":0}]}"; nomsg "r1q M9: ... a unit price of zero is a missing price" "قیمت واحد ندارد"
+call POST inventory/documents "{\"type\":15,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$W1,\"allowZeroPrice\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; nomsg "r1q M9: ... and the document form takes the zero-price permission from the finance manager only" "مجوز صریح مدیر مالی"
+call GET "inventory/documents/$OBZ"; check "r1q M9: the zero-priced draft of the finance manager carries that approval with its day and name" '.success and .data.zeroPriceApprovedAt != null and (.data.zeroPriceApprovedByName|length) > 0'
+call POST inventory/documents "{\"id\":$OBZ,\"type\":15,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":2,\"unitPrice\":1500}]}"
+check "r1q M9: the draft saved again by another user (now with a price) has lost the finance manager's zero-price approval" '.success and .data.status == 0 and .data.zeroPriceApprovedAt == null and .data.zeroPriceApprovedByName == null and .data.lines[0].unitPrice == 1500'
 call DELETE "inventory/documents/$OBZ"; check "r1q D35: the zero-priced draft is deleted again so the test stock stays as it was" '.success and .data == true'
 
 # ---------------------------------------------------------------- cost accounting and the Sepidar link
@@ -645,6 +678,38 @@ as "$FM_TOKEN" GET "finance/audit?EntityType=InventoryItem&EntityId=$BOLT&PageSi
 as "$ADMIN_TOKEN" POST inventory/items '{"code":"05001001000001","title":"ماده مصرفی آزمون گروه ۰۵","unit":"عدد","trackingMode":0,"requiresIncomingInspection":false}'; check "r1q D11: a consumable (group 05) starts without the incoming inspection and needs no reason: that is the baseline of its group" '.success and .data.requiresIncomingInspection == false'
 as "$ADMIN_TOKEN" POST inventory/items '{"code":"01003011060101","title":"ورق آزمون بدون بازرسی ورودی","unit":"kg","trackingMode":1,"requiresIncomingInspection":false}'; nomsg "r1q D11: a new material that starts without the incoming inspection of its group needs the reason" "دلیل تغییر را بنویسید"
 
+# review M8: a reduction of a quality gate ALWAYS waits for the QA manager (also when no purchase order of the item is open), only one reduction waits per item, a stricter control applies at
+# once and leaves the waiting request stale (the QA manager can then only reject it), the list of requests is for PMO, QC and QA, and the answer to a decision is the decided row itself
+TOKEN=$ADMIN_TOKEN
+item XQ "{\"code\":\"01003011060201\",\"title\":\"ورق آزمون تغییر کنترل کیفی\",\"unit\":\"kg\",\"trackingMode\":1,\"requiresIncomingInspection\":true,\"requiredCertificateType\":2,\"shelfLifeDays\":100}" "with the inspection, EN 10204 3.1 and 100 days of shelf life (a start stricter than its group needs no approval)"
+check "r1q M8: ... it starts with those gates and nothing waits" '.success and .data.requiresIncomingInspection == true and .data.requiredCertificateType == 2 and .data.shelfLifeDays == 100 and .data.pendingQualityChangeId == null'
+as "$QC_TOKEN" POST inventory/items/quality "{\"itemId\":$XQ,\"requiresIncomingInspection\":true,\"requiredCertificateType\":1,\"shelfLifeDays\":100,\"reason\":\"Certificate 2.2 is enough for this plate\"}"
+check "r1q M8: lowering the certificate to EN 10204 2.2 waits for the QA manager although no purchase order of the item is open: the item keeps 3.1" '.success and .data.requiredCertificateType == 2 and .data.pendingQualityChangeId != null'
+XQCH=$(val .data.pendingQualityChangeId)
+as "$QC_TOKEN" POST inventory/items/quality "{\"itemId\":$XQ,\"requiresIncomingInspection\":true,\"requiredCertificateType\":2,\"reason\":\"The shelf life is not needed\"}"; nomsg "r1q M8: a second reduction of the same item is refused while the first one waits (one request per item)" "در انتظار تایید QA است"
+as "$QC_TOKEN" POST inventory/items/quality "{\"itemId\":$XQ,\"requiresIncomingInspection\":true,\"requiredCertificateType\":3,\"shelfLifeDays\":100}"
+check "r1q M8: a stricter control (EN 10204 3.2) applies at once, with no reason and no second approval, while the reduction still waits" ".success and .data.requiredCertificateType == 3 and .data.pendingQualityChangeId == $XQCH"
+as "$QC_TOKEN" GET "inventory/items/quality-changes?ItemId=$XQ&Status=0"
+check "r1q M8: the waiting request shows that it is stale: it was made on 3.1, the item is on 3.2 now" ".success and (.data.data|length) == 1 and .data.data[0].id == $XQCH and .data.data[0].stale == true and .data.data[0].oldRequiredCertificateType == 2 and .data.data[0].currentRequiredCertificateType == 3 and .data.data[0].requiredCertificateType == 1"
+as "$QA_TOKEN" POST inventory/items/quality-changes/decide "{\"id\":$XQCH,\"approve\":true,\"note\":\"OK\"}"; nomsg "r1q M8: the QA manager cannot approve a stale request (it would apply a picture of the item that is gone)" "تایید آن مجاز نیست"
+as "$QA_TOKEN" POST inventory/items/quality-changes/decide "{\"id\":$XQCH,\"approve\":false,\"note\":\"The item changed since the request\"}"
+check "r1q M8: ... the rejection works, and the answer is the decided row itself, not the newest row of the list" ".success and .data.id == $XQCH and .data.status == 2 and .data.itemCode == \"01003011060201\" and .data.decidedByName != null"
+call GET "inventory/items/$XQ"; check "r1q M8: the item stays on EN 10204 3.2 and nothing waits" '.success and .data.requiredCertificateType == 3 and .data.pendingQualityChangeId == null'
+as "$QC_TOKEN" GET "inventory/items/quality-changes?ItemId=$XQ"; check "r1q M8: the history of the item lists its three requests, newest first: the stricter control applied at once, the rejected reduction, the start" '.success and ([.data.data[]|.status]) == [1,2,1]'
+as "$WH_TOKEN" GET "inventory/items/quality-changes"; [ "$CODE" = "403" ] && ok "r1q M8: the list of quality-gate requests is closed to the storekeeper (403)" || bad "r1q M8: the list of quality-gate requests is closed to the storekeeper (403) got $CODE"
+as "$PLAN_TOKEN" GET "inventory/items/quality-changes"; [ "$CODE" = "403" ] && ok "r1q M8: ... and to the planning user (403)" || bad "r1q M8: ... and to the planning user (403) got $CODE"
+as "$QC_TOKEN" POST inventory/items/quality "{\"itemId\":$XQ,\"requiresIncomingInspection\":true,\"requiredCertificateType\":2,\"shelfLifeDays\":100,\"reason\":\"3.1 is enough for this plate\"}"
+check "r1q M8: once the first request is decided a new reduction (3.2 to 3.1) is accepted and waits again" '.success and .data.requiredCertificateType == 3 and .data.pendingQualityChangeId != null'
+XQCH2=$(val .data.pendingQualityChangeId)
+as "$QA_TOKEN" POST inventory/items/quality-changes/decide "{\"id\":$XQCH2,\"approve\":true,\"note\":\"3.1 is the contract requirement\"}"
+check "r1q M8: the QA manager approves it: the answer is that row, with the values the request was made on and the values it asked for" ".success and .data.id == $XQCH2 and .data.status == 1 and .data.oldRequiredCertificateType == 3 and .data.requiredCertificateType == 2"
+call GET "inventory/items/$XQ"; check "r1q M8: the item is on EN 10204 3.1 now" '.success and .data.requiredCertificateType == 2 and .data.pendingQualityChangeId == null'
+call POST inventory/items '{"code":"01003011060301","title":"ورق آزمون شروع بدون بازرسی","unit":"kg","trackingMode":1,"requiresIncomingInspection":false,"qualityChangeReason":"Plates of a certified supplier are checked on the line"}'
+check "r1q M8: a new material that asks to start without the incoming inspection is created with the inspection of its group; the request waits for QA" '.success and .data.requiresIncomingInspection == true and .data.pendingQualityChangeId != null'
+XQ2=$(val .data.id); XQ2CH=$(val .data.pendingQualityChangeId)
+as "$QA_TOKEN" POST inventory/items/quality-changes/decide "{\"id\":$XQ2CH,\"approve\":true,\"note\":\"Supplier file checked\"}"; check "r1q M8: the QA manager approves it" '.success and .data.status == 1'
+call GET "inventory/items/$XQ2"; check "r1q M8: ... and the new material has no incoming inspection now" '.success and .data.requiresIncomingInspection == false and .data.pendingQualityChangeId == null'
+
 # switching the purchase order rule on: only petty-cash purchases are received without an order
 call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "purchase order rule switched on" '.success and .data.value == 1'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-23T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"locationId\":$L2}]}"
@@ -673,6 +738,15 @@ WO1=$(val .data.id)
 call POST WorkOrders "{\"contractId\":$QCT,\"equipmentId\":$QEQ,\"code\":\"QA-WO-2\",\"title\":\"Pump unit 2\",\"description\":\"x\",\"count\":1}"; check "quality: work order 2" '.success and .data.id > 0'
 WO2=$(val .data.id)
 
+
+# The bolts of the pump units come as the customer's property against the work orders (customer property receipt into a kind-8 warehouse, not valued). A release note lists only what a work
+# order made or received, so these receipts are the "made" quantity of the release-note lines and of the delivery gate below (R1q review C1, H4).
+call POST inventory/warehouses '{"code":"WH-CP","title":"اموال مشتری","kind":8}'; check "quality: customer-property warehouse (kind 8) created" '.success and .data.id > 0'
+WCP=$(val .data.id)
+call POST inventory/documents "{\"type\":17,\"documentDate\":\"${D0}T00:00:00\",\"warehouseId\":$WCP,\"contractId\":$QCT,\"workOrderId\":$WO1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":5}]}"; check "quality: customer property receipt of 5 bolts for work order 1 drafted" '.success and .data.id > 0'
+CPR1=$(val .data.id); call POST "inventory/documents/$CPR1/confirm"; check "quality: the 5 bolts of work order 1 are received" '.success and .data.status == 1'
+call POST inventory/documents "{\"type\":17,\"documentDate\":\"${D0}T00:00:00\",\"warehouseId\":$WCP,\"contractId\":$QCT,\"workOrderId\":$WO2,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"; CPR2=$(val .data.id)
+call POST "inventory/documents/$CPR2/confirm"; check "quality: the bolt of work order 2 is received" '.success and .data.status == 1'
 # --- A. ITP: templates, system drafts, point rules
 as "$QC_TOKEN" GET quality/itp-templates; check "ITP templates seeded: steam turbine 37 rows, pump, condenser, lube oil" '.success and (.data.data|length) >= 4 and ([.data.data[]|select(.code=="ITP-STEAM-TURBINE")|.activityCount][0] == 37) and ([.data.data[]|select(.code=="ITP-PUMP")|.activityCount][0] == 6)'
 PUMPT=$(jq -r '.data.data[]|select(.code=="ITP-PUMP")|.id' "$B")
@@ -687,29 +761,36 @@ as "$QC_TOKEN" POST quality/itps/ensure "{\"workOrderId\":$WO1,\"productType\":4
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\"}"; nomsg "activity with an H point cannot be done before the client approved the ITP" "کارفرما تایید نشده"
 as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-1\"}"; no "client approval before submission rejected"
 as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"submit\"}"; check "ITP submitted" '.success and .data.status == 1'
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\"}"; no "client approval needs the client letter reference"
+# R1q review H6: the client's approval is recorded by somebody who did not prepare, change or submit the plan (a vendor cannot approve for the client alone), with the client's reference
+# (at most 300 characters) and a date that is not in the future and not older than the back-date window
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\"}"; nomsg "client approval needs the client letter reference" "مرجع تایید کارفرما را وارد کنید"
 as "$ENG_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-1\"}"; no "engineering cannot record the client approval"
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-LTR-77\",\"date\":\"$D0\"}"; check "ITP approved by the client (letter reference kept)" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-LTR-77"'
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-LTR-77\",\"date\":\"$D0\"}"; nomsg "r1q H6: the QC user who prepared and submitted the plan cannot record the client's approval of it (segregation of duties)" "تفکیک وظایف"
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"$LONGREF\"}"; nomsg "r1q H6: a client reference of 301 characters is refused" "حداکثر 300 نویسه"
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-LTR-77\",\"date\":\"$(dd 1)\"}"; nomsg "r1q H6: an approval dated tomorrow is refused" "نمی‌تواند در آینده باشد"
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-LTR-77\",\"date\":\"$(dd -10)\"}"; nomsg "r1q H6: an approval dated ten days back is refused (back-date window of 7 days)" "بیش از 7 روز پیش است"
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-LTR-77\",\"date\":\"$(dd -2)\"}"; check "ITP approved by the client (letter reference and the day kept; recorded by the QA manager, who did not touch the plan)" ".success and .data.status == 2 and .data.clientApprovalReference == \"CL-LTR-77\" and (.data.clientApprovalDate[0:10]) == \"$(dd -2)\""
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\"}"; check "H point: done refused without the vendor release" '.success == false and (.message|contains("H"))'
 as "$ENG_TOKEN" POST quality/itps/release "{\"activityId\":$A1,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"organisation\":\"Vendor Co\",\"reference\":\"V-REL-1\"}"; no "only QC records a point release"
 as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A1,\"party\":1,\"action\":4,\"personName\":\"Vendor QC\",\"reference\":\"x\"}"; check "H point cannot be waived" '.success == false'
 as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A1,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"organisation\":\"Vendor Co\",\"reference\":\"V-REL-1\"}"; check "vendor H release recorded" '.success'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\"}"; nomsg "r1q D18: an activity is not done without proof (an accepted inspection on it or an attached document)" "مدرک لازم است"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\",\"evidenceDocumentId\":\"3fa85f64-5717-4562-b3fc-2c963f66afa6\"}"; nomsg "r1q D18: a document id that is not in the document store is no proof" "در مخزن اسناد پیدا نشد"
-as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\",\"evidenceDocumentId\":\"$DOCID\",\"note\":\"Certificates EN 10204 3.1 reviewed\"}"; check "H point released and proven by the attached document -> activity done, ITP in use (the evidence stays on the activity)" ".success and ([.data.activities[]|select(.id==$A1)|.status][0] == 2) and ([.data.activities[]|select(.id==$A1)|.evidenceDocumentId][0] == \"$DOCID\") and .data.status == 3"
+# R1q review M16: the proof is a file uploaded lately by a QC, QA or engineering user, and it proves one activity only
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\",\"evidenceDocumentId\":\"$DOCID\"}"; nomsg "r1q M16: a file uploaded by the PMO account is no proof (the uploader must be QC, QA or engineering)" "توسط کاربر QC، QA یا مهندسی بارگذاری شده باشد"
+upload_as "$QC_TOKEN" itp-a1-evidence; EV1=$UPLOADED
+[ -n "$EV1" ] && ok "r1q M16: the certificate review file is uploaded by the QC user" || bad "r1q M16: the certificate review file is uploaded by the QC user"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\",\"evidenceDocumentId\":\"$EV1\",\"note\":\"Certificates EN 10204 3.1 reviewed\"}"; check "H point released and proven by the file the QC user uploaded -> activity done, ITP in use (the evidence stays on the activity)" ".success and ([.data.activities[]|select(.id==$A1)|.status][0] == 2) and ([.data.activities[]|select(.id==$A1)|.evidenceDocumentId][0] == \"$EV1\") and .data.status == 3"
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A6,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"organisation\":\"Vendor Co\",\"reference\":\"V-REL-6\"}"; check "vendor H release on the packing activity" '.success'
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"done\",\"evidenceDocumentId\":\"$EV1\"}"; nomsg "r1q M16: the file that proved the first activity cannot prove a second one" "پیش‌تر مدرک فعالیت دیگری شده است"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$EV1" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/itp-a1-evidence.txt"); nomsg "r1q M16: the file that proves an activity cannot be replaced afterwards" "مدرک انجام یک فعالیت برنامه بازرسی"
 as "$PROD_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"x\"}"; no "production cannot mark an activity not applicable"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\"}"; no "not applicable needs a reason"
-as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"No run test for this pump order\"}"; nomsg "r1q D9: a witness point of the client or the third party cannot be dropped without the client's letter reference" "نامه موافقت کارفرما"
-as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"No run test for this pump order\",\"reference\":\"CL-LTR-81\"}"
-check "r1q D9: with the client's letter the run test is not applicable; the approved plan moves to revision 1 (draft) and keeps revision 0 as a snapshot" ".success and ([.data.activities[]|select(.id==$A4)|.status][0] == 4) and ([.data.activities[]|select(.id==$A4)|.notApplicableReference][0] == \"CL-LTR-81\") and .data.revision == 1 and .data.status == 0 and (.data.revisions|length) == 1 and .data.revisions[0].revision == 0 and .data.revisions[0].clientApprovalReference == \"CL-LTR-77\""
-as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A5,\"action\":\"not-applicable\",\"note\":\"Performance test at site only\",\"reference\":\"CL-LTR-81\"}"; check "performance test marked not applicable with the same client letter (the plan is already in revision 1)" ".success and .data.revision == 1 and ([.data.activities[]|select(.id==$A5)|.notApplicableReference][0] == \"CL-LTR-81\")"
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"submit\"}"; check "revision 1 of the plan submitted to the client" '.success and .data.status == 1'
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-LTR-82\",\"date\":\"$D0\"}"; check "revision 1 approved again by the client (new letter reference)" '.success and .data.status == 2 and .data.revision == 1 and .data.clientApprovalReference == "CL-LTR-82"'
-as "$QC_TOKEN" POST quality/itps "{\"id\":$ITP1,\"noticeDays\":0}"; nomsg "r1q D9: the notice period is locked once the client approved the plan" "قفل است"
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"revise\",\"reason\":\"Notice period of in-house witness tests agreed with the client at 0 days (letter CL-LTR-83)\"}"; check "the notice period changes only through a revision: revision 2 opened as a draft" '.success and .data.revision == 2 and .data.status == 0 and (.data.revisions|length) == 2'
-as "$QC_TOKEN" POST quality/itps "{\"id\":$ITP1,\"noticeDays\":0}"; check "notice period set to 0 days in the draft revision" '.success and .data.noticeDays == 0'
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"submit\"}"
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP1,\"action\":\"client-approve\",\"reference\":\"CL-LTR-83\",\"date\":\"$D0\"}"; check "revision 2 approved by the client" '.success and .data.status == 2 and .data.revision == 2 and .data.noticeDays == 0'
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"No run test for this pump order\",\"reference\":\"$LONGREF\"}"; nomsg "r1q H6: the reference of a not-applicable decision is at most 300 characters" "حداکثر 300 نویسه"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"No run test for this pump order\",\"reference\":\"CL-LTR-81\"}"; nomsg "r1q H6: a witness point of the client or the third party is not dropped with a typed reference: only the client's incoming letter registered in the Office counts" "نامه موافقت کارفرما"
+# R1q review H6: the notice period is at least the company minimum (1 day by default; 0 days would waive the client's witness at once) and is locked once the client approved the plan
+as "$QC_TOKEN" POST quality/itps "{\"id\":$ITP1,\"noticeDays\":0}"; nomsg "r1q H6: a notice period of 0 days is refused (company minimum 1 day)" "باید بین 1 تا 365 روز باشد"
+as "$QC_TOKEN" POST quality/itps "{\"id\":$ITP1,\"noticeDays\":3}"; nomsg "r1q D9: the notice period is locked once the client approved the plan" "قفل است"
 
 # the system drafts the ITP of a work order that only has QC records (no human step)
 call POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"operation\":\"Casing welding\",\"result\":1,\"quantity\":1}"; check "first record of work order 2 saved (PMO may write non-ITP records)" '.success' 
@@ -765,21 +846,31 @@ as "$QC_TOKEN" POST quality/equipment '{"name":"Fresh caliper","type":1}'; FC=$(
 as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$FC,\"eventDate\":\"$(dd -2)\",\"labName\":\"Lab A\",\"labAccredited\":true,\"certificateNumber\":\"CAL-FC-1\",\"certificateDocumentId\":\"$DOCID\",\"traceabilityStatement\":\"Traceable\",\"asFoundPass\":true,\"asLeftPass\":true}"; check "r1q D15: a caliper calibrated two days ago" '.success and .data.status == 0'
 as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"recordDate\":\"$(dd -5)\",\"measurements\":[{\"characteristic\":\"Thread\",\"nominal\":24,\"tolPlus\":0.1,\"tolMinus\":0.1,\"measured\":24.05,\"unit\":\"mm\",\"equipmentId\":$FC}]}"; nomsg "r1q D15: a record dated five days back cannot use an instrument that was not calibrated yet on that day" "کالیبراسیون معتبر نداشته است"
 as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"recordDate\":\"$(dd -1)\",\"measurements\":[{\"characteristic\":\"Thread\",\"nominal\":24,\"tolPlus\":0.1,\"tolMinus\":0.1,\"measured\":24.05,\"unit\":\"mm\",\"equipmentId\":$FC}]}"; check "r1q D15: a record dated yesterday with the same instrument is accepted (calibrated on that day and today)" ".success and (.data.recordDate[0:10]) == \"$(dd -1)\" and .data.measurements[0].equipmentCode != null"
-# R1q D14: declaring an instrument calibration-free is the QA manager's decision, with a reason, and it is in the audit trail
-as "$QC_TOKEN" POST quality/equipment "{\"id\":$FC,\"name\":\"Fresh caliper\",\"type\":1,\"requiresCalibration\":false,\"calibrationWaiverReason\":\"x\"}"; nomsg "r1q D14: QC cannot switch the calibration requirement off (a decision of the QA manager)" "تصمیم مدیر QA"
-as "$QA_TOKEN" POST quality/equipment "{\"id\":$FC,\"name\":\"Fresh caliper\",\"type\":1,\"requiresCalibration\":false}"; nomsg "r1q D14: the QA manager needs a written reason" "دلیل بی‌نیازی"
-as "$QA_TOKEN" POST quality/equipment "{\"id\":$FC,\"name\":\"Fresh caliper\",\"type\":1,\"requiresCalibration\":false,\"calibrationWaiverReason\":\"Go/no-go gauge: no measuring function\"}"; check "r1q D14: the QA manager waives the calibration with a reason" '.success and .data.status == 4 and .data.calibrationWaiverReason == "Go/no-go gauge: no measuring function" and .data.calibrationWaivedAt != null'
-as "$FM_TOKEN" GET "finance/audit?EntityType=MeasuringEquipment&EntityId=$FC&PageSize=0"; check "r1q D14: the waiver is in the audit trail with the user and the reason" '.success and ([.data.data[]|select(.action == "Modified" and (.userName|length) > 0 and (.afterJson|tostring|contains("Go/no-go gauge")))]|length) >= 1'
+# R1q D14, review M14: declaring an instrument calibration-free is a two-step decision of the quality department: the QA manager asks with a written reason and another QA or QC user approves; the
+# register call itself (new or existing instrument) never switches the requirement off; both steps are in the audit trail
+as "$QA_TOKEN" POST quality/equipment "{\"id\":$FC,\"name\":\"Fresh caliper\",\"type\":1,\"requiresCalibration\":false,\"calibrationWaiverReason\":\"x\"}"; nomsg "r1q M14: saving an existing instrument with the calibration switched off is refused, even for the QA manager (two steps)" "دو مرحله دارد"
+as "$QA_TOKEN" POST quality/equipment '{"name":"Waived gauge","type":1,"requiresCalibration":false}'; nomsg "r1q M14: a new instrument cannot be registered as calibration-free either" "دو مرحله دارد"
+as "$QC_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"request-waiver\",\"reason\":\"x\"}"; nomsg "r1q D14: QC cannot ask to switch the calibration requirement off (a decision of the QA manager)" "تصمیم مدیر QA"
+as "$QA_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"request-waiver\"}"; nomsg "r1q D14: the QA manager needs a written reason" "دلیل بی‌نیازی"
+as "$QA_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"request-waiver\",\"reason\":\"$LONG1001\"}"; nomsg "r1q L21: a reason longer than 1000 characters is refused with a message, not by the database" "متن دلیل بیش از ۱۰۰۰ نویسه است"
+as "$QA_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"request-waiver\",\"reason\":\"Go/no-go gauge: no measuring function\"}"; check "r1q M14: the QA manager's request waits for a second person; the instrument still needs its calibration" '.success and .data.waiverPending == true and .data.status != 4 and .data.calibrationWaiverRequestReason == "Go/no-go gauge: no measuring function" and .data.calibrationWaiverRequestedByName != null and .data.calibrationWaivedAt == null'
+as "$QA_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"request-waiver\",\"reason\":\"again\"}"; nomsg "r1q M14: a second request is refused while one is pending" "در انتظار تایید است"
+as "$QC_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"reject-waiver\"}"; check "r1q M14: another user rejects the request: the instrument is as before" '.success and .data.waiverPending == false and .data.calibrationWaiverRequestReason == null and .data.status != 4'
+as "$QA_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"request-waiver\",\"reason\":\"Go/no-go gauge: no measuring function\"}"; check "r1q M14: the QA manager asks again" '.success and .data.waiverPending == true'
+as "$QA_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"approve-waiver\"}"; nomsg "r1q M14: the requester cannot approve his own request" "درخواست‌کننده نمی‌تواند"
+as "$WH_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"approve-waiver\"}"; no "r1q M14: the warehouse user cannot approve it"
+as "$QC_TOKEN" POST quality/equipment/action "{\"id\":$FC,\"action\":\"approve-waiver\"}"; check "r1q D14: a second person approves: the calibration is not required (status 4), the reason and the day stay on the instrument" '.success and .data.status == 4 and .data.waiverPending == false and .data.calibrationWaiverReason == "Go/no-go gauge: no measuring function" and .data.calibrationWaivedAt != null'
+as "$FM_TOKEN" GET "finance/audit?EntityType=MeasuringEquipment&EntityId=$FC&PageSize=0"; check "r1q D14: the two requests and the approval (three changes that carry the reason) are in the audit trail with the user" '.success and ([.data.data[]|select(.action == "Modified" and (.userName|length) > 0 and (.afterJson|tostring|contains("Go/no-go gauge")))]|length) == 3'
 # R1q D3: an NCR drafted from a failed inspection is cancelled only by somebody other than the inspector, with a reason, and only after an accepted re-inspection of the same product (★)
 as "$QC_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"operation\":\"Final visual\",\"quantity\":1,\"result\":2,\"note\":\"Scratch on the thread\"}"; check "r1q D3: a failed visual inspection drafts an NCR" '.success and .data.result == 2 and .data.ncrId != null'
 NCR4=$(val .data.ncrId)
-as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR4"; check "r1q D34: the drafted NCR is in the QC inbox at once, due on the minor decision date (7 days), and the link opens the NCR page" ".success and (.data.data|length) == 1 and .data.data[0].recipientRole == \"QC\" and (.data.data[0].dueDate[0:10]) == \"$(dd 7)\" and .data.data[0].link == \"/inventory/ncr/$NCR4\""
+as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR4:classify"; check "r1q D34: the drafted NCR is in the QC inbox at once, due on the minor decision date (7 days), and the link opens the NCR page" ".success and (.data.data|length) == 1 and .data.data[0].recipientRole == \"QC\" and (.data.data[0].dueDate[0:10]) == \"$(dd 7)\" and .data.data[0].link == \"/inventory/ncr/$NCR4\""
 as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR4,\"cancel\":true}"; nomsg "r1q D3: cancelling an NCR needs a reason" "علت ابطال"
 as "$QC_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR4,\"cancel\":true,\"reason\":\"Entered by mistake\"}"; nomsg "r1q D3: the inspector whose inspection drafted the NCR cannot cancel it" "ثبت‌کننده یا ویرایشگر"
 as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR4,\"cancel\":true,\"reason\":\"Entered by mistake\"}"; nomsg "r1q D3: an NCR of a failed inspection is not cancelled before an accepted re-inspection exists" "تا بازرسی مجدد قبول‌شده‌ای"
-as "$QC_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"operation\":\"Final visual\",\"quantity\":1,\"result\":1}"; check "r1q D3: the re-inspection of the same product is accepted" '.success and .data.result == 1 and .data.ncrId == null'
+as "$QC_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"operation\":\"Final visual\",\"quantity\":1,\"result\":1}"; check "r1q D3: the re-inspection of the same product is accepted" '.success and .data.result == 1 and .data.ncrId == null'; RRA=$(val .data.id)
 as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR4,\"cancel\":true,\"reason\":\"Re-inspected and accepted\"}"; check "r1q D3: another QC user cancels it with a reason; who and why are kept" '.success and .data.status == 4 and .data.cancelReason == "Re-inspected and accepted" and .data.cancelledByName != null'
-as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR4"; check "r1q D34: the cancelled NCR leaves the QC inbox" '.success and (.data.data|length) == 0'
+as "$QC2_TOKEN" GET "office/inbox?SourceKey=ncr:$NCR4:classify"; check "r1q D34: the cancelled NCR leaves the QC inbox" '.success and (.data.data|length) == 0'
 # R1q D17 ★: the register of inspector qualifications starts to count when the first one is entered; then a QC inspector records only with a valid certificate of his own
 as "$QA_TOKEN" POST quality/persons "{\"name\":\"QC Two (inspector)\",\"personnelCode\":\"I-002\",\"employer\":1,\"userId\":$QC2ID}"; IP2=$(val .data.id)
 as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$IP2,\"kind\":4,\"method\":\"VISUAL\",\"scope\":\"Dimensional and visual inspection\",\"certificateNumber\":\"INS-QC2\",\"issuedDate\":\"$(dd -30)\",\"expiryDate\":\"$(dd 300)\"}"; check "r1q D17: an inspector qualification registered for the second QC user" '.success and .data.state == 0 and .data.kind == 4'
@@ -799,9 +890,31 @@ approve3 "$NCR5"; check "r1q D5: NCR5 (a bolt found in the workshop, rework) is 
 as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR5}"; nomsg "r1q D5: a workshop rework is not executed by a click: it needs the finished rework operation or an accepted re-inspection" "عملیات دوباره‌کاری پایان‌یافته و بازرسی قبول‌شده"
 as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR5,\"reworkOperationId\":999999}"; nomsg "r1q D5: an unknown rework operation is refused" "عملیات دوباره‌کاری پیدا نشد"
 as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR5,\"reinspectionKind\":\"QcRecord\",\"reinspectionRecordId\":$R3}"; nomsg "r1q D5: a rejected inspection record is not a re-inspection" "با نتیجه «قبول» نیست"
+# R1q review H3: the re-inspection that proves a workshop rework is a record of THIS product made AFTER this report; an old accepted record, or an inspection made for something else, proves nothing
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR5,\"reinspectionKind\":\"QcRecord\",\"reinspectionRecordId\":$RRA}"; nomsg "r1q H3: an accepted record made BEFORE the report is no evidence of the rework" "بازرسی مجدد باید بعد از ثبت گزارش عدم انطباق انجام شده باشد"
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR5,\"reinspectionKind\":\"QcInspection\",\"reinspectionRecordId\":$QI_P}"; nomsg "r1q H3: an incoming inspection that is not the re-inspection of this report is refused" "بازرسی مجدد همین گزارش عدم انطباق نیست"
 as "$QC_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"operation\":\"Re-inspection after rework\",\"quantity\":1,\"result\":1}"; RR=$(val .data.id)
 as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR5,\"reinspectionKind\":\"QcRecord\",\"reinspectionRecordId\":$RR}"; check "r1q D5: executed with the accepted re-inspection record, which stays linked to the NCR" ".success and .data.status == 2 and .data.reinspectionKind == \"QcRecord\" and .data.reinspectionRecordId == $RR"
 as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR5,\"effectivenessCheck\":\"Gauge check in use, no repeat in the next ten assemblies\"}"; check "r1q D5: NCR5 closed by the second QC user" '.success and .data.status == 3'
+# R1q review H3: one re-inspection record proves one report, and the person who closes a report does not close it on his own evidence
+ncr "{\"source\":2,\"severity\":1,\"itemId\":$BOLT,\"quantity\":1,\"workOrderId\":$WO2,\"disposition\":2,\"description\":\"Second cross-threaded bolt\",\"causeCategory\":1,\"rootCause\":\"Cross-threaded by hand\",\"correctiveAction\":\"Thread gauge check before assembly\"}"; NCR9=$(val .data.id)
+approve3 "$NCR9"; check "r1q H3: NCR9 (a second bolt found in the workshop, rework) is approved" '.success and .data.status == 1 and .data.warehouseId == null'
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR9,\"reinspectionKind\":\"QcRecord\",\"reinspectionRecordId\":$RR}"; nomsg "r1q H3: the record that proved NCR5 does not prove NCR9 (one re-inspection proves one report)" "قبلاً برای گزارش عدم انطباق دیگری ثبت شده است"
+as "$QC2_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"operation\":\"Re-inspection of the second bolt\",\"quantity\":1,\"result\":1}"; check "r1q H3: the second QC user re-inspects the second bolt (accepted)" '.success and .data.result == 1'
+RR9=$(val .data.id)
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR9,\"reinspectionKind\":\"QcRecord\",\"reinspectionRecordId\":$RR9}"; check "r1q H3: NCR9 is executed with its own record" ".success and .data.status == 2 and .data.reinspectionKind == \"QcRecord\" and .data.reinspectionRecordId == $RR9"
+as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR9,\"effectivenessCheck\":\"Gauge check in use\"}"; nomsg "r1q H3: the second QC user cannot close the report on the re-inspection he recorded himself" "بازرسی مجدد را خود شما ثبت کرده‌اید"
+as "$QC3_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR9,\"effectivenessCheck\":\"Gauge check in use\"}"; check "r1q H3: the third QC user closes NCR9" '.success and .data.status == 3'
+# R1q review H7: the person whose failed record drafted a report (here the operator's self-inspection) is a maker of it and cannot give a signature either; an edit of what the signers read clears the signatures
+as "$PROD_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"operation\":\"Operator check of the thread\",\"quantity\":1,\"result\":2,\"note\":\"Burr on the thread\"}"; check "r1q H7: the failed self-inspection of the operator drafts an NCR" '.success and .data.result == 2 and .data.ncrId != null and .data.selfInspection == true'
+NCR10=$(val .data.ncrId)
+ncr "{\"id\":$NCR10,\"severity\":1,\"disposition\":4,\"source\":2,\"description\":\"Burr on the thread\",\"causeCategory\":1,\"rootCause\":\"Tap worn\",\"correctiveAction\":\"Change the tap every 200 holes\"}"; check "r1q H7: NCR10 classified by QC: minor, scrap" '.success and .data.severity == 1 and .data.disposition == 4'
+as "$QC2_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR10,\"kind\":4}"; check "r1q H7: NCR10 signed by the second QC user" '.success and .data.qualityApprovedAt != null'
+as "$ENG_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR10,\"kind\":5}"; check "r1q H7: NCR10 signed by engineering" '.success and .data.engineeringApprovedAt != null and .data.status == 0'
+as "$PROD_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$NCR10,\"kind\":3}"; nomsg "r1q H7: the operator whose record drafted the report cannot give the manufacturing signature" "ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند آن را امضا کند"
+ncr "{\"id\":$NCR10,\"severity\":1,\"disposition\":4,\"source\":2,\"description\":\"Burr on the thread, found again on the next piece\",\"causeCategory\":1,\"rootCause\":\"Tap worn\",\"correctiveAction\":\"Change the tap every 200 holes\"}"; check "r1q H7: a change of what the signers read (the facts) clears both signatures" '.success and .data.qualityApprovedAt == null and .data.engineeringApprovedAt == null and .data.status == 0'
+as "$QC_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"operation\":\"Operator check of the thread\",\"quantity\":1,\"result\":1}"; check "r1q H7: a later accepted re-inspection of the same product" '.success and .data.result == 1'
+as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR10,\"cancel\":true,\"reason\":\"Re-inspected and accepted\"}"; check "r1q H7: another QC user cancels NCR10 with the reason, so nothing stays open" '.success and .data.status == 4'
 ncr "{\"source\":2,\"severity\":1,\"itemId\":$BOLT,\"quantity\":1,\"workOrderId\":$WO2,\"disposition\":4,\"description\":\"Thread stripped, not repairable\",\"causeCategory\":1,\"rootCause\":\"Over-torque\",\"correctiveAction\":\"Torque value in the assembly instruction\"}"; NCR6=$(val .data.id)
 approve3 "$NCR6"
 as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR6}"; nomsg "r1q D5: a workshop scrap is not executed without a scrap receipt" "با رسید ضایعات تاییدشده"
@@ -818,7 +931,13 @@ as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCR7,\"scrapDocument
 # --- D. out-of-tolerance impact (ISO 7.1.5.2)
 as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\"}"; nomsg "r1q D10: a release note without a list of items is refused (a delivery may only carry what the released note lists)" "فهرست اقلام برگه ترخیص"
 as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\",\"lines\":[{\"itemId\":$ROTOR,\"quantity\":2,\"serialNumbers\":[\"RT-1\"]}]}"; nomsg "r1q D10: a serial item needs one serial number per piece" "سریال قطعات"
-as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; check "release note drafted while points are still open (cannot be released yet); r1q D10: it lists the two bolts it will release" '.success and .data.status == 0 and (.data.number|startswith("RN-")) and .data.canRelease == false and (.data.lines|length) == 1 and .data.lines[0].quantity == 2 and .data.draftedByName != null'
+# R1q review C1, H4: the lines of a release note are checked against what the work order made or received (a serial number of a piece the work order made, a quantity within its confirmed receipts)
+as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\",\"lines\":[{\"itemId\":$ROTOR,\"quantity\":1,\"serialNumbers\":[\"NO-SUCH-SERIAL-1\"]}]}"; nomsg "r1q H4: a serial number the system does not know is refused on a release note line" "در سامانه ثبت نشده است"
+call GET "inventory/trace/serial/$RT"; ROTORSN=$(val .data.unit.serialNumber)
+as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\",\"lines\":[{\"itemId\":$ROTOR,\"quantity\":1,\"serialNumbers\":[\"$ROTORSN\"]}]}"; nomsg "r1q H4: a rotor that another work order (or none) made cannot be released with this work order" "ساخته یا ثبت نشده است"
+as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\",\"lines\":[{\"itemId\":$RAW,\"quantity\":1}]}"; nomsg "r1q H4: an item that this work order never made or received is refused" "رسید ساخت یا رسید خریدی ثبت نشده است"
+as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":6}]}"; nomsg "r1q H4: six bolts against the five the work order received are refused" "از مقدار ساخته یا دریافت‌شده برای دستور کار (5) بیشتر است"
+as "$QC_TOKEN" POST quality/release-notes "{\"workOrderId\":$WO1,\"itemsText\":\"Feed pump unit 1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":5}]}"; check "release note drafted while points are still open (cannot be released yet); r1q D10: it lists the five bolts it will release" '.success and .data.status == 0 and (.data.number|startswith("RN-")) and .data.canRelease == false and (.data.lines|length) == 1 and .data.lines[0].quantity == 5 and .data.draftedByName != null'
 RN1=$(val .data.id)
 as "$QC_TOKEN" POST quality/release-notes/action "{\"id\":$RN1,\"action\":\"release\"}"; nomsg "r1q D22: the person who drafted the release note cannot release it (maker-checker)" "کسی که آن را تنظیم یا ویرایش کرده نمی‌تواند صادر کند"
 as "$QC2_TOKEN" POST quality/release-notes/action "{\"id\":$RN1,\"action\":\"release\"}"; check "release refused while H/W points and reports are open (computed checks named in the answer; r1q D22: tried by a second QC user, since the drafter is refused before the checks)" '.success == false and (.message|contains("ترخیص ممکن نیست"))'
@@ -896,6 +1015,10 @@ as "$QC_TOKEN" POST quality/reports "$(pt_report "$QPT2" 25 8 | jq -c --argjson 
 as "$QC_TOKEN" POST quality/reports "$(pt_report "$QPT2" 25 11)"; check "dwell time 11 min computes Fail" '.success and ([.data.values[]|select(.parameter=="Dwell time")|.pass][0] == false)'
 PR5=$(val .data.id)
 as "$QC_TOKEN" POST quality/reports/action "{\"id\":$PR5,\"action\":\"submit\"}"; no "failed report without an item (no NCR possible) cannot be submitted"
+# r1q M15: a draft report is judged by the date it was entered with: the date stays unless a new one is typed, and a new date still has to fit the window
+as "$QC_TOKEN" POST quality/reports "$(pt_report "$QPT2" 25 11 | jq -c --argjson id "$PR5" --arg d "$(dd -3)" '. + {id:$id,reportDate:$d}')"; check "r1q M15: a draft test report can be re-dated three days back (inside the back-date window)" ".success and .data.status == 0 and (.data.reportDate|startswith(\"$(dd -3)\"))"
+as "$QC_TOKEN" POST quality/reports "$(pt_report "$QPT2" 25 11 | jq -c --argjson id "$PR5" '. + {id:$id}')"; check "r1q M15: saved again without a date the draft keeps the date it was entered with (it is not moved to today)" ".success and .data.status == 0 and (.data.reportDate|startswith(\"$(dd -3)\"))"
+as "$QC_TOKEN" POST quality/reports "$(pt_report "$QPT2" 25 11 | jq -c --argjson id "$PR5" --arg d "$(dd -9)" '. + {id:$id,reportDate:$d}')"; nomsg "r1q M15: a new date older than the back-date window (9 days back) is refused for a draft too" "ثبت با تاخیر بیش از 7 روز مجاز نیست"
 as "$QC_TOKEN" POST quality/reports "$(pt_report "$QPT2" 25 11 $BOLT)"; PR6=$(val .data.id)
 as "$QC_TOKEN" POST quality/reports/action "{\"id\":$PR6,\"action\":\"submit\"}"; check "failed report submitted: NCR drafted automatically" '.success and .data.result == 2 and .data.ncrId != null and (.data.ncrNumber|startswith("NCR-"))'
 # run test limits and mandatory rows
@@ -917,26 +1040,59 @@ as "$ENG_TOKEN" POST quality/itps/limits "{\"parameterId\":$P_TESTP,\"min\":20,\
 as "$QC_TOKEN" POST quality/reports "$(echo "$HYD" | jq -c --argjson id "$HR" --arg rv "$HRV" '. + {id:$id,rowVersion:$rv}')"; check "report re-evaluated against the engineering limit: Pass" '.success and (.data.problems|length) == 0 and ([.data.values[]|select(.parameter=="Test pressure")|.pass][0] == true)'
 as "$ENG_TOKEN" POST quality/itps/limits "{\"parameterId\":$P_TESTP,\"min\":15,\"max\":18,\"source\":\"MAWP 11 bar x 1.5 = 16.5 (datasheet DS-77)\"}"
 
-# --- A (continued). W points waived by notice, reports complete the activity, release row rules
+# --- A (continued). real completion of plan 1: release rows, the witness notice, reports that complete the activity
+# The approved plan keeps the notice period of 10 days (R1q review H6: the company minimum is 1 day and a plan can no longer be agreed at 0), so no witness point is waived by notice in
+# this scenario; every W point gets a real release row. The waiver by notice (period passed, notice date from a letter) is tested on plan 2 after the Office letters exist.
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A2,\"action\":\"done\"}"; check "activity 2: done refused (vendor H, TPI W notice and report missing)" '.success == false and (.message|contains("H"))'
 as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A2,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"reference\":\"V-REL-2\"}"; check "activity 2 vendor H release" '.success'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A2,\"action\":\"done\"}"; check "activity 2: W point needs the witness notice; the report is still missing" '.success == false and (.message|contains("W"))'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A2,\"action\":\"notify\",\"date\":\"$(dd -12)\"}"; nomsg "r1q D9: a typed past notice date is refused (the notice date is the server day or a signed outgoing letter)" "عقب‌تر از امروز"
-as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A2,\"action\":\"notify\"}"; check "witness notice recorded with the server date (notice period 0 days after the agreed revision, so the deadline is today)" ".success and ([.data.activities[]|select(.id==$A2)|.status][0] == 1) and ([.data.activities[]|select(.id==$A2)|.notificationSentAt[0:10]][0] == \"$D0\") and ([.data.activities[]|select(.id==$A2)|.witnessDeadline[0:10]][0] == \"$D0\")"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A2,\"action\":\"notify\"}"; check "witness notice recorded with the server date; the deadline is the notice period of the approved plan (10 days) later" ".success and ([.data.activities[]|select(.id==$A2)|.status][0] == 1) and ([.data.activities[]|select(.id==$A2)|.notificationSentAt[0:10]][0] == \"$D0\") and ([.data.activities[]|select(.id==$A2)|.witnessDeadline[0:10]][0] == \"$(dd 10)\")"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A2,\"action\":\"done\"}"; check "r1q H6: the notice period has not passed, so the witness point is not waived by notice" '.success == false and (.message|contains("W"))'
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A2,\"party\":2,\"action\":1,\"personName\":\"TPI Inspector\",\"organisation\":\"TPI Co\",\"reference\":\"TPI-W-2\"}"; check "activity 2: the TPI inspector attends the witness point (release row)" '.success'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A2,\"action\":\"done\"}"; check "report still required for activity 2" '.success == false'
 DIMV=$(jq -nc --argjson a "$A2" --argjson e "$G4" '{type:12,itpActivityId:$a,equipmentIds:[$e],values:[{parameter:"Bore diameter",unit:"mm",min:99.95,max:100.05,measured:100.01}]}')
 as "$QC_TOKEN" POST quality/reports "$DIMV"; DR=$(val .data.id)
 as "$QC_TOKEN" POST quality/reports/action "{\"id\":$DR,\"action\":\"submit\"}"; check "dimensional report submitted" '.success and .data.result == 1'
 as "$QC2_TOKEN" POST quality/reports/action "{\"id\":$DR,\"action\":\"approve\"}"; check "approved by the second QC" '.success and .data.status == 2'
-as "$QC_TOKEN" GET "quality/itps/$ITP1"; check "approved passing report completes activity 2; the TPI witness was waived by notice (W only)" "([.data.activities[]|select(.id==$A2)|.status][0] == 2) and ([.data.activities[]|select(.id==$A2)|.releases[]|select(.waivedByNotice)|.party]|index(2)) != null"
-# activity 3 (hydro, H/H/W): both H releases and the report
+as "$QC_TOKEN" GET "quality/itps/$ITP1"; check "approved passing report completes activity 2 with the real release rows of the vendor and the TPI (nothing waived by notice)" "([.data.activities[]|select(.id==$A2)|.status][0] == 2) and ([.data.activities[]|select(.id==$A2)|.releases[]|select(.waivedByNotice)]|length) == 0 and ([.data.activities[]|select(.id==$A2)|.releases[]]|length) == 2"
+# activity 3 (hydro, H/H/W): both H releases, the client's witness release and the report
 as "$QC_TOKEN" POST quality/reports/action "{\"id\":$HR,\"action\":\"submit\"}"; check "hydro report submitted" '.success and .data.status == 1 and .data.result == 1'
 as "$QC2_TOKEN" POST quality/reports/action "{\"id\":$HR,\"action\":\"approve\"}"; check "hydro report approved" '.success and .data.status == 2'
 as "$QC_TOKEN" GET "quality/itps/$ITP1"; check "approved report alone does not finish the activity: H points of vendor and TPI are open" "([.data.activities[]|select(.id==$A3)|.status][0] != 2) and ([.data.activities[]|select(.id==$A3)|.blockers|length][0] >= 2)"
 as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A3,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"reference\":\"V-REL-3\"}"; check "vendor H release on the hydro test" '.success'
-as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A3,\"action\":\"notify\"}"
-as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A3,\"party\":2,\"action\":1,\"personName\":\"TPI Inspector\",\"organisation\":\"TPI Co\",\"reference\":\"TPI-REL-3\"}"
-check "TPI H release completes the hydro activity (client W waived by notice)" ".success and ([.data.activities[]|select(.id==$A3)|.status][0] == 2) and ([.data.activities[]|select(.id==$A3)|.releases[]|select(.waivedByNotice)|.party]|index(3)) != null"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A3,\"action\":\"notify\"}"; check "witness notice of the hydro test recorded" ".success and ([.data.activities[]|select(.id==$A3)|.status][0] == 1)"
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A3,\"party\":2,\"action\":1,\"personName\":\"TPI Inspector\",\"organisation\":\"TPI Co\",\"reference\":\"TPI-REL-3\"}"; check "TPI H release recorded; the client's witness point is still open (10 days of notice, no waiver)" ".success and ([.data.activities[]|select(.id==$A3)|.status][0] != 2)"
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A3,\"party\":3,\"action\":1,\"personName\":\"Client representative\",\"organisation\":\"Client Co\",\"reference\":\"CL-W-3\"}"
+check "client W release completes the hydro activity (every point has a real release row)" ".success and ([.data.activities[]|select(.id==$A3)|.status][0] == 2) and ([.data.activities[]|select(.id==$A3)|.releases[]|select(.waivedByNotice)]|length) == 0"
+# activity 4 (mechanical running test, H/W/W): engineering sets the two limits the pump template leaves open, and the report names the instrument that measured them
+as "$QC_TOKEN" GET "quality/itps/$ITP1"
+P_VIB=$(val ".data.activities[]|select(.id==$A4)|.parameters[]|select(.name==\"Vibration\")|.id"); P_BRG=$(val ".data.activities[]|select(.id==$A4)|.parameters[]|select(.name==\"Bearing temperature\")|.id")
+RUNV=$(jq -nc --argjson a "$A4" --argjson e "$G4" '{type:8,itpActivityId:$a,equipmentIds:[$e],values:[{parameter:"Overspeed trip 1",measured:109},{parameter:"Overspeed trip 2",measured:110},{parameter:"Overspeed trip 3",measured:111},{parameter:"Continuous run duration",measured:5},{parameter:"Vibration",unit:"mm/s",measured:3.2},{parameter:"Bearing temperature",unit:"°C",measured:71}]}')
+as "$QC_TOKEN" POST quality/reports "$RUNV"; check "run test report of activity 4: vibration and bearing temperature have no limit yet (unknown, not invented)" '.success and ([.data.values[]|select(.parameter=="Vibration")|.requiresLimits][0] == true) and ([.data.values[]|select(.parameter=="Vibration")|.pass][0] == null) and (.data.problems|length) > 0'
+RUNR=$(val .data.id); RUNRV=$(val .data.rowVersion)
+as "$QC_TOKEN" POST quality/reports/action "{\"id\":$RUNR,\"action\":\"submit\"}"; nomsg "run test report cannot be submitted without the engineering limits" "حدود پذیرش"
+as "$ENG_TOKEN" POST quality/itps/limits "{\"parameterId\":$P_VIB,\"max\":4.5,\"source\":\"API 610 8.3.4: 4.5 mm/s (datasheet DS-77)\"}"; check "engineering sets the vibration limit" ".success and ([.data.activities[]|select(.id==$A4)|.parameters[]|select(.name==\"Vibration\")|.max][0] == 4.5)"
+as "$ENG_TOKEN" POST quality/itps/limits "{\"parameterId\":$P_BRG,\"max\":85,\"source\":\"API 610 8.3.4: 85 degC (datasheet DS-77)\"}"; check "engineering sets the bearing temperature limit" ".success and ([.data.activities[]|select(.id==$A4)|.parameters[]|select(.name==\"Bearing temperature\")|.max][0] == 85)"
+as "$QC_TOKEN" POST quality/reports "$(echo "$RUNV" | jq -c --argjson id "$RUNR" --arg rv "$RUNRV" '. + {id:$id,rowVersion:$rv}')"; check "run test report re-evaluated against the engineering limits and the fixed overspeed limits: Pass" '.success and (.data.problems|length) == 0 and ([.data.values[]|.pass]|all(. == true))'
+as "$QC_TOKEN" POST quality/reports/action "{\"id\":$RUNR,\"action\":\"submit\"}"; check "run test report submitted; result Pass" '.success and .data.status == 1 and .data.result == 1'
+as "$QC2_TOKEN" POST quality/reports/action "{\"id\":$RUNR,\"action\":\"approve\"}"; check "run test report approved by the second QC" '.success and .data.status == 2'
+as "$QC_TOKEN" GET "quality/itps/$ITP1"; check "approved report alone does not finish activity 4: the vendor H and the two witness points have no release yet" "([.data.activities[]|select(.id==$A4)|.status][0] != 2) and ([.data.activities[]|select(.id==$A4)|.blockers|length][0] >= 3)"
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A4,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"reference\":\"V-REL-4\"}"; check "vendor H release on the running test" '.success'
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"notify\"}"; check "witness notice of the running test recorded" ".success and ([.data.activities[]|select(.id==$A4)|.status][0] == 1)"
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A4,\"party\":2,\"action\":1,\"personName\":\"TPI Inspector\",\"organisation\":\"TPI Co\",\"reference\":\"TPI-W-4\"}"; check "TPI witness release on the running test" '.success'
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A4,\"party\":3,\"action\":1,\"personName\":\"Client representative\",\"organisation\":\"Client Co\",\"reference\":\"CL-W-4\"}"
+check "client witness release completes the running test (real rows, nothing waived)" ".success and ([.data.activities[]|select(.id==$A4)|.status][0] == 2) and ([.data.activities[]|select(.id==$A4)|.releases[]|select(.waivedByNotice)]|length) == 0"
+# activity 5 (performance and NPSH test, H/W/W): no fixed limits, the inspector types the limits of each row
+PERFV=$(jq -nc --argjson a "$A5" --argjson e "$G4" '{type:9,itpActivityId:$a,equipmentIds:[$e],values:[{parameter:"Head",unit:"m",min:95,max:105,measured:100.4},{parameter:"Flow",unit:"m3/h",min:190,max:210,measured:201},{parameter:"NPSH required",unit:"m",max:4.5,measured:3.9}]}')
+as "$QC_TOKEN" POST quality/reports "$PERFV"; check "performance report with the limits typed per row: Pass computed by the server" '.success and (.data.problems|length) == 0 and ([.data.values[]|.pass]|all(. == true))'
+PERFR=$(val .data.id)
+as "$QC_TOKEN" POST quality/reports/action "{\"id\":$PERFR,\"action\":\"submit\"}"; check "performance report submitted" '.success and .data.status == 1 and .data.result == 1'
+as "$QC2_TOKEN" POST quality/reports/action "{\"id\":$PERFR,\"action\":\"approve\"}"; check "performance report approved by the second QC" '.success and .data.status == 2'
+for PARTY in 1 2 3; do
+  as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A5,\"party\":$PARTY,\"action\":1,\"personName\":\"Release person $PARTY\",\"organisation\":\"Party $PARTY\",\"reference\":\"REL-5-$PARTY\"}"
+done
+check "the third release completes the performance test (vendor H, TPI W and client W all have release rows)" ".success and ([.data.activities[]|select(.id==$A5)|.status][0] == 2) and ([.data.activities[]|select(.id==$A5)|.releases[]]|length) == 3"
 as "$QC_TOKEN" GET "quality/itps/pending-points?WorkOrderId=$WO1"; check "pending points list holds the packing H point only" "(.data.data|length) == 1 and .data.data[0].itemNo == \"6\""
 
 # --- F. welding: WPS/PQR approvals, welder qualification and 6-month continuity (ASME IX QW-322)
@@ -960,6 +1116,13 @@ as "$QC_TOKEN" POST quality/wps/action "{\"id\":$WPS3,\"action\":\"approve-qc\"}
 as "$ENG_TOKEN" POST quality/wps/action "{\"id\":$WPS3,\"action\":\"approve-engineering\"}"; nomsg "creator of a WPS cannot approve it (segregation of duties)" "تفکیک وظایف"
 
 wperson() { as "$QA_TOKEN" POST quality/persons "{\"name\":\"$1\",\"personnelCode\":\"$2\",\"employer\":1,\"stampId\":\"$3\"}"; val .data.id; }
+addmonths() { # addmonths YYYY-MM-DD N: the same day N months later, the last day of that month when it has no such day (the rule of AddMonths on the server)
+  local y=${1:0:4} m=${1:5:2} d=${1:8:2} t last
+  t=$(( 10#$y * 12 + 10#$m - 1 + $2 )); y=$(( t / 12 )); m=$(( t % 12 + 1 ))
+  last=$(date -d "$(printf '%04d-%02d-01' $y $m) +1 month -1 day" +%d)
+  [ $((10#$d)) -gt $((10#$last)) ] && d=$last
+  printf '%04d-%02d-%02d' $y $m $((10#$d))
+}
 wqual() { # wqual PERSON NUMBER METHOD ISSUED-DAYS-AGO
   as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$1,\"kind\":1,\"method\":\"$3\",\"scheme\":1,\"scope\":\"P-1 plate\",\"certificateNumber\":\"$2\",\"issuedDate\":\"$(dd -$4)\",\"certificateDocumentId\":\"$DOCID\"}"; val .data.id; }
 WP1=$(wperson "Welder One" W-001 W11); QW1=$(wqual $WP1 WQ-1 GTAW 30)
@@ -985,7 +1148,7 @@ weld "$(dd -250)" J-10 $QW3; nomsg "r1q D15: a weld log dated 250 days back is r
 weld "$D0" J-11 $QW3; nomsg "chain: weld today by a welder who has not welded since his certificate was issued 300 days ago -> lapsed" "تداوم جوشکاری قطع شده"
 WP7=$(wperson "Welder Seven" W-007 W17); QW7=$(wqual $WP7 WQ-7 GTAW 187)
 call GET "quality/qualifications?PersonId=$WP7"; LAPSE7=$(val '.data.data[0].lapsesOn[0:10]')
-check "r1q D15: the continuity of welder seven ended between 3 and 6 days ago (computed: certificate issued 187 days ago plus six months)" ".success and .data.data[0].state == 3 and (.data.data[0].lapsesOn[0:10]) >= \"$(dd -6)\" and (.data.data[0].lapsesOn[0:10]) <= \"$(dd -3)\""
+check "r1q D15: the continuity of welder seven ended on the day of his certificate (issued 187 days ago) plus six months, which is in the last 3 to 6 days" ".success and .data.data[0].state == 3 and (.data.data[0].lapsesOn[0:10]) == \"$(addmonths "$(dd -187)" 6)\" and (.data.data[0].lapsesOn[0:10]) >= \"$(dd -6)\" and (.data.data[0].lapsesOn[0:10]) <= \"$(dd -3)\""
 weld "$LAPSE7" J-17 $QW7; nomsg "r1q D15: a weld log dated on the last valid day is refused today, because the certificate is also checked on the day of entry" "امروز قابل استفاده نیست"
 weld "$(dd -2)" J-18 $QW1; check "r1q D15: a weld log dated two days back by a welder who is valid on that day and today is accepted" ".success and (.data.weldDate[0:10]) == \"$(dd -2)\""
 as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WP2,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"certificateNumber\":\"WQ-2R\",\"issuedDate\":\"$(dd -5)\",\"renewsQualificationId\":$QW2}"; check "re-test registered as renewal" '.success and .data.renewsQualificationId != null'
@@ -996,7 +1159,15 @@ as "$QA_TOKEN" POST quality/qualifications/action "{\"id\":$QW6,\"action\":\"rev
 as "$QA_TOKEN" POST quality/qualifications/action "{\"id\":$QW6,\"action\":\"revoke\",\"reason\":\"Rejected welds in the audit\"}"; check "qualification revoked" '.success and .data.revoked == true and .data.state == 4'
 weld "$D0" J-16 $QW6; check "revoked qualification cannot be used" '.success == false'
 call GET "quality/qualifications/continuity?Days=30"; check "continuity list shows the welder whose six months end within 30 days" "(.data.data|map(.id)|index($QW4)) != null"
-call GET "quality/weld-logs?WorkOrderId=$WO2"; check "weld logs of work order 2: 3 accepted (J-1, J-14, J-18; r1q D15 replaced the three old chain welds by one dated two days back)" '(.data.data|length) == 3'
+# R1q review M15 and L19: a weld log restarts the six-month continuity of the welder, so it may be dated today at most; within the window a welder whose six months are nearly over keeps his qualification by welding
+weld "$(dd 1)" J-19 $QW1; nomsg "r1q M15: a weld log dated tomorrow is refused (no leeway for the browser's time zone: it would postpone the lapse)" "نمی‌تواند در آینده باشد"
+WP8=$(wperson "Welder Eight" W-008 W18); QW8=$(wqual $WP8 WQ-8 GTAW 175)
+call GET "quality/qualifications?PersonId=$WP8"; check "r1q L19: welder eight (certificate issued 175 days ago) is usable, but his six months end in 6 to 9 days: expiring soon" ".success and .data.data[0].state == 1 and (.data.data[0].lapsesOn[0:10]) == \"$(addmonths "$(dd -175)" 6)\" and (.data.data[0].lapsesOn[0:10]) >= \"$(dd 6)\" and (.data.data[0].lapsesOn[0:10]) <= \"$(dd 9)\""
+call GET "quality/qualifications/continuity?Days=30"; check "r1q L19: the continuity list shows welder eight before he welds" "(.data.data|map(.id)|index($QW8)) != null"
+weld "$D0" J-20 $QW8; check "r1q L19: welder eight welds today on the approved WPS" '.success and .data.welderName == "Welder Eight"'
+call GET "quality/qualifications?PersonId=$WP8"; check "r1q L19: his six months now run from today (a weld restarts the continuity) and the qualification is valid again" ".success and .data.data[0].state == 0 and (.data.data[0].lapsesOn[0:10]) == \"$(addmonths "$D0" 6)\""
+call GET "quality/qualifications/continuity?Days=30"; check "r1q L19: ... so he is no longer on the continuity list" "(.data.data|map(.id)|index($QW8)) == null"
+call GET "quality/weld-logs?WorkOrderId=$WO2"; check "weld logs of work order 2: 4 accepted (J-1, J-14, J-18 and J-20 of welder eight; r1q D15 replaced the three old chain welds by one dated two days back)" '(.data.data|length) == 4'
 
 # --- G. material certificates (EN 10204) and traceability
 as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$LOT,\"type\":2,\"number\":\"MTC-3.1-9\",\"issuer\":\"Mill A\",\"documentId\":\"$DOCID\",\"summary\":\"26NiCrMoV14-5 chemistry and mechanicals OK\"}"; check "warehouse registers the certificate of the lot (pending)" '.success and .data.result == 0 and .data.heatNumber == "H-7781"'
@@ -1023,16 +1194,29 @@ as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C22,\"accept\":true}"
 as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0}"; check "a 2.2 certificate does not satisfy a 3.1 requirement" '.success == false'
 as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOT,\"type\":2,\"number\":\"MTC-3.1-77\",\"documentId\":\"$DOCID\"}"; C31=$(val .data.id)
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C31,\"accept\":true}"
-# R1q D16: an incoming inspection that rests on measured values names the instruments; an instrument whose calibration is overdue is refused
-as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0,\"measured\":true}"; nomsg "r1q D16: a measured incoming inspection without an instrument is refused" "ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید"
-as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0,\"measured\":true,\"equipmentIds\":[$G2]}"; nomsg "r1q D16: ... and one with an overdue instrument (G2, certificate expired) is refused" "منقضی شده است؛ استفاده از آن مجاز نیست"
-as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0,\"measured\":true,\"equipmentIds\":[$G4]}"; check "with a verified 3.1 certificate the lot is accepted (r1q D16: the measured values name the calibrated instrument G4)" ".success and .data.status == 1 and .data.equipmentIds == [$G4]"
+# R1q D16 and review M12: an incoming inspection that rests on measured values names the instrument of every value (calibrated today); whether it is "measured" follows from those values, never from
+# a flag of the client; and a QC inspector records it only with a valid inspector qualification once the company keeps that register
+as "$QC3_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0}"; nomsg "r1q M12: a QC user with no inspector qualification cannot record an incoming inspection" "ثبت نتیجه بازرسی ورودی بدون گواهی صلاحیت معتبر مجاز نیست"
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0,\"measurements\":[{\"characteristic\":\"Thickness\",\"nominal\":10,\"tolPlus\":0.2,\"tolMinus\":0.2,\"measured\":10.05,\"unit\":\"mm\"}]}"; nomsg "r1q D16: a measured value without the instrument that measured it is refused" "ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید"
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0,\"measurements\":[{\"characteristic\":\"Thickness\",\"nominal\":10,\"tolPlus\":0.2,\"tolMinus\":0.2,\"measured\":10.05,\"unit\":\"mm\",\"equipmentId\":$G2}]}"; nomsg "r1q D16: ... and one measured with an overdue instrument (G2, certificate expired) is refused" "منقضی شده است؛ استفاده از آن مجاز نیست"
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0,\"measurements\":[{\"characteristic\":\"Thickness\",\"nominal\":10,\"tolPlus\":0.2,\"tolMinus\":0.2,\"measured\":10.5,\"unit\":\"mm\",\"equipmentId\":$G4}]}"; nomsg "r1q M12: a value out of tolerance cannot be accepted whole" "اندازه‌گیری خارج از تلرانس ثبت شده است"
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0,\"measurements\":[{\"characteristic\":\"Thickness\",\"nominal\":10,\"tolPlus\":0.2,\"tolMinus\":0.2,\"measured\":10.05,\"unit\":\"mm\",\"equipmentId\":$G4}]}"; check "with a verified 3.1 certificate the lot is accepted (r1q D16: the measured value names the calibrated instrument G4, which is kept on the inspection)" ".success and .data.status == 1 and .data.equipmentIds == [$G4] and (.data.measurements|length) == 1 and .data.measurements[0].equipmentId == $G4 and .data.measurements[0].pass == true"
+# a second lot of the plate: the old client flag \"measured\" has no meaning any more, an inspection without measurement lines is recorded as it is
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"$D0\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"referenceNumber\":\"INV-902\",\"lines\":[{\"itemId\":$PL31,\"quantity\":10,\"heatNumber\":\"HT-3101\",\"unitPrice\":1000}]}"; PRC2=$(val .data.id)
+call POST "inventory/documents/$PRC2/confirm"; check "receipt of the second lot of the 3.1 plate into quarantine" '.success'
+call GET "inventory/quality/inspections?Status=0"; QI31B=$(jq -r ".data.data[]|select(.itemId==$PL31)|.id" "$B")
+call GET "inventory/stock/lots?ItemId=$PL31"; PL31LOTB=$(jq -r '.data.data[]|select(.heatNumber=="HT-3101")|.id' "$B")
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-3.1-78\",\"documentId\":\"$DOCID\"}"; C31B=$(val .data.id)
+as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C31B,\"accept\":true}"; check "the 3.1 certificate of the second lot is verified" '.success and .data.result == 1'
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31B,\"acceptedQuantity\":10,\"rejectedQuantity\":0,\"measured\":true}"; check "r1q M12: the old \"measured\" flag alone proves nothing and demands nothing: no measurement lines, no instrument, recorded as it is" ".success and .data.status == 1 and ((.data.equipmentIds // [])|length) == 0 and ((.data.measurements // [])|length) == 0"
 
 # --- H. NCR additions: due date, CAPA for major NCR, committee size (see also the NCR section above)
 call GET "inventory/quality/ncr/$NCR2"; check "major NCR from the NCR section has its CAPA drafted by the system" '.success and .data.capaId != null and (.data.capaNumber|startswith("CAPA-")) and .data.dueDate != null'
 NCR2CAPA=$(val .data.capaId)
 
 # --- I. CAPA (ISO 9001 10.2): owner, actions, effectiveness check by another person
+# R1q review M11: whoever created, edited or owns a CAPA (or one of its actions) does not judge its effectiveness, close it or cancel it. QA defines the CAPAs below, so QC judges the effectiveness and QC2 closes.
+# The day an action was really done may be entered up to MaxBackdateDays late; the CAPA is implemented on the day of the last action of the round, and the waiting period of the check runs from that day.
 capa_cycle() { # capa_cycle ID OWNER_ID OWNER_TOKEN EFFECTIVENESS_TOKEN CLOSE_TOKEN
   as "$QA_TOKEN" GET "quality/capas/$1"; local rv src sid
   rv=$(val .data.rowVersion); src=$(val .data.source); sid=$(val '.data.sourceId // empty')
@@ -1041,62 +1225,87 @@ capa_cycle() { # capa_cycle ID OWNER_ID OWNER_TOKEN EFFECTIVENESS_TOKEN CLOSE_TO
     '{id:$id,rowVersion:$rv,source:$src,problem:"Problem found",rootCauseMethod:1,rootCauseAnalysis:"Why 1 ... why 5: procedure gap",ownerUserId:$owner,dueDate:$due,effectivenessCriteria:"No recurrence in the next 3 lots",actions:[{description:"Revise the procedure and train staff",ownerUserId:$owner,dueDate:$adue}]} + (if $sid != "" then {sourceId:($sid|tonumber)} else {} end)')
   as "$QA_TOKEN" POST quality/capas "$body"
 }
-capa_cycle $NCR2CAPA $PRODID "$PROD_TOKEN"; check "QA completes the CAPA: owner, root cause, action, effectiveness criteria -> actions defined" '.success and .data.status == 1 and .data.ownerName != null and (.data.actions|length) == 1'
+capa_cycle $NCR2CAPA $PRODID "$PROD_TOKEN"; check "QA completes the CAPA: owner, root cause, action, effectiveness criteria -> actions defined; the CAPA drafted for a major NCR is mandatory, in round 1, not escalated" '.success and .data.status == 1 and .data.ownerName != null and (.data.actions|length) == 1 and .data.mandatory == true and .data.iteration == 1 and .data.escalationLevel == 0'
 CA_ACT=$(val '.data.actions[0].id')
+as "$QA_TOKEN" POST quality/capas "{\"id\":$NCR2CAPA,\"problem\":\"Problem found\",\"source\":9,\"rootCauseMethod\":1,\"rootCauseAnalysis\":\"x\",\"ownerUserId\":$PRODID,\"effectivenessCriteria\":\"y\",\"actions\":[]}"; nomsg "r1q M11: the source of a CAPA is fixed when it is created (a mandatory CAPA cannot be turned into an optional one)" "منبع CAPA پس از ثبت تغییر نمی‌کند"
 as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"implemented\"}"; no "implemented refused while an action is not done"
 as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"complete-action\",\"actionId\":$CA_ACT}"; no "completing an action needs evidence or a note"
-as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"complete-action\",\"actionId\":$CA_ACT,\"note\":\"Procedure revised, training record TR-9\"}"; check "owner completes the action" '.success'
-as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"implemented\"}"; check "CAPA implemented: effectiveness review date set automatically" '.success and .data.status == 2 and .data.effectivenessDueDate != null'
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"complete-action\",\"actionId\":$CA_ACT,\"note\":\"Procedure revised, training record TR-9\",\"date\":\"$(dd 1)\"}"; nomsg "r1q M11: the day an action was done cannot be in the future" "نمی‌تواند در آینده باشد"
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"complete-action\",\"actionId\":$CA_ACT,\"note\":\"Procedure revised, training record TR-9\",\"date\":\"$(dd -8)\"}"; nomsg "r1q M11: ... nor older than the back-date window of the company (7 days: 8 days back is refused)" "ثبت با تاخیر بیش از 7 روز مجاز نیست"
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"complete-action\",\"actionId\":$CA_ACT,\"note\":\"Procedure revised, training record TR-9\",\"date\":\"$(dd -7)\"}"; check "owner completes the action and enters the day it was really done (7 days ago, the oldest day the window allows)" ".success and ([.data.actions[]|select(.id == $CA_ACT)|.doneAt[0:10]][0] == \"$(dd -7)\")"
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"implemented\"}"; check "CAPA implemented: its implementation day is the day of its last action (7 days ago), the effectiveness review date is set automatically" ".success and .data.status == 2 and .data.effectivenessDueDate != null and (.data.implementedAt[0:10]) == \"$(dd -7)\""
 as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"effectiveness\",\"note\":\"ok\",\"passed\":true}"; nomsg "the owner cannot verify effectiveness (role and segregation)" "مجوز"
 as "$QC_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"close\"}"; no "closing before the effectiveness check rejected"
 as "$QC_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"effectiveness\",\"passed\":true}"; no "effectiveness result needs a written note against the criteria"
 # R1q D20: the effect of an action shows over time: no check before the waiting period (company setting, default 30 days) has passed since the implementation
 as "$QC_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"effectiveness\",\"note\":\"3 lots inspected, no recurrence\",\"passed\":true}"; nomsg "r1q D20: the effectiveness check is refused before the waiting period (30 days) after the implementation" "حداقل 30 روز پس از اجرای اقدام‌ها"
-as "$QA_TOKEN" GET "quality/capas/$NCR2CAPA"; check "r1q D20: the CAPA shows the earliest day of the check (implementation day plus 30)" ".success and (.data.effectivenessEarliest[0:10]) == \"$(dd 30)\""
-as "$QA_TOKEN" POST quality/settings '{"key":"EffectivenessWaitDays","value":0}'; check "r1q D20: QA sets the waiting period to zero for the rest of the test (restored after the audit section)" '.success and ([.data[]|select(.key=="EffectivenessWaitDays")|.value][0] == 0)'
-# R1q D21: a failed check re-opens the CAPA for a new round (new iteration, new actions); round 1 stays as the record
-as "$QC_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"effectiveness\",\"note\":\"Recurrence found in lot 4\",\"passed\":false}"; check "r1q D21: a failed effectiveness check re-opens the CAPA as round 2" '.success and .data.status == 0 and .data.iteration == 2 and .data.implementedAt == null and (.data.actions|length) == 1'
+as "$QA_TOKEN" GET "quality/capas/$NCR2CAPA"; check "r1q D20: the CAPA shows the earliest day of the check (the implementation day, 7 days ago, plus 30)" ".success and (.data.effectivenessEarliest[0:10]) == \"$(dd 23)\""
+as "$QA_TOKEN" POST quality/settings '{"key":"EffectivenessWaitDays","value":6}'; nomsg "r1q M14: a waiting period under a week is refused (the range is 7 to 365 days)" "باید عدد صحیح بین 7 تا 365 باشد"
+as "$QA_TOKEN" POST quality/settings '{"key":"EffectivenessWaitDays","value":7}'; check "r1q D20: QA sets the waiting period to its minimum, 7 days, for the rest of the test (restored after the audit section)" '.success and ([.data[]|select(.key=="EffectivenessWaitDays")|.value][0] == 7)'
+# R1q D21: a failed check re-opens the CAPA for a new round (new iteration, new actions); round 1 stays as the record. The old due date is cleared: the new round needs a new one before its actions are defined (review M11)
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"effectiveness\",\"note\":\"Recurrence found in lot 4\",\"passed\":false}"; check "r1q D21: a failed effectiveness check re-opens the CAPA as round 2 (no implementation day, no due date)" '.success and .data.status == 0 and .data.iteration == 2 and .data.implementedAt == null and .data.dueDate == null and (.data.actions|length) == 1'
 as "$QA_TOKEN" GET "quality/capas/$NCR2CAPA"
 CAPA2BODY=$(jq -c --arg adue "$(dd 12)" '.data | {id,rowVersion,source,sourceId,problem,containment,rootCauseMethod,rootCauseAnalysis,ownerUserId,dueDate,effectivenessCriteria,actions:([.actions[]|{id,description,ownerUserId,dueDate}] + [{description:"Release check lot by lot for the next three lots",ownerUserId:.ownerUserId,dueDate:$adue}])}' "$B")
-as "$QA_TOKEN" POST quality/capas "$CAPA2BODY"; check "r1q D21: QA defines the actions of round 2; the done action of round 1 stays" '.success and .data.status == 1 and .data.iteration == 2 and (.data.actions|length) == 2 and ([.data.actions[]|select(.iteration == 2)]|length) == 1'
+as "$QA_TOKEN" POST quality/capas "$CAPA2BODY"; check "r1q M11: round 2 with an action but no new due date stays open (the old date was cleared, so the CAPA is not defined yet)" '.success and .data.status == 0 and .data.dueDate == null and .data.iteration == 2 and (.data.actions|length) == 2'
+as "$QA_TOKEN" GET "quality/capas/$NCR2CAPA"
+CAPA2BODY=$(jq -c --arg due "$(dd 25)" '.data | {id,rowVersion,source,sourceId,problem,containment,rootCauseMethod,rootCauseAnalysis,ownerUserId,dueDate:$due,effectivenessCriteria,actions:[.actions[]|{id,description,ownerUserId,dueDate}]}' "$B")
+as "$QA_TOKEN" POST quality/capas "$CAPA2BODY"; check "r1q D21: QA gives round 2 its new due date; the actions are defined and the done action of round 1 stays" '.success and .data.status == 1 and .data.iteration == 2 and (.data.actions|length) == 2 and ([.data.actions[]|select(.iteration == 2)]|length) == 1'
 CA_ACT2=$(val '[.data.actions[]|select(.iteration == 2)][0].id')
-as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"complete-action\",\"actionId\":$CA_ACT2,\"note\":\"Lot-by-lot release check added to the instruction\"}"; check "r1q D21: the owner completes the action of round 2 (done today, with his note as the evidence)" ".success and ([.data.actions[]|select(.id == $CA_ACT2)|.doneAt[0:10]][0] == \"$D0\") and ([.data.actions[]|select(.id == $CA_ACT2)|.evidenceNote][0] == \"Lot-by-lot release check added to the instruction\")"
-as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"implemented\"}"; check "r1q D21: round 2 implemented" '.success and .data.status == 2 and .data.iteration == 2'
-as "$QC_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"effectiveness\",\"note\":\"3 lots inspected, no recurrence\",\"passed\":true}"; check "effectiveness verified by QC" '.success and .data.status == 3'
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"complete-action\",\"actionId\":$CA_ACT2,\"note\":\"Lot-by-lot release check added to the instruction\",\"date\":\"$(dd -7)\"}"; check "r1q D21: the owner completes the action of round 2 (done 7 days ago, with his note as the evidence)" ".success and ([.data.actions[]|select(.id == $CA_ACT2)|.doneAt[0:10]][0] == \"$(dd -7)\") and ([.data.actions[]|select(.id == $CA_ACT2)|.evidenceNote][0] == \"Lot-by-lot release check added to the instruction\")"
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"implemented\"}"; check "r1q D21: round 2 implemented, on the day of its action" ".success and .data.status == 2 and .data.iteration == 2 and (.data.implementedAt[0:10]) == \"$(dd -7)\""
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"effectiveness\",\"note\":\"3 lots inspected, no recurrence\",\"passed\":true}"; check "effectiveness verified by QC (7 days after the implementation day, the minimum waiting period)" '.success and .data.status == 3'
 as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"close\"}"; no "only QA/QC close a CAPA"
-as "$QA_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"close\",\"note\":\"closed\"}"; check "CAPA closed by QA" '.success and .data.status == 4 and .data.closedByName != null'
-# a CAPA owned by QA cannot be closed by QA
-as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Calibration labels missing\",\"source\":5,\"rootCauseMethod\":2,\"rootCauseAnalysis\":\"Fishbone\",\"ownerUserId\":$QAID,\"dueDate\":\"$(dd 15)\",\"effectivenessCriteria\":\"Audit shows labels\",\"actions\":[{\"description\":\"Label all instruments\",\"ownerUserId\":$QAID,\"dueDate\":\"$(dd 5)\"}]}"; check "manual CAPA with owner QA" '.success and .data.status == 1 and .data.autoDrafted == false'
+as "$QA_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"close\",\"note\":\"closed\"}"; nomsg "r1q M11: QA, who defined the CAPA, cannot close it (segregation of duties)" "تفکیک وظایف"
+as "$QC2_TOKEN" POST quality/capas/action "{\"id\":$NCR2CAPA,\"action\":\"close\",\"note\":\"closed\"}"; check "CAPA closed by another quality person (QC2), who had no part in it" '.success and .data.status == 4 and .data.closedByName != null'
+# a CAPA owned by QA cannot be judged or closed by QA
+as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Calibration labels missing\",\"source\":5,\"rootCauseMethod\":2,\"rootCauseAnalysis\":\"Fishbone\",\"ownerUserId\":$QAID,\"dueDate\":\"$(dd 15)\",\"effectivenessCriteria\":\"Audit shows labels\",\"actions\":[{\"description\":\"Label all instruments\",\"ownerUserId\":$QAID,\"dueDate\":\"$(dd 5)\"}]}"; check "manual CAPA with owner QA (source: data analysis, so no rule requires it)" '.success and .data.status == 1 and .data.autoDrafted == false and .data.mandatory == false'
 CP2=$(val .data.id); CP2A=$(val '.data.actions[0].id')
-as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"complete-action\",\"actionId\":$CP2A,\"note\":\"done\"}"
-as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"implemented\"}"
+as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"complete-action\",\"actionId\":$CP2A,\"note\":\"done\",\"date\":\"$(dd -7)\"}"; check "QA completes his own action (done 7 days ago)" '.success'
+as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"implemented\"}"; check "the CAPA owned by QA is implemented" '.success and .data.status == 2'
 as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"effectiveness\",\"note\":\"self check\",\"passed\":true}"; nomsg "the owner (QA) cannot verify the effectiveness of his own CAPA" "تفکیک وظایف"
-as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"effectiveness\",\"note\":\"labels present on 14 of 14\",\"passed\":true}"
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"effectiveness\",\"note\":\"labels present on 14 of 14\",\"passed\":true}"; check "QC verifies the effectiveness of the CAPA owned by QA" '.success and .data.status == 3'
 as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"close\"}"; nomsg "the owner (QA) cannot close his own CAPA" "تفکیک وظایف"
 as "$QC2_TOKEN" POST quality/capas/action "{\"id\":$CP2,\"action\":\"close\"}"; check "another quality person closes it" '.success and .data.status == 4'
+# R1q D21: a CAPA that a rule required (a major NCR, an audit finding, a non-conformance source) is cancelled only by the QA manager, with a reason that stays on the record, and not by the person who created or owns it (review M11)
+as "$QC_TOKEN" POST quality/capas "{\"problem\":\"Recurring paint defects\",\"source\":1,\"rootCauseMethod\":2,\"rootCauseAnalysis\":\"Fishbone\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 15)\",\"effectivenessCriteria\":\"No paint defect in 3 lots\",\"actions\":[{\"description\":\"Check booth humidity\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 5)\"}]}"; check "r1q M11: QC registers a CAPA for recurring paint defects (source: non-conformance, so mandatory)" '.success and .data.status == 1 and .data.mandatory == true'
+CP5=$(val .data.id)
+as "$QC2_TOKEN" POST quality/capas/action "{\"id\":$CP5,\"action\":\"cancel\",\"note\":\"Not needed\"}"; nomsg "r1q D21: QC cannot cancel a mandatory CAPA (non-conformance source)" "فقط مدیر QA"
+as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP5,\"action\":\"cancel\"}"; nomsg "r1q D21: the QA manager needs a written reason" "دلیل لغو را بنویسید"
+as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP5,\"action\":\"cancel\",\"note\":\"Duplicate of the CAPA of the paint NCR\"}"; check "r1q D21: the QA manager (who did not create or edit it) cancels it; the reason and the day stay on the CAPA" '.success and .data.status == 5 and .data.cancelReason == "Duplicate of the CAPA of the paint NCR" and .data.cancelledAt != null'
+as "$FM_TOKEN" GET "finance/audit?EntityType=Capa&EntityId=$CP5&PageSize=0"; check "r1q D21: the cancellation is in the audit trail with the user and the reason" '.success and ([.data.data[]|select(.action == "Modified" and (.userName|length) > 0 and (.afterJson|tostring|contains("Duplicate of the CAPA of the paint NCR")))]|length) == 1'
+# an optional CAPA with two actions: the implementation day is the day of the LAST action, so the waiting period of the check starts there (3 days ago plus 7 days = 4 days ahead)
+as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Optional improvement idea\",\"source\":9,\"rootCauseMethod\":1,\"rootCauseAnalysis\":\"x\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 15)\",\"effectivenessCriteria\":\"y\",\"actions\":[{\"description\":\"First step\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 5)\"},{\"description\":\"Second step\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 6)\"}]}"; check "an optional CAPA (source: other) with two actions" '.success and .data.status == 1 and .data.mandatory == false and (.data.actions|length) == 2'
+CP6=$(val .data.id); CP6A=$(val '.data.actions[0].id'); CP6B=$(val '.data.actions[1].id')
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$CP6,\"action\":\"complete-action\",\"actionId\":$CP6A,\"note\":\"First step done\",\"date\":\"$(dd -7)\"}"; check "the first action is done 7 days ago" '.success'
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$CP6,\"action\":\"complete-action\",\"actionId\":$CP6B,\"note\":\"Second step done\",\"date\":\"$(dd -3)\"}"; check "the second action is done 3 days ago" '.success'
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$CP6,\"action\":\"implemented\"}"; check "r1q M11: the CAPA is implemented on the day of its LAST action (3 days ago), and its earliest effectiveness check is 4 days ahead" ".success and .data.status == 2 and (.data.implementedAt[0:10]) == \"$(dd -3)\" and (.data.effectivenessEarliest[0:10]) == \"$(dd 4)\""
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP6,\"action\":\"effectiveness\",\"note\":\"Looks fine\",\"passed\":true}"; nomsg "r1q M11: the check is refused before that day (the first action, done 7 days ago, does not start the waiting period)" "حداقل 7 روز پس از اجرای اقدام‌ها"
+as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP6,\"action\":\"cancel\",\"note\":\"Not pursued\"}"; nomsg "r1q M11: QA, who defined the CAPA, cannot cancel it either (a second person decides it is not needed)" "تفکیک وظایف"
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP6,\"action\":\"cancel\",\"note\":\"Not pursued\"}"; check "r1q D21: a CAPA that no rule required may still be cancelled by QC (who had no part in it), with a reason" '.success and .data.status == 5 and .data.cancelReason == "Not pursued"'
+# R1q D13 and review M11: late CAPAs escalate to QA and, after 14 days, to the CEO. The very first run only records the level of the CAPAs that are already late (the whole backlog is not announced in one night)
+as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Backlog item that was late before the first run\",\"source\":9,\"rootCauseMethod\":1,\"rootCauseAnalysis\":\"x\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd -3)\",\"effectivenessCriteria\":\"y\",\"actions\":[{\"description\":\"z\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd -3)\"}]}"; CP0=$(val .data.id)
+as "$QA_TOKEN" POST quality/capas/escalate; check "r1q M11: the first escalation run only records the level of the CAPA that was already late and tells nobody" '.success and .data.firstRun == true and .data.recorded == 1 and .data.escalated == 0 and .data.ceoNotified == 0 and .data.skipped == 0'
+as "$QA_TOKEN" GET "office/inbox?SourceKey=capa-late:qa:$CP0"; check "r1q M11: QA has no alert about it" '.success and (.data.data|length) == 0'
+as "$QA_TOKEN" GET "quality/capas/$CP0"; check "r1q M11: but the CAPA carries its level (1: late), so it is not announced later either" '.success and .data.escalationLevel == 1'
 # overdue CAPA is computed and listed
 as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Late CAPA\",\"source\":9,\"rootCauseMethod\":1,\"rootCauseAnalysis\":\"x\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd -5)\",\"effectivenessCriteria\":\"y\",\"actions\":[{\"description\":\"z\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd -5)\"}]}"; CP3=$(val .data.id)
 as "$QA_TOKEN" GET quality/capas/overdue; check "overdue CAPA listed (computed from the due date)" "(.data.data|map(.id)|index($CP3)) != null"
-# R1q D21: a CAPA that a rule required (a major NCR, an audit finding, a non-conformance source) is cancelled only by the QA manager, with a reason that stays on the record
-as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Recurring paint defects\",\"source\":1,\"rootCauseMethod\":2,\"rootCauseAnalysis\":\"Fishbone\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 15)\",\"effectivenessCriteria\":\"No paint defect in 3 lots\",\"actions\":[{\"description\":\"Check booth humidity\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 5)\"}]}"; CP5=$(val .data.id)
-as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP5,\"action\":\"cancel\",\"note\":\"Not needed\"}"; nomsg "r1q D21: QC cannot cancel a mandatory CAPA (non-conformance source)" "فقط مدیر QA"
-as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP5,\"action\":\"cancel\"}"; nomsg "r1q D21: the QA manager needs a written reason" "دلیل لغو را بنویسید"
-as "$QA_TOKEN" POST quality/capas/action "{\"id\":$CP5,\"action\":\"cancel\",\"note\":\"Duplicate of the CAPA of the paint NCR\"}"; check "r1q D21: the QA manager cancels it; the reason and the day stay on the CAPA" '.success and .data.status == 5 and .data.cancelReason == "Duplicate of the CAPA of the paint NCR" and .data.cancelledAt != null'
-as "$FM_TOKEN" GET "finance/audit?EntityType=Capa&EntityId=$CP5&PageSize=0"; check "r1q D21: the cancellation is in the audit trail with the user and the reason" '.success and ([.data.data[]|select(.action == "Modified" and (.userName|length) > 0 and (.afterJson|tostring|contains("Duplicate of the CAPA of the paint NCR")))]|length) >= 1'
-as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Optional improvement idea\",\"source\":9,\"rootCauseMethod\":1,\"rootCauseAnalysis\":\"x\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 15)\",\"effectivenessCriteria\":\"y\",\"actions\":[{\"description\":\"z\",\"ownerUserId\":$PRODID,\"dueDate\":\"$(dd 5)\"}]}"; CP6=$(val .data.id)
-as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP6,\"action\":\"cancel\",\"note\":\"Not pursued\"}"; check "r1q D21: a CAPA that no rule required may still be cancelled by QC, with a reason" '.success and .data.status == 5 and .data.cancelReason == "Not pursued"'
-# R1q D13: every action owner finds his action in the inbox with its due date and reads the CAPA he works on; late CAPAs escalate to QA and, after 14 days, to the CEO
+# R1q D13: every action owner finds his action in the inbox with its due date and reads the CAPA he works on
 as "$QA_TOKEN" POST quality/capas "{\"problem\":\"Gate pass log not kept\",\"source\":9,\"rootCauseMethod\":1,\"rootCauseAnalysis\":\"x\",\"ownerUserId\":$QCID,\"dueDate\":\"$(dd -20)\",\"effectivenessCriteria\":\"y\",\"actions\":[{\"description\":\"Keep the gate pass log\",\"ownerUserId\":$SECID,\"dueDate\":\"$(dd -20)\"}]}"; check "r1q D13: a CAPA with an action owned by the security officer" '.success and .data.status == 1'
 CP4=$(val .data.id); CP4A=$(val '.data.actions[0].id')
 as "$SEC_TOKEN" GET "office/inbox?SourceKey=capa-action:$CP4A"; check "r1q D13: the action is in the inbox of its owner with its due date" ".success and (.data.data|length) == 1 and (.data.data[0].dueDate[0:10]) == \"$(dd -20)\" and (.data.data[0].title|contains(\"Keep the gate pass log\")) and .data.data[0].link == \"/quality/capa/$CP4\""
 as "$SEC_TOKEN" GET quality/capas; check "r1q D13: the action owner sees only the CAPA he works on" ".success and (.data.data|length) == 1 and .data.data[0].id == $CP4"
 as "$SEC_TOKEN" GET "quality/capas/$NCR2CAPA"; nomsg "r1q D13: ... and cannot open another CAPA" "شما مجوز این کار را ندارید"
 as "$SEC_TOKEN" GET "quality/capas/$CP4"; check "r1q D13: the action owner opens the CAPA of his action" ".success and .data.id == $CP4"
-as "$QA_TOKEN" POST quality/capas/escalate; check "r1q D13: the escalation (the method the 04:00 job calls) raises the two late CAPAs, one of them to the CEO" '.success and .data.escalated == 2 and .data.ceoNotified == 1'
+as "$QA_TOKEN" POST quality/capas/escalate; check "r1q D13: the escalation (the method the 04:00 job calls) raises the two CAPAs that became late after the first run, one of them to the CEO; the backlog CAPA recorded by the first run is not raised again" '.success and .data.firstRun == false and .data.recorded == 0 and .data.escalated == 2 and .data.ceoNotified == 1'
 as "$QA_TOKEN" GET "office/inbox?SourceKey=capa-late:qa:$CP4"; check "r1q D13: QA is told about the CAPA that is 20 days late" '.success and (.data.data|length) == 1'
 as "$CEO_TOKEN" GET "office/inbox?SourceKey=capa-late:ceo:$CP4"; check "r1q D13: and the CEO too, because it is 14 days or more late" '.success and (.data.data|length) == 1'
 as "$CEO_TOKEN" GET "office/inbox?SourceKey=capa-late:ceo:$CP3"; check "r1q D13: the CEO is not told about the CAPA that is only 5 days late" '.success and (.data.data|length) == 0'
-as "$QA_TOKEN" POST quality/capas/escalate; check "r1q D13: a second run raises nothing again" '.success and .data.escalated == 0 and .data.ceoNotified == 0'
+as "$QA_TOKEN" GET "office/inbox?SourceKey=capa-late:qa:$CP3"; check "r1q D13: QA is told about it" '.success and (.data.data|length) == 1'
+as "$QA_TOKEN" POST quality/capas/escalate; check "r1q D13: a second run raises nothing again" '.success and .data.escalated == 0 and .data.ceoNotified == 0 and .data.recorded == 0'
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP3,\"action\":\"cancel\",\"note\":\"Superseded by the CAPA of the gate pass log\"}"; check "r1q M11: QC cancels the 5-day late CAPA (an optional one, and QC had no part in it)" '.success and .data.status == 5'
+as "$QA_TOKEN" GET "office/inbox?SourceKey=capa-late:qa:$CP3"; check "r1q M11: the late alert of a cancelled CAPA is closed with it" '.success and (.data.data|length) == 0'
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$CP0,\"action\":\"cancel\",\"note\":\"Backlog item dropped\"}"; check "the backlog CAPA is cancelled too, so only the 20-day late CAPA of the gate pass log stays overdue" '.success and .data.status == 5'
 as "$SEC_TOKEN" POST quality/capas/action "{\"id\":$CP4,\"action\":\"complete-action\",\"actionId\":$CP4A,\"note\":\"Gate pass log kept since Monday\"}"; check "r1q D13: the action owner completes his own action (done today, with his note as the evidence)" ".success and ([.data.actions[]|select(.id == $CP4A)|.doneAt[0:10]][0] == \"$D0\") and ([.data.actions[]|select(.id == $CP4A)|.evidenceNote][0] == \"Gate pass log kept since Monday\")"
 as "$SEC_TOKEN" GET "office/inbox?SourceKey=capa-action:$CP4A"; check "r1q D13: the done action leaves his inbox" '.success and (.data.data|length) == 0'
 
@@ -1162,10 +1371,11 @@ call POST quality/audits/findings "{\"auditId\":$AUD,\"clause\":\"8.5\",\"type\"
 call POST quality/audits/action "{\"id\":$AUD,\"action\":\"done\",\"reportDocumentId\":\"$DOCID\"}"; check "audit done with its report" '.success and .data.status == 1'
 call POST quality/audits/action "{\"id\":$AUD,\"action\":\"close\"}"; nomsg "audit cannot be closed while the finding CAPA is open" "CAPA"
 capa_cycle $AFC $PRODID "$PROD_TOKEN"; CAA=$(val '.data.actions[0].id')
-as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"complete-action\",\"actionId\":$CAA,\"note\":\"Labels fitted\"}"
-as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"implemented\"}"
-as "$QC_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"effectiveness\",\"note\":\"All labelled\",\"passed\":true}"
-as "$QA_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"close\"}"
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"complete-action\",\"actionId\":$CAA,\"note\":\"Labels fitted\",\"date\":\"$(dd -7)\"}"; check "the CAPA of the audit finding: its action is done (7 days ago)" '.success'
+as "$PROD_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"implemented\"}"; check "the CAPA of the audit finding is implemented" '.success and .data.status == 2'
+as "$QC_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"effectiveness\",\"note\":\"All labelled\",\"passed\":true}"; check "the CAPA of the audit finding: effectiveness verified by QC" '.success and .data.status == 3'
+as "$QA_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"close\"}"; nomsg "r1q M11: QA, who defined the CAPA of the finding, does not close it (segregation of duties)" "تفکیک وظایف"
+as "$QC2_TOKEN" POST quality/capas/action "{\"id\":$AFC,\"action\":\"close\"}"; check "the CAPA of the audit finding is closed by another quality person" '.success and .data.status == 4'
 call POST quality/audits/action "{\"id\":$AUD,\"action\":\"close\"}"; check "audit closed once the CAPA is closed" '.success and .data.status == 2'
 as "$QA_TOKEN" POST quality/settings '{"key":"EffectivenessWaitDays","value":30}'; check "r1q D20: the waiting period of the effectiveness check is back to 30 days" '.success and ([.data[]|select(.key=="EffectivenessWaitDays")|.value][0] == 30)'
 # management review: inputs are computed from the system data
@@ -1182,15 +1392,34 @@ call POST quality/management-reviews/decision "{\"reviewId\":$MR1,\"text\":\"Add
 MRD1=$(val '.data.decisions[0].id')
 call POST quality/management-reviews/decision "{\"reviewId\":$MR1,\"text\":\"Update the calibration schedule\",\"responsibleUserId\":$ENGID,\"dueDate\":\"$(dd 20)\"}"; check "r1q D23: a second decision, without a CAPA" '.success and (.data.decisions|length) == 2 and ([.data.decisions[]|.status]|all(. == 0))'
 MRD2=$(val '[.data.decisions[]|select(.text == "Update the calibration schedule")][0].id')
+call POST quality/management-reviews/decision "{\"reviewId\":$MR1,\"text\":\"Brief the gate staff on the visitor procedure\",\"responsibleUserId\":$SECID,\"dueDate\":\"$(dd 25)\"}"; check "r1q M17: a third decision, of the security officer (who is not a quality reader)" '.success and (.data.decisions|length) == 3'
+MRD3=$(val '[.data.decisions[]|select(.text == "Brief the gate staff on the visitor procedure")][0].id')
+call POST quality/management-reviews/decision "{\"reviewId\":$MR1,\"text\":\"Review the quality objectives every quarter\",\"responsibleUserId\":$QAID,\"dueDate\":\"$(dd 40)\"}"; check "r1q M17: a fourth decision, of the QA manager himself" '.success and (.data.decisions|length) == 4'
+MRD4=$(val '[.data.decisions[]|select(.text == "Review the quality objectives every quarter")][0].id')
 call POST quality/management-reviews/action "{\"id\":$MR1,\"action\":\"close\"}"; no "review cannot be closed without the minutes (FO-QA-022)"
 call POST quality/management-reviews/action "{\"id\":$MR1,\"action\":\"close\",\"minutesDocumentId\":\"$DOCID\"}"; check "management review closed with the minutes" '.success and .data.status == 2'
-# R1q D23: after the meeting the decisions are followed up: an open decision is a task of its responsible person with the due date, and is done with a note, after its CAPA is closed
+# R1q D23 and review M17: after the meeting the decisions are followed up: an open decision is a task of its responsible person with the due date. The responsible person reports the work done, and a reviewer
+# (QA, PMO, the CEO) who is not that person confirms it; only then is the decision done. The responsible person reads the review his decision belongs to, with his own decisions only.
 as "$QC_TOKEN" GET "office/inbox?SourceKey=review-decision:$MRD1"; check "r1q D23: the open decision is a task in the inbox of the responsible person, due on its date, and the link opens the review" ".success and (.data.data|length) == 1 and (.data.data[0].dueDate[0:10]) == \"$(dd 30)\" and .data.data[0].link == \"/quality/management-reviews/$MR1\""
+as "$SEC_TOKEN" GET "quality/management-reviews/$MR1"; check "r1q M17: the security officer, who is not a quality reader, reads the closed review his decision belongs to: his own decision only and none of the inputs" ".success and (.data.decisions|length) == 1 and .data.decisions[0].id == $MRD3 and (.data.inputs|length) == 0"
+as "$FM_TOKEN" GET "quality/management-reviews/$MR1"; nomsg "r1q M17: the finance manager, who is neither a reader nor responsible for a decision of it, cannot read it" "شما مجوز این کار را ندارید"
 as "$QC_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD1,\"action\":\"done\"}"; nomsg "r1q D23: a decision is reported done with a written note" "شرح اقدام انجام‌شده"
 as "$QC_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD1,\"action\":\"done\",\"note\":\"Technician hired\"}"; nomsg "r1q D23: ... and not before the CAPA of the decision is closed" "هنوز بسته نشده است"
 as "$WH_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"done\",\"note\":\"Schedule updated\"}"; nomsg "r1q D23: somebody who is neither responsible nor a reviewer cannot report it" "شما مجوز این کار را ندارید"
-as "$ENG_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"done\",\"note\":\"Schedule updated\"}"; check "r1q D23: the responsible person reports his decision done; the day and the person are kept" ".success and ([.data.decisions[]|select(.id == $MRD2)|.status][0] == 1) and ([.data.decisions[]|select(.id == $MRD2)|.doneAt][0] != null) and ([.data.decisions[]|select(.id == $MRD2)|.doneByName][0] != null)"
-as "$ENG_TOKEN" GET "office/inbox?SourceKey=review-decision:$MRD2"; check "r1q D23: the done decision leaves the inbox" '.success and (.data.data|length) == 0'
+as "$ENG_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"done\",\"note\":\"Schedule updated\"}"; check "r1q M17: the responsible person reports his decision done: it stays open and waits for the confirmation of QA or PMO" ".success and ([.data.decisions[]|select(.id == $MRD2)|.status][0] == 0) and ([.data.decisions[]|select(.id == $MRD2)|.doneRequested][0] == true) and ([.data.decisions[]|select(.id == $MRD2)|.doneRequestedByName][0] != null) and ([.data.decisions[]|select(.id == $MRD2)|.doneAt][0] == null)"
+as "$ENG_TOKEN" GET "office/inbox?SourceKey=review-decision:$MRD2"; check "r1q M17: the reported decision leaves the inbox of its owner" '.success and (.data.data|length) == 0'
+as "$QA_TOKEN" GET "office/inbox?SourceKey=review-decision-confirm:$MRD2"; check "r1q M17: ... and becomes a task of QA and PMO to confirm" '.success and (.data.data|length) == 1'
+as "$ENG_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"done\",\"note\":\"Schedule updated, confirm please\"}"; nomsg "r1q M17: the owner cannot confirm his own report: it waits for QA or PMO" "منتظر تایید QA یا PMO است"
+as "$QA_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"return\"}"; nomsg "r1q M17: a report is sent back with a written reason" "دلیل برگرداندن گزارش انجام را بنویسید"
+as "$QA_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"return\",\"note\":\"Attach the revised schedule\"}"; check "r1q M17: QA sends the report back with the reason: the decision is the owner's task again" ".success and ([.data.decisions[]|select(.id == $MRD2)|.status][0] == 0) and ([.data.decisions[]|select(.id == $MRD2)|.doneRequested][0] == false)"
+as "$ENG_TOKEN" GET "office/inbox?SourceKey=review-decision:$MRD2"; check "r1q M17: ... and it is back in his inbox" '.success and (.data.data|length) == 1'
+as "$ENG_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"done\",\"note\":\"Revised schedule attached, document FO-QC-31\"}"; check "r1q M17: the owner reports it again" ".success and ([.data.decisions[]|select(.id == $MRD2)|.doneRequested][0] == true)"
+as "$QA_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD2,\"action\":\"done\",\"note\":\"Schedule checked against the calibration plan\"}"; check "r1q M17: QA, who is not the owner, confirms: the decision is done; the day and the person are kept" ".success and ([.data.decisions[]|select(.id == $MRD2)|.status][0] == 1) and ([.data.decisions[]|select(.id == $MRD2)|.doneAt][0] != null) and ([.data.decisions[]|select(.id == $MRD2)|.doneByName][0] != null) and ([.data.decisions[]|select(.id == $MRD2)|.doneNote][0] == \"Schedule checked against the calibration plan\")"
+as "$QA_TOKEN" GET "office/inbox?SourceKey=review-decision-confirm:$MRD2"; check "r1q M17: the confirmation task is closed" '.success and (.data.data|length) == 0'
+as "$SEC_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD3,\"action\":\"done\",\"note\":\"Gate staff briefed on Sunday\"}"; check "r1q M17: the security officer (not a quality reader) reports his decision; the answer holds his decision only" ".success and (.data.decisions|length) == 1 and .data.decisions[0].id == $MRD3 and .data.decisions[0].doneRequested == true and (.data.inputs|length) == 0"
+as "$QA_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD4,\"action\":\"cancel\",\"note\":\"Not needed\"}"; nomsg "r1q M17: nobody cancels a decision he is responsible for himself" "خودتان لغو نمی‌کنید"
+as "$QA_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD4,\"action\":\"done\",\"note\":\"Quarterly review put in the calendar\"}"; check "r1q M17: the QA manager, responsible for his own decision, reports it done: it waits for somebody else" ".success and ([.data.decisions[]|select(.id == $MRD4)|.status][0] == 0) and ([.data.decisions[]|select(.id == $MRD4)|.doneRequested][0] == true)"
+call POST quality/management-reviews/decision/action "{\"decisionId\":$MRD4,\"action\":\"done\",\"note\":\"Calendar entry checked\"}"; check "r1q M17: the PMO confirms it" ".success and ([.data.decisions[]|select(.id == $MRD4)|.status][0] == 1)"
 as "$QC_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD1,\"action\":\"cancel\",\"note\":\"x\"}"; nomsg "r1q D23: cancelling a decision is for QA, the CEO or PMO" "لغو تصمیم بازنگری"
 as "$QA_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD1,\"action\":\"cancel\"}"; nomsg "r1q D23: ... with a reason" "دلیل لغو تصمیم را بنویسید"
 as "$QA_TOKEN" POST quality/management-reviews/decision/action "{\"decisionId\":$MRD1,\"action\":\"cancel\",\"note\":\"Replaced by an outsourced calibration contract\"}"; check "r1q D23: QA cancels the decision with the reason" ".success and ([.data.decisions[]|select(.id == $MRD1)|.status][0] == 2) and ([.data.decisions[]|select(.id == $MRD1)|.doneNote][0] == \"Replaced by an outsourced calibration contract\")"
@@ -1202,7 +1431,7 @@ as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"plan\
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "r1q D22: without a final inspection record the release checks fail on that one check only" '.success and .data.canRelease == false and ([.data.checks[]|select(.code=="FINAL_INSPECTION")|.passed][0] == false) and ([.data.checks[]|select(.code != "FINAL_INSPECTION")|.passed]|all) and ([.data.checks[]|select(.code=="PRODUCTION_COMPLETE")|.passed][0] == true)'
 as "$QC_TOKEN" POST quality/records "{\"type\":2,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"operation\":\"Final inspection of pump unit 1\",\"quantity\":1,\"result\":2,\"note\":\"Paint chipped at the nameplate\"}"; check "r1q D22: a rejected final inspection drafts an NCR of the final source and does not open the release" '.success and .data.result == 2 and .data.ncrId != null'
 FNCR=$(val .data.ncrId)
-as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "r1q D22: the last final inspection rejected: the check names the result; the NCR of the work order blocks as well" '.success and .data.canRelease == false and ([.data.checks[]|select(.code=="FINAL_INSPECTION")|.passed][0] == false) and ([.data.checks[]|select(.code=="FINAL_INSPECTION")|.detail][0]|contains("Reject")) and ([.data.checks[]|select(.code=="NO_OPEN_NCR")|.passed][0] == false)'
+as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "r1q D22: the last final inspection rejected: the check names the result; the NCR of the work order blocks as well" '.success and .data.canRelease == false and ([.data.checks[]|select(.code=="FINAL_INSPECTION")|.passed][0] == false) and ([.data.checks[]|select(.code=="FINAL_INSPECTION")|.detail][0] == "نتیجه آخرین بازرسی نهایی: رد") and ([.data.checks[]|select(.code=="NO_OPEN_NCR")|.passed][0] == false)'
 as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$FNCR,\"cancel\":true,\"reason\":\"Repainted and re-inspected\"}"; nomsg "r1q D3: the NCR of the final inspection stays until an accepted re-inspection of the product exists" "تا بازرسی مجدد قبول‌شده‌ای"
 as "$QC_TOKEN" POST quality/records "{\"type\":2,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"operation\":\"Final inspection of pump unit 1\",\"quantity\":1,\"result\":1}"; check "r1q D22: the final inspection repeated after the repair is accepted" '.success and .data.result == 1'
 as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$FNCR,\"cancel\":true,\"reason\":\"Repainted and re-inspected\"}"; check "r1q D3: ... and then another QC user cancels the NCR with the reason" '.success and .data.status == 4'
@@ -1232,23 +1461,27 @@ as "$QC2_TOKEN" POST quality/release-notes/action "{\"id\":$RN1,\"action\":\"rel
 as "$QC_TOKEN" POST quality/release-notes "{\"id\":$RN1,\"workOrderId\":$WO1,\"itemsText\":\"changed\"}"; nomsg "a released note cannot be edited" "ویرایش نمی"
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/data-book"; check "data book: release note section now complete" '[.data.sections[]|select(.no==10)|.entries[0].missing][0] == false'
 # R1q D10: the delivery carries only what the released note lists, and only while no non-conformance is open on the work order
-mkdelivery $WO1 3; DL3=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL3/approve" '{"kind":4}'
-call POST "inventory/documents/$DL3/confirm"; nomsg "r1q D10: a delivery of 3 bolts against a release note that lists 2 is refused" "از مقدار ترخیص‌شده (2) بیشتر است"
+mkdelivery $WO1 6; DL3=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL3/approve" '{"kind":4}'
+call POST "inventory/documents/$DL3/confirm"; nomsg "r1q D10: a delivery of 6 bolts against a release note that lists 5 is refused" "از مقدار ترخیص‌شده (5) بیشتر است"
 ncr "{\"source\":2,\"severity\":1,\"itemId\":$BOLT,\"quantity\":1,\"workOrderId\":$WO1,\"description\":\"Found after the release\"}"; NCR8=$(val .data.id); NCR8NUM=$(val .data.number)
 mkdelivery $WO1 1; DL1=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL1/approve" '{"kind":4}'
 call POST "inventory/documents/$DL1/confirm"; check "r1q D10: an NCR raised after the release stops the delivery until it is closed or cancelled; the NCR number is named" ".success == false and (.message|contains(\"تا بسته‌شدن عدم انطباق‌های باز\")) and (.message|contains(\"$NCR8NUM\"))"
 as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCR8,\"cancel\":true,\"reason\":\"Entered against the wrong work order\"}"; check "r1q D3: another QC user cancels that NCR (a report with no inspection or test behind it)" '.success and .data.status == 4'
 call POST "inventory/documents/$DL1/confirm"; check "customer delivery of the released work order is confirmed" '.success and .data.status == 1'
-mkdelivery $WO1 2; DL4=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL4/approve" '{"kind":4}'
-call POST "inventory/documents/$DL4/confirm"; nomsg "r1q D10: earlier deliveries are counted: 1 delivered, 2 more would make 3 of the 2 released" "از مقدار ترخیص‌شده (2) بیشتر است"
-mkdelivery $WO1 1; DL5=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL5/approve" '{"kind":4}'
-call POST "inventory/documents/$DL5/confirm"; check "r1q D10: the second bolt, within the released list, is delivered" '.success and .data.status == 1'
-mkdelivery $WO1 1; DL6=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL6/approve" '{"kind":4}'
-call POST "inventory/documents/$DL6/confirm"; nomsg "r1q D10: nothing is left of the release note (2 of 2 delivered)" "از مقدار ترخیص‌شده (2) بیشتر است"
+mkdelivery $WO1 5; DL4=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL4/approve" '{"kind":4}'
+call POST "inventory/documents/$DL4/confirm"; nomsg "r1q D10: earlier deliveries are counted: 1 delivered, 5 more would make 6 of the 5 released" "از مقدار ترخیص‌شده (5) بیشتر است"
+mkdelivery $WO1 2; DL5=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL5/approve" '{"kind":4}'
+call POST "inventory/documents/$DL5/confirm"; check "r1q D10: two more bolts, within the released list, are delivered (3 of 5)" '.success and .data.status == 1'
+mkdelivery $WO1 3; DL6=$(val .data.id); as "$QC_TOKEN" POST "inventory/documents/$DL6/approve" '{"kind":4}'
+call POST "inventory/documents/$DL6/confirm"; nomsg "r1q D10: three more would go over the list (3 of 5 delivered, 6 asked)" "از مقدار ترخیص‌شده (5) بیشتر است"
 
 # --- N. ITP revision after approval (snapshot) and settings
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"submit\"}"
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"client-approve\",\"reference\":\"CL-2-1\"}"; check "ITP 2 approved" '.success and .data.status == 2'
+# R1q review H6: ITP 2 was drafted by the system; the client's approval is recorded by somebody who did not submit or change it
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"submit\"}"; check "ITP 2 (drafted by the system) is submitted by the QC user" '.success and .data.status == 1'
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"client-approve\",\"reference\":\"CL-2-1\"}"; nomsg "r1q H6: the QC user who submitted the plan cannot record the client's approval of it" "تفکیک وظایف"
+call POST quality/itps "{\"id\":$ITP2,\"noticeDays\":10}"; check "r1q H6: the PMO account saves the plan (and so becomes one of its editors)" '.success and .data.noticeDays == 10 and .data.status == 1'
+call POST quality/itps/action "{\"id\":$ITP2,\"action\":\"client-approve\",\"reference\":\"CL-2-1\"}"; nomsg "r1q H6: ... and cannot record the client's approval either" "تفکیک وظایف"
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"client-approve\",\"reference\":\"CL-2-1\",\"date\":\"$(dd -3)\"}"; check "ITP 2 approved (recorded by the QA manager, who did not touch the plan, with the day of the client's letter, 3 days ago)" ".success and .data.status == 2 and (.data.clientApprovalDate[0:10]) == \"$(dd -3)\""
 A2_1=$(val '.data.activities[0].id')
 as "$QC_TOKEN" POST quality/itps/activity "{\"id\":$A2_1,\"itpId\":$ITP2,\"seq\":1,\"activity\":\"Material certificates of pressure-containing parts (revised)\",\"pointVendor\":1,\"pointTpi\":3,\"pointClient\":3}"; nomsg "changing an approved ITP needs a written reason" "دلیل تغییر"
 as "$QC_TOKEN" POST quality/itps/activity "{\"id\":$A2_1,\"itpId\":$ITP2,\"seq\":1,\"activity\":\"Material certificates of pressure-containing parts (revised)\",\"pointVendor\":1,\"pointTpi\":3,\"pointClient\":3,\"reason\":\"Client asked for review of all certificates\"}"; check "approved ITP edited with a reason: revision 1 (first issue is 0), back to draft, old revision kept" '.success and .data.revision == 1 and .data.status == 0 and (.data.revisions|length) >= 1'
@@ -1261,18 +1494,136 @@ as "$QA_TOKEN" POST quality/settings '{"key":"CalibrationWarnDays","value":30}'
 as "$QA_TOKEN" POST quality/settings '{"key":"MajorNcrCommitteeMin","value":1}'; nomsg "r1q D30: a technical committee for a major NCR has at least two members (1 refused)" "باید عدد صحیح بین 2 تا 10 باشد"
 as "$QA_TOKEN" POST quality/settings '{"key":"WeldContinuityMonths","value":3650}'; nomsg "r1q D30: a welder continuity of 3650 months is refused (ASME IX QW-322: the range is 1 to 12 months)" "باید عدد صحیح بین 1 تا 12 باشد"
 as "$QA_TOKEN" POST quality/settings '{"key":"NcrMinorDueDays","value":7.5}'; nomsg "r1q D30: days are whole numbers (7.5 refused)" "باید عدد صحیح بین 1 تا 180 باشد"
-as "$QA_TOKEN" POST quality/settings '{"key":"EffectivenessWaitDays","value":400}'; nomsg "r1q D30: a waiting period beyond a year is refused" "باید عدد صحیح بین 0 تا 365 باشد"
+as "$QA_TOKEN" POST quality/settings '{"key":"EffectivenessWaitDays","value":400}'; nomsg "r1q D30: a waiting period beyond a year is refused (the range is 7 to 365 days since the review)" "باید عدد صحیح بین 7 تا 365 باشد"
 as "$QA_TOKEN" GET quality/settings; check "r1q D30: the refused values were not stored (committee minimum still 3, minor NCR period still 7, welder continuity still 6 months and a default)" '.success and ([.data[]|select(.key=="MajorNcrCommitteeMin")|.value][0] == 3) and ([.data[]|select(.key=="NcrMinorDueDays")|.value][0] == 7) and ([.data[]|select(.key=="WeldContinuityMonths")|.value][0] == 6) and ([.data[]|select(.key=="WeldContinuityMonths")|.isDefault][0] == true) and ([.data[]|select(.key=="WeldContinuityMonths")|.max][0] == 12)'
 as "$QA_TOKEN" POST quality/settings '{"key":"WeldContinuityMonths","value":12}'; check "r1q D30: twelve months, the top of the range, is accepted and stored" '.success and ([.data[]|select(.key=="WeldContinuityMonths")|.value][0] == 12) and ([.data[]|select(.key=="WeldContinuityMonths")|.isDefault][0] == false)'
 as "$QA_TOKEN" POST quality/settings '{"key":"WeldContinuityMonths","value":6}'; check "r1q D30: ... and put back to the six months of the standard" '.success and ([.data[]|select(.key=="WeldContinuityMonths")|.value][0] == 6)'
+# R1q review H6 and M14: the minimum of the witness notice period (company setting, 1 to 30 days, default 1) and the ranges of the other new settings
+as "$QA_TOKEN" GET quality/settings; check "r1q M14: the new settings carry their ★ default and their range: back-date window 7 (0-30), waiting period of the effectiveness check 30 (7-365, put back by QA), minimum witness notice 1 (1-30)" '.success and ([.data[]|select(.key=="MaxBackdateDays")|[.value,.min,.max,.isDefault]][0] == [7,0,30,true]) and ([.data[]|select(.key=="EffectivenessWaitDays")|[.value,.min,.max]][0] == [30,7,365]) and ([.data[]|select(.key=="MinNoticeDays")|[.value,.min,.max,.isDefault]][0] == [1,1,30,true])'
+as "$QA_TOKEN" POST quality/settings '{"key":"MaxBackdateDays","value":31}'; nomsg "r1q M14: a back-date window beyond a month is refused" "باید عدد صحیح بین 0 تا 30 باشد"
+as "$QA_TOKEN" POST quality/settings '{"key":"MinNoticeDays","value":31}'; nomsg "r1q H6: the company minimum of the witness notice is at most 30 days (31 refused)" "باید عدد صحیح بین 1 تا 30 باشد"
+as "$QA_TOKEN" POST quality/settings '{"key":"MinNoticeDays","value":0}'; nomsg "r1q H6: ... and at least one day (0 refused: a notice of no days would waive the client's witness at once)" "باید عدد صحیح بین 1 تا 30 باشد"
+as "$QA_TOKEN" POST quality/settings '{"key":"MinNoticeDays","value":14}'; check "r1q H6: QA raises the company minimum of the notice period to 14 days" '.success and ([.data[]|select(.key=="MinNoticeDays")|.value][0] == 14)'
+as "$QC_TOKEN" POST quality/itps "{\"id\":$ITP2,\"noticeDays\":10}"; nomsg "r1q H6: a plan cannot be saved with a notice period under the company minimum (10 under 14)" "باید بین 14 تا 365 روز باشد"
+as "$QC_TOKEN" GET "quality/itps/$ITP2"; check "r1q H6: a plan saved with fewer days than the minimum (10 under 14) is read at the minimum, so every deadline of its witness notices follows the minimum" '.success and .data.noticeDays == 14'
+as "$QA_TOKEN" POST quality/settings '{"key":"MinNoticeDays","value":1}'; check "r1q H6: the minimum is back to one day" '.success and ([.data[]|select(.key=="MinNoticeDays")|.value][0] == 1)'
+as "$QC_TOKEN" GET "quality/itps/$ITP2"; check "r1q H6: ... and the plan reads its own 10 days again" '.success and .data.noticeDays == 10'
 
 # --- O. quality dashboard and CEO dashboard (computed, read-only)
-as "$QA_TOKEN" GET quality/dashboard
-check "quality dashboard: overdue CAPA, calibration, pending H points, lapsing qualifications, overdue complaints" '.success and .data.overdueCapas >= 1 and .data.calibrationOverdue >= 1 and .data.calibrationDue30 >= 1 and .data.pendingHPoints >= 1 and .data.qualificationsLapsing >= 1 and .data.complaintsOverdue >= 1'
-check "quality dashboard: alerts and lists are computed" '(.data.alerts|length) >= 3 and (.data.overdueCapaList|length) >= 1 and (.data.calibrationList|length) >= 1 and (.data.pendingPoints|length) >= 1 and (.data.ncrs.notClassified + .data.ncrs.minor + .data.ncrs.major) >= 1'
+as "$QA_TOKEN" GET quality/dashboard; cp "$B" "$B.dash"
+check "quality dashboard: the exact counts of the scenario: 1 overdue CAPA, 1 instrument overdue and 1 due within 30 days, 1 H point waiting, no witness notice due, 3 welder certificates lapsing, 1 complaint open and overdue, no NCR past its decision day, 1 release note waiting" '.success and .data.overdueCapas == 1 and .data.calibrationOverdue == 1 and .data.calibrationDue30 == 1 and .data.pendingHPoints == 1 and .data.witnessNoticesDue == 0 and .data.qualificationsLapsing == 3 and .data.complaintsOpen == 1 and .data.complaintsOverdue == 1 and .data.overdueNcrs == 0 and .data.releaseNotesPending == 1'
+check "quality dashboard: the alerts are exactly these six, with their level and count, computed from the records" '.success and ([.data.alerts[]|[.code,.level,.count]]) == [["CAPA_OVERDUE","danger",1],["CALIBRATION_OVERDUE","danger",1],["CALIBRATION_DUE","warning",1],["H_POINTS","warning",1],["QUALIFICATION","warning",3],["COMPLAINT_OVERDUE","danger",1]]'
+as "$QA_TOKEN" GET quality/capas/overdue; OVC=$(jq -c '[.data.data[].id]' "$B")
+as "$QA_TOKEN" GET quality/equipment/due; EQD=$(jq -c '[.data.data[].id]' "$B")
+as "$QA_TOKEN" GET "quality/qualifications/continuity?Days=30"; QLC=$(jq -c '[.data.data[].id]' "$B")
+as "$QA_TOKEN" GET "inventory/quality/ncr?PageSize=0"
+NCRC=$(jq -c '[.data.data[]|select(.status != 3 and .status != 4)|.severity] | {notClassified:(map(select(. == 0))|length),minor:(map(select(. == 1))|length),major:(map(select(. == 2))|length)}' "$B")
+cp "$B.dash" "$B"
+check "quality dashboard: the lists are those of the screens behind them (same overdue CAPAs, instruments and certificates); the open NCRs by severity equal the NCR list: 3 not classified, 3 minor, 1 major, all reported within a week, none past its decision day" ".success and (.data.overdueCapaList|map(.id)) == $OVC and (.data.calibrationList|map(.id)) == $EQD and (.data.qualificationList|map(.id)) == $QLC and (.data.ncrs|{notClassified,minor,major}) == $NCRC and .data.ncrs.notClassified == 3 and .data.ncrs.minor == 3 and .data.ncrs.major == 1 and .data.ncrs.age0To7 == 7 and .data.ncrs.age8To30 == 0 and .data.ncrs.age31Plus == 0 and .data.ncrs.overdue == 0 and (.data.pendingPoints|map({workOrderCode,hPoints,wPoints})) == [{workOrderCode:\"QA-WO-1\",hPoints:1,wPoints:0}]"
 as "$CEO_TOKEN" GET finance/ceo-dashboard
-check "CEO dashboard carries the quality counts and alerts" '.success and .data.overdueCapas >= 1 and .data.calibrationOverdue >= 1 and .data.pendingHPoints >= 1 and .data.qualificationsLapsing >= 1 and .data.complaintsOverdue >= 1 and ([.data.alerts[]|.text]|length) >= 3'
+check "CEO dashboard: the same exact quality counts, and the six quality alerts with their texts" ".success and .data.overdueCapas == 1 and .data.calibrationOverdue == 1 and .data.pendingHPoints == 1 and .data.qualificationsLapsing == 3 and .data.complaintsOverdue == 1 and ($(jq -c '[.data.alerts[].text]' "$B.dash") - [.data.alerts[].text]) == []"
 as "$QA_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "QA user cannot write warehouse documents (403)" || bad "QA user cannot write warehouse documents (403) got $CODE"
+
+# --- P. Goods under hold, expired lots, stock counts of quarantine stock, serial write-off, length checks (review M10, M13, M18, L21, L24)
+# Zero-value test goods (items of their own, adjustments without a price), so the books and the stock value of the later sections stay as they are.
+TOKEN=$ADMIN_TOKEN
+item XSER "{\"code\":\"02130002010003\",\"title\":\"شفت آزمون نگهداری ناانطباق\",\"itemGroupId\":$G2,\"unit\":\"عدد\",\"trackingMode\":2,\"requiresIncomingInspection\":false}" "serial part for the hold and write-off tests"
+item XEXP "{\"code\":\"01001026120101\",\"title\":\"میلگرد آزمون ماندگاری\",\"itemGroupId\":$G2,\"unit\":\"kg\",\"trackingMode\":1,\"shelfLifeDays\":10,\"requiresIncomingInspection\":false}" "lot material with 10 days of shelf life"
+call GET "inventory/items/$XEXP"; check "r1q M13: the test material has a shelf life of 10 days and no incoming inspection (after the QA approval of its start gates)" '.success and .data.shelfLifeDays == 10 and .data.requiresIncomingInspection == false and .data.pendingQualityChangeId == null'
+adjust_in() { # adjust_in DATE WAREHOUSE LINES : an increase adjustment with the approvals of the warehouse supervisor and of planning, confirmed (the answer of the confirmation stays in $B)
+  call POST inventory/documents "{\"type\":7,\"documentDate\":\"${1}T00:00:00\",\"warehouseId\":$2,\"referenceNumber\":\"P-HOLD\",\"lines\":$3}"; ADJ=$(val .data.id)
+  as "$SUP_TOKEN" POST "inventory/documents/$ADJ/approve" '{"kind":1}'; as "$PLAN_TOKEN" POST "inventory/documents/$ADJ/approve" '{"kind":2}'
+  call POST "inventory/documents/$ADJ/confirm"
+}
+TRX() { echo "{\"type\":6,\"documentDate\":\"${D0}T00:00:00\",\"warehouseId\":$1,\"destinationWarehouseId\":$2,\"lines\":$3}"; } # TRX FROM TO LINES : a transfer draft
+adjust_in "$D0" $W1 "[{\"itemId\":$XSER,\"quantity\":3,\"serialNumbers\":[\"XS-1\",\"XS-2\",\"XS-3\"]}]"; check "r1q M18: three pieces of the test shaft (XS-1 to XS-3) are in the main warehouse" '.success and .data.status == 1'
+adjust_in "$(dd -30)" $W1 "[{\"itemId\":$XEXP,\"quantity\":10,\"lotNumber\":\"XE-OLD\"}]"; check "r1q M13: 10 kg of the test material received 30 days ago (lot XE-OLD)" '.success and .data.status == 1'
+adjust_in "$D0" $W1 "[{\"itemId\":$XEXP,\"quantity\":10,\"lotNumber\":\"XE-NEW\"}]"; check "r1q M13: 10 kg received today (lot XE-NEW)" '.success and .data.status == 1'
+call GET "inventory/stock/lots?ItemId=$XEXP"; XEOLD=$(val '.data.data[]|select(.lotNumber=="XE-OLD")|.id'); XENEW=$(val '.data.data[]|select(.lotNumber=="XE-NEW")|.id')
+check "r1q M13: the lots expire after the shelf life counted from the day of the receipt: XE-OLD 20 days ago, XE-NEW in 10 days" "([.data.data[]|select(.lotNumber==\"XE-OLD\")|.expiryDate[0:10]][0] == \"$(dd -20)\") and ([.data.data[]|select(.lotNumber==\"XE-NEW\")|.expiryDate[0:10]][0] == \"$(dd 10)\")"
+
+# M13: an expired lot is moved only INTO quarantine (or scrap), never to a warehouse that production or a customer draws on
+call POST inventory/documents "$(TRX $W1 $W2 "[{\"itemId\":$XEXP,\"quantity\":4,\"lotId\":$XEOLD}]")"; DX=$(val .data.id)
+call POST "inventory/documents/$DX/confirm"; nomsg "r1q M13: an expired lot is not transferred to a usable warehouse (the workshop)" "منقضی شده است"
+call DELETE "inventory/documents/$DX"
+call POST inventory/documents "$(TRX $W1 $W2 "[{\"itemId\":$XEXP,\"quantity\":4,\"lotId\":$XENEW}]")"; DX=$(val .data.id)
+call POST "inventory/documents/$DX/confirm"; check "r1q M13: a lot that has not expired (XE-NEW, 10 days left) is transferred as before" '.success and .data.status == 1'
+call POST inventory/documents "$(TRX $W1 $WQ "[{\"itemId\":$XEXP,\"quantity\":4,\"lotId\":$XEOLD}]")"; DX=$(val .data.id)
+call POST "inventory/documents/$DX/confirm"; check "r1q M13: ... the expired lot may go INTO the quarantine warehouse (the way out of the expiry); an inspection waits for it there" '.success and .data.status == 1'
+as "$QC_TOKEN" GET "inventory/quality/inspections?Status=0&PageSize=0"; QI_X=$(jq -r ".data.data[]|select(.itemId == $XEXP)|.id" "$B")
+check "r1q M13: ... exactly one inspection waits for the 4 kg of XE-OLD" ".success and ([.data.data[]|select(.itemId == $XEXP)]|length) == 1 and ([.data.data[]|select(.itemId == $XEXP)|.quantity][0]) == 4"
+IDS60=$(jq -nc '[range(1001;1061)]')
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI_X,\"acceptedQuantity\":4,\"rejectedQuantity\":0,\"targetWarehouseId\":$W1,\"reportNumber\":\"QC-IR-XE-1\",\"equipmentIds\":$IDS60}"; nomsg "r1q L21: a list of measuring instruments that does not fit the column is refused with a message" "تعداد ابزارهای اندازه‌گیری انتخاب‌شده بیش از حد است"
+as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI_X,\"acceptedQuantity\":4,\"rejectedQuantity\":0,\"targetWarehouseId\":$W1,\"reportNumber\":\"QC-IR-XE-1\"}"; nomsg "r1q M13: accepting the expired lot would release it to a usable warehouse: refused" "منقضی شده است"
+as "$QC_TOKEN" GET "inventory/quality/inspections?Status=0&PageSize=0"; check "r1q M13: ... and the inspection is still waiting" ".success and ([.data.data[]|select(.id == $QI_X)]|length) == 1"
+
+# M18: goods an open NCR is about are held; a piece (serial number) is held wherever it is, a lot only for the quantity of the report in its warehouse
+ncr "{\"source\":2,\"severity\":1,\"itemId\":$XSER,\"quantity\":1,\"serialNumbers\":[\"XS-1\"],\"warehouseId\":$W1,\"disposition\":4,\"description\":\"Shaft XS-1 cracked in the store\",\"causeCategory\":4,\"rootCause\":\"Dropped during handling\",\"correctiveAction\":\"Racks with padded rests\"}"
+check "r1q M18: an NCR for piece XS-1 (decision: scrap)" '.success and .data.status == 0 and .data.disposition == 4'
+NCRXA=$(val .data.id); NCRXAN=$(val .data.number)
+call POST inventory/documents "$(TRX $W1 $W2 "[{\"itemId\":$XSER,\"quantity\":1,\"serialNumbers\":[\"XS-1\"]}]")"
+check "r1q M18: the piece is not moved to a usable warehouse while the report is open: refused already at the draft, the piece and the report are named" ".success == false and (.message|contains(\"XS-1\")) and (.message|contains(\"$NCRXAN\")) and (.message|contains(\"نگهداری می‌شود\"))"
+call POST inventory/documents "$(TRX $W1 $W2 "[{\"itemId\":$XSER,\"quantity\":1,\"serialNumbers\":[\"XS-3\"]}]")"; DX3=$(val .data.id)
+check "r1q M18: a clean draft for another piece (XS-3) is saved" '.success and .data.status == 0'
+ncr "{\"source\":2,\"severity\":1,\"itemId\":$XSER,\"quantity\":1,\"serialNumbers\":[\"XS-3\"],\"warehouseId\":$W1,\"disposition\":1,\"concessionNumber\":\"CN-XS-3\",\"description\":\"Doubt about the bore of XS-3\",\"causeCategory\":4,\"rootCause\":\"Gauge reading to be repeated\"}"
+NCRXB=$(val .data.id); NCRXBN=$(val .data.number)
+call POST "inventory/documents/$DX3/confirm"; check "r1q M18: a report raised after the draft holds the piece: the confirmation checks again and refuses (the report is named)" ".success == false and (.message|contains(\"XS-3\")) and (.message|contains(\"$NCRXBN\"))"
+as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCRXB,\"cancel\":true,\"reason\":\"$LONG1001\"}"; nomsg "r1q L21: a cancel reason longer than 1000 characters is refused with a message" "علت ابطال نباید بیش از ۱۰۰۰ نویسه باشد"
+as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCRXB,\"cancel\":true,\"reason\":\"The bore was measured again: within tolerance\"}"; check "r1q M18: the report is cancelled by another QC user" '.success and .data.status == 4'
+call POST "inventory/documents/$DX3/confirm"; check "r1q M18: with the report gone the hold ends: the same draft is confirmed" '.success and .data.status == 1'
+call POST inventory/quality/ncr/close "{\"id\":$NCRXA,\"effectivenessCheck\":\"x\"}"; [ "$CODE" = "403" ] && ok "r1q L24: a PMO user cannot close or cancel NCRs (QC and QA only) (403)" || bad "r1q L24: a PMO user cannot close or cancel NCRs (QC and QA only) (403) got $CODE"
+approve3 "$NCRXA"; check "r1q M18: NCR XS-1 is approved by the three signatures (scrap decision, not executed yet)" '.success and .data.status == 1'
+call POST inventory/documents "$(TRX $W1 $W2 "[{\"itemId\":$XSER,\"quantity\":1,\"serialNumbers\":[\"XS-1\"]}]")"; nomsg "r1q M18: an approved decision that is not executed still holds the piece" "نگهداری می‌شود"
+as "$QC_TOKEN" POST inventory/quality/ncr/execute "{\"id\":$NCRXA,\"targetWarehouseId\":$WS}"; check "r1q M18: the decision is executed (XS-1 moves to the scrap warehouse by the report's own transfer)" '.success and .data.status == 2 and (.data.resultDocumentNumber|startswith("TR-"))'
+call GET "inventory/stock/serials?Contains=XS-1&ItemId=$XSER"; check "r1q M18: ... the piece is in the scrap warehouse" ".success and .data.data[0].warehouseId == $WS"
+# a lot is held for the quantity of the report only: 3 of the 6 kg of XE-NEW in the main warehouse
+ncr "{\"source\":2,\"severity\":1,\"itemId\":$XEXP,\"lotId\":$XENEW,\"quantity\":3,\"warehouseId\":$W1,\"disposition\":1,\"concessionNumber\":\"CN-XE-NEW\",\"description\":\"Surface rust on part of lot XE-NEW\",\"causeCategory\":4,\"rootCause\":\"Wet rack\"}"
+NCRXL=$(val .data.id); NCRXLN=$(val .data.number)
+call POST inventory/documents "$(TRX $W1 $W2 "[{\"itemId\":$XEXP,\"quantity\":4,\"lotId\":$XENEW}]")"
+check "r1q M18: 4 of the 6 kg would leave less than the 3 kg the report holds: refused (the held quantity and the report are named)" ".success == false and (.message|contains(\"$NCRXLN\")) and (.message|contains(\"XE-NEW\")) and (.message|contains(\"3 از موجودی این انبار\"))"
+call POST inventory/documents "$(TRX $W1 $W2 "[{\"itemId\":$XEXP,\"quantity\":3,\"lotId\":$XENEW}]")"; DXL=$(val .data.id)
+call POST "inventory/documents/$DXL/confirm"; check "r1q M18: 3 kg may go: the 3 kg of the report stay in the main warehouse" '.success and .data.status == 1'
+as "$QC2_TOKEN" POST inventory/quality/ncr/close "{\"id\":$NCRXL,\"cancel\":true,\"reason\":\"The rust was surface dust: cleaned\"}"; check "r1q M18: the lot report is cancelled by another QC user" '.success and .data.status == 4'
+
+# M10: pieces of a serial item are written off by a decrease adjustment only against a scrap NCR (approved or executed) that lists them
+ncr "{\"source\":2,\"severity\":1,\"itemId\":$XSER,\"quantity\":1,\"serialNumbers\":[\"XS-2\"],\"warehouseId\":$W1,\"disposition\":4,\"description\":\"Shaft XS-2 lost its centre holes\",\"causeCategory\":4,\"rootCause\":\"Machined twice\",\"correctiveAction\":\"Job card checks the operation count\"}"
+NCRXW=$(val .data.id)
+WOFF() { echo "{\"type\":8,\"documentDate\":\"${D0}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$XSER,\"quantity\":1,\"serialNumbers\":[\"$1\"]}]$2}"; } # WOFF SERIAL [,extra fields]
+call POST inventory/documents "$(WOFF XS-2 '')"; nomsg "r1q M10: a serial piece is not written off by a decrease adjustment without a report" "فقط با گزارش عدم انطباق دارای تصمیم ضایعات"
+call POST inventory/documents "$(WOFF XS-2 ",\"writeOffNcrId\":$NCRXW")"; nomsg "r1q M10: a report that is still open (no approved scrap decision) does not allow it" "تصمیم ضایعات تاییدشده یا اجراشده ندارد"
+approve3 "$NCRXW"
+call POST inventory/documents "$(WOFF XS-1 ",\"writeOffNcrId\":$NCRXW")"; nomsg "r1q M10: the report must list the piece (XS-1 is not in the report of XS-2)" "نیامده است"
+call POST inventory/documents "$(WOFF XS-2 ",\"writeOffNcrId\":$NCRXW")"; WOD=$(val .data.id)
+check "r1q M10: with the approved scrap report that lists XS-2 the write-off is saved as a draft that names the report" ".success and .data.status == 0 and .data.writeOffNcrId == $NCRXW"
+as "$SUP_TOKEN" POST "inventory/documents/$WOD/approve" '{"kind":1}'; as "$PLAN_TOKEN" POST "inventory/documents/$WOD/approve" '{"kind":2}'
+call POST "inventory/documents/$WOD/confirm"; check "r1q M10: ... and, with the two approvals of an adjustment, confirmed (the approved report holds goods, but an adjustment is a correction, not a use)" '.success and .data.status == 1 and (.data.number|startswith("AD-"))'
+call GET "inventory/stock?ItemId=$XSER"; check "r1q M10: the main warehouse holds none of the three pieces any more (XS-1 in scrap, XS-2 written off, XS-3 in the workshop)" "(([.data.data[]|select(.warehouseId==$W1)|.quantity]|add) // 0) == 0 and ([.data.data[]|select(.warehouseId==$WS)|.quantity]|add) == 1 and ([.data.data[]|select(.warehouseId==$W2)|.quantity]|add) == 1"
+
+# M10: a stock count in a quarantine, scrap or contractor warehouse needs the quality approval (QC or QA) besides the approvals of the warehouse and planning
+call POST inventory/counts "{\"kind\":1,\"countDate\":\"${D0}T00:00:00\",\"warehouseId\":$WQ,\"groupCode\":\"01001026120101\"}"
+check "r1q M10: a count in the quarantine warehouse says that it needs the quality approval too" '.success and .data.qualityApprovalRequired == true and .data.qualityApprovedAt == null and .data.linesCount == 1'
+CNTQ=$(val .data.id); LINESQ=$(jq -c '[.data.lines[]|{lineId:.id,countedQuantity:(.systemQuantity-1)}]' "$B")
+call POST inventory/counts/lines "{\"id\":$CNTQ,\"lines\":$LINESQ}"; check "r1q M10: 1 kg less than the books in quarantine" '.success and .data.differencesCount == 1'
+call POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"submit\"}"; check "r1q M10: the count is submitted" '.success and .data.status == 1'
+as "$SUP_TOKEN" POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"approve-warehouse\"}"; as "$PLAN_TOKEN" POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"approve-planning\"}"
+check "r1q M10: with the warehouse and planning approvals the count is still not approved: the quality approval is missing" '.success and .data.status == 1 and .data.warehouseApprovedAt != null and .data.planningApprovedAt != null and .data.qualityApprovedAt == null'
+call POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"post\"}"; no "r1q M10: ... and it cannot be posted"
+as "$WH_TOKEN" POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"approve-quality\"}"; nomsg "r1q M10: the storekeeper cannot give the quality approval" "کنترل کیفیت یا مدیر تضمین کیفیت"
+as "$QC_TOKEN" POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"approve-quality\"}"; check "r1q M10: a QC user who did not start, count or approve it gives the quality approval: the count is approved" '.success and .data.status == 2 and .data.qualityApprovedAt != null and .data.qualityApprovedByName != null'
+as "$QC2_TOKEN" POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"approve-quality\"}"; nomsg "r1q M10: the quality approval is given once" "قبلاً ثبت شده است"
+call POST inventory/counts/action "{\"id\":$CNTQ,\"action\":\"post\"}"; check "r1q M10: the count is posted: one decrease adjustment of 1 kg out of quarantine" '.success and .data.status == 3 and (.data.decreaseDocumentNumber|startswith("AD-"))'
+call GET "inventory/stock?ItemId=$XEXP"; check "r1q M10: quarantine holds 3 kg of the test material now" "([.data.data[]|select(.warehouseId==$WQ)|.quantity]|add) == 3"
+call POST inventory/counts "{\"kind\":1,\"countDate\":\"${D0}T00:00:00\",\"warehouseId\":$W1,\"groupCode\":\"01001026120101\"}"
+check "r1q M10: a count in a usable warehouse does not need it" '.success and .data.qualityApprovalRequired == false and .data.linesCount == 2'
+CNTU=$(val .data.id); LINESU=$(jq -c '[.data.lines[]|{lineId:.id,countedQuantity:.systemQuantity}]' "$B")
+call POST inventory/counts/lines "{\"id\":$CNTU,\"lines\":$LINESU}"; call POST inventory/counts/action "{\"id\":$CNTU,\"action\":\"submit\"}"
+as "$QC_TOKEN" POST inventory/counts/action "{\"id\":$CNTU,\"action\":\"approve-quality\"}"; nomsg "r1q M10: ... and a quality approval on it is refused" "تایید کنترل کیفیت لازم ندارد"
+call POST inventory/counts/action "{\"id\":$CNTU,\"action\":\"cancel\"}"; check "r1q M10: the usable-warehouse count is cancelled again (the warehouse is not left frozen)" '.success and .data.status == 4'
+
+# L21: more texts that have a column length are refused with a message
+LINES400=$(jq -nc '[range(1;401)|"LONG-SERIAL-\(.)"]')
+as "$QC_TOKEN" POST quality/release-notes "{\"id\":$RN2,\"workOrderId\":$WO2,\"itemsText\":\"Feed pump unit 2\",\"lines\":[{\"itemId\":$SHAFT,\"quantity\":400,\"serialNumbers\":$LINES400}]}"; nomsg "r1q L21: a serial list that does not fit the release line column (4000 characters) is refused with a message" "بیش از ۴۰۰۰ نویسه"
+as "$QC_TOKEN" POST quality/release-notes/action "{\"id\":$RN2,\"action\":\"cancel\",\"reason\":\"$LONG1001\"}"; nomsg "r1q L21: a release note cancel reason longer than 1000 characters is refused with a message" "دلیل لغو نباید بیش از ۱۰۰۰ نویسه باشد"
 TOKEN=$ADMIN_TOKEN
 
 # ================================================================ PROJECT CONTROL (PMO) MODULE (release 1)
@@ -2069,7 +2420,7 @@ FE=finance/entities; FM2=finance/migration; FAU=finance/audit; FSX=finance/sepid
 user2 aud.ci 28 'Ci#Aud-User-2026' 09120000032 0012345632
 AUD_TOKEN=$(login aud.ci 'Ci#Aud-User-2026')
 as "$AUD_TOKEN" GET "quality/equipment?PageSize=0"; check "r1q D27: the auditor (role 28) reads the measuring equipment register (the caliper G4 is in it)" ".success and ([.data.data[]|select(.id == $G4)]|length) == 1"
-as "$AUD_TOKEN" GET quality/dashboard; check "r1q D27: ... and the quality dashboard" '.success and .data.overdueCapas >= 1'
+as "$AUD_TOKEN" GET quality/dashboard; check "r1q D27: ... and the quality dashboard" '.success and .data.overdueCapas == 1'
 as "$AUD_TOKEN" POST quality/equipment '{"name":"Auditor gauge","type":1,"requiresCalibration":true}'; nomsg "r1q D27: ... but an auditor only reads: registering an instrument is refused" "شما مجوز این کار را ندارید"
 [ -n "$FM2_TOKEN" ] && [ -n "$AUD_TOKEN" ] && ok "f3: login second finance manager and the auditor (role 28)" || bad "f3: login second finance manager and the auditor (role 28)"
 
@@ -3188,9 +3539,10 @@ as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"register\"}"
 as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"send\"}"; nomsg "office: sending needs a delivery method" "روش ارسال"
 as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"send\",\"deliveryMethod\":3}"; check "office: sent by courier" '.success and .data.status == 4 and .data.deliveryMethod == 3 and (.data.sentDateText|test("^14[0-9]{2}/[0-9]{2}/[0-9]{2}$"))'
 ibx "$OSEC_TOKEN" "letter:$OL1:dispatch"; check "office: the dispatch item is closed after sending" '.success and (.data.data|length) == 0'
-# R1q D9: the proof of a witness notice is a signed outgoing letter of this system; its signing day is the notice day (not a typed date)
+# R1q D9, review H5: the proof of a witness notice is an outgoing letter of THIS system, of the contract of the plan, addressed to its client and SENT after the client approved the plan;
+# the letters of the contract are made after the numbering checks of the Office section (see the block "ITP notices and not-applicable decisions proven by letters")
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":999999}"; nomsg "r1q D9: a letter that does not exist is no proof of a notice" "نامه انتخاب‌شده پیدا نشد"
-as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OL1}"; check "r1q D9: the notice of the packing hold point is given by the signed, sent outgoing letter OL1: status Notified, notice day = the day the letter was signed, letter number kept" ".success and ([.data.activities[]|select(.id == $A6)|.status][0] == 1) and ([.data.activities[]|select(.id == $A6)|.notificationLetterId][0] == $OL1) and ([.data.activities[]|select(.id == $A6)|.notificationLetterNumber][0] == \"OUT-$OPY-OPS-0001\") and ([.data.activities[]|select(.id == $A6)|.notificationSentAt[0:10]][0] == \"$D0\")"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OL1}"; nomsg "r1q H5: a sent outgoing letter that is not linked to the contract of the plan is no proof of a notice" "به همین پروژه/قرارداد وصل نیست"
 as "$OSEC_TOKEN" GET "$OF/letters?Number=OUT-$OPY-OPS-0001"; check "office: search by number finds the letter" ".success and (.data.data|length) == 1 and .data.data[0].id == $OL1"
 
 # --- incoming letter: numbered at registration by the secretariat
@@ -3435,6 +3787,81 @@ as "$QC_TOKEN" GET $OF/letters/$OR4; no "office R2: a stranger still does not se
 as "$OSEC_TOKEN" GET $OF/letters/$OL4; check "office R2: the secret letter stays register data only for the secretariat" '.success and .data.metadataOnly == true and .data.bodyHtml == null and (.data.attachments|length) == 0'
 as "$OSEC_TOKEN" GET $OF/letters/$OL4/attachments/$OATT2; [ "$CODE" = "404" ] && ok "office R2: and its attachment is still 404 for the secretariat" || bad "office R2: and its attachment is still 404 for the secretariat got $CODE"
 as "$OSEC_TOKEN" GET "$OF/letters?Contains=RAREWORD123&PageSize=100"; check "office R2: and the secretariat's text search still misses it" '.success and (.data.data|length) == 0'
+
+# --- ITP notices and not-applicable decisions proven by letters (R1q review H5, H6)
+# Written after the numbering checks of the Office sections, because every letter takes a number. The proof of a witness notice is an outgoing letter of THIS system, linked to the contract of the plan, addressed to its
+# client and SENT after the client approved the plan; the client's agreement that a control point of the client or the third party is not applicable is the client's own incoming letter, registered by the secretariat
+# and linked to the same contract. Plan 1 (work order 1) was approved by the client two days ago; plan 2 (work order 2) is a draft again after its revision.
+as "$OSEC_TOKEN" POST $OF/parties '{"name":"تامین‌کننده آزمون اعلام","kind":2,"email":"supplier-itp@example.com"}'; check "r1q H5: setup: a supplier party in the Office register" '.success and .data.id > 0'
+OSUP=$(val .data.id)
+outletter() { # outletter SUBJECT CONTRACTID PARTYID [SENT-DATE] : an outgoing letter of the unit linked to a contract, written by the expert and signed by the manager; with a date the secretariat sends it on that day (OLX = its id)
+  as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":2,\"subject\":\"$1\",\"bodyHtml\":\"<p>اعلام آماده بودن آزمون</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"partyId\":$3}],\"contractId\":$2}"; OLX=$(val .data.id)
+  as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OLX,\"action\":\"submit\"}"
+  as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OLX,\"action\":\"sign\"}"
+  if [ -n "${4:-}" ]; then as "$OSEC_TOKEN" POST $OF/letters/action "{\"id\":$OLX,\"action\":\"send\",\"deliveryMethod\":3,\"date\":\"$4\"}"; fi
+}
+inletter() { # inletter SUBJECT CONTRACTID PARTYID NUMBER DATE : an incoming letter registered by the secretariat (OLX = its id)
+  as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"$1\",\"senderPartyId\":$3,\"incomingNumber\":\"$4\",\"incomingDate\":\"$5T00:00:00\",\"recipients\":[{\"type\":1,\"positionId\":$OP_MGR}],\"contractId\":$2,\"register\":true}"; OLX=$(val .data.id)
+}
+outletter "اعلام بازرسی بسته بندی (امضا شده، ارسال نشده)" $QCT $OPARTY; check "r1q H5: setup: a signed outgoing letter of the contract that the secretariat has not sent" '.success and .data.status == 2'
+OLU=$OLX
+outletter "اعلام بازرسی بسته بندی (پروژه دیگر)" $PCT $OPARTY "$D0"; check "r1q H5: setup: a letter sent today to the client, linked to ANOTHER contract" ".success and .data.status == 4 and .data.contractId == $PCT"
+OLO=$OLX
+outletter "اعلام بازرسی بسته بندی (به تامین کننده)" $QCT $OSUP "$D0"; check "r1q H5: setup: a letter of the contract sent today to a supplier" ".success and .data.status == 4 and .data.contractId == $QCT"
+OLS=$OLX
+outletter "اعلام بازرسی بسته بندی (تاریخ آینده)" $QCT $OPARTY "$(dd 3)"; check "r1q H5: setup: a letter of the contract that carries a send date three days ahead" ".success and .data.status == 4 and (.data.sentDate[0:10]) == \"$(dd 3)\""
+OLF=$OLX
+outletter "اعلام بازرسی بسته بندی (سه روز پیش)" $QCT $OPARTY "$(dd -3)"; check "r1q H5: setup: a letter of the contract sent to the client three days ago" ".success and .data.status == 4 and (.data.sentDate[0:10]) == \"$(dd -3)\""
+OLW=$OLX
+outletter "اعلام بازرسی بسته بندی (دیروز)" $QCT $OPARTY "$(dd -1)"; check "r1q H5: setup: a letter of the contract sent to the client yesterday" ".success and .data.status == 4 and (.data.sentDate[0:10]) == \"$(dd -1)\""
+OLY=$OLX
+outletter "اعلام بازرسی بسته بندی (امروز)" $QCT $OPARTY "$D0"; check "r1q H5: setup: a letter of the contract sent to the client today" ".success and .data.status == 4 and .data.contractId == $QCT and (.data.sentDate[0:10]) == \"$D0\""
+OLA=$OLX
+# plan 1: the notice of the packing hold point
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OI1}"; nomsg "r1q H5: an incoming letter is no proof of a notice (only a letter this system sent out is)" "فقط نامه صادره ثبت‌شده در این سامانه"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLU}"; nomsg "r1q H5: a signed letter that the secretariat has not sent is no proof of a notice" "هنوز ارسال نشده است"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLO}"; nomsg "r1q H5: a sent letter linked to another contract is no proof of a notice of this plan" "نامه اعلام باید در دبیرخانه به قرارداد این برنامه متصل شده باشد"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLS}"; nomsg "r1q H5: a letter sent to a supplier is no notice to the client" "گیرنده نامه انتخاب‌شده کارفرمای این قرارداد نیست"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLF}"; nomsg "r1q H5: a letter whose send date is in the future is no proof of a notice" "تاریخ ارسال نامه در آینده است"
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLW}"; nomsg "r1q H5: a letter sent three days ago, before the client approved plan 1 two days ago, does not prove a notice" "نامه پیش از تایید برنامه توسط کارفرما ارسال شده است"
+as "$QA_TOKEN" POST quality/settings '{"key":"MaxBackdateDays","value":0}'; check "r1q H5: setup: the back-date window is 0 days for the next check" '.success and ([.data[]|select(.key=="MaxBackdateDays")|.value][0] == 0)'
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLY}"; nomsg "r1q H5: with a back-date window of 0 days a letter sent yesterday is too old" "تاریخ ارسال نامه بیش از 0 روز پیش است"
+as "$QA_TOKEN" POST quality/settings '{"key":"MaxBackdateDays","value":7}'; check "r1q H5: ... and the back-date window is 7 days again" '.success and ([.data[]|select(.key=="MaxBackdateDays")|.value][0] == 7)'
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLA}"; check "r1q H5: the notice is proven by the letter the secretariat sent today to the client of the contract: the activity is notified from the day the letter was sent, with the letter number" ".success and ([.data.activities[]|select(.id==$A6)|.status][0] == 1) and ([.data.activities[]|select(.id==$A6)|.notificationLetterId][0] == $OLA) and ([.data.activities[]|select(.id==$A6)|.notificationSentAt[0:10]][0] == \"$D0\") and ([.data.activities[]|select(.id==$A6)|.notificationLetterNumber][0] != null)"
+# plan 2: a revised plan is approved by the client again before an H or W point is done; the witness notice of its second activity comes from the letter sent three days ago
+as "$QC_TOKEN" GET "quality/itps/$ITP2"; ITP2S2=$(val '.data.activities[]|select(.seq==2)|.id'); ITP2S3=$(val '.data.activities[]|select(.seq==3)|.id'); ITP2S6=$(val '.data.activities[]|select(.seq==6)|.id')
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$ITP2S2,\"action\":\"done\"}"; nomsg "r1q H6: after the revision plan 2 is a draft again, so an activity with a hold or witness point is not done before the client approved it" "کارفرما تایید نشده"
+as "$QC_TOKEN" POST quality/itps "{\"id\":$ITP2,\"noticeDays\":2}"; check "r1q H6: the notice period of the revised plan is 2 days (the plan is a draft again, so it is not locked)" '.success and .data.noticeDays == 2 and .data.status == 0'
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"submit\"}"; check "r1q H6: the revised plan 2 is submitted again" '.success and .data.status == 1'
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"client-approve\",\"reference\":\"CL-2-2\",\"date\":\"$(dd -5)\"}"; check "r1q H6: the revised plan is approved by the client five days ago, recorded by the QA manager who did not touch it" ".success and .data.status == 2 and .data.noticeDays == 2 and (.data.clientApprovalDate[0:10]) == \"$(dd -5)\" and .data.revision == 1"
+as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$ITP2S2,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"organisation\":\"Vendor Co\",\"reference\":\"V-REL-22\"}"; check "r1q H5: vendor hold release on activity 2 of plan 2" '.success'
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$ITP2S2,\"action\":\"notify\",\"letterId\":$OLW}"; check "r1q H5: the witness notice of plan 2 counts from the day the letter was sent (three days ago, after the approval five days ago): period 2 days, deadline yesterday" ".success and ([.data.activities[]|select(.id==$ITP2S2)|.status][0] == 1) and ([.data.activities[]|select(.id==$ITP2S2)|.notificationLetterId][0] == $OLW) and ([.data.activities[]|select(.id==$ITP2S2)|.notificationSentAt[0:10]][0] == \"$(dd -3)\") and ([.data.activities[]|select(.id==$ITP2S2)|.witnessDeadline[0:10]][0] == \"$(dd -1)\")"
+DIM2=$(jq -nc --argjson a "$ITP2S2" --argjson e "$G4" '{type:12,itpActivityId:$a,equipmentIds:[$e],values:[{parameter:"Bore diameter",unit:"mm",min:99.95,max:100.05,measured:100.02}]}')
+as "$QC_TOKEN" POST quality/reports "$DIM2"; DR2=$(val .data.id)
+as "$QC_TOKEN" POST quality/reports/action "{\"id\":$DR2,\"action\":\"submit\"}"; check "r1q H5: the dimensional report of plan 2 is submitted" '.success and .data.status == 1 and .data.result == 1'
+as "$QC2_TOKEN" POST quality/reports/action "{\"id\":$DR2,\"action\":\"approve\"}"; check "r1q H5: ... and approved by the second QC" '.success and .data.status == 2'
+as "$QC_TOKEN" GET "quality/itps/$ITP2"; check "r1q H5: the approved report completes activity 2 of plan 2: the third-party witness is waived by the notice of the letter (its period passed), the vendor release is a real one" "([.data.activities[]|select(.id==$ITP2S2)|.status][0] == 2) and ([.data.activities[]|select(.id==$ITP2S2)|.releases[]|select(.waivedByNotice)]|length) == 1 and ([.data.activities[]|select(.id==$ITP2S2)|.releases[]|select(.waivedByNotice and .party == 2)]|length) == 1 and ([.data.activities[]|select(.id==$ITP2S2)|.releases[]|select(.waivedByNotice|not)]|length) == 1"
+# a point only the vendor holds (the packing check) is dropped by the quality manager's own decision with a reason; the client's and the third party's points are not
+as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$ITP2S6,\"action\":\"not-applicable\",\"note\":\"Packing is done by the client's carrier\"}"; check "r1q H6: a control point that only the vendor holds is not applicable on the quality manager's reason alone (the plan stays in use: its second activity is done)" ".success and ([.data.activities[]|select(.id==$ITP2S6)|.status][0] == 4) and .data.status == 3"
+inletter "موافقت کارفرما با حذف آزمون هیدرو" $QCT $OPARTY "EXT-CL-1" "$D0"; check "r1q H6: setup: the client's incoming letter of the contract, registered today" ".success and .data.status == 5 and .data.contractId == $QCT"
+OLC=$OLX
+inletter "موافقت کارفرما (قبل از تایید برنامه)" $QCT $OPARTY "EXT-CL-0" "$(dd -6)"; check "r1q H6: setup: a client letter dated six days ago" '.success and .data.status == 5'
+OLCO=$OLX
+inletter "موافقت کارفرما (تاریخ آینده)" $QCT $OPARTY "EXT-CL-9" "$(dd 2)"; check "r1q H6: setup: a client letter dated two days ahead" '.success and .data.status == 5'
+OLCF=$OLX
+inletter "نامه تامین کننده" $QCT $OSUP "EXT-SUP-1" "$D0"; check "r1q H6: setup: an incoming letter of the contract from a supplier" '.success and .data.status == 5'
+OLCS=$OLX
+NA3="{\"id\":$ITP2S3,\"action\":\"not-applicable\",\"note\":\"Client waives the hydrostatic test of this unit\""
+as "$QA_TOKEN" POST quality/itps/activity/action "$NA3,\"letterId\":$OLW}"; nomsg "r1q H6: an OUTGOING letter does not prove the client's agreement" "موافقت کارفرما را فقط نامه وارده ثبت‌شده در دبیرخانه اثبات می‌کند"
+as "$QA_TOKEN" POST quality/itps/activity/action "$NA3,\"letterId\":$OI1}"; nomsg "r1q H6: an incoming letter that is not linked to the contract of the plan is no agreement" "نامه کارفرما باید در دبیرخانه به قرارداد این برنامه متصل شده باشد"
+as "$QA_TOKEN" POST quality/itps/activity/action "$NA3,\"letterId\":$OLCS}"; nomsg "r1q H6: the letter of a supplier is no agreement of the client" "فرستنده نامه انتخاب‌شده کارفرمای این قرارداد نیست"
+as "$QA_TOKEN" POST quality/itps/activity/action "$NA3,\"letterId\":$OLCO}"; nomsg "r1q H6: a client letter older than the approval of the plan (six days ago; approved five days ago) is no agreement to a point that plan contains" "نامه کارفرما پیش از آخرین تایید برنامه است"
+as "$QA_TOKEN" POST quality/itps/activity/action "$NA3,\"letterId\":$OLCF}"; nomsg "r1q H6: a client letter dated in the future is no agreement" "تاریخ نامه کارفرما در آینده است"
+as "$QA_TOKEN" POST quality/itps/activity/action "$NA3,\"letterId\":$OLC}"; check "r1q H6: the client's own letter lets the point be requested as not applicable: the activity stays OPEN and pending, the plan is back in draft as revision 2, with the letter number kept" ".success and .data.status == 0 and .data.revision == 2 and ([.data.activities[]|select(.id==$ITP2S3)|.status][0] != 4) and ([.data.activities[]|select(.id==$ITP2S3)|.notApplicablePending][0] == true) and ([.data.activities[]|select(.id==$ITP2S3)|.notApplicableLetterId][0] == $OLC) and ([.data.activities[]|select(.id==$ITP2S3)|.notApplicableReference][0] == \"EXT-CL-1\") and ([.data.activities[]|select(.id==$ITP2S3)|.notApplicableLetterNumber][0] != null)"
+as "$QA_TOKEN" POST quality/itps/activity/action "$NA3,\"letterId\":$OLC}"; nomsg "r1q H6: a second request for the same activity is refused while the first waits for the client" "درخواست غیرقابل‌اجرا شدن ثبت شده"
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"submit\"}"; check "r1q H6: the revised plan with the pending request is submitted for the client" '.success and .data.status == 1'
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"client-approve\",\"reference\":\"CL-2-3\"}"; nomsg "r1q H6: the QA manager who asked for the change cannot record the client's approval of the plan that holds it" "تفکیک وظایف"
+as "$ADMIN_TOKEN" POST quality/itps/action "{\"id\":$ITP2,\"action\":\"client-approve\",\"reference\":\"CL-2-3\"}"; check "r1q H6: the PMO account, which did not touch this revision, records the client's approval: the pending request becomes final (not applicable), the plan is approved again" ".success and .data.status == 2 and .data.clientApprovalReference == \"CL-2-3\" and ([.data.activities[]|select(.id==$ITP2S3)|.status][0] == 4) and ([.data.activities[]|select(.id==$ITP2S3)|.notApplicablePending][0] == false)"
 
 # --- meeting -> minutes -> decisions in the owners' inboxes -> overdue alert
 OMEET="{\"title\":\"جلسه هماهنگی آزمون\",\"kind\":1,\"startAt\":\"2026-07-01T10:00:00\",\"place\":\"اتاق جلسات\",\"chairPositionId\":$OP_MGR,\"secretaryPositionId\":$OP_EMP,\"agenda\":[{\"seq\":1,\"title\":\"بررسی پیشرفت\",\"minutes\":\"گزارش ارائه شد\"},{\"seq\":2,\"title\":\"موارد متفرقه\",\"minutes\":\"موردی نبود\"}],\"attendees\":[{\"positionId\":$OP_EMP,\"present\":true},{\"positionId\":$OP_CHK,\"present\":true},{\"externalName\":\"مهمان بیرونی\",\"present\":true}],\"decisions\":[{\"text\":\"تحویل گزارش نهایی\",\"ownerPositionId\":$OP_EMP,\"dueDate\":\"2026-07-10T00:00:00\",\"agendaSeq\":1},{\"text\":\"بازبینی نقشه‌ها\",\"ownerPositionId\":$OP_CHK,\"dueDate\":\"2035-01-01T00:00:00\",\"agendaSeq\":2}]}"
@@ -4087,7 +4514,7 @@ mbdraft 6 49 3; MBO3=$MBO; MBN3=$MBN
 as "$QC_TOKEN" GET "quality/itps/by-work-order/$MFWO"; check "mes B: the work order of the item D orders has the ITP the QC decision of order A drafted (a draft, by the system)" '.success and .data.autoDrafted == true and .data.status == 0 and (.data.activities|length) > 0'
 MBITP=$(val .data.id)
 as "$QC_TOKEN" POST quality/itps/action "{\"id\":$MBITP,\"action\":\"submit\"}"; check "mes B: the ITP of the work order is submitted" '.success and .data.status == 1'
-as "$QC_TOKEN" POST quality/itps/action "{\"id\":$MBITP,\"action\":\"client-approve\",\"reference\":\"CL-MF-1\"}"; check "mes B: the ITP of the work order is approved by the client (letter reference kept), so the release gate passes" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-MF-1"'
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$MBITP,\"action\":\"client-approve\",\"reference\":\"CL-MF-1\"}"; check "mes B: the ITP of the work order is approved by the client, recorded by the QA manager who did not submit it (r1q H6; letter reference kept), so the release gate passes" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-MF-1"'
 mbrelease "$MBO1" D1; mbrelease "$MBO2" D2; mbrelease "$MBO3" D3
 call GET "$MF/orders/$MBO1"; MBOP1=$(val '.data.operations[0].id')
 call GET "$MF/orders/$MBO2"; MBOP2=$(val '.data.operations[0].id')
@@ -4645,6 +5072,13 @@ sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":1,\"salesOrderLineId\":$SLO1L1}" 
 sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":7,\"salesOrderLineId\":$SLO1L1}"; nomsg "sales: a delivery above the open quantity of the order line (7 of 6) is refused" "از مانده سفارش (6) بیشتر است"
 sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":1}"; nomsg "sales: every delivery line must name the order line" "ردیف سفارش فروش را انتخاب کنید"
 sldoc "$SLO1" "{\"itemId\":$SLSPB,\"quantity\":1,\"salesOrderLineId\":$SLO1L1}"; nomsg "sales: the item of the delivery line must be the item of the order line" "یکی نیست"
+# R1q review H4: a delivery that names a work order goes through the release gate even when it is booked on a sales order (a sales order used to hide the work order); work order 2 of the quality scenario has no released note;
+# the spare parts of D1 to D3 below name no work order and are not held by it
+sldoc "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":1,\"salesOrderLineId\":$SLO1L1}" "\"workOrderId\":$WO2"; check "r1q H4: a delivery against the sales order that names work order 2 is saved as a draft" ".success and .data.status == 0 and .data.salesOrderId == $SLO1 and .data.workOrderId == $WO2"
+SLH4=$(val .data.id)
+as "$QC_TOKEN" POST "inventory/documents/$SLH4/approve" '{"kind":4}'
+call POST "inventory/documents/$SLH4/confirm"; nomsg "r1q H4: ... and it is not confirmed: the booking on a sales order does not hide the work order, which has no released note" "صادرشده وجود ندارد"
+call DELETE "inventory/documents/$SLH4"; check "r1q H4: the refused draft is deleted again" '.success and .data == true'
 sldeliver "$SLO1" "{\"itemId\":$SLSPA,\"quantity\":4,\"salesOrderLineId\":$SLO1L1},{\"itemId\":$SLSPB,\"quantity\":12,\"salesOrderLineId\":$SLO1L2}" "D1 (4 impellers and 12 seals)"
 SLD1=$SLDOC
 as "$SL_TOKEN" GET $SL/orders/$SLO1; check "sales: after D1 the order is partly delivered: impellers 4 delivered / 2 still reserved / 4 invoiced, seals 12 delivered / 0 reserved / 12 invoiced; one delivery with its invoice" '.success and .data.status == 3 and .data.lines[0].deliveredQuantity == 4 and .data.lines[0].reservedQuantity == 2 and .data.lines[0].invoicedQuantity == 4 and .data.lines[1].deliveredQuantity == 12 and .data.lines[1].reservedQuantity == 0 and .data.lines[1].invoicedQuantity == 12 and (.data.deliveries|length) == 1 and .data.deliveries[0].invoiceId > 0 and .data.deliveries[0].reversed == false and .data.deliveries[0].draftNote == null'
@@ -4920,6 +5354,12 @@ SVIS1=$(val .data.id)
 svdoc "{\"type\":11,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"serviceOrderId\":$SVO1,\"driverName\":\"راننده\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"تحویل‌گیرنده\",\"lines\":[{\"itemId\":$SVPB,\"quantity\":1}]}"; check "service: delivery of 1 O-ring drafted against O1 (parts left on site)" ".success and .data.status == 0 and .data.serviceOrderId == $SVO1"
 SVDL1=$(val .data.id)
 call GET "inventory/documents?ServiceOrderId=$SVO1&PageSize=0"; check "service: the warehouse list filtered by the service order shows exactly the issue and the delivery of O1" ".success and .data.totalItems == 2 and ([.data.data[].id]|sort) == ([$SVIS1,$SVDL1]|sort)"
+# R1q review H4: a delivery of parts that names a work order goes through the release gate even when it is booked on a service order; the delivery of O-rings above names none and is not held by it
+svdoc "{\"type\":11,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"serviceOrderId\":$SVO1,\"workOrderId\":$WO2,\"driverName\":\"راننده\",\"vehiclePlate\":\"11A111\",\"receiverName\":\"تحویل‌گیرنده\",\"lines\":[{\"itemId\":$SVPB,\"quantity\":1}]}"; check "r1q H4: a delivery against the service order that names work order 2 is saved as a draft" ".success and .data.status == 0 and .data.serviceOrderId == $SVO1 and .data.workOrderId == $WO2"
+SVH4=$(val .data.id)
+as "$QC_TOKEN" POST "inventory/documents/$SVH4/approve" '{"kind":4}'
+call POST "inventory/documents/$SVH4/confirm"; nomsg "r1q H4: ... and it is not confirmed: the booking on a service order does not hide the work order, which has no released note" "صادرشده وجود ندارد"
+call DELETE "inventory/documents/$SVH4"; check "r1q H4: the refused draft is deleted again" '.success and .data == true'
 as "$WH_TOKEN" GET "$SVC/orders/$SVO1"; check "service: the storekeeper reads the service order to issue and deliver its parts" ".success and .data.id == $SVO1"
 as "$WH_TOKEN" GET "$SVC/requests?PageSize=0"; nomsg "service: the storekeeper still cannot read service requests" "مجوز"
 sva POST "$SVC/orders/time-entries" "{\"orderId\":$SVO1,\"employeeId\":$SVE1,\"hours\":1,\"kind\":2}"; check "service: (setup) a first time row" '.success'

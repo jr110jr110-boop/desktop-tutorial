@@ -300,8 +300,8 @@ namespace Services.NasbNiro.Inventory
                 Items.Add(item);
             }
 
-            // R1q D11: the quality gates of an item are changed by QC, QA or PMO only, with a reason when a control is reduced,
-            // and with the second approval of QA while approved purchase orders of the item are open
+            // R1q D11 and review M8: the quality gates of an item are changed by QC, QA or PMO only, with a reason when a control is reduced, and a reduction always waits for
+            // the second approval of QA
             bool isNewItem = !dto.Id.HasValue;
             int? newShelfLife = Quality.ItemQualityRules.NormalizeShelfLife(dto.ShelfLifeDays);
             QualityApplication quality = new QualityApplication { Apply = true };
@@ -340,6 +340,13 @@ namespace Services.NasbNiro.Inventory
                 item.RequiresIncomingInspection = dto.RequiresIncomingInspection;
                 item.RequiredCertificateType = dto.RequiredCertificateType;
                 item.ShelfLifeDays = newShelfLife;
+            }
+            else if (isNewItem)
+            {
+                // review M8: a new item whose requested gates are weaker than the baseline of its group is created with the baseline until QA approves the request
+                item.RequiresIncomingInspection = startInspection;
+                item.RequiredCertificateType = null;
+                item.ShelfLifeDays = null;
             }
             Stamp(item, !dto.Id.HasValue);
             if (quality.Change != null) { quality.Change.Item = item; _uow.Set<ItemQualityChange>().Add(quality.Change); }
@@ -380,20 +387,24 @@ namespace Services.NasbNiro.Inventory
                 result.Error = "برای کم‌کردن یک کنترل کیفی (حذف بازرسی ورودی، کاهش نوع گواهی یا حذف/افزایش ماندگاری) دلیل تغییر را بنویسید.";
                 return result;
             }
-            if (!weakening) return result;
-
-            bool openOrders = item != null && await _uow.Set<PurchaseOrderLine>().AnyAsync(l => l.ItemId == item.Id && !l.PurchaseOrder.Deleted &&
-                (l.PurchaseOrder.Status == PurchaseOrderStatus.Approved || l.PurchaseOrder.Status == PurchaseOrderStatus.Released || l.PurchaseOrder.Status == PurchaseOrderStatus.PartlyReceived), cancellationToken);
+            // review M8: reducing a control ALWAYS waits for the second approval of QA (an open purchase order or not), and only one such request waits per item;
+            // a stricter control applies at once and is kept in the history of the item
+            if (weakening && item != null && await _uow.Set<ItemQualityChange>().AnyAsync(c => c.ItemId == item.Id && c.Status == ItemQualityChangeStatus.Pending && !c.Deleted, cancellationToken))
+            {
+                result.Error = "برای این کالا درخواست دیگری برای کم‌کردن کنترل کیفی در انتظار تایید QA است؛ ابتدا درباره آن تصمیم گرفته شود.";
+                return result;
+            }
             DateTimeOffset now = DateTimeOffset.Now;
             result.Change = new ItemQualityChange
             {
                 RequiresIncomingInspection = inspection, RequiredCertificateType = certificate, ShelfLifeDays = shelfLife, Reason = reason,
-                Status = openOrders ? ItemQualityChangeStatus.Pending : ItemQualityChangeStatus.Approved,
-                DecidedAt = openOrders ? (DateTimeOffset?)null : now, DecidedByUserId = openOrders ? (int?)null : _user.UserId,
-                DecisionNote = openOrders ? null : "بدون سفارش خرید باز: تغییر مستقیم اعمال شد و در سابقه ثبت است.",
+                OldRequiresIncomingInspection = oldInspection, OldRequiredCertificateType = oldCertificate, OldShelfLifeDays = oldShelfLife,
+                Status = weakening ? ItemQualityChangeStatus.Pending : ItemQualityChangeStatus.Approved,
+                DecidedAt = weakening ? (DateTimeOffset?)null : now, DecidedByUserId = weakening ? (int?)null : _user.UserId,
+                DecisionNote = weakening ? null : "کنترل کیفی سخت‌تر یا بدون کاهش شد: بدون تایید دوم اعمال شد و در سابقه ثبت است.",
                 ItemId = item?.Id ?? 0, CreateDate = now, CreatorUserId = _user.UserId, ModifyDate = now, ModifierUserId = _user.UserId,
             };
-            result.Apply = !openOrders;
+            result.Apply = !weakening;
             return result;
         }
 
@@ -401,7 +412,7 @@ namespace Services.NasbNiro.Inventory
         {
             if (change == null) return;
             await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "itemquality:" + change.Id, change.Status == ItemQualityChangeStatus.Pending, "inventory", "item-quality", change.Id,
-                "تایید تغییر کنترل کیفی کالای " + item.Code + " (سفارش خرید باز دارد)", "/inventory/items", "QA", cancellationToken);
+                "تایید کاهش کنترل کیفی کالای " + item.Code, "/inventory/items", "QA", cancellationToken);
         }
 
         public async Task<ResponseDto<InventoryItemDto>> SaveItemQualityAsync(SaveItemQualityDto dto, CancellationToken cancellationToken)
@@ -429,29 +440,39 @@ namespace Services.NasbNiro.Inventory
             return await GetItemAsync(item.Id, cancellationToken);
         }
 
+        private static IQueryable<ItemQualityChangeDto> QualityChangeRows(IQueryable<ItemQualityChange> rows) =>
+            rows.OrderByDescending(c => c.Id).Select(c => new ItemQualityChangeDto
+            {
+                Id = c.Id, ItemId = c.ItemId, ItemCode = c.Item.Code, ItemTitle = c.Item.Title, RequiresIncomingInspection = c.RequiresIncomingInspection,
+                RequiredCertificateType = c.RequiredCertificateType, ShelfLifeDays = c.ShelfLifeDays, CurrentRequiresIncomingInspection = c.Item.RequiresIncomingInspection,
+                CurrentRequiredCertificateType = c.Item.RequiredCertificateType, CurrentShelfLifeDays = c.Item.ShelfLifeDays,
+                OldRequiresIncomingInspection = c.OldRequiresIncomingInspection, OldRequiredCertificateType = c.OldRequiredCertificateType, OldShelfLifeDays = c.OldShelfLifeDays,
+                Stale = c.Status == ItemQualityChangeStatus.Pending && (c.Item.RequiresIncomingInspection != c.OldRequiresIncomingInspection ||
+                    c.Item.RequiredCertificateType != c.OldRequiredCertificateType || c.Item.ShelfLifeDays != c.OldShelfLifeDays),
+                Reason = c.Reason, Status = c.Status, RequestedAt = c.CreateDate, DecidedAt = c.DecidedAt, DecisionNote = c.DecisionNote,
+            });
+
+        private async Task FillQualityChangeNamesAsync(IReadOnlyCollection<ItemQualityChangeDto> rows, CancellationToken cancellationToken)
+        {
+            List<int> ids = rows.Select(p => p.Id).ToList();
+            var users = await _uow.Set<ItemQualityChange>().Where(c => ids.Contains(c.Id)).Select(c => new { c.Id, c.CreatorUserId, c.DecidedByUserId }).ToListAsync(cancellationToken);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, users.SelectMany(u => new int?[] { u.CreatorUserId, u.DecidedByUserId }), cancellationToken);
+            foreach (ItemQualityChangeDto row in rows)
+            {
+                var u = users.First(x => x.Id == row.Id);
+                row.RequestedByName = names.Name(u.CreatorUserId);
+                row.DecidedByName = names.Name(u.DecidedByUserId);
+            }
+        }
+
         public async Task<ResponseDto<PagedList<ItemQualityChangeDto>>> GetQualityChangesAsync(ItemQualityChangeQuery query, CancellationToken cancellationToken)
         {
             query ??= new ItemQualityChangeQuery();
             IQueryable<ItemQualityChange> rows = _uow.Set<ItemQualityChange>().Where(c => !c.Deleted);
             if (query.Status.HasValue) rows = rows.Where(c => c.Status == query.Status.Value);
             if (query.ItemId.HasValue) rows = rows.Where(c => c.ItemId == query.ItemId.Value);
-            IQueryable<ItemQualityChangeDto> projection = rows.OrderByDescending(c => c.Id).Select(c => new ItemQualityChangeDto
-            {
-                Id = c.Id, ItemId = c.ItemId, ItemCode = c.Item.Code, ItemTitle = c.Item.Title, RequiresIncomingInspection = c.RequiresIncomingInspection,
-                RequiredCertificateType = c.RequiredCertificateType, ShelfLifeDays = c.ShelfLifeDays, CurrentRequiresIncomingInspection = c.Item.RequiresIncomingInspection,
-                CurrentRequiredCertificateType = c.Item.RequiredCertificateType, CurrentShelfLifeDays = c.Item.ShelfLifeDays, Reason = c.Reason, Status = c.Status,
-                RequestedAt = c.CreateDate, DecidedAt = c.DecidedAt, DecisionNote = c.DecisionNote,
-            });
-            PagedList<ItemQualityChangeDto> page = await PagedList<ItemQualityChangeDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken);
-            List<int> ids = page.Select(p => p.Id).ToList();
-            var users = await _uow.Set<ItemQualityChange>().Where(c => ids.Contains(c.Id)).Select(c => new { c.Id, c.CreatorUserId, c.DecidedByUserId }).ToListAsync(cancellationToken);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, users.SelectMany(u => new int?[] { u.CreatorUserId, u.DecidedByUserId }), cancellationToken);
-            foreach (ItemQualityChangeDto row in page)
-            {
-                var u = users.First(x => x.Id == row.Id);
-                row.RequestedByName = names.Name(u.CreatorUserId);
-                row.DecidedByName = names.Name(u.DecidedByUserId);
-            }
+            PagedList<ItemQualityChangeDto> page = await PagedList<ItemQualityChangeDto>.CreateAsync(QualityChangeRows(rows), query.PageNumber, query.PageSize, cancellationToken);
+            await FillQualityChangeNamesAsync(page, cancellationToken);
             return ResponseDtoHelper.Ok(page);
         }
 
@@ -465,6 +486,10 @@ namespace Services.NasbNiro.Inventory
             if (change.CreatorUserId == _user.UserId) return ResponseDtoHelper.BadRequest<ItemQualityChangeDto>(InventoryMessages.SameUser);
             string note = InventoryText.Clean(dto.Note);
             if (!dto.Approve && note == null) return ResponseDtoHelper.BadRequest<ItemQualityChangeDto>("دلیل رد تغییر را بنویسید.");
+            // review M8: the request was made against the gates the item had then; if somebody changed them since, the approval would apply a stale picture
+            if (dto.Approve && (change.Item.RequiresIncomingInspection != change.OldRequiresIncomingInspection || change.Item.RequiredCertificateType != change.OldRequiredCertificateType ||
+                change.Item.ShelfLifeDays != change.OldShelfLifeDays))
+                return ResponseDtoHelper.BadRequest<ItemQualityChangeDto>("کنترل‌های کیفی کالا پس از ثبت این درخواست تغییر کرده‌اند و تایید آن مجاز نیست؛ درخواست را رد کنید و در صورت نیاز دوباره ثبت کنید.");
             DateTimeOffset now = DateTimeOffset.Now;
             if (dto.Approve)
             {
@@ -479,8 +504,9 @@ namespace Services.NasbNiro.Inventory
             change.ModifyDate = now; change.ModifierUserId = _user.UserId;
             await _uow.SaveChangesAsync(cancellationToken);
             await SyncQualityGateAsync(change, change.Item, cancellationToken);
-            PagedList<ItemQualityChangeDto> one = (await GetQualityChangesAsync(new ItemQualityChangeQuery { ItemId = change.ItemId, PageNumber = 1, PageSize = 50 }, cancellationToken)).Data;
-            return ResponseDtoHelper.Ok(one.First(x => x.Id == change.Id));
+            ItemQualityChangeDto decided = await QualityChangeRows(_uow.Set<ItemQualityChange>().AsNoTracking().Where(c => c.Id == change.Id)).FirstAsync(cancellationToken);
+            await FillQualityChangeNamesAsync(new[] { decided }, cancellationToken);
+            return ResponseDtoHelper.Ok(decided);
         }
 
         public async Task<ResponseDto<bool>> DeleteItemAsync(int id, CancellationToken cancellationToken)

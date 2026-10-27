@@ -88,6 +88,16 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public bool CurrentRequiresIncomingInspection { get; set; }
         public Entities.Model.NasbNiro.Quality.CertificateType? CurrentRequiredCertificateType { get; set; }
         public int? CurrentShelfLifeDays { get; set; }
+
+        /// <summary>The gates of the item when the request was made; the request can be approved only while the item still has them.</summary>
+        public bool OldRequiresIncomingInspection { get; set; }
+
+        public Entities.Model.NasbNiro.Quality.CertificateType? OldRequiredCertificateType { get; set; }
+        public int? OldShelfLifeDays { get; set; }
+
+        /// <summary>The item's gates changed after the request: it cannot be approved any more (reject it and ask again).</summary>
+        public bool Stale { get; set; }
+
         public string Reason { get; set; }
         public ItemQualityChangeStatus Status { get; set; }
         public string RequestedByName { get; set; }
@@ -133,7 +143,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? ShelfLifeDays { get; set; }
         public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }
 
-        /// <summary>A change that reduces a quality control is waiting for the second approval of QA (open approved purchase orders exist).</summary>
+        /// <summary>A change that reduces a quality control is waiting for the second approval of QA; the item keeps its gates until then.</summary>
         public int? PendingQualityChangeId { get; set; }
     }
 
@@ -266,6 +276,17 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>Cost centre code (an issue without a work order, for example spare parts of the maintenance cost centre).</summary>
         public string CostCenter { get; set; }
+
+        /// <summary>
+        /// Opening balance only (R1q D35, review M9): every line needs a price above zero; the finance manager (and nobody else) can set this to let lines without a price
+        /// come in valued at zero. The approval is stored on the document and is lost when someone else changes the draft.
+        /// </summary>
+        public bool AllowZeroPrice { get; set; }
+
+        /// <summary>
+        /// An adjustment that writes off serial pieces (review M10): the scrap NCR (decision scrap, approved or executed) that lists those serial numbers. Not used by other documents.
+        /// </summary>
+        public int? WriteOffNcrId { get; set; }
         public List<SaveDocumentLineDto> Lines { get; set; } = new List<SaveDocumentLineDto>();
     }
 
@@ -403,6 +424,13 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string PriceQuotes { get; set; }
         public DateTimeOffset? FinanceApprovedAt { get; set; }
         public string FinanceApprovedByName { get; set; }
+
+        /// <summary>The finance manager's approval of an opening balance with lines that have no price (review M9).</summary>
+        public DateTimeOffset? ZeroPriceApprovedAt { get; set; }
+        public string ZeroPriceApprovedByName { get; set; }
+
+        /// <summary>The scrap NCR a serial write-off by adjustment is made against (review M10).</summary>
+        public int? WriteOffNcrId { get; set; }
         public List<DocumentLineDto> Lines { get; set; } = new List<DocumentLineDto>();
     }
 
@@ -591,7 +619,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         /// <summary>Warehouse/location (quantity) of the stock of the lot.</summary>
         public string Locations { get; set; }
 
-        /// <summary>The approved concession NCR with which the use of the lot after its expiry was allowed.</summary>
+        /// <summary>The valid concession NCR (all signatures, permit given on or after the expiry date) with which the use of the lot after its expiry was allowed.</summary>
         public string ConcessionNcrNumber { get; set; }
     }
 

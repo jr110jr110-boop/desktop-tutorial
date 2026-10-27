@@ -390,8 +390,6 @@ namespace Services.NasbNiro.Quality
             if (dto == null || !Enum.IsDefined(typeof(TestReportType), dto.Type)) return Bad<TestReportDto>(QualityText.InvalidData);
             if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<TestReportDto>(QualityText.NotAllowed + " (گزارش آزمون را بازرس QC ثبت می‌کند)");
             DateTime date = (dto.ReportDate ?? DateTime.Today).Date;
-            string dateProblem = await QualityChecks.RecordDateAsync(_uow, date, "گزارش آزمون", cancellationToken);
-            if (dateProblem != null) return Bad<TestReportDto>(dateProblem);
 
             TestReport report = null;
             if (dto.Id.HasValue)
@@ -401,6 +399,11 @@ namespace Services.NasbNiro.Quality
                 if (report.Status == TestReportStatus.Submitted) return Bad<TestReportDto>("گزارش ارسال‌شده منتظر تایید است و ویرایش نمی‌شود.");
                 if (report.Status == TestReportStatus.Approved) return Bad<TestReportDto>("گزارش تاییدشده قابل ویرایش نیست.");
                 if (report.ExaminerUserId != Me) return Bad<TestReportDto>("گزارش را فقط بازرس ثبت‌کننده ویرایش می‌کند.");
+                // review M15: a draft or rejected report is judged by the date it was first entered with, not by today: the date stays unless a new one is typed, and a report whose
+                // own date has fallen out of the back-date window cannot be revived by saving it again
+                string originalProblem = await QualityChecks.RecordDateAsync(_uow, report.ReportDate, "گزارش آزمون", cancellationToken);
+                if (originalProblem != null) return Bad<TestReportDto>(originalProblem + " گزارش پیش‌نویس یا ردشده‌ای که از مهلت ثبت گذشته ویرایش نمی‌شود؛ گزارش تازه‌ای با تاریخ واقعی آزمون ثبت کنید.");
+                date = (dto.ReportDate ?? report.ReportDate).Date;
                 dto.Type = report.Type;
                 if (Clean(dto.RowVersion) != null)
                 {
@@ -408,6 +411,8 @@ namespace Services.NasbNiro.Quality
                     catch (FormatException) { return Bad<TestReportDto>(QualityText.InvalidData); }
                 }
             }
+            string dateProblem = await QualityChecks.RecordDateAsync(_uow, date, "گزارش آزمون", cancellationToken);
+            if (dateProblem != null) return Bad<TestReportDto>(dateProblem);
 
             ItpActivity activity = null;
             if (dto.ItpActivityId.HasValue)

@@ -42,6 +42,9 @@ namespace ViewModels.NasbNiro.QualityDtos
 
     public class CapaDto : CapaListDto
     {
+        /// <summary>Required by a rule (system-drafted, non-conformance or audit finding source): only the QA manager can cancel it.</summary>
+        public bool Mandatory { get; set; }
+
         public string SourceNumber { get; set; }
         public string Containment { get; set; }
         public RootCauseMethod RootCauseMethod { get; set; }
@@ -76,6 +79,18 @@ namespace ViewModels.NasbNiro.QualityDtos
 
         /// <summary>Of them, those the CEO was told about.</summary>
         public int CeoNotified { get; set; }
+
+        /// <summary>
+        /// True for the very first run: the levels of the CAPAs that were already late were only recorded (<see cref="Recorded"/>) and nobody was told, so that the first night
+        /// after the upgrade does not flood QA and the CEO with the whole backlog.
+        /// </summary>
+        public bool FirstRun { get; set; }
+
+        /// <summary>CAPAs whose level was recorded without telling anybody (first run only).</summary>
+        public int Recorded { get; set; }
+
+        /// <summary>CAPAs that could not be handled now (somebody changed them at the same moment, or the notice failed); the next run tries again.</summary>
+        public int Skipped { get; set; }
     }
 
     public class CapaQuery : PaginationParams
@@ -122,6 +137,12 @@ namespace ViewModels.NasbNiro.QualityDtos
 
         /// <summary>For effectiveness: the check passed.</summary>
         public bool Passed { get; set; }
+
+        /// <summary>
+        /// For complete-action: the day the action was really done (today when empty). Not in the future and not older than the back-date window (setting MaxBackdateDays); the
+        /// CAPA counts as implemented on the day of its last action of the round, and the waiting period of the effectiveness check runs from that day.
+        /// </summary>
+        public DateTime? Date { get; set; }
     }
 
     // ------------------------------------------------------------------ customer complaints

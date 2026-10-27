@@ -258,6 +258,10 @@ namespace Services.NasbNiro.Inventory
             return counted.HasValue ? counted.Value - l.SystemQuantity : (decimal?)null;
         }
 
+        /// <summary>Review M10 (D31): goods in quarantine, scrap or a contractor's warehouse are written off or found by a count only with a quality approval besides the warehouse and planning ones.</summary>
+        internal static bool NeedsQualityApproval(Warehouse warehouse) =>
+            warehouse != null && (warehouse.Kind == WarehouseKind.Quarantine || warehouse.Kind == WarehouseKind.Scrap || warehouse.Kind == WarehouseKind.Subcontractor);
+
         public async Task<ResponseDto<List<StockCountListItemDto>>> GetCountsAsync(int? warehouseId, CancellationToken cancellationToken)
         {
             IQueryable<StockCount> counts = Counts.Where(c => !c.Deleted);
@@ -280,7 +284,7 @@ namespace Services.NasbNiro.Inventory
             var docIds = new[] { count.IncreaseDocumentId, count.DecreaseDocumentId }.Where(x => x.HasValue).Select(x => x.Value).ToList();
             Dictionary<int, string> numbers = await _uow.Set<InventoryDocument>().Where(d => docIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, d => d.Number, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow,
-                new int?[] { count.CreatorUserId, count.WarehouseApprovedByUserId, count.PlanningApprovedByUserId }, cancellationToken);
+                new int?[] { count.CreatorUserId, count.WarehouseApprovedByUserId, count.PlanningApprovedByUserId, count.QualityApprovedByUserId }, cancellationToken);
             var dto = new StockCountDto
             {
                 Id = count.Id, Number = count.Number, Kind = count.Kind, Status = count.Status, CountDate = count.CountDate,
@@ -288,6 +292,7 @@ namespace Services.NasbNiro.Inventory
                 Description = count.Description, SnapshotAt = count.SnapshotAt, CreatorName = names.Name(count.CreatorUserId),
                 WarehouseApprovedAt = count.WarehouseApprovedAt, WarehouseApprovedByName = names.Name(count.WarehouseApprovedByUserId),
                 PlanningApprovedAt = count.PlanningApprovedAt, PlanningApprovedByName = names.Name(count.PlanningApprovedByUserId),
+                QualityApprovalRequired = NeedsQualityApproval(count.Warehouse), QualityApprovedAt = count.QualityApprovedAt, QualityApprovedByName = names.Name(count.QualityApprovedByUserId),
                 PostedAt = count.PostedAt, IncreaseDocumentId = count.IncreaseDocumentId, DecreaseDocumentId = count.DecreaseDocumentId,
                 IncreaseDocumentNumber = count.IncreaseDocumentId.HasValue && numbers.TryGetValue(count.IncreaseDocumentId.Value, out string inc) ? inc : null,
                 DecreaseDocumentNumber = count.DecreaseDocumentId.HasValue && numbers.TryGetValue(count.DecreaseDocumentId.Value, out string dec) ? dec : null,
@@ -396,11 +401,15 @@ namespace Services.NasbNiro.Inventory
         public async Task<ResponseDto<StockCountDto>> CountActionAsync(StockCountActionDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.InvalidData);
-            StockCount count = await Counts.Include(c => c.Lines).ThenInclude(l => l.Item).FirstOrDefaultAsync(c => c.Id == dto.Id && !c.Deleted, cancellationToken);
+            StockCount count = await Counts.Include(c => c.Warehouse).Include(c => c.Lines).ThenInclude(l => l.Item).FirstOrDefaultAsync(c => c.Id == dto.Id && !c.Deleted, cancellationToken);
             if (count == null) return ResponseDtoHelper.NotFound<StockCountDto>("شمارش پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             int me = _user.UserId;
             string action = (dto.Action ?? "").Trim().ToLowerInvariant();
+            // the endpoint lets QC and QA in for the quality approval only; every other action stays with the warehouse and planning people
+            if (action != "approve-quality" && !_user.IsInRole(InventoryRoles.Counts))
+                return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.NotAllowed);
+            bool qualityNeeded = NeedsQualityApproval(count.Warehouse);
             switch (action)
             {
                 case "submit":
@@ -417,10 +426,26 @@ namespace Services.NasbNiro.Inventory
                     if (!_user.IsInRole(warehouse ? InventoryRoles.RoleWarehouseSupervisor : InventoryRoles.RolePlanning))
                         return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.NotAllowed + (warehouse ? " (سرپرست انبار)" : " (برنامه‌ریزی و کنترل پروژه)"));
                     int? other = warehouse ? count.PlanningApprovedByUserId : count.WarehouseApprovedByUserId;
-                    if (me == count.CreatorUserId || me == other) return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.SameUser);
+                    if (me == count.CreatorUserId || me == other || me == count.QualityApprovedByUserId) return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.SameUser);
                     if (warehouse) { count.WarehouseApprovedAt = now; count.WarehouseApprovedByUserId = me; }
                     else { count.PlanningApprovedAt = now; count.PlanningApprovedByUserId = me; }
-                    if (count.WarehouseApprovedAt.HasValue && count.PlanningApprovedAt.HasValue) count.Status = StockCountStatus.Approved;
+                    if (count.WarehouseApprovedAt.HasValue && count.PlanningApprovedAt.HasValue && (!qualityNeeded || count.QualityApprovedAt.HasValue)) count.Status = StockCountStatus.Approved;
+                    break;
+                }
+                case "approve-quality":
+                {
+                    // review M10 (D31): quarantine, scrap and contractor stock are counted under the eye of quality control; a QC or QA user who neither counted nor approved it signs
+                    if (count.Status != StockCountStatus.Submitted && count.Status != StockCountStatus.Approved) return ResponseDtoHelper.BadRequest<StockCountDto>("فقط شمارش ارسال‌شده یا تاییدشده، تایید کنترل کیفیت می‌گیرد.");
+                    if (!qualityNeeded) return ResponseDtoHelper.BadRequest<StockCountDto>("شمارش انبار قابل‌مصرف تایید کنترل کیفیت لازم ندارد.");
+                    if (!_user.IsInRole(InventoryRoles.RoleQualitySigner))
+                        return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.NotAllowed + " (کنترل کیفیت یا مدیر تضمین کیفیت)");
+                    if (count.QualityApprovedAt.HasValue) return ResponseDtoHelper.BadRequest<StockCountDto>("تایید کنترل کیفیت این شمارش قبلاً ثبت شده است.");
+                    bool counted = count.Lines.Any(l => l.CountedByUserId == me);
+                    if (me == count.CreatorUserId || counted || me == count.WarehouseApprovedByUserId || me == count.PlanningApprovedByUserId)
+                        return ResponseDtoHelper.BadRequest<StockCountDto>(InventoryMessages.SameUser + " (تایید کیفی را کسی نمی‌دهد که شمارش را شروع کرده، شمرده یا تایید کرده است)");
+                    count.QualityApprovedAt = now;
+                    count.QualityApprovedByUserId = me;
+                    if (count.Status == StockCountStatus.Submitted && count.WarehouseApprovedAt.HasValue && count.PlanningApprovedAt.HasValue) count.Status = StockCountStatus.Approved;
                     break;
                 }
                 case "post":
@@ -443,6 +468,8 @@ namespace Services.NasbNiro.Inventory
         private async Task<ResponseDto<StockCountDto>> PostAsync(StockCount count, CancellationToken cancellationToken)
         {
             if (count.Status != StockCountStatus.Approved) return ResponseDtoHelper.BadRequest<StockCountDto>("شمارش پیش از ثبت باید تایید انبار و برنامه‌ریزی را داشته باشد.");
+            if (NeedsQualityApproval(count.Warehouse) && !count.QualityApprovedAt.HasValue)
+                return ResponseDtoHelper.BadRequest<StockCountDto>("شمارش انبار قرنطینه، ضایعات یا پیمانکار پیش از ثبت، تایید کنترل کیفیت (QC یا QA) را هم لازم دارد (approve-quality).");
             var differences = count.Lines.Select(l => new { Line = l, Diff = Difference(l) ?? 0 }).Where(x => x.Diff != 0).ToList();
             var serial = differences.FirstOrDefault(x => x.Line.Item.TrackingMode == ItemTrackingMode.Serial);
             if (serial != null)

@@ -175,6 +175,8 @@ namespace Services.NasbNiro.Inventory
                     FinanceApprovedAt = d.FinanceApprovedAt,
                     WarehouseApprovedAt = d.WarehouseApprovedAt,
                     PlanningApprovedAt = d.PlanningApprovedAt,
+                    ZeroPriceApprovedAt = d.ZeroPriceApprovedAt,
+                    WriteOffNcrId = d.WriteOffNcrId,
                     Lines = d.Lines.OrderBy(l => l.RowNumber).Select(l => new DocumentLineDto
                     {
                         Id = l.Id,
@@ -211,12 +213,12 @@ namespace Services.NasbNiro.Inventory
                 .Select(d => new
                 {
                     d.CreatorUserId, d.ConfirmedByUserId, d.CancelledByUserId, d.ExitCheckedByUserId, d.QcLoadingApprovedByUserId,
-                    d.WarehouseApprovedByUserId, d.PlanningApprovedByUserId, d.FinanceApprovedByUserId,
+                    d.WarehouseApprovedByUserId, d.PlanningApprovedByUserId, d.FinanceApprovedByUserId, d.ZeroPriceApprovedByUserId,
                 }).FirstAsync(cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[]
             {
                 raw.CreatorUserId, raw.ConfirmedByUserId, raw.CancelledByUserId, raw.ExitCheckedByUserId, raw.QcLoadingApprovedByUserId,
-                raw.WarehouseApprovedByUserId, raw.PlanningApprovedByUserId, raw.FinanceApprovedByUserId,
+                raw.WarehouseApprovedByUserId, raw.PlanningApprovedByUserId, raw.FinanceApprovedByUserId, raw.ZeroPriceApprovedByUserId,
             }, cancellationToken);
             if (document.SalesOrderId.HasValue)
                 document.SalesOrderNumber = await _uow.Set<Entities.Model.NasbNiro.Sales.SlSalesOrder>().Where(o => o.Id == document.SalesOrderId.Value).Select(o => o.Number).FirstOrDefaultAsync(cancellationToken);
@@ -230,6 +232,7 @@ namespace Services.NasbNiro.Inventory
             document.WarehouseApprovedByName = names.Name(raw.WarehouseApprovedByUserId);
             document.PlanningApprovedByName = names.Name(raw.PlanningApprovedByUserId);
             document.FinanceApprovedByName = names.Name(raw.FinanceApprovedByUserId);
+            document.ZeroPriceApprovedByName = names.Name(raw.ZeroPriceApprovedByUserId);
             return ResponseDtoHelper.Ok(document);
         }
 
@@ -382,6 +385,27 @@ namespace Services.NasbNiro.Inventory
                 }
             }
 
+            // review M18: goods an open (or approved but not yet executed) non-conformance is about are refused at the draft already; a document made by quality control is looked at when it is confirmed
+            if (system == null)
+            {
+                string holdRefusal = await Quality.QualityChecks.HoldAsync(_uow, dto.Type, dto.WarehouseId, destination?.Kind, null, HoldLinesOfDto(dto.Type, lines), cancellationToken);
+                if (holdRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(holdRefusal);
+            }
+            // review M9 (D35): the opening balance carries a price on every line, or the finance manager's zero-price approval is stored on the draft
+            bool zeroPriceApproved = false;
+            if (dto.Type == InventoryDocumentType.OpeningBalance)
+            {
+                if (dto.AllowZeroPrice && !_user.IsInRole(OpeningStockService.OpeningZeroPriceRole))
+                    return ResponseDtoHelper.BadRequest<DocumentDto>("ورود موجودی بدون قیمت (ارزش صفر) فقط با مجوز صریح مدیر مالی ممکن است؛ قیمت واحد همه ردیف‌ها را بنویسید یا از مدیر مالی بخواهید سند را ثبت کند.");
+                zeroPriceApproved = dto.AllowZeroPrice && lines.Any(l => !l.UnitPrice.HasValue || l.UnitPrice.Value <= 0);
+                string priceRefusal = CheckOpeningPrices(dto.Type, lines.Select(l => l.UnitPrice), zeroPriceApproved);
+                if (priceRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(priceRefusal);
+            }
+            // review M10: pieces of a serial item are written off by an adjustment only against an approved scrap NCR that lists them
+            string writeOffRefusal = await CheckSerialWriteOffAsync(dto.Type, dto.WriteOffNcrId,
+                lines.SelectMany(l => l.SerialNumbers.Select(s => (l.ItemId, s))).ToList(), cancellationToken);
+            if (writeOffRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(writeOffRefusal);
+
             InventoryDocument document;
             if (existing != null)
             {
@@ -420,6 +444,8 @@ namespace Services.NasbNiro.Inventory
             document.MaterialRequestId = dto.MaterialRequestId;
             SetHeaderExtras(document, dto);
             ClearApprovals(document);
+            if (zeroPriceApproved) { document.ZeroPriceApprovedAt = DateTimeOffset.Now; document.ZeroPriceApprovedByUserId = _user.UserId; }
+            document.WriteOffNcrId = dto.Type == InventoryDocumentType.AdjustmentDecrease && lines.Any(l => l.SerialNumbers.Count > 0) ? dto.WriteOffNcrId : null;
             document.ModifyDate = DateTimeOffset.Now;
             document.ModifierUserId = _user.UserId;
 
@@ -492,6 +518,58 @@ namespace Services.NasbNiro.Inventory
             document.QcLoadingApprovedByUserId = null;
             document.FinanceApprovedAt = null;
             document.FinanceApprovedByUserId = null;
+            document.ZeroPriceApprovedAt = null;
+            document.ZeroPriceApprovedByUserId = null;
+        }
+
+        private static List<Quality.HoldLine> HoldLinesOf(InventoryDocumentType type, IEnumerable<InventoryDocumentLine> lines) =>
+            (lines ?? Enumerable.Empty<InventoryDocumentLine>())
+                .Where(l => !InventoryDocumentRules.IsConversion(type) || l.Direction == DocumentLineDirection.Out)
+                .Select(l => new Quality.HoldLine
+                {
+                    ItemId = l.ItemId, LotId = l.LotId, LotNumber = l.LotNumber, Quantity = l.Quantity,
+                    Serials = (l.Serials ?? new List<InventoryDocumentLineSerial>()).Select(s => s.SerialNumber).ToList(),
+                    Outgoing = type != InventoryDocumentType.ProductionReceipt && type != InventoryDocumentType.ProductionReturn,
+                }).ToList();
+
+        private static List<Quality.HoldLine> HoldLinesOfDto(InventoryDocumentType type, IEnumerable<SaveDocumentLineDto> lines) =>
+            (lines ?? Enumerable.Empty<SaveDocumentLineDto>())
+                .Where(l => !InventoryDocumentRules.IsConversion(type) || l.Direction == DocumentLineDirection.Out)
+                .Select(l => new Quality.HoldLine
+                {
+                    ItemId = l.ItemId, LotId = l.LotId, LotNumber = l.LotNumber, Quantity = l.Quantity,
+                    Serials = (l.SerialNumbers ?? new List<string>()).ToList(),
+                    Outgoing = type != InventoryDocumentType.ProductionReceipt && type != InventoryDocumentType.ProductionReturn,
+                }).ToList();
+
+        /// <summary>Review M9 (D35): an opening balance needs a price above zero on every line unless the finance manager approved the zero price on the document.</summary>
+        private static string CheckOpeningPrices(InventoryDocumentType type, IEnumerable<decimal?> prices, bool zeroPriceApproved)
+        {
+            if (type != InventoryDocumentType.OpeningBalance || zeroPriceApproved) return null;
+            int missing = (prices ?? Enumerable.Empty<decimal?>()).Count(p => !p.HasValue || p.Value <= 0);
+            return missing == 0
+                ? null
+                : $"موجودی اول دوره در {missing} ردیف قیمت واحد ندارد (در دفتر با ارزش صفر ثبت می‌شود)؛ قیمت واحد همه ردیف‌ها را بنویسید، یا مدیر مالی ورود بدون قیمت را صریحاً مجاز کند.";
+        }
+
+        /// <summary>
+        /// Review M10: pieces of a serial item are written off by an adjustment only against a scrap NCR (decision scrap, approved or executed) that lists every one of those serial
+        /// numbers; a write-off with no such report, or with pieces the report does not name, is refused.
+        /// </summary>
+        private async Task<string> CheckSerialWriteOffAsync(InventoryDocumentType type, int? writeOffNcrId, List<(int ItemId, string Serial)> serials, CancellationToken cancellationToken)
+        {
+            if (type != InventoryDocumentType.AdjustmentDecrease || serials == null || serials.Count == 0) return null;
+            if (!writeOffNcrId.HasValue)
+                return "کسر قطعه سریالی با سند تعدیل فقط با گزارش عدم انطباق دارای تصمیم ضایعات (تاییدشده یا اجراشده) ممکن است؛ شماره آن گزارش را در سند بنویسید (WriteOffNcrId).";
+            NonConformance ncr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == writeOffNcrId.Value && !n.Deleted, cancellationToken);
+            if (ncr == null) return "گزارش عدم انطباق کسر سریال پیدا نشد.";
+            if (ncr.Disposition != NcrDisposition.Scrap || (ncr.Status != NcrStatus.Approved && ncr.Status != NcrStatus.Executed))
+                return $"گزارش {ncr.Number} تصمیم ضایعات تاییدشده یا اجراشده ندارد؛ کسر قطعه سریالی با آن مجاز نیست.";
+            List<string> listed = Quality.NonconformingHoldRules.SerialsOf(ncr);
+            foreach ((int itemId, string serial) in serials)
+                if (ncr.ItemId != itemId || !listed.Contains((serial ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase))
+                    return $"سریال {serial} در گزارش عدم انطباق {ncr.Number} (ضایعات) نیامده است؛ فقط قطعه‌هایی که در همان گزارش نوشته شده‌اند با تعدیل کسر می‌شوند.";
+            return null;
         }
 
         /// <summary>Which warehouse kinds each document type may use (quarantine, scrap, contractor, customer property).</summary>
@@ -805,17 +883,17 @@ namespace Services.NasbNiro.Inventory
                 string serviceRefusal = await AfterSales.SvDocumentLink.CheckConfirmAsync(_uow, document, cancellationToken);
                 if (serviceRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(serviceRefusal);
             }
-            // customer delivery needs a signed release note for the work order (API Q1 / ISO 9001 8.6)
-            // (a delivery of spare parts against a sales order has no work order: the sales order is checked instead)
-            if (document.Type == InventoryDocumentType.CustomerDelivery && document.SalesOrderId.HasValue)
+            // customer delivery (API Q1 / ISO 9001 8.6): a sales order has its own fulfilment check; then EVERY customer delivery goes through the quality gate (review H4):
+            // no non-conformance open on its work order, lots or serial numbers, and, when the delivery is of a work order's product (named on the document or made by a work
+            // order, whatever sales or service order it is booked on), a released note that covers every line. Only spare parts against a sales or service order with no
+            // work order skip the release note.
+            if (document.Type == InventoryDocumentType.CustomerDelivery)
             {
-                string salesError = await Sales.SlFulfilment.CheckConfirmAsync(_uow, document, cancellationToken);
-                if (salesError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesError);
-            }
-            else if (document.Type == InventoryDocumentType.CustomerDelivery && Quality.ReleaseCoverage.GateApplies(document.SalesOrderId.HasValue, document.ServiceOrderId.HasValue, document.WorkOrderId.HasValue))
-            {
-                // R1q D10 ★: only a delivery of spare parts against a service order (no work order) skips the release note; the lines of every other
-                // delivery must be covered by a released note of the work order, and no non-conformance may be open on it
+                if (document.SalesOrderId.HasValue)
+                {
+                    string salesError = await Sales.SlFulfilment.CheckConfirmAsync(_uow, document, cancellationToken);
+                    if (salesError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(salesError);
+                }
                 string releaseError = await _release.CheckDeliveryAsync(document, cancellationToken);
                 if (releaseError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(releaseError);
             }
@@ -830,6 +908,16 @@ namespace Services.NasbNiro.Inventory
                     touched.Contains(c.WarehouseId), cancellationToken);
                 if (frozen) return ResponseDtoHelper.BadRequest<DocumentDto>("انبارگردانی سالانه این انبار باز است؛ تا ثبت نتیجه شمارش، سند جدید تایید نمی‌شود.");
             }
+
+            // review M18: goods an open (or approved but not yet executed) non-conformance is about are held; the check is made again here because the report may have been raised after the draft
+            string holdRefusal = await Quality.QualityChecks.HoldAsync(_uow, type, document.WarehouseId, destination?.Kind, document.NcrId, HoldLinesOf(type, document.Lines), cancellationToken);
+            if (holdRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(holdRefusal);
+            // review M9 / M10: the opening balance needs a price on every line (or the finance manager's approval of the zero price), a serial write-off needs its scrap NCR
+            string priceRefusal = CheckOpeningPrices(document.Type, document.Lines.Select(l => l.UnitPrice), document.ZeroPriceApprovedByUserId.HasValue);
+            if (priceRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(priceRefusal);
+            string writeOffRefusal = await CheckSerialWriteOffAsync(document.Type, document.WriteOffNcrId,
+                document.Lines.Where(l => l.Serials != null && l.Serials.Count > 0).SelectMany(l => l.Serials.Select(s => (l.ItemId, s.SerialNumber))).ToList(), cancellationToken);
+            if (writeOffRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(writeOffRefusal);
 
             MaterialRequest request = null;
             if (type == InventoryDocumentType.Issue)
@@ -858,17 +946,17 @@ namespace Services.NasbNiro.Inventory
             var errors = new List<string>();
             DateTimeOffset now = DateTimeOffset.Now;
 
-            // R1q D32: an expired lot is not issued, delivered or sent out; it may be used only under an approved concession NCR on that very lot (QC/QA signature, engineering, manufacturing and the concession permit)
-            HashSet<int> concessionLots = null;
+            // R1q D32 + review M13: an expired lot is not issued, delivered, sent out or moved to a usable warehouse; it may be used only under a valid concession NCR on that very lot
+            // (all three signatures, the permit given after the QC signature) that was approved on or after the day the lot expired. The way out is a transfer into quarantine or scrap.
+            List<(int LotId, DateTimeOffset At)> concessions = null;
             async Task<string> ExpiredLotAsync(InventoryLot lot, InventoryItem lotItem)
             {
-                if (lot == null || !Quality.LotExpiryRules.Consumes(type) || !Quality.LotExpiryRules.IsExpired(lot.ExpiryDate, DateTime.Today)) return null;
-                concessionLots ??= (await _uow.Set<NonConformance>()
-                    .Where(n => !n.Deleted && n.LotId != null && n.Disposition == NcrDisposition.Concession && n.ConcessionApprovedAt != null &&
-                                (n.Status == NcrStatus.Approved || n.Status == NcrStatus.Executed || n.Status == NcrStatus.Closed))
-                    .Select(n => n.LotId.Value).ToListAsync(cancellationToken)).ToHashSet();
-                if (concessionLots.Contains(lot.Id)) return null;
-                return $"بچ {lot.LotNumber} کالای {lotItem.Code} در {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(lot.ExpiryDate.Value))} منقضی شده است؛ مصرف، تحویل یا ارسال آن فقط با گزارش عدم انطباق دارای مجوز ارفاقی تاییدشده برای همین بچ ممکن است (یا کالا را به قرنطینه/ضایعات منتقل کنید).";
+                if (lot == null || !Quality.LotExpiryRules.Refuses(type, destination?.Kind) || !Quality.LotExpiryRules.IsExpired(lot.ExpiryDate, DateTime.Today)) return null;
+                concessions ??= (await Quality.ConcessionRules.Valid(_uow.Set<NonConformance>().Where(n => n.LotId != null), true)
+                    .Select(n => new { LotId = n.LotId.Value, At = n.ConcessionApprovedAt }).ToListAsync(cancellationToken))
+                    .Where(x => x.At.HasValue).Select(x => (x.LotId, x.At.Value)).ToList();
+                if (concessions.Any(c => c.LotId == lot.Id && Quality.LotExpiryRules.ConcessionCovers(lot.ExpiryDate.Value, c.At))) return null;
+                return $"بچ {lot.LotNumber} کالای {lotItem.Code} در {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(lot.ExpiryDate.Value))} منقضی شده است؛ مصرف، تحویل، ارسال یا انتقال آن به انبار قابل‌مصرف فقط با گزارش عدم انطباق دارای مجوز ارفاقی تاییدشده برای همین بچ ممکن است که پس از تاریخ انقضا صادر شده باشد؛ در غیر این صورت کالا را فقط به انبار قرنطینه یا ضایعات منتقل کنید.";
             }
 
             foreach (InventoryDocumentLine line in document.Lines.OrderBy(l => l.RowNumber))

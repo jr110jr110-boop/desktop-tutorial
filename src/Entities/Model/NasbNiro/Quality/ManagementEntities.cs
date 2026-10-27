@@ -60,7 +60,16 @@ namespace Entities.Model.NasbNiro.Quality
 
         public DateTimeOffset? EscalatedAt { get; set; }
 
-        /// <summary>A mandatory CAPA can only be cancelled by the QA manager, with a reason (R1q D21).</summary>
+        /// <summary>
+        /// Required by a rule when it was created (drafted by the system, from a non-conformance or from an audit finding): fixed at creation, so editing the source cannot
+        /// turn it into an optional CAPA; only the QA manager cancels it (R1q D21, review M11).
+        /// </summary>
+        public bool Mandatory { get; set; }
+
+        /// <summary>Everybody who edited the CAPA or finished an action for another person, ids between commas: none of them judges the effectiveness, closes or cancels it (review M11).</summary>
+        public string EditorUserIds { get; set; }
+
+        /// <summary>The reason a CAPA was cancelled (R1q D21).</summary>
         public string CancelReason { get; set; }
 
         public DateTimeOffset? CancelledAt { get; set; }
@@ -337,6 +346,13 @@ namespace Entities.Model.NasbNiro.Quality
         public DateTimeOffset? DoneAt { get; set; }
         public int? DoneByUserId { get; set; }
         public string DoneNote { get; set; }
+
+        // ----- review M17: the responsible person reports the work done; QA or PMO (not he himself) confirms it
+        /// <summary>The responsible person reported the decision done (the status stays Open until a reviewer confirms).</summary>
+        public DateTimeOffset? DoneRequestedAt { get; set; }
+
+        public int? DoneRequestedByUserId { get; set; }
+        public string DoneRequestNote { get; set; }
     }
 
     /// <summary>Numbers the company can change (days, months): see <c>QualitySettingKeys</c>.</summary>

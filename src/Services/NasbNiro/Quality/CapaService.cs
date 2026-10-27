@@ -66,6 +66,13 @@ namespace Services.NasbNiro.Quality
         /// <summary>The roles that read every CAPA; anybody else sees the CAPAs he owns or has an action in (R1q D13).</summary>
         private bool ReadsAll => _user.IsInRole(QualityRoles.Readers);
 
+        /// <summary>
+        /// Review M11: the person who created or edited the CAPA, owns it or owns one of its actions, or finished an action for somebody else cannot be the one who judges its
+        /// effectiveness, closes it or cancels it. A CAPA the system drafted has no human creator.
+        /// </summary>
+        private bool IsMaker(Capa c) =>
+            global::Services.NasbNiro.Finance.LedgerMath.Touched(c.AutoDrafted ? 0 : c.CreatorUserId, c.EditorUserIds, Me) || c.OwnerUserId == Me || (c.Actions ?? new List<CapaAction>()).Any(a => a.OwnerUserId == Me);
+
         private static bool IsOverdue(Capa c, DateTime today) =>
             ((c.Status == CapaStatus.Open || c.Status == CapaStatus.ActionsDefined) && c.DueDate.HasValue && c.DueDate.Value.Date < today) ||
             (c.Status == CapaStatus.Implemented && c.EffectivenessDueDate.HasValue && c.EffectivenessDueDate.Value.Date < today);
@@ -84,7 +91,7 @@ namespace Services.NasbNiro.Quality
             var capa = new Capa
             {
                 Number = await InventoryNumbers.NextNumberAsync(_uow, QualityNumbers.Capa, "CAPA", DateTime.Today, cancellationToken),
-                Source = source, SourceId = sourceId, Problem = Clean(problem), Status = CapaStatus.Open, AutoDrafted = auto,
+                Source = source, SourceId = sourceId, Problem = Clean(problem), Status = CapaStatus.Open, AutoDrafted = auto, Mandatory = CapaRules.IsMandatory(auto, source),
                 DueDate = auto ? DateTime.Today.AddDays((int)settings[QualitySettingKeys.NcrMajorDays]) : (DateTime?)null,
                 Actions = new List<CapaAction>(), CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
@@ -161,7 +168,7 @@ namespace Services.NasbNiro.Quality
             {
                 Id = l.Id, Number = l.Number, Source = l.Source, SourceId = l.SourceId, Problem = l.Problem, Status = l.Status, OwnerUserId = l.OwnerUserId,
                 OwnerName = l.OwnerName, DueDate = l.DueDate, EffectivenessDueDate = l.EffectivenessDueDate, Overdue = l.Overdue, AutoDrafted = l.AutoDrafted,
-                SourceNumber = sourceNumber, Containment = c.Containment, RootCauseMethod = c.RootCauseMethod, RootCauseAnalysis = c.RootCauseAnalysis,
+                Mandatory = c.Mandatory || CapaRules.IsMandatory(c.AutoDrafted, c.Source), SourceNumber = sourceNumber, Containment = c.Containment, RootCauseMethod = c.RootCauseMethod, RootCauseAnalysis = c.RootCauseAnalysis,
                 EffectivenessCriteria = c.EffectivenessCriteria, EffectivenessResult = c.EffectivenessResult, ImplementedAt = c.ImplementedAt, ClosedAt = c.ClosedAt,
                 ClosedByName = names.Name(c.ClosedByUserId), CloseNote = c.CloseNote, RowVersion = c.RowVersion == null ? null : Convert.ToBase64String(c.RowVersion),
                 Iteration = c.Iteration, EscalationLevel = c.EscalationLevel, CancelReason = c.CancelReason, CancelledAt = c.CancelledAt,
@@ -204,6 +211,8 @@ namespace Services.NasbNiro.Quality
                 capa = await _uow.Set<Capa>().Include(c => c.Actions).FirstOrDefaultAsync(c => c.Id == dto.Id.Value && !c.Deleted, cancellationToken);
                 if (capa == null) return QualityText.NotFound<CapaDto>("اقدام اصلاحی و پیشگیرانه پیدا نشد.");
                 if (capa.Status != CapaStatus.Open && capa.Status != CapaStatus.ActionsDefined) return Bad<CapaDto>("در این مرحله اقدام اصلاحی ویرایش نمی‌شود.");
+                // review M11: the source decides whether the CAPA is mandatory; it is fixed when the CAPA is created
+                if (dto.Source != capa.Source || dto.SourceId != capa.SourceId) return Bad<CapaDto>("منبع CAPA پس از ثبت تغییر نمی‌کند؛ اگر منبع را اشتباه ثبت کرده‌اید، آن را لغو و CAPA تازه‌ای ثبت کنید.");
                 if (Clean(dto.RowVersion) != null)
                 {
                     try { _uow.Entry(capa).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); }
@@ -235,7 +244,8 @@ namespace Services.NasbNiro.Quality
             // the actions of a new round (after a failed effectiveness check) belong to the new iteration
             foreach (SaveCapaActionDto a in input.Where(a => !a.Id.HasValue || capa.Actions.All(x => x.Id != a.Id.Value)))
                 capa.Actions.Add(new CapaAction { Description = Clean(a.Description), OwnerUserId = a.OwnerUserId, DueDate = a.DueDate?.Date, Iteration = capa.Iteration });
-            capa.Source = dto.Source; capa.SourceId = dto.SourceId; capa.Problem = Clean(dto.Problem); capa.Containment = Clean(dto.Containment);
+            capa.Problem = Clean(dto.Problem); capa.Containment = Clean(dto.Containment);
+            capa.EditorUserIds = global::Services.NasbNiro.Finance.LedgerMath.WithEditor(capa.EditorUserIds, Me);
             capa.RootCauseMethod = dto.RootCauseMethod; capa.RootCauseAnalysis = Clean(dto.RootCauseAnalysis); capa.OwnerUserId = dto.OwnerUserId;
             if (dto.DueDate.HasValue) capa.DueDate = dto.DueDate.Value.Date;
             capa.EffectivenessCriteria = Clean(dto.EffectivenessCriteria);
@@ -267,21 +277,29 @@ namespace Services.NasbNiro.Quality
                     if (!staff && action.OwnerUserId != Me && capa.OwnerUserId != Me) return Bad<CapaDto>(QualityText.NotAllowed);
                     if (action.DoneAt.HasValue) return Bad<CapaDto>("این اقدام قبلاً انجام شده است.");
                     if (Clean(dto.Note) == null && !dto.EvidenceDocumentId.HasValue) return Bad<CapaDto>("مدرک یا شرح انجام اقدام را وارد کنید.");
-                    action.DoneAt = DateTime.Today; action.EvidenceNote = Clean(dto.Note); action.EvidenceDocumentId = dto.EvidenceDocumentId;
+                    // the day the action was really done may be entered late, within the back-date window of the company (never in the future); the waiting period of the
+                    // effectiveness check runs from the last such day, so a late entry does not start the waiting period again
+                    DateTime doneOn = (dto.Date ?? DateTime.Today).Date;
+                    string doneDateProblem = await QualityChecks.RecordDateAsync(_uow, doneOn, "انجام اقدام CAPA", cancellationToken, allowTomorrow: false);
+                    if (doneDateProblem != null) return Bad<CapaDto>(doneDateProblem);
+                    action.DoneAt = doneOn; action.EvidenceNote = Clean(dto.Note); action.EvidenceDocumentId = dto.EvidenceDocumentId;
+                    if (action.OwnerUserId != Me) capa.EditorUserIds = global::Services.NasbNiro.Finance.LedgerMath.WithEditor(capa.EditorUserIds, Me); // done on behalf of the owner
                     break;
                 case "implemented":
                     if (capa.Status != CapaStatus.ActionsDefined) return Bad<CapaDto>("فقط CAPA با اقدام‌های تعریف‌شده اجرا می‌شود.");
                     if (!staff && capa.OwnerUserId != Me) return Bad<CapaDto>(QualityText.NotAllowed);
                     if (!capa.Actions.Any(a => a.Iteration == capa.Iteration)) return Bad<CapaDto>("برای این دور CAPA هنوز اقدامی تعریف نشده است.");
                     if (capa.Actions.Any(a => !a.DoneAt.HasValue)) return Bad<CapaDto>("همه اقدام‌ها باید انجام شده باشند.");
-                    capa.Status = CapaStatus.Implemented; capa.ImplementedAt = DateTime.Today;
+                    capa.Status = CapaStatus.Implemented;
+                    capa.ImplementedAt = CapaRules.ImplementedOn(capa.Actions.Where(a => a.Iteration == capa.Iteration).Select(a => a.DoneAt), DateTime.Today);
+                    if (capa.OwnerUserId != Me) capa.EditorUserIds = global::Services.NasbNiro.Finance.LedgerMath.WithEditor(capa.EditorUserIds, Me);
                     Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
                     capa.EffectivenessDueDate = DateTime.Today.AddDays((int)settings[QualitySettingKeys.CapaEffectivenessDays]);
                     break;
                 case "effectiveness":
                     if (capa.Status != CapaStatus.Implemented) return Bad<CapaDto>("بررسی اثربخشی فقط پس از اجرای اقدام‌ها ثبت می‌شود.");
                     if (!_user.IsInRole(QualityRoles.CapaClosers)) return Bad<CapaDto>(QualityText.NotAllowed);
-                    if (capa.OwnerUserId == Me) return Bad<CapaDto>(QualityText.SameUser + " (اثربخشی را مسئول اقدام ارزیابی نمی‌کند)");
+                    if (IsMaker(capa)) return Bad<CapaDto>(QualityText.SameUser + " (اثربخشی را کسی که CAPA را تعریف یا ویرایش کرده یا مسئول CAPA یا یکی از اقدام‌های آن است ارزیابی نمی‌کند)");
                     if (Clean(dto.Note) == null) return Bad<CapaDto>("نتیجه بررسی اثربخشی را (بر اساس معیار تعریف‌شده) بنویسید.");
                     // R1q D20: the effect of an action shows over time; the check is made no earlier than the waiting period after the implementation
                     Dictionary<string, decimal> waitSettings = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
@@ -296,7 +314,8 @@ namespace Services.NasbNiro.Quality
                     else
                     {
                         // R1q D20: a failed check re-opens the CAPA for a new round: new actions, a new implementation and a new check (the old actions stay as the record of round n)
-                        capa.Status = CapaStatus.Open; capa.ImplementedAt = null; capa.EffectivenessDueDate = null;
+                        // the old due date is cleared: the new round needs a new one before its actions can be defined (review M11)
+                        capa.Status = CapaStatus.Open; capa.ImplementedAt = null; capa.EffectivenessDueDate = null; capa.DueDate = null;
                         capa.Iteration++;
                         capa.CloseNote = null;
                     }
@@ -304,7 +323,7 @@ namespace Services.NasbNiro.Quality
                 case "close":
                     if (capa.Status != CapaStatus.EffectivenessCheck) return Bad<CapaDto>("بستن CAPA فقط پس از تایید اثربخشی ممکن است.");
                     if (!_user.IsInRole(QualityRoles.CapaClosers)) return Bad<CapaDto>(QualityText.NotAllowed + " (CAPA را تضمین کیفیت یا مدیر QC می‌بندد)");
-                    if (capa.OwnerUserId == Me) return Bad<CapaDto>(QualityText.SameUser + " (CAPA را مسئول آن نمی‌بندد)");
+                    if (IsMaker(capa)) return Bad<CapaDto>(QualityText.SameUser + " (CAPA را کسی که آن را تعریف یا ویرایش کرده یا مسئول CAPA یا یکی از اقدام‌های آن است نمی‌بندد)");
                     capa.Status = CapaStatus.Closed; capa.ClosedAt = now; capa.ClosedByUserId = Me; capa.CloseNote = Clean(dto.Note);
                     break;
                 case "cancel":
@@ -312,8 +331,10 @@ namespace Services.NasbNiro.Quality
                     if (capa.Status == CapaStatus.Closed || capa.Status == CapaStatus.Cancelled) return Bad<CapaDto>("CAPA بسته یا لغو شده است.");
                     if (Clean(dto.Note) == null) return Bad<CapaDto>("دلیل لغو را بنویسید.");
                     // R1q D21: a CAPA the system or a rule required (major NCR, audit finding, auto-drafted) is cancelled only by the QA manager, with a reason that stays on the record
-                    if (CapaRules.IsMandatory(capa.AutoDrafted, capa.Source) && !_user.IsInRole(QualityRoles.QaManager))
+                    if ((capa.Mandatory || CapaRules.IsMandatory(capa.AutoDrafted, capa.Source)) && !_user.IsInRole(QualityRoles.QaManager))
                         return Bad<CapaDto>(QualityText.NotAllowed + " (CAPA الزامی را فقط مدیر QA با ثبت دلیل لغو می‌کند)");
+                    // review M11: nobody cancels the CAPA he created, edited or owns (a second person decides it is not needed)
+                    if (IsMaker(capa)) return Bad<CapaDto>(QualityText.SameUser + " (CAPA را کسی که آن را تعریف یا ویرایش کرده یا مسئول CAPA یا یکی از اقدام‌های آن است لغو نمی‌کند)");
                     capa.Status = CapaStatus.Cancelled; capa.CloseNote = Clean(dto.Note); capa.ClosedAt = now; capa.ClosedByUserId = Me;
                     capa.CancelReason = Clean(dto.Note); capa.CancelledAt = now; capa.CancelledByUserId = Me;
                     break;
@@ -328,10 +349,34 @@ namespace Services.NasbNiro.Quality
                 capa.Status == CapaStatus.Implemented ? capa.EffectivenessDueDate : (DateTime?)null);
             await SyncAssignGateAsync(capa, cancellationToken);
             await SyncActionTasksAsync(capa, cancellationToken);
+            if (capa.Status == CapaStatus.Closed || capa.Status == CapaStatus.Cancelled) await CloseLateAlertsAsync(capa.Id, capa.Status == CapaStatus.Closed ? "CAPA بسته شد." : "CAPA لغو شد.", cancellationToken);
             return await GetCapaAsync(capa.Id, cancellationToken);
         }
 
         // -------------------------------------------------------------------------------- inbox and escalation (R1q D13)
+
+        /// <summary>The "late CAPA" alerts of QA and the CEO stop being true when the CAPA is closed, cancelled or on time again (review M11).</summary>
+        private async Task CloseLateAlertsAsync(int capaId, string reason, CancellationToken cancellationToken)
+        {
+            await _notify.CloseAsync("capa-late:qa:" + capaId, reason, cancellationToken);
+            await _notify.CloseAsync("capa-late:ceo:" + capaId, reason, cancellationToken);
+        }
+
+        private async Task NotifyLateAsync(Capa c, int level, CancellationToken cancellationToken)
+        {
+            string title = (level >= 2 ? "CAPA با دیرکرد طولانی (اطلاع مدیرعامل): " : "CAPA دیرکرددار: ") + c.Number;
+            await _notify.NotifyAsync(new global::Services.NasbNiro.Office.NotifyRequest
+            {
+                SourceKey = "capa-late:qa:" + c.Id, Module = "quality", SourceType = "capa-late", SourceId = c.Id, Title = title, Link = "/quality/capa/" + c.Id,
+                Kind = global::Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "QA", DueDate = c.DueDate,
+            }, cancellationToken);
+            if (level >= 2)
+                await _notify.NotifyAsync(new global::Services.NasbNiro.Office.NotifyRequest
+                {
+                    SourceKey = "capa-late:ceo:" + c.Id, Module = "quality", SourceType = "capa-late", SourceId = c.Id, Title = title, Link = "/quality/capa/" + c.Id,
+                    Kind = global::Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "CEO", DueDate = c.DueDate,
+                }, cancellationToken);
+        }
 
         /// <summary>Each open action of the current round with an owner is a task in the inbox of that owner until it is done (or the CAPA stops).</summary>
         private async Task SyncActionTasksAsync(Capa capa, CancellationToken cancellationToken)
@@ -357,41 +402,65 @@ namespace Services.NasbNiro.Quality
             Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
             int ceoAfter = (int)settings[QualitySettingKeys.CapaCeoEscalationDays];
             DateTime today = DateTime.Today;
+            bool bootstrapped = await _uow.Set<QualitySetting>().AnyAsync(x => x.Key == QualitySettingKeys.CapaEscalationBootstrapped, cancellationToken);
             List<Capa> open = await _uow.Set<Capa>().Where(c => !c.Deleted && c.Status != CapaStatus.Closed && c.Status != CapaStatus.Cancelled).ToListAsync(cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
-            var raised = new List<Capa>();
+
+            if (!bootstrapped)
+            {
+                // review M11: the first run after the upgrade only records the level of the CAPAs that are already late; telling QA and the CEO about the whole backlog in one
+                // night would bury the alerts that matter. The marker is saved in the same transaction, so this happens once.
+                result.FirstRun = true;
+                foreach (Capa c in open)
+                {
+                    DateTime? due = (c.Status == CapaStatus.Implemented || c.Status == CapaStatus.EffectivenessCheck) ? c.EffectivenessDueDate : c.DueDate;
+                    int level = CapaRules.EscalationLevel(due, today, ceoAfter);
+                    if (level == c.EscalationLevel) continue;
+                    c.EscalationLevel = level; c.EscalatedAt = level > 0 ? now : (DateTimeOffset?)null;
+                    if (level > 0) result.Recorded++;
+                }
+                _uow.Set<QualitySetting>().Add(new QualitySetting
+                {
+                    Key = QualitySettingKeys.CapaEscalationBootstrapped, Value = 1, Title = "اجرای اول بررسی شبانه CAPA انجام شد", Source = "سامانه",
+                });
+                try { await _uow.SaveChangesAsync(cancellationToken); }
+                catch (DbUpdateConcurrencyException) { result.Skipped = open.Count; }
+                return result;
+            }
+
             foreach (Capa c in open)
             {
                 DateTime? due = (c.Status == CapaStatus.Implemented || c.Status == CapaStatus.EffectivenessCheck) ? c.EffectivenessDueDate : c.DueDate;
                 int level = CapaRules.EscalationLevel(due, today, ceoAfter);
-                if (level > c.EscalationLevel)
+                if (level == c.EscalationLevel) continue;
+                int previous = c.EscalationLevel;
+                try
                 {
-                    c.EscalationLevel = level; c.EscalatedAt = now;
-                    raised.Add(c);
+                    // the people are told first and the level is saved afterwards: when the notice fails the level stays, and the next run tells them again
+                    if (level > c.EscalationLevel) await NotifyLateAsync(c, level, cancellationToken);
+                    else if (level == 0) await CloseLateAlertsAsync(c.Id, "CAPA دیگر دیرکرد ندارد.", cancellationToken); // recovered (a new due date or a new round): it can be escalated again
+                    c.EscalationLevel = level;
+                    if (level > 0) c.EscalatedAt = now;
+                    await _uow.SaveChangesAsync(cancellationToken);
                 }
-                else if (level < c.EscalationLevel)
+                catch (DbUpdateConcurrencyException)
                 {
-                    c.EscalationLevel = level; // recovered (a new due date or a new round): it can be escalated again
+                    // somebody changed the CAPA at the same moment (a manual run and the nightly job overlap): leave it for the next run
+                    _uow.Entry(c).State = EntityState.Detached;
+                    result.Skipped++;
+                    continue;
                 }
-            }
-            await _uow.SaveChangesAsync(cancellationToken);
-            foreach (Capa c in raised)
-            {
-                result.Escalated++;
-                string title = (c.EscalationLevel >= 2 ? "CAPA با دیرکرد طولانی (اطلاع مدیرعامل): " : "CAPA دیرکرددار: ") + c.Number;
-                await _notify.NotifyAsync(new global::Services.NasbNiro.Office.NotifyRequest
+                catch (OperationCanceledException) { throw; }
+                catch (Exception)
                 {
-                    SourceKey = "capa-late:qa:" + c.Id, Module = "quality", SourceType = "capa-late", SourceId = c.Id, Title = title, Link = "/quality/capa/" + c.Id,
-                    Kind = global::Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "QA", DueDate = c.DueDate,
-                }, cancellationToken);
-                if (c.EscalationLevel >= 2)
+                    _uow.Entry(c).State = EntityState.Detached;
+                    result.Skipped++;
+                    continue;
+                }
+                if (level > previous)
                 {
-                    result.CeoNotified++;
-                    await _notify.NotifyAsync(new global::Services.NasbNiro.Office.NotifyRequest
-                    {
-                        SourceKey = "capa-late:ceo:" + c.Id, Module = "quality", SourceType = "capa-late", SourceId = c.Id, Title = title, Link = "/quality/capa/" + c.Id,
-                        Kind = global::Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "CEO", DueDate = c.DueDate,
-                    }, cancellationToken);
+                    result.Escalated++;
+                    if (level >= 2) result.CeoNotified++;
                 }
             }
             return result;

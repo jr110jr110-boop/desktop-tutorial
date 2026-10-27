@@ -58,6 +58,13 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string CalibrationWaiverReason { get; set; }
 
         public DateTimeOffset? CalibrationWaivedAt { get; set; }
+
+        /// <summary>A pending request of QA to waive the calibration (review M14): another QA or QC user approves it with the action "approve-waiver" (or "reject-waiver").</summary>
+        public bool WaiverPending { get; set; }
+
+        public string CalibrationWaiverRequestReason { get; set; }
+        public DateTimeOffset? CalibrationWaiverRequestedAt { get; set; }
+        public string CalibrationWaiverRequestedByName { get; set; }
         public List<CalibrationEventDto> Events { get; set; } = new List<CalibrationEventDto>();
     }
 
@@ -92,10 +99,11 @@ namespace ViewModels.NasbNiro.QualityDtos
         public Guid? CorrectionTableDocumentId { get; set; }
         public string Note { get; set; }
 
-        /// <summary>Needed when <see cref="RequiresCalibration"/> is false (a decision of the QA manager).</summary>
+        /// <summary>Kept for old clients and ignored: switching the calibration off is the two-step waiver (actions "request-waiver" and "approve-waiver"), never part of a save.</summary>
         public string CalibrationWaiverReason { get; set; }
     }
 
+    /// <summary>Actions: out-of-service, return-to-service (QC); request-waiver (QA, with a reason), approve-waiver and reject-waiver (another QA or QC user).</summary>
     public class EquipmentActionDto
     {
         public int Id { get; set; }

@@ -101,6 +101,9 @@ namespace Entities.Model.NasbNiro.Quality
 
         public string Note { get; set; }
 
+        /// <summary>Everybody who edited, revised or submitted the plan since the last client approval, ids between commas: none of them records the client's approval (R1q H6).</summary>
+        public string EditorUserIds { get; set; }
+
         public ICollection<ItpActivity> Activities { get; set; }
         public ICollection<ItpRevision> Revisions { get; set; }
 
@@ -165,7 +168,16 @@ namespace Entities.Model.NasbNiro.Quality
         /// <summary>The client's (or third party's) letter that agrees the hold or witness point is not applicable (R1q D9).</summary>
         public string NotApplicableReference { get; set; }
 
-        /// <summary>The signed outgoing letter (OfLetter) that told the parties about the witness point; its signing date is the notification date (R1q D9).</summary>
+        /// <summary>
+        /// The registered incoming letter (OfLetter) of the client that agreed the point is not applicable. The activity stays open (<see cref="NotApplicablePending"/>)
+        /// until the client approves the revised plan; only then is it NotApplicable (R1q H6).
+        /// </summary>
+        public int? NotApplicableLetterId { get; set; }
+
+        /// <summary>The not-applicable decision waits for the client's approval of the revised plan (R1q H6).</summary>
+        public bool NotApplicablePending { get; set; }
+
+        /// <summary>The outgoing letter (OfLetter) of the contract that told the client about the witness point; it must be marked Sent and its sent date is the notification date (R1q D9, review H5).</summary>
         public int? NotificationLetterId { get; set; }
 
         /// <summary>Proof that an activity without a required report was done: a document or a written note (R1q D18).</summary>

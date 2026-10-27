@@ -182,6 +182,8 @@ namespace Services.NasbNiro.Inventory
                         WarehouseId = warehouse.Id,
                         ReferenceNumber = InventoryText.Clean(dto.Reference) ?? "موجودی اول دوره",
                         Description = $"ورود موجودی اول دوره از داده انبار قبلی ({warehouse.Title})",
+                        // the finance manager's explicit decision is stored on each draft (review M9); the document service checks the role again
+                        AllowZeroPrice = dto.AllowZeroPrice,
                         Lines = merged.Skip(start).Take(500).ToList(),
                     }, cancellationToken);
                     if (!saved.Success) { result.Errors.Add($"انبار {warehouse.Code}: {saved.Message}"); continue; }

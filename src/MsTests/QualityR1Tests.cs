@@ -1,12 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using DataLayer.Context;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Quality;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Quality;
+using ViewModels.NasbNiro.InventoryDtos;
 
 namespace MsTests
 {
@@ -49,15 +55,59 @@ namespace MsTests
             Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.MajorNcrCommitteeMin, "x", 2));
             Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.MajorNcrCommitteeMin, "x", 10));
             Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.MajorNcrCommitteeMin, "x", 11));
-            // the back-date window may be zero (no late entry at all) but not negative or a year and a day
+            // the back-date window may be zero (no late entry at all) but a month at most: a year of back-dating is a typo that would switch the control off (review M14)
             Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.MaxBackdateDays, "x", 0));
-            Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.MaxBackdateDays, "x", 365));
-            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.MaxBackdateDays, "x", 366));
+            Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.MaxBackdateDays, "x", 30));
+            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.MaxBackdateDays, "x", 31));
+            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.MaxBackdateDays, "x", 365));
             Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.MaxBackdateDays, "x", -1));
-            // the CAPA effectiveness wait may be zero (the check at once) but the NCR due days must be at least one
-            Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.EffectivenessWaitDays, "x", 0));
+            // the CAPA effectiveness wait is at least a week (a check at once proves nothing) and a year at most; the NCR due days must be at least one
+            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.EffectivenessWaitDays, "x", 0));
+            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.EffectivenessWaitDays, "x", 6));
+            Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.EffectivenessWaitDays, "x", 7));
+            Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.EffectivenessWaitDays, "x", 365));
+            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.EffectivenessWaitDays, "x", 366));
             Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.NcrMinorDays, "x", 0));
+            // a witness notice period of zero days would waive the client's witness point at once (review H6)
+            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.MinNoticeDays, "x", 0));
+            Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.MinNoticeDays, "x", 1));
+            Assert.IsNull(QualitySettingRules.Check(QualitySettingKeys.MinNoticeDays, "x", 30));
+            Assert.IsNotNull(QualitySettingRules.Check(QualitySettingKeys.MinNoticeDays, "x", 31));
             Assert.AreEqual("تنظیم نامعتبر است.", QualitySettingRules.Check("NotASetting", "x", 1));
+        }
+
+        [TestMethod]
+        public void A_Stored_Setting_Outside_Its_Range_Is_Read_As_The_Nearest_Bound()
+        {
+            // rows written before the ranges existed (or by hand in the database) must not switch a control off (review M14)
+            Assert.AreEqual(12m, QualitySettingRules.Clamp(QualitySettingKeys.WeldContinuityMonths, 3650m), "a typo for 365 days");
+            Assert.AreEqual(1m, QualitySettingRules.Clamp(QualitySettingKeys.WeldContinuityMonths, 0m));
+            Assert.AreEqual(1m, QualitySettingRules.Clamp(QualitySettingKeys.WeldContinuityMonths, -4m));
+            Assert.AreEqual(6m, QualitySettingRules.Clamp(QualitySettingKeys.WeldContinuityMonths, 6m), "a valid value is untouched");
+            Assert.AreEqual(6m, QualitySettingRules.Clamp(QualitySettingKeys.WeldContinuityMonths, 6.9m), "a fraction is cut, not rounded up");
+            Assert.AreEqual(30m, QualitySettingRules.Clamp(QualitySettingKeys.MaxBackdateDays, 365m));
+            Assert.AreEqual(0m, QualitySettingRules.Clamp(QualitySettingKeys.MaxBackdateDays, 0m), "zero is a valid back-date window");
+            Assert.AreEqual(7m, QualitySettingRules.Clamp(QualitySettingKeys.EffectivenessWaitDays, 0m), "an effectiveness wait of zero was read as the check at once");
+            Assert.AreEqual(2m, QualitySettingRules.Clamp(QualitySettingKeys.MajorNcrCommitteeMin, 0m), "a committee of nobody");
+            Assert.AreEqual(1m, QualitySettingRules.Clamp(QualitySettingKeys.MinNoticeDays, 0m));
+            Assert.AreEqual(42.5m, QualitySettingRules.Clamp("NotASetting", 42.5m), "a key without a range is returned unchanged");
+            Assert.AreEqual(42.5m, QualitySettingRules.Clamp(null, 42.5m));
+            foreach (QualitySetting setting in QualitySettingKeys.Defaults())
+                Assert.AreEqual(setting.Value, QualitySettingRules.Clamp(setting.Key, setting.Value), "the default of " + setting.Key + " must be a fixed point of the clamp");
+        }
+
+        [TestMethod]
+        public void The_Star_Defaults_Of_The_Settings_Are_Those_Of_The_Brief()
+        {
+            Dictionary<string, decimal> defaults = QualitySettingKeys.Defaults().ToDictionary(s => s.Key, s => s.Value);
+            Assert.AreEqual(7m, defaults[QualitySettingKeys.MaxBackdateDays]);
+            Assert.AreEqual(30m, defaults[QualitySettingKeys.EffectivenessWaitDays]);
+            Assert.AreEqual(1m, defaults[QualitySettingKeys.MinNoticeDays]);
+            Assert.AreEqual(6m, defaults[QualitySettingKeys.WeldContinuityMonths], "ASME IX QW-322");
+            Assert.AreEqual(3m, defaults[QualitySettingKeys.MajorNcrCommitteeMin], "QC, engineering and manufacturing");
+            // the bootstrap marker of the CAPA escalation is a stored row, not a setting a user can edit: it has no range and is not a default
+            Assert.IsFalse(QualitySettingRules.TryGetBounds(QualitySettingKeys.CapaEscalationBootstrapped, out _, out _));
+            Assert.IsFalse(defaults.ContainsKey(QualitySettingKeys.CapaEscalationBootstrapped));
         }
 
         // ------------------------------------------------------------------------------------------ D15 back-date window
@@ -81,6 +131,22 @@ namespace MsTests
             Assert.IsNull(RecordDateRules.Check(Today.AddDays(-7).AddHours(23), Today.AddHours(1), 7, "x"));
             Assert.IsNotNull(RecordDateRules.Check(Today.AddDays(-1), Today, 0, "x"), "no late entry at all");
             Assert.IsNull(RecordDateRules.Check(Today, Today, 0, "x"));
+        }
+
+        [TestMethod]
+        public void A_Weld_Log_Gets_No_Tomorrow_Leeway()
+        {
+            // a weld entry restarts the six-month continuity of a welder: at most today (review M15)
+            Assert.IsNull(RecordDateRules.Check(Today, Today, 7, "گزارش جوشکاری", allowTomorrow: false), "today");
+            string tomorrow = RecordDateRules.Check(Today.AddDays(1), Today, 7, "گزارش جوشکاری", allowTomorrow: false);
+            Assert.IsNotNull(tomorrow);
+            StringAssert.Contains(tomorrow, "در آینده");
+            StringAssert.Contains(tomorrow, "گزارش جوشکاری");
+            Assert.IsNull(RecordDateRules.Check(Today.AddDays(-7), Today, 7, "گزارش جوشکاری", allowTomorrow: false), "the back-date window is the same");
+            Assert.IsNotNull(RecordDateRules.Check(Today.AddDays(-8), Today, 7, "گزارش جوشکاری", allowTomorrow: false));
+            // the other records keep the one day of leeway for the time zone of the browser
+            Assert.IsNull(RecordDateRules.Check(Today.AddDays(1), Today, 7, "بازرسی"));
+            Assert.IsNull(RecordDateRules.Check(Today.AddDays(1), Today, 7, "بازرسی", allowTomorrow: true));
         }
 
         // ------------------------------------------------------------------------------------------ D10 release coverage of a delivery
@@ -124,11 +190,18 @@ namespace MsTests
         [TestMethod]
         public void The_Release_Note_Gate_Applies_To_Every_Delivery_Except_Spare_Parts_Of_A_Sales_Order_Or_A_Service_Order_Without_A_Work_Order()
         {
-            Assert.IsTrue(ReleaseCoverage.GateApplies(false, false, true), "a delivery of a work order's product");
-            Assert.IsTrue(ReleaseCoverage.GateApplies(false, false, false), "a delivery that names neither: the gate asks for the work order");
-            Assert.IsFalse(ReleaseCoverage.GateApplies(true, false, false), "spare parts against a sales order: the fulfilment check of the sales order applies");
-            Assert.IsFalse(ReleaseCoverage.GateApplies(false, true, false), "spare parts against a service order with no work order");
-            Assert.IsTrue(ReleaseCoverage.GateApplies(false, true, true), "a service order that names a work order cannot be used to skip the release note");
+            // GateApplies(hasSalesOrder, hasServiceOrder, hasWorkOrder, anyUnitHasWorkOrder)
+            Assert.IsTrue(ReleaseCoverage.GateApplies(false, false, true, false), "a delivery of a work order's product");
+            Assert.IsTrue(ReleaseCoverage.GateApplies(false, false, false, false), "a delivery that names no order of any kind: the gate asks for the work order");
+            Assert.IsFalse(ReleaseCoverage.GateApplies(true, false, false, false), "spare parts against a sales order: the fulfilment check of the sales order applies");
+            Assert.IsFalse(ReleaseCoverage.GateApplies(false, true, false, false), "spare parts against a service order with no work order");
+            // review H4: naming a sales or a service order must not be a way round the release note of a manufactured product
+            Assert.IsTrue(ReleaseCoverage.GateApplies(true, false, true, false), "a sales order that also names the work order");
+            Assert.IsTrue(ReleaseCoverage.GateApplies(false, true, true, false), "a service order that names a work order cannot be used to skip the release note");
+            Assert.IsTrue(ReleaseCoverage.GateApplies(true, false, false, true), "a sales order with a serial unit that a work order made");
+            Assert.IsTrue(ReleaseCoverage.GateApplies(false, true, false, true), "a service order with a serial unit that a work order made");
+            Assert.IsTrue(ReleaseCoverage.GateApplies(true, true, true, true));
+            Assert.IsFalse(ReleaseCoverage.GateApplies(true, true, false, false), "both orders, no work order anywhere: spare parts");
         }
 
         // ------------------------------------------------------------------------------------------ D32 expired lots
@@ -147,14 +220,141 @@ namespace MsTests
                 Assert.IsFalse(LotExpiryRules.Consumes(type), type + " must stay possible for an expired lot");
         }
 
+        [TestMethod]
+        public void An_Expired_Lot_Moves_Only_Into_Quarantine_Or_Scrap()
+        {
+            // review M13: a transfer (including the release from quarantine and the return from a subcontractor) must not carry expired goods into stock that production draws on
+            Assert.IsTrue(LotExpiryRules.Refuses(InventoryDocumentType.Issue, null));
+            Assert.IsTrue(LotExpiryRules.Refuses(InventoryDocumentType.CustomerDelivery, null));
+            Assert.IsTrue(LotExpiryRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.RawMaterial), "into usable stock");
+            Assert.IsTrue(LotExpiryRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.General));
+            Assert.IsTrue(LotExpiryRules.Refuses(InventoryDocumentType.Transfer, null), "no destination known");
+            Assert.IsTrue(LotExpiryRules.Refuses(InventoryDocumentType.QcRelease, WarehouseKind.Parts), "the release from quarantine into usable stock");
+            Assert.IsTrue(LotExpiryRules.Refuses(InventoryDocumentType.SubcontractReturn, WarehouseKind.WorkInProgress), "the return from a subcontractor into usable stock");
+            Assert.IsFalse(LotExpiryRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.Quarantine), "to quarantine");
+            Assert.IsFalse(LotExpiryRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.Scrap), "to scrap");
+            Assert.IsFalse(LotExpiryRules.Refuses(InventoryDocumentType.SupplierReturn, null), "back to the supplier");
+            Assert.IsFalse(LotExpiryRules.Refuses(InventoryDocumentType.ScrapSale, null));
+            Assert.IsFalse(LotExpiryRules.Refuses(InventoryDocumentType.AdjustmentDecrease, null), "written off");
+            Assert.IsFalse(LotExpiryRules.Refuses(InventoryDocumentType.PurchaseReceipt, WarehouseKind.RawMaterial), "receiving is not using");
+        }
+
+        [TestMethod]
+        public void A_Concession_Covers_An_Expired_Lot_Only_When_It_Was_Given_After_The_Expiry()
+        {
+            DateTime expiry = Today.AddDays(-10);
+            Assert.IsTrue(LotExpiryRules.ConcessionCovers(expiry, new DateTimeOffset(expiry.AddDays(1).AddHours(9))), "approved the day after the lot spoiled");
+            Assert.IsTrue(LotExpiryRules.ConcessionCovers(expiry, new DateTimeOffset(expiry.AddHours(8))), "approved on the expiry day itself");
+            Assert.IsFalse(LotExpiryRules.ConcessionCovers(expiry, new DateTimeOffset(expiry.AddDays(-1).AddHours(23))), "approved while the lot was still good says nothing about the spoiled lot");
+            Assert.IsFalse(LotExpiryRules.ConcessionCovers(expiry, new DateTimeOffset(expiry.AddDays(-30))));
+        }
+
+        // ------------------------------------------------------------------------------------------ concession permit, nonconforming stock hold (review H4, M18)
+
+        private static NonConformance Ncr(NcrStatus status, NcrDisposition disposition, bool signedByAll, DateTime? permit = null, DateTime? qualitySigned = null)
+        {
+            DateTimeOffset signed = new DateTimeOffset((qualitySigned ?? Today.AddDays(-3)).AddHours(9));
+            var n = new NonConformance { Status = status, Disposition = disposition, SerialNumbers = "S-1\r\n S-2 \n\nS-3" };
+            if (signedByAll)
+            {
+                n.QualityApprovedAt = signed;
+                n.EngineeringApprovedAt = signed.AddHours(1);
+                n.ManufacturingApprovedAt = signed.AddHours(2);
+            }
+            if (permit.HasValue) n.ConcessionApprovedAt = new DateTimeOffset(permit.Value.AddHours(10));
+            return n;
+        }
+
+        [TestMethod]
+        public void A_Concession_Permit_Counts_Only_On_A_Fully_Signed_Concession_With_The_Permit_After_The_Quality_Signature()
+        {
+            Assert.IsTrue(ConcessionRules.IsValid(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true, Today.AddDays(-2)), false), "the full chain");
+            Assert.IsTrue(ConcessionRules.IsValid(Ncr(NcrStatus.Executed, NcrDisposition.Concession, true, Today.AddDays(-2)), false));
+            Assert.IsFalse(ConcessionRules.IsValid(Ncr(NcrStatus.Closed, NcrDisposition.Concession, true, Today.AddDays(-2)), false), "a closed report is history unless asked for");
+            Assert.IsTrue(ConcessionRules.IsValid(Ncr(NcrStatus.Closed, NcrDisposition.Concession, true, Today.AddDays(-2)), true));
+            Assert.IsFalse(ConcessionRules.IsValid(Ncr(NcrStatus.Open, NcrDisposition.Concession, true, Today.AddDays(-2)), true), "an open report is not a decision yet");
+            Assert.IsFalse(ConcessionRules.IsValid(Ncr(NcrStatus.Cancelled, NcrDisposition.Concession, true, Today.AddDays(-2)), true));
+            Assert.IsFalse(ConcessionRules.IsValid(Ncr(NcrStatus.Approved, NcrDisposition.Scrap, true, Today.AddDays(-2)), false), "another disposition is not a concession");
+            Assert.IsFalse(ConcessionRules.IsValid(Ncr(NcrStatus.Approved, NcrDisposition.Concession, false, Today.AddDays(-2)), false), "unsigned");
+            Assert.IsFalse(ConcessionRules.IsValid(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true), false), "no permit");
+            Assert.IsFalse(ConcessionRules.IsValid(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true, Today.AddDays(-5), Today.AddDays(-3)), false), "the permit given before the quality signature");
+            Assert.IsFalse(ConcessionRules.IsValid(null, false));
+            NonConformance partial = Ncr(NcrStatus.Approved, NcrDisposition.Concession, true, Today.AddDays(-2));
+            partial.ManufacturingApprovedAt = null;
+            Assert.IsFalse(ConcessionRules.IsValid(partial, false), "one of the three signatures is missing");
+        }
+
+        [TestMethod]
+        public void Goods_Of_An_Open_Or_Approved_Ncr_Are_Held_Until_A_Valid_Concession_Or_Execution()
+        {
+            Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Open, NcrDisposition.None, false)));
+            Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Scrap, true)), "approved but not yet executed");
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Executed, NcrDisposition.Scrap, true)), "executed: the stock document moved the goods");
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Closed, NcrDisposition.Scrap, true)));
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Cancelled, NcrDisposition.None, false)));
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true, Today.AddDays(-2))), "a valid concession is the permission to use the goods");
+            Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true)), "a concession without its permit still holds");
+            NonConformance deleted = Ncr(NcrStatus.Open, NcrDisposition.None, false);
+            deleted.Delete();
+            Assert.IsFalse(NonconformingHoldRules.Holds(deleted));
+            Assert.IsFalse(NonconformingHoldRules.Holds(null));
+        }
+
+        [TestMethod]
+        public void Held_Goods_Cannot_Be_Used_Up_Produced_Back_Or_Moved_Into_Usable_Stock()
+        {
+            foreach (InventoryDocumentType type in new[] { InventoryDocumentType.Issue, InventoryDocumentType.CustomerDelivery, InventoryDocumentType.SubcontractIssue, InventoryDocumentType.StageConversion,
+                                                           InventoryDocumentType.ProductionReceipt, InventoryDocumentType.ProductionReturn })
+                Assert.IsTrue(NonconformingHoldRules.Refuses(type, null), type + " must refuse held goods");
+            Assert.IsTrue(NonconformingHoldRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.FinishedGoods), "into stock a customer draws on");
+            Assert.IsTrue(NonconformingHoldRules.Refuses(InventoryDocumentType.QcRelease, WarehouseKind.Parts));
+            // the way out of the hold: the report's own disposition document (rework into quarantine, scrap, return to the supplier) and the write-offs
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.Quarantine), "rework or repair goes to quarantine");
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.Scrap), "scrap");
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.SupplierReturn, null), "return to the supplier");
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.AdjustmentDecrease, null));
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.PurchaseReceipt, WarehouseKind.RawMaterial));
+        }
+
+        [TestMethod]
+        public void A_Hold_Blocks_The_Held_Quantity_Not_The_Whole_Lot()
+        {
+            // 10 on hand, 4 held by an open report: 6 may go, 7 may not
+            Assert.IsFalse(NonconformingHoldRules.BlocksQuantity(10m, 6m, 4m), "exactly the free quantity");
+            Assert.IsTrue(NonconformingHoldRules.BlocksQuantity(10m, 7m, 4m));
+            Assert.IsFalse(NonconformingHoldRules.BlocksQuantity(10m, 10m, 0m), "nothing is held in this warehouse");
+            Assert.IsTrue(NonconformingHoldRules.BlocksQuantity(4m, 4m, 4m), "all of it is held");
+            Assert.IsFalse(NonconformingHoldRules.BlocksQuantity(4m, 0m, 4m), "a document that takes nothing out of the lot");
+            Assert.IsTrue(NonconformingHoldRules.BlocksQuantity(3m, 0m, 4m), "less on hand than the reports hold: the shortfall is still held back");
+        }
+
+        [TestMethod]
+        public void The_Serials_Of_A_Report_Are_Read_One_Per_Line_And_Trimmed()
+        {
+            CollectionAssert.AreEqual(new[] { "S-1", "S-2", "S-3" }, NonconformingHoldRules.SerialsOf(Ncr(NcrStatus.Open, NcrDisposition.None, false)));
+            Assert.AreEqual(0, NonconformingHoldRules.SerialsOf(new NonConformance()).Count);
+            Assert.AreEqual(0, NonconformingHoldRules.SerialsOf(null).Count);
+        }
+
         // ------------------------------------------------------------------------------------------ D13, D20, D21 CAPA timing
 
         [TestMethod]
         public void Capa_Effectiveness_Cannot_Be_Judged_Before_The_Wait_Has_Passed()
         {
             Assert.AreEqual(new DateTime(2026, 10, 31), CapaRules.EffectivenessEarliest(new DateTime(2026, 10, 1, 10, 30, 0), 30));
-            Assert.AreEqual(new DateTime(2026, 10, 1), CapaRules.EffectivenessEarliest(new DateTime(2026, 10, 1, 23, 59, 0), 0), "a wait of zero allows the check the same day");
+            Assert.AreEqual(new DateTime(2026, 10, 8), CapaRules.EffectivenessEarliest(new DateTime(2026, 10, 1, 23, 59, 0), 7), "the shortest waiting period the settings allow is seven days");
             Assert.AreEqual(new DateTime(2027, 10, 1), CapaRules.EffectivenessEarliest(new DateTime(2026, 10, 1), 365));
+        }
+
+        [TestMethod]
+        public void Capa_Is_Implemented_On_The_Day_Of_Its_Last_Action()
+        {
+            Assert.AreEqual(new DateTime(2026, 10, 24), CapaRules.ImplementedOn(new DateTime?[] { new DateTime(2026, 10, 20), new DateTime(2026, 10, 24, 15, 0, 0), null }, Today), "the last day an action was done");
+            Assert.AreEqual(Today.Date, CapaRules.ImplementedOn(new DateTime?[] { null }, Today), "no day known: today");
+            Assert.AreEqual(Today.Date, CapaRules.ImplementedOn(null, Today));
+            // an action entered seven days late (the default back-date window) lets the shortest waiting period run out today; an action done today does not
+            Assert.AreEqual(Today.Date, CapaRules.EffectivenessEarliest(CapaRules.ImplementedOn(new DateTime?[] { Today.AddDays(-7) }, Today), 7));
+            Assert.AreEqual(Today.Date.AddDays(7), CapaRules.EffectivenessEarliest(CapaRules.ImplementedOn(new DateTime?[] { Today }, Today), 7));
         }
 
         [TestMethod]
@@ -277,6 +477,145 @@ namespace MsTests
             Assert.IsTrue(ItpNoticeRules.HasEvidence(true, null), "an accepted inspection record on the activity");
             Assert.IsTrue(ItpNoticeRules.HasEvidence(false, Guid.NewGuid()), "a document");
             Assert.IsTrue(ItpNoticeRules.HasEvidence(true, Guid.NewGuid()));
+        }
+
+        [TestMethod]
+        public void The_Notice_Period_Is_Never_Shorter_Than_The_Company_Minimum()
+        {
+            // plans saved before the minimum existed may hold 0 days; a witness point would be waived the day it was announced (review H6)
+            Assert.AreEqual(1, ItpNoticeRules.EffectiveDays(0, 1));
+            Assert.AreEqual(10, ItpNoticeRules.EffectiveDays(10, 1));
+            Assert.AreEqual(5, ItpNoticeRules.EffectiveDays(2, 5), "the company raised its minimum above the stored period");
+            Assert.AreEqual(0, ItpNoticeRules.EffectiveDays(0, 0));
+            Assert.AreEqual(3, ItpNoticeRules.EffectiveDays(3, -2), "a negative minimum is read as none");
+            // with the effective period a legacy plan with 0 days is no longer waived on the notice day itself
+            Assert.IsFalse(ItpNoticeRules.WaivedByNotice(Today, ItpNoticeRules.EffectiveDays(0, 1), Today));
+            Assert.IsTrue(ItpNoticeRules.WaivedByNotice(Today.AddDays(-1), ItpNoticeRules.EffectiveDays(0, 1), Today));
+            Assert.IsTrue(ItpNoticeRules.WaivedByNotice(Today, 0, Today), "what the legacy value would have done");
+
+            Assert.IsNotNull(ItpNoticeRules.CheckNoticeDays(0, 1));
+            Assert.IsNull(ItpNoticeRules.CheckNoticeDays(1, 1));
+            Assert.IsNull(ItpNoticeRules.CheckNoticeDays(365, 1));
+            Assert.IsNotNull(ItpNoticeRules.CheckNoticeDays(366, 1));
+            Assert.IsNotNull(ItpNoticeRules.CheckNoticeDays(-3, 1));
+            string refused = ItpNoticeRules.CheckNoticeDays(2, 3);
+            Assert.IsNotNull(refused);
+            StringAssert.Contains(refused, "3");
+            Assert.AreEqual(300, ItpNoticeRules.MaxReferenceLength, "the column length of the reference of a not-applicable decision");
+        }
+
+        [TestMethod]
+        public void A_Witness_Letter_Counts_From_The_Day_It_Was_Sent_Inside_The_Window_And_After_The_Plan_Approval()
+        {
+            DateTime approved = Today.AddDays(-4);
+            Assert.IsNull(ItpNoticeRules.CheckLetterDate(Today, Today, approved, 7), "sent today");
+            Assert.IsNull(ItpNoticeRules.CheckLetterDate(Today.AddDays(-2), Today, approved, 7), "sent two days ago, after the approval");
+            Assert.IsNull(ItpNoticeRules.CheckLetterDate(approved, Today, approved, 7), "sent on the approval day itself");
+            string beforeApproval = ItpNoticeRules.CheckLetterDate(approved.AddDays(-1), Today, approved, 30);
+            Assert.IsNotNull(beforeApproval, "a letter older than the approval of the plan proves nothing about this plan");
+            StringAssert.Contains(beforeApproval, "تایید برنامه");
+            string future = ItpNoticeRules.CheckLetterDate(Today.AddDays(1), Today, approved, 7);
+            Assert.IsNotNull(future);
+            StringAssert.Contains(future, "آینده");
+            Assert.IsNull(ItpNoticeRules.CheckLetterDate(Today.AddDays(-7), Today, null, 7), "no approval date known: only the window applies; seven days back is inside");
+            string old = ItpNoticeRules.CheckLetterDate(Today.AddDays(-8), Today, null, 7);
+            Assert.IsNotNull(old, "eight days back is outside a window of seven");
+            StringAssert.Contains(old, "7 روز");
+            Assert.IsNotNull(ItpNoticeRules.CheckLetterDate(Today.AddDays(-1), Today, null, 0), "a window of zero: only today");
+            Assert.IsNull(ItpNoticeRules.CheckLetterDate(Today, Today, null, 0));
+            Assert.IsNull(ItpNoticeRules.CheckLetterDate(Today.AddHours(22), Today.AddHours(1), approved, 7), "time of day never matters");
+        }
+
+        [TestMethod]
+        public void The_Client_Letter_That_Drops_A_Control_Point_Must_Be_Newer_Than_The_Last_Plan_Approval()
+        {
+            DateTime approved = Today.AddDays(-20);
+            Assert.IsNull(ItpNoticeRules.CheckClientLetterDate(Today, Today, approved));
+            Assert.IsNull(ItpNoticeRules.CheckClientLetterDate(approved, Today, approved), "written on the approval day");
+            Assert.IsNull(ItpNoticeRules.CheckClientLetterDate(Today.AddDays(-5), Today, null), "the plan was never approved: any past letter");
+            string older = ItpNoticeRules.CheckClientLetterDate(approved.AddDays(-1), Today, approved);
+            Assert.IsNotNull(older, "a letter older than the approval cannot drop a point the client approved");
+            StringAssert.Contains(older, "پیش از آخرین تایید");
+            Assert.IsNotNull(ItpNoticeRules.CheckClientLetterDate(Today.AddDays(1), Today, approved), "a letter from the future");
+        }
+
+        [TestMethod]
+        public void The_Client_Approval_Date_Is_Today_Or_Inside_The_Back_Date_Window()
+        {
+            Assert.IsNull(ItpNoticeRules.CheckApprovalDate(Today, Today, 7));
+            Assert.IsNull(ItpNoticeRules.CheckApprovalDate(Today.AddDays(-7), Today, 7), "exactly seven days back");
+            string old = ItpNoticeRules.CheckApprovalDate(Today.AddDays(-8), Today, 7);
+            Assert.IsNotNull(old);
+            StringAssert.Contains(old, "7 روز");
+            Assert.IsNotNull(ItpNoticeRules.CheckApprovalDate(Today.AddDays(1), Today, 7), "an approval from the future would let a letter 'after the approval' be a future letter");
+            Assert.IsNull(ItpNoticeRules.CheckApprovalDate(Today, Today, 0));
+            Assert.IsNotNull(ItpNoticeRules.CheckApprovalDate(Today.AddDays(-1), Today, 0));
+        }
+
+        [TestMethod]
+        public void Only_A_Customer_Of_The_Contract_Stands_For_Its_Client()
+        {
+            // IsClient(supplier, customer, customerId, linkedCustomerIds)
+            Assert.IsFalse(ClientPartyRules.IsClient(true, false, null, new int[0]), "a supplier is never the client");
+            Assert.IsFalse(ClientPartyRules.IsClient(true, true, 4, new[] { 4 }), "a party that is a supplier too is still not the client");
+            Assert.IsTrue(ClientPartyRules.IsClient(false, true, 4, new[] { 4, 9 }), "a customer Sales linked to the contract");
+            Assert.IsFalse(ClientPartyRules.IsClient(false, true, 5, new[] { 4, 9 }), "a customer of another contract");
+            Assert.IsFalse(ClientPartyRules.IsClient(false, false, null, new[] { 4 }), "an organisation (a ministry, an agency) when the contract's customer is known");
+            Assert.IsFalse(ClientPartyRules.IsClient(false, true, null, new[] { 4 }), "a customer party not tied to a customer record");
+            Assert.IsTrue(ClientPartyRules.IsClient(false, true, 5, new int[0]), "no customer recorded on the contract: any non-supplier party");
+            Assert.IsTrue(ClientPartyRules.IsClient(false, false, null, null), "no link information at all");
+        }
+
+        [TestMethod]
+        public void An_Evidence_File_Must_Be_Recent_From_A_Quality_Uploader_And_Used_Once()
+        {
+            DateTimeOffset At(int daysBack) => new DateTimeOffset(Today.AddDays(-daysBack).AddHours(11));
+            Assert.IsNull(EvidenceDocumentRules.Check(At(0), true, false, Today, 7), "uploaded today by QC");
+            Assert.IsNull(EvidenceDocumentRules.Check(At(7), true, false, Today, 7), "seven days back is inside the window");
+            string old = EvidenceDocumentRules.Check(At(8), true, false, Today, 7);
+            Assert.IsNotNull(old);
+            StringAssert.Contains(old, "7 روز");
+            Assert.IsNotNull(EvidenceDocumentRules.Check(At(-3), true, false, Today, 7), "an upload stamped in the future");
+            string legacy = EvidenceDocumentRules.Check(default(DateTimeOffset), true, false, Today, 7);
+            Assert.IsNotNull(legacy, "a file loaded before uploads were stamped has no date");
+            StringAssert.Contains(legacy, "قدیمی");
+            Assert.IsNotNull(EvidenceDocumentRules.Check(new DateTimeOffset(1999, 12, 31, 0, 0, 0, TimeSpan.Zero), true, false, Today, 7), "before 2000 is the same as never");
+            string wrongUploader = EvidenceDocumentRules.Check(At(0), false, false, Today, 7);
+            Assert.IsNotNull(wrongUploader, "uploaded by somebody who is not in quality or engineering");
+            StringAssert.Contains(wrongUploader, "QC");
+            string reused = EvidenceDocumentRules.Check(At(0), true, true, Today, 7);
+            Assert.IsNotNull(reused, "one file proves one activity");
+            StringAssert.Contains(reused, "فعالیت دیگری");
+            Assert.IsNull(EvidenceDocumentRules.Check(At(0), true, false, Today, 0), "window zero, uploaded today: acceptable");
+            Assert.IsNotNull(EvidenceDocumentRules.Check(At(1), true, false, Today, 0), "window zero: yesterday's upload is refused");
+        }
+
+        [TestMethod]
+        public void The_Quality_Roles_That_May_Upload_Evidence_Exclude_Production_And_The_Warehouse()
+        {
+            string[] uploaders = QualityRoles.EvidenceUploaders.Split(',');
+            CollectionAssert.AreEquivalent(new[] { "QC", "QA", "ENGINEERING" }, uploaders);
+            foreach (string role in new[] { "PRODUCTIONMANAGER", "CONSTRUCTION", "WAREHOUSE", "WHSUPERVISOR", "PLANNING", "COMMERCIAL" })
+                Assert.IsFalse(uploaders.Contains(role), role + " is not a quality uploader");
+        }
+
+        [TestMethod]
+        public void The_Maker_Of_A_Record_Is_Everyone_Who_Created_Or_Edited_It()
+        {
+            // the one rule behind the maker-checker of the NCR, the ITP, the CAPA and the review (reviews H3, H7, M11)
+            string ids = Services.NasbNiro.Finance.LedgerMath.WithEditor(null, 5);
+            Assert.AreEqual(",5,", ids);
+            ids = Services.NasbNiro.Finance.LedgerMath.WithEditor(ids, 7);
+            Assert.AreEqual(",5,7,", ids);
+            Assert.AreEqual(",5,7,", Services.NasbNiro.Finance.LedgerMath.WithEditor(ids, 5), "an editor is recorded once");
+            Assert.IsTrue(Services.NasbNiro.Finance.LedgerMath.Touched(0, ids, 5));
+            Assert.IsTrue(Services.NasbNiro.Finance.LedgerMath.Touched(0, ids, 7));
+            Assert.IsFalse(Services.NasbNiro.Finance.LedgerMath.Touched(0, ids, 57), "user 57 is not user 5 or 7");
+            Assert.IsFalse(Services.NasbNiro.Finance.LedgerMath.Touched(0, ids, 6));
+            Assert.IsTrue(Services.NasbNiro.Finance.LedgerMath.Touched(9, null, 9), "the creator");
+            Assert.IsFalse(Services.NasbNiro.Finance.LedgerMath.Touched(9, null, 8));
+            Assert.IsFalse(Services.NasbNiro.Finance.LedgerMath.Touched(0, null, 0), "a record the system drafted (creator 0) has no maker among the users");
+            Assert.IsFalse(Services.NasbNiro.Finance.LedgerMath.Touched(0, ",", 3));
         }
 
         // ------------------------------------------------------------------------------------------ D41 document revisions
@@ -422,12 +761,38 @@ namespace MsTests
             Assert.AreEqual("TestReport", NcrReinspection.Report);
         }
 
-        [TestMethod]
-        public void NCR_QC_Signature_Is_Given_By_QC_Or_QA_And_Cancel_Is_For_QC_Or_QA()
+        private static string[] RolesOf(Type controller, string action)
         {
+            MethodInfo method = controller.GetMethod(action, BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(method, controller.Name + "." + action + " does not exist");
+            string roles = method.GetCustomAttributes<AuthorizeAttribute>(true).Select(a => a.Roles).FirstOrDefault(r => !string.IsNullOrEmpty(r));
+            Assert.IsNotNull(roles, controller.Name + "." + action + " has no role list");
+            return roles.Split(',').Select(r => r.Trim()).ToArray();
+        }
+
+        [TestMethod]
+        public void The_Role_Lists_Of_The_Quality_Decisions_On_The_Routes_Exclude_The_People_Who_Must_Not_Make_Them()
+        {
+            Type ncr = typeof(WebApi.Controllers.InventoryQualityController);
+            Type items = typeof(WebApi.Controllers.InventoryItemsController);
+
+            // the QC signature of an NCR comes from a QC user or the QA manager (who steps in when the QC people drafted or edited the report); the other signatures stay with their departments
+            string[] approvers = RolesOf(ncr, "ApproveNcrAsync");
+            CollectionAssert.IsSubsetOf(new[] { "QC", "QA", "ENGINEERING" }, approvers);
+            // closing or cancelling an NCR is QC and QA only: PMO reads the reports but does not close them (review L24); who may do which is decided inside with the maker rule
+            CollectionAssert.AreEquivalent(new[] { "QC", "QA" }, RolesOf(ncr, "CloseNcrAsync"));
             CollectionAssert.AreEquivalent(new[] { "QC", "QA" }, InventoryRoles.RoleQualitySigner.Split(','));
-            CollectionAssert.AreEquivalent(new[] { "PMO", "QC", "QA" }, InventoryRoles.QcOrQa.Split(','));
-            Assert.IsTrue(InventoryRoles.NcrApprovers.Split(',').Contains("QA"), "QA can sign when the QC people drafted or edited the report");
+
+            // the quality gates of an item, their pending changes, and the second approval: the storekeepers and planners who keep the master data are outside
+            string[] gate = { "PMO", "QC", "QA" };
+            CollectionAssert.AreEquivalent(gate, RolesOf(items, "SaveQualityAsync"));
+            CollectionAssert.AreEquivalent(gate, RolesOf(items, "GetQualityChangesAsync"));
+            CollectionAssert.AreEquivalent(new[] { "QA" }, RolesOf(items, "DecideQualityChangeAsync"));
+            foreach (string storekeeper in new[] { "WAREHOUSE", "WHSUPERVISOR", "PLANNING", "ENGINEERING" })
+            {
+                Assert.IsFalse(RolesOf(items, "SaveQualityAsync").Contains(storekeeper), storekeeper + " must not change a quality gate of an item");
+                Assert.IsFalse(RolesOf(items, "GetQualityChangesAsync").Contains(storekeeper), storekeeper + " must not read the pending gate changes");
+            }
         }
 
         // ------------------------------------------------------------------------------------------ D27 readers
@@ -467,12 +832,72 @@ namespace MsTests
         private static IConfiguration Config(string value) =>
             new ConfigurationBuilder().AddInMemoryCollection(value == null ? new Dictionary<string, string>() : new Dictionary<string, string> { { "Quality:Jobs", value } }).Build();
 
-        // ------------------------------------------------------------------------------------------ D35 opening import
+        // ------------------------------------------------------------------------------------------ D35 opening import, M16 upload stamp
+
+        /// <summary>A stand-in that fails the moment anything touches it: proves that a service refused a request before it read or wrote any data.</summary>
+        public class TouchedProxy : DispatchProxy
+        {
+            protected override object Invoke(MethodInfo targetMethod, object[] args) => throw new InvalidOperationException("touched: " + targetMethod.Name);
+        }
+
+        private sealed class RoleUser : IInventoryUserContext
+        {
+            private readonly string[] _roles;
+            public RoleUser(params string[] roles) { _roles = roles; }
+            public int UserId => 7;
+            public bool IsInRole(string role) => role.Split(',').Any(r => _roles.Contains(r.Trim(), StringComparer.OrdinalIgnoreCase));
+        }
 
         [TestMethod]
-        public void Only_The_Finance_Manager_May_Let_An_Opening_Balance_Come_In_Without_A_Price()
+        public async Task An_Opening_Balance_Without_A_Price_Is_Refused_Before_Any_Data_Is_Read_Unless_The_Finance_Manager_Allows_It()
         {
-            Assert.AreEqual("FINANCEMANAGER", OpeningStockService.OpeningZeroPriceRole);
+            IUnitOfWork uow = DispatchProxy.Create<IUnitOfWork, TouchedProxy>();
+            IInventoryDocumentService documents = DispatchProxy.Create<IInventoryDocumentService, TouchedProxy>();
+            var dto = new OpeningImportDto
+            {
+                AllowZeroPrice = true,
+                Rows = new List<OpeningImportRowDto> { new OpeningImportRowDto { ItemCode = "X-1", WarehouseCode = "W1", Quantity = 5m } },
+            };
+
+            // stock without a price is valued at zero in the books: warehouse, planning, QA and PMO cannot accept that on the finance manager's behalf
+            foreach (string role in new[] { "WAREHOUSE", "WHSUPERVISOR", "PLANNING", "PMO", "QA", "FINANCIAL" })
+            {
+                var service = new OpeningStockService(uow, new RoleUser(role), documents);
+                var refused = await service.ImportAsync(dto, CancellationToken.None);
+                Assert.IsFalse(refused.Success, role + " must not let stock in without a price");
+                StringAssert.Contains(refused.Message, "مدیر مالی");
+            }
+
+            // the finance manager passes the gate: the service goes on to read the items, which the stand-in does not allow (so the call ends in the stand-in's exception)
+            var finance = new OpeningStockService(uow, new RoleUser("FINANCEMANAGER"), documents);
+            bool wentOn = false;
+            try { await finance.ImportAsync(dto, CancellationToken.None); }
+            catch (InvalidOperationException touched) { wentOn = touched.Message.StartsWith("touched", StringComparison.Ordinal); }
+            Assert.IsTrue(wentOn, "the finance manager's request must reach the data");
+
+            // without the knowing consent the role does not matter for the gate: the rows are read and each unpriced row is refused later
+            dto.AllowZeroPrice = false;
+            bool read = false;
+            try { await new OpeningStockService(uow, new RoleUser("WAREHOUSE"), documents).ImportAsync(dto, CancellationToken.None); }
+            catch (InvalidOperationException touched) { read = touched.Message.StartsWith("touched", StringComparison.Ordinal); }
+            Assert.IsTrue(read, "an import that does not ask for zero prices is not stopped by the gate");
+
+            // an empty file is refused first
+            var empty = await new OpeningStockService(uow, new RoleUser("FINANCEMANAGER"), documents).ImportAsync(new OpeningImportDto { AllowZeroPrice = true }, CancellationToken.None);
+            Assert.IsFalse(empty.Success);
+        }
+
+        [TestMethod]
+        public void An_Uploaded_File_Carries_The_Upload_Moment_And_The_Uploader()
+        {
+            DateTimeOffset before = DateTimeOffset.Now;
+            var file = new Entities.Model.Document("evidence/a.pdf", "application/pdf");
+            DateTimeOffset after = DateTimeOffset.Now;
+            Assert.IsTrue(file.RegisterDate >= before && file.RegisterDate <= after, "the upload moment is stamped when the file is created");
+            Assert.IsNull(file.UploadedByUserId, "not known until the uploader is set (files uploaded before the stamp keep null)");
+            Assert.AreEqual(12, file.SetUploader(12).UploadedByUserId);
+            Assert.IsNull(file.SetUploader(null).UploadedByUserId);
+            Assert.IsNull(file.SetUploader(0).UploadedByUserId, "an anonymous or unknown user id is not an uploader");
         }
     }
 }

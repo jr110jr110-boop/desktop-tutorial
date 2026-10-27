@@ -184,6 +184,16 @@ namespace Entities.Model.NasbNiro.Inventory
         public DateTimeOffset? PlanningApprovedAt { get; set; }
         public int? PlanningApprovedByUserId { get; set; }
 
+        /// <summary>
+        /// Opening balance only (R1q D35, review M9): the finance manager let the document come in with lines that have no price (valued at zero in the books). Set when the
+        /// finance manager saves the draft with <c>AllowZeroPrice</c>; any later change by someone else clears it.
+        /// </summary>
+        public DateTimeOffset? ZeroPriceApprovedAt { get; set; }
+        public int? ZeroPriceApprovedByUserId { get; set; }
+
+        /// <summary>The scrap NCR (approved or executed, decision scrap) that a write-off of serial pieces by an adjustment is made against (review M10).</summary>
+        public int? WriteOffNcrId { get; set; }
+
         public ICollection<InventoryDocumentLine> Lines { get; set; }
 
         [Timestamp]

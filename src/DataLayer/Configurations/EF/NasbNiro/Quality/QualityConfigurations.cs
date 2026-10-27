@@ -56,6 +56,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.HasIndex(x => x.Status);
                 b.Property(x => x.ClientApprovalReference).HasMaxLength(Title);
                 b.Property(x => x.Note).HasMaxLength(Text);
+                b.Property(x => x.EditorUserIds).HasMaxLength(Text);
                 b.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Template).WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
@@ -80,6 +81,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.StatusNote).HasMaxLength(Text);
                 b.Property(x => x.NotApplicableReference).HasMaxLength(Title);
                 b.Property(x => x.EvidenceNote).HasMaxLength(Text);
+                b.HasIndex(x => x.EvidenceDocumentId);
                 b.HasIndex(x => new { x.ItpId, x.Status });
                 b.HasOne(x => x.Itp).WithMany(x => x.Activities).HasForeignKey(x => x.ItpId).OnDelete(DeleteBehavior.Cascade);
             });
@@ -206,6 +208,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.Accuracy).HasMaxLength(Name);
                 b.Property(x => x.OutOfServiceReason).HasMaxLength(Text);
                 b.Property(x => x.CalibrationWaiverReason).HasMaxLength(Text);
+                b.Property(x => x.CalibrationWaiverRequestReason).HasMaxLength(Text);
                 b.Property(x => x.Note).HasMaxLength(Text);
                 b.HasIndex(x => x.NextDue);
             });
@@ -349,6 +352,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.EffectivenessResult).HasMaxLength(LongText);
                 b.Property(x => x.CloseNote).HasMaxLength(Text);
                 b.Property(x => x.CancelReason).HasMaxLength(Text);
+                b.Property(x => x.EditorUserIds).HasMaxLength(Text);
                 b.Property(x => x.Iteration).HasDefaultValue(1);
             });
             builder.Entity<CapaAction>(b =>
@@ -475,6 +479,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.ToTable("QaReviewDecisions");
                 b.Property(x => x.Text).HasMaxLength(LongText).IsRequired();
                 b.Property(x => x.DoneNote).HasMaxLength(Text);
+                b.Property(x => x.DoneRequestNote).HasMaxLength(Text);
                 b.HasOne(x => x.Review).WithMany(x => x.Decisions).HasForeignKey(x => x.ReviewId).OnDelete(DeleteBehavior.Cascade);
                 b.HasOne(x => x.Capa).WithMany().HasForeignKey(x => x.CapaId).OnDelete(DeleteBehavior.Restrict);
             });

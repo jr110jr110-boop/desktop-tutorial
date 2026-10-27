@@ -161,6 +161,7 @@ namespace Services.NasbNiro.Quality
             List<CalibrationEvent> events = await _uow.Set<CalibrationEvent>().Where(x => x.EquipmentId == id && !x.Deleted).OrderByDescending(x => x.EventDate).ThenByDescending(x => x.Id).ToListAsync(cancellationToken);
             var cases = await _uow.Set<OutOfToleranceCase>().Where(c => c.EquipmentId == id && !c.Deleted).Select(c => new { c.Id, c.Number, c.CalibrationEventId }).ToListAsync(cancellationToken);
             EquipmentListDto l = ToList(e, DateTime.Today, warn);
+            Dictionary<int, string> requesters = await InventoryUsers.GetNamesAsync(_uow, new[] { e.CalibrationWaiverRequestedByUserId }, cancellationToken);
             return ResponseDtoHelper.Ok(new EquipmentDto
             {
                 Id = l.Id, Code = l.Code, Name = l.Name, Type = l.Type, SerialNumber = l.SerialNumber, Location = l.Location, RequiresCalibration = l.RequiresCalibration,
@@ -168,6 +169,8 @@ namespace Services.NasbNiro.Quality
                 Maker = e.Maker, Model = e.Model, OwnerUnit = e.OwnerUnit, Range = e.Range, Accuracy = e.Accuracy, OutOfServiceReason = e.OutOfServiceReason,
                 CorrectionTableDocumentId = e.CorrectionTableDocumentId, Note = e.Note, RowVersion = e.RowVersion == null ? null : Convert.ToBase64String(e.RowVersion),
                 CalibrationWaiverReason = e.CalibrationWaiverReason, CalibrationWaivedAt = e.CalibrationWaivedAt,
+                WaiverPending = WaiverPending(e), CalibrationWaiverRequestReason = e.CalibrationWaiverRequestReason, CalibrationWaiverRequestedAt = e.CalibrationWaiverRequestedAt,
+                CalibrationWaiverRequestedByName = requesters.Name(e.CalibrationWaiverRequestedByUserId),
                 Events = events.Select(x => new CalibrationEventDto
                 {
                     Id = x.Id, EquipmentId = x.EquipmentId, EquipmentCode = e.Code, EventDate = x.EventDate, LabName = x.LabName, LabAccredited = x.LabAccredited,
@@ -178,14 +181,11 @@ namespace Services.NasbNiro.Quality
             });
         }
 
-        private string WaiverProblem(SaveEquipmentDto dto, bool waives)
-        {
-            if (!waives) return null;
-            if (!_user.IsInRole(QualityRoles.QaManager))
-                return "اعلام اینکه تجهیز نیاز به کالیبراسیون ندارد تصمیم مدیر QA است و با ثبت دلیل انجام می‌شود؛ QC نمی‌تواند آن را خاموش کند.";
-            if (Clean(dto.CalibrationWaiverReason) == null) return "دلیل بی‌نیازی تجهیز به کالیبراسیون را بنویسید.";
-            return null;
-        }
+        /// <summary>A request of QA to waive the calibration that nobody has decided yet.</summary>
+        private static bool WaiverPending(MeasuringEquipment e) => e.RequiresCalibration && e.CalibrationWaiverRequestedAt.HasValue;
+
+        private const string WaiverIsTwoStep =
+            "اعلام اینکه تجهیز نیاز به کالیبراسیون ندارد دو مرحله دارد: مدیر QA با ثبت دلیل «درخواست بی‌نیازی» می‌دهد و یک کاربر دیگر از QA یا QC آن را تایید می‌کند؛ این کار هنگام ثبت یا ویرایش تجهیز انجام نمی‌شود.";
 
         public async Task<ResponseDto<EquipmentDto>> SaveEquipmentAsync(SaveEquipmentDto dto, CancellationToken cancellationToken)
         {
@@ -195,16 +195,13 @@ namespace Services.NasbNiro.Quality
             await EnsureIntervalsAsync(cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
             MeasuringEquipment e;
-            // R1q D14: an instrument that needs no calibration is usable even when it was never calibrated, so declaring that (when registering it or later)
-            // is a decision of the QA manager with a reason
-            bool waives = !dto.RequiresCalibration;
+            // R1q D14 and review M14: an instrument that needs no calibration is usable even when it was never calibrated, so declaring that is a two-step decision
+            // (request by QA with a reason, approval by another QA or QC user) made on the instrument after it exists, never in the call that registers or edits it
             if (dto.Id.HasValue)
             {
                 e = await _uow.Set<MeasuringEquipment>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (e == null) return QualityText.NotFound<EquipmentDto>("تجهیز اندازه‌گیری پیدا نشد.");
-                waives = !dto.RequiresCalibration && e.RequiresCalibration;
-                string waiverProblem = WaiverProblem(dto, waives);
-                if (waiverProblem != null) return Bad<EquipmentDto>(waiverProblem);
+                if (!dto.RequiresCalibration && e.RequiresCalibration) return Bad<EquipmentDto>(WaiverIsTwoStep);
                 if (Clean(dto.RowVersion) != null)
                 {
                     try { _uow.Entry(e).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); }
@@ -213,8 +210,7 @@ namespace Services.NasbNiro.Quality
             }
             else
             {
-                string waiverProblem = WaiverProblem(dto, waives);
-                if (waiverProblem != null) return Bad<EquipmentDto>(waiverProblem);
+                if (!dto.RequiresCalibration) return Bad<EquipmentDto>(WaiverIsTwoStep);
                 int interval = dto.IntervalMonths ?? await _uow.Set<CalibrationIntervalDefault>().Where(i => i.EquipmentType == dto.Type).Select(i => i.Months).FirstOrDefaultAsync(cancellationToken);
                 int number = await InventoryNumbers.NextAsync(_uow, QualityNumbers.Equipment, 0, cancellationToken);
                 e = new MeasuringEquipment
@@ -224,14 +220,11 @@ namespace Services.NasbNiro.Quality
                 };
                 _uow.Set<MeasuringEquipment>().Add(e);
             }
-            // the reason, the person and the date are kept on the instrument and in the audit log
-            if (waives)
-            {
-                e.CalibrationWaiverReason = Clean(dto.CalibrationWaiverReason); e.CalibrationWaivedByUserId = Me; e.CalibrationWaivedAt = now;
-            }
-            else if (dto.RequiresCalibration)
+            // calibration required again (strengthening): the waiver and any request leave the instrument; the audit log keeps them
+            if (dto.RequiresCalibration)
             {
                 e.CalibrationWaiverReason = null; e.CalibrationWaivedByUserId = null; e.CalibrationWaivedAt = null;
+                e.CalibrationWaiverRequestReason = null; e.CalibrationWaiverRequestedByUserId = null; e.CalibrationWaiverRequestedAt = null;
             }
             e.Name = Clean(dto.Name); e.Type = dto.Type; e.Maker = Clean(dto.Maker); e.Model = Clean(dto.Model); e.SerialNumber = Clean(dto.SerialNumber);
             e.OwnerUnit = Clean(dto.OwnerUnit); e.Location = Clean(dto.Location); e.Range = Clean(dto.Range); e.Accuracy = Clean(dto.Accuracy);
@@ -253,11 +246,33 @@ namespace Services.NasbNiro.Quality
         public async Task<ResponseDto<EquipmentDto>> EquipmentActionAsync(EquipmentActionDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || Clean(dto.Action) == null) return Bad<EquipmentDto>(QualityText.InvalidData);
-            if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<EquipmentDto>(QualityText.NotAllowed);
+            string action = dto.Action.Trim().ToLowerInvariant();
+            bool waiverStep = action == "request-waiver" || action == "approve-waiver" || action == "reject-waiver";
+            if (!_user.IsInRole(waiverStep ? QualityRoles.Inspectors + "," + QualityRoles.QaManager : QualityRoles.Inspectors)) return Bad<EquipmentDto>(QualityText.NotAllowed);
+            if (Clean(dto.Reason) != null && Clean(dto.Reason).Length > 1000) return Bad<EquipmentDto>("متن دلیل بیش از ۱۰۰۰ نویسه است.");
             MeasuringEquipment e = await _uow.Set<MeasuringEquipment>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
             if (e == null) return QualityText.NotFound<EquipmentDto>("تجهیز اندازه‌گیری پیدا نشد.");
-            switch (dto.Action.Trim().ToLowerInvariant())
+            switch (action)
             {
+                case "request-waiver":
+                    // only the QA manager asks; the reason is written down and the request waits for a second person
+                    if (!_user.IsInRole(QualityRoles.QaManager)) return Bad<EquipmentDto>("درخواست بی‌نیازی تجهیز به کالیبراسیون تصمیم مدیر QA است.");
+                    if (!e.RequiresCalibration) return Bad<EquipmentDto>("این تجهیز هم‌اکنون نیاز به کالیبراسیون ندارد.");
+                    if (WaiverPending(e)) return Bad<EquipmentDto>("درخواست بی‌نیازی این تجهیز در انتظار تایید است.");
+                    if (Clean(dto.Reason) == null) return Bad<EquipmentDto>("دلیل بی‌نیازی تجهیز به کالیبراسیون را بنویسید.");
+                    e.CalibrationWaiverRequestReason = Clean(dto.Reason); e.CalibrationWaiverRequestedByUserId = Me; e.CalibrationWaiverRequestedAt = DateTimeOffset.Now;
+                    break;
+                case "approve-waiver":
+                    if (!WaiverPending(e)) return Bad<EquipmentDto>("درخواست بی‌نیازی در انتظار تایید برای این تجهیز نیست.");
+                    if (e.CalibrationWaiverRequestedByUserId == Me) return Bad<EquipmentDto>("درخواست‌کننده نمی‌تواند درخواست خودش را تایید کند؛ " + QualityText.SameUser);
+                    e.RequiresCalibration = false; e.CalibrationWaiverReason = e.CalibrationWaiverRequestReason;
+                    e.CalibrationWaivedByUserId = Me; e.CalibrationWaivedAt = DateTimeOffset.Now;
+                    if (e.Status != EquipmentStatus.OutOfService) e.Status = EquipmentStatus.NotRequired;
+                    break;
+                case "reject-waiver":
+                    if (!WaiverPending(e)) return Bad<EquipmentDto>("درخواست بی‌نیازی در انتظار تایید برای این تجهیز نیست.");
+                    e.CalibrationWaiverRequestReason = null; e.CalibrationWaiverRequestedByUserId = null; e.CalibrationWaiverRequestedAt = null;
+                    break;
                 case "out-of-service":
                     if (Clean(dto.Reason) == null) return Bad<EquipmentDto>("دلیل خارج‌کردن از رده را بنویسید.");
                     e.Status = EquipmentStatus.OutOfService; e.OutOfServiceReason = Clean(dto.Reason);
@@ -351,10 +366,17 @@ namespace Services.NasbNiro.Quality
             var reports = await used.Select(x => new { x.ReportId, x.Report.Number, x.Report.ReportDate }).Distinct().ToListAsync(cancellationToken);
             foreach (var r in reports)
                 kase.Items.Add(new OutOfToleranceItem { SourceKind = "TestReport", SourceId = r.ReportId, SourceNumber = r.Number, SourceDate = r.ReportDate, Assessment = OotAssessment.Pending });
-            // R1q D16: incoming inspections now record the instruments used; they are part of the impact too
-            var inspections = await _uow.Set<QcInspection>().Where(q => !q.Deleted && q.EquipmentIds != null && q.InspectedAt != null)
-                .Select(q => new { q.Id, q.Number, q.EquipmentIds, q.InspectedAt }).ToListAsync(cancellationToken);
+            // R1q D16: incoming inspections now record the instruments used; they are part of the impact too. The database narrows them to the instrument and the period
+            // (a day of leeway each side for the time zone); the exact day and the exact id (the list is comma separated: "3" is not "13") are then judged here (review L23)
             string mark = equipmentId.ToString();
+            DateTimeOffset upperBound = new DateTimeOffset(to.Date.AddDays(2));
+            IQueryable<QcInspection> inPeriod = _uow.Set<QcInspection>().Where(q => !q.Deleted && q.EquipmentIds != null && q.EquipmentIds.Contains(mark) && q.InspectedAt != null && q.InspectedAt <= upperBound);
+            if (from.HasValue)
+            {
+                DateTimeOffset lowerBound = new DateTimeOffset(from.Value.Date.AddDays(-1));
+                inPeriod = inPeriod.Where(q => q.InspectedAt >= lowerBound);
+            }
+            var inspections = await inPeriod.Select(q => new { q.Id, q.Number, q.EquipmentIds, q.InspectedAt }).ToListAsync(cancellationToken);
             foreach (var q in inspections)
             {
                 DateTime day = q.InspectedAt.Value.Date;
@@ -502,12 +524,15 @@ namespace Services.NasbNiro.Quality
         {
             if (item.Case.Items.Any(i => i.SourceKind == kind && i.SourceId == recordId))
                 return "این سند خودش از اسناد پرونده است (با همان تجهیز انجام شده)، بازرسی مجدد نیست.";
+            // one document proves one re-inspection: a document already linked to another row of any case is not used twice (review H3)
+            if (await _uow.Set<OutOfToleranceItem>().AnyAsync(i => i.Id != item.Id && i.ReinspectionKind == kind && i.ReinspectionRecordId == recordId, cancellationToken))
+                return "این سند قبلاً برای بازرسی مجدد سند دیگری ثبت شده است؛ هر بازرسی مجدد فقط یک سند را پوشش می‌دهد.";
             // what the original document was about
-            int? workOrderId = null; int? itemId = null; string serial = null;
+            int? workOrderId = null; int? itemId = null; string serial = null; int? lotId = null; int? receiptId = null;
             if (item.SourceKind == "QcRecord")
             {
-                var o = await _uow.Set<QcRecord>().Where(x => x.Id == item.SourceId).Select(x => new { x.WorkOrderId, x.ItemId, x.SerialNumber }).FirstOrDefaultAsync(cancellationToken);
-                workOrderId = o?.WorkOrderId; itemId = o?.ItemId; serial = o?.SerialNumber;
+                var o = await _uow.Set<QcRecord>().Where(x => x.Id == item.SourceId).Select(x => new { x.WorkOrderId, x.ItemId, x.SerialNumber, x.LotId }).FirstOrDefaultAsync(cancellationToken);
+                workOrderId = o?.WorkOrderId; itemId = o?.ItemId; serial = o?.SerialNumber; lotId = o?.LotId;
             }
             else if (item.SourceKind == "TestReport")
             {
@@ -516,7 +541,8 @@ namespace Services.NasbNiro.Quality
             }
             else
             {
-                itemId = await _uow.Set<QcInspection>().Where(x => x.Id == item.SourceId).Select(x => (int?)x.ItemId).FirstOrDefaultAsync(cancellationToken);
+                var o = await _uow.Set<QcInspection>().Where(x => x.Id == item.SourceId).Select(x => new { x.ItemId, x.LotId, x.ReceiptDocumentId }).FirstOrDefaultAsync(cancellationToken);
+                itemId = o?.ItemId; lotId = o?.LotId; receiptId = o?.ReceiptDocumentId;
             }
             DateTime since = item.Case.ToDate.Date;
             DateTimeOffset created = item.Case.CreateDate;
@@ -528,6 +554,7 @@ namespace Services.NasbNiro.Quality
                         if (r == null) return "گزارش بازرسی مجدد پیدا نشد.";
                         if (r.Result != QcResult.Accept) return "بازرسی مجدد باید با نتیجه «قبول» ثبت شده باشد.";
                         if (r.RecordDate.Date < since || r.CreateDate < created) return "بازرسی مجدد باید بعد از کالیبراسیونی انجام شده باشد که تجهیز را خارج از تلرانس نشان داد.";
+                        if (lotId.HasValue && r.LotId != lotId) return "بچ بازرسی مجدد با بچ سند اصلی نمی‌خواند.";
                         return Matches(workOrderId, itemId, serial, r.WorkOrderId, r.ItemId, r.SerialNumber);
                     }
                 case NcrReinspection.Report:
@@ -543,7 +570,11 @@ namespace Services.NasbNiro.Quality
                         QcInspection r = await _uow.Set<QcInspection>().FirstOrDefaultAsync(x => x.Id == recordId && !x.Deleted, cancellationToken);
                         if (r == null) return "بازرسی مجدد پیدا نشد.";
                         if (r.Status != InspectionStatus.Done || r.AcceptedQuantity <= 0) return "بازرسی مجدد هنوز با نتیجه «قبول» ثبت نشده است.";
-                        if (r.InspectedAt.HasValue && r.InspectedAt.Value < created) return "بازرسی مجدد باید بعد از کالیبراسیونی انجام شده باشد که تجهیز را خارج از تلرانس نشان داد.";
+                        if (!r.InspectedAt.HasValue || r.InspectedAt.Value < created) return "بازرسی مجدد باید بعد از کالیبراسیونی انجام شده باشد که تجهیز را خارج از تلرانس نشان داد.";
+                        // an incoming inspection is about a lot or a receipt: it must be the same lot, or (for a document that names no lot) the same receipt
+                        if (lotId.HasValue) { if (r.LotId != lotId) return "بچ بازرسی مجدد با بچ سند اصلی نمی‌خواند."; }
+                        else if (receiptId.HasValue) { if (r.ReceiptDocumentId != receiptId) return "رسید بازرسی مجدد با رسید سند اصلی نمی‌خواند."; }
+                        else return "بازرسی ورودی فقط برای سندی که بچ یا رسید دارد بازرسی مجدد است.";
                         return Matches(null, itemId, null, null, r.ItemId, null);
                     }
                 default:

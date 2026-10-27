@@ -38,6 +38,15 @@ namespace Entities.Model.NasbNiro.Quality
         public int? CalibrationWaivedByUserId { get; set; }
         public DateTimeOffset? CalibrationWaivedAt { get; set; }
 
+        /// <summary>
+        /// The waiver is two steps (review M14): QA requests it with a reason, another QA or QC user approves it. A request is pending while the instrument still requires
+        /// calibration and <see cref="CalibrationWaiverRequestedAt"/> is set; the approval copies the reason to <see cref="CalibrationWaiverReason"/>.
+        /// </summary>
+        public string CalibrationWaiverRequestReason { get; set; }
+
+        public int? CalibrationWaiverRequestedByUserId { get; set; }
+        public DateTimeOffset? CalibrationWaiverRequestedAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }

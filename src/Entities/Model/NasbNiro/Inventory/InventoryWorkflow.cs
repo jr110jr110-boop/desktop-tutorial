@@ -69,13 +69,17 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>Measuring instruments used by the inspector, ids separated by commas ("3,5"); each had to be usable on the day (R1q D16).</summary>
         public string EquipmentIds { get; set; }
 
+        /// <summary>The measured values of the inspection as JSON (characteristic, nominal, tolerances, value, unit, instrument, pass): the inspection is "measured" when this is not empty (review M12).</summary>
+        public string MeasurementsJson { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
 
     /// <summary>
-    /// A request to relax a quality gate of an item (incoming inspection off, a lower certificate type, a longer shelf life) while approved purchase orders
-    /// for the item are still open: a second person (QA) must approve it before it applies (R1q D11, provisional).
+    /// A request to relax a quality gate of an item (incoming inspection off, a lower certificate type, a longer shelf life): a second person (QA) must approve it before it
+    /// applies, whether purchase orders of the item are open or not (R1q D11, review M8). A stricter control applies at once and is kept here as an approved row.
+    /// The Old* columns hold the gates the item had when the request was made: the approval is refused when they have changed since.
     /// </summary>
     public class ItemQualityChange : BaseEntity
     {
@@ -85,6 +89,12 @@ namespace Entities.Model.NasbNiro.Inventory
         public bool RequiresIncomingInspection { get; set; }
         public CertificateType? RequiredCertificateType { get; set; }
         public int? ShelfLifeDays { get; set; }
+
+        /// <summary>The gates of the item when the request was made (review M8): a decision is refused once the item no longer has these values.</summary>
+        public bool OldRequiresIncomingInspection { get; set; }
+
+        public CertificateType? OldRequiredCertificateType { get; set; }
+        public int? OldShelfLifeDays { get; set; }
 
         public string Reason { get; set; }
 
@@ -305,6 +315,10 @@ namespace Entities.Model.NasbNiro.Inventory
         public int? WarehouseApprovedByUserId { get; set; }
         public DateTimeOffset? PlanningApprovedAt { get; set; }
         public int? PlanningApprovedByUserId { get; set; }
+
+        /// <summary>A count in a quarantine, scrap or contractor warehouse also needs a QC or QA user who did not count or approve it (R1q D31, review M10).</summary>
+        public DateTimeOffset? QualityApprovedAt { get; set; }
+        public int? QualityApprovedByUserId { get; set; }
         public DateTimeOffset? PostedAt { get; set; }
         public int? PostedByUserId { get; set; }
 

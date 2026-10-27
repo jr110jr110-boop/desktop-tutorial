@@ -128,6 +128,13 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string DoneByName { get; set; }
         public string DoneNote { get; set; }
 
+        /// <summary>The responsible person reported the work done and a reviewer (QA or PMO, not he himself) has not confirmed it yet; the status is still Open.</summary>
+        public bool DoneRequested { get; set; }
+
+        public DateTimeOffset? DoneRequestedAt { get; set; }
+        public string DoneRequestedByName { get; set; }
+        public string DoneRequestNote { get; set; }
+
         /// <summary>Open and past its due date.</summary>
         public bool Overdue { get; set; }
     }
@@ -189,10 +196,13 @@ namespace ViewModels.NasbNiro.QualityDtos
     {
         public int DecisionId { get; set; }
 
-        /// <summary>done, cancel, reopen</summary>
+        /// <summary>
+        /// done: the responsible person reports the work done (the decision stays open and a QA or PMO user other than him confirms it with a second "done"; a reviewer who is not
+        /// the responsible person completes it at once). return: a reviewer sends a reported decision back to its owner. cancel (QA, PMO, CEO; never the owner), reopen.
+        /// </summary>
         public string Action { get; set; }
 
-        /// <summary>done: what was done (or the evidence reference); cancel and reopen: the reason.</summary>
+        /// <summary>done: what was done (or the evidence reference); return, cancel and reopen: the reason. At most 1000 characters.</summary>
         public string Note { get; set; }
     }
 

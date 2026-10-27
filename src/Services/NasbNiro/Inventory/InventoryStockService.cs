@@ -265,13 +265,12 @@ namespace Services.NasbNiro.Inventory
                 b.Lot.LotNumber, b.Lot.HeatNumber, Expiry = b.Lot.ExpiryDate.Value, Warehouse = b.Warehouse.Code, Location = b.Location.Code, b.Quantity,
             }).ToListAsync(cancellationToken);
 
-            // a lot allowed for use after its expiry by an approved concession NCR on that lot is marked, not hidden
+            // a lot allowed for use after its expiry by a valid concession NCR on that lot (all signatures, the permit after the QC signature, approved on or after the expiry date)
+            // is marked, not hidden: the same rule the documents apply (review M13)
             List<int> lotIds = rows.Select(r => r.LotId).Distinct().ToList();
-            var concessions = (await _uow.Set<NonConformance>()
-                .Where(n => !n.Deleted && n.LotId != null && lotIds.Contains(n.LotId.Value) && n.Disposition == NcrDisposition.Concession && n.ConcessionApprovedAt != null &&
-                            (n.Status == NcrStatus.Approved || n.Status == NcrStatus.Executed || n.Status == NcrStatus.Closed))
-                .Select(n => new { LotId = n.LotId.Value, n.Number }).ToListAsync(cancellationToken))
-                .GroupBy(x => x.LotId).ToDictionary(g => g.Key, g => g.OrderBy(x => x.Number).First().Number);
+            var concessionRows = (await Quality.ConcessionRules.Valid(_uow.Set<NonConformance>().Where(n => n.LotId != null && lotIds.Contains(n.LotId.Value)), true)
+                .Select(n => new { LotId = n.LotId.Value, n.Number, At = n.ConcessionApprovedAt }).ToListAsync(cancellationToken))
+                .Where(x => x.At.HasValue).ToList();
 
             List<LotExpiryDto> list = rows.GroupBy(r => r.LotId).Select(g =>
             {
@@ -283,7 +282,8 @@ namespace Services.NasbNiro.Inventory
                     DaysLeft = (int)(first.Expiry.Date - today).TotalDays, Expired = first.Expiry.Date < today,
                     OnHand = g.Sum(x => x.Quantity),
                     Locations = string.Join("، ", g.OrderBy(x => x.Warehouse).ThenBy(x => x.Location).Select(x => $"{x.Warehouse}{(x.Location != null ? "/" + x.Location : string.Empty)} ({x.Quantity.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)})")),
-                    ConcessionNcrNumber = concessions.TryGetValue(first.LotId, out string number) ? number : null,
+                    ConcessionNcrNumber = concessionRows.Where(c => c.LotId == first.LotId && Quality.LotExpiryRules.ConcessionCovers(first.Expiry, c.At.Value))
+                        .OrderBy(c => c.Number).Select(c => c.Number).FirstOrDefault(),
                 };
             }).OrderBy(x => x.ExpiryDate).ThenBy(x => x.ItemCode).ThenBy(x => x.LotNumber).ToList();
             return ResponseDtoHelper.Ok(await PagedList<LotExpiryDto>.CreateAsync(list, query.PageNumber, query.PageSize, cancellationToken));

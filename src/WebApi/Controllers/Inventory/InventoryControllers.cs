@@ -61,10 +61,11 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SaveQualityAsync([FromBody] SaveItemQualityDto dto, CancellationToken ct) => Ok(await _service.SaveItemQualityAsync(dto, ct));
 
         [HttpGet("quality-changes")]
+        [Authorize(Roles = InventoryRoles.ItemQuality)]
         public async Task<IActionResult> GetQualityChangesAsync([FromQuery] ItemQualityChangeQuery query, CancellationToken ct) =>
             Ok((await _service.GetQualityChangesAsync(query, ct)).ToPaginatedResultSafe());
 
-        /// <summary>The second approval (QA manager, never the person who asked) of a quality-gate change on an item with open purchase orders.</summary>
+        /// <summary>The second approval (QA manager, never the person who asked) of a request to reduce a quality gate of an item; refused when the item's gates changed since the request.</summary>
         [HttpPost("quality-changes/decide")]
         [Authorize(Roles = "QA")]
         public async Task<IActionResult> DecideQualityChangeAsync([FromBody] DecideItemQualityChangeDto dto, CancellationToken ct) => Ok(await _service.DecideQualityChangeAsync(dto, ct));
@@ -284,9 +285,9 @@ namespace WebApi.Controllers
         [Authorize(Roles = InventoryRoles.Documents)]
         public async Task<IActionResult> LinesAsync([FromBody] SaveCountLinesDto dto, CancellationToken ct) => Ok(await _service.SaveCountLinesAsync(dto, ct));
 
-        /// <summary>submit, approve-warehouse, approve-planning, post, cancel; the role is checked inside.</summary>
+        /// <summary>submit, approve-warehouse, approve-planning, approve-quality (QC or QA, quarantine/scrap/contractor warehouses), post, cancel; the role is checked inside.</summary>
         [HttpPost("action")]
-        [Authorize(Roles = InventoryRoles.Counts)]
+        [Authorize(Roles = InventoryRoles.Counts + ",QC,QA")]
         public async Task<IActionResult> ActionAsync([FromBody] StockCountActionDto dto, CancellationToken ct) => Ok(await _service.CountActionAsync(dto, ct));
     }
 

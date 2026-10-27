@@ -467,7 +467,7 @@ namespace Services.NasbNiro.Quality
             if (dto == null || Clean(dto.JointNo) == null) return Bad<WeldLogDto>("شماره اتصال جوش را وارد کنید.");
             if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<WeldLogDto>(QualityText.NotAllowed + " (گزارش جوشکاری را بازرس QC ثبت می‌کند)");
             DateTime date = (dto.WeldDate ?? DateTime.Today).Date;
-            string dateProblem = await QualityChecks.RecordDateAsync(_uow, date, "جوشکاری", cancellationToken);
+            string dateProblem = await QualityChecks.RecordDateAsync(_uow, date, "جوشکاری", cancellationToken, allowTomorrow: false);
             if (dateProblem != null) return Bad<WeldLogDto>(dateProblem);
             if (!Enum.IsDefined(typeof(VtResult), dto.Vt)) return Bad<WeldLogDto>(QualityText.InvalidData);
             if (!await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId && !w.Deleted, cancellationToken)) return Bad<WeldLogDto>("دستور کار پیدا نشد.");

@@ -44,7 +44,8 @@ namespace Services.NasbNiro.Quality
             {
                 using IServiceScope scope = _scopes.CreateScope();
                 var result = await scope.ServiceProvider.GetRequiredService<ICapaService>().EscalateAsync(cancellationToken);
-                _logger?.LogInformation("Quality job: {Escalated} CAPA escalated to QA, {Ceo} to the CEO", result.Escalated, result.CeoNotified);
+                if (result.FirstRun) _logger?.LogInformation("Quality job: first run, the level of {Recorded} late CAPA(s) was recorded without telling anybody", result.Recorded);
+                else _logger?.LogInformation("Quality job: {Escalated} CAPA escalated to QA, {Ceo} to the CEO, {Skipped} left for the next run", result.Escalated, result.CeoNotified, result.Skipped);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { _logger?.LogWarning(ex, "Quality job (CAPA escalation) failed; it will run again tomorrow."); }
