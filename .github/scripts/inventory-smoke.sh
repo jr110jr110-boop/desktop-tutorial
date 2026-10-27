@@ -6068,8 +6068,12 @@ call POST Contracts '{"code":"CD-CT-01","title":"قرارداد آزمون جز�
 CDCT=$(val .data.id); CDCTT=$(val .data.title)
 cdv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"درآمد پروژه‌ی آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"10301\",\"debit\":90000000,\"detail1Code\":\"${FXCUS:-}\"},{\"accountCode\":\"60101\",\"credit\":90000000,\"contractId\":$CDCT}]}"
 cdv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"هزینه‌ی پروژه‌ی آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"70104\",\"debit\":35000000,\"contractId\":$CDCT},{\"accountCode\":\"10101\",\"credit\":35000000}]}"
-# a supplier balance of this year (the credit of the 2024 voucher of the finance section is the other one): it is overdue (older than 30 days) from the second Persian month of the year on
-cdv "{\"date\":\"${CDYS}T00:00:00\",\"description\":\"خرید اعتباری آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"70101\",\"debit\":80000000},{\"accountCode\":\"30101\",\"credit\":80000000,\"detail1Code\":\"${FXSUP:-}\"}]}"
+# an overdue supplier balance: a supplier detail of its own (the first supplier detail of the finance section has payments against it this year, and the ageing matches payments FIFO against
+# the oldest credits, so a credit on it would be eaten), credited 45 days ago, so it sits in the 31-60 bucket of the ledger ageing (overdue) with nothing paid against it
+# (the ageing counts the vouchers of the current fiscal year only, so in the first 45 days of a Persian year the credit is dated the first day of the year and is not overdue yet; the checks below know that)
+CDOD=$(dd -45); CDOVERDUE=1; if [ "$CDOD" \< "$CDYS" ]; then CDOD=$CDYS; CDOVERDUE=0; fi
+as "$FM_TOKEN" POST $FG/details '{"code":"CDSUP-1","title":"تأمین‌کننده‌ی آزمون جزئیات مدیرعامل","type":2,"isActive":true}'; check "ceo drills setup: a supplier detail of its own for the overdue balance" '.success and .data.code == "CDSUP-1"'
+cdv "{\"date\":\"${CDOD}T00:00:00\",\"description\":\"خرید اعتباری آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"70101\",\"debit\":80000000},{\"accountCode\":\"30101\",\"credit\":80000000,\"detail1Code\":\"CDSUP-1\"}]}"
 
 # --- fin.cash_accounts: the accounts of the treasury; the totals are the cash position and the finance dashboard
 as "$CEO_TOKEN" GET finance/dashboard
@@ -6114,10 +6118,15 @@ cdcheck "ceo drill fin.payables_by_supplier: the totals are the sums of the list
 
 # --- fin.payables_overdue: the payables ageing of the general ledger as of today (the notes schedule of the financial statements), one row per supplier; overdue = the three buckets over 30 days, the headline figure
 as "$FM_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"
-CDPA=$(cdx '.data.payables|{n:length,overdue:(map(.days31To60 + .days61To90 + .over90)|add // 0),total:(map(.total)|add // 0),max:(map(.days31To60 + .days61To90 + .over90)|max // 0),rows:(map("\(.name)|\(.current|n)|\(.days31To60|n)|\(.days61To90|n)|\(.over90|n)|\((.days31To60 + .days61To90 + .over90)|n)|\(.total|n)")|sort)}')
+# the drill lists the suppliers whose balance is overdue (the KPI's function keeps only those); suppliers with a current balance only are not in it
+CDPA=$(cdx '.data.payables|map(select((.days31To60 + .days61To90 + .over90) > 0))|{n:length,overdue:(map(.days31To60 + .days61To90 + .over90)|add // 0),total:(map(.total)|add // 0),max:(map(.days31To60 + .days61To90 + .over90)|max // 0),rows:(map("\(.name)|\(.current|n)|\(.days31To60|n)|\(.days61To90|n)|\(.over90|n)|\((.days31To60 + .days61To90 + .over90)|n)|\(.total|n)")|sort)}')
 cdrill fin.payables_overdue "top=200"
-cdnonempty "ceo drill fin.payables_overdue: the ledger ageing of the scenario has a supplier (the credits of the 2024 voucher and of the voucher of this section)" "$(jq -r '.n' <<<"$CDPA")"
-cdnonempty "ceo drill fin.payables_overdue: ... and the supplier balance is overdue (older than 30 days)" "$(jq -r '.overdue' <<<"$CDPA")"
+if [ "$CDOVERDUE" = 1 ]; then
+  cdnonempty "ceo drill fin.payables_overdue: the ledger ageing of the scenario has a supplier with an overdue balance (the 80,000,000 credited 45 days ago to CDSUP-1)" "$(jq -r '.n' <<<"$CDPA")"
+  cdcheck "ceo drill fin.payables_overdue: the setup supplier is in the drill with its 80,000,000 in the 31-60 bucket, nothing current and nothing older" '.success and ([.data.rows[]|select(.supplier == "تأمین‌کننده‌ی آزمون جزئیات مدیرعامل")|[.current,.days31To60,.days61To90,.over90,.overdue,.total]]) == [[0,80000000,0,0,80000000,80000000]]'
+else
+  cdcheck "ceo drill fin.payables_overdue: in the first 45 days of the year the setup credit is current, so the setup supplier is not in the overdue list" '.success and ([.data.rows[]|select(.supplier == "تأمین‌کننده‌ی آزمون جزئیات مدیرعامل")]|length) == 0'
+fi
 cdcheck "ceo drill fin.payables_overdue: one row per supplier of the ledger payables ageing as of today (current, 31-60, 61-90, over 90, overdue, total), as the notes schedule of the financial statements" '.success and .data.totalCount == ('"$CDPA"').n and ([.data.rows[]|"\(.supplier)|\(.current|n)|\(.days31To60|n)|\(.days61To90|n)|\(.over90|n)|\(.overdue|n)|\(.total|n)"]|sort) == ('"$CDPA"').rows'
 cdcheck "ceo drill fin.payables_overdue: the overdue total is the sum of the buckets over 30 days and the headline payablesOverdue of the overview; the biggest overdue first; the link is the financial statements page" '.success and .data.totals.overdue == ('"$CDPA"').overdue and .data.totals.total == ('"$CDPA"').total and .data.rows[0].overdue == ('"$CDPA"').max and .data.rows[0].link == "/fn/financial-statements"'
 as "$CEO_TOKEN" GET "$CD/overview?refresh=true"; CDOVPAY=$(val '[.data.headline[]|select(.key == "payablesOverdue")][0].value')
@@ -6748,7 +6757,7 @@ for CDW in $(jq -r '.[].id' <<<"$CDWHL"); do
 done
 as "$CEO_TOKEN" GET finance/valuation
 CDVAL=$(jq -c '.data|{total:.totalValue,cost:(.items|map({key:(.itemId|tostring),value:.averageCost})|from_entries),stock:(.items|map(select(.quantity > 0)|{itemId,quantity,value}))}' "$B")
-as "$CEO_TOKEN" GET "inventory/lots?PageSize=0"; CDCPL=$(jq -c '[.data.data[]|select(.isCustomerProperty)|.id]' "$B")
+as "$CEO_TOKEN" GET "inventory/stock/lots?PageSize=0"; CDCPL=$(jq -c '[.data.data[]|select(.isCustomerProperty)|.id]' "$B")
 as "$CEO_TOKEN" GET "inventory/items?PageSize=0"; CDITM=$(jq -c '.data.data|map({id,code,title,unit,group:.itemGroupTitle,min:.minStock,active:.isActive})' "$B")
 CDKX='[]'
 for CDI in $(jq -r '.[].id' <<<"$CDITM"); do
