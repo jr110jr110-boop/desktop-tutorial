@@ -6072,8 +6072,14 @@ cdv "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"هزینه‌ی پروژ�
 # the oldest credits, so a credit on it would be eaten), credited 45 days ago, so it sits in the 31-60 bucket of the ledger ageing (overdue) with nothing paid against it
 # (the ageing counts the vouchers of the current fiscal year only, so in the first 45 days of a Persian year the credit is dated the first day of the year and is not overdue yet; the checks below know that)
 CDOD=$(dd -45); CDOVERDUE=1; if [ "$CDOD" \< "$CDYS" ]; then CDOD=$CDYS; CDOVERDUE=0; fi
-as "$FM_TOKEN" POST $FG/details '{"code":"CDSUP-1","title":"تأمین‌کننده‌ی آزمون جزئیات مدیرعامل","type":2,"isActive":true}'; check "ceo drills setup: a supplier detail of its own for the overdue balance" '.success and .data.code == "CDSUP-1"'
-cdv "{\"date\":\"${CDOD}T00:00:00\",\"description\":\"خرید اعتباری آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"70101\",\"debit\":80000000},{\"accountCode\":\"30101\",\"credit\":80000000,\"detail1Code\":\"CDSUP-1\"}]}"
+# supplier details are system-made: a new supplier of its own, and the finance manager asks for its standard detail (SUP-<id>) before the manual voucher names it
+call POST Provider "{\"name\":\"تأمین‌کننده‌ی آزمون جزئیات مدیرعامل\",\"categoryId\":${CAT:-0}}"; check "ceo drills setup: a supplier of its own for the overdue balance" '.success and .data.id > 0'; CDSUPID=$(val '.data.id // empty')
+as "$FM_TOKEN" POST $FG/details "{\"type\":2,\"linkedEntityId\":${CDSUPID:-0}}"; check "ceo drills setup: the standard supplier detail of the new supplier is made on request (SUP-<id>, the supplier's name)" ".success and .data.code == \"SUP-${CDSUPID:-0}\" and .data.type == 2 and .data.linkedEntityId == ${CDSUPID:-0} and .data.title == \"تأمین‌کننده‌ی آزمون جزئیات مدیرعامل\""
+as "$FM_TOKEN" POST $FG/details "{\"type\":2,\"linkedEntityId\":${CDSUPID:-0}}"; CDSUPD=$(val .data.id)
+check "ceo drills setup: asking again returns the same detail (no duplicate)" ".success and .data.id == $CDSUPD and .data.code == \"SUP-${CDSUPID:-0}\""
+as "$FM_TOKEN" POST $FG/details '{"type":2,"linkedEntityId":987654321}'; nomsg "ceo drills setup: a detail for a supplier that does not exist is refused" "پیدا نشد"
+as "$FM_TOKEN" POST $FG/details '{"code":"CDSUP-1","title":"تأمین‌کننده‌ی آزمون","type":2,"isActive":true}'; nomsg "ceo drills setup: a supplier detail is never typed by hand (the system makes it)" "سیستم می‌سازد"
+cdv "{\"date\":\"${CDOD}T00:00:00\",\"description\":\"خرید اعتباری آزمون جزئیات مدیرعامل\",\"lines\":[{\"accountCode\":\"70101\",\"debit\":80000000},{\"accountCode\":\"30101\",\"credit\":80000000,\"detail1Code\":\"SUP-${CDSUPID:-0}\"}]}"
 
 # --- fin.cash_accounts: the accounts of the treasury; the totals are the cash position and the finance dashboard
 as "$CEO_TOKEN" GET finance/dashboard

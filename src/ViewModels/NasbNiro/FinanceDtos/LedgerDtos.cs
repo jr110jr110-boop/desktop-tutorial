@@ -127,6 +127,13 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Title { get; set; }
         public FnDetailType Type { get; set; } = FnDetailType.Person;
         public bool IsActive { get; set; } = true;
+
+        /// <summary>
+        /// For the system-made kinds (supplier, customer, project, work order, employee, bank, cash box, petty cash, asset): the id of the linked record. The call then makes sure the
+        /// standard detail of that record exists (the same code and title the posting job would give it, e.g. SUP-12) and returns it; nothing else of the request is used.
+        /// Without it, only Person and Other details are made by hand.
+        /// </summary>
+        public int? LinkedEntityId { get; set; }
     }
 
     // ============================================================================================ vouchers

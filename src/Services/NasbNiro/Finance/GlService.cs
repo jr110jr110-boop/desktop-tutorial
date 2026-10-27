@@ -398,6 +398,15 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<DetailAccountDto>> SaveDetailAsync(SaveDetailAccountDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<DetailAccountDto>(NotAllowed);
+            if (dto != null && !dto.Id.HasValue && dto.LinkedEntityId.HasValue)
+            {
+                // "make sure the detail of this record exists": the system-made kinds get their standard detail here, before a manual voucher names it (the posting job would make the same one)
+                if (dto.Type == FnDetailType.Person || dto.Type == FnDetailType.Other) return Bad<DetailAccountDto>("تفصیلی «شخص» و «سایر» به رکوردی وصل نیست؛ کد و عنوان را بدهید.");
+                if (!await LinkedRecordExistsAsync(dto.Type, dto.LinkedEntityId.Value, ct)) return ResponseDtoHelper.NotFound<DetailAccountDto>("رکورد مرتبط با این تفصیلی پیدا نشد.");
+                FnDetailAccount linked = await new DetailResolver(_uow).GetAsync(dto.Type, dto.LinkedEntityId.Value, ct);
+                await _uow.SaveChangesAsync(ct);
+                return ResponseDtoHelper.Ok(new DetailAccountDto { Id = linked.Id, Code = linked.Code, Title = linked.Title, Type = linked.Type, LinkedEntityId = linked.LinkedEntityId, IsActive = linked.IsActive });
+            }
             if (dto == null || Clean(dto.Title) == null) return Bad<DetailAccountDto>("عنوان تفصیلی را وارد کنید.");
             FnDetailAccount d;
             if (dto.Id.HasValue)
@@ -421,6 +430,24 @@ namespace Services.NasbNiro.Finance
             d.IsActive = dto.IsActive;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(new DetailAccountDto { Id = d.Id, Code = d.Code, Title = d.Title, Type = d.Type, LinkedEntityId = d.LinkedEntityId, IsActive = d.IsActive });
+        }
+
+        /// <summary>True when the record a system-made detail would be linked to exists (the kinds the resolver names).</summary>
+        private async Task<bool> LinkedRecordExistsAsync(FnDetailType type, int id, CancellationToken ct)
+        {
+            switch (type)
+            {
+                case FnDetailType.Supplier: return await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AnyAsync(p => p.Id == id && !p.Deleted, ct);
+                case FnDetailType.Customer: return await _uow.Set<FnCustomer>().AnyAsync(c => c.Id == id, ct);
+                case FnDetailType.Project: return await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AnyAsync(c => c.Id == id && !c.Deleted, ct);
+                case FnDetailType.WorkOrder: return await _uow.Set<Entities.Model.NasbNiro.Contracts.WorkOrder>().AnyAsync(w => w.Id == id && !w.Deleted, ct);
+                case FnDetailType.Employee: return await _uow.Set<FnEmployee>().AnyAsync(e => e.Id == id, ct);
+                case FnDetailType.Bank: return await _uow.Set<FnBankAccount>().AnyAsync(b => b.Id == id, ct);
+                case FnDetailType.CashBox: return await _uow.Set<FnCashBox>().AnyAsync(b => b.Id == id, ct);
+                case FnDetailType.PettyCash: return await _uow.Set<FnPettyCash>().AnyAsync(b => b.Id == id, ct);
+                case FnDetailType.Asset: return await _uow.Set<FnAsset>().AnyAsync(a => a.Id == id, ct);
+                default: return false;
+            }
         }
 
         // ================================================================================== vouchers: reading
