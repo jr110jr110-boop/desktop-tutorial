@@ -50,6 +50,10 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.BadRequest<string>("دسته بندی یافت نشد.");
             }
 
+            // a category that suppliers still carry is not removed (the suppliers would lose their grouping; move them first)
+            if (await _unitOfWork.Set<Provider>().AnyAsync(p => !p.Deleted && p.CategoryId == categoryId, cancellationToken))
+                return ResponseDtoHelper.BadRequest<string>("این دسته‌بندی هنوز به تأمین‌کننده‌هایی اختصاص دارد و حذف نمی‌شود؛ ابتدا دسته‌بندی آن‌ها را تغییر دهید.");
+
             _categories.Remove(categoryToDelete);
 
 

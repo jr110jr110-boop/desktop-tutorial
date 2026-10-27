@@ -148,7 +148,8 @@ namespace Services.NasbNiro
             EntityEntry<Equipment> entityEntry = _equipments.Update(equipment);
 
             if (await this.SaveChangesAsync(cancellationToken))
-                return await this.GetResponseEquipmentDtoByIdAsync(entityEntry.Entity.Id, cancellationToken);
+                // the row is flagged as deleted now, so the usual re-read (which skips deleted rows) would answer "not found" for a delete that worked (R1 front finding)
+                return ResponseDtoHelper.Ok(_mapper.Map<ResponseEquipmentDto>(entityEntry.Entity));
 
             return ResponseDtoHelper
                 .BadRequest<ResponseEquipmentDto>(NasbNiroMessages.EquipmentNotDeleted);

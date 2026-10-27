@@ -58,6 +58,11 @@ login() {
 TOKEN=$(login Admin 'Ci#Adm1n-Build-2026')
 [ -n "$TOKEN" ] && ok "login admin (PMO)" || bad "login admin (PMO)"
 ADMIN_TOKEN=$TOKEN
+# the refresh answers with the claims of the roles too (the front keeps them between sign-ins; a role change shows at the next refresh)
+ADMIN_REFRESH=$(jq -r '.. | .refreshToken? // empty' "$B" | head -n1); ADMIN_ACL=$(jq -c '.data.accessList|sort' "$B")
+curl -s -X POST "$API/Accounts/refresh-token" -H 'Content-Type: application/json' -d "{\"refreshToken\":\"$ADMIN_REFRESH\"}" -o "$B"
+check "login: the refresh answer carries a new access token, a new refresh token and exactly the access list of the sign-in answer" ".success and (.data.accessToken|type) == \"string\" and (.data.refreshToken|type) == \"string\" and .data.refreshToken != \"$ADMIN_REFRESH\" and (.data.accessList|sort) == $ADMIN_ACL"
+ADMIN_TOKEN=$(jq -r '.data.accessToken' "$B"); TOKEN=$ADMIN_TOKEN
 
 as() { local t=$TOKEN; TOKEN=$1; shift; call "$@"; TOKEN=$t; } # as TOKEN METHOD PATH [JSON]
 # refused(): the last call did not succeed (the services answer 200 + success=false for role and rule violations)
@@ -204,8 +209,9 @@ as "$PLAN_TOKEN" PUT Contracts "{\"id\":$R1ACT,\"code\":\"R1A-CT-1\",\"title\":\
 as "$PLAN_TOKEN" DELETE "Contracts/$R1ACT"; r403 "r1a legacy: planning edits contracts but only the PMO deletes one (403)"
 as "$COM_TOKEN" DELETE Contracts/delete-contract-collection "[$R1ACT]"; r403 "r1a legacy: commercial cannot delete contracts in bulk either (403)"
 call GET "Contracts/contracts?Id=$R1ACT"; check "r1a legacy: the refused deletes left the contract in place" ".success and .data.id == $R1ACT"
-call DELETE "Contracts/$R1ACT"; call GET "Contracts/contracts?Id=$R1ACT"
-nomsg "r1a legacy: the PMO deletes an empty contract (afterwards the contract is gone)" "قرارداد یافت نشد"
+call DELETE "Contracts/$R1ACT"; check "r1a legacy: the PMO deletes an empty contract and the answer says so (success with the deleted row, not a \"not found\")" ".success and .data.id == $R1ACT"
+call GET "Contracts/contracts?Id=$R1ACT"
+nomsg "r1a legacy: afterwards the contract is gone" "قرارداد یافت نشد"
 
 # item codes per WI-WH-002 (material, part, MESC standard part, product)
 C_RAW=01001025120101; C_SHAFT=02130001010003; C_BOLT=50.10.12.024.1; C_ROTOR=031TS250PB1405
@@ -487,6 +493,11 @@ call GET "inventory/stock/serials?Contains=C-1&ItemId=$CAST"; check "C-1 marked 
 call POST ProviderCategories '{"categoryName":"پیمانکاران ماشینکاری"}'; CAT=$(jq -r '.data.id // .id // empty' "$B")
 call POST Provider "{\"name\":\"کارگاه ماشینکاری آزمون\",\"categoryId\":${CAT:-0}}"; PRV=$(jq -r '.data.id // empty' "$B")
 [ -n "$PRV" ] && ok "subcontractor created" || bad "subcontractor created"
+# the list page deletes categories in bulk (DELETE ProviderCategories/delete with the ids); a category a supplier still carries is kept, an unused one goes
+call POST ProviderCategories '{"categoryName":"دسته‌ی موقت آزمون"}'; CATTMP=$(jq -r '.data.id // .id // empty' "$B")
+call DELETE ProviderCategories/delete "[${CAT:-0},${CATTMP:-0}]"
+check "supplier categories: the bulk delete keeps the category in use (Persian refusal naming the suppliers) and removes the unused one" '.success and (.data|length) == 2 and .data[0].success == false and (.data[0].message|contains("تأمین‌کننده")) and .data[1].success == true'
+call GET ProviderCategories; check "supplier categories: afterwards the used category is still listed and the temporary one is not" "([.data[]|select(.id == ${CAT:-0})]|length) == 1 and ([.data[]|select(.id == ${CATTMP:-0})]|length) == 0"
 call POST inventory/documents "{\"type\":9,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$WK,\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-2\"]}]}"
 check "subcontract issue without contractor rejected" '.success == false'
 call POST inventory/documents "{\"type\":9,\"documentDate\":\"2026-10-18T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$WK,\"providerId\":${PRV:-0},\"lines\":[{\"itemId\":$CAST,\"quantity\":1,\"serialNumbers\":[\"C-2\"]}]}"
@@ -1401,7 +1412,8 @@ as "$QC_TOKEN" POST $PC/guarantees/parse; no "pc: QC cannot parse guarantees"
 call POST ContractGuaranty "{\"title\":\"ضمانت‌نامه پیش‌پرداخت\",\"bank\":\"ملی\",\"no\":\"PC-G-2\",\"price\":\"200,000,000\",\"regDate\":\"$(dd -100)T00:00:00\",\"dueDate\":\"$(dd 200)T00:00:00\",\"contractEntityId\":$PCT}"; check "r1a pc: second legacy guaranty created" '.success'
 as "$COM_TOKEN" POST $PC/guarantees/parse; check "r1a pc: the second guaranty is parsed into typed side data" '.success and .data.created >= 1'
 as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "r1a pc: the second guarantee is active with the amount 200,000,000 and no release event" '.success and ([.data.data[]|select(.no=="PC-G-2")][0]|(.status == 3 and .amountDecimal == 200000000 and (.events|length) == 0))'
-PCG2=$(jq -r '[.data.data[]|select(.no=="PC-G-2")][0].id' "$B"); PCG2BODY=$(jq -c '[.data.data[]|select(.no=="PC-G-2")][0]|del(.events)' "$B")
+PCG2=$(jq -r '[.data.data[]|select(.no=="PC-G-2")][0].id' "$B"); PCG2BODY=$(jq -c '[.data.data[]|select(.no=="PC-G-2")][0]|del(.events)' "$B"); PCGROWS=$(jq -c '[.data.data[].id]|sort' "$B")
+as "$FM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "r1a pc: the finance manager, who releases guarantees, reads the guarantees list too (the same rows the commercial user sees)" ".success and ([.data.data[].id]|sort) == $PCGROWS"
 as "$COM_TOKEN" POST $PC/guarantees "$(jq -c '.status = 6' <<< "$PCG2BODY")"; nomsg "r1a pc: Released cannot be set through the save call (only the release action does it)" "از این مسیر"
 as "$COM_TOKEN" POST $PC/guarantees "$(jq -c '.status = 5' <<< "$PCG2BODY")"; nomsg "r1a pc: Expired cannot be set by hand either (the expiry is automatic: correct the date or extend)" "تمدید کنید"
 as "$COM_TOKEN" POST $PC/guarantees/events "{\"guaranteeId\":$PCG2,\"kind\":4,\"eventDate\":\"$(dd 0)T00:00:00\"}"; nomsg "r1a pc: a release event cannot be added through the events call" "guarantees/release"

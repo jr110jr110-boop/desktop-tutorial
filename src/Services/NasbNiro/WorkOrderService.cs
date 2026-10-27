@@ -569,7 +569,8 @@ namespace Services.NasbNiro
 
             if (await this.SaveChangesAsync(cancellationToken))
             {
-                return await this.GetResponseWorkOrderDtoAsync(entityEntry.Entity, cancellationToken);
+                // the row is flagged as deleted now, so the usual re-read (which skips deleted rows) would answer "not found" for a delete that worked (R1 front finding)
+                return ResponseDtoHelper.Ok(_mapper.Map<ResponseWorkOrderDto>(entityEntry.Entity));
             }
 
             return ResponseDtoHelper.BadRequest<ResponseWorkOrderDto>(NasbNiroMessages.WorkOrderNotDeleted);

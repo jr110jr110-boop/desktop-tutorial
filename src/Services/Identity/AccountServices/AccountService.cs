@@ -276,24 +276,30 @@ namespace Services.Identity.AccountServices
             user.LastLoggedIn = DateTime.Now;
             await _userManager.UpdateAsync(user).WithCancellationTokenAsync(cancellationToken);
 
-            // the claims of the roles the user holds (by role id; the old LIKE on the role name did the same and could not be run on the in-memory test database)
-            int[] roleIds = await _uow.Set<UserRole>().AsNoTracking()
-                .Where(ur => ur.UserId == user.Id)
-                .Select(ur => ur.RoleId)
-                .ToArrayAsync(cancellationToken);
-
-            string[] accessList = await _uow.Set<RoleClaim>().AsNoTracking()
-                .Where(rc => roleIds.Contains(rc.RoleId))
-                .Select(rc => rc.ClaimValue)
-                .Distinct()
-                .ToArrayAsync(cancellationToken);
-
             return new ResponseLoginUserDto()
             {
                 AccessToken = token.AccessToken,
                 RefreshToken = token.RefreshToken,
-                AccessList = accessList,
+                AccessList = await AccessListAsync(user.Id, cancellationToken),
             };
+        }
+
+        /// <summary>
+        /// The claims of the roles the user holds (by role id; the old LIKE on the role name did the same and could not be run on the in-memory test database).
+        /// The sign-in and the refresh both return it, so a role change shows at the next refresh and not only at the next sign-in.
+        /// </summary>
+        private async Task<string[]> AccessListAsync(int userId, CancellationToken cancellationToken)
+        {
+            int[] roleIds = await _uow.Set<UserRole>().AsNoTracking()
+                .Where(ur => ur.UserId == userId)
+                .Select(ur => ur.RoleId)
+                .ToArrayAsync(cancellationToken);
+
+            return await _uow.Set<RoleClaim>().AsNoTracking()
+                .Where(rc => roleIds.Contains(rc.RoleId))
+                .Select(rc => rc.ClaimValue)
+                .Distinct()
+                .ToArrayAsync(cancellationToken);
         }
 
         private async Task RecordSignInAsync(int userId, int? entityId, string action, string summary, CancellationToken cancellationToken)
@@ -352,7 +358,8 @@ namespace Services.Identity.AccountServices
                 = new ResponseLoginUserDto()
                 {
                     AccessToken = token.AccessToken,
-                    RefreshToken = token.RefreshToken
+                    RefreshToken = token.RefreshToken,
+                    AccessList = await AccessListAsync(storagetoken.User.Id, cancellationToken),
                 };
 
             return ResponseDtoHelper.Ok(responseLoginUserDto);

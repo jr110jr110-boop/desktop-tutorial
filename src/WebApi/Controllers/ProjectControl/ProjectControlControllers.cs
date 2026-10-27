@@ -295,7 +295,7 @@ namespace WebApi.Controllers.ProjectControl
         public async Task<IActionResult> EvaluateMilestonesAsync(int contractId, CancellationToken ct) => Ok(await _commercial.EvaluateMilestonesAsync(contractId, ct));
 
         [HttpGet("guarantees")]
-        [Authorize(Roles = ProjectControlRoles.Readers)]
+        [Authorize(Roles = ProjectControlRoles.Readers + ",FINANCEMANAGER,TREASURY")] // the money side releases and watches the guarantees (R1a)
         public async Task<IActionResult> GuaranteesAsync([FromQuery] PcGuaranteeQuery query, CancellationToken ct) => Ok((await _commercial.GetGuaranteesAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpPost("guarantees/parse")]
