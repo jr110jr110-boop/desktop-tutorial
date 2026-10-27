@@ -62,6 +62,7 @@ namespace Services.NasbNiro.AfterSales
                 SvSettingKeys.CostCenterCode => SvSettingKeys.DefaultCostCenter,
                 SvSettingKeys.SurveyLeadDays => SvSettingKeys.DefaultSurveyLeadDays.ToString(),
                 SvSettingKeys.VisitLeadDays => SvSettingKeys.DefaultVisitLeadDays.ToString(),
+                SvSettingKeys.LowScoreThreshold => SvSettingKeys.DefaultLowScoreThreshold.ToString(),
                 _ => null,
             };
             return ResponseDtoHelper.Ok(SvSettingKeys.All.Select(k => new SvSettingDto { Key = k.Key, Title = k.Title, Text = saved.GetValueOrDefault(k.Key), Effective = Effective(k.Key) }).ToList());
@@ -78,6 +79,8 @@ namespace Services.NasbNiro.AfterSales
             if (textTooLong != null) return Bad<SvSettingDto>(textTooLong);
             if ((dto.Key == SvSettingKeys.SurveyLeadDays || dto.Key == SvSettingKeys.VisitLeadDays) && (text == null || !int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n) || n < 0))
                 return Bad<SvSettingDto>("تعداد روز باید عدد صحیح غیرمنفی باشد.");
+            if (dto.Key == SvSettingKeys.LowScoreThreshold && text != null && (!int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int threshold) || threshold < 1 || threshold > 5))
+                return Bad<SvSettingDto>("امتیاز آستانه باید عددی صحیح بین ۱ تا ۵ باشد.");
             if (dto.Key == SvSettingKeys.LabourWorkCenterCode && text != null && !await _uow.Set<Entities.Model.NasbNiro.Production.MfWorkCenter>().AnyAsync(w => w.Code == text && !w.Deleted, ct))
                 return Bad<SvSettingDto>("مرکز کاری با این کد پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
@@ -191,6 +194,13 @@ namespace Services.NasbNiro.AfterSales
             string tooLong = SvLimits.First((dto.Description, SvLimits.LongText, "شرح درخواست"), (dto.Channel, SvLimits.Name, "کانال دریافت"));
             if (tooLong != null) return Bad<SvRequestDto>(tooLong);
             if (!Enum.IsDefined(typeof(SvRequestType), dto.Type) || !Enum.IsDefined(typeof(SvPriority), dto.Priority)) return Bad<SvRequestDto>(SlText.InvalidData);
+            // R1p D24: the SLA clock is the server's; a person registering a call or a letter may date it within the last 24 hours, nothing else
+            DateTime serverNow = DateTime.Now;
+            if (!dto.Id.HasValue)
+            {
+                string timeRefusal = SvSlaTime.CheckReceived(dto.ReceivedAt, dto.Channel, serverNow);
+                if (timeRefusal != null) return Bad<SvRequestDto>(timeRefusal);
+            }
             if (!await _uow.Set<FnCustomer>().AnyAsync(c => c.Id == dto.CustomerId, ct)) return Bad<SvRequestDto>("مشتری پیدا نشد.");
             if (dto.ContactId.HasValue && !await _uow.Set<SlContact>().AnyAsync(c => c.Id == dto.ContactId.Value && c.CustomerId == dto.CustomerId && !c.Deleted, ct)) return Bad<SvRequestDto>("مخاطب پیدا نشد یا مال این مشتری نیست.");
             if (dto.UnitId.HasValue)
@@ -208,12 +218,14 @@ namespace Services.NasbNiro.AfterSales
                 if (row == null) return SlText.NotFound<SvRequestDto>("درخواست خدمات پیدا نشد.");
                 if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SvRequestDto>(SlText.InvalidData);
                 if (row.Status != SvRequestStatus.Open) return Bad<SvRequestDto>("درخواستی که واگذار شده ویرایش نمی‌شود.");
-                // an edit without a received time keeps the original one (the SLA clock does not restart)
-                received = dto.ReceivedAt ?? row.ReceivedAt;
+                // the received time is fixed at the registration: an edit may send it back unchanged but never move it (the SLA clock does not restart or slide)
+                string changed = SvSlaTime.CheckUnchanged(dto.ReceivedAt, row.ReceivedAt);
+                if (changed != null) return Bad<SvRequestDto>(changed);
+                received = row.ReceivedAt;
             }
             else
             {
-                received = dto.ReceivedAt ?? DateTime.Now;
+                received = SvSlaTime.ReceivedOf(dto.ReceivedAt, serverNow);
                 row = new SvServiceRequest { Number = await InventoryNumbers.NextNumberAsync(_uow, SvNumbers.Request, "SVR", received, ct), Status = SvRequestStatus.Open, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<SvServiceRequest>().Add(row);
             }
@@ -254,10 +266,13 @@ namespace Services.NasbNiro.AfterSales
         {
             if (!_user.IsInRole(SvRoles.Writers)) return Bad<SvRequestDto>(SlText.NotAllowed);
             if (dto == null) return Bad<SvRequestDto>(SlText.InvalidData);
+            // R1p D24: the time of an action is the server's; a supplied time would let the office move a late response inside the SLA
+            string actionRefusal = SvSlaTime.CheckAction(dto.At);
+            if (actionRefusal != null) return Bad<SvRequestDto>(actionRefusal);
             SvServiceRequest row = await _uow.Set<SvServiceRequest>().FirstOrDefaultAsync(r => r.Id == dto.Id && !r.Deleted, ct);
             if (row == null) return SlText.NotFound<SvRequestDto>("درخواست خدمات پیدا نشد.");
             if (!SlConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<SvRequestDto>(SlText.InvalidData);
-            DateTime at = dto.At ?? DateTime.Now;
+            DateTime at = DateTime.Now;
             DateTimeOffset now = DateTimeOffset.Now;
             if (row.Status == SvRequestStatus.Closed) return Bad<SvRequestDto>("درخواست بسته شده است.");
             switch ((dto.Action ?? string.Empty).Trim().ToLowerInvariant())

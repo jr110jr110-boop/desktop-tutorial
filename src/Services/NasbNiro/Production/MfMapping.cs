@@ -21,7 +21,13 @@ namespace Services.NasbNiro.Production
         {
             if (ops.Count == 0) return new List<OperationDto>();
             List<int> orderIds = ops.Select(o => o.OrderId).Distinct().ToList();
-            Dictionary<int, string> orders = await _uow.Set<MfProductionOrder>().AsNoTracking().Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, o => o.Number, ct);
+            var orderRows = await _uow.Set<MfProductionOrder>().AsNoTracking().Where(o => orderIds.Contains(o.Id)).Select(o => new { o.Id, o.Number, o.Quantity }).ToListAsync(ct);
+            Dictionary<int, string> orders = orderRows.ToDictionary(o => o.Id, o => o.Number);
+            // R1p D7: the expected quantity of an operation comes from the chain of all operations of its order (the operation before it), so the whole chain is read
+            List<MfOperation> chainRows = await _uow.Set<MfOperation>().AsNoTracking().Where(o => !o.Deleted && orderIds.Contains(o.OrderId)).ToListAsync(ct);
+            List<int> wpsIds = ops.Where(o => o.WpsId.HasValue).Select(o => o.WpsId.Value).Distinct().ToList();
+            Dictionary<int, string> wpsNumbers = wpsIds.Count == 0 ? new Dictionary<int, string>()
+                : (await _uow.Set<Entities.Model.NasbNiro.Quality.Wps>().AsNoTracking().Where(w => wpsIds.Contains(w.Id)).Select(w => new { w.Id, w.Number, w.Revision }).ToListAsync(ct)).ToDictionary(w => w.Id, w => w.Number + "/" + w.Revision);
             List<int> centerIds = ops.Where(o => o.WorkCenterId.HasValue).Select(o => o.WorkCenterId.Value).Distinct().ToList();
             var centers = centerIds.Count == 0 ? new Dictionary<int, MfWorkCenter>()
                 : await _uow.Set<MfWorkCenter>().AsNoTracking().Where(c => centerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
@@ -55,6 +61,9 @@ namespace Services.NasbNiro.Production
                     SubcontractIssueNumber = o.SubcontractIssueId.HasValue && docs.TryGetValue(o.SubcontractIssueId.Value, out string d) ? d : null, IsRework = o.IsRework,
                     ReworkOfOperationId = o.ReworkOfOperationId, SkipReason = o.SkipReason, StartedAtText = MfText.Stamp(o.StartedAt), FinishedAtText = MfText.Stamp(o.FinishedAt), Note = o.Note,
                     RunningBookings = b?.Running ?? 0, HoursBooked = b?.Hours ?? 0,
+                    ExpectedQty = MfQuantityRules.Expected(chainRows.Where(x => x.OrderId == o.OrderId), o, orderRows.First(x => x.Id == o.OrderId).Quantity),
+                    IsWelding = o.IsWelding, WpsId = o.WpsId, WpsNumber = o.WpsId.HasValue && wpsNumbers.TryGetValue(o.WpsId.Value, out string wn) ? wn : null, WeldLogId = o.WeldLogId,
+                    AcceptedByConcession = o.AcceptedByConcession, AcceptanceStale = o.QcAccepted && !MfTerminalRules.AcceptanceStillHolds(o),
                 };
             }).OrderBy(d => d.OrderId).ThenBy(d => d.Sequence).ThenBy(d => d.IsRework ? 1 : 0).ToList();
         }

@@ -78,6 +78,12 @@ namespace Entities.Model.NasbNiro.Finance
 
         public DateTimeOffset CreatedAt { get; set; }
         public int CreatedByUserId { get; set; }
+
+        /// <summary>
+        /// R1p D1: a labour amount that could reveal one person's hourly pay (the monthly aggregate of a work order or cost centre that fewer than three payroll-rated employees worked on, posted only because the quarter-end cap forced it out).
+        /// Readers other than PAYROLL, FINANCEMANAGER and CEO see no amount for such an entry.
+        /// </summary>
+        public bool LabourProtected { get; set; }
     }
 
     public enum AccountingEventType
@@ -215,6 +221,9 @@ namespace Entities.Model.NasbNiro.Finance
         /// <summary>Other first-detail party: "Customer", "BankAccount", "CashBox", "PettyCash", "Employee", "Asset" (suppliers use ProviderId).</summary>
         public string PartyType { get; set; }
         public int? PartyId { get; set; }
+
+        /// <summary>R1p D1: the debit or credit of this line is a protected labour amount (see <see cref="CostEntry.LabourProtected"/>); non-payroll readers see no amount.</summary>
+        public bool LabourProtected { get; set; }
 
         // optional foreign currency amount of the line
         public string CurrencyCode { get; set; }

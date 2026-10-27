@@ -57,7 +57,8 @@ namespace Services.NasbNiro.Production
         /// <summary>The only roles that see a labour amount that would reveal one person's payroll cost (the payroll readers of finance).</summary>
         public const string PayrollRoles = "PAYROLL,FINANCEMANAGER,CEO";
 
-        private bool SeesPayroll => _user.IsInRole(PayrollRoles);
+        // an AI seat never sees the payroll-derived amounts (the same rule as the after-sales module)
+        private bool SeesPayroll => MfPrivacy.SeesPayroll(_user);
 
         public async Task<ResponseDto<CostRunResultDto>> RunAsync(RunCostDto dto, CancellationToken ct)
         {
@@ -118,7 +119,7 @@ namespace Services.NasbNiro.Production
                 Id = p.Id, RunId = p.RunId, RunNumber = runs.GetValueOrDefault(p.RunId), PostingDate = p.PostingDate, PostingDateText = MfText.Date(p.PostingDate), WorkOrderId = p.WorkOrderId,
                 WorkOrderCode = wos.GetValueOrDefault(p.WorkOrderId), ContractId = p.ContractId, WbsNodeId = p.WbsNodeId, WbsCode = p.WbsNodeId.HasValue ? wbs.GetValueOrDefault(p.WbsNodeId.Value) : null,
                 WorkCenterId = p.WorkCenterId, WorkCenterCode = p.WorkCenterId.HasValue ? wcs.GetValueOrDefault(p.WorkCenterId.Value) : null, BookingCount = p.BookingCount,
-                LabourHours = p.LabourHours, MachineHours = p.MachineHours, OverheadAmount = p.OverheadAmount,
+                LabourHours = p.LabourHours, MachineHours = p.MachineHours, OverheadAmount = p.OverheadAmount, LabourDeferred = p.LabourDeferred,
                 LabourAmount = MfCostMask.Labour(p.LabourAmount, MfCostMask.IsProtected(p.EmployeeCount, p.PayrollEmployeeCount), seesPayroll), LabourHidden = !seesPayroll && MfCostMask.IsProtected(p.EmployeeCount, p.PayrollEmployeeCount),
             }).ToList();
             return ResponseDtoHelper.Ok(await Map(page, dtos, ct));
@@ -199,6 +200,11 @@ namespace Services.NasbNiro.Production
             public decimal Overhead;
             public readonly HashSet<int> Employees = new HashSet<int>();
             public readonly HashSet<int> PayrollEmployees = new HashSet<int>();
+
+            /// <summary>R1p D1: fewer than three payroll-rated employees behind the group: its labour waits for the monthly aggregate posting.</summary>
+            public bool Deferred;
+
+            public readonly List<(MfTimeBooking Booking, decimal Labour, bool FromPayroll)> Items = new List<(MfTimeBooking, decimal, bool)>();
         }
 
         private static decimal R(decimal v) => Math.Round(v, 0, MidpointRounding.AwayFromZero);
@@ -267,6 +273,7 @@ namespace Services.NasbNiro.Production
                 if (rate.FromPayroll) g.PayrollEmployees.Add(b.EmployeeId);
                 g.LabourHours += b.Hours;
                 g.Labour += b.Hours * rate.PerHour;
+                g.Items.Add((b, b.Hours * rate.PerHour, rate.FromPayroll));
                 if (usesMachine) { g.MachineHours += b.Hours; g.Overhead += b.Hours * machineRate; }
                 posted[day].Add(b);
                 if (rate.FromPayroll) result.LabourRateFromPayroll++; else result.LabourRateFromWorkCenter++;
@@ -285,13 +292,31 @@ namespace Services.NasbNiro.Production
             {
                 DateTime day = dayGroups.Key;
                 List<Group> list = dayGroups.Value.Values.OrderBy(g => g.WorkOrderId).ThenBy(g => g.WbsNodeId ?? 0).ThenBy(g => g.WorkCenterId ?? 0).ToList();
-                foreach (Group g in list) { g.Labour = R(g.Labour); g.Overhead = R(g.Overhead); }
+                foreach (Group g in list)
+                {
+                    g.Overhead = R(g.Overhead);
+                    // R1p D1: a group of fewer than three payroll-rated employees would show one person's pay as its daily labour amount, so that labour is not posted per day. Its bookings carry the amount
+                    // (unrounded) and the month they belong to; the monthly aggregate posting takes it (per work order, else per cost centre, else carried on; see MfLabourService).
+                    g.Deferred = MfCostMask.IsProtected(g.Employees.Count, g.PayrollEmployees.Count);
+                    if (g.Deferred)
+                    {
+                        result.BookingsDeferred += g.Bookings;
+                        foreach (var item in g.Items)
+                        {
+                            item.Booking.LabourPendingPeriod = MfLabourMonth.Of(day);
+                            item.Booking.PendingLabour = item.Labour;
+                            item.Booking.RateFromPayroll = item.FromPayroll;
+                        }
+                        g.Labour = 0;
+                    }
+                    else g.Labour = R(g.Labour);
+                }
                 var run = new MfCostRun
                 {
                     Number = await InventoryNumbers.NextNumberAsync(_uow, MfNumbers.CostRun, "MCR", day, ct), PostingDate = day, RunAt = stamp, RunByUserId = _userId, BookingCount = posted[day].Count,
                     LabourHours = list.Sum(g => g.LabourHours), MachineHours = list.Sum(g => g.MachineHours), LabourAmount = list.Sum(g => g.Labour), OverheadAmount = list.Sum(g => g.Overhead),
                     EmployeeCount = list.SelectMany(g => g.Employees).Distinct().Count(), PayrollEmployeeCount = list.SelectMany(g => g.PayrollEmployees).Distinct().Count(),
-                    LabourProtected = list.Any(g => MfCostMask.IsProtected(g.Employees.Count, g.PayrollEmployees.Count)),
+                    LabourProtected = false,   // the protected groups are not in the amounts of the run any more, so the run total shows nobody's pay
                 };
                 _uow.Set<MfCostRun>().Add(run);
                 foreach (Group g in list)
@@ -300,6 +325,7 @@ namespace Services.NasbNiro.Production
                     {
                         Run = run, PostingDate = day, WorkOrderId = g.WorkOrderId, ContractId = g.ContractId, WbsNodeId = g.WbsNodeId, WorkCenterId = g.WorkCenterId, BookingCount = g.Bookings,
                         LabourHours = g.LabourHours, MachineHours = g.MachineHours, LabourAmount = g.Labour, OverheadAmount = g.Overhead, EmployeeCount = g.Employees.Count, PayrollEmployeeCount = g.PayrollEmployees.Count,
+                        LabourDeferred = g.Deferred,
                     });
                     string wcCode = g.WorkCenterId.HasValue ? centers.GetValueOrDefault(g.WorkCenterId.Value)?.Code : null;
                     string text = $"{run.Number} - {MfText.Date(day)}" + (wcCode != null ? " - " + wcCode : string.Empty);
@@ -350,6 +376,7 @@ namespace Services.NasbNiro.Production
             foreach (var kv in errors.OrderBy(k => k.Key, StringComparer.Ordinal)) result.Errors.Add(kv.Value > 1 ? $"{kv.Key} ({kv.Value} رزرو)" : kv.Key);
             result.Message = result.BookingsPosted > 0
                 ? $"هزینه {MfText.Number(result.BookingsPosted)} رزرو ثبت شد." + (result.BookingsSkipped > 0 ? $" {MfText.Number(result.BookingsSkipped)} رزرو به‌دلیل نبودن نرخ ثبت نشد." : string.Empty)
+                    + (result.BookingsDeferred > 0 ? $" دستمزد {MfText.Number(result.BookingsDeferred)} رزرو که کمتر از سه نفر پرسنل با نرخ حقوق پشت آن است به ثبت ماهانه موکول شد." : string.Empty)
                 : result.BookingsSkipped > 0 ? "هزینه‌ای ثبت نشد: " + string.Join("؛ ", result.Errors) : "رزرو دارای ساعت برای ثبت هزینه وجود نداشت.";
             return result;
         }

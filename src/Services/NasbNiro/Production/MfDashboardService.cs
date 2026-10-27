@@ -107,12 +107,7 @@ namespace Services.NasbNiro.Production
             d.MonthScrapQty = qty?.Scrap ?? 0;
             d.ScrapRatePercent = d.MonthGoodQty + d.MonthScrapQty > 0 ? MfKpi.Pct(d.MonthScrapQty, d.MonthGoodQty + d.MonthScrapQty) : (decimal?)null;
             d.Oee = await MfKpi.OeeAsync(_uow, monthStart, today, null, ct);
-            var total = MfKpi.Compute(new OeeDto
-            {
-                PlannedHours = d.Oee.Sum(o => o.PlannedHours), DowntimeHours = d.Oee.Sum(o => o.DowntimeHours), BookedRunHours = d.Oee.Sum(o => o.BookedRunHours), StandardHours = d.Oee.Sum(o => o.StandardHours),
-                GoodQty = d.Oee.Sum(o => o.GoodQty), ScrapQty = d.Oee.Sum(o => o.ScrapQty),
-            });
-            d.OeePercent = total.OeePercent;
+            d.OeePercent = MfKpi.Total(d.Oee).OeePercent;
             return ResponseDtoHelper.Ok(d);
         }
 

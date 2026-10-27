@@ -167,6 +167,9 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>Record or report the system drafted this NCR from (QIR-/TR- number).</summary>
         public string SourceRecordNumber { get; set; }
 
+        /// <summary>Production rework operation (MfOperation, IsRework) that did the rework; filled by the production module.</summary>
+        public int? ReworkOperationId { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }

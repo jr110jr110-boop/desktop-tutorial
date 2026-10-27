@@ -38,6 +38,10 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public decimal QueueDaysDefault { get; set; }
         public bool IsActive { get; set; }
         public int MachineCount { get; set; }
+
+        /// <summary>R1p D43: the terminal refuses to start an operation of this centre without a machine (while the centre has machines).</summary>
+        public bool RequiresMachine { get; set; }
+
         public string RowVersion { get; set; }
     }
 
@@ -56,6 +60,10 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public string CostCenter { get; set; }
         public decimal QueueDaysDefault { get; set; }
         public bool IsActive { get; set; } = true;
+
+        /// <summary>R1p D43 (★ default true): an operation of the centre starts on the terminal only with a machine, while the centre has machines.</summary>
+        public bool RequiresMachine { get; set; } = true;
+
         public string RowVersion { get; set; }
     }
 
@@ -140,6 +148,12 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public MfInspectionRequirement InspectionRequirement { get; set; }
         public int? ItpTestType { get; set; }
         public bool FirstArticleRequired { get; set; }
+
+        /// <summary>R1p D12: a welding step (WPS and welder qualification are checked on the terminal).</summary>
+        public bool IsWelding { get; set; }
+
+        public int? WpsId { get; set; }
+        public string WpsNumber { get; set; }
     }
 
     public class SaveOperationStandardDto
@@ -160,6 +174,11 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public MfInspectionRequirement InspectionRequirement { get; set; }
         public int? ItpTestType { get; set; }
         public bool FirstArticleRequired { get; set; }
+
+        /// <summary>R1p D12: a welding step; then <see cref="WpsId"/> (an approved WPS) is mandatory.</summary>
+        public bool IsWelding { get; set; }
+
+        public int? WpsId { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ routing revisions

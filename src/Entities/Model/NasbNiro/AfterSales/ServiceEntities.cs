@@ -312,6 +312,26 @@ namespace Entities.Model.NasbNiro.AfterSales
         /// <summary>Average of the scores, two decimals; empty until answered.</summary>
         public decimal? AverageScore { get; set; }
 
+        /// <summary>Why a survey was skipped (R1p D25: skipping without a reason hides a customer who would have scored low).</summary>
+        public string SkipReason { get; set; }
+
+        /// <summary>
+        /// R1p D25: the role of the person who typed the customer's scores in (SERVICE or SALES, the people the scores are about). Such answers are unverified until QA checks a sample of them with the customer.
+        /// </summary>
+        public string RecordedByRole { get; set; }
+
+        public int? AnsweredByUserId { get; set; }
+
+        /// <summary>Set by QA only (the checker of the person who recorded the answers).</summary>
+        public bool Verified { get; set; }
+        public int? VerifiedByUserId { get; set; }
+        public DateTimeOffset? VerifiedAt { get; set; }
+        public string VerifyNote { get; set; }
+
+        /// <summary>R1p D25: the customer complaint draft the system opened because a score was below the threshold (one per survey).</summary>
+        public int? ComplaintId { get; set; }
+        public Quality.CustomerComplaint Complaint { get; set; }
+
         public ICollection<SlSurveyAnswer> Answers { get; set; } = new List<SlSurveyAnswer>();
 
         [Timestamp]

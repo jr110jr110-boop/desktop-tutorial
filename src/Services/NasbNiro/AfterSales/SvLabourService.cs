@@ -58,21 +58,33 @@ namespace Services.NasbNiro.AfterSales
 
         public async Task<int> RunNightlyAsync(CancellationToken ct) => (await PostAsync(DateTime.Today, ct)).Periods.Count;
 
+        /// <summary>One month of the monthly labour postings in the books: the amount and how many of its entries are protected (a plain integer sum; the flag is derived in memory).</summary>
+        internal sealed class CostMonthRow
+        {
+            public int Period { get; set; }
+            public decimal Amount { get; set; }
+            public int ProtectedEntries { get; set; }
+        }
+
+        internal static IQueryable<CostMonthRow> CostByPeriod(IQueryable<CostEntry> entries) =>
+            entries.Where(c => c.SourceType == SvLabourMonth.SourceType).GroupBy(c => c.SourceId)
+                .Select(g => new CostMonthRow { Period = g.Key, Amount = g.Sum(c => c.Amount), ProtectedEntries = g.Sum(c => c.LabourProtected ? 1 : 0) });
+
         public async Task<ResponseDto<List<SvLabourPeriodDto>>> HistoryAsync(CancellationToken ct)
         {
             if (!_user.IsInRole(Runners)) return SlText.Bad<List<SvLabourPeriodDto>>(SlText.NotAllowed);
             var orders = await _uow.Set<SvServiceOrder>().AsNoTracking()
                 .Where(o => !o.Deleted && o.LabourAggregatedAt != null && o.LabourPendingPeriod != null)
                 .Select(o => new { Period = o.LabourPendingPeriod.Value, o.Decision, o.LabourAmount, o.LabourAggregatedAt }).ToListAsync(ct);
-            var costs = await _uow.Set<CostEntry>().AsNoTracking().Where(c => c.SourceType == SvLabourMonth.SourceType)
-                .GroupBy(c => c.SourceId).Select(g => new { Period = g.Key, Amount = g.Sum(c => c.Amount) }).ToListAsync(ct);
+            var costs = (await CostByPeriod(_uow.Set<CostEntry>().AsNoTracking()).ToListAsync(ct))
+                .Select(c => new { c.Period, c.Amount, Flagged = c.ProtectedEntries > 0 }).ToList();
             var events = await _uow.Set<AccountingEvent>().AsNoTracking().Where(e => e.SourceType == SvLabourMonth.SourceType && e.ReversesEventId == null)
                 .Select(e => new { e.Id, e.SourceId }).ToListAsync(ct);
             var rows = orders.GroupBy(o => o.Period).OrderByDescending(g => g.Key).Select(g => new SvLabourPeriodDto
             {
                 Period = g.Key, PeriodText = SvLabourMonth.Text(g.Key), Orders = g.Count(),
                 EventAmount = g.Where(o => o.Decision == SvWarrantyDecision.Warranty || o.Decision == SvWarrantyDecision.Goodwill).Sum(o => o.LabourAmount),
-                CostAmount = costs.Where(c => c.Period == g.Key).Sum(c => c.Amount),
+                CostAmount = costs.Where(c => c.Period == g.Key).Sum(c => c.Amount), Protected = costs.Any(c => c.Period == g.Key && c.Flagged),
                 EventId = events.Where(e => e.SourceId == g.Key).OrderByDescending(e => e.Id).Select(e => (int?)e.Id).FirstOrDefault(),
                 PostedAt = g.Max(o => o.LabourAggregatedAt),
             }).ToList();
@@ -89,22 +101,47 @@ namespace Services.NasbNiro.AfterSales
 
             DateTimeOffset now = DateTimeOffset.Now;
             string center = await SvSettings.EnsureCostCenterAsync(_uow, ct);
-            var posted = new List<(SvLabourPeriodDto Dto, AccountingEvent Event)>();
-            foreach (var month in orders.GroupBy(o => o.LabourPendingPeriod.Value).OrderBy(g => g.Key))
+            HashSet<int> postedPeriods = (await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => o.LabourPendingPeriod != null && o.LabourAggregatedAt != null).Select(o => o.LabourPendingPeriod.Value).Distinct().ToListAsync(ct)).ToHashSet();
+
+            // The pools by month, oldest first. R1p D2: a pool that is itself protected (fewer than three payroll-rated employees behind the month total) is carried to the next month and joins that pool;
+            // so the loop runs over the carried pools too, as long as their month has ended.
+            var pools = new SortedDictionary<int, List<SvServiceOrder>>();
+            foreach (SvServiceOrder o in orders)
             {
-                int period = month.Key;
+                if (!pools.TryGetValue(o.LabourPendingPeriod.Value, out List<SvServiceOrder> list)) pools[o.LabourPendingPeriod.Value] = list = new List<SvServiceOrder>();
+                list.Add(o);
+            }
+
+            var posted = new List<(SvLabourPeriodDto Dto, AccountingEvent Event)>();
+            while (pools.Count > 0 && pools.Keys.First() < current)
+            {
+                int period = pools.Keys.First();
+                List<SvServiceOrder> month = pools[period];
+                pools.Remove(period);
                 List<SvPendingLabour> pending = month.OrderBy(o => o.Id).Select(o => new SvPendingLabour
                 {
                     OrderId = o.Id, Decision = o.Decision, ContractId = o.ContractId, CostCenter = o.CostCenterCode ?? center, Labour = o.LabourAmount,
                     Employees = o.TimeEntries.Where(t => t.Hours > 0).Select(t => t.EmployeeId).ToHashSet(),
                     PayrollEmployees = o.TimeEntries.Where(t => t.Hours > 0 && t.RateFromPayroll == true).Select(t => t.EmployeeId).ToHashSet(),
                 }).ToList();
+
+                Production.MfLabourMonthAction action = SvLabourMonth.Decide(pending, period);
+                if (action == Production.MfLabourMonthAction.Carry)
+                {
+                    int next = SvLabourMonth.NextOpen(period, postedPeriods);
+                    foreach (SvServiceOrder o in month) { o.LabourPendingPeriod = next; o.ModifyDate = now; o.ModifierUserId = _user.UserId; }
+                    if (!pools.TryGetValue(next, out List<SvServiceOrder> target)) pools[next] = target = new List<SvServiceOrder>();
+                    target.AddRange(month);
+                    result.OrdersCarried += month.Count;
+                    continue;
+                }
+                bool flagged = action == Production.MfLabourMonthAction.PostProtected; // the quarter ended: posted, but only payroll, the finance manager and the CEO read the amount
                 DateTime end = SvLabourMonth.End(period);
 
                 // the one accounting event of the month: no order number, no per-order line
                 AccountingEvent ev = null;
                 var lines = SvLabourMonth.EventLines(pending, period)
-                    .Select(l => new AccountingEventLine { AccountRole = l.Role, Debit = l.Debit, Credit = l.Credit, CostCenter = center, Description = l.Description }).ToList();
+                    .Select(l => new AccountingEventLine { AccountRole = l.Role, Debit = l.Debit, Credit = l.Credit, CostCenter = center, Description = l.Description, LabourProtected = flagged }).ToList();
                 if (lines.Count > 0)
                     ev = _costing.AddEvent(AccountingEventType.WarrantyCost, end, SvLabourMonth.SourceType, period, SvLabourMonth.Number(period), "دستمزد جذب‌شده در خدمات پس از فروش - ماه " + SvLabourMonth.Text(period), lines);
 
@@ -114,14 +151,16 @@ namespace Services.NasbNiro.AfterSales
                     _uow.Set<CostEntry>().Add(new CostEntry
                     {
                         EntryDate = end, Kind = CostKind.Labour, ContractId = g.ContractId, CostCenter = g.CostCenter, Quantity = 0, Amount = g.Amount,
-                        SourceType = SvLabourMonth.SourceType, SourceId = period, SourceNumber = SvLabourMonth.Number(period),
+                        SourceType = SvLabourMonth.SourceType, SourceId = period, SourceNumber = SvLabourMonth.Number(period), LabourProtected = flagged,
                         Description = "دستمزد ماهانه خدمات پس از فروش - ماه " + SvLabourMonth.Text(period), CreatedAt = now, CreatedByUserId = _user.UserId,
                     });
 
-                foreach (SvServiceOrder o in month) { o.LabourAggregatedAt = now; o.ModifyDate = now; o.ModifierUserId = _user.UserId; }
+                // the orders of the pool take the month they are posted in (a carried order was pending in an earlier month)
+                foreach (SvServiceOrder o in month) { o.LabourPendingPeriod = period; o.LabourAggregatedAt = now; o.ModifyDate = now; o.ModifierUserId = _user.UserId; }
+                postedPeriods.Add(period);
                 posted.Add((new SvLabourPeriodDto
                 {
-                    Period = period, PeriodText = SvLabourMonth.Text(period), Orders = month.Count(), PostedAt = now, CostAmount = groups.Sum(g => g.Amount),
+                    Period = period, PeriodText = SvLabourMonth.Text(period), Orders = month.Count, PostedAt = now, CostAmount = groups.Sum(g => g.Amount), Protected = flagged,
                     EventAmount = pending.Where(p => p.Decision == SvWarrantyDecision.Warranty || p.Decision == SvWarrantyDecision.Goodwill).Sum(p => p.Labour),
                 }, ev));
             }

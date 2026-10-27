@@ -206,6 +206,12 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.HasIndex(x => x.ShipmentId).IsUnique().HasFilter("[Deleted] = 0 AND [ShipmentId] IS NOT NULL");
                 b.Property(x => x.Comments).HasMaxLength(LongText);
                 b.Property(x => x.AverageScore).HasPrecision(5, 2);
+                b.Property(x => x.SkipReason).HasMaxLength(Text);
+                b.Property(x => x.RecordedByRole).HasMaxLength(Code);
+                b.Property(x => x.VerifyNote).HasMaxLength(Text);
+                // R1p D25: one complaint draft per survey, so a re-saved answer never opens a second one
+                b.HasIndex(x => x.ComplaintId).IsUnique().HasFilter("[ComplaintId] IS NOT NULL");
+                b.HasOne(x => x.Complaint).WithMany().HasForeignKey(x => x.ComplaintId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<PcShipment>().WithMany().HasForeignKey(x => x.ShipmentId).OnDelete(DeleteBehavior.Restrict);

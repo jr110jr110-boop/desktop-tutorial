@@ -31,8 +31,8 @@ namespace ViewModels.NasbNiro.ProductionDtos
         /// <summary>Start of the operator's running booking (ISO; the terminal timer counts from it).</summary>
         public DateTime? MyRunningSince { get; set; }
 
-        /// <summary>The quantity the finish must reach: the order quantity, or for a rework operation the rework quantity of the rejected step.</summary>
-        public decimal ExpectedQty { get; set; }
+        /// <summary>R1p D43: the work centre has machines and requires one: the start is refused without <c>machineId</c> (a waiting booking excepted).</summary>
+        public bool MachineRequired { get; set; }
 
         /// <summary>The signed-in operator has a booking (running or ended) on this operation, so he may report quantities and finish it.</summary>
         public bool HasMyBooking { get; set; }
@@ -124,8 +124,14 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public string OrderNumber { get; set; }
         public string JobCard { get; set; }
         public string OperationTitle { get; set; }
+        /// <summary>0 with <see cref="EmployeeHidden"/> when the reader may not see who worked (only PRODUCTIONMANAGER, SHOPSUPERVISOR, PAYROLL, FINANCEMANAGER, CEO and the employee himself do).</summary>
         public int EmployeeId { get; set; }
+
         public string EmployeeName { get; set; }
+
+        /// <summary>R1p D1: the person behind the hours is hidden from this reader; the hours per work centre stay visible.</summary>
+        public bool EmployeeHidden { get; set; }
+
         public int? MachineId { get; set; }
         public string MachineTitle { get; set; }
         public MfBookingKind Kind { get; set; }
@@ -152,8 +158,53 @@ namespace ViewModels.NasbNiro.ProductionDtos
         /// <summary>The booking is costed in the accounting (daily cost posting): it cannot be changed any more.</summary>
         public bool CostPosted { get; set; }
 
+        /// <summary>R1p D39: an extra booking added to an operation of a completed order (the original bookings are frozen).</summary>
+        public bool IsCorrection { get; set; }
+
+        public int? CorrectsBookingId { get; set; }
+
         /// <summary>Concurrency token for bookings/edit.</summary>
         public string RowVersion { get; set; }
+    }
+
+    /// <summary>R1p D1: booked hours per work centre and day, without a name (the reader without the right to see names uses this).</summary>
+    public class BookingHoursQuery
+    {
+        public int? WorkCenterId { get; set; }
+        public int? OrderId { get; set; }
+        public DateTime? From { get; set; }
+        public DateTime? To { get; set; }
+    }
+
+    public class BookingHoursDto
+    {
+        public int? WorkCenterId { get; set; }
+        public string WorkCenterCode { get; set; }
+        public string WorkCenterTitle { get; set; }
+        public DateTime Date { get; set; }
+        public string DateText { get; set; }
+        public int Bookings { get; set; }
+        public decimal Hours { get; set; }
+    }
+
+    /// <summary>
+    /// R1p D39: the bookings of a completed (or closed) order are frozen. A shop supervisor adds an extra booking with a reason; it carries <c>IsCorrection</c>, never changes an original booking and
+    /// adds hours only (a wrong booking is neutralised by finance, not by the shop).
+    /// </summary>
+    public class SaveCorrectionBookingDto
+    {
+        public int OperationId { get; set; }
+        public int EmployeeId { get; set; }
+        public MfBookingKind Kind { get; set; } = MfBookingKind.Run;
+        public DateTime StartAt { get; set; }
+        public DateTime EndAt { get; set; }
+        public int? MachineId { get; set; }
+
+        /// <summary>The frozen booking this one corrects, when it corrects one.</summary>
+        public int? CorrectsBookingId { get; set; }
+
+        public string Note { get; set; }
+        public string Reason { get; set; }
     }
 
     /// <summary>A completed booking made by a supervisor for somebody else (reason required).</summary>

@@ -96,15 +96,22 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string Code { get; set; }
         public int Quantity { get; set; }
         public decimal Material { get; set; }
-        public decimal Labour { get; set; }
+
+        /// <summary>
+        /// R1p D1: null (with <see cref="LabourHidden"/>) when a labour entry of the work order is a protected amount (fewer than three payroll-rated employees behind the month's pool) and the reader is not
+        /// PAYROLL, FINANCEMANAGER or CEO. <see cref="TotalCost"/>, <see cref="UnitCost"/>, <see cref="WipBalance"/> and <see cref="LabourInLedger"/> carry the labour as well and are hidden with it.
+        /// </summary>
+        public decimal? Labour { get; set; }
+
         public decimal Overhead { get; set; }
         public decimal Subcontract { get; set; }
-        public decimal TotalCost { get; set; }
-        public decimal UnitCost { get; set; }
-        public decimal WipBalance { get; set; }
-        public decimal LabourInLedger { get; set; }
+        public decimal? TotalCost { get; set; }
+        public decimal? UnitCost { get; set; }
+        public decimal? WipBalance { get; set; }
+        public decimal? LabourInLedger { get; set; }
         public decimal TransferredOut { get; set; }
         public bool IsClosed { get; set; }
+        public bool LabourHidden { get; set; }
     }
 
     public class FnWorkOrderCloseDto

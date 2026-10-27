@@ -164,6 +164,14 @@ namespace WebApi.Controllers
         [HttpPost("bookings/edit")]
         public async Task<IActionResult> EditBookingAsync([FromBody] EditBookingDto dto, CancellationToken ct) => Ok(await _shop.EditBookingAsync(dto, ct));
 
+        /// <summary>An extra booking on an operation of a completed order (its own bookings are frozen), by the shop supervisor with a reason.</summary>
+        [HttpPost("bookings/correct")]
+        public async Task<IActionResult> CorrectBookingAsync([FromBody] SaveCorrectionBookingDto dto, CancellationToken ct) => Ok(await _shop.CorrectBookingAsync(dto, ct));
+
+        /// <summary>Booked hours per work centre and day, without any name.</summary>
+        [HttpGet("bookings/hours")]
+        public async Task<IActionResult> BookingHoursAsync([FromQuery] BookingHoursQuery query, CancellationToken ct) => Ok(await _shop.GetBookingHoursAsync(query, ct));
+
         [HttpGet("attendance-differences")]
         public async Task<IActionResult> AttendanceDifferencesAsync([FromQuery] AttendanceDifferenceQuery query, CancellationToken ct) => Ok((await _shop.GetAttendanceDifferencesAsync(query, ct)).ToPaginatedResultSafe());
     }

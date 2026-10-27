@@ -40,6 +40,16 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public string ItemCode { get; set; }
         public string ItemTitle { get; set; }
         public decimal Quantity { get; set; }
+
+        /// <summary>R1p D6: pieces an approved NCR scrap decision wrote off this order (a replacement order is drafted for them).</summary>
+        public decimal WrittenOffQty { get; set; }
+
+        /// <summary>R1p D6: the quantity the order still makes: <c>Quantity - WrittenOffQty</c>.</summary>
+        public decimal EffectiveQuantity { get; set; }
+
+        /// <summary>R1p D6: the order this one replaces (drafted after a scrap decision).</summary>
+        public int? ReplacesOrderId { get; set; }
+
         public string Unit { get; set; }
         public MfOrderStatus Status { get; set; }
         public int? RoutingRevisionId { get; set; }
@@ -94,6 +104,13 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public string ProductionReceiptNumber { get; set; }
         public string CancelReason { get; set; }
         public string Note { get; set; }
+
+        /// <summary>R1p D6: number of the order this one replaces.</summary>
+        public string ReplacesOrderNumber { get; set; }
+
+        /// <summary>R1p D6: number of the replacement order drafted after a scrap decision of this order.</summary>
+        public string ReplacementOrderNumber { get; set; }
+
         public List<OrderComponentDto> Components { get; set; } = new List<OrderComponentDto>();
         public List<OperationDto> Operations { get; set; } = new List<OperationDto>();
 
@@ -164,6 +181,27 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int RunningBookings { get; set; }
 
         public decimal HoursBooked { get; set; }
+
+        /// <summary>
+        /// R1p D7: the quantity the operation has to report (good + scrap): the good quantity of the operation before it (the first operation: the order quantity); for a rework operation the rework quantity
+        /// of the rejected step it reworks.
+        /// </summary>
+        public decimal ExpectedQty { get; set; }
+
+        /// <summary>R1p D12: a welding step; it starts only with the approved WPS and a welder qualified for its process.</summary>
+        public bool IsWelding { get; set; }
+
+        public int? WpsId { get; set; }
+        public string WpsNumber { get; set; }
+
+        /// <summary>R1p D12: the weld log the system drafted from the booking when the welding step finished.</summary>
+        public int? WeldLogId { get; set; }
+
+        /// <summary>R1p D6: the rejected step continues on an approved NCR concession.</summary>
+        public bool AcceptedByConcession { get; set; }
+
+        /// <summary>R1p D38: QC accepted the step early but the reported quantities changed since (a new acceptance is needed).</summary>
+        public bool AcceptanceStale { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ release gate
@@ -260,13 +298,19 @@ namespace ViewModels.NasbNiro.ProductionDtos
     {
         public int Id { get; set; }
 
-        /// <summary>skip, complete-outside.</summary>
+        /// <summary>skip, complete-outside, accept-by-concession, scrap-by-ncr.</summary>
         public string Action { get; set; }
 
         public string Reason { get; set; }
 
         /// <summary>complete-outside: the confirmed return-from-contractor document.</summary>
         public int? DocumentId { get; set; }
+
+        /// <summary>
+        /// accept-by-concession and scrap-by-ncr (production manager, R1p D6): the non-conformance report of this operation. It must be approved with the matching disposition
+        /// (Concession, Scrap) by quality, engineering and production; the operation never continues on a draft or an open NCR.
+        /// </summary>
+        public int? NcrId { get; set; }
     }
 
     public class QcDecisionDto
@@ -280,6 +324,25 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         /// <summary>For an ITP point operation: the ITP activity of the work order the acceptance rests on (found by the test type when empty).</summary>
         public int? ItpActivityId { get; set; }
+
+        /// <summary>
+        /// R1p D16: the measured values behind the decision. Every value needs the measuring instrument (a calibrated item of the equipment register) it was measured with: a value without an instrument
+        /// is refused, because a measurement nobody can trace to a calibrated instrument proves nothing.
+        /// </summary>
+        public List<QcMeasurementInputDto> Measurements { get; set; } = new List<QcMeasurementInputDto>();
+    }
+
+    public class QcMeasurementInputDto
+    {
+        public string Characteristic { get; set; }
+        public decimal Nominal { get; set; }
+        public decimal TolPlus { get; set; }
+        public decimal TolMinus { get; set; }
+        public decimal Measured { get; set; }
+        public string Unit { get; set; }
+
+        /// <summary>The measuring instrument (equipment register id); mandatory for every value.</summary>
+        public int? InstrumentId { get; set; }
     }
 
     public class ReworkOperationDto

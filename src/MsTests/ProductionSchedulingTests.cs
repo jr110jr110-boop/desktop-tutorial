@@ -194,21 +194,26 @@ namespace MsTests
         [TestMethod]
         public void Oee_Of_A_Small_Case_Is_Availability_Times_Performance_Times_Quality()
         {
+            // R1p D29 (ISO 22400-2): the availability is the run time over the planned busy time (10 / 40 = 25.0 %), no longer (planned - downtime) / planned (36 / 40 = 90 %).
+            // The OEE is availability x performance x quality = 25.0 % x 70.0 % x 85.7 % = 15.0 %; the figure of the earlier releases (90 % x 70 % x 85.7 % = 54.0 %) stays one release as OeeLegacy.
             OeeDto o = MfKpi.Compute(new OeeDto { PlannedHours = 40, DowntimeHours = 4, BookedRunHours = 10, StandardHours = 7, GoodQty = 6, ScrapQty = 1 });
-            Assert.AreEqual(90.0m, o.AvailabilityPercent);
+            Assert.AreEqual(25.0m, o.AvailabilityPercent);
             Assert.AreEqual(70.0m, o.PerformancePercent);
             Assert.AreEqual(85.7m, o.QualityPercent);
-            Assert.AreEqual(54.0m, o.OeePercent);
+            Assert.AreEqual(15.0m, o.OeePercent);
+            Assert.AreEqual(54.0m, o.OeeLegacy);
         }
 
         [TestMethod]
         public void Oee_Is_Empty_Without_Run_Time_Or_Pieces()
         {
+            // R1p D29: a centre that was planned for 40 hours and ran none has availability 0 % (before ISO 22400-2 it showed 100 % because no downtime was recorded)
             OeeDto o = MfKpi.Compute(new OeeDto { PlannedHours = 40, DowntimeHours = 0 });
-            Assert.AreEqual(100.0m, o.AvailabilityPercent);
+            Assert.AreEqual(0.0m, o.AvailabilityPercent);
             Assert.IsNull(o.PerformancePercent);
             Assert.IsNull(o.QualityPercent);
             Assert.IsNull(o.OeePercent);
+            Assert.IsNull(o.OeeLegacy);
         }
     }
 }

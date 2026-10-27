@@ -83,6 +83,9 @@ namespace Services.NasbNiro.AfterSales
             List<int> itemIds = docs.SelectMany(d => d.Lines.Select(l => l.ItemId)).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
             bool seesPayroll = SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
+            // R1p D2: hours per person next to the visible amounts of several orders can be solved for each person's hourly pay, and the month an order waits in tells how small its pool was.
+            // Whoever is not payroll, the finance manager or the CEO sees the hours of an entry without the person (an employee still sees his own entries) and no aggregate month.
+            int? ownEmployeeId = seesPayroll ? null : (await MfText.EmployeeOfUserAsync(_uow, Me, ct))?.Id;
 
             return rows.Select(r =>
             {
@@ -105,9 +108,13 @@ namespace Services.NasbNiro.AfterSales
                     ReportDocumentId = r.ReportDocumentId, Findings = r.Findings, Recommendations = r.Recommendations, RunningHoursReading = r.RunningHoursReading, ClosedAtText = SlText.Stamp(r.ClosedAt),
                     Engineers = r.Engineers.OrderBy(e => e.Id).Select(e => new SvEngineerDto { EmployeeId = e.EmployeeId, Name = employeeNames.GetValueOrDefault(e.EmployeeId) }).ToList(),
                     Tasks = r.Tasks.OrderBy(t => t.RowNumber).Select(t => new SvTaskDto { Id = t.Id, RowNumber = t.RowNumber, Description = t.Description, IsDone = t.IsDone }).ToList(),
-                    TimeEntries = r.TimeEntries.OrderBy(t => t.WorkDate).ThenBy(t => t.Id).Select(t => new SvTimeEntryDto
+                    TimeEntries = r.TimeEntries.OrderBy(t => t.WorkDate).ThenBy(t => t.Id).Select(t =>
                     {
-                        Id = t.Id, EmployeeId = t.EmployeeId, EmployeeName = employeeNames.GetValueOrDefault(t.EmployeeId), WorkDate = t.WorkDate, WorkDateText = SlText.Date(t.WorkDate), Hours = t.Hours, Kind = t.Kind, KindText = SvText.TimeKind(t.Kind), Note = t.Note,
+                        bool named = seesPayroll || (ownEmployeeId.HasValue && ownEmployeeId.Value == t.EmployeeId);
+                        return new SvTimeEntryDto
+                        {
+                            Id = t.Id, EmployeeId = named ? t.EmployeeId : 0, EmployeeName = named ? employeeNames.GetValueOrDefault(t.EmployeeId) : null, EmployeeHidden = !named, WorkDate = t.WorkDate, WorkDateText = SlText.Date(t.WorkDate), Hours = t.Hours, Kind = t.Kind, KindText = SvText.TimeKind(t.Kind), Note = t.Note,
+                        };
                     }).ToList(),
                     Measurements = r.Measurements.OrderBy(m => m.Id).Select(m => new SvMeasurementDto { Id = m.Id, Name = m.Name, Value = m.Value, Unit = m.Unit, Note = m.Note }).ToList(),
                     Parts = docs.Where(d => d.ServiceOrderId == r.Id).Select(d => new SvPartDocumentDto
@@ -116,7 +123,7 @@ namespace Services.NasbNiro.AfterSales
                         Lines = d.Lines.OrderBy(l => l.RowNumber).Select(l => new SvPartLineDto { ItemId = l.ItemId, ItemCode = items.GetValueOrDefault(l.ItemId)?.Code, ItemName = items.GetValueOrDefault(l.ItemId)?.Title, Quantity = l.Quantity }).ToList(),
                     }).ToList(),
                     TravelHours = travel, WorkHours = work, WaitingHours = waiting, TotalHours = travel + work + waiting,
-                    LabourHours = r.CostPostedAt.HasValue ? r.LabourHours : travel + work + waiting, LabourAmount = labour, LabourHidden = hidden, LabourAggregatePending = r.LabourPendingPeriod.HasValue && !r.LabourAggregatedAt.HasValue, LabourAggregatePeriod = r.LabourPendingPeriod, PartsAmount = r.PartsAmount,
+                    LabourHours = r.CostPostedAt.HasValue ? r.LabourHours : travel + work + waiting, LabourAmount = labour, LabourHidden = hidden, LabourAggregatePending = r.LabourPendingPeriod.HasValue && !r.LabourAggregatedAt.HasValue, LabourAggregatePeriod = seesPayroll ? r.LabourPendingPeriod : null, PartsAmount = r.PartsAmount,
                     TotalCost = labour.HasValue ? labour.Value + r.PartsAmount : (decimal?)null, CostPosted = r.CostPostedAt.HasValue,
                     BillableLabourRateRial = r.BillableLabourRateRial, InvoiceId = r.InvoiceId, InvoiceNumber = r.InvoiceId.HasValue ? invoices.GetValueOrDefault(r.InvoiceId.Value) : null, DraftNote = r.DraftNote,
                     RowVersion = SlConcurrency.Text(r.RowVersion),
@@ -328,10 +335,11 @@ namespace Services.NasbNiro.AfterSales
 
         // ================================================================================== warranty decision
 
-        private async Task<bool> CoveredAsync(SvServiceOrder row, CancellationToken ct)
+        /// <summary>Whether the warranty of the unit covers the day of the failure, and whether the dates it rests on were confirmed by a second person (R1p D26).</summary>
+        private async Task<(bool Covered, bool Confirmed)> CoverageAsync(SvServiceOrder row, CancellationToken ct)
         {
             SvInstalledUnit unit = await _uow.Set<SvInstalledUnit>().AsNoTracking().FirstAsync(u => u.Id == row.UnitId, ct);
-            return !unit.Decommissioned && SvWarranty.Covers(unit.WarrantyStart, unit.WarrantyEnd, row.WarrantyTestedOn ?? DateTime.Today);
+            return (!unit.Decommissioned && SvWarranty.Covers(unit.WarrantyStart, unit.WarrantyEnd, row.WarrantyTestedOn ?? DateTime.Today), unit.IsConfirmed);
         }
 
         public async Task<ResponseDto<SvOrderDto>> RequestGoodwillAsync(SvGoodwillRequestDto dto, CancellationToken ct)
@@ -369,7 +377,8 @@ namespace Services.NasbNiro.AfterSales
                 if (LedgerMath.Touched(row.CreatorUserId, row.EditorUserIds, Me)) return Bad<SvOrderDto>(SlText.SameUser);
             }
             else return Bad<SvOrderDto>("تصمیم گارانتی نامعتبر است.");
-            string rule = SvWarranty.CheckDecision(dto.Decision, await CoveredAsync(row, ct), dto.CauseIsMisuse, row.GoodwillRequestedAt.HasValue);
+            (bool covered, bool confirmed) = await CoverageAsync(row, ct);
+            string rule = SvWarranty.CheckDecision(dto.Decision, covered, dto.CauseIsMisuse, row.GoodwillRequestedAt.HasValue, confirmed);
             if (rule != null) return Bad<SvOrderDto>(rule);
             row.Decision = dto.Decision; row.CauseIsMisuse = dto.CauseIsMisuse; row.DecisionNote = Clean(dto.Note); row.DecidedByUserId = Me; row.DecidedAt = DateTimeOffset.Now;
             row.ModifyDate = DateTimeOffset.Now; row.ModifierUserId = Me;
@@ -427,7 +436,8 @@ namespace Services.NasbNiro.AfterSales
             if (row.Decision == SvWarrantyDecision.None && !row.LtsaContractId.HasValue) return Bad<SvOrderDto>("برای بستن، تصمیم گارانتی (گارانتی، قابل‌فاکتور یا حسن نیت) گرفته شود.");
             if (row.Decision == SvWarrantyDecision.Warranty)
             {
-                string rule = SvWarranty.CheckDecision(SvWarrantyDecision.Warranty, await CoveredAsync(row, ct), row.CauseIsMisuse, row.GoodwillRequestedAt.HasValue);
+                (bool covered, bool confirmed) = await CoverageAsync(row, ct);
+                string rule = SvWarranty.CheckDecision(SvWarrantyDecision.Warranty, covered, row.CauseIsMisuse, row.GoodwillRequestedAt.HasValue, confirmed);
                 if (rule != null) return Bad<SvOrderDto>(rule);
             }
             if (await _uow.Set<InventoryDocument>().AnyAsync(d => d.ServiceOrderId == row.Id && !d.Deleted && d.Status == InventoryDocumentStatus.Draft, ct))

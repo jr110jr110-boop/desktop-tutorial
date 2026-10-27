@@ -28,6 +28,9 @@ namespace Services.NasbNiro.AfterSales
         public const string SettingSetters = "CEO";
         public const string GoodwillDeciders = "CEO";
 
+        /// <summary>R1p D25: only QA verifies a sample of the survey answers that SERVICE or SALES typed in (the people the scores are about must not confirm them themselves).</summary>
+        public const string SurveyVerifiers = "QA";
+
         /// <summary>Who sees the labour cost of an order when it could show one person's hourly pay.</summary>
         public const string PayrollSeers = "PAYROLL,FINANCEMANAGER,CEO";
 
@@ -60,9 +63,15 @@ namespace Services.NasbNiro.AfterSales
         /// <summary>Days before the due date of an LTSA visit when its service order is drafted. Default 30 (the brief; an assumption the company can change).</summary>
         public const string VisitLeadDays = "VisitLeadDays";
 
+        /// <summary>
+        /// R1p D25: a customer survey score below this opens a customer complaint draft. The configuration key Service:LowScoreThreshold is the fallback when the CEO has not entered a value here; default 3 (★ provisional decision).
+        /// </summary>
+        public const string LowScoreThreshold = "LowScoreThreshold";
+
         public const string DefaultCostCenter = "AFTERSALES";
         public const int DefaultSurveyLeadDays = 30;
         public const int DefaultVisitLeadDays = 30;
+        public const int DefaultLowScoreThreshold = 3;
 
         public static readonly (string Key, string Title)[] All =
         {
@@ -70,6 +79,7 @@ namespace Services.NasbNiro.AfterSales
             (LabourWorkCenterCode, "کد مرکز کاری که نرخ ساعتی دستمزد استاندارد آن برای مهندسانِ بدون فیش حقوقی تأییدشده به کار می‌رود (پیش‌فرض ندارد)"),
             (SurveyLeadDays, "روز بعد از تحویل برای پیش‌نویس نظرسنجی (پیش‌فرض ۳۰)"),
             (VisitLeadDays, "روز قبل از موعد بازدید LTSA برای پیش‌نویس دستور خدمات (پیش‌فرض ۳۰)"),
+            (LowScoreThreshold, "امتیاز آستانه‌ی نظرسنجی: امتیاز کمتر از این مقدار (۱ تا ۵) پیش‌نویس شکایت مشتری باز می‌کند (پیش‌فرض ۳)"),
         };
     }
 
@@ -194,6 +204,57 @@ namespace Services.NasbNiro.AfterSales
         public static bool Breached(DateTime? due, DateTime? doneAt, DateTime asOf) => due.HasValue && (doneAt ?? asOf) > due.Value;
     }
 
+    /// <summary>
+    /// R1p D24: the clocks of the SLA are the server's. An action (first response, resolution, assignment) is stamped with the server time; the client never sends it. The received time of a request is the server time too,
+    /// except that a person registering a phone call or a letter may enter the time it really came in, only within the last 24 hours (★ provisional decision) and not in the future: a request that came in earlier than that is
+    /// registered now and its clock starts now. A channel that is the system itself (e-mail, portal, anything else) always gets the server time. The time of a request is never changed after it is registered.
+    /// </summary>
+    internal static class SvSlaTime
+    {
+        /// <summary>How far back a person may date a registered call or letter.</summary>
+        public const int BackdateHours = 24;
+
+        /// <summary>Clock difference between the client and the server that is not held against the client.</summary>
+        public static readonly TimeSpan FutureTolerance = TimeSpan.FromMinutes(5);
+
+        public const string ActionRefusal = "زمان اقدام از ساعت سرور ثبت می‌شود و قابل تعیین نیست.";
+        public const string ChannelRefusal = "زمان دریافت را فقط برای ثبت تماس تلفنی یا نامه می‌توان وارد کرد؛ برای کانال‌های دیگر (ایمیل، سامانه و غیره) زمان دریافت همان زمان ثبت در سرور است.";
+        public const string FutureRefusal = "زمان دریافت در آینده است.";
+        public const string TooOldRefusal = "زمان دریافت بیش از ۲۴ ساعت قبل است؛ درخواست را بدون زمان دریافت ثبت کنید تا ساعت SLA از زمان ثبت شروع شود.";
+        public const string ChangeRefusal = "زمان دریافت پس از ثبت درخواست تغییر نمی‌کند.";
+
+        private static readonly string[] CallOrLetterWords = { "تلفن", "تماس", "نامه", "فکس", "phone", "call", "letter", "fax" };
+
+        private static string Normal(string text) => (text ?? string.Empty).Replace('ي', 'ی').Replace('ك', 'ک').Trim().ToLowerInvariant();
+
+        /// <summary>A phone call or a letter: the channels in which a person types in what came from outside at some earlier moment.</summary>
+        public static bool IsCallOrLetter(string channel)
+        {
+            string c = Normal(channel);
+            return c.Length > 0 && CallOrLetterWords.Any(w => c.Contains(w));
+        }
+
+        /// <summary>The Persian refusal of a client-supplied received time of a NEW request, or null when it is allowed (or not supplied).</summary>
+        public static string CheckReceived(DateTime? supplied, string channel, DateTime now)
+        {
+            if (!supplied.HasValue) return null;
+            if (!IsCallOrLetter(channel)) return ChannelRefusal;
+            if (supplied.Value > now + FutureTolerance) return FutureRefusal;
+            if (supplied.Value < now.AddHours(-BackdateHours)) return TooOldRefusal;
+            return null;
+        }
+
+        /// <summary>The received time of a new request: the one supplied (a call or a letter, already checked, never later than now) or the server time.</summary>
+        public static DateTime ReceivedOf(DateTime? supplied, DateTime now) => supplied.HasValue ? (supplied.Value > now ? now : supplied.Value) : now;
+
+        /// <summary>An edit may send the stored received time back, but not another one.</summary>
+        public static string CheckUnchanged(DateTime? supplied, DateTime stored) =>
+            supplied.HasValue && Math.Abs((supplied.Value - stored).TotalSeconds) > 1 ? ChangeRefusal : null;
+
+        /// <summary>An action carries no client time.</summary>
+        public static string CheckAction(DateTime? supplied) => supplied.HasValue ? ActionRefusal : null;
+    }
+
     internal static class SvWarranty
     {
         public static DateTime End(DateTime start, int months) => start.Date.AddMonths(months);
@@ -207,11 +268,16 @@ namespace Services.NasbNiro.AfterSales
 
         /// <summary>The rule of a warranty decision. Returns a Persian message, or null when it is allowed.</summary>
         /// <param name="coveredOnTestDate">The warranty covers the day the failure was reported.</param>
-        public static string CheckDecision(SvWarrantyDecision decision, bool coveredOnTestDate, bool misuse, bool requestedGoodwill)
+        /// <param name="datesConfirmed">
+        /// R1p D26: the dates of the unit (handover, commissioning, warranty start and end) were confirmed by a second person. A decision that grants the warranty rests on those dates, so it is refused while they are
+        /// the unchecked entry of one person (a unit edited after its confirmation goes back to unconfirmed). Billable and goodwill decisions do not depend on the dates.
+        /// </param>
+        public static string CheckDecision(SvWarrantyDecision decision, bool coveredOnTestDate, bool misuse, bool requestedGoodwill, bool datesConfirmed = true)
         {
             switch (decision)
             {
                 case SvWarrantyDecision.Warranty:
+                    if (!datesConfirmed) return "تاریخ‌های گارانتی این واحد هنوز توسط شخص دوم تأیید نشده است؛ تصمیم «گارانتی» ممکن نیست.";
                     if (!coveredOnTestDate) return "واحد در تاریخ گزارش خرابی در گارانتی نبوده است؛ تصمیم «گارانتی» ممکن نیست.";
                     if (misuse) return "علت خرابی سوءاستفاده مشتری است؛ تصمیم «گارانتی» ممکن نیست.";
                     return null;
@@ -265,6 +331,26 @@ namespace Services.NasbNiro.AfterSales
         /// <summary>Mean time between failures: operating hours divided by the failures; empty without a failure.</summary>
         public static decimal? Mtbf(decimal operatingHours, int failures) => failures > 0 ? SlText.R2(operatingHours / failures) : (decimal?)null;
 
+        /// <summary>
+        /// R1p D36: the meter hours a unit ran INSIDE the period (the failures of the period are divided by the hours of the same period, not by the whole life of the unit).
+        /// The hours are the meter reading at the end of the period less the reading at its start. The readings are the ones of the closed service orders. The reading at the start is the last one before the period; a unit commissioned
+        /// inside the period started at zero; an open start (no from-date) counts from zero. Empty (the unit is left out of the hours AND of the failures) when the period cannot be measured for the unit: no reading before the period
+        /// for a unit older than the period, or no reading at all inside the period.
+        /// </summary>
+        public static decimal? PeriodHours(IEnumerable<(DateTime Date, decimal Hours)> readings, DateTime? from, DateTime? to, DateTime? commissioned)
+        {
+            List<(DateTime Date, decimal Hours)> list = readings.OrderBy(r => r.Date).ThenBy(r => r.Hours).ToList();
+            DateTime low = from.HasValue ? from.Value.Date : DateTime.MinValue, high = to.HasValue ? to.Value.Date : DateTime.MaxValue;
+            if (!list.Any(r => r.Date >= low && r.Date <= high)) return null;
+            decimal end = list.Last(r => r.Date <= high).Hours;
+            decimal start;
+            if (!from.HasValue) start = 0;
+            else if (list.Any(r => r.Date < low)) start = list.Last(r => r.Date < low).Hours;
+            else if (commissioned.HasValue && commissioned.Value.Date >= low) start = 0;
+            else return null;
+            return Math.Max(0, end - start);
+        }
+
         /// <summary>Failures after the first one.</summary>
         public static int Repeats(int failures) => Math.Max(0, failures - 1);
     }
@@ -272,6 +358,29 @@ namespace Services.NasbNiro.AfterSales
     internal static class SvSurveyMath
     {
         public static bool ValidScore(int score) => score >= 1 && score <= 5;
+
+        public const string ConfigKey = "Service:LowScoreThreshold";
+
+        /// <summary>
+        /// R1p D25: the threshold below which a score opens a complaint draft. The first usable of the CEO's setting, the configuration value and the default (3, ★ provisional); kept between 1 and 5 (a score is 1 to 5, so 1 never complains and 5 complains for 1 to 4).
+        /// </summary>
+        public static int Threshold(string setting, string configured)
+        {
+            foreach (string text in new[] { setting, configured })
+                if (text != null && int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) && v >= 1) return Math.Min(v, 5);
+            return SvSettingKeys.DefaultLowScoreThreshold;
+        }
+
+        /// <summary>The questions scored below the threshold.</summary>
+        public static List<(int RowNumber, string Question, int Score)> LowScores(IEnumerable<(int RowNumber, string Question, int? Score)> answers, int threshold) =>
+            answers.Where(a => a.Score.HasValue && a.Score.Value < threshold).OrderBy(a => a.RowNumber).Select(a => (a.RowNumber, a.Question, a.Score.Value)).ToList();
+
+        /// <summary>A survey is answered only when every question has a score.</summary>
+        public static bool AllAnswered(IEnumerable<int?> scores)
+        {
+            List<int?> list = scores.ToList();
+            return list.Count > 0 && list.All(s => s.HasValue);
+        }
 
         /// <summary>Average of the given scores, two decimals; empty without a score.</summary>
         public static decimal? Average(IEnumerable<int> scores)
@@ -436,6 +545,26 @@ namespace Services.NasbNiro.AfterSales
 
         /// <summary>A month is posted by a run on <paramref name="asOf"/> only when it has ended (the run day is in a later month).</summary>
         public static bool Due(int period, DateTime asOf) => period < Of(asOf);
+
+        /// <summary>
+        /// R1p D2: what to do with the whole pool of a month. The pool is the sum of every pending order of the month, so the month total is one person's pay when fewer than three payroll-rated employees are behind the pool
+        /// (each order alone being protected does not make the sum safe, and the sum alone is what the event shows). A protected pool waits for the next month and joins that month's pool; at the end of a Persian quarter
+        /// it is posted anyway, flagged as protected (★ provisional cap), so it never waits for ever.
+        /// </summary>
+        public static Production.MfLabourMonthAction Decide(IEnumerable<SvPendingLabour> orders, int period)
+        {
+            List<SvPendingLabour> list = orders.ToList();
+            return Production.MfLabourCarry.Decide(list.SelectMany(o => o.Employees).Distinct().Count(), list.SelectMany(o => o.PayrollEmployees).Distinct().Count(), period);
+        }
+
+        /// <summary>The month a carried pool waits in: the next one, or the first later one that has no posting yet (a posted month is never reopened).</summary>
+        public static int NextOpen(int period, IEnumerable<int> posted)
+        {
+            HashSet<int> set = posted.ToHashSet();
+            int next = Next(period);
+            while (set.Contains(next)) next = Next(next);
+            return next;
+        }
 
         private static bool Protected(IEnumerable<SvPendingLabour> orders)
         {

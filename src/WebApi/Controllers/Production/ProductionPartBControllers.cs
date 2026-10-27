@@ -17,10 +17,12 @@ namespace WebApi.Controllers
     public class ProductionCostController : ControllerBase
     {
         private readonly IMfCostService _cost;
+        private readonly IMfLabourService _labour;
 
-        public ProductionCostController(IMfCostService cost)
+        public ProductionCostController(IMfCostService cost, IMfLabourService labour)
         {
             _cost = cost;
+            _labour = labour;
         }
 
         [HttpPost("cost/run")]
@@ -31,6 +33,14 @@ namespace WebApi.Controllers
 
         [HttpGet("cost/postings")]
         public async Task<IActionResult> PostingsAsync([FromQuery] CostPostingQuery query, CancellationToken ct) => Ok((await _cost.GetPostingsAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>R1p D1: posts the labour of protected groups (fewer than three payroll-rated employees) as the monthly aggregate of every ended month; idempotent.</summary>
+        [HttpPost("cost/labour-month")]
+        public async Task<IActionResult> LabourMonthAsync([FromBody] MfLabourMonthRunDto dto, CancellationToken ct) => Ok(await _labour.RunAsync(dto, ct));
+
+        /// <summary>R1p D1: the months already posted as monthly aggregates (a protected amount is hidden from readers outside PAYROLL, FINANCEMANAGER and CEO).</summary>
+        [HttpGet("cost/labour-months")]
+        public async Task<IActionResult> LabourMonthsAsync(CancellationToken ct) => Ok(await _labour.HistoryAsync(ct));
     }
 
     /// <summary>The finite-capacity scheduler, the load report and the dispatch list of a work centre.</summary>

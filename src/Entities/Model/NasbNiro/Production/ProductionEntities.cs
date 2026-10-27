@@ -38,6 +38,12 @@ namespace Entities.Model.NasbNiro.Production
         public decimal QueueDaysDefault { get; set; }
         public bool IsActive { get; set; } = true;
 
+        /// <summary>
+        /// R1p D43: an operation of this centre cannot be started on the terminal without choosing a machine (the machine hours, the machine overhead and the OEE come from it).
+        /// ★ provisional decision: true by default; the rule applies only while the centre has at least one machine that is not retired (a centre without machines has nothing to choose).
+        /// </summary>
+        public bool RequiresMachine { get; set; } = true;
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -91,6 +97,12 @@ namespace Entities.Model.NasbNiro.Production
         public int? ItpTestType { get; set; }
 
         public bool FirstArticleRequired { get; set; }
+
+        /// <summary>R1p D12: a welding step. It starts only with an approved WPS (<see cref="WpsId"/>) and a booking employee who holds a valid welder qualification for the process of that WPS.</summary>
+        public bool IsWelding { get; set; }
+
+        /// <summary>R1p D12: the welding procedure specification (Wps of the quality module) the step is welded by.</summary>
+        public int? WpsId { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -209,6 +221,12 @@ namespace Entities.Model.NasbNiro.Production
         public string CancelReason { get; set; }
         public string Note { get; set; }
 
+        /// <summary>R1p D6: pieces of the order scrapped by an approved NCR decision (the order makes <c>Quantity - WrittenOffQty</c>; a replacement order is drafted for them).</summary>
+        public decimal WrittenOffQty { get; set; }
+
+        /// <summary>R1p D6: the order this one was drafted to replace after a scrap decision.</summary>
+        public int? ReplacesOrderId { get; set; }
+
         /// <summary>The operations and components of the order (so the order and its children are saved together).</summary>
         public ICollection<MfOperation> Operations { get; set; } = new List<MfOperation>();
 
@@ -280,6 +298,24 @@ namespace Entities.Model.NasbNiro.Production
         public DateTimeOffset? FinishedAt { get; set; }
         public string Note { get; set; }
 
+        /// <summary>R1p D12: a welding step (copied from the standard when the order is drafted).</summary>
+        public bool IsWelding { get; set; }
+
+        /// <summary>R1p D12: the approved WPS the step is welded by (copied from the standard).</summary>
+        public int? WpsId { get; set; }
+
+        /// <summary>R1p D12: the weld log drafted from the booking when the welding step finished.</summary>
+        public int? WeldLogId { get; set; }
+
+        /// <summary>R1p D6: the production manager let the order continue with this rejected step on the strength of an approved NCR concession (<see cref="NcrId"/>).</summary>
+        public bool AcceptedByConcession { get; set; }
+
+        /// <summary>R1p D38: the reported quantities at the moment QC accepted the step; a finish with other quantities needs a new acceptance.</summary>
+        public decimal? QcAcceptedGoodQty { get; set; }
+
+        public decimal? QcAcceptedScrapQty { get; set; }
+        public decimal? QcAcceptedReworkQty { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -337,6 +373,26 @@ namespace Entities.Model.NasbNiro.Production
 
         /// <summary>Set when the cost posting has handled the booking (a posted booking is final: a correction goes through finance).</summary>
         public DateTimeOffset? CostPostedAt { get; set; }
+
+        /// <summary>
+        /// R1p D1: the labour of this booking belongs to a protected group (fewer than three payroll-rated employees on the work order, WBS node and work centre of the day), so it was NOT posted per group.
+        /// It waits for the monthly aggregate posting of this Persian month (yyyymm); null for a booking posted the normal way.
+        /// </summary>
+        public int? LabourPendingPeriod { get; set; }
+
+        /// <summary>R1p D1: the labour cost (hours x hourly rate) that waits for the monthly posting.</summary>
+        public decimal? PendingLabour { get; set; }
+
+        /// <summary>R1p D1: the hourly rate behind <see cref="PendingLabour"/> came from an approved payslip (the employee counts as payroll-rated in the monthly privacy test).</summary>
+        public bool RateFromPayroll { get; set; }
+
+        /// <summary>R1p D1: the monthly aggregate posting took the pending labour of this booking.</summary>
+        public DateTimeOffset? LabourAggregatedAt { get; set; }
+
+        /// <summary>R1p D39: an extra booking the shop supervisor added to an operation of a completed order, with a reason (bookings of a completed order are never edited).</summary>
+        public bool IsCorrection { get; set; }
+
+        public int? CorrectsBookingId { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -419,6 +475,9 @@ namespace Entities.Model.NasbNiro.Production
 
         /// <summary>Distinct employees in the row whose labour rate came from payroll.</summary>
         public int PayrollEmployeeCount { get; set; }
+
+        /// <summary>R1p D1: the labour of this protected row is not in the accounting entries of the day; it waits for the monthly aggregate posting (the machine overhead of the row is posted at once).</summary>
+        public bool LabourDeferred { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ scheduling (part B)

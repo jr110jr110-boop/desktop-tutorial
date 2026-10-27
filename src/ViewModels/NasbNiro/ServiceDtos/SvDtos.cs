@@ -237,7 +237,10 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public int? UnitId { get; set; }
         public string Channel { get; set; }
 
-        /// <summary>When the request was received (the SLA clock starts here); now when empty.</summary>
+        /// <summary>
+        /// When the request was received (the SLA clock starts here). The server time when empty. A person registering a phone call or a letter may enter the real time within the last 24 hours; every other channel
+        /// (e-mail, portal) refuses a value. Fixed after the registration.
+        /// </summary>
         public DateTime? ReceivedAt { get; set; }
 
         public string Description { get; set; }
@@ -255,7 +258,7 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public int? UserId { get; set; }
         public string Resolution { get; set; }
 
-        /// <summary>When the action happened (now when empty); lets the office enter a response given earlier.</summary>
+        /// <summary>Not accepted any more (R1p D24): the time of an action is the server's. A request that carries a value is refused.</summary>
         public DateTime? At { get; set; }
 
         public string RowVersion { get; set; }
@@ -289,8 +292,13 @@ namespace ViewModels.NasbNiro.ServiceDtos
     public class SvTimeEntryDto
     {
         public int Id { get; set; }
+
+        /// <summary>0 and no name for a reader who is not payroll, the finance manager or the CEO (R1p D2), except for his own entries.</summary>
         public int EmployeeId { get; set; }
         public string EmployeeName { get; set; }
+
+        /// <summary>The person of this entry is not shown to this reader.</summary>
+        public bool EmployeeHidden { get; set; }
         public DateTime WorkDate { get; set; }
         public string WorkDateText { get; set; }
         public decimal Hours { get; set; }
@@ -555,6 +563,9 @@ namespace ViewModels.NasbNiro.ServiceDtos
     {
         public DateTime AsOf { get; set; }
         public List<SvLabourPeriodDto> Periods { get; set; } = new List<SvLabourPeriodDto>();
+
+        /// <summary>R1p D2: orders whose month total would show one person's pay (fewer than three payroll-rated employees behind it): they wait for the next month, up to the end of the quarter.</summary>
+        public int OrdersCarried { get; set; }
     }
 
     public class SvLabourPeriodDto
@@ -574,6 +585,9 @@ namespace ViewModels.NasbNiro.ServiceDtos
 
         /// <summary>When the month was posted.</summary>
         public DateTimeOffset? PostedAt { get; set; }
+
+        /// <summary>R1p D2: the month total came from fewer than three payroll-rated employees and was posted at the end of the quarter; every reader but payroll, the finance manager and the CEO sees no amount in it.</summary>
+        public bool Protected { get; set; }
     }
 
     public class SvJobsResultDto
@@ -593,6 +607,9 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public SlSurveyStatus? Status { get; set; }
         public SlSurveyKind? Kind { get; set; }
         public int? CustomerId { get; set; }
+
+        /// <summary>R1p D25: QA picks its sample among the answered surveys that are still unverified (false) or lists the verified ones (true).</summary>
+        public bool? Verified { get; set; }
     }
 
     public class SlSurveyAnswerDto
@@ -622,6 +639,22 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public string AnsweredAtText { get; set; }
         public string Comments { get; set; }
         public decimal? AverageScore { get; set; }
+
+        /// <summary>R1p D25: why the survey was skipped.</summary>
+        public string SkipReason { get; set; }
+
+        /// <summary>R1p D25: SERVICE or SALES, whoever typed the customer's scores in (empty until answered).</summary>
+        public string RecordedByRole { get; set; }
+
+        /// <summary>R1p D25: QA checked these answers with the customer.</summary>
+        public bool Verified { get; set; }
+        public string VerifiedAtText { get; set; }
+        public string VerifyNote { get; set; }
+
+        /// <summary>R1p D25: the complaint draft opened because a score was below the threshold.</summary>
+        public int? ComplaintId { get; set; }
+        public string ComplaintNumber { get; set; }
+
         public List<SlSurveyAnswerDto> Answers { get; set; } = new List<SlSurveyAnswerDto>();
         public string RowVersion { get; set; }
     }
@@ -640,11 +673,18 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public string RowVersion { get; set; }
     }
 
-    /// <summary>Action "send" or "skip".</summary>
+    /// <summary>Action "send", "skip" (Reason is mandatory) or "verify" (QA only; Note says what was checked with the customer).</summary>
     public class SlSurveyActionDto
     {
         public int Id { get; set; }
         public string Action { get; set; }
+
+        /// <summary>The reason of a skip.</summary>
+        public string Reason { get; set; }
+
+        /// <summary>What QA checked with the customer (verify).</summary>
+        public string Note { get; set; }
+
         public string RowVersion { get; set; }
     }
 
@@ -731,7 +771,18 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public List<SvRepeatFailureDto> RepeatFailures { get; set; } = new List<SvRepeatFailureDto>();
         public List<SvProductKpiDto> ByProduct { get; set; } = new List<SvProductKpiDto>();
         public int TotalFailures { get; set; }
+
+        /// <summary>R1p D36: the meter hours the ACTIVE units ran inside the period (the increase of the meter, not the whole life of the units).</summary>
         public decimal TotalRunningHours { get; set; }
+
+        /// <summary>The failures of the same units in the same period divided into <see cref="TotalRunningHours"/>.</summary>
         public decimal? MtbfHours { get; set; }
+
+        /// <summary>The breakdown requests of the units that went into the MTBF.</summary>
+        public int MtbfFailures { get; set; }
+
+        /// <summary>The active units whose hours of the period are known, and the active units left out because the period cannot be measured for them (their failures are left out too).</summary>
+        public int MtbfUnits { get; set; }
+        public int MtbfUnitsExcluded { get; set; }
     }
 }

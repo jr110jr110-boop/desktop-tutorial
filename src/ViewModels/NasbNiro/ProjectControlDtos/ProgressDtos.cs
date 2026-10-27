@@ -143,7 +143,13 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int? WbsNodeId { get; set; }
         public CostKind Kind { get; set; }
         public DateTime EntryDate { get; set; }
-        public decimal Amount { get; set; }
+
+        /// <summary>Null (with <see cref="LabourHidden"/>) for a protected labour amount seen by a reader who is not PAYROLL, FINANCEMANAGER or CEO (R1p D1).</summary>
+        public decimal? Amount { get; set; }
+
+        /// <summary>R1p D1: the entry is a labour amount that could show one person's pay (fewer than three payroll-rated employees behind it).</summary>
+        public bool LabourHidden { get; set; }
+
         public string SourceType { get; set; }
         public string SourceNumber { get; set; }
         public string Description { get; set; }

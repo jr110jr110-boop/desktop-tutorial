@@ -9,12 +9,17 @@ using Entities.Model.NasbNiro.Constract;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Production;
+using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
+using Services.NasbNiro.Quality;
 using ViewModels.NasbNiro.OfficeDtos;
 using ViewModels.NasbNiro.Pagination;
 using ViewModels.NasbNiro.ProductionDtos;
+using DocumentDto = ViewModels.NasbNiro.InventoryDtos.DocumentDto;
+using SaveDocumentDto = ViewModels.NasbNiro.InventoryDtos.SaveDocumentDto;
+using SaveDocumentLineDto = ViewModels.NasbNiro.InventoryDtos.SaveDocumentLineDto;
 
 namespace Services.NasbNiro.Production
 {
@@ -33,6 +38,13 @@ namespace Services.NasbNiro.Production
         Task<ResponseDto<PagedList<BookingDto>>> GetBookingsAsync(BookingQuery query, CancellationToken ct);
         Task<ResponseDto<BookingDto>> CreateBookingAsync(SaveBookingDto dto, CancellationToken ct);
         Task<ResponseDto<BookingDto>> EditBookingAsync(EditBookingDto dto, CancellationToken ct);
+
+        /// <summary>R1p D39: an extra booking on an operation of a completed order (its own bookings are frozen), by the shop supervisor with a reason.</summary>
+        Task<ResponseDto<BookingDto>> CorrectBookingAsync(SaveCorrectionBookingDto dto, CancellationToken ct);
+
+        /// <summary>R1p D1: booked hours per work centre and day without any name (the readers who may not see names use this).</summary>
+        Task<ResponseDto<List<BookingHoursDto>>> GetBookingHoursAsync(BookingHoursQuery query, CancellationToken ct);
+
         Task<ResponseDto<PagedList<AttendanceDifferenceDto>>> GetAttendanceDifferencesAsync(AttendanceDifferenceQuery query, CancellationToken ct);
     }
 
@@ -43,6 +55,7 @@ namespace Services.NasbNiro.Production
         private readonly IInventoryUserContext _user;
         private readonly IAttendanceService _attendance;
         private readonly INotificationService _notify;
+        private readonly IInventoryDocumentService _documents;
         private readonly MfFlow _flow;
 
         public MfShopFloorService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IAttendanceService attendance, INotificationService notify = null)
@@ -51,6 +64,7 @@ namespace Services.NasbNiro.Production
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _attendance = attendance ?? throw new ArgumentNullException(nameof(attendance));
             _notify = notify;
+            _documents = documents;
             _flow = new MfFlow(uow, user, documents, notify);
         }
 
@@ -96,8 +110,13 @@ namespace Services.NasbNiro.Production
             var items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).Select(i => new { i.Id, i.Code, i.Title }).ToListAsync(ct);
             Dictionary<int, MfFlow.Urgency> urgency = await MfFlow.UrgencyAsync(_uow, ct);
             List<int> opIds = ops.Select(o => o.Id).ToList();
-            List<int> originIds = ops.Where(o => o.IsRework && o.ReworkOfOperationId.HasValue).Select(o => o.ReworkOfOperationId.Value).Distinct().ToList();
-            Dictionary<int, decimal> originRework = await _uow.Set<MfOperation>().AsNoTracking().Where(o => originIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, o => o.ReworkQty, ct);
+            // R1p D43: the work centres that make the machine mandatory at the terminal (they require one and still have a machine that is not retired)
+            List<int> centerIds = ops.Where(o => o.WorkCenterId.HasValue).Select(o => o.WorkCenterId.Value).Distinct().ToList();
+            Dictionary<int, bool> requiresMachine = centerIds.Count == 0 ? new Dictionary<int, bool>()
+                : await _uow.Set<MfWorkCenter>().AsNoTracking().Where(c => centerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.RequiresMachine, ct);
+            HashSet<int> withMachines = centerIds.Count == 0 ? new HashSet<int>()
+                : (await _uow.Set<MfMachineInfo>().AsNoTracking().Where(i => !i.Deleted && i.WorkCenterId != null && centerIds.Contains(i.WorkCenterId.Value) && i.Status != MfMachineStatus.Retired)
+                    .Select(i => i.WorkCenterId.Value).Distinct().ToListAsync(ct)).ToHashSet();
             HashSet<int> booked = employeeId.HasValue
                 ? (await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.EmployeeId == employeeId.Value && opIds.Contains(b.OperationId)).Select(b => b.OperationId).Distinct().ToListAsync(ct)).ToHashSet()
                 : new HashSet<int>();
@@ -123,7 +142,9 @@ namespace Services.NasbNiro.Production
                     SkipReason = d.SkipReason, StartedAtText = d.StartedAtText, FinishedAtText = d.FinishedAtText, Note = d.Note, RunningBookings = d.RunningBookings, HoursBooked = d.HoursBooked,
                     ItemCode = item?.Code, ItemTitle = item?.Title, OrderQuantity = order.Quantity, Unit = order.Unit, OrderPriority = u != null && u.Priority > 0 ? u.Priority : (int?)null,
                     NeedDateText = MfText.Date(u?.NeedDate), MyRunning = running != null, MyRunningSinceText = MfText.Stamp(running?.StartAt), MyRunningSince = running?.StartAt,
-                    ExpectedQty = d.IsRework && d.ReworkOfOperationId.HasValue && originRework.TryGetValue(d.ReworkOfOperationId.Value, out decimal rq) && rq > 0 ? rq : order.Quantity,
+                    ExpectedQty = d.ExpectedQty, IsWelding = d.IsWelding, WpsId = d.WpsId, WpsNumber = d.WpsNumber, WeldLogId = d.WeldLogId, AcceptedByConcession = d.AcceptedByConcession,
+                    AcceptanceStale = d.AcceptanceStale,
+                    MachineRequired = d.WorkCenterId.HasValue && MfTerminalRules.MachineRequired(requiresMachine.GetValueOrDefault(d.WorkCenterId.Value), withMachines.Contains(d.WorkCenterId.Value) ? 1 : 0, MfBookingKind.Run),
                     HasMyBooking = booked.Contains(d.Id),
                 };
             }).ToList();
@@ -247,10 +268,24 @@ namespace Services.NasbNiro.Production
             if (l.Op.Status == MfOperationStatus.QcHold) return Bad<TerminalOperationDto>("این مرحله در انتظار بازرسی کنترل کیفیت است.");
             if (!Workable.Contains(l.Op.Status)) return Bad<TerminalOperationDto>("این مرحله قابل شروع نیست (وضعیت: " + MfText.OperationStatus(l.Op.Status) + ").");
 
+            // R1p D43: a work centre with machines needs the machine chosen at the terminal (machine hours, machine overhead and OEE come from it); a waiting booking needs none
+            if (!dto.MachineId.HasValue && l.Op.WorkCenterId.HasValue)
+            {
+                MfWorkCenter centre = await _uow.Set<MfWorkCenter>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == l.Op.WorkCenterId.Value, ct);
+                int machines = centre == null ? 0 : await _uow.Set<MfMachineInfo>().CountAsync(i => !i.Deleted && i.WorkCenterId == centre.Id && i.Status != MfMachineStatus.Retired, ct);
+                if (centre != null && MfTerminalRules.MachineRequired(centre.RequiresMachine, machines, dto.Kind))
+                    return Bad<TerminalOperationDto>($"برای مرکز کار {centre.Code} انتخاب ماشین الزامی است؛ ماشین را انتخاب کنید (ساعت ماشین، سربار ماشین و OEE از آن محاسبه می‌شود).");
+            }
             if (dto.MachineId.HasValue)
             {
                 string problem = await CheckMachineAsync(dto.MachineId.Value, l.Op, ct);
                 if (problem != null) return Bad<TerminalOperationDto>(problem);
+            }
+            // R1p D12: a welding step starts only with the approved WPS of the step and a welder qualified for its process
+            if (l.Op.IsWelding)
+            {
+                var weld = await MfWelding.CheckStartAsync(_uow, l.Op, l.Employee, dto.Kind, DateTime.Today, ct);
+                if (weld.Error != null) return Bad<TerminalOperationDto>(weld.Error);
             }
             MfTimeBooking running = await RunningOfAsync(l.Employee.Id, ct);
             DateTime now = Now();
@@ -365,14 +400,143 @@ namespace Services.NasbNiro.Production
             booking.ReworkQty += dto.ReworkQty;
             if (dto.ScrapQty > 0) booking.ScrapReasonCodeId = dto.ScrapReasonCodeId;
             if (Clean(dto.Note) != null) booking.Note = Clean(dto.Note);
+            if (dto.ScrapQty > 0) await QueueScrapAsync(l.Order, l.Op, dto.ScrapQty, dto.ScrapReasonCodeId, ct);
             return null;
         }
 
-        private static decimal ExpectedQuantity(Loaded l)
+        /// <summary>R1p D7: what the operation has to report is the good quantity of the operation before it (the first: the order quantity), not the full order quantity again after earlier scrap.</summary>
+        private static decimal ExpectedQuantity(Loaded l) => MfQuantityRules.Expected(l.All, l.Op, l.Order.Quantity);
+
+        // ================================================================================== terminal scrap (R1p D33)
+
+        private sealed class ScrapEvent
         {
-            if (!l.Op.IsRework) return l.Order.Quantity;
-            MfOperation origin = l.All.FirstOrDefault(o => o.Id == l.Op.ReworkOfOperationId);
-            return origin != null && origin.ReworkQty > 0 ? origin.ReworkQty : l.Order.Quantity;
+            public MfProductionOrder Order;
+            public MfOperation Op;
+            public decimal Quantity;
+            public string Job;
+            public string Serial;
+            public NonConformance Ncr;
+        }
+
+        private readonly List<ScrapEvent> _scrapEvents = new List<ScrapEvent>();
+
+        /// <summary>
+        /// Scrap reported on the shop floor leaves a trace for quality and for the stock. A draft non-conformance report (the lot of the order or, when exactly one serial is planned, that serial) is added to the same
+        /// save as the quantity; after the save <see cref="ScrapDocumentsAsync"/> drafts the scrap receipt of the inventory module (workshop scrap goes to the scrap warehouse). Both stay drafts: quality classifies
+        /// and decides the report, the warehouse confirms the receipt. ★ provisional decision: one report and one receipt per scrap report.
+        /// </summary>
+        private async Task QueueScrapAsync(MfProductionOrder order, MfOperation op, decimal quantity, int? reasonCodeId, CancellationToken ct)
+        {
+            if (quantity <= 0) return;
+            string job = MfMapping.JobCard(order.Number, op);
+            var ev = new ScrapEvent { Order = order, Op = op, Quantity = quantity, Job = job };
+            if (order.ItemId.HasValue)
+            {
+                (int? lotId, List<string> serials) = await MfTrace.OfOrderAsync(_uow, order, ct);
+                ev.Serial = serials.Count == 1 ? serials[0] : null;
+                string reason = reasonCodeId.HasValue ? await _uow.Set<MfReasonCode>().AsNoTracking().Where(r => r.Id == reasonCodeId.Value).Select(r => r.Title).FirstOrDefaultAsync(ct) : null;
+                ev.Ncr = await QualityNcrFactory.DraftAsync(_uow, Me, NcrSource.InProcess, order.ItemId.Value, lotId, quantity, ev.Serial, order.WorkOrderId, null,
+                    $"ضایعات {MfFlow.Num(quantity)} {order.Unit} در عملیات {job} ({op.Title}) دستور تولید {order.Number}" + (reason == null ? string.Empty : $"؛ دلیل: {reason}") + "؛ گزارش خودکار از ثبت ضایعات ترمینال کارگاه",
+                    job, null, ct);
+            }
+            _scrapEvents.Add(ev);
+        }
+
+        /// <summary>Call after the caller's save went through: the draft scrap receipts of the scrap reported in this request. A problem never fails the operation; it is returned as a note.</summary>
+        private async Task<List<string>> ScrapDocumentsAsync(CancellationToken ct)
+        {
+            var notes = new List<string>();
+            if (_scrapEvents.Count == 0) return notes;
+            bool changed = false;
+            Warehouse scrapWarehouse = await _uow.Set<Warehouse>().AsNoTracking().Where(w => w.IsActive && !w.Deleted && w.Kind == WarehouseKind.Scrap).OrderBy(w => w.Id).FirstOrDefaultAsync(ct);
+            foreach (ScrapEvent ev in _scrapEvents.ToList())
+            {
+                if (ev.Ncr != null) notes.Add($"گزارش عدم انطباق پیش‌نویس {ev.Ncr.Number} برای ضایعات عملیات {ev.Job} ساخته شد.");
+                string problem = null;
+                InventoryItem item = ev.Order.ItemId.HasValue ? await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == ev.Order.ItemId.Value, ct) : null;
+                if (item == null) problem = "کالای دستور تولید مشخص نیست.";
+                else if (scrapWarehouse == null) problem = "انبار ضایعات تعریف نشده است.";
+                else
+                {
+                    var line = new SaveDocumentLineDto { ItemId = item.Id, Quantity = ev.Quantity, Description = $"ضایعات عملیات {ev.Job}" };
+                    if (item.TrackingMode == ItemTrackingMode.Lot) line.LotNumber = ev.Order.Number;
+                    else if (item.TrackingMode == ItemTrackingMode.Serial)
+                    {
+                        if (ev.Serial == null || ev.Quantity != 1) problem = "سریال قطعه ضایعاتی مشخص نیست؛ رسید ضایعات را پس از مشخص شدن سریال‌ها دستی ثبت کنید.";
+                        else line.SerialNumbers = new List<string> { ev.Serial };
+                    }
+                    if (problem == null)
+                    {
+                        ResponseDto<DocumentDto> saved = await _documents.SaveDraftAsync(new SaveDocumentDto
+                        {
+                            Type = InventoryDocumentType.ScrapReceipt, DocumentDate = DateTime.Today, WarehouseId = scrapWarehouse.Id, WorkOrderId = ev.Order.WorkOrderId, ContractId = ev.Order.ContractId,
+                            ReferenceNumber = ev.Ncr?.Number ?? ev.Job, Description = $"رسید ضایعات کارگاه - عملیات {ev.Job}", Lines = new List<SaveDocumentLineDto> { line },
+                        }, ct);
+                        if (saved != null && saved.Success && saved.Data != null)
+                        {
+                            // a draft inventory document has no number until the warehouse confirms it: name it by the report it quotes (its reference), else by its id
+                            string draftName = saved.Data.Number ?? (ev.Ncr != null ? $"مربوط به گزارش {ev.Ncr.Number}" : $"شناسه {saved.Data.Id}");
+                            notes.Add($"رسید ضایعات پیش‌نویس ({draftName}) در انبار ضایعات ساخته شد؛ انباردار آن را بررسی و قطعی کند.");
+                            if (ev.Ncr != null)
+                            {
+                                ev.Ncr.Description = (ev.Ncr.Description ?? string.Empty) + $" | رسید ضایعات پیش‌نویس شناسه {saved.Data.Id}";
+                                ev.Ncr.ModifyDate = DateTimeOffset.Now;
+                                changed = true;
+                            }
+                        }
+                        else problem = saved?.Message ?? "پیش‌نویس رسید ضایعات ساخته نشد.";
+                    }
+                }
+                if (problem != null) notes.Add($"رسید ضایعات عملیات {ev.Job} ساخته نشد: {problem}");
+            }
+            _scrapEvents.Clear();
+            if (changed)
+            {
+                try
+                {
+                    await _uow.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateException)
+                {
+                    notes.Add("پیوند رسید ضایعات به گزارش عدم انطباق ثبت نشد.");
+                }
+            }
+            return notes;
+        }
+
+        /// <summary>
+        /// R1p D12: the weld log drafted from the booking when a welding step finishes (the welder is the employee with most run hours on the step). QC completes it in the quality module.
+        /// A problem never fails the finish; it is returned as a note.
+        /// </summary>
+        private async Task<List<string>> WeldLogAsync(Loaded l, CancellationToken ct)
+        {
+            var notes = new List<string>();
+            if (!l.Op.IsWelding || l.Op.WeldLogId.HasValue) return notes;
+            var hours = await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.OperationId == l.Op.Id && (b.Kind == MfBookingKind.Run || b.Kind == MfBookingKind.Rework))
+                .GroupBy(b => b.EmployeeId).Select(g => new { Id = g.Key, Hours = g.Sum(b => b.Hours) }).ToListAsync(ct);
+            int welderId = hours.OrderByDescending(h => h.Hours).ThenBy(h => h.Id).Select(h => h.Id).FirstOrDefault();
+            FnEmployee welder = welderId == 0 ? l.Employee : await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(e => e.Id == welderId, ct) ?? l.Employee;
+            (WeldLog log, string note) = await MfWelding.DraftWeldLogAsync(_uow, Me, l.Order, l.Op, welder, ct);
+            if (log == null)
+            {
+                notes.Add("پیش‌نویس گزارش جوش ساخته نشد: " + note);
+                return notes;
+            }
+            try
+            {
+                await _uow.SaveChangesAsync(ct);   // the log gets its number
+                l.Op.WeldLogId = log.Id;
+                l.Op.ModifyDate = DateTimeOffset.Now;
+                await _uow.SaveChangesAsync(ct);
+                notes.Add("پیش‌نویس گزارش جوش از ثبت زمان ساخته شد؛ QC بازرسی چشمی و مشخصات جوش را در ماژول کیفیت تکمیل کند.");
+            }
+            catch (DbUpdateException)
+            {
+                _uow.Entry(log).State = EntityState.Detached;
+                notes.Add("پیش‌نویس گزارش جوش ثبت نشد؛ QC آن را در ماژول کیفیت وارد کند.");
+            }
+            return notes;
         }
 
         private async Task<MfTimeBooking> MyBookingAsync(Loaded l, CancellationToken ct) =>
@@ -401,7 +565,8 @@ namespace Services.NasbNiro.Production
             {
                 return Bad<TerminalOperationDto>(MfText.Concurrency);
             }
-            return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
+            List<string> scrapNotes = await ScrapDocumentsAsync(ct);
+            return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct), scrapNotes.Count == 0 ? null : Join(scrapNotes));
         }
 
         public async Task<ResponseDto<TerminalOperationDto>> FinishAsync(FinishOperationDto dto, CancellationToken ct)
@@ -425,7 +590,18 @@ namespace Services.NasbNiro.Production
             if (booking.EndAt == null) Close(booking, Now());
             l.Op.FinishedAt = stamp;
             bool inspected = l.Op.InspectionRequirement == MfInspectionRequirement.Qc || l.Op.InspectionRequirement == MfInspectionRequirement.ItpPoint;
-            if (inspected && !l.Op.QcAccepted)
+            var staleNotes = new List<string>();
+            // R1p D38: an early QC acceptance holds only for the quantities QC saw; other quantities at the finish need a new acceptance
+            bool accepted = l.Op.QcAccepted && MfTerminalRules.AcceptanceStillHolds(l.Op);
+            if (l.Op.QcAccepted && !accepted)
+            {
+                l.Op.QcAccepted = false;
+                l.Op.QcAcceptedGoodQty = null;
+                l.Op.QcAcceptedScrapQty = null;
+                l.Op.QcAcceptedReworkQty = null;
+                staleNotes.Add("تعداد گزارش‌شده پس از پذیرش بازرسی تغییر کرده است؛ بازرسی QC دوباره لازم است.");
+            }
+            if (inspected && !accepted)
             {
                 l.Op.Status = MfOperationStatus.QcHold;
                 l.Op.QcRequestedAt = stamp;
@@ -434,6 +610,7 @@ namespace Services.NasbNiro.Production
             l.Op.ModifyDate = stamp;
             l.Op.ModifierUserId = Me;
             List<string> notes = await _flow.ApplyAsync(l.Order, l.All, ct);
+            notes.AddRange(staleNotes);
             await _flow.PartSyncAsync(l.Op, ct);
             try
             {
@@ -444,6 +621,8 @@ namespace Services.NasbNiro.Production
                 return Bad<TerminalOperationDto>(MfText.Concurrency);
             }
             notes.AddRange(await _flow.AfterSaveAsync(ct));
+            notes.AddRange(await ScrapDocumentsAsync(ct));
+            notes.AddRange(await WeldLogAsync(l, ct));
             await MfGates.QcAsync(_notify, l.Op, l.Order.Number, ct);
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct), notes.Count == 0 ? null : Join(notes));
         }
@@ -551,8 +730,13 @@ namespace Services.NasbNiro.Production
         private async Task<List<BookingDto>> BookingDtosAsync(List<MfTimeBooking> rows, CancellationToken ct)
         {
             if (rows.Count == 0) return new List<BookingDto>();
-            List<int> employeeIds = rows.Select(r => r.EmployeeId).Distinct().ToList();
-            Dictionary<int, string> employees = MfNames.ToDictionary(await _uow.Set<FnEmployee>().AsNoTracking().Where(e => employeeIds.Contains(e.Id)).ToListAsync(ct));
+            // R1p D1: who worked is shown only to the shop management, payroll, finance, the CEO and the employee himself; everybody else sees the hours without the name
+            bool named = MfPrivacy.SeesNames(_user);
+            FnEmployee viewer = named ? null : await MfText.EmployeeOfUserAsync(_uow, Me, ct);
+            bool Visible(MfTimeBooking b) => MfBookingRules.SeesName(named, viewer?.Id, b.EmployeeId);
+            List<int> employeeIds = rows.Where(Visible).Select(r => r.EmployeeId).Distinct().ToList();
+            Dictionary<int, string> employees = employeeIds.Count == 0 ? new Dictionary<int, string>()
+                : MfNames.ToDictionary(await _uow.Set<FnEmployee>().AsNoTracking().Where(e => employeeIds.Contains(e.Id)).ToListAsync(ct));
             List<int> machineIds = rows.Where(r => r.MachineId.HasValue).Select(r => r.MachineId.Value).Distinct().ToList();
             Dictionary<int, string> machines = machineIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<Machine>().AsNoTracking().Where(m => machineIds.Contains(m.Id)).ToDictionaryAsync(m => m.Id, m => m.Title, ct);
             List<int> opIds = rows.Select(r => r.OperationId).Distinct().ToList();
@@ -563,10 +747,11 @@ namespace Services.NasbNiro.Production
             {
                 MfOperation op = ops.First(o => o.Id == b.OperationId);
                 orders.TryGetValue(op.OrderId, out string number);
+                bool visible = Visible(b);
                 return new BookingDto
                 {
-                    Id = b.Id, OperationId = b.OperationId, OrderNumber = number, JobCard = MfMapping.JobCard(number, op), OperationTitle = op.Title, EmployeeId = b.EmployeeId,
-                    EmployeeName = employees.TryGetValue(b.EmployeeId, out string en) ? en : null, MachineId = b.MachineId, MachineTitle = b.MachineId.HasValue && machines.TryGetValue(b.MachineId.Value, out string mt) ? mt : null,
+                    Id = b.Id, OperationId = b.OperationId, OrderNumber = number, JobCard = MfMapping.JobCard(number, op), OperationTitle = op.Title, EmployeeId = visible ? b.EmployeeId : 0,
+                    EmployeeName = visible && employees.TryGetValue(b.EmployeeId, out string en) ? en : null, EmployeeHidden = !visible, IsCorrection = b.IsCorrection, CorrectsBookingId = b.CorrectsBookingId, MachineId = b.MachineId, MachineTitle = b.MachineId.HasValue && machines.TryGetValue(b.MachineId.Value, out string mt) ? mt : null,
                     Kind = b.Kind, StartAt = b.StartAt, StartAtText = MfText.Stamp(b.StartAt), EndAt = b.EndAt, EndAtText = MfText.Stamp(b.EndAt), Minutes = b.Minutes, Hours = b.Hours,
                     GoodQty = b.GoodQty, ScrapQty = b.ScrapQty, ScrapReasonCodeId = b.ScrapReasonCodeId, ReworkQty = b.ReworkQty, ReasonCodeId = b.ReasonCodeId, Note = b.Note, Source = b.Source,
                     SupervisorReason = b.SupervisorReason, EditReason = b.EditReason, Running = b.EndAt == null, DayClosed = DayClosed(b), CostPosted = b.CostPostedAt != null, RowVersion = b.RowVersion == null ? null : Convert.ToBase64String(b.RowVersion),
@@ -576,19 +761,27 @@ namespace Services.NasbNiro.Production
 
         public async Task<ResponseDto<PagedList<BookingDto>>> GetBookingsAsync(BookingQuery query, CancellationToken ct)
         {
-            if (!_user.IsInRole(ProductionRoles.MasterReaders)) return Bad<PagedList<BookingDto>>(MfText.NotAllowed);
+            if (!_user.IsInRole(MfPrivacy.BookingReaders)) return Bad<PagedList<BookingDto>>(MfText.NotAllowed);
             query ??= new BookingQuery();
+            // R1p D1: names behind the hours are for PRODUCTIONMANAGER, SHOPSUPERVISOR, PAYROLL, FINANCEMANAGER, CEO and the employee himself
+            bool named = MfPrivacy.SeesNames(_user);
+            FnEmployee me = named ? null : await MfText.EmployeeOfUserAsync(_uow, Me, ct);
             IQueryable<MfTimeBooking> q = _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted);
-            if (!_user.IsInRole(ProductionRoles.Readers))
+            if (!named && !_user.IsInRole(ProductionRoles.Readers))
             {
                 // an operator sees his own bookings only
-                FnEmployee me = await MfText.EmployeeOfUserAsync(_uow, Me, ct);
                 if (me == null) return Bad<PagedList<BookingDto>>(NoEmployee);
                 q = q.Where(b => b.EmployeeId == me.Id);
             }
             if (query.OperationId.HasValue) q = q.Where(b => b.OperationId == query.OperationId.Value);
             if (query.OrderId.HasValue) q = q.Where(b => _uow.Set<MfOperation>().Any(o => o.Id == b.OperationId && o.OrderId == query.OrderId.Value));
-            if (query.EmployeeId.HasValue) q = q.Where(b => b.EmployeeId == query.EmployeeId.Value);
+            if (query.EmployeeId.HasValue)
+            {
+                // a filter by person would name the person behind the rows it returns
+                if (!named && query.EmployeeId.Value != me?.Id)
+                    return Bad<PagedList<BookingDto>>("جست‌وجوی ثبت زمان بر اساس شخص فقط برای مدیر تولید، سرپرست کارگاه، حقوق و دستمزد، مدیر مالی، مدیرعامل و خود شخص ممکن است؛ ساعت ثبت‌شده به تفکیک مرکز کار را از گزارش ساعت‌ها ببینید.");
+                q = q.Where(b => b.EmployeeId == query.EmployeeId.Value);
+            }
             if (query.WorkCenterId.HasValue) q = q.Where(b => _uow.Set<MfOperation>().Any(o => o.Id == b.OperationId && o.WorkCenterId == query.WorkCenterId.Value));
             if (query.From.HasValue) { DateTime f = query.From.Value.Date; q = q.Where(b => b.StartAt >= f); }
             if (query.To.HasValue) { DateTime t = query.To.Value.Date.AddDays(1); q = q.Where(b => b.StartAt < t); }
@@ -618,11 +811,18 @@ namespace Services.NasbNiro.Production
             if (end <= start) return Bad<BookingDto>("پایان باید بعد از شروع باشد.");
             if (end > DateTime.Now) return Bad<BookingDto>("پایان ثبت زمان نمی‌تواند در آینده باشد.");
             if ((end - start).TotalHours > 16) return Bad<BookingDto>("یک ثبت زمان بیش از ۱۶ ساعت نمی‌شود.");
-            if (!await _uow.Set<FnEmployee>().AnyAsync(e => e.Id == dto.EmployeeId && e.IsActive, ct)) return Bad<BookingDto>("پرسنل پیدا نشد یا غیرفعال است.");
+            FnEmployee worker = await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(e => e.Id == dto.EmployeeId && e.IsActive, ct);
+            if (worker == null) return Bad<BookingDto>("پرسنل پیدا نشد یا غیرفعال است.");
             Loaded l = await LoadAsync(dto.OperationId, false, ct);
             if (l.Error != null) return Bad<BookingDto>(l.Error);
             if (l.Op.Status == MfOperationStatus.Waiting || l.Op.Status == MfOperationStatus.Done || l.Op.Status == MfOperationStatus.Skipped || l.Op.Status == MfOperationStatus.Rejected)
                 return Bad<BookingDto>("روی این عملیات (با وضعیت فعلی) نمی‌توان زمان ثبت کرد.");
+            // R1p D12: the same welding rule as on the terminal (approved WPS, qualified welder) also binds a booking a supervisor makes for somebody else
+            if (l.Op.IsWelding)
+            {
+                var weld = await MfWelding.CheckStartAsync(_uow, l.Op, worker, dto.Kind, start.Date, ct);
+                if (weld.Error != null) return Bad<BookingDto>(weld.Error);
+            }
             if (dto.MachineId.HasValue && !await _uow.Set<Machine>().AnyAsync(m => m.Id == dto.MachineId.Value, ct)) return Bad<BookingDto>("ماشین پیدا نشد.");
             if (dto.GoodQty < 0 || dto.ScrapQty < 0 || dto.ReworkQty < 0) return Bad<BookingDto>("تعداد نمی‌تواند منفی باشد.");
             if (dto.ScrapQty > 0 && !dto.ScrapReasonCodeId.HasValue) return Bad<BookingDto>("برای ضایعات، دلیل ضایعات را انتخاب کنید.");
@@ -645,6 +845,7 @@ namespace Services.NasbNiro.Production
             l.Op.GoodQty += dto.GoodQty;
             l.Op.ScrapQty += dto.ScrapQty;
             l.Op.ReworkQty += dto.ReworkQty;
+            if (dto.ScrapQty > 0) await QueueScrapAsync(l.Order, l.Op, dto.ScrapQty, dto.ScrapReasonCodeId, ct);
             if (l.Op.Status == MfOperationStatus.Ready) l.Op.Status = MfOperationStatus.Paused;
             l.Op.StartedAt ??= new DateTimeOffset(start);
             l.Op.ModifyDate = stamp;
@@ -662,8 +863,9 @@ namespace Services.NasbNiro.Production
             {
                 return Bad<BookingDto>("ثبت زمان ممکن نشد؛ دوباره تلاش کنید.");
             }
-            await _flow.AfterSaveAsync(ct);
-            return ResponseDtoHelper.Ok((await BookingDtosAsync(new List<MfTimeBooking> { booking }, ct))[0]);
+            List<string> notes = await _flow.AfterSaveAsync(ct);
+            notes.AddRange(await ScrapDocumentsAsync(ct));
+            return ResponseDtoHelper.Ok((await BookingDtosAsync(new List<MfTimeBooking> { booking }, ct))[0], notes.Count == 0 ? null : Join(notes));
         }
 
         public async Task<ResponseDto<BookingDto>> EditBookingAsync(EditBookingDto dto, CancellationToken ct)
@@ -680,7 +882,9 @@ namespace Services.NasbNiro.Production
             if (DayClosed(b) && !_user.IsInRole(ProductionRoles.Supervisor)) return Bad<BookingDto>("روز این ثبت زمان بسته شده است؛ فقط سرپرست کارگاه با ذکر دلیل می‌تواند آن را تغییر دهد.");
             MfOperation op = await _uow.Set<MfOperation>().FirstAsync(o => o.Id == b.OperationId, ct);
             MfProductionOrder order = await _uow.Set<MfProductionOrder>().FirstAsync(o => o.Id == op.OrderId, ct);
-            if (order.Status == MfOrderStatus.Closed || order.Status == MfOrderStatus.Cancelled) return Bad<BookingDto>("دستور تولید بسته یا لغو شده است.");
+            // R1p D39: the bookings of a completed, closed or cancelled order are frozen; the supervisor adds a correction booking with a reason instead
+            if (MfBookingRules.IsFrozen(order.Status))
+                return Bad<BookingDto>("ثبت زمان‌های دستور تولید تکمیل‌شده، بسته یا لغوشده تغییر نمی‌کند؛ برای اصلاح، سرپرست کارگاه «ثبت زمان اصلاحی» (bookings/correct) را با ذکر دلیل اضافه کند.");
 
             DateTime start = dto.StartAt.HasValue ? new DateTime(dto.StartAt.Value.Year, dto.StartAt.Value.Month, dto.StartAt.Value.Day, dto.StartAt.Value.Hour, dto.StartAt.Value.Minute, dto.StartAt.Value.Second) : b.StartAt;
             DateTime end = dto.EndAt.HasValue ? new DateTime(dto.EndAt.Value.Year, dto.EndAt.Value.Month, dto.EndAt.Value.Day, dto.EndAt.Value.Hour, dto.EndAt.Value.Minute, dto.EndAt.Value.Second) : b.EndAt.Value;
@@ -697,7 +901,13 @@ namespace Services.NasbNiro.Production
             string overlap = await OverlapAsync(b.EmployeeId, start, end, b.Id, ct);
             if (overlap != null) return Bad<BookingDto>(overlap);
             decimal opGood = op.GoodQty - b.GoodQty + good, opScrap = op.ScrapQty - b.ScrapQty + scrap;
-            if (opGood + opScrap > order.Quantity) return Bad<BookingDto>("مجموع سالم و ضایعات از تعداد دستور بیشتر می‌شود.");
+            List<MfOperation> allOps = await _uow.Set<MfOperation>().Where(o => o.OrderId == order.Id && !o.Deleted).ToListAsync(ct);
+            // R1p D7: against the quantity this operation has to report (the good quantity of the operation before it), not the full order quantity
+            if (opGood + opScrap > MfQuantityRules.Expected(allOps, op, order.Quantity)) return Bad<BookingDto>("مجموع سالم و ضایعات از تعداد این عملیات (تعداد سالم مرحله قبل) بیشتر می‌شود.");
+            // R1p D38: after QC accepted a finished step its quantities are not changed any more
+            if (op.QcAccepted && op.Status == MfOperationStatus.Done && (good != b.GoodQty || scrap != b.ScrapQty || rework != b.ReworkQty))
+                return Bad<BookingDto>("تعداد این مرحله پس از پذیرش بازرسی QC تغییر نمی‌کند؛ برای تغییر، بازرسی دوباره (گزارش عدم انطباق) لازم است.");
+            if (scrap > b.ScrapQty) await QueueScrapAsync(order, op, scrap - b.ScrapQty, scrapReason, ct);
 
             op.GoodQty = opGood;
             op.ScrapQty = opScrap;
@@ -725,7 +935,91 @@ namespace Services.NasbNiro.Production
             {
                 return Bad<BookingDto>(MfText.Concurrency);
             }
-            return ResponseDtoHelper.Ok((await BookingDtosAsync(new List<MfTimeBooking> { b }, ct))[0]);
+            List<string> editNotes = await ScrapDocumentsAsync(ct);
+            return ResponseDtoHelper.Ok((await BookingDtosAsync(new List<MfTimeBooking> { b }, ct))[0], editNotes.Count == 0 ? null : Join(editNotes));
+        }
+
+        public async Task<ResponseDto<BookingDto>> CorrectBookingAsync(SaveCorrectionBookingDto dto, CancellationToken ct)
+        {
+            if (!_user.IsInRole(ProductionRoles.Supervisors)) return Bad<BookingDto>(MfText.NotAllowed);
+            if (dto == null || !Enum.IsDefined(typeof(MfBookingKind), dto.Kind)) return Bad<BookingDto>(MfText.InvalidData);
+            string reason = Clean(dto.Reason);
+            if (reason == null) return Bad<BookingDto>("برای ثبت زمان اصلاحی، دلیل را بنویسید.");
+            DateTime start = new DateTime(dto.StartAt.Year, dto.StartAt.Month, dto.StartAt.Day, dto.StartAt.Hour, dto.StartAt.Minute, dto.StartAt.Second);
+            DateTime end = new DateTime(dto.EndAt.Year, dto.EndAt.Month, dto.EndAt.Day, dto.EndAt.Hour, dto.EndAt.Minute, dto.EndAt.Second);
+            if (end <= start) return Bad<BookingDto>("پایان باید بعد از شروع باشد.");
+            if (end > DateTime.Now) return Bad<BookingDto>("پایان ثبت زمان نمی‌تواند در آینده باشد.");
+            if ((end - start).TotalHours > 16) return Bad<BookingDto>("یک ثبت زمان بیش از ۱۶ ساعت نمی‌شود.");
+            MfOperation op = await _uow.Set<MfOperation>().FirstOrDefaultAsync(o => o.Id == dto.OperationId && !o.Deleted, ct);
+            if (op == null) return MfText.NotFound<BookingDto>("عملیات پیدا نشد.");
+            MfProductionOrder order = await _uow.Set<MfProductionOrder>().FirstAsync(o => o.Id == op.OrderId, ct);
+            if (order.Status == MfOrderStatus.Released || order.Status == MfOrderStatus.InProgress)
+                return Bad<BookingDto>("این دستور تولید هنوز در حال اجراست؛ ثبت زمان عادی (bookings/create) را به کار ببرید. ثبت زمان اصلاحی فقط برای دستور تکمیل‌شده است.");
+            if (order.Status != MfOrderStatus.Completed)
+                return Bad<BookingDto>("ثبت زمان اصلاحی فقط برای دستور تولید تکمیل‌شده است؛ اصلاح هزینه دستور بسته یا لغوشده از طریق امور مالی انجام می‌شود.");
+            FnEmployee worker = await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(e => e.Id == dto.EmployeeId && e.IsActive, ct);
+            if (worker == null) return Bad<BookingDto>("پرسنل پیدا نشد یا غیرفعال است.");
+            if (dto.CorrectsBookingId.HasValue && !await _uow.Set<MfTimeBooking>().AnyAsync(x => x.Id == dto.CorrectsBookingId.Value && x.OperationId == op.Id && !x.Deleted, ct))
+                return Bad<BookingDto>("ثبت زمانی که این اصلاح به آن مربوط است در همین عملیات پیدا نشد.");
+            if (dto.MachineId.HasValue && !await _uow.Set<Machine>().AnyAsync(m => m.Id == dto.MachineId.Value, ct)) return Bad<BookingDto>("ماشین پیدا نشد.");
+            string overlap = await OverlapAsync(dto.EmployeeId, start, end, 0, ct);
+            if (overlap != null) return Bad<BookingDto>(overlap);
+            if (op.IsWelding)
+            {
+                var weld = await MfWelding.CheckStartAsync(_uow, op, worker, dto.Kind, start.Date, ct);
+                if (weld.Error != null) return Bad<BookingDto>(weld.Error);
+            }
+            DateTimeOffset stamp = DateTimeOffset.Now;
+            int minutes = MinutesBetween(start, end);
+            var booking = new MfTimeBooking
+            {
+                OperationId = op.Id, EmployeeId = dto.EmployeeId, MachineId = dto.MachineId, Kind = dto.Kind, StartAt = start, EndAt = end, Minutes = minutes, Hours = MfText.HoursOf(minutes), Note = Clean(dto.Note),
+                Source = MfBookingSource.Supervisor, SupervisorReason = reason, IsCorrection = true, CorrectsBookingId = dto.CorrectsBookingId, CreateDate = stamp, ModifyDate = stamp, CreatorUserId = Me, ModifierUserId = Me,
+            };
+            _uow.Set<MfTimeBooking>().Add(booking);
+            op.ModifyDate = stamp;
+            op.ModifierUserId = Me;
+            try
+            {
+                await _uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Bad<BookingDto>(MfText.Concurrency);
+            }
+            catch (DbUpdateException)
+            {
+                return Bad<BookingDto>("ثبت زمان اصلاحی ممکن نشد؛ دوباره تلاش کنید.");
+            }
+            return ResponseDtoHelper.Ok((await BookingDtosAsync(new List<MfTimeBooking> { booking }, ct))[0]);
+        }
+
+        public async Task<ResponseDto<List<BookingHoursDto>>> GetBookingHoursAsync(BookingHoursQuery query, CancellationToken ct)
+        {
+            // the operators see their own bookings only, so the hours of everybody else are not for them
+            if (!_user.IsInRole(ProductionRoles.Readers + ",PAYROLL")) return Bad<List<BookingHoursDto>>(MfText.NotAllowed);
+            query ??= new BookingHoursQuery();
+            DateTime lastDay = (query.To ?? DateTime.Today).Date;
+            DateTime firstDay = (query.From ?? lastDay.AddDays(-30)).Date;
+            if (lastDay < firstDay || (lastDay - firstDay).TotalDays > 366) return Bad<List<BookingHoursDto>>("بازه باید حداکثر ۳۶۷ روز باشد.");
+            DateTime upper = lastDay.AddDays(1);
+            var rows = await (from b in _uow.Set<MfTimeBooking>().AsNoTracking()
+                              join o in _uow.Set<MfOperation>().AsNoTracking() on b.OperationId equals o.Id
+                              where !b.Deleted && b.EndAt != null && b.StartAt >= firstDay && b.StartAt < upper
+                                    && (!query.WorkCenterId.HasValue || o.WorkCenterId == query.WorkCenterId.Value) && (!query.OrderId.HasValue || o.OrderId == query.OrderId.Value)
+                              select new { b.StartAt, b.Hours, o.WorkCenterId }).ToListAsync(ct);
+            List<int> centerIds = rows.Where(r => r.WorkCenterId.HasValue).Select(r => r.WorkCenterId.Value).Distinct().ToList();
+            var centers = centerIds.Count == 0 ? new Dictionary<int, MfWorkCenter>() : await _uow.Set<MfWorkCenter>().AsNoTracking().Where(c => centerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+            List<BookingHoursDto> list = rows.GroupBy(r => (r.WorkCenterId, Date: r.StartAt.Date)).OrderBy(g => g.Key.Date).ThenBy(g => g.Key.WorkCenterId ?? 0).Select(g =>
+            {
+                MfWorkCenter wc = g.Key.WorkCenterId.HasValue && centers.TryGetValue(g.Key.WorkCenterId.Value, out MfWorkCenter c) ? c : null;
+                return new BookingHoursDto
+                {
+                    WorkCenterId = g.Key.WorkCenterId, WorkCenterCode = wc?.Code, WorkCenterTitle = wc?.Title, Date = g.Key.Date, DateText = MfText.Date(g.Key.Date),
+                    Bookings = g.Count(), Hours = Math.Round(g.Sum(x => x.Hours), 2, MidpointRounding.AwayFromZero),
+                };
+            }).ToList();
+            return ResponseDtoHelper.Ok(list);
         }
 
         // ================================================================================== attendance versus booking

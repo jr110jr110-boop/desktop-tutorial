@@ -36,6 +36,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.LabourRateRial).HasPrecision(18, 2);
                 b.Property(x => x.QueueDaysDefault).HasPrecision(9, 2);
                 b.Property(x => x.CostCenter).HasMaxLength(Code);
+                b.Property(x => x.RequiresMachine).HasDefaultValue(true); // R1p D43: existing work centres get true as well
                 b.HasOne<PcCalendar>().WithMany().HasForeignKey(x => x.CalendarId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<MfMachineInfo>(b =>
@@ -66,6 +67,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne<MfWorkCenter>().WithMany().HasForeignKey(x => x.WorkCenterId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<Provider>().WithMany().HasForeignKey(x => x.DefaultSupplierId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ControlledDocument>().WithMany().HasForeignKey(x => x.WorkInstructionDocumentId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<Wps>().WithMany().HasForeignKey(x => x.WpsId).OnDelete(DeleteBehavior.Restrict); // R1p D12
             });
             builder.Entity<MfRoutingRevision>(b =>
             {
@@ -95,6 +97,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasIndex(x => x.ProcessId);
                 b.HasIndex(x => x.Status);
                 b.Property(x => x.Quantity).HasPrecision(18, 4);
+                b.Property(x => x.WrittenOffQty).HasPrecision(18, 4);
+                b.HasIndex(x => x.ReplacesOrderId).HasFilter("[ReplacesOrderId] IS NOT NULL");
                 b.Property(x => x.Unit).HasMaxLength(Code);
                 b.Property(x => x.SerialsPlanned).HasMaxLength(LongText);
                 b.Property(x => x.ReleaseOverrideReason).HasMaxLength(Text);
@@ -110,6 +114,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne<PcActivity>().WithMany().HasForeignKey(x => x.ActivityId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<InventoryItem>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfRoutingRevision>().WithMany().HasForeignKey(x => x.RoutingRevisionId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfProductionOrder>().WithMany().HasForeignKey(x => x.ReplacesOrderId).OnDelete(DeleteBehavior.Restrict); // R1p D6
                 b.HasOne(x => x.KitRequest).WithMany().HasForeignKey(x => x.KitRequestId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<InventoryDocument>().WithMany().HasForeignKey(x => x.ProductionReceiptId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -134,6 +139,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.GoodQty).HasPrecision(18, 4);
                 b.Property(x => x.ScrapQty).HasPrecision(18, 4);
                 b.Property(x => x.ReworkQty).HasPrecision(18, 4);
+                b.Property(x => x.QcAcceptedGoodQty).HasPrecision(18, 4);
+                b.Property(x => x.QcAcceptedScrapQty).HasPrecision(18, 4);
+                b.Property(x => x.QcAcceptedReworkQty).HasPrecision(18, 4);
                 b.Property(x => x.SkipReason).HasMaxLength(Text);
                 b.Property(x => x.Note).HasMaxLength(Text);
                 b.HasOne<MfProductionOrder>().WithMany(o => o.Operations).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
@@ -148,6 +156,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne(x => x.PurchaseRequestLine).WithMany().HasForeignKey(x => x.PurchaseRequestLineId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<Entities.Model.NasbNiro.Procurement.PurchaseOrderLine>().WithMany().HasForeignKey(x => x.PurchaseOrderLineId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<InventoryDocument>().WithMany().HasForeignKey(x => x.SubcontractIssueId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<Wps>().WithMany().HasForeignKey(x => x.WpsId).OnDelete(DeleteBehavior.Restrict); // R1p D12
+                b.HasOne<WeldLog>().WithMany().HasForeignKey(x => x.WeldLogId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<MfOperationPart>(b =>
             {
@@ -170,6 +180,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.GoodQty).HasPrecision(18, 4);
                 b.Property(x => x.ScrapQty).HasPrecision(18, 4);
                 b.Property(x => x.ReworkQty).HasPrecision(18, 4);
+                // R1p D1: labour of a protected group waits for the monthly aggregate posting (fractions of a rial are kept until the month is summed)
+                b.Property(x => x.PendingLabour).HasPrecision(22, 4);
+                b.HasIndex(x => x.LabourPendingPeriod).HasFilter("[LabourPendingPeriod] IS NOT NULL");
+                b.HasOne<MfTimeBooking>().WithMany().HasForeignKey(x => x.CorrectsBookingId).OnDelete(DeleteBehavior.Restrict); // R1p D39
                 b.Property(x => x.Note).HasMaxLength(Text);
                 b.Property(x => x.SupervisorReason).HasMaxLength(Text);
                 b.Property(x => x.EditReason).HasMaxLength(Text);
