@@ -2,6 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WebApi.Filters;
 using Services.NasbNiro.Ceo;
 
 namespace WebApi.Controllers
@@ -12,6 +13,7 @@ namespace WebApi.Controllers
     /// <summary>The overview (headline, nine sections, alerts, pulse), one fresh section, the snapshot of the day and the spoken summaries (voice mode). CEO and PMO.</summary>
     [ApiController]
     [Authorize]
+    [RolesCheckedInService] // CEO and PMO: the services check the reader roles on every call (D1); the snapshot and the analysis are writes only in the sense of a cache row and an audited conversation
     [Route("api/v1/ceo")]
     public class CeoOverviewController : ControllerBase
     {

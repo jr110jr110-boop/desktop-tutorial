@@ -3211,6 +3211,36 @@ namespace DataLayer.Migrations
                     b.ToTable("AiToolCallLogs", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Ceo.CeoKpiSnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<decimal>("Value")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Date", "Key")
+                        .IsUnique();
+
+                    b.ToTable("CeoKpiSnapshots", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Constract.Machine", b =>
                 {
                     b.Property<int>("Id")

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WebApi.Filters;
 using Services.NasbNiro.Ceo.Drills;
 using ViewModels.NasbNiro.CeoDtos;
 
@@ -16,6 +17,7 @@ namespace WebApi.Controllers
     /// <summary>Drill catalogue, one drill, and the narrative analysis of a section. CEO and PMO.</summary>
     [ApiController]
     [Authorize]
+    [RolesCheckedInService] // CEO and PMO: the services check the reader roles on every call (D1); the snapshot and the analysis are writes only in the sense of a cache row and an audited conversation
     [Route("api/v1/ceo")]
     public class CeoDrillController : ControllerBase
     {
