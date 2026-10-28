@@ -1,0 +1,70 @@
+  Determining projects to restore...
+D:\a\desktop-tutorial\desktop-tutorial\src\Entities\Entities.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\Entities\Entities.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\ViewModels\ViewModels.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\ViewModels\ViewModels.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\ViewModels\ViewModels.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\WebApi\WebApi.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\WebApi\WebApi.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\WebApi\WebApi.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\Services\Services.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\Services\Services.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\Services\Services.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\DataLayer\DataLayer.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\DataLayer\DataLayer.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\DataLayer\DataLayer.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\IocConfig\IocConfig.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\IocConfig\IocConfig.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\IocConfig\IocConfig.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+  Restored D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj (in 9.53 sec).
+  7 of 8 projects are up-to-date for restore.
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+D:\a\desktop-tutorial\desktop-tutorial\src\Entities\Entities.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\Entities\Entities.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+D:\a\desktop-tutorial\desktop-tutorial\src\IocConfig\IocConfig.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+D:\a\desktop-tutorial\desktop-tutorial\src\IocConfig\IocConfig.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\IocConfig\IocConfig.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+D:\a\desktop-tutorial\desktop-tutorial\src\DataLayer\DataLayer.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+D:\a\desktop-tutorial\desktop-tutorial\src\DataLayer\DataLayer.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\DataLayer\DataLayer.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+D:\a\desktop-tutorial\desktop-tutorial\src\WebApi\WebApi.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+D:\a\desktop-tutorial\desktop-tutorial\src\WebApi\WebApi.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\WebApi\WebApi.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+D:\a\desktop-tutorial\desktop-tutorial\src\ViewModels\ViewModels.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+D:\a\desktop-tutorial\desktop-tutorial\src\ViewModels\ViewModels.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\ViewModels\ViewModels.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+  Common -> D:\a\desktop-tutorial\desktop-tutorial\src\Common\bin\Release\net10.0\Common.dll
+D:\a\desktop-tutorial\desktop-tutorial\src\Services\Services.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+D:\a\desktop-tutorial\desktop-tutorial\src\Services\Services.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+D:\a\desktop-tutorial\desktop-tutorial\src\Services\Services.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+  Entities -> D:\a\desktop-tutorial\desktop-tutorial\src\Entities\bin\Release\net10.0\Entities.dll
+  ViewModels -> D:\a\desktop-tutorial\desktop-tutorial\src\ViewModels\bin\Release\net10.0\ViewModels.dll
+  DataLayer -> D:\a\desktop-tutorial\desktop-tutorial\src\DataLayer\bin\Release\net10.0\DataLayer.dll
+  Services -> D:\a\desktop-tutorial\desktop-tutorial\src\Services\bin\Release\net10.0\Services.dll
+  IocConfig -> D:\a\desktop-tutorial\desktop-tutorial\src\IocConfig\bin\Release\net10.0\IocConfig.dll
+  WebApi -> D:\a\desktop-tutorial\desktop-tutorial\src\WebApi\bin\Release\net10.0\WebApi.dll
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\AiSeatTests.cs(40,10): warning MSTEST0044: 'DataTestMethod' is obsolete. Use 'TestMethod' instead. (https://learn.microsoft.com/dotnet/core/testing/mstest-analyzers/mstest0044) [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\OfficeR2Tests.cs(234,13): warning MSTEST0039: Use 'Assert.ThrowsExactly' instead of 'Assert.ThrowsException' (https://learn.microsoft.com/dotnet/core/testing/mstest-analyzers/mstest0039) [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\OfficeR2Tests.cs(235,13): warning MSTEST0039: Use 'Assert.ThrowsExactly' instead of 'Assert.ThrowsException' (https://learn.microsoft.com/dotnet/core/testing/mstest-analyzers/mstest0039) [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\OfficeR2Tests.cs(397,13): warning MSTEST0039: Use 'Assert.ThrowsExactly' instead of 'Assert.ThrowsException' (https://learn.microsoft.com/dotnet/core/testing/mstest-analyzers/mstest0039) [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\OfficeR2Tests.cs(401,13): warning MSTEST0039: Use 'Assert.ThrowsExactly' instead of 'Assert.ThrowsException' (https://learn.microsoft.com/dotnet/core/testing/mstest-analyzers/mstest0039) [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\OfficeR2Tests.cs(402,13): warning MSTEST0039: Use 'Assert.ThrowsExactly' instead of 'Assert.ThrowsException' (https://learn.microsoft.com/dotnet/core/testing/mstest-analyzers/mstest0039) [D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\MsTests.csproj]
+  MsTests -> D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\bin\Release\net10.0\MsTests.dll
+Test run for D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\bin\Release\net10.0\MsTests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+  Failed Held_Goods_Cannot_Be_Used_Up_Produced_Back_Or_Moved_Into_Usable_Stock [9 ms]
+  Error Message:
+   Assert.IsTrue failed. ProductionReceipt must refuse held goods
+  Stack Trace:
+     at MsTests.QualityR1Tests.Held_Goods_Cannot_Be_Used_Up_Produced_Back_Or_Moved_Into_Usable_Stock() in D:\a\desktop-tutorial\desktop-tutorial\src\MsTests\QualityR1Tests.cs:line 314
+   at System.RuntimeMethodHandle.InvokeMethod(ObjectHandleOnStack target, Void** arguments, ObjectHandleOnStack sig, BOOL isConstructor, ObjectHandleOnStack result)
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+
+
+Failed!  - Failed:     1, Passed:   682, Skipped:     0, Total:   683, Duration: 2 m 22 s - MsTests.dll (net10.0)
