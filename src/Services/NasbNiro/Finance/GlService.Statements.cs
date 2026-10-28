@@ -40,6 +40,7 @@ namespace Services.NasbNiro.Finance
             if (from < year.StartDate.Date || to > year.EndDate.Date || from > to) return (null, default, default, null, "بازه باید داخل سال مالی باشد.");
             IQueryable<FnVoucherLine> lines = _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.Voucher.FiscalYearId == year.Id && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose);
             lines = q.IncludeDraft ? lines : lines.Where(l => l.Voucher.Status == FnVoucherStatus.Final);
+            lines = FnLabourMask.Visible(lines, FnLabourMask.Sees(_user));   // R1p D1/D2: protected labour lines (a debit and a credit of the same amount) are read by PAYROLL, FINANCEMANAGER and CEO only
             var rows = await lines.Where(l => l.Voucher.Date <= to)
                 .GroupBy(l => new { l.Account.Code, l.Voucher.Type, Before = l.Voucher.Date < from || l.Voucher.Type == FnVoucherType.Opening })
                 .Select(g => new { g.Key.Code, g.Key.Type, g.Key.Before, Net = g.Sum(x => x.Debit - x.Credit) }).ToListAsync(ct);
@@ -172,9 +173,12 @@ namespace Services.NasbNiro.Finance
             if (d.Error != null) return Bad<FnDrillDto>(d.Error);
             IQueryable<FnVoucherLine> q = _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.Voucher.FiscalYearId == d.Year.Id && l.Account.Code.StartsWith(prefix) && l.Voucher.Date >= d.From && l.Voucher.Date <= d.To);
             if (!(query?.IncludeDraft ?? false)) q = q.Where(l => l.Voucher.Status == FnVoucherStatus.Final);
+            bool seesProtected = FnLabourMask.Sees(_user);
+            bool labourHidden = !seesProtected && await q.AnyAsync(l => l.LabourProtected, ct);
+            q = FnLabourMask.Visible(q, seesProtected);   // R1p D1/D2: protected labour lines are read by PAYROLL, FINANCEMANAGER and CEO only
             var rows = await q.OrderBy(l => l.Voucher.Date).ThenBy(l => l.VoucherId).ThenBy(l => l.RowNumber).Take(2000)
                 .Select(l => new FnDrillRowDto { VoucherId = l.VoucherId, Number = l.Voucher.Number, TemporaryNumber = l.Voucher.TemporaryNumber, Date = l.Voucher.Date, Description = l.Description ?? l.Voucher.Description, AccountCode = l.Account.Code, Debit = l.Debit, Credit = l.Credit, SourceType = l.Voucher.SourceType, SourceNumber = l.Voucher.SourceNumber }).ToListAsync(ct);
-            return ResponseDtoHelper.Ok(new FnDrillDto { AccountPrefix = prefix, Rows = rows, TotalDebit = rows.Sum(r => r.Debit), TotalCredit = rows.Sum(r => r.Credit) });
+            return ResponseDtoHelper.Ok(new FnDrillDto { AccountPrefix = prefix, Rows = rows, TotalDebit = rows.Sum(r => r.Debit), TotalCredit = rows.Sum(r => r.Credit), LabourHidden = labourHidden });
         }
 
         public async Task<ResponseDto<List<FnViewDto>>> GetViewsAsync(CancellationToken ct)

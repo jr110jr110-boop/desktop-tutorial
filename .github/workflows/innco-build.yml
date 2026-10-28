@@ -166,6 +166,7 @@ jobs:
         env:
           ASPNETCORE_ENVIRONMENT: Development
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
+          Production__MaxBackdateDays: '3650'  # the smoke books and corrects shop-floor time on fixed 2026 dates, far more than the 7 days a correction booking may reach back by default (off everywhere else; the smoke breaks about ten years after those dates)
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
@@ -181,6 +182,7 @@ jobs:
         env:
           ASPNETCORE_ENVIRONMENT: Development
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
+          Production__MaxBackdateDays: '3650'  # the smoke books and corrects shop-floor time on fixed 2026 dates, far more than the 7 days a correction booking may reach back by default (off everywhere else; the smoke breaks about ten years after those dates)
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
@@ -195,6 +197,7 @@ jobs:
         env:
           ASPNETCORE_ENVIRONMENT: Development
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
+          Production__MaxBackdateDays: '3650'  # the smoke books and corrects shop-floor time on fixed 2026 dates, far more than the 7 days a correction booking may reach back by default (off everywhere else; the smoke breaks about ten years after those dates)
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand

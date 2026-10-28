@@ -164,9 +164,13 @@ namespace WebApi.Controllers
         [HttpPost("bookings/edit")]
         public async Task<IActionResult> EditBookingAsync([FromBody] EditBookingDto dto, CancellationToken ct) => Ok(await _shop.EditBookingAsync(dto, ct));
 
-        /// <summary>An extra booking on an operation of a completed order (its own bookings are frozen), by the shop supervisor with a reason.</summary>
+        /// <summary>An extra booking on an operation of a completed order (its own bookings are frozen), by the shop supervisor with a reason; it waits for the approval of another production manager.</summary>
         [HttpPost("bookings/correct")]
         public async Task<IActionResult> CorrectBookingAsync([FromBody] SaveCorrectionBookingDto dto, CancellationToken ct) => Ok(await _shop.CorrectBookingAsync(dto, ct));
+
+        /// <summary>A production manager other than the creator approves (or rejects) a correction booking; before that it counts in no cost run, hour report or OEE.</summary>
+        [HttpPost("bookings/approve-correction")]
+        public async Task<IActionResult> ApproveCorrectionAsync([FromBody] ApproveCorrectionDto dto, CancellationToken ct) => Ok(await _shop.ApproveCorrectionAsync(dto, ct));
 
         /// <summary>Booked hours per work centre and day, without any name.</summary>
         [HttpGet("bookings/hours")]

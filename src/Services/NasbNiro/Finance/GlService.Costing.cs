@@ -329,7 +329,7 @@ namespace Services.NasbNiro.Finance
             WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == workOrderId, ct);
             if (wo == null) return ResponseDtoHelper.NotFound<FnWorkOrderCostDto>("دستور کار پیدا نشد.");
             WoCostNumbers n = await BuildCostAsync(wo, ct);
-            // R1p D1: a protected labour amount is shown to PAYROLL, FINANCEMANAGER and CEO only; the totals carry the labour and are hidden with it
+            // R1p D1: since labour is absorbed at the pooled average rate a work order never carries one person's pay; only a row backfilled from the one-or-two-person era keeps the flag, and its labour is then shown to PAYROLL, FINANCEMANAGER and CEO only
             bool hide = n.LabourProtected && !Production.MfPrivacy.SeesPayroll(_user);
             return ResponseDtoHelper.Ok(new FnWorkOrderCostDto
             {
@@ -351,13 +351,6 @@ namespace Services.NasbNiro.Finance
             WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == workOrderId, ct);
             if (wo == null) return ResponseDtoHelper.NotFound<FnWorkOrderCloseDto>("دستور کار پیدا نشد.");
             if (wo.Condition != WorkOrderCondition.Done) return Bad<FnWorkOrderCloseDto>("فقط دستور کار انجام‌شده بسته می‌شود.");
-            // R1p D1: the direct labour of a protected group (fewer than three payroll-rated employees) reaches the work order only with the monthly aggregate posting of production; closing before that would leave it out of the cost
-            if (await (from b in _uow.Set<global::Entities.Model.NasbNiro.Production.MfTimeBooking>()
-                       join o in _uow.Set<global::Entities.Model.NasbNiro.Production.MfOperation>() on b.OperationId equals o.Id
-                       join p in _uow.Set<global::Entities.Model.NasbNiro.Production.MfProductionOrder>() on o.OrderId equals p.Id
-                       where !b.Deleted && b.LabourPendingPeriod != null && b.LabourAggregatedAt == null && p.WorkOrderId == workOrderId
-                       select b.Id).AnyAsync(ct))
-                return Bad<FnWorkOrderCloseDto>("بخشی از دستمزد مستقیم تولید این دستور کار (ساعت‌های گروه‌های کمتر از سه نفر با نرخ حقوق) هنوز در ثبت ماهانه دستمزد تولید نیامده و به بهای دستور کار نرسیده است؛ پس از ثبت ماهانه، دستور کار را ببندید.");
             if (await _uow.Set<FnContractRevenue>().AnyAsync(r => r.ContractId == wo.ContractId && r.Method == FnRevenueMethod.PercentOfCompletion, ct))
                 return Bad<FnWorkOrderCloseDto>("قرارداد این دستور کار به روش درصد پیشرفت شناسایی می‌شود؛ بهای آن با اجرای شناسایی درآمد به بهای تمام‌شده منتقل می‌شود و دستور کار به محصول ساخته‌شده بسته نمی‌شود."); 
             if (await _uow.Set<FnWorkOrderClose>().AnyAsync(c => c.WorkOrderId == workOrderId && !c.IsOpen, ct)) return Bad<FnWorkOrderCloseDto>("این دستور کار قبلاً بسته شده است؛ برای تغییر باید توسط مدیر مالی بازگشایی شود.");

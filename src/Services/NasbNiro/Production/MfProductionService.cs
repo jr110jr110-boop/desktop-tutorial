@@ -47,6 +47,7 @@ namespace Services.NasbNiro.Production
         private readonly IInventoryUserContext _user;
         private readonly INotificationService _notify;
         private readonly IInspectionService _inspections;
+        private readonly IInventoryDocumentService _documents;
         private readonly MfFlow _flow;
 
         public MfProductionService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IInspectionService inspections, INotificationService notify = null)
@@ -55,6 +56,7 @@ namespace Services.NasbNiro.Production
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _inspections = inspections ?? throw new ArgumentNullException(nameof(inspections));
             _notify = notify;
+            _documents = documents;
             _flow = new MfFlow(uow, user, documents, notify);
         }
 
@@ -593,6 +595,7 @@ namespace Services.NasbNiro.Production
             if (order.Status != MfOrderStatus.Released && order.Status != MfOrderStatus.InProgress) return Bad<OperationDto>("دستور تولید در وضعیتی نیست که عملیات آن تغییر کند.");
             List<string> notes;
             var actionNotes = new List<string>();
+            var writeOffs = new List<MfWriteOff>();
 
             if (action == "skip")
             {
@@ -666,9 +669,13 @@ namespace Services.NasbNiro.Production
                 {
                     decimal scrapped = ncr.Quantity > 0 ? Math.Min(ncr.Quantity, op.GoodQty) : op.GoodQty;
                     if (scrapped <= 0) return Bad<OperationDto>("تعداد سالمی که ضایعات شود روی این عملیات ثبت نشده است.");
+                    // R1p D6/D33: the same write-off as the terminal scrap: the order's written-off quantity and planned serials follow, the replacement draft gets its own serials, and the scrap receipt is drafted after the save
+                    var writeOff = new MfWriteOff { Order = order, Op = op, Quantity = scrapped, Job = JobCard(order.Number, op), Ncr = ncr, NcrIsNew = false };
+                    string writeOffProblem = await MfWriteOffs.ApplyAsync(_uow, Me, writeOff, ncr.SerialNumbers, ct);
+                    if (writeOffProblem != null) return Bad<OperationDto>(writeOffProblem);
+                    writeOffs.Add(writeOff);
                     op.GoodQty -= scrapped;
                     op.ScrapQty += scrapped;
-                    order.WrittenOffQty += scrapped;
                     op.Status = MfOperationStatus.Done;
                     op.FinishedAt ??= now;
                     if (op.GoodQty == 0)
@@ -683,8 +690,6 @@ namespace Services.NasbNiro.Production
                             later.ModifierUserId = Me;
                         }
                     }
-                    MfProductionOrder replacement = await DraftReplacementAsync(order, scrapped, ncr, now, ct);
-                    actionNotes.Add($"دستور تولید جایگزین {replacement.Number} (پیش‌نویس) برای {MfFlow.Num(scrapped)} {order.Unit} ساخته شد.");
                 }
             }
             else return Bad<OperationDto>("عمل نامعتبر است.");
@@ -703,6 +708,7 @@ namespace Services.NasbNiro.Production
                 return Bad<OperationDto>(MfText.Concurrency);
             }
             notes.AddRange(await _flow.AfterSaveAsync(ct));
+            notes.AddRange(await MfWriteOffs.AfterSaveAsync(_uow, _documents, _notify, writeOffs, ct));
             await MfGates.QcAsync(_notify, op, order.Number, ct);
             await MfGates.OrderAsync(_notify, order, ct);
             return ResponseDtoHelper.Ok(await OneAsync(op, ct), notes.Count == 0 ? null : Join(notes));
@@ -731,7 +737,7 @@ namespace Services.NasbNiro.Production
             {
                 if (Clean(m.Characteristic) == null) return Bad<OperationDto>("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
                 if (!m.InstrumentId.HasValue)
-                    return Bad<OperationDto>($"برای مقدار اندازه‌گیری‌شده «{Clean(m.Characteristic)}» ابزار اندازه‌گیری (InstrumentId) را انتخاب کنید؛ مقداری که به ابزار کالیبره ردیابی نشود پذیرفته نمی‌شود.");
+                    return Bad<OperationDto>($"برای مقدار اندازه‌گیری‌شده «{Clean(m.Characteristic)}» ابزار اندازه‌گیری را انتخاب کنید؛ مقداری که به ابزار کالیبره ردیابی نشود پذیرفته نمی‌شود.");
                 measurements.Add(new SaveQcMeasurementDto { Characteristic = m.Characteristic, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured, Unit = m.Unit, EquipmentId = m.InstrumentId });
             }
 
@@ -787,6 +793,12 @@ namespace Services.NasbNiro.Production
                     {
                         if (!record.NcrId.HasValue) return Bad<OperationDto>("گزارش عدم انطباق برای این بازرسی ساخته نشد.");
                         op.NcrId = record.NcrId;
+                        // R1p D42/D6: the report names every serial of the pieces under inspection, one per line (the inspection record keeps the shortened one-line text), so that a later scrap decision can tell which serials it takes
+                        if (serials.Count > 0)
+                        {
+                            NonConformance qcNcr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == record.NcrId.Value, ct);
+                            if (qcNcr != null) { qcNcr.SerialNumbers = MfSerialRules.PerLine(serials); qcNcr.ModifyDate = now; }
+                        }
                         op.Status = MfOperationStatus.Rejected;
                         op.QcAccepted = false;
                         // R1p D8: a rework decision only marks the quantity; the rework operation is made after the NCR is approved with a rework disposition (operations/rework)
@@ -869,37 +881,6 @@ namespace Services.NasbNiro.Production
             }
             notes.AddRange(await _flow.AfterSaveAsync(ct));
             return ResponseDtoHelper.Ok(await OneAsync(rework, ct), notes.Count == 0 ? null : Join(notes));
-        }
-
-        /// <summary>
-        /// R1p D6: the order that replaces the pieces an approved scrap decision wrote off: a draft for the scrapped quantity (the components in proportion, the operations of the approved routing) that refers back to the
-        /// order and the NCR. People release it as any other order. ★ provisional decision: always drafted, never released by the system.
-        /// </summary>
-        private async Task<MfProductionOrder> DraftReplacementAsync(MfProductionOrder order, decimal quantity, NonConformance ncr, DateTimeOffset now, CancellationToken ct)
-        {
-            var replacement = new MfProductionOrder
-            {
-                Number = await InventoryNumbers.NextNumberAsync(_uow, MfNumbers.ProductionOrder, "PO-MF", DateTime.Today, ct),
-                WorkOrderId = order.WorkOrderId, ContractId = order.ContractId, ProcessId = order.ProcessId, BomId = order.BomId, ActivityId = order.ActivityId, ItemId = order.ItemId,
-                Quantity = quantity, Unit = order.Unit, Status = MfOrderStatus.Draft, AutoDrafted = true, ReplacesOrderId = order.Id,
-                Note = $"جایگزین {MfFlow.Num(quantity)} {order.Unit} ضایعات دستور تولید {order.Number} (گزارش عدم انطباق {ncr.Number})",
-                CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
-            };
-            List<MfOrderComponent> comps = await _uow.Set<MfOrderComponent>().AsNoTracking().Where(c => c.OrderId == order.Id).ToListAsync(ct);
-            foreach (MfOrderComponent c in comps)
-                replacement.Components.Add(new MfOrderComponent { ItemId = c.ItemId, Quantity = order.Quantity > 0 ? Math.Round(c.Quantity * quantity / order.Quantity, 4) : c.Quantity, Unit = c.Unit });
-            InventoryItem item = order.ItemId.HasValue ? await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == order.ItemId.Value, ct) : null;
-            if (item != null)
-            {
-                MfResolvedRouting routing = await MfRouting.ResolveAsync(_uow, item, ct);
-                if (routing.Revision != null)
-                {
-                    replacement.RoutingRevisionId = routing.Revision.Id;
-                    foreach (MfOperation op in MfDraftingService.OperationsFromRouting(routing, quantity, now, Me)) replacement.Operations.Add(op);
-                }
-            }
-            _uow.Set<MfProductionOrder>().Add(replacement);
-            return replacement;
         }
     }
 }

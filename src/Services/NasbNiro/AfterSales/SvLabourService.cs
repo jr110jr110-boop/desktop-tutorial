@@ -7,10 +7,12 @@ using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.AfterSales;
 using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Production;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Services.NasbNiro.Finance;
 using Services.NasbNiro.Inventory;
+using Services.NasbNiro.Production;
 using Services.NasbNiro.Sales;
 using ViewModels.NasbNiro.ServiceDtos;
 
@@ -18,20 +20,40 @@ namespace Services.NasbNiro.AfterSales
 {
     public interface ISvLabourService
     {
-        /// <summary>The monthly aggregate posting of the protected labour, by hand (finance manager, CEO): every ended month with pending orders gets its one accounting event.</summary>
+        /// <summary>The month-end run of the service labour pool, by hand (finance manager, CEO): every ended month with pending orders is closed and its true-up posted.</summary>
         Task<ResponseDto<SvLabourAggregateResultDto>> RunAsync(SvJobsRunDto dto, CancellationToken ct);
 
-        /// <summary>The same run for the nightly job (no user; the day is today): the first nights of a month post the month before. Returns the months posted.</summary>
+        /// <summary>The same run for the nightly job (no user; the day is today): the first nights of a month close the month before. Returns the months closed.</summary>
         Task<int> RunNightlyAsync(CancellationToken ct);
 
-        /// <summary>The months already posted, newest first (finance manager, CEO): rebuilt from the aggregated orders, the cost entries and the accounting events, so every browser sees the same history.</summary>
+        /// <summary>The months already closed, newest first (finance manager, CEO, finance, payroll): rebuilt from the pool rows, so every browser sees the same history.</summary>
         Task<ResponseDto<List<SvLabourPeriodDto>>> HistoryAsync(CancellationToken ct);
     }
 
-    /// <summary>The monthly aggregate posting of protected labour (see <see cref="SvLabourMonth"/>). Idempotent: an order is taken once; a month with nothing pending posts nothing.</summary>
+    // ===========================================================================================================================================================================================================
+    // LABOUR COST RULE OF AFTER-SALES (R1p D2) - POOLED AVERAGE RATE. It is the rule of production (see the top of MfLabourService) applied to the service department. ★ The company must confirm it.
+    //
+    //  1. Nothing that is published per service order is one person's pay. The labour of a closed order is hours x the pooled average rate of the SERVICE MONTH POOL, never hours x the engineer's own rate; it is spread
+    //     over warranty, goodwill, LTSA and billable orders alike by their hours. (An engineer without an approved payslip is costed at the standard rate of the work centre named in the settings: not pay.)
+    //  2. The pool of a Persian month = the payroll-rated engineers (an approved payslip exists) with hours on the orders closed in the month; pool average rate = pool cost / pool hours. The cost comes from payroll as before
+    //     and only the pool total leaves the payroll boundary. The service department is one pool (it has no cost-centre split); with fewer than three payroll-rated engineers in the month nothing is published.
+    //  3. At the close an order is absorbed at the rate of the last CLOSED service month; ★ before the first month is closed at the standard rate (the work centre of the settings). The order is marked with the month whose
+    //     pool will true it up (the month of the close, or the first later month that is not closed).
+    //  4. This MONTH-END run stores the pool (MfLabourPool, module Service: people, hours, cost, absorbed, the rate of the next closes) and posts the true-up, actual pool cost less absorbed, as ONE company-level line:
+    //     no order, no contract. The line moves the difference between the service-labour-absorbed account and the labour-rate-variance account.
+    //  5. CARRY: with fewer than three payroll-rated engineers in the month nothing is published: the orders move to the next open month and join its pool. ★ At the end of a Persian quarter the carry is posted anyway as one
+    //     true-up line flagged LabourProtected (cost entry, event line, voucher line); the voucher, ledger and drill-down readers and the Sepidar events export leave it out for every role except PAYROLL,
+    //     FINANCEMANAGER and CEO. A protected pool has no rate.
+    //  6. The engineers named on an order are visible only to SERVICE, payroll readers (PAYROLL, FINANCEMANAGER, CEO) and the engineer himself; everybody else sees the hours without the name.
+    // ===========================================================================================================================================================================================================
+
+    /// <summary>The month-end run of the service labour pool and its true-up (see the rule above). Idempotent: an order is taken once, a month with nothing pending closes nothing.</summary>
     public class SvLabourService : ISvLabourService
     {
         public const string Runners = "FINANCEMANAGER,CEO";
+
+        /// <summary>Who reads the closed months: the runners, finance and payroll (a protected amount stays hidden from all but the payroll readers).</summary>
+        public const string Readers = Runners + ",FINANCIAL,PAYROLL";
 
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -53,42 +75,39 @@ namespace Services.NasbNiro.AfterSales
             bool allowFuture = string.Equals(_configuration?[SvJobsGuard.AllowFutureKey], "true", StringComparison.OrdinalIgnoreCase);
             string refusal = SvJobsGuard.Refusal(asOf, DateTime.Today, allowFuture);
             if (refusal != null) return SlText.Bad<SvLabourAggregateResultDto>(refusal);
-            return ResponseDtoHelper.Ok(await PostAsync(asOf, ct));
+            try
+            {
+                return ResponseDtoHelper.Ok(await PostAsync(asOf, ct));
+            }
+            catch (DbUpdateException)
+            {
+                // a second run at the same moment: the unique pool index lets only one of them close the month
+                return SlText.Bad<SvLabourAggregateResultDto>(SlText.Concurrency);
+            }
         }
 
         public async Task<int> RunNightlyAsync(CancellationToken ct) => (await PostAsync(DateTime.Today, ct)).Periods.Count;
 
-        /// <summary>One month of the monthly labour postings in the books: the amount and how many of its entries are protected (a plain integer sum; the flag is derived in memory).</summary>
-        internal sealed class CostMonthRow
-        {
-            public int Period { get; set; }
-            public decimal Amount { get; set; }
-            public int ProtectedEntries { get; set; }
-        }
-
-        internal static IQueryable<CostMonthRow> CostByPeriod(IQueryable<CostEntry> entries) =>
-            entries.Where(c => c.SourceType == SvLabourMonth.SourceType).GroupBy(c => c.SourceId)
-                .Select(g => new CostMonthRow { Period = g.Key, Amount = g.Sum(c => c.Amount), ProtectedEntries = g.Sum(c => c.LabourProtected ? 1 : 0) });
-
         public async Task<ResponseDto<List<SvLabourPeriodDto>>> HistoryAsync(CancellationToken ct)
         {
-            if (!_user.IsInRole(Runners)) return SlText.Bad<List<SvLabourPeriodDto>>(SlText.NotAllowed);
-            var orders = await _uow.Set<SvServiceOrder>().AsNoTracking()
-                .Where(o => !o.Deleted && o.LabourAggregatedAt != null && o.LabourPendingPeriod != null)
-                .Select(o => new { Period = o.LabourPendingPeriod.Value, o.Decision, o.LabourAmount, o.LabourAggregatedAt }).ToListAsync(ct);
-            var costs = (await CostByPeriod(_uow.Set<CostEntry>().AsNoTracking()).ToListAsync(ct))
-                .Select(c => new { c.Period, c.Amount, Flagged = c.ProtectedEntries > 0 }).ToList();
-            var events = await _uow.Set<AccountingEvent>().AsNoTracking().Where(e => e.SourceType == SvLabourMonth.SourceType && e.ReversesEventId == null)
-                .Select(e => new { e.Id, e.SourceId }).ToListAsync(ct);
-            var rows = orders.GroupBy(o => o.Period).OrderByDescending(g => g.Key).Select(g => new SvLabourPeriodDto
+            if (!_user.IsInRole(Readers)) return SlText.Bad<List<SvLabourPeriodDto>>(SlText.NotAllowed);
+            bool seesPayroll = SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
+            List<MfLabourPool> pools = await _uow.Set<MfLabourPool>().AsNoTracking().Where(p => p.Module == MfLabourModule.Service).OrderByDescending(p => p.Period).ToListAsync(ct);
+            var rows = pools.Select(p => new SvLabourPeriodDto
             {
-                Period = g.Key, PeriodText = SvLabourMonth.Text(g.Key), Orders = g.Count(),
-                EventAmount = g.Where(o => o.Decision == SvWarrantyDecision.Warranty || o.Decision == SvWarrantyDecision.Goodwill).Sum(o => o.LabourAmount),
-                CostAmount = costs.Where(c => c.Period == g.Key).Sum(c => c.Amount), Protected = costs.Any(c => c.Period == g.Key && c.Flagged),
-                EventId = events.Where(e => e.SourceId == g.Key).OrderByDescending(e => e.Id).Select(e => (int?)e.Id).FirstOrDefault(),
-                PostedAt = g.Max(o => o.LabourAggregatedAt),
+                Period = p.Period, PeriodText = SvLabourMonth.Text(p.Period), Orders = p.Items, People = p.People, Hours = p.Hours, Rate = p.Rate, Protected = p.Protected,
+                Absorbed = p.Protected && !seesPayroll ? (decimal?)null : p.Absorbed, Variance = p.Protected && !seesPayroll ? (decimal?)null : p.Variance, EventId = p.AccountingEventId, PostedAt = p.PostedAt,
             }).ToList();
             return ResponseDtoHelper.Ok(rows);
+        }
+
+        /// <summary>The months whose pool is closed: the pool rows, and the months of the orders an earlier release aggregated (a closed month is never reopened).</summary>
+        internal static async Task<HashSet<int>> ClosedMonthsAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            HashSet<int> closed = await MfLabourPoolStore.ClosedAsync(uow, MfLabourModule.Service, ct);
+            foreach (int period in await uow.Set<SvServiceOrder>().AsNoTracking().Where(o => o.LabourPendingPeriod != null && o.LabourAggregatedAt != null).Select(o => o.LabourPendingPeriod.Value).Distinct().ToListAsync(ct))
+                closed.Add(period);
+            return closed;
         }
 
         private async Task<SvLabourAggregateResultDto> PostAsync(DateTime asOf, CancellationToken ct)
@@ -99,69 +118,85 @@ namespace Services.NasbNiro.AfterSales
                 .Where(o => !o.Deleted && o.Status == SvOrderStatus.Closed && o.LabourPendingPeriod != null && o.LabourAggregatedAt == null && o.LabourPendingPeriod < current).ToListAsync(ct);
             if (orders.Count == 0) return result;
 
+            await _costing.EnsureAccountRolesAsync(ct);
             DateTimeOffset now = DateTimeOffset.Now;
             string center = await SvSettings.EnsureCostCenterAsync(_uow, ct);
-            HashSet<int> postedPeriods = (await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => o.LabourPendingPeriod != null && o.LabourAggregatedAt != null).Select(o => o.LabourPendingPeriod.Value).Distinct().ToListAsync(ct)).ToHashSet();
+            HashSet<int> closed = await ClosedMonthsAsync(_uow, ct);
+            bool seesPayroll = SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
 
-            // The pools by month, oldest first. R1p D2: a pool that is itself protected (fewer than three payroll-rated employees behind the month total) is carried to the next month and joins that pool;
-            // so the loop runs over the carried pools too, as long as their month has ended.
-            var pools = new SortedDictionary<int, List<SvServiceOrder>>();
-            foreach (SvServiceOrder o in orders)
+            // the orders by the month whose pool takes them, oldest first; a carried month joins the next one, so the loop runs over those too as long as their month has ended
+            var months = new SortedDictionary<int, List<SvServiceOrder>>();
+            void Put(int period, SvServiceOrder o)
             {
-                if (!pools.TryGetValue(o.LabourPendingPeriod.Value, out List<SvServiceOrder> list)) pools[o.LabourPendingPeriod.Value] = list = new List<SvServiceOrder>();
+                if (!months.TryGetValue(period, out List<SvServiceOrder> list)) months[period] = list = new List<SvServiceOrder>();
                 list.Add(o);
+            }
+            foreach (SvServiceOrder o in orders) Put(o.LabourPendingPeriod.Value, o);
+
+            MfPoolItem Describe(SvServiceOrder o)
+            {
+                List<SvTimeEntry> payroll = o.TimeEntries.Where(t => t.Hours > 0 && t.RateFromPayroll == true).ToList();
+                return new MfPoolItem { Id = o.Id, Employees = payroll.Select(t => t.EmployeeId).ToHashSet(), Hours = payroll.Sum(t => t.Hours), Cost = o.LabourPayrollCost ?? 0, Absorbed = o.LabourPooledAmount ?? 0 };
             }
 
             var posted = new List<(SvLabourPeriodDto Dto, AccountingEvent Event)>();
-            while (pools.Count > 0 && pools.Keys.First() < current)
+            while (months.Count > 0 && months.Keys.First() < current)
             {
-                int period = pools.Keys.First();
-                List<SvServiceOrder> month = pools[period];
-                pools.Remove(period);
-                List<SvPendingLabour> pending = month.OrderBy(o => o.Id).Select(o => new SvPendingLabour
-                {
-                    OrderId = o.Id, Decision = o.Decision, ContractId = o.ContractId, CostCenter = o.CostCenterCode ?? center, Labour = o.LabourAmount,
-                    Employees = o.TimeEntries.Where(t => t.Hours > 0).Select(t => t.EmployeeId).ToHashSet(),
-                    PayrollEmployees = o.TimeEntries.Where(t => t.Hours > 0 && t.RateFromPayroll == true).Select(t => t.EmployeeId).ToHashSet(),
-                }).ToList();
+                int period = months.Keys.First();
+                List<SvServiceOrder> month = months[period];
+                months.Remove(period);
 
-                Production.MfLabourMonthAction action = SvLabourMonth.Decide(pending, period);
-                if (action == Production.MfLabourMonthAction.Carry)
+                // a closed month is never reopened (cannot happen through the close; this keeps the unique pool index safe)
+                if (closed.Contains(period))
                 {
-                    int next = SvLabourMonth.NextOpen(period, postedPeriods);
-                    foreach (SvServiceOrder o in month) { o.LabourPendingPeriod = next; o.ModifyDate = now; o.ModifierUserId = _user.UserId; }
-                    if (!pools.TryGetValue(next, out List<SvServiceOrder> target)) pools[next] = target = new List<SvServiceOrder>();
-                    target.AddRange(month);
-                    result.OrdersCarried += month.Count;
+                    int open = SvLabourMonth.NextOpen(period, closed);
+                    foreach (SvServiceOrder o in month) { o.LabourPendingPeriod = open; o.ModifyDate = now; o.ModifierUserId = _user.UserId; Put(open, o); }
                     continue;
                 }
-                bool flagged = action == Production.MfLabourMonthAction.PostProtected; // the quarter ended: posted, but only payroll, the finance manager and the CEO read the amount
+
+                MfPoolPlan plan = MfLabourPooling.PlanSingle(month.OrderBy(o => o.Id).Select(Describe), period, center);
+                if (plan.CarriedItemIds.Count > 0)
+                {
+                    HashSet<int> carried = plan.CarriedItemIds.ToHashSet();
+                    int next = SvLabourMonth.NextOpen(period, closed);
+                    foreach (SvServiceOrder o in month.Where(x => carried.Contains(x.Id))) { o.LabourPendingPeriod = next; o.ModifyDate = now; o.ModifierUserId = _user.UserId; Put(next, o); }
+                    result.OrdersCarried += carried.Count;
+                }
+                if (plan.Pools.Count == 0) continue;
+
                 DateTime end = SvLabourMonth.End(period);
+                string number = SvLabourMonth.Number(period), text = SvLabourMonth.Text(period);
+                MfPoolResult pool = plan.Pools.Single();
+                var row = new MfLabourPool
+                {
+                    Module = MfLabourModule.Service, Period = period, PoolKey = center, People = pool.People, Hours = pool.Hours, Cost = pool.Cost, Absorbed = pool.Absorbed, Variance = pool.Variance,
+                    Rate = pool.Rate, Protected = pool.Protected, Items = pool.ItemIds.Count, PostedAt = now, PostedByUserId = _user.UserId,
+                };
+                _uow.Set<MfLabourPool>().Add(row);
 
-                // the one accounting event of the month: no order number, no per-order line
+                // the one company-level line of the month: no order number, no contract
                 AccountingEvent ev = null;
-                var lines = SvLabourMonth.EventLines(pending, period)
-                    .Select(l => new AccountingEventLine { AccountRole = l.Role, Debit = l.Debit, Credit = l.Credit, CostCenter = center, Description = l.Description, LabourProtected = flagged }).ToList();
-                if (lines.Count > 0)
-                    ev = _costing.AddEvent(AccountingEventType.WarrantyCost, end, SvLabourMonth.SourceType, period, SvLabourMonth.Number(period), "دستمزد جذب‌شده در خدمات پس از فروش - ماه " + SvLabourMonth.Text(period), lines);
-
-                // the labour cost entries of the month: one per contract (small shares without a contract), the hours stay on the orders
-                var groups = SvLabourMonth.CostGroups(pending);
-                foreach (var g in groups)
+                if (pool.Variance != 0)
+                {
                     _uow.Set<CostEntry>().Add(new CostEntry
                     {
-                        EntryDate = end, Kind = CostKind.Labour, ContractId = g.ContractId, CostCenter = g.CostCenter, Quantity = 0, Amount = g.Amount,
-                        SourceType = SvLabourMonth.SourceType, SourceId = period, SourceNumber = SvLabourMonth.Number(period), LabourProtected = flagged,
-                        Description = "دستمزد ماهانه خدمات پس از فروش - ماه " + SvLabourMonth.Text(period), CreatedAt = now, CreatedByUserId = _user.UserId,
+                        EntryDate = end, Kind = CostKind.Labour, CostCenter = center, Quantity = 0, Amount = pool.Variance, SourceType = SvLabourMonth.SourceType, SourceId = period, SourceNumber = number,
+                        LabourProtected = pool.Protected, Description = "تفاوت نرخ دستمزد خدمات پس از فروش (هزینه‌ی واقعی استخر منهای جذب‌شده) - ماه " + text, CreatedAt = now, CreatedByUserId = _user.UserId,
                     });
+                    string description = "تفاوت نرخ دستمزد جذب‌شده در خدمات پس از فروش - ماه " + text;
+                    List<AccountingEventLine> lines = MfLabourVariance.Lines(pool.Variance, AccountRoles.ServiceLabourAbsorbed, center, pool.Protected, description);
+                    ev = _costing.AddEvent(AccountingEventType.LabourAbsorbed, end, SvLabourMonth.SourceType, period, number, "تفاوت نرخ دستمزد جذب‌شده خدمات پس از فروش (بستن ماه) - ماه " + text, lines);
+                    row.AccountingEvent = ev;
+                }
 
-                // the orders of the pool take the month they are posted in (a carried order was pending in an earlier month)
-                foreach (SvServiceOrder o in month) { o.LabourPendingPeriod = period; o.LabourAggregatedAt = now; o.ModifyDate = now; o.ModifierUserId = _user.UserId; }
-                postedPeriods.Add(period);
+                // the orders of the pool take the month they are closed in (a carried order was pending in an earlier month)
+                HashSet<int> done = pool.ItemIds.ToHashSet();
+                foreach (SvServiceOrder o in month.Where(x => done.Contains(x.Id))) { o.LabourPendingPeriod = period; o.LabourAggregatedAt = now; o.ModifyDate = now; o.ModifierUserId = _user.UserId; }
+                closed.Add(period);
                 posted.Add((new SvLabourPeriodDto
                 {
-                    Period = period, PeriodText = SvLabourMonth.Text(period), Orders = month.Count, PostedAt = now, CostAmount = groups.Sum(g => g.Amount), Protected = flagged,
-                    EventAmount = pending.Where(p => p.Decision == SvWarrantyDecision.Warranty || p.Decision == SvWarrantyDecision.Goodwill).Sum(p => p.Labour),
+                    Period = period, PeriodText = text, Orders = done.Count, People = pool.People, Hours = pool.Hours, Rate = pool.Rate, Protected = pool.Protected, PostedAt = now,
+                    Absorbed = pool.Protected && !seesPayroll ? (decimal?)null : pool.Absorbed, Variance = pool.Protected && !seesPayroll ? (decimal?)null : pool.Variance,
                 }, ev));
             }
             await _uow.SaveChangesAsync(ct);

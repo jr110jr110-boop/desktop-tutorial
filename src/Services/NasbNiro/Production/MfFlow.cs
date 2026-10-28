@@ -100,7 +100,11 @@ namespace Services.NasbNiro.Production
                         op.ModifyDate = now;
                         op.ModifierUserId = _user.UserId;
                     }
-                    if (ok && op.IsOutside && !op.OutsideDrafted) await DraftOutsideAsync(order, op, chain, ct);
+                    if (ok && op.IsOutside && !op.OutsideDrafted)
+                    {
+                        string problem = await DraftOutsideAsync(order, op, chain, ct);
+                        if (problem != null) notes.Add(problem);
+                    }
                 }
                 previous = op;
             }
@@ -159,14 +163,17 @@ namespace Services.NasbNiro.Production
 
         // ================================================================================== outside work
 
-        private async Task DraftOutsideAsync(MfProductionOrder order, MfOperation op, List<MfOperation> chain, CancellationToken ct)
+        /// <summary>Drafts the purchase request of an outside operation that became ready; returns the persian reason when nothing is drafted (the step before handed over no good piece).</summary>
+        private async Task<string> DraftOutsideAsync(MfProductionOrder order, MfOperation op, List<MfOperation> chain, CancellationToken ct)
         {
             DateTimeOffset now = DateTimeOffset.Now;
             string job = MfNames.Operation(order.Number, op.Sequence);
 
-            // R1p D7: what goes to the contractor is what the operation before it finished (good pieces), not the whole order quantity again after earlier scrap or a write-off
+            // R1p D7: what goes to the contractor is what the operation before it finished (good pieces), not the whole order quantity again after earlier scrap or a write-off;
+            // when the step before produced nothing there is nothing to send, and no request is drafted for pieces that do not exist
             decimal quantity = MfQuantityRules.Expected(chain, op, order.Quantity);
-            if (quantity <= 0) quantity = order.Quantity;
+            if (quantity <= 0)
+                return $"کار بیرونی عملیات {job} آماده شد ولی مرحله‌ی قبل هیچ قطعه‌ی سالمی تحویل نداده است؛ درخواست خرید و حواله ارسال به پیمانکار ساخته نشد.";
 
             // purchase request: a subcontract line, drafted for procurement (existing approvals apply). It is only added to the context here; the caller's save stores it with the operation.
             Provider supplier = op.OutsideSupplierId.HasValue ? await _uow.Set<Provider>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == op.OutsideSupplierId.Value, ct) : null;
@@ -190,6 +197,7 @@ namespace Services.NasbNiro.Production
             op.PurchaseRequestLine = request.Lines.First();
             _pendingIssues.Add((order, op, request, quantity));
             op.OutsideDrafted = true;
+            return null;
         }
 
         /// <summary>
@@ -294,8 +302,9 @@ namespace Services.NasbNiro.Production
             if (item.TrackingMode == ItemTrackingMode.Lot) line.LotNumber = order.Number;
             else if (item.TrackingMode == ItemTrackingMode.Serial)
             {
-                List<string> serials = (order.SerialsPlanned ?? string.Empty).Split(new[] { '\n', '\r', ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToList();
-                if (serials.Count != (int)quantity) { notes.Add("رسید ساخت ساخته نشد: تعداد سریال‌های برنامه‌ریزی‌شده با تعداد سالم برابر نیست."); return false; }
+                // R1p D6/D33: scrapped pieces left the planned serials when they were written off, so the planned serials are the serials of the good pieces
+                List<string> serials = MfSerialRules.Planned(order.SerialsPlanned);
+                if (serials.Count != (int)quantity) { notes.Add($"رسید ساخت ساخته نشد: تعداد سریال‌های برنامه‌ریزی‌شده ({serials.Count}) با تعداد سالم ({Num(quantity)}) برابر نیست؛ سریال‌های دستور را اصلاح کنید."); return false; }
                 line.SerialNumbers = serials;
             }
             ResponseDto<DocumentDto> saved = await _documents.SaveDraftAsync(new SaveDocumentDto

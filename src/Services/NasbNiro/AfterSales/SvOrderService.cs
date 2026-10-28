@@ -82,16 +82,13 @@ namespace Services.NasbNiro.AfterSales
                 .Where(d => d.ServiceOrderId != null && ids.Contains(d.ServiceOrderId.Value) && !d.Deleted && d.Status != InventoryDocumentStatus.Cancelled).OrderBy(d => d.Id).ToListAsync(ct);
             List<int> itemIds = docs.SelectMany(d => d.Lines.Select(l => l.ItemId)).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
-            bool seesPayroll = SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
-            // R1p D2: hours per person next to the visible amounts of several orders can be solved for each person's hourly pay, and the month an order waits in tells how small its pool was.
-            // Whoever is not payroll, the finance manager or the CEO sees the hours of an entry without the person (an employee still sees his own entries) and no aggregate month.
-            int? ownEmployeeId = seesPayroll ? null : (await MfText.EmployeeOfUserAsync(_uow, Me, ct))?.Id;
+            // R1p D2: the engineers behind an order are named only for SERVICE, the payroll readers and the engineer himself; everybody else sees the hours without the person.
+            bool seesNames = SvRoles.SeesNames(_user.IsInRole(SvRoles.NameSeers));
+            int? ownEmployeeId = seesNames ? null : (await MfText.EmployeeOfUserAsync(_uow, Me, ct))?.Id;
 
             return rows.Select(r =>
             {
-                bool prot = SvPrivacy.LabourProtected(r.LabourEmployeeCount, r.LabourPayrollEmployeeCount);
-                decimal? labour = r.CostPostedAt.HasValue ? MfCostMask.Labour(r.LabourAmount, prot, seesPayroll) : (decimal?)0m;
-                bool hidden = r.CostPostedAt.HasValue && prot && !seesPayroll;
+                decimal labour = r.CostPostedAt.HasValue ? r.LabourAmount : 0m;
                 decimal travel = r.TimeEntries.Where(t => t.Kind == SvTimeKind.Travel).Sum(t => t.Hours);
                 decimal work = r.TimeEntries.Where(t => t.Kind == SvTimeKind.Work).Sum(t => t.Hours);
                 decimal waiting = r.TimeEntries.Where(t => t.Kind == SvTimeKind.Waiting).Sum(t => t.Hours);
@@ -106,11 +103,15 @@ namespace Services.NasbNiro.AfterSales
                     Decision = r.Decision, DecisionText = SvText.Decision(r.Decision), CauseIsMisuse = r.CauseIsMisuse, DecisionNote = r.DecisionNote, DecidedAtText = SlText.Stamp(r.DecidedAt), DecidedByUserId = r.DecidedByUserId,
                     GoodwillRequested = r.GoodwillRequestedAt.HasValue, GoodwillReason = r.GoodwillReason, WarrantyTestedOn = r.WarrantyTestedOn, WarrantyTestedOnText = SlText.Date(r.WarrantyTestedOn),
                     ReportDocumentId = r.ReportDocumentId, Findings = r.Findings, Recommendations = r.Recommendations, RunningHoursReading = r.RunningHoursReading, ClosedAtText = SlText.Stamp(r.ClosedAt),
-                    Engineers = r.Engineers.OrderBy(e => e.Id).Select(e => new SvEngineerDto { EmployeeId = e.EmployeeId, Name = employeeNames.GetValueOrDefault(e.EmployeeId) }).ToList(),
+                    Engineers = r.Engineers.OrderBy(e => e.Id).Select(e =>
+                    {
+                        bool named = seesNames || (ownEmployeeId.HasValue && ownEmployeeId.Value == e.EmployeeId);
+                        return new SvEngineerDto { EmployeeId = named ? e.EmployeeId : 0, Name = named ? employeeNames.GetValueOrDefault(e.EmployeeId) : null, EmployeeHidden = !named };
+                    }).ToList(),
                     Tasks = r.Tasks.OrderBy(t => t.RowNumber).Select(t => new SvTaskDto { Id = t.Id, RowNumber = t.RowNumber, Description = t.Description, IsDone = t.IsDone }).ToList(),
                     TimeEntries = r.TimeEntries.OrderBy(t => t.WorkDate).ThenBy(t => t.Id).Select(t =>
                     {
-                        bool named = seesPayroll || (ownEmployeeId.HasValue && ownEmployeeId.Value == t.EmployeeId);
+                        bool named = seesNames || (ownEmployeeId.HasValue && ownEmployeeId.Value == t.EmployeeId);
                         return new SvTimeEntryDto
                         {
                             Id = t.Id, EmployeeId = named ? t.EmployeeId : 0, EmployeeName = named ? employeeNames.GetValueOrDefault(t.EmployeeId) : null, EmployeeHidden = !named, WorkDate = t.WorkDate, WorkDateText = SlText.Date(t.WorkDate), Hours = t.Hours, Kind = t.Kind, KindText = SvText.TimeKind(t.Kind), Note = t.Note,
@@ -123,8 +124,8 @@ namespace Services.NasbNiro.AfterSales
                         Lines = d.Lines.OrderBy(l => l.RowNumber).Select(l => new SvPartLineDto { ItemId = l.ItemId, ItemCode = items.GetValueOrDefault(l.ItemId)?.Code, ItemName = items.GetValueOrDefault(l.ItemId)?.Title, Quantity = l.Quantity }).ToList(),
                     }).ToList(),
                     TravelHours = travel, WorkHours = work, WaitingHours = waiting, TotalHours = travel + work + waiting,
-                    LabourHours = r.CostPostedAt.HasValue ? r.LabourHours : travel + work + waiting, LabourAmount = labour, LabourHidden = hidden, LabourAggregatePending = r.LabourPendingPeriod.HasValue && !r.LabourAggregatedAt.HasValue, LabourAggregatePeriod = seesPayroll ? r.LabourPendingPeriod : null, PartsAmount = r.PartsAmount,
-                    TotalCost = labour.HasValue ? labour.Value + r.PartsAmount : (decimal?)null, CostPosted = r.CostPostedAt.HasValue,
+                    LabourHours = r.CostPostedAt.HasValue ? r.LabourHours : travel + work + waiting, LabourAmount = labour, PartsAmount = r.PartsAmount,
+                    TotalCost = labour + r.PartsAmount, CostPosted = r.CostPostedAt.HasValue,
                     BillableLabourRateRial = r.BillableLabourRateRial, InvoiceId = r.InvoiceId, InvoiceNumber = r.InvoiceId.HasValue ? invoices.GetValueOrDefault(r.InvoiceId.Value) : null, DraftNote = r.DraftNote,
                     RowVersion = SlConcurrency.Text(r.RowVersion),
                 };
@@ -448,12 +449,16 @@ namespace Services.NasbNiro.AfterSales
             DateTime today = DateTime.Today;
             DateTimeOffset now = DateTimeOffset.Now;
 
-            // labour: hours x the hourly cost (payroll when an approved payslip exists, else the standard rate of the work centre of the settings)
+            // labour (R1p D2, pooled average rate; the rule is at the top of SvLabourService): the hours of an engineer with an approved payslip are absorbed at the pooled average rate of the last closed service
+            // month (before any month is closed: at the standard rate of the work centre of the settings), never at the engineer's own rate; an engineer without a payslip is costed at the standard rate of that work centre.
             string wcCode = await SvSettings.TextAsync(_uow, SvSettingKeys.LabourWorkCenterCode, ct);
             MfWorkCenter wc = wcCode != null ? await _uow.Set<MfWorkCenter>().AsNoTracking().FirstOrDefaultAsync(w => w.Code == wcCode && !w.Deleted, ct) : null;
-            var engine = new MfCostEngine(_uow, _costing, Me, false);
+            var engine = new MfCostEngine(_uow, _costing, Me);
             var cache = new Dictionary<int, MfCostEngine.Rate>();
-            decimal labour = 0, hours = 0;
+            string poolKey = await SvSettings.CostCenterAsync(_uow, ct);
+            MfPoolRate pooled = MfLabourRates.Pooled(await MfLabourPoolStore.RatesAsync(_uow, MfLabourModule.Service, ct), poolKey);
+            decimal? standardRate = MfLabourRates.Standard(null, wc?.LabourRateRial);
+            decimal pooledRaw = 0, standardRaw = 0, payrollCost = 0, hours = 0;
             var employees = new HashSet<int>();
             var payroll = new HashSet<int>();
             foreach (var g in row.TimeEntries.Where(t => t.Hours > 0).GroupBy(t => t.EmployeeId))
@@ -461,13 +466,23 @@ namespace Services.NasbNiro.AfterSales
                 MfCostEngine.Rate rate = await engine.LabourRateAsync(g.Key, wc, "دستور خدمات " + row.Number, cache, ct);
                 if (rate.Error != null) return Bad<SvOrderDto>(rate.Error);
                 decimal h = g.Sum(t => t.Hours);
-                labour += h * rate.PerHour;
                 hours += h;
                 employees.Add(g.Key);
-                if (rate.FromPayroll) payroll.Add(g.Key);
+                if (rate.FromPayroll)
+                {
+                    if (pooled == null && !standardRate.HasValue)
+                        return Bad<SvOrderDto>(wc == null
+                            ? "برای جذب دستمزد مهندس دارای فیش حقوقی، تا بسته‌شدن نخستین ماه، نرخ دستمزد استاندارد لازم است و مرکز کار نرخ دستمزد در تنظیمات خدمات انتخاب نشده است؛ امور مالی مرکز کار و نرخ ساعتی آن را وارد کند."
+                            : $"نرخ ساعتی دستمزد استاندارد مرکز کار {wc.Code} ثبت نشده است و تا بسته‌شدن نخستین ماه برای جذب دستمزد مهندس دارای فیش حقوقی لازم است؛ امور مالی نرخ را وارد کند.");
+                    payroll.Add(g.Key);
+                    pooledRaw += h * (pooled != null ? pooled.Rate : standardRate.Value);
+                    payrollCost += h * rate.PerHour;
+                }
+                else standardRaw += h * rate.PerHour;
                 foreach (SvTimeEntry t in g) t.RateFromPayroll = rate.FromPayroll;
             }
-            labour = SlText.R0(labour);
+            decimal labourPooled = SlText.R0(pooledRaw);
+            decimal labour = labourPooled + SlText.R0(standardRaw);
 
             // parts: the cost entries of the warehouse documents of this order (issue and customer delivery, reversals included), split by the kind of document:
             // the parts consumed (issue) and the parts left on site (customer delivery, whose own posting went to cost of sales)
@@ -491,18 +506,16 @@ namespace Services.NasbNiro.AfterSales
             string center = row.CostCenterCode ?? await SvSettings.EnsureCostCenterAsync(_uow, ct);
             row.CostCenterCode = center;
 
-            // Protected labour (one or two payroll-rated people behind it) is posted neither as a cost entry nor in the event of the order: the amount next to the visible hours of the order would show one person's hourly pay.
-            // It is marked pending for a Persian month and the monthly aggregate posting (SvLabourService) carries it: one event and one cost entry per contract and month. The labour hours stay on the order.
-            bool protectedLabour = SvPrivacy.LabourProtected(employees.Count, payroll.Count);
-            bool deferred = SvLabourMonth.Deferred(labour, protectedLabour);
-            if (deferred)
+            // what the month-end true-up needs: the payroll cost of the payroll-rated hours and what was absorbed for them, and the month whose pool takes the order (a closed month is never reopened)
+            if (payroll.Count > 0)
             {
-                var posted = await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => o.LabourPendingPeriod != null && o.LabourAggregatedAt != null).Select(o => o.LabourPendingPeriod.Value).Distinct().ToListAsync(ct);
-                row.LabourPendingPeriod = SvLabourMonth.Assign(today, posted); // a month already posted is never reopened: a later close goes to the next month's run
+                row.LabourPayrollCost = payrollCost;
+                row.LabourPooledAmount = labourPooled;
+                row.LabourPendingPeriod = SvLabourMonth.Assign(today, await SvLabourService.ClosedMonthsAsync(_uow, ct));
             }
 
-            // otherwise the labour is one aggregated cost entry of the order (never one per person), without the hours (as the production cost run does): the hours stay on the order
-            if (labour != 0 && !deferred)
+            // the labour is one aggregated cost entry of the order (never one per person), without the hours (as the production cost run does): the hours stay on the order
+            if (labour != 0)
                 _uow.Set<CostEntry>().Add(new CostEntry
                 {
                     EntryDate = today, Kind = CostKind.Labour, ContractId = row.ContractId, CostCenter = center, Quantity = 0, Amount = labour, SourceType = SvCostSource.Order, SourceId = row.Id, SourceNumber = row.Number,
@@ -511,12 +524,10 @@ namespace Services.NasbNiro.AfterSales
 
             // Only warranty and goodwill orders post an accounting event: the brief asks for the event on the warranty provision (warranty) and for a draft invoice (billable work). A billable order earns its revenue
             // through the invoice, and the visit of a service agreement (LTSA) is paid by the agreement, so neither takes a cost out of the provision or the goodwill expense; their labour stays a cost entry of the cost centre and the contract.
-            // A protected order posts its parts part now and no labour (no event at all when it has no parts).
             AccountingEvent ev = null;
-            decimal eventLabour = deferred ? 0m : labour;
-            if ((row.Decision == SvWarrantyDecision.Warranty || row.Decision == SvWarrantyDecision.Goodwill) && eventLabour + parts != 0)
+            if ((row.Decision == SvWarrantyDecision.Warranty || row.Decision == SvWarrantyDecision.Goodwill) && labour + parts != 0)
             {
-                var lines = SvPosting.WarrantyLines(row.Decision == SvWarrantyDecision.Warranty, eventLabour, partsConsumed, partsLeftOnSite, row.Number)
+                var lines = SvPosting.WarrantyLines(row.Decision == SvWarrantyDecision.Warranty, labour, partsConsumed, partsLeftOnSite, row.Number)
                     .Select(l => new AccountingEventLine { AccountRole = l.Role, Debit = l.Debit, Credit = l.Credit, ContractId = row.ContractId, CostCenter = center, Description = l.Description }).ToList();
                 ev = _costing.AddEvent(AccountingEventType.WarrantyCost, today, SvCostSource.Order, row.Id, row.Number, "هزینه خدمات پس از فروش " + row.Number, lines);
                 row.WarrantyEvent = ev;

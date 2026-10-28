@@ -125,119 +125,262 @@ namespace Services.NasbNiro.Production
         }
     }
 
-    /// <summary>
-    /// D1 and D2: the privacy of a month of labour. A pool of labour (a work order, a cost centre) that fewer than three payroll-rated employees worked on would show one person's hourly pay
-    /// when it is posted as an amount. Such a pool is not posted: it is carried to the next month and joins that month's pool; at a quarter end it is posted anyway (flagged as protected,
-    /// so every reader but payroll, the finance manager and the CEO sees no amount). ★ provisional decision: the cap is the end of the Persian quarter.
-    /// </summary>
-    internal enum MfLabourMonthAction
+    /// <summary>R1p D29: time intervals of one machine, joined (two people working the same machine at the same time use the machine once).</summary>
+    internal static class MfIntervals
     {
-        /// <summary>Enough people behind the pool: post it as it is.</summary>
-        Post = 0,
+        public static List<(DateTime Start, DateTime End)> Union(IEnumerable<(DateTime Start, DateTime End)> items)
+        {
+            var sorted = items.Where(i => i.End > i.Start).OrderBy(i => i.Start).ThenBy(i => i.End).ToList();
+            var result = new List<(DateTime Start, DateTime End)>();
+            foreach (var item in sorted)
+            {
+                if (result.Count > 0 && item.Start <= result[result.Count - 1].End)
+                {
+                    var last = result[result.Count - 1];
+                    if (item.End > last.End) result[result.Count - 1] = (last.Start, item.End);
+                }
+                else result.Add(item);
+            }
+            return result;
+        }
 
-        /// <summary>Too few people: wait for the next month.</summary>
-        Carry = 1,
+        /// <summary>What is left of <paramref name="from"/> when <paramref name="taken"/> (both joined already) is cut out.</summary>
+        public static List<(DateTime Start, DateTime End)> Subtract(List<(DateTime Start, DateTime End)> from, List<(DateTime Start, DateTime End)> taken)
+        {
+            var result = new List<(DateTime Start, DateTime End)>();
+            foreach (var interval in from)
+            {
+                DateTime cursor = interval.Start;
+                foreach (var cut in taken.Where(t => t.End > interval.Start && t.Start < interval.End).OrderBy(t => t.Start))
+                {
+                    if (cut.Start > cursor) result.Add((cursor, cut.Start));
+                    if (cut.End > cursor) cursor = cut.End;
+                }
+                if (cursor < interval.End) result.Add((cursor, interval.End));
+            }
+            return result;
+        }
 
-        /// <summary>Too few people but the quarter ends: post it flagged as protected.</summary>
-        PostProtected = 2,
+        public static decimal Hours(IEnumerable<(DateTime Start, DateTime End)> items) => (decimal)items.Sum(i => (i.End - i.Start).TotalHours);
     }
 
-    internal static class MfLabourCarry
+    /// <summary>
+    /// R1p D29: the time a work centre spent running, setting up, waiting or on other booked work, counted as MACHINE time. The bookings of one machine are joined per kind, and a moment of the machine counts for
+    /// one kind only (run before setup before other work before waiting), so two welders on one machine do not book it twice and the loss categories add up to the machine's busy time.
+    /// Bookings without a machine (a manual work centre) count their own hours: every person is a resource of his own.
+    /// </summary>
+    internal static class MfMachineTime
     {
+        public sealed class Row
+        {
+            public int? MachineId;
+            public MfBookingKind Kind;
+            public DateTime Start;
+            public DateTime End;
+            public decimal Hours;
+        }
+
+        public sealed class Result
+        {
+            public decimal Run;
+            public decimal Setup;
+            public decimal Waiting;
+            public decimal Other;
+        }
+
+        public static Result Of(IEnumerable<Row> rows)
+        {
+            var result = new Result();
+            List<Row> list = rows.ToList();
+            foreach (var machine in list.Where(r => r.MachineId.HasValue).GroupBy(r => r.MachineId.Value))
+            {
+                List<(DateTime Start, DateTime End)> Kind(Func<MfBookingKind, bool> pick) => MfIntervals.Union(machine.Where(r => pick(r.Kind)).Select(r => (r.Start, r.End)));
+                var run = Kind(k => k == MfBookingKind.Run);
+                var setup = MfIntervals.Subtract(Kind(k => k == MfBookingKind.Setup), run);
+                var other = MfIntervals.Subtract(Kind(k => k != MfBookingKind.Run && k != MfBookingKind.Setup && k != MfBookingKind.Waiting), MfIntervals.Union(run.Concat(setup)));
+                var waiting = MfIntervals.Subtract(Kind(k => k == MfBookingKind.Waiting), MfIntervals.Union(run.Concat(setup).Concat(other)));
+                result.Run += MfIntervals.Hours(run);
+                result.Setup += MfIntervals.Hours(setup);
+                result.Other += MfIntervals.Hours(other);
+                result.Waiting += MfIntervals.Hours(waiting);
+            }
+            foreach (Row r in list.Where(r => !r.MachineId.HasValue))
+            {
+                if (r.Kind == MfBookingKind.Run) result.Run += r.Hours;
+                else if (r.Kind == MfBookingKind.Setup) result.Setup += r.Hours;
+                else if (r.Kind == MfBookingKind.Waiting) result.Waiting += r.Hours;
+                else result.Other += r.Hours;
+            }
+            return result;
+        }
+    }
+
+    /// <summary>One booking (production) or one closed order (service) in the labour pool of a month: the plain values the pooling rule needs.</summary>
+    internal sealed class MfPoolItem
+    {
+        public int Id;
+
+        /// <summary>The cost centre of the work centre of the booking; null = the default production cost centre. Not used by the service pool.</summary>
+        public string CostCenter;
+
+        /// <summary>The distinct payroll-rated employees with hours behind the item (one for a booking, the engineers for an order).</summary>
+        public ISet<int> Employees = new HashSet<int>();
+
+        public decimal Hours;
+
+        /// <summary>Hours x the own hourly payroll cost of the people, unrounded.</summary>
+        public decimal Cost;
+
+        /// <summary>What the days or the close of the order absorbed for the item at the rate in force, whole rial.</summary>
+        public decimal Absorbed;
+    }
+
+    /// <summary>One pool of a month and its true-up.</summary>
+    internal sealed class MfPoolResult
+    {
+        /// <summary>The cost centre code, or <see cref="MfLabourPooling.CompanyKey"/>.</summary>
+        public string Key;
+
+        public int People;
+        public decimal Hours;
+        public decimal Cost;
+        public decimal Absorbed;
+
+        /// <summary>Cost less absorbed (whole rial): the one company-level line.</summary>
+        public decimal Variance;
+
+        /// <summary>Cost / hours, four decimals; null for a protected pool.</summary>
+        public decimal? Rate;
+
+        /// <summary>Posted only because the quarter ended: fewer than three payroll-rated people are behind it.</summary>
+        public bool Protected;
+
+        public List<int> ItemIds = new List<int>();
+    }
+
+    internal sealed class MfPoolPlan
+    {
+        public List<MfPoolResult> Pools = new List<MfPoolResult>();
+
+        /// <summary>The items that wait for the next month (the whole month is too small and the quarter does not end).</summary>
+        public List<int> CarriedItemIds = new List<int>();
+    }
+
+    /// <summary>
+    /// R1p D1 and D2: the labour pool of a month. Labour is absorbed at a pooled average rate (pool cost / pool hours), so no amount that is published is one person's pay.
+    /// The pool is made of the payroll-rated employees with hours in the month: per cost centre when that cost centre has at least <see cref="MinPeople"/> of them; the people of the cost centres that have fewer
+    /// form the company pool when they are at least three themselves; when they are one or two, the pools of that month all dissolve into one company pool (two rates published side by side would let anybody subtract
+    /// the one from the other and isolate the one or two people left over); a company with fewer than three payroll-rated people in the month publishes nothing: the month is carried and joins the next one, and at the
+    /// end of a Persian quarter the carry is posted company-wide as one true-up line flagged as protected (★ provisional cap).
+    /// </summary>
+    internal static class MfLabourPooling
+    {
+        public const int MinPeople = 3;
+
+        /// <summary>The key of the company pool (a cost centre code never is this).</summary>
+        public const string CompanyKey = "*";
+
         /// <summary>Khordad, Shahrivar, Azar and Esfand end the Persian quarters.</summary>
         public static bool IsQuarterEnd(int period) => period % 100 == 3 || period % 100 == 6 || period % 100 == 9 || period % 100 == 12;
 
-        public static MfLabourMonthAction Decide(int employees, int payrollEmployees, int period) =>
-            !MfCostMask.IsProtected(employees, payrollEmployees) ? MfLabourMonthAction.Post
-            : IsQuarterEnd(period) ? MfLabourMonthAction.PostProtected
-            : MfLabourMonthAction.Carry;
-    }
+        public static int People(IEnumerable<MfPoolItem> items) => items.SelectMany(i => i.Employees).Distinct().Count();
 
-    /// <summary>One booking whose labour waits for the monthly aggregate posting (the plain values the planner needs).</summary>
-    internal sealed class MfPendingBooking
-    {
-        public int BookingId;
-        public int WorkOrderId;
-        public int? ContractId;
-        public int? WbsNodeId;
-        public string CostCenter;
-        public int EmployeeId;
+        /// <summary>The pooled average rate: pool cost / pool hours, four decimals (null without hours).</summary>
+        public static decimal? Rate(decimal cost, decimal hours) => hours <= 0 ? (decimal?)null : Math.Round(cost / hours, 4, MidpointRounding.AwayFromZero);
 
-        /// <summary>The hourly rate of the employee came from an approved payslip.</summary>
-        public bool FromPayroll;
+        private static MfPoolResult Build(string key, List<MfPoolItem> list, bool isProtected)
+        {
+            decimal hours = list.Sum(i => i.Hours), cost = list.Sum(i => i.Cost), absorbed = list.Sum(i => i.Absorbed);
+            decimal rounded = Math.Round(cost, 0, MidpointRounding.AwayFromZero);
+            return new MfPoolResult
+            {
+                Key = key, People = People(list), Hours = hours, Cost = rounded, Absorbed = absorbed, Variance = rounded - absorbed, Rate = isProtected ? (decimal?)null : Rate(cost, hours),
+                Protected = isProtected, ItemIds = list.Select(i => i.Id).OrderBy(i => i).ToList(),
+            };
+        }
 
-        public decimal Labour;
-    }
+        /// <summary>The production pools of a month (cost centres, then the company pool).</summary>
+        public static MfPoolPlan Plan(IEnumerable<MfPoolItem> items, int period, string defaultCostCenter)
+        {
+            var plan = new MfPoolPlan();
+            List<MfPoolItem> all = items.ToList();
+            if (all.Count == 0) return plan;
+            var centres = all.GroupBy(i => i.CostCenter ?? defaultCostCenter).OrderBy(g => g.Key, StringComparer.Ordinal).ToList();
+            List<IGrouping<string, MfPoolItem>> own = centres.Where(g => People(g) >= MinPeople).ToList();
+            List<MfPoolItem> rest = centres.Where(g => People(g) < MinPeople).SelectMany(g => g).ToList();
+            if (rest.Count == 0 || People(rest) >= MinPeople)
+            {
+                foreach (var g in own) plan.Pools.Add(Build(g.Key, g.ToList(), false));
+                if (rest.Count > 0) plan.Pools.Add(Build(CompanyKey, rest, false));
+                return plan;
+            }
+            if (People(all) >= MinPeople) { plan.Pools.Add(Build(CompanyKey, all, false)); return plan; }
+            if (IsQuarterEnd(period)) plan.Pools.Add(Build(CompanyKey, all, true));
+            else plan.CarriedItemIds.AddRange(all.Select(i => i.Id));
+            return plan;
+        }
 
-    /// <summary>A labour amount of the monthly aggregate posting: per work order (and WBS node), or per cost centre when the work order alone was too small.</summary>
-    internal sealed class MfLabourPlanGroup
-    {
-        public int? WorkOrderId;
-        public int? ContractId;
-        public int? WbsNodeId;
-
-        /// <summary>The cost centre of a cost-centre group (no work order); null for a work-order group.</summary>
-        public string CostCenter;
-
-        public decimal Amount;
-
-        /// <summary>Posted only because the quarter ended: fewer than three payroll-rated employees are behind it, so only PAYROLL, FINANCEMANAGER and CEO read the amount.</summary>
-        public bool Protected;
-
-        public List<int> BookingIds = new List<int>();
-    }
-
-    internal sealed class MfLabourPlan
-    {
-        public List<MfLabourPlanGroup> Groups = new List<MfLabourPlanGroup>();
-
-        /// <summary>The bookings that wait for the next month.</summary>
-        public List<int> CarriedBookingIds = new List<int>();
+        /// <summary>The single pool of a module that has no cost-centre split (the service department): the pool, or the carry, or the protected quarter-end line.</summary>
+        public static MfPoolPlan PlanSingle(IEnumerable<MfPoolItem> items, int period, string key)
+        {
+            var plan = new MfPoolPlan();
+            List<MfPoolItem> all = items.ToList();
+            if (all.Count == 0) return plan;
+            if (People(all) >= MinPeople) plan.Pools.Add(Build(key, all, false));
+            else if (IsQuarterEnd(period)) plan.Pools.Add(Build(key, all, true));
+            else plan.CarriedItemIds.AddRange(all.Select(i => i.Id));
+            return plan;
+        }
     }
 
     /// <summary>
-    /// D1: what the monthly aggregate posting does with the pool of a month. Level 1: every (work order, WBS node) with enough people behind it (three payroll-rated employees) is posted on its own.
-    /// Level 2: what is left is pooled per cost centre; a cost centre with enough people is posted as one amount without a work order. Level 3: a cost centre that is still too small is carried to the next
-    /// month (and joins that month's pool) - except at the end of a Persian quarter, when its work-order groups are posted anyway, flagged as protected (★ provisional cap).
+    /// R1p D1/D2: the two lines of the month-end true-up of a pool. Under-absorbed (variance above zero): the labour-rate-variance account is debited and the absorbed-labour account credited; over-absorbed: the other
+    /// way round. The lines carry the cost centre (none for the company pool) and the protected flag of the pool, and no work order, WBS node or day.
     /// </summary>
-    internal static class MfLabourPlanner
+    internal static class MfLabourVariance
     {
-        private static int Employees(IEnumerable<MfPendingBooking> g) => g.Select(b => b.EmployeeId).Distinct().Count();
-        private static int PayrollEmployees(IEnumerable<MfPendingBooking> g) => g.Where(b => b.FromPayroll).Select(b => b.EmployeeId).Distinct().Count();
-        private static decimal Rounded(IEnumerable<MfPendingBooking> g) => Math.Round(g.Sum(b => b.Labour), 0, MidpointRounding.AwayFromZero);
-
-        private static MfLabourPlanGroup WorkOrderGroup(IGrouping<(int WorkOrderId, int? WbsNodeId), MfPendingBooking> g, bool isProtected) => new MfLabourPlanGroup
+        public static List<Entities.Model.NasbNiro.Finance.AccountingEventLine> Lines(decimal variance, string absorbedRole, string costCenter, bool isProtected, string description)
         {
-            WorkOrderId = g.Key.WorkOrderId, ContractId = g.Select(b => b.ContractId).FirstOrDefault(c => c.HasValue), WbsNodeId = g.Key.WbsNodeId, Amount = Rounded(g), Protected = isProtected,
-            BookingIds = g.Select(b => b.BookingId).OrderBy(i => i).ToList(),
-        };
-
-        public static MfLabourPlan Plan(IEnumerable<MfPendingBooking> pool, int period)
-        {
-            var plan = new MfLabourPlan();
-            var rest = new List<MfPendingBooking>();
-            foreach (var g in pool.GroupBy(b => (b.WorkOrderId, b.WbsNodeId)).OrderBy(g => g.Key.WorkOrderId).ThenBy(g => g.Key.WbsNodeId ?? 0))
-            {
-                if (MfLabourCarry.Decide(Employees(g), PayrollEmployees(g), period) == MfLabourMonthAction.Post) plan.Groups.Add(WorkOrderGroup(g, false));
-                else rest.AddRange(g);
-            }
-            foreach (var cc in rest.GroupBy(b => b.CostCenter ?? MfLabourMonth.DefaultCostCenter).OrderBy(g => g.Key, StringComparer.Ordinal))
-            {
-                switch (MfLabourCarry.Decide(Employees(cc), PayrollEmployees(cc), period))
-                {
-                    case MfLabourMonthAction.Post:
-                        plan.Groups.Add(new MfLabourPlanGroup { CostCenter = cc.Key, Amount = Rounded(cc), BookingIds = cc.Select(b => b.BookingId).OrderBy(i => i).ToList() });
-                        break;
-                    case MfLabourMonthAction.PostProtected:
-                        foreach (var g in cc.GroupBy(b => (b.WorkOrderId, b.WbsNodeId)).OrderBy(g => g.Key.WorkOrderId).ThenBy(g => g.Key.WbsNodeId ?? 0)) plan.Groups.Add(WorkOrderGroup(g, true));
-                        break;
-                    default:
-                        plan.CarriedBookingIds.AddRange(cc.Select(b => b.BookingId));
-                        break;
-                }
-            }
-            return plan;
+            var lines = new List<Entities.Model.NasbNiro.Finance.AccountingEventLine>();
+            if (variance == 0) return lines;
+            lines.Add(new Entities.Model.NasbNiro.Finance.AccountingEventLine { AccountRole = global::Services.NasbNiro.Finance.AccountRoles.LabourRateVariance, Debit = Math.Max(variance, 0), Credit = Math.Max(-variance, 0), CostCenter = costCenter, LabourProtected = isProtected, Description = description });
+            lines.Add(new Entities.Model.NasbNiro.Finance.AccountingEventLine { AccountRole = absorbedRole, Debit = Math.Max(-variance, 0), Credit = Math.Max(variance, 0), CostCenter = costCenter, LabourProtected = isProtected, Description = description });
+            return lines;
         }
+    }
+
+    /// <summary>The newest unprotected rate of a pool (one row of <see cref="Entities.Model.NasbNiro.Production.MfLabourPool"/>).</summary>
+    internal sealed class MfPoolRate
+    {
+        public int Period;
+        public string Key;
+        public decimal Rate;
+    }
+
+    /// <summary>
+    /// R1p D1 and D2: the rate a day absorbs labour at. The pooled average rate of the last closed month of the same pool (the cost centre's own pool of that month, else the company pool of that month); until a month
+    /// is closed the standard labour rate (the setting <c>Production:StandardLabourRate</c>, else the standard rate of the work centre). Never the employee's own rate.
+    /// </summary>
+    internal static class MfLabourRates
+    {
+        /// <summary>The newest month that has a pool for the cost centre or for the company; within a month the pool of the cost centre wins.</summary>
+        public static MfPoolRate Pooled(IReadOnlyCollection<MfPoolRate> pools, string costCenter)
+        {
+            foreach (int period in pools.Select(p => p.Period).Distinct().OrderByDescending(p => p))
+            {
+                MfPoolRate own = costCenter == null ? null : pools.FirstOrDefault(p => p.Period == period && string.Equals(p.Key, costCenter, StringComparison.Ordinal));
+                if (own != null) return own;
+                MfPoolRate company = pools.FirstOrDefault(p => p.Period == period && p.Key == MfLabourPooling.CompanyKey);
+                if (company != null) return company;
+            }
+            return null;
+        }
+
+        /// <summary>What a day absorbs for a booking: hours x the pooled (or standard) rate, to the whole rial, half away from zero. The month-end true-up is the pool cost less the sum of these.</summary>
+        public static decimal Absorbed(decimal hours, decimal rate) => Math.Round(hours * rate, 0, MidpointRounding.AwayFromZero);
+
+        /// <summary>The standard labour rate: the configured one, else the work centre's; null when neither is set (positive values only).</summary>
+        public static decimal? Standard(decimal? configured, decimal? workCenter) => configured.HasValue && configured.Value > 0 ? configured : workCenter.HasValue && workCenter.Value > 0 ? workCenter : null;
     }
 
     /// <summary>
@@ -266,6 +409,58 @@ namespace Services.NasbNiro.Production
         public static List<string> Planned(string text) =>
             (text ?? string.Empty).Split(new[] { '\n', '\r', ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToList();
 
+        /// <summary>The serial numbers as the one-per-line text the non-conformance report keeps (the field of the NCR is "one serial per line").</summary>
+        public static string PerLine(IEnumerable<string> serials) => string.Join("\n", serials);
+
+        /// <summary>
+        /// R1p D6/D33: which serial numbers a write-off of <paramref name="quantity"/> pieces takes. Nothing planned: nothing to track (empty list). The scrap of every planned piece needs no names; a part of them needs exactly
+        /// that many serials, all of them among the planned ones. The persian reason comes back instead of a list when the serials cannot be told.
+        /// </summary>
+        public static (List<string> Scrapped, string Error) Scrapped(List<string> planned, string named, decimal quantity)
+        {
+            if (planned == null || planned.Count == 0) return (new List<string>(), null);
+            if (quantity <= 0 || quantity != Math.Floor(quantity)) return (null, "تعداد قطعه‌ی سریال‌دار باید عدد صحیح و بیشتر از صفر باشد.");
+            int count = (int)quantity;
+            List<string> typed = Planned(named);
+            if (typed.Count == 0)
+            {
+                if (count == planned.Count) return (planned.ToList(), null);
+                return (null, $"کالا سریال‌دار است؛ شماره سریال {count} قطعه‌ی ضایعاتی را وارد کنید (هر سریال در یک خط). سریال‌های برنامه‌ریزی‌شده‌ی دستور: {string.Join("، ", planned)}.");
+            }
+            List<string> unknown = typed.Where(t => !planned.Any(p => string.Equals(p, t, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (unknown.Count > 0) return (null, "این سریال‌ها جزو سریال‌های برنامه‌ریزی‌شده‌ی دستور نیستند یا قبلاً ضایعات شده‌اند: " + string.Join("، ", unknown) + ".");
+            if (typed.Count != count) return (null, $"تعداد سریال‌های ضایعاتی ({typed.Count}) با تعداد ضایعات ({count}) برابر نیست.");
+            return (typed.Select(t => planned.First(p => string.Equals(p, t, StringComparison.OrdinalIgnoreCase))).ToList(), null);
+        }
+
+        /// <summary>The planned serials that stay after a write-off, in the planned order.</summary>
+        public static List<string> Remaining(List<string> planned, IEnumerable<string> scrapped)
+        {
+            var gone = new HashSet<string>(scrapped ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            return planned.Where(p => !gone.Contains(p)).ToList();
+        }
+
+        /// <summary>
+        /// The planned serials of the pieces that replace the scrapped ones: the scrapped serial with "-R" (and a number when that is taken as well), so the new piece is traceable to the one it replaces.
+        /// ★ provisional naming; the planner can change them while the replacement order is a draft.
+        /// </summary>
+        public static List<string> Replacements(IEnumerable<string> scrapped, Func<string, bool> taken)
+        {
+            var result = new List<string>();
+            foreach (string serial in scrapped)
+            {
+                string candidate = serial + "-R";
+                int n = 1;
+                while (taken(candidate) || result.Any(r => string.Equals(r, candidate, StringComparison.OrdinalIgnoreCase)))
+                {
+                    n++;
+                    candidate = serial + "-R" + n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                result.Add(candidate);
+            }
+            return result;
+        }
+
         /// <summary>The serial numbers as one text that fits a column of <paramref name="max"/> characters: whole serials only, with " …" at the end when some did not fit; null when none fits.</summary>
         public static string Joined(IEnumerable<string> serials, int max)
         {
@@ -283,7 +478,7 @@ namespace Services.NasbNiro.Production
         }
     }
 
-    /// <summary>D1: names of the monthly aggregate posting of protected production labour (the Persian month arithmetic is the one of the after-sales monthly posting).</summary>
+    /// <summary>R1p D1: names of the monthly true-up of the production labour pools (the Persian month arithmetic is the one of the after-sales monthly posting).</summary>
     internal static class MfLabourMonth
     {
         public const string SourceType = "MfLabourMonth";
@@ -295,8 +490,13 @@ namespace Services.NasbNiro.Production
         public static string Text(int period) => global::Services.NasbNiro.AfterSales.SvLabourMonth.Text(period);
         public static int NextOpen(int period, IEnumerable<int> posted) => global::Services.NasbNiro.AfterSales.SvLabourMonth.NextOpen(period, posted);
 
-        /// <summary>The cost centre that takes a booking's labour when its work order alone is protected: the one of the work centre, else the production cost centre.</summary>
+        /// <summary>The month whose pool takes a booking of <paramref name="day"/>: its own month, or the first later month that is not closed yet (a closed month is never reopened).</summary>
+        public static int Assign(DateTime day, IEnumerable<int> closed) => global::Services.NasbNiro.AfterSales.SvLabourMonth.Assign(day, closed);
+
+        /// <summary>The cost centre that takes the pool of a booking: the one of the work centre, else the production cost centre.</summary>
         public const string DefaultCostCenter = "PRODUCTION";
+
+        public static string CostCenterOf(string workCenterCostCenter) => MfText.Clean(workCenterCostCenter);
     }
 
     /// <summary>D39 and D1: who may change or read time bookings.</summary>
@@ -307,6 +507,62 @@ namespace Services.NasbNiro.Production
 
         /// <summary>Whether the booking shows the person: the named roles, or the booking's own employee. Everybody else sees the hours without the name.</summary>
         public static bool SeesName(bool inNamedRole, int? readerEmployeeId, int bookingEmployeeId) => inNamedRole || (readerEmployeeId.HasValue && readerEmployeeId.Value == bookingEmployeeId);
+
+        /// <summary>R1p D39: a correction booking counts (cost run, hours, OEE, attendance check) only after a production manager other than its creator approved it.</summary>
+        public static IQueryable<MfTimeBooking> Effective(IQueryable<MfTimeBooking> bookings) => bookings.Where(b => !b.IsCorrection || b.CorrectionApprovedByUserId != null);
+
+        /// <summary>R1p D39: the days a correction may reach back (setting Production:MaxBackdateDays, ★ 7). Null when the start is inside the limit.</summary>
+        public static string BackdateRefusal(DateTime start, DateTime today, int maxDays)
+        {
+            if (maxDays < 0) maxDays = 0;
+            if (start.Date >= today.Date.AddDays(-maxDays)) return null;
+            return $"ثبت زمان اصلاحی حداکثر {maxDays} روز به عقب ممکن است؛ تاریخ شروع این ثبت زمان بیشتر از این گذشته است.";
+        }
+
+        /// <summary>
+        /// R1p review 9: a correction cannot add more hours to a person's day than the attendance records leave unbooked (the minutes he was present, less the minutes already booked that day).
+        /// Null when it fits; a day without any attendance record takes no correction.
+        /// </summary>
+        public static string AttendanceRefusal(int attendedMinutes, int bookedMinutes, int correctionMinutes)
+        {
+            if (attendedMinutes <= 0) return "برای این پرسنل در روز ثبت زمان اصلاحی تردد ثبت نشده است؛ زمان اصلاحی فقط برای روزی که حضور ثبت شده ممکن است.";
+            if (bookedMinutes + correctionMinutes <= attendedMinutes) return null;
+            return $"مجموع زمان ثبت‌شده‌ی این پرسنل در آن روز ({MfFlow.Num(MfText.HoursOf(bookedMinutes))} ساعت) با این ثبت زمان اصلاحی ({MfFlow.Num(MfText.HoursOf(correctionMinutes))} ساعت) از حضور او ({MfFlow.Num(MfText.HoursOf(attendedMinutes))} ساعت) بیشتر می‌شود.";
+        }
+
+        /// <summary>The persian reason why a correction cannot be approved by this user, or null.</summary>
+        public static string ApprovalRefusal(MfTimeBooking booking, int approverUserId)
+        {
+            if (!booking.IsCorrection) return "این ثبت زمان اصلاحی نیست.";
+            if (booking.CorrectionApprovedByUserId.HasValue) return "این ثبت زمان اصلاحی قبلاً تأیید شده است.";
+            if (booking.CreatorUserId == approverUserId) return "ثبت زمان اصلاحی را شخص دیگری غیر از ثبت‌کننده‌ی آن باید تأیید کند (تفکیک وظایف).";
+            return null;
+        }
+
+        /// <summary>
+        /// R1p D7/D38: the quantities booked on a step are final once the step is done and QC accepted them, an NCR decided about them, or they went through by a concession, and once the next step started working on them.
+        /// Returns the persian reason, or null when the quantities of the step may still change.
+        /// </summary>
+        public static string QuantityFrozen(MfOperation op, IEnumerable<MfOperation> operations)
+        {
+            bool settled = op.Status == MfOperationStatus.Done || op.Status == MfOperationStatus.Rejected;
+            if (op.QcAccepted && op.Status == MfOperationStatus.Done)
+                return "تعداد این مرحله پس از پذیرش بازرسی QC تغییر نمی‌کند؛ برای تغییر، بازرسی دوباره (گزارش عدم انطباق) لازم است.";
+            if (op.AcceptedByConcession)
+                return "این مرحله با ارفاق ادامه یافته است و تعداد آن تغییر نمی‌کند.";
+            if (op.NcrId.HasValue && settled)
+                return "برای این مرحله گزارش عدم انطباق ثبت شده و تصمیم آن اعمال شده یا در جریان است؛ تعداد آن با ثبت زمان تغییر نمی‌کند.";
+            List<MfOperation> chain = MfFlow.Chain(operations);
+            int index = chain.FindIndex(o => ReferenceEquals(o, op) || (o.Id != 0 && o.Id == op.Id));
+            if (index >= 0 && op.Status == MfOperationStatus.Done)
+            {
+                MfOperation next = chain.Skip(index + 1).FirstOrDefault(o => o.Status != MfOperationStatus.Skipped);
+                if (next != null && (next.StartedAt.HasValue || next.Status == MfOperationStatus.InProgress || next.Status == MfOperationStatus.Paused || next.Status == MfOperationStatus.QcHold
+                                     || next.Status == MfOperationStatus.Done || next.Status == MfOperationStatus.Rejected))
+                    return "مرحله بعد از این مرحله شروع شده است و با تعداد آن کار می‌کند؛ تعداد این مرحله دیگر تغییر نمی‌کند.";
+            }
+            return null;
+        }
     }
 
     /// <summary>D38 and D43: terminal rules.</summary>
@@ -335,6 +591,9 @@ namespace Services.NasbNiro.Production
             if (ncr.Disposition != wanted) return $"تصمیم این گزارش عدم انطباق «{name}» نیست.";
             if (wanted == NcrDisposition.Rework ? !(ncr.Status == NcrStatus.Approved || ncr.Status == NcrStatus.Executed) : !Decided(ncr.Status))
                 return $"تصمیم «{name}» این گزارش عدم انطباق هنوز با امضای کیفیت، مهندسی و تولید تأیید نشده است؛ دستور تولید تا آن زمان ادامه نمی‌یابد.";
+            // R1p D8: one report allows one rework operation; if that rework fails inspection too, the inspection raises a new report on it and the decision (concession or scrap) is taken on that one
+            if (wanted == NcrDisposition.Rework && ncr.ReworkOperationId.HasValue)
+                return "برای این گزارش عدم انطباق قبلاً عملیات دوباره‌کاری ساخته شده است و یک گزارش فقط یک بار دوباره‌کاری می‌دهد؛ اگر دوباره‌کاری هم در بازرسی رد شد، بازرسی برای آن گزارش عدم انطباق تازه می‌سازد و تصمیم (ارفاق یا ضایعات) روی آن گرفته می‌شود.";
             return null;
         }
     }

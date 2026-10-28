@@ -88,14 +88,14 @@ namespace DataLayer.Context
             { typeof(MfReasonCode), null },
             { typeof(MfProductionOrder), new[] { "Status", "Quantity", "RoutingRevisionId", "ReleasedByUserId", "ReleaseOverride", "ReleaseOverrideReason", "KitOverrideReason", "CancelReason" } },
             { typeof(MfOperation), new[] { "Status", "SkipReason", "WorkCenterId", "QcAccepted" } },
-            { typeof(MfTimeBooking), new[] { "OperationId", "EmployeeId", "MachineId", "Kind", "StartAt", "EndAt", "Minutes", "Hours", "GoodQty", "ScrapQty", "ReworkQty", "SupervisorReason", "EditReason", "Source" } },
+            { typeof(MfTimeBooking), new[] { "OperationId", "EmployeeId", "MachineId", "Kind", "StartAt", "EndAt", "Minutes", "Hours", "GoodQty", "ScrapQty", "ReworkQty", "SupervisorReason", "EditReason", "Source", "IsCorrection", "CorrectsBookingId", "CorrectionApprovedByUserId", "CorrectionApprovedAt" } },   // R1p review 9: the maker and the approver of a correction booking
             { typeof(MfMaintenanceRequest), new[] { "MachineId", "Status", "Description" } },
             // release P1 part B: maintenance gates and master data, and the cost runs (one row a day; the per-booking marks are not listed)
             { typeof(MfMaintenancePlan), null },
             { typeof(MfMaintenanceOrder), new[] { "MachineId", "Kind", "Status", "PlanId", "RequestId", "Task", "DueDate", "DowntimeStart", "DowntimeEnd", "Cause", "ActionTaken", "CostCenter", "MaterialRequestId", "IssueDocumentId", "StartedByUserId", "DoneByUserId", "CancelReason" } },
             { typeof(MfMaintenanceLabour), new[] { "OrderId", "EmployeeId", "WorkDate", "Hours" } },
             { typeof(MfMaintenancePart), new[] { "OrderId", "ItemId", "Quantity" } },
-            { typeof(MfCostRun), new[] { "Number", "PostingDate", "RunByUserId", "BookingCount", "MachineHours", "OverheadAmount", "AccountingEventId" } }, // not the labour amount or hours: with one employee they give his hourly payroll cost
+            { typeof(MfCostRun), new[] { "Number", "PostingDate", "RunByUserId", "BookingCount", "MachineHours", "OverheadAmount", "AccountingEventId" } }, // the labour amount is hours x the pooled average rate (R1p), no one person's pay; it stays off this list only because the accounting event of the run carries it
             // sales (release S1): the thresholds, the credit limit, the reason codes and the gates (bid decision, proposal approval, price list approval, credit approval); contacts and sites hold personal data and are not listed
             { typeof(SlSetting), null },
             { typeof(SlReasonCode), null },

@@ -36,7 +36,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.LabourRateRial).HasPrecision(18, 2);
                 b.Property(x => x.QueueDaysDefault).HasPrecision(9, 2);
                 b.Property(x => x.CostCenter).HasMaxLength(Code);
-                b.Property(x => x.RequiresMachine).HasDefaultValue(true); // R1p D43: existing work centres get true as well
+                // R1p D43: existing work centres get true as well. The sentinel is the default value itself: without it EF treats a false (the CLR default) as "not set" and the database default (true) would be stored,
+                // so a work centre could never be saved as "no machine required".
+                b.Property(x => x.RequiresMachine).HasDefaultValue(true).HasSentinel(true);
                 b.HasOne<PcCalendar>().WithMany().HasForeignKey(x => x.CalendarId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<MfMachineInfo>(b =>
@@ -180,8 +182,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.GoodQty).HasPrecision(18, 4);
                 b.Property(x => x.ScrapQty).HasPrecision(18, 4);
                 b.Property(x => x.ReworkQty).HasPrecision(18, 4);
-                // R1p D1: labour of a protected group waits for the monthly aggregate posting (fractions of a rial are kept until the month is summed)
-                b.Property(x => x.PendingLabour).HasPrecision(22, 4);
+                // R1p D1: the own payroll cost of the booking (fractions of a rial are kept until the pool of the month is summed: ten decimals, so that neither the pool cost nor its four-decimal rate depends on a storage rounding)
+                // and what the daily posting absorbed for it at the pooled rate
+                b.Property(x => x.PayrollCost).HasPrecision(28, 10);
+                b.Property(x => x.AbsorbedLabour).HasPrecision(18, 2);
                 b.HasIndex(x => x.LabourPendingPeriod).HasFilter("[LabourPendingPeriod] IS NOT NULL");
                 b.HasOne<MfTimeBooking>().WithMany().HasForeignKey(x => x.CorrectsBookingId).OnDelete(DeleteBehavior.Restrict); // R1p D39
                 b.Property(x => x.Note).HasMaxLength(Text);
@@ -234,6 +238,20 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne(x => x.Run).WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<WorkOrder>().WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfWorkCenter>().WithMany().HasForeignKey(x => x.WorkCenterId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // R1p D1/D2: the labour pools of the months (one row per module, month and pool): the pooled average rate of the next days and the month-end true-up
+            builder.Entity<MfLabourPool>(b =>
+            {
+                b.ToTable("MfLabourPools");
+                b.Property(x => x.PoolKey).HasMaxLength(Code).IsRequired();
+                b.HasIndex(x => new { x.Module, x.Period, x.PoolKey }).IsUnique();
+                b.Property(x => x.Hours).HasPrecision(14, 2);
+                b.Property(x => x.Cost).HasPrecision(18, 2);
+                b.Property(x => x.Absorbed).HasPrecision(18, 2);
+                b.Property(x => x.Variance).HasPrecision(18, 2);
+                b.Property(x => x.Rate).HasPrecision(18, 4);
+                b.HasOne(x => x.AccountingEvent).WithMany().HasForeignKey(x => x.AccountingEventId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ------------------------------------------------------------------ scheduling (part B)

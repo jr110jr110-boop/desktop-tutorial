@@ -100,6 +100,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string AccountPrefix { get; set; }
         public decimal TotalDebit { get; set; }
         public decimal TotalCredit { get; set; }
+
+        /// <summary>R1p D1/D2: true when protected labour lines of these accounts are left out for this reader (only PAYROLL, FINANCEMANAGER and CEO see them).</summary>
+        public bool LabourHidden { get; set; }
         public List<FnDrillRowDto> Rows { get; set; } = new List<FnDrillRowDto>();
     }
 

@@ -38,6 +38,18 @@ namespace Services.NasbNiro.Finance
         public const string OutboxReaders = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL,AUDITOR";
     }
 
+    /// <summary>
+    /// R1p D1/D2: the voucher lines flagged <c>LabourProtected</c> (the quarter-end true-up of a labour pool that fewer than three payroll-rated people stood behind) are read by PAYROLL, FINANCEMANAGER and CEO only.
+    /// Every other reader of voucher lines (voucher view, journal, ledger, trial balance, statements, drill-down) leaves them out. The flagged lines always come in pairs of one debit and one credit of the same amount, so the
+    /// books stay balanced for the readers who do not see them.
+    /// </summary>
+    internal static class FnLabourMask
+    {
+        public static bool Sees(Inventory.IInventoryUserContext user) => Production.MfPrivacy.SeesPayroll(user);
+
+        public static IQueryable<FnVoucherLine> Visible(IQueryable<FnVoucherLine> lines, bool sees) => sees ? lines : lines.Where(l => !l.LabourProtected);
+    }
+
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (the finance module uses 441..480).</summary>
     internal static class FinanceNumbers
     {

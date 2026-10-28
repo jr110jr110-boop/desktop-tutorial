@@ -31,13 +31,19 @@ namespace Services.NasbNiro.AfterSales
         /// <summary>R1p D25: only QA verifies a sample of the survey answers that SERVICE or SALES typed in (the people the scores are about must not confirm them themselves).</summary>
         public const string SurveyVerifiers = "QA";
 
-        /// <summary>Who sees the labour cost of an order when it could show one person's hourly pay.</summary>
+        /// <summary>The roles that read payroll-derived figures (a protected quarter-end labour amount, the names of the pool).</summary>
         public const string PayrollSeers = "PAYROLL,FINANCEMANAGER,CEO";
+
+        /// <summary>R1p D2: who sees the engineers named on an order and on its time entries: SERVICE and the payroll readers (the engineer himself sees his own entries as well). Everybody else sees hours without a name.</summary>
+        public const string NameSeers = Service + "," + PayrollSeers;
 
         /// <summary>
         /// Whether the caller sees the labour cost. A seat or the evaluation user (it acts as CEO, but its text is read by other people) never does: it gets the masked form.
         /// </summary>
         public static bool SeesPayroll(bool inRole) => inRole && !Ai.AiActing.IsActing;
+
+        /// <summary>The same rule for the names of the engineers: a seat of the AI never sees them.</summary>
+        public static bool SeesNames(bool inRole) => inRole && !Ai.AiActing.IsActing;
     }
 
     internal static class SvNumbers
@@ -382,6 +388,14 @@ namespace Services.NasbNiro.AfterSales
             return list.Count > 0 && list.All(s => s.HasValue);
         }
 
+        /// <summary>R1p D25: the surveys whose average is a figure: answered, with a score, and verified by QA with the customer. Every satisfaction average (service dashboard, CEO dashboard, audit review) reads this set.</summary>
+        public static IQueryable<SlSurvey> VerifiedAnswers(IQueryable<SlSurvey> surveys) =>
+            surveys.Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.Verified && s.AverageScore != null);
+
+        /// <summary>The answered surveys nobody has verified yet: counted next to the average, never part of it.</summary>
+        public static IQueryable<SlSurvey> UnverifiedAnswers(IQueryable<SlSurvey> surveys) =>
+            surveys.Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && !s.Verified);
+
         /// <summary>Average of the given scores, two decimals; empty without a score.</summary>
         public static decimal? Average(IEnumerable<int> scores)
         {
@@ -406,12 +420,6 @@ namespace Services.NasbNiro.AfterSales
             var calendar = new PersianCalendar();
             return calendar.ToDateTime(calendar.GetYear(day), 1, 1, 0, 0, 0, 0);
         }
-    }
-
-    /// <summary>Cost privacy: the labour of an order is one person's pay when fewer than three people are behind it.</summary>
-    internal static class SvPrivacy
-    {
-        public static bool LabourProtected(int employees, int payrollEmployees) => Production.MfCostMask.IsProtected(employees, payrollEmployees);
     }
 
     /// <summary>The lengths of the columns of the service tables (the same figures as the model configuration): a longer text is refused with a message instead of failing in the database.</summary>
@@ -472,7 +480,7 @@ namespace Services.NasbNiro.AfterSales
     }
 
     /// <summary>The accounting event of a warranty or goodwill order at its close. Labour absorbed goes to its own service account (70113, not the production labour), the parts left on site are cost of sales (as their delivery document posted) and the parts consumed are material expense.
-    /// The labour passed here is zero for an order whose labour is protected: that labour is not posted per order but in the monthly aggregate (<see cref="SvLabourMonth"/>).</summary>
+    /// The labour passed here is absorbed at the pooled average rate of the service month pool (R1p D2): the difference to the real payroll cost is trued up once a month (<see cref="SvLabourService"/>).</summary>
     internal static class SvPosting
     {
         public static List<(string Role, decimal Debit, decimal Credit, string Description)> WarrantyLines(bool warranty, decimal labour, decimal partsConsumed, decimal partsLeftOnSite, string number)
@@ -489,26 +497,9 @@ namespace Services.NasbNiro.AfterSales
         }
     }
 
-    /// <summary>One closed order whose protected labour waits for its monthly aggregate posting (the pure input of <see cref="SvLabourMonth"/>).</summary>
-    internal sealed class SvPendingLabour
-    {
-        public int OrderId { get; set; }
-        public SvWarrantyDecision Decision { get; set; }
-        public int? ContractId { get; set; }
-        public string CostCenter { get; set; }
-        public decimal Labour { get; set; }
-
-        /// <summary>The employees with hours on the order, and those among them paid through an approved payslip (their hourly pay is the personal data).</summary>
-        public HashSet<int> Employees { get; set; } = new HashSet<int>();
-        public HashSet<int> PayrollEmployees { get; set; } = new HashSet<int>();
-    }
-
     /// <summary>
-    /// Monthly aggregate posting of protected labour (the labour of an order that fewer than three payroll-rated employees worked on; binding rule: payroll personal data only PAYROLL / FINANCEMANAGER / CEO).
-    /// A per-order posting of such labour would let every reader of the accounting events (PMO, CEO, FINANCIAL, FINANCEMANAGER, PLANNING) and of the cost entries divide the amount by the visible hours of the order and get one person's hourly pay.
-    /// So at the close the labour of a protected order is only marked pending for a Persian month; the parts part (not personal) is still posted at once. The monthly run posts ONE accounting event per month with the summed labour of all the pending orders
-    /// of the month (no order number, no per-order line) and one labour cost entry per contract and month.
-    /// The month of an order is the month it closes in; when that month already has its aggregate posting (only possible with an injected future day) the order goes to the first later month that has none: a posted month is never touched again.
+    /// Month arithmetic and names of the service labour pools (R1p D2; the rule itself is described at the top of <see cref="SvLabourService"/>). Labour of a closed order is absorbed at the pooled average rate of the last
+    /// closed service month; the order is marked with the Persian month (yyyymm) whose pool trues it up: the month of the close, or the first later month that is not closed yet (a closed month is never reopened).
     /// </summary>
     internal static class SvLabourMonth
     {
@@ -521,7 +512,7 @@ namespace Services.NasbNiro.AfterSales
 
         public static int Next(int period) => period % 100 == 12 ? (period / 100 + 1) * 100 + 1 : period + 1;
 
-        /// <summary>The last day of the Persian month; the date of its aggregate posting.</summary>
+        /// <summary>The last day of the Persian month; the date of its true-up posting.</summary>
         public static DateTime End(int period)
         {
             int year = period / 100, month = period % 100;
@@ -531,87 +522,25 @@ namespace Services.NasbNiro.AfterSales
         public static string Text(int period) => $"{period / 100}/{(period % 100).ToString("00", CultureInfo.InvariantCulture)}";
         public static string Number(int period) => "SVL-" + period.ToString(CultureInfo.InvariantCulture);
 
-        /// <summary>The labour of the order is not posted at its close: it is protected and not zero.</summary>
-        public static bool Deferred(decimal labour, bool labourProtected) => labourProtected && labour != 0;
-
-        /// <summary>The month an order closed on <paramref name="closeDay"/> is aggregated in: the month of the close, or the first later month without a posting.</summary>
-        public static int Assign(DateTime closeDay, IEnumerable<int> postedPeriods)
+        /// <summary>The month an order closed on <paramref name="closeDay"/> is trued up in: the month of the close, or the first later month that is not closed yet.</summary>
+        public static int Assign(DateTime closeDay, IEnumerable<int> closedPeriods)
         {
-            HashSet<int> posted = postedPeriods.ToHashSet();
+            HashSet<int> closed = closedPeriods.ToHashSet();
             int period = Of(closeDay);
-            while (posted.Contains(period)) period = Next(period);
+            while (closed.Contains(period)) period = Next(period);
             return period;
         }
 
-        /// <summary>A month is posted by a run on <paramref name="asOf"/> only when it has ended (the run day is in a later month).</summary>
+        /// <summary>A month is closed by a run on <paramref name="asOf"/> only when it has ended (the run day is in a later month).</summary>
         public static bool Due(int period, DateTime asOf) => period < Of(asOf);
 
-        /// <summary>
-        /// R1p D2: what to do with the whole pool of a month. The pool is the sum of every pending order of the month, so the month total is one person's pay when fewer than three payroll-rated employees are behind the pool
-        /// (each order alone being protected does not make the sum safe, and the sum alone is what the event shows). A protected pool waits for the next month and joins that month's pool; at the end of a Persian quarter
-        /// it is posted anyway, flagged as protected (★ provisional cap), so it never waits for ever.
-        /// </summary>
-        public static Production.MfLabourMonthAction Decide(IEnumerable<SvPendingLabour> orders, int period)
+        /// <summary>The month a carried pool waits in: the next one, or the first later one that is not closed (a closed month is never reopened).</summary>
+        public static int NextOpen(int period, IEnumerable<int> closed)
         {
-            List<SvPendingLabour> list = orders.ToList();
-            return Production.MfLabourCarry.Decide(list.SelectMany(o => o.Employees).Distinct().Count(), list.SelectMany(o => o.PayrollEmployees).Distinct().Count(), period);
-        }
-
-        /// <summary>The month a carried pool waits in: the next one, or the first later one that has no posting yet (a posted month is never reopened).</summary>
-        public static int NextOpen(int period, IEnumerable<int> posted)
-        {
-            HashSet<int> set = posted.ToHashSet();
+            HashSet<int> set = closed.ToHashSet();
             int next = Next(period);
             while (set.Contains(next)) next = Next(next);
             return next;
-        }
-
-        private static bool Protected(IEnumerable<SvPendingLabour> orders)
-        {
-            List<SvPendingLabour> list = orders.ToList();
-            return SvPrivacy.LabourProtected(list.SelectMany(o => o.Employees).Distinct().Count(), list.SelectMany(o => o.PayrollEmployees).Distinct().Count());
-        }
-
-        /// <summary>
-        /// The lines of the one accounting event of a month (warranty and goodwill orders only; a billable order and the visit of an agreement are paid by the customer and post no event). Debit: the warranty provision for the warranty labour and the
-        /// goodwill expense for the goodwill labour; credit: the service labour absorbed. Never an order number, never a per-order line. When both kinds exist but one of them comes from fewer than three payroll-rated employees, that split would show
-        /// a person's pay again, so both go to one debit line of the larger kind (warranty on a tie): the books get the exact month total, the split is not published.
-        /// </summary>
-        public static List<(string Role, decimal Debit, decimal Credit, string Description)> EventLines(IEnumerable<SvPendingLabour> orders, int period)
-        {
-            List<SvPendingLabour> warranty = orders.Where(o => o.Decision == SvWarrantyDecision.Warranty).ToList();
-            List<SvPendingLabour> goodwill = orders.Where(o => o.Decision == SvWarrantyDecision.Goodwill).ToList();
-            decimal w = warranty.Sum(o => o.Labour), g = goodwill.Sum(o => o.Labour);
-            var lines = new List<(string, decimal, decimal, string)>();
-            string label = "ماه " + Text(period);
-            if (w + g == 0) return lines;
-            bool split = w != 0 && g != 0 && !Protected(warranty) && !Protected(goodwill);
-            if (split)
-            {
-                lines.Add((AccountRoles.WarrantyProvision, w, 0m, "هزینه خدمات گارانتی " + label));
-                lines.Add((AccountRoles.WarrantyExpense, g, 0m, "هزینه خدمات حسن نیت " + label));
-            }
-            else if (w != 0 && g != 0)
-                lines.Add((w >= g ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, w + g, 0m, "هزینه خدمات پس از فروش " + label));
-            else
-                lines.Add((w != 0 ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, w + g, 0m, "هزینه خدمات " + (w != 0 ? "گارانتی" : "حسن نیت") + " " + label));
-            lines.Add((AccountRoles.ServiceLabourAbsorbed, 0m, w + g, "دستمزد جذب‌شده در خدمات پس از فروش " + label));
-            return lines;
-        }
-
-        /// <summary>
-        /// The labour cost entries of a month (every kind of order): one per contract and cost centre. A contract whose own share comes from fewer than three payroll-rated employees would show a person's pay in the contract cost list, so its share
-        /// joins the entry without a contract of the same cost centre (the cost stays in the cost centre and the books; only the contract allocation of that small share is lost).
-        /// </summary>
-        public static List<(int? ContractId, string CostCenter, decimal Amount)> CostGroups(IEnumerable<SvPendingLabour> orders)
-        {
-            var result = new Dictionary<(int?, string), decimal>();
-            foreach (var group in orders.Where(o => o.Labour != 0).GroupBy(o => (o.ContractId, o.CostCenter)))
-            {
-                (int?, string) key = group.Key.ContractId.HasValue && !Protected(group) ? (group.Key.ContractId, group.Key.CostCenter) : ((int?)null, group.Key.CostCenter);
-                result[key] = result.GetValueOrDefault(key) + group.Sum(o => o.Labour);
-            }
-            return result.OrderBy(x => x.Key.Item1 ?? int.MaxValue).ThenBy(x => x.Key.Item2, StringComparer.Ordinal).Select(x => (x.Key.Item1, x.Key.Item2, x.Value)).ToList();
         }
     }
 

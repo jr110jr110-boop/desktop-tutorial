@@ -653,7 +653,11 @@ namespace Services.NasbNiro.Production
         }
     }
 
-    /// <summary>Availability, MTBF, MTTR and OEE. Planned time is the working days of the work-centre calendar x its shift hours; downtime is counted on working days only, at most one shift a day.</summary>
+    /// <summary>
+    /// Availability, MTBF, MTTR and OEE. Planned time is the working days of the work-centre calendar x its shift hours; downtime is counted on working days only, at most one shift a day.
+    /// R1p review 11: the run time of the OEE and of the machine KPIs is MACHINE time: the run bookings of one machine are joined (two welders on one machine run it once), bookings without a machine count their own hours.
+    /// Units: MTBF = scheduled shift hours the machine was available per breakdown; MTTR = clock hours from the stop to the end of the repair (a repair over the night counts the night); the OEE parts are shift/machine hours.
+    /// </summary>
     internal static class MfKpi
     {
         public static decimal Pct(decimal part, decimal whole) => whole <= 0 ? 0 : Math.Round(part / whole * 100m, 1, MidpointRounding.AwayFromZero);
@@ -681,15 +685,14 @@ namespace Services.NasbNiro.Production
 
         /// <summary>
         /// R1p D29: the OEE after ISO 22400-2 (see <see cref="MfOeeMath"/>): planned busy time = planned time less planned maintenance; availability = run time / planned busy time; performance = ideal cycle time x
-        /// produced count / run time; quality = good / produced. The run time is the booked run hours (hours of people, so two people on one machine book twice - the product of the three parts is still right).
-        /// The figure of the earlier releases (availability from downtime only) stays one release as <c>OeeLegacy</c>.
+        /// produced count / run time; quality = good / produced. The run time (<see cref="OeeDto.RunHours"/>) is MACHINE time (R1p review 11): the run intervals of one machine are joined, so two people on one machine run it once;
+        /// the person-hours stay in <see cref="OeeDto.BookedRunHours"/>. The figure of the earlier releases (availability from downtime only) stays one release as <c>OeeLegacy</c> and is computed from the person-hours as before.
         /// </summary>
         public static OeeDto Compute(OeeDto o)
         {
-            o.RunHours = o.BookedRunHours;
             MfOeeMath.Result r = MfOeeMath.Compute(new MfOeeMath.Input
             {
-                PlannedHours = o.PlannedHours, PlannedMaintenanceHours = o.PlannedMaintenanceHours, BreakdownHours = o.BreakdownHours, RunHours = o.BookedRunHours, SetupHours = o.SetupHours, WaitingHours = o.WaitingHours,
+                PlannedHours = o.PlannedHours, PlannedMaintenanceHours = o.PlannedMaintenanceHours, BreakdownHours = o.BreakdownHours, RunHours = o.RunHours, SetupHours = o.SetupHours, WaitingHours = o.WaitingHours,
                 OtherBookedHours = o.OtherBookedHours, StandardHours = o.StandardHours, GoodQty = o.GoodQty, ScrapQty = o.ScrapQty,
             });
             o.PlannedBusyHours = r.PlannedBusyHours;
@@ -709,7 +712,7 @@ namespace Services.NasbNiro.Production
             return Compute(new OeeDto
             {
                 PlannedHours = list.Sum(o => o.PlannedHours), DowntimeHours = list.Sum(o => o.DowntimeHours), PlannedMaintenanceHours = list.Sum(o => o.PlannedMaintenanceHours), BreakdownHours = list.Sum(o => o.BreakdownHours),
-                BookedRunHours = list.Sum(o => o.BookedRunHours), SetupHours = list.Sum(o => o.SetupHours), WaitingHours = list.Sum(o => o.WaitingHours), OtherBookedHours = list.Sum(o => o.OtherBookedHours),
+                BookedRunHours = list.Sum(o => o.BookedRunHours), RunHours = list.Sum(o => o.RunHours), SetupHours = list.Sum(o => o.SetupHours), WaitingHours = list.Sum(o => o.WaitingHours), OtherBookedHours = list.Sum(o => o.OtherBookedHours),
                 StandardHours = list.Sum(o => o.StandardHours), GoodQty = list.Sum(o => o.GoodQty), ScrapQty = list.Sum(o => o.ScrapQty),
             });
         }
@@ -729,12 +732,15 @@ namespace Services.NasbNiro.Production
             DateTime end = to.Date.AddDays(1);
             List<MfMaintenanceOrder> orders = await uow.Set<MfMaintenanceOrder>().AsNoTracking()
                 .Where(o => !o.Deleted && machineIds.Contains(o.MachineId) && o.Status != MfMaintenanceOrderStatus.Cancelled && o.DowntimeStart != null && o.DowntimeStart < end).ToListAsync(ct);
+            // R1p review 11: the machine's run time comes from the run bookings of the machine, joined (the same definition as the OEE of its work centre)
+            var booked = await MfBookingRules.Effective(uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.EndAt != null && b.MachineId != null && machineIds.Contains(b.MachineId.Value) && b.StartAt >= from.Date && b.StartAt < end))
+                .Select(b => new { b.MachineId, b.Kind, b.StartAt, EndAt = b.EndAt.Value, b.Hours }).ToListAsync(ct);
             var list = new List<MachineKpiDto>();
             foreach (MfMachineInfo info in infos)
             {
                 MfCenter c = centers[info.WorkCenterId.Value];
                 decimal planned = PlannedHours(c, from, to);
-                decimal down = 0;
+                decimal down = 0, plannedMaintenance = 0, breakdownHours = 0;
                 int breakdowns = 0;
                 var repairs = new List<(DateTime Start, DateTime? End)>();
                 foreach (MfMaintenanceOrder o in orders.Where(x => x.MachineId == info.MachineId))
@@ -743,6 +749,7 @@ namespace Services.NasbNiro.Production
                     if (stop.HasValue && stop.Value < from.Date) continue;
                     decimal h = DowntimeHours(c, o.DowntimeStart.Value, stop, from, to);
                     down += h;
+                    if (o.Kind == MfMaintenanceKind.Planned) plannedMaintenance += h; else breakdownHours += h;
                     if (o.Kind == MfMaintenanceKind.Breakdown && o.DowntimeStart.Value.Date >= from.Date)
                     {
                         breakdowns++;
@@ -750,11 +757,17 @@ namespace Services.NasbNiro.Production
                     }
                 }
                 down = Math.Min(down, planned);
+                plannedMaintenance = Math.Round(Math.Min(plannedMaintenance, planned), 2, MidpointRounding.AwayFromZero);
+                breakdownHours = Math.Round(Math.Min(breakdownHours, planned - plannedMaintenance), 2, MidpointRounding.AwayFromZero);
                 decimal up = Math.Max(0, planned - down);
+                decimal busy = Math.Max(0, planned - plannedMaintenance);
+                MfMachineTime.Result time = MfMachineTime.Of(booked.Where(b => b.MachineId == info.MachineId).Select(b => new MfMachineTime.Row { MachineId = b.MachineId, Kind = b.Kind, Start = b.StartAt, End = b.EndAt, Hours = b.Hours }));
+                decimal run = Math.Round(time.Run, 2, MidpointRounding.AwayFromZero);
                 list.Add(new MachineKpiDto
                 {
                     MachineId = info.MachineId, MachineTitle = titles.GetValueOrDefault(info.MachineId), WorkCenterId = c.Wc.Id, WorkCenterCode = c.Wc.Code, PlannedHours = planned, DowntimeHours = down,
-                    AvailabilityPercent = planned > 0 ? Pct(up, planned) : (decimal?)null, Breakdowns = breakdowns,
+                    PlannedMaintenanceHours = plannedMaintenance, BreakdownHours = breakdownHours, PlannedBusyHours = busy, RunHours = run,
+                    AvailabilityPercent = busy > 0 ? Pct(run, busy) : (decimal?)null, TechnicalAvailabilityPercent = planned > 0 ? Pct(up, planned) : (decimal?)null, Breakdowns = breakdowns,
                     MtbfHours = breakdowns > 0 ? Math.Round(up / breakdowns, 2, MidpointRounding.AwayFromZero) : (decimal?)null,
                     // R1p D37: the repair time is the clock time from the stop to the end of the repair (a repair over the night is not cut to the shift hours); only the breakdowns that started in the period and were repaired by its end
                     MttrHours = MfOeeMath.Mttr(repairs, from, end),
@@ -778,11 +791,12 @@ namespace Services.NasbNiro.Production
             List<MfMaintenanceOrder> orders = machineIds.Count == 0 ? new List<MfMaintenanceOrder>()
                 : await uow.Set<MfMaintenanceOrder>().AsNoTracking().Where(o => !o.Deleted && machineIds.Contains(o.MachineId) && o.Status != MfMaintenanceOrderStatus.Cancelled && o.DowntimeStart != null && o.DowntimeStart < end).ToListAsync(ct);
             // R1p D29: every kind of booking is read (setup, waiting, rework and cleaning are loss categories of the planned busy time); only the run bookings are production time and carry the pieces
-            var bookings = await (from b in uow.Set<MfTimeBooking>().AsNoTracking()
+            // R1p review 11: the corrections that wait for approval are not read, and the run time is machine time (joined per machine, see below)
+            var bookings = await (from b in MfBookingRules.Effective(uow.Set<MfTimeBooking>().AsNoTracking())
                                   join o in uow.Set<MfOperation>().AsNoTracking() on b.OperationId equals o.Id
                                   join p in uow.Set<MfProductionOrder>().AsNoTracking() on o.OrderId equals p.Id
                                   where !b.Deleted && b.EndAt != null && b.StartAt >= firstDay && b.StartAt < end && o.WorkCenterId != null && wcIds.Contains(o.WorkCenterId.Value)
-                                  select new { WorkCenterId = o.WorkCenterId.Value, b.Kind, b.Hours, b.GoodQty, b.ScrapQty, o.OperationTemplateId, o.RunHoursPlanned, OrderQty = p.Quantity }).ToListAsync(ct);
+                                  select new { WorkCenterId = o.WorkCenterId.Value, b.MachineId, b.Kind, b.StartAt, EndAt = b.EndAt.Value, b.Hours, b.GoodQty, b.ScrapQty, o.OperationTemplateId, o.RunHoursPlanned, OrderQty = p.Quantity }).ToListAsync(ct);
             List<int> templateIds = bookings.Where(b => b.Kind == MfBookingKind.Run && b.OperationTemplateId.HasValue).Select(b => b.OperationTemplateId.Value).Distinct().ToList();
             Dictionary<int, decimal> standard = templateIds.Count == 0 ? new Dictionary<int, decimal>()
                 : await uow.Set<MfOperationStandard>().AsNoTracking().Where(s => !s.Deleted && templateIds.Contains(s.OperationTemplateId)).ToDictionaryAsync(s => s.OperationTemplateId, s => s.RunHoursPerUnit, ct);
@@ -806,20 +820,21 @@ namespace Services.NasbNiro.Production
                 dto.PlannedMaintenanceHours = Math.Round(Math.Min(plannedMaintenance, dto.PlannedHours), 2, MidpointRounding.AwayFromZero);
                 dto.BreakdownHours = Math.Round(Math.Min(breakdown, dto.PlannedHours - dto.PlannedMaintenanceHours), 2, MidpointRounding.AwayFromZero);
                 dto.DowntimeHours = dto.PlannedMaintenanceHours + dto.BreakdownHours;
-                foreach (var b in bookings.Where(x => x.WorkCenterId == wc.Id))
+                var centreBookings = bookings.Where(x => x.WorkCenterId == wc.Id).ToList();
+                foreach (var b in centreBookings.Where(x => x.Kind == MfBookingKind.Run))
                 {
-                    if (b.Kind == MfBookingKind.Run)
-                    {
-                        decimal perPiece = b.OperationTemplateId.HasValue && standard.TryGetValue(b.OperationTemplateId.Value, out decimal s) && s > 0 ? s : (b.OrderQty > 0 ? b.RunHoursPlanned / b.OrderQty : 0);
-                        dto.BookedRunHours += b.Hours;
-                        dto.GoodQty += b.GoodQty;
-                        dto.ScrapQty += b.ScrapQty;
-                        dto.StandardHours += perPiece * (b.GoodQty + b.ScrapQty);
-                    }
-                    else if (b.Kind == MfBookingKind.Setup) dto.SetupHours += b.Hours;
-                    else if (b.Kind == MfBookingKind.Waiting) dto.WaitingHours += b.Hours;
-                    else dto.OtherBookedHours += b.Hours; // rework and cleaning
+                    decimal perPiece = b.OperationTemplateId.HasValue && standard.TryGetValue(b.OperationTemplateId.Value, out decimal s) && s > 0 ? s : (b.OrderQty > 0 ? b.RunHoursPlanned / b.OrderQty : 0);
+                    dto.BookedRunHours += b.Hours;   // person-hours (labour), kept for the cost side
+                    dto.GoodQty += b.GoodQty;
+                    dto.ScrapQty += b.ScrapQty;
+                    dto.StandardHours += perPiece * (b.GoodQty + b.ScrapQty);
                 }
+                // machine time: the intervals of one machine are joined per kind, a moment counts for one kind only, bookings without a machine count their own hours
+                MfMachineTime.Result time = MfMachineTime.Of(centreBookings.Select(b => new MfMachineTime.Row { MachineId = b.MachineId, Kind = b.Kind, Start = b.StartAt, End = b.EndAt, Hours = b.Hours }));
+                dto.RunHours = Math.Round(time.Run, 2, MidpointRounding.AwayFromZero);
+                dto.SetupHours = Math.Round(time.Setup, 2, MidpointRounding.AwayFromZero);
+                dto.WaitingHours = Math.Round(time.Waiting, 2, MidpointRounding.AwayFromZero);
+                dto.OtherBookedHours = Math.Round(time.Other, 2, MidpointRounding.AwayFromZero);   // rework and cleaning
                 dto.StandardHours = Math.Round(dto.StandardHours, 2, MidpointRounding.AwayFromZero);
                 result.Add(Compute(dto));
             }

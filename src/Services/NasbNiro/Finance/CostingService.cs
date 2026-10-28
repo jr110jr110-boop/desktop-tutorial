@@ -97,6 +97,11 @@ namespace Services.NasbNiro.Finance
         /// <summary>★ دستمزد جذب‌شده خدمات پس از فروش: جدا از LabourAbsorbed تولید (70102) تا هزینه‌ی دستمزد تعمیرات گارانتی با کالای در جریان ساخت قاطی نشود. فرض: حسابدار تایید کند.</summary>
         public const string ServiceLabourAbsorbed = "ServiceLabourAbsorbed";
 
+        /// <summary>
+        /// ★ R1p: انحراف نرخ دستمزد جذب‌شده. دستمزد با نرخ میانگین استخر جذب می‌شود؛ پایان ماه تفاوت هزینه‌ی واقعی استخر (حقوق) و مبلغ جذب‌شده در یک ردیف شرکتی (بدون دستور کار) به این حساب می‌رود. فرض: حسابدار کد 70114 را تایید کند.
+        /// </summary>
+        public const string LabourRateVariance = "LabourRateVariance";
+
         public static string InventoryOf(string itemCode)
         {
             string prefix = itemCode != null && itemCode.Length >= 2 && char.IsDigit(itemCode[0]) && char.IsDigit(itemCode[1]) ? itemCode.Substring(0, 2) : null;
@@ -185,6 +190,7 @@ namespace Services.NasbNiro.Finance
             yield return (WarrantyProvision, "ذخیره تضمین محصولات");
             yield return (WarrantyExpense, "هزینه گارانتی");
             yield return (ServiceLabourAbsorbed, "دستمزد جذب‌شده خدمات پس از فروش");
+            yield return (LabourRateVariance, "انحراف نرخ دستمزد جذب‌شده");
         }
     }
 
@@ -556,7 +562,7 @@ namespace Services.NasbNiro.Finance
                     "ابطال " + e.Description, e.Lines.Select(l => new AccountingEventLine
                     {
                         AccountRole = l.AccountRole, Debit = l.Credit, Credit = l.Debit, ProviderId = l.ProviderId, WorkOrderId = l.WorkOrderId,
-                        ContractId = l.ContractId, CostCenter = l.CostCenter, ItemId = l.ItemId, Quantity = l.Quantity, Description = l.Description,
+                        ContractId = l.ContractId, CostCenter = l.CostCenter, ItemId = l.ItemId, Quantity = l.Quantity, Description = l.Description, LabourProtected = l.LabourProtected,
                     }).ToList());
                 reversal.ReversesEventId = e.Id;
                 await UndoReliefAsync(e, cancellationToken);

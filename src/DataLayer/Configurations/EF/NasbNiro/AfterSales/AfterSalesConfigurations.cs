@@ -118,6 +118,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.Property(x => x.RunningHoursReading).HasPrecision(18, 2);
                 b.Property(x => x.LabourHours).HasPrecision(18, 4);
                 b.Property(x => x.LabourAmount).HasPrecision(22, 2);
+                b.Property(x => x.LabourPayrollCost).HasPrecision(28, 10);
+                b.Property(x => x.LabourPooledAmount).HasPrecision(22, 2);
                 b.Property(x => x.PartsAmount).HasPrecision(22, 2);
                 b.Property(x => x.BillableLabourRateRial).HasPrecision(22, 2);
                 b.Property(x => x.DraftNote).HasMaxLength(Text);

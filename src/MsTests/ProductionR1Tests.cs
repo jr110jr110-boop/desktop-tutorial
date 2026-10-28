@@ -16,9 +16,9 @@ using Services.NasbNiro.Production;
 namespace MsTests
 {
     /// <summary>
-    /// The pure rules of release R1p (production, maintenance and after-sales audit findings): the quantity chain of the operations (D7), the OEE after ISO 22400-2 (D29), MTTR on clock hours (D37),
-    /// the privacy of a month of labour with its carry to the next month and the quarter-end cap (D1, D2), the booking and terminal rules (D38, D39, D43), the NCR dispositions (D6, D8),
-    /// the SLA clock (D24), the survey rules (D25), the warranty rule (D26) and the field MTBF hours (D36). Every figure is worked out by hand in the test.
+    /// The pure rules of release R1p (production, maintenance and after-sales audit findings): the quantity chain of the operations (D7), the OEE after ISO 22400-2 on MACHINE time (D29), MTTR on clock hours (D37),
+    /// the corrections that wait for a second person, the frozen quantities and the one rework per NCR (D38, D39, D43, D6, D8), the scrap serials, the SLA clock (D24), the survey rules (D25), the warranty rule (D26),
+    /// the field MTBF hours (D36) and the model of the new columns. The pooled labour rate (D1, D2) is tested in <c>ProductionCostTests</c>. Every figure is worked out by hand in the test.
     /// </summary>
     [TestClass]
     public class ProductionR1Tests
@@ -166,122 +166,58 @@ namespace MsTests
             Assert.AreEqual(4m, MfOeeMath.Mttr(repairs.Skip(1).Take(1), start, end));
         }
 
-        // ------------------------------------------------------------------------------------------ D1 and D2: the privacy of a month of labour
+        // ------------------------------------------------------------------------------------------ D29: OEE on machine time (review item 11)
+
+        private static DateTime T(int hour, int minute = 0) => new DateTime(2026, 8, 3, hour, minute, 0);
+
+        private static MfMachineTime.Row Row(int? machine, MfBookingKind kind, DateTime start, DateTime end) =>
+            new MfMachineTime.Row { MachineId = machine, Kind = kind, Start = start, End = end, Hours = (decimal)(end - start).TotalHours };
 
         [TestMethod]
-        public void A_Pool_With_Fewer_Than_Three_Payroll_Rated_People_Waits_And_At_The_Quarter_End_Is_Posted_Flagged()
+        public void Intervals_Of_One_Machine_Are_Joined_And_Cut_So_That_Two_People_Use_The_Machine_Once()
         {
-            Assert.AreEqual(MfLabourMonthAction.Post, MfLabourCarry.Decide(3, 3, 140505));
-            Assert.AreEqual(MfLabourMonthAction.Carry, MfLabourCarry.Decide(1, 1, 140505), "Mordad is not a quarter end");
-            Assert.AreEqual(MfLabourMonthAction.PostProtected, MfLabourCarry.Decide(1, 1, 140506), "Shahrivar ends the quarter");
-            Assert.AreEqual(MfLabourMonthAction.Carry, MfLabourCarry.Decide(2, 2, 140507));
-            Assert.AreEqual(MfLabourMonthAction.PostProtected, MfLabourCarry.Decide(2, 2, 140509), "Azar");
-            Assert.AreEqual(MfLabourMonthAction.PostProtected, MfLabourCarry.Decide(1, 1, 140512), "Esfand");
-            Assert.AreEqual(MfLabourMonthAction.PostProtected, MfLabourCarry.Decide(2, 2, 140503), "Khordad");
-            Assert.AreEqual(MfLabourMonthAction.Post, MfLabourCarry.Decide(1, 0, 140505), "the work-centre standard rate is nobody's pay");
-            Assert.AreEqual(MfLabourMonthAction.Carry, MfLabourCarry.Decide(6, 1, 140505), "one payroll employee among five on the standard rate: the known part can be subtracted");
-            foreach (int month in new[] { 3, 6, 9, 12 }) Assert.IsTrue(MfLabourCarry.IsQuarterEnd(140500 + month), month.ToString());
-            foreach (int month in new[] { 1, 2, 4, 5, 7, 8, 10, 11 }) Assert.IsFalse(MfLabourCarry.IsQuarterEnd(140500 + month), month.ToString());
+            var joined = MfIntervals.Union(new[] { (T(8), T(10)), (T(9), T(11)), (T(11), T(12)), (T(13), T(14)), (T(15), T(15)) });
+            CollectionAssert.AreEqual(new[] { (T(8), T(12)), (T(13), T(14)) }, joined, "the overlapping and the touching ones are joined, the empty one is dropped");
+            Assert.AreEqual(5m, MfIntervals.Hours(joined));
+            var left = MfIntervals.Subtract(joined, MfIntervals.Union(new[] { (T(9), T(10)), (T(11, 30), T(13, 30)) }));
+            CollectionAssert.AreEqual(new[] { (T(8), T(9)), (T(10), T(11, 30)), (T(13, 30), T(14)) }, left, "08-12 less 09-10 and 11:30-13:30, and 13-14 less 13-13:30");
+            Assert.AreEqual(3m, MfIntervals.Hours(left), "1 + 1.5 + 0.5");
         }
 
         [TestMethod]
-        public void The_Month_Arithmetic_Of_The_Monthly_Posting_Is_The_Persian_Calendar()
+        public void Machine_Time_Counts_A_Moment_Of_The_Machine_For_One_Kind_Only_And_A_Manual_Booking_Its_Own_Hours()
         {
-            Assert.AreEqual(140505, MfLabourMonth.Of(new DateTime(2026, 8, 6)));
-            Assert.AreEqual("MLM-140506", MfLabourMonth.Number(140506));
-            Assert.AreEqual("1405/05", MfLabourMonth.Text(140505));
-            Assert.AreEqual(new DateTime(2026, 8, 22), MfLabourMonth.End(140505), "Mordad has 31 days: 1405/05/31");
-            Assert.AreEqual(new DateTime(2026, 9, 22), MfLabourMonth.End(140506), "Shahrivar has 31 days: 1405/06/31");
-            Assert.AreEqual(140506, MfLabourMonth.NextOpen(140505, new int[0]));
-            Assert.AreEqual(140507, MfLabourMonth.NextOpen(140505, new[] { 140506 }), "a posted month is never reopened");
-            Assert.AreEqual(140601, MfLabourMonth.NextOpen(140512, new int[0]));
-        }
-
-        private static MfPendingBooking B(int id, int workOrder, int employee, decimal labour, bool payroll = true, int? wbs = null, string centre = "CNC") =>
-            new MfPendingBooking { BookingId = id, WorkOrderId = workOrder, ContractId = 7, WbsNodeId = wbs, CostCenter = centre, EmployeeId = employee, FromPayroll = payroll, Labour = labour };
-
-        [TestMethod]
-        public void A_Work_Order_With_Three_Payroll_Rated_People_Is_Posted_On_Its_Own_And_The_Sum_Is_Rounded_Once()
-        {
-            MfLabourPlan plan = MfLabourPlanner.Plan(new[] { B(1, 10, 1, 100.4m), B(2, 10, 2, 200.4m), B(3, 10, 3, 300.4m) }, 140505);
-            Assert.AreEqual(0, plan.CarriedBookingIds.Count);
-            Assert.AreEqual(1, plan.Groups.Count);
-            MfLabourPlanGroup g = plan.Groups[0];
-            Assert.AreEqual(10, g.WorkOrderId);
-            Assert.AreEqual(7, g.ContractId);
-            Assert.IsFalse(g.Protected);
-            Assert.AreEqual(601m, g.Amount, "100.4 + 200.4 + 300.4 = 601.2 rounded once, not 100 + 200 + 300");
-            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, g.BookingIds);
-            Assert.AreEqual(2m, MfLabourPlanner.Plan(new[] { B(1, 10, 1, 0.5m), B(2, 10, 2, 0.5m), B(3, 10, 3, 0.5m) }, 140505).Groups[0].Amount, "1.5 rounds away from zero");
+            var rows = new List<MfMachineTime.Row>
+            {
+                Row(1, MfBookingKind.Run, T(8), T(12)),          // two welders run the same machine: 08:00-12:00 and 10:00-14:00
+                Row(1, MfBookingKind.Run, T(10), T(14)),
+                Row(1, MfBookingKind.Setup, T(7), T(9)),         // setup 07:00-09:00, of which 08:00-09:00 is run time
+                Row(1, MfBookingKind.Cleaning, T(14), T(14, 30)),
+                Row(1, MfBookingKind.Waiting, T(12), T(15)),     // waiting 12:00-15:00, of which up to 14:30 is something else
+                Row(2, MfBookingKind.Run, T(8), T(9)),           // another machine: its own hour
+                Row(null, MfBookingKind.Run, T(8), T(10)),       // a manual work centre: every person is a resource of his own
+                Row(null, MfBookingKind.Waiting, T(9), T(10, 30)),
+            };
+            MfMachineTime.Result r = MfMachineTime.Of(rows);
+            Assert.AreEqual(9m, r.Run, "machine 1: 08:00-14:00 = 6 h (not 4 + 4 person-hours), machine 2: 1 h, the manual centre: 2 h");
+            Assert.AreEqual(1m, r.Setup, "07:00-08:00 only");
+            Assert.AreEqual(0.5m, r.Other, "the cleaning 14:00-14:30");
+            Assert.AreEqual(2m, r.Waiting, "machine 1: 14:30-15:00 = 0.5 h, the manual centre: 1.5 h");
         }
 
         [TestMethod]
-        public void Small_Work_Orders_Of_One_Cost_Centre_Are_Posted_Together_Without_A_Work_Order_When_They_Are_Enough_People()
+        public void Oee_Availability_Is_The_Machine_Run_Time_Over_The_Planned_Busy_Time_So_Two_People_On_One_Machine_Are_Not_Counted_Twice()
         {
-            // three work orders with one payroll-rated person each: alone each would show a person's pay; together in the cost centre they are three people
-            MfLabourPlan plan = MfLabourPlanner.Plan(new[] { B(1, 10, 1, 100m), B(2, 11, 2, 200m), B(3, 12, 3, 300m) }, 140505);
-            Assert.AreEqual(0, plan.CarriedBookingIds.Count);
-            Assert.AreEqual(1, plan.Groups.Count);
-            Assert.IsNull(plan.Groups[0].WorkOrderId);
-            Assert.AreEqual("CNC", plan.Groups[0].CostCenter);
-            Assert.AreEqual(600m, plan.Groups[0].Amount);
-            Assert.IsFalse(plan.Groups[0].Protected);
-            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, plan.Groups[0].BookingIds);
-        }
-
-        [TestMethod]
-        public void A_Pool_That_Is_Still_Too_Small_Is_Carried_To_The_Next_Month_Except_At_The_Quarter_End()
-        {
-            var pool = new[] { B(1, 10, 1, 100m), B(2, 11, 2, 200m) };
-            MfLabourPlan carried = MfLabourPlanner.Plan(pool, 140505);
-            Assert.AreEqual(0, carried.Groups.Count);
-            CollectionAssert.AreEqual(new[] { 1, 2 }, carried.CarriedBookingIds);
-
-            MfLabourPlan capped = MfLabourPlanner.Plan(pool, 140506);
-            Assert.AreEqual(0, capped.CarriedBookingIds.Count);
-            Assert.AreEqual(2, capped.Groups.Count);
-            Assert.IsTrue(capped.Groups.All(x => x.Protected), "posted per work order, flagged: only PAYROLL, FINANCEMANAGER and CEO read the amounts");
-            CollectionAssert.AreEqual(new[] { 10, 11 }, capped.Groups.Select(x => x.WorkOrderId.Value).ToArray());
-            CollectionAssert.AreEqual(new[] { 100m, 200m }, capped.Groups.Select(x => x.Amount).ToArray());
-        }
-
-        [TestMethod]
-        public void A_Big_Work_Order_Is_Posted_While_A_Small_One_In_The_Same_Month_Waits()
-        {
-            MfLabourPlan plan = MfLabourPlanner.Plan(new[] { B(1, 10, 1, 10m), B(2, 10, 2, 10m), B(3, 10, 3, 10m), B(4, 11, 4, 99m) }, 140505);
-            Assert.AreEqual(1, plan.Groups.Count);
-            Assert.AreEqual(10, plan.Groups[0].WorkOrderId);
-            Assert.AreEqual(30m, plan.Groups[0].Amount);
-            CollectionAssert.AreEqual(new[] { 4 }, plan.CarriedBookingIds);
-        }
-
-        [TestMethod]
-        public void People_On_The_Standard_Rate_Are_Not_Personal_Pay_And_Wbs_Nodes_Are_Posted_Apart()
-        {
-            // one person without a payroll rate: the work-centre rate is not his pay, so the group is posted as it is
-            MfLabourPlan standard = MfLabourPlanner.Plan(new[] { B(1, 10, 1, 40m, payroll: false) }, 140505);
-            Assert.AreEqual(1, standard.Groups.Count);
-            Assert.AreEqual(40m, standard.Groups[0].Amount);
-            Assert.IsFalse(standard.Groups[0].Protected);
-            // the same work order on two WBS nodes: two groups
-            MfLabourPlan nodes = MfLabourPlanner.Plan(new[] { B(1, 10, 1, 10m, wbs: 5), B(2, 10, 2, 20m, wbs: 5), B(3, 10, 3, 30m, wbs: 5), B(4, 10, 1, 1m, wbs: 6), B(5, 10, 2, 2m, wbs: 6), B(6, 10, 3, 3m, wbs: 6) }, 140505);
-            Assert.AreEqual(2, nodes.Groups.Count);
-            CollectionAssert.AreEqual(new[] { 60m, 6m }, nodes.Groups.Select(x => x.Amount).ToArray());
-            CollectionAssert.AreEqual(new int?[] { 5, 6 }, nodes.Groups.Select(x => x.WbsNodeId).ToArray());
-        }
-
-        private static SvPendingLabour Pend(int id, params int[] payrollEmployees) =>
-            new SvPendingLabour { OrderId = id, Decision = SvWarrantyDecision.Warranty, CostCenter = "AFTERSALES", Labour = 100m, Employees = payrollEmployees.ToHashSet(), PayrollEmployees = payrollEmployees.ToHashSet() };
-
-        [TestMethod]
-        public void The_Month_Pool_Of_Service_Labour_Waits_Instead_Of_Showing_One_Persons_Pay_And_Is_Capped_At_The_Quarter_End()
-        {
-            // D2: the pool of the month is the sum of its orders; two orders by the same one person are still one person
-            Assert.AreEqual(MfLabourMonthAction.Carry, SvLabourMonth.Decide(new[] { Pend(1, 7), Pend(2, 7) }, 140508));
-            Assert.AreEqual(MfLabourMonthAction.Post, SvLabourMonth.Decide(new[] { Pend(1, 7), Pend(2, 8), Pend(3, 9) }, 140508));
-            Assert.AreEqual(MfLabourMonthAction.PostProtected, SvLabourMonth.Decide(new[] { Pend(1, 7) }, 140509), "Azar is a quarter end");
-            Assert.AreEqual(140509, SvLabourMonth.NextOpen(140508, new int[0]));
-            Assert.AreEqual(140510, SvLabourMonth.NextOpen(140508, new[] { 140509 }));
+            // 8 planned hours, one machine: two welders each booked 4 h of run, overlapping 10:00-12:00: person-hours 8, machine run time 6 (08:00-14:00)
+            MfMachineTime.Result machine = MfMachineTime.Of(new[] { Row(1, MfBookingKind.Run, T(8), T(12)), Row(1, MfBookingKind.Run, T(10), T(14)) });
+            Assert.AreEqual(6m, machine.Run);
+            MfOeeMath.Result r = MfOeeMath.Compute(new MfOeeMath.Input { PlannedHours = 8m, RunHours = machine.Run, StandardHours = 5.4m, GoodQty = 9m, ScrapQty = 1m });
+            Assert.AreEqual(75m, r.AvailabilityPercent, "6 / 8");
+            Assert.AreEqual(90m, r.PerformancePercent, "5.4 / 6");
+            Assert.AreEqual(90m, r.QualityPercent, "9 / 10");
+            Assert.AreEqual(60.8m, r.OeePercent, "5.4 x 9 / (10 x 8) = 60.75, half away from zero");
+            // the person-hours of the earlier definition would have called the same machine 100 % available
+            Assert.AreEqual(100m, MfOeeMath.Compute(new MfOeeMath.Input { PlannedHours = 8m, RunHours = 8m, StandardHours = 5.4m, GoodQty = 9m, ScrapQty = 1m }).AvailabilityPercent);
         }
 
         // ------------------------------------------------------------------------------------------ D43, D38, D39: terminal and booking rules
@@ -346,6 +282,121 @@ namespace MsTests
             Assert.IsNull(MfSerialRules.Joined(new string[0], 200));
         }
 
+        // ------------------------------------------------------------------------------------------ D39: corrections wait for a second person (review item 9)
+
+        [TestMethod]
+        public void A_Correction_Counts_Only_After_A_Production_Manager_Other_Than_Its_Creator_Approved_It()
+        {
+            var list = new List<MfTimeBooking>
+            {
+                new MfTimeBooking { Id = 1, CreatorUserId = 4 },
+                new MfTimeBooking { Id = 2, IsCorrection = true, CreatorUserId = 4 },
+                new MfTimeBooking { Id = 3, IsCorrection = true, CreatorUserId = 4, CorrectionApprovedByUserId = 9 },
+            };
+            CollectionAssert.AreEqual(new[] { 1, 3 }, MfBookingRules.Effective(list.AsQueryable()).Select(b => b.Id).ToArray(), "the pending correction is in no hours, cost or OEE figure");
+            StringAssert.Contains(MfBookingRules.ApprovalRefusal(list[0], 9), "اصلاحی نیست", "an ordinary booking needs no approval");
+            Assert.IsNull(MfBookingRules.ApprovalRefusal(list[1], 9), "another production manager may approve");
+            StringAssert.Contains(MfBookingRules.ApprovalRefusal(list[1], 4), "تفکیک وظایف", "the creator may not approve his own correction");
+            StringAssert.Contains(MfBookingRules.ApprovalRefusal(list[2], 8), "قبلاً تأیید", "approved once");
+        }
+
+        [TestMethod]
+        public void A_Correction_May_Reach_Back_Only_The_Configured_Days_And_Only_Into_The_Attended_Time_Of_The_Day()
+        {
+            var today = new DateTime(2026, 10, 27, 15, 0, 0);
+            Assert.IsNull(MfBookingRules.BackdateRefusal(new DateTime(2026, 10, 20, 8, 0, 0), today, 7), "exactly 7 days back is allowed (★ Production:MaxBackdateDays = 7)");
+            StringAssert.Contains(MfBookingRules.BackdateRefusal(new DateTime(2026, 10, 19, 23, 59, 0), today, 7), "حداکثر 7 روز");
+            Assert.IsNull(MfBookingRules.BackdateRefusal(new DateTime(2026, 10, 27, 8, 0, 0), today, 7));
+            Assert.IsNull(MfBookingRules.BackdateRefusal(new DateTime(2026, 10, 27, 8, 0, 0), today, 0), "0 days: only today");
+            StringAssert.Contains(MfBookingRules.BackdateRefusal(new DateTime(2026, 10, 26, 8, 0, 0), today, 0), "حداکثر 0 روز");
+            Assert.IsNotNull(MfBookingRules.BackdateRefusal(new DateTime(2026, 10, 26, 8, 0, 0), today, -3), "a negative setting is read as 0");
+
+            StringAssert.Contains(MfBookingRules.AttendanceRefusal(0, 0, 60), "تردد ثبت نشده", "a day without attendance records takes no correction");
+            Assert.IsNull(MfBookingRules.AttendanceRefusal(480, 420, 60), "7 h booked + 1 h = the 8 h he was present");
+            string over = MfBookingRules.AttendanceRefusal(480, 420, 61);
+            StringAssert.Contains(over, "(7 ساعت)");
+            StringAssert.Contains(over, "(1.02 ساعت)");
+            StringAssert.Contains(over, "(8 ساعت)");
+            Assert.IsNotNull(MfBookingRules.AttendanceRefusal(480, 480, 1));
+        }
+
+        // ------------------------------------------------------------------------------------------ D7, D38: quantities are final once something rests on them (review item 7)
+
+        private static MfOperation Step(int id, int sequence, MfOperationStatus status, bool qcAccepted = false, bool concession = false, int? ncr = null, bool started = false) =>
+            new MfOperation
+            {
+                Id = id, OrderId = 1, Sequence = sequence, Status = status, QcAccepted = qcAccepted, AcceptedByConcession = concession, NcrId = ncr,
+                StartedAt = started ? new DateTimeOffset(2026, 8, 3, 9, 0, 0, TimeSpan.Zero) : (DateTimeOffset?)null,
+            };
+
+        [TestMethod]
+        public void The_Quantities_Of_A_Done_Step_Are_Frozen_After_QC_Acceptance_A_Concession_An_Ncr_Or_When_The_Next_Step_Started()
+        {
+            var accepted = Step(1, 10, MfOperationStatus.Done, qcAccepted: true);
+            StringAssert.Contains(MfBookingRules.QuantityFrozen(accepted, new[] { accepted }), "پذیرش بازرسی QC");
+
+            var concession = Step(1, 10, MfOperationStatus.Done, concession: true);
+            StringAssert.Contains(MfBookingRules.QuantityFrozen(concession, new[] { concession }), "ارفاق");
+
+            var withNcr = Step(1, 10, MfOperationStatus.Done, ncr: 5);
+            StringAssert.Contains(MfBookingRules.QuantityFrozen(withNcr, new[] { withNcr }), "گزارش عدم انطباق");
+            var rejected = Step(1, 10, MfOperationStatus.Rejected, ncr: 5);
+            StringAssert.Contains(MfBookingRules.QuantityFrozen(rejected, new[] { rejected }), "گزارش عدم انطباق");
+            var open = Step(1, 10, MfOperationStatus.InProgress, ncr: 5);
+            Assert.IsNull(MfBookingRules.QuantityFrozen(open, new[] { open }), "a step still running can be corrected");
+
+            // the next step started working on the pieces
+            var first = Step(1, 10, MfOperationStatus.Done);
+            var nextRunning = Step(2, 20, MfOperationStatus.InProgress);
+            StringAssert.Contains(MfBookingRules.QuantityFrozen(first, new[] { first, nextRunning }), "مرحله بعد");
+            var nextReady = Step(2, 20, MfOperationStatus.Ready);
+            Assert.IsNull(MfBookingRules.QuantityFrozen(first, new[] { first, nextReady }), "the next step has not started: the quantity can still be corrected");
+            var skipped = Step(2, 20, MfOperationStatus.Skipped);
+            var afterSkipped = Step(3, 30, MfOperationStatus.Done);
+            StringAssert.Contains(MfBookingRules.QuantityFrozen(first, new[] { first, skipped, afterSkipped }), "مرحله بعد", "a skipped step passes the pieces on: the step after it counts");
+            Assert.IsNull(MfBookingRules.QuantityFrozen(first, new[] { first, skipped, Step(3, 30, MfOperationStatus.Ready) }));
+            Assert.IsNull(MfBookingRules.QuantityFrozen(first, new[] { first }), "the last step has nobody after it");
+            var ready = Step(1, 10, MfOperationStatus.Ready);
+            Assert.IsNull(MfBookingRules.QuantityFrozen(ready, new[] { ready, nextRunning }));
+        }
+
+        // ------------------------------------------------------------------------------------------ D6, D33: scrap serials (review item 12)
+
+        [TestMethod]
+        public void A_Partial_Scrap_Of_Serial_Pieces_Needs_The_Serials_And_The_Rest_Stay_On_The_Order()
+        {
+            var planned = new List<string> { "S1", "S2", "S3" };
+            // every planned piece scrapped: no names needed
+            CollectionAssert.AreEqual(new[] { "S1", "S2", "S3" }, MfSerialRules.Scrapped(planned, null, 3m).Scrapped);
+            // part of them: exactly that many serials, written as planned (the typed case does not matter)
+            var (one, error) = MfSerialRules.Scrapped(planned, "s2", 1m);
+            Assert.IsNull(error);
+            CollectionAssert.AreEqual(new[] { "S2" }, one);
+            CollectionAssert.AreEqual(new[] { "S1", "S3" }, MfSerialRules.Remaining(planned, one), "the remaining serials in the planned order");
+            // no serials for a part of the pieces
+            StringAssert.Contains(MfSerialRules.Scrapped(planned, null, 2m).Error, "شماره سریال 2 قطعه");
+            // a serial that is not planned (or was scrapped already)
+            StringAssert.Contains(MfSerialRules.Scrapped(planned, "S9", 1m).Error, "جزو سریال‌های برنامه‌ریزی‌شده");
+            // the count must match
+            StringAssert.Contains(MfSerialRules.Scrapped(planned, "S1, S2", 1m).Error, "برابر نیست");
+            // whole pieces only
+            Assert.IsNotNull(MfSerialRules.Scrapped(planned, "S1", 1.5m).Error);
+            Assert.IsNotNull(MfSerialRules.Scrapped(planned, "S1", 0m).Error);
+            // nothing planned: nothing to track
+            var none = MfSerialRules.Scrapped(new List<string>(), null, 4m);
+            Assert.IsNull(none.Error);
+            Assert.AreEqual(0, none.Scrapped.Count);
+            Assert.AreEqual("S1\nS3", MfSerialRules.PerLine(new[] { "S1", "S3" }), "the NCR keeps one serial per line");
+        }
+
+        [TestMethod]
+        public void The_Replacement_Pieces_Get_New_Traceable_Serials_That_Are_Never_Taken_Twice()
+        {
+            CollectionAssert.AreEqual(new[] { "S1-R", "S2-R" }, MfSerialRules.Replacements(new[] { "S1", "S2" }, s => false));
+            CollectionAssert.AreEqual(new[] { "S1-R2", "S2-R" }, MfSerialRules.Replacements(new[] { "S1", "S2" }, s => s == "S1-R"), "S1-R is taken: S1-R2");
+            CollectionAssert.AreEqual(new[] { "S1-R", "S1-R2" }, MfSerialRules.Replacements(new[] { "S1", "S1" }, s => false), "even inside one list");
+        }
+
         // ------------------------------------------------------------------------------------------ D6, D8: what an NCR has to say
 
         private static NonConformance Ncr(NcrDisposition disposition, NcrStatus status) => new NonConformance { Disposition = disposition, Status = status };
@@ -364,6 +415,20 @@ namespace MsTests
             Assert.IsNotNull(MfNcrRules.Check(Ncr(NcrDisposition.Rework, NcrStatus.Open), NcrDisposition.Rework), "the decision has to be signed first");
             Assert.IsNotNull(MfNcrRules.Check(Ncr(NcrDisposition.None, NcrStatus.Open), NcrDisposition.Rework));
             Assert.IsNotNull(MfNcrRules.Check(Ncr(NcrDisposition.Rework, NcrStatus.Closed), NcrDisposition.Rework), "a closed rework is over: no new rework operation");
+        }
+
+        [TestMethod]
+        public void One_Ncr_Allows_One_Rework_Operation_And_A_Failed_Rework_Needs_A_New_Report()
+        {
+            // review item 6: the NCR already gave its rework operation
+            var used = new NonConformance { Disposition = NcrDisposition.Rework, Status = NcrStatus.Approved, ReworkOperationId = 42 };
+            StringAssert.Contains(MfNcrRules.Check(used, NcrDisposition.Rework), "فقط یک بار");
+            used.Status = NcrStatus.Executed;
+            Assert.IsNotNull(MfNcrRules.Check(used, NcrDisposition.Rework));
+            // the same NCR before its rework operation exists, and the other dispositions, are not limited by it
+            Assert.IsNull(MfNcrRules.Check(new NonConformance { Disposition = NcrDisposition.Rework, Status = NcrStatus.Approved }, NcrDisposition.Rework));
+            Assert.IsNull(MfNcrRules.Check(new NonConformance { Disposition = NcrDisposition.Scrap, Status = NcrStatus.Approved, ReworkOperationId = 42 }, NcrDisposition.Scrap));
+            Assert.IsNull(MfNcrRules.Check(new NonConformance { Disposition = NcrDisposition.Concession, Status = NcrStatus.Closed, ReworkOperationId = 42 }, NcrDisposition.Concession));
         }
 
         // ------------------------------------------------------------------------------------------ D19: a work order without an ITP is refused too
@@ -513,24 +578,56 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void The_Grouped_Labour_Cost_Queries_Translate_To_Plain_Sql_Aggregates()
+        public void The_Grouped_And_Filtered_Queries_Of_Release_R1p_Translate_To_Plain_Sql()
         {
-            // the cost report of the finance link and the history of the service labour months group the cost entries; the protected flag is summed as an integer (no Any inside the grouping),
-            // so the whole grouping is SUM/GROUP BY that the provider translates on every version. ToQueryString throws when a query cannot be translated.
+            // ToQueryString throws when a query cannot be translated, so a query that EF could not run on the server fails here and not on the first request
             var (provider, scope, context) = OfflineContext();
             using (provider)
             using (scope)
             {
+                // the cost report of the finance link groups the cost entries; the protected flag is summed as an integer (no Any inside the grouping)
                 string report = Services.NasbNiro.Finance.FinanceLinkService.CostSums(context.Set<Entities.Model.NasbNiro.Finance.CostEntry>().Where(c => c.ContractId == 1)).ToQueryString();
                 StringAssert.Contains(report, "GROUP BY");
                 StringAssert.Contains(report, "SUM(");
                 Assert.IsFalse(report.Contains("EXISTS"), "no subquery inside the grouping: " + report);
 
-                string months = SvLabourService.CostByPeriod(context.Set<Entities.Model.NasbNiro.Finance.CostEntry>().AsNoTracking()).ToQueryString();
-                StringAssert.Contains(months, "GROUP BY");
-                StringAssert.Contains(months, "SUM(");
-                Assert.IsFalse(months.Contains("EXISTS"), "no subquery inside the grouping: " + months);
+                // review item 19: the booked hours of a period are summed per work centre and day in the database, from the bookings that count (a correction waiting for approval is not one)
+                string hours = MfShopFloorService.HoursByCentreAndDay(context.Set<MfTimeBooking>().AsNoTracking(), context.Set<MfOperation>().AsNoTracking(), new DateTime(2026, 8, 1), new DateTime(2026, 9, 1), 5, null).ToQueryString();
+                StringAssert.Contains(hours, "GROUP BY");
+                StringAssert.Contains(hours, "SUM(");
+                StringAssert.Contains(hours, "COUNT(");
+                StringAssert.Contains(hours, "CorrectionApprovedByUserId", "only approved corrections count");
+
+                // review item 10: the satisfaction average reads the verified surveys only
+                string verified = SvSurveyMath.VerifiedAnswers(context.Set<SlSurvey>()).ToQueryString();
+                StringAssert.Contains(verified, "Verified");
+                StringAssert.Contains(SvSurveyMath.UnverifiedAnswers(context.Set<SlSurvey>()).ToQueryString(), "Verified");
+
+                // the voucher readers leave the protected labour lines out for the roles that may not read them
+                string masked = Services.NasbNiro.Finance.FnLabourMask.Visible(context.Set<Entities.Model.NasbNiro.Finance.FnVoucherLine>(), false).ToQueryString();
+                StringAssert.Contains(masked, "WHERE");
+                StringAssert.Contains(masked, "[LabourProtected]");
+                Assert.IsFalse(Services.NasbNiro.Finance.FnLabourMask.Visible(context.Set<Entities.Model.NasbNiro.Finance.FnVoucherLine>(), true).ToQueryString().Contains("WHERE"), "the payroll readers get every line");
             }
+        }
+
+        [TestMethod]
+        public void A_Boolean_Column_That_Defaults_To_True_Has_The_Sentinel_True_So_That_False_Is_Stored_As_False()
+        {
+            // With the default sentinel (false) EF treats a CLR false as "not set" and leaves the column out of the INSERT, so the database default (true) is applied and a false is silently saved as true.
+            // HasSentinel(true) makes true the "not set" value instead. Every boolean with a default of true must have it (R1p review 3: RequiresMachine and RequiresIncomingInspection).
+            var (provider, scope, context) = OfflineContext();
+            using var providerHolder = provider;
+            using var scopeHolder = scope;
+            var model = context.GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>().Model;
+            var defaultingToTrue = model.GetEntityTypes().SelectMany(e => e.GetProperties()).Where(p => p.ClrType == typeof(bool) && Equals(p.GetDefaultValue(), true)).ToList();
+            Assert.IsTrue(defaultingToTrue.Any(p => p.DeclaringType.ClrType == typeof(MfWorkCenter) && p.Name == "RequiresMachine"), "the scan finds the work-centre column");
+            Assert.IsTrue(defaultingToTrue.Any(p => p.DeclaringType.ClrType == typeof(InventoryItem) && p.Name == "RequiresIncomingInspection"), "and the item column");
+            foreach (var property in defaultingToTrue)
+                Assert.AreEqual(true, property.Sentinel, property.DeclaringType.DisplayName() + "." + property.Name + " defaults to true and needs HasSentinel(true)");
+            // the CLR default of both new objects is true as well (a new object is "unset")
+            Assert.IsTrue(new MfWorkCenter().RequiresMachine);
+            Assert.IsTrue(new InventoryItem().RequiresIncomingInspection);
         }
 
         [TestMethod]
@@ -547,16 +644,45 @@ namespace MsTests
                 Assert.IsNotNull(entity, type.Name);
                 foreach (string name in names) Assert.IsNotNull(entity.FindProperty(name), type.Name + "." + name);
             }
+            void Lacks(Type type, params string[] names)
+            {
+                foreach (string name in names) Assert.IsNull(model.FindEntityType(type).FindProperty(name), type.Name + "." + name + " was removed again");
+            }
             bool HasForeignKey(Type type, string property) => model.FindEntityType(type).GetForeignKeys().Any(f => f.Properties.Any(p => p.Name == property));
+            void Precision(Type type, string name, int precision, int scale)
+            {
+                var property = model.FindEntityType(type).FindProperty(name);
+                Assert.AreEqual(precision, property.GetPrecision(), type.Name + "." + name + " precision");
+                Assert.AreEqual(scale, property.GetScale(), type.Name + "." + name + " scale");
+            }
 
-            Has(typeof(MfTimeBooking), "LabourPendingPeriod", "PendingLabour", "RateFromPayroll", "LabourAggregatedAt", "IsCorrection", "CorrectsBookingId");
-            Has(typeof(MfCostPosting), "LabourDeferred");
+            // the labour pools: the booking carries the cost payroll gave, what the days absorbed and the month of its pool; nothing per person leaves the booking
+            Has(typeof(MfTimeBooking), "LabourPendingPeriod", "PayrollCost", "AbsorbedLabour", "RateFromPayroll", "LabourAggregatedAt", "IsCorrection", "CorrectsBookingId", "CorrectionApprovedByUserId", "CorrectionApprovedAt");
+            Lacks(typeof(MfTimeBooking), "PendingLabour");
+            Lacks(typeof(MfCostPosting), "LabourDeferred");
+            Has(typeof(MfLabourPool), "Module", "Period", "PoolKey", "People", "Hours", "Cost", "Absorbed", "Variance", "Rate", "Protected", "Items", "AccountingEventId", "PostedAt", "PostedByUserId");
+            Has(typeof(SvServiceOrder), "LabourPendingPeriod", "LabourAggregatedAt", "LabourPayrollCost", "LabourPooledAmount");
+            Precision(typeof(MfTimeBooking), "PayrollCost", 28, 10);
+            Precision(typeof(MfTimeBooking), "AbsorbedLabour", 18, 2);
+            Precision(typeof(MfLabourPool), "Hours", 14, 2);
+            Precision(typeof(MfLabourPool), "Cost", 18, 2);
+            Precision(typeof(MfLabourPool), "Absorbed", 18, 2);
+            Precision(typeof(MfLabourPool), "Variance", 18, 2);
+            Precision(typeof(MfLabourPool), "Rate", 18, 4);
+            Precision(typeof(SvServiceOrder), "LabourPayrollCost", 28, 10);
+            Precision(typeof(SvServiceOrder), "LabourPooledAmount", 22, 2);
+            Assert.IsTrue(model.FindEntityType(typeof(MfLabourPool)).GetIndexes().Any(i => i.IsUnique && i.Properties.Select(p => p.Name).SequenceEqual(new[] { "Module", "Period", "PoolKey" })), "one pool row per module, month and pool: two runs at once cannot close a month twice");
+            Assert.IsTrue(HasForeignKey(typeof(MfLabourPool), "AccountingEventId"));
+
+            // the protected flag travels from the cost entry to the event line and the voucher line
+            Has(typeof(Entities.Model.NasbNiro.Finance.CostEntry), "LabourProtected");
+            Has(typeof(Entities.Model.NasbNiro.Finance.AccountingEventLine), "LabourProtected");
+            Has(typeof(Entities.Model.NasbNiro.Finance.FnVoucherLine), "LabourProtected");
+
             Has(typeof(MfOperation), "IsWelding", "WpsId", "WeldLogId", "AcceptedByConcession", "QcAcceptedGoodQty", "QcAcceptedScrapQty", "QcAcceptedReworkQty");
             Has(typeof(MfOperationStandard), "IsWelding", "WpsId");
             Has(typeof(MfProductionOrder), "WrittenOffQty", "ReplacesOrderId");
             Has(typeof(MfWorkCenter), "RequiresMachine");
-            Has(typeof(Entities.Model.NasbNiro.Finance.CostEntry), "LabourProtected");
-            Has(typeof(Entities.Model.NasbNiro.Finance.AccountingEventLine), "LabourProtected");
             Has(typeof(NonConformance), "ReworkOperationId");
             Has(typeof(SlSurvey), "SkipReason", "RecordedByRole", "AnsweredByUserId", "Verified", "VerifiedByUserId", "VerifiedAt", "VerifyNote", "ComplaintId");
 

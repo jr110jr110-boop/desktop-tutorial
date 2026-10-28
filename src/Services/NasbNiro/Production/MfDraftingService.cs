@@ -11,6 +11,7 @@ using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
 using Services.NasbNiro.Quality;
@@ -41,13 +42,15 @@ namespace Services.NasbNiro.Production
         private readonly IInventoryUserContext _user;
         private readonly INotificationService _notify;
         private readonly IItpService _itp;
+        private readonly ILogger<MfDraftingService> _logger;
 
-        public MfDraftingService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify = null, IItpService itp = null)
+        public MfDraftingService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify = null, IItpService itp = null, ILogger<MfDraftingService> logger = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _notify = notify;
             _itp = itp;
+            _logger = logger;
         }
 
         private int Me
@@ -73,8 +76,10 @@ namespace Services.NasbNiro.Production
                 await SyncGatesAsync(result.OrderIds, ct);
                 return result.Drafted;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // a hook never throws into the process that called it, but a failed drafting must leave a trace (R1p review 19)
+                _logger?.LogWarning(ex, "Production order drafting for process {ProcessId} failed", processId);
                 Detach(added);
                 return 0;
             }
@@ -93,8 +98,9 @@ namespace Services.NasbNiro.Production
                 await SyncGatesAsync(result.OrderIds, ct);
                 return result.Drafted;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger?.LogWarning(ex, "Production order drafting for work order {WorkOrderId} failed", workOrderId);
                 Detach(added);
                 return 0;
             }
@@ -164,9 +170,11 @@ namespace Services.NasbNiro.Production
                         : $"برای دستور کار {wo.Code} برنامه بازرسی و آزمون (ITP) ساخته نشد (قالب ITP در ماژول کیفیت پیدا نشد)؛ بدون ITP دستور تولید صادر نمی‌شود.");
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // the drafting of the orders stands; the release gate names the missing ITP
+                // the drafting of the orders stands; the release gate names the missing ITP (R1p review 19: the failure is logged and told to the planner instead of being swallowed)
+                _logger?.LogWarning(ex, "Drafting the ITP of the work orders of production orders {OrderIds} failed", string.Join(",", result.OrderIds));
+                result.Notes.Add("ساخت خودکار برنامه بازرسی و آزمون (ITP) با خطا روبه‌رو شد؛ آن را در ماژول کیفیت بسازید، بدون ITP دستور تولید صادر نمی‌شود.");
             }
         }
 

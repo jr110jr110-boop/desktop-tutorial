@@ -10,7 +10,7 @@ namespace WebApi.Controllers
 {
     // Production / shop floor (MES), release P1 part B. Role checks are in the services; rule violations answer 200 with success=false.
 
-    /// <summary>Daily cost posting of the time bookings (finance and the production manager).</summary>
+    /// <summary>Daily cost posting of the time bookings and the month-end run of the labour pools (finance, finance manager and the production manager).</summary>
     [ApiController]
     [Authorize]
     [Route("api/v1/production")]
@@ -34,11 +34,11 @@ namespace WebApi.Controllers
         [HttpGet("cost/postings")]
         public async Task<IActionResult> PostingsAsync([FromQuery] CostPostingQuery query, CancellationToken ct) => Ok((await _cost.GetPostingsAsync(query, ct)).ToPaginatedResultSafe());
 
-        /// <summary>R1p D1: posts the labour of protected groups (fewer than three payroll-rated employees) as the monthly aggregate of every ended month; idempotent.</summary>
+        /// <summary>R1p D1: the month-end run of the labour pools (finance manager, finance, production manager): closes every ended month, stores its pools (the rates of the following days) and posts the true-up (actual pool cost less what the days absorbed) as one company-level line per pool; idempotent.</summary>
         [HttpPost("cost/labour-month")]
         public async Task<IActionResult> LabourMonthAsync([FromBody] MfLabourMonthRunDto dto, CancellationToken ct) => Ok(await _labour.RunAsync(dto, ct));
 
-        /// <summary>R1p D1: the months already posted as monthly aggregates (a protected amount is hidden from readers outside PAYROLL, FINANCEMANAGER and CEO).</summary>
+        /// <summary>R1p D1: the months already closed with their pools (people, hours, pooled rate, absorbed, true-up); the amounts of a protected pool are hidden from readers outside PAYROLL, FINANCEMANAGER and CEO.</summary>
         [HttpGet("cost/labour-months")]
         public async Task<IActionResult> LabourMonthsAsync(CancellationToken ct) => Ok(await _labour.HistoryAsync(ct));
     }

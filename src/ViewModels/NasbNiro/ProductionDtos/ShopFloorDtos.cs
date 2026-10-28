@@ -61,6 +61,12 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? ScrapReasonCodeId { get; set; }
         public decimal ReworkQty { get; set; }
         public string Note { get; set; }
+
+        /// <summary>
+        /// R1p D6/D33: the serial numbers of the scrapped pieces, one per line, for a serial-tracked item when only a part of the order's planned serials is scrapped (the scrap of every planned piece needs none).
+        /// They must be among the planned serials of the order and as many as <see cref="ScrapQty"/>.
+        /// </summary>
+        public string ScrapSerials { get; set; }
     }
 
     public class FinishOperationDto : ReportQuantityDto
@@ -163,6 +169,11 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         public int? CorrectsBookingId { get; set; }
 
+        /// <summary>R1p D39: a correction that no production manager (other than its creator) has approved yet; it is in no cost run, hour report or OEE until then.</summary>
+        public bool CorrectionPending { get; set; }
+
+        public string CorrectionApprovedAtText { get; set; }
+
         /// <summary>Concurrency token for bookings/edit.</summary>
         public string RowVersion { get; set; }
     }
@@ -223,6 +234,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? ReasonCodeId { get; set; }
         public string Note { get; set; }
         public string Reason { get; set; }
+
+        /// <summary>R1p D6/D33: the serial numbers of the scrapped pieces, one per line (see <see cref="ReportQuantityDto.ScrapSerials"/>).</summary>
+        public string ScrapSerials { get; set; }
     }
 
     public class EditBookingDto
@@ -237,6 +251,23 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? ScrapReasonCodeId { get; set; }
         public decimal? ReworkQty { get; set; }
         public string Note { get; set; }
+        public string Reason { get; set; }
+        public string RowVersion { get; set; }
+
+        /// <summary>R1p D6/D33: the serial numbers of the pieces scrapped by the increase of <see cref="ScrapQty"/>, one per line (see <see cref="ReportQuantityDto.ScrapSerials"/>).</summary>
+        public string ScrapSerials { get; set; }
+    }
+
+    /// <summary>
+    /// R1p D39: the approval of a correction booking by a production manager other than its creator (a correction counts in no cost run, hour report or OEE before that), or its rejection with a reason.
+    /// </summary>
+    public class ApproveCorrectionDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>True (default) approves; false rejects the correction (a reason is then required) and removes it.</summary>
+        public bool Approve { get; set; } = true;
+
         public string Reason { get; set; }
         public string RowVersion { get; set; }
     }

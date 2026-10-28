@@ -77,7 +77,7 @@ namespace Services.NasbNiro.Finance
                         CostCenter = l.CostCenter, Description = l.Description,
                     }).ToList(),
                 }), query.PageNumber, query.PageSize, cancellationToken);
-            // R1p D1: a protected labour amount (the monthly aggregate forced out by the quarter-end cap) is read by PAYROLL, FINANCEMANAGER and CEO only; for everybody else the line, and so the event total, carries no amount
+            // R1p D1/D2: a protected labour amount (the quarter-end true-up of a pool behind which fewer than three payroll-rated people stood) is read by PAYROLL, FINANCEMANAGER and CEO only; for everybody else the line, and so the event total, carries no amount
             bool seesPayroll = Production.MfPrivacy.SeesPayroll(_user);
             foreach (AccountingEventDto e in page)
             {
@@ -196,6 +196,13 @@ namespace Services.NasbNiro.Finance
             List<AccountingEvent> events = await query.OrderBy(e => e.EventDate).ThenBy(e => e.Id).AsSplitQuery().ToListAsync(cancellationToken);
             if (events.Count == 0) return (null, null, "رویدادی برای ارسال به سپیدار نیست.");
 
+            // R1p D1/D2: a protected labour line goes out of the system only through PAYROLL, FINANCEMANAGER or CEO; the refusal names the period so that the finance manager exports exactly those events
+            if (!Production.MfPrivacy.SeesPayroll(_user))
+            {
+                string protectedRefusal = ProtectedLabourRefusal(events.Where(e => e.Lines.Any(l => l.LabourProtected)).Select(e => e.EventDate));
+                if (protectedRefusal != null) return (null, null, protectedRefusal);
+            }
+
             await _costing.EnsureAccountRolesAsync(cancellationToken);
             Dictionary<string, string> accounts = await _uow.Set<AccountMapping>().Where(m => m.IsActive)
                 .ToDictionaryAsync(m => m.Role, m => m.SepidarAccountCode, StringComparer.OrdinalIgnoreCase, cancellationToken);
@@ -270,6 +277,17 @@ namespace Services.NasbNiro.Finance
 
             /// <summary>R1p D1: how many of the summed entries are protected labour amounts (a plain integer sum, so the grouping holds SQL aggregates only; the flag is derived from it in memory).</summary>
             public int ProtectedEntries { get; set; }
+        }
+
+        /// <summary>
+        /// R1p D1/D2: the refusal when events with a protected labour line (the quarter-end true-up of a pool that fewer than three payroll-rated people stood behind) are exported by a role that may not read it.
+        /// It names the Persian months of those events so that the finance manager exports exactly them. Null when no event is protected.
+        /// </summary>
+        internal static string ProtectedLabourRefusal(IEnumerable<DateTime> protectedEventDates)
+        {
+            List<string> periods = protectedEventDates.Select(Production.MfLabourMonth.Of).Distinct().OrderBy(p => p).Select(Production.MfLabourMonth.Text).ToList();
+            return periods.Count == 0 ? null
+                : "رویدادهای انتخاب‌شده شامل مبلغ محرمانه‌ی دستمزد (تفاوت نرخ دستمزد، دوره‌ی " + string.Join("، ", periods) + ") است که فقط مدیر مالی، مدیرعامل یا حقوق و دستمزد می‌توانند صادر کنند؛ آن رویدادها را از انتخاب خارج کنید یا مدیر مالی صادر کند.";
         }
 
         internal static IQueryable<CostSumRow> CostSums(IQueryable<CostEntry> entries) =>

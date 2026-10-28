@@ -80,8 +80,8 @@ namespace Entities.Model.NasbNiro.Finance
         public int CreatedByUserId { get; set; }
 
         /// <summary>
-        /// R1p D1: a labour amount that could reveal one person's hourly pay (the monthly aggregate of a work order or cost centre that fewer than three payroll-rated employees worked on, posted only because the quarter-end cap forced it out).
-        /// Readers other than PAYROLL, FINANCEMANAGER and CEO see no amount for such an entry.
+        /// R1p D1/D2: a labour amount that could reveal the pay of one or two people: the quarter-end true-up of a pool that fewer than three payroll-rated employees were behind (posted company-wide, without work order),
+        /// or a per-work-order labour entry of the old per-group posting that the backfill flagged. Readers other than PAYROLL, FINANCEMANAGER and CEO see no amount for such an entry.
         /// </summary>
         public bool LabourProtected { get; set; }
     }
@@ -222,7 +222,7 @@ namespace Entities.Model.NasbNiro.Finance
         public string PartyType { get; set; }
         public int? PartyId { get; set; }
 
-        /// <summary>R1p D1: the debit or credit of this line is a protected labour amount (see <see cref="CostEntry.LabourProtected"/>); non-payroll readers see no amount.</summary>
+        /// <summary>R1p D1/D2: the debit or credit of this line is a protected labour amount (see <see cref="CostEntry.LabourProtected"/>); non-payroll readers see no amount. It is carried to the voucher line.</summary>
         public bool LabourProtected { get; set; }
 
         // optional foreign currency amount of the line

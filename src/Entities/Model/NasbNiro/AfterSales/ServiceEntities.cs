@@ -191,11 +191,20 @@ namespace Entities.Model.NasbNiro.AfterSales
         /// <summary>Set together with <see cref="WarrantyEventId"/> so the close is one save (the id exists only after it).</summary>
         public Finance.AccountingEvent WarrantyEvent { get; set; }
 
-        /// <summary>Protected labour (one or two payroll employees behind it) is not posted per order: the Persian month (yyyymm) whose monthly aggregate posting will carry it. Empty when the labour was posted with the order.</summary>
+        /// <summary>
+        /// R1p D2 (pooled average rate): the Persian month (yyyymm) whose service labour pool takes this order at the month-end true-up; set when the order is closed with hours of payroll-rated engineers
+        /// (the first month without a pool at or after the close). The monthly run moves it to a later month while the pool of its month is too small. Empty when no payroll-rated engineer worked on the order.
+        /// </summary>
         public int? LabourPendingPeriod { get; set; }
 
-        /// <summary>When the monthly aggregate posting took the labour of this order (empty while it is pending).</summary>
+        /// <summary>When the month-end true-up took this order into its pool (empty while it waits).</summary>
         public DateTimeOffset? LabourAggregatedAt { get; set; }
+
+        /// <summary>R1p D2: hours x the own hourly payroll cost of the payroll-rated engineers of the order, unrounded. It only goes into the cost total of a pool; no API shows it (on its own it is one person's pay).</summary>
+        public decimal? LabourPayrollCost { get; set; }
+
+        /// <summary>R1p D2: the part of <see cref="LabourAmount"/> absorbed for the payroll-rated engineers at the pooled average rate (the rest is hours of engineers without payroll at the standard rate).</summary>
+        public decimal? LabourPooledAmount { get; set; }
 
         // ----- billing (Billable)
         public decimal? BillableLabourRateRial { get; set; }

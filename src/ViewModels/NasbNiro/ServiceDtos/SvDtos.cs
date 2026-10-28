@@ -277,8 +277,12 @@ namespace ViewModels.NasbNiro.ServiceDtos
 
     public class SvEngineerDto
     {
+        /// <summary>0 and no name for a reader who is not SERVICE, payroll, the finance manager or the CEO (R1p D2), except for the engineer himself.</summary>
         public int EmployeeId { get; set; }
         public string Name { get; set; }
+
+        /// <summary>The person is not shown to this reader.</summary>
+        public bool EmployeeHidden { get; set; }
     }
 
     public class SvTaskDto
@@ -293,7 +297,7 @@ namespace ViewModels.NasbNiro.ServiceDtos
     {
         public int Id { get; set; }
 
-        /// <summary>0 and no name for a reader who is not payroll, the finance manager or the CEO (R1p D2), except for his own entries.</summary>
+        /// <summary>0 and no name for a reader who is not SERVICE, payroll, the finance manager or the CEO (R1p D2), except for his own entries.</summary>
         public int EmployeeId { get; set; }
         public string EmployeeName { get; set; }
 
@@ -387,18 +391,11 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public decimal WaitingHours { get; set; }
         public decimal TotalHours { get; set; }
 
-        // ----- cost: labour is hidden (null) when one person's hourly pay could be worked out from it, except for payroll, the finance manager and the CEO
+        // ----- cost: the labour is absorbed at the pooled average rate of the service month pool (R1p D2), so it is never one person's pay
         public decimal LabourHours { get; set; }
-        public decimal? LabourAmount { get; set; }
-        public bool LabourHidden { get; set; }
-
-        /// <summary>The labour is protected and waits for the monthly aggregate posting (it is not posted per order).</summary>
-        public bool LabourAggregatePending { get; set; }
-
-        /// <summary>The Persian month (yyyymm) whose aggregate posting carries the protected labour of this order (not a cost figure; empty when the labour was posted with the order).</summary>
-        public int? LabourAggregatePeriod { get; set; }
+        public decimal LabourAmount { get; set; }
         public decimal PartsAmount { get; set; }
-        public decimal? TotalCost { get; set; }
+        public decimal TotalCost { get; set; }
         public bool CostPosted { get; set; }
         public decimal? BillableLabourRateRial { get; set; }
         public int? InvoiceId { get; set; }
@@ -558,13 +555,13 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public DateTime? AsOf { get; set; }
     }
 
-    /// <summary>The monthly aggregate posting of protected labour: for the finance manager and the CEO only (the exact amounts are payroll-derived).</summary>
+    /// <summary>The month-end run of the service labour pool (R1p D2): closes the ended months and posts the true-up of the labour absorbed at the pooled average rate.</summary>
     public class SvLabourAggregateResultDto
     {
         public DateTime AsOf { get; set; }
         public List<SvLabourPeriodDto> Periods { get; set; } = new List<SvLabourPeriodDto>();
 
-        /// <summary>R1p D2: orders whose month total would show one person's pay (fewer than three payroll-rated employees behind it): they wait for the next month, up to the end of the quarter.</summary>
+        /// <summary>Orders whose month has fewer than three payroll-rated engineers behind it: nothing is published, they wait for the next month and join its pool (up to the end of the quarter).</summary>
         public int OrdersCarried { get; set; }
     }
 
@@ -573,20 +570,30 @@ namespace ViewModels.NasbNiro.ServiceDtos
         /// <summary>The Persian month as yyyymm.</summary>
         public int Period { get; set; }
         public string PeriodText { get; set; }
+
+        /// <summary>Orders the true-up took into the pool of the month.</summary>
         public int Orders { get; set; }
 
-        /// <summary>The labour in the accounting event (warranty and goodwill orders).</summary>
-        public decimal EventAmount { get; set; }
+        /// <summary>Distinct payroll-rated engineers in the pool.</summary>
+        public int People { get; set; }
 
-        /// <summary>The labour in the cost entries (every kind of order).</summary>
-        public decimal CostAmount { get; set; }
+        public decimal Hours { get; set; }
+
+        /// <summary>The pooled average rate (pool cost / pool hours) the orders closed from now on are absorbed at. Null for a protected pool.</summary>
+        public decimal? Rate { get; set; }
+
+        /// <summary>What the closed orders absorbed. Null for a protected pool and a reader outside PAYROLL, FINANCEMANAGER and CEO.</summary>
+        public decimal? Absorbed { get; set; }
+
+        /// <summary>Pool cost less absorbed: the one company-level true-up line of the month. Null like <see cref="Absorbed"/>.</summary>
+        public decimal? Variance { get; set; }
 
         public int? EventId { get; set; }
 
-        /// <summary>When the month was posted.</summary>
+        /// <summary>When the month was closed.</summary>
         public DateTimeOffset? PostedAt { get; set; }
 
-        /// <summary>R1p D2: the month total came from fewer than three payroll-rated employees and was posted at the end of the quarter; every reader but payroll, the finance manager and the CEO sees no amount in it.</summary>
+        /// <summary>The pool had fewer than three payroll-rated engineers and was closed by the quarter-end cap: every reader but payroll, the finance manager and the CEO sees no amount in it.</summary>
         public bool Protected { get; set; }
     }
 
@@ -712,16 +719,23 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public int UnitsOutOfWarranty { get; set; }
         public int UnitsToConfirm { get; set; }
 
-        /// <summary>Cost of the warranty orders closed since the first day of the Persian year (labour + parts); empty when it would show one person's pay.</summary>
-        public decimal? WarrantyCostYtd { get; set; }
+        /// <summary>Cost of the warranty orders closed since the first day of the Persian year (labour at the pooled average rate + parts).</summary>
+        public decimal WarrantyCostYtd { get; set; }
 
-        public bool WarrantyCostHidden { get; set; }
         public int WarrantyOrdersYtd { get; set; }
         public int OpenOrders { get; set; }
         public int OrdersWaitingClose { get; set; }
         public int GoodwillWaiting { get; set; }
         public int SurveysDrafted { get; set; }
+
+        /// <summary>Average score of the VERIFIED satisfaction surveys (R1p D25); empty when none is verified yet.</summary>
         public decimal? SurveyAverageScore { get; set; }
+
+        /// <summary>How many verified surveys the average is made of.</summary>
+        public int SurveysVerified { get; set; }
+
+        /// <summary>Answered surveys QA has not verified yet: they are in no average.</summary>
+        public int SurveysUnverified { get; set; }
     }
 
     public class SvKpiQuery
@@ -749,12 +763,11 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public decimal RunningHours { get; set; }
         public int Failures { get; set; }
 
-        /// <summary>Operating hours of the units divided by their breakdown requests; empty without a failure.</summary>
+        /// <summary>Operating hours of the units divided by their breakdown requests; empty without a failure. METER hours (the operating time the units' meters counted), not clock hours.</summary>
         public decimal? MtbfHours { get; set; }
 
         public int WarrantyOrders { get; set; }
-        public decimal? WarrantyCost { get; set; }
-        public bool WarrantyCostHidden { get; set; }
+        public decimal WarrantyCost { get; set; }
     }
 
     public class SvKpiDto
@@ -762,10 +775,13 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public DateTime AsOf { get; set; }
         public int RequestsCounted { get; set; }
 
-        /// <summary>Average hours from the receipt to the first response; empty without a response.</summary>
+        /// <summary>
+        /// Average CLOCK hours from the receipt to the first response; empty without a response. ★ design note: the clock does not stop while the request waits for the customer (the SLA, the list, the dashboard and
+        /// the CEO dashboard all measure it the same way); the company decides whether a "waiting for customer" status should pause it.
+        /// </summary>
         public decimal? FirstResponseHours { get; set; }
 
-        /// <summary>Average hours from the receipt to the resolution; empty without a resolved request.</summary>
+        /// <summary>Average CLOCK hours from the receipt to the resolution; empty without a resolved request (same note as <see cref="FirstResponseHours"/>).</summary>
         public decimal? ResolutionHours { get; set; }
 
         public List<SvRepeatFailureDto> RepeatFailures { get; set; } = new List<SvRepeatFailureDto>();
@@ -775,7 +791,7 @@ namespace ViewModels.NasbNiro.ServiceDtos
         /// <summary>R1p D36: the meter hours the ACTIVE units ran inside the period (the increase of the meter, not the whole life of the units).</summary>
         public decimal TotalRunningHours { get; set; }
 
-        /// <summary>The failures of the same units in the same period divided into <see cref="TotalRunningHours"/>.</summary>
+        /// <summary>The failures of the same units in the same period divided into <see cref="TotalRunningHours"/>: METER hours between failures (the repair time is clock time and is not part of it).</summary>
         public decimal? MtbfHours { get; set; }
 
         /// <summary>The breakdown requests of the units that went into the MTBF.</summary>

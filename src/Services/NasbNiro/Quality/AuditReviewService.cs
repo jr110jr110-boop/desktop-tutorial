@@ -280,12 +280,13 @@ namespace Services.NasbNiro.Quality
             int complaintsOpen = await _uow.Set<CustomerComplaint>().CountAsync(c => !c.Deleted && c.Status != ComplaintStatus.Closed, cancellationToken);
             int complaintsLate = await _uow.Set<CustomerComplaint>().CountAsync(c => !c.Deleted && c.Status != ComplaintStatus.Responded && c.Status != ComplaintStatus.Closed && c.ResponseDue < today, cancellationToken);
             drafts[ReviewInputCategory.CustomerSatisfaction] = $"شکایت مشتری در ۱۲ ماه گذشته: {complaints}؛ باز: {complaintsOpen}؛ پاسخ دیرکرد: {complaintsLate}";
-            // the average of the satisfaction surveys the customers answered in the same twelve months (ISO 9001 9.1.2)
-            List<decimal> surveyScores = await _uow.Set<Entities.Model.NasbNiro.AfterSales.SlSurvey>().Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.AfterSales.SlSurveyStatus.Answered && x.AverageScore != null && x.AnsweredAt >= new DateTimeOffset(from))
+            // the average of the satisfaction surveys the customers answered in the same twelve months (ISO 9001 9.1.2); R1p D25: verified answers only, the unverified ones are counted next to it
+            List<decimal> surveyScores = await _uow.Set<Entities.Model.NasbNiro.AfterSales.SlSurvey>().Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.AfterSales.SlSurveyStatus.Answered && x.Verified && x.AverageScore != null && x.AnsweredAt >= new DateTimeOffset(from))
                 .Select(x => x.AverageScore.Value).ToListAsync(cancellationToken);
-            drafts[ReviewInputCategory.CustomerSatisfaction] += surveyScores.Count == 0
-                ? "؛ نظرسنجی پاسخ‌داده‌شده‌ای در این دوره نیست"
-                : $"؛ میانگین امتیاز نظرسنجی مشتریان (از ۵): {Math.Round(surveyScores.Average(), 2, MidpointRounding.AwayFromZero).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} از {surveyScores.Count} نظرسنجی";
+            int surveysUnverified = await _uow.Set<Entities.Model.NasbNiro.AfterSales.SlSurvey>().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.AfterSales.SlSurveyStatus.Answered && !x.Verified && x.AnsweredAt >= new DateTimeOffset(from), cancellationToken);
+            drafts[ReviewInputCategory.CustomerSatisfaction] += (surveyScores.Count == 0
+                ? "؛ نظرسنجی تأییدشده‌ای در این دوره نیست"
+                : $"؛ میانگین امتیاز نظرسنجی‌های تأییدشده‌ی مشتریان (از ۵): {Math.Round(surveyScores.Average(), 2, MidpointRounding.AwayFromZero).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} از {surveyScores.Count} نظرسنجی") + $"؛ پاسخ‌های هنوز تأییدنشده: {surveysUnverified}";
 
             int pass = await _uow.Set<TestReport>().CountAsync(r => !r.Deleted && r.Status == TestReportStatus.Approved && r.Result == ReportResult.Pass && r.ReportDate >= from, cancellationToken);
             int fail = await _uow.Set<TestReport>().CountAsync(r => !r.Deleted && r.Result == ReportResult.Fail && r.ReportDate >= from, cancellationToken);

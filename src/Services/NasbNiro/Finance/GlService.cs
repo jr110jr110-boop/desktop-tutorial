@@ -436,25 +436,30 @@ namespace Services.NasbNiro.Finance
                 .ToDictionaryAsync(v => v.ReversesVoucherId.Value, v => v.Id, ct);
             Dictionary<int, int> attachmentCounts = await _uow.Set<FnVoucherAttachment>().Where(a => ids.Contains(a.VoucherId))
                 .GroupBy(a => a.VoucherId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+            // R1p D1/D2: protected labour lines go to PAYROLL, FINANCEMANAGER and CEO only; for anybody else they are left out of the lines and of the total (a debit and a credit of the same amount)
+            bool seesProtected = FnLabourMask.Sees(_user);
+            Dictionary<int, decimal> hiddenDebit = seesProtected ? new Dictionary<int, decimal>()
+                : await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.LabourProtected && ids.Contains(l.VoucherId))
+                    .GroupBy(l => l.VoucherId).Select(g => new { g.Key, Debit = g.Sum(x => x.Debit) }).ToDictionaryAsync(x => x.Key, x => x.Debit, ct);
             return rows.Select(v => new VoucherDto
             {
                 Id = v.Id, FiscalYearId = v.FiscalYearId, FiscalYearTitle = v.FiscalYear?.Title, Number = v.Number, TemporaryNumber = v.TemporaryNumber, Date = v.Date,
                 Type = v.Type, Status = v.Status, Description = v.Description, SourceType = v.SourceType, SourceId = v.SourceId, SourceNumber = v.SourceNumber,
                 AccountingEventId = v.AccountingEventId, ReversesVoucherId = v.ReversesVoucherId, ReverseNextPeriod = v.ReverseNextPeriod, AutoReversalVoucherId = v.AutoReversalVoucherId, ReversedByVoucherId = reversedBy.TryGetValue(v.Id, out int rb) ? rb : (int?)null,
-                LatePosting = v.LatePosting, TotalAmount = v.TotalAmount, CreatedByUserId = v.CreatedByUserId,
+                LatePosting = v.LatePosting, TotalAmount = v.TotalAmount - (hiddenDebit.TryGetValue(v.Id, out decimal hd) ? hd : 0), LabourHidden = hiddenDebit.ContainsKey(v.Id), CreatedByUserId = v.CreatedByUserId,
                 LegalEntityId = v.FiscalYear == null ? 0 : v.FiscalYear.LegalEntityId, IsImported = v.IsImported,
                 CeoApprovedByUserId = v.CeoApprovedByUserId, CeoApprovedAt = v.CeoApprovedAt,
                 AttachmentCount = attachmentCounts.TryGetValue(v.Id, out int ac) ? ac : 0,
                 CreatorName = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId), CreatedAt = v.CreatedAt,
                 CheckedByName = v.CheckedByUserId == 0 ? "سیستم" : names.Name(v.CheckedByUserId), CheckedAt = v.CheckedAt,
                 FinalizedByName = names.Name(v.FinalizedByUserId), FinalizedAt = v.FinalizedAt,
-                Lines = withLines ? v.Lines.OrderBy(l => l.RowNumber).Select(l => new VoucherLineDto
+                Lines = withLines ? v.Lines.Where(l => seesProtected || !l.LabourProtected).OrderBy(l => l.RowNumber).Select(l => new VoucherLineDto
                 {
                     RowNumber = l.RowNumber, AccountId = l.AccountId, AccountCode = l.Account?.Code, AccountTitle = l.Account?.Title,
                     Detail1Id = l.Detail1Id, Detail1Code = l.Detail1?.Code, Detail1Title = l.Detail1?.Title,
                     Detail2Id = l.Detail2Id, Detail2Code = l.Detail2?.Code, Detail2Title = l.Detail2?.Title,
                     Debit = l.Debit, Credit = l.Credit, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity,
-                    Description = l.Description, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole,
+                    Description = l.Description, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole, LabourProtected = l.LabourProtected,
                 }).ToList() : new List<VoucherLineDto>(),
             }).ToList();
         }
@@ -729,7 +734,7 @@ namespace Services.NasbNiro.Finance
                 {
                     RowNumber = l.RowNumber, AccountId = l.AccountId, Detail1Id = l.Detail1Id, Detail2Id = l.Detail2Id, Debit = l.Credit, Credit = l.Debit,
                     CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity, Description = l.Description,
-                    WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole,
+                    WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole, LabourProtected = l.LabourProtected,
                 }).ToList(),
             };
             _uow.Set<FnVoucher>().Add(reversal);
