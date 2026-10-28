@@ -181,7 +181,10 @@ namespace Entities.Model.NasbNiro.AfterSales
 
         // ----- cost (posted when the order is closed)
         public decimal LabourHours { get; set; }
+
+        /// <summary>R1p D2 (round 3): hours x the STANDARD rate of the after-sales labour work centre, for every engineer alike (an order closed by the earlier release holds the engineers' own pay here; see SvLegacyLabour).</summary>
         public decimal LabourAmount { get; set; }
+
         public int LabourEmployeeCount { get; set; }
         public int LabourPayrollEmployeeCount { get; set; }
         public decimal PartsAmount { get; set; }
@@ -192,18 +195,22 @@ namespace Entities.Model.NasbNiro.AfterSales
         public Finance.AccountingEvent WarrantyEvent { get; set; }
 
         /// <summary>
-        /// R1p D2 (pooled average rate): the Persian month (yyyymm) whose service labour pool takes this order at the month-end true-up; set when the order is closed with hours of payroll-rated engineers
-        /// (the first month without a pool at or after the close). The monthly run moves it to a later month while the pool of its month is too small. Empty when no payroll-rated engineer worked on the order.
+        /// R1p D2 (standard rate, round 3): the Persian month (yyyymm) whose variance takes this order at the month-end run; set when the order is closed with hours of payroll-rated engineers (the first month that is not closed
+        /// at or after the close). The monthly run moves it to a later month while the month does not pass the publication gate. Empty when no payroll-rated engineer worked on the order.
         /// </summary>
         public int? LabourPendingPeriod { get; set; }
 
-        /// <summary>When the month-end true-up took this order into its pool (empty while it waits).</summary>
+        /// <summary>When the month-end run took this order into the pool of its month (empty while it waits).</summary>
         public DateTimeOffset? LabourAggregatedAt { get; set; }
 
         /// <summary>R1p D2: hours x the own hourly payroll cost of the payroll-rated engineers of the order, unrounded. It only goes into the cost total of a pool; no API shows it (on its own it is one person's pay).</summary>
         public decimal? LabourPayrollCost { get; set; }
 
-        /// <summary>R1p D2: the part of <see cref="LabourAmount"/> absorbed for the payroll-rated engineers at the pooled average rate (the rest is hours of engineers without payroll at the standard rate).</summary>
+        /// <summary>
+        /// R1p D2: the part of <see cref="LabourAmount"/> absorbed for the payroll-rated engineers at the standard rate (the rest is the hours of engineers without a payslip, at the same standard rate). It is the amount the pool takes
+        /// off its cost. Positive on every order of this release that has payroll-rated hours; empty or not positive only on an order of the earlier release (see SvLegacyLabour); a waiting order the backfill converted holds minus
+        /// the standard-rate part of its labour here, so that the variance of its month carries that part too.
+        /// </summary>
         public decimal? LabourPooledAmount { get; set; }
 
         // ----- billing (Billable)

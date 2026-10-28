@@ -293,6 +293,12 @@ namespace Entities.Model.NasbNiro.Production
         public bool IsRework { get; set; }
         public int? ReworkOfOperationId { get; set; }
 
+        /// <summary>
+        /// R1p L9 (round 3): the non-conformance reports whose rework this operation does (<c>NonConformance.ReworkOperationId</c>, a column of the quality module). The operation and the link are stored by ONE save: the id of the
+        /// operation exists only after it, and the relationship fills it in. Nothing reads this collection.
+        /// </summary>
+        public ICollection<NonConformance> ReworkedNcrs { get; set; } = new List<NonConformance>();
+
         public string SkipReason { get; set; }
         public DateTimeOffset? StartedAt { get; set; }
         public DateTimeOffset? FinishedAt { get; set; }
@@ -375,9 +381,9 @@ namespace Entities.Model.NasbNiro.Production
         public DateTimeOffset? CostPostedAt { get; set; }
 
         /// <summary>
-        /// R1p D1 (pooled average rate): the Persian month (yyyymm) whose labour pool takes this booking at the month-end true-up. The daily cost posting sets it for the booking of a payroll-rated employee
-        /// (a booking paid by a work-centre standard rate is final at posting and has none; a late booking of a month that is already closed goes to the next open month). The monthly run moves it to a later month
-        /// while the pool of its month is too small (fewer than three payroll-rated employees).
+        /// R1p D1 (standard rate, round 3): the Persian month (yyyymm) whose variance includes this booking at the month-end run. The daily cost posting sets it for the booking of a payroll-rated employee (an employee without an
+        /// approved payslip is absorbed at the same standard rate and has no variance, so no month; a late booking of a month that is already closed goes to the next open month). The monthly run moves it to a later month
+        /// while the month does not pass the publication gate (too few payroll-rated people, or one or two of them dominate the hours).
         /// </summary>
         public int? LabourPendingPeriod { get; set; }
 
@@ -386,13 +392,13 @@ namespace Entities.Model.NasbNiro.Production
         /// </summary>
         public decimal? PayrollCost { get; set; }
 
-        /// <summary>R1p D1: the labour the daily cost posting absorbed for this booking: hours x the pooled average rate (the last closed month of its pool, else the standard rate), rounded to a whole rial. The true-up of the month is pool cost less the sum of these.</summary>
+        /// <summary>R1p D1: the labour the daily cost posting absorbed for this booking: hours x the STANDARD rate of the work centre (else Production:StandardLabourRate), rounded to a whole rial. The variance of the month is the payroll cost of its pool less the sum of these.</summary>
         public decimal? AbsorbedLabour { get; set; }
 
         /// <summary>R1p D1: the hourly rate of the employee came from an approved payslip (the employee counts as payroll-rated in the pool test).</summary>
         public bool RateFromPayroll { get; set; }
 
-        /// <summary>R1p D1: the month-end true-up took this booking into its pool.</summary>
+        /// <summary>R1p D1: the month-end run took this booking into the pool of its month.</summary>
         public DateTimeOffset? LabourAggregatedAt { get; set; }
 
         /// <summary>R1p D39: an extra booking the shop supervisor added to an operation of a completed order, with a reason (bookings of a completed order are never edited).</summary>
@@ -458,7 +464,10 @@ namespace Entities.Model.NasbNiro.Production
         /// <summary>Distinct employees among them whose labour rate came from payroll.</summary>
         public int PayrollEmployeeCount { get; set; }
 
-        /// <summary>Kept for the database (it exists since release P1). Since R1p labour is absorbed at a pooled average rate, so no run total shows one person's pay: always false.</summary>
+        /// <summary>
+        /// Written by the earlier release (since P1) when a protected group (one or two payroll-rated people) stood behind a day of labour at the employees' own pay. Since R1p labour is absorbed at the STANDARD rate, so no run
+        /// total shows one person's pay: a run of this release is always false. The flag on an old run is the marker the read side keys on (see MfLegacyLabour).
+        /// </summary>
         public bool LabourProtected { get; set; }
 
         public int? AccountingEventId { get; set; }
@@ -499,11 +508,11 @@ namespace Entities.Model.NasbNiro.Production
     }
 
     /// <summary>
-    /// R1p D1/D2: one labour pool of one Persian month and its month-end true-up. Labour is absorbed into work orders at a pooled average rate (pool cost / pool hours), so no published amount is one person's pay:
-    /// the pool is the payroll-rated employees with hours in the month, per cost centre when that cost centre has at least three of them, else the company pool of the remaining people, else nothing is published and the
-    /// month is carried (at a Persian quarter end the carry is posted as one company-wide line flagged protected). The month-end run stores the pool here (people, hours, payroll cost, what the days absorbed, the rate for the
-    /// next month) and posts the true-up (cost less absorbed) as ONE line without work order, WBS node or day. The daily cost posting reads the newest unprotected rate of the pool as its absorption rate.
-    /// A row of a protected pool carries no rate and is read only by PAYROLL, FINANCEMANAGER and CEO.
+    /// R1p D1/D2 (round 3): the labour pool of one Persian month of one module (production or service) and its month-end variance. Labour is absorbed into work orders at a STANDARD rate that finance sets, so no published
+    /// amount is one person's pay. The pool is the payroll-rated employees (an approved payslip exists) with hours in the month: its cost is their own payroll cost, its variance is that cost less what their hours absorbed
+    /// at the standard rate. One row per module and month (<see cref="PoolKey"/> is always "*"). The variance is posted as ONE company-level line without work order, WBS node or day when the pool passes the publication
+    /// gate (at least Production:PoolMinPeople people, nobody over Production:PoolMaxShare of the hours, the two largest over Production:PoolMaxTopTwoShare); a month that fails it is carried into the next, and at a
+    /// Persian quarter end the accumulated variance is posted as one line flagged protected. The row is read only by PAYROLL, FINANCEMANAGER and CEO (the other readers get the month, its state and the absorbed total).
     /// </summary>
     public class MfLabourPool
     {
@@ -513,10 +522,10 @@ namespace Entities.Model.NasbNiro.Production
         /// <summary>The Persian month as yyyymm.</summary>
         public int Period { get; set; }
 
-        /// <summary>The cost centre code of the pool, or "*" for the company pool.</summary>
+        /// <summary>Always "*" (one pool per module and month). Kept as part of the unique index (Module, Period, PoolKey).</summary>
         public string PoolKey { get; set; }
 
-        /// <summary>Distinct payroll-rated employees with hours in the pool (3 or more unless the pool is protected).</summary>
+        /// <summary>Distinct payroll-rated employees with hours in the pool (at least the gate's minimum unless the pool is protected).</summary>
         public int People { get; set; }
 
         public decimal Hours { get; set; }
@@ -524,19 +533,19 @@ namespace Entities.Model.NasbNiro.Production
         /// <summary>The labour cost of the pool from payroll (the sum of the own hourly cost x hours of its people): the only payroll figure that leaves the payroll boundary.</summary>
         public decimal Cost { get; set; }
 
-        /// <summary>What the days (production) or the closed orders (service) absorbed for the pool at the rate in force.</summary>
+        /// <summary>What the days (production) or the closed orders (service) absorbed for the people of the pool at the standard rate.</summary>
         public decimal Absorbed { get; set; }
 
         /// <summary>Cost less absorbed: the one company-level line of the month.</summary>
         public decimal Variance { get; set; }
 
-        /// <summary>Cost / hours, four decimals: the absorption rate of the next days. Null for a protected pool.</summary>
+        /// <summary>Cost / hours, four decimals: the actual average hourly payroll cost of the pool, shown to the payroll readers only. Null for a protected pool.</summary>
         public decimal? Rate { get; set; }
 
-        /// <summary>Posted by the quarter-end cap although fewer than three payroll-rated employees are behind it (flagged on the cost entry, the event line and the voucher line).</summary>
+        /// <summary>Posted by the quarter-end cap although the gate was not passed (flagged on the cost entry, the event line and the voucher line).</summary>
         public bool Protected { get; set; }
 
-        /// <summary>Bookings (production) or orders (service) the true-up took.</summary>
+        /// <summary>Bookings (production) or orders (service) the month-end run took.</summary>
         public int Items { get; set; }
 
         public int? AccountingEventId { get; set; }

@@ -416,7 +416,8 @@ namespace Services.NasbNiro.Finance
 
         private async Task<ParallelRunDto> RunDtoAsync(FnParallelRun run, bool withDifferences, CancellationToken ct)
         {
-            string title = await _uow.Set<FnPeriod>().AsNoTracking().Where(p => p.Id == run.PeriodId).Select(p => p.Title).FirstOrDefaultAsync(ct);
+            var period = await _uow.Set<FnPeriod>().AsNoTracking().Where(p => p.Id == run.PeriodId).Select(p => new { p.Title, p.FiscalYearId, p.StartDate, p.EndDate }).FirstOrDefaultAsync(ct);
+            string title = period?.Title;
             var dto = new ParallelRunDto
             {
                 Id = run.Id, LegalEntityId = run.LegalEntityId, PeriodId = run.PeriodId, PeriodTitle = title, Rows = run.Rows, Matched = run.Matched, PmisOnly = run.PmisOnly,
@@ -425,6 +426,8 @@ namespace Services.NasbNiro.Finance
             };
             if (withDifferences)
             {
+                // R1p C1: the comparison never contains the confidential labour lines (see CompareAsync); the screen says so when the period has some, because Sepidar holds them and its labour accounts then differ
+                if (period != null) dto.LabourHidden = await _uow.Set<FnVoucherLine>().AsNoTracking().AnyAsync(l => l.LabourProtected && l.Voucher.FiscalYearId == period.FiscalYearId && l.Voucher.Date >= period.StartDate && l.Voucher.Date <= period.EndDate, ct);
                 dto.Differences = await _uow.Set<FnParallelDifference>().AsNoTracking().Where(d => d.RunId == run.Id).OrderBy(d => d.Id)
                     .Select(d => new ParallelDifferenceDto
                     {
@@ -445,7 +448,8 @@ namespace Services.NasbNiro.Finance
             Dictionary<string, string> map = await SepidarMapAsync(ct);
 
             // PMIS side: the period's movement per (account, first detail)
-            IQueryable<FnVoucherLine> lq = _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.Voucher.FiscalYearId == p.FiscalYearId && l.Voucher.Date >= p.StartDate && l.Voucher.Date <= p.EndDate);
+            // R1p C1: the comparison is stored and read by every finance reader, so it is made from the lines everybody may see, whoever runs it (the confidential labour lines are left out)
+            IQueryable<FnVoucherLine> lq = FnLabourMask.Visible(_uow.Set<FnVoucherLine>().AsNoTracking(), false).Where(l => l.Voucher.FiscalYearId == p.FiscalYearId && l.Voucher.Date >= p.StartDate && l.Voucher.Date <= p.EndDate);
             if (!dto.IncludeDraft) lq = lq.Where(l => l.Voucher.Status == FnVoucherStatus.Final);
             var pmisRows = await lq.GroupBy(l => new { l.AccountId, l.Detail1Id })
                 .Select(g => new { g.Key.AccountId, g.Key.Detail1Id, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) }).ToListAsync(ct);

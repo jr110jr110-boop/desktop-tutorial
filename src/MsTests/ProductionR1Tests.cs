@@ -664,7 +664,7 @@ namespace MsTests
             Has(typeof(SvServiceOrder), "LabourPendingPeriod", "LabourAggregatedAt", "LabourPayrollCost", "LabourPooledAmount");
             Precision(typeof(MfTimeBooking), "PayrollCost", 28, 10);
             Precision(typeof(MfTimeBooking), "AbsorbedLabour", 18, 2);
-            Precision(typeof(MfLabourPool), "Hours", 14, 2);
+            Precision(typeof(MfLabourPool), "Hours", 18, 4);
             Precision(typeof(MfLabourPool), "Cost", 18, 2);
             Precision(typeof(MfLabourPool), "Absorbed", 18, 2);
             Precision(typeof(MfLabourPool), "Variance", 18, 2);
@@ -694,7 +694,13 @@ namespace MsTests
             Assert.IsTrue(HasForeignKey(typeof(SlSurvey), "ComplaintId"));
             Assert.AreEqual(true, model.FindEntityType(typeof(MfWorkCenter)).FindProperty("RequiresMachine").GetDefaultValue(), "existing work centres get true too");
             Assert.IsTrue(model.FindEntityType(typeof(SlSurvey)).GetIndexes().Any(i => i.IsUnique && i.Properties.Count == 1 && i.Properties[0].Name == "ComplaintId" && i.GetFilter() != null), "one complaint draft per survey");
-            Assert.IsTrue(model.FindEntityType(typeof(MfTimeBooking)).GetIndexes().Any(i => i.Properties.Count == 1 && i.Properties[0].Name == "LabourPendingPeriod" && i.GetFilter() != null));
+            // the month-end run reads the bookings and the orders that wait: the filtered index holds only the rows with a pending month AND not yet pooled (R1p round 3, L11)
+            foreach (Type waiting in new[] { typeof(MfTimeBooking), typeof(SvServiceOrder) })
+            {
+                var pendingIndex = model.FindEntityType(waiting).GetIndexes().Single(i => i.Properties.Count == 1 && i.Properties[0].Name == "LabourPendingPeriod");
+                StringAssert.Contains(pendingIndex.GetFilter(), "[LabourPendingPeriod] IS NOT NULL", waiting.Name);
+                StringAssert.Contains(pendingIndex.GetFilter(), "[LabourAggregatedAt] IS NULL", waiting.Name);
+            }
         }
     }
 }

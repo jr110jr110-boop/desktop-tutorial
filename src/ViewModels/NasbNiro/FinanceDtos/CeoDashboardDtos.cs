@@ -94,8 +94,11 @@ namespace ViewModels.NasbNiro.FinanceDtos
         /// <summary>Open requests whose response or resolution time is past.</summary>
         public int ServiceSlaBreaches { get; set; }
         public int ServiceUnitsInWarranty { get; set; }
-        /// <summary>Warranty cost of the closed warranty orders since the first day of the Persian year (labour at the pooled average rate + parts).</summary>
-        public decimal ServiceWarrantyCostYtd { get; set; }
+        /// <summary>Warranty cost of the closed warranty orders since the first day of the Persian year (labour at the standard rate + parts).</summary>
+        public decimal? ServiceWarrantyCostYtd { get; set; }
+
+        /// <summary>True when the warranty cost is empty because an order closed by an earlier release at the engineers' own pay (one or two of them with a payslip) is among them and the reader is not payroll, finance manager or CEO.</summary>
+        public bool ServiceWarrantyCostHidden { get; set; }
         public int ServiceGoodwillWaiting { get; set; }
 
         /// <summary>Average score of the VERIFIED satisfaction surveys (R1p D25); empty when none is verified yet.</summary>

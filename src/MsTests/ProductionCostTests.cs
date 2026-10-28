@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Production;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -14,8 +15,9 @@ using Services.NasbNiro.Production;
 namespace MsTests
 {
     /// <summary>
-    /// The pure rules of the production cost posting: the payroll hourly rate, the POOLED AVERAGE LABOUR RATE (R1p review items 1, 2 and 4: a pool per cost centre, the company pool, the carry and the flagged quarter-end line),
-    /// the rate the days absorb at, the month-end true-up lines, the voucher mask and the refusal of the Sepidar export, and the payroll/production labour hand-over. Every figure is worked out by hand in the test.
+    /// The pure rules of the production cost posting: the payroll hourly rate, the STANDARD RATE the days absorb at, the month's pool and its publication gate (R1p round 3: at least five payroll-rated people, nobody over half
+    /// of the hours, the two largest over four fifths; otherwise carried, and flagged at the quarter end), the month-end variance lines, the voucher mask and the refusal of the Sepidar export, the masks of the rows of the
+    /// earlier release, and the payroll/production labour hand-over. Every figure is worked out by hand in the test.
     /// </summary>
     [TestClass]
     public class ProductionCostTests
@@ -38,27 +40,30 @@ namespace MsTests
             Assert.AreEqual(215384.62m, System.Math.Round(MfCostEngine.HourlyRate(44800000m, 208m), 2));
         }
 
-        // ------------------------------------------------------------------------------------------ the pools of a month (review items 1, 2, 4)
+        // ------------------------------------------------------------------------------------------ the month of a module: the pool, the gate, the carry (round 3)
 
-        /// <summary>One booking: one payroll-rated employee, his hours, what payroll says they cost (hours x his own hourly cost, unrounded) and what the days absorbed for them.</summary>
-        private static MfPoolItem Item(int id, string centre, int employee, decimal hours, decimal cost, decimal absorbed) =>
-            new MfPoolItem { Id = id, CostCenter = centre, Employees = new HashSet<int> { employee }, Hours = hours, Cost = cost, Absorbed = absorbed };
+        /// <summary>One booking: one payroll-rated employee, his hours, what payroll says they cost (hours x his own hourly cost, unrounded) and what the day absorbed for them at the STANDARD rate.</summary>
+        private static MfPoolItem Item(int id, int employee, decimal hours, decimal cost, decimal absorbed) => MfPoolItem.Of(id, employee, hours, cost, absorbed);
 
-        // The month used by the pool tests. Employee: hours / cost (his own hourly cost x hours) / absorbed by the days.
-        //   CNC:    e1 8 h / 800,000 / 700,000    e2 4 h / 480,000 / 350,000    e3 6 h / 540,000 / 525,000
-        //   WELD:   e4 5 h / 650,000 / 437,500    e5 5 h / 500,000 / 437,500    e6 10 h / 1,100,000 / 1,125,000
-        //   PAINT:  e7 2 h / 160,000 / 150,000
-        //   ASM:    e8 3 h / 270,000 / 250,000    e9 5 h / 400,000 / 400,000
-        private static MfPoolItem[] Cnc() => new[] { Item(1, "CNC", 1, 8m, 800000m, 700000m), Item(2, "CNC", 2, 4m, 480000m, 350000m), Item(3, "CNC", 3, 6m, 540000m, 525000m) };
-        private static MfPoolItem[] Weld() => new[] { Item(4, "WELD", 4, 5m, 650000m, 437500m), Item(5, "WELD", 5, 5m, 500000m, 437500m), Item(6, "WELD", 6, 10m, 1100000m, 1125000m) };
-        private static MfPoolItem Paint() => Item(7, "PAINT", 7, 2m, 160000m, 150000m);
-        private static MfPoolItem[] Assembly() => new[] { Item(8, "ASM", 8, 3m, 270000m, 250000m), Item(9, "ASM", 9, 5m, 400000m, 400000m) };
+        // The month used by the pool tests: the standard rate is 100,000 a hour, six payroll-rated people.
+        //   person: hours / cost (hours x his own hourly cost) / absorbed (hours x 100,000)
+        //   e1  8 h /   800,000 /   800,000      e2  6 h /   660,000 /   600,000      e3  6 h /   540,000 /   600,000
+        //   e4  5 h /   600,000 /   500,000      e5  5 h /   450,000 /   500,000      e6  4 h /   520,000 /   400,000
+        //   together 34 h / 3,570,000 / 3,400,000: variance 170,000 (under-absorbed), actual average rate 105,000
+        private static MfPoolItem[] SixPeople() => new[]
+        {
+            Item(1, 1, 8m, 800000m, 800000m), Item(2, 2, 6m, 660000m, 600000m), Item(3, 3, 6m, 540000m, 600000m),
+            Item(4, 4, 5m, 600000m, 500000m), Item(5, 5, 5m, 450000m, 500000m), Item(6, 6, 4m, 520000m, 400000m),
+        };
+
+        /// <summary>Items of people with the given hours and nothing else (cost and absorbed are not looked at by the gate).</summary>
+        private static MfPoolItem[] People(params decimal[] hours) => hours.Select((h, i) => Item(i + 1, i + 1, h, 0m, 0m)).ToArray();
 
         [TestMethod]
-        public void The_Pooled_Average_Rate_Is_The_Pool_Cost_Divided_By_The_Pool_Hours_To_Four_Decimals()
+        public void The_Actual_Average_Rate_Is_The_Pool_Cost_Divided_By_The_Pool_Hours_To_Four_Decimals()
         {
+            Assert.AreEqual(105000m, MfLabourPooling.Rate(3570000m, 34m), "3,570,000 / 34 h");
             Assert.AreEqual(101111.1111m, MfLabourPooling.Rate(1820000m, 18m), "1,820,000 / 18 h");
-            Assert.AreEqual(112500m, MfLabourPooling.Rate(2250000m, 20m));
             Assert.AreEqual(133.6m, MfLabourPooling.Rate(601.2m, 4.5m), "the cost is not rounded before the division");
             Assert.AreEqual(0m, MfLabourPooling.Rate(0m, 5m));
             Assert.IsNull(MfLabourPooling.Rate(1000m, 0m), "a pool without hours has no rate");
@@ -66,8 +71,9 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void A_Day_Absorbs_The_Booked_Hours_Times_The_Pool_Rate_To_The_Whole_Rial_Half_Away_From_Zero()
+        public void A_Day_Absorbs_The_Booked_Hours_Times_The_Standard_Rate_To_The_Whole_Rial_Half_Away_From_Zero()
         {
+            Assert.AreEqual(800000m, MfLabourRates.Absorbed(8m, 100000m), "8 h x 100,000");
             Assert.AreEqual(808889m, MfLabourRates.Absorbed(8m, 101111.1111m), "8 x 101,111.1111 = 808,888.8888");
             Assert.AreEqual(606667m, MfLabourRates.Absorbed(6m, 101111.1111m), "6 x 101,111.1111 = 606,666.6666");
             Assert.AreEqual(8m, MfLabourRates.Absorbed(2.5m, 3m), "7.5 rounds up");
@@ -76,214 +82,205 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void Each_Cost_Centre_With_Three_People_Is_Its_Own_Pool_And_The_Month_End_Variance_Is_Cost_Less_Absorbed()
+        public void The_Gate_Needs_Five_People_With_Hours()
         {
-            MfPoolPlan plan = MfLabourPooling.Plan(Cnc().Concat(Weld()), 140505, MfLabourMonth.DefaultCostCenter);
+            var defaults = new MfLabourGateSettings();
+            Assert.AreEqual((5, 0.50m, 0.80m), (defaults.MinPeople, defaults.MaxShare, defaults.MaxTopTwoShare), "★ the defaults");
+
+            MfGateResult six = MfLabourPooling.Gate(SixPeople(), defaults);
+            Assert.AreEqual((6, 34m, true, false, true), (six.People, six.Hours, six.EnoughPeople, six.Dominated, six.Passed));
+            Assert.AreEqual(8m / 34m, six.LargestShare);
+            Assert.AreEqual(14m / 34m, six.TopTwoShare, "8 + 6 of 34");
+
+            MfGateResult five = MfLabourPooling.Gate(SixPeople().Take(5), defaults);
+            Assert.AreEqual((5, true, true), (five.People, five.EnoughPeople, five.Passed), "exactly the minimum is enough");
+            MfGateResult four = MfLabourPooling.Gate(SixPeople().Take(4), defaults);
+            Assert.AreEqual((4, false, false), (four.People, four.EnoughPeople, four.Passed), "four people are too few: the old minimum of three is gone");
+
+            // a person with no hours is not a person of the pool; one person on several bookings counts once and his hours add up
+            var items = SixPeople().Take(4).Concat(new[] { Item(7, 7, 0m, 0m, 0m), Item(8, 1, 2m, 0m, 0m) }).ToArray();
+            Assert.AreEqual(4, MfLabourPooling.People(items));
+            Assert.AreEqual(4, MfLabourPooling.Gate(items, defaults).People);
+            Assert.AreEqual(27m, MfLabourPooling.Gate(items, defaults).Hours, "8 + 2 + 6 + 6 + 5 h");
+
+            // the settings can ask for more people, never for fewer than the three of the earlier releases
+            Assert.IsTrue(MfLabourPooling.Gate(SixPeople(), new MfLabourGateSettings { MinPeople = 6 }).Passed);
+            Assert.IsFalse(MfLabourPooling.Gate(SixPeople(), new MfLabourGateSettings { MinPeople = 7 }).Passed);
+        }
+
+        [TestMethod]
+        public void The_Gate_Refuses_A_Pool_Where_One_Person_Has_Over_Half_Or_Two_People_Over_Four_Fifths_Of_The_Hours()
+        {
+            var settings = new MfLabourGateSettings();
+
+            // 17 of 32 h: over half
+            MfGateResult one = MfLabourPooling.Gate(People(17m, 3m, 3m, 3m, 3m, 3m), settings);
+            Assert.IsTrue(one.Dominated);
+            Assert.IsTrue(one.EnoughPeople);
+            Assert.IsFalse(one.Passed);
+
+            // exactly half (16 of 32 h) is allowed; the two largest are 20 of 32 = 0.625
+            MfGateResult half = MfLabourPooling.Gate(People(16m, 4m, 3m, 3m, 3m, 3m), settings);
+            Assert.AreEqual(0.5m, half.LargestShare);
+            Assert.AreEqual(0.625m, half.TopTwoShare);
+            Assert.IsFalse(half.Dominated, "the boundary is exact: at most half");
+            Assert.IsTrue(half.Passed);
+
+            // 13 + 13 of 32 h = 0.8125: two people over four fifths (nobody over half)
+            MfGateResult two = MfLabourPooling.Gate(People(13m, 13m, 2m, 2m, 1m, 1m), settings);
+            Assert.IsTrue(two.LargestShare < 0.5m);
+            Assert.IsTrue(two.Dominated);
+            Assert.IsFalse(two.Passed);
+
+            // exactly four fifths (8 + 8 of 20 h) is allowed
+            MfGateResult fifths = MfLabourPooling.Gate(People(8m, 8m, 2m, 1m, 1m), settings);
+            Assert.AreEqual(0.8m, fifths.TopTwoShare);
+            Assert.IsFalse(fifths.Dominated);
+            Assert.IsTrue(fifths.Passed);
+
+            // 8.5 + 8.5 of 20 h = 0.85
+            Assert.IsTrue(MfLabourPooling.Gate(People(8.5m, 8.5m, 1m, 1m, 1m), settings).Dominated);
+
+            // one person on two bookings is one person: 10 + 7 h of 32 is 17 h
+            var split = new[] { Item(1, 1, 10m, 0m, 0m), Item(2, 1, 7m, 0m, 0m), Item(3, 2, 3m, 0m, 0m), Item(4, 3, 3m, 0m, 0m), Item(5, 4, 3m, 0m, 0m), Item(6, 5, 3m, 0m, 0m), Item(7, 6, 3m, 0m, 0m) };
+            Assert.AreEqual(6, MfLabourPooling.People(split));
+            Assert.IsTrue(MfLabourPooling.Gate(split, settings).Dominated, "the hours of one person add up before the share is worked out");
+
+            // the shares are settings too
+            Assert.IsTrue(MfLabourPooling.Gate(People(17m, 3m, 3m, 3m, 3m, 3m), new MfLabourGateSettings { MaxShare = 0.60m, MaxTopTwoShare = 0.90m }).Passed);
+            Assert.IsFalse(MfLabourPooling.Gate(People(8m, 6m, 6m, 5m, 5m, 4m), new MfLabourGateSettings { MaxShare = 0.20m }).Passed);
+        }
+
+        [TestMethod]
+        public void The_Gate_Settings_Are_Read_From_The_Configuration_With_A_Floor_And_Defaults_For_Unusable_Values()
+        {
+            MfLabourGateSettings Read(params (string Key, string Value)[] values) =>
+                MfLabourGateSettings.Read(new ConfigurationBuilder().AddInMemoryCollection(values.ToDictionary(v => v.Key, v => v.Value)).Build());
+
+            Assert.AreEqual("Production:PoolMinPeople", MfLabourGateSettings.MinPeopleKey);
+            Assert.AreEqual("Production:PoolMaxShare", MfLabourGateSettings.MaxShareKey);
+            Assert.AreEqual("Production:PoolMaxTopTwoShare", MfLabourGateSettings.MaxTopTwoShareKey);
+
+            var none = MfLabourGateSettings.Read(null);
+            Assert.AreEqual((5, 0.50m, 0.80m), (none.MinPeople, none.MaxShare, none.MaxTopTwoShare));
+            var empty = Read();
+            Assert.AreEqual((5, 0.50m, 0.80m), (empty.MinPeople, empty.MaxShare, empty.MaxTopTwoShare));
+
+            var set = Read(("Production:PoolMinPeople", "7"), ("Production:PoolMaxShare", "0.4"), ("Production:PoolMaxTopTwoShare", "0.7"));
+            Assert.AreEqual((7, 0.4m, 0.7m), (set.MinPeople, set.MaxShare, set.MaxTopTwoShare));
+            Assert.AreEqual(3, Read(("Production:PoolMinPeople", "2")).MinPeople, "never below the three people of the earlier releases");
+            Assert.AreEqual(3, Read(("Production:PoolMinPeople", "3")).MinPeople);
+
+            var bad = Read(("Production:PoolMinPeople", "abc"), ("Production:PoolMaxShare", "1.5"), ("Production:PoolMaxTopTwoShare", "0"));
+            Assert.AreEqual((5, 0.50m, 0.80m), (bad.MinPeople, bad.MaxShare, bad.MaxTopTwoShare), "unusable values are the defaults");
+            Assert.AreEqual(5, Read(("Production:PoolMinPeople", "0")).MinPeople);
+            Assert.AreEqual(5, Read(("Production:PoolMinPeople", "-4")).MinPeople);
+            Assert.AreEqual(1m, Read(("Production:PoolMaxShare", "1")).MaxShare, "a share of one (no limit) is allowed");
+        }
+
+        [TestMethod]
+        public void A_Month_That_Passes_The_Gate_Is_One_Pool_With_The_Variance_Of_Cost_Less_Absorbed()
+        {
+            MfPoolPlan plan = MfLabourPooling.Plan(SixPeople(), 140505, new MfLabourGateSettings());
             Assert.AreEqual(0, plan.CarriedItemIds.Count);
-            Assert.AreEqual(2, plan.Pools.Count);
-
-            MfPoolResult cnc = plan.Pools[0];
-            Assert.AreEqual("CNC", cnc.Key);
-            Assert.AreEqual(3, cnc.People);
-            Assert.AreEqual(18m, cnc.Hours, "8 + 4 + 6");
-            Assert.AreEqual(1820000m, cnc.Cost, "800,000 + 480,000 + 540,000");
-            Assert.AreEqual(1575000m, cnc.Absorbed, "700,000 + 350,000 + 525,000");
-            Assert.AreEqual(245000m, cnc.Variance, "under-absorbed by 245,000");
-            Assert.AreEqual(101111.1111m, cnc.Rate);
-            Assert.IsFalse(cnc.Protected);
-            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, cnc.ItemIds);
-
-            MfPoolResult weld = plan.Pools[1];
-            Assert.AreEqual("WELD", weld.Key);
-            Assert.AreEqual(3, weld.People);
-            Assert.AreEqual(20m, weld.Hours);
-            Assert.AreEqual(2250000m, weld.Cost);
-            Assert.AreEqual(2000000m, weld.Absorbed);
-            Assert.AreEqual(250000m, weld.Variance);
-            Assert.AreEqual(112500m, weld.Rate);
-            CollectionAssert.AreEqual(new[] { 4, 5, 6 }, weld.ItemIds);
+            Assert.IsTrue(plan.Gate.Passed);
+            MfPoolResult pool = plan.Pool;
+            Assert.AreEqual(MfLabourPooling.CompanyKey, pool.Key);
+            Assert.AreEqual("*", pool.Key, "one pool a module and month");
+            Assert.AreEqual((6, 34m, 3570000m, 3400000m, 170000m), (pool.People, pool.Hours, pool.Cost, pool.Absorbed, pool.Variance));
+            Assert.AreEqual(105000m, pool.Rate);
+            Assert.IsFalse(pool.Protected);
+            CollectionAssert.AreEqual(new[] { 1, 2, 3, 4, 5, 6 }, pool.ItemIds);
         }
 
         [TestMethod]
-        public void The_Cost_Centres_With_Fewer_Than_Three_People_Form_The_Company_Pool_When_They_Are_Three_Together()
+        public void A_Month_That_Fails_The_Gate_Is_Carried_And_At_The_Quarter_End_Posted_Flagged_Without_A_Rate()
         {
-            // PAINT has one person and ASM two: alone each would show a person's pay; together they are three people
-            MfPoolPlan plan = MfLabourPooling.Plan(Cnc().Concat(new[] { Paint() }).Concat(Assembly()), 140505, MfLabourMonth.DefaultCostCenter);
-            Assert.AreEqual(0, plan.CarriedItemIds.Count);
-            Assert.AreEqual(2, plan.Pools.Count);
-            Assert.AreEqual("CNC", plan.Pools[0].Key, "the cost centre with three people keeps its own pool");
-            Assert.AreEqual(101111.1111m, plan.Pools[0].Rate);
+            var settings = new MfLabourGateSettings();
+            MfPoolItem[] four = SixPeople().Take(4).ToArray();
 
-            MfPoolResult company = plan.Pools[1];
-            Assert.AreEqual(MfLabourPooling.CompanyKey, company.Key);
-            Assert.AreEqual(3, company.People);
-            Assert.AreEqual(10m, company.Hours, "2 + 3 + 5");
-            Assert.AreEqual(830000m, company.Cost, "160,000 + 270,000 + 400,000");
-            Assert.AreEqual(800000m, company.Absorbed);
-            Assert.AreEqual(30000m, company.Variance);
-            Assert.AreEqual(83000m, company.Rate);
-            CollectionAssert.AreEqual(new[] { 7, 8, 9 }, company.ItemIds);
-        }
+            MfPoolPlan carried = MfLabourPooling.Plan(four, 140505, settings);
+            Assert.IsNull(carried.Pool, "Mordad is not a quarter end: nothing is published");
+            Assert.IsFalse(carried.Gate.Passed);
+            CollectionAssert.AreEqual(new[] { 1, 2, 3, 4 }, carried.CarriedItemIds);
 
-        [TestMethod]
-        public void One_Or_Two_Left_Over_People_Dissolve_Every_Pool_Of_The_Month_Into_One_Company_Pool()
-        {
-            // CNC (three people) and PAINT (one): the CNC rate 101,111.1111 published beside a company rate would let anybody subtract it and isolate the person on PAINT
-            MfPoolPlan one = MfLabourPooling.Plan(Cnc().Concat(new[] { Paint() }), 140505, MfLabourMonth.DefaultCostCenter);
-            Assert.AreEqual(1, one.Pools.Count);
-            MfPoolResult all = one.Pools[0];
-            Assert.AreEqual(MfLabourPooling.CompanyKey, all.Key);
-            Assert.AreEqual(4, all.People);
-            Assert.AreEqual(20m, all.Hours, "18 + 2");
-            Assert.AreEqual(1980000m, all.Cost, "1,820,000 + 160,000");
-            Assert.AreEqual(1725000m, all.Absorbed);
-            Assert.AreEqual(255000m, all.Variance);
-            Assert.AreEqual(99000m, all.Rate);
-            CollectionAssert.AreEqual(new[] { 1, 2, 3, 7 }, all.ItemIds);
-
-            // two left over people are the same
-            MfPoolPlan two = MfLabourPooling.Plan(Cnc().Concat(new[] { Paint(), Item(8, "ASM", 8, 3m, 270000m, 250000m) }), 140505, MfLabourMonth.DefaultCostCenter);
-            Assert.AreEqual(1, two.Pools.Count);
-            Assert.AreEqual(MfLabourPooling.CompanyKey, two.Pools[0].Key);
-            Assert.AreEqual(5, two.Pools[0].People);
-        }
-
-        [TestMethod]
-        public void One_Person_Booked_In_Two_Cost_Centres_Counts_Once()
-        {
-            // employee 1 works in CNC (with e2, e3) and in PAINT: PAINT has one person, so the month is one company pool of the three distinct people
-            var items = new[] { Item(1, "CNC", 1, 8m, 800000m, 700000m), Item(2, "CNC", 2, 4m, 480000m, 350000m), Item(3, "CNC", 3, 6m, 540000m, 525000m), Item(10, "PAINT", 1, 1m, 100000m, 90000m) };
-            Assert.AreEqual(3, MfLabourPooling.People(items));
-            MfPoolPlan plan = MfLabourPooling.Plan(items, 140505, MfLabourMonth.DefaultCostCenter);
-            Assert.AreEqual(1, plan.Pools.Count);
-            Assert.AreEqual(MfLabourPooling.CompanyKey, plan.Pools[0].Key);
-            Assert.AreEqual(3, plan.Pools[0].People);
-            Assert.AreEqual(19m, plan.Pools[0].Hours);
-            Assert.AreEqual(1920000m, plan.Pools[0].Cost);
-        }
-
-        [TestMethod]
-        public void A_Month_With_Fewer_Than_Three_Payroll_Rated_People_Is_Carried_And_At_The_Quarter_End_Posted_Flagged_Without_A_Rate()
-        {
-            var two = new[] { Item(1, "CNC", 1, 8m, 800000m, 700000m), Paint() };
-
-            MfPoolPlan carried = MfLabourPooling.Plan(two, 140505, MfLabourMonth.DefaultCostCenter);
-            Assert.AreEqual(0, carried.Pools.Count, "Mordad is not a quarter end: nothing is published");
-            CollectionAssert.AreEqual(new[] { 1, 7 }, carried.CarriedItemIds);
-
-            MfPoolPlan capped = MfLabourPooling.Plan(two, 140506, MfLabourMonth.DefaultCostCenter);
+            MfPoolPlan capped = MfLabourPooling.Plan(four, 140506, settings);
             Assert.AreEqual(0, capped.CarriedItemIds.Count);
-            Assert.AreEqual(1, capped.Pools.Count, "Shahrivar ends the quarter: ONE company-wide line");
-            MfPoolResult line = capped.Pools[0];
+            MfPoolResult line = capped.Pool;
+            Assert.IsNotNull(line, "Shahrivar ends the quarter: ONE company-wide line");
             Assert.AreEqual(MfLabourPooling.CompanyKey, line.Key);
             Assert.IsTrue(line.Protected);
-            Assert.IsNull(line.Rate, "a protected pool has no rate: it would be the average of one or two people");
-            Assert.AreEqual(2, line.People);
-            Assert.AreEqual(10m, line.Hours);
-            Assert.AreEqual(960000m, line.Cost, "800,000 + 160,000");
-            Assert.AreEqual(850000m, line.Absorbed);
-            Assert.AreEqual(110000m, line.Variance);
+            Assert.IsNull(line.Rate, "a protected pool has no rate");
+            Assert.AreEqual((4, 25m, 2600000m, 2500000m, 100000m), (line.People, line.Hours, line.Cost, line.Absorbed, line.Variance), "800,000 + 660,000 + 540,000 + 600,000 less 2,500,000");
+
+            // a dominated pool fails the same way
+            MfPoolItem[] dominated = { Item(1, 1, 17m, 1700000m, 1700000m), Item(2, 2, 3m, 300000m, 300000m), Item(3, 3, 3m, 300000m, 300000m), Item(4, 4, 3m, 300000m, 300000m), Item(5, 5, 3m, 330000m, 300000m), Item(6, 6, 3m, 300000m, 300000m) };
+            Assert.IsNull(MfLabourPooling.Plan(dominated, 140507, settings).Pool, "Mehr");
+            Assert.AreEqual(6, MfLabourPooling.Plan(dominated, 140507, settings).CarriedItemIds.Count);
+            MfPoolPlan flagged = MfLabourPooling.Plan(dominated, 140509, settings);
+            Assert.IsTrue(flagged.Pool.Protected, "Azar");
+            Assert.AreEqual(30000m, flagged.Pool.Variance);
 
             foreach (int month in new[] { 3, 6, 9, 12 }) Assert.IsTrue(MfLabourPooling.IsQuarterEnd(140500 + month), "month " + month);
             foreach (int month in new[] { 1, 2, 4, 5, 7, 8, 10, 11 }) Assert.IsFalse(MfLabourPooling.IsQuarterEnd(140500 + month), "month " + month);
-            Assert.AreEqual(0, MfLabourPooling.Plan(new MfPoolItem[0], 140506, MfLabourMonth.DefaultCostCenter).Pools.Count, "nothing booked, nothing posted");
+            MfPoolPlan empty = MfLabourPooling.Plan(new MfPoolItem[0], 140506, settings);
+            Assert.IsNull(empty.Pool, "nothing booked, nothing posted");
+            Assert.IsNull(empty.Gate);
+            Assert.AreEqual(0, empty.CarriedItemIds.Count);
         }
 
         [TestMethod]
-        public void The_Pool_Cost_Is_Rounded_Once_And_A_Booking_Without_A_Cost_Centre_Belongs_To_The_Production_Cost_Centre()
+        public void The_Pool_Cost_Is_Rounded_Once()
         {
             // 100.4 + 200.4 + 300.4 = 601.2 -> 601 once (not 100 + 200 + 300); 4.5 hours: rate 601.2 / 4.5 = 133.6; absorbed 600 -> variance 1
-            var items = new[]
-            {
-                Item(1, null, 1, 1.5m, 100.4m, 200m), Item(2, null, 2, 1.5m, 200.4m, 200m), Item(3, null, 3, 1.5m, 300.4m, 200m),
-            };
-            MfPoolPlan plan = MfLabourPooling.Plan(items, 140505, MfLabourMonth.DefaultCostCenter);
-            Assert.AreEqual(1, plan.Pools.Count);
-            Assert.AreEqual("PRODUCTION", plan.Pools[0].Key);
-            Assert.AreEqual(601m, plan.Pools[0].Cost);
-            Assert.AreEqual(133.6m, plan.Pools[0].Rate);
-            Assert.AreEqual(1m, plan.Pools[0].Variance);
+            var items = new[] { Item(1, 1, 1.5m, 100.4m, 200m), Item(2, 2, 1.5m, 200.4m, 200m), Item(3, 3, 1.5m, 300.4m, 200m) };
+            MfPoolPlan plan = MfLabourPooling.Plan(items, 140505, new MfLabourGateSettings { MinPeople = 3 });
+            Assert.IsTrue(plan.Gate.Passed);
+            Assert.AreEqual((601m, 133.6m, 1m), (plan.Pool.Cost, plan.Pool.Rate, plan.Pool.Variance));
         }
 
         [TestMethod]
-        public void The_Service_Department_Is_One_Pool_Or_The_Carry_Or_The_Flagged_Quarter_End_Line()
+        public void The_Service_Department_Pools_The_Engineers_Of_Several_Orders_And_An_Engineer_Counts_Once()
         {
-            // three engineers on the orders closed in the month: one pool, rate 90,000 (cost 1,800,000 / 20 h), absorbed 1,700,000 -> variance 100,000
-            var three = new[]
+            // order 1: engineers 7 (4 h) and 8 (3 h); order 2: engineer 7 (2 h) again; orders 3 and 4: engineers 9, 10, 11 (2 h each)
+            MfPoolItem Order(int id, decimal cost, decimal absorbed, params (int Engineer, decimal Hours)[] who)
             {
-                Item(1, null, 1, 8m, 800000m, 760000m), Item(2, null, 2, 7m, 630000m, 665000m), Item(3, null, 3, 5m, 370000m, 275000m),
+                var item = new MfPoolItem { Id = id, Cost = cost, Absorbed = absorbed };
+                foreach (var w in who) item.PersonHours[w.Engineer] = item.PersonHours.GetValueOrDefault(w.Engineer) + w.Hours;
+                return item;
+            }
+            var orders = new[]
+            {
+                Order(1, 700000m, 630000m, (7, 4m), (8, 3m)), Order(2, 200000m, 180000m, (7, 2m)),
+                Order(3, 220000m, 180000m, (9, 2m), (10, 2m)), Order(4, 120000m, 90000m, (11, 1m)),
             };
-            MfPoolPlan pooled = MfLabourPooling.PlanSingle(three, 140508, "AFTERSALES");
-            Assert.AreEqual(1, pooled.Pools.Count);
-            Assert.AreEqual("AFTERSALES", pooled.Pools[0].Key);
-            Assert.AreEqual(3, pooled.Pools[0].People);
-            Assert.AreEqual(20m, pooled.Pools[0].Hours);
-            Assert.AreEqual(1800000m, pooled.Pools[0].Cost);
-            Assert.AreEqual(1700000m, pooled.Pools[0].Absorbed);
-            Assert.AreEqual(100000m, pooled.Pools[0].Variance);
-            Assert.AreEqual(90000m, pooled.Pools[0].Rate);
+            Assert.AreEqual(5, MfLabourPooling.People(orders));
+            Assert.AreEqual(14m, orders.Sum(o => o.Hours), "7 + 2 + 4 + 1 h");
+            MfPoolPlan plan = MfLabourPooling.Plan(orders, 140508, new MfLabourGateSettings());
+            Assert.IsTrue(plan.Gate.Passed, "engineer 7 has 6 of 14 hours (0.43), the two largest 9 of 14 (0.64)");
+            Assert.AreEqual((5, 14m, 1240000m, 1080000m, 160000m), (plan.Pool.People, plan.Pool.Hours, plan.Pool.Cost, plan.Pool.Absorbed, plan.Pool.Variance));
+            CollectionAssert.AreEqual(new[] { 1, 2, 3, 4 }, plan.Pool.ItemIds);
 
-            // two engineers (the same one on two orders is still one person): carried, then flagged at the end of the quarter (Azar)
-            var two = new[] { Item(1, null, 7, 4m, 400000m, 350000m), Item(2, null, 7, 2m, 200000m, 180000m), Item(3, null, 8, 3m, 300000m, 250000m) };
-            Assert.AreEqual(2, MfLabourPooling.People(two));
-            MfPoolPlan carried = MfLabourPooling.PlanSingle(two, 140508, "AFTERSALES");
-            Assert.AreEqual(0, carried.Pools.Count);
-            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, carried.CarriedItemIds);
-            MfPoolPlan capped = MfLabourPooling.PlanSingle(two, 140509, "AFTERSALES");
-            Assert.AreEqual(0, capped.CarriedItemIds.Count);
-            Assert.AreEqual(1, capped.Pools.Count);
-            Assert.IsTrue(capped.Pools[0].Protected);
-            Assert.IsNull(capped.Pools[0].Rate);
-            Assert.AreEqual(900000m, capped.Pools[0].Cost);
-            Assert.AreEqual(780000m, capped.Pools[0].Absorbed);
-            Assert.AreEqual(120000m, capped.Pools[0].Variance);
+            // the same engineers on fewer orders are still four people: carried, then flagged at the end of the quarter (Azar)
+            MfPoolItem[] few = orders.Take(3).ToArray();
+            Assert.AreEqual(4, MfLabourPooling.People(few));
+            Assert.IsNull(MfLabourPooling.Plan(few, 140508, new MfLabourGateSettings()).Pool);
+            Assert.IsTrue(MfLabourPooling.Plan(few, 140509, new MfLabourGateSettings()).Pool.Protected);
         }
 
-        // ------------------------------------------------------------------------------------------ the rate of the days
+        // ------------------------------------------------------------------------------------------ the standard rate of the days
 
         [TestMethod]
-        public void The_Days_Absorb_At_The_Newest_Closed_Months_Own_Pool_Else_The_Company_Pool_Of_That_Month()
+        public void The_Standard_Rate_Is_The_Work_Centre_Rate_Else_The_Setting_And_Never_Zero()
         {
-            var pools = new List<MfPoolRate>
-            {
-                new MfPoolRate { Period = 140505, Key = "CNC", Rate = 100000m },
-                new MfPoolRate { Period = 140505, Key = MfLabourPooling.CompanyKey, Rate = 90000m },
-                new MfPoolRate { Period = 140506, Key = MfLabourPooling.CompanyKey, Rate = 95000m },
-                new MfPoolRate { Period = 140507, Key = "CNC", Rate = 101111.1111m },
-                new MfPoolRate { Period = 140507, Key = MfLabourPooling.CompanyKey, Rate = 99000m },
-            };
-            Assert.AreEqual(101111.1111m, MfLabourRates.Pooled(pools, "CNC").Rate, "the newest month has an own pool of the cost centre");
-            Assert.AreEqual(99000m, MfLabourRates.Pooled(pools, "WELD").Rate, "no pool of its own in the newest month: that month's company pool");
-            Assert.AreEqual(99000m, MfLabourRates.Pooled(pools, null).Rate, "no cost centre: the company pool");
-            Assert.AreEqual(140507, MfLabourRates.Pooled(pools, "WELD").Period);
-
-            // the newest month has the company pool only: it wins over an older own pool (the rate of the cost centre two months ago is not the rate now)
-            var older = new List<MfPoolRate>
-            {
-                new MfPoolRate { Period = 140505, Key = "CNC", Rate = 100000m },
-                new MfPoolRate { Period = 140506, Key = MfLabourPooling.CompanyKey, Rate = 95000m },
-            };
-            Assert.AreEqual(95000m, MfLabourRates.Pooled(older, "CNC").Rate);
-            Assert.IsNull(MfLabourRates.Pooled(new List<MfPoolRate>(), "CNC"), "no month closed yet: the standard rate is used");
-            // a cost centre code is a key and is compared exactly: «cnc» is not the pool of «CNC»
-            var sameMonth = new List<MfPoolRate>
-            {
-                new MfPoolRate { Period = 140506, Key = "CNC", Rate = 100000m },
-                new MfPoolRate { Period = 140506, Key = MfLabourPooling.CompanyKey, Rate = 95000m },
-            };
-            Assert.AreEqual(100000m, MfLabourRates.Pooled(sameMonth, "CNC").Rate, "within a month the pool of the cost centre wins over the company pool");
-            Assert.AreEqual(95000m, MfLabourRates.Pooled(sameMonth, "cnc").Rate);
-        }
-
-        [TestMethod]
-        public void Until_A_Month_Is_Closed_The_Standard_Rate_Is_The_Setting_Else_The_Work_Centre_Rate_And_Never_Zero()
-        {
-            Assert.AreEqual(150000m, MfLabourRates.Standard(150000m, 100000m), "the configured rate wins");
-            Assert.AreEqual(100000m, MfLabourRates.Standard(null, 100000m));
+            Assert.AreEqual(150000m, MfLabourRates.Standard(150000m, 100000m), "the rate finance set for the work centre wins");
+            Assert.AreEqual(100000m, MfLabourRates.Standard(null, 100000m), "a centre without a rate takes the setting");
             Assert.AreEqual(100000m, MfLabourRates.Standard(0m, 100000m), "zero is not a rate");
             Assert.AreEqual(100000m, MfLabourRates.Standard(-5m, 100000m));
-            Assert.IsNull(MfLabourRates.Standard(null, null));
+            Assert.AreEqual(150000m, MfLabourRates.Standard(150000m, null));
+            Assert.IsNull(MfLabourRates.Standard(null, null), "neither: the run refuses and names the centre");
             Assert.IsNull(MfLabourRates.Standard(0m, 0m));
+            Assert.IsNull(MfLabourRates.Standard(null, 0m));
 
             string Read(string value) => MfCostEngine.ConfiguredStandardRate(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string> { ["Production:StandardLabourRate"] = value }).Build()) is decimal d ? d.ToString(System.Globalization.CultureInfo.InvariantCulture) : "none";
             Assert.AreEqual("250000", Read("250000"));
@@ -300,19 +297,24 @@ namespace MsTests
         [TestMethod]
         public void The_Month_End_Variance_Is_Two_Balanced_Lines_Without_A_Work_Order_A_Contract_Or_A_Day()
         {
-            // under-absorbed by 245,000 (CNC of the example above): the variance account is debited and the absorbed-labour account credited
-            List<AccountingEventLine> under = MfLabourVariance.Lines(245000m, AccountRoles.LabourAbsorbed, "CNC", false, "تفاوت");
+            // production, under-absorbed by 170,000 (the month above): the variance account is debited and the absorbed-labour account credited; company level, so no cost centre either
+            List<AccountingEventLine> under = MfLabourVariance.Lines(170000m, AccountRoles.LabourAbsorbed, null, false, "تفاوت");
             Assert.AreEqual(2, under.Count);
             Assert.AreEqual(AccountRoles.LabourRateVariance, under[0].AccountRole);
-            Assert.AreEqual(245000m, under[0].Debit);
+            Assert.AreEqual(170000m, under[0].Debit);
             Assert.AreEqual(0m, under[0].Credit);
             Assert.AreEqual(AccountRoles.LabourAbsorbed, under[1].AccountRole);
             Assert.AreEqual(0m, under[1].Debit);
-            Assert.AreEqual(245000m, under[1].Credit);
-            Assert.IsTrue(under.All(l => l.CostCenter == "CNC" && !l.LabourProtected && l.WorkOrderId == null && l.ContractId == null));
+            Assert.AreEqual(170000m, under[1].Credit);
+            Assert.IsTrue(under.All(l => l.CostCenter == null && !l.LabourProtected && l.WorkOrderId == null && l.ContractId == null));
             Assert.AreEqual(under.Sum(l => l.Debit), under.Sum(l => l.Credit));
 
-            // over-absorbed by 90,000 and flagged: the other way round, the company pool has no cost centre
+            // after-sales keeps its own cost centre on the two lines
+            List<AccountingEventLine> service = MfLabourVariance.Lines(160000m, AccountRoles.ServiceLabourAbsorbed, "AFTERSALES", false, "تفاوت");
+            Assert.AreEqual(AccountRoles.ServiceLabourAbsorbed, service[1].AccountRole);
+            Assert.IsTrue(service.All(l => l.CostCenter == "AFTERSALES" && l.WorkOrderId == null && l.ContractId == null));
+
+            // over-absorbed by 90,000 and flagged (the quarter-end line): the other way round
             List<AccountingEventLine> over = MfLabourVariance.Lines(-90000m, AccountRoles.ServiceLabourAbsorbed, null, true, "تفاوت");
             Assert.AreEqual(AccountRoles.LabourRateVariance, over[0].AccountRole);
             Assert.AreEqual(0m, over[0].Debit);
@@ -322,7 +324,7 @@ namespace MsTests
             Assert.IsTrue(over.All(l => l.CostCenter == null && l.LabourProtected), "both lines of a protected pool carry the flag");
             Assert.AreEqual(over.Sum(l => l.Debit), over.Sum(l => l.Credit));
 
-            Assert.AreEqual(0, MfLabourVariance.Lines(0m, AccountRoles.LabourAbsorbed, "CNC", false, "x").Count, "an exactly absorbed pool posts nothing");
+            Assert.AreEqual(0, MfLabourVariance.Lines(0m, AccountRoles.LabourAbsorbed, null, false, "x").Count, "an exactly absorbed pool posts nothing");
         }
 
         // ------------------------------------------------------------------------------------------ who sees a protected line
@@ -341,6 +343,58 @@ namespace MsTests
             CollectionAssert.AreEqual(new[] { 1, 2 }, FnLabourMask.Visible(lines, false).Select(l => l.Id).ToArray());
             CollectionAssert.AreEqual(new[] { 1, 2, 3, 4 }, FnLabourMask.Visible(lines, true).Select(l => l.Id).ToArray());
             Assert.AreEqual(FnLabourMask.Visible(lines, false).Sum(l => l.Debit), FnLabourMask.Visible(lines, false).Sum(l => l.Credit), "still balanced for the other readers");
+        }
+
+        [TestMethod]
+        public void The_Visible_Total_Of_A_Voucher_Leaves_Out_The_Flagged_Debits_For_Everybody_Outside_Payroll_Finance_Manager_And_Ceo()
+        {
+            // the helper the CEO drill of the waiting vouchers calls, like the voucher list does: a voucher's total is the sum of its debits
+            var lines = new List<FnVoucherLine>
+            {
+                new FnVoucherLine { Debit = 245000m }, new FnVoucherLine { Credit = 245000m },
+                new FnVoucherLine { Debit = 90000m, LabourProtected = true }, new FnVoucherLine { Credit = 90000m, LabourProtected = true },
+            };
+            Assert.AreEqual(335000m, FnLabourMask.VisibleTotal(lines, true), "245,000 + 90,000");
+            Assert.AreEqual(245000m, FnLabourMask.VisibleTotal(lines, false), "the flagged 90,000 is not in it");
+            Assert.AreEqual(90000m, FnLabourMask.HiddenDebit(lines));
+            Assert.AreEqual(0m, FnLabourMask.VisibleTotal(null, false));
+            Assert.AreEqual(0m, FnLabourMask.VisibleTotal(new List<FnVoucherLine>(), true));
+            Assert.AreEqual(0m, FnLabourMask.HiddenDebit(null));
+            // a voucher total (the sum of all debits) less the hidden debits is what the voucher list shows
+            Assert.AreEqual(FnLabourMask.VisibleTotal(lines, false), lines.Sum(l => l.Debit) - FnLabourMask.HiddenDebit(lines));
+            StringAssert.Contains(FnLabourMask.Refusal("دوره‌ی 1405/06"), "دوره‌ی 1405/06");
+            StringAssert.Contains(FnLabourMask.Refusal("x"), "فقط برای حقوق و دستمزد، مدیر مالی و مدیرعامل");
+        }
+
+        [TestMethod]
+        public void A_Row_Of_The_Earlier_Release_Is_Masked_By_Its_Own_Group_Rule_And_A_Row_Of_This_Release_Never_Is()
+        {
+            // the earlier release's group rule: payroll-rated people behind the amount, fewer than three of them (employees and payroll-rated people both count)
+            Assert.IsTrue(MfLegacyLabour.Group(1, 1));
+            Assert.IsTrue(MfLegacyLabour.Group(2, 2));
+            Assert.IsTrue(MfLegacyLabour.Group(5, 2), "five people, two of them with a payslip");
+            Assert.IsTrue(MfLegacyLabour.Group(2, 5));
+            Assert.IsFalse(MfLegacyLabour.Group(3, 3));
+            Assert.IsFalse(MfLegacyLabour.Group(4, 0), "nobody with a payslip: there is no pay to show");
+            Assert.IsFalse(MfLegacyLabour.Group(0, 0));
+
+            // a run: only a run flagged by the earlier release can be protected, and the postings of it by their own group
+            var earlier = new MfCostRun { LabourProtected = true };
+            var current = new MfCostRun { LabourProtected = false };
+            Assert.IsTrue(MfLegacyLabour.IsProtected(earlier));
+            Assert.IsFalse(MfLegacyLabour.IsProtected(current));
+            Assert.IsFalse(MfLegacyLabour.IsProtected((MfCostRun)null));
+            var small = new MfCostPosting { EmployeeCount = 2, PayrollEmployeeCount = 1 };
+            var big = new MfCostPosting { EmployeeCount = 4, PayrollEmployeeCount = 4 };
+            Assert.IsTrue(MfLegacyLabour.IsProtected(earlier, small));
+            Assert.IsFalse(MfLegacyLabour.IsProtected(earlier, big));
+            Assert.IsFalse(MfLegacyLabour.IsProtected(current, small), "a posting of this release with one payroll-rated person was absorbed at the standard rate: it shows nothing of any pay");
+            Assert.IsFalse(MfLegacyLabour.IsProtected(earlier, null));
+
+            // what the reader gets
+            Assert.IsNull(MfLegacyLabour.Labour(500000m, true, false));
+            Assert.AreEqual(500000m, MfLegacyLabour.Labour(500000m, true, true));
+            Assert.AreEqual(500000m, MfLegacyLabour.Labour(500000m, false, false));
         }
 
         [TestMethod]
@@ -405,9 +459,6 @@ namespace MsTests
             Assert.AreEqual(140506, MfLabourMonth.NextOpen(140505, new int[0]));
             Assert.AreEqual(140507, MfLabourMonth.NextOpen(140505, new[] { 140506 }), "a closed month is never reopened");
             Assert.AreEqual(140601, MfLabourMonth.NextOpen(140512, new int[0]));
-            Assert.AreEqual("CNC", MfLabourMonth.CostCenterOf(" CNC "));
-            Assert.IsNull(MfLabourMonth.CostCenterOf("  "));
-            Assert.IsNull(MfLabourMonth.CostCenterOf(null));
         }
 
         [TestMethod]

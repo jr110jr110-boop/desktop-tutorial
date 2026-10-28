@@ -292,7 +292,7 @@ namespace Services.NasbNiro.Finance
             public decimal Material, Labour, Overhead, Subcontract, TotalCost, UnitCost, WipBalance, LabourInLedger, TransferredOut;
             public bool IsClosed;
 
-            /// <summary>R1p D1: a labour entry of the work order is a protected amount (the monthly aggregate was posted by the quarter-end cap although fewer than three payroll-rated employees were behind it).</summary>
+            /// <summary>R1p D1: a labour entry of the work order is a protected amount (a row of the earlier release, when labour was costed at the person's own rate and fewer than three payroll-rated employees were behind it). New rows never carry the flag.</summary>
             public bool LabourProtected;
         }
 
@@ -329,13 +329,14 @@ namespace Services.NasbNiro.Finance
             WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == workOrderId, ct);
             if (wo == null) return ResponseDtoHelper.NotFound<FnWorkOrderCostDto>("دستور کار پیدا نشد.");
             WoCostNumbers n = await BuildCostAsync(wo, ct);
-            // R1p D1: since labour is absorbed at the pooled average rate a work order never carries one person's pay; only a row backfilled from the one-or-two-person era keeps the flag, and its labour is then shown to PAYROLL, FINANCEMANAGER and CEO only
+            // R1p D1: since labour is absorbed at the standard rate a work order never carries one person's pay; only a row of the earlier release keeps the flag, and its labour is then shown to PAYROLL, FINANCEMANAGER and CEO only.
+            // What has left WIP is hidden with it: total cost = WIP balance + what was transferred, so one visible figure next to the other would give the hidden labour back (R1p C1/H3)
             bool hide = n.LabourProtected && !Production.MfPrivacy.SeesPayroll(_user);
             return ResponseDtoHelper.Ok(new FnWorkOrderCostDto
             {
-                WorkOrderId = n.WorkOrderId, Code = n.Code, Quantity = n.Quantity, Material = n.Material, Overhead = n.Overhead, Subcontract = n.Subcontract, TransferredOut = n.TransferredOut, IsClosed = n.IsClosed,
+                WorkOrderId = n.WorkOrderId, Code = n.Code, Quantity = n.Quantity, Material = n.Material, Overhead = n.Overhead, Subcontract = n.Subcontract, IsClosed = n.IsClosed,
                 LabourHidden = hide, Labour = hide ? (decimal?)null : n.Labour, TotalCost = hide ? (decimal?)null : n.TotalCost, UnitCost = hide ? (decimal?)null : n.UnitCost,
-                WipBalance = hide ? (decimal?)null : n.WipBalance, LabourInLedger = hide ? (decimal?)null : n.LabourInLedger,
+                WipBalance = hide ? (decimal?)null : n.WipBalance, LabourInLedger = hide ? (decimal?)null : n.LabourInLedger, TransferredOut = hide ? (decimal?)null : n.TransferredOut,
             });
         }
 

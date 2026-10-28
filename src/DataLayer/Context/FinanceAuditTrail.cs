@@ -95,7 +95,7 @@ namespace DataLayer.Context
             { typeof(MfMaintenanceOrder), new[] { "MachineId", "Kind", "Status", "PlanId", "RequestId", "Task", "DueDate", "DowntimeStart", "DowntimeEnd", "Cause", "ActionTaken", "CostCenter", "MaterialRequestId", "IssueDocumentId", "StartedByUserId", "DoneByUserId", "CancelReason" } },
             { typeof(MfMaintenanceLabour), new[] { "OrderId", "EmployeeId", "WorkDate", "Hours" } },
             { typeof(MfMaintenancePart), new[] { "OrderId", "ItemId", "Quantity" } },
-            { typeof(MfCostRun), new[] { "Number", "PostingDate", "RunByUserId", "BookingCount", "MachineHours", "OverheadAmount", "AccountingEventId" } }, // the labour amount is hours x the pooled average rate (R1p), no one person's pay; it stays off this list only because the accounting event of the run carries it
+            { typeof(MfCostRun), new[] { "Number", "PostingDate", "RunByUserId", "BookingCount", "MachineHours", "OverheadAmount", "AccountingEventId" } }, // the labour amount is hours x the standard rate (R1p), no one person's pay; it stays off this list only because the accounting event of the run carries it
             // sales (release S1): the thresholds, the credit limit, the reason codes and the gates (bid decision, proposal approval, price list approval, credit approval); contacts and sites hold personal data and are not listed
             { typeof(SlSetting), null },
             { typeof(SlReasonCode), null },
@@ -119,6 +119,14 @@ namespace DataLayer.Context
         };
 
         private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban" };
+
+        /// <summary>
+        /// R1p C1: a voucher line flagged as confidential labour (LabourProtected) is read by PAYROLL, FINANCEMANAGER and CEO only, but the audit trail is read by the auditor too, so the amounts of such a line
+        /// are never written to it: the trail says that the line was added, changed or deleted and shows this text instead of the amounts. The total of a voucher that holds such a line is the sum of its debits and
+        /// would give the amounts away (total less the visible lines), so it is replaced by the same text.
+        /// </summary>
+        internal const string ConfidentialText = "محرمانه (حقوق)";
+        private static readonly HashSet<string> ConfidentialAmounts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Debit", "Credit", "CurrencyAmount", "Quantity", "TotalAmount" };
         private static readonly HashSet<string> Skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RowVersion" };
 
         public static void Capture(DbContext context, IHttpContextAccessor accessor)
@@ -170,6 +178,7 @@ namespace DataLayer.Context
 
                 var before = new Dictionary<string, object>();
                 var after = new Dictionary<string, object>();
+                bool confidentialLine = IsConfidential(entry);
                 foreach (PropertyEntry p in entry.Properties)
                 {
                     string name = p.Metadata.Name;
@@ -177,19 +186,19 @@ namespace DataLayer.Context
                     if (only != null && !only.Contains(name)) continue;
                     if (entry.State == EntityState.Added)
                     {
-                        after[name] = Shape(name, p.CurrentValue);
+                        after[name] = Shape(name, p.CurrentValue, confidentialLine);
                         if (Masked.Contains(name) && p.CurrentValue is string added) after[name + "Hash"] = Hash(added);
                     }
                     else if (entry.State == EntityState.Deleted)
                     {
-                        before[name] = Shape(name, p.OriginalValue);
+                        before[name] = Shape(name, p.OriginalValue, confidentialLine);
                         if (Masked.Contains(name) && p.OriginalValue is string removed) before[name + "Hash"] = Hash(removed);
                     }
                     else
                     {
                         if (!p.IsModified || Equals(p.OriginalValue, p.CurrentValue)) continue;
-                        before[name] = Shape(name, p.OriginalValue);
-                        after[name] = Shape(name, p.CurrentValue);
+                        before[name] = Shape(name, p.OriginalValue, confidentialLine);
+                        after[name] = Shape(name, p.CurrentValue, confidentialLine);
                         // a one-way hash of the full value: a change that keeps the visible last digits is still detectable
                         if (Masked.Contains(name)) { before[name + "Hash"] = p.OriginalValue is string o ? Hash(o) : null; after[name + "Hash"] = p.CurrentValue is string c ? Hash(c) : null; }
                     }
@@ -235,9 +244,26 @@ namespace DataLayer.Context
             return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalised))).Substring(0, 16).ToLowerInvariant();
         }
 
-        private static object Shape(string name, object value)
+        /// <summary>
+        /// True for a voucher line that is flagged as confidential labour now or was before the change, and for a voucher that holds such a line (its lines are in memory when it is made or reversed, or are tracked
+        /// by the context when it is changed).
+        /// </summary>
+        private static bool IsConfidential(EntityEntry entry)
+        {
+            if (entry.Entity is FnVoucher voucher)
+            {
+                if (voucher.Lines != null && voucher.Lines.Any(l => l.LabourProtected)) return true;
+                return voucher.Id != 0 && entry.Context.ChangeTracker.Entries<FnVoucherLine>().Any(e => e.Entity.VoucherId == voucher.Id && e.Entity.LabourProtected);
+            }
+            if (!(entry.Entity is FnVoucherLine line)) return false;
+            if (line.LabourProtected) return true;
+            return entry.State != EntityState.Added && entry.Property(nameof(FnVoucherLine.LabourProtected)).OriginalValue is true;
+        }
+
+        private static object Shape(string name, object value, bool confidentialLine = false)
         {
             if (value == null) return null;
+            if (confidentialLine && ConfidentialAmounts.Contains(name)) return ConfidentialText;
             if (Masked.Contains(name) && value is string s) return s.Length <= 4 ? "****" : "****" + s.Substring(s.Length - 4);
             if (value is Enum) return value.ToString();
             if (value is DateTime dt) return PersianText(dt);

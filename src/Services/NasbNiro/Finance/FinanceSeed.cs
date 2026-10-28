@@ -67,7 +67,7 @@ namespace Services.NasbNiro.Finance
             ("70101", "مواد مستقیم"), ("70102", "دستمزد مستقیم"), ("70103", "سربار ساخت"), ("70104", "پیمانکاری و خدمات خریداری‌شده"),
             ("70105", "بهای تمام‌شده ضایعات فروخته‌شده"), ("70106", "اضافات و کسورات انبار"), ("70107", "تعدیل ارزش موجودی"), ("70108", "اختلاف قیمت خرید"), ("70109", "انحراف بهای تمام‌شده"), ("70110", "سربار جذب‌شده"), ("70111", "انحراف جذب سربار"), ("70112", "هزینه زیان مورد انتظار قراردادها"),
             ("70113", "دستمزد جذب‌شده خدمات پس از فروش"), // ★ new in S1 part B (assumption: the accountant confirms the code); 70102 stays the production direct labour
-            ("70114", "انحراف نرخ دستمزد جذب‌شده"), // ★ new in R1p (assumption: the accountant confirms the code): the month-end true-up of the labour absorbed at the pooled average rate
+            ("70114", "انحراف نرخ دستمزد جذب‌شده"), // ★ new in R1p (assumption: the accountant confirms the code): the month-end variance of a module: the payroll cost of the payroll-rated people less the labour the days absorbed at the standard rate (one company-level line a module and month)
             ("70201", "حقوق و دستمزد غیرمستقیم"), ("70202", "مواد غیرمستقیم و مصرفی"), ("70203", "استهلاک"), ("70204", "تعمیر و نگهداری"), ("70205", "انرژی"), ("70206", "سایر"),
             ("80101", "حقوق و دستمزد"), ("80102", "بیمه سهم کارفرما"), ("80103", "مزایای پایان خدمت"), ("80104", "استهلاک"), ("80105", "اجاره"),
             ("80106", "حمل و نقل"), ("80107", "خدمات حرفه‌ای"), ("80108", "سایر"), ("80109", "هزینه گارانتی"),
@@ -213,7 +213,7 @@ namespace Services.NasbNiro.Finance
             //  - the warranty expense (goodwill) is 80109 «هزینه گارانتی»
             //  - the labour of an after-sales order is absorbed into the new 70113, not into the production labour 70102
             { AccountRoles.WarrantyProvision, "30406" }, { AccountRoles.WarrantyExpense, "80109" }, { AccountRoles.ServiceLabourAbsorbed, "70113" },
-            // release R1p ★ assumption for the accountant to confirm: the true-up of the labour absorbed at the pooled average rate (pool payroll cost less absorbed) goes to the new 70114
+            // release R1p ★ assumption for the accountant to confirm: the month-end variance (payroll cost of the payroll-rated people less the labour absorbed at the standard rate; one company-level line a module and month) goes to the new 70114
             { AccountRoles.LabourRateVariance, "70114" },
         };
 

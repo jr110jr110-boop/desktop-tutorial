@@ -829,8 +829,9 @@ namespace Services.NasbNiro.Production
                     dto.ScrapQty += b.ScrapQty;
                     dto.StandardHours += perPiece * (b.GoodQty + b.ScrapQty);
                 }
-                // machine time: the intervals of one machine are joined per kind, a moment counts for one kind only, bookings without a machine count their own hours
-                MfMachineTime.Result time = MfMachineTime.Of(centreBookings.Select(b => new MfMachineTime.Row { MachineId = b.MachineId, Kind = b.Kind, Start = b.StartAt, End = b.EndAt, Hours = b.Hours }));
+                // machine time: the intervals of one machine are joined per kind, a moment counts for one kind only; bookings without a machine count their own hours at a manual work centre only, never at a centre that requires a machine (R1p D43)
+                bool machineCentre = wc.RequiresMachine && machineCount > 0;
+                MfMachineTime.Result time = MfMachineTime.Of(centreBookings.Select(b => new MfMachineTime.Row { MachineId = b.MachineId, Kind = b.Kind, Start = b.StartAt, End = b.EndAt, Hours = b.Hours, RequiresMachine = machineCentre }));
                 dto.RunHours = Math.Round(time.Run, 2, MidpointRounding.AwayFromZero);
                 dto.SetupHours = Math.Round(time.Setup, 2, MidpointRounding.AwayFromZero);
                 dto.WaitingHours = Math.Round(time.Waiting, 2, MidpointRounding.AwayFromZero);

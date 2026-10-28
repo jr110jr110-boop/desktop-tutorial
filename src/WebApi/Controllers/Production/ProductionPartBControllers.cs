@@ -34,11 +34,11 @@ namespace WebApi.Controllers
         [HttpGet("cost/postings")]
         public async Task<IActionResult> PostingsAsync([FromQuery] CostPostingQuery query, CancellationToken ct) => Ok((await _cost.GetPostingsAsync(query, ct)).ToPaginatedResultSafe());
 
-        /// <summary>R1p D1: the month-end run of the labour pools (finance manager, finance, production manager): closes every ended month, stores its pools (the rates of the following days) and posts the true-up (actual pool cost less what the days absorbed) as one company-level line per pool; idempotent.</summary>
+        /// <summary>R1p D1: the month-end run of the labour variance (finance manager, finance, production manager): closes every ended month, stores its pool and posts the variance (actual payroll cost of the payroll-rated people less what the days absorbed at the standard rates) as one company-level line when the publication gate is passed, else carries the month (the quarter end posts it flagged as protected); idempotent.</summary>
         [HttpPost("cost/labour-month")]
         public async Task<IActionResult> LabourMonthAsync([FromBody] MfLabourMonthRunDto dto, CancellationToken ct) => Ok(await _labour.RunAsync(dto, ct));
 
-        /// <summary>R1p D1: the months already closed with their pools (people, hours, pooled rate, absorbed, true-up); the amounts of a protected pool are hidden from readers outside PAYROLL, FINANCEMANAGER and CEO.</summary>
+        /// <summary>R1p D1: the months, newest first, with their state (posted, protected, pending) and the amount absorbed at the standard rates for every reader; the pool (people, hours, actual average rate, cost) and the variance only for PAYROLL, FINANCEMANAGER and CEO.</summary>
         [HttpGet("cost/labour-months")]
         public async Task<IActionResult> LabourMonthsAsync(CancellationToken ct) => Ok(await _labour.HistoryAsync(ct));
     }

@@ -50,7 +50,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
 
         public decimal? Credit { get; set; }
 
-        /// <summary>R1p D1: the amount of this line is a protected labour amount (fewer than three payroll-rated employees behind the month's pool).</summary>
+        /// <summary>R1p D1: the amount of this line is a protected labour amount (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate).</summary>
         public bool LabourHidden { get; set; }
 
         public int? ProviderId { get; set; }

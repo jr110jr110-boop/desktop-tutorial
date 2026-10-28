@@ -49,7 +49,7 @@ namespace Services.NasbNiro.Finance
             WoCostNumbers cost = await BuildCostAsync(wo, ct);
             // R1p D1: this report shows the labour actual and the totals that carry it; while a protected labour amount is part of the work order, only PAYROLL, FINANCEMANAGER and CEO read it
             if (cost.LabourProtected && !Production.MfPrivacy.SeesPayroll(_user))
-                return Bad<FnPlannedActualDto>("هزینه دستمزد این دستور کار به‌دلیل حفظ محرمانگی حقوق (کمتر از سه نفر) فقط برای حسابداری حقوق، مدیر مالی و مدیرعامل نمایش داده می‌شود؛ گزارش برنامه در برابر واقعی برای نقش شما در دسترس نیست.");
+                return Bad<FnPlannedActualDto>("هزینه دستمزد این دستور کار به‌دلیل حفظ محرمانگی حقوق فقط برای حسابداری حقوق، مدیر مالی و مدیرعامل نمایش داده می‌شود؛ گزارش برنامه در برابر واقعی برای نقش شما در دسترس نیست.");
             var dto = new FnPlannedActualDto { WorkOrderId = wo.Id, Code = wo.Code, HasEstimate = est != null, IsClosed = cost.IsClosed, PlannedQuantity = est?.Quantity ?? 0, ActualQuantity = cost.Quantity };
             FnPlannedActualRowDto Row(string element, decimal planned, decimal actual) => new FnPlannedActualRowDto
             {

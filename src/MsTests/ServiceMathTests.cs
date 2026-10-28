@@ -216,10 +216,11 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void The_Labour_Of_An_Order_Is_Posted_At_The_Close_At_The_Pool_Rate_Whoever_The_Engineer_Is()
+        public void The_Labour_Of_An_Order_Is_Posted_At_The_Close_At_The_Standard_Rate_Whoever_The_Engineer_Is()
         {
-            // R1p D2: the labour of an order is hours x the pooled average rate of the service month pool, never the engineer's own pay, so one engineer on one order no longer defers it.
-            // 12 h at the standard rate 90,000 = 1,080,000 (the rate of the last closed month; the standard rate before the first closed month)
+            // R1p round 3: the labour of an order is hours x the standard rate that finance set for the after-sales work centre, never the engineer's own pay and never an average of a pool, so one engineer on one order
+            // no longer defers it and the amount tells nothing about anybody's pay (the month-end variance is a separate company-level line).
+            // 12 h at the standard rate 90,000 = 1,080,000
             decimal labour = global::Services.NasbNiro.Production.MfLabourRates.Absorbed(12m, 90000m);
             Assert.AreEqual(1080000m, labour);
             var lines = SvPosting.WarrantyLines(true, labour, 500000m, 80000m, "SVO-4");
@@ -229,6 +230,8 @@ namespace MsTests
             Assert.AreEqual(lines.Sum(l => l.Debit), lines.Sum(l => l.Credit));
             // 7.5 h at 101,111.1111: 758,333.33 -> 758,333 (whole rial, half away from zero)
             Assert.AreEqual(758333m, global::Services.NasbNiro.Production.MfLabourRates.Absorbed(7.5m, 101111.1111m));
+            // 7.5 h at the standard 90,000 = 675,000
+            Assert.AreEqual(675000m, global::Services.NasbNiro.Production.MfLabourRates.Absorbed(7.5m, 90000m));
             // parts only: the lines carry no labour amount
             var partsOnly = SvPosting.WarrantyLines(true, 0m, 500000m, 80000m, "SVO-4");
             Assert.AreEqual(3, partsOnly.Count);
@@ -236,6 +239,37 @@ namespace MsTests
             Assert.IsFalse(partsOnly.Any(l => l.Role == Services.NasbNiro.Finance.AccountRoles.ServiceLabourAbsorbed));
             // nothing at all: the lines carry no amount (the service posts no event then)
             Assert.AreEqual(0m, SvPosting.WarrantyLines(true, 0m, 0m, 0m, "SVO-4").Sum(l => l.Debit));
+        }
+
+        [TestMethod]
+        public void An_Order_Of_The_Earlier_Release_With_A_Small_Payroll_Group_Is_Recognised_By_Its_Markers_And_An_Order_Of_This_Release_Never_Is()
+        {
+            // the earlier release stored no pooled amount and held back the labour of an order that fewer than three payroll-rated engineers worked on
+            Assert.IsTrue(SvLegacyLabour.IsProtected(null, 1, 1));
+            Assert.IsTrue(SvLegacyLabour.IsProtected(0m, 2, 2));
+            Assert.IsTrue(SvLegacyLabour.IsProtected(null, 5, 2), "five engineers, two of them with a payslip");
+            Assert.IsTrue(SvLegacyLabour.IsProtected(-400000m, 2, 2), "the data step keeps the standard-rate part of a converted row as a pooled amount of zero or less: the row stays masked");
+            Assert.IsFalse(SvLegacyLabour.IsProtected(null, 3, 3));
+            Assert.IsFalse(SvLegacyLabour.IsProtected(null, 4, 0), "nobody with a payslip: there is no pay to show");
+            Assert.IsFalse(SvLegacyLabour.IsProtected(null, 0, 0));
+            // an order of this release always holds the positive amount its payroll-rated hours absorbed at the standard rate
+            Assert.IsFalse(SvLegacyLabour.IsProtected(900000m, 1, 1));
+            Assert.IsFalse(SvLegacyLabour.IsProtected(1m, 2, 2));
+
+            var earlier = new SvServiceOrder { Number = "SVO-OLD", LabourEmployeeCount = 1, LabourPayrollEmployeeCount = 1, LabourAmount = 400000m };
+            var current = new SvServiceOrder { Number = "SVO-NEW", LabourEmployeeCount = 1, LabourPayrollEmployeeCount = 1, LabourAmount = 400000m, LabourPooledAmount = 360000m };
+            var big = new SvServiceOrder { Number = "SVO-BIG", LabourEmployeeCount = 4, LabourPayrollEmployeeCount = 4, LabourAmount = 900000m };
+            Assert.IsTrue(SvLegacyLabour.IsProtected(earlier));
+            Assert.IsFalse(SvLegacyLabour.IsProtected(current));
+            Assert.IsFalse(SvLegacyLabour.IsProtected(big));
+            Assert.IsFalse(SvLegacyLabour.IsProtected((SvServiceOrder)null));
+            // the query condition gives the same answers as the method
+            var protectedByFilter = new[] { earlier, current, big }.AsQueryable().Where(SvLegacyLabour.Filter).Select(o => o.Number).ToList();
+            CollectionAssert.AreEqual(new[] { "SVO-OLD" }, protectedByFilter);
+            // what a reader gets: nothing of a protected order unless he reads payroll
+            Assert.AreEqual(0m, SvLegacyLabour.Visible(400000m, true, false));
+            Assert.AreEqual(400000m, SvLegacyLabour.Visible(400000m, true, true));
+            Assert.AreEqual(400000m, SvLegacyLabour.Visible(400000m, false, false));
         }
 
         [TestMethod]

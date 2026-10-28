@@ -26,8 +26,14 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public decimal LabourHours { get; set; }
         public decimal MachineHours { get; set; }
 
-        /// <summary>The labour absorbed on the day, at the pooled average rate (hours x rate): it is never one person's pay.</summary>
-        public decimal LabourAmount { get; set; }
+        /// <summary>
+        /// The labour absorbed on the day at the standard rate of the work centres (hours x rate): it is never one person's pay. Null (with <see cref="LabourHidden"/>) only for a run of the earlier release that
+        /// absorbed one or two payroll-rated people at their own rate, for a reader who is not PAYROLL, FINANCEMANAGER or CEO.
+        /// </summary>
+        public decimal? LabourAmount { get; set; }
+
+        /// <summary>The amount is hidden: the run is from the earlier release (personal rates) and fewer than three payroll-rated people stood behind it.</summary>
+        public bool LabourHidden { get; set; }
         public decimal OverheadAmount { get; set; }
         public int? AccountingEventId { get; set; }
     }
@@ -43,19 +49,13 @@ namespace ViewModels.NasbNiro.ProductionDtos
         /// <summary>Bookings without hours: nothing to cost, marked as handled.</summary>
         public int ZeroHourBookings { get; set; }
 
-        /// <summary>Bookings whose labour rate came from the last approved payroll month of the employee (the employee is payroll-rated; the labour is still absorbed at the pooled average rate, never at that rate).</summary>
+        /// <summary>Posted bookings of employees with an approved payroll month: their own cost is remembered for the month-end variance; the labour is absorbed at the standard rate like every other booking.</summary>
         public int LabourRateFromPayroll { get; set; }
 
-        /// <summary>Bookings whose labour rate came from the standard labour rate of the work centre (no payroll exists for the employee yet).</summary>
+        /// <summary>Posted bookings of employees without an approved payroll month (absorbed at the standard rate; they have no variance).</summary>
         public int LabourRateFromWorkCenter { get; set; }
 
-        /// <summary>R1p D1: payroll-rated bookings absorbed at the pooled average rate of the last closed month of their pool.</summary>
-        public int LabourAtPoolRate { get; set; }
-
-        /// <summary>R1p D1: payroll-rated bookings absorbed at the standard labour rate, because no month of their pool is closed yet.</summary>
-        public int LabourAtStandardRate { get; set; }
-
-        /// <summary>The labour absorbed by the posted bookings (hours x the pooled average rate).</summary>
+        /// <summary>The labour absorbed by the posted bookings (hours x the standard rate of the work centre).</summary>
         public decimal LabourAmount { get; set; }
         public decimal OverheadAmount { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
@@ -94,8 +94,13 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public decimal LabourHours { get; set; }
         public decimal MachineHours { get; set; }
 
-        /// <summary>The labour absorbed in the row: hours x the pooled average rate (never one person's pay).</summary>
-        public decimal LabourAmount { get; set; }
+        /// <summary>
+        /// The labour absorbed in the row: hours x the standard rate of the work centre (never one person's pay). Null (with <see cref="LabourHidden"/>) only for a posting of the earlier release with one or two
+        /// payroll-rated people behind it, for a reader who is not PAYROLL, FINANCEMANAGER or CEO.
+        /// </summary>
+        public decimal? LabourAmount { get; set; }
+
+        public bool LabourHidden { get; set; }
 
         public decimal OverheadAmount { get; set; }
     }
@@ -108,29 +113,35 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public DateTime? AsOf { get; set; }
     }
 
-    /// <summary>One labour pool of a closed month.</summary>
+    /// <summary>
+    /// The pool of a month with the figures that come from payroll (people, hours, the actual average rate, cost, variance). Returned to PAYROLL, FINANCEMANAGER and CEO ONLY; every other reader gets
+    /// an empty list of pools and the state and absorbed total of the month (<see cref="MfLabourPeriodDto"/>).
+    /// </summary>
     public class MfLabourPoolDto
     {
-        /// <summary>The cost centre code, or * for the company pool.</summary>
+        /// <summary>Always * (one pool per module and month).</summary>
         public string PoolKey { get; set; }
 
         public bool IsCompany { get; set; }
 
-        /// <summary>Distinct payroll-rated employees in the pool (at least three unless the pool is protected).</summary>
+        /// <summary>Distinct payroll-rated employees with hours in the pool.</summary>
         public int People { get; set; }
 
         public decimal Hours { get; set; }
 
-        /// <summary>The pooled average rate (pool cost / pool hours) the next days absorb at. Null for a protected pool.</summary>
+        /// <summary>The actual average rate (pool cost / pool hours). Null for a protected pool. It absorbs nothing: the days absorb at the standard rate.</summary>
         public decimal? Rate { get; set; }
 
-        /// <summary>What the days absorbed for the pool. Null for a protected pool and a reader outside PAYROLL, FINANCEMANAGER and CEO.</summary>
-        public decimal? Absorbed { get; set; }
+        /// <summary>The payroll cost of the pool.</summary>
+        public decimal Cost { get; set; }
 
-        /// <summary>Pool cost less absorbed: the one company-level true-up line. Null like <see cref="Absorbed"/>.</summary>
-        public decimal? Variance { get; set; }
+        /// <summary>What the days absorbed for the pool at the standard rates.</summary>
+        public decimal Absorbed { get; set; }
 
-        /// <summary>Posted by the quarter-end cap although fewer than three payroll-rated employees were behind it.</summary>
+        /// <summary>Pool cost less absorbed: the one company-level variance line of the month.</summary>
+        public decimal Variance { get; set; }
+
+        /// <summary>Posted by the quarter-end cap because the gate (people, dominance) was not passed: the line is flagged protected.</summary>
         public bool Protected { get; set; }
     }
 
@@ -141,16 +152,25 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         public string PeriodText { get; set; }
 
-        /// <summary>Bookings the true-up took into the pools of the month.</summary>
+        /// <summary>Posted (an ordinary company-level variance line), Protected (the quarter-end line flagged as protected) or Pending (bookings wait for the month to end, or for the gate).</summary>
+        public string State { get; set; }
+
+        public string StateText { get; set; }
+
+        /// <summary>Bookings of the payroll-rated people in the month (posted into the pool, or waiting).</summary>
         public int Bookings { get; set; }
 
+        /// <summary>What the days absorbed for those bookings at the standard rates: hours x a standard, readable by every reader of the screen.</summary>
+        public decimal Absorbed { get; set; }
+
+        /// <summary>The month was closed by the quarter-end cap: the variance line is flagged protected.</summary>
+        public bool Protected { get; set; }
+
+        /// <summary>The pool of the month with the payroll figures. EMPTY unless the reader is PAYROLL, FINANCEMANAGER or CEO.</summary>
         public List<MfLabourPoolDto> Pools { get; set; } = new List<MfLabourPoolDto>();
 
-        /// <summary>The sum of the true-up lines of the month. Null (with <see cref="Protected"/>) for a reader who may not see a protected amount.</summary>
+        /// <summary>The variance line of the month (cost less absorbed). Null unless the reader is PAYROLL, FINANCEMANAGER or CEO.</summary>
         public decimal? Variance { get; set; }
-
-        /// <summary>The month was closed by the quarter-end cap: the true-up is flagged protected.</summary>
-        public bool Protected { get; set; }
 
         public int? EventId { get; set; }
         public DateTimeOffset? PostedAt { get; set; }
@@ -161,7 +181,7 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public DateTime AsOf { get; set; }
         public List<MfLabourPeriodDto> Periods { get; set; } = new List<MfLabourPeriodDto>();
 
-        /// <summary>Bookings carried to a later month because fewer than three payroll-rated employees were behind the pool.</summary>
+        /// <summary>Bookings carried to the next month because the gate was not passed (fewer than the minimum number of payroll-rated people, or one person dominates the hours).</summary>
         public int BookingsCarried { get; set; }
 
         public string Message { get; set; }

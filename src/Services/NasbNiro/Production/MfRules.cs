@@ -167,7 +167,7 @@ namespace Services.NasbNiro.Production
     /// <summary>
     /// R1p D29: the time a work centre spent running, setting up, waiting or on other booked work, counted as MACHINE time. The bookings of one machine are joined per kind, and a moment of the machine counts for
     /// one kind only (run before setup before other work before waiting), so two welders on one machine do not book it twice and the loss categories add up to the machine's busy time.
-    /// Bookings without a machine (a manual work centre) count their own hours: every person is a resource of his own.
+    /// Bookings without a machine at a manual work centre (one that does not require a machine) count their own hours: every person is a resource of his own; at a centre that requires a machine they count nothing.
     /// </summary>
     internal static class MfMachineTime
     {
@@ -178,6 +178,12 @@ namespace Services.NasbNiro.Production
             public DateTime Start;
             public DateTime End;
             public decimal Hours;
+
+            /// <summary>
+            /// R1p D43 (round 3): the work centre of the booking has machines to choose from and requires one. A booking of such a centre that names no machine (an old row) is NOT machine time: it is left out, never counted
+            /// at its person-hours.
+            /// </summary>
+            public bool RequiresMachine;
         }
 
         public sealed class Result
@@ -204,7 +210,7 @@ namespace Services.NasbNiro.Production
                 result.Other += MfIntervals.Hours(other);
                 result.Waiting += MfIntervals.Hours(waiting);
             }
-            foreach (Row r in list.Where(r => !r.MachineId.HasValue))
+            foreach (Row r in list.Where(r => !r.MachineId.HasValue && !r.RequiresMachine))
             {
                 if (r.Kind == MfBookingKind.Run) result.Run += r.Hours;
                 else if (r.Kind == MfBookingKind.Setup) result.Setup += r.Hours;
@@ -215,30 +221,53 @@ namespace Services.NasbNiro.Production
         }
     }
 
-    /// <summary>One booking (production) or one closed order (service) in the labour pool of a month: the plain values the pooling rule needs.</summary>
+    /// <summary>
+    /// One booking (production) or one closed order (service) in the labour pool of a month: the plain values the publication gate and the variance need.
+    /// Only payroll-rated people are in it: a person without an approved payslip is costed at the standard rate and has no variance.
+    /// </summary>
     internal sealed class MfPoolItem
     {
         public int Id;
 
-        /// <summary>The cost centre of the work centre of the booking; null = the default production cost centre. Not used by the service pool.</summary>
-        public string CostCenter;
+        /// <summary>The payroll-rated people behind the item and the hours each of them worked on it (one person for a booking, the engineers for an order).</summary>
+        public Dictionary<int, decimal> PersonHours = new Dictionary<int, decimal>();
 
-        /// <summary>The distinct payroll-rated employees with hours behind the item (one for a booking, the engineers for an order).</summary>
-        public ISet<int> Employees = new HashSet<int>();
-
-        public decimal Hours;
+        public decimal Hours => PersonHours.Values.Sum();
 
         /// <summary>Hours x the own hourly payroll cost of the people, unrounded.</summary>
         public decimal Cost;
 
-        /// <summary>What the days or the close of the order absorbed for the item at the rate in force, whole rial.</summary>
+        /// <summary>What the days or the close of the order absorbed for the item at the STANDARD rate, whole rial.</summary>
         public decimal Absorbed;
+
+        public static MfPoolItem Of(int id, int employeeId, decimal hours, decimal cost, decimal absorbed) =>
+            new MfPoolItem { Id = id, PersonHours = new Dictionary<int, decimal> { { employeeId, hours } }, Cost = cost, Absorbed = absorbed };
     }
 
-    /// <summary>One pool of a month and its true-up.</summary>
+    /// <summary>What the publication gate found in the payroll-rated hours of a month.</summary>
+    internal sealed class MfGateResult
+    {
+        /// <summary>Distinct payroll-rated people with hours.</summary>
+        public int People;
+
+        public decimal Hours;
+
+        /// <summary>The largest share of one person in the hours of the pool (0 to 1).</summary>
+        public decimal LargestShare;
+
+        /// <summary>The share of the two biggest people together.</summary>
+        public decimal TopTwoShare;
+
+        public bool EnoughPeople;
+        public bool Dominated;
+
+        public bool Passed => EnoughPeople && !Dominated && Hours > 0;
+    }
+
+    /// <summary>The month's variance of one module (production or service): the pool of the month, or the carry, or the flagged quarter-end line.</summary>
     internal sealed class MfPoolResult
     {
-        /// <summary>The cost centre code, or <see cref="MfLabourPooling.CompanyKey"/>.</summary>
+        /// <summary>Always <see cref="MfLabourPooling.CompanyKey"/>: one pool per module and month.</summary>
         public string Key;
 
         public int People;
@@ -249,10 +278,10 @@ namespace Services.NasbNiro.Production
         /// <summary>Cost less absorbed (whole rial): the one company-level line.</summary>
         public decimal Variance;
 
-        /// <summary>Cost / hours, four decimals; null for a protected pool.</summary>
+        /// <summary>Cost / hours, four decimals: the actual average rate, shown to the payroll readers only. Null for a protected pool.</summary>
         public decimal? Rate;
 
-        /// <summary>Posted only because the quarter ended: fewer than three payroll-rated people are behind it.</summary>
+        /// <summary>Posted only because the quarter ended: the gate (people, dominance) was not passed.</summary>
         public bool Protected;
 
         public List<int> ItemIds = new List<int>();
@@ -260,82 +289,131 @@ namespace Services.NasbNiro.Production
 
     internal sealed class MfPoolPlan
     {
-        public List<MfPoolResult> Pools = new List<MfPoolResult>();
+        /// <summary>The pool to post; null when the month is carried or empty.</summary>
+        public MfPoolResult Pool;
 
-        /// <summary>The items that wait for the next month (the whole month is too small and the quarter does not end).</summary>
+        /// <summary>What the gate found (null for an empty month).</summary>
+        public MfGateResult Gate;
+
+        /// <summary>The items that wait for the next month (the gate was not passed and the quarter does not end).</summary>
         public List<int> CarriedItemIds = new List<int>();
     }
 
     /// <summary>
-    /// R1p D1 and D2: the labour pool of a month. Labour is absorbed at a pooled average rate (pool cost / pool hours), so no amount that is published is one person's pay.
-    /// The pool is made of the payroll-rated employees with hours in the month: per cost centre when that cost centre has at least <see cref="MinPeople"/> of them; the people of the cost centres that have fewer
-    /// form the company pool when they are at least three themselves; when they are one or two, the pools of that month all dissolve into one company pool (two rates published side by side would let anybody subtract
-    /// the one from the other and isolate the one or two people left over); a company with fewer than three payroll-rated people in the month publishes nothing: the month is carried and joins the next one, and at the
-    /// end of a Persian quarter the carry is posted company-wide as one true-up line flagged as protected (★ provisional cap).
+    /// ★ R1p D1/D2 (round 3): the settings of the publication gate of the monthly labour variance. The month's variance (actual payroll cost of the payroll-rated people with hours less what was absorbed at the standard
+    /// rate) is published as an ordinary line only when at least <see cref="MinPeople"/> payroll-rated people have hours in the pool AND nobody dominates it (the largest person has at most <see cref="MaxShare"/> of the hours
+    /// and the two largest together at most <see cref="MaxTopTwoShare"/>). Otherwise the month is carried and, at the end of a Persian quarter, posted as one line flagged as protected.
+    /// </summary>
+    internal sealed class MfLabourGateSettings
+    {
+        public const string MinPeopleKey = "Production:PoolMinPeople";
+        public const string MaxShareKey = "Production:PoolMaxShare";
+        public const string MaxTopTwoShareKey = "Production:PoolMaxTopTwoShare";
+
+        public const int DefaultMinPeople = 5;
+
+        /// <summary>The smallest group the earlier releases accepted; a setting below it is raised to it.</summary>
+        public const int FloorMinPeople = 3;
+
+        public const decimal DefaultMaxShare = 0.50m;
+        public const decimal DefaultMaxTopTwoShare = 0.80m;
+
+        public int MinPeople = DefaultMinPeople;
+        public decimal MaxShare = DefaultMaxShare;
+        public decimal MaxTopTwoShare = DefaultMaxTopTwoShare;
+
+        private static decimal Share(string text, decimal fallback) =>
+            decimal.TryParse(text, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out decimal v) && v > 0m && v <= 1m ? v : fallback;
+
+        /// <summary>The settings in the configuration; an unset or unusable value is the default.</summary>
+        public static MfLabourGateSettings Read(Microsoft.Extensions.Configuration.IConfiguration configuration)
+        {
+            var settings = new MfLabourGateSettings();
+            if (configuration == null) return settings;
+            if (int.TryParse(configuration[MinPeopleKey], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int people) && people > 0)
+                settings.MinPeople = Math.Max(people, FloorMinPeople);
+            settings.MaxShare = Share(configuration[MaxShareKey], DefaultMaxShare);
+            settings.MaxTopTwoShare = Share(configuration[MaxTopTwoShareKey], DefaultMaxTopTwoShare);
+            return settings;
+        }
+    }
+
+    /// <summary>
+    /// R1p D1 and D2 (round 3): the monthly labour variance of a module. Labour is ABSORBED at a standard rate that finance sets (<see cref="MfLabourRates.Standard"/>), so nothing posted per work order, WBS node, work centre,
+    /// day or service order is anybody's pay. What is left is the VARIANCE of the month: the actual payroll cost of the payroll-rated people who have hours in the month, less what was absorbed for those hours at the standard
+    /// rate. It is posted once per module and month at company level, and only when it cannot be worked back to a person: see <see cref="MfLabourGateSettings"/> (at least five payroll-rated people, nobody over half of
+    /// the hours, the two largest together over four fifths). A month that fails the gate is carried to the next open month and joins its pool; at the end of a Persian quarter (Khordad, Shahrivar, Azar, Esfand) the
+    /// accumulated variance is posted anyway as one company line flagged as protected, which only PAYROLL, FINANCEMANAGER and CEO read.
     /// </summary>
     internal static class MfLabourPooling
     {
-        public const int MinPeople = 3;
-
-        /// <summary>The key of the company pool (a cost centre code never is this).</summary>
+        /// <summary>The pool key of every module's pool (a module has one pool a month).</summary>
         public const string CompanyKey = "*";
 
         /// <summary>Khordad, Shahrivar, Azar and Esfand end the Persian quarters.</summary>
         public static bool IsQuarterEnd(int period) => period % 100 == 3 || period % 100 == 6 || period % 100 == 9 || period % 100 == 12;
 
-        public static int People(IEnumerable<MfPoolItem> items) => items.SelectMany(i => i.Employees).Distinct().Count();
+        /// <summary>The distinct payroll-rated people with hours behind the items.</summary>
+        public static int People(IEnumerable<MfPoolItem> items) => HoursOfPeople(items).Count(kv => kv.Value > 0);
 
-        /// <summary>The pooled average rate: pool cost / pool hours, four decimals (null without hours).</summary>
+        private static Dictionary<int, decimal> HoursOfPeople(IEnumerable<MfPoolItem> items)
+        {
+            var hours = new Dictionary<int, decimal>();
+            foreach (MfPoolItem item in items)
+                foreach (var person in item.PersonHours)
+                    hours[person.Key] = hours.GetValueOrDefault(person.Key) + person.Value;
+            return hours;
+        }
+
+        /// <summary>The actual average rate: pool cost / pool hours, four decimals (null without hours). Payroll readers only.</summary>
         public static decimal? Rate(decimal cost, decimal hours) => hours <= 0 ? (decimal?)null : Math.Round(cost / hours, 4, MidpointRounding.AwayFromZero);
 
-        private static MfPoolResult Build(string key, List<MfPoolItem> list, bool isProtected)
+        /// <summary>The publication gate: enough people, and nobody dominates the hours.</summary>
+        public static MfGateResult Gate(IEnumerable<MfPoolItem> items, MfLabourGateSettings settings)
+        {
+            settings ??= new MfLabourGateSettings();
+            List<decimal> hours = HoursOfPeople(items).Values.Where(h => h > 0).OrderByDescending(h => h).ToList();
+            decimal total = hours.Sum();
+            var result = new MfGateResult { People = hours.Count, Hours = total };
+            if (total > 0)
+            {
+                result.LargestShare = hours[0] / total;
+                result.TopTwoShare = hours.Take(2).Sum() / total;
+            }
+            result.EnoughPeople = hours.Count >= settings.MinPeople;
+            // compared on the hours themselves (no division), so the boundary is exact: exactly half is allowed
+            result.Dominated = total > 0 && (hours[0] > settings.MaxShare * total || hours.Take(2).Sum() > settings.MaxTopTwoShare * total);
+            return result;
+        }
+
+        private static MfPoolResult Build(List<MfPoolItem> list, MfGateResult gate, bool isProtected)
         {
             decimal hours = list.Sum(i => i.Hours), cost = list.Sum(i => i.Cost), absorbed = list.Sum(i => i.Absorbed);
             decimal rounded = Math.Round(cost, 0, MidpointRounding.AwayFromZero);
             return new MfPoolResult
             {
-                Key = key, People = People(list), Hours = hours, Cost = rounded, Absorbed = absorbed, Variance = rounded - absorbed, Rate = isProtected ? (decimal?)null : Rate(cost, hours),
+                Key = CompanyKey, People = gate.People, Hours = hours, Cost = rounded, Absorbed = absorbed, Variance = rounded - absorbed, Rate = isProtected ? (decimal?)null : Rate(cost, hours),
                 Protected = isProtected, ItemIds = list.Select(i => i.Id).OrderBy(i => i).ToList(),
             };
         }
 
-        /// <summary>The production pools of a month (cost centres, then the company pool).</summary>
-        public static MfPoolPlan Plan(IEnumerable<MfPoolItem> items, int period, string defaultCostCenter)
+        /// <summary>The month of a module: the pool when the gate is passed, the carry when it is not, the flagged quarter-end line when the quarter ends.</summary>
+        public static MfPoolPlan Plan(IEnumerable<MfPoolItem> items, int period, MfLabourGateSettings settings)
         {
             var plan = new MfPoolPlan();
             List<MfPoolItem> all = items.ToList();
             if (all.Count == 0) return plan;
-            var centres = all.GroupBy(i => i.CostCenter ?? defaultCostCenter).OrderBy(g => g.Key, StringComparer.Ordinal).ToList();
-            List<IGrouping<string, MfPoolItem>> own = centres.Where(g => People(g) >= MinPeople).ToList();
-            List<MfPoolItem> rest = centres.Where(g => People(g) < MinPeople).SelectMany(g => g).ToList();
-            if (rest.Count == 0 || People(rest) >= MinPeople)
-            {
-                foreach (var g in own) plan.Pools.Add(Build(g.Key, g.ToList(), false));
-                if (rest.Count > 0) plan.Pools.Add(Build(CompanyKey, rest, false));
-                return plan;
-            }
-            if (People(all) >= MinPeople) { plan.Pools.Add(Build(CompanyKey, all, false)); return plan; }
-            if (IsQuarterEnd(period)) plan.Pools.Add(Build(CompanyKey, all, true));
-            else plan.CarriedItemIds.AddRange(all.Select(i => i.Id));
-            return plan;
-        }
-
-        /// <summary>The single pool of a module that has no cost-centre split (the service department): the pool, or the carry, or the protected quarter-end line.</summary>
-        public static MfPoolPlan PlanSingle(IEnumerable<MfPoolItem> items, int period, string key)
-        {
-            var plan = new MfPoolPlan();
-            List<MfPoolItem> all = items.ToList();
-            if (all.Count == 0) return plan;
-            if (People(all) >= MinPeople) plan.Pools.Add(Build(key, all, false));
-            else if (IsQuarterEnd(period)) plan.Pools.Add(Build(key, all, true));
+            plan.Gate = Gate(all, settings);
+            if (plan.Gate.Passed) plan.Pool = Build(all, plan.Gate, false);
+            else if (IsQuarterEnd(period)) plan.Pool = Build(all, plan.Gate, true);
             else plan.CarriedItemIds.AddRange(all.Select(i => i.Id));
             return plan;
         }
     }
 
     /// <summary>
-    /// R1p D1/D2: the two lines of the month-end true-up of a pool. Under-absorbed (variance above zero): the labour-rate-variance account is debited and the absorbed-labour account credited; over-absorbed: the other
-    /// way round. The lines carry the cost centre (none for the company pool) and the protected flag of the pool, and no work order, WBS node or day.
+    /// R1p D1/D2: the two lines of the month-end variance of a module. Under-absorbed (variance above zero): the labour-rate-variance account is debited and the absorbed-labour account credited; over-absorbed: the other
+    /// way round. The lines carry the protected flag of the pool and no work order, WBS node or day (production: no cost centre either; after-sales: its own cost centre).
     /// </summary>
     internal static class MfLabourVariance
     {
@@ -349,38 +427,43 @@ namespace Services.NasbNiro.Production
         }
     }
 
-    /// <summary>The newest unprotected rate of a pool (one row of <see cref="Entities.Model.NasbNiro.Production.MfLabourPool"/>).</summary>
-    internal sealed class MfPoolRate
-    {
-        public int Period;
-        public string Key;
-        public decimal Rate;
-    }
-
     /// <summary>
-    /// R1p D1 and D2: the rate a day absorbs labour at. The pooled average rate of the last closed month of the same pool (the cost centre's own pool of that month, else the company pool of that month); until a month
-    /// is closed the standard labour rate (the setting <c>Production:StandardLabourRate</c>, else the standard rate of the work centre). Never the employee's own rate.
+    /// R1p D1 and D2 (round 3): the rate a day or a service order absorbs labour at. A STANDARD rate that finance sets and that is not derived from anybody's pay: the standard rate of the work centre
+    /// (<see cref="MfWorkCenter.LabourRateRial"/>, maintained per Persian year; the after-sales labour work centre has one too), else the setting <c>Production:StandardLabourRate</c>; when neither exists the
+    /// run refuses and names the centre. The same rate applies to a person with a payslip and one without, so the amounts posted per work order, WBS node and day are hours x a standard and show nothing of any pay.
     /// </summary>
     internal static class MfLabourRates
     {
-        /// <summary>The newest month that has a pool for the cost centre or for the company; within a month the pool of the cost centre wins.</summary>
-        public static MfPoolRate Pooled(IReadOnlyCollection<MfPoolRate> pools, string costCenter)
-        {
-            foreach (int period in pools.Select(p => p.Period).Distinct().OrderByDescending(p => p))
-            {
-                MfPoolRate own = costCenter == null ? null : pools.FirstOrDefault(p => p.Period == period && string.Equals(p.Key, costCenter, StringComparison.Ordinal));
-                if (own != null) return own;
-                MfPoolRate company = pools.FirstOrDefault(p => p.Period == period && p.Key == MfLabourPooling.CompanyKey);
-                if (company != null) return company;
-            }
-            return null;
-        }
-
-        /// <summary>What a day absorbs for a booking: hours x the pooled (or standard) rate, to the whole rial, half away from zero. The month-end true-up is the pool cost less the sum of these.</summary>
+        /// <summary>What a day absorbs for a booking: hours x the standard rate, to the whole rial, half away from zero. The month-end variance is the payroll cost less the sum of these.</summary>
         public static decimal Absorbed(decimal hours, decimal rate) => Math.Round(hours * rate, 0, MidpointRounding.AwayFromZero);
 
-        /// <summary>The standard labour rate: the configured one, else the work centre's; null when neither is set (positive values only).</summary>
-        public static decimal? Standard(decimal? configured, decimal? workCenter) => configured.HasValue && configured.Value > 0 ? configured : workCenter.HasValue && workCenter.Value > 0 ? workCenter : null;
+        /// <summary>The standard labour rate of a centre: its own rate, else the configured fallback; null when neither is set (positive values only).</summary>
+        public static decimal? Standard(decimal? workCenter, decimal? configured) => workCenter.HasValue && workCenter.Value > 0 ? workCenter : configured.HasValue && configured.Value > 0 ? configured : null;
+    }
+
+    /// <summary>
+    /// R1p H3 (round 3): the read-side mask for rows stored by the EARLIER release, which absorbed labour at the employee's own hourly pay. A run or posting of that release shows one person's pay when only one or two
+    /// of the people behind it were paid through payroll; it is returned as hidden to every reader but PAYROLL, FINANCEMANAGER and CEO. The new release never writes such a row: it absorbs at the standard rate, sets
+    /// <see cref="MfCostRun.LabourProtected"/> to false on every run and keeps the counts only as information, so none of these rules trips on a row it wrote. The CEO overview and drill use the same helper.
+    /// </summary>
+    internal static class MfLegacyLabour
+    {
+        /// <summary>The smallest group of payroll-rated people whose labour amount the earlier release published.</summary>
+        public const int MinEmployees = 3;
+
+        /// <summary>The earlier release's group rule: payroll-rated people behind the amount, fewer than three of them (employees and payroll-rated people both count).</summary>
+        public static bool Group(int employees, int payrollEmployees) => payrollEmployees > 0 && Math.Min(employees, payrollEmployees) < MinEmployees;
+
+        /// <summary>A run of the earlier release that held at least one protected group (the flag it stored). A run of this release is never protected.</summary>
+        public static bool IsProtected(MfCostRun run) => run != null && run.LabourProtected;
+
+        /// <summary>A posting of the earlier release: its run was flagged and its own group had one or two payroll-rated people.</summary>
+        public static bool IsProtected(bool runProtected, int employees, int payrollEmployees) => runProtected && Group(employees, payrollEmployees);
+
+        public static bool IsProtected(MfCostRun run, MfCostPosting posting) => run != null && posting != null && IsProtected(run.LabourProtected, posting.EmployeeCount, posting.PayrollEmployeeCount);
+
+        /// <summary>The amount for a reader: empty when the row is protected and the reader is not a payroll reader.</summary>
+        public static decimal? Labour(decimal amount, bool isProtected, bool seesPayroll) => isProtected && !seesPayroll ? (decimal?)null : amount;
     }
 
     /// <summary>
@@ -478,7 +561,7 @@ namespace Services.NasbNiro.Production
         }
     }
 
-    /// <summary>R1p D1: names of the monthly true-up of the production labour pools (the Persian month arithmetic is the one of the after-sales monthly posting).</summary>
+    /// <summary>R1p D1: names of the monthly variance of the production labour (the Persian month arithmetic is the one of the after-sales month-end run).</summary>
     internal static class MfLabourMonth
     {
         public const string SourceType = "MfLabourMonth";
@@ -492,11 +575,6 @@ namespace Services.NasbNiro.Production
 
         /// <summary>The month whose pool takes a booking of <paramref name="day"/>: its own month, or the first later month that is not closed yet (a closed month is never reopened).</summary>
         public static int Assign(DateTime day, IEnumerable<int> closed) => global::Services.NasbNiro.AfterSales.SvLabourMonth.Assign(day, closed);
-
-        /// <summary>The cost centre that takes the pool of a booking: the one of the work centre, else the production cost centre.</summary>
-        public const string DefaultCostCenter = "PRODUCTION";
-
-        public static string CostCenterOf(string workCenterCostCenter) => MfText.Clean(workCenterCostCenter);
     }
 
     /// <summary>D39 and D1: who may change or read time bookings.</summary>

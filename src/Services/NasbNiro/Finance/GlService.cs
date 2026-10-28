@@ -189,16 +189,18 @@ namespace Services.NasbNiro.Finance
             FnFiscalYear previous = await _uow.Set<FnFiscalYear>().Where(y => y.LegalEntityId == year.LegalEntityId && y.EndDate < year.StartDate).OrderByDescending(y => y.EndDate).FirstOrDefaultAsync(ct);
             if (previous != null && previous.Status != FnYearStatus.Closed) return Bad<FiscalYearDto>($"ابتدا سال مالی قبل ({previous.Year}) را ببندید؛ سال‌ها به ترتیب بسته می‌شوند.");
 
-            // balances of the year per account and detail
+            // balances of the year per account and detail. R1p C1: the part that comes from lines flagged as confidential labour is kept apart (hiddenBalances): the closing lines of an account carry the visible balance only,
+            // and the confidential part is written as lines of its own, flagged the same way, so that a reader who does not see them neither sees nor can subtract them (they cancel inside each voucher)
             var rows = await _uow.Set<FnVoucherLine>().Where(l => l.Voucher.FiscalYearId == year.Id && l.Voucher.Status == FnVoucherStatus.Final)
-                .GroupBy(l => new { l.AccountId, l.Detail1Id, l.Detail2Id })
-                .Select(g => new { g.Key.AccountId, g.Key.Detail1Id, g.Key.Detail2Id, Debit = g.Sum(l => l.Debit), Credit = g.Sum(l => l.Credit) }).ToListAsync(ct);
+                .GroupBy(l => new { l.AccountId, l.Detail1Id, l.Detail2Id, l.LabourProtected })
+                .Select(g => new { g.Key.AccountId, g.Key.Detail1Id, g.Key.Detail2Id, g.Key.LabourProtected, Debit = g.Sum(l => l.Debit), Credit = g.Sum(l => l.Credit) }).ToListAsync(ct);
             Dictionary<int, FnAccount> byId = byCode.Values.ToDictionary(a => a.Id);
             var balances = new Dictionary<(int, int?, int?), decimal>();
+            var hiddenBalances = new Dictionary<(int, int?, int?), decimal>();
             foreach (var r in rows)
             {
                 decimal b = r.Debit - r.Credit;
-                if (b != 0) balances[(r.AccountId, r.Detail1Id, r.Detail2Id)] = b;
+                if (b != 0) (r.LabourProtected ? hiddenBalances : balances)[(r.AccountId, r.Detail1Id, r.Detail2Id)] = b;
             }
 
             DateTime endDate = year.EndDate.Date;
@@ -209,43 +211,50 @@ namespace Services.NasbNiro.Finance
                 CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, CheckedByUserId = Me, CheckedAt = DateTimeOffset.Now,
                 FinalizedByUserId = Me, FinalizedAt = DateTimeOffset.Now, Lines = new List<FnVoucherLine>(),
             };
-            void AddLine(FnVoucher v, FnAccount account, int? d1, int? d2, decimal amountDebitMinusCredit, string text)
+            void AddLine(FnVoucher v, FnAccount account, int? d1, int? d2, decimal amountDebitMinusCredit, string text, bool confidential = false)
             {
                 if (amountDebitMinusCredit == 0) return;
                 v.Lines.Add(new FnVoucherLine
                 {
                     RowNumber = v.Lines.Count + 1, AccountId = account.Id, Detail1Id = d1, Detail2Id = d2,
-                    Debit = amountDebitMinusCredit > 0 ? amountDebitMinusCredit : 0, Credit = amountDebitMinusCredit < 0 ? -amountDebitMinusCredit : 0, Description = text,
+                    Debit = amountDebitMinusCredit > 0 ? amountDebitMinusCredit : 0, Credit = amountDebitMinusCredit < 0 ? -amountDebitMinusCredit : 0, Description = text, LabourProtected = confidential,
                 });
             }
 
             string note = Clean(dto.Reason) != null ? " — " + Clean(dto.Reason) : "";
 
-            // (1) temporary accounts -> summary account
+            // (1) temporary accounts -> summary account (the confidential part of each account is closed by lines of its own, flagged; it nets to zero because the flagged lines come in equal pairs, so the summary account is the same)
             FnVoucher v1 = MakeVoucher(year, endDate, FnVoucherType.YearEndTemporaryClose, $"بستن حساب‌های موقت سال {year.Title}{note}");
-            var temporary = balances.Where(p => byId[p.Key.Item1].Temporary && p.Key.Item1 != summary.Id)
-                .GroupBy(p => p.Key.Item1).Select(g => new { AccountId = g.Key, Balance = g.Sum(x => x.Value) }).ToList();
-            foreach (var t in temporary) AddLine(v1, byId[t.AccountId], null, null, -t.Balance, "بستن حساب موقت");
-            decimal toSummary = v1.Lines.Sum(l => l.Debit) - v1.Lines.Sum(l => l.Credit);
-            AddLine(v1, summary, null, null, -toSummary, "خلاصه سود و زیان");
+            List<(int AccountId, decimal Balance)> TemporaryOf(Dictionary<(int, int?, int?), decimal> source) => source.Where(p => byId[p.Key.Item1].Temporary && p.Key.Item1 != summary.Id)
+                .GroupBy(p => p.Key.Item1).Select(g => (g.Key, g.Sum(x => x.Value))).ToList();
+            foreach (var t in TemporaryOf(balances)) AddLine(v1, byId[t.AccountId], null, null, -t.Balance, "بستن حساب موقت");
+            foreach (var t in TemporaryOf(hiddenBalances)) AddLine(v1, byId[t.AccountId], null, null, -t.Balance, "بستن حساب موقت", true);
+            decimal toSummaryVisible = v1.Lines.Where(l => !l.LabourProtected).Sum(l => l.Debit - l.Credit);
+            decimal toSummaryHidden = v1.Lines.Where(l => l.LabourProtected).Sum(l => l.Debit - l.Credit);
+            AddLine(v1, summary, null, null, -toSummaryVisible, "خلاصه سود و زیان");
+            AddLine(v1, summary, null, null, -toSummaryHidden, "خلاصه سود و زیان", true);   // only when the flagged lines do not cancel inside the temporary accounts; the visible and the flagged lines each balance by themselves
             if (v1.Lines.Count > 0) created.Add(v1);
 
             // (2) summary account -> retained earnings
-            decimal summaryBalance = balances.Where(p => p.Key.Item1 == summary.Id).Sum(p => p.Value) - toSummary;   // debit minus credit after (1)
+            decimal summaryVisible = balances.Where(p => p.Key.Item1 == summary.Id).Sum(p => p.Value) - toSummaryVisible;   // debit minus credit after (1)
+            decimal summaryHidden = hiddenBalances.Where(p => p.Key.Item1 == summary.Id).Sum(p => p.Value) - toSummaryHidden;
             FnVoucher v2 = MakeVoucher(year, endDate, FnVoucherType.YearEndTemporaryClose, $"انتقال سود (زیان) سال {year.Title} به سود انباشته");
-            AddLine(v2, summary, null, null, -summaryBalance, "انتقال خلاصه سود و زیان");
-            AddLine(v2, retained, null, null, summaryBalance, "سود (زیان) انباشته");
+            AddLine(v2, summary, null, null, -summaryVisible, "انتقال خلاصه سود و زیان");
+            AddLine(v2, retained, null, null, summaryVisible, "سود (زیان) انباشته");
+            AddLine(v2, summary, null, null, -summaryHidden, "انتقال خلاصه سود و زیان", true);
+            AddLine(v2, retained, null, null, summaryHidden, "سود (زیان) انباشته", true);
             if (v2.Lines.Count > 0) created.Add(v2);
 
-            // balances after (1) and (2) for the permanent accounts
+            // balances after (1) and (2) for the permanent accounts, the visible and the confidential part apart
             var closing = new Dictionary<(int, int?, int?), decimal>();
+            var closingHidden = new Dictionary<(int, int?, int?), decimal>();
             foreach (var p in balances)
                 if (!byId[p.Key.Item1].Temporary) closing[p.Key] = p.Value;
-            if (summaryBalance != 0)
-            {
-                var key = (retained.Id, (int?)null, (int?)null);
-                closing[key] = (closing.TryGetValue(key, out decimal old) ? old : 0) + summaryBalance;
-            }
+            foreach (var p in hiddenBalances)
+                if (!byId[p.Key.Item1].Temporary) closingHidden[p.Key] = p.Value;
+            var retainedKey = (retained.Id, (int?)null, (int?)null);
+            if (summaryVisible != 0) closing[retainedKey] = (closing.TryGetValue(retainedKey, out decimal old) ? old : 0) + summaryVisible;
+            if (summaryHidden != 0) closingHidden[retainedKey] = (closingHidden.TryGetValue(retainedKey, out decimal oldHidden) ? oldHidden : 0) + summaryHidden;
 
             // (3) closing voucher of the permanent accounts, (4) opening voucher of the next year
             FnVoucher v3 = MakeVoucher(year, endDate, FnVoucherType.Closing, $"سند اختتامیه سال {year.Title}");
@@ -254,6 +263,11 @@ namespace Services.NasbNiro.Finance
             {
                 AddLine(v3, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, -p.Value, "اختتامیه");
                 AddLine(v4, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, p.Value, "افتتاحیه");
+            }
+            foreach (var p in closingHidden.Where(x => x.Value != 0).OrderBy(x => byId[x.Key.Item1].Code))
+            {
+                AddLine(v3, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, -p.Value, "اختتامیه", true);
+                AddLine(v4, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, p.Value, "افتتاحیه", true);
             }
             if (v3.Lines.Count > 0) created.Add(v3);
             if (v4.Lines.Count > 0) created.Add(v4);

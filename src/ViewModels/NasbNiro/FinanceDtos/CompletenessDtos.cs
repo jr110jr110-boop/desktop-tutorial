@@ -572,6 +572,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTimeOffset? SignedOffAt { get; set; }
         public string SignOffNote { get; set; }
         public int? UnexplainedAtSignOff { get; set; }
+        /// <summary>True when the period has confidential labour lines (R1p): the comparison leaves them out, so the labour accounts of Sepidar may differ by them; the single-run view only.</summary>
+        public bool LabourHidden { get; set; }
         public List<ParallelDifferenceDto> Differences { get; set; } = new List<ParallelDifferenceDto>();
     }
 

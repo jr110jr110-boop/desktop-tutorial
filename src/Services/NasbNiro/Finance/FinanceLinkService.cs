@@ -77,7 +77,7 @@ namespace Services.NasbNiro.Finance
                         CostCenter = l.CostCenter, Description = l.Description,
                     }).ToList(),
                 }), query.PageNumber, query.PageSize, cancellationToken);
-            // R1p D1/D2: a protected labour amount (the quarter-end true-up of a pool behind which fewer than three payroll-rated people stood) is read by PAYROLL, FINANCEMANAGER and CEO only; for everybody else the line, and so the event total, carries no amount
+            // R1p D1/D2: a protected labour amount (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate) is read by PAYROLL, FINANCEMANAGER and CEO only; for everybody else the line, and so the event total, carries no amount
             bool seesPayroll = Production.MfPrivacy.SeesPayroll(_user);
             foreach (AccountingEventDto e in page)
             {
@@ -280,7 +280,7 @@ namespace Services.NasbNiro.Finance
         }
 
         /// <summary>
-        /// R1p D1/D2: the refusal when events with a protected labour line (the quarter-end true-up of a pool that fewer than three payroll-rated people stood behind) are exported by a role that may not read it.
+        /// R1p D1/D2: the refusal when events with a protected labour line (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate) are exported by a role that may not read it.
         /// It names the Persian months of those events so that the finance manager exports exactly them. Null when no event is protected.
         /// </summary>
         internal static string ProtectedLabourRefusal(IEnumerable<DateTime> protectedEventDates)
@@ -291,7 +291,7 @@ namespace Services.NasbNiro.Finance
         }
 
         internal static IQueryable<CostSumRow> CostSums(IQueryable<CostEntry> entries) =>
-            entries.GroupBy(c => new { c.ContractId, c.WorkOrderId, c.CostCenter, c.Kind })
+            entries.GroupBy(c => new { c.ContractId, c.WorkOrderId, c.CostCenter, c.Kind, c.LabourProtected })
                 .Select(g => new CostSumRow
                 {
                     ContractId = g.Key.ContractId, WorkOrderId = g.Key.WorkOrderId, CostCenter = g.Key.CostCenter, Kind = g.Key.Kind,
@@ -310,7 +310,9 @@ namespace Services.NasbNiro.Finance
             List<int> cIds = rows.Where(r => r.ContractId.HasValue).Select(r => r.ContractId.Value).Distinct().ToList();
             var workOrders = await _uow.Set<WorkOrder>().Where(w => woIds.Contains(w.Id)).Select(w => new { w.Id, w.Code, w.Title }).ToDictionaryAsync(w => w.Id, cancellationToken);
             var contracts = await _uow.Set<ContractEntity>().Where(c => cIds.Contains(c.Id)).Select(c => new { c.Id, c.Code, c.Title }).ToDictionaryAsync(c => c.Id, cancellationToken);
-            List<WorkOrderCostDto> result = rows.GroupBy(r => new { r.ContractId, r.WorkOrderId, r.CostCenter }).Select(g => new WorkOrderCostDto
+            // a protected company-level line (no contract, no work order) is a row of its own, so that the published variances of the other months of the same cost centre stay readable for everybody;
+            // a work order keeps one row, and a protected labour entry in it hides the labour of the whole row (the rows of the earlier release)
+            List<WorkOrderCostDto> result = rows.GroupBy(r => new { r.ContractId, r.WorkOrderId, r.CostCenter, Own = r.WorkOrderId == null && r.ContractId == null && r.Protected }).Select(g => new WorkOrderCostDto
             {
                 ContractId = g.Key.ContractId,
                 ContractCode = g.Key.ContractId.HasValue && contracts.TryGetValue(g.Key.ContractId.Value, out var c) ? c.Code : null,

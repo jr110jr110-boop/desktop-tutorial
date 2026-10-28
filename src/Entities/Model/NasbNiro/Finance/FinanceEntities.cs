@@ -80,7 +80,7 @@ namespace Entities.Model.NasbNiro.Finance
         public int CreatedByUserId { get; set; }
 
         /// <summary>
-        /// R1p D1/D2: a labour amount that could reveal the pay of one or two people: the quarter-end true-up of a pool that fewer than three payroll-rated employees were behind (posted company-wide, without work order),
+        /// R1p D1/D2: a labour amount that could reveal the pay of one or two people: the quarter-end line of a monthly labour variance whose pool did not pass the publication gate (too few payroll-rated people, or one or two of them dominate the hours; posted company-wide, without work order),
         /// or a per-work-order labour entry of the old per-group posting that the backfill flagged. Readers other than PAYROLL, FINANCEMANAGER and CEO see no amount for such an entry.
         /// </summary>
         public bool LabourProtected { get; set; }

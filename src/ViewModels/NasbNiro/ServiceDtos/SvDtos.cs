@@ -391,12 +391,18 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public decimal WaitingHours { get; set; }
         public decimal TotalHours { get; set; }
 
-        // ----- cost: the labour is absorbed at the pooled average rate of the service month pool (R1p D2), so it is never one person's pay
+        // ----- cost: the labour is absorbed at the STANDARD rate of the after-sales labour work centre (R1p D2), so it is hours x a standard and never one person's pay
         public decimal LabourHours { get; set; }
         public decimal LabourAmount { get; set; }
         public decimal PartsAmount { get; set; }
         public decimal TotalCost { get; set; }
         public bool CostPosted { get; set; }
+
+        /// <summary>
+        /// True for the reader who is not shown the amounts: the order was closed by an earlier release at the engineers' own pay and only one or two of them had a payslip, so <see cref="LabourAmount"/> and
+        /// <see cref="TotalCost"/> are returned as zero to every reader but PAYROLL, FINANCEMANAGER and CEO (who see the amounts, and the flag false). An order closed by this release never has it.
+        /// </summary>
+        public bool LegacyProtected { get; set; }
         public decimal? BillableLabourRateRial { get; set; }
         public int? InvoiceId { get; set; }
         public string InvoiceNumber { get; set; }
@@ -555,46 +561,61 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public DateTime? AsOf { get; set; }
     }
 
-    /// <summary>The month-end run of the service labour pool (R1p D2): closes the ended months and posts the true-up of the labour absorbed at the pooled average rate.</summary>
+    /// <summary>The month-end run of the service labour variance (R1p D2): closes the ended months and posts the variance of the labour absorbed at the standard rate.</summary>
     public class SvLabourAggregateResultDto
     {
         public DateTime AsOf { get; set; }
         public List<SvLabourPeriodDto> Periods { get; set; } = new List<SvLabourPeriodDto>();
 
-        /// <summary>Orders whose month has fewer than three payroll-rated engineers behind it: nothing is published, they wait for the next month and join its pool (up to the end of the quarter).</summary>
+        /// <summary>Orders whose month did not pass the publication gate (too few payroll-rated engineers, or one or two of them dominate the hours): nothing is published, they wait for the next month and join its pool (up to the end of the quarter).</summary>
         public int OrdersCarried { get; set; }
+
+        public string Message { get; set; }
     }
 
+    /// <summary>
+    /// One service labour month. Every reader gets the month, its state and what the closed orders absorbed at the standard rate (hours x a standard). The pool (people, hours, actual average rate, cost) and the variance
+    /// are filled only for PAYROLL, FINANCEMANAGER and CEO: they would otherwise let a reader work back to a person's pay.
+    /// </summary>
     public class SvLabourPeriodDto
     {
         /// <summary>The Persian month as yyyymm.</summary>
         public int Period { get; set; }
         public string PeriodText { get; set; }
 
-        /// <summary>Orders the true-up took into the pool of the month.</summary>
+        /// <summary>Posted (closed through the gate), Protected (closed by the quarter-end cap, flagged) or Pending (the month waits: it has not ended, or the gate was not passed).</summary>
+        public string State { get; set; }
+        public string StateText { get; set; }
+
+        /// <summary>Orders the month closed (a pending month: the orders that wait in it).</summary>
         public int Orders { get; set; }
 
-        /// <summary>Distinct payroll-rated engineers in the pool.</summary>
-        public int People { get; set; }
+        /// <summary>What the orders absorbed at the standard rate: visible to every reader of the screen.</summary>
+        public decimal Absorbed { get; set; }
 
-        public decimal Hours { get; set; }
-
-        /// <summary>The pooled average rate (pool cost / pool hours) the orders closed from now on are absorbed at. Null for a protected pool.</summary>
-        public decimal? Rate { get; set; }
-
-        /// <summary>What the closed orders absorbed. Null for a protected pool and a reader outside PAYROLL, FINANCEMANAGER and CEO.</summary>
-        public decimal? Absorbed { get; set; }
-
-        /// <summary>Pool cost less absorbed: the one company-level true-up line of the month. Null like <see cref="Absorbed"/>.</summary>
-        public decimal? Variance { get; set; }
+        /// <summary>The pool of the month was closed by the quarter-end cap (flagged): every reader but payroll, the finance manager and the CEO sees no amount of it in the books.</summary>
+        public bool Protected { get; set; }
 
         public int? EventId { get; set; }
 
         /// <summary>When the month was closed.</summary>
         public DateTimeOffset? PostedAt { get; set; }
 
-        /// <summary>The pool had fewer than three payroll-rated engineers and was closed by the quarter-end cap: every reader but payroll, the finance manager and the CEO sees no amount in it.</summary>
-        public bool Protected { get; set; }
+        // ----- payroll readers only (PAYROLL, FINANCEMANAGER, CEO); null for everybody else
+
+        /// <summary>Distinct payroll-rated engineers in the pool.</summary>
+        public int? People { get; set; }
+
+        public decimal? Hours { get; set; }
+
+        /// <summary>The actual average hourly payroll cost of the pool (cost / hours). Null for a protected pool.</summary>
+        public decimal? Rate { get; set; }
+
+        /// <summary>The actual payroll cost of the people in the pool.</summary>
+        public decimal? Cost { get; set; }
+
+        /// <summary>Cost less absorbed: the one company-level variance line of the month.</summary>
+        public decimal? Variance { get; set; }
     }
 
     public class SvJobsResultDto
@@ -719,8 +740,13 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public int UnitsOutOfWarranty { get; set; }
         public int UnitsToConfirm { get; set; }
 
-        /// <summary>Cost of the warranty orders closed since the first day of the Persian year (labour at the pooled average rate + parts).</summary>
-        public decimal WarrantyCostYtd { get; set; }
+        /// <summary>
+        /// Cost of the warranty orders closed since the first day of the Persian year (labour at the standard rate + parts). Empty (and <see cref="WarrantyCostHidden"/>) for a reader outside PAYROLL, FINANCEMANAGER and CEO
+        /// when an order closed by an earlier release at the engineers' own pay is among them.
+        /// </summary>
+        public decimal? WarrantyCostYtd { get; set; }
+
+        public bool WarrantyCostHidden { get; set; }
 
         public int WarrantyOrdersYtd { get; set; }
         public int OpenOrders { get; set; }
@@ -767,7 +793,11 @@ namespace ViewModels.NasbNiro.ServiceDtos
         public decimal? MtbfHours { get; set; }
 
         public int WarrantyOrders { get; set; }
-        public decimal WarrantyCost { get; set; }
+
+        /// <summary>Empty (and <see cref="WarrantyCostHidden"/>) like <see cref="SvDashboardDto.WarrantyCostYtd"/>.</summary>
+        public decimal? WarrantyCost { get; set; }
+
+        public bool WarrantyCostHidden { get; set; }
     }
 
     public class SvKpiDto

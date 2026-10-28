@@ -204,7 +204,7 @@ namespace Entities.Model.NasbNiro.Finance
         public string SourceRole { get; set; }
 
         /// <summary>
-        /// R1p D1/D2: the line is a protected labour amount (the quarter-end true-up of a pool that fewer than three payroll-rated employees were behind; see <see cref="AccountingEventLine.LabourProtected"/>).
+        /// R1p D1/D2: the line is a protected labour amount (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate: too few payroll-rated people, or one or two of them dominate the hours; see <see cref="AccountingEventLine.LabourProtected"/>).
         /// The voucher, ledger and drill-down readers leave such a line out for every role except PAYROLL, FINANCEMANAGER and CEO.
         /// </summary>
         public bool LabourProtected { get; set; }

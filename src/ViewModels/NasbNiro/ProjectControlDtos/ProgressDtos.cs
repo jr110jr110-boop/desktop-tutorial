@@ -147,7 +147,7 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         /// <summary>Null (with <see cref="LabourHidden"/>) for a protected labour amount seen by a reader who is not PAYROLL, FINANCEMANAGER or CEO (R1p D1).</summary>
         public decimal? Amount { get; set; }
 
-        /// <summary>R1p D1: the entry is a labour amount that could show one person's pay (fewer than three payroll-rated employees behind it).</summary>
+        /// <summary>R1p D1: the entry is a labour amount that could show one person's pay (a quarter-end variance line whose pool did not pass the publication gate, or a row of the earlier release with one or two payroll-rated people behind it).</summary>
         public bool LabourHidden { get; set; }
 
         public string SourceType { get; set; }

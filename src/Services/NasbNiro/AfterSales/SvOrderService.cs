@@ -11,6 +11,7 @@ using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.Sales;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Services.NasbNiro.Finance;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
@@ -44,13 +45,15 @@ namespace Services.NasbNiro.AfterSales
         private readonly IInventoryUserContext _user;
         private readonly ICostingService _costing;
         private readonly INotificationService _notify;
+        private readonly IConfiguration _configuration;
 
-        public SvOrderService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, INotificationService notify = null)
+        public SvOrderService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, INotificationService notify = null, IConfiguration configuration = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
             _notify = notify;
+            _configuration = configuration;
         }
 
         private int Me => _user.UserId;
@@ -85,10 +88,14 @@ namespace Services.NasbNiro.AfterSales
             // R1p D2: the engineers behind an order are named only for SERVICE, the payroll readers and the engineer himself; everybody else sees the hours without the person.
             bool seesNames = SvRoles.SeesNames(_user.IsInRole(SvRoles.NameSeers));
             int? ownEmployeeId = seesNames ? null : (await MfText.EmployeeOfUserAsync(_uow, Me, ct))?.Id;
+            // R1p H3: an order closed by the earlier release at the engineers' own pay, with one or two payslips behind it, is one person's pay: labour and total are returned as zero (and flagged) to everybody but the payroll readers
+            bool seesPayroll = SvRoles.SeesPayroll(_user.IsInRole(SvRoles.PayrollSeers));
 
             return rows.Select(r =>
             {
-                decimal labour = r.CostPostedAt.HasValue ? r.LabourAmount : 0m;
+                bool legacy = r.CostPostedAt.HasValue && SvLegacyLabour.IsProtected(r);
+                bool hidden = legacy && !seesPayroll;
+                decimal labour = r.CostPostedAt.HasValue ? SvLegacyLabour.Visible(r.LabourAmount, legacy, seesPayroll) : 0m;
                 decimal travel = r.TimeEntries.Where(t => t.Kind == SvTimeKind.Travel).Sum(t => t.Hours);
                 decimal work = r.TimeEntries.Where(t => t.Kind == SvTimeKind.Work).Sum(t => t.Hours);
                 decimal waiting = r.TimeEntries.Where(t => t.Kind == SvTimeKind.Waiting).Sum(t => t.Hours);
@@ -125,7 +132,7 @@ namespace Services.NasbNiro.AfterSales
                     }).ToList(),
                     TravelHours = travel, WorkHours = work, WaitingHours = waiting, TotalHours = travel + work + waiting,
                     LabourHours = r.CostPostedAt.HasValue ? r.LabourHours : travel + work + waiting, LabourAmount = labour, PartsAmount = r.PartsAmount,
-                    TotalCost = labour + r.PartsAmount, CostPosted = r.CostPostedAt.HasValue,
+                    TotalCost = hidden ? 0m : labour + r.PartsAmount, CostPosted = r.CostPostedAt.HasValue, LegacyProtected = hidden,
                     BillableLabourRateRial = r.BillableLabourRateRial, InvoiceId = r.InvoiceId, InvoiceNumber = r.InvoiceId.HasValue ? invoices.GetValueOrDefault(r.InvoiceId.Value) : null, DraftNote = r.DraftNote,
                     RowVersion = SlConcurrency.Text(r.RowVersion),
                 };
@@ -449,36 +456,37 @@ namespace Services.NasbNiro.AfterSales
             DateTime today = DateTime.Today;
             DateTimeOffset now = DateTimeOffset.Now;
 
-            // labour (R1p D2, pooled average rate; the rule is at the top of SvLabourService): the hours of an engineer with an approved payslip are absorbed at the pooled average rate of the last closed service
-            // month (before any month is closed: at the standard rate of the work centre of the settings), never at the engineer's own rate; an engineer without a payslip is costed at the standard rate of that work centre.
+            // labour (R1p D2, round 3; the rule is at the top of SvLabourService): the hours of EVERY engineer are absorbed at the STANDARD hourly rate of the after-sales labour work centre (finance sets it per Persian year),
+            // else at Production:StandardLabourRate, whoever worked them and whatever he is paid, so the order shows hours x a standard and never one person's pay. For an engineer with an approved payslip the order also
+            // remembers his own payroll cost, which only the month-end variance uses.
             string wcCode = await SvSettings.TextAsync(_uow, SvSettingKeys.LabourWorkCenterCode, ct);
             MfWorkCenter wc = wcCode != null ? await _uow.Set<MfWorkCenter>().AsNoTracking().FirstOrDefaultAsync(w => w.Code == wcCode && !w.Deleted, ct) : null;
-            var engine = new MfCostEngine(_uow, _costing, Me);
+            var engine = new MfCostEngine(_uow, _costing, Me, _configuration);
             var cache = new Dictionary<int, MfCostEngine.Rate>();
-            string poolKey = await SvSettings.CostCenterAsync(_uow, ct);
-            MfPoolRate pooled = MfLabourRates.Pooled(await MfLabourPoolStore.RatesAsync(_uow, MfLabourModule.Service, ct), poolKey);
-            decimal? standardRate = MfLabourRates.Standard(null, wc?.LabourRateRial);
+            decimal? standardRate = MfLabourRates.Standard(wc?.LabourRateRial, MfCostEngine.ConfiguredStandardRate(_configuration));
             decimal pooledRaw = 0, standardRaw = 0, payrollCost = 0, hours = 0;
             var employees = new HashSet<int>();
             var payroll = new HashSet<int>();
             foreach (var g in row.TimeEntries.Where(t => t.Hours > 0).GroupBy(t => t.EmployeeId))
             {
-                MfCostEngine.Rate rate = await engine.LabourRateAsync(g.Key, wc, "دستور خدمات " + row.Number, cache, ct);
+                if (!standardRate.HasValue)
+                    return Bad<SvOrderDto>(wcCode == null
+                        ? "برای جذب دستمزد دستور خدمات نرخ ساعتی دستمزد استاندارد لازم است؛ مرکز کار نرخ دستمزد در تنظیمات خدمات انتخاب نشده است و نرخ دستمزد استاندارد تولید هم تعریف نشده است. امور مالی مرکز کار و نرخ ساعتی آن را وارد کند."
+                        : wc == null
+                            ? $"مرکز کار {wcCode} که در تنظیمات خدمات برای نرخ دستمزد انتخاب شده پیدا نشد و نرخ دستمزد استاندارد تولید هم تعریف نشده است؛ امور مالی مرکز کار درست را در تنظیمات انتخاب کند."
+                            : $"نرخ ساعتی دستمزد استاندارد مرکز کار {wc.Code} ثبت نشده است و نرخ دستمزد استاندارد تولید هم تعریف نشده است؛ امور مالی یکی از این دو را وارد کند.");
+                MfCostEngine.Rate rate = await engine.PayrollRateAsync(g.Key, cache, ct);
                 if (rate.Error != null) return Bad<SvOrderDto>(rate.Error);
                 decimal h = g.Sum(t => t.Hours);
                 hours += h;
                 employees.Add(g.Key);
                 if (rate.FromPayroll)
                 {
-                    if (pooled == null && !standardRate.HasValue)
-                        return Bad<SvOrderDto>(wc == null
-                            ? "برای جذب دستمزد مهندس دارای فیش حقوقی، تا بسته‌شدن نخستین ماه، نرخ دستمزد استاندارد لازم است و مرکز کار نرخ دستمزد در تنظیمات خدمات انتخاب نشده است؛ امور مالی مرکز کار و نرخ ساعتی آن را وارد کند."
-                            : $"نرخ ساعتی دستمزد استاندارد مرکز کار {wc.Code} ثبت نشده است و تا بسته‌شدن نخستین ماه برای جذب دستمزد مهندس دارای فیش حقوقی لازم است؛ امور مالی نرخ را وارد کند.");
                     payroll.Add(g.Key);
-                    pooledRaw += h * (pooled != null ? pooled.Rate : standardRate.Value);
+                    pooledRaw += h * standardRate.Value;
                     payrollCost += h * rate.PerHour;
                 }
-                else standardRaw += h * rate.PerHour;
+                else standardRaw += h * standardRate.Value;
                 foreach (SvTimeEntry t in g) t.RateFromPayroll = rate.FromPayroll;
             }
             decimal labourPooled = SlText.R0(pooledRaw);
@@ -506,7 +514,7 @@ namespace Services.NasbNiro.AfterSales
             string center = row.CostCenterCode ?? await SvSettings.EnsureCostCenterAsync(_uow, ct);
             row.CostCenterCode = center;
 
-            // what the month-end true-up needs: the payroll cost of the payroll-rated hours and what was absorbed for them, and the month whose pool takes the order (a closed month is never reopened)
+            // what the month-end variance needs: the payroll cost of the payroll-rated hours and what was absorbed for them at the standard rate, and the month whose pool takes the order (a closed month is never reopened)
             if (payroll.Count > 0)
             {
                 row.LabourPayrollCost = payrollCost;

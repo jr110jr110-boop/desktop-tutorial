@@ -355,6 +355,8 @@ namespace Services.NasbNiro.Finance
             if (src == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
             if (src.IsImported) return Bad<VoucherDto>("سند واردشده از سپیدار کپی نمی‌شود.");
             if (src.Type == FnVoucherType.Opening || src.Type == FnVoucherType.Closing || src.Type == FnVoucherType.YearEndTemporaryClose) return Bad<VoucherDto>("سند افتتاحیه و اختتامیه کپی نمی‌شود.");
+            // R1p C1: the copy would carry the confidential labour lines (and the full total) into a draft that the copier can open, edit and print
+            if (!FnLabourMask.Sees(_user) && src.Lines.Any(l => l.LabourProtected)) return Bad<VoucherDto>("این سند شامل سطر محرمانه‌ی دستمزد است؛ فقط مدیر مالی، مدیرعامل یا حقوق و دستمزد می‌توانند آن را کپی کنند.");
             DateTime date = (dto.Date ?? DateTime.Today).Date;
             var check = await CheckDateAsync(date, src.FiscalYear.LegalEntityId, ct);
             if (check.Error != null) return Bad<VoucherDto>(check.Error);

@@ -60,7 +60,10 @@ namespace Services.NasbNiro.AfterSales
         /// <summary>Code of the cost centre «پس از فروش» (created on first use when it does not exist). Default AFTERSALES.</summary>
         public const string CostCenterCode = "CostCenterCode";
 
-        /// <summary>Code of the work centre whose standard labour rate is used for an engineer without an approved payslip. No default: finance sets it.</summary>
+        /// <summary>
+        /// Code of the work centre whose STANDARD hourly labour rate (<see cref="Entities.Model.NasbNiro.Production.MfWorkCenter.LabourRateRial"/>, maintained per Persian year by finance) the labour of every closed service order is absorbed
+        /// at, whoever worked it. No default: finance sets it; without it (or with a centre that has no rate and no Production:StandardLabourRate) closing an order that has hours is refused and names the centre.
+        /// </summary>
         public const string LabourWorkCenterCode = "LabourWorkCenterCode";
 
         /// <summary>Days after the handover when the delivery survey is drafted. Default 30 (the brief; an assumption the company can change).</summary>
@@ -82,7 +85,7 @@ namespace Services.NasbNiro.AfterSales
         public static readonly (string Key, string Title)[] All =
         {
             (CostCenterCode, "کد مرکز هزینه پس از فروش (پیش‌فرض AFTERSALES)"),
-            (LabourWorkCenterCode, "کد مرکز کاری که نرخ ساعتی دستمزد استاندارد آن برای مهندسانِ بدون فیش حقوقی تأییدشده به کار می‌رود (پیش‌فرض ندارد)"),
+            (LabourWorkCenterCode, "کد مرکز کاری که نرخ ساعتی دستمزد استاندارد آن برای جذب دستمزد همه‌ی دستورهای خدمات به کار می‌رود (پیش‌فرض ندارد)"),
             (SurveyLeadDays, "روز بعد از تحویل برای پیش‌نویس نظرسنجی (پیش‌فرض ۳۰)"),
             (VisitLeadDays, "روز قبل از موعد بازدید LTSA برای پیش‌نویس دستور خدمات (پیش‌فرض ۳۰)"),
             (LowScoreThreshold, "امتیاز آستانه‌ی نظرسنجی: امتیاز کمتر از این مقدار (۱ تا ۵) پیش‌نویس شکایت مشتری باز می‌کند (پیش‌فرض ۳)"),
@@ -480,7 +483,7 @@ namespace Services.NasbNiro.AfterSales
     }
 
     /// <summary>The accounting event of a warranty or goodwill order at its close. Labour absorbed goes to its own service account (70113, not the production labour), the parts left on site are cost of sales (as their delivery document posted) and the parts consumed are material expense.
-    /// The labour passed here is absorbed at the pooled average rate of the service month pool (R1p D2): the difference to the real payroll cost is trued up once a month (<see cref="SvLabourService"/>).</summary>
+    /// The labour passed here is absorbed at the STANDARD rate of the after-sales labour work centre (R1p D2): the difference to the real payroll cost is posted once a month at company level (<see cref="SvLabourService"/>).</summary>
     internal static class SvPosting
     {
         public static List<(string Role, decimal Debit, decimal Credit, string Description)> WarrantyLines(bool warranty, decimal labour, decimal partsConsumed, decimal partsLeftOnSite, string number)
@@ -498,8 +501,8 @@ namespace Services.NasbNiro.AfterSales
     }
 
     /// <summary>
-    /// Month arithmetic and names of the service labour pools (R1p D2; the rule itself is described at the top of <see cref="SvLabourService"/>). Labour of a closed order is absorbed at the pooled average rate of the last
-    /// closed service month; the order is marked with the Persian month (yyyymm) whose pool trues it up: the month of the close, or the first later month that is not closed yet (a closed month is never reopened).
+    /// Month arithmetic and names of the service labour months (R1p D2; the rule itself is described at the top of <see cref="SvLabourService"/>). Labour of a closed order is absorbed at the standard rate; an order with
+    /// payroll-rated engineers is marked with the Persian month (yyyymm) whose variance includes it: the month of the close, or the first later month that is not closed yet (a closed month is never reopened).
     /// </summary>
     internal static class SvLabourMonth
     {
@@ -542,6 +545,26 @@ namespace Services.NasbNiro.AfterSales
             while (set.Contains(next)) next = Next(next);
             return next;
         }
+    }
+
+    /// <summary>
+    /// R1p H3 (round 3): the read-side mask for service orders closed by the EARLIER release, which absorbed the labour at the engineers' own hourly pay. When only one or two of the engineers were paid through payroll
+    /// the order's labour (and its total cost) is one person's pay and is returned as hidden to every reader but PAYROLL, FINANCEMANAGER and CEO. The marker only an old row has: nothing was absorbed through the pool
+    /// (<c>LabourPooledAmount</c> empty or not positive: an order of this release always holds the positive amount its payroll-rated hours absorbed at the standard rate) AND the earlier release's group rule
+    /// (<see cref="Production.MfLegacyLabour.Group"/>) holds for its engineer counts. A row converted by the backfill keeps a pooled amount of zero or less, so it stays masked. The CEO overview and drill use the same helper.
+    /// </summary>
+    internal static class SvLegacyLabour
+    {
+        public static bool IsProtected(decimal? pooledAmount, int employees, int payrollEmployees) => (pooledAmount ?? 0m) <= 0m && Production.MfLegacyLabour.Group(employees, payrollEmployees);
+
+        public static bool IsProtected(SvServiceOrder order) => order != null && IsProtected(order.LabourPooledAmount, order.LabourEmployeeCount, order.LabourPayrollEmployeeCount);
+
+        /// <summary>The same rule as a query condition (the dashboards and the CEO overview filter the closed orders with it).</summary>
+        public static readonly System.Linq.Expressions.Expression<Func<SvServiceOrder, bool>> Filter =
+            o => (o.LabourPooledAmount ?? 0m) <= 0m && o.LabourPayrollEmployeeCount > 0 && (o.LabourEmployeeCount < Production.MfLegacyLabour.MinEmployees || o.LabourPayrollEmployeeCount < Production.MfLegacyLabour.MinEmployees);
+
+        /// <summary>The amount for a reader: empty (zero in the order DTO) when the order is protected and the reader is not a payroll reader.</summary>
+        public static decimal Visible(decimal amount, bool isProtected, bool seesPayroll) => isProtected && !seesPayroll ? 0m : amount;
     }
 
     /// <summary>The price of a spare part on the invoice of a billable order: the approved price list valid on the day (never an invented price).</summary>

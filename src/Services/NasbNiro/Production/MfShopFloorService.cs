@@ -281,13 +281,8 @@ namespace Services.NasbNiro.Production
             if (!Workable.Contains(l.Op.Status)) return Bad<TerminalOperationDto>("این مرحله قابل شروع نیست (وضعیت: " + MfText.OperationStatus(l.Op.Status) + ").");
 
             // R1p D43: a work centre with machines needs the machine chosen at the terminal (machine hours, machine overhead and OEE come from it); a waiting booking needs none
-            if (!dto.MachineId.HasValue && l.Op.WorkCenterId.HasValue)
-            {
-                MfWorkCenter centre = await _uow.Set<MfWorkCenter>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == l.Op.WorkCenterId.Value, ct);
-                int machines = centre == null ? 0 : await _uow.Set<MfMachineInfo>().CountAsync(i => !i.Deleted && i.WorkCenterId == centre.Id && i.Status != MfMachineStatus.Retired, ct);
-                if (centre != null && MfTerminalRules.MachineRequired(centre.RequiresMachine, machines, dto.Kind))
-                    return Bad<TerminalOperationDto>($"برای مرکز کار {centre.Code} انتخاب ماشین الزامی است؛ ماشین را انتخاب کنید (ساعت ماشین، سربار ماشین و OEE از آن محاسبه می‌شود).");
-            }
+            string machineNeeded = await MachineRequirementAsync(l.Op, dto.Kind, dto.MachineId, ct);
+            if (machineNeeded != null) return Bad<TerminalOperationDto>(machineNeeded);
             if (dto.MachineId.HasValue)
             {
                 string problem = await CheckMachineAsync(dto.MachineId.Value, l.Op, true, ct);
@@ -348,6 +343,21 @@ namespace Services.NasbNiro.Production
             }
             await _flow.AfterSaveAsync(ct);
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
+        }
+
+        /// <summary>
+        /// R1p D43 (round 3): a work centre with machines to choose from (<see cref="MfWorkCenter.RequiresMachine"/>) needs the machine named wherever time is booked: at the terminal, in a booking a supervisor makes for somebody
+        /// else, in an edit and in a correction. A waiting booking needs none. Null = nothing missing; otherwise the Persian reason.
+        /// </summary>
+        private async Task<string> MachineRequirementAsync(MfOperation op, MfBookingKind kind, int? machineId, CancellationToken ct)
+        {
+            if (machineId.HasValue || !op.WorkCenterId.HasValue) return null;
+            MfWorkCenter centre = await _uow.Set<MfWorkCenter>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == op.WorkCenterId.Value, ct);
+            if (centre == null) return null;
+            int machines = await _uow.Set<MfMachineInfo>().CountAsync(i => !i.Deleted && i.WorkCenterId == centre.Id && i.Status != MfMachineStatus.Retired, ct);
+            return MfTerminalRules.MachineRequired(centre.RequiresMachine, machines, kind)
+                ? $"برای مرکز کار {centre.Code} انتخاب ماشین الزامی است؛ ماشین را انتخاب کنید (ساعت ماشین، سربار ماشین و OEE از آن محاسبه می‌شود)."
+                : null;
         }
 
         /// <summary>
@@ -790,6 +800,9 @@ namespace Services.NasbNiro.Production
                 string machineProblem = await CheckMachineAsync(dto.MachineId.Value, l.Op, false, ct);
                 if (machineProblem != null) return Bad<BookingDto>(machineProblem);
             }
+            // R1p D43 (round 3): the machine requirement binds a booking a supervisor makes for somebody else as well
+            string machineNeeded = await MachineRequirementAsync(l.Op, dto.Kind, dto.MachineId, ct);
+            if (machineNeeded != null) return Bad<BookingDto>(machineNeeded);
             if (dto.GoodQty < 0 || dto.ScrapQty < 0 || dto.ReworkQty < 0) return Bad<BookingDto>("تعداد نمی‌تواند منفی باشد.");
             if (dto.ScrapQty > 0 && !dto.ScrapReasonCodeId.HasValue) return Bad<BookingDto>("برای ضایعات، دلیل ضایعات را انتخاب کنید.");
             string reasonProblem = await CheckReasonAsync(dto.ScrapReasonCodeId, new[] { MfReasonKind.Scrap }, ct);
@@ -859,9 +872,14 @@ namespace Services.NasbNiro.Production
 
             DateTime start = dto.StartAt.HasValue ? new DateTime(dto.StartAt.Value.Year, dto.StartAt.Value.Month, dto.StartAt.Value.Day, dto.StartAt.Value.Hour, dto.StartAt.Value.Minute, dto.StartAt.Value.Second) : b.StartAt;
             DateTime end = dto.EndAt.HasValue ? new DateTime(dto.EndAt.Value.Year, dto.EndAt.Value.Month, dto.EndAt.Value.Day, dto.EndAt.Value.Hour, dto.EndAt.Value.Minute, dto.EndAt.Value.Second) : b.EndAt.Value;
-            if (end <= start) return Bad<BookingDto>("پایان باید بعد از شروع باشد.");
-            if (end > DateTime.Now) return Bad<BookingDto>("پایان ثبت زمان نمی‌تواند در آینده باشد.");
-            if ((end - start).TotalHours > 16) return Bad<BookingDto>("یک ثبت زمان بیش از ۱۶ ساعت نمی‌شود.");
+            // R1p L8 (round 3): the time window is checked only when the edit sends times; an edit of quantities or of the machine leaves the stored times alone (a zero-length booking can still have its quantities edited)
+            bool timesSent = dto.StartAt.HasValue || dto.EndAt.HasValue;
+            if (timesSent)
+            {
+                if (end <= start) return Bad<BookingDto>("پایان باید بعد از شروع باشد.");
+                if (end > DateTime.Now) return Bad<BookingDto>("پایان ثبت زمان نمی‌تواند در آینده باشد.");
+                if ((end - start).TotalHours > 16) return Bad<BookingDto>("یک ثبت زمان بیش از ۱۶ ساعت نمی‌شود.");
+            }
             if (dto.MachineId.HasValue && dto.MachineId != b.MachineId)
             {
                 string machineProblem = await CheckMachineAsync(dto.MachineId.Value, op, false, ct);
@@ -873,8 +891,11 @@ namespace Services.NasbNiro.Production
             if (scrap > 0 && !scrapReason.HasValue) return Bad<BookingDto>("برای ضایعات، دلیل ضایعات را انتخاب کنید.");
             string reasonProblem = await CheckReasonAsync(dto.ScrapReasonCodeId, new[] { MfReasonKind.Scrap }, ct);
             if (reasonProblem != null) return Bad<BookingDto>(reasonProblem);
-            string overlap = await OverlapAsync(b.EmployeeId, start, end, b.Id, ct);
-            if (overlap != null) return Bad<BookingDto>(overlap);
+            if (timesSent)
+            {
+                string overlap = await OverlapAsync(b.EmployeeId, start, end, b.Id, ct);
+                if (overlap != null) return Bad<BookingDto>(overlap);
+            }
             decimal opGood = op.GoodQty - b.GoodQty + good, opScrap = op.ScrapQty - b.ScrapQty + scrap;
             List<MfOperation> allOps = await _uow.Set<MfOperation>().Where(o => o.OrderId == order.Id && !o.Deleted).ToListAsync(ct);
             // R1p D7: against the quantity this operation has to report (the good quantity of the operation before it), not the full order quantity
@@ -890,6 +911,9 @@ namespace Services.NasbNiro.Production
             }
             // R1p D12 (review 8): the welding rule that let this booking start (approved WPS, qualified welder) is checked again when the edit changes the kind of work or the day
             MfBookingKind kind = dto.Kind.HasValue && Enum.IsDefined(typeof(MfBookingKind), dto.Kind.Value) ? dto.Kind.Value : b.Kind;
+            // R1p D43 (round 3): after the edit the booking still names its machine where the work centre requires one
+            string machineNeeded = await MachineRequirementAsync(op, kind, dto.MachineId ?? b.MachineId, ct);
+            if (machineNeeded != null) return Bad<BookingDto>(machineNeeded);
             if (op.IsWelding && (kind != b.Kind || start.Date != b.StartAt.Date))
             {
                 FnEmployee welder = await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(e => e.Id == b.EmployeeId, ct);
@@ -977,6 +1001,9 @@ namespace Services.NasbNiro.Production
                 string machineProblem = await CheckMachineAsync(dto.MachineId.Value, op, false, ct);
                 if (machineProblem != null) return Bad<BookingDto>(machineProblem);
             }
+            // R1p D43 (round 3): a correction names the machine as well where the work centre requires one
+            string machineNeeded = await MachineRequirementAsync(op, dto.Kind, dto.MachineId, ct);
+            if (machineNeeded != null) return Bad<BookingDto>(machineNeeded);
             string overlap = await OverlapAsync(dto.EmployeeId, start, end, 0, ct);
             if (overlap != null) return Bad<BookingDto>(overlap);
             int minutes = MinutesBetween(start, end);

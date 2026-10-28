@@ -859,6 +859,10 @@ namespace Services.NasbNiro.Production
             MfOperation rework = NewReworkOperation(order, op, ncr.Id, now);
             if (Clean(dto.Note) != null) rework.Note = Clean(dto.Note);
             loaded.All.Add(rework);
+            // R1p L9 (round 3): the report learns which operation does its rework in the SAME save as the operation (one transaction): the once-per-report rule can never be lost to a failed second save,
+            // and a conflicting change of the report rolls the whole rework back (the id of the operation is filled in by the save through the relationship)
+            rework.ReworkedNcrs.Add(ncr);
+            ncr.ModifyDate = now;
             List<string> notes = await _flow.ApplyAsync(order, loaded.All, ct);
             try
             {
@@ -867,17 +871,6 @@ namespace Services.NasbNiro.Production
             catch (DbUpdateConcurrencyException)
             {
                 return Bad<OperationDto>(MfText.Concurrency);
-            }
-            // the NCR learns which operation did its rework
-            ncr.ReworkOperationId = rework.Id;
-            ncr.ModifyDate = DateTimeOffset.Now;
-            try
-            {
-                await _uow.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException)
-            {
-                notes.Add("پیوند عملیات دوباره‌کاری به گزارش عدم انطباق ثبت نشد.");
             }
             notes.AddRange(await _flow.AfterSaveAsync(ct));
             return ResponseDtoHelper.Ok(await OneAsync(rework, ct), notes.Count == 0 ? null : Join(notes));

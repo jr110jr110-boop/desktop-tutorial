@@ -207,12 +207,13 @@ namespace Services.NasbNiro.Finance
             Alert(sales.BelowCostProposals > 0, "danger", $"{sales.BelowCostProposals} پیشنهاد با قیمت کمتر از بهای تمام‌شده منتظر تصمیم مدیرعامل است", "/sales/proposals");
             Alert(sales.BidDecisionsWaiting > 0, "info", $"{sales.BidDecisionsWaiting} استعلام منتظر تصمیم شرکت یا عدم شرکت است", "/sales/bid-decisions");
             // after-sales service: open requests, SLA breaches, units in warranty, the warranty cost of the year, goodwill waiting for the CEO, the satisfaction average
-            // the warranty cost needs no mask (its labour is absorbed at the pooled average rate); the satisfaction average counts verified answers only and the unverified ones are counted next to it (R1p D25)
-            var service = await AfterSales.SvDashboardService.CoreAsync(_uow, productionAsOf ?? DateTime.Now, ct);
+            // the warranty cost needs a mask only for an order closed by an earlier release at the engineers' own pay (one or two payslips behind it); the new labour is absorbed at the standard rate. The satisfaction average counts verified answers only and the unverified ones are counted next to it (R1p D25)
+            var service = await AfterSales.SvDashboardService.CoreAsync(_uow, productionAsOf ?? DateTime.Now, AfterSales.SvRoles.SeesPayroll(_user.IsInRole(AfterSales.SvRoles.PayrollSeers)), ct);
             d.ServiceOpenRequests = service.OpenRequests;
             d.ServiceSlaBreaches = service.SlaBreaches;
             d.ServiceUnitsInWarranty = service.UnitsInWarranty;
             d.ServiceWarrantyCostYtd = service.WarrantyCostYtd;
+            d.ServiceWarrantyCostHidden = service.WarrantyCostHidden;
             d.ServiceGoodwillWaiting = service.GoodwillWaiting;
             d.ServiceSurveyAverageScore = service.SurveyAverageScore;
             d.ServiceSurveysUnverified = service.SurveysUnverified;

@@ -10,8 +10,8 @@ namespace Services.NasbNiro.Production
 {
     /// <summary>
     /// The nightly jobs of the production module, shortly after 02:00 (offline: the server clock is the only input; every job is idempotent and a failure of one does not stop the others).
-    /// 1. the maintenance plans that are due get a draft order, 2. the finite-capacity scheduler runs again, 3. the cost of the closed time bookings is posted, 4. the labour of protected groups
-    /// (fewer than three payroll-rated employees) of every ended month is posted as the monthly aggregate.
+    /// 1. the maintenance plans that are due get a draft order, 2. the finite-capacity scheduler runs again, 3. the cost of the closed time bookings is posted, 4. the month-end labour variance (actual payroll
+    /// cost less the labour absorbed at the standard rates) of every ended month is posted as one company line, or carried when the publication gate is not passed.
     /// Switch: Production:Jobs=false. Lead days of the maintenance plans: Production:MaintenanceLeadDays (default 7).
     /// </summary>
     public class ProductionHostedService : BackgroundService
@@ -52,7 +52,7 @@ namespace Services.NasbNiro.Production
                     if (!await RunAsync("maintenance plans", async sp => { var r = await sp.GetRequiredService<IMfMaintenanceService>().DraftDueNightlyAsync(stoppingToken); _logger?.LogInformation("Maintenance job: {Drafted} orders drafted from {Plans} plans", r.Drafted, r.PlansChecked); }, stoppingToken)) return;
                     if (!await RunAsync("scheduler", async sp => { var r = await sp.GetRequiredService<IMfScheduleService>().RunNightlyAsync(stoppingToken); _logger?.LogInformation("Scheduler job: {Orders} orders, {Late} late", r.Orders, r.LateOrders); }, stoppingToken)) return;
                     if (!await RunAsync("cost posting", async sp => { var r = await sp.GetRequiredService<IMfCostService>().RunNightlyAsync(stoppingToken); _logger?.LogInformation("Cost job: {Posted} bookings posted, {Skipped} skipped", r.BookingsPosted, r.BookingsSkipped); }, stoppingToken)) return;
-                    // R1p D1: after the daily posting, the labour of protected groups of every ended month is posted as the monthly aggregate (the first nights of a month post the month before)
+                    // R1p D1: after the daily posting, the labour variance of every ended month is posted as one company line when the month passes the publication gate (the first nights of a month post the month before)
                     if (!await RunAsync("labour month", async sp => { int months = await sp.GetRequiredService<IMfLabourService>().RunNightlyAsync(stoppingToken); _logger?.LogInformation("Labour month job: {Months} months posted", months); }, stoppingToken)) return;
                 }
                 try { await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken); }
