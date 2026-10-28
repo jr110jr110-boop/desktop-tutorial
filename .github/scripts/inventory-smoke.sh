@@ -7416,7 +7416,7 @@ cdcheck "ceo drill qc.h_points_pending: the number of rows is the pending hold p
 # --- qc.documents_waiting: the draft stock documents that need an approval and the document revisions that wait for a review or an approval
 # two draft stock documents that need an approval are made for it, an adjustment of 9 days ago and an opening balance of 3 days ago (deleted again below)
 as "$ADMIN_TOKEN" POST inventory/documents "{\"type\":7,\"documentDate\":\"$(dd -9)T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$RAW,\"quantity\":1}]}"; CDDA=$(val .data.id)
-as "$ADMIN_TOKEN" POST inventory/documents "{\"type\":15,\"documentDate\":\"$(dd -3)T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$RAW,\"quantity\":1}]}"; CDDB=$(val .data.id)
+as "$ADMIN_TOKEN" POST inventory/documents "{\"type\":15,\"documentDate\":\"$(dd -3)T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$RAW,\"quantity\":1,\"unitPrice\":1000}]}"; CDDB=$(val .data.id)  # an opening balance needs a unit price at the draft (R1q M9)
 if [ -n "$CDDA" ] && [ "$CDDA" != null ] && [ -n "$CDDB" ] && [ "$CDDB" != null ]; then ok "ceo drills: two draft stock documents (an adjustment of 9 days ago, an opening balance of 3 days ago) are made for the document drill"; else bad "ceo drills: two draft stock documents (an adjustment of 9 days ago, an opening balance of 3 days ago) are made for the document drill"; fi
 as "$CEO_TOKEN" GET finance/ceo-dashboard
 CDQC=$(cdx '.data|{docs:.documentsWaitingApproval}')
