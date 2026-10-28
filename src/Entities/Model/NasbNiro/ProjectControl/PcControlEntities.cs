@@ -197,8 +197,14 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public int? ReviewedByUserId { get; set; }
         public DateTimeOffset? ReviewedAt { get; set; }
 
-        /// <summary>R1a2 (H4): who gave the last quantification. An approver is never the creator or the quantifier of the claim.</summary>
+        /// <summary>R1a2 (H4): who gave the last quantification. An approver is never the creator, the last editor of the text or the quantifier of the claim.</summary>
         public int? QuantifiedByUserId { get; set; }
+
+        /// <summary>
+        /// R1a2 (L-7): who wrote the text of the claim last (the issue, the basis, the direction, the cross-claim flag): the creator at the registration, then every person whose save changed one of them.
+        /// An approver is never this person (the edit that took the approvals back could otherwise be followed by an approval of the same person).
+        /// </summary>
+        public int? LastEditedByUserId { get; set; }
 
         /// <summary>R1a2 (H4): who gave the PMO approval, and when. Both are cleared when the claim is quantified or edited again.</summary>
         public int? PmoApprovedByUserId { get; set; }

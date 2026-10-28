@@ -726,8 +726,12 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     }
     if (-not $adminName) { $adminName = 'Admin' }
 
+    # R1a2 (L-10): a server must NOT run in the Development environment. In Development the start-up security checks (StartupSecurityChecks: the shipped signing key, an empty key) are
+    # skipped and appsettings.Production.json is not loaded at all, so a server started that way would sign tokens with the key that ships in appsettings.json (public in the source code).
+    # This script never sets ASPNETCORE_ENVIRONMENT=Development, and a person must not set it for the site or the machine.
     $jwtKey = [string](Get-JsonSetting $settings @('BearerTokens', 'Key'))
-    if (-not $jwtKey -or $jwtKey.Length -lt 32) { $jwtKey = New-RandomText 64 }
+    # a key that starts with "CI-ONLY" is the key of the build machine and the tests (it ships in appsettings.json): it is never kept on a server, also when it was copied into this file by hand
+    if (-not $jwtKey -or $jwtKey.Length -lt 32 -or $jwtKey.StartsWith('CI-ONLY', [System.StringComparison]::OrdinalIgnoreCase)) { $jwtKey = New-RandomText 64 }
     $auditKey = [string](Get-JsonSetting $settings @('Identity', 'AuditHmacKey'))   # keyed hash of the masked values in the audit trail; never replaced once it exists
     if (-not $auditKey) { $auditKey = New-RandomText 64 }
 

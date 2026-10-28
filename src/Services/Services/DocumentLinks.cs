@@ -127,6 +127,9 @@ namespace Services.Services
             ["Inquiry"] = "استعلام",
             ["InventoryDocument"] = "سند انبار",
             ["InventoryLot"] = "محموله انبار",
+            // R1a2 (merge preparation): the inspection and test plan activity of the quality branch (R1q: ItpActivity.EvidenceDocumentId becomes a file link at the merge). The entity is not in this branch yet;
+            // until it is, the name is only a word in a list and the unit test accepts it because it is on the list of kinds that come with the merge (DocumentRulesTests).
+            ["ItpActivity"] = "فعالیت برنامه بازرسی و آزمون",
             ["ManagementReview"] = "بازنگری مدیریت",
             ["MaterialCertificate"] = "گواهی مواد",
             ["MeasuringEquipment"] = "تجهیز اندازه‌گیری",

@@ -240,6 +240,16 @@ jobs:
           failed=$(echo "$line" | sed -E 's/.* ([0-9]+) failed.*/\1/')
           if [ "$failed" != "0" ]; then echo "::error::$failed smoke checks failed"; grep '^FAIL' smoke-output/7-inventory.txt | head -50; exit 1; fi
 
+      - name: Fail the job unless the start-up checks (front-end 404s, sign-out) finished with 0 failed
+        if: always()
+        run: |
+          # R1a2 review (L-8b): smoke.sh counts its own checks (an "(expect ...)" echo checked nothing); its step is continue-on-error too, so this step makes the job honest about them
+          line=$(grep -E '^--- checks: [0-9]+ passed, [0-9]+ failed' smoke-output/3-results.txt | tail -n 1 || true)
+          echo "summary: ${line:-<missing>}"
+          if [ -z "$line" ]; then echo "::error::the start-up smoke did not print its summary line (it ended early)"; exit 1; fi
+          failed=$(echo "$line" | sed -E 's/.* ([0-9]+) failed.*/\1/')
+          if [ "$failed" != "0" ]; then echo "::error::$failed start-up smoke checks failed"; grep '^FAIL' smoke-output/3-results.txt | head -20; exit 1; fi
+
   package:
     # Publishes the API (Release, framework-dependent, for IIS + .NET 10 Hosting Bundle) with the
     # front-end in wwwroot, and stores it on the innco-package branch.

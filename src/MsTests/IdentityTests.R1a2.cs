@@ -67,7 +67,7 @@ namespace MsTests
 
         private static ClaimsPrincipal Pmo(int id, string name = "pmo") => Signed(id, name, "PMO");
 
-        private static Task<ResponseDto<string>> SetRolesAsync(Host h, ClaimsPrincipal by, int userId, params int[] roleIds) =>
+        private static Task<ResponseDto<ChangeRoleResultDto>> SetRolesAsync(Host h, ClaimsPrincipal by, int userId, params int[] roleIds) =>
             h.As(by, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = userId, RoleIds = roleIds }, default).AsTask());
 
         // ---------------------------------------------------------------------------------------------------- H1: the bootstrap of the second PMO user
@@ -112,9 +112,11 @@ namespace MsTests
         {
             var h = new Host(Unique("boot"));
             int p2 = await h.AddPmoAsync(Unique("p2"));
-            int third = (await h.As(h.Admin, s => s.RegisterAsync(NewUser(Unique("p3"), new[] { PmoRole }, GoodPassword), default).AsTask())).Data.Id;
+            string thirdName = Unique("p3");
+            int third = (await h.As(h.Admin, s => s.RegisterAsync(NewUser(thirdName, new[] { PmoRole }, GoodPassword), default).AsTask())).Data.Id;
             RoleGrantDto grant = (await GrantsAsync(h, Pmo(p2))).Single(g => g.UserId == third);
             Assert.IsFalse((await ApproveAsync(h, h.Admin, grant.Id)).Success, "the requester cannot approve");
+            await ChoosePasswordAsync(h, third, thirdName); // M-2: the receiver chooses a password of his own first
             ResponseDto<RoleGrantDto> approved = await ApproveAsync(h, Pmo(p2), grant.Id);
             Assert.IsTrue(approved.Success, approved.Message);
             CollectionAssert.AreEqual(new[] { "PMO" }, h.RolesOf(third));
@@ -137,7 +139,9 @@ namespace MsTests
         {
             var h = new Host(Unique("days"));
             int pmo2 = (await h.As(h.Admin, s => s.RegisterAsync(NewUser(Unique("pmo"), new[] { PmoRole }, GoodPassword), default).AsTask())).Data.Id;
-            int user = await h.RegisterAsync(h.Admin, Unique("fin"), new[] { WarehouseRole, FinanceManagerRole });
+            string userName = Unique("fin");
+            int user = await h.RegisterAsync(h.Admin, userName, new[] { WarehouseRole, FinanceManagerRole });
+            await ChoosePasswordAsync(h, user, userName); // M-2 is a different rule: the receiver has chosen his own password, so only the age of the approver is in the way here
             RoleGrantDto grant = (await GrantsAsync(h, h.Admin)).Single(g => g.UserId == user);
             ClaimsPrincipal second = Pmo(pmo2, "pmo2");
 
@@ -166,7 +170,9 @@ namespace MsTests
             int p2 = await h.AddPmoAsync(Unique("p2"));                             // long-standing, like the seeded administrator (no record)
             int p3 = await h.AddPmoAsync(Unique("p3"), grantedBy: p2, ageDays: 30); // his PMO role was given on the request of p2
             int p4 = await h.AddPmoAsync(Unique("p4"), grantedBy: h.AdminId, ageDays: 30);
-            int user = await h.RegisterAsync(h.Admin, Unique("u"), new[] { WarehouseRole });
+            string userName = Unique("u");
+            int user = await h.RegisterAsync(h.Admin, userName, new[] { WarehouseRole });
+            await ChoosePasswordAsync(h, user, userName); // M-2 is a different rule: the receiver has chosen his own password
 
             Assert.IsTrue((await SetRolesAsync(h, Pmo(p2, "p2"), user, WarehouseRole, CeoRole)).Success);
             RoleGrantDto grant = (await GrantsAsync(h, Pmo(p3, "p3"))).Single(g => g.UserId == user);
@@ -201,7 +207,9 @@ namespace MsTests
             var h = new Host(Unique("indep"));
             int p2 = await h.AddPmoAsync(Unique("p2"));
             int boot = await h.AddPmoAsync(Unique("boot"), grantedBy: p2, bootstrap: true, ageDays: 30);
-            int user = await h.RegisterAsync(h.Admin, Unique("u"), new[] { WarehouseRole });
+            string userName = Unique("u");
+            int user = await h.RegisterAsync(h.Admin, userName, new[] { WarehouseRole });
+            await ChoosePasswordAsync(h, user, userName); // M-2 is a different rule: the receiver has chosen his own password
             Assert.IsTrue((await SetRolesAsync(h, Pmo(p2, "p2"), user, WarehouseRole, FinanceManagerRole)).Success);
             RoleGrantDto grant = (await GrantsAsync(h, Pmo(boot, "boot"))).Single(g => g.UserId == user);
             Assert.IsTrue(grant.CanApprove, grant.CannotApproveReason);
@@ -291,7 +299,7 @@ namespace MsTests
             int u = await h.RegisterAsync(h.Admin, Unique("u"), new[] { WarehouseRole, CeoRole });
             RoleGrantDto grant = (await GrantsAsync(h, Pmo(p2))).Single(g => g.UserId == u);
 
-            ResponseDto<string> dropped = await SetRolesAsync(h, h.Admin, u, WarehouseRole);
+            ResponseDto<ChangeRoleResultDto> dropped = await SetRolesAsync(h, h.Admin, u, WarehouseRole);
             Assert.IsTrue(dropped.Success);
             StringAssert.Contains(dropped.Message, AccountServiceMessages.GrantWithdrawnByEdit, "the answer says that the request is gone");
             StringAssert.Contains(dropped.Message, "CEO");
@@ -310,7 +318,7 @@ namespace MsTests
 
             // an edit that still asks for the role leaves the request where it is
             int w = await h.RegisterAsync(h.Admin, Unique("w"), new[] { WarehouseRole, CeoRole });
-            ResponseDto<string> kept = await SetRolesAsync(h, h.Admin, w, WarehouseRole, CeoRole);
+            ResponseDto<ChangeRoleResultDto> kept = await SetRolesAsync(h, h.Admin, w, WarehouseRole, CeoRole);
             Assert.IsTrue(kept.Success);
             Assert.IsFalse(kept.Message.Contains(AccountServiceMessages.GrantWithdrawnByEdit), "nothing was withdrawn, so the answer does not say so");
             Assert.AreEqual(1, (await GrantsAsync(h, Pmo(p2))).Count(g => g.UserId == w));
@@ -377,7 +385,8 @@ namespace MsTests
             int p2 = await h.AddPmoAsync(Unique("p2"));
             string name = Unique("u");
             int id = await h.RegisterAsync(h.Admin, name, new[] { WarehouseRole, RoleConstants.EngineerResponseRole.Id });
-            ResponseLoginUserDto session = await SignInAsync(h, name);
+            await ChoosePasswordAsync(h, id, name); // M-2: the approval below waits until the receiver has chosen a password of his own; done before the sessions of this test begin
+            ResponseLoginUserDto session = await SignInAsync(h, name, ChosenPassword);
             Assert.IsNull(await h.TokenProblemAsync(session.AccessToken));
 
             Assert.IsTrue((await SetRolesAsync(h, h.Admin, id, WarehouseRole)).Success);
@@ -613,7 +622,12 @@ namespace MsTests
                 FnAuditLog row = log.Single(a => a.EntityType == "Identity.SignIn" && a.Action == "Failure" && a.UserId == 0 && (a.Summary ?? "").Contains("«My»"));
                 StringAssert.Contains(row.Summary, typed.Length + " ");
                 Assert.IsTrue(log.Any(a => (a.Summary ?? "").Contains("«An»")), "the second call keeps its first two characters as well");
-                Assert.IsTrue(log.Any(a => a.Action == "Blocked" && !(a.Summary ?? "").Contains(typed)), "the blocked seat name is kept short as well");
+                // R1a2 (L-3): a seat name is counted per address and minute like an unknown name (a row for the first attempt of the minute), is kept short as well, and has no "Blocked" row of its own any more
+                FnAuditLog seat = log.Single(a => a.EntityType == "Identity.SignIn" && a.UserId == 0 && (a.Summary ?? "").Contains("«se»"));
+                Assert.AreEqual("Failure", seat.Action);
+                StringAssert.Contains(seat.Summary, "نام کاربری سرویس");
+                Assert.IsFalse(seat.Summary.Contains(typed), "the seat name is kept short as well");
+                Assert.IsFalse(log.Any(a => a.Action == "Blocked"), "no row of its own for an attempt with a seat name");
             }
             finally
             {

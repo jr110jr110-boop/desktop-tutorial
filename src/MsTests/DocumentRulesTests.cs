@@ -385,15 +385,23 @@ namespace MsTests
             Assert.AreEqual(0, missing.Length, "no longer found: " + string.Join(", ", missing));
         }
 
+        /// <summary>
+        /// Kinds that are named in <see cref="DocumentLinks.Kinds"/> ahead of the merge of another branch whose entity is not in this one yet (R1q: ItpActivity). A kind on this list may be absent from the model;
+        /// once the entity exists the kind is checked like all the others, so the list needs no change at the merge. Any other kind that names no entity is still a mistake.
+        /// </summary>
+        private static readonly string[] KindsOfOtherBranches = { "ItpActivity" };
+
         [TestMethod]
         public void Every_Owner_Kind_Is_Persian_And_Names_A_Type_That_Exists()
         {
             var names = new HashSet<string>(H.Model.GetEntityTypes().Select(t => t.ClrType.Name));
             foreach (KeyValuePair<string, string> kind in DocumentLinks.Kinds)
             {
-                Assert.IsTrue(names.Contains(kind.Key), kind.Key + " is not an entity of the model");
                 Assert.IsTrue(kind.Value.Any(ch => ch >= '؀' && ch <= 'ۿ'), kind.Key + " has no Persian name");
+                if (!names.Contains(kind.Key) && KindsOfOtherBranches.Contains(kind.Key)) continue;
+                Assert.IsTrue(names.Contains(kind.Key), kind.Key + " is not an entity of the model");
             }
+            Assert.IsTrue(DocumentLinks.Kinds.ContainsKey("ItpActivity"), "the quality branch (R1q) links the evidence of an ITP activity to a file: its kind has a Persian name before the merge");
             foreach (KeyValuePair<string, DocumentLinks.ParentOwner> table in DocumentLinks.LinkTables)
             {
                 Assert.IsTrue(names.Contains(table.Key), table.Key + " is not an entity of the model");

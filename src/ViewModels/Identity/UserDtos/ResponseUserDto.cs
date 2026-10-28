@@ -30,5 +30,13 @@ namespace ViewModels.Identity.UserDtos
 
         public Guid? ProfilePhotoId { get; set; }
         public ResponseFileDto ProfilePhoto { get; set; }
+
+        /// <summary>
+        /// R1a2 (L-9): filled only in the answers of register-user and update-user (false and null everywhere else): true when a request is waiting for a second PMO user
+        /// (a sensitive role, or the removal of the PMO role). <see cref="GrantId"/> is the first such request (role-grants/{id}/approve), <see cref="GrantIds"/> all of them.
+        /// </summary>
+        public bool Pending { get; set; }
+        public int? GrantId { get; set; }
+        public int[] GrantIds { get; set; }
     }
 }

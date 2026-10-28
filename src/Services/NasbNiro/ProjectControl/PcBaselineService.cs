@@ -530,7 +530,7 @@ namespace Services.NasbNiro.ProjectControl
         {
             Id = c.Id, Number = c.Number, ContractId = c.ContractId, Direction = c.Direction, Issue = c.Issue, Basis = c.Basis, DaysQuantified = c.DaysQuantified, AmountQuantified = c.AmountQuantified, Status = c.Status,
             IsCrossClaim = c.IsCrossClaim, PmoApproved = c.PmoApproved, DesignManufacturingApproved = c.DesignManufacturingApproved, ReviewNote = c.ReviewNote, RowVersion = c.RowVersion == null ? null : Convert.ToBase64String(c.RowVersion),
-            QuantifiedByUserId = c.QuantifiedByUserId, PmoApprovedByUserId = c.PmoApprovedByUserId, PmoApprovedAt = c.PmoApprovedAt, DesignApprovedByUserId = c.DesignApprovedByUserId, DesignApprovedAt = c.DesignApprovedAt,
+            QuantifiedByUserId = c.QuantifiedByUserId, LastEditedByUserId = c.LastEditedByUserId, PmoApprovedByUserId = c.PmoApprovedByUserId, PmoApprovedAt = c.PmoApprovedAt, DesignApprovedByUserId = c.DesignApprovedByUserId, DesignApprovedAt = c.DesignApprovedAt,
         };
 
         /// <summary>
@@ -545,14 +545,14 @@ namespace Services.NasbNiro.ProjectControl
         }
 
         /// <summary>
-        /// R1a2 (H4): the problem with an approval that does not depend on which side approves, or null. A claim is approved only on the quantified amount (status Quantified),
-        /// and not by the person who registered it or the person who quantified it (an approval of one's own work is no approval).
+        /// R1a2 (H4, L-7): the problem with an approval that does not depend on which side approves, or null. A claim is approved only on the quantified amount (status Quantified),
+        /// and not by the person who registered it, the person who wrote its text last or the person who quantified it (an approval of one's own work is no approval).
         /// </summary>
         private string ClaimApprovalProblem(PcClaim c)
         {
             if (c.Status != PcClaimStatus.Quantified) return "تایید فقط برای ادعای برآوردشده ممکن است؛ ابتدا ادعا برآورد شود.";
-            if (c.CreatorUserId == Me || c.QuantifiedByUserId == Me)
-                return PcText.SameUser + " (تایید‌کننده نمی‌تواند ثبت‌کننده یا برآوردکننده‌ی همین ادعا باشد)";
+            if (c.CreatorUserId == Me || c.QuantifiedByUserId == Me || c.LastEditedByUserId == Me)
+                return PcText.SameUser + " (تایید‌کننده نمی‌تواند ثبت‌کننده، آخرین ویرایش‌کننده‌ی متن یا برآوردکننده‌ی همین ادعا باشد)";
             return null;
         }
 
@@ -591,10 +591,12 @@ namespace Services.NasbNiro.ProjectControl
                     return Bad<PcClaimDto>("ادعای ابلاغ‌شده ویرایش نمی‌شود؛ در صورت نیاز آن را پس بگیرید و ادعای تازه ثبت کنید.");
                 bool edited = c.Direction != dto.Direction || c.Issue != Clean(dto.Issue) || c.Basis != Clean(dto.Basis) || c.IsCrossClaim != dto.IsCrossClaim;
                 if (edited && (c.PmoApproved || c.DesignManufacturingApproved)) ResetClaimApprovals(c);
+                // R1a2 (L-7): the person whose save changed the text is remembered; he is barred from both approvals like the creator and the quantifier
+                if (edited) c.LastEditedByUserId = Me;
             }
             else
             {
-                c = new PcClaim { ContractId = dto.ContractId, Status = PcClaimStatus.Issue, CreateDate = now, CreatorUserId = Me, Number = await InventoryNumbers.NextNumberAsync(_uow, PcNumbers.Claim, "CL", DateTime.Today, cancellationToken) };
+                c = new PcClaim { ContractId = dto.ContractId, Status = PcClaimStatus.Issue, CreateDate = now, CreatorUserId = Me, LastEditedByUserId = Me, Number = await InventoryNumbers.NextNumberAsync(_uow, PcNumbers.Claim, "CL", DateTime.Today, cancellationToken) };
                 _uow.Set<PcClaim>().Add(c);
             }
             c.Direction = dto.Direction; c.Issue = Clean(dto.Issue); c.Basis = Clean(dto.Basis); c.IsCrossClaim = dto.IsCrossClaim; c.ModifyDate = now; c.ModifierUserId = Me;

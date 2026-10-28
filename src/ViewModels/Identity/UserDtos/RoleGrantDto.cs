@@ -22,13 +22,18 @@ namespace ViewModels.Identity.UserDtos
         /// <summary>
         /// True when the signed-in PMO user may approve it: not the one who asked, not the user who receives the role, not a PMO whose own PMO role was
         /// given on the request of the same person, and one who has held the PMO role for the minimum time (Identity:ApproverMinDays).
+        /// R1a2 (M-2): a sensitive role also waits until its receiver has chosen a password of his own (the PMO user who registered him, or reset his password, knows the other one);
+        /// that holds for every viewer, and <see cref="CannotApproveReason"/> says so.
         /// </summary>
         public bool CanApprove { get; set; }
 
         /// <summary>R1a2: Persian text of the reason why the signed-in user cannot approve it; empty when he or she can.</summary>
         public string CannotApproveReason { get; set; }
 
-        /// <summary>R1a2: "role" (a sensitive role is requested) or "reset" (the password reset of a PMO or sensitive-role holder; Role is then PASSWORD_RESET).</summary>
+        /// <summary>
+        /// R1a2: "role" (a sensitive role is requested), "reset" (the password reset of a PMO or sensitive-role holder; Role is then PASSWORD_RESET) or, since the review fixes,
+        /// "revoke" (the PMO role is to be taken away: Role is PMO; or a PMO user's account is to be deleted: Role is USER_DELETE).
+        /// </summary>
         public string Kind { get; set; } = "role";
 
         /// <summary>R1a2: filled only in the answer that approves a "reset" request: the temporary password, shown this once; hand it to the user.</summary>

@@ -51,8 +51,13 @@ call() {
 }
 val() { jq -r "$1" "$B"; }
 
+# R1a2 (M-2): the receiver of a sensitive role must have chosen a password of his own before the role can be approved (the PMO user who registered him knows the first one).
+# REGPW remembers the password a user was registered with (user and user2 fill it); OWNPW remembers the password he chose (own_pw fills it, key "name|registered password").
+# The many login lines of this script keep naming the password of the registration: login() signs in with the password the user chose, when there is one.
+declare -A REGPW=() OWNPW=()
 login() {
-  curl -s -X POST "$API/Accounts/login" -H 'Content-Type: application/json' -d "{\"userName\":\"$1\",\"password\":\"$2\"}" -o "$B"
+  local pw=${OWNPW["$1|$2"]:-$2}
+  curl -s -X POST "$API/Accounts/login" -H 'Content-Type: application/json' -d "{\"userName\":\"$1\",\"password\":\"$pw\"}" -o "$B"
   jq -r '.. | .accessToken? // empty' "$B" | head -n1
 }
 TOKEN=$(login Admin 'Ci#Adm1n-Build-2026')
@@ -76,10 +81,11 @@ r403() { if [ "$CODE" = "403" ]; then nomsg "$1" "مجوز"; else bad "$1 (got H
 # r401 NAME : R1a2, the token of the last call is no longer accepted (the security stamp moved on, the account was removed...): HTTP 401 and the standard sign-in-needed body
 r401() { if [ "$CODE" = "401" ]; then nomsg "$1" "وارد سامانه شوید"; else bad "$1 (got HTTP $CODE)"; fi; }
 uid() { as "$1" GET Accounts/get-current-user-info; jq -r '.data.id // .data.userId // empty' "$B"; }
-user2() { call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
+user2() { REGPW["$1"]="$3"; call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"$5\"}"; }
 
 # users of the other roles (approvals must come from different people)
 user() { # user NAME ROLEID PASSWORD N
+  REGPW["$1"]="$3"
   call POST Accounts/register-user "{\"userName\":\"$1\",\"name\":\"$1\",\"lastName\":\"آزمون\",\"email\":\"$1@example.com\",\"roleIds\":[$2],\"password\":\"$3\",\"phoneNumber\":\"0912000000$4\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"001234567$4\"}"
 }
 user wh.ci 6 'Ci#Wh-User-2026' 1
@@ -97,8 +103,28 @@ user pmo2.ci 1 'Ci#Pmo2-User-2026' 6
 # "Bootstrap" and an alert to the CEO. Admin is the only PMO user at this point, so pmo2.ci is that case (the audit row and the alert are checked further down).
 check "r1a2 h1: the second PMO user is given the PMO role at once (bootstrap: only one active PMO user existed) and the answer says that no second approval was needed" '.success and .data.id > 0 and (.message|contains("بدون تأیید دوم")) and ([.data.roles[]?.name]|index("PMO")) != null'
 PMO2_TOKEN=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$PMO2_TOKEN" ] && ok "login second PMO user" || bad "login second PMO user"
-approve_grants() { # approve_grants USERNAME... : the second PMO user approves every open request for a sensitive role of these users; every approve answer and the number of approvals are asserted
-  local names g ids n=0 want=$#
+# own_pw NAME : R1a2 (M-2) the receiver of a sensitive role chooses a password of his own, with the current one (the answer comes with fresh tokens). The new password is the registered one with
+# "-Own" added; login() maps the pair, so the lines further down keep naming the password of the registration. The fresh access token (it carries the roles the user has now) stays in OWN_TOKEN.
+# The refusal of an approval before this step is checked once, with ceo.ci below.
+OWN_TOKEN=""
+own_pw() {
+  local name=$1 old=${REGPW["$1"]:-} t
+  if [ -z "$old" ]; then echo '{"note":"no registered password is known for this user"}' > "$B"; bad "own_pw: the registered password of $name is known"; return 1; fi
+  t=$(login "$name" "$old")
+  if [ -z "$t" ]; then bad "own_pw: $name signs in with the password of the registration"; return 1; fi
+  as "$t" POST Accounts/change-password "{\"currentPassword\":\"$old\",\"newPassword\":\"$old-Own\"}"
+  if jq -e '.success and (.data.accessToken|length) > 20' "$B" >/dev/null 2>&1; then
+    ok "own_pw: $name chooses a password of his own (current password required, fresh tokens come back)"
+    OWNPW["$name|$old"]="$old-Own"
+    OWN_TOKEN=$(val .data.accessToken)
+  else
+    bad "own_pw: $name chooses a password of his own (current password required, fresh tokens come back)"
+    return 1
+  fi
+}
+approve_grants() { # approve_grants USERNAME... : every receiver first chooses a password of his own (own_pw); then the second PMO user approves every open request for a sensitive role of these users; every approve answer and the number of approvals are asserted
+  local names g ids n=0 want=$# u
+  for u in "$@"; do own_pw "$u"; done
   names=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
   as "$PMO2_TOKEN" GET Accounts/role-grants
   ids=$(jq -r --argjson n "$names" '.data[]? | select(.canApprove and (.userName as $u | $n | index($u) != null)) | .id' "$B")
@@ -110,7 +136,17 @@ approve_grants() { # approve_grants USERNAME... : the second PMO user approves e
   # one request per user in every use of this helper (each user is registered with exactly one sensitive role)
   [ "$n" = "$want" ] && ok "approve_grants: $n request(s) approved for $want user(s) ($*)" || bad "approve_grants: $n request(s) approved, $want expected ($*)"
 }
-call POST Accounts/register-user "{\"userName\":\"ceo.ci\",\"name\":\"ceo.ci\",\"lastName\":\"آزمون\",\"email\":\"ceo.ci@example.com\",\"roleIds\":[13],\"password\":\"Ci#Ceo-User-2026\",\"phoneNumber\":\"09120000019\",\"birthDate\":\"1990-01-01T00:00:00+03:30\",\"nationalCode\":\"0012345619\"}"
+user2 ceo.ci 13 'Ci#Ceo-User-2026' 09120000019 0012345619
+check "r1a2 review l-9: the answer of register-user says that the CEO role waits: pending, the id of the request and the ids of all the requests of the user, and no role is given yet" '.success and .data.id > 0 and .data.pending == true and .data.grantId > 0 and (.data.grantIds|length) == 1 and .data.grantIds[0] == .data.grantId and ((.data.roles // [])|length) == 0'
+CEOID=$(val .data.id); CEOG=$(val .data.grantId)
+# R1a2 review (M-2): the PMO user who registers a person chooses the first password, so a sensitive role asked for that person waits until he has chosen a password of his own.
+# Whoever looks, the list says so, and an approval before that is refused with the same reason (approve_grants below makes the receiver change his password first and then approves)
+as "$PMO2_TOKEN" GET Accounts/role-grants
+check "r1a2 review m-2: the request for the CEO role is listed but cannot be approved yet, not even by the independent second PMO user, and the list says that the receiver has not changed his own password" ".success and ([.data[]|select(.id == $CEOG and .userName == \"ceo.ci\" and .kind == \"role\" and .canApprove == false and (.cannotApproveReason|contains(\"رمز عبور خودش را عوض نکرده\")))]|length) == 1"
+as "$PMO2_TOKEN" POST "Accounts/role-grants/$CEOG/approve"; nomsg "r1a2 review m-2: and the approval is refused with the same reason" "رمز عبور خودش را عوض نکرده"
+CEO_PRE_TOKEN=$(login ceo.ci 'Ci#Ceo-User-2026'); [ -n "$CEO_PRE_TOKEN" ] && ok "r1a2 review m-2: the receiver signs in with the password he was registered with (he holds no role yet)" || bad "r1a2 review m-2: the receiver signs in with the password he was registered with (he holds no role yet)"
+as "$CEO_PRE_TOKEN" GET "office/inbox?SourceKey=grant-own-password-$CEOID"
+check "r1a2 review m-2: the receiver finds a note in his inbox that the role waits until he has changed his password" '.success and (.data.data|length) == 1 and (.data.data[0].title|contains("نقش حساس درخواست شده است"))'
 approve_grants ceo.ci
 COM_TOKEN=$(login com.ci 'Ci#Com-User-2026'); CEO_TOKEN=$(login ceo.ci 'Ci#Ceo-User-2026')
 [ -n "$COM_TOKEN" ] && [ -n "$CEO_TOKEN" ] && ok "login commercial and CEO users" || bad "login commercial and CEO users"
@@ -138,6 +174,7 @@ user2 iam.ci 6 'Ci#Iam-User-2026' 09120000090 0012345690
 check "r1a identity: the PMO registers a throwaway user (warehouse role)" '.success and .data.id > 0'; IAMID=$(val .data.id)
 user2 iam2.ci 17 'Ci#Iam2-User-2026' 09120000091 0012345691
 check "r1a identity: a user registered with a sensitive role (FINANCEMANAGER) is created without it; the answer says the role waits for a second PMO user" '.success and .data.id > 0 and (.message|contains("FINANCEMANAGER")) and ((.data.roles // [])|length) == 0'; IAM2ID=$(val .data.id)
+check "r1a2 review l-9: the answer of register-user carries the same shape as the reset request: pending is true and the request has an id" '.success and .data.pending == true and .data.grantId > 0 and (.data.grantIds|length) == 1'
 IAMADM=$(uid "$ADMIN_TOKEN"); IAMPMO2=$(uid "$PMO2_TOKEN")
 [ -n "$IAMADM" ] && [ -n "$IAMPMO2" ] && ok "r1a identity: the ids of the two PMO users are resolved" || bad "r1a identity: the ids of the two PMO users are resolved"
 
@@ -204,17 +241,31 @@ check "r1a2 l2: change-temporary-password with an unknown name gives the plain r
 CODE=$(tmpchange iam2.ci 'Wrong#Pass-0004'); L2D=$(jq -cS . "$B")
 check "r1a2 l2: change-temporary-password with a wrong temporary password of a real user gives the plain refusal" ".success == false and (.message|contains(\"$GENERIC\"))"
 if [ "$L2C" = "$L2D" ]; then ok "r1a2 l2: change-temporary-password answers an unknown name and a wrong password with the very same JSON"; else { echo "$L2C"; echo "$L2D"; } > "$B"; bad "r1a2 l2: change-temporary-password answers an unknown name and a wrong password with the very same JSON"; fi
-# a person who types the password into the name field: refused like any unknown name, and the typed text is looked for in the whole audit trail at the end of the finance audit checks
+# a person who types the password into the name field: refused like any unknown name, and the typed text is looked for in the whole audit trail at the end of the finance audit checks.
+# R1a2 review (L-8a): the attempts with unknown names are counted per address and minute, and only the first of a minute (and the 10th, 100th ...) leaves a row; the attempts above have
+# used up the first row of this minute. The wait starts a new minute, so the password typed into the name field is the first attempt of it and its row can be asserted exactly (audit section below).
+sleep $(( 61 - $(date +%s) % 60 ))
 TYPEDPW='Ci#Typed-Into-Name-2026'
 login "$TYPEDPW" 'x' >/dev/null; check "r1a2 m5: a password typed into the name field is refused like any unknown name" ".success == false and (.message|contains(\"$GENERIC\"))"
 CODE=$(tmpchange "$TYPEDPW" 'x'); check "r1a2 m5: the same through change-temporary-password" ".success == false and (.message|contains(\"$GENERIC\"))"
+# R1a2 review (L-3): a sign-in with the name of an AI seat ("seat.*") is counted like any unknown name (the two attempts above are the 1st and 2nd of this minute, these eight are the 3rd to the 10th,
+# so exactly one row is written, for the 10th) instead of one row for every attempt, and the answer is the plain refusal of a wrong password
+for _ in 1 2 3 4 5 6 7 8; do login 'seat.pmo-weekly' 'Wrong#Pass-0007' >/dev/null; done
+SEATANS=$(jq -cS . "$B")
+check "r1a2 review l-3: a sign-in with the name of a seat is refused with the plain text of a wrong password" ".success == false and (.message|contains(\"$GENERIC\")) and .data == null"
+if [ "$SEATANS" = "$L2A" ]; then ok "r1a2 review l-3: and the answer is the very same JSON as the one for an unknown name"; else { echo "$L2A"; echo "$SEATANS"; } > "$B"; bad "r1a2 review l-3: and the answer is the very same JSON as the one for an unknown name"; fi
 
 # --- roles: a sensitive role needs a second PMO user; nobody changes his or her own roles
 call GET Accounts/role-grants
 check "r1a identity: the request for the sensitive role is listed; the PMO user who made it cannot approve it" '.success and ([.data[]|select(.userName == "iam2.ci" and .role == "FINANCEMANAGER" and .canApprove == false)]|length) == 1'
 IAMG=$(jq -r '[.data[]|select(.userName == "iam2.ci")][0].id' "$B")
 call POST "Accounts/role-grants/$IAMG/approve"; nomsg "r1a identity: the PMO user who asked cannot approve the own request" "(PMO) دیگری باید"
+# R1a2 review (M-2): the receiver chooses a password of his own first. The password change ended the token he made at his first sign-in, so the token that comes with the change is the one
+# "made before the approval" below.
+own_pw iam2.ci; IAM2_OLD_TOKEN=$OWN_TOKEN
 as "$PMO2_TOKEN" GET Accounts/role-grants; check "r1a identity: the second PMO user may approve it" ".success and ([.data[]|select(.id == $IAMG and .canApprove == true)]|length) == 1"
+# R1a2 review (L-8c): the control call of the check further down: the old token is accepted right up to the approval, so its refusal afterwards is the effect of the approval
+as "$IAM2_OLD_TOKEN" GET Accounts/get-current-user-info; check "r1a2 review l-8c (control): the token made before the approval is still accepted just before the approval" '.success'
 as "$PMO2_TOKEN" POST "Accounts/role-grants/$IAMG/approve"; check "r1a identity: the second PMO user approves and the role is given" '.success and .data.role == "FINANCEMANAGER"'
 call GET "Accounts/get-user-info?Id=$IAM2ID"; check "r1a identity: after the approval the user holds the sensitive role" '.success and ([.data.roles[].name]|index("FINANCEMANAGER")) != null'
 as "$IAM2_OLD_TOKEN" GET Accounts/get-current-user-info; r401 "r1a2 h2: the access token made before the sensitive role was approved is refused at once (the approval moved the security stamp on)"
@@ -247,7 +298,7 @@ as "$IAM2_TOKEN" GET "office/inbox?SourceKey=reset-done-$IAM2ID"
 check "r1a2 h1: and a note that the reset was done with the approval of two administrators" '.success and (.data.data|length) == 1 and (.data.data[0].title|contains("با تأیید دو مدیر بازنشانی شد"))'
 
 # --- R1a2 (H2): a role taken away ends the access tokens made with it at once; the refresh token (still good) brings a token with the roles the user has now
-call POST Accounts/edit-user-roles "{\"userId\":$IAM2ID,\"roleIds\":[6]}"; check "r1a identity: taking a role away is immediate" '.success and .data == "WAREHOUSE"'
+call POST Accounts/edit-user-roles "{\"userId\":$IAM2ID,\"roleIds\":[6]}"; check "r1a identity: taking a role away is immediate; the answer carries the roles the user holds now and says that no request waits (R1a2 review l-9: data is an object since the review)" '.success and .data.roles == "WAREHOUSE" and .data.pending == false and (.data.grantIds|length) == 0'
 as "$IAM2_TOKEN" GET "finance/audit?PageSize=1"; r401 "r1a2 h2: the token made while the user held the role is refused at once after the role is taken away"
 rfsh "$IAM2_REFRESH"
 check "r1a2 h2: the refresh token is still good and brings a new pair" '.success and (.data.accessToken|length) > 20 and (.data.refreshToken|length) > 20'
@@ -272,12 +323,16 @@ call GET "Accounts/get-user-info?Id=$IAMID"; check "r1a2 l1: the user did not ge
 # --- R1a2 (H1b): the approver is independent of the requester: a PMO user whose PMO role was given on the request of the same person cannot approve what that person asks for next
 user2 pmo3.ci 1 'Ci#Pmo3-User-2026' 09120000094 0012345694
 check "r1a2 h1: with two active PMO users a third PMO user is a request, not a role (the bootstrap is only for the second one)" '.success and .data.id > 0 and ((.data.roles // [])|length) == 0 and (.message|contains("PMO"))'; PMO3ID=$(val .data.id)
+check "r1a2 review l-9: and the answer carries the id of the request (pending, grantId)" '.success and .data.pending == true and .data.grantId > 0'
+own_pw pmo3.ci
 as "$PMO2_TOKEN" GET Accounts/role-grants; PMO3G=$(jq -r '[.data[]|select(.userName == "pmo3.ci")][0].id' "$B")
 as "$PMO2_TOKEN" POST "Accounts/role-grants/$PMO3G/approve"
 check "r1a2 h1: the second PMO user approves the third (his own PMO role came from the audited bootstrap, which the rule leaves out)" '.success and .data.role == "PMO"'
 PMO3_TOKEN=$(login pmo3.ci 'Ci#Pmo3-User-2026'); [ -n "$PMO3_TOKEN" ] && ok "r1a2 h1: the third PMO user signs in" || bad "r1a2 h1: the third PMO user signs in"
 user2 pmo4.ci 1 'Ci#Pmo4-User-2026' 09120000095 0012345695
 check "r1a2 h1: the administrator asks for a fourth PMO user" '.success and .data.id > 0 and ((.data.roles // [])|length) == 0'; PMO4ID=$(val .data.id)
+# R1a2 review (M-2): the fourth user chooses his own password first, so the refusals of the third PMO user below can only come from the independence rule and not from the password rule
+own_pw pmo4.ci
 as "$PMO3_TOKEN" GET Accounts/role-grants
 check "r1a2 h1: the third PMO user (his role was given on the administrator's request) may not approve the administrator's next request, and the list says why" '.success and ([.data[]|select(.userName == "pmo4.ci" and .canApprove == false and (.cannotApproveReason|contains("مستقل")))]|length) == 1'
 PMO4G=$(jq -r '[.data[]|select(.userName == "pmo4.ci")][0].id' "$B")
@@ -287,13 +342,61 @@ as "$PMO2_TOKEN" POST "Accounts/role-grants/$PMO4G/approve"; check "r1a2 h1: the
 for _ in 1 2 3 4 5; do login pmo4.ci 'Wrong#Pass-0005' >/dev/null; done
 nomsg "r1a2 m1: five wrong passwords lock a PMO account too, and the answer says so" "تعلیق شده"
 PMO4_TOKEN=$(login pmo4.ci 'Ci#Pmo4-User-2026'); [ -n "$PMO4_TOKEN" ] && ok "r1a2 m1: the locked PMO account signs in with the right password from the server itself (the recovery) and the lock is lifted" || bad "r1a2 m1: the locked PMO account signs in with the right password from the server itself (the recovery) and the lock is lifted"
+# R1a2 review (L-1): the recovery has a cap. The sign-in just above cleared the count of wrong passwords from the server; more than ten of them within five minutes end the recovery for that
+# PMO user: the first five lock the account, and the right password from the server itself is then refused like any other (the control is the recovery above, with the count at five)
+for _ in 1 2 3 4 5 6 7 8 9 10 11; do login pmo4.ci 'Wrong#Pass-0008' >/dev/null; done
+nomsg "r1a2 review l-1: eleven wrong passwords from the server itself lock the PMO account and the answer says so" "تعلیق شده"
+login pmo4.ci 'Ci#Pmo4-User-2026' >/dev/null
+nomsg "r1a2 review l-1: after that the right password from the server itself no longer lifts the lock: the recovery is capped" "تعلیق شده"
 # the reset of a PMO user is a request as well; the PMO user whose password it is cannot approve it
 call POST Accounts/admin-reset-password "{\"userId\":$PMO4ID}"
 check "r1a2 h1: the reset of a PMO user is a request too" '.success and .data.pending == true and .data.grantId > 0'; PMO4RG=$(val .data.grantId)
 as "$PMO4_TOKEN" POST "Accounts/role-grants/$PMO4RG/approve"; nomsg "r1a2 h1: the PMO user whose password it is cannot approve its reset" "کاربری که نقش به او داده"
+# R1a2 review (L-4): nor can he reject it (a hijacked session of a PMO user could otherwise block its own reset for good); the next line shows that the request is still there and that any other PMO user can reject it
+as "$PMO4_TOKEN" POST "Accounts/role-grants/$PMO4RG/reject"; nomsg "r1a2 review l-4: the PMO user whose password it is cannot reject its reset either" "خودتان نمی‌توانید رد کنید"
 call POST "Accounts/role-grants/$PMO4RG/reject"; check "r1a2 h1: a pending reset request can be rejected" '.success and .data == true'
 as "$PMO2_TOKEN" GET Accounts/role-grants; check "r1a2 h1: a rejected request is gone from the list" ".success and ([.data[]|select(.id == $PMO4RG)]|length) == 0"
 as "$PMO4_TOKEN" GET Accounts/get-current-user-info; check "r1a2 h1: a rejected request changes nothing: the token of the PMO user still works" '.success'
+
+# --- R1a2 review (M-1): taking the PMO role from a user, and deleting a PMO user, are requests as well. The PMO role is a sensitive role: a PMO user who could be removed at once could be removed
+# one after the other until fewer than two were left, and the next PMO user would then be given the role without a second approval (the bootstrap). The request is a claim of the user with the
+# kind "revoke" (the role is PMO, or USER_DELETE for the deletion), it expires after seven days, is audited, and is approved or rejected like the others.
+call POST Accounts/edit-user-roles "{\"userId\":$PMO4ID,\"roleIds\":[]}"
+check "r1a2 review m-1: taking the PMO role from a PMO user is only requested: he still holds it, the answer carries the id of the request and says that a second PMO user must approve" '.success and .data.pending == true and .data.grantId > 0 and (.data.grantIds|length) == 1 and (.data.roles|contains("PMO")) and (.message|contains("پس از تأیید یک مدیر (PMO) دیگر"))'
+PMO4VG=$(val .data.grantId)
+as "$PMO4_TOKEN" GET Accounts/get-current-user-info; check "r1a2 review m-1 (control): while the request waits nothing has changed for the user: his token still works" '.success'
+as "$PMO2_TOKEN" GET Accounts/role-grants
+check "r1a2 review m-1: the request is listed with the kind \"revoke\" and the role PMO, and the independent second PMO user may approve it" ".success and ([.data[]|select(.id == $PMO4VG and .kind == \"revoke\" and .role == \"PMO\" and .userName == \"pmo4.ci\" and .canApprove == true)]|length) == 1"
+call POST "Accounts/role-grants/$PMO4VG/approve"; nomsg "r1a2 review m-1: the PMO user who asked cannot approve it" "(PMO) دیگری باید"
+as "$PMO4_TOKEN" POST "Accounts/role-grants/$PMO4VG/approve"; nomsg "r1a2 review m-1: nor can the PMO user concerned" "کاربری که نقش به او داده"
+as "$PMO4_TOKEN" POST "Accounts/role-grants/$PMO4VG/reject"; nomsg "r1a2 review l-4: and he cannot reject it" "خودتان نمی‌توانید رد کنید"
+as "$PMO2_TOKEN" POST "Accounts/role-grants/$PMO4VG/approve"; check "r1a2 review m-1: the independent second PMO user approves: the PMO role is taken away" '.success and .data.kind == "revoke" and .data.role == "PMO"'
+as "$PMO4_TOKEN" GET Accounts/get-current-user-info; r401 "r1a2 review m-1: the token made with the PMO role is refused at once (the approval moved the security stamp on)"
+call GET "Accounts/get-user-info?Id=$PMO4ID"; check "r1a2 review m-1: the user no longer holds the PMO role" '.success and ([.data.roles[].name]|index("PMO")) == null'
+# the deletion of a PMO user is such a request too (the third PMO user is the one: his token is checked just before and just after)
+call DELETE "Accounts/delete-user/$PMO3ID"
+check "r1a2 review m-1: deleting a PMO user is only requested: the answer is a success with data false and says that a second PMO user must approve" '.success and .data == false and (.message|contains("پس از تأیید یک مدیر (PMO) دیگر"))'
+as "$PMO3_TOKEN" GET Accounts/get-current-user-info; check "r1a2 review m-1 (control): the token of the third PMO user works while the deletion of his account waits" '.success'
+call DELETE "Accounts/delete-user/$PMO3ID"; nomsg "r1a2 review m-1: a second request for the same deletion is not made while one waits" "از قبل درخواست"
+as "$PMO2_TOKEN" GET Accounts/role-grants
+check "r1a2 review m-1: the request to delete him is listed with the kind \"revoke\" and the label USER_DELETE" ".success and ([.data[]|select(.userName == \"pmo3.ci\" and .kind == \"revoke\" and .role == \"USER_DELETE\" and .canApprove == true)]|length) == 1"
+PMO3DG=$(jq -r '[.data[]|select(.userName == "pmo3.ci" and .kind == "revoke")][0].id' "$B")
+as "$PMO3_TOKEN" POST "Accounts/role-grants/$PMO3DG/reject"; nomsg "r1a2 review l-4: the PMO user whose account it is cannot reject its deletion" "خودتان نمی‌توانید رد کنید"
+as "$PMO2_TOKEN" POST "Accounts/role-grants/$PMO3DG/approve"; check "r1a2 review m-1: the independent second PMO user approves: the account is deleted" '.success and .data.kind == "revoke" and .data.role == "USER_DELETE"'
+as "$PMO3_TOKEN" GET Accounts/get-current-user-info; r401 "r1a2 h2: the token of a deleted PMO user stops working at once (401, standard refusal body)"
+login pmo3.ci 'Wrong#Pass-0009' >/dev/null; L2F=$(jq -cS . "$B")
+if [ "$L2F" = "$L2A" ]; then ok "r1a2 review m-1: the deleted PMO user answers a wrong password with the very same JSON as an unknown name"; else { echo "$L2A"; echo "$L2F"; } > "$B"; bad "r1a2 review m-1: the deleted PMO user answers a wrong password with the very same JSON as an unknown name"; fi
+# a PMO user may take the PMO role from himself (nobody can be forced to; the trail says "SteppedDown"), but he does not give himself another role by the same edit. The fifth PMO user does it.
+user2 pmo5.ci 1 'Ci#Pmo5-User-2026' 09120000096 0012345696
+check "r1a2 review m-1: setup: a fifth PMO user is asked for" '.success and .data.id > 0 and .data.pending == true and .data.grantId > 0'; PMO5ID=$(val .data.id); PMO5G=$(val .data.grantId)
+own_pw pmo5.ci
+as "$PMO2_TOKEN" POST "Accounts/role-grants/$PMO5G/approve"; check "r1a2 review m-1: setup: the second PMO user gives him the role" '.success and .data.role == "PMO"'
+PMO5_TOKEN=$(login pmo5.ci 'Ci#Pmo5-User-2026'); [ -n "$PMO5_TOKEN" ] && ok "r1a2 review m-1: the fifth PMO user signs in" || bad "r1a2 review m-1: the fifth PMO user signs in"
+as "$PMO5_TOKEN" POST Accounts/edit-user-roles "{\"userId\":$PMO5ID,\"roleIds\":[6]}"; nomsg "r1a2 review m-1: a PMO user does not give himself another role while taking the PMO role from himself" "خودتان مجاز نیست"
+as "$PMO5_TOKEN" GET Accounts/get-current-user-info; check "r1a2 review m-1 (control): the refused edit changed nothing: his token still works" '.success'
+as "$PMO5_TOKEN" POST Accounts/edit-user-roles "{\"userId\":$PMO5ID,\"roleIds\":[]}"
+check "r1a2 review m-1: a PMO user takes the PMO role from himself at once, without a second approval, and the answer says so" '.success and (.data.roles|contains("PMO")|not) and .data.pending == false and (.message|contains("از خودتان برداشته شد"))'
+as "$PMO5_TOKEN" GET Accounts/get-current-user-info; r401 "r1a2 review m-1: his token ends at once (the security stamp moved on); he signs in again as an ordinary user"
 
 # --- R1a2 (L3): a refresh token works once. A second use a moment later is only refused (a double click); a late second use is taken for a copy of the token and
 # ends every session of the user (checked in the audit section further down, after the grace time)
@@ -307,11 +410,10 @@ if [ -n "$TOK_R2" ] && [ "$TOK_R2" != "$TOK_R1" ]; then ok "r1a2 l3: the new ref
 rfsh "$TOK_R1"; nomsg "r1a2 l3: the same refresh token a moment later is refused (a double click is not taken for a theft)" "نامعتبر"
 as "$TOK_B" GET Accounts/get-current-user-info; check "r1a2 l3: and the session goes on: the access token of the first refresh still works" '.success'
 
-# --- the end of the throwaway users: deleted, their token stops working at once, they cannot sign in (tok.ci stays for the refresh-token check in the audit section)
-call DELETE "Accounts/delete-user/$PMO4ID"; check "r1a2 h1: the PMO deletes the fourth PMO user" '.success'
-as "$PMO3_TOKEN" GET Accounts/get-current-user-info; check "r1a2 h2 (control): the token of the third PMO user works just before the user is deleted" '.success'
-call DELETE "Accounts/delete-user/$PMO3ID"; check "r1a2 h1: the PMO deletes the third PMO user" '.success'
-as "$PMO3_TOKEN" GET Accounts/get-current-user-info; r401 "r1a2 h2: the token of a deleted PMO user stops working at once (401, standard refusal body)"
+# --- the end of the throwaway users: deleted, their token stops working at once, they cannot sign in (tok.ci stays for the refresh-token check in the audit section).
+# The third PMO user was deleted through the request above (R1a2 review, M-1); the fourth and the fifth no longer hold the PMO role, so their accounts are deleted at once.
+call DELETE "Accounts/delete-user/$PMO4ID"; check "r1a2 h1: the PMO deletes the fourth user (he holds no PMO role any more, so no second approval is asked for)" '.success and .data == true'
+call DELETE "Accounts/delete-user/$PMO5ID"; check "r1a2 review m-1: and the fifth, who took the PMO role from himself" '.success and .data == true'
 call DELETE "Accounts/delete-user/$IAM2ID"; check "r1a identity: the PMO deletes the second throwaway user" '.success'
 as "$IAM_TOKEN" GET Accounts/get-current-user-info; check "r1a2 h2 (control): the token of the first throwaway user works just before the user is deleted" '.success'
 call DELETE "Accounts/delete-user/$IAMID"; check "r1a identity: the PMO deletes the first throwaway user" '.success'
@@ -816,6 +918,11 @@ for M8T in WH_TOKEN QC_TOKEN ENG_TOKEN PLAN_TOKEN; do as "${!M8T}" GET "Provider
 as "$WH_TOKEN" GET "Provider?PageSize=50"; check "r1a2 m8: in the list of providers the storekeeper sees the account masked as well, and the rest of the record is there" '.success and ([.data.data[]|select(.name == "تامین‌کننده الف آزمون")]|length) == 1 and (tostring|contains("1234567890123")|not) and (tostring|contains("IR970170000000100324200002")|not)'
 as "$COM_TOKEN" GET "Provider?PageSize=50"; check "r1a2 m8: while the commercial user sees it in full in the list" '.success and (tostring|contains("1234567890123"))'
 as "$WH_TOKEN" GET "Provider/vendor-list"; check "r1a2 m8: the vendor list never carries a full account number either" '.success and (tostring|contains("1234567890123")|not) and (tostring|contains("6037991234567890")|not)'
+# R1a2 review (L-6): the IBAN of the supplier profile (procurement/suppliers) is bank data as well: purchasing, finance and treasury read it in full, every other reader of the supplier list gets ****
+# and its last four characters (the profile of the supplier was saved with this IBAN a few lines above)
+L6SUP='IR970170000000100324200002'
+for L6T in ADMIN_TOKEN COM_TOKEN FIN_TOKEN FM_TOKEN TR_TOKEN; do as "${!L6T}" GET "procurement/suppliers?contains=%D8%A7%D9%84%D9%81"; check "r1a2 review l-6: ${L6T%_TOKEN} reads the IBAN of the supplier profile in full" ".success and ([.data[]|select(.providerId == $PA and .iban == \"$L6SUP\")]|length) == 1"; done
+for L6T in WH_TOKEN QC_TOKEN ENG_TOKEN PLAN_TOKEN CEO_TOKEN; do as "${!L6T}" GET "procurement/suppliers?contains=%D8%A7%D9%84%D9%81"; check "r1a2 review l-6: ${L6T%_TOKEN} reads the supplier profile with the IBAN masked to the last four characters, and the full IBAN is nowhere in the answer" ".success and ([.data[]|select(.providerId == $PA and .iban == \"****0002\")]|length) == 1 and (tostring|contains(\"$L6SUP\")|not)"; done
 
 as "$CEO_TOKEN" GET finance/ceo-dashboard; check "CEO dashboard: stock value, payables and projects" '.success and .data.stockValue > 0 and .data.payablesOpen == 0 and .data.receivedNotInvoiced > 0 and .data.openPurchaseOrders == 1'
 as "$WH_TOKEN" GET finance/ceo-dashboard; [ "$CODE" = "403" ] && ok "storekeeper cannot open the CEO dashboard (403)" || bad "storekeeper cannot open the CEO dashboard (403) got $CODE"
@@ -1369,6 +1476,19 @@ as "$ENG_TOKEN" POST $PC/claims/action "{\"id\":$CL3,\"action\":\"approve-design
 as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL3,\"action\":\"notify\"}"; check "r1a2 h4: after two fresh approvals the claim is notified" '.success and .data.status == 2'
 as "$PLAN_TOKEN" POST $PC/claims "{\"id\":$CL3,\"contractId\":$PCT,\"direction\":1,\"issue\":\"متن دیگر پس از ابلاغ\",\"basis\":\"بند ۱۴ قرارداد\"}"; nomsg "r1a2 h4: a claim that was notified is not edited any more (what the client was told does not change)" "ادعای ابلاغ‌شده ویرایش نمی‌شود"
 
+# R1a2 review (L-7): the person whose save changed the text of a claim last is barred from both approvals too, like the one who registered it and the one who quantified it. The user with both roles
+# (PMO and engineering) is neither of those two for the fourth claim, so before the review he could approve it on either side; now he edited the text, and he cannot.
+as "$PLAN_TOKEN" POST $PC/claims "{\"contractId\":$PCT,\"direction\":1,\"issue\":\"ادعای چهارم برای آزمون آخرین ویرایش‌کننده\",\"basis\":\"بند ۱۶ قرارداد\"}"
+check "r1a2 review l-7: a claim is registered by planning; the registrant is the last editor of the text so far" ".success and .data.id > 0 and .data.status == 0 and .data.lastEditedByUserId == $PLANID"
+CL4=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/claims/action "{\"id\":$CL4,\"action\":\"quantify\",\"days\":2,\"amount\":500000}"; check "r1a2 review l-7: planning quantifies it" ".success and .data.status == 1 and .data.quantifiedByUserId == $PLANID"
+as "$DUAL_TOKEN" POST $PC/claims "{\"id\":$CL4,\"contractId\":$PCT,\"direction\":1,\"issue\":\"ادعای چهارم برای آزمون آخرین ویرایش‌کننده (متن اصلاح‌شده)\",\"basis\":\"بند ۱۶ قرارداد\"}"
+check "r1a2 review l-7: the user with both roles corrects the text: he is the last editor now, the quantification and the quantifier stay" ".success and .data.status == 1 and .data.lastEditedByUserId == $DUALID and .data.quantifiedByUserId == $PLANID and .data.daysQuantified == 2"
+as "$DUAL_TOKEN" POST $PC/claims/action "{\"id\":$CL4,\"action\":\"approve-pmo\"}"; nomsg "r1a2 review l-7: the last editor of the text cannot approve it as the PMO deputy" "آخرین ویرایش"
+as "$DUAL_TOKEN" POST $PC/claims/action "{\"id\":$CL4,\"action\":\"approve-design\"}"; nomsg "r1a2 review l-7: nor for the design and manufacturing side" "آخرین ویرایش"
+call POST $PC/claims/action "{\"id\":$CL4,\"action\":\"approve-pmo\"}"; check "r1a2 review l-7 (control): a PMO user who neither registered, quantified nor edited it approves" ".success and .data.pmoApproved == true and .data.pmoApprovedByUserId == $IAMADM"
+as "$ENG_TOKEN" POST $PC/claims/action "{\"id\":$CL4,\"action\":\"approve-design\"}"; check "r1a2 review l-7 (control): and so does engineering" ".success and .data.designManufacturingApproved == true and .data.designApprovedByUserId == $ENGID"
+
 # --- equipment code and MDR/MDL from the template
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PCW1,\"contractId\":$PCT,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"25\"}"; check "pc: equipment project code PU1002501" '.success and .data.equipmentProjectCode == "PU1002501"'
 as "$QC_TOKEN" POST $PC/mdr/draft "{\"contractId\":$PCT,\"workOrderId\":$PCW1}"; no "pc: QC cannot draft the MDR"
@@ -1651,6 +1771,11 @@ check "r1a2 m2: the third guarantee is active with the amount 100,000,000 and no
 PCG3=$(jq -r '[.data.data[]|select(.no=="PC-G-3")][0].id' "$B"); PCG3BODY=$(jq -c '[.data.data[]|select(.no=="PC-G-3")][0]|del(.events)' "$B")
 # R1a2 (M3): the legacy row of a guaranty that project control keeps a record for (expiry, alerts, release) is not deleted, whatever its state (active, released ...)
 PCGSRC=$(jq -c '[.data.data[]|select(.no != null)|{(.no): .sourceId}]|add' "$B")
+# R1a2 review (L-6): the price text of a guaranty ("500,000,000") is money data as well. The contract carries its guaranties (the read stays open to every signed-in user): the price roles and the roles
+# that write guaranties read the text, everybody else gets it left out and the rest of the record as it was
+for L6T in COM_TOKEN FM_TOKEN PLAN_TOKEN CEO_TOKEN TR_TOKEN; do as "${!L6T}" GET "Contracts/contracts?Id=$PCT"; check "r1a2 review l-6: ${L6T%_TOKEN} reads the price of the guaranties of the contract" '.success and ([.data.guaranties[]|select(.no == "PC-G-1" and .price == "500,000,000")]|length) == 1 and ([.data.guaranties[]|select(.no == "PC-G-3" and .price == "100,000,000")]|length) == 1'; done
+for L6T in WH_TOKEN QC_TOKEN ENG_TOKEN; do as "${!L6T}" GET "Contracts/contracts?Id=$PCT"; check "r1a2 review l-6: ${L6T%_TOKEN} reads the guaranties of the contract with the price text left out and the rest of the record there" '.success and (.data.guaranties|length) >= 3 and ([.data.guaranties[]|select(.price != null)]|length) == 0 and ([.data.guaranties[]|select(.no == "PC-G-1" and .bank == "ملی")]|length) == 1'; done
+# R1a2 (M3), continued: the deletes of the legacy rows
 for PCGNO in PC-G-1 PC-G-2 PC-G-3; do
   PCGLID=$(jq -r --arg g "$PCGNO" '.[$g]' <<<"$PCGSRC")
   call DELETE "ContractGuaranty?contractGuarantyId=$PCGLID"; nomsg "r1a2 m3: the legacy guaranty $PCGNO, which project control keeps a record for, cannot be deleted" "حذف ضمانت‌نامه ممکن نیست"
@@ -1675,6 +1800,47 @@ as "$FM_TOKEN" POST $PC/guarantees/events "$CANCELBODY"
 check "r1a2 m2: a different person, the finance manager, confirms: the guarantee is cancelled and the event carries the note" '.success and .data.status == 7 and ([.data.events[]|select(.kind == 3)]|length) == 1 and ([.data.events[]|select(.kind == 3)][0].note|contains("نامه کارفرما"))'
 as "$FM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG3,\"releaseDate\":\"$(dd 0)T00:00:00\",\"note\":\"نامه کارفرما\"}"; nomsg "r1a2 m2: a cancelled guarantee is not released" "آزاد نمی"
 as "$COM_TOKEN" POST $PC/guarantees "$(jq -c '.status = 3' <<< "$PCG3BODY")"; nomsg "r1a2 m2: a cancelled guarantee is not opened again" "دوباره باز نمی"
+
+# --- R1a2 review (M-3): the release and the cancellation of a guarantee share ONE request slot. The first call records who asked, for WHICH of the two (release = 1, cancellation = 2), with which date and
+# note; only the same action confirms it, and the confirmation records the date and the note of the request. The one who asked, or a PMO user, takes the request back (guarantees/withdraw).
+# A fourth guarantee (PC-G-4, expiry far away: the alert figures of PC-G-1 stay as they are) is used for this; it ends released.
+call POST ContractGuaranty "{\"title\":\"ضمانت‌نامه آزمون درخواست مشترک\",\"bank\":\"ملی\",\"no\":\"PC-G-4\",\"price\":\"50,000,000\",\"regDate\":\"$(dd -5)T00:00:00\",\"dueDate\":\"$(dd 450)T00:00:00\",\"contractEntityId\":$PCT}"; check "r1a2 review m-3: a fourth legacy guaranty is created" '.success and .data.id > 0'
+as "$COM_TOKEN" POST $PC/guarantees/parse; check "r1a2 review m-3: the fourth guaranty is parsed into typed side data" '.success and .data.created >= 1'
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"
+check "r1a2 review m-3: the fourth guarantee is active with the amount 50,000,000 and no request on its record" '.success and ([.data.data[]|select(.no=="PC-G-4")][0]|(.status == 3 and .amountDecimal == 50000000 and .releaseRequestedByUserId == null and .releaseRequestedKind == null and .releaseRequestOpen == false))'
+PCG4=$(jq -r '[.data.data[]|select(.no=="PC-G-4")][0].id' "$B")
+M3D=$(dd -2); M3N='نامه کارفرما شماره ۷۷۱'
+as "$COM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG4,\"releaseDate\":\"${M3D}T00:00:00\",\"note\":\"$M3N\"}"
+check "r1a2 review m-3: a release is requested: the guarantee stays active, and the request says which action it is for (release = 1) with its date and its note" ".success and .data.status == 3 and .data.releaseRequestedByUserId == $COMID and .data.releaseRequestedKind == 1 and .data.releaseRequestedNote == \"$M3N\" and (.data.releaseRequestedDate|startswith(\"$M3D\")) and .data.releaseRequestOpen == true and (.data.events|length) == 0"
+as "$FM_TOKEN" POST $PC/guarantees/events "{\"guaranteeId\":$PCG4,\"kind\":3,\"eventDate\":\"$(dd 0)T00:00:00\",\"note\":\"نامه بانک\"}"
+nomsg "r1a2 review m-3: a different person cannot confirm the RELEASE request by cancelling: the refusal names the pending action" "درخواست «آزادسازی» منتظر تأیید است"
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"
+check "r1a2 review m-3: so the guarantee is still active and the release request is untouched: the same person, kind, note and date" ".success and ([.data.data[]|select(.no==\"PC-G-4\")][0]|(.status == 3 and .releaseRequestedByUserId == $COMID and .releaseRequestedKind == 1 and .releaseRequestedNote == \"$M3N\" and (.releaseRequestedDate|startswith(\"$M3D\")) and .releaseRequestOpen == true))"
+# the request is taken back by the one who asked or by a PMO user; the others (and the roles outside the lists) cannot
+WDBODY="{\"guaranteeId\":$PCG4}"
+as "$WH_TOKEN" POST $PC/guarantees/withdraw "$WDBODY"; r403 "r1a2 review m-3: the storekeeper cannot take a request back (403)"
+as "$FIN_TOKEN" POST $PC/guarantees/withdraw "$WDBODY"; r403 "r1a2 review m-3: the accountant cannot take a request back either (403)"
+as "$FM_TOKEN" POST $PC/guarantees/withdraw "$WDBODY"; nomsg "r1a2 review m-3: a finance manager who did not ask cannot take the request back (the one who asked, or a PMO user, can)" "فقط کسی که آن را ثبت کرده یا کاربر PMO"
+as "$COM_TOKEN" POST $PC/guarantees/withdraw "$WDBODY"
+check "r1a2 review m-3: the one who asked takes the request back: all five fields are cleared, the guarantee is as before, and the answer says which request it was" '.success and .data.status == 3 and .data.releaseRequestedByUserId == null and .data.releaseRequestedAt == null and .data.releaseRequestedKind == null and .data.releaseRequestedNote == null and .data.releaseRequestedDate == null and .data.releaseRequestOpen == false and (.message|contains("درخواست آزادسازی پس گرفته شد"))'
+as "$COM_TOKEN" POST $PC/guarantees/withdraw "$WDBODY"; nomsg "r1a2 review m-3: there is nothing to take back a second time" "درخواستی منتظر تأیید نیست"
+as "$FM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG4,\"releaseDate\":\"${M3D}T00:00:00\",\"note\":\"$M3N\"}"
+check "r1a2 review m-3: a call by another person after the withdrawal is only a new request, it releases nothing: the request now belongs to the finance manager" ".success and .data.status == 3 and .data.releaseRequestedByUserId == $FMID2 and .data.releaseRequestedKind == 1 and (.data.events|length) == 0"
+call POST $PC/guarantees/withdraw "$WDBODY"
+check "r1a2 review m-3: a PMO user takes back a request that somebody else made" '.success and .data.releaseRequestedByUserId == null and .data.releaseRequestedKind == null and .data.releaseRequestOpen == false'
+# the other way round: a request for the cancellation is not confirmed by a release call
+as "$COM_TOKEN" POST $PC/guarantees/events "{\"guaranteeId\":$PCG4,\"kind\":3,\"eventDate\":\"$(dd -1)T00:00:00\",\"note\":\"نامه بانک\"}"
+check "r1a2 review m-3: a cancellation is requested: the request says it is for the cancellation (kind 2) and nothing else changes" '.success and .data.status == 3 and .data.releaseRequestedKind == 2 and .data.releaseRequestOpen == true and (.data.events|length) == 0'
+as "$FM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG4,\"releaseDate\":\"$(dd -1)T00:00:00\",\"note\":\"نامه بانک\"}"
+nomsg "r1a2 review m-3: a release call cannot confirm the cancellation request: the refusal names the pending action" "درخواست «ابطال» منتظر تأیید است"
+as "$COM_TOKEN" POST $PC/guarantees/withdraw "$WDBODY"; check "r1a2 review m-3: the one who asked takes the cancellation request back; the slot is free again" '.success and .data.releaseRequestedKind == null and .data.releaseRequestOpen == false and (.message|contains("درخواست ابطال پس گرفته شد"))'
+# request the release, try to confirm it as a cancellation (refused), then confirm it as a release with another date and another note
+as "$COM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG4,\"releaseDate\":\"${M3D}T00:00:00\",\"note\":\"$M3N\"}"; check "r1a2 review m-3: the release is requested again" '.success and .data.status == 3 and .data.releaseRequestedKind == 1'
+as "$FM_TOKEN" POST $PC/guarantees/events "{\"guaranteeId\":$PCG4,\"kind\":3,\"eventDate\":\"$(dd 0)T00:00:00\",\"note\":\"نامه بانک\"}"; nomsg "r1a2 review m-3: the cancellation of the finance manager is refused again, naming the pending release" "درخواست «آزادسازی» منتظر تأیید است"
+as "$FM_TOKEN" POST $PC/guarantees/release "{\"guaranteeId\":$PCG4,\"releaseDate\":\"$(dd 0)T00:00:00\",\"note\":\"تأیید مالی\"}"
+check "r1a2 review m-3: the finance manager confirms the release with another date and another note: the guarantee is released on the DATE and with the NOTE OF THE REQUEST, the note of the confirming person follows it, and the answer says that the date was replaced" ".success and .data.status == 6 and ([.data.events[]|select(.kind == 4)]|length) == 1 and ([.data.events[]|select(.kind == 4)][0].eventDate|startswith(\"$M3D\")) and ([.data.events[]|select(.kind == 4)][0].note == \"$M3N | تأییدکننده: تأیید مالی\") and (.message|contains(\"تاریخ واردشده با تاریخ درخواست یکی نبود\"))"
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"
+check "r1a2 review m-3: the register shows PC-G-4 released with no request open, and PC-G-1 untouched (active)" '.success and ([.data.data[]|select(.no=="PC-G-4")][0]|(.status == 6 and .releaseRequestOpen == false)) and ([.data.data[]|select(.no=="PC-G-1")][0].status == 3)'
 
 call POST Contracts '{"code":"PC-CT-P","title":"قرارداد آزمون جریمه","status":1,"employer":"کارفرمای آزمون"}'; PCP=$(val .data.id)
 as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PCP,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"contractDeliveryDate\":\"$(dd -14)T00:00:00\",\"dataDateWeekday\":3,\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "pc: penalty contract terms saved" '.success'
@@ -2363,6 +2529,15 @@ as "$AUD_TOKEN" GET "$FAU?EntityType=Identity.SignIn&Action=Logout&PageSize=0"
 check "r1a2 m6: the sign-out of the throwaway finance manager is in the audit trail" '.success and ([.data.data[]|select(.summary|contains("iam2.ci"))]|length) >= 1'
 as "$AUD_TOKEN" GET "$FAU?EntityType=Identity.SignIn&Action=LoopbackSignIn&PageSize=0"
 check "r1a2 m1: the sign-in of the locked PMO account from the server itself is in the audit trail" '.success and ([.data.data[]|select(.summary|contains("pmo4.ci"))]|length) >= 1'
+as "$AUD_TOKEN" GET "$FAU?EntityType=Identity.SignIn&Action=LoopbackCapped&PageSize=0"
+check "r1a2 review l-1: the end of the recovery for the PMO user, after more than ten wrong passwords from the server itself, is in the audit trail once" '.success and (.data.data|length) == 1 and (.data.data[0].summary|contains("pmo4.ci"))'
+# R1a2 review (M-1): the requests to take the PMO role from a user and to delete a PMO user, their approvals and the step-down of a PMO user leave rows with the people who did each step
+as "$AUD_TOKEN" GET "$FAU?Action=RevokeRequested&PageSize=0"
+check "r1a2 review m-1: the two requests (take the PMO role from the fourth PMO user, delete the third) are in the audit trail, each with the PMO user who asked" ".success and (.data.data|length) == 2 and ([.data.data[]|select(.userId == $IAMADM and .entityType == \"Identity.Roles\" and .entityId == $PMO4ID)]|length) == 1 and ([.data.data[]|select(.userId == $IAMADM and .entityType == \"Identity.User\" and .entityId == $PMO3ID)]|length) == 1"
+as "$AUD_TOKEN" GET "$FAU?Action=RevokeApproved&PageSize=0"
+check "r1a2 review m-1: and their two approvals, each by the second PMO user" ".success and (.data.data|length) == 2 and ([.data.data[]|select(.userId == $IAMPMO2 and (.entityId == $PMO4ID or .entityId == $PMO3ID))]|length) == 2"
+as "$AUD_TOKEN" GET "$FAU?Action=SteppedDown&PageSize=0"
+check "r1a2 review m-1: the step-down of the fifth PMO user is in the audit trail, with himself as the actor" ".success and (.data.data|length) == 1 and .data.data[0].entityId == $PMO5ID and .data.data[0].userId == $PMO5ID"
 # the late half of the refresh-token check (the first half is in the identity block): the refresh token that was used comes back after the grace time and is taken for a copy
 TOK_WAIT=$(( 33 - ( $(date +%s) - TOK_T0 ) )); if [ "$TOK_WAIT" -gt 0 ]; then sleep "$TOK_WAIT"; fi
 rfsh "$TOK_R1"; nomsg "r1a2 l3: the used refresh token presented again after the grace time is refused, and the answer says that every session was closed" "استفاده شده بود"
@@ -2375,6 +2550,11 @@ as "$ADMIN_TOKEN" DELETE "Accounts/delete-user/$TOKID"; check "r1a2 l3: the thro
 as "$AUD_TOKEN" GET "$FAU?PageSize=0"
 check "r1a2 m5: the password typed into the name field is nowhere in the whole audit trail" ".success and ([.data.data[]|((.summary // \"\") + (.beforeJson // \"\") + (.afterJson // \"\"))]|join(\" \")|contains(\"$TYPEDPW\")|not)"
 check "r1a2 m5: the attempts with unknown names are in the trail as the length and the first two characters of the name" '.success and ([.data.data[]|select(.entityType == "Identity.SignIn" and (.summary|contains("نام کاربری ناشناخته")) and (.summary|contains("نویسه، با شروع")))]|length) >= 1'
+# R1a2 review (L-8a): the check above is satisfied by any unknown name. The attempt with the password in the name field was the first of its minute (the smoke waited for a new minute), so it left
+# exactly one row, and that row holds the length of the typed text (23) and its first two characters (Ci), nothing more
+check "r1a2 review l-8a: the password typed into the name field left exactly one row in the trail: the length of the text and its first two characters" '.success and ([.data.data[]|select(.entityType == "Identity.SignIn" and (.summary|contains("نام کاربری ناشناخته")) and (.summary|contains("23 نویسه، با شروع «Ci»")))]|length) == 1'
+# R1a2 review (L-3): the eight sign-ins with the name of a seat were the 3rd to the 10th attempts of that minute: one row, written for the 10th, with the length and the first two characters of the name
+check "r1a2 review l-3: the sign-ins with the name of a seat left exactly one aggregated row (the 10th attempt of the minute), not one row for every attempt" '.success and ([.data.data[]|select(.entityType == "Identity.SignIn" and (.summary|contains("نام کاربری سرویس")))]|length) == 1 and ([.data.data[]|select(.entityType == "Identity.SignIn" and (.summary|contains("نام کاربری سرویس")))][0].summary|(contains("15 نویسه، با شروع «se»") and contains("در این دقیقه: 10")))'
 # the two approvals of a claim and the release of a guarantee leave a row each, with the person who did it (the ids are read before the trail is, the check reads the last answer)
 ENGUID=$(uid "$ENG_TOKEN"); FMUID=$(uid "$FM_TOKEN")
 [ -n "$ENGUID" ] && [ -n "$FMUID" ] && ok "r1a pc: the ids of the engineering user and the finance manager are resolved" || bad "r1a pc: the ids of the engineering user and the finance manager are resolved"
@@ -2382,6 +2562,10 @@ as "$AUD_TOKEN" GET "$FAU?EntityType=PcClaim&EntityId=$CL1&PageSize=0"
 check "r1a pc: both approvals of the first claim are in the audit trail, the PMO approval by the PMO user and the design approval by the engineering user, then the notification" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.PmoApproved) == true and .userId == $IAMADM)]|length) == 1 and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.DesignManufacturingApproved) == true and .userId == $ENGUID)]|length) == 1 and ([.data.data[]|select(.action == \"Modified\" and ((.afterJson // \"{}\")|fromjson|.Status) == \"Notified\")]|length) == 1"
 as "$AUD_TOKEN" GET "$FAU?EntityType=PcGuaranteeInfo&EntityId=$PCG2&PageSize=0"
 check "r1a pc: the release of the guarantee is in the audit trail with the finance manager who signed it (active before, released after)" ".success and ([.data.data[]|select(.action == \"Modified\" and ((.beforeJson // \"{}\")|fromjson|.Status) == \"Active\" and ((.afterJson // \"{}\")|fromjson|.Status) == \"Released\" and .userId == $FMUID)]|length) == 1"
+# R1a2 review (M-3): a request that is taken back leaves its mark in the trail of the guarantee: the request as it was (kind, person, date, note) before, nothing after, and the person who cleared it
+as "$AUD_TOKEN" GET "$FAU?EntityType=PcGuaranteeInfo&EntityId=$PCG4&PageSize=0"
+M3W='select(.action == "Modified" and ((.beforeJson // "{}")|fromjson|.ReleaseRequestedKind) != null and ((.afterJson // "{}")|fromjson|.ReleaseRequestedKind) == null)'
+check "r1a2 review m-3: the three withdrawals (two by the person who asked, one by a PMO user for the request of the finance manager) are in the audit trail of the guarantee, each with the person who cleared the request" ".success and ([.data.data[]|$M3W]|length) == 3 and ([.data.data[]|$M3W|select(.userId == $COMID)]|length) == 2 and ([.data.data[]|$M3W|select(.userId == $IAMADM and ((.beforeJson|fromjson|.ReleaseRequestedByUserId) == $FMID2))]|length) == 1"
 
 # --- period-close checklist
 # a sandbox period of the main company (fiscal year 1396) holds one final and one draft voucher for the close-checklist and export tests

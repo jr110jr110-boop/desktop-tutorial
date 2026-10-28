@@ -145,11 +145,13 @@ namespace Controllers
             return Ok(await _accountService.ChangeTemporaryPasswordAsync(dto, cancellationToken));
         }
 
-        // ★ PMO only, and never the own roles. A sensitive role is only requested here; a second PMO user approves it (role-grants).
+        // ★ PMO only, and never the own roles (a PMO user may only step down from PMO himself, unless he is the last active one).
+        // A sensitive role, and the removal of the PMO role, are only requested here; a second PMO user approves them (role-grants).
+        // R1a2 (L-9): data is { roles, pending, grantId, grantIds } (it was the comma-joined roles string).
         [HttpPost("edit-user-roles")]
         [Authorize(Roles = RoleConstants.PMO)]
-        [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
-        public async ValueTask<ActionResult<ResponseDto<string>>> EditRolesAsync(
+        [ProducesResponseType(typeof(ResponseDto<ChangeRoleResultDto>), (int)HttpStatusCode.OK)]
+        public async ValueTask<ActionResult<ResponseDto<ChangeRoleResultDto>>> EditRolesAsync(
             ChangeRoleDto changeRoleDto, CancellationToken cancellationToken)
         {
             return Ok(await _accountService.ChangeRoleAsync(changeRoleDto, cancellationToken));

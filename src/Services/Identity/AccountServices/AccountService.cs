@@ -92,7 +92,11 @@ namespace Services.Identity.AccountServices
         /// <summary>Id of the signed-in user, 0 when nobody is signed in.</summary>
         private int Me => int.TryParse(Caller?.Identity?.GetUserId(), out int id) ? id : 0;
 
-        private bool CallerIsPmo => Caller?.IsInRole(IdentityRules.Pmo) == true;
+        /// <summary>
+        /// The caller holds the PMO role. R1a2 (H-1): the service user of an AI seat holds roles (the weekly-report seat holds PMO) and acts in-process with a principal of its own;
+        /// it is never a PMO user for the administration of users (it cannot sign in, and it can never be an approver).
+        /// </summary>
+        private bool CallerIsPmo => Caller?.IsInRole(IdentityRules.Pmo) == true && !global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(Caller.Identity.GetUserName());
 
         private static ResponseDto<T> OnlyPmoAnswer<T>() => ResponseDtoHelper.Forbidden<T>(AccountServiceMessages.OnlyPmo);
 
@@ -183,7 +187,8 @@ namespace Services.Identity.AccountServices
                        .FailedToRegisterUser + createUserResult.DumpErrors());
             }
 
-            RoleOutcome outcome = await ApplyRolesAsync(user, roles, cancellationToken);
+            // R1a2 (M-2): the PMO user who registers an account chooses its first password, so a sensitive role asked for it waits until the user has chosen a password of his own
+            RoleOutcome outcome = await ApplyRolesAsync(user, roles, cancellationToken, receiverIsNew: true);
             if (outcome.Error != null)
             {
                 await _userManager.DeleteAsync(user).WithCancellationTokenAsync(cancellationToken);
@@ -198,6 +203,7 @@ namespace Services.Identity.AccountServices
             await _uow.SaveChangesAsync(cancellationToken);
 
             ResponseDto<ResponseUserDto> created = await GetResponseUserDtoByIdAsync(new GetUserDto { Id = user.Id }, cancellationToken);
+            AttachPending(created.Data, outcome); // R1a2 (L-9): { pending, grantId, grantIds } like admin-reset-password and edit-user-roles
             string note = outcome.Note();
             return note == null ? created : ResponseDtoHelper.Ok(created.Data, note);
         }
@@ -214,7 +220,8 @@ namespace Services.Identity.AccountServices
             // the service users of the AI seats ("seat.*") are locked out for good; this check keeps them out even if a lockout were ever lifted
             if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(loginUserDto.UserName))
             {
-                await RecordSignInAsync(0, null, IdentityAudit.Blocked, $"تلاش برای ورود با کاربر سرویس ({IdentityRules.NameHint(loginUserDto.UserName)})", cancellationToken);
+                // R1a2 (L-3): counted per address and minute like the unknown names (not one append-only row for every attempt)
+                await RecordUnknownUserAsync(loginUserDto.UserName, "ورود ناموفق", cancellationToken, "نام کاربری سرویس");
                 return GenericLoginRefusal();
             }
 
@@ -248,8 +255,12 @@ namespace Services.Identity.AccountServices
             // CheckPasswordSignInAsync does not make the identity cookie that PasswordSignInAsync made; the API signs in with the JWT only.
             // R1a2 (M1), the documented recovery: a PMO account is never locked out for a person at the server itself (loopback address), so
             // somebody's wrong passwords from the network cannot shut the administrators out for good.
+            // R1a2 (L-1): the recovery has a cap. More than IdentityRules.LoopbackFailureCap wrong passwords from the server itself within five minutes
+            // end it for that user for a while: his sign-in from the server is then held back by the lock-out like any other.
             SignInResult signInResult;
-            if (FromServerItself && await _userManager.IsInRoleAsync(user, IdentityRules.Pmo).WithCancellationTokenAsync(cancellationToken))
+            string loopbackKey = user.Id + ":" + user.UserName;
+            if (FromServerItself && LoopbackFailureTally.RecoveryOpen(loopbackKey, DateTimeOffset.Now)
+                && await _userManager.IsInRoleAsync(user, IdentityRules.Pmo).WithCancellationTokenAsync(cancellationToken))
             {
                 bool right = await _userManager.CheckPasswordAsync(user, loginUserDto.Password).WithCancellationTokenAsync(cancellationToken);
                 if (right)
@@ -260,12 +271,16 @@ namespace Services.Identity.AccountServices
                         await RecordSignInAsync(user.Id, user.Id, IdentityAudit.LoopbackSignIn, $"حساب قفل‌شده‌ی «{NameOf(user)}» از خود سرور باز شد", cancellationToken);
                     }
                     await _userManager.ResetAccessFailedCountAsync(user).WithCancellationTokenAsync(cancellationToken);
+                    LoopbackFailureTally.Clear(loopbackKey);
                     signInResult = SignInResult.Success;
                 }
                 else
                 {
                     // a wrong password is counted here too (a guess from the server itself must not be free), but only the sign-in from the network is held back by the lock
                     await _userManager.AccessFailedAsync(user).WithCancellationTokenAsync(cancellationToken);
+                    if (LoopbackFailureTally.Add(loopbackKey, DateTimeOffset.Now) == IdentityRules.LoopbackFailureCap + 1)
+                        await RecordSignInAsync(user.Id, user.Id, IdentityAudit.LoopbackCapped,
+                            $"بیش از {IdentityRules.LoopbackFailureCap} رمز نادرست از خود سرور برای «{NameOf(user)}»؛ ورود از سرور هم مثل بقیه تابع قفل حساب شد", cancellationToken);
                     signInResult = await _userManager.IsLockedOutAsync(user).WithCancellationTokenAsync(cancellationToken) ? SignInResult.LockedOut : SignInResult.Failed;
                 }
             }
@@ -323,14 +338,14 @@ namespace Services.Identity.AccountServices
         /// A sign-in or temporary-password attempt with a name that does not exist (R1a2, M1 and M5): counted per client address and minute, and a row is written only for the
         /// first attempt of the minute and at 10, 100, 1000 ... attempts. The row holds the length and the first two characters of the typed name, never the whole text.
         /// </summary>
-        private async Task RecordUnknownUserAsync(string typedName, string what, CancellationToken cancellationToken)
+        private async Task RecordUnknownUserAsync(string typedName, string what, CancellationToken cancellationToken, string kind = "نام کاربری ناشناخته")
         {
             int count = UnknownUserTally.Add(ClientAddress?.ToString(), DateTimeOffset.Now);
             if (!UnknownUserTally.IsRowWorthy(count)) return;
             string hint = IdentityRules.NameHint(typedName);
             string summary = count == 1
-                ? $"{what}: نام کاربری ناشناخته ({hint})"
-                : $"{what}: نام کاربری ناشناخته ({hint})؛ شمار تلاش‌های این نشانی در این دقیقه: {count}";
+                ? $"{what}: {kind} ({hint})"
+                : $"{what}: {kind} ({hint})؛ شمار تلاش‌های این نشانی در این دقیقه: {count}";
             await RecordSignInAsync(0, null, count == 1 ? IdentityAudit.Failure : IdentityAudit.UnknownUsers, summary, cancellationToken);
         }
 
@@ -744,9 +759,13 @@ namespace Services.Identity.AccountServices
             if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(user.UserName))
                 return ResponseDtoHelper.BadRequest<AdminResetPasswordResultDto>(SeatUserMessage);
 
-            IList<string> held = await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken);
-            if (held.Any(IdentityRules.IsSensitiveRole))
-                return await RequestResetAsync(user, held, me, cancellationToken);
+            // R1a2 (M-2): a user who held a sensitive role (the PMO role included) within the last week is handled like one who holds it now; otherwise a PMO user could take
+            // the role away, reset the password at once, learn it and ask for the role back as if it were routine
+            List<string> sensitive = (await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken)).Where(IdentityRules.IsSensitiveRole).ToList();
+            if (sensitive.Count == 0)
+                sensitive = await RecentlySensitiveRolesAsync(user.Id, cancellationToken);
+            if (sensitive.Count > 0)
+                return await RequestResetAsync(user, sensitive, me, cancellationToken);
 
             ResetOutcome outcome = await ResetInTransactionAsync(user.Id, dto.TemporaryPassword, me, null, null, cancellationToken);
             if (outcome.Error != null)
@@ -761,14 +780,18 @@ namespace Services.Identity.AccountServices
             }, AccountServiceMessages.PasswordResetSuccessfully);
         }
 
-        /// <summary>The reset of a PMO or sensitive-role holder is written down as a request (a claim of the user, kind "reset") that a different PMO user must approve.</summary>
-        private async Task<ResponseDto<AdminResetPasswordResultDto>> RequestResetAsync(User user, IList<string> held, int me, CancellationToken cancellationToken)
+        /// <summary>
+        /// The reset of a PMO or sensitive-role holder (or of somebody who was one in the last week, R1a2 M-2) is written down as a request (a claim of the user, kind "reset")
+        /// that a different PMO user must approve. <paramref name="sensitive"/> are the roles that make him sensitive (for the trail).
+        /// </summary>
+        private async Task<ResponseDto<AdminResetPasswordResultDto>> RequestResetAsync(User user, IList<string> sensitive, int me, CancellationToken cancellationToken)
         {
             var open = await OpenGrantsOfAsync(user.Id, cancellationToken);
             if (open.Any(o => o.Grant.IsReset))
                 return ResponseDtoHelper.BadRequest<AdminResetPasswordResultDto>(AccountServiceMessages.ResetAlreadyPending);
 
-            // a request that nobody can ever approve (the requester and the user themselves are the only PMO users) would only give a false sense of safety
+            // a request that nobody can ever approve (the requester and the user themselves are the only PMO users) would only give a false sense of safety.
+            // R1a2 (H-1): the AI seats do not count as approvers (CountActivePmoAsync leaves them out)
             if (await CountActivePmoAsync(new[] { me, user.Id }, cancellationToken) == 0)
                 return ResponseDtoHelper.BadRequest<AdminResetPasswordResultDto>(AccountServiceMessages.ResetNoApprover);
 
@@ -776,7 +799,7 @@ namespace Services.Identity.AccountServices
             var row = new UserClaim { UserId = user.Id, ClaimType = IdentityRules.PendingRoleGrantClaimType, ClaimValue = grant.ToClaimValue() };
             _uow.Set<UserClaim>().Add(row);
             IdentityAudit.Add(_uow, _http, me, IdentityAudit.Password, user.Id, IdentityAudit.ResetRequested,
-                $"درخواست بازنشانی رمز عبور «{NameOf(user)}» ({string.Join("، ", held.Where(IdentityRules.IsSensitiveRole))})؛ تا تأیید مدیر (PMO) دیگر انجام نمی‌شود",
+                $"درخواست بازنشانی رمز عبور «{NameOf(user)}» ({string.Join("، ", sensitive)})؛ تا تأیید مدیر (PMO) دیگر انجام نمی‌شود",
                 after: new { requestedBy = me, expires = grant.ExpiresAt.ToString("O") });
             IdentityInbox.Alert(_uow, "reset-request-" + user.Id, AccountServiceMessages.ResetRequestedInbox, recipientUserId: user.Id);
             await _uow.SaveChangesAsync(cancellationToken);
@@ -899,8 +922,21 @@ namespace Services.Identity.AccountServices
             public List<string> Pending { get; } = new List<string>();
             public List<string> AlreadyPending { get; } = new List<string>();
             public List<string> Withdrawn { get; } = new List<string>();
+
+            /// <summary>R1a2 (M-1): the removal of the PMO role was requested by this call; it was already requested; the request was withdrawn by an edit that keeps the role.</summary>
+            public List<string> RevokePending { get; } = new List<string>();
+            public List<string> RevokeAlreadyPending { get; } = new List<string>();
+            public bool RevokeWithdrawn { get; set; }
+
+            /// <summary>R1a2 (L-9): ids of the requests (sensitive roles, removal of the PMO role) of this user that wait for a second PMO user after this call.</summary>
+            public List<int> GrantIds { get; } = new List<int>();
+
             public bool Bootstrapped { get; set; }
             public string Error { get; set; }
+
+            public bool HasPending => GrantIds.Count > 0;
+
+            public int? FirstGrantId => GrantIds.Count > 0 ? GrantIds[0] : (int?)null;
 
             public string AuditText()
             {
@@ -908,6 +944,7 @@ namespace Services.Identity.AccountServices
                 if (Added.Count > 0) parts.Add("نقش‌های داده‌شده: " + string.Join("، ", Added));
                 if (Removed.Count > 0) parts.Add("نقش‌های گرفته‌شده: " + string.Join("، ", Removed));
                 if (Pending.Count > 0) parts.Add("در انتظار تأیید مدیر دوم: " + string.Join("، ", Pending));
+                if (RevokePending.Count > 0) parts.Add("برداشتن در انتظار تأیید مدیر دوم: " + string.Join("، ", RevokePending));
                 if (Withdrawn.Count > 0) parts.Add("درخواست‌های پس‌گرفته‌شده: " + string.Join("، ", Withdrawn));
                 return parts.Count == 0 ? "" : " — " + string.Join("؛ ", parts);
             }
@@ -915,23 +952,44 @@ namespace Services.Identity.AccountServices
             public string PendingMessage() => AccountServiceMessages.SensitiveRolePending + string.Join("، ", Pending);
 
             /// <summary>
-            /// The message of the answer: the open requests first, or a note about the bootstrap of the second PMO user, and (L1) the requests this edit withdrew
-            /// (an edit that no longer asks for a sensitive role says so, so nobody expects the second approval of a request that is gone); null when none applies.
+            /// The message of the answer: the open requests first, or a note about the bootstrap of the second PMO user, then the request to take the PMO role away that this call made,
+            /// and (L1) the requests this edit withdrew (an edit that no longer asks for a sensitive role says so, so nobody expects the second approval of a request that is gone);
+            /// null when none applies.
             /// </summary>
             public string Note()
             {
-                string main = Pending.Count > 0 ? PendingMessage()
-                    : Bootstrapped ? AccountServiceMessages.PmoBootstrapApplied
-                    : null;
-                if (Withdrawn.Count == 0) return main;
-                string withdrawn = AccountServiceMessages.GrantWithdrawnByEdit + string.Join("، ", Withdrawn);
-                return main == null ? withdrawn : main + " " + withdrawn;
+                var parts = new List<string>();
+                if (Pending.Count > 0) parts.Add(PendingMessage());
+                else if (Bootstrapped) parts.Add(AccountServiceMessages.PmoBootstrapApplied);
+                if (RevokePending.Count > 0) parts.Add(AccountServiceMessages.RevokePending + string.Join("، ", RevokePending));
+                if (Withdrawn.Count > 0) parts.Add(AccountServiceMessages.GrantWithdrawnByEdit + string.Join("، ", Withdrawn));
+                if (RevokeWithdrawn) parts.Add(AccountServiceMessages.RevokeWithdrawnByEdit + IdentityRules.Pmo);
+                return parts.Count == 0 ? null : string.Join(" ", parts);
             }
         }
 
+        private static bool HasRole(IEnumerable<string> roleNames, string role) =>
+            roleNames != null && roleNames.Any(n => string.Equals(n, role, StringComparison.OrdinalIgnoreCase));
+
+        private static ChangeRoleResultDto ResultOf(IEnumerable<string> roles, RoleOutcome outcome) => new ChangeRoleResultDto
+        {
+            Roles = string.Join(",", roles ?? Enumerable.Empty<string>()),
+            Pending = outcome != null && outcome.HasPending,
+            GrantId = outcome?.FirstGrantId,
+            GrantIds = outcome?.GrantIds.ToArray() ?? Array.Empty<int>(),
+        };
+
+        private static void AttachPending(ResponseUserDto dto, RoleOutcome outcome)
+        {
+            if (dto == null || outcome == null) return;
+            dto.Pending = outcome.HasPending;
+            dto.GrantId = outcome.FirstGrantId;
+            dto.GrantIds = outcome.GrantIds.ToArray();
+        }
+
         /// <summary>
-        /// The open (not expired) requests of a user: sensitive roles asked for him or her and, since R1a2, a password reset (check <see cref="PendingRoleGrant.IsReset"/>).
-        /// Expired ones are not returned.
+        /// The open (not expired) requests of a user: sensitive roles asked for him or her, a password reset (check <see cref="PendingRoleGrant.IsReset"/>) and, since the review
+        /// fixes, the removal of the PMO role or the deletion of the account (<see cref="PendingRoleGrant.IsRevoke"/>). Expired ones are not returned.
         /// </summary>
         private async Task<List<(UserClaim Row, PendingRoleGrant Grant)>> OpenGrantsOfAsync(int userId, CancellationToken cancellationToken)
         {
@@ -947,6 +1005,8 @@ namespace Services.Identity.AccountServices
 
         /// <summary>
         /// The number of active PMO users other than <paramref name="excluding"/> (the role is resolved by name here and the users are filtered by its id).
+        /// R1a2 (H-1): the service users of the AI seats are not counted. The weekly-report seat holds the PMO role and is made active a few seconds after the server starts; counted,
+        /// it would stop the bootstrap of the second PMO user for ever and let a request nobody can approve look as if somebody could. A seat can never sign in or approve.
         /// </summary>
         private async Task<int> CountActivePmoAsync(IEnumerable<int> excluding, CancellationToken cancellationToken)
         {
@@ -954,14 +1014,18 @@ namespace Services.Identity.AccountServices
             if (pmo == null) return 0;
             int[] skip = (excluding ?? Enumerable.Empty<int>()).ToArray();
             int roleId = pmo.Id;
+            string seatPrefix = global::Services.NasbNiro.Ai.AiSeatNames.UserPrefix;
             return await _uow.Set<UserRole>().AsNoTracking()
-                .Where(ur => ur.RoleId == roleId && !skip.Contains(ur.UserId) && ur.User.IsActive && !ur.User.IsDeleted)
+                .Where(ur => ur.RoleId == roleId && !skip.Contains(ur.UserId) && ur.User.IsActive && !ur.User.IsDeleted && !ur.User.UserName.StartsWith(seatPrefix))
                 .Select(ur => ur.UserId)
                 .Distinct()
                 .CountAsync(cancellationToken);
         }
 
-        /// <summary>The record of the sensitive role <paramref name="role"/> the user holds (who asked for it, who approved it, when), or null when none was kept (the seeded administrator, users of before R1a2).</summary>
+        /// <summary>
+        /// The record of the sensitive role <paramref name="role"/> the user holds now (who asked for it, who approved it, when), or null when none was kept (the seeded administrator on a
+        /// new installation). A record of a role that was taken away is not returned (R1a2, M-2: it stays only as the memory of a recently held role).
+        /// </summary>
         private async Task<RoleGrantRecord> GetGrantRecordAsync(int userId, string role, CancellationToken cancellationToken)
         {
             List<string> values = await _uow.Set<UserClaim>().AsNoTracking()
@@ -970,12 +1034,12 @@ namespace Services.Identity.AccountServices
                 .ToListAsync(cancellationToken);
             RoleGrantRecord found = null;
             foreach (string value in values)
-                if (RoleGrantRecord.TryParse(value, out RoleGrantRecord record) && string.Equals(record.Role, role, StringComparison.OrdinalIgnoreCase) && (found == null || record.At > found.At))
+                if (RoleGrantRecord.TryParse(value, out RoleGrantRecord record) && !record.IsRemoved && string.Equals(record.Role, role, StringComparison.OrdinalIgnoreCase) && (found == null || record.At > found.At))
                     found = record;
             return found;
         }
 
-        /// <summary>Writes the record of a sensitive role that was just given; the caller saves.</summary>
+        /// <summary>Writes the record of a sensitive role that was just given; the caller saves. <paramref name="requestedBy"/> is the PMO user who asked, <paramref name="approvedBy"/> the one who approved (0 for the bootstrap).</summary>
         private void AddGrantRecord(int userId, string role, int requestedBy, int approvedBy, bool bootstrap)
         {
             var record = new RoleGrantRecord { Role = role.Trim().ToUpperInvariant(), GrantedBy = requestedBy, ApprovedBy = approvedBy, At = DateTimeOffset.Now, Bootstrap = bootstrap };
@@ -983,24 +1047,147 @@ namespace Services.Identity.AccountServices
         }
 
         /// <summary>
-        /// Brings the roles of a user to the wanted list: roles are taken away at once, ordinary roles are given at once,
-        /// sensitive roles (the PMO role too, since R1a2) become a request that a second PMO user must approve.
-        /// The one exception: while fewer than two active PMO users exist the PMO role is given at once, with an audit row and an alert to the CEO (the bootstrap of the second PMO user).
-        /// An edit that no longer asks for a role withdraws the pending request for it (L1). A change of roles gives the user a new security stamp (H2). Saves.
+        /// R1a2 (M-2): marks the records of the sensitive roles that were taken away as removed instead of deleting them, so that a password reset of the former holder is still handled as a
+        /// sensitive one for <see cref="IdentityRules.RecentSensitiveWindow"/>. A sensitive role that has no record (given before the records existed) gets one that is already marked.
+        /// Ordinary roles have no record. The caller saves.
         /// </summary>
-        private async Task<RoleOutcome> ApplyRolesAsync(User user, IList<Role> wanted, CancellationToken cancellationToken)
+        private async Task MarkRolesRemovedAsync(int userId, IEnumerable<string> roles, CancellationToken cancellationToken)
+        {
+            DateTimeOffset now = DateTimeOffset.Now;
+            string[] sensitive = (roles ?? Enumerable.Empty<string>()).Where(IdentityRules.IsSensitiveRole).Select(r => r.Trim().ToUpperInvariant()).Distinct().ToArray();
+            if (sensitive.Length == 0) return;
+            List<UserClaim> rows = await _uow.Set<UserClaim>()
+                .Where(c => c.UserId == userId && c.ClaimType == IdentityRules.RoleGrantedClaimType)
+                .ToListAsync(cancellationToken);
+            foreach (string role in sensitive)
+            {
+                bool marked = false;
+                foreach (UserClaim row in rows)
+                {
+                    if (RoleGrantRecord.TryParse(row.ClaimValue, out RoleGrantRecord record) && record.Role == role && !record.IsRemoved)
+                    {
+                        record.RemovedAt = now;
+                        row.ClaimValue = record.ToClaimValue();
+                        marked = true;
+                    }
+                }
+                if (!marked)
+                    _uow.Set<UserClaim>().Add(new UserClaim
+                    {
+                        UserId = userId, ClaimType = IdentityRules.RoleGrantedClaimType,
+                        ClaimValue = new RoleGrantRecord { Role = role, At = now, RemovedAt = now, Legacy = true }.ToClaimValue(),
+                    });
+            }
+        }
+
+        /// <summary>R1a2 (M-2): the sensitive roles the user lost less than a week ago (from the records that stay when a role is taken away).</summary>
+        private async Task<List<string>> RecentlySensitiveRolesAsync(int userId, CancellationToken cancellationToken)
+        {
+            List<string> values = await _uow.Set<UserClaim>().AsNoTracking()
+                .Where(c => c.UserId == userId && c.ClaimType == IdentityRules.RoleGrantedClaimType)
+                .Select(c => c.ClaimValue)
+                .ToListAsync(cancellationToken);
+            var records = new List<RoleGrantRecord>();
+            foreach (string value in values)
+                if (RoleGrantRecord.TryParse(value, out RoleGrantRecord record)) records.Add(record);
+            return IdentityRules.RecentlySensitiveRoles(records, DateTimeOffset.Now);
+        }
+
+        /// <summary>
+        /// R1a2 (M-2): of these users, the ones whose password may still be known to the PMO user who registered them or reset it: the latest "Registered" or "AdminReset" row of the
+        /// audit trail is newer than their latest password change of their own ("Changed", or "TempChanged" after a reset), see <see cref="IdentityRules.PasswordMayBeKnownToPmo"/>.
+        /// No column was added for this; the append-only trail is the memory.
+        /// </summary>
+        private async Task<HashSet<int>> ReceiversWhoMustChangeAsync(IEnumerable<int> userIds, CancellationToken cancellationToken)
+        {
+            int[] ids = (userIds ?? Enumerable.Empty<int>()).Distinct().ToArray();
+            var result = new HashSet<int>();
+            if (ids.Length == 0) return result;
+
+            var rows = await _uow.Set<Entities.Model.NasbNiro.Finance.FnAuditLog>().AsNoTracking()
+                .Where(a => a.EntityId != null && ids.Contains(a.EntityId.Value)
+                            && ((a.EntityType == IdentityAudit.User && a.Action == IdentityAudit.Registered)
+                                || (a.EntityType == IdentityAudit.Password && (a.Action == IdentityAudit.AdminReset || a.Action == IdentityAudit.TempChanged || a.Action == IdentityAudit.Changed))))
+                .Select(a => new { a.Id, EntityId = a.EntityId.Value, a.Action, a.UserId })
+                .ToListAsync(cancellationToken);
+
+            foreach (int id in ids)
+            {
+                long setByPmo = 0, own = 0;
+                foreach (var row in rows.Where(r => r.EntityId == id))
+                {
+                    if (row.Action == IdentityAudit.Registered || row.Action == IdentityAudit.AdminReset) setByPmo = Math.Max(setByPmo, row.Id);
+                    else if (row.UserId == id) own = Math.Max(own, row.Id);   // a change of his own: the user is the actor
+                }
+                if (IdentityRules.PasswordMayBeKnownToPmo(setByPmo, own)) result.Add(id);
+            }
+            return result;
+        }
+
+        private async Task<bool> ReceiverMustChangeOwnPasswordAsync(int userId, CancellationToken cancellationToken) =>
+            (await ReceiversWhoMustChangeAsync(new[] { userId }, cancellationToken)).Contains(userId);
+
+        /// <summary>
+        /// Takes the lock that makes the count of the PMO users and the grant or removal that depends on it one step (R1a2, M-1): without it two calls at the same moment could both see
+        /// "one PMO user" and both be bootstrapped, or two PMO users could step down together and leave nobody. An exclusive application lock (sp_getapplock) held until the transaction
+        /// ends; only for SQL Server. The in-memory database of the tests has no concurrency worth guarding, so nothing is taken there.
+        /// </summary>
+        private async Task TakeBootstrapLockAsync(CancellationToken cancellationToken)
+        {
+            if (!(_uow is DbContext db) || !db.Database.IsRelational()) return;
+            if (!string.Equals(db.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal)) return;
+            await db.Database.ExecuteSqlRawAsync(
+                "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'pmis:pmo-bootstrap', @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 20000; "
+                + "IF @r < 0 THROW 51000, N'The lock of the PMO bootstrap could not be taken.', 1;", cancellationToken);
+        }
+
+        /// <summary>
+        /// Brings the roles of a user to the wanted list: roles are taken away at once (the PMO role is the exception, R1a2 M-1: its removal is a request, see below), ordinary roles are given at once,
+        /// sensitive roles (the PMO role too, since R1a2) become a request that a second PMO user must approve.
+        /// The one exception: while fewer than two active PMO users exist (AI seats are not counted) the PMO role is given at once, with an audit row and an alert to the CEO (the bootstrap of the second PMO user).
+        /// When the PMO role is being given, the count and the grant are one step under a lock (M-1).
+        /// An edit that no longer asks for a role withdraws the pending request for it (L1). A change of roles gives the user a new security stamp (H2). Saves.
+        /// <paramref name="receiverIsNew"/>: the user was registered by this very call (a PMO user chose his password; the audit row of the registration is written after this).
+        /// </summary>
+        private async Task<RoleOutcome> ApplyRolesAsync(User user, IList<Role> wanted, CancellationToken cancellationToken, bool receiverIsNew = false)
+        {
+            IList<string> currentNames = await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken);
+            bool wantsNewPmo = HasRole(wanted.Select(r => r.Name), IdentityRules.Pmo) && !HasRole(currentNames, IdentityRules.Pmo);
+            if (!wantsNewPmo)
+                return await ApplyRolesCoreAsync(user, wanted, currentNames, receiverIsNew, cancellationToken);
+
+            int userId = user.Id;
+            return await InTransactionAsync(async () =>
+            {
+                await TakeBootstrapLockAsync(cancellationToken);
+                User current = await _userManager.FindByIdAsync(userId.ToString()).WithCancellationTokenAsync(cancellationToken);
+                IList<string> names = await _userManager.GetRolesAsync(current).WithCancellationTokenAsync(cancellationToken);
+                return await ApplyRolesCoreAsync(current, wanted, names, receiverIsNew, cancellationToken);
+            }, cancellationToken);
+        }
+
+        private async Task<RoleOutcome> ApplyRolesCoreAsync(User user, IList<Role> wanted, IList<string> currentNames, bool receiverIsNew, CancellationToken cancellationToken)
         {
             var outcome = new RoleOutcome();
-            IList<string> currentNames = await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken);
-            var open = (await OpenGrantsOfAsync(user.Id, cancellationToken)).Where(o => !o.Grant.IsReset).ToList();
+            var openAll = await OpenGrantsOfAsync(user.Id, cancellationToken);
+            var open = openAll.Where(o => o.Grant.IsRole).ToList();
+            var openRevoke = openAll.FirstOrDefault(o => o.Grant.IsRevoke && !o.Grant.IsUserDelete);
             string[] wantedNames = wanted.Select(r => r.Name).ToArray();
 
-            bool wantsNewPmo = wantedNames.Any(n => string.Equals(n, IdentityRules.Pmo, StringComparison.OrdinalIgnoreCase))
-                               && !currentNames.Any(n => string.Equals(n, IdentityRules.Pmo, StringComparison.OrdinalIgnoreCase));
+            bool wantsNewPmo = HasRole(wantedNames, IdentityRules.Pmo) && !HasRole(currentNames, IdentityRules.Pmo);
             int activePmo = wantsNewPmo ? await CountActivePmoAsync(null, cancellationToken) : int.MaxValue;
             bool bootstrap = wantsNewPmo && activePmo < IdentityRules.PmoBootstrapBelow;
 
             IdentityRules.RolePlan plan = IdentityRules.PlanRoles(currentNames, wantedNames, open.Select(o => o.Grant.Role), bootstrap);
+
+            // R1a2 (M-1): taking the PMO role away is a request; one that nobody could approve is not made (nothing has been changed yet)
+            if (plan.RevokeNeedsApproval.Count > 0 && openRevoke.Row == null
+                && await CountActivePmoAsync(new[] { Me, user.Id }, cancellationToken) == 0)
+            {
+                outcome.Error = AccountServiceMessages.RevokeNoApprover;
+                return outcome;
+            }
+
             bool changed = false;
 
             // L1: a request for a role that this edit no longer asks for is withdrawn, so it cannot be approved later against the intention of the edit
@@ -1012,6 +1199,16 @@ namespace Services.Identity.AccountServices
                     $"پس‌گرفتن درخواست نقش {withdrawn.Grant.Role} برای «{NameOf(user)}» با ویرایش نقش‌ها",
                     before: new { role = withdrawn.Grant.Role, requestedBy = withdrawn.Grant.RequestedBy });
                 outcome.Withdrawn.Add(withdrawn.Grant.Role);
+            }
+
+            // R1a2 (M-1): an edit that keeps the PMO role withdraws the request to take it away
+            if (openRevoke.Row != null && wantedSet.Contains(IdentityRules.Pmo))
+            {
+                _uow.Set<UserClaim>().Remove(openRevoke.Row);
+                IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Roles, user.Id, IdentityAudit.GrantRejected,
+                    $"پس‌گرفتن درخواست برداشتن نقش {IdentityRules.Pmo} از «{NameOf(user)}» با ویرایش نقش‌ها",
+                    before: new { role = openRevoke.Grant.Role, kind = IdentityRules.KindRevoke, requestedBy = openRevoke.Grant.RequestedBy });
+                outcome.RevokeWithdrawn = true;
             }
 
             if (plan.AddNow.Count > 0)
@@ -1027,7 +1224,9 @@ namespace Services.Identity.AccountServices
 
                 foreach (string role in plan.AddNow.Where(IdentityRules.IsSensitiveRole))
                 {
-                    // only the PMO role can get here (the bootstrap); the record lets the approval rules see who made this PMO user
+                    // only the PMO role can get here (the bootstrap); the record lets the approval rules see who made this PMO user.
+                    // R1a2 (M-1): GrantedBy is the PMO user who really did it (the actor), so the chain can be followed in the trail; the record stays exempt from the
+                    // "granted by the requester" rule because the bootstrap is the audited start that makes two PMO users possible at all
                     AddGrantRecord(user.Id, role, Me, 0, bootstrap: true);
                     IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Roles, user.Id, IdentityAudit.Bootstrap,
                         $"راه‌اندازی مدیر دوم: نقش {role} بدون تأیید دوم به «{NameOf(user)}» داده شد (کمتر از {IdentityRules.PmoBootstrapBelow} مدیر PMO فعال بود: {activePmo})",
@@ -1049,16 +1248,30 @@ namespace Services.Identity.AccountServices
                 outcome.Removed.AddRange(plan.Remove);
                 changed = true;
 
-                // the record of a role that is gone goes with it
-                var gone = new HashSet<string>(plan.Remove.Select(r => r.Trim().ToUpperInvariant()), StringComparer.Ordinal);
-                List<UserClaim> records = await _uow.Set<UserClaim>()
-                    .Where(c => c.UserId == user.Id && c.ClaimType == IdentityRules.RoleGrantedClaimType)
-                    .ToListAsync(cancellationToken);
-                foreach (UserClaim row in records)
-                    if (RoleGrantRecord.TryParse(row.ClaimValue, out RoleGrantRecord record) && gone.Contains(record.Role)) _uow.Set<UserClaim>().Remove(row);
+                // R1a2 (M-2): the record of a sensitive role that is gone stays, marked as removed (a reset of this user is still handled as a sensitive one for a week)
+                await MarkRolesRemovedAsync(user.Id, plan.Remove, cancellationToken);
             }
 
             DateTimeOffset now = DateTimeOffset.Now;
+
+            // R1a2 (M-1): the removal of the PMO role waits for a second PMO user
+            foreach (string role in plan.RevokeNeedsApproval)
+            {
+                if (openRevoke.Row != null)
+                {
+                    outcome.RevokeAlreadyPending.Add(role);
+                    continue;
+                }
+                var revoke = new PendingRoleGrant { Role = role, RequestedBy = Me, RequestedAt = now, Kind = IdentityRules.KindRevoke };
+                _uow.Set<UserClaim>().Add(new UserClaim { UserId = user.Id, ClaimType = IdentityRules.PendingRoleGrantClaimType, ClaimValue = revoke.ToClaimValue() });
+                IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Roles, user.Id, IdentityAudit.RevokeRequested,
+                    $"درخواست برداشتن نقش {role} از «{NameOf(user)}»؛ تا تأیید مدیر (PMO) دیگر اعمال نمی‌شود",
+                    after: new { role, requestedBy = Me, expires = revoke.ExpiresAt.ToString("O") });
+                IdentityInbox.Alert(_uow, "revoke-request-" + user.Id, AccountServiceMessages.RevokeRequestedInbox, recipientUserId: user.Id);
+                outcome.RevokePending.Add(role);
+            }
+
+            bool grantRequested = false;
             foreach (string role in plan.NeedApproval)
             {
                 var grant = new PendingRoleGrant { Role = role, RequestedBy = Me, RequestedAt = now };
@@ -1067,7 +1280,11 @@ namespace Services.Identity.AccountServices
                     $"درخواست نقش حساس {role} برای «{NameOf(user)}»؛ تا تأیید مدیر (PMO) دیگر اعمال نمی‌شود",
                     after: new { role, requestedBy = Me, expires = grant.ExpiresAt.ToString("O") });
                 outcome.Pending.Add(role);
+                grantRequested = true;
             }
+            // R1a2 (M-2): the approval waits until the receiver has chosen a password of his own; he is told so in his inbox
+            if (grantRequested && (receiverIsNew || await ReceiverMustChangeOwnPasswordAsync(user.Id, cancellationToken)))
+                IdentityInbox.Alert(_uow, "grant-own-password-" + user.Id, AccountServiceMessages.GrantNeedsOwnPasswordInbox, recipientUserId: user.Id);
             outcome.AlreadyPending.AddRange(plan.AlreadyPending);
 
             if (outcome.Added.Count > 0 || outcome.Removed.Count > 0)
@@ -1079,16 +1296,71 @@ namespace Services.Identity.AccountServices
             if (changed) RotateStamp(user);
 
             await _uow.SaveChangesAsync(cancellationToken);
+
+            // R1a2 (L-9): the answer says which requests of this user are waiting now
+            foreach (var waiting in (await OpenGrantsOfAsync(user.Id, cancellationToken)).Where(o => !o.Grant.IsReset && !o.Grant.IsUserDelete).OrderBy(o => o.Row.Id))
+                outcome.GrantIds.Add(waiting.Row.Id);
             return outcome;
         }
 
-        public async ValueTask<ResponseDto<string>> ChangeRoleAsync(ChangeRoleDto changeRoleDto, CancellationToken cancellationToken)
+        private enum OwnRoleChange { None, StepDown, Refused }
+
+        /// <summary>
+        /// What a PMO user asks for when he edits his own roles (R1a2, M-1): nothing; to take the PMO role from himself (allowed, see <see cref="StepDownAsync"/>); or anything else
+        /// (refused: nobody gives himself a role or takes another one away).
+        /// </summary>
+        private async Task<OwnRoleChange> ClassifyOwnRoleChangeAsync(User user, IList<Role> wanted, CancellationToken cancellationToken)
+        {
+            IList<string> mine = await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken);
+            IdentityRules.RolePlan plan = IdentityRules.PlanRoles(mine, wanted.Select(r => r.Name), Enumerable.Empty<string>());
+            if (plan.IsEmpty) return OwnRoleChange.None;
+            return plan.IsOnlyPmoRemoval ? OwnRoleChange.StepDown : OwnRoleChange.Refused;
+        }
+
+        /// <summary>
+        /// R1a2 (M-1): a PMO user takes the PMO role from himself. Nobody can be forced to do it, so it needs no second approval (the trail says "SteppedDown"), except that the
+        /// last active PMO user cannot (the company would be left without anybody to administer users). The count and the removal are one step under the lock of the bootstrap.
+        /// </summary>
+        private Task<(bool Done, string Error, IList<string> Roles)> StepDownAsync(int userId, CancellationToken cancellationToken) =>
+            InTransactionAsync<(bool Done, string Error, IList<string> Roles)>(async () =>
+            {
+                await TakeBootstrapLockAsync(cancellationToken);
+                User self = await _userManager.FindByIdAsync(userId.ToString()).WithCancellationTokenAsync(cancellationToken);
+                if (self == null) return (false, AccountServiceMessages.UserNotFound, null);
+
+                if (await CountActivePmoAsync(new[] { userId }, cancellationToken) == 0)
+                {
+                    IdentityAudit.Add(_uow, _http, userId, IdentityAudit.Access, userId, IdentityAudit.Refused, $"تلاش برای کنار رفتن از PMO «{NameOf(self)}» در حالی که آخرین مدیر فعال است");
+                    await _uow.SaveChangesAsync(cancellationToken);
+                    return (false, AccountServiceMessages.LastPmoCannotStepDown, null);
+                }
+
+                IList<string> before = await _userManager.GetRolesAsync(self).WithCancellationTokenAsync(cancellationToken);
+                if (HasRole(before, IdentityRules.Pmo))
+                {
+                    IdentityResult removed = await _userManager.RemoveFromRoleAsync(self, IdentityRules.Pmo).WithCancellationTokenAsync(cancellationToken);
+                    if (!removed.Succeeded) return (false, AccountServiceMessages.FailedToAssignRole + removed.DumpErrors(), null);
+                    await MarkRolesRemovedAsync(userId, new[] { IdentityRules.Pmo }, cancellationToken);
+
+                    // a request to take the role from him is moot now
+                    foreach (var moot in (await OpenGrantsOfAsync(userId, cancellationToken)).Where(o => o.Grant.IsRevoke && !o.Grant.IsUserDelete))
+                        _uow.Set<UserClaim>().Remove(moot.Row);
+
+                    RotateStamp(self);
+                    IdentityAudit.Add(_uow, _http, userId, IdentityAudit.Roles, userId, IdentityAudit.SteppedDown,
+                        $"«{NameOf(self)}» نقش PMO را از خودش برداشت", before: new { roles = before }, after: new { removed = new[] { IdentityRules.Pmo } });
+                    await _uow.SaveChangesAsync(cancellationToken);
+                }
+                return (true, null, await _userManager.GetRolesAsync(self).WithCancellationTokenAsync(cancellationToken));
+            }, cancellationToken);
+
+        public async ValueTask<ResponseDto<ChangeRoleResultDto>> ChangeRoleAsync(ChangeRoleDto changeRoleDto, CancellationToken cancellationToken)
         {
             if (!CallerIsPmo)
-                return OnlyPmoAnswer<string>();
+                return OnlyPmoAnswer<ChangeRoleResultDto>();
 
             if (changeRoleDto is null)
-                return ResponseDtoHelper.BadRequest<string>
+                return ResponseDtoHelper.BadRequest<ChangeRoleResultDto>
                     (AccountServiceMessages.NullDataReceived);
 
             User user = await _userManager
@@ -1096,31 +1368,40 @@ namespace Services.Identity.AccountServices
                 .WithCancellationTokenAsync(cancellationToken);
 
             if (user is null)
-                return ResponseDtoHelper.NotFound<string>
+                return ResponseDtoHelper.NotFound<ChangeRoleResultDto>
                     (AccountServiceMessages.UserNotFound);
 
             // the service users of the AI seats are managed by the system only
             if (global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(user.UserName))
-                return ResponseDtoHelper.BadRequest<string>(SeatUserMessage);
-
-            // nobody changes his or her own roles: another PMO user does it (and a sensitive role needs a third look anyway)
-            if (user.Id == Me)
-            {
-                IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Access, user.Id, IdentityAudit.Refused, $"تلاش برای تغییر نقش‌های خود «{NameOf(user)}»");
-                await _uow.SaveChangesAsync(cancellationToken);
-                return ResponseDtoHelper.Forbidden<string>(AccountServiceMessages.CannotChangeOwnRoles);
-            }
+                return ResponseDtoHelper.BadRequest<ChangeRoleResultDto>(SeatUserMessage);
 
             int[] roleIds = changeRoleDto.RoleIds ?? Array.Empty<int>();
             List<Role> wanted = await _roleManager.Roles.Where(role => roleIds.Contains(role.Id)).ToListAsync(cancellationToken);
 
+            // nobody changes his or her own roles: another PMO user does it (and a sensitive role needs a third look anyway).
+            // R1a2 (M-1): the one exception is a PMO user who takes the PMO role from himself (unless he is the last active one)
+            if (user.Id == Me)
+            {
+                if (await ClassifyOwnRoleChangeAsync(user, wanted, cancellationToken) == OwnRoleChange.StepDown)
+                {
+                    var step = await StepDownAsync(user.Id, cancellationToken);
+                    return step.Done
+                        ? ResponseDtoHelper.Ok(ResultOf(step.Roles, null), AccountServiceMessages.SteppedDown)
+                        : ResponseDtoHelper.BadRequest<ChangeRoleResultDto>(step.Error);
+                }
+
+                IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Access, user.Id, IdentityAudit.Refused, $"تلاش برای تغییر نقش‌های خود «{NameOf(user)}»");
+                await _uow.SaveChangesAsync(cancellationToken);
+                return ResponseDtoHelper.Forbidden<ChangeRoleResultDto>(AccountServiceMessages.CannotChangeOwnRoles);
+            }
+
             RoleOutcome outcome = await ApplyRolesAsync(user, wanted, cancellationToken);
             if (outcome.Error != null)
-                return ResponseDtoHelper.BadRequest<string>(outcome.Error);
+                return ResponseDtoHelper.BadRequest<ChangeRoleResultDto>(outcome.Error);
 
             IList<string> userCurrentRoles = await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken);
             string message = outcome.Note() ?? AccountServiceMessages.RolesChangedSuccessfully;
-            return ResponseDtoHelper.Ok(string.Join(",", userCurrentRoles), message);
+            return ResponseDtoHelper.Ok(ResultOf(userCurrentRoles, outcome), message);
         }
 
         public async ValueTask<ResponseDto<IEnumerable<ResponseRole>>> GetAllRolesAsync(CancellationToken cancellationToken)
@@ -1164,6 +1445,13 @@ namespace Services.Identity.AccountServices
             }
         }
 
+        /// <summary>Persian words for what a request asks (used in the trail): a reset, a deletion, the removal of a role, or a role.</summary>
+        private static string WhatOf(PendingRoleGrant grant) =>
+            grant.IsReset ? "بازنشانی رمز عبور"
+            : grant.IsUserDelete ? "حذف حساب"
+            : grant.IsRevoke ? "برداشتن نقش " + grant.Role
+            : "نقش " + grant.Role;
+
         public async ValueTask<ResponseDto<List<RoleGrantDto>>> GetRoleGrantsAsync(CancellationToken cancellationToken)
         {
             if (!CallerIsPmo)
@@ -1193,11 +1481,17 @@ namespace Services.Identity.AccountServices
                 return full.Length == 0 ? u.UserName : full;
             }
 
+            // R1a2 (M-2): a sensitive role waits until its receiver has chosen a password of his own (this does not depend on who looks)
+            HashSet<int> mustChange = await ReceiversWhoMustChangeAsync(parsed.Where(p => p.Grant.IsRole).Select(p => p.Row.UserId), cancellationToken);
+
             var list = parsed
                 .Where(p => users.Any(u => u.Id == p.Row.UserId && !u.IsDeleted))
                 .Select(p =>
                 {
                     string problem = IdentityRules.ApprovalProblem(p.Grant.RequestedBy, me, p.Row.UserId, myPmoRecord, Rules.ApproverMinDays, now);
+                    string reason = ApprovalProblemText(problem);
+                    if (reason == null && p.Grant.IsRole && mustChange.Contains(p.Row.UserId))
+                        reason = AccountServiceMessages.GrantReceiverMustChangeOwnPassword;
                     return new RoleGrantDto
                     {
                         Id = p.Row.Id,
@@ -1210,8 +1504,8 @@ namespace Services.Identity.AccountServices
                         RequestedByName = Display(p.Grant.RequestedBy),
                         RequestedAt = p.Grant.RequestedAt,
                         ExpiresAt = p.Grant.ExpiresAt,
-                        CanApprove = problem == null,
-                        CannotApproveReason = ApprovalProblemText(problem),
+                        CanApprove = reason == null,
+                        CannotApproveReason = reason,
                     };
                 })
                 .ToList();
@@ -1234,7 +1528,7 @@ namespace Services.Identity.AccountServices
 
             int me = Me;
             DateTimeOffset now = DateTimeOffset.Now;
-            string what = grant.IsReset ? "بازنشانی رمز عبور" : "نقش " + grant.Role;
+            string what = WhatOf(grant);
             if (grant.IsExpired(now))
             {
                 _uow.Set<UserClaim>().Remove(row);
@@ -1243,15 +1537,17 @@ namespace Services.Identity.AccountServices
                 return ResponseDtoHelper.BadRequest<RoleGrantDto>(AccountServiceMessages.GrantExpired);
             }
 
-            // R1a2 (L1): the request was valid when it was made; it must still be valid now: the user is active and the requester is still a PMO user
+            // R1a2 (L1): the request was valid when it was made; it must still be valid now: the user is active and the requester is still a PMO user.
+            // (R1a2, M-1: a request to take the PMO role from a user or to delete him does not need the user to be active; an inactive PMO user is exactly who one may want to remove)
             User requester = await _userManager.FindByIdAsync(grant.RequestedBy.ToString()).WithCancellationTokenAsync(cancellationToken);
             bool requesterStillPmo = requester != null && requester.IsActive && !requester.IsDeleted
                                      && await _userManager.IsInRoleAsync(requester, IdentityRules.Pmo).WithCancellationTokenAsync(cancellationToken);
-            if (!user.IsActive || !requesterStillPmo)
+            bool userStillValid = user.IsActive || grant.IsRevoke;
+            if (!userStillValid || !requesterStillPmo)
             {
                 _uow.Set<UserClaim>().Remove(row);
                 IdentityAudit.Add(_uow, _http, me, IdentityAudit.Roles, user.Id, IdentityAudit.GrantVoid,
-                    $"درخواست {what} برای «{NameOf(user)}» بی‌اعتبار شد ({(!user.IsActive ? "کاربر غیرفعال است" : "درخواست‌کننده دیگر PMO نیست")})");
+                    $"درخواست {what} برای «{NameOf(user)}» بی‌اعتبار شد ({(!userStillValid ? "کاربر غیرفعال است" : "درخواست‌کننده دیگر PMO نیست")})");
                 await _uow.SaveChangesAsync(cancellationToken);
                 return ResponseDtoHelper.BadRequest<RoleGrantDto>(AccountServiceMessages.GrantVoid);
             }
@@ -1281,6 +1577,19 @@ namespace Services.Identity.AccountServices
                 }, AccountServiceMessages.ResetApproved);
             }
 
+            // R1a2 (M-1): taking the PMO role from a user, or deleting a PMO user
+            if (grant.IsRevoke)
+                return await ApproveRevokeAsync(row, grant, user, me, cancellationToken);
+
+            // R1a2 (M-2): the PMO user who registered the receiver, or who reset his password, may know it; the role waits until the receiver has chosen a password of his own
+            if (await ReceiverMustChangeOwnPasswordAsync(user.Id, cancellationToken))
+            {
+                IdentityAudit.Add(_uow, _http, me, IdentityAudit.Access, user.Id, IdentityAudit.Refused,
+                    $"تلاش برای تأیید {what} برای «{NameOf(user)}» پیش از آنکه خود گیرنده رمز عبورش را عوض کند");
+                await _uow.SaveChangesAsync(cancellationToken);
+                return ResponseDtoHelper.Forbidden<RoleGrantDto>(AccountServiceMessages.GrantReceiverMustChangeOwnPassword);
+            }
+
             Role role = await _roleManager.FindByNameAsync(grant.Role).WithCancellationTokenAsync(cancellationToken);
             if (role == null)
                 return ResponseDtoHelper.BadRequest<RoleGrantDto>(AccountServiceMessages.InvalidRoleDetected);
@@ -1307,6 +1616,47 @@ namespace Services.Identity.AccountServices
             }, AccountServiceMessages.GrantApproved);
         }
 
+        /// <summary>
+        /// R1a2 (M-1): the approval of a request to take the PMO role from a user, or to delete a PMO user's account. The caller checked that the request is still valid and that the
+        /// approver is independent (not the requester, not the user, not a PMO user whose role the requester gave, not a new one).
+        /// </summary>
+        private async Task<ResponseDto<RoleGrantDto>> ApproveRevokeAsync(UserClaim row, PendingRoleGrant grant, User user, int me, CancellationToken cancellationToken)
+        {
+            string name = NameOf(user);
+            if (grant.IsUserDelete)
+            {
+                IdentityResult deleted = await DeleteAccountAsync(user, cancellationToken);
+                if (!deleted.Succeeded)
+                    return ResponseDtoHelper.BadRequest<RoleGrantDto>(deleted.DumpErrors());
+                IdentityAudit.Add(_uow, _http, me, IdentityAudit.User, user.Id, IdentityAudit.Deleted,
+                    $"حذف مدیر (PMO) «{name}» با درخواست کاربر {grant.RequestedBy} و تأیید کاربر {me}");
+            }
+            else
+            {
+                IList<string> held = await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken);
+                if (HasRole(held, IdentityRules.Pmo))
+                {
+                    IdentityResult removed = await _userManager.RemoveFromRoleAsync(user, IdentityRules.Pmo).WithCancellationTokenAsync(cancellationToken);
+                    if (!removed.Succeeded)
+                        return ResponseDtoHelper.BadRequest<RoleGrantDto>(AccountServiceMessages.FailedToAssignRole + removed.DumpErrors());
+                    await MarkRolesRemovedAsync(user.Id, new[] { IdentityRules.Pmo }, cancellationToken);
+                    RotateStamp(user); // the access tokens made with the PMO role end now; the refresh token brings one without it
+                }
+            }
+
+            _uow.Set<UserClaim>().Remove(row);
+            IdentityAudit.Add(_uow, _http, me, IdentityAudit.Roles, user.Id, IdentityAudit.RevokeApproved,
+                $"تأیید {WhatOf(grant)} برای «{name}» (درخواست‌کننده: کاربر {grant.RequestedBy}، تأییدکننده: کاربر {me})",
+                before: new { role = grant.Role, requestedBy = grant.RequestedBy }, after: new { approvedBy = me });
+            await _uow.SaveChangesAsync(cancellationToken);
+
+            return ResponseDtoHelper.Ok(new RoleGrantDto
+            {
+                Id = row.Id, UserId = user.Id, UserName = user.UserName, DisplayName = user.DisplayName, Role = grant.Role, Kind = grant.Kind,
+                RequestedByUserId = grant.RequestedBy, RequestedAt = grant.RequestedAt, ExpiresAt = grant.ExpiresAt,
+            }, AccountServiceMessages.RevokeApproved);
+        }
+
         public async ValueTask<ResponseDto<bool>> RejectRoleGrantAsync(int grantId, CancellationToken cancellationToken)
         {
             if (!CallerIsPmo)
@@ -1318,9 +1668,20 @@ namespace Services.Identity.AccountServices
                 return ResponseDtoHelper.NotFound<bool>(AccountServiceMessages.GrantNotFound);
 
             User user = await _userManager.FindByIdAsync(row.UserId.ToString()).WithCancellationTokenAsync(cancellationToken);
+
+            // R1a2 (L-4): the target of a password reset, or of the removal of his PMO role / the deletion of his account, cannot reject that request himself: a hijacked session of a
+            // PMO user could otherwise block its own reset or removal for good. (He may reject a request to give himself a role: that only takes power away.)
+            if ((grant.IsReset || grant.IsRevoke) && row.UserId == Me)
+            {
+                IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Access, row.UserId, IdentityAudit.Refused,
+                    $"تلاش برای رد {WhatOf(grant)} درباره‌ی حساب خود «{NameOf(user)}»");
+                await _uow.SaveChangesAsync(cancellationToken);
+                return ResponseDtoHelper.Forbidden<bool>(AccountServiceMessages.CannotRejectOwnRequest);
+            }
+
             _uow.Set<UserClaim>().Remove(row);
             IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Roles, row.UserId, IdentityAudit.GrantRejected,
-                $"رد یا پس‌گرفتن درخواست {(grant.IsReset ? "بازنشانی رمز عبور" : "نقش " + grant.Role)} برای «{NameOf(user)}»",
+                $"رد یا پس‌گرفتن درخواست {WhatOf(grant)} برای «{NameOf(user)}»",
                 before: new { role = grant.Role, requestedBy = grant.RequestedBy });
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(true, AccountServiceMessages.GrantRejected);
@@ -1508,18 +1869,23 @@ namespace Services.Identity.AccountServices
             int[] roleIds = updateUserDto.RoleIds ?? Array.Empty<int>();
             List<Role> wanted = await _roleManager.Roles.Where(role => roleIds.Contains(role.Id)).ToListAsync(cancellationToken);
 
-            // a PMO user may correct his or her own details, but not the list of roles; this is decided before anything is changed
+            // a PMO user may correct his or her own details, but not the list of roles; this is decided before anything is changed.
+            // R1a2 (M-1): the one exception is a PMO user who takes the PMO role from himself (unless he is the last active one)
             bool isSelf = user.Id == Me;
+            bool steppingDown = false;
             if (isSelf)
             {
-                IList<string> mine = await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken);
-                IdentityRules.RolePlan plan = IdentityRules.PlanRoles(mine, wanted.Select(r => r.Name), Enumerable.Empty<string>());
-                if (!plan.IsEmpty)
+                OwnRoleChange own = await ClassifyOwnRoleChangeAsync(user, wanted, cancellationToken);
+                if (own == OwnRoleChange.Refused)
                 {
                     IdentityAudit.Add(_uow, _http, Me, IdentityAudit.Access, user.Id, IdentityAudit.Refused, $"تلاش برای تغییر نقش‌های خود «{NameOf(user)}» از راه ویرایش کاربر");
                     await _uow.SaveChangesAsync(cancellationToken);
                     return ResponseDtoHelper.Forbidden<ResponseUserDto>(AccountServiceMessages.CannotChangeOwnRoles);
                 }
+                steppingDown = own == OwnRoleChange.StepDown;
+                // checked here as well so that nothing is saved when the answer is no (StepDownAsync checks again under the lock)
+                if (steppingDown && await CountActivePmoAsync(new[] { Me }, cancellationToken) == 0)
+                    return ResponseDtoHelper.BadRequest<ResponseUserDto>(AccountServiceMessages.LastPmoCannotStepDown);
             }
 
             _mapper.Map(updateUserDto, user);
@@ -1529,20 +1895,29 @@ namespace Services.Identity.AccountServices
             if (result.Succeeded)
             {
                 string message = null;
+                RoleOutcome outcome = null;
                 if (!isSelf)
                 {
-                    RoleOutcome outcome = await ApplyRolesAsync(user, wanted, cancellationToken);
+                    outcome = await ApplyRolesAsync(user, wanted, cancellationToken);
                     if (outcome.Error != null)
                         return ResponseDtoHelper.BadRequest<ResponseUserDto>(outcome.Error);
                     message = outcome.Note()
                         ?? string.Join(",", await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken));
                 }
+                else if (steppingDown)
+                {
+                    var step = await StepDownAsync(user.Id, cancellationToken);
+                    if (!step.Done)
+                        return ResponseDtoHelper.BadRequest<ResponseUserDto>(step.Error);
+                    message = AccountServiceMessages.SteppedDown;
+                }
 
                 IdentityAudit.Add(_uow, _http, Me, IdentityAudit.User, user.Id, IdentityAudit.Updated, $"ویرایش کاربر «{NameOf(user)}»");
                 await _uow.SaveChangesAsync(cancellationToken);
 
-                return ResponseDtoHelper
-                   .Ok((await LoadUserDtoAsync(user.Id, cancellationToken)).Data, message);
+                ResponseUserDto updated = (await LoadUserDtoAsync(user.Id, cancellationToken)).Data;
+                AttachPending(updated, outcome); // R1a2 (L-9): { pending, grantId, grantIds }
+                return ResponseDtoHelper.Ok(updated, message);
             }
 
 
@@ -1596,14 +1971,15 @@ namespace Services.Identity.AccountServices
                 return ResponseDtoHelper
                     .BadRequest<bool>("این کاربر قبلا حذف شده است.");
 
-            user.IsDeleted = true;
-            RotateStamp(user); // R1a2 (H2): the access tokens made before end at once, not when they expire
-            IdentityResult result = await _userManager.UpdateAsync(user).WithCancellationTokenAsync(cancellationToken);
+            // R1a2 (M-1): deleting a PMO user is a request that a different PMO user approves (deleting the other PMO user is how one person could bring the bootstrap back).
+            // The answer is a success with data false and a message that says that the deletion is waiting.
+            if (HasRole(await _userManager.GetRolesAsync(user).WithCancellationTokenAsync(cancellationToken), IdentityRules.Pmo))
+                return await RequestDeleteOfPmoAsync(user, cancellationToken);
+
+            IdentityResult result = await DeleteAccountAsync(user, cancellationToken);
 
             if (result.Succeeded)
             {
-                // the deleted user's sessions end now
-                await _tokenStoreService.InvalidateUserTokensAsync(user.Id).WithCancellationTokenAsync(cancellationToken);
                 IdentityAudit.Add(_uow, _http, Me, IdentityAudit.User, user.Id, IdentityAudit.Deleted, $"حذف کاربر «{NameOf(user)}»");
                 await _uow.SaveChangesAsync(cancellationToken);
                 return ResponseDtoHelper
@@ -1612,6 +1988,41 @@ namespace Services.Identity.AccountServices
 
             return ResponseDtoHelper
                     .BadRequest<bool>(result.DumpErrors());
+        }
+
+        /// <summary>
+        /// Marks the account deleted (soft delete) and ends its sessions. R1a2 (H2): the security stamp changes, so the access tokens made before end at once, not when they expire.
+        /// The caller writes the audit row and saves.
+        /// </summary>
+        private async Task<IdentityResult> DeleteAccountAsync(User user, CancellationToken cancellationToken)
+        {
+            user.IsDeleted = true;
+            RotateStamp(user);
+            IdentityResult result = await _userManager.UpdateAsync(user).WithCancellationTokenAsync(cancellationToken);
+            // the deleted user's sessions end now
+            if (result.Succeeded) await _tokenStoreService.InvalidateUserTokensAsync(user.Id).WithCancellationTokenAsync(cancellationToken);
+            return result;
+        }
+
+        /// <summary>R1a2 (M-1): the request to delete a PMO user (a claim of that user, kind "revoke", role USER_DELETE) that a different PMO user approves in role-grants/{id}/approve.</summary>
+        private async Task<ResponseDto<bool>> RequestDeleteOfPmoAsync(User user, CancellationToken cancellationToken)
+        {
+            var open = await OpenGrantsOfAsync(user.Id, cancellationToken);
+            if (open.Any(o => o.Grant.IsUserDelete))
+                return ResponseDtoHelper.BadRequest<bool>(AccountServiceMessages.DeleteAlreadyPending);
+
+            // a request that nobody could approve (the requester and the user are the only PMO users) is not made; the user can step down himself instead
+            if (await CountActivePmoAsync(new[] { Me, user.Id }, cancellationToken) == 0)
+                return ResponseDtoHelper.BadRequest<bool>(AccountServiceMessages.RevokeNoApprover);
+
+            var grant = new PendingRoleGrant { Role = IdentityRules.DeleteRoleLabel, RequestedBy = Me, RequestedAt = DateTimeOffset.Now, Kind = IdentityRules.KindRevoke };
+            _uow.Set<UserClaim>().Add(new UserClaim { UserId = user.Id, ClaimType = IdentityRules.PendingRoleGrantClaimType, ClaimValue = grant.ToClaimValue() });
+            IdentityAudit.Add(_uow, _http, Me, IdentityAudit.User, user.Id, IdentityAudit.RevokeRequested,
+                $"درخواست حذف مدیر (PMO) «{NameOf(user)}»؛ تا تأیید مدیر (PMO) دیگر انجام نمی‌شود",
+                after: new { requestedBy = Me, expires = grant.ExpiresAt.ToString("O") });
+            IdentityInbox.Alert(_uow, "revoke-request-" + user.Id, AccountServiceMessages.RevokeRequestedInbox, recipientUserId: user.Id);
+            await _uow.SaveChangesAsync(cancellationToken);
+            return ResponseDtoHelper.Ok(false, AccountServiceMessages.DeleteNeedsApproval);
         }
 
         public async ValueTask<ResponseDto<IEnumerable<DeleteUserResultDto>>> DeleteUserCollectionAsync(IEnumerable<int> userIds, CancellationToken cancellationToken)

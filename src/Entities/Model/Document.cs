@@ -48,11 +48,8 @@ namespace Entities.Model
         /// </summary>
         public int? UploadedByUserId { get; protected set; }
 
-        public Document SetUploadedBy(int? userId)
-        {
-            UploadedByUserId = userId;
-            return this;
-        }
+        // R1a2: one line on purpose. The quality branch (R1q) has its own setter, SetUploader; at the merge this line becomes "=> SetUploader(userId);" and the callers (DocumentService, the tests) stay as they are.
+        public Document SetUploadedBy(int? userId) { UploadedByUserId = userId; return this; }
 
         public void SetMimeType(string mimType)
         {

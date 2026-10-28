@@ -454,10 +454,16 @@ namespace MsTests
             ClaimsPrincipal pmo = Signed(second, pmoName, "PMO");
             CollectionAssert.AreEqual(new[] { "PMO" }, h.RolesOf(second));
 
-            ResponseDto<string> own = await h.As(pmo, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { PmoRole, WarehouseRole } }, default).AsTask());
+            ResponseDto<ChangeRoleResultDto> own = await h.As(pmo, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { PmoRole, WarehouseRole } }, default).AsTask());
             Assert.IsFalse(own.Success);
             Assert.AreEqual(HttpStatusCode.Forbidden, own.HttpStatusCode);
             Assert.AreEqual(AccountServiceMessages.CannotChangeOwnRoles, own.Message);
+
+            // R1a2 (M-1): the one thing he may do to himself is to step down; a step-down that also gives him a role is something else and is refused
+            ResponseDto<ChangeRoleResultDto> mixed = await h.As(pmo, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { WarehouseRole } }, default).AsTask());
+            Assert.IsFalse(mixed.Success);
+            Assert.AreEqual(HttpStatusCode.Forbidden, mixed.HttpStatusCode);
+            CollectionAssert.AreEqual(new[] { "PMO" }, h.RolesOf(second));
 
             // the same through the edit-user screen: other fields yes, the list of roles no
             UpdateUserDto edit = Edit(second, pmoName + "@example.com", new[] { PmoRole, WarehouseRole });
@@ -502,7 +508,8 @@ namespace MsTests
             // a user who is not a PMO user cannot approve it
             Assert.IsFalse((await h.As(Signed(fin, name, "WAREHOUSE"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask())).Success);
 
-            // a second PMO user can
+            // a second PMO user can, once the receiver has chosen a password of his own (R1a2, M-2: the PMO user who registered him chose the first one; see the tests of M-2)
+            await ChoosePasswordAsync(h, fin, name);
             int second = await h.AddPmoAsync(Unique("pmo"));
             ClaimsPrincipal pmo2 = Signed(second, "pmo2", "PMO");
             Assert.IsTrue((await h.As(pmo2, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.Id == grant.Id).CanApprove);

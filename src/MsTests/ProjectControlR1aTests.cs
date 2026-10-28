@@ -271,6 +271,51 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task TheLastEditorOfTheTextCannotApproveEitherSideOfTheClaim()
+        {
+            // R1a2 (L-7): registered by the planning manager (24), quantified by the commercial manager (26)
+            int id = await RegisteredClaim(Planning, Commercial);
+            PcClaim registered = Reload<PcClaim>(id);
+            Assert.AreEqual(24, registered.LastEditedByUserId, "the creator wrote the first text");
+
+            // a PMO user changes the text: he is the last editor now, so he cannot give the PMO approval; another PMO user can
+            ResponseDto<PcClaimDto> edited = await SaveClaim(Pmo1, new PcClaimDto { Id = id, ContractId = registered.ContractId, Direction = registered.Direction, Issue = registered.Issue + " (corrected)", Basis = registered.Basis });
+            Assert.IsTrue(edited.Success, edited.Message);
+            Assert.AreEqual(11, Reload<PcClaim>(id).LastEditedByUserId);
+            Assert.AreEqual(11, edited.Data.LastEditedByUserId, "the answer shows who wrote the text last");
+            ResponseDto<PcClaimDto> own = await ClaimAction(Pmo1, id, "approve-pmo");
+            Assert.IsFalse(own.Success, "the person who changed the text does not approve it");
+            Assert.IsTrue(own.Message.Contains(SameUser) && own.Message.Contains("آخرین ویرایش‌کننده"), own.Message);
+            Assert.IsFalse(Reload<PcClaim>(id).PmoApproved);
+
+            // a save that changes nothing does not make the saver the editor
+            PcClaim current = Reload<PcClaim>(id);
+            ResponseDto<PcClaimDto> unchanged = await SaveClaim(ProjectManager, new PcClaimDto { Id = id, ContractId = current.ContractId, Direction = current.Direction, Issue = current.Issue, Basis = current.Basis, IsCrossClaim = current.IsCrossClaim });
+            Assert.IsTrue(unchanged.Success, unchanged.Message);
+            Assert.AreEqual(11, Reload<PcClaim>(id).LastEditedByUserId, "nothing was changed, nobody became the editor");
+            Assert.IsTrue((await ClaimAction(Pmo2, id, "approve-pmo")).Success);
+            Assert.IsTrue((await ClaimAction(ProjectManager, id, "approve-design")).Success, "he saved the claim without changing it: he is not the editor");
+
+            // the project manager now changes the text: both approvals are taken back and he cannot give the design approval (the engineering manager can)
+            ResponseDto<PcClaimDto> changed = await SaveClaim(ProjectManager, new PcClaimDto { Id = id, ContractId = current.ContractId, Direction = current.Direction, Issue = current.Issue + " (and more)", Basis = current.Basis, IsCrossClaim = current.IsCrossClaim });
+            Assert.IsTrue(changed.Success, changed.Message);
+            PcClaim afterChange = Reload<PcClaim>(id);
+            Assert.AreEqual(22, afterChange.LastEditedByUserId);
+            Assert.IsFalse(afterChange.PmoApproved || afterChange.DesignManufacturingApproved, "the edit took the approvals back");
+            ResponseDto<PcClaimDto> pm = await ClaimAction(ProjectManager, id, "approve-design");
+            Assert.IsFalse(pm.Success);
+            Assert.IsTrue(pm.Message.Contains(SameUser) && pm.Message.Contains("آخرین ویرایش‌کننده"), pm.Message);
+            Assert.IsTrue((await ClaimAction(Engineering, id, "approve-design")).Success);
+            // the earlier editor is not the last one any more
+            Assert.IsTrue((await ClaimAction(Pmo1, id, "approve-pmo")).Success);
+
+            // the trail has the editor of each change
+            List<FnAuditLog> rows = Modified(nameof(PcClaim), id);
+            Assert.IsTrue(rows.Any(r => r.AfterJson != null && r.AfterJson.Contains("LastEditedByUserId") && Fields(r.AfterJson)["LastEditedByUserId"].GetInt32() == 11));
+            Assert.IsTrue(rows.Any(r => r.AfterJson != null && r.AfterJson.Contains("LastEditedByUserId") && Fields(r.AfterJson)["LastEditedByUserId"].GetInt32() == 22));
+        }
+
+        [TestMethod]
         public async Task ANewQuantificationOrAnEditStartsTheApprovalsAgainAndTheClientIsToldOnlyAfterTheNewOnes()
         {
             int id = await RegisteredClaim(Planning, Planning);
@@ -516,6 +561,9 @@ namespace MsTests
         private static Task<ResponseDto<PcGuaranteeDto>> Event(ClaimsPrincipal who, int id, PcGuaranteeEventKind kind, DateTime? newExpiry = null, string note = null, Guid? documentId = null, DateTime? date = null) =>
             H.As(who, p => p.GetRequiredService<IPcCommercialService>().AddGuaranteeEventAsync(
                 new PcGuaranteeEventSaveDto { GuaranteeId = id, Kind = kind, EventDate = date ?? DateTime.Today, NewExpiryDate = newExpiry, Note = note, DocumentId = documentId }, CancellationToken.None));
+
+        private static Task<ResponseDto<PcGuaranteeDto>> Withdraw(ClaimsPrincipal who, int id) =>
+            H.As(who, p => p.GetRequiredService<IPcCommercialService>().WithdrawGuaranteeRequestAsync(new PcGuaranteeWithdrawDto { GuaranteeId = id }, CancellationToken.None));
 
         /// <summary>R1a2 (M2): the release needs two people. The first call only records the request; a different user of the roles confirms with the second call.</summary>
         private static async Task<ResponseDto<PcGuaranteeDto>> ReleaseByTwo(ClaimsPrincipal asker, ClaimsPrincipal confirmer, int id, DateTime date, string note)
@@ -773,7 +821,7 @@ namespace MsTests
             PcGuaranteeEvent ev = H.Read(u => u.Set<PcGuaranteeEvent>().Single(e => e.GuaranteeInfoId == id));
             Assert.AreEqual(PcGuaranteeEventKind.Cancellation, ev.Kind);
             Assert.AreEqual(date, ev.EventDate);
-            Assert.AreEqual("client letter 12 (confirmed)", ev.Note);
+            Assert.AreEqual("client letter 12 | تأییدکننده: client letter 12 (confirmed)", ev.Note, "R1a2 (M-3): the note of the request first, then the different note of the one who confirmed");
             Assert.AreEqual(11, ev.CreatedByUserId);
 
             List<FnAuditLog> rows = Modified(nameof(PcGuaranteeInfo), id);
@@ -792,6 +840,258 @@ namespace MsTests
             Assert.IsFalse(reopen.Success);
             Assert.IsTrue(reopen.Message.Contains("دوباره باز نمی‌شود"), reopen.Message);
             Assert.AreEqual(PcGuaranteeStatus.Cancelled, Reload<PcGuaranteeInfo>(id).Status);
+        }
+
+        // ------------------------------------------------------------------------------------------------ R1a2 (M-3): one request slot for the release and the cancellation
+
+        [TestMethod]
+        public async Task TheReleaseAndTheCancellationShareOneRequestAndOnlyTheSameActionConfirmsIt()
+        {
+            // a request for the release is not confirmed by the cancellation: the second person who believes he starts a cancellation would otherwise close the guarantee with the release of the first
+            int id = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            DateTime date = DateTime.Today.AddDays(-2);
+            ResponseDto<PcGuaranteeDto> asked = await Release(Commercial, id, date, "client letter 31");
+            Assert.IsTrue(asked.Success, asked.Message);
+            Assert.AreEqual(PcGuaranteeCloseKind.Release, asked.Data.ReleaseRequestedKind, "the row says which action was asked for");
+            Assert.AreEqual(date, asked.Data.ReleaseRequestedDate);
+            Assert.AreEqual("client letter 31", asked.Data.ReleaseRequestedNote);
+            Assert.IsTrue(asked.Data.ReleaseRequestOpen);
+
+            ResponseDto<PcGuaranteeDto> wrong = await Event(FinanceManager, id, PcGuaranteeEventKind.Cancellation, note: "bank letter 77", date: date);
+            Assert.IsFalse(wrong.Success, "the cancellation must not confirm the request for the release");
+            Assert.IsTrue(wrong.Message.Contains("یک درخواست «آزادسازی» منتظر تأیید است"), wrong.Message);
+            Assert.IsTrue(wrong.Message.Contains("guarantees/withdraw"), "the answer says how to take the request back");
+            ResponseDto<PcGuaranteeDto> ownWrong = await Event(Commercial, id, PcGuaranteeEventKind.Cancellation, note: "bank letter 77", date: date);
+            Assert.IsFalse(ownWrong.Success, "the one who asked cannot turn his own request into the other action either");
+            Assert.IsTrue(ownWrong.Message.Contains("یک درخواست «آزادسازی» منتظر تأیید است"), ownWrong.Message);
+            PcGuaranteeInfo kept = Reload<PcGuaranteeInfo>(id);
+            Assert.AreEqual(PcGuaranteeStatus.Active, kept.Status);
+            Assert.AreEqual(26, kept.ReleaseRequestedByUserId, "the refusals changed nothing in the request");
+            Assert.AreEqual(PcGuaranteeCloseKind.Release, kept.ReleaseRequestedKind);
+            Assert.AreEqual("client letter 31", kept.ReleaseRequestedNote);
+            Assert.AreEqual(date, kept.ReleaseRequestedDate);
+            Assert.AreEqual(0, EventCount(id));
+            Assert.AreEqual(1, Modified(nameof(PcGuaranteeInfo), id).Count, "and left no trail row");
+
+            // the same action by a different person confirms it
+            ResponseDto<PcGuaranteeDto> done = await Release(FinanceManager, id, date, "client letter 31");
+            Assert.IsTrue(done.Success, done.Message);
+            Assert.AreEqual(PcGuaranteeStatus.Released, done.Data.Status);
+            Assert.IsFalse(done.Data.ReleaseRequestOpen, "a closed guarantee has no open request; the fields stay as the record of who asked");
+            Assert.AreEqual(PcGuaranteeCloseKind.Release, done.Data.ReleaseRequestedKind);
+
+            // and the reverse: a request for the cancellation is not confirmed by the release
+            int other = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            Assert.IsTrue((await Event(FinanceManager, other, PcGuaranteeEventKind.Cancellation, note: "client letter 32", date: date)).Success);
+            ResponseDto<PcGuaranteeDto> reverse = await Release(Commercial, other, date, "client letter 32");
+            Assert.IsFalse(reverse.Success, "the release must not confirm the request for the cancellation");
+            Assert.IsTrue(reverse.Message.Contains("یک درخواست «ابطال» منتظر تأیید است"), reverse.Message);
+            Assert.AreEqual(PcGuaranteeStatus.Active, Reload<PcGuaranteeInfo>(other).Status);
+            Assert.AreEqual(PcGuaranteeCloseKind.Cancellation, Reload<PcGuaranteeInfo>(other).ReleaseRequestedKind);
+            Assert.AreEqual(0, EventCount(other));
+            ResponseDto<PcGuaranteeDto> cancelled = await Event(Pmo1, other, PcGuaranteeEventKind.Cancellation, note: "client letter 32", date: date);
+            Assert.IsTrue(cancelled.Success, cancelled.Message);
+            Assert.AreEqual(PcGuaranteeStatus.Cancelled, cancelled.Data.Status);
+            Assert.AreEqual(PcGuaranteeCloseKind.Cancellation, cancelled.Data.ReleaseRequestedKind);
+
+            // the kind is in the trail of the row, as the name of the action
+            List<FnAuditLog> rows = Modified(nameof(PcGuaranteeInfo), id);
+            Assert.AreEqual("Release", Fields(rows[0].AfterJson)["ReleaseRequestedKind"].GetString());
+            Assert.AreEqual("client letter 31", Fields(rows[0].AfterJson)["ReleaseRequestedNote"].GetString());
+        }
+
+        [TestMethod]
+        public async Task AForgottenRequestOfOneKindIsReplacedByTheNewRequestOfTheOtherKind()
+        {
+            int id = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            Assert.IsTrue((await Release(Commercial, id, DateTime.Today, "letter 8 days old")).Success);
+            AgeRequest(id, 8);
+            // after seven days the old request counts for nothing: the other action is not refused because of it, it records a request of its own
+            ResponseDto<PcGuaranteeDto> next = await Event(FinanceManager, id, PcGuaranteeEventKind.Cancellation, note: "bank letter 9", date: DateTime.Today);
+            Assert.IsTrue(next.Success, next.Message);
+            Assert.AreEqual(PcGuaranteeStatus.Active, next.Data.Status);
+            Assert.AreEqual(PcGuaranteeCloseKind.Cancellation, next.Data.ReleaseRequestedKind);
+            Assert.AreEqual(27, next.Data.ReleaseRequestedByUserId);
+            Assert.AreEqual("bank letter 9", next.Data.ReleaseRequestedNote);
+            Assert.IsTrue(next.Data.ReleaseRequestOpen);
+            Assert.AreEqual(0, EventCount(id));
+        }
+
+        [TestMethod]
+        public void ARequestIsOpenOnlyWithAKindWithinSevenDaysOnAnOpenGuarantee()
+        {
+            DateTime now = new DateTime(2026, 5, 20, 10, 0, 0);
+            PcGuaranteeInfo Make(Action<PcGuaranteeInfo> change = null)
+            {
+                var info = new PcGuaranteeInfo { Status = PcGuaranteeStatus.Active, ReleaseRequestedByUserId = 5, ReleaseRequestedAt = now.AddDays(-6), ReleaseRequestedKind = PcGuaranteeCloseKind.Cancellation };
+                change?.Invoke(info);
+                return info;
+            }
+            Assert.IsTrue(PcCommercialService.RequestIsOpen(Make(), now));
+            Assert.IsTrue(PcCommercialService.RequestIsOpen(Make(i => i.ReleaseRequestedAt = now.AddDays(-7)), now), "exactly seven days is still open");
+            Assert.IsFalse(PcCommercialService.RequestIsOpen(Make(i => i.ReleaseRequestedAt = now.AddDays(-7).AddMinutes(-1)), now));
+            Assert.IsFalse(PcCommercialService.RequestIsOpen(Make(i => i.ReleaseRequestedKind = null), now), "a request that does not say what it asks for is nobody's to confirm");
+            Assert.IsFalse(PcCommercialService.RequestIsOpen(Make(i => i.ReleaseRequestedByUserId = null), now));
+            Assert.IsFalse(PcCommercialService.RequestIsOpen(Make(i => i.ReleaseRequestedAt = null), now));
+            Assert.IsFalse(PcCommercialService.RequestIsOpen(Make(i => i.Status = PcGuaranteeStatus.Released), now));
+            Assert.IsFalse(PcCommercialService.RequestIsOpen(Make(i => i.Status = PcGuaranteeStatus.Cancelled), now));
+            Assert.IsTrue(PcCommercialService.RequestIsOpen(Make(i => i.Status = PcGuaranteeStatus.Expired), now), "an expired guarantee can still be released by the client letter");
+        }
+
+        [TestMethod]
+        public async Task TheConfirmationRecordsTheDateAndTheNoteOfTheRequest()
+        {
+            // release: the second person gives another date and another wording; the guarantee is released with the date and the note of the first
+            int id = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            DateTime requested = DateTime.Today.AddDays(-5), other = DateTime.Today.AddDays(-1);
+            Assert.IsTrue((await Release(Commercial, id, requested, "client letter 40")).Success);
+            ResponseDto<PcGuaranteeDto> done = await Release(FinanceManager, id, other, "my own wording");
+            Assert.IsTrue(done.Success, done.Message);
+            Assert.IsTrue(done.Message.Contains("تاریخ درخواست‌دهنده ثبت شد"), "the confirming person is told that his date was replaced: " + done.Message);
+            PcGuaranteeEvent ev = H.Read(u => u.Set<PcGuaranteeEvent>().Single(e => e.GuaranteeInfoId == id));
+            Assert.AreEqual(PcGuaranteeEventKind.Release, ev.Kind);
+            Assert.AreEqual(requested, ev.EventDate, "the date of the request, not the date of the confirming call");
+            Assert.AreEqual("client letter 40 | تأییدکننده: my own wording", ev.Note);
+            Assert.AreEqual(27, ev.CreatedByUserId);
+            Assert.AreEqual(requested, done.Data.Events.Single().EventDate);
+
+            // the same date and the same note: nothing to say, the plain note
+            int same = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            Assert.IsTrue((await Release(Commercial, same, requested, "client letter 41")).Success);
+            ResponseDto<PcGuaranteeDto> sameDone = await Release(FinanceManager, same, requested, "  client letter 41 ");
+            Assert.IsTrue(sameDone.Success, sameDone.Message);
+            Assert.IsNull(sameDone.Message, "the confirming call agreed with the request: no remark");
+            PcGuaranteeEvent sameEv = H.Read(u => u.Set<PcGuaranteeEvent>().Single(e => e.GuaranteeInfoId == same));
+            Assert.AreEqual(requested, sameEv.EventDate);
+            Assert.AreEqual("client letter 41", sameEv.Note);
+
+            // cancellation: the same rule
+            int cancel = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            Assert.IsTrue((await Event(Commercial, cancel, PcGuaranteeEventKind.Cancellation, note: "bank letter 42", date: requested)).Success);
+            ResponseDto<PcGuaranteeDto> cancelled = await Event(Pmo2, cancel, PcGuaranteeEventKind.Cancellation, note: "bank letter 42 (read again)", date: other);
+            Assert.IsTrue(cancelled.Success, cancelled.Message);
+            Assert.IsTrue(cancelled.Message.Contains("تاریخ درخواست‌دهنده ثبت شد"), cancelled.Message);
+            PcGuaranteeEvent cancelEv = H.Read(u => u.Set<PcGuaranteeEvent>().Single(e => e.GuaranteeInfoId == cancel));
+            Assert.AreEqual(requested, cancelEv.EventDate);
+            Assert.AreEqual("bank letter 42 | تأییدکننده: bank letter 42 (read again)", cancelEv.Note);
+            Assert.AreEqual(12, cancelEv.CreatedByUserId);
+        }
+
+        [TestMethod]
+        public async Task ANoteLongerThanTheColumnIsRefusedAndTheJoinedNoteIsCutAtTheColumn()
+        {
+            int id = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            ResponseDto<PcGuaranteeDto> tooLong = await Release(Commercial, id, DateTime.Today, new string('x', 1001));
+            Assert.IsFalse(tooLong.Success);
+            Assert.IsTrue(tooLong.Message.Contains("1000"), tooLong.Message);
+            ResponseDto<PcGuaranteeDto> tooLongCancel = await Event(Commercial, id, PcGuaranteeEventKind.Cancellation, note: new string('x', 1001), date: DateTime.Today);
+            Assert.IsFalse(tooLongCancel.Success);
+            Assert.IsNull(Reload<PcGuaranteeInfo>(id).ReleaseRequestedByUserId, "a refused call records no request");
+
+            // a note of exactly 1000 characters is the longest; the joined note of the confirmation is cut at the column size
+            string longest = new string('a', 1000);
+            Assert.IsTrue((await Release(Commercial, id, DateTime.Today, longest)).Success);
+            Assert.AreEqual(1000, Reload<PcGuaranteeInfo>(id).ReleaseRequestedNote.Length);
+            ResponseDto<PcGuaranteeDto> done = await Release(FinanceManager, id, DateTime.Today, "b");
+            Assert.IsTrue(done.Success, done.Message);
+            string note = H.Read(u => u.Set<PcGuaranteeEvent>().Single(e => e.GuaranteeInfoId == id).Note);
+            Assert.AreEqual(1000, note.Length);
+            Assert.AreEqual(longest, note);
+        }
+
+        [TestMethod]
+        public async Task ARequestIsWithdrawnByTheOneWhoAskedOrByAPmoUserAndThenNobodyCanConfirmIt()
+        {
+            int id = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            DateTime date = DateTime.Today.AddDays(-1);
+
+            ResponseDto<PcGuaranteeDto> none = await Withdraw(Commercial, id);
+            Assert.IsFalse(none.Success, "nothing to withdraw yet");
+            Assert.IsTrue(none.Message.Contains("درخواستی منتظر تأیید نیست"), none.Message);
+
+            Assert.IsTrue((await Release(Commercial, id, date, "letter 50")).Success);
+            foreach (ClaimsPrincipal who in new[] { Qc, Accountant, Engineering, Construction })
+            {
+                ResponseDto<PcGuaranteeDto> refused = await Withdraw(who, id);
+                Assert.IsFalse(refused.Success, "a role outside the three cannot withdraw");
+                Assert.IsTrue(refused.Message.Contains(NotAllowed), refused.Message);
+            }
+            // a user of the roles who is neither the one who asked nor a PMO user
+            ResponseDto<PcGuaranteeDto> stranger = await Withdraw(FinanceManager, id);
+            Assert.IsFalse(stranger.Success);
+            Assert.IsTrue(stranger.Message.Contains("فقط کسی که آن را ثبت کرده یا کاربر PMO"), stranger.Message);
+            Assert.AreEqual(26, Reload<PcGuaranteeInfo>(id).ReleaseRequestedByUserId);
+            Assert.IsFalse((await Withdraw(Commercial, 987654)).Success, "unknown guarantee");
+
+            // the one who asked takes it back: all five fields are cleared
+            ResponseDto<PcGuaranteeDto> withdrawn = await Withdraw(Commercial, id);
+            Assert.IsTrue(withdrawn.Success, withdrawn.Message);
+            Assert.IsTrue(withdrawn.Message.Contains("درخواست آزادسازی پس گرفته شد"), withdrawn.Message);
+            Assert.IsFalse(withdrawn.Data.ReleaseRequestOpen);
+            PcGuaranteeInfo cleared = Reload<PcGuaranteeInfo>(id);
+            Assert.IsNull(cleared.ReleaseRequestedByUserId);
+            Assert.IsNull(cleared.ReleaseRequestedAt);
+            Assert.IsNull(cleared.ReleaseRequestedKind);
+            Assert.IsNull(cleared.ReleaseRequestedNote);
+            Assert.IsNull(cleared.ReleaseRequestedDate);
+            Assert.AreEqual(PcGuaranteeStatus.Active, cleared.Status);
+            Assert.IsFalse((await Withdraw(Commercial, id)).Success, "a second withdrawal finds nothing");
+
+            // the trail has the request and the withdrawal, with the user of each
+            List<FnAuditLog> rows = Modified(nameof(PcGuaranteeInfo), id);
+            Assert.AreEqual(2, rows.Count);
+            Assert.AreEqual(26, rows[1].UserId);
+            Assert.AreEqual(26, Fields(rows[1].BeforeJson)["ReleaseRequestedByUserId"].GetInt32());
+            Assert.AreEqual("Release", Fields(rows[1].BeforeJson)["ReleaseRequestedKind"].GetString());
+            Assert.AreEqual("letter 50", Fields(rows[1].BeforeJson)["ReleaseRequestedNote"].GetString());
+
+            // after the withdrawal a call of somebody else records a NEW request (it does not confirm the old one)
+            ResponseDto<PcGuaranteeDto> fresh = await Release(FinanceManager, id, date, "letter 50 again");
+            Assert.IsTrue(fresh.Success, fresh.Message);
+            Assert.AreEqual(PcGuaranteeStatus.Active, fresh.Data.Status);
+            Assert.AreEqual(27, fresh.Data.ReleaseRequestedByUserId);
+            Assert.AreEqual(0, EventCount(id));
+
+            // a PMO user takes back the request of somebody else (the one who asked is away)
+            ResponseDto<PcGuaranteeDto> byPmo = await Withdraw(Pmo1, id);
+            Assert.IsTrue(byPmo.Success, byPmo.Message);
+            Assert.IsNull(Reload<PcGuaranteeInfo>(id).ReleaseRequestedByUserId);
+            Assert.AreEqual(11, Modified(nameof(PcGuaranteeInfo), id).Last().UserId, "the trail names the PMO user who withdrew");
+
+            // a request for the cancellation is withdrawn the same way, and the answer names it
+            Assert.IsTrue((await Event(Commercial, id, PcGuaranteeEventKind.Cancellation, note: "bank letter 51", date: date)).Success);
+            ResponseDto<PcGuaranteeDto> cancelWithdrawn = await Withdraw(Commercial, id);
+            Assert.IsTrue(cancelWithdrawn.Success, cancelWithdrawn.Message);
+            Assert.IsTrue(cancelWithdrawn.Message.Contains("درخواست ابطال پس گرفته شد"), cancelWithdrawn.Message);
+
+            // a request that was confirmed, and a request that is older than seven days, cannot be withdrawn: there is nothing waiting
+            Assert.IsTrue((await Release(Commercial, id, date, "letter 52")).Success);
+            Assert.IsTrue((await Release(FinanceManager, id, date, "letter 52")).Success);
+            Assert.IsFalse((await Withdraw(Commercial, id)).Success, "a released guarantee has no request waiting");
+            Assert.AreEqual(PcGuaranteeStatus.Released, Reload<PcGuaranteeInfo>(id).Status);
+            int old = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30));
+            Assert.IsTrue((await Release(Commercial, old, date, "letter 53")).Success);
+            AgeRequest(old, 8);
+            Assert.IsFalse((await Withdraw(Commercial, old)).Success, "a forgotten request is not waiting either");
+        }
+
+        [TestMethod]
+        public async Task TheDtoOfTheListingCarriesTheOpenRequest()
+        {
+            int id = NewGuarantee(PcGuaranteeStatus.Active, DateTime.Today.AddDays(30), contractId: 7001);
+            DateTime date = DateTime.Today.AddDays(-3);
+            Assert.IsTrue((await Release(Commercial, id, date, "letter 60")).Success);
+            var page = await H.As(Pmo1, p => p.GetRequiredService<IPcCommercialService>().GetGuaranteesAsync(new PcGuaranteeQuery { ContractId = 7001, PageNumber = 1, PageSize = 20 }, CancellationToken.None));
+            Assert.IsTrue(page.Success, page.Message);
+            PcGuaranteeDto row = page.Data.Single(g => g.Id == id);
+            Assert.IsTrue(row.ReleaseRequestOpen);
+            Assert.AreEqual(PcGuaranteeCloseKind.Release, row.ReleaseRequestedKind);
+            Assert.AreEqual("letter 60", row.ReleaseRequestedNote);
+            Assert.AreEqual(date, row.ReleaseRequestedDate);
+            Assert.AreEqual(26, row.ReleaseRequestedByUserId);
+            AgeRequest(id, 8);
+            page = await H.As(Pmo1, p => p.GetRequiredService<IPcCommercialService>().GetGuaranteesAsync(new PcGuaranteeQuery { ContractId = 7001, PageNumber = 1, PageSize = 20 }, CancellationToken.None));
+            Assert.IsFalse(page.Data.Single(g => g.Id == id).ReleaseRequestOpen, "after seven days the listing shows the request as forgotten, though the fields stay");
         }
 
         [TestMethod]
@@ -994,11 +1294,16 @@ namespace MsTests
             CollectionAssert.AreEqual(Set("PMO,PLANNING,COMMERCIAL,FINANCIAL"), Set(RolesOf(controller, "EvaluateMilestonesAsync")),
                 "the evaluation of the payment milestones starts the invoicing flow: not for every signed-in user");
             CollectionAssert.AreEqual(Set("COMMERCIAL,FINANCEMANAGER,PMO"), Set(RolesOf(controller, "ReleaseGuaranteeAsync")));
+            CollectionAssert.AreEqual(Set("COMMERCIAL,FINANCEMANAGER,PMO"), Set(RolesOf(controller, "WithdrawGuaranteeRequestAsync")), "R1a2 (M-3): the withdrawal has the roles of the release");
 
             MethodInfo release = controller.GetMethod("ReleaseGuaranteeAsync");
             HttpPostAttribute post = release.GetCustomAttribute<HttpPostAttribute>();
             Assert.IsNotNull(post, "the release is a POST");
             Assert.AreEqual("guarantees/release", post.Template);
+
+            HttpPostAttribute withdraw = controller.GetMethod("WithdrawGuaranteeRequestAsync").GetCustomAttribute<HttpPostAttribute>();
+            Assert.IsNotNull(withdraw, "the withdrawal is a POST");
+            Assert.AreEqual("guarantees/withdraw", withdraw.Template);
         }
     }
 }

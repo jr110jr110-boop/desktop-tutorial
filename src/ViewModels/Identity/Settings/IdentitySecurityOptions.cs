@@ -29,5 +29,12 @@ namespace ViewModels.Identity.Settings
         /// chosen before the new password rule are unknown to us. The audit trail row "UpgradeForced" is the marker that it ran; set false to skip it.
         /// </summary>
         public bool ForcePasswordChangeAtUpgrade { get; set; } = true;
+
+        /// <summary>
+        /// ★ R1a2 (L-5): on the first start after an upgrade every PMO user (not the AI seats) who has no record of how he got the role gets a "Legacy" record (who gave the role is not known),
+        /// and the audit trail gets a row "LegacyPmoRecord" for each of them and one summary row, which is the marker that it ran; set false to skip it. The company should review the
+        /// list of PMO users once after this (the audit rows list them).
+        /// </summary>
+        public bool LegacyPmoRecordsAtUpgrade { get; set; } = true;
     }
 }

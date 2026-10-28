@@ -106,7 +106,52 @@ namespace Services.Identity
                 if (withoutLockout.Count > 0) context.SaveChanges();
 
                 ForcePasswordChangeOnce(context, freshInstall);
+                WriteLegacyPmoRecordsOnce(context, freshInstall);
             }
+        }
+
+        /// <summary>
+        /// R1a2 (L-5): the first start after the upgrade writes a "Legacy" record for every PMO user (not the AI seats, not deleted users) who has no record of how he got the role, so the
+        /// approval rules have data for them: who gave the role is not known (GrantedBy is 0), and the record is exempt from the minimum-days rule. The audit trail gets one row
+        /// "LegacyPmoRecord" per user and one summary row without a user, which is the marker that this ran (also written on a new installation, where there is nothing to record).
+        /// The company should review the list of PMO users once after the upgrade. <c>Identity:LegacyPmoRecordsAtUpgrade</c> = false skips the whole step.
+        /// </summary>
+        private void WriteLegacyPmoRecordsOnce(ApplicationDbContext context, bool freshInstall)
+        {
+            IdentitySecurityOptions options = _adminUserSeedOptions.Value.Identity ?? new IdentitySecurityOptions();
+            if (!options.LegacyPmoRecordsAtUpgrade) return;
+            if (context.Set<Entities.Model.NasbNiro.Finance.FnAuditLog>().Any(a => a.Action == IdentityAudit.LegacyPmoRecord && a.EntityId == null)) return;
+
+            var names = new System.Collections.Generic.List<string>();
+            if (!freshInstall)
+            {
+                Role pmo = context.Roles.FirstOrDefault(r => r.Name == IdentityRules.Pmo);
+                if (pmo != null)
+                {
+                    var recorded = new System.Collections.Generic.HashSet<int>();
+                    foreach (UserClaim claim in context.Set<UserClaim>().Where(c => c.ClaimType == IdentityRules.RoleGrantedClaimType).ToList())
+                        if (RoleGrantRecord.TryParse(claim.ClaimValue, out RoleGrantRecord record) && record.Role == IdentityRules.Pmo && !record.IsRemoved) recorded.Add(claim.UserId);
+
+                    var holders = context.Set<UserRole>().Where(ur => ur.RoleId == pmo.Id && !ur.User.IsDeleted)
+                        .Select(ur => new { ur.UserId, ur.User.UserName })
+                        .ToList();
+                    foreach (var holder in holders.Where(h => !global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(h.UserName) && !recorded.Contains(h.UserId)).OrderBy(h => h.UserId))
+                    {
+                        var record = new RoleGrantRecord { Role = IdentityRules.Pmo, GrantedBy = 0, ApprovedBy = 0, At = DateTimeOffset.Now, Legacy = true };
+                        context.Set<UserClaim>().Add(new UserClaim { UserId = holder.UserId, ClaimType = IdentityRules.RoleGrantedClaimType, ClaimValue = record.ToClaimValue() });
+                        IdentityAudit.Add(context, null, 0, IdentityAudit.Roles, holder.UserId, IdentityAudit.LegacyPmoRecord,
+                            $"ارتقا: برای مدیر PMO «{holder.UserName}» پرونده‌ی «قدیمی» ثبت شد (ثبت‌کننده‌ی نقش مشخص نیست)");
+                        names.Add(holder.UserName);
+                    }
+                }
+            }
+
+            IdentityAudit.Add(context, null, 0, IdentityAudit.User, null, IdentityAudit.LegacyPmoRecord,
+                freshInstall
+                    ? "نصب تازه: پرونده‌ی قدیمی مدیران PMO لازم نیست (نشانگر ثبت شد)"
+                    : $"ارتقا: برای {names.Count} مدیر PMO پرونده‌ی «قدیمی» ثبت شد؛ فهرست مدیران PMO را یک‌بار بازبینی کنید: {string.Join("، ", names)}");
+            context.SaveChanges();
+            _logger.LogInformation("Legacy PMO records written at upgrade: {Count} user(s) (fresh installation: {Fresh}).", names.Count, freshInstall);
         }
 
         /// <summary>
