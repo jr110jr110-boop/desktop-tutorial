@@ -115,6 +115,25 @@ export const InventoryRoles = {
   approvePlanning: ["PLANNING", "PMO"],
   approveQuality: ["QC"],
   executeNcr: list("PMO,QC,WAREHOUSE"),
+  // R1q: NCR signatures, cancel and close, item quality fields, opening import
+  /** the quality signature of an NCR comes from QC or the QA manager (InventoryRoles.RoleQualitySigner); the maker/editor of the NCR may not give it, the API refuses with its own message */
+  qualitySigners: list("QC,QA"),
+  /** the engineering signature and the concession permit of an NCR (InventoryRoles.RoleEngineering) */
+  engineeringSigners: ["ENGINEERING"],
+  /** the manufacturing signature of an NCR (InventoryRoles.RoleManufacturing) */
+  manufacturingSigners: list("CONSTRUCTION,PRODUCTIONMANAGER"),
+  /** close or cancel an NCR, link the re-inspection (InventoryRoles.QcOrQa; PMO reads NCRs but does not close them) */
+  qcOrQa: list("QC,QA"),
+  /** POST inventory/ncrs/approve: the approvers of the module and the QA manager (InventoryRoles.NcrApprovers; the Approvers constant of the API also holds PRODUCTIONMANAGER) */
+  ncrApprovers: list("PMO,PLANNING,WHSUPERVISOR,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE,FINANCIAL,PRODUCTIONMANAGER,QA"),
+  /** change the quality fields of an item and read the pending changes (InventoryRoles.ItemQuality); the decision on a weakening is the QA manager's */
+  itemQuality: list("PMO,QC,QA"),
+  /** approve or reject a pending weakening of the quality fields of an item (QA manager) */
+  itemQualityDeciders: ["QA"],
+  /** POST inventory/documents/import-opening (InventoryRoles.Documents + FINANCEMANAGER) */
+  openingImport: list("PMO,WAREHOUSE,WHSUPERVISOR,FINANCEMANAGER"),
+  /** only the finance manager may allow zero-priced rows in an opening import (OpeningStockService.OpeningZeroPriceRole) */
+  zeroPriceAllowers: ["FINANCEMANAGER"],
 };
 
 /**
@@ -378,7 +397,10 @@ export function hasAccess(claim: string | undefined | null): boolean {
  * the write roles are checked inside the services, so they are listed here to show or hide the buttons.
  */
 export const QualityRoles = {
-  readers: list("PMO,CEO,QC,QA,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,PLANNING,WAREHOUSE,WHSUPERVISOR,COMMERCIAL"),
+  /** QualityRoles.Readers; R1q D27 added the auditor, the production and shop managers, maintenance, service, the project manager and the document controller */
+  readers: list("PMO,CEO,QC,QA,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,PLANNING,WAREHOUSE,WHSUPERVISOR,COMMERCIAL,AUDITOR,PRODUCTIONMANAGER,SHOPSUPERVISOR,MAINTENANCE,SERVICE,PROJECTMANAGER,DCC"),
+  /** the QA manager: approves what is relaxed (calibration waiver, cancelling a mandatory CAPA) and may cancel an NCR */
+  qaManager: ["QA"],
   /** only QC inspects, tests, calibrates, notifies and releases control points */
   inspectors: ["QC"],
   managers: list("QC,QA,PMO"),
@@ -391,6 +413,8 @@ export const QualityRoles = {
   recordWriters: list("QC,PMO,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER"),
   capaStaff: list("QA,QC,PMO"),
   capaClosers: list("QA,QC"),
+  /** runs the nightly late-CAPA escalation now (POST quality/capas/escalate: QA, PMO) */
+  capaEscalate: list("QA,PMO"),
   certificateWriters: list("QC,QA,PMO,WAREHOUSE,WHSUPERVISOR,ENGINEERING"),
   documentApprovers: list("QA,PMO,CEO"),
   documentReviewers: list("QA,QC,PMO,ENGINEERING,ENGINEER"),

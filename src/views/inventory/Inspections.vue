@@ -2,7 +2,8 @@
 import { computed, nextTick, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
-import { getInspections, getWarehouses, recordInspection, uploadFile } from "@/api/InventoryAPIs";
+import { getInspections, getWarehouses, recordInspection, rowsOf, uploadFile } from "@/api/InventoryAPIs";
+import { getEquipmentList } from "@/api/QualityAPIs";
 import {
   distributionText,
   documentTypes,
@@ -28,6 +29,14 @@ const form = ref<any>(null);
 const saving = ref(false);
 const printing = ref<any>(null);
 const canRecord = hasRole(InventoryRoles.qc);
+// measuring instruments (quality module): an inspection names the instruments used and every measured value names its own instrument; the API refuses an instrument
+// whose calibration is not valid today (overdue or out of service), so only the usable ones are offered
+const equipment = ref<any[]>([]);
+const usableEquipment = computed(() => equipment.value.filter((e) => e.status !== 2 && e.status !== 3));
+const equipmentLabel = (id: number) => {
+  const e = equipment.value.find((x) => x.id === id);
+  return e ? `${e.code} ${e.name}` : "#" + id;
+};
 
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 // the accepted goods are released to a normal warehouse, not to quarantine, scrap or the contractor
@@ -59,7 +68,57 @@ function openResult(row: any) {
     reportDocumentId: null,
     note: "",
     rejectReason: "",
+    equipmentIds: [] as number[],
+    measurements: [] as any[],
   };
+}
+
+function addMeasurement() {
+  form.value.measurements.push({ characteristic: "", nominal: null, tolPlus: 0, tolMinus: 0, measured: null, unit: "", equipmentId: form.value.equipmentIds[0] ?? null });
+}
+
+// the display of the verdict only; the API decides (a value out of tolerance cannot be accepted)
+function passes(m: any) {
+  if (m.nominal === null || m.nominal === "" || m.measured === null || m.measured === "") return null;
+  const round = (v: number) => Math.round(v * 1e9) / 1e9;
+  const measured = round(Number(m.measured));
+  return measured >= round(Number(m.nominal) - (Number(m.tolMinus) || 0)) && measured <= round(Number(m.nominal) + (Number(m.tolPlus) || 0));
+}
+const hasFailedMeasurement = computed(() => !!form.value && form.value.measurements.some((m: any) => passes(m) === false));
+
+// an instrument that is ticked stays selectable for the values; a value whose instrument was un-ticked keeps it (the API still checks it)
+function measurementsBody(): any[] | null {
+  const out: any[] = [];
+  for (const m of form.value.measurements) {
+    const name = String(m.characteristic || "").trim();
+    const numbers = [m.nominal, m.measured, m.tolPlus, m.tolMinus];
+    if (!name) {
+      fail("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
+      return null;
+    }
+    if (numbers.some((v) => v === null || v === "" || !Number.isFinite(Number(v)))) {
+      fail(`مقدار اسمی، تلرانس‌ها و مقدار اندازه‌گیری‌شده «${name}» را به عدد وارد کنید.`);
+      return null;
+    }
+    if (Number(m.tolPlus) < 0 || Number(m.tolMinus) < 0) {
+      fail("تلرانس‌ها را به صورت مقدار مثبت وارد کنید (+ و −).");
+      return null;
+    }
+    if (!m.equipmentId) {
+      fail(`برای اندازه‌گیری «${name}» ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید.`);
+      return null;
+    }
+    out.push({
+      characteristic: name,
+      nominal: Number(m.nominal),
+      tolPlus: Number(m.tolPlus),
+      tolMinus: Number(m.tolMinus),
+      measured: Number(m.measured),
+      unit: String(m.unit || "").trim() || null,
+      equipmentId: Number(m.equipmentId),
+    });
+  }
+  return out;
 }
 
 // serial items: the rejected pieces are ticked one by one
@@ -90,6 +149,8 @@ async function attach(event: Event) {
 
 async function save() {
   const f = form.value;
+  const measurements = measurementsBody();
+  if (!measurements) return;
   saving.value = true;
   const [data, error] = await recordInspection({
     id: f.id,
@@ -102,6 +163,10 @@ async function save() {
     reportDocumentId: f.reportDocumentId,
     note: f.note,
     rejectReason: f.rejectReason,
+    // the API takes "measured" from the values (the flag is ignored there); the instruments are checked for a valid calibration on the day
+    measured: measurements.length > 0,
+    equipmentIds: f.equipmentIds,
+    measurements,
   });
   saving.value = false;
   if (error) return fail(error);
@@ -121,6 +186,8 @@ onMounted(async () => {
   const [w] = await getWarehouses();
   warehouses.value = w || [];
   load();
+  // the list is read by the quality readers; a user outside them gets an error that is not worth showing here
+  getEquipmentList({ PageSize: 300 }).then(([list]) => (equipment.value = rowsOf(list)));
 });
 </script>
 
@@ -136,6 +203,8 @@ onMounted(async () => {
         { label: 'تاریخ رسید', value: jalali(printing.receiptDate) },
         { label: 'تامین‌کننده', value: printing.providerName || '-' },
         { label: 'شماره گزارش بازرسی', value: printing.reportNumber || '-' },
+        ...(printing.reinspectionOfNcrNumber ? [{ label: 'بازرسی مجدد پس از اصلاح گزارش', value: printing.reinspectionOfNcrNumber, ltr: true }] : []),
+        ...(printing.equipmentIds && printing.equipmentIds.length ? [{ label: 'ابزار اندازه‌گیری', value: printing.equipmentIds.map(equipmentLabel).join('، '), ltr: true }] : []),
       ]"
       :notes="printing.note ? [{ label: 'توضیح', value: printing.note }] : []"
       :signatures="[
@@ -179,6 +248,32 @@ onMounted(async () => {
       <p v-if="printing.serialNumbers.length" class="small m-1">
         <b>سریال‌ها:</b> <span class="inv-ltr">{{ printing.serialNumbers.join("، ") }}</span>
       </p>
+      <table v-if="printing.measurements && printing.measurements.length" class="mt-1">
+        <thead>
+          <tr>
+            <th>مشخصه</th>
+            <th>اسمی</th>
+            <th>+ تلرانس</th>
+            <th>− تلرانس</th>
+            <th>اندازه‌گیری‌شده</th>
+            <th>واحد</th>
+            <th>ابزار</th>
+            <th>نتیجه</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(m, i) in printing.measurements" :key="i">
+            <td>{{ m.characteristic }}</td>
+            <td class="num">{{ num(m.nominal) }}</td>
+            <td class="num">{{ num(m.tolPlus) }}</td>
+            <td class="num">{{ num(m.tolMinus) }}</td>
+            <td class="num">{{ num(m.measured) }}</td>
+            <td>{{ m.unit }}</td>
+            <td class="inv-ltr">{{ m.equipmentId ? equipmentLabel(m.equipmentId) : "-" }}</td>
+            <td>{{ m.pass ? "قبول" : "رد" }}</td>
+          </tr>
+        </tbody>
+      </table>
     </PrintForm>
 
     <div :class="{ 'screen-only': printing }">
@@ -220,7 +315,13 @@ onMounted(async () => {
                 <td class="text-center inv-muted" colspan="10">موردی نیست.</td>
               </tr>
               <tr v-for="r in rows" :key="r.id">
-                <td class="inv-ltr">{{ r.number }}</td>
+                <td class="inv-ltr">
+                  {{ r.number }}
+                  <div v-if="r.reinspectionOfNcrId" class="small">
+                    <span class="inv-badge info">بازرسی مجدد</span>
+                    <router-link :to="{ name: 'InventoryNcrEdit', params: { id: r.reinspectionOfNcrId } }" class="inv-ltr ms-1" :title="'بازرسی مجدد پس از اصلاح گزارش عدم انطباق ' + r.reinspectionOfNcrNumber">{{ r.reinspectionOfNcrNumber }}</router-link>
+                  </div>
+                </td>
                 <td>
                   <router-link :to="{ name: 'InventoryDocumentEdit', params: { id: r.receiptDocumentId } }" class="inv-ltr">{{ r.receiptNumber }}</router-link>
                 </td>
@@ -255,11 +356,17 @@ onMounted(async () => {
     </div>
 
     <div v-if="form" class="inv-modal-backdrop" @click.self="form = null">
-      <div class="inv-modal" style="max-width: 640px">
+      <div class="inv-modal wide" style="max-width: 860px">
         <h2 class="inv-title mb-2">نتیجه بازرسی {{ form.row.number }}</h2>
         <p class="small mb-2">
           <span class="inv-ltr">{{ form.row.itemCode }}</span> — {{ form.row.itemTitle }} · {{ num(form.row.quantity) }} {{ form.row.unit }} · رسید
           <span class="inv-ltr">{{ form.row.receiptNumber }}</span>
+        </p>
+        <p v-if="form.row.reinspectionOfNcrId" class="small mb-2">
+          <span class="inv-badge info">بازرسی مجدد</span>
+          کالای برگشته از دوباره‌کاری یا تعمیر گزارش
+          <router-link :to="{ name: 'InventoryNcrEdit', params: { id: form.row.reinspectionOfNcrId } }" class="inv-ltr">{{ form.row.reinspectionOfNcrNumber }}</router-link>
+          است؛ گزارش فقط با قبول‌شدن این بازرسی بسته می‌شود.
         </p>
         <div v-if="form.row.serialNumbers.length" class="mb-2">
           <div class="small mb-1">قطعات مردود را علامت بزنید:</div>
@@ -307,6 +414,66 @@ onMounted(async () => {
           <div v-if="form.rejectedQuantity > 0" class="col-12">
             <label class="form-label small mb-0">شرح عدم انطباق (برای NCR) *</label>
             <textarea v-model="form.rejectReason" class="form-control form-control-sm" rows="2"></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">ابزارهای اندازه‌گیری به‌کاررفته</label>
+            <div class="d-flex flex-wrap gap-2">
+              <label v-for="e in usableEquipment" :key="e.id" class="form-check small border rounded px-2 py-1">
+                <input v-model="form.equipmentIds" :value="e.id" class="form-check-input ms-1" type="checkbox" />
+                <span class="inv-ltr">{{ e.code }}</span> {{ e.name }}
+                <span v-if="e.status === 1" class="inv-badge warn">نزدیک سررسید</span>
+              </label>
+              <span v-if="!usableEquipment.length" class="inv-muted small">ابزار اندازه‌گیری با کالیبراسیون معتبر ثبت نشده است.</span>
+            </div>
+            <span class="inv-muted small">ابزار سررسیدگذشته یا خارج از رده در فهرست نیست؛ کالیبراسیون ابزار در روز ثبت بررسی می‌شود.</span>
+          </div>
+          <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+              <label class="form-label small mb-0">مقادیر اندازه‌گیری‌شده (ابعاد، ضخامت، سختی…)</label>
+              <button class="btn btn-sm btn-outline-primary py-0" type="button" @click="addMeasurement">+ مقدار</button>
+            </div>
+            <div v-if="form.measurements.length" class="table-responsive">
+              <table class="table table-sm mb-1">
+                <thead>
+                  <tr>
+                    <th>مشخصه *</th>
+                    <th>اسمی</th>
+                    <th>+ تلرانس</th>
+                    <th>− تلرانس</th>
+                    <th>اندازه‌گیری‌شده</th>
+                    <th>واحد</th>
+                    <th>ابزار *</th>
+                    <th></th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(m, i) in form.measurements" :key="i">
+                    <td><input v-model="m.characteristic" class="form-control form-control-sm" maxlength="200" /></td>
+                    <td><input v-model="m.nominal" class="form-control form-control-sm inv-ltr" step="any" type="number" /></td>
+                    <td><input v-model="m.tolPlus" class="form-control form-control-sm inv-ltr" min="0" step="any" type="number" /></td>
+                    <td><input v-model="m.tolMinus" class="form-control form-control-sm inv-ltr" min="0" step="any" type="number" /></td>
+                    <td><input v-model="m.measured" class="form-control form-control-sm inv-ltr" step="any" type="number" /></td>
+                    <td><input v-model="m.unit" class="form-control form-control-sm" maxlength="30" style="width: 4.5rem" /></td>
+                    <td>
+                      <select v-model="m.equipmentId" class="form-select form-select-sm">
+                        <option :value="null">-</option>
+                        <option v-for="e in usableEquipment" :key="e.id" :value="e.id">{{ e.code }} {{ e.name }}</option>
+                      </select>
+                    </td>
+                    <td class="text-nowrap">
+                      <span v-if="passes(m) === true" class="inv-badge ok">در تلرانس</span>
+                      <span v-else-if="passes(m) === false" class="inv-badge bad">خارج از تلرانس</span>
+                    </td>
+                    <td><button class="btn btn-sm btn-outline-danger py-0" type="button" @click="form.measurements.splice(i, 1)">حذف</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="inv-muted small mb-0">بازرسی چشمی یا مدرکی مقدار اندازه‌گیری‌شده ندارد؛ برای بازرسی ابعادی هر مقدار را با ابزارش ثبت کنید.</p>
+            <p v-if="hasFailedMeasurement && !(form.rejectedQuantity > 0)" class="small text-danger mb-0">
+              مقدار خارج از تلرانس ثبت شده است؛ کل مقدار قبول نمی‌شود، مقدار رد را مشخص کنید.
+            </p>
           </div>
           <div class="col-12">
             <label class="form-label small mb-0">توضیح</label>

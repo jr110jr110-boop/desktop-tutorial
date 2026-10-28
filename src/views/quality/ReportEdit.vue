@@ -10,7 +10,7 @@ import ItemPicker from "@/components/inventory/ItemPicker.vue";
 import { getEquipmentList, getItpByWorkOrder, getQualifications, getReportStandards, getTestReport, saveTestReport, testReportAction } from "@/api/QualityAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, today } from "@/composables/inventory";
-import { dateInput, qualificationStates, releaseParties, reportResults, reportStatuses, reportTypes, resultBadge, testTypes } from "@/composables/quality";
+import { dateInput, qualificationStates, releaseParties, reportResults, reportStatuses, reportTypes, resultBadge, testTypes, useBackdateWindow } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
 
 // One test report: values with limits (standards / ITP), indications, equipment, witnesses, submit and approve.
@@ -32,6 +32,11 @@ async function doPrint() {
 const isQc = hasRole(QualityRoles.inspectors);
 
 const editable = computed(() => rep.value && (isNew || rep.value.status === 0 || rep.value.status === 3));
+// the date of a report is limited to the back-date window of the company (R1q D15): from MaxBackdateDays days back to tomorrow; the API refuses a date outside it with its own
+// Persian text, which is shown. A draft or rejected report is judged by the date it was first entered with (review M15).
+const { min: dateMin, max: dateMax, hint: dateHint, warning: dateWarning, load: loadWindow } = useBackdateWindow(true);
+const enteredOn = ref<string | null>(null);
+const staleDraft = computed(() => !isNew && !!rep.value && !!editable.value && !!enteredOn.value && dateWarning(enteredOn.value) !== "");
 const ndtMethod = computed(() => ({ 1: "PT", 2: "MT", 3: "UT", 4: "RT" } as Record<number, string>)[rep.value?.type]);
 const hasIndications = computed(() => [1, 2, 3, 4].includes(rep.value?.type));
 
@@ -44,6 +49,7 @@ function blank() {
 }
 
 function load(dto: any) {
+  enteredOn.value = dateInput(dto.reportDate);
   rep.value = {
     ...dto,
     reportDate: dateInput(dto.reportDate),
@@ -138,6 +144,7 @@ async function loadQualifications() {
 }
 
 onMounted(async () => {
+  loadWindow();
   const [eq] = await getEquipmentList({ PageSize: 300 });
   equipment.value = rowsOf(eq).filter((e: any) => e.status !== 3);
   if (isNew) {
@@ -178,13 +185,20 @@ onMounted(async () => {
         <ul class="mb-0"><li v-for="(p, i) in rep.problems" :key="i">{{ p }}</li></ul>
       </div>
       <div v-if="rep.status === 3 && rep.rejectReason" class="alert alert-danger py-2">دلیل رد: {{ rep.rejectReason }}</div>
+      <div v-if="staleDraft" class="alert alert-warning py-2">
+        تاریخ ثبت‌شده این گزارش ({{ jalali(enteredOn) }}) از مهلت ثبت گذشته است؛ پیش‌نویس یا گزارش ردشده‌ای که از مهلت گذشته ویرایش نمی‌شود. گزارش تازه‌ای با تاریخ واقعی آزمون ثبت کنید.
+      </div>
 
       <div class="row g-2">
         <div class="col-md-3">
           <label class="form-label small mb-0">نوع گزارش</label>
           <select v-model="rep.type" :disabled="!isNew" class="form-select form-select-sm"><option v-for="(t, k) in reportTypes" :key="k" :value="Number(k)">{{ t }}</option></select>
         </div>
-        <div class="col-md-2"><label class="form-label small mb-0">تاریخ</label><input v-model="rep.reportDate" :disabled="!editable" class="form-control form-control-sm" type="date" /></div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">تاریخ</label>
+          <input v-model="rep.reportDate" :disabled="!editable" :max="dateMax" :min="dateMin" class="form-control form-control-sm" type="date" />
+          <span v-if="editable && dateWarning(rep.reportDate)" class="small text-danger">{{ dateWarning(rep.reportDate) }}</span>
+        </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">دستور ساخت</label>
           <WorkOrderSelect v-if="editable" v-model="rep.workOrderId" @change="loadActivities" />
@@ -220,6 +234,7 @@ onMounted(async () => {
         <div class="col-md-4"><label class="form-label small mb-0">پیوست (عکس / نقشه نشانه‌ها)</label><DocAttach v-model="rep.documentId" :disabled="!editable" title="پیوست گزارش آزمون" /></div>
         <div class="col-md-8"><label class="form-label small mb-0">توضیح</label><input v-model="rep.note" :disabled="!editable" class="form-control form-control-sm" /></div>
       </div>
+      <p v-if="editable" class="inv-muted small mt-2 mb-0">{{ dateHint }}</p>
       <p v-if="rep.examinerName || rep.approvedByName" class="small mt-2 mb-0">
         آزمونگر: {{ rep.examinerName }} <span v-if="rep.submittedAt">— ارسال: {{ jalali(rep.submittedAt, true) }}</span>
         <span v-if="rep.approvedByName">— تایید: {{ rep.approvedByName }} {{ jalali(rep.approvedAt, true) }}</span>

@@ -1,5 +1,8 @@
-import { ref, type Ref } from "vue";
+import moment from "moment-jalaali";
+import { computed, ref, type Ref } from "vue";
+import { getQualitySettings } from "@/api/QualityAPIs";
 import { fail } from "@/composables/inventory";
+import { hasRole, QualityRoles } from "@/composables/roles";
 
 // Names for the quality pages (enums of the API, QualityEnums.cs). Values are numbers in the JSON.
 export const productTypes: Record<number, string> = { 1: "توربین بخار", 2: "واحد ORC", 3: "کندانسور", 4: "پمپ", 5: "سیستم روغن روانکاری", 6: "شیر", 9: "سایر" };
@@ -42,10 +45,15 @@ export const capaStatuses: Record<number, string> = { 0: "باز (ناقص)", 1:
 export const releaseNoteStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "صادر شد", 2: "لغو شد" };
 export const complaintStatuses: Record<number, string> = { 0: "دریافت شد", 1: "در حال بررسی", 2: "پاسخ داده شد", 3: "بسته شد" };
 export const documentTypes: Record<number, string> = { 1: "رویه (PR)", 2: "دستورالعمل (WI)", 3: "فرم (FO)", 4: "BL", 5: "نقشه", 6: "مشخصات فنی", 9: "سایر" };
-export const documentStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "در بررسی", 2: "تاییدشده", 3: "معتبر", 4: "منسوخ" };
+/** ControlledDocumentStatus of the API; 5 = approved with an effective date in the future (the current revision stays in force until that day, R1q D41). */
+export const documentStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "در بررسی", 2: "تاییدشده", 3: "معتبر", 4: "منسوخ", 5: "زمان‌بندی‌شده" };
+/** Colour of a document or revision status: in force green, obsolete red, scheduled (a future effective date) blue, the ones on their way to approval amber. */
+export const documentStatusBadge = (s: number) => (s === 3 ? "ok" : s === 4 ? "bad" : s === 5 ? "info" : "warn");
 export const auditStatuses: Record<number, string> = { 0: "برنامه‌ریزی‌شده", 1: "انجام‌شده", 2: "بسته‌شده" };
 export const findingTypes: Record<number, string> = { 1: "عدم انطباق عمده", 2: "عدم انطباق جزئی", 3: "مشاهده", 4: "فرصت بهبود" };
 export const reviewStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "برگزار شد", 2: "بسته شد" };
+/** ReviewDecisionStatus of the API (R1q D23): the follow-up of one decision of a closed management review. */
+export const reviewDecisionStatuses: Record<number, string> = { 0: "باز", 1: "انجام شد", 2: "لغو شد" };
 export const severities: Record<number, string> = { 0: "تعیین نشده", 1: "جزئی (Minor)", 2: "عمده (Major)" };
 export const alertLevelClass: Record<string, string> = { danger: "alert-danger", warning: "alert-warning", info: "alert-info" };
 
@@ -71,6 +79,72 @@ export const qualityFormCodes = {
 
 export const distributionQc = "توزیع نسخ: ۱- کنترل کیفیت ۲- مهندسی ۳- تولید ۴- تضمین کیفیت";
 export const distributionQa = "توزیع نسخ: ۱- تضمین کیفیت ۲- مدیریت ۳- واحدهای ذی‌ربط";
+
+/** An accepted re-inspection as the API takes it: kind is QcInspection, QcRecord or TestReport (NCR execute / close, out-of-tolerance re-inspection). */
+export interface ReinspectionValue {
+  kind: string | null;
+  recordId: number | null;
+}
+
+export const reinspectionKinds: Record<string, string> = {
+  QcInspection: "بازرسی ورودی مجدد",
+  QcRecord: "سابقه بازرسی (QC)",
+  TestReport: "گزارش آزمون",
+};
+
+/**
+ * The numeric values of the quality settings (key -> value), read once and shared by the pages that need one (the back-date window, the minimum notice days of an ITP).
+ * GET quality/settings answers the quality readers only; for anybody else the map stays empty and the defaults of the caller apply (the API decides anyway).
+ */
+const settingValues = ref<Record<string, number>>({});
+let settingsRequest: Promise<void> | null = null;
+
+export function loadSettingValues(): Promise<void> {
+  // the settings endpoint answers the readers of the module only: for the others nothing is asked and the defaults apply
+  if (!hasRole(QualityRoles.readers)) return Promise.resolve();
+  if (!settingsRequest) {
+    settingsRequest = getQualitySettings().then(([data]) => {
+      const rows = Array.isArray(data) ? data : data?.data || [];
+      const values: Record<string, number> = {};
+      rows.forEach((x: any) => {
+        if (x && x.key && x.value !== null && x.value !== "" && Number.isFinite(Number(x.value))) values[x.key] = Number(x.value);
+      });
+      settingValues.value = values;
+    });
+  }
+  return settingsRequest;
+}
+
+/** Forget the cached values (after a setting was saved) so that the next page reads the new ones. */
+export function resetSettingValues() {
+  settingsRequest = null;
+}
+
+/** The value of one setting, or the fallback while it is unknown. */
+export const settingValue = (key: string, fallback: number) => computed(() => settingValues.value[key] ?? fallback);
+
+/**
+ * The back-date window of the company (R1q D15, setting MaxBackdateDays): an inspection record or a test report may be dated from today minus that many days to tomorrow
+ * (one day of leeway for the time zone of the browser), a weld log from the same day to today. The pickers get min and max; a date outside the window shows a warning and the
+ * API refuses it with its own Persian text, which the page shows. Without the setting (the settings endpoint answers readers only) the default of 7 days applies.
+ */
+export function useBackdateWindow(allowTomorrow = true) {
+  const days = settingValue("MaxBackdateDays", 7);
+  const min = computed(() => moment().subtract(days.value, "days").format("YYYY-MM-DD"));
+  const max = computed(() => moment().add(allowTomorrow ? 1 : 0, "days").format("YYYY-MM-DD"));
+  const hint = computed(
+    () => `تاریخ ثبت از ${days.value} روز قبل تا ${allowTomorrow ? "فردا" : "امروز"} مجاز است (تنظیم «حداکثر تاخیر مجاز در ثبت» در تنظیمات کیفیت)؛ برای ثبت دیرتر QA مهلت را تغییر می‌دهد.`
+  );
+  /** A warning for a date outside the window, or "" (the API decides; this only warns before the save). */
+  function warning(value: string | null | undefined): string {
+    if (!value) return "";
+    const day = String(value).slice(0, 10);
+    if (day > max.value) return "تاریخ نمی‌تواند در آینده باشد.";
+    if (day < min.value) return `ثبت با تاخیر بیش از ${days.value} روز مجاز نیست.`;
+    return "";
+  }
+  return { days, min, max, hint, warning, load: loadSettingValues };
+}
 
 /** Date value for <input type="date">. */
 export function dateInput(value: string | null | undefined): string | null {

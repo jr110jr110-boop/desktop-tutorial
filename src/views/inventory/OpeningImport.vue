@@ -5,6 +5,7 @@ import { computed, ref } from "vue";
 import * as XLSX from "xlsx";
 import { importOpening } from "@/api/InventoryAPIs";
 import { fail, ok, today } from "@/composables/inventory";
+import { hasRole, InventoryRoles } from "@/composables/roles";
 
 // the fields of OpeningImportRowDto and the header words that are recognised automatically
 const fields = [
@@ -17,16 +18,35 @@ const fields = [
   { key: "certificateNumber", label: "گواهی (MTC)", words: ["گواهی", "mtc", "certificate"] },
   { key: "labelNumber", label: "شماره برچسب (YYDDDNNNN)", words: ["برچسب", "شماره برچسب", "label"] },
   { key: "serialNumbers", label: "سریال‌ها", words: ["سریال", "سریال‌ها", "serial", "s/n"] },
-  { key: "unitPrice", label: "فی (ریال)", words: ["فی", "قیمت", "قیمت واحد", "price", "unit price"] },
+  { key: "unitPrice", label: "فی (ریال) *", words: ["فی", "قیمت", "قیمت واحد", "price", "unit price"] },
   { key: "description", label: "توضیح", words: ["توضیح", "توضیحات", "description", "note"] },
 ];
 
 const state = ref<any>(null);
-const header = ref({ documentDate: today(), reference: "", createLocations: true, importValidRows: false });
+const header = ref({ documentDate: today(), reference: "", createLocations: true, importValidRows: false, allowZeroPrice: false });
 const busy = ref(false);
 const result = ref<any>(null);
+// R1q D35: every row needs a unit price (stock without a price is valued at zero in the books); only the finance manager may let rows come in without one, knowingly
+const canAllowZeroPrice = hasRole(InventoryRoles.zeroPriceAllowers);
 
 const mapped = computed(() => (state.value ? fields.filter((f) => state.value.map[f.key] >= 0) : []));
+// rows with a quantity but no usable price (the API lists each of them as an error unless the finance manager allows zero prices)
+const unpricedRows = computed(() => {
+  if (!state.value) return [] as number[];
+  const out: number[] = [];
+  state.value.rows.forEach((r: any[], i: number) => {
+    const code = cell(r, "itemCode");
+    const warehouse = cell(r, "warehouseCode");
+    if (code === null && warehouse === null) return;
+    const quantity = toNumber(cell(r, "quantity")) ?? 0;
+    const serials = (cell(r, "serialNumbers") || "").trim();
+    // a serial item takes its quantity from the serial list, so a row with serials counts too
+    if (quantity <= 0 && !serials) return;
+    const price = toNumber(cell(r, "unitPrice"));
+    if (price === null || price <= 0) out.push(i + 2);
+  });
+  return out;
+});
 
 function normalize(text: any): string {
   return String(text ?? "").trim().toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/\s+/g, " ");
@@ -98,8 +118,18 @@ function buildRows() {
 async function run() {
   if (state.value.map.itemCode < 0 || state.value.map.warehouseCode < 0 || state.value.map.quantity < 0)
     return fail("ستون کد کالا، کد انبار و مقدار را مشخص کنید.");
+  const allowZeroPrice = canAllowZeroPrice && header.value.allowZeroPrice;
+  if (state.value.map.unitPrice < 0 && !allowZeroPrice)
+    return fail("ستون فی (قیمت واحد) را مشخص کنید؛ موجودی اول دوره بدون قیمت در دفتر با ارزش صفر ثبت می‌شود و فقط مدیر مالی می‌تواند آن را صریحاً مجاز کند.");
   busy.value = true;
-  const [data, error] = await importOpening({ ...header.value, rows: buildRows() });
+  const [data, error] = await importOpening({
+    documentDate: header.value.documentDate,
+    reference: header.value.reference,
+    createLocations: header.value.createLocations,
+    importValidRows: header.value.importValidRows,
+    allowZeroPrice,
+    rows: buildRows(),
+  });
   busy.value = false;
   if (error) return fail(error);
   result.value = data;
@@ -152,6 +182,15 @@ async function run() {
         </table>
       </div>
 
+      <div v-if="unpricedRows.length" class="alert py-2 small mt-2 mb-0" :class="header.allowZeroPrice && canAllowZeroPrice ? 'alert-warning' : 'alert-danger'">
+        {{ unpricedRows.length }} ردیف فی (قیمت واحد) ندارد (ردیف
+        <span class="inv-ltr">{{ unpricedRows.slice(0, 15).join("، ") }}</span><span v-if="unpricedRows.length > 15"> و …</span>).
+        <template v-if="header.allowZeroPrice && canAllowZeroPrice">با مجوز مدیر مالی این ردیف‌ها با ارزش صفر وارد و در سابقه ممیزی ثبت می‌شوند.</template>
+        <template v-else>
+          موجودی اول دوره بدون قیمت در دفتر با ارزش صفر ثبت می‌شود؛ این ردیف‌ها خطا می‌گیرند و وارد نمی‌شوند. قیمت را در فایل بنویسید<span v-if="!canAllowZeroPrice"> یا از مدیر مالی بخواهید ورود را انجام دهد</span>.
+        </template>
+      </div>
+
       <div class="row g-2 mt-1 align-items-end">
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ سند</label>
@@ -169,6 +208,10 @@ async function run() {
           <label class="form-check small mb-0">
             <input v-model="header.importValidRows" class="form-check-input" type="checkbox" />
             اگر بعضی ردیف‌ها خطا دارند، ردیف‌های درست وارد شوند
+          </label>
+          <label v-if="canAllowZeroPrice" class="form-check small mb-0">
+            <input v-model="header.allowZeroPrice" class="form-check-input" type="checkbox" />
+            ورود ردیف‌های بدون قیمت (ارزش صفر) را مجاز می‌کنم
           </label>
         </div>
         <div class="col-md-4 text-end">
@@ -190,7 +233,14 @@ async function run() {
         <router-link v-for="id in result.documentIds" :key="id" :to="{ name: 'InventoryDocumentEdit', params: { id } }" class="me-2">سند {{ id }}</router-link>
         — هر کدام را باز کنید و تایید سرپرست انبار و برنامه‌ریزی را ثبت کنید.
       </p>
+      <div v-if="result.zeroPricedLines?.length" class="alert alert-warning small">
+        <b>{{ result.zeroPricedLines.length }} ردیف بدون قیمت با ارزش صفر وارد شد</b> (مجوز مدیر مالی؛ در سابقه ممیزی ثبت شد). پیش از تایید اسناد، قیمت این ردیف‌ها را در پیش‌نویس کامل کنید:
+        <ul class="mb-0 mt-1" style="max-height: 220px; overflow-y: auto">
+          <li v-for="(l, i) in result.zeroPricedLines" :key="i">{{ l }}</li>
+        </ul>
+      </div>
       <div v-if="result.errors?.length" class="table-responsive" style="max-height: 360px; overflow-y: auto">
+        <h3 class="inv-title mb-1" style="font-size: 1rem">خطاهای ردیف‌ها (شماره ردیف = شماره سطر فایل، سطر اول عنوان است)</h3>
         <table class="table table-sm table-bordered">
           <thead><tr><th style="width: 3rem">#</th><th>خطا</th></tr></thead>
           <tbody>

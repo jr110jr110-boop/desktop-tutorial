@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { nextTick } from "vue";
-import { printForm } from "@/composables/quality";
-import ReviewPrint from "@/components/quality/print/ReviewPrint.vue";
-import { onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
+import ReviewPrint from "@/components/quality/print/ReviewPrint.vue";
 import DocAttach from "@/components/quality/DocAttach.vue";
+import ReasonDialog from "@/components/quality/ReasonDialog.vue";
 import UserSelect from "@/components/quality/UserSelect.vue";
-import { getReview, reviewAction, saveReviewDecision, saveReviewInput } from "@/api/QualityAPIs";
+import { getReview, reviewAction, reviewDecisionAction, saveReviewDecision, saveReviewInput } from "@/api/QualityAPIs";
 import { fail, jalali, ok } from "@/composables/inventory";
-import { dateInput, reviewInputCategories, reviewStatuses } from "@/composables/quality";
-import { hasRole, QualityRoles } from "@/composables/roles";
+import { dateInput, printForm, reviewDecisionStatuses, reviewInputCategories, reviewStatuses } from "@/composables/quality";
+import { currentUserId, hasRole, QualityRoles } from "@/composables/roles";
 
 // Management review (ISO 9001 9.3): inputs per category, decisions (optionally drafting a CAPA), hold and close with minutes.
+// After the closing the decisions are followed up (R1q D23, review M17): the responsible person reports a decision done, QA / PMO / CEO (not he himself) confirms it,
+// sends the report back, cancels the decision or opens it again - always with a written reason. The responsible person of a decision reaches the closed review from
+// his inbox without being a reader of the module and sees his own decisions only.
 const route = useRoute();
 const review = ref<any>(null);
 const input = ref<any>(null);
@@ -23,6 +25,10 @@ async function doPrint() {
   printForm();
 }
 const canWrite = hasRole(QualityRoles.review);
+/** the readers of the module see the whole review; anybody else only the decisions he is responsible for */
+const seesAll = hasRole(QualityRoles.readers);
+const me = currentUserId();
+const closed = computed(() => review.value?.status === 2);
 
 async function load() {
   const [data, error] = await getReview(Number(route.params.id));
@@ -61,22 +67,78 @@ async function act(action: string) {
   ok("انجام شد.");
 }
 
+// ---------------------------------------------------------------------------------------------- follow-up of the decisions
+type FollowUp = "done" | "return" | "cancel" | "reopen";
+const followUp = ref<{ decision: any; action: FollowUp } | null>(null);
+
+const isOwner = (d: any) => me !== null && d.responsibleUserId === me;
+/** the responsible person reports the work done (the decision stays open until a reviewer confirms) */
+const canReport = (d: any) => closed.value && d.status === 0 && !d.doneRequested && isOwner(d);
+/** QA / PMO / CEO who is not the responsible person: completes the decision (or confirms the report of the owner) */
+const canConfirm = (d: any) => closed.value && d.status === 0 && canWrite && !isOwner(d);
+const canSendBack = (d: any) => closed.value && d.status === 0 && d.doneRequested && canWrite && !isOwner(d);
+const canCancelDecision = (d: any) => closed.value && d.status === 0 && canWrite && !isOwner(d);
+const canReopen = (d: any) => closed.value && d.status !== 0 && canWrite;
+const statusClass = (d: any) => (d.status === 1 ? "ok" : d.status === 2 ? "" : d.overdue ? "bad" : "warn");
+
+const openCount = computed(() => (review.value ? review.value.decisions.filter((d: any) => d.status === 0).length : 0));
+const overdueCount = computed(() => (review.value ? review.value.decisions.filter((d: any) => d.overdue).length : 0));
+
+const followUpDialog = computed(() => {
+  const f = followUp.value;
+  if (!f) return null;
+  const owner = isOwner(f.decision);
+  switch (f.action) {
+    case "done":
+      return owner
+        ? { title: "گزارش انجام تصمیم", label: "شرح اقدام انجام‌شده (یا مرجع مدرک)", confirmText: "گزارش انجام", confirmClass: "btn-success", initialText: "", hint: "پس از گزارش، یک نفر از QA، PMO یا مدیرعامل (غیر از شما) آن را تایید می‌کند تا تصمیم «انجام شد» ثبت شود؛ اگر CAPA مرتبط دارد، باید بسته شده باشد." }
+        : { title: f.decision.doneRequested ? "تایید انجام تصمیم" : "ثبت انجام تصمیم", label: "شرح اقدام انجام‌شده (یا مرجع مدرک)", confirmText: "انجام شد", confirmClass: "btn-success", initialText: f.decision.doneRequestNote || "", hint: "اگر CAPA مرتبط دارد، باید بسته شده باشد؛ شرح در پرونده می‌ماند." };
+    case "return":
+      return { title: "برگرداندن گزارش انجام", label: "دلیل برگرداندن", confirmText: "برگردان", confirmClass: "btn-warning", initialText: "", hint: "تصمیم باز می‌ماند و دوباره در صندوق مسئول آن قرار می‌گیرد." };
+    case "cancel":
+      return { title: "لغو تصمیم", label: "دلیل لغو", confirmText: "لغو تصمیم", confirmClass: "btn-danger", initialText: "", hint: "تصمیم لغو‌شده دیگر پیگیری و دیرکرد حساب نمی‌شود؛ مسئول تصمیم نمی‌تواند خودش آن را لغو کند." };
+    default:
+      return { title: "بازگشایی تصمیم", label: "دلیل بازگشایی", confirmText: "بازگشایی", confirmClass: "btn-primary", initialText: "", hint: "تصمیم دوباره باز و پیگیری می‌شود." };
+  }
+});
+
+const followUpDone: Record<FollowUp, string> = {
+  done: "ثبت شد.",
+  return: "گزارش انجام به مسئول برگردانده شد.",
+  cancel: "تصمیم لغو شد.",
+  reopen: "تصمیم دوباره باز شد.",
+};
+
+async function decide(text: string) {
+  const f = followUp.value;
+  if (!f) return;
+  busy.value = true;
+  const [data, error] = await reviewDecisionAction(f.decision.id, f.action, text);
+  busy.value = false;
+  if (error) return fail(error);
+  review.value = data;
+  followUp.value = null;
+  ok(followUpDone[f.action]);
+}
+
 onMounted(load);
 </script>
 
 <template>
   <div v-if="review" class="inv-page">
-    <ReviewPrint :review="review" />
+    <ReviewPrint v-if="seesAll" :review="review" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
           <h1 class="inv-title">بازنگری مدیریت — {{ jalali(review.reviewDate) }}</h1>
           <span :class="{ ok: review.status === 2, info: review.status === 1, warn: review.status === 0 }" class="inv-badge">{{ reviewStatuses[review.status] }}</span>
+          <span v-if="closed && openCount" class="inv-badge warn ms-1">{{ openCount }} تصمیم باز</span>
+          <span v-if="overdueCount" class="inv-badge bad ms-1">{{ overdueCount }} تصمیم از موعد گذشته</span>
           <span class="inv-muted ms-2">حاضرین: {{ review.attendees || "—" }}</span>
         </div>
         <div class="d-flex flex-wrap gap-2 align-items-end">
-          <router-link :to="{ name: 'QualityReviews' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
-          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ صورتجلسه (FO-QA-022)</button>
+          <router-link :to="seesAll ? { name: 'QualityReviews' } : { name: 'OfInbox' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
+          <button v-if="seesAll" class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ صورتجلسه (FO-QA-022)</button>
           <template v-if="canWrite">
             <button v-if="review.status === 0" :disabled="busy" class="btn btn-sm btn-primary" @click="act('hold')">جلسه برگزار شد</button>
             <button v-if="review.status === 1" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="act('redraft')">بازگشت به پیش‌نویس</button>
@@ -85,9 +147,10 @@ onMounted(load);
         </div>
       </div>
       <div class="col-md-6"><label class="form-label small mb-0">صورتجلسه (فایل)</label><DocAttach v-model="minutes" title="صورتجلسه بازنگری مدیریت" :disabled="!canWrite || review.status === 2" /></div>
+      <p v-if="!seesAll" class="inv-muted small mt-2 mb-0">فقط تصمیم‌هایی که شما مسئول آن‌ها هستید نمایش داده می‌شود.</p>
     </div>
 
-    <div class="inv-card">
+    <div v-if="seesAll" class="inv-card">
       <div class="inv-toolbar">
         <h2 class="inv-title">ورودی‌ها (۹.۳.۲)</h2>
         <button v-if="canWrite && review.status !== 2" class="btn btn-sm btn-primary" @click="input = { category: 1, text: '', attendees: review.attendees }">ورودی جدید</button>
@@ -128,17 +191,57 @@ onMounted(load);
         </div>
       </div>
       <table class="table table-sm mb-0">
-        <thead><tr><th>تصمیم</th><th>مسئول</th><th>مهلت</th><th>CAPA</th><th></th></tr></thead>
+        <thead><tr><th>تصمیم</th><th>مسئول</th><th>مهلت</th><th v-if="closed">وضعیت</th><th>CAPA</th><th></th></tr></thead>
         <tbody>
-          <tr v-if="!review.decisions.length"><td colspan="5" class="text-center inv-muted">تصمیمی ثبت نشده.</td></tr>
-          <tr v-for="d in review.decisions" :key="d.id">
-            <td class="small" style="white-space: pre-wrap">{{ d.text }}</td><td>{{ d.responsibleName }}</td><td>{{ jalali(d.dueDate) }}</td>
+          <tr v-if="!review.decisions.length"><td :colspan="closed ? 6 : 5" class="text-center inv-muted">تصمیمی ثبت نشده.</td></tr>
+          <tr v-for="d in review.decisions" :key="d.id" :class="{ 'table-warning': d.overdue }">
+            <td class="small" style="white-space: pre-wrap">
+              {{ d.text }}
+              <div v-if="d.doneRequested" class="mt-1">
+                <span class="inv-badge info">گزارش انجام داده شده؛ منتظر تایید QA یا PMO</span>
+                <span class="inv-muted"> {{ d.doneRequestedByName }} — {{ jalali(d.doneRequestedAt, true) }}: {{ d.doneRequestNote }}</span>
+              </div>
+              <div v-else-if="d.status === 0 && d.doneNote" class="mt-1 text-danger">گزارش انجام برگردانده شد: {{ d.doneNote }}</div>
+              <div v-if="d.status !== 0" class="mt-1 inv-muted">{{ reviewDecisionStatuses[d.status] }} توسط {{ d.doneByName || "—" }} — {{ jalali(d.doneAt, true) }}: {{ d.doneNote }}</div>
+            </td>
+            <td>{{ d.responsibleName }}</td>
+            <td :class="{ 'text-danger': d.overdue }">{{ jalali(d.dueDate) }}</td>
+            <td v-if="closed">
+              <span :class="statusClass(d)" class="inv-badge">{{ reviewDecisionStatuses[d.status] }}</span>
+              <span v-if="d.overdue" class="inv-badge bad ms-1">از موعد گذشته</span>
+            </td>
             <td><router-link v-if="d.capaId" :to="{ name: 'QualityCapaEdit', params: { id: d.capaId } }" class="inv-ltr">{{ d.capaNumber }}</router-link></td>
-            <td><button v-if="canWrite && review.status !== 2" class="btn btn-sm btn-outline-secondary" @click="decision = { ...d, dueDate: dateInput(d.dueDate), createCapa: false }">ویرایش</button></td>
+            <td>
+              <div class="d-flex flex-wrap gap-1">
+                <button v-if="canWrite && review.status !== 2" class="btn btn-sm btn-outline-secondary" @click="decision = { ...d, dueDate: dateInput(d.dueDate), createCapa: false }">ویرایش</button>
+                <button v-if="canReport(d)" :disabled="busy" class="btn btn-sm btn-outline-success" @click="followUp = { decision: d, action: 'done' }">گزارش انجام</button>
+                <button v-if="canConfirm(d)" :disabled="busy" class="btn btn-sm btn-outline-success" @click="followUp = { decision: d, action: 'done' }">{{ d.doneRequested ? "تایید انجام" : "ثبت انجام" }}</button>
+                <button v-if="canSendBack(d)" :disabled="busy" class="btn btn-sm btn-outline-warning" @click="followUp = { decision: d, action: 'return' }">برگرداندن</button>
+                <button v-if="canCancelDecision(d)" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="followUp = { decision: d, action: 'cancel' }">لغو</button>
+                <button v-if="canReopen(d)" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="followUp = { decision: d, action: 'reopen' }">بازگشایی</button>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
+      <p v-if="closed" class="inv-muted small mt-2 mb-0">
+        پیگیری: مسئول تصمیم انجام آن را گزارش می‌کند و یک نفر از QA، PMO یا مدیرعامل (غیر از خود او) تایید می‌کند؛ تصمیمی که CAPA دارد پس از بسته‌شدن CAPA انجام‌شده ثبت می‌شود. لغو و بازگشایی با دلیل مکتوب است و مسئول تصمیم، آن را خودش لغو نمی‌کند.
+      </p>
     </div>
+
+    <ReasonDialog
+      v-if="followUp && followUpDialog"
+      :key="followUp.decision.id + followUp.action"
+      :busy="busy"
+      :confirm-class="followUpDialog.confirmClass"
+      :confirm-text="followUpDialog.confirmText"
+      :hint="followUpDialog.hint"
+      :initial-text="followUpDialog.initialText"
+      :label="followUpDialog.label"
+      :title="followUpDialog.title"
+      @close="followUp = null"
+      @confirm="decide"
+    />
   </div>
 </template>
 

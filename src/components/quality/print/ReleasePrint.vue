@@ -25,6 +25,18 @@ defineProps<{ note: any; kind: "note" | "coc" }>();
     ]"
     :signatures="kind === 'coc' ? [{ title: 'کنترل کیفیت (صادرکننده)', name: note.releasedByName, date: jalali(note.releasedAt) }, { title: 'نماینده مدیریت (تضمین کیفیت)' }] : [{ title: 'کنترل کیفیت (صادرکننده)', name: note.releasedByName, date: jalali(note.releasedAt) }]"
     :distribution="distributionQc">
+    <!-- the lines of the note: what a customer delivery of the work order may carry (R1q D10) -->
+    <table v-if="note.lines && note.lines.length" class="mb-1">
+      <thead><tr><th>ردیف</th><th>کالا</th><th>مقدار</th><th>سریال‌ها</th></tr></thead>
+      <tbody>
+        <tr v-for="(l, i) in note.lines" :key="i">
+          <td>{{ l.rowNumber || i + 1 }}</td>
+          <td><span class="inv-ltr">{{ l.itemCode }}</span> — {{ l.itemTitle }}</td>
+          <td>{{ l.quantity }} {{ l.unit }}</td>
+          <td class="inv-ltr">{{ (l.serialNumbers || []).join("، ") || "-" }}</td>
+        </tr>
+      </tbody>
+    </table>
     <template v-if="kind === 'coc'">
       <p class="mt-1">
         بدینوسیله گواهی می‌شود اقلام یادشده برای دستور ساخت {{ note.workOrderCode }} مطابق با نقشه‌ها، مشخصات فنی و برنامه بازرسی و آزمون تاییدشده ساخته و بازرسی شده و

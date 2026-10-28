@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { nextTick } from "vue";
-import { printForm } from "@/composables/quality";
+import { computed, nextTick, onMounted, ref } from "vue";
 import TransmittalPrint from "@/components/quality/print/TransmittalPrint.vue";
-import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
 import UserSelect from "@/components/quality/UserSelect.vue";
 import { getControlledDocument, revisionAction, saveControlledDocument, saveRevision } from "@/api/QualityAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
-import { documentStatuses, documentTypes } from "@/composables/quality";
+import { documentStatusBadge, documentStatuses, documentTypes, printForm } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
 
 // One controlled document with its revisions: prepared by one person, reviewed by a second, approved by a third; the previous revision becomes obsolete.
@@ -27,6 +25,11 @@ const recipients = ref<{ userIds: (number | null)[]; units: string }>({ userIds:
 const distributeFor = ref<number | null>(null);
 const canReview = hasRole(QualityRoles.documentReviewers);
 const canApprove = hasRole(QualityRoles.documentApprovers);
+// R1q D41: a revision approved with an effective date in the future is "scheduled" (status 5): the current revision stays in force until that day and the nightly job
+// promotes the new one then. Only one revision can wait, and a waiting revision is withdrawn with the action "obsolete".
+const scheduled = computed(() => (doc.value?.revisions || []).find((r: any) => r.status === 5) || null);
+const inProgress = computed(() => (doc.value?.revisions || []).some((r: any) => r.status === 0 || r.status === 1));
+const startsLater = computed(() => !!effective.value && effective.value > today());
 
 async function load() {
   const [data, error] = await getControlledDocument(Number(route.params.id));
@@ -54,6 +57,11 @@ async function addRevision() {
 }
 
 async function act(id: number, action: string, extra: any = {}) {
+  if (action === "obsolete") {
+    const r = (doc.value?.revisions || []).find((x: any) => x.id === id);
+    const text = r && r.status === 5 ? `بازنگری ${r.revision} که برای اجرا در آینده برنامه‌ریزی شده پس گرفته شود؟ بازنگری جاری سر جای خود می‌ماند.` : "این بازنگری منسوخ شود؟";
+    if (!confirm(text)) return;
+  }
   busy.value = true;
   const [data, error] = await revisionAction(id, action, extra);
   busy.value = false;
@@ -80,13 +88,14 @@ onMounted(load);
       <div class="inv-toolbar">
         <div>
           <h1 class="inv-title">{{ doc.title }} <span class="inv-ltr ms-2">{{ doc.code }}</span></h1>
-          <span :class="{ ok: doc.status === 3, bad: doc.status === 4, warn: doc.status < 3 }" class="inv-badge">{{ documentStatuses[doc.status] }}</span>
+          <span :class="documentStatusBadge(doc.status)" class="inv-badge">{{ documentStatuses[doc.status] }}</span>
           <span class="inv-muted ms-2">بازنگری جاری {{ doc.currentRevision || "—" }} — اجرا از {{ jalali(doc.effectiveDate) || "—" }}</span>
+          <span v-if="scheduled" class="inv-badge info ms-2">بازنگری {{ scheduled.revision }} از {{ jalali(scheduled.effectiveDate) }} اجرا می‌شود</span>
         </div>
         <div class="d-flex gap-2">
           <router-link :to="{ name: 'QualityDocuments' }" class="btn btn-sm btn-outline-secondary">بازگشت</router-link>
           <button v-if="canReview" :disabled="busy" class="btn btn-sm btn-primary" @click="saveHeader">ذخیره مشخصات</button>
-          <button v-if="canReview" class="btn btn-sm btn-outline-primary" @click="rev = { revision: '', changeSummary: '', fileDocumentId: null }">بازنگری جدید</button>
+          <button v-if="canReview" :disabled="!!scheduled" :title="scheduled ? 'بازنگری برنامه‌ریزی‌شده منتظر اجراست' : ''" class="btn btn-sm btn-outline-primary" @click="rev = { revision: '', changeSummary: '', fileDocumentId: null }">بازنگری جدید</button>
         </div>
       </div>
       <div class="row g-2">
@@ -106,23 +115,26 @@ onMounted(load);
         <div class="col-md-4"><label class="form-label small mb-0">فایل بازنگری</label><DocAttach v-model="rev.fileDocumentId" title="فایل بازنگری سند" /></div>
         <div class="col-12 d-flex gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="addRevision">ثبت</button><button class="btn btn-sm btn-outline-secondary" @click="rev = null">انصراف</button></div>
       </div>
-      <p class="inv-muted mt-2 mb-0">همزمان فقط یک بازنگری در جریان تایید می‌تواند باشد.</p>
+      <p class="inv-muted mt-2 mb-0">همزمان فقط یک بازنگری در جریان تایید می‌تواند باشد.<template v-if="inProgress"> هم‌اکنون یک بازنگری در جریان تایید دارد.</template></p>
     </div>
 
     <div v-for="r in doc.revisions" :key="r.id" class="inv-card">
       <div class="inv-toolbar">
-        <h2 class="inv-title">بازنگری <span class="inv-ltr">{{ r.revision }}</span> <span :class="{ ok: r.status === 3, bad: r.status === 4, warn: r.status < 3 }" class="inv-badge ms-2">{{ documentStatuses[r.status] }}</span></h2>
+        <h2 class="inv-title">بازنگری <span class="inv-ltr">{{ r.revision }}</span> <span :class="documentStatusBadge(r.status)" class="inv-badge ms-2">{{ documentStatuses[r.status] }}</span></h2>
         <div class="d-flex flex-wrap gap-2 align-items-end">
           <button v-if="r.status === 0 && canReview" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="act(r.id, 'review')">بررسی شد</button>
           <template v-if="r.status === 1 && canApprove">
             <input v-model="effective" class="form-control form-control-sm" style="max-width: 160px" type="date" />
-            <button :disabled="busy" class="btn btn-sm btn-success" @click="act(r.id, 'approve', { effectiveDate: effective })">تایید و اجرا</button>
+            <button :disabled="busy" class="btn btn-sm btn-success" @click="act(r.id, 'approve', { effectiveDate: effective })">{{ startsLater ? "تایید و زمان‌بندی اجرا" : "تایید و اجرا" }}</button>
           </template>
           <button v-if="r.status === 3 && canApprove" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act(r.id, 'obsolete')">منسوخ</button>
+          <button v-if="r.status === 5 && canApprove" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act(r.id, 'obsolete')">پس‌گرفتن (لغو زمان‌بندی)</button>
           <button v-if="r.status === 3 && canReview" class="btn btn-sm btn-outline-secondary" @click="distributeFor = r.id">توزیع</button>
           <button class="btn btn-sm btn-outline-secondary" @click="doPrint(r)">چاپ فرم توزیع</button>
         </div>
       </div>
+      <p v-if="r.status === 1 && canApprove" class="inv-muted small mb-1">تاریخ اجرا امروز یا گذشته باشد، بازنگری همین حالا معتبر می‌شود و قبلی منسوخ می‌شود؛ تاریخ آینده بازنگری را «زمان‌بندی‌شده» می‌کند و تا آن روز بازنگری جاری معتبر می‌ماند.</p>
+      <p v-if="r.status === 5" class="small text-primary mb-1">زمان‌بندی‌شده برای {{ jalali(r.effectiveDate) }}: تا آن روز بازنگری {{ doc.currentRevision || "—" }} معتبر می‌ماند و در همان روز، سامانه این بازنگری را معتبر می‌کند.</p>
       <p class="small mb-1">{{ r.changeSummary }} <DocAttach :model-value="r.fileDocumentId" :disabled="true" title="فایل بازنگری" /></p>
       <div class="d-flex flex-wrap gap-2 mb-2">
         <span class="inv-badge ok">تهیه: {{ r.preparedByName }}</span>

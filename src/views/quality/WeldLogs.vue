@@ -10,7 +10,7 @@ import WorkOrderSelect from "@/components/quality/WorkOrderSelect.vue";
 import { getQualifications, getTestReports, getWeldLogs, getWpsList, saveWeldLog } from "@/api/QualityAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, printPage, today } from "@/composables/inventory";
-import { qualificationStates, usePaged, vtResults } from "@/composables/quality";
+import { qualificationStates, useBackdateWindow, usePaged, vtResults } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
 
 // Weld log: every weld joint with WPS, welder qualification, filler batch, temperatures, visual result and the NDT reports.
@@ -19,6 +19,9 @@ const router = useRouter();
 const filters = ref({ WorkOrderId: route.query.workOrderId ? Number(route.query.workOrderId) : null, SerialNumber: "" });
 const list = usePaged(getWeldLogs, filters);
 const canQc = hasRole(QualityRoles.inspectors);
+// a weld log may be dated from MaxBackdateDays days back to today, never later (R1q D15, review M15: a weld restarts the continuity of the welder); the API refuses other dates
+// with its own Persian text, which is shown
+const { min: dateMin, max: dateMax, hint: dateHint, warning: dateWarning, load: loadWindow } = useBackdateWindow(false);
 const form = ref<any>(null);
 const wpsList = ref<any[]>([]);
 const welders = ref<any[]>([]);
@@ -36,6 +39,7 @@ const blank = () => ({
 const nn = (v: any) => (v === "" || v === undefined ? null : v);
 
 async function openForm() {
+  loadWindow();
   form.value = blank();
   const [w] = await getWpsList({ Status: 1, PageSize: 200 });
   wpsList.value = rowsOf(w);
@@ -86,7 +90,11 @@ onMounted(list.load);
 
       <div v-if="form" class="border rounded p-2 mb-3 d-print-none">
         <div class="row g-2">
-          <div class="col-md-2"><label class="form-label small mb-0">تاریخ</label><input v-model="form.weldDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2">
+            <label class="form-label small mb-0">تاریخ جوشکاری</label>
+            <input v-model="form.weldDate" :max="dateMax" :min="dateMin" class="form-control form-control-sm" type="date" />
+            <span v-if="dateWarning(form.weldDate)" class="small text-danger">{{ dateWarning(form.weldDate) }}</span>
+          </div>
           <div class="col-md-2"><label class="form-label small mb-0">دستور ساخت *</label><WorkOrderSelect v-model="form.workOrderId" @change="loadReports" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">سریال قطعه</label><input v-model="form.serialNumber" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">شماره اتصال *</label><input v-model="form.jointNo" class="form-control form-control-sm inv-ltr" /></div>
@@ -118,6 +126,7 @@ onMounted(list.load);
           <div class="col-md-4 d-flex align-items-end gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="save">ثبت</button><button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button></div>
         </div>
         <p class="inv-muted mt-2 mb-0">سرور بررسی می‌کند: WPS تاییدشده، هم‌فرایند بودن گواهی، معتبر بودن گواهی در تاریخ جوش (تداوم ۶ ماه) و دماهای پیش‌گرم و بین‌پاسی طبق WPS.</p>
+        <p class="inv-muted small mt-1 mb-0">{{ dateHint }}</p>
       </div>
 
       <div class="inv-filters mb-3 d-print-none">

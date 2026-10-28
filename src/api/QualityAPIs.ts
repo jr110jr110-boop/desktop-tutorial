@@ -56,6 +56,11 @@ export const saveCalibrationInterval = (equipmentType: number, months: number, s
 export const getOotCases = (params: any) => call("get", base + "out-of-tolerance", undefined, clean(params));
 export const getOotCase = (id: number) => call("get", base + "out-of-tolerance/" + id);
 export const assessOot = (dto: any) => call("post", base + "out-of-tolerance/assess", dto);
+/**
+ * R1q D40: links the accepted new inspection that re-inspected a document assessed as "re-inspect".
+ * LinkOotReinspectionDto { itemId (the affected document line of the case), kind: "QcRecord" | "TestReport" | "QcInspection", recordId }. Answer: the case (OotCaseDto).
+ */
+export const linkOotReinspection = (dto: any) => call("post", base + "out-of-tolerance/reinspection", dto);
 export const closeOot = (id: number, note?: string) => call("post", base + "out-of-tolerance/close", { id, note: note || null });
 
 // persons, qualifications, WPS, PQR, weld log
@@ -91,6 +96,11 @@ export const getCapa = (id: number) => call("get", base + "capas/" + id);
 export const saveCapa = (dto: any) => call("post", base + "capas", dto);
 /** action: complete-action (actionId, note or evidence), implemented, effectiveness (note, passed), close, cancel (note). */
 export const capaAction = (id: number, action: string, extra: any = {}) => call("post", base + "capas/action", { id, action, ...extra });
+/**
+ * Runs the nightly late-CAPA escalation now (QA and PMO; the same method the 04:00 job calls).
+ * Answer: CapaEscalationResultDto { escalated, ceoNotified, firstRun, recorded, skipped }.
+ */
+export const escalateCapas = () => call("post", base + "capas/escalate");
 export const getComplaints = (params: any) => call("get", base + "complaints", undefined, clean(params));
 export const getComplaint = (id: number) => call("get", base + "complaints/" + id);
 export const saveComplaint = (dto: any) => call("post", base + "complaints", dto);
@@ -113,6 +123,12 @@ export const saveReviewInput = (dto: any) => call("post", base + "management-rev
 export const saveReviewDecision = (dto: any) => call("post", base + "management-reviews/decision", dto);
 /** action: redraft, hold, close (minutesDocumentId). */
 export const reviewAction = (id: number, action: string, minutesDocumentId?: string | null) => call("post", base + "management-reviews/action", { id, action, minutesDocumentId: minutesDocumentId || null });
+/**
+ * Follow-up of one decision of a closed review (R1q D23, review M17). ReviewDecisionActionDto { decisionId, action, note (at most 1000 characters) }.
+ * action: done (the responsible person reports the work done; a reviewer who is not the responsible person confirms it), return (a reviewer sends a reported decision back, note = reason),
+ * cancel (QA, PMO, CEO; never the owner; note = reason), reopen (note = reason). Answer: the review (ReviewDto).
+ */
+export const reviewDecisionAction = (decisionId: number, action: string, note?: string) => call("post", base + "management-reviews/decision/action", { decisionId, action, note: note || null });
 
 // release notes and the final data book
 export const getReleaseNotes = (params: any) => call("get", base + "release-notes", undefined, clean(params));

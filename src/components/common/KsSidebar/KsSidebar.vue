@@ -434,7 +434,8 @@ const links = {
     { title: "گزارش جوشکاری", routeName: "QualityWeldLogs", disabled: !hasRole(QualityRoles.readers) },
     { title: "گواهی‌های مواد (EN 10204)", routeName: "QualityCertificates", disabled: !hasRole(QualityRoles.readers) },
     { title: "ردیابی سریال و بچ", routeName: "QualityTraceability", disabled: !hasRole(QualityRoles.readers) },
-    { title: "اقدام اصلاحی و پیشگیرانه (CAPA)", routeName: "QualityCapas", disabled: !hasRole(QualityRoles.readers) },
+    // open to every signed-in user (R1q D13): the API shows a non-reader only the CAPAs he owns or has an action in
+    { title: "اقدام اصلاحی و پیشگیرانه (CAPA)", routeName: "QualityCapas" },
     { title: "برگه‌های ترخیص", routeName: "QualityReleaseNotes", disabled: !hasRole(QualityRoles.readers) },
     { title: "شکایات مشتری", routeName: "QualityComplaints", disabled: !hasRole(QualityRoles.readers) },
     { title: "کنترل مدارک", routeName: "QualityDocuments", disabled: !hasRole(QualityRoles.readers) },

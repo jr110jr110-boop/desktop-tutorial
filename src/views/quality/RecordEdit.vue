@@ -11,7 +11,7 @@ import { getEquipmentList, getItpByWorkOrder, getQcRecord, saveQcRecord } from "
 import { getLots } from "@/api/InventoryAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, num, ok, today } from "@/composables/inventory";
-import { activityStatuses, dateInput, qcResults, recordTypes } from "@/composables/quality";
+import { activityStatuses, dateInput, qcResults, recordTypes, useBackdateWindow } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
 
 // One inspection record with its measurements. A record cannot be edited after it is saved (the API has no update).
@@ -32,6 +32,9 @@ async function doPrint(mode: any = null) {
 }
 const canWrite = hasRole(QualityRoles.recordWriters);
 const isQc = hasRole(QualityRoles.inspectors);
+// the date of a record is limited to the back-date window of the company (R1q D15, setting MaxBackdateDays): from that many days back to tomorrow; the API refuses a date
+// outside it with its own Persian text, which is shown
+const { min: dateMin, max: dateMax, hint: dateHint, warning: dateWarning, load: loadWindow } = useBackdateWindow(true);
 
 function blank() {
   return {
@@ -94,6 +97,7 @@ async function save() {
 }
 
 onMounted(async () => {
+  loadWindow();
   const [eq] = await getEquipmentList({ PageSize: 300 });
   equipment.value = rowsOf(eq);
   if (isNew) {
@@ -132,7 +136,11 @@ onMounted(async () => {
           <label class="form-label small mb-0">نوع</label>
           <select v-model="rec.type" :disabled="!isNew" class="form-select form-select-sm"><option v-for="(t, k) in recordTypes" :key="k" :value="Number(k)">{{ t }}</option></select>
         </div>
-        <div class="col-md-2"><label class="form-label small mb-0">تاریخ</label><input v-model="rec.recordDate" :disabled="!isNew" class="form-control form-control-sm" type="date" /></div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">تاریخ</label>
+          <input v-model="rec.recordDate" :disabled="!isNew" :max="dateMax" :min="dateMin" class="form-control form-control-sm" type="date" />
+          <span v-if="isNew && dateWarning(rec.recordDate)" class="small text-danger">{{ dateWarning(rec.recordDate) }}</span>
+        </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">دستور ساخت</label>
           <WorkOrderSelect v-if="isNew" v-model="rec.workOrderId" @change="loadActivities" />
@@ -170,6 +178,7 @@ onMounted(async () => {
       </div>
       <p v-if="rec.ncrId" class="small mt-2 mb-0">گزارش عدم انطباق: <router-link :to="{ name: 'InventoryNcrEdit', params: { id: rec.ncrId } }" class="inv-ltr">{{ rec.ncrNumber }}</router-link></p>
       <p v-if="isNew" class="inv-muted mt-2 mb-0">اگر نتیجه «رد» ثبت شود، سیستم گزارش عدم انطباق را پیش‌نویس می‌کند. تجهیز اندازه‌گیری باید در تاریخ بازرسی کالیبره باشد.</p>
+      <p v-if="isNew" class="inv-muted small mt-1 mb-0">{{ dateHint }}</p>
     </div>
 
     <div v-if="needsMeasurements || rec.measurements.length" class="inv-card">

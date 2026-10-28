@@ -19,6 +19,15 @@ export const getItemByCode = (code: string) => call("get", base + "items/by-code
 export const saveItem = (dto: any) => call("post", base + "items", dto);
 export const deleteItem = (id: number) => call("delete", base + "items/" + id);
 export const importItems = (rows: any[]) => call("post", base + "items/import", rows);
+/**
+ * R1q D11: QC, QA or PMO change the quality fields of an item. SaveItemQualityDto { itemId, requiresIncomingInspection, requiredCertificateType (1 = 2.2, 2 = 3.1, 3 = 3.2 | null), shelfLifeDays | null, reason }.
+ * A reduction (no more inspection, a lower certificate type, a shorter or no shelf life) needs a reason and waits for the QA manager; a stricter control applies at once. Answer: the item (InventoryItemDto).
+ */
+export const saveItemQuality = (dto: any) => call("post", base + "items/quality", dto);
+/** ItemQualityChangeQuery { Status? (0 pending, 1 approved, 2 rejected), ItemId?, PageNumber, PageSize }; QC, QA and PMO read it. */
+export const getItemQualityChanges = (params: any) => call("get", base + "items/quality-changes", undefined, clean(params));
+/** DecideItemQualityChangeDto { id, approve, note }: the second approval (QA only, never the person who asked); a rejection needs the note. */
+export const decideItemQualityChange = (dto: any) => call("post", base + "items/quality-changes/decide", dto);
 
 export const getWarehouses = () => call("get", base + "warehouses");
 export const saveWarehouse = (dto: any) => call("post", base + "warehouses", dto);
@@ -81,6 +90,8 @@ export const getBalances = (params: any) => call("get", base + "stock", undefine
 export const getItemStocks = (params: any) => call("get", base + "stock/items", undefined, clean(params));
 export const getKardex = (params: any) => call("get", base + "stock/kardex", undefined, clean(params));
 export const getLots = (params: any) => call("get", base + "stock/lots", undefined, clean(params));
+/** LotExpiryQuery { WithinDays? (empty = the company setting ExpiryWarnDays), ItemId?, OnlyExpired?, PageNumber, PageSize } -> LotExpiryDto rows (R1q D32). */
+export const getExpiringLots = (params: any) => call("get", base + "stock/expiry", undefined, clean(params));
 export const saveLot = (dto: any) => call("post", base + "stock/lots", dto);
 export const getSerials = (params: any) => call("get", base + "stock/serials", undefined, clean(params));
 

@@ -76,7 +76,7 @@ onMounted(load);
             <tr v-if="!rows.length">
               <td class="text-center inv-muted" colspan="9">گزارشی نیست.</td>
             </tr>
-            <tr v-for="r in rows" :key="r.id" role="button" @click="open(r.id)">
+            <tr v-for="r in rows" :key="r.id" role="button" :class="{ 'text-muted': r.status === 4 }" @click="open(r.id)">
               <td class="inv-ltr">{{ r.number }}</td>
               <td>{{ jalali(r.reportDate) }}</td>
               <td>{{ ncrSources[r.source] }}</td>

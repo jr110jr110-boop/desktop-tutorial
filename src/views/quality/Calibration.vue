@@ -111,10 +111,12 @@ onMounted(register.load);
           <div class="col-md-3"><label class="form-label small mb-0">محدوده اندازه‌گیری</label><input v-model="form.range" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">دقت / تفکیک</label><input v-model="form.accuracy" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">فاصله کالیبراسیون (ماه)</label><input v-model.number="form.intervalMonths" class="form-control form-control-sm" placeholder="پیش‌فرض نوع" type="number" min="1" /></div>
-          <div class="col-md-3 d-flex align-items-end"><label class="form-check small"><input v-model="form.requiresCalibration" class="form-check-input" type="checkbox" /> نیاز به کالیبراسیون دارد</label></div>
+          <div class="col-md-3 d-flex align-items-end">
+            <label class="form-check small mb-0"><input v-model="form.requiresCalibration" class="form-check-input" disabled type="checkbox" /> نیاز به کالیبراسیون دارد</label>
+          </div>
           <div class="col-md-4 d-flex align-items-end gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="create">ثبت</button><button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button></div>
         </div>
-        <p class="inv-muted mt-2 mb-0">کد INN-IST-nnn را سیستم می‌دهد.</p>
+        <p class="inv-muted mt-2 mb-0">کد INN-IST-nnn را سیستم می‌دهد. تجهیز جدید همیشه کالیبراسیون لازم دارد؛ بی‌نیازی به کالیبراسیون را بعداً مدیر QA با دلیل درخواست می‌دهد و QA یا QC دیگری تایید می‌کند (صفحه تجهیز).</p>
       </div>
 
       <ul class="nav nav-tabs mb-3 d-print-none">

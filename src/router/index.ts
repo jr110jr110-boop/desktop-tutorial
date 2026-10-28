@@ -424,7 +424,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/ncr/:id", name: "InventoryNcrEdit", component: () => import("@/views/inventory/NcrEdit.vue"), meta: { access: "warehouse" } },
   { path: "/inventory/counts", name: "InventoryStockCounts", component: () => import("@/views/inventory/StockCounts.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
   { path: "/inventory/counts/:id", name: "InventoryStockCountEdit", component: () => import("@/views/inventory/StockCountEdit.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
-  { path: "/inventory/opening-import", name: "InventoryOpeningImport", component: () => import("@/views/inventory/OpeningImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.documents } },
+  { path: "/inventory/opening-import", name: "InventoryOpeningImport", component: () => import("@/views/inventory/OpeningImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.openingImport } },
   // Finance and cost accounting
   { path: "/procurement/settings", name: "ProcurementSettings", component: () => import("@/views/procurement/Settings.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/requests", name: "ProcurementRequests", component: () => import("@/views/procurement/Requests.vue"), meta: { roles: ProcurementRoles.readers } },
@@ -527,8 +527,9 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/quality/weld-logs", name: "QualityWeldLogs", component: () => import("@/views/quality/WeldLogs.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/certificates", name: "QualityCertificates", component: () => import("@/views/quality/Certificates.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/traceability", name: "QualityTraceability", component: () => import("@/views/quality/Traceability.vue"), meta: { roles: QualityRoles.readers } },
-  { path: "/quality/capa", name: "QualityCapas", component: () => import("@/views/quality/Capas.vue"), meta: { roles: QualityRoles.readers } },
-  { path: "/quality/capa/:id", name: "QualityCapaEdit", component: () => import("@/views/quality/CapaEdit.vue"), meta: { roles: QualityRoles.readers } },
+  // the CAPA pages are open to every signed-in user (R1q D13): the API shows a non-reader only the CAPAs he owns or has an action in, and the owners of actions reach them from the inbox
+  { path: "/quality/capa", name: "QualityCapas", component: () => import("@/views/quality/Capas.vue") },
+  { path: "/quality/capa/:id", name: "QualityCapaEdit", component: () => import("@/views/quality/CapaEdit.vue") },
   { path: "/quality/release-notes", name: "QualityReleaseNotes", component: () => import("@/views/quality/ReleaseNotes.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/release-notes/:id", name: "QualityReleaseNoteEdit", component: () => import("@/views/quality/ReleaseNoteEdit.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/data-book/:workOrderId", name: "QualityDataBook", component: () => import("@/views/quality/DataBook.vue"), meta: { roles: QualityRoles.readers } },
@@ -538,7 +539,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/quality/audits", name: "QualityAudits", component: () => import("@/views/quality/Audits.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/audits/:id", name: "QualityAuditEdit", component: () => import("@/views/quality/AuditEdit.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/management-reviews", name: "QualityReviews", component: () => import("@/views/quality/Reviews.vue"), meta: { roles: QualityRoles.readers } },
-  { path: "/quality/management-reviews/:id", name: "QualityReviewEdit", component: () => import("@/views/quality/ReviewEdit.vue"), meta: { roles: QualityRoles.readers } },
+  // GET management-reviews/{id} is open to a signed-in user who is responsible for a decision of a closed review (review M17): he reaches the review from the inbox and sees his own decisions only
+  { path: "/quality/management-reviews/:id", name: "QualityReviewEdit", component: () => import("@/views/quality/ReviewEdit.vue") },
   { path: "/quality/settings", name: "QualitySettings", component: () => import("@/views/quality/Settings.vue"), meta: { roles: QualityRoles.readers } },
   // Project control (PMO): the paths of the alert links of the API (/project-control/portfolio, guarantees, changes, milestones, transmittals, penalties) are kept
   { path: "/project-control/portfolio", name: "ProjectControlPortfolio", component: () => import("@/views/projectControl/Portfolio.vue"), meta: { roles: ProjectControlRoles.readers } },

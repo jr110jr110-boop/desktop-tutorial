@@ -5,7 +5,7 @@ import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import QPager from "@/components/quality/QPager.vue";
 import { checkDocumentCode, getControlledDocuments, getMasterList, getRetention, saveControlledDocument, saveRetention } from "@/api/QualityAPIs";
 import { fail, jalali, ok, printPage } from "@/composables/inventory";
-import { documentStatuses, documentTypes, usePaged } from "@/composables/quality";
+import { documentStatusBadge, documentStatuses, documentTypes, usePaged } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
 
 // Document control (ISO 9001 7.5): master list of the effective revisions, all documents, retention rules.
@@ -118,7 +118,7 @@ onMounted(master.load);
             <tr v-for="d in src().rows.value" :key="d.id" role="button" @click="router.push({ name: 'QualityDocumentEdit', params: { id: d.id } })">
               <td class="inv-ltr">{{ d.code }}</td><td>{{ d.title }}</td><td>{{ documentTypes[d.type] }}</td><td class="inv-ltr">{{ d.currentRevision }}</td><td>{{ jalali(d.effectiveDate) }}</td>
               <td>{{ d.retentionClass }}</td><td>{{ d.responsibleUnit }}</td>
-              <td><span :class="{ ok: d.status === 3, bad: d.status === 4, warn: d.status < 3 }" class="inv-badge">{{ documentStatuses[d.status] }}</span></td>
+              <td><span :class="documentStatusBadge(d.status)" class="inv-badge">{{ documentStatuses[d.status] }}</span></td>
             </tr>
           </tbody>
         </table>
