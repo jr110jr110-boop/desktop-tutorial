@@ -270,7 +270,7 @@ if [ "$L2C" = "$L2D" ]; then ok "r1a2 l2: change-temporary-password answers an u
 # used up the first row of this minute. The wait starts a new minute, so the password typed into the name field is the first attempt of it and its row can be asserted exactly (audit section below).
 sleep $(( 61 - $(date +%s) % 60 ))
 TYPEDPW='Ci#Typed-Into-Name-2026'
-login "$TYPEDPW" 'x' >/dev/null; check "r1a2 m5: a password typed into the name field is refused like any unknown name" ".success == false and (.message|contains(\"$GENERIC\"))"
+login "$TYPEDPW" 'Wrong#Pass-0005' >/dev/null; check "r1a2 m5: a password typed into the name field is refused like any unknown name" ".success == false and (.message|contains(\"$GENERIC\"))"   # the password must pass the DTO's MinLength(8), otherwise the model validation answers 400 before the attempt is counted
 CODE=$(tmpchange "$TYPEDPW" 'x'); check "r1a2 m5: the same through change-temporary-password" ".success == false and (.message|contains(\"$GENERIC\"))"
 # R1a2 review (L-3): a sign-in with the name of an AI seat ("seat.*") is counted like any unknown name (the two attempts above are the 1st and 2nd of this minute, these eight are the 3rd to the 10th,
 # so exactly one row is written, for the 10th) instead of one row for every attempt, and the answer is the plain refusal of a wrong password
