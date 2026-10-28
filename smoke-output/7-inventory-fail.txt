@@ -1,0 +1,2 @@
+=== devices before the push
+{"success":true,"message":null,"data":[{"id":1,"code":"GATE-1","title":"درب اصلی","location":"ورودی","isActive":true,"lastPushAt":null,"lastPushAtText":null}],"httpStatusCode":200}
