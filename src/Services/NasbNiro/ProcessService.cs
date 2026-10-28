@@ -479,6 +479,11 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper
                     .BadRequest<ResponseProcessDto>(NasbNiroMessages.ProcessAlreadyIsDeleted);
 
+            // R1a2 (M3): a process that a production order or the schedule (a WBS node) refers to is not deleted; the collection delete comes through here too
+            string blocked = await LegacyDeleteGuard.ProcessAsync(_unitOfWork, processId, cancellationToken);
+            if (blocked != null)
+                return ResponseDtoHelper.BadRequest<ResponseProcessDto>(blocked);
+
             process.Delete();
 
             EntityEntry<ProcessEntity> entityEntry = _processs.Update(process);

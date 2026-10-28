@@ -196,6 +196,18 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public string ReviewNote { get; set; }
         public int? ReviewedByUserId { get; set; }
         public DateTimeOffset? ReviewedAt { get; set; }
+
+        /// <summary>R1a2 (H4): who gave the last quantification. An approver is never the creator or the quantifier of the claim.</summary>
+        public int? QuantifiedByUserId { get; set; }
+
+        /// <summary>R1a2 (H4): who gave the PMO approval, and when. Both are cleared when the claim is quantified or edited again.</summary>
+        public int? PmoApprovedByUserId { get; set; }
+        public DateTimeOffset? PmoApprovedAt { get; set; }
+
+        /// <summary>R1a2 (H4): who gave the design and manufacturing approval, and when. Both are cleared when the claim is quantified or edited again.</summary>
+        public int? DesignApprovedByUserId { get; set; }
+        public DateTimeOffset? DesignApprovedAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }

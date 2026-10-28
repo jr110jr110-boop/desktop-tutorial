@@ -321,6 +321,13 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public bool ParseFailed { get; set; }
         public string ParseNote { get; set; }
 
+        /// <summary>
+        /// R1a2 (M2): who asked for the release or the cancellation of the guarantee, and when. Both actions need two people: the first call only records the request,
+        /// a different user of the allowed roles confirms it. The request stays on the row after the confirmation as the record of who asked.
+        /// </summary>
+        public int? ReleaseRequestedByUserId { get; set; }
+        public DateTime? ReleaseRequestedAt { get; set; }
+
         public ICollection<PcGuaranteeEvent> Events { get; set; }
 
         [Timestamp]

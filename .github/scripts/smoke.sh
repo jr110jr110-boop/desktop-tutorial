@@ -74,7 +74,15 @@ while IFS= read -r ep; do
 done < .github/scripts/get-endpoints.txt
 rm -f "$OUT/body.tmp"
 
-curl -s "$BASE/api/v1/Accounts/logout/$REFRESH" -H "Authorization: Bearer $TOKEN" -o "$OUT/logout.json" -w 'logout_http=%{http_code}\n' | tee -a "$OUT/3-results.txt"
+# logout (R1a2, M6): POST with the refresh token in the body; the address form is kept for one release only (deprecated) and is no longer used here
+curl -s -X POST "$BASE/api/v1/Accounts/logout" -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d "{\"refreshToken\":\"$REFRESH\"}" -o "$OUT/logout.json" -w 'logout_http=%{http_code}\n' | tee -a "$OUT/3-results.txt"
+echo "logout_success=$(jq -r '.success' "$OUT/logout.json" 2>/dev/null) (expect true)" | tee -a "$OUT/3-results.txt"
+# the refresh token of a signed-out user is dead, and so is the access token it was issued with (the security stamp moved on, R1a2 H2)
+curl -s -X POST "$BASE/api/v1/Accounts/refresh-token" -H 'Content-Type: application/json' \
+  -d "{\"refreshToken\":\"$REFRESH\"}" -o "$OUT/refresh-after-logout.json" -w 'refresh_after_logout_http=%{http_code}\n' | tee -a "$OUT/3-results.txt"
+echo "refresh_after_logout_success=$(jq -r '.success' "$OUT/refresh-after-logout.json" 2>/dev/null) (expect false)" | tee -a "$OUT/3-results.txt"
+echo "old_access_token_after_logout $(curl -s -o /dev/null -w 'http=%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/Accounts/get-current-user-info") (expect 401)" | tee -a "$OUT/3-results.txt"
 
 echo "--- status codes:" >> "$OUT/3-results.txt"
 awk '{print $1}' "$OUT/4-endpoints.txt" | sort | uniq -c >> "$OUT/3-results.txt"

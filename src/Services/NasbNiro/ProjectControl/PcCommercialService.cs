@@ -330,6 +330,7 @@ namespace Services.NasbNiro.ProjectControl
                     GuaranteeType = i.GuaranteeType, AmountDecimal = i.AmountDecimal, CurrencyCode = i.CurrencyCode, IssuerKind = i.IssuerKind, ValidFrom = i.ValidFrom, ExpiryDate = i.ExpiryDate,
                     ReleaseTrigger = i.ReleaseTrigger, Status = i.Status, ParseFailed = i.ParseFailed, ParseNote = i.ParseNote,
                     DaysToExpiry = i.ExpiryDate.HasValue ? (int)(i.ExpiryDate.Value.Date - today).TotalDays : (int?)null,
+                    ReleaseRequestedByUserId = i.ReleaseRequestedByUserId, ReleaseRequestedAt = i.ReleaseRequestedAt,
                     Events = events.Where(e => e.GuaranteeInfoId == i.Id).Select(e => new PcGuaranteeEventDto { Id = e.Id, Kind = e.Kind, EventDate = e.EventDate, NewExpiryDate = e.NewExpiryDate, Fee = e.Fee, DocumentId = e.DocumentId, Note = e.Note }).ToList(),
                 });
             }
@@ -362,6 +363,10 @@ namespace Services.NasbNiro.ProjectControl
             // R1a (finding M7): Released and Expired are never set from here; the release has its own action and the expiry is automatic
             string statusProblem = StatusChangeProblem(info?.Status ?? PcGuaranteeStatus.Requested, dto.Status);
             if (statusProblem != null) return Bad<PcGuaranteeDto>(statusProblem);
+            // R1a2 (M2): once the guarantee is issued its expiry date is what the bank holds; it changes only through an extension event that carries its evidence (a note and, when there is one, the letter).
+            // A date that is still missing (an old row the parser could not read) may be filled in once.
+            if (info != null && info.Status != PcGuaranteeStatus.Requested && info.ExpiryDate.HasValue && dto.ExpiryDate?.Date != info.ExpiryDate.Value.Date)
+                return Bad<PcGuaranteeDto>("پس از صدور ضمانت‌نامه، تاریخ انقضا فقط با رویداد «تمدید» (با توضیح و در صورت وجود، فایل نامه) تغییر می‌کند.");
             if (info == null)
             {
                 bool exists = dto.SourceKind == PcGuaranteeSource.ContractGuaranty
@@ -392,14 +397,50 @@ namespace Services.NasbNiro.ProjectControl
             if (requested == 0 || !Enum.IsDefined(typeof(PcGuaranteeStatus), requested) || requested == current) return null;
             if (requested == PcGuaranteeStatus.Released) return "آزادسازی ضمانت‌نامه از این مسیر ثبت نمی‌شود؛ از عمل «آزادسازی» (با تاریخ و توضیح) استفاده کنید.";
             if (requested == PcGuaranteeStatus.Expired) return "انقضای ضمانت‌نامه پس از گذشتن تاریخ انقضا به‌صورت خودکار ثبت می‌شود؛ تاریخ انقضا را اصلاح یا ضمانت‌نامه را تمدید کنید.";
+            // R1a2 (M2): the cancellation is an event of its own (date, note, two people), not a status that one person types in
+            if (requested == PcGuaranteeStatus.Cancelled) return "ابطال ضمانت‌نامه از این مسیر ثبت نمی‌شود؛ از رویداد «ابطال» (با تاریخ، توضیح و تأیید شخص دوم) استفاده کنید.";
             if (current == PcGuaranteeStatus.Released) return "ضمانت‌نامه آزادشده دوباره باز نمی‌شود.";
+            if (current == PcGuaranteeStatus.Cancelled) return "ضمانت‌نامه ابطال‌شده دوباره باز نمی‌شود.";
+            // an expired guarantee leaves that status only through an extension event (evidence and a new date) or the release; any other status would hide it from the alerts
+            if (current == PcGuaranteeStatus.Expired)
+                return "ضمانت‌نامه منقضی‌شده با تغییر وضعیت دوباره فعال نمی‌شود؛ آن را با رویداد «تمدید» (با توضیح و تاریخ جدید) تمدید کنید.";
+            return null;
+        }
+
+        /// <summary>Roles of the release and the cancellation: the money side signs these too, so the list differs from the other guarantee actions (★ to be confirmed by the company).</summary>
+        private const string CloseRoles = "COMMERCIAL,FINANCEMANAGER,PMO";
+
+        /// <summary>A request that nobody confirmed within this many days is forgotten: the next call records a new one (the older values stay in the audit trail).</summary>
+        private const int RequestValidDays = 7;
+
+        /// <summary>
+        /// R1a2 (M2): the release and the cancellation of a guarantee need two people. The first call records who asked and when and changes nothing else; a call by a different user of
+        /// <see cref="CloseRoles"/> confirms, and the action then runs with the date and the note of the confirming call. Returns null when the caller confirms (the action goes on);
+        /// otherwise the answer to give: the request that was recorded, or the refusal of a confirmation by the one who asked.
+        /// </summary>
+        private async Task<ResponseDto<PcGuaranteeDto>> FirstOfTwoAsync(PcGuaranteeInfo info, string what, DateTimeOffset now, CancellationToken cancellationToken)
+        {
+            bool open = info.ReleaseRequestedByUserId != null && info.ReleaseRequestedAt != null && info.ReleaseRequestedAt.Value.AddDays(RequestValidDays) >= now.DateTime;
+            if (!open)
+            {
+                info.ReleaseRequestedByUserId = Me; info.ReleaseRequestedAt = now.DateTime;
+                info.ModifyDate = now; info.ModifierUserId = Me;
+                try { await _uow.SaveChangesAsync(cancellationToken); }
+                catch (DbUpdateConcurrencyException) { return Bad<PcGuaranteeDto>(PcText.Concurrency); }
+                PcGuaranteeDto recorded = (await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First();
+                return ResponseDtoHelper.Ok(recorded, $"درخواست {what} ثبت شد و منتظر تأیید شخص دیگری از بازرگانی، مدیر مالی یا PMO است (تفکیک وظایف)؛ این درخواست {RequestValidDays} روز معتبر است و تا آن زمان ضمانت‌نامه تغییر نمی‌کند.");
+            }
+            if (info.ReleaseRequestedByUserId == Me)
+                return Bad<PcGuaranteeDto>($"درخواست {what} را خودتان ثبت کرده‌اید؛ تأیید آن باید از شخص دیگری باشد (تفکیک وظایف).");
             return null;
         }
 
         public async Task<ResponseDto<PcGuaranteeDto>> AddGuaranteeEventAsync(PcGuaranteeEventSaveDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || !Enum.IsDefined(typeof(PcGuaranteeEventKind), dto.Kind)) return Bad<PcGuaranteeDto>(PcText.InvalidData);
-            if (!_user.IsInRole("COMMERCIAL,FINANCIAL,PMO")) return Bad<PcGuaranteeDto>(PcText.NotAllowed);
+            bool cancellation = dto.Kind == PcGuaranteeEventKind.Cancellation;
+            if (!_user.IsInRole(cancellation ? CloseRoles : "COMMERCIAL,FINANCIAL,PMO"))
+                return Bad<PcGuaranteeDto>(cancellation ? PcText.NotAllowed + " (ابطال ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)" : PcText.NotAllowed);
             // R1a: these two have their own paths (the release action with its date and note, and the daily expiry job); here they would only leave a row without a state change
             if (dto.Kind == PcGuaranteeEventKind.Release) return Bad<PcGuaranteeDto>("آزادسازی ضمانت‌نامه با عمل «آزادسازی» (guarantees/release) ثبت می‌شود.");
             if (dto.Kind == PcGuaranteeEventKind.Expiry) return Bad<PcGuaranteeDto>("انقضای ضمانت‌نامه به‌صورت خودکار ثبت می‌شود.");
@@ -415,9 +456,18 @@ namespace Services.NasbNiro.ProjectControl
                     break;
                 case PcGuaranteeEventKind.Extension:
                     if (!dto.NewExpiryDate.HasValue || (info.ExpiryDate.HasValue && dto.NewExpiryDate.Value.Date <= info.ExpiryDate.Value.Date)) return Bad<PcGuaranteeDto>("تاریخ جدید انقضا باید بعد از تاریخ فعلی باشد.");
+                    // R1a2 (M2): the extension is the only way the expiry date changes after the issue, so it carries its evidence: a note, and the letter when there is one
+                    if (Clean(dto.Note) == null) return Bad<PcGuaranteeDto>("برای تمدید ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه یا الحاقیه‌ی بانک) را بنویسید.");
+                    if (dto.DocumentId.HasValue && !await _uow.Set<Entities.Model.Document>().AnyAsync(d => d.Id == dto.DocumentId.Value, cancellationToken)) return Bad<PcGuaranteeDto>("فایل نامه‌ی پیوست پیدا نشد.");
                     info.ExpiryDate = dto.NewExpiryDate.Value.Date; info.Status = PcGuaranteeStatus.Active;
                     break;
                 case PcGuaranteeEventKind.Cancellation:
+                    // R1a2 (M2): the same rules as the release: allowed roles, a date that is not in the future, a note, and a second person
+                    if (dto.EventDate == default) return Bad<PcGuaranteeDto>("تاریخ ابطال را وارد کنید.");
+                    if (dto.EventDate.Date > DateTime.Today) return Bad<PcGuaranteeDto>("تاریخ ابطال نمی‌تواند در آینده باشد.");
+                    if (Clean(dto.Note) == null) return Bad<PcGuaranteeDto>("برای ابطال ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه کارفرما یا بانک) را بنویسید.");
+                    ResponseDto<PcGuaranteeDto> firstOfTwo = await FirstOfTwoAsync(info, "ابطال", now, cancellationToken);
+                    if (firstOfTwo != null) return firstOfTwo;
                     info.Status = PcGuaranteeStatus.Cancelled;
                     break;
             }
@@ -436,7 +486,7 @@ namespace Services.NasbNiro.ProjectControl
         {
             if (dto == null) return Bad<PcGuaranteeDto>(PcText.InvalidData);
             // the money side signs the release too, so this list differs from the other guarantee actions (★ to be confirmed by the company)
-            if (!_user.IsInRole("COMMERCIAL,FINANCEMANAGER,PMO")) return Bad<PcGuaranteeDto>(PcText.NotAllowed + " (آزادسازی ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)");
+            if (!_user.IsInRole(CloseRoles)) return Bad<PcGuaranteeDto>(PcText.NotAllowed + " (آزادسازی ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)");
             if (dto.ReleaseDate == default) return Bad<PcGuaranteeDto>("تاریخ آزادسازی را وارد کنید.");
             if (dto.ReleaseDate.Date > DateTime.Today) return Bad<PcGuaranteeDto>("تاریخ آزادسازی نمی‌تواند در آینده باشد.");
             string note = Clean(dto.Note);
@@ -447,6 +497,9 @@ namespace Services.NasbNiro.ProjectControl
             if (info.Status == PcGuaranteeStatus.Cancelled) return Bad<PcGuaranteeDto>("ضمانت‌نامه ابطال‌شده آزاد نمی‌شود.");
             if (info.Status == PcGuaranteeStatus.Requested) return Bad<PcGuaranteeDto>("ضمانت‌نامه‌ای که هنوز صادر نشده آزاد نمی‌شود.");
             DateTimeOffset now = DateTimeOffset.Now;
+            // R1a2 (M2): a second person confirms; the first call only records the request
+            ResponseDto<PcGuaranteeDto> firstOfTwo = await FirstOfTwoAsync(info, "آزادسازی", now, cancellationToken);
+            if (firstOfTwo != null) return firstOfTwo;
             info.Status = PcGuaranteeStatus.Released;
             info.ModifyDate = now; info.ModifierUserId = Me;
             _uow.Set<PcGuaranteeEvent>().Add(new PcGuaranteeEvent

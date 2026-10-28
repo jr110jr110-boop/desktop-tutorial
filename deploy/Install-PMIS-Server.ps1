@@ -9,10 +9,15 @@
     2. If PMIS is already installed: runs the existing nightly backup task once and waits
        for it (database + uploaded files) - the update stops if the backup fails.
     3. Runs install.ps1 (keeps settings, database, users and uploaded files; adds the new modules).
-    4. Shows the addresses to open in the browser.
+    4. Shows the addresses to open in the browser (HTTPS; plain HTTP works on the server itself only).
+
+  HTTPS: install.ps1 keeps the certificate the site uses; the first time it makes a self-signed one and writes its public file to
+  <install folder>\certificates\innco-pmis.cer - install that file as a trusted root certificate on the client computers.
+  To use a certificate of the company (in the computer's personal store, with its private key), give its thumbprint:
+      .\Install-PMIS-Server.ps1 -CertificateThumbprint 0123456789ABCDEF...
 #>
 [CmdletBinding()]
-param([switch]$NoPrompt)
+param([switch]$NoPrompt, [string]$CertificateThumbprint)
 $ErrorActionPreference = 'Stop'
 $ServerName = 'PMIS'
 $ServerIp   = '192.168.3.17'
@@ -64,12 +69,14 @@ if ($task) {
     if ($taskArgs -match '-DatabaseName "([^"]+)"') { $params.DatabaseName = $Matches[1] }
     Say ("Existing installation: folder {0}, backups {1}, database {2}" -f $params.InstallRoot, $params.BackupFolder, $params.DatabaseName) Cyan
 }
+if ($CertificateThumbprint) { $params.CertificateThumbprint = $CertificateThumbprint }
 Push-Location (Split-Path -Parent $installer)
 try { & $installer @params } finally { Pop-Location }
 if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { Say 'Installation reported an error. See the log in <install folder>\logs.' Red; exit 1 }
 
 # 4. addresses ------------------------------------------------------------------------------
 Say ''
-Say 'PMIS is ready. Open in Chrome or Edge from any computer in the network:' Green
-Say "   http://$ServerIp/" Green
-Say "   http://$($ServerName.ToLower())/" Green
+Say 'PMIS is ready. Open in Chrome or Edge from any computer in the network (HTTPS):' Green
+Say "   https://$ServerIp/" Green
+Say "   https://$($ServerName.ToLower())/" Green
+Say 'If the browser warns about the certificate, install <install folder>\certificates\innco-pmis.cer as a trusted root certificate on that computer.' Yellow

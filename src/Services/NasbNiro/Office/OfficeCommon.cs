@@ -29,6 +29,15 @@ namespace Services.NasbNiro.Office
         /// <summary>Numbering rules and letter templates.</summary>
         public const string LetterAdmins = "SECRETARIAT,PMO,CEO";
 
+        /// <summary>R1a2 (C1): the list of correspondents (customers, suppliers, authorities) is kept by the secretariat and the PMO; everybody else only reads it.</summary>
+        public const string PartyEditors = "SECRETARIAT,PMO";
+
+        /// <summary>
+        /// R1a2 (L10): the roles that create a meeting without holding a position of the organisation chart. A holder of a position (or his approved deputy) creates one as well,
+        /// which covers the chair and the secretary of the meeting; a signed-in user with neither does not.
+        /// </summary>
+        public const string MeetingCreators = "SECRETARIAT,PMO,CEO";
+
         /// <summary>Attendance of everybody; ordinary users see their own days only.</summary>
         public const string AttendanceReaders = "HR,CEO";
     }

@@ -409,8 +409,13 @@ namespace Services.NasbNiro.Office
         public async Task<ResponseDto<MyOfficeDto>> SaveSignatureAsync(SaveSignatureDto dto, CancellationToken ct)
         {
             if (dto == null || dto.DocumentId == Guid.Empty) return Bad<MyOfficeDto>("تصویر امضا را بارگذاری و شناسه آن را بفرستید.");
-            if (!await _uow.Set<Entities.Model.Document>().AnyAsync(d => d.Id == dto.DocumentId, ct)) return Bad<MyOfficeDto>("فایل بارگذاری‌شده پیدا نشد.");
+            Entities.Model.Document file = await _uow.Set<Entities.Model.Document>().AsNoTracking().FirstOrDefaultAsync(d => d.Id == dto.DocumentId, ct);
+            if (file == null) return Bad<MyOfficeDto>("فایل بارگذاری‌شده پیدا نشد.");
             OfUserSignature s = await _uow.Set<OfUserSignature>().FirstOrDefaultAsync(x => x.UserId == Me, ct);
+            // R1a2 (L10): the picture becomes the caller's signature only when the caller uploaded it himself (or it already is his signature, which a repeated save leaves as it is);
+            // the id of somebody else's file, a letter attachment or a contract scan must not turn into his signature. Files from before the uploader was recorded (null) are not accepted: upload the picture again.
+            bool alreadyHis = s != null && s.ImageDocumentId == dto.DocumentId;
+            if (!alreadyHis && (Me <= 0 || file.UploadedByUserId != Me)) return Bad<MyOfficeDto>("تصویر امضا باید فایلی باشد که خودتان بارگذاری کرده‌اید؛ تصویر را دوباره بارگذاری کنید.");
             if (s == null)
             {
                 s = new OfUserSignature { UserId = Me };

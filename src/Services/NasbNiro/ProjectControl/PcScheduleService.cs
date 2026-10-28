@@ -158,6 +158,20 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok(await PagedList<PcWbsNodeDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
         }
 
+        /// <summary>
+        /// R1a2 (finding L6): the responsible unit decides who starts, holds and resumes an activity (see <see cref="ActivityActionAsync"/>), so setting or changing
+        /// it is the decision of planning and the PMO. A project manager is also a unit manager and can edit everything else, but he cannot hand an activity
+        /// (or a WBS node) to his own role and then start it himself. An unchanged unit (compared the way it is stored: trimmed, upper case) is not a change.
+        /// </summary>
+        private bool UnitChangeRefused(string current, string requested)
+        {
+            string was = Clean(current)?.ToUpperInvariant();
+            string wanted = Clean(requested)?.ToUpperInvariant();
+            return !string.Equals(was, wanted, StringComparison.Ordinal) && !_user.IsInRole(ProjectControlRoles.Planning);
+        }
+
+        private const string UnitChangeNotAllowed = " (تعیین یا تغییر واحد مسئول با برنامه‌ریزی یا PMO است)";
+
         public async Task<ResponseDto<PcWbsNodeDto>> SaveWbsNodeAsync(PcWbsNodeDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || Clean(dto.Code) == null || Clean(dto.Title) == null) return Bad<PcWbsNodeDto>(PcText.InvalidData);
@@ -182,9 +196,11 @@ namespace Services.NasbNiro.ProjectControl
                 n = await _uow.Set<PcWbsNode>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (n == null) return PcText.NotFound<PcWbsNodeDto>("گره WBS پیدا نشد.");
                 if (n.ContractId != dto.ContractId) return Bad<PcWbsNodeDto>("قرارداد گره قابل تغییر نیست.");
+                if (UnitChangeRefused(n.ResponsibleUnit, dto.ResponsibleUnit)) return Bad<PcWbsNodeDto>(PcText.NotAllowed + UnitChangeNotAllowed);
             }
             else
             {
+                if (UnitChangeRefused(null, dto.ResponsibleUnit)) return Bad<PcWbsNodeDto>(PcText.NotAllowed + UnitChangeNotAllowed);
                 n = new PcWbsNode { ContractId = dto.ContractId, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<PcWbsNode>().Add(n);
             }
@@ -697,10 +713,12 @@ namespace Services.NasbNiro.ProjectControl
                 a = await _uow.Set<PcActivity>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (a == null) return PcText.NotFound<PcActivityDto>("فعالیت پیدا نشد.");
                 if (a.ContractId != dto.ContractId) return Bad<PcActivityDto>("قرارداد فعالیت قابل تغییر نیست.");
+                if (UnitChangeRefused(a.ResponsibleUnit, dto.ResponsibleUnit)) return Bad<PcActivityDto>(PcText.NotAllowed + UnitChangeNotAllowed);
                 if (code == null) code = a.Code;
             }
             else
             {
+                if (UnitChangeRefused(null, dto.ResponsibleUnit)) return Bad<PcActivityDto>(PcText.NotAllowed + UnitChangeNotAllowed);
                 if (code == null)
                 {
                     int count = await _uow.Set<PcActivity>().CountAsync(x => x.ContractId == dto.ContractId, cancellationToken);

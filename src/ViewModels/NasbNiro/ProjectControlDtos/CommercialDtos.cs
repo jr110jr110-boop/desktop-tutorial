@@ -66,6 +66,11 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public bool ParseFailed { get; set; }
         public string ParseNote { get; set; }
         public int? DaysToExpiry { get; set; }
+
+        /// <summary>R1a2 (M2): read-only. Who asked for the release or cancellation and when; the request waits for a different user to confirm (the same action is called again).</summary>
+        public int? ReleaseRequestedByUserId { get; set; }
+        public DateTime? ReleaseRequestedAt { get; set; }
+
         public List<PcGuaranteeEventDto> Events { get; set; } = new List<PcGuaranteeEventDto>();
     }
 

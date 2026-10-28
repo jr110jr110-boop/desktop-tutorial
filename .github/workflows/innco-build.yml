@@ -171,6 +171,10 @@ jobs:
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
+          AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
+          Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
+          Identity__RateLimitPerMinute: '1000'  # the smoke signs in many test users from one address; everywhere else 20 per minute per address
+          Identity__AuditHmacKey: 'ci-only-audit-hmac-key-8f3a91c2d47e6b05-not-a-secret'  # CI-only key of the keyed hash that the audit trail writes next to a masked national code, phone or IBAN
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/smoke.sh
@@ -187,6 +191,10 @@ jobs:
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
+          AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
+          Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
+          Identity__RateLimitPerMinute: '1000'  # the smoke signs in many test users from one address; everywhere else 20 per minute per address
+          Identity__AuditHmacKey: 'ci-only-audit-hmac-key-8f3a91c2d47e6b05-not-a-secret'  # CI-only key of the keyed hash that the audit trail writes next to a masked national code, phone or IBAN
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/inventory-smoke.sh
@@ -202,6 +210,10 @@ jobs:
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
+          AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
+          Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
+          Identity__RateLimitPerMinute: '1000'  # the smoke signs in many test users from one address; everywhere else 20 per minute per address
+          Identity__AuditHmacKey: 'ci-only-audit-hmac-key-8f3a91c2d47e6b05-not-a-secret'  # CI-only key of the keyed hash that the audit trail writes next to a masked national code, phone or IBAN
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: |
           set -o pipefail
@@ -308,6 +320,8 @@ jobs:
         continue-on-error: true
         shell: powershell
         run: |
+          # Admin is made with this temporary password and must choose a new one at the first sign-in (MUST_CHANGE_PASSWORD): install-checks.ps1 (phase 1-first)
+          # does that through Accounts/change-temporary-password, and phases 2 and 3 sign in with the new password. The site is HTTPS (self-signed certificate made by the installer).
           powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -AdminPassword 'Ci#Adm1n-Install-2026' | Tee-Object -FilePath install-output\1-first-run.txt
           "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\1-first-run.txt
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 1-first

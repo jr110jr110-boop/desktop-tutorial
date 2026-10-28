@@ -38,6 +38,20 @@ namespace WebApi.Controllers
         /// <summary>Holidays.</summary>
         public const string HolidayWriters = "PMO,HR,PLANNING";
 
+        // ---- sensitive legacy reads (R1a2, M8; see LegacyFieldAccess): the reads stay open to every signed-in user, these two fields are not ----
+
+        /// <summary>
+        /// The bank accounts of a provider (account number, SHABA, card number) in <c>GET Provider</c>, <c>Provider/providers</c>, <c>Provider/vendor-list</c> and wherever a provider is nested in an answer.
+        /// Everybody else gets the number masked to its last four digits. ★ to be confirmed by the company.
+        /// </summary>
+        public const string ProviderBankReaders = "PMO,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY";
+
+        /// <summary>
+        /// The price of a contract, the price and the accepted price of a provisional statement, the price of an inquiry and the finance price of a buy order.
+        /// Everybody else gets null. ★ to be confirmed by the company.
+        /// </summary>
+        public const string PriceReaders = "PMO,CEO,COMMERCIAL,FINANCIAL,FINANCEMANAGER,PLANNING,PROJECTMANAGER,SALES";
+
         // ---- legacy buy order / assembly workflow: each stage belongs to the role that sees it on the card board (CardBoardService) ----
 
         /// <summary>Technical score of an inquiry and the "technical scores are complete" step of a buy order (the card board shows the stage to engineering).</summary>

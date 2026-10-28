@@ -11,9 +11,18 @@
       - the program: API and user interface together, as one IIS site
       - the SQL Server database: empty, or restored from a backup of the current system
       - Windows authentication from the program to SQL Server (no database password in any file)
+      - HTTPS for the program (a certificate you give, or a self-signed one made here); plain HTTP only on this computer itself
       - a daily backup of the database and of the uploaded files (scheduled task)
 
     Run it again at any time to update the program. Settings, uploaded files and the database are kept.
+    The settings file of the site (appsettings.Production.json) is merged, not rewritten: only the database connection,
+    the sign-in key and issuer, the log levels and the audit key are set by this script; every other key stays as it is.
+
+    HTTPS: the program is reached at https://<computer name>/ (port 443). The plain HTTP address works on this computer only
+    (127.0.0.1), for the installer's own checks and for the recovery sign-in. Use -CertificateThumbprint for a certificate of
+    the company's own authority (or a purchased one). Without it, the certificate the site uses now is kept, otherwise a
+    self-signed certificate is made; browsers warn about a self-signed certificate until its public file
+    (<InstallRoot>\certificates\innco-pmis.cer) is installed as a trusted root on the client computers.
 
     Run as Administrator, from the folder that contains this script:
 
@@ -43,9 +52,21 @@
     Folder of the old program, the one that contains "UploadedDocuments" and "wwwroot". Its uploaded
     files are copied into the new program.
 
+.PARAMETER Port
+    The plain HTTP port (default 80). It is bound to 127.0.0.1 only: the program answers on this computer itself, not on the network.
+
+.PARAMETER HttpsPort
+    The HTTPS port that people use (default 443).
+
+.PARAMETER CertificateThumbprint
+    Thumbprint of the TLS certificate for the HTTPS address. The certificate must be in the computer's personal store
+    (Cert:\LocalMachine\My) with its private key. If omitted: the certificate the site already uses is kept; on a first
+    installation a self-signed certificate for this computer's name and addresses is made (valid 5 years).
+
 .PARAMETER AdminPassword
-    Password of the "Admin" user when a new, empty database is created. If omitted, one is generated
-    and shown at the end.
+    Temporary password of the "Admin" user, used only when the program has to create that account (a new, empty database).
+    If omitted, one is generated and shown at the end. The program asks for a new password at the first sign-in, and the
+    temporary one is taken out of the settings file as soon as the account exists.
 
 .PARAMETER HostingBundle
     Path or URL of the .NET 10 Hosting Bundle installer (dotnet-hosting-10.x.x-win.exe). Default: the
@@ -67,6 +88,8 @@ param(
     [string]$DatabaseName = 'IRNNCO',
     [string]$SiteName = 'INNCO',
     [ValidateRange(1, 65535)][int]$Port = 80,
+    [ValidateRange(1, 65535)][int]$HttpsPort = 443,
+    [string]$CertificateThumbprint,
     [string]$RestoreBackup,
     [switch]$ReplaceDatabase,
     [string]$UploadedFilesFrom,
@@ -79,7 +102,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $PackageDir = $PSScriptRoot
-$ScriptVersion = '1.0'
+$ScriptVersion = '1.1'
+$SelfSignedName = 'INNCO PMIS (self-signed)'   # friendly name of the certificate this script makes
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 $script:TranscriptOn = $false
 
@@ -254,6 +278,150 @@ function Test-HostingBundle {
     $hasModuleFile = Test-Path (Join-Path $env:ProgramFiles 'IIS\Asp.Net Core Module\V2\aspnetcorev2.dll')
     $registered = $null -ne (Get-WebGlobalModule -Name 'AspNetCoreModuleV2' -ErrorAction SilentlyContinue)
     return [pscustomobject]@{ Runtime = $hasRuntime; ModuleFile = $hasModuleFile; Module = ($hasModuleFile -and $registered) }
+}
+
+# ----------------------------------------------------------------------------------------------
+# Settings file: the existing appsettings.Production.json is merged, never rewritten (R1a2, M7)
+# ----------------------------------------------------------------------------------------------
+
+function Get-JsonSetting($Root, [string[]]$Path) {
+    $node = $Root
+    foreach ($name in $Path) {
+        if ($null -eq $node) { return $null }
+        $property = $node.PSObject.Properties[$name]
+        if ($null -eq $property) { return $null }
+        $node = $property.Value
+    }
+    return $node
+}
+
+# Sets Root.Path[0].Path[1]... to Value and creates the objects on the way; nothing else in the file is touched.
+function Set-JsonSetting($Root, [string[]]$Path, $Value) {
+    $node = $Root
+    for ($i = 0; $i -lt $Path.Count - 1; $i++) {
+        $property = $node.PSObject.Properties[$Path[$i]]
+        if ($null -eq $property) {
+            $child = [pscustomobject]@{}
+            $node | Add-Member -NotePropertyName $Path[$i] -NotePropertyValue $child
+            $node = $child
+        }
+        elseif ($property.Value -is [System.Management.Automation.PSCustomObject]) { $node = $property.Value }
+        else {
+            $child = [pscustomobject]@{}
+            $property.Value = $child
+            $node = $child
+        }
+    }
+    $leaf = $Path[$Path.Count - 1]
+    $existingLeaf = $node.PSObject.Properties[$leaf]
+    if ($null -ne $existingLeaf) { $existingLeaf.Value = $Value }
+    else { $node | Add-Member -NotePropertyName $leaf -NotePropertyValue $Value }
+}
+
+# Removes the last name of Path (and the object that held it when nothing else is left in it).
+function Remove-JsonSetting($Root, [string[]]$Path) {
+    $parent = $Root
+    if ($Path.Count -gt 1) { $parent = Get-JsonSetting $Root ([string[]]$Path[0..($Path.Count - 2)]) }
+    if ($null -eq $parent) { return }
+    $leaf = $Path[$Path.Count - 1]
+    if ($null -ne $parent.PSObject.Properties[$leaf]) { $parent.PSObject.Properties.Remove($leaf) }
+    if ($Path.Count -eq 2 -and @($parent.PSObject.Properties).Count -eq 0) { $Root.PSObject.Properties.Remove($Path[0]) }
+}
+
+function Write-JsonSettings($Settings, [string]$Path) {
+    $json = $Settings | ConvertTo-Json -Depth 20
+    [IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# True when the program has already made the administrator account (the table exists only after the program's first start).
+function Test-AdminAccount([string]$UserName) {
+    $count = Invoke-Sql -Database $DatabaseName -Scalar -Parameters @{ '@n' = $UserName } -Query @"
+IF OBJECT_ID(N'dbo.AppUsers', N'U') IS NULL SELECT 0 ELSE SELECT COUNT(*) FROM dbo.AppUsers WHERE UserName = @n
+"@
+    return ([int]$count) -gt 0
+}
+
+# ----------------------------------------------------------------------------------------------
+# HTTPS (R1a2, M6)
+# ----------------------------------------------------------------------------------------------
+
+# The DNS names and IPv4 addresses a self-signed certificate of this computer is made for.
+function Get-CertificateNames {
+    $names = New-Object System.Collections.Generic.List[string]
+    $names.Add($env:COMPUTERNAME.ToLowerInvariant())
+    try {
+        $fullName = [System.Net.Dns]::GetHostEntry([string]$env:COMPUTERNAME).HostName.ToLowerInvariant()
+        if ($fullName -and -not $names.Contains($fullName)) { $names.Add($fullName) }
+    }
+    catch { }
+    if (-not $names.Contains('localhost')) { $names.Add('localhost') }
+    $addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                   Where-Object { $_.IPAddress -notlike '169.254.*' } |
+                   ForEach-Object { $_.IPAddress } | Select-Object -Unique)
+    return [pscustomobject]@{ Dns = $names.ToArray(); Addresses = $addresses }
+}
+
+# True when the subject alternative names of the certificate contain every name and address of Names.
+function Test-CertificateCovers($Certificate, $Names) {
+    $extension = $Certificate.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' } | Select-Object -First 1
+    if ($null -eq $extension) { return $false }
+    $values = @(($extension.Format($true) -split '[,\r\n]+') | ForEach-Object { ($_ -split '=', 2)[-1].Trim().ToLowerInvariant() })
+    foreach ($wanted in (@($Names.Dns) + @($Names.Addresses))) {
+        if (-not $wanted) { continue }
+        if ($values -notcontains ([string]$wanted).ToLowerInvariant()) { return $false }
+    }
+    return $true
+}
+
+# The certificate for the HTTPS address: the one asked for, else the one the site uses now, else one of ours that is still good, else a new self-signed one.
+function Resolve-SiteCertificate([string]$Requested, [string]$CurrentHash) {
+    $store = 'Cert:\LocalMachine\My'
+    if ($Requested) {
+        $thumbprint = ($Requested -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+        $certificate = Get-Item -Path "$store\$thumbprint" -ErrorAction SilentlyContinue
+        if ($null -eq $certificate) { throw "No certificate with thumbprint $thumbprint in the computer's personal certificate store ($store). Import it there, with its private key, and run the script again." }
+        if (-not $certificate.HasPrivateKey) { throw "The certificate $thumbprint has no private key in the computer store, so IIS cannot use it." }
+        if ($certificate.NotAfter -lt (Get-Date)) { throw "The certificate $thumbprint expired on $($certificate.NotAfter.ToString('yyyy-MM-dd'))." }
+        Write-Info "Certificate: $($certificate.Subject) (given thumbprint, valid until $($certificate.NotAfter.ToString('yyyy-MM-dd')))."
+        return $certificate
+    }
+    if ($CurrentHash) {
+        $current = Get-Item -Path "$store\$CurrentHash" -ErrorAction SilentlyContinue
+        if ($null -ne $current -and $current.HasPrivateKey -and $current.NotAfter -gt (Get-Date).AddDays(14)) {
+            Write-Info "Certificate: kept the one the site uses now ($($current.Subject), valid until $($current.NotAfter.ToString('yyyy-MM-dd')))."
+            return $current
+        }
+    }
+    $names = Get-CertificateNames
+    $own = @(Get-ChildItem -Path $store | Where-Object { $_.FriendlyName -eq $SelfSignedName -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) } | Sort-Object NotAfter -Descending)
+    foreach ($candidate in $own) {
+        if (Test-CertificateCovers $candidate $names) {
+            Write-Info "Certificate: reused the self-signed certificate made earlier (valid until $($candidate.NotAfter.ToString('yyyy-MM-dd')))."
+            return $candidate
+        }
+    }
+    $alternative = (@($names.Dns | ForEach-Object { "DNS=$_" }) + @($names.Addresses | ForEach-Object { "IPAddress=$_" })) -join '&'
+    $made = New-SelfSignedCertificate -Subject ('CN=' + $env:COMPUTERNAME.ToLowerInvariant()) -FriendlyName $SelfSignedName -CertStoreLocation $store `
+                -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(5) `
+                -TextExtension @("2.5.29.17={text}$alternative")
+    Write-Info "Certificate: made a self-signed certificate for $($names.Dns -join ', ') and $($names.Addresses -join ', ') (valid until $($made.NotAfter.ToString('yyyy-MM-dd')))."
+    return $made
+}
+
+# Connects with TLS and returns the thumbprint of the certificate the server presents. It only reads the certificate, so the validation accepts everything.
+function Get-ServedCertificateThumbprint([string]$HostName, [int]$TcpPort) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $client.Connect($HostName, $TcpPort)
+        $accept = [System.Net.Security.RemoteCertificateValidationCallback] { param($sender, $certificate, $chain, $errors) $true }
+        $ssl = New-Object System.Net.Security.SslStream($client.GetStream(), $false, $accept)
+        try {
+            $ssl.AuthenticateAsClient($HostName, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+            return (New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $ssl.RemoteCertificate).Thumbprint
+        }
+        finally { $ssl.Dispose() }
+    }
+    finally { $client.Close() }
 }
 
 # ----------------------------------------------------------------------------------------------
@@ -534,65 +702,137 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
 
     # 8. Settings -------------------------------------------------------------------------------
     Write-Step 'Settings (appsettings.Production.json)'
+    # R1a2 (M7): the settings file of the site is MERGED, not rewritten. This script sets only: the database connection, the sign-in key (kept when there is one) and the
+    # token issuer (https), the log levels, the audit key (kept when there is one) and, until the program has created the Admin account, the temporary password of that account.
+    # Every other key of the file (allowed origins, AI endpoints, limits under "Identity" ...) stays exactly as it is.
     $settingsPath = Join-Path $AppDir 'appsettings.Production.json'
-    $existing = $null
+    $seedMarker = Join-Path $InstallRoot 'admin-seed-done.txt'
+    $settings = $null
     if (Test-Path $settingsPath) {
-        try { $existing = Get-Content -Raw -Path $settingsPath | ConvertFrom-Json }
-        catch { Write-Warn "The existing settings file could not be read and is replaced: $($_.Exception.Message)" }
-    }
-    $jwtKey = $null; $seedPassword = $null
-    if ($existing -and $existing.BearerTokens) { $jwtKey = $existing.BearerTokens.Key }
-    if ($existing -and $existing.AdminUserSeed) { $seedPassword = $existing.AdminUserSeed.Password }
-    if (-not $jwtKey) { $jwtKey = New-RandomText 64 }
-    if ($AdminPassword) { $seedPassword = $AdminPassword }
-    if (-not $seedPassword) { $seedPassword = New-RandomText 14 -Password }
-    if ($createdNewDatabase) { $newAdminPassword = $seedPassword }
-
-    $settings = [ordered]@{
-        ConnectionStrings = [ordered]@{
-            SqlServer = [ordered]@{
-                ApplicationDbContextConnection = "Data Source=$script:SqlInstance;Initial Catalog=$DatabaseName;Integrated Security=True;TrustServerCertificate=True;"
-            }
+        try { $settings = Get-Content -Raw -Path $settingsPath -Encoding UTF8 | ConvertFrom-Json }
+        catch {
+            $unreadable = "$settingsPath.unreadable-{0:yyyyMMdd-HHmmss}" -f (Get-Date)
+            Copy-Item -Path $settingsPath -Destination $unreadable -Force
+            Write-Warn "The existing settings file could not be read, a new one is made. The old file is kept as $unreadable ($($_.Exception.Message))"
         }
-        BearerTokens      = [ordered]@{ Key = $jwtKey; Issuer = "http://$($env:COMPUTERNAME.ToLowerInvariant()):$Port/" }
-        AdminUserSeed     = [ordered]@{ Password = $seedPassword }
-        Logging           = [ordered]@{ LogLevel = [ordered]@{ Default = 'Warning'; System = 'Warning'; Microsoft = 'Warning' } }
     }
-    $json = $settings | ConvertTo-Json -Depth 10
-    [IO.File]::WriteAllText($settingsPath, $json, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Ok 'Database connection uses Windows authentication; sign-in key kept or created.'
+    if ($null -eq $settings -or $settings -isnot [System.Management.Automation.PSCustomObject]) { $settings = [pscustomobject]@{} }
+
+    # the name of the administrator account the program creates (the shipped settings say which)
+    $adminName = [string](Get-JsonSetting $settings @('AdminUserSeed', 'Username'))
+    if (-not $adminName) {
+        try { $adminName = [string](Get-JsonSetting (Get-Content -Raw -Path (Join-Path $AppDir 'appsettings.json') -Encoding UTF8 | ConvertFrom-Json) @('AdminUserSeed', 'Username')) }
+        catch { }
+    }
+    if (-not $adminName) { $adminName = 'Admin' }
+
+    $jwtKey = [string](Get-JsonSetting $settings @('BearerTokens', 'Key'))
+    if (-not $jwtKey -or $jwtKey.Length -lt 32) { $jwtKey = New-RandomText 64 }
+    $auditKey = [string](Get-JsonSetting $settings @('Identity', 'AuditHmacKey'))   # keyed hash of the masked values in the audit trail; never replaced once it exists
+    if (-not $auditKey) { $auditKey = New-RandomText 64 }
+
+    # The seed password is needed only while the account does not exist; it goes into the file now and comes out again as soon as the program has made the account (step 11).
+    $seedNeeded = -not (Test-AdminAccount $adminName)
+    $seedPassword = $null
+    if ($seedNeeded) {
+        if ($AdminPassword) { $seedPassword = $AdminPassword }
+        else { $seedPassword = [string](Get-JsonSetting $settings @('AdminUserSeed', 'Password')) }
+        if (-not $seedPassword -or $seedPassword -eq 'SET-BY-INSTALL-ps1') { $seedPassword = New-RandomText 14 -Password }
+        $newAdminPassword = $seedPassword
+    }
+    elseif ($AdminPassword) { Write-Info "-AdminPassword is not used: the account '$adminName' exists already (its password is changed in the program)." }
+
+    $httpsSuffix = if ($HttpsPort -eq 443) { '' } else { ":$HttpsPort" }
+    Set-JsonSetting $settings @('ConnectionStrings', 'SqlServer', 'ApplicationDbContextConnection') "Data Source=$script:SqlInstance;Initial Catalog=$DatabaseName;Integrated Security=True;TrustServerCertificate=True;"
+    Set-JsonSetting $settings @('BearerTokens', 'Key') $jwtKey
+    Set-JsonSetting $settings @('BearerTokens', 'Issuer') "https://$($env:COMPUTERNAME.ToLowerInvariant())$httpsSuffix/"
+    Set-JsonSetting $settings @('Identity', 'AuditHmacKey') $auditKey
+    Set-JsonSetting $settings @('Logging', 'LogLevel') ([pscustomobject]@{ Default = 'Warning'; System = 'Warning'; Microsoft = 'Warning' })
+    if ($seedNeeded) { Set-JsonSetting $settings @('AdminUserSeed', 'Password') $seedPassword }
+    else { Remove-JsonSetting $settings @('AdminUserSeed', 'Password') }   # an older installation kept the password of the first installation here
+    Write-JsonSettings $settings $settingsPath
+    Write-Ok 'Database connection uses Windows authentication; sign-in key and audit key kept or created; the other settings were left as they are.'
 
     # 9. Web site -------------------------------------------------------------------------------
-    Write-Step "IIS site '$SiteName' on port $Port"
+    Write-Step "IIS site '$SiteName' (HTTPS on port $HttpsPort, plain HTTP on this computer only)"
+    # HTTPS (R1a2, M6). The sign-in passwords and the tokens travel over this network, so the program is reached over HTTPS only:
+    #   - the HTTPS address (*:$HttpsPort) is open to the network and carries the certificate chosen below;
+    #   - the plain HTTP address is bound to 127.0.0.1, so it answers on this computer itself only (the installer's own checks, health checks, the recovery sign-in);
+    #   - the program sends the HSTS header on its HTTPS answers (one year), so a browser that has seen the HTTPS address does not go back to plain HTTP.
+    # Certificate: -CertificateThumbprint (a certificate of the company's own authority or a purchased one, in the computer's personal store with its private key). Without it
+    # the certificate the site uses now is kept; on a first installation a self-signed certificate for this computer's names and addresses is made. Browsers warn about a
+    # self-signed certificate until its public file (<InstallRoot>\certificates\innco-pmis.cer) is installed as a trusted root certificate on the client computers.
     foreach ($other in @(Get-Website | Where-Object { $_.Name -ne $SiteName })) {
-        $usesPort = @($other.bindings.Collection | Where-Object { $_.protocol -eq 'http' -and $_.bindingInformation -like "*:$($Port):" }).Count -gt 0
+        $usesPort = @($other.bindings.Collection | Where-Object {
+            ($_.protocol -eq 'http' -and $_.bindingInformation -like "*:$($Port):") -or ($_.protocol -eq 'https' -and $_.bindingInformation -like "*:$($HttpsPort):")
+        }).Count -gt 0
         $autoStart = "$($other.serverAutoStart)" -eq 'True'
         if ($usesPort -and ($other.State -eq 'Started' -or $autoStart)) {
             if ($other.State -eq 'Started') { Stop-Website -Name $other.Name }
             Set-ItemProperty "IIS:\Sites\$($other.Name)" -Name serverAutoStart -Value $false
-            Write-Info "Stopped site '$($other.Name)' because it used port $Port."
+            Write-Info "Stopped site '$($other.Name)' because it used port $Port or $HttpsPort."
         }
     }
+    $loopbackBinding = "127.0.0.1:$($Port):"
     $site = Get-Website | Where-Object { $_.Name -eq $SiteName }
     if (-not $site) {
         $siteId = 1 + (@(Get-Website | ForEach-Object { [int]$_.id }) + 0 | Measure-Object -Maximum).Maximum
-        New-Website -Name $SiteName -Id $siteId -PhysicalPath $AppDir -ApplicationPool $SiteName -Port $Port -IPAddress '*' | Out-Null
+        New-Website -Name $SiteName -Id $siteId -PhysicalPath $AppDir -ApplicationPool $SiteName -Port $Port -IPAddress '127.0.0.1' | Out-Null
         Write-Info "Created site '$SiteName'."
     }
     else {
         Set-ItemProperty "IIS:\Sites\$SiteName" -Name physicalPath -Value $AppDir
         Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool -Value $SiteName
-        $hasBinding = @($site.bindings.Collection | Where-Object { $_.protocol -eq 'http' -and $_.bindingInformation -like "*:$($Port):*" }).Count -gt 0
-        if (-not $hasBinding) { New-WebBinding -Name $SiteName -Protocol http -Port $Port -IPAddress '*' }
+    }
+    # plain HTTP on the loopback address only: an earlier version bound it to every address
+    foreach ($binding in @(Get-WebBinding -Name $SiteName -Protocol http)) {
+        if ($binding.bindingInformation -ne $loopbackBinding) {
+            # bindingInformation reads "<ip>:<port>:<host name>", for example "*:80:"
+            if (([string]$binding.bindingInformation) -match '^(.*):(\d+):(.*)$') {
+                $removal = @{ Name = $SiteName; Protocol = 'http'; IPAddress = $Matches[1]; Port = [int]$Matches[2] }
+                if ($Matches[3]) { $removal.HostHeader = $Matches[3] }
+                Remove-WebBinding @removal
+            }
+            else { throw "Cannot read the address of the HTTP binding '$($binding.bindingInformation)'." }
+            Write-Info "Removed the HTTP address $($binding.bindingInformation) (plain HTTP is for this computer only now)."
+        }
+    }
+    if (@(Get-WebBinding -Name $SiteName -Protocol http | Where-Object { $_.bindingInformation -eq $loopbackBinding }).Count -eq 0) {
+        New-WebBinding -Name $SiteName -Protocol http -Port $Port -IPAddress '127.0.0.1'
+    }
+
+    # the HTTPS address and its certificate
+    $httpsBinding = Get-WebBinding -Name $SiteName -Protocol https | Where-Object { $_.bindingInformation -like "*:$($HttpsPort):*" } | Select-Object -First 1
+    $currentHash = $null
+    if ($httpsBinding) { $currentHash = [string]$httpsBinding.certificateHash }
+    $certificate = Resolve-SiteCertificate $CertificateThumbprint $currentHash
+    $certificateThumbprint = $certificate.Thumbprint
+    $certificateSelfSigned = $certificate.Subject -eq $certificate.Issuer
+    if (-not $httpsBinding) { New-WebBinding -Name $SiteName -Protocol https -Port $HttpsPort -IPAddress '*' -SslFlags 0 }
+    $sslPath = "IIS:\SslBindings\0.0.0.0!$HttpsPort"
+    if (Test-Path $sslPath) { Remove-Item -Path $sslPath -Force }   # replaces the certificate of an earlier run
+    New-Item -Path $sslPath -Value $certificate | Out-Null
+    $certificatePublicFile = $null
+    if ($certificateSelfSigned) {
+        $certificateDir = Join-Path $InstallRoot 'certificates'
+        New-Item -ItemType Directory -Force -Path $certificateDir | Out-Null
+        $certificatePublicFile = Join-Path $certificateDir 'innco-pmis.cer'
+        Export-Certificate -Cert $certificate -FilePath $certificatePublicFile -Force | Out-Null   # public part only; the private key cannot be exported
+        Write-Info "Public file of the certificate (for the client computers): $certificatePublicFile"
     }
     Set-ItemProperty "IIS:\Sites\$SiteName" -Name serverAutoStart -Value $true
 
-    $ruleName = "INNCO PMIS (TCP $Port)"
+    $ruleName = "INNCO PMIS (HTTPS TCP $HttpsPort)"
     if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Any | Out-Null
-        Write-Info "Firewall: port $Port opened."
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $HttpsPort -Profile Any | Out-Null
+        Write-Info "Firewall: port $HttpsPort opened."
     }
-    Write-Ok 'Site configured.'
+    $oldRuleName = "INNCO PMIS (TCP $Port)"   # the rule of earlier versions opened the plain HTTP port to the network
+    if (Get-NetFirewallRule -DisplayName $oldRuleName -ErrorAction SilentlyContinue) {
+        Remove-NetFirewallRule -DisplayName $oldRuleName
+        Write-Info "Firewall: the rule that opened plain HTTP (port $Port) to the network was removed."
+    }
+    Write-Ok "Site configured: https on port $HttpsPort (certificate $certificateThumbprint), http on 127.0.0.1:$Port only."
 
     # 10. Daily backup task ---------------------------------------------------------------------
     Write-Step 'Daily backup (scheduled task, 01:30)'
@@ -610,7 +850,7 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     Write-Step 'Start and check'
     Start-WebAppPool -Name $SiteName -ErrorAction SilentlyContinue
     Start-Website -Name $SiteName
-    $base = "http://localhost:$Port"
+    $base = "http://127.0.0.1:$Port"   # plain HTTP exists on this computer only
     Write-Info 'Waiting for the program to start (the first start can take a few minutes)...'
     $swagger = Wait-Http "$base/swagger/v1/swagger.json" 900
     Write-Ok "API answers ($([int]$swagger.StatusCode))."
@@ -622,11 +862,32 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     $migrations = [int](Invoke-Sql -Database $DatabaseName -Scalar -Query 'SELECT COUNT(*) FROM dbo.__EFMigrationsHistory')
     $lastMigration = [string](Invoke-Sql -Database $DatabaseName -Scalar -Query 'SELECT TOP (1) MigrationId FROM dbo.__EFMigrationsHistory ORDER BY MigrationId DESC')
     Write-Ok "Database structure is up to date ($migrations updates applied, last: $lastMigration)."
-    if ($createdNewDatabase) {
-        $body = @{ userName = 'Admin'; password = $seedPassword } | ConvertTo-Json
+
+    # HTTPS must answer with the certificate that was chosen above
+    $served = Get-ServedCertificateThumbprint '127.0.0.1' $HttpsPort
+    if ($served -ne $certificateThumbprint) { throw "HTTPS on port $HttpsPort answers with another certificate ($served) than the chosen one ($certificateThumbprint)." }
+    Write-Ok "HTTPS answers on port $HttpsPort with the chosen certificate."
+
+    # The administrator account: the program made it when it started. The temporary password is proven once (the program asks for a new password at the first sign-in,
+    # which is the right answer here), then it is taken out of the settings file for good and a marker records that.
+    if ($seedNeeded) {
+        if (-not (Test-AdminAccount $adminName)) { throw "The program did not create the account '$adminName'. See the program logs in $LogsDir." }
+        $body = @{ userName = $adminName; password = $seedPassword } | ConvertTo-Json
         $login = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$base/api/v1/Accounts/login" -ContentType 'application/json' -Body $body
-        if ($login.Content -notmatch '"accessToken"\s*:\s*"[^"]+') { throw "Signing in as Admin failed: $($login.Content)" }
-        Write-Ok 'Signing in as Admin works.'
+        if ($login.Content -notmatch '"accessToken"\s*:\s*"[^"]+' -and $login.Content -notmatch 'MUST_CHANGE_PASSWORD') { throw "Signing in as '$adminName' failed: $($login.Content)" }
+        Write-Ok "The account '$adminName' exists and its temporary password works (the program asks for a new password at the first sign-in)."
+        Remove-JsonSetting $settings @('AdminUserSeed', 'Password')
+        Write-JsonSettings $settings $settingsPath
+        Write-Ok 'The temporary password is no longer in the settings file.'
+    }
+    if (-not (Test-Path $seedMarker)) {
+        $markerDate = Get-Date -Format 'yyyy-MM-dd HH:mm'
+        $markerText = @(
+            "INNCO PMIS: the seed password of the administrator account '$adminName' was removed from appsettings.Production.json ($markerDate).",
+            'The program asked for a new password at the first sign-in; the temporary one is not stored anywhere.',
+            'Do not put a password back into AdminUserSeed:Password. A forgotten password is reset in the program by a PMO user.'
+        )
+        Set-Content -Path $seedMarker -Value $markerText -Encoding ASCII
     }
 
     if (-not $SkipFirstBackup) {
@@ -648,8 +909,8 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     $ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
              Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
              ForEach-Object { $_.IPAddress })
-    $suffix = if ($Port -eq 80) { '' } else { ":$Port" }
-    $siteUrls = @("http://$($env:COMPUTERNAME.ToLowerInvariant())$suffix/") + @($ips | ForEach-Object { "http://$_$suffix/" })
+    $suffix = if ($HttpsPort -eq 443) { '' } else { ":$HttpsPort" }
+    $siteUrls = @("https://$($env:COMPUTERNAME.ToLowerInvariant())$suffix/") + @($ips | ForEach-Object { "https://$_$suffix/" })
 }
 catch {
     $exitCode = 1
@@ -676,14 +937,23 @@ finally {
 if ($exitCode -eq 0) {
     Write-Host ''
     Write-Host 'INSTALLATION FINISHED' -ForegroundColor Green
-    Write-Host 'Open the program in a browser on any computer of the network:'
+    Write-Host 'Open the program in a browser on any computer of the network (HTTPS; plain HTTP works on this server only):'
     foreach ($url in $siteUrls) { Write-Host "    $url" }
+    if ($certificatePublicFile) {
+        Write-Host ''
+        Write-Host 'HTTPS certificate (self-signed):' -ForegroundColor Green
+        Write-Host '    Browsers warn until this public file is installed as a trusted root certificate on every client computer'
+        Write-Host '    (group policy, or double-click the file > Install Certificate > Local Machine > Trusted Root Certification Authorities):'
+        Write-Host "        $certificatePublicFile"
+        Write-Host '    To use a certificate of the company or a purchased one, run this script again with -CertificateThumbprint <thumbprint>.'
+    }
     if ($newAdminPassword) {
         Write-Host ''
-        Write-Host 'First sign-in (new database):' -ForegroundColor Green
-        Write-Host '    User name: Admin'
-        Write-Host "    Password:  $newAdminPassword"
-        Write-Host '    Write it down now and change it after the first sign-in. It is not in the log file.'
+        Write-Host 'First sign-in (new account):' -ForegroundColor Green
+        Write-Host "    User name: $adminName"
+        Write-Host "    Password:  $newAdminPassword   (temporary)"
+        Write-Host '    The program asks for a new password at the first sign-in. Write the temporary one down now:'
+        Write-Host '    it is not in the log file and it is no longer in the settings file.'
     }
 }
 exit $exitCode

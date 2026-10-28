@@ -21,6 +21,15 @@ namespace ViewModels.Identity.UserDtos
         public string TemporaryPassword { get; set; }
 
         public bool MustChangePassword { get; set; }
+
+        /// <summary>
+        /// R1a2: true when nothing was reset yet: the user is a PMO user or holds a sensitive role, so a second PMO user must approve the request
+        /// (role-grants/{GrantId}/approve). The temporary password is then made at the approval and shown to the approver.
+        /// </summary>
+        public bool Pending { get; set; }
+
+        /// <summary>R1a2: id of the pending request when <see cref="Pending"/> is true.</summary>
+        public int? GrantId { get; set; }
     }
 
     /// <summary>The user who signed in with a temporary password sets a new one (anonymous call: the temporary password is the proof).</summary>
