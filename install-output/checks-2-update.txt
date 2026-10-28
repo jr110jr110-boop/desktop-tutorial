@@ -1,0 +1,15 @@
+PASS  home page shows the user interface  http=200
+PASS  page address inside the program  http=200
+PASS  javascript asset  /assets/index.dab26c9e.js http=200 type=text/javascript
+PASS  unknown API address answers 404  http=404
+PASS  https answers with the user interface  https://runnervmdaln5/ http=200
+PASS  https answers carry the HSTS header  max-age=31536000
+PASS  plain http is for the server itself only  http://172.19.64.1/ is not served (ProtocolError)
+PASS  sign in as Admin (the first time the program asks for a new password)  token length=885
+PASS  the installer password is no longer in the settings file  password removed, marker present, https issuer, audit key present
+PASS  contracts list (database query)  http=200 bytes=133
+PASS  download the uploaded document  http=200
+PASS  uploaded files on disk  1 files in UploadedDocuments
+PASS  backup task exists  state=Ready lastResult=0
+PASS  database backup files  IRNNCO_20261028_1916.bak=12705792 IRNNCO_20261028_1917.bak=13295616
+PASS  file backup copy  2 files

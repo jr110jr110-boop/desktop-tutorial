@@ -1,0 +1,24 @@
+#Software: Microsoft Internet Information Services 10.0
+#Version: 1.0
+#Date: 2026-10-28 19:16:25
+#Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) cs(Referer) sc-status sc-substatus sc-win32-status sc-bytes cs-bytes time-taken
+2026-10-28 19:16:25 127.0.0.1 GET /swagger/v1/swagger.json - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 1855344 178 27007
+2026-10-28 19:16:25 127.0.0.1 GET / - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 131 67
+2026-10-28 19:16:25 127.0.0.1 GET /contract/list - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 144 2
+2026-10-28 19:16:25 127.0.0.1 POST /api/v1/Accounts/login - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 507 278 237
+2026-10-28 19:16:32 127.0.0.1 GET / - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 155 2
+2026-10-28 19:16:32 127.0.0.1 GET /contract/update/5 - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 148 1
+2026-10-28 19:16:32 127.0.0.1 GET / - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 131 0
+2026-10-28 19:16:32 127.0.0.1 GET /assets/index.dab26c9e.js - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 550132 155 16
+2026-10-28 19:16:32 127.0.0.1 GET /api/v1/NoSuchThing/x - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 404 0 0 707 151 7
+2026-10-28 19:16:32 fe80::9c9e:b72e:2649:e153%15 GET / - 443 - fe80::9c9e:b72e:2649:e153%15 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 746 159 1
+2026-10-28 19:16:32 fe80::9c9e:b72e:2649:e153%15 GET / - 443 - fe80::9c9e:b72e:2649:e153%15 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 746 135 0
+2026-10-28 19:16:32 127.0.0.1 POST /api/v1/Accounts/login - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 507 278 81
+2026-10-28 19:16:34 127.0.0.1 POST /api/v1/Accounts/change-temporary-password - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 1848 353 587
+2026-10-28 19:16:34 127.0.0.1 POST /api/v1/Accounts/login - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 297 278 97
+2026-10-28 19:16:34 127.0.0.1 GET /api/v1/Contracts PageNumber=1&PageSize=10 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 308 1081 281
+2026-10-28 19:16:34 127.0.0.1 POST /api/v1/Documents Description=ci&Name=ci-upload&Code=ci1 80 - 127.0.0.1 curl/8.21.0 - 200 0 0 212 1379 72
+2026-10-28 19:16:34 127.0.0.1 GET /api/v1/Documents DocumentId=108f240c-d468-4ed7-5f67-08df3527fb62 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 279 1104 63
+2026-10-28 19:17:10 127.0.0.1 GET /swagger/v1/swagger.json - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 1855344 178 9319
+2026-10-28 19:17:10 127.0.0.1 GET / - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 131 66
+2026-10-28 19:17:10 127.0.0.1 GET /contract/list - 80 - 127.0.0.1 Mozilla/5.0+(Windows+NT;+Windows+NT+10.0;+en-US)+WindowsPowerShell/5.1.26100.33648 - 200 0 0 643 144 2

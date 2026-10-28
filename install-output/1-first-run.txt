@@ -1,0 +1,92 @@
+﻿INNCO PMIS installer 1.1
+    Windows:        Microsoft Windows Server 2025 Datacenter (10.0.26100)
+    Computer:       runnervmdaln5
+    Program folder: D:\INNCO\app
+    Backup folder:  D:\INNCO\Backup
+    Package:        source_sha=b2edfa26483395f173d0507f388acdcf1c7ba5a0
+    Package:        built_utc=2026-10-28T19:07:26Z
+    Package:        sdk=10.0.403
+    Package:        aspnetcore_runtime=Microsoft.AspNetCore.App 10.0.14 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+    WARNING: The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+==> IIS (web server)
+    OK: IIS is installed.
+
+==> .NET 10 Hosting Bundle
+    Latest .NET 10 release: 10.0.14
+    Downloading https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.14/dotnet-hosting-10.0.14-win.exe
+    Download verified (SHA-512).
+    OK: Installed.
+
+==> SQL Server
+    Instance: .\SQLEXPRESS
+    Version:  Microsoft SQL Server 2022 (RTM) - 16.0.1000.6 (X64)
+    Edition:  Express Edition (64-bit)
+    OK: Connected (SQL Server service account: NT Service\MSSQL$SQLEXPRESS).
+
+==> Folders and permissions
+    OK: D:\INNCO and D:\INNCO\Backup are limited to Administrators, SYSTEM and the services that need them.
+
+==> IIS application pool
+    Created application pool 'INNCO'.
+    Stopped application pool 'INNCO'.
+    OK: No managed code, always running, restarts daily at 03:00, runs as 'IIS AppPool\INNCO'.
+
+==> Program files
+    OK: Program copied to D:\INNCO\app
+
+==> Database 'IRNNCO'
+    OK: Created a new, empty database. The program creates its tables when it starts.
+    OK: 'IIS AppPool\INNCO' can use the database (no password needed); the backup task can back it up.
+
+==> Settings (appsettings.Production.json)
+    OK: Database connection uses Windows authentication; sign-in key and audit key kept or created; the other settings were left as they are.
+
+==> IIS site 'INNCO' (HTTPS on port 443, plain HTTP on this computer only)
+    Stopped site 'Default Web Site' because it used port 80 or 443.
+    Created site 'INNCO'.
+    Certificate: made a self-signed certificate for runnervmdaln5, localhost and 172.19.64.1, 10.1.0.78, 127.0.0.1 (valid until 2031-10-28).
+    Public file of the certificate (for the client computers): D:\INNCO\certificates\innco-pmis.cer
+    Firewall: port 443 opened.
+    OK: Site configured: https on port 443 (certificate A3DC15704E3724B164CC94385817AD17DE18847A), http on 127.0.0.1:80 only.
+
+==> Daily backup (scheduled task, 01:30)
+    OK: Task 'INNCO daily backup': database to D:\INNCO\Backup\database (kept 14 days), uploaded files to D:\INNCO\Backup\files.
+
+==> Start and check
+    Waiting for the program to start (the first start can take a few minutes)...
+    OK: API answers (200).
+    OK: User interface answers.
+    OK: Database structure is up to date (113 updates applied, last: 20261028174238_ProductionR1).
+    OK: HTTPS answers on port 443 with the chosen certificate.
+    OK: The account 'Admin' exists and its temporary password works (the program asks for a new password at the first sign-in).
+    OK: The temporary password is no longer in the settings file.
+
+==> First backup (runs the scheduled task once)
+    2026-10-28 19:16:26  Database backup OK: D:\INNCO\Backup\database\IRNNCO_20261028_1916.bak (8.8 MB)
+    2026-10-28 19:16:26  Uploaded files OK: D:\INNCO\Backup\files (1 files)
+    OK: Backup works.
+
+Warnings:
+  - The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+Log file (send this one if something went wrong): D:\INNCO\logs\install-20261028-191156.log
+
+INSTALLATION FINISHED
+Open the program in a browser on any computer of the network (HTTPS; plain HTTP works on this server only):
+    https://runnervmdaln5/
+    https://172.19.64.1/
+    https://10.1.0.78/
+
+HTTPS certificate (self-signed):
+    Browsers warn until this public file is installed as a trusted root certificate on every client computer
+    (group policy, or double-click the file > Install Certificate > Local Machine > Trusted Root Certification Authorities):
+        D:\INNCO\certificates\innco-pmis.cer
+    To use a certificate of the company or a purchased one, run this script again with -CertificateThumbprint <thumbprint>.
+
+First sign-in (new account):
+    User name: Admin
+    Password:  Ci#Adm1n-Install-2026   (temporary)
+    The program asks for a new password at the first sign-in. Write the temporary one down now:
+    it is not in the log file and it is no longer in the settings file.
+exit=0
