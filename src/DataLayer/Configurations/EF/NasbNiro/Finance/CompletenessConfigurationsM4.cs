@@ -67,6 +67,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.EditorUserIds).HasMaxLength(200);
                 b.Property(x => x.YearsOfService).HasPrecision(18, 4);
                 b.Property(x => x.MonthlyBase).HasPrecision(18, 0);
+                b.Property(x => x.BaseSource).HasMaxLength(30);
                 b.Property(x => x.DailyWage).HasPrecision(18, 0);
                 b.Property(x => x.SeveranceDaysPerYear).HasPrecision(18, 4);
                 b.Property(x => x.UnusedLeaveDays).HasPrecision(18, 4);

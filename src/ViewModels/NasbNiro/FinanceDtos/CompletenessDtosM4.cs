@@ -226,7 +226,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal? UnusedLeaveDays { get; set; }
         /// <summary>Notice days owed (decided by finance / HR); paid at the daily wage.</summary>
         public decimal NoticeDays { get; set; }
-        /// <summary>Empty = the severance items of the last payslip (else daily wage x 30).</summary>
+        /// <summary>No longer accepted: the base is computed from the approved wage history (the severance items of the last payslip, else the approved daily wage x the payroll month). A value is refused.</summary>
         public decimal? MonthlyBase { get; set; }
         public string Note { get; set; }
     }
@@ -242,6 +242,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTime TerminationDate { get; set; }
         public decimal YearsOfService { get; set; }
         public decimal MonthlyBase { get; set; }
+
+        /// <summary>WageHistory or CurrentWage (no wage history exists yet: the current approved daily wage was used); null on older records.</summary>
+        public string BaseSource { get; set; }
         public decimal DailyWage { get; set; }
         public decimal SeveranceDaysPerYear { get; set; }
         public decimal UnusedLeaveDays { get; set; }

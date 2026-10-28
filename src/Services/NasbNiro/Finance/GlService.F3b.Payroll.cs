@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Office;
 using Microsoft.EntityFrameworkCore;
 using ViewModels.NasbNiro.FinanceDtos;
 using static Services.NasbNiro.Finance.LedgerMath;
@@ -69,46 +70,58 @@ namespace Services.NasbNiro.Finance
         private sealed class TermCalc
         {
             public int Months; public decimal Years, MonthlyBase, Daily, DaysPerYear, LeaveDays, NoticeDays, Severance, Leave, Notice, Total, Tax, Insurance;
+            public string BaseSource;
             public List<string> Sources = new List<string>();
             public string Error;
         }
 
-        private async Task<TermCalc> TerminationCalcAsync(FnEmployee e, DateTime termination, decimal? leaveDays, decimal noticeDays, decimal? monthlyBase, CancellationToken ct)
+        /// <summary>
+        /// The settlement figures. Release R1f: the base is never typed. It is the severance items of the last posted payslip (itself calculated from the approved wage history), else the approved daily wage in force
+        /// at the termination month x the payroll month; the record keeps where the base came from (WageHistory, or CurrentWage when the employee has no wage history yet). The 30-day month and the 360-day year are rate-table keys.
+        /// </summary>
+        private async Task<TermCalc> TerminationCalcAsync(FnEmployee e, DateTime termination, decimal? leaveDays, decimal noticeDays, CancellationToken ct)
         {
             var c = new TermCalc();
             if (termination.Date < e.HireDate.Date) { c.Error = "تاریخ پایان کار قبل از تاریخ استخدام است."; return c; }
-            if (noticeDays < 0 || (leaveDays.HasValue && leaveDays.Value < 0) || (monthlyBase.HasValue && monthlyBase.Value < 0)) { c.Error = "روزها و مبلغ نمی‌توانند منفی باشند."; return c; }
+            if (noticeDays < 0 || (leaveDays.HasValue && leaveDays.Value < 0)) { c.Error = "روزها نمی‌توانند منفی باشند."; return c; }
             int year = FinanceSeed.PersianYearOf(termination);
+            await F2Seed.EnsureAsync(_uow, ct);
             List<FnPayrollRateTable> rateRows = await _uow.Set<FnPayrollRateTable>().AsNoTracking().Where(r => r.Year == 0 || r.Year == year).ToListAsync(ct);
             var rates = new PayrollRates(rateRows, year);
-            if (!rates.Has("TerminationSeveranceDaysPerYear")) { c.Error = "نرخ «TerminationSeveranceDaysPerYear» (روز حق سنوات برای هر سال) در جدول نرخ‌ها وارد نشده است."; return c; }
+            string missing = rates.Require(year, "TerminationSeveranceDaysPerYear", PayrollKeys.MonthDays, PayrollKeys.YearDays);
+            if (missing != null) { c.Error = missing; return c; }
+            decimal monthDays = rates.Get(PayrollKeys.MonthDays), yearDays = rates.Get(PayrollKeys.YearDays);
+            if (monthDays <= 0m || yearDays <= 0m) { c.Error = $"مقدار «{PayrollKeys.MonthDays}» و «{PayrollKeys.YearDays}» باید بزرگ‌تر از صفر باشد."; return c; }
             c.DaysPerYear = rates.Get("TerminationSeveranceDaysPerYear");
-            c.Sources.Add(RateText(rateRows, "TerminationSeveranceDaysPerYear", year));
+            foreach (string key in new[] { "TerminationSeveranceDaysPerYear", PayrollKeys.MonthDays, PayrollKeys.YearDays }) c.Sources.Add(RateText(rateRows, key, year));
             c.Months = PersianCal.FullMonths(e.HireDate.Date, termination.Date.AddDays(1));
             c.Years = Math.Round(c.Months / 12m, 4, MidpointRounding.AwayFromZero);
 
-            if (monthlyBase.HasValue) { c.MonthlyBase = R(monthlyBase.Value); c.Sources.Add("پایه ماهانه: ورودی کاربر"); }
+            Dictionary<int, List<FnEmployeeWage>> history = await WageHistory.LoadAsync(_uow, new[] { e.Id }, ct);
+            history.TryGetValue(e.Id, out List<FnEmployeeWage> wageRows);
+            decimal wage = WageHistory.WageAt(wageRows, e.DailyWage, WageHistory.MonthStart(termination), out bool fromHistory);
+            c.BaseSource = fromHistory ? "WageHistory" : "CurrentWage";
+
+            HashSet<string> baseCodes = (await _uow.Set<FnPayrollItem>().AsNoTracking().Where(i => i.SeveranceBase && i.Kind == FnPayrollItemKind.Earning).Select(i => i.Code).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            FnPayslip slip = await _uow.Set<FnPayslip>().AsNoTracking().Include(p => p.Lines).Include(p => p.Run)
+                .Where(p => p.EmployeeId == e.Id && (p.Run.Status == FnPayrollStatus.Posted || p.Run.Status == FnPayrollStatus.Paid) && p.Run.Month >= 1 && p.Run.Month <= 12)
+                .OrderByDescending(p => p.Run.Year).ThenByDescending(p => p.Run.Month).AsSplitQuery().FirstOrDefaultAsync(ct);
+            if (slip != null && baseCodes.Count > 0)
+            {
+                decimal sum = slip.Lines.Where(l => l.Kind == FnPayrollItemKind.Earning && baseCodes.Contains(l.ItemCode)).Sum(l => l.Amount);
+                // a part month is scaled to the payroll-month basis
+                c.MonthlyBase = slip.DaysPaid > 0 && slip.DaysPaid != monthDays ? R(sum * monthDays / slip.DaysPaid) : R(sum);
+                c.Sources.Add($"پایه ماهانه: اقلام مبنای سنوات آخرین فیش حقوقی ثبت‌شده ({slip.Run.Year}/{slip.Run.Month:00}) که از مزد مصوب همان ماه محاسبه شده است");
+            }
             else
             {
-                HashSet<string> baseCodes = (await _uow.Set<FnPayrollItem>().AsNoTracking().Where(i => i.SeveranceBase && i.Kind == FnPayrollItemKind.Earning).Select(i => i.Code).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                FnPayslip slip = await _uow.Set<FnPayslip>().AsNoTracking().Include(p => p.Lines).Include(p => p.Run)
-                    .Where(p => p.EmployeeId == e.Id && (p.Run.Status == FnPayrollStatus.Posted || p.Run.Status == FnPayrollStatus.Paid) && p.Run.Month >= 1 && p.Run.Month <= 12)
-                    .OrderByDescending(p => p.Run.Year).ThenByDescending(p => p.Run.Month).AsSplitQuery().FirstOrDefaultAsync(ct);
-                if (slip != null && baseCodes.Count > 0)
-                {
-                    decimal sum = slip.Lines.Where(l => l.Kind == FnPayrollItemKind.Earning && baseCodes.Contains(l.ItemCode)).Sum(l => l.Amount);
-                    // a part month is scaled to the 30-day payroll basis
-                    c.MonthlyBase = slip.DaysPaid > 0 && slip.DaysPaid != 30m ? R(sum * 30m / slip.DaysPaid) : R(sum);
-                    c.Sources.Add($"پایه ماهانه: اقلام مبنای سنوات آخرین فیش حقوقی ثبت‌شده ({slip.Run.Year}/{slip.Run.Month:00})");
-                }
-                else
-                {
-                    c.MonthlyBase = R(e.DailyWage * 30m);
-                    c.Sources.Add("پایه ماهانه: مزد روزانه قرارداد × ۳۰ (فیش حقوقی ثبت‌شده‌ای نیست)");
-                }
+                c.MonthlyBase = R(wage * monthDays);
+                c.Sources.Add(fromHistory ? "پایه ماهانه: مزد روزانه مصوب (سابقه مزد) در ماه پایان کار × روزهای ماه حقوقی (فیش حقوقی ثبت‌شده‌ای نیست)"
+                    : "پایه ماهانه: مزد روزانه فعلی تاییدشده × روزهای ماه حقوقی (فیش حقوقی ثبت‌شده‌ای نیست)");
             }
-            if (c.MonthlyBase <= 0) { c.Error = "پایه ماهانه محاسبه سنوات صفر است؛ پایه را وارد کنید یا مزد روزانه کارمند را تکمیل کنید."; return c; }
-            c.Daily = R(c.MonthlyBase / 30m);
+            c.Sources.Add(fromHistory ? "منبع پایه: سابقه مزد تاییدشده (WageHistory)" : "منبع پایه: مزد روزانه فعلی (CurrentWage)؛ برای این کارمند سابقه مزد ثبت نشده است");
+            if (c.MonthlyBase <= 0) { c.Error = "پایه ماهانه محاسبه سنوات صفر است؛ مزد روزانه کارمند را تکمیل و تایید کنید."; return c; }
+            c.Daily = R(c.MonthlyBase / monthDays);
             if (leaveDays.HasValue) { c.LeaveDays = leaveDays.Value; c.Sources.Add("روزهای مرخصی استفاده‌نشده: ورودی کاربر"); }
             else
             {
@@ -117,9 +130,9 @@ namespace Services.NasbNiro.Finance
                 c.Sources.Add(b == null ? "روزهای مرخصی استفاده‌نشده: مانده مرخصی سال ثبت نشده است (صفر)" : "روزهای مرخصی استفاده‌نشده: مانده مرخصی سال پایان کار");
             }
             c.NoticeDays = noticeDays;
-            c.Severance = R(c.MonthlyBase * c.DaysPerYear * c.Months / 360m);
-            c.Leave = R(c.MonthlyBase * c.LeaveDays / 30m);
-            c.Notice = R(c.MonthlyBase * c.NoticeDays / 30m);
+            c.Severance = R(c.MonthlyBase * c.DaysPerYear * c.Months / yearDays);
+            c.Leave = R(c.MonthlyBase * c.LeaveDays / monthDays);
+            c.Notice = R(c.MonthlyBase * c.NoticeDays / monthDays);
             c.Total = c.Severance + c.Leave + c.Notice;
             // the leave and notice pay are earnings: employee insurance (the percentage of the seeded SS_EMPLOYEE item) and income tax at the margin of the last payslip month; the severance is exempt (review 3, M4)
             decimal lnGross = c.Leave + c.Notice;
@@ -145,7 +158,7 @@ namespace Services.NasbNiro.Finance
         private FnTerminationDto TerminationDto(FnTermination t, FnEmployee e, List<string> sources) => new FnTerminationDto
         {
             Id = t.Id, Number = t.Number, EmployeeId = t.EmployeeId, EmployeeName = EmployeeName(e), PersonnelCode = e.PersonnelCode, HireDate = t.HireDate, TerminationDate = t.TerminationDate,
-            YearsOfService = t.YearsOfService, MonthlyBase = t.MonthlyBase, DailyWage = t.DailyWage, SeveranceDaysPerYear = t.SeveranceDaysPerYear, UnusedLeaveDays = t.UnusedLeaveDays, NoticeDays = t.NoticeDays,
+            YearsOfService = t.YearsOfService, MonthlyBase = t.MonthlyBase, BaseSource = t.BaseSource, DailyWage = t.DailyWage, SeveranceDaysPerYear = t.SeveranceDaysPerYear, UnusedLeaveDays = t.UnusedLeaveDays, NoticeDays = t.NoticeDays,
             SeverancePay = t.SeverancePay, LeavePay = t.LeavePay, NoticePay = t.NoticePay, Total = t.Total, TaxAmount = t.TaxAmount, InsuranceAmount = t.InsuranceAmount, NetPayable = t.NetPayable, FromSeveranceProvision = t.FromSeveranceProvision, FromLeaveProvision = t.FromLeaveProvision,
             Status = t.Status, VoucherId = t.VoucherId, Note = t.Note, Sources = sources ?? new List<string>(),
         };
@@ -161,8 +174,10 @@ namespace Services.NasbNiro.Finance
         {
             if (!CanWritePayroll) return Bad<FnTerminationDto>(PayrollNotAllowed);
             if (dto == null || dto.TerminationDate == default) return Bad<FnTerminationDto>("کارمند و تاریخ پایان کار را وارد کنید.");
+            if (dto.MonthlyBase.HasValue) return Bad<FnTerminationDto>("پایه ماهانه دستی پذیرفته نمی‌شود؛ پایه از سابقه مزد تاییدشده کارمند محاسبه می‌شود.");
             FnEmployee e = await _uow.Set<FnEmployee>().FirstOrDefaultAsync(x => x.Id == dto.EmployeeId, ct);
             if (e == null) return ResponseDtoHelper.NotFound<FnTerminationDto>("کارمند پیدا نشد.");
+            if (e.PendingApproval) return Bad<FnTerminationDto>("مزد این کارمند هنوز توسط نفر دوم تایید نشده است؛ پس از تایید می‌توان تسویه‌حساب را تهیه کرد.");
             FnTermination t = null;
             if (dto.Id.HasValue)
             {
@@ -173,7 +188,7 @@ namespace Services.NasbNiro.Finance
             }
             int self = t?.Id ?? 0;
             if (await _uow.Set<FnTermination>().AnyAsync(x => x.EmployeeId == dto.EmployeeId && x.Status != FnSettlementStatus.Cancelled && x.Id != self, ct)) return Bad<FnTerminationDto>("برای این کارمند تسویه‌حساب دیگری ثبت شده است.");
-            TermCalc c = await TerminationCalcAsync(e, dto.TerminationDate, dto.UnusedLeaveDays, dto.NoticeDays, dto.MonthlyBase, ct);
+            TermCalc c = await TerminationCalcAsync(e, dto.TerminationDate, dto.UnusedLeaveDays, dto.NoticeDays, ct);
             if (c.Error != null) return Bad<FnTerminationDto>(c.Error);
             if (t == null)
             {
@@ -188,7 +203,7 @@ namespace Services.NasbNiro.Finance
 
         private static void ApplyTermination(FnTermination t, FnEmployee e, DateTime termination, TermCalc c, string note)
         {
-            t.HireDate = e.HireDate.Date; t.TerminationDate = termination.Date; t.YearsOfService = c.Years; t.MonthlyBase = c.MonthlyBase; t.DailyWage = c.Daily; t.SeveranceDaysPerYear = c.DaysPerYear;
+            t.HireDate = e.HireDate.Date; t.TerminationDate = termination.Date; t.YearsOfService = c.Years; t.MonthlyBase = c.MonthlyBase; t.BaseSource = c.BaseSource; t.DailyWage = c.Daily; t.SeveranceDaysPerYear = c.DaysPerYear;
             t.UnusedLeaveDays = c.LeaveDays; t.NoticeDays = c.NoticeDays; t.SeverancePay = c.Severance; t.LeavePay = c.Leave; t.NoticePay = c.Notice; t.Total = c.Total; t.Note = note;
             t.TaxAmount = c.Tax; t.InsuranceAmount = c.Insurance; t.NetPayable = c.Total - c.Tax - c.Insurance;
         }
@@ -203,11 +218,13 @@ namespace Services.NasbNiro.Finance
             string action = dto.Action.Trim().ToLowerInvariant();
             if (action == "cancel") { t.Status = FnSettlementStatus.Cancelled; await _uow.SaveChangesAsync(ct); return ResponseDtoHelper.Ok(TerminationDto(t, t.Employee, null)); }
             if (action != "approve") return Bad<FnTerminationDto>("عمل نامعتبر است.");
+            // release R1f: like the monthly run, the settlement is approved by the finance manager (not by any payroll user) and never by the person who prepared or edited it
+            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<FnTerminationDto>(PayrollNotAllowed + " (تایید تسویه‌حساب فقط توسط مدیر مالی)");
             if (Touched(t.PreparedByUserId, t.EditorUserIds, Me)) return Bad<FnTerminationDto>(SameUser);
             // recomputed now: payslips, leave and the rate table may have changed since the draft
-            TermCalc c = await TerminationCalcAsync(t.Employee, t.TerminationDate, t.UnusedLeaveDays, t.NoticeDays, t.MonthlyBase, ct);
+            TermCalc c = await TerminationCalcAsync(t.Employee, t.TerminationDate, t.UnusedLeaveDays, t.NoticeDays, ct);
             if (c.Error != null) return Bad<FnTerminationDto>(c.Error);
-            if (c.Total != t.Total || c.Tax != t.TaxAmount || c.Insurance != t.InsuranceAmount) return Bad<FnTerminationDto>("مبالغ پس از تهیه پیش‌نویس تغییر کرده است؛ پیش‌نویس را دوباره ذخیره کنید.");
+            if (c.Total != t.Total || c.Tax != t.TaxAmount || c.Insurance != t.InsuranceAmount || c.MonthlyBase != t.MonthlyBase) return Bad<FnTerminationDto>("مبالغ پس از تهیه پیش‌نویس تغییر کرده است؛ پیش‌نویس را دوباره ذخیره کنید.");
             DateTime date = (dto.Date ?? t.TerminationDate).Date;
             decimal severanceBalance = await ProvisionBalanceAsync(AccountRoles.SeveranceProvision, "40201", date, ct), leaveBalance = await ProvisionBalanceAsync(AccountRoles.LeaveProvision, "30403", date, ct);
             decimal fromSeverance = Math.Min(t.SeverancePay, severanceBalance), fromLeave = Math.Min(t.LeavePay, leaveBalance);
@@ -241,9 +258,64 @@ namespace Services.NasbNiro.Finance
             if (v.Error != null) return Bad<FnTerminationDto>(v.Error);
             t.Voucher = v.Voucher; t.FromSeveranceProvision = fromSeverance; t.FromLeaveProvision = fromLeave; t.Status = FnSettlementStatus.Posted; t.ApprovedByUserId = Me; t.ApprovedAt = DateTimeOffset.Now;
             if (t.Employee.EndDate == null || t.Employee.EndDate.Value.Date > t.TerminationDate) t.Employee.EndDate = t.TerminationDate;
+            // release R1f (leavers): the identity user is locked and the open shift assignments end, in the same save as the settlement, and the audit trail records it
+            c.Sources.AddRange(await ApplyLeaverAsync(t.Employee, t.TerminationDate, t.Number, ct));
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(TerminationDto(t, t.Employee, c.Sources));
         }
+
+        /// <summary>
+        /// A leaver (approved settlement): the linked identity user is deactivated (IsActive off, lockout enabled with an end date far in the future, a new security stamp) and the open shift assignments of the employee end on the last day
+        /// (an assignment that would only start after it is removed). Both are written to the audit trail with the settlement number. Returns the lines for the result of the approval.
+        /// </summary>
+        private async Task<List<string>> ApplyLeaverAsync(FnEmployee e, DateTime terminationDate, string number, CancellationToken ct)
+        {
+            var notes = new List<string>();
+            DateTime last = terminationDate.Date;
+            var before = new Dictionary<string, object>();
+            var after = new Dictionary<string, object>();
+            if (e.UserId.HasValue)
+            {
+                Entities.Identity.User u = await _uow.Set<Entities.Identity.User>().FirstOrDefaultAsync(x => x.Id == e.UserId.Value, ct);
+                if (u != null)
+                {
+                    bool alreadyLocked = !u.IsActive && u.LockoutEnabled && u.LockoutEnd.HasValue && u.LockoutEnd.Value > DateTimeOffset.Now.AddYears(50);
+                    if (!alreadyLocked)
+                    {
+                        before["userIsActive"] = u.IsActive; before["userLockoutEnd"] = LockoutText(u.LockoutEnd);
+                        u.IsActive = false; u.LockoutEnabled = true; u.LockoutEnd = DateTimeOffset.MaxValue; u.SecurityStamp = Guid.NewGuid().ToString("D");
+                        after["userIsActive"] = false; after["userLockoutEnd"] = LockoutText(DateTimeOffset.MaxValue);
+                        notes.Add("پایان خدمت: حساب کاربری کارمند غیرفعال و قفل شد.");
+                    }
+                }
+            }
+            List<OfShiftAssignment> open = await _uow.Set<OfShiftAssignment>().Where(a => a.EmployeeId == e.Id && (a.ToDate == null || a.ToDate > last)).ToListAsync(ct);
+            int ended = 0, removed = 0;
+            foreach (OfShiftAssignment a in open)
+            {
+                if (a.FromDate.Date > last) { _uow.Set<OfShiftAssignment>().Remove(a); removed++; }
+                else { a.ToDate = last; ended++; }
+            }
+            if (ended + removed > 0)
+            {
+                before["openShiftAssignments"] = ended + removed; after["endedShiftAssignments"] = ended; after["removedFutureAssignments"] = removed;
+                notes.Add($"پایان خدمت: {ended + removed} تخصیص شیفت باز بسته شد.");
+            }
+            if (before.Count > 0 || after.Count > 0)
+                _uow.Set<FnAuditLog>().Add(new FnAuditLog
+                {
+                    EntityType = "FnEmployee", EntityId = e.Id, Action = "Leaver", Summary = $"پایان خدمت {number}: حساب کاربری و تخصیص‌های شیفت بسته شد",
+                    BeforeJson = System.Text.Json.JsonSerializer.Serialize(before), AfterJson = System.Text.Json.JsonSerializer.Serialize(after), UserId = Me, At = DateTimeOffset.Now,
+                });
+            return notes;
+        }
+
+        /// <summary>
+        /// Audit text of a lockout end: always a Persian date or a fixed Persian label, never a culture-formatted Gregorian text
+        /// (the request culture of the API is Persian, so a plain ToString would change with the setting).
+        /// </summary>
+        internal static string LockoutText(DateTimeOffset? end) =>
+            end == null ? "بدون قفل" : end.Value.Year >= 3000 ? "بدون پایان (قفل دائم)" : PersianDate(end.Value.LocalDateTime);
 
         // ================================================================================== yearly bonus (عیدی)
 
@@ -258,23 +330,25 @@ namespace Services.NasbNiro.Finance
         private async Task<BonusCalc> BonusCalcAsync(int year, List<int> employeeIds, CancellationToken ct)
         {
             var c = new BonusCalc();
+            await F2Seed.EnsureAsync(_uow, ct);
             List<FnPayrollRateTable> rateRows = await _uow.Set<FnPayrollRateTable>().AsNoTracking().Where(r => r.Year == 0 || r.Year == year).ToListAsync(ct);
             var rates = new PayrollRates(rateRows, year);
-            foreach (string key in new[] { "BonusDaysPerYear", "BonusCapDaysOfMinimumWage", "MinimumDailyWage" })
-                if (!rates.Has(key)) { c.Error = $"نرخ «{key}» برای سال {year} در جدول نرخ‌ها وارد نشده است."; return c; }
+            // release R1f: no key is assumed - the gross ceiling of the bonus (labour law, 90 days of the minimum wage as the starred seed) is a rate-table key like the others; an absent key refuses and names itself
+            string[] keys = { "BonusDaysPerYear", "BonusCapDaysOfMinimumWage", "MinimumDailyWage", PayrollKeys.BonusGrossCapDays };
+            string missing = rates.Require(year, keys);
+            if (missing != null) { c.Error = missing; return c; }
             List<FnTaxBracket> brackets = await _uow.Set<FnTaxBracket>().AsNoTracking().Where(b => b.Year == year).OrderBy(b => b.FromAmount).ToListAsync(ct);
             if (brackets.Count == 0) { c.Error = $"جدول پلکان مالیات حقوق سال {year} وارد نشده است."; return c; }
             c.BonusDays = rates.Get("BonusDaysPerYear"); c.CapDays = rates.Get("BonusCapDaysOfMinimumWage"); c.MinimumDailyWage = rates.Get("MinimumDailyWage"); c.Cap = R(c.CapDays * c.MinimumDailyWage);
-            foreach (string key in new[] { "BonusDaysPerYear", "BonusCapDaysOfMinimumWage", "MinimumDailyWage" }) c.Sources.Add(RateText(rateRows, key, year));
-            // the labour-law ceiling of the bonus itself (default 90 days of the minimum wage, to be confirmed by finance) is a separate figure from the tax exemption (review 3, H8)
-            c.GrossCapDays = rates.Has("BonusGrossCapDaysOfMinimumWage") ? rates.Get("BonusGrossCapDaysOfMinimumWage") : 90m;
-            c.Sources.Add(rates.Has("BonusGrossCapDaysOfMinimumWage") ? RateText(rateRows, "BonusGrossCapDaysOfMinimumWage", year) : "BonusGrossCapDaysOfMinimumWage = 90 (پیش‌فرض بر پایه قانون کار؛ تایید مالی لازم است)");
+            foreach (string key in keys) c.Sources.Add(RateText(rateRows, key, year));
+            // the labour-law ceiling of the bonus itself is a separate figure from the tax exemption (review 3, H8)
+            c.GrossCapDays = rates.Get(PayrollKeys.BonusGrossCapDays);
             c.Sources.Add("سقف عیدی و معافیت مالیاتی عیدی هر دو به نسبت روزهای اشتغال در سال محاسبه می‌شوند.");
             c.Sources.Add("مالیات: تفاوت مالیات حقوق ماهانه (پلکان سال) با و بدون بخش مشمول عیدی در ماه آخرین فیش حقوقی؛ حق بیمه بر عیدی محاسبه نشده است.");
 
             DateTime yStart = FiscalCalendars.Current.YearStart(year).Date, yEnd = FiscalCalendars.Current.YearEnd(year).Date;
             int yearDays = (int)(yEnd - yStart).TotalDays + 1;
-            IQueryable<FnEmployee> q = _uow.Set<FnEmployee>().AsNoTracking().Where(e => e.HireDate <= yEnd && (e.EndDate == null || e.EndDate >= yStart));
+            IQueryable<FnEmployee> q = _uow.Set<FnEmployee>().AsNoTracking().Where(e => !e.PendingApproval && e.HireDate <= yEnd && (e.EndDate == null || e.EndDate >= yStart));
             if (employeeIds != null && employeeIds.Count > 0) q = q.Where(e => employeeIds.Contains(e.Id));
             List<FnEmployee> employees = await q.OrderBy(e => e.PersonnelCode).ThenBy(e => e.Id).ToListAsync(ct);
             List<int> ids = employees.Select(e => e.Id).ToList();
@@ -374,6 +448,8 @@ namespace Services.NasbNiro.Finance
             string action = dto.Action.Trim().ToLowerInvariant();
             if (action == "cancel") { r.Status = FnSettlementStatus.Cancelled; await _uow.SaveChangesAsync(ct); return ResponseDtoHelper.Ok(await BonusDtoAsync(r, null, ct)); }
             if (action != "approve") return Bad<FnBonusRunDto>("عمل نامعتبر است.");
+            // release R1f: the bonus run is approved by the finance manager, consistent with the monthly run, and never by the person who prepared or edited it
+            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<FnBonusRunDto>(PayrollNotAllowed + " (تایید محاسبه عیدی فقط توسط مدیر مالی)");
             if (Touched(r.PreparedByUserId, r.EditorUserIds, Me)) return Bad<FnBonusRunDto>(SameUser);
             BonusCalc c = await BonusCalcAsync(r.Year, r.Lines.Select(l => l.EmployeeId).ToList(), ct);
             if (c.Error != null) return Bad<FnBonusRunDto>(c.Error);

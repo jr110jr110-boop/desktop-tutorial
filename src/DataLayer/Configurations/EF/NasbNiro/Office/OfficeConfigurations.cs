@@ -218,6 +218,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
             builder.Entity<OfShiftAssignment>(b =>
             {
                 b.ToTable("OfShiftAssignments");
+                b.Property(x => x.Reason).HasMaxLength(Text);
                 b.HasIndex(x => new { x.EmployeeId, x.FromDate });
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<OfShift>().WithMany().HasForeignKey(x => x.ShiftId).OnDelete(DeleteBehavior.Restrict);
@@ -231,12 +232,22 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
                 b.Property(x => x.Location).HasMaxLength(Name);
                 b.Property(x => x.ApiKeyHash).HasMaxLength(Name).IsRequired();
             });
+            builder.Entity<OfDevicePushLog>(b =>
+            {
+                b.ToTable("OfDevicePushLogs");
+                b.Property(x => x.DeviceCode).HasMaxLength(Code);
+                b.Property(x => x.PayloadHash).HasMaxLength(64);
+                b.Property(x => x.Outcome).HasMaxLength(30);
+                b.HasIndex(x => new { x.DeviceId, x.ReceivedAt });
+            });
             builder.Entity<OfClockEvent>(b =>
             {
                 b.ToTable("OfClockEvents");
                 b.Property(x => x.DeviceCode).HasMaxLength(Code);
                 b.Property(x => x.Reason).HasMaxLength(Text);
+                b.Property(x => x.RejectReason).HasMaxLength(Text);
                 b.HasIndex(x => new { x.EmployeeId, x.Timestamp });
+                b.HasIndex(x => x.Approval);
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<OfAttendancePolicy>(b =>
@@ -265,6 +276,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
             builder.Entity<OfAttendanceMonth>(b =>
             {
                 b.ToTable("OfAttendanceMonths");
+                b.Property(x => x.RejectReason).HasMaxLength(Text);
+                b.Property(x => x.SnapshotJson).HasColumnType("nvarchar(max)");
+                b.Property(x => x.SnapshotHash).HasMaxLength(64);
                 b.HasIndex(x => new { x.Year, x.Month }).IsUnique();
             });
             builder.Entity<OfLeaveRequest>(b =>

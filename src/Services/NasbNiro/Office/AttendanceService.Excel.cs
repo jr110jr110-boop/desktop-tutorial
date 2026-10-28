@@ -332,11 +332,13 @@ namespace Services.NasbNiro.Office
 
             var unknownCodes = new List<string>();
             int added, duplicates, unknown, rejected;
+            string fileHash = PayloadHash(rows);
             // the read of the existing events and the insert of the new ones are one step: two files imported at the same moment cannot both add the same event
             await ClockStoreLock.WaitAsync(ct);
             try
             {
                 (added, duplicates, unknown, rejected) = await StoreAsync(rows, OfClockSource.Import, fallbackDevice, result.Errors, ct, unknownCodes);
+                LogPush(null, fallbackDevice, rows.Count, added, duplicates, fileHash, "Import");
                 if (saveAs != null) await UpsertProfileAsync(saveAs, mapping, ct);
                 try { await _uow.SaveChangesAsync(ct); }
                 catch (DbUpdateException) { return Bad<ClockImportResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }

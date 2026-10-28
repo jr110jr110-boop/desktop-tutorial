@@ -148,7 +148,9 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<List<ExportMappingRowDto>>> GetDetailMappingAsync(bool onlyUnmapped, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<List<ExportMappingRowDto>>(NotAllowed);
-            var list = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => d.IsActive).OrderBy(d => d.Code)
+            // release R1f: the employee detail accounts are listed to the roles that read personal data only
+            bool seePersonal = PersonalLedger.Sees(_user);
+            var list = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => d.IsActive && (seePersonal || d.Type != FnDetailType.Employee)).OrderBy(d => d.Code)
                 .Select(d => new { d.Id, d.Code, d.Title }).Take(5000).ToListAsync(ct);
             Dictionary<int, string> maps = await _uow.Set<FnDetailSepidarMap>().AsNoTracking().ToDictionaryAsync(m => m.DetailAccountId, m => m.SepidarCode, ct);
             var rows = list.Select(d => new ExportMappingRowDto { Code = d.Code, Title = d.Title, SepidarCode = maps.TryGetValue(d.Id, out string s) ? s : null, Mapped = maps.ContainsKey(d.Id) }).ToList();
@@ -360,8 +362,13 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<byte[]>> DownloadAsync(int id, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<byte[]>(NotAllowed);
-            string content = await _uow.Set<FnVoucherExport>().AsNoTracking().Where(e => e.Id == id).Select(e => e.Content).FirstOrDefaultAsync(ct);
-            if (content == null) return ResponseDtoHelper.NotFound<byte[]>("خروجی پیدا نشد.");
+            var stored = await _uow.Set<FnVoucherExport>().AsNoTracking().Where(e => e.Id == id).Select(e => new { e.Content, e.Period.FiscalYearId, e.Period.StartDate, e.Period.EndDate }).FirstOrDefaultAsync(ct);
+            if (stored == null || stored.Content == null) return ResponseDtoHelper.NotFound<byte[]>("خروجی پیدا نشد.");
+            string content = stored.Content;
+            // release R1f: the file carries the detail code of every line, so the lines on an employee detail account (a person's loan or advance) are in it: the roles that may not see persons do not get such a file
+            if (!PersonalLedger.Sees(_user) && await _uow.Set<FnVoucherLine>().AsNoTracking().AnyAsync(l => l.Voucher.FiscalYearId == stored.FiscalYearId && l.Voucher.Date >= stored.StartDate && l.Voucher.Date <= stored.EndDate
+                && l.Voucher.Status == FnVoucherStatus.Final && ((l.Detail1 != null && l.Detail1.Type == FnDetailType.Employee) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Employee)), ct))
+                return Bad<byte[]>("این خروجی ردیف‌های پرسنلی (وام و مساعده کارکنان) دارد؛ دریافت فایل فقط برای حقوق و دستمزد، مدیر مالی و مدیرعامل مجاز است.");
             byte[] body = Encoding.UTF8.GetBytes(content);
             return ResponseDtoHelper.Ok(Encoding.UTF8.GetPreamble().Concat(body).ToArray());
         }

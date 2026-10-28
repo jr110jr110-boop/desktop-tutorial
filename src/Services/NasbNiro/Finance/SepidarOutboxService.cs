@@ -106,7 +106,8 @@ namespace Services.NasbNiro.Finance
         private static bool IsPayroll(FnOutboxKind kind) => kind == FnOutboxKind.PayrollInsuranceList || kind == FnOutboxKind.PayrollTaxList;
         private bool CanSee(FnOutboxKind kind) => IsPayroll(kind) ? _user.IsInRole(FinanceRoles.PayrollReaders) : _user.IsInRole(FinanceRoles.OutboxReaders);
         private bool CanPrepare(FnOutboxKind kind) => IsPayroll(kind) ? _user.IsInRole(FinanceRoles.PayrollUsers) : _user.IsInRole(FinanceRoles.Accountants);
-        private bool CanApprove(FnOutboxKind kind) => IsPayroll(kind) ? _user.IsInRole(FinanceRoles.PayrollUsers) : _user.IsInRole(FinanceRoles.Managers);
+        // release R1f: every package, the payroll lists included, is approved by the finance manager (not by any payroll peer), consistent with the monthly run
+        private bool CanApprove(FnOutboxKind kind) => _user.IsInRole(FinanceRoles.Managers);
 
         private static bool ValidYear(int y) => y >= 1300 && y <= 1600;
 
@@ -174,6 +175,35 @@ namespace Services.NasbNiro.Finance
             return tables;
         }
 
+        /// <summary>
+        /// The people whose actions produced the content of a package that the background job drafted (",5,7,"): the creator, preparer, editors, approver and poster of the payroll runs of the month, or the creator, editors and
+        /// approver of the posted invoices of the period. None of them may approve the package (a system-made package has no creator that the rule could name).
+        /// </summary>
+        private async Task<string> TriggerUsersAsync(FnOutboxKind kind, int year, int? month, DateTime from, DateTime to, CancellationToken ct)
+        {
+            var ids = new HashSet<int>();
+            void Add(int? id) { if (id.HasValue && id.Value > 0) ids.Add(id.Value); }
+            void AddList(string csv)
+            {
+                if (csv == null) return;
+                foreach (string part in csv.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                    if (int.TryParse(part, out int v)) Add(v);
+            }
+            if (IsPayroll(kind))
+            {
+                var runs = await _uow.Set<FnPayrollRun>().AsNoTracking().Where(r => r.Year == year && r.Month == month && r.Status >= FnPayrollStatus.Approved)
+                    .Select(r => new { r.CreatedByUserId, r.PreparedByUserId, r.ApprovedByUserId, r.PostedByUserId, r.EditorUserIds }).ToListAsync(ct);
+                foreach (var r in runs) { Add(r.CreatedByUserId); Add(r.PreparedByUserId); Add(r.ApprovedByUserId); Add(r.PostedByUserId); AddList(r.EditorUserIds); }
+            }
+            else
+            {
+                var invoices = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Date >= from && i.Date <= to)
+                    .Select(i => new { i.CreatedByUserId, i.ApprovedByUserId, i.EditorUserIds }).ToListAsync(ct);
+                foreach (var i in invoices) { Add(i.CreatedByUserId); Add(i.ApprovedByUserId); AddList(i.EditorUserIds); }
+            }
+            return ids.Count == 0 ? null : "," + string.Join(",", ids.OrderBy(x => x)) + ",";
+        }
+
         private static string Hash(string json)
         {
             using (SHA256 sha = SHA256.Create())
@@ -217,6 +247,7 @@ namespace Services.NasbNiro.Finance
                 Number = await InventoryNumbers.NextNumberAsync(_uow, FinanceNumbers.OutboxPackage, "SEP", to, ct), Kind = dto.Kind, Year = dto.Year, Month = month, Season = season,
                 WorkshopId = workshopId, Status = FnOutboxStatus.Draft, Version = previous.Count == 0 ? 1 : previous.Max(p => p.Version) + 1, FromDate = from, ToDate = to,
                 ContentHash = Hash(json), PayloadJson = json, RowCount = rowCount, Note = Clean(dto.Note), CreatedByUserId = userId, CreatedAt = DateTimeOffset.Now,
+                TriggerUserIds = userId == 0 ? await TriggerUsersAsync(dto.Kind, dto.Year, month, from, to, ct) : null,
             };
             _uow.Set<FnOutboxPackage>().Add(package);
             await _uow.SaveChangesAsync(ct);
@@ -275,7 +306,9 @@ namespace Services.NasbNiro.Finance
                 if (!await Exists(FnOutboxKind.PayrollInsuranceList, month, null, w)) await Make(new GenerateOutboxDto { Kind = FnOutboxKind.PayrollInsuranceList, Year = year, Month = month, WorkshopId = w });
             if (await _uow.Set<FnPayslip>().AnyAsync(p => p.Run.Year == year && p.Run.Month == month && p.Run.Status >= FnPayrollStatus.Approved, ct) && !await Exists(FnOutboxKind.PayrollTaxList, month, null, null))
                 await Make(new GenerateOutboxDto { Kind = FnOutboxKind.PayrollTaxList, Year = year, Month = month });
-            return $"{year}/{month:00}: {made} package(s) drafted";
+            // payslips of a legacy run without an insurance workshop cannot be listed per workshop: the log says so instead of dropping them silently
+            int withoutWorkshop = await _uow.Set<FnPayslip>().AsNoTracking().CountAsync(p => p.Run.Year == year && p.Run.Month == month && p.Run.Status >= FnPayrollStatus.Approved && p.WorkshopId == null, ct);
+            return $"{year}/{month:00}: {made} package(s) drafted" + (withoutWorkshop > 0 ? $"; {withoutWorkshop} payslip(s) have no insurance workshop and are not in a workshop list" : "");
         }
 
         // ================================================================================== reading
@@ -387,6 +420,8 @@ namespace Services.NasbNiro.Finance
                     if (!CanApprove(p.Kind)) return Bad<OutboxPackageDto>(NotAllowed);
                     if (p.Status != FnOutboxStatus.Draft) return Bad<OutboxPackageDto>("فقط بسته پیش‌نویس تایید می‌شود.");
                     if (p.CreatedByUserId != 0 && p.CreatedByUserId == Me) return Bad<OutboxPackageDto>("تایید باید توسط شخص دیگری غیر از تهیه‌کننده بسته انجام شود.");
+                    if (p.CreatedByUserId == 0 && p.TriggerUserIds != null && p.TriggerUserIds.Contains("," + Me + ","))
+                        return Bad<OutboxPackageDto>("این بسته را سیستم تهیه کرده است اما محتوای آن حاصل کار شماست (ثبت، محاسبه یا تایید حقوق و اسناد دوره)؛ باید شخص دیگری آن را تایید کند.");
                     p.Status = FnOutboxStatus.Ready; p.ApprovedByUserId = Me; p.ApprovedAt = DateTimeOffset.Now;
                     break;
                 case "send":

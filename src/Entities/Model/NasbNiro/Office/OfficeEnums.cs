@@ -47,5 +47,16 @@ namespace Entities.Model.NasbNiro.Office
 
     public enum OfDayStatus { Present = 1, Absent = 2, Leave = 3, Mission = 4, Rest = 5, Incomplete = 6 }
 
+    /// <summary>
+    /// Approval state of a clock event. 0 = Approved so that every existing row, every device push and every import keeps counting; a manual event is a request that starts Pending and counts
+    /// only once a second person approved it (release R1f, 4-eyes).
+    /// </summary>
+    public enum OfClockApproval { Approved = 0, Pending = 1, Rejected = 2 }
+
+    /// <summary>
+    /// State of the HR month close (two steps: HR prepares, a second person confirms). 0 = Confirmed so that the months closed before the two-step rule stay closed.
+    /// </summary>
+    public enum OfMonthStatus { Confirmed = 0, Prepared = 1, Rejected = 2 }
+
     public enum OfRequestStatus { Draft = 0, InApproval = 1, Approved = 2, Rejected = 3, Cancelled = 4, Completed = 5 }
 }

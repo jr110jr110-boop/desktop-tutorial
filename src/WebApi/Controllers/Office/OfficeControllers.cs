@@ -233,15 +233,28 @@ namespace WebApi.Controllers
         [HttpGet("devices")]
         public async Task<IActionResult> DevicesAsync(CancellationToken ct) => Ok(await _attendance.GetDevicesAsync(ct));
 
-        /// <summary>The new key is returned once (DeviceKeyDto.ApiKey); only its hash is stored.</summary>
+        /// <summary>HR and PMO only. A new device's key is returned once (DeviceKeyDto.ApiKey); an edit never issues a key; only its hash is stored.</summary>
         [HttpPost("devices")]
         public async Task<IActionResult> SaveDeviceAsync([FromBody] SaveDeviceDto dto, CancellationToken ct) => Ok(await _attendance.SaveDeviceAsync(dto, ct));
+
+        /// <summary>Issues a new key for a device (the old key stops working); the key is returned once. HR and PMO only; audited.</summary>
+        [HttpPost("devices/{id:int}/rotate-key")]
+        public async Task<IActionResult> RotateDeviceKeyAsync(int id, CancellationToken ct) => Ok(await _attendance.RotateDeviceKeyAsync(id, ct));
+
+        /// <summary>The lightweight log of the pushes of the devices (count of events and hash of the payload, not one row per punch).</summary>
+        [HttpGet("device-pushes")]
+        public async Task<IActionResult> DevicePushesAsync([FromQuery] DevicePushLogQuery query, CancellationToken ct) => Ok((await _attendance.GetPushLogsAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpGet("clock")]
         public async Task<IActionResult> ClockAsync([FromQuery] ClockQuery query, CancellationToken ct) => Ok((await _attendance.GetClockEventsAsync(query, ct)).ToPaginatedResultSafe());
 
+        /// <summary>A manual clock event is a request (HR records it for ANOTHER employee, with a reason): it counts only after a second HR user or the unit manager of the employee approved it.</summary>
         [HttpPost("clock/manual")]
         public async Task<IActionResult> ManualAsync([FromBody] ManualClockDto dto, CancellationToken ct) => Ok(await _attendance.AddManualEventAsync(dto, ct));
+
+        /// <summary>Approve or reject a manual clock request (any signed-in user: the service allows another HR user or the unit manager of the employee, never the author or the employee).</summary>
+        [HttpPost("clock/request-action")]
+        public async Task<IActionResult> ClockRequestActionAsync([FromBody] ClockRequestActionDto dto, CancellationToken ct) => Ok(await _attendance.ClockRequestActionAsync(dto, ct));
 
         [HttpPost("clock/import")]
         public async Task<IActionResult> ImportAsync([FromBody] ImportClockDto dto, CancellationToken ct) => Ok(await _attendance.ImportEventsAsync(dto, ct));
@@ -310,8 +323,25 @@ namespace WebApi.Controllers
         [HttpGet("days")]
         public async Task<IActionResult> DaysAsync([FromQuery] DayQuery query, CancellationToken ct) => Ok((await _attendance.GetDaysAsync(query, ct)).ToPaginatedResultSafe());
 
+        /// <summary>Step one of the month close: HR prepares the month (sheets written and locked, a snapshot frozen). Payroll can use the month only after step two.</summary>
         [HttpPost("close-month")]
         public async Task<IActionResult> CloseMonthAsync([FromBody] CloseMonthDto dto, CancellationToken ct) => Ok(await _attendance.CloseMonthAsync(dto, ct));
+
+        /// <summary>Step two: the finance manager (or, if the company policy allows it, a second HR user) confirms the prepared month. The preparer never confirms.</summary>
+        [HttpPost("confirm-month")]
+        public async Task<IActionResult> ConfirmMonthAsync([FromBody] ConfirmMonthDto dto, CancellationToken ct) => Ok(await _attendance.ConfirmMonthAsync(dto, ct));
+
+        /// <summary>Sends a prepared month (or, for the finance manager, a confirmed one while no payroll is approved) back to HR with a reason.</summary>
+        [HttpPost("reject-month")]
+        public async Task<IActionResult> RejectMonthAsync([FromBody] RejectMonthDto dto, CancellationToken ct) => Ok(await _attendance.RejectMonthAsync(dto, ct));
+
+        /// <summary>Corrections of locked attendance sheets that payroll proposed (HR, CEO, payroll and the finance manager read them).</summary>
+        [HttpGet("corrections")]
+        public async Task<IActionResult> CorrectionsAsync([FromQuery] CorrectionQuery query, CancellationToken ct) => Ok((await _attendance.GetCorrectionsAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>HR approves or rejects a correction; never the user who proposed it.</summary>
+        [HttpPost("corrections/action")]
+        public async Task<IActionResult> CorrectionActionAsync([FromBody] CorrectionActionDto dto, CancellationToken ct) => Ok(await _attendance.CorrectionActionAsync(dto, ct));
 
         [HttpGet("month/{year:int}/{month:int}")]
         public async Task<IActionResult> MonthAsync(int year, int month, CancellationToken ct) => Ok(await _attendance.GetMonthStatusAsync(year, month, ct));

@@ -48,6 +48,12 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTimeOffset? ExportedAt { get; set; }
         public DateTimeOffset? SentAt { get; set; }
 
+        /// <summary>
+        /// A package made by the background job has no creator (CreatedByUserId = 0); for the payroll lists this holds the people whose actions produced its content (",5,7," - the creator, preparer, approver and poster
+        /// of the payroll runs of the month). None of them may approve the package.
+        /// </summary>
+        public string TriggerUserIds { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -292,11 +298,25 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTimeOffset CreatedAt { get; set; }
         public int CreatedByUserId { get; set; }
 
+        /// <summary>
+        /// A new employee (and, through FnEmployeeChange, a change of DailyWage / ExemptionFlags / ChildrenCount / HardAndHarmful / BankIban) is used by a payroll run only after a second PAYROLL or FINANCEMANAGER user approved it.
+        /// True from the creation until that approval; false for every existing row.
+        /// </summary>
+        public bool PendingApproval { get; set; }
+
+        /// <summary>Everyone who edited the master row since the last payroll run that included the employee was approved (",5,7,"): none of them may approve that run.</summary>
+        public string EditorUserIds { get; set; }
+        public int? LastEditedByUserId { get; set; }
+        public DateTimeOffset? LastEditedAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
 
     public enum FnLoanKind { Loan = 1, Advance = 2 }
+
+    /// <summary>Approval state of a loan or advance. 0 = Approved so existing rows keep working; a new request starts Pending and is used (instalments, disbursement) only after FINANCEMANAGER approved it.</summary>
+    public enum FnLoanApproval { Approved = 0, Pending = 1, Rejected = 2 }
 
     public class FnEmployeeLoan
     {
@@ -315,6 +335,16 @@ namespace Entities.Model.NasbNiro.Finance
         public bool IsActive { get; set; } = true;
         public DateTimeOffset CreatedAt { get; set; }
         public int CreatedByUserId { get; set; }
+
+        public FnLoanApproval ApprovalStatus { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public string RejectReason { get; set; }
+
+        /// <summary>Everyone who created or changed the loan since the last approved payroll run that recovered it (",5,7,").</summary>
+        public string EditorUserIds { get; set; }
+        public int? LastEditedByUserId { get; set; }
+        public DateTimeOffset? LastEditedAt { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -389,6 +419,9 @@ namespace Entities.Model.NasbNiro.Finance
 
     // ------------------------------------------------------------------------------------------ attendance and leave
 
+    /// <summary>Where the numbers of a monthly sheet came from. 0 = Manual so that existing rows (whose origin is unknown) are shown as manual entries.</summary>
+    public enum FnSheetSource { Manual = 0, HrClose = 1, Import = 2 }
+
     public class FnAttendanceSheet
     {
         public int Id { get; set; }
@@ -412,6 +445,15 @@ namespace Entities.Model.NasbNiro.Finance
         public string InputsJson { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }
         public int UpdatedByUserId { get; set; }
+
+        /// <summary>HrClose: written by the HR month close (and locked). Manual / Import: typed or uploaded by payroll.</summary>
+        public FnSheetSource Source { get; set; }
+
+        /// <summary>A locked row's attendance numbers can only change through a correction request that HR approves; payroll may still change the Input items and the work-order hours.</summary>
+        public bool Locked { get; set; }
+
+        /// <summary>Everyone who changed the row (",5,7,"): none of them may approve a payroll run that uses it.</summary>
+        public string EditorUserIds { get; set; }
         public ICollection<FnAttendanceWorkOrder> WorkOrders { get; set; }
 
         [Timestamp]
@@ -501,6 +543,9 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal OtherDeductions { get; set; }
         public decimal Provisions { get; set; }
         public decimal Net { get; set; }
+
+        /// <summary>The IBAN of the employee at the moment the run was approved; the bank-transfer file reads this value (null on payslips approved before the snapshot existed: the file then falls back to the employee row).</summary>
+        public string BankIban { get; set; }
         public ICollection<FnPayslipLine> Lines { get; set; }
         public ICollection<FnPayslipAllocation> Allocations { get; set; }
     }

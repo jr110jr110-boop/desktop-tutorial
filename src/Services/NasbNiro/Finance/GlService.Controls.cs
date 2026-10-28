@@ -18,7 +18,7 @@ namespace Services.NasbNiro.Finance
     // approval thresholds, template vouchers, voucher copy and mass entry.
     public partial class GlService
     {
-        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse, FinanceSeed.SettingPayableTerms };
+        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse, FinanceSeed.SettingPayableTerms, FinanceSeed.SettingGoLiveMonth };
 
         // ------------------------------------------------------------------------------------------ audit trail
 
@@ -30,6 +30,19 @@ namespace Services.NasbNiro.Finance
             string type = Clean(query.EntityType);
             if (type != null) q = q.Where(a => a.EntityType == type);
             if (query.EntityId.HasValue) q = q.Where(a => a.EntityId == query.EntityId.Value);
+            // release R1f: the trail of a manual voucher line on an employee detail account (a person's loan or advance) carries the person's detail and the amount: the auditor does not read it
+            if (!PersonalLedger.Sees(_user) && (type == null || type == nameof(FnVoucherLine)))
+            {
+                List<int> employeeDetails = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => d.Type == FnDetailType.Employee).Select(d => d.Id).ToListAsync(ct);
+                if (employeeDetails.Count > 0)
+                {
+                    List<int> personalLines = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => (l.Detail1 != null && l.Detail1.Type == FnDetailType.Employee) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Employee)).Select(l => l.Id).ToListAsync(ct);
+                    var lineRows = await _uow.Set<FnAuditLog>().AsNoTracking().Where(a => a.EntityType == "FnVoucherLine").Select(a => new { a.Id, a.EntityId, a.BeforeJson, a.AfterJson }).ToListAsync(ct);
+                    List<int> hidden = lineRows.Where(x => (x.EntityId.HasValue && personalLines.Contains(x.EntityId.Value)) || PersonalLedger.MentionsDetail(x.BeforeJson, employeeDetails) || PersonalLedger.MentionsDetail(x.AfterJson, employeeDetails))
+                        .Select(x => x.Id).ToList();
+                    if (hidden.Count > 0) q = q.Where(a => !hidden.Contains(a.Id));
+                }
+            }
             if (query.UserId.HasValue) q = q.Where(a => a.UserId == query.UserId.Value);
             string action = Clean(query.Action);
             if (action != null) q = q.Where(a => a.Action == action);
@@ -64,9 +77,16 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<FinanceSettingDto>(NotAllowed + " (مدیر مالی)");
             if (dto == null || Clean(dto.Key) == null || !SettingKeys.Contains(dto.Key.Trim())) return Bad<FinanceSettingDto>("کلید تنظیم نامعتبر است.");
             string value = Clean(dto.Value);
-            if (value == null) return Bad<FinanceSettingDto>("مقدار را وارد کنید.");
             string key = dto.Key.Trim();
-            if (key == FinanceSeed.SettingParallelMonths)
+            // the go-live month may be emptied: then the month of the first confirmed HR close is used
+            if (value == null && key != FinanceSeed.SettingGoLiveMonth) return Bad<FinanceSettingDto>("مقدار را وارد کنید.");
+            if (key == FinanceSeed.SettingGoLiveMonth)
+            {
+                if (value == null) value = "";
+                else if (!PayrollGoLive.TryParse(value, out int goYear, out int goMonth)) return Bad<FinanceSettingDto>("ماه شروع را به شکل سال/ماه شمسی (مثلاً ۱۴۰۵/۰۸) وارد کنید.");
+                else value = PayrollGoLive.Format(goYear, goMonth);
+            }
+            else if (key == FinanceSeed.SettingParallelMonths)
             {
                 if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int months) || months < 1 || months > 12) return Bad<FinanceSettingDto>("تعداد ماه باید بین ۱ تا ۱۲ باشد.");
             }

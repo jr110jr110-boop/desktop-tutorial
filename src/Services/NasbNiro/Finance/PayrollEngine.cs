@@ -23,11 +23,26 @@ namespace Services.NasbNiro.Finance
 
         public bool Has(string key) => _values.ContainsKey(key);
 
+        public bool TryGet(string key, out decimal value) => _values.TryGetValue(key, out value);
+
         public decimal Get(string key)
         {
             if (_values.TryGetValue(key, out decimal v)) return v;
             Missing.Add(key);
             return 0;
+        }
+
+        /// <summary>The refusal text for absent keys: names every key, because nothing is assumed silently.</summary>
+        public static string MissingMessage(int year, IEnumerable<string> keys) =>
+            $"مقادیر قانونی زیر برای سال {year} در جدول نرخ‌ها وارد نشده است و محاسبه ممکن نیست: " + string.Join("، ", keys) +
+            ". هیچ مقداری به‌صورت پیش‌فرض فرض نمی‌شود؛ مقدار و منبع آن را در جدول نرخ‌ها (یا جدول مالیات) ثبت کنید.";
+
+        /// <summary>Null when all keys exist; otherwise the Persian refusal naming the absent keys (they are also recorded in <see cref="Missing"/>).</summary>
+        public string Require(int year, params string[] keys)
+        {
+            List<string> absent = keys.Where(k => !Has(k)).ToList();
+            foreach (string k in absent) Missing.Add(k);
+            return absent.Count == 0 ? null : MissingMessage(year, absent);
         }
     }
 
@@ -37,6 +52,9 @@ namespace Services.NasbNiro.Finance
         public FnAttendanceSheet Sheet { get; set; }
         public Dictionary<string, decimal> Inputs { get; set; } = new Dictionary<string, decimal>();
         public List<FnEmployeeLoan> Loans { get; set; } = new List<FnEmployeeLoan>();
+
+        /// <summary>The daily wage in force at the month (the approved wage history); null uses the cached DailyWage of the employee.</summary>
+        public decimal? DailyWage { get; set; }
     }
 
     internal sealed class PayrollLine
@@ -73,6 +91,17 @@ namespace Services.NasbNiro.Finance
         public decimal OtherDeductions { get; set; }
         public decimal Provisions { get; set; }
         public decimal Net { get; set; }
+
+        /// <summary>Sick days that social security pays (not paid by the company and not insurable days of the company).</summary>
+        public decimal SickSsoDays { get; set; }
+
+        /// <summary>The monthly base (daily wage x the payroll month) is below the minimum wage of the rate table (a warning only, never blocking).</summary>
+        public bool BelowMinimumWage { get; set; }
+        public decimal MonthlyBase { get; set; }
+        public decimal MinimumMonthly { get; set; }
+
+        /// <summary>The rate table has no MinimumDailyWage: the minimum-wage check could not be made.</summary>
+        public bool MinimumWageUnknown { get; set; }
     }
 
     /// <summary>
@@ -84,7 +113,7 @@ namespace Services.NasbNiro.Finance
         public static readonly string[] BuiltInNames =
         {
             "DAYS", "DAYS_WORKED", "OT_HOURS", "NIGHT_HOURS", "HOLIDAY_HOURS", "PAID_LEAVE_DAYS", "UNPAID_LEAVE_DAYS", "ABSENCE_DAYS", "MISSION_DAYS", "CHILDREN",
-            "DAILY_WAGE", "HOURLY_WAGE", "SHIFT_PERCENT", "INSURABLE", "INSURABLE_CAPPED", "TAXABLE", "GROSS", "LEAVE_ENTITLEMENT", "SEVERANCE_BASE",
+            "DAILY_WAGE", "HOURLY_WAGE", "SHIFT_PERCENT", "INSURABLE", "INSURABLE_CAPPED", "TAXABLE", "GROSS", "LEAVE_ENTITLEMENT", "SEVERANCE_BASE", "SICK_DAYS", "SICK_SSO_DAYS",
         };
 
         public static readonly string[] Conditions = { "Married", "HasChildren", "HardAndHarmful" };
@@ -118,24 +147,45 @@ namespace Services.NasbNiro.Finance
             FnEmployee e = input.Employee;
             FnAttendanceSheet s = input.Sheet;
             var result = new PayrollResult();
-            // the payroll month is always 30 days (company decision): a full month pays 30 days in a 29-, 30- or 31-day month; only unpaid leave and absence reduce it
-            // days of the Persian month before the hire date or after the end date are not employed days (same 30-day basis)
+            // the payroll month has a fixed length (company decision, rate-table key PayrollMonthDays, 30): a full month pays that many days in a 29-, 30- or 31-day month; only unpaid leave, absence and the sick days
+            // that social security pays reduce it. Days of the Persian month before the hire date or after the end date are not employed days (same basis)
+            decimal basisDays = rates.Get(PayrollKeys.MonthDays);
+            decimal basis = Math.Max(basisDays, 1m);
             int monthDays = PersianCal.DaysIn(year, month);
             DateTime monthStart = PersianCal.Start(year, month).Date, monthEnd = monthStart.AddDays(monthDays - 1);
             int notEmployed = 0;
             if (e.HireDate.Date > monthStart) notEmployed += (int)Math.Min(monthDays, (e.HireDate.Date - monthStart).TotalDays);
             if (e.EndDate.HasValue && e.EndDate.Value.Date < monthEnd) notEmployed += (int)Math.Min(monthDays, (monthEnd - e.EndDate.Value.Date).TotalDays);
             notEmployed = Math.Min(notEmployed, monthDays);
-            decimal daysPaid = Math.Max(0m, Math.Min(30m, 30m - s.UnpaidLeaveDays - s.AbsenceDays - notEmployed));
+            // sick days (separate bucket SickDays): the key SickPayBasis says who pays them. The days social security pays are neither paid nor insured by the company
+            decimal sickSso = 0m;
+            if (s.SickLeaveDays > 0m)
+            {
+                int sickBasis = (int)rates.Get(PayrollKeys.SickPayBasis);
+                decimal companyDays = rates.Get(PayrollKeys.SickCompanyDays);
+                if (sickBasis == PayrollKeys.SickAllBySso) sickSso = s.SickLeaveDays;
+                else if (sickBasis == PayrollKeys.SickCompanyThenSso) sickSso = Math.Max(0m, s.SickLeaveDays - companyDays);
+            }
+            result.SickSsoDays = sickSso;
+            decimal daysPaid = Math.Max(0m, Math.Min(basisDays, basisDays - s.UnpaidLeaveDays - s.AbsenceDays - notEmployed - sickSso));
             if (s.DaysWorked + s.PaidLeaveDays + s.SickLeaveDays + s.MissionDays <= 0) daysPaid = 0; // no attendance at all: nothing is paid for days
             result.DaysPaid = daysPaid;
-            decimal dailyWage = e.DailyWage;
+            decimal dailyWage = input.DailyWage ?? e.DailyWage;
+            // the minimum-wage check is a warning, never a block: the monthly base (daily wage x the payroll month) against the rate-table minimum
+            if (rates.TryGet(PayrollKeys.MinimumDailyWage, out decimal minimumDaily) && minimumDaily > 0m)
+            {
+                result.MonthlyBase = R(dailyWage * basisDays);
+                result.MinimumMonthly = R(minimumDaily * basisDays);
+                result.BelowMinimumWage = result.MonthlyBase < result.MinimumMonthly;
+            }
+            else result.MinimumWageUnknown = true;
 
             var vars = new Dictionary<string, decimal>(StringComparer.Ordinal)
             {
                 ["DAYS"] = daysPaid, ["DAYS_WORKED"] = s.DaysWorked, ["OT_HOURS"] = s.OvertimeHours, ["NIGHT_HOURS"] = s.NightHours, ["HOLIDAY_HOURS"] = s.HolidayHours,
                 ["PAID_LEAVE_DAYS"] = s.PaidLeaveDays, ["UNPAID_LEAVE_DAYS"] = s.UnpaidLeaveDays, ["ABSENCE_DAYS"] = s.AbsenceDays, ["MISSION_DAYS"] = s.MissionDays,
                 ["CHILDREN"] = e.ChildrenCount, ["DAILY_WAGE"] = dailyWage, ["INSURABLE"] = 0m, ["INSURABLE_CAPPED"] = 0m, ["TAXABLE"] = 0m, ["GROSS"] = 0m,
+                ["SICK_DAYS"] = s.SickLeaveDays, ["SICK_SSO_DAYS"] = sickSso,
             };
             vars["SHIFT_PERCENT"] = s.ShiftType >= 1 && s.ShiftType <= 3 ? rates.Get("ShiftPercent" + s.ShiftType) : 0m;
             vars["LEAVE_ENTITLEMENT"] = rates.Get("LeaveEntitlementMonthly");
@@ -163,7 +213,7 @@ namespace Services.NasbNiro.Finance
                     {
                         @base = rates.Get(item.RateKey);
                         amount = @base * (item.Factor == 0 ? 1 : item.Factor);
-                        if (item.ProRata) amount = amount * Math.Min(daysPaid, 30m) / 30m;
+                        if (item.ProRata) amount = amount * Math.Min(daysPaid, basis) / basis;
                         break;
                     }
                     case FnPayrollCalc.PerDayWorked:
@@ -182,7 +232,11 @@ namespace Services.NasbNiro.Finance
                             case "HOLIDAY": hours = s.HolidayHours; break;
                         }
                         @base = vars["HOURLY_WAGE"];
-                        amount = @base * hours * (item.Factor == 0 ? 1 : item.Factor);
+                        decimal hourFactor = item.Factor == 0 ? 1 : item.Factor;
+                        // the holiday-work premium has its own rate-table key (percent): an item of kind HOLIDAY that names a RateKey reads its factor from there
+                        if (string.Equals((item.Variant ?? "").Trim(), "HOLIDAY", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(item.RateKey))
+                            hourFactor = rates.Get(item.RateKey) / 100m;
+                        amount = @base * hours * hourFactor;
                         break;
                     }
                     case FnPayrollCalc.PercentOfItems:

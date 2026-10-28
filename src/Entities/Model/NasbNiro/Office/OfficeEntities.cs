@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Entities.Model.NasbNiro.Office
 {
@@ -392,8 +393,9 @@ namespace Entities.Model.NasbNiro.Office
         public int StartMinute { get; set; }
         public int EndMinute { get; set; }
         public int BreakMinutes { get; set; }
-        public int NightStartMinute { get; set; } = 22 * 60;
-        public int NightEndMinute { get; set; } = 6 * 60;
+        /// <summary>The night window of the shift (minutes from midnight). Filled from the rate-table keys NightWindowStartMinute / NightWindowEndMinute when the shift is saved; no literal default lives here.</summary>
+        public int NightStartMinute { get; set; }
+        public int NightEndMinute { get; set; }
 
         /// <summary>Bit n is set when the weekday with number n (0 = Sunday ... 6 = Saturday) is a working day of the shift.</summary>
         public int WorkDaysMask { get; set; }
@@ -410,6 +412,9 @@ namespace Entities.Model.NasbNiro.Office
         public DateTime? ToDate { get; set; }
         public int CreatedByUserId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
+
+        /// <summary>Required when the assignment starts inside a month that is already running or closed (back-dating inside the open month).</summary>
+        public string Reason { get; set; }
     }
 
     /// <summary>A time clock or middleware on the LAN that pushes events. The key is shown once and stored as a hash.</summary>
@@ -421,6 +426,30 @@ namespace Entities.Model.NasbNiro.Office
         public string ApiKeyHash { get; set; }
         public bool IsActive { get; set; } = true;
         public DateTimeOffset? LastPushAt { get; set; }
+
+        /// <summary>The key is shown once when the device is created; a new key is only issued by the separate rotate action, which stamps these two fields (they are audited, the key itself never is).</summary>
+        public DateTimeOffset? KeyRotatedAt { get; set; }
+        public int? KeyRotatedByUserId { get; set; }
+    }
+
+    /// <summary>
+    /// One row per push of a device (or per import file): the device, the number of events, how many were new and a SHA-256 of the payload. A lightweight log instead of one audit row per punch.
+    /// </summary>
+    public class OfDevicePushLog
+    {
+        public long Id { get; set; }
+        public int? DeviceId { get; set; }
+        public string DeviceCode { get; set; }
+        public DateTimeOffset ReceivedAt { get; set; }
+        public int EventCount { get; set; }
+        public int Accepted { get; set; }
+        public int Duplicates { get; set; }
+
+        /// <summary>SHA-256 (hex) of the received events in canonical order.</summary>
+        public string PayloadHash { get; set; }
+
+        /// <summary>Push, or Rejected when the key or the code was wrong (the attempt is kept).</summary>
+        public string Outcome { get; set; }
     }
 
     public class OfClockEvent
@@ -435,11 +464,17 @@ namespace Entities.Model.NasbNiro.Office
         public OfClockDirection Direction { get; set; }
         public OfClockSource Source { get; set; }
 
-        /// <summary>Manual events: the reason (audit).</summary>
+        /// <summary>Manual events: the reason (required; audit).</summary>
         public string Reason { get; set; }
 
         public int? CreatedByUserId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
+
+        /// <summary>Only an Approved event counts in the day computation. Device pushes and imports are Approved on arrival; a manual event is a request (Pending) until a second person decides.</summary>
+        public OfClockApproval Approval { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public string RejectReason { get; set; }
     }
 
     /// <summary>
@@ -459,7 +494,20 @@ namespace Entities.Model.NasbNiro.Office
         /// <summary>Overtime allowed per day without a request; null means not configured (then only requested overtime counts).</summary>
         public int? MaxOvertimeMinutesPerDay { get; set; }
 
-        public bool OvertimeNeedsPreApproval { get; set; }
+        /// <summary>
+        /// Overtime and holiday work count only up to the hours of an approved overtime request of that day; the rest is reported as unapproved overtime and is not paid. Stored in the long-standing column
+        /// OvertimeNeedsPreApproval (renamed in code only, no migration); a new row starts with the switch on. A row an administrator saved keeps what it was saved with.
+        /// </summary>
+        [Column("OvertimeNeedsPreApproval")]
+        public bool OvertimeRequiresApproval { get; set; } = true;
+
+        /// <summary>Early leave beyond the grace is deducted like lateness (minutes x the same coefficient) unless this switch is set. Stored inverted so that the default of an existing row (false) means the deduction is on.</summary>
+        public bool EarlyLeaveDeductionDisabled { get; set; }
+
+        /// <summary>
+        /// Who confirms the month close: false (default) only FINANCEMANAGER; true also a second HR user (never the preparer). The preparer can never confirm.
+        /// </summary>
+        public bool MonthConfirmByHrPeer { get; set; }
 
         /// <summary>Overtime is rounded down to a multiple of this many minutes (0 or 1 = no rounding).</summary>
         public int RoundingMinutes { get; set; }
@@ -505,7 +553,13 @@ namespace Entities.Model.NasbNiro.Office
         /// <summary>Deducted time for the delay of the day: DelayMinutes x the policy coefficient at the time of the computation (0 when the delay is inside the grace).</summary>
         public int DelayDeductionMinutes { get; set; }
         public int EarlyLeaveMinutes { get; set; }
+
+        /// <summary>Deducted time for early leave beyond the grace: EarlyLeaveMinutes x the delay coefficient (0 when the company switch is off).</summary>
+        public int EarlyLeaveDeductionMinutes { get; set; }
         public int OvertimeMinutes { get; set; }
+
+        /// <summary>Overtime or holiday work that no approved overtime request covers (only counted when the policy requires approval): reported, never paid.</summary>
+        public int UnapprovedOvertimeMinutes { get; set; }
         public int NightMinutes { get; set; }
         public int HolidayMinutes { get; set; }
         public int AbsenceDays { get; set; }
@@ -519,15 +573,32 @@ namespace Entities.Model.NasbNiro.Office
         public DateTimeOffset ComputedAt { get; set; }
     }
 
+    /// <summary>
+    /// The HR close of a month in two steps: HR prepares (ClosedAt / ClosedByUserId are the preparation; the sheets are written and locked and a snapshot is frozen), a second person confirms.
+    /// Payroll is calculated and approved only for a Confirmed month.
+    /// </summary>
     public class OfAttendanceMonth
     {
         public int Id { get; set; }
         public int Year { get; set; }
         public int Month { get; set; }
+
+        /// <summary>When the month was (last) prepared.</summary>
         public DateTimeOffset ClosedAt { get; set; }
+
+        /// <summary>The preparer: cannot confirm.</summary>
         public int ClosedByUserId { get; set; }
         public int SheetCount { get; set; }
         public int SkippedLocked { get; set; }
+
+        public OfMonthStatus Status { get; set; }
+        public DateTimeOffset? ConfirmedAt { get; set; }
+        public int? ConfirmedByUserId { get; set; }
+        public string RejectReason { get; set; }
+
+        /// <summary>JSON of the numbers written to the sheets at preparation (frozen) and its SHA-256: confirmation checks that the sheets still hold exactly these numbers.</summary>
+        public string SnapshotJson { get; set; }
+        public string SnapshotHash { get; set; }
     }
 
     public class OfLeaveRequest : BaseEntity

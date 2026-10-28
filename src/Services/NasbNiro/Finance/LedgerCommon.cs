@@ -96,6 +96,8 @@ namespace Services.NasbNiro.Finance
         /// <summary>The user created or edited the document: he cannot be its checker or approver.</summary>
         public static bool Touched(int creator, string ids, int user) => (creator != 0 && creator == user) || (ids != null && ids.Contains("," + user + ","));
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+        /// <summary>A free text cut to the length of its column (the database refuses a longer text; the in-memory test database does not).</summary>
+        public static string Cap(string s, int max) => s != null && s.Length > max ? s.Substring(0, max) : s;
 
         public static string PersianDate(DateTime date) => Inventory.InventoryText.PersianDate(date);
 

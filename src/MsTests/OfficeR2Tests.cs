@@ -87,7 +87,7 @@ namespace MsTests
             return new DayInput
             {
                 Date = date, HasShift = true, StartMinute = 8 * 60, EndMinute = 16 * 60, BreakMinutes = 30, GraceMinutes = grace, DelayPenaltyFactor = factor,
-                OvertimeNeedsPreApproval = false, Punches = new System.Collections.Generic.List<DateTime> { date.AddMinutes(inMinute), date.AddMinutes(outMinute) },
+                OvertimeRequiresApproval = false, Punches = new System.Collections.Generic.List<DateTime> { date.AddMinutes(inMinute), date.AddMinutes(outMinute) },
             };
         }
 
@@ -96,7 +96,11 @@ namespace MsTests
         {
             var p = new OfAttendancePolicy();
             Assert.AreEqual(15, p.GraceMinutes);
-            Assert.IsFalse(p.OvertimeNeedsPreApproval);
+            // release R1f: overtime counts only up to an approved request unless the policy switch is turned off (starred default on)
+            Assert.IsTrue(p.OvertimeRequiresApproval);
+            // early leave is deducted like lateness unless the company switches it off (stored inverted: the default of an old row means on)
+            Assert.IsFalse(p.EarlyLeaveDeductionDisabled);
+            Assert.IsFalse(p.MonthConfirmByHrPeer);
             Assert.AreEqual(1320, p.MonthlyOvertimeCapMinutes);
             Assert.AreEqual(3m, p.DelayPenaltyFactor);
             Assert.IsNull(p.MaxOvertimeMinutesPerDay);
@@ -110,12 +114,12 @@ namespace MsTests
         [TestMethod]
         public void Old_Policy_Defaults_Are_Upgraded_Once_And_An_Admins_Row_Is_Not_Touched()
         {
-            Assert.IsTrue(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = true }));
+            Assert.IsTrue(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeRequiresApproval = true }));
             // an admin changed it: grace 5, or pre-approval off
-            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 5, OvertimeNeedsPreApproval = true }));
-            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = false }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 5, OvertimeRequiresApproval = true }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeRequiresApproval = false }));
             // already upgraded (the marker): an admin who chose grace 0 again is not overwritten
-            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = true, CompanyRulesApplied = true }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeRequiresApproval = true, CompanyRulesApplied = true }));
             Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(null));
         }
 

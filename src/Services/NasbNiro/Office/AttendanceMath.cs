@@ -53,8 +53,10 @@ namespace Services.NasbNiro.Office
         public int StartMinute { get; set; }
         public int EndMinute { get; set; }
         public int BreakMinutes { get; set; }
-        public int NightStartMinute { get; set; } = 22 * 60;
-        public int NightEndMinute { get; set; } = 6 * 60;
+
+        /// <summary>The night window (minutes from midnight), read from the shift or, for a day without a shift, from the rate-table keys NightWindowStartMinute / NightWindowEndMinute. No literal default: equal values mean no night window.</summary>
+        public int NightStartMinute { get; set; }
+        public int NightEndMinute { get; set; }
 
         /// <summary>A holiday, a weekly off day, or a day the shift does not work.</summary>
         public bool NonWorking { get; set; }
@@ -64,11 +66,16 @@ namespace Services.NasbNiro.Office
 
         public int GraceMinutes { get; set; }
         public int? MaxOvertimeMinutes { get; set; }
-        public bool OvertimeNeedsPreApproval { get; set; } = true;
+
+        /// <summary>Overtime and holiday work count only up to the approved overtime of the day (policy switch OvertimeRequiresApproval, starred default on); the rest is reported as unapproved.</summary>
+        public bool OvertimeRequiresApproval { get; set; } = true;
         public int RoundingMinutes { get; set; }
 
-        /// <summary>Deduction coefficient for a delay beyond the grace (company: 3).</summary>
+        /// <summary>Deduction coefficient for a delay or an early leave beyond the grace (company: 3).</summary>
         public decimal DelayPenaltyFactor { get; set; } = 3m;
+
+        /// <summary>Early leave beyond the grace is deducted like lateness (policy switch EarlyLeaveDeduction, starred default on).</summary>
+        public bool EarlyLeaveDeductionEnabled { get; set; } = true;
         public int ApprovedOvertimeMinutes { get; set; }
 
         public bool DailyPaidLeave { get; set; }
@@ -95,7 +102,13 @@ namespace Services.NasbNiro.Office
         /// <summary>Deducted time for the delay: DelayMinutes x the coefficient (the whole delay, not only the part above the grace).</summary>
         public int DelayDeductionMinutes { get; set; }
         public int EarlyLeaveMinutes { get; set; }
+
+        /// <summary>Deducted time for the early leave: EarlyLeaveMinutes x the same coefficient as the delay (0 inside the grace or when the switch is off).</summary>
+        public int EarlyLeaveDeductionMinutes { get; set; }
         public int OvertimeMinutes { get; set; }
+
+        /// <summary>Overtime or holiday work no approved request covers: reported, never paid (counted only when the policy requires approval).</summary>
+        public int UnapprovedOvertimeMinutes { get; set; }
         public int NightMinutes { get; set; }
         public int HolidayMinutes { get; set; }
         public int AbsenceDays { get; set; }
@@ -110,8 +123,9 @@ namespace Services.NasbNiro.Office
     /// The daily attendance computation, free of any database access so the numbers can be checked by hand.
     /// Rules: the first and the last clock event of the day are the presence interval; delay and early leave beyond the grace are counted in full;
     /// a delay beyond the grace is deducted as delay x coefficient (company: grace 15, coefficient 3: 14 minutes late = 0, 16 minutes late = 48 minutes deducted; no leave is used for lateness);
-    /// overtime is the time after the shift end, limited to the approved hours (or the policy maximum when no pre-approval is needed) and rounded down;
-    /// night minutes are the part of the presence interval inside the night window; on a non-working day all worked minutes are holiday work.
+    /// early leave beyond the grace is deducted the same way (same coefficient) unless the company switch is off;
+    /// overtime is the time after the shift end, limited to the approved hours of the day when the policy requires approval (the rest is reported as unapproved), to the policy maximum and rounded down;
+    /// night minutes are the part of the presence interval inside the night window; on a non-working day all worked minutes are holiday work, counted in the overtime bucket (same approval rule, maximum and rounding, and the monthly cap at the close).
     /// </summary>
     internal static class AttendanceMath
     {
@@ -149,6 +163,7 @@ namespace Services.NasbNiro.Office
 
         public static int NightOverlap(DateTime date, DateTime from, DateTime to, int nightStart, int nightEnd)
         {
+            if (nightStart == nightEnd) return 0; // no night window configured
             int total = 0;
             for (int k = -1; k <= 1; k++)
             {
@@ -166,6 +181,38 @@ namespace Services.NasbNiro.Office
         /// <summary>The overtime of a month that counts and is paid: the sum of the days, at most the monthly cap (a cap of 0 or less counts nothing).</summary>
         public static int MonthlyOvertime(IEnumerable<int> dayMinutes, int capMinutes) =>
             Math.Min(Math.Max(0, dayMinutes.Sum()), Math.Max(0, capMinutes));
+
+        /// <summary>
+        /// The overtime and the holiday work of a month that count: holiday work sits in the overtime bucket, so ONE monthly cap covers both. The days are filled in date order until the cap is used up;
+        /// what comes after is not counted (a cap of 0 or less counts nothing).
+        /// </summary>
+        public static (int OvertimeMinutes, int HolidayMinutes) MonthlyExtraWork(IEnumerable<(DateTime Date, int OvertimeMinutes, int HolidayMinutes)> days, int capMinutes)
+        {
+            int left = Math.Max(0, capMinutes), overtime = 0, holiday = 0;
+            foreach (var day in days.OrderBy(x => x.Date))
+            {
+                int takeOvertime = Math.Min(left, Math.Max(0, day.OvertimeMinutes));
+                overtime += takeOvertime; left -= takeOvertime;
+                int takeHoliday = Math.Min(left, Math.Max(0, day.HolidayMinutes));
+                holiday += takeHoliday; left -= takeHoliday;
+            }
+            return (overtime, holiday);
+        }
+
+        /// <summary>
+        /// Extra work of one day (overtime after the shift, or the minutes worked on a day off) as it counts: with the approval rule on only up to the approved overtime of the day, never above the daily maximum, rounded down.
+        /// <paramref name="unapproved"/> is the part no approved request covers (0 when the rule is off): reported, never paid.
+        /// </summary>
+        public static int CountedExtraWork(DayInput d, int rawMinutes, out int unapproved)
+        {
+            int raw = Math.Max(0, rawMinutes);
+            int covered = d.OvertimeRequiresApproval ? Math.Min(raw, Math.Max(0, d.ApprovedOvertimeMinutes)) : raw;
+            unapproved = d.OvertimeRequiresApproval ? raw - covered : 0;
+            int counted = covered;
+            if (d.MaxOvertimeMinutes.HasValue) counted = Math.Min(counted, Math.Max(0, d.MaxOvertimeMinutes.Value));
+            if (d.RoundingMinutes > 1) counted = counted / d.RoundingMinutes * d.RoundingMinutes;
+            return counted;
+        }
 
         /// <summary>
         /// The deducted minutes of a day as a part of a paid day (deducted minutes / scheduled minutes of the shift), at most one day. This is how the lateness deduction reaches payroll:
@@ -195,7 +242,9 @@ namespace Services.NasbNiro.Office
                 r.Status = OfDayStatus.Present;
                 if (d.NonWorking)
                 {
-                    r.HolidayMinutes = r.WorkedMinutes;
+                    // holiday work is overtime-bucket work: the approval rule, the daily maximum and the rounding apply; the monthly cap is applied at the close
+                    r.HolidayMinutes = CountedExtraWork(d, r.WorkedMinutes, out int unapprovedHoliday);
+                    r.UnapprovedOvertimeMinutes = unapprovedHoliday;
                     return r;
                 }
                 if (!d.HasShift) return r;
@@ -208,14 +257,13 @@ namespace Services.NasbNiro.Office
                 r.DelayMinutes = delay <= d.GraceMinutes ? 0 : delay;
                 r.DelayDeductionMinutes = DelayDeduction(r.DelayMinutes, d.DelayPenaltyFactor);
                 r.EarlyLeaveMinutes = early <= d.GraceMinutes ? 0 : early;
+                // early leave beyond the grace is deducted like lateness: the whole minutes x the same coefficient (company switch EarlyLeaveDeduction, starred default on)
+                r.EarlyLeaveDeductionMinutes = d.EarlyLeaveDeductionEnabled ? DelayDeduction(r.EarlyLeaveMinutes, d.DelayPenaltyFactor) : 0;
 
                 int raw = Math.Max(0, (int)Math.Floor((r.LastOut.Value - shiftEnd).TotalMinutes));
-                // with pre-approval the approved request is the limit; without it every minute counts up to the daily maximum (no maximum configured: no limit)
-                int cap = d.OvertimeNeedsPreApproval ? d.ApprovedOvertimeMinutes : int.MaxValue;
-                if (d.MaxOvertimeMinutes.HasValue) cap = Math.Min(cap, d.MaxOvertimeMinutes.Value);
-                int overtime = Math.Min(raw, Math.Max(0, cap));
-                if (d.RoundingMinutes > 1) overtime = overtime / d.RoundingMinutes * d.RoundingMinutes;
-                r.OvertimeMinutes = overtime;
+                // with the approval rule the approved request of the day is the limit and the rest is reported as unapproved; without it every minute counts. The daily maximum and the rounding apply to both.
+                r.OvertimeMinutes = CountedExtraWork(d, raw, out int unapprovedOvertime);
+                r.UnapprovedOvertimeMinutes = unapprovedOvertime;
 
                 // hourly leave is a part of a paid day; hourly mission only excuses the delay and the early leave
                 // the day is the scheduled working time (end − start − break), the same basis as the lateness deduction and the month close

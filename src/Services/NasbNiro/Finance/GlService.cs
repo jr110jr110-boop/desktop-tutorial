@@ -383,6 +383,8 @@ namespace Services.NasbNiro.Finance
         {
             query ??= new DetailAccountQuery();
             IQueryable<FnDetailAccount> q = _uow.Set<FnDetailAccount>().AsNoTracking();
+            // release R1f: the employee detail accounts (the loan and advance receivable per person) are listed to the roles that read personal data only
+            if (!PersonalLedger.Sees(_user)) q = q.Where(d => d.Type != FnDetailType.Employee);
             if (query.Type.HasValue) q = q.Where(d => d.Type == query.Type.Value);
             string text = Clean(query.Contains);
             if (text != null) q = q.Where(d => d.Code.Contains(text) || d.Title.Contains(text));
@@ -428,6 +430,7 @@ namespace Services.NasbNiro.Finance
         private async Task<List<VoucherDto>> LoadVoucherDtosAsync(IQueryable<FnVoucher> query, bool withLines, CancellationToken ct)
         {
             IQueryable<FnVoucher> q = query.AsNoTracking();
+            bool seePersonal = PersonalLedger.Sees(_user);
             if (withLines) q = q.Include(v => v.Lines).ThenInclude(l => l.Account).Include(v => v.Lines).ThenInclude(l => l.Detail1).Include(v => v.Lines).ThenInclude(l => l.Detail2);
             List<FnVoucher> rows = await q.Include(v => v.FiscalYear).AsSplitQuery().ToListAsync(ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(v => new int?[] { v.CreatedByUserId, v.CheckedByUserId, v.FinalizedByUserId }), ct);
@@ -448,21 +451,36 @@ namespace Services.NasbNiro.Finance
                 CreatorName = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId), CreatedAt = v.CreatedAt,
                 CheckedByName = v.CheckedByUserId == 0 ? "سیستم" : names.Name(v.CheckedByUserId), CheckedAt = v.CheckedAt,
                 FinalizedByName = names.Name(v.FinalizedByUserId), FinalizedAt = v.FinalizedAt,
-                Lines = withLines ? v.Lines.OrderBy(l => l.RowNumber).Select(l => new VoucherLineDto
-                {
-                    RowNumber = l.RowNumber, AccountId = l.AccountId, AccountCode = l.Account?.Code, AccountTitle = l.Account?.Title,
-                    Detail1Id = l.Detail1Id, Detail1Code = l.Detail1?.Code, Detail1Title = l.Detail1?.Title,
-                    Detail2Id = l.Detail2Id, Detail2Code = l.Detail2?.Code, Detail2Title = l.Detail2?.Title,
-                    Debit = l.Debit, Credit = l.Credit, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity,
-                    Description = l.Description, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole,
-                }).ToList() : new List<VoucherLineDto>(),
+                Lines = withLines ? LinesOf(v, seePersonal) : new List<VoucherLineDto>(),
             }).ToList();
+        }
+
+        /// <summary>
+        /// The lines of a voucher as the reader may see them (release R1f): the lines on an employee detail account (the loan and advance receivable kept per employee) show one person's money, so outside
+        /// PAYROLL, FINANCEMANAGER and the CEO they are merged per account and side into one anonymous line; the totals stay.
+        /// </summary>
+        private static List<VoucherLineDto> LinesOf(FnVoucher v, bool seePersonal)
+        {
+            List<FnVoucherLine> ordered = v.Lines.OrderBy(l => l.RowNumber).ToList();
+            List<VoucherLineDto> lines = ordered.Select(l => new VoucherLineDto
+            {
+                RowNumber = l.RowNumber, AccountId = l.AccountId, AccountCode = l.Account?.Code, AccountTitle = l.Account?.Title,
+                Detail1Id = l.Detail1Id, Detail1Code = l.Detail1?.Code, Detail1Title = l.Detail1?.Title,
+                Detail2Id = l.Detail2Id, Detail2Code = l.Detail2?.Code, Detail2Title = l.Detail2?.Title,
+                Debit = l.Debit, Credit = l.Credit, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity,
+                Description = l.Description, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole,
+            }).ToList();
+            if (seePersonal) return lines;
+            return PersonalLedger.Merge(lines, ordered.Select(l => l.Detail1?.Type == FnDetailType.Employee || l.Detail2?.Type == FnDetailType.Employee).ToList());
         }
 
         public async Task<ResponseDto<PagedList<VoucherDto>>> GetVouchersAsync(VoucherQuery query, CancellationToken ct)
         {
             await FinanceSeed.EnsureAsync(_uow, ct);
             query ??= new VoucherQuery();
+            // release R1f: the vouchers of one employee detail account are that person's loan and advance lines: asked for by name they are for PAYROLL, FINANCEMANAGER and the CEO only
+            if (query.Detail1Id.HasValue && !PersonalLedger.Sees(_user) && await _uow.Set<FnDetailAccount>().AnyAsync(d => d.Id == query.Detail1Id.Value && d.Type == FnDetailType.Employee, ct))
+                return Bad<PagedList<VoucherDto>>(PersonalLedger.NotAllowed);
             IQueryable<FnVoucher> q = _uow.Set<FnVoucher>();
             if (query.FiscalYearId.HasValue) q = q.Where(v => v.FiscalYearId == query.FiscalYearId.Value);
             else
@@ -556,6 +574,8 @@ namespace Services.NasbNiro.Finance
                     if (manual && !Has(account.Detail2Types, d2.Type)) return (null, $"ردیف {row}: حساب {account.Code} تفصیلی دوم از نوع {d2.Type} نمی‌پذیرد.");
                 }
                 if (manual && account.RequiresDetail && d1 == null) return (null, $"ردیف {row}: حساب {account.Code} ({account.Title}) تفصیلی اجباری دارد.");
+                // release R1f: an employee detail account is a person's loan or advance; only the roles that read personal data write on it by hand (the others would also never see the line they wrote)
+                if (manual && (d1?.Type == FnDetailType.Employee || d2?.Type == FnDetailType.Employee) && !PersonalLedger.Sees(_user)) return (null, $"ردیف {row}: {PersonalLedger.NotAllowed}");
 
                 bool anyCurrency = Clean(l.CurrencyCode) != null || l.CurrencyAmount.HasValue || l.Rate.HasValue;
                 if (anyCurrency && !FinanceFeatures.ForeignCurrency) return (null, FinanceFeatures.OnlyRial);

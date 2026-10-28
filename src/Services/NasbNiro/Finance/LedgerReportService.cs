@@ -160,10 +160,13 @@ namespace Services.NasbNiro.Finance
             if (q.AccountId.HasValue) account = await _uow.Set<FnAccount>().AsNoTracking().FirstOrDefaultAsync(a => a.Id == q.AccountId.Value, ct);
             else if (code != null) account = await _uow.Set<FnAccount>().AsNoTracking().FirstOrDefaultAsync(a => a.Code == code, ct);
             FnDetailAccount detail = null;
+            bool seePersonal = PersonalLedger.Sees(_user);
             if (allowDetail && q.DetailId.HasValue)
             {
                 detail = await _uow.Set<FnDetailAccount>().AsNoTracking().FirstOrDefaultAsync(d => d.Id == q.DetailId.Value, ct);
                 if (detail == null) return ResponseDtoHelper.NotFound<LedgerStatementDto>("تفصیلی پیدا نشد.");
+                // release R1f: the statement of one employee detail account is that person's loan and advance lines: PAYROLL, FINANCEMANAGER and the CEO only
+                if (detail.Type == FnDetailType.Employee && !seePersonal) return Bad<LedgerStatementDto>(PersonalLedger.NotAllowed);
             }
             if (account == null && detail == null) return Bad<LedgerStatementDto>(allowDetail ? "حساب یا تفصیلی را مشخص کنید." : "کد حساب کل را مشخص کنید.");
             if (account == null && q.AccountId.HasValue) return ResponseDtoHelper.NotFound<LedgerStatementDto>("حساب پیدا نشد.");
@@ -176,11 +179,14 @@ namespace Services.NasbNiro.Finance
             decimal opening = openingSum == null ? 0 : openingSum.Debit - openingSum.Credit;
             var rows = await lines.Where(l => l.Voucher.Date >= r.Range.From && l.Voucher.Date <= r.Range.To)
                 .OrderBy(l => l.Voucher.Date).ThenBy(l => l.Voucher.Number ?? int.MaxValue).ThenBy(l => l.VoucherId).ThenBy(l => l.RowNumber)
-                .Select(l => new
+                .Select(l => new PersonalLedger.Row
                 {
-                    l.Voucher.Date, l.VoucherId, l.Voucher.Number, AccountCode = l.Account.Code, DetailTitle = l.Detail1 == null ? null : l.Detail1.Title,
-                    Description = l.Description ?? l.Voucher.Description, l.Debit, l.Credit,
+                    Date = l.Voucher.Date, VoucherId = l.VoucherId, Number = l.Voucher.Number, AccountCode = l.Account.Code, DetailTitle = l.Detail1 == null ? null : l.Detail1.Title,
+                    Description = l.Description ?? l.Voucher.Description, Debit = l.Debit, Credit = l.Credit,
+                    Personal = (l.Detail1 != null && l.Detail1.Type == FnDetailType.Employee) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Employee),
                 }).ToListAsync(ct);
+            // release R1f: the lines of the employee detail accounts of one voucher are merged for the readers who may not see persons (the totals and the balance do not change)
+            if (!seePersonal) rows = PersonalLedger.MergeRows(rows);
 
             var dto = new LedgerStatementDto
             {
@@ -220,11 +226,16 @@ namespace Services.NasbNiro.Finance
             Dictionary<int, FnAccount> byId = (await _uow.Set<FnAccount>().AsNoTracking().ToListAsync(ct)).ToDictionary(a => a.Id);
             Dictionary<int, FnDetailAccount> details = (await _uow.Set<FnDetailAccount>().AsNoTracking().ToListAsync(ct)).ToDictionary(d => d.Id);
 
+            // release R1f: the rows of the employee detail accounts (the loan and advance receivable per person) are merged into one anonymous row per account for the readers who may not see persons
+            const int PersonalKey = -1;
+            bool seePersonal = PersonalLedger.Sees(_user);
             // key = (account or its general, detail) according to the level
             (int, int?) KeyOf(Sum2 s)
             {
                 int account = q.Level == 1 ? (byId[s.AccountId].ParentId ?? s.AccountId) : s.AccountId;
-                return (account, q.Level == 3 ? s.DetailId : null);
+                int? detail = q.Level == 3 ? s.DetailId : null;
+                if (!seePersonal && detail.HasValue && details.TryGetValue(detail.Value, out FnDetailAccount d) && d.Type == FnDetailType.Employee) detail = PersonalKey;
+                return (account, detail);
             }
             var table = new Dictionary<(int, int?), decimal[]>();   // opening net, debit, credit
             decimal[] Row((int, int?) key)
@@ -242,10 +253,11 @@ namespace Services.NasbNiro.Finance
                 decimal openingNet = kv.Value[0], debit = kv.Value[1], credit = kv.Value[2];
                 if (openingNet == 0 && debit == 0 && credit == 0) continue;
                 decimal closingNet = openingNet + debit - credit;
+                bool merged = kv.Key.Item2 == PersonalKey;
                 var row = new TrialBalanceRowDto
                 {
-                    Code = a.Code + (kv.Key.Item2.HasValue && details.ContainsKey(kv.Key.Item2.Value) ? "/" + details[kv.Key.Item2.Value].Code : ""),
-                    Title = a.Title + (kv.Key.Item2.HasValue && details.ContainsKey(kv.Key.Item2.Value) ? " - " + details[kv.Key.Item2.Value].Title : ""),
+                    Code = a.Code + (merged ? "/" + PersonalLedger.MaskedCode : kv.Key.Item2.HasValue && details.ContainsKey(kv.Key.Item2.Value) ? "/" + details[kv.Key.Item2.Value].Code : ""),
+                    Title = a.Title + (merged ? " - " + PersonalLedger.MaskedTitle : kv.Key.Item2.HasValue && details.ContainsKey(kv.Key.Item2.Value) ? " - " + details[kv.Key.Item2.Value].Title : ""),
                     Level = q.Level, Type = a.Type,
                 };
                 if (q.Columns >= 6) { row.OpeningDebit = openingNet > 0 ? openingNet : 0; row.OpeningCredit = openingNet < 0 ? -openingNet : 0; }
