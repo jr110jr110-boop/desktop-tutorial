@@ -1,0 +1,4019 @@
+[
+ {
+  "key": "fin.revenue_by_month",
+  "module": "finance",
+  "title": "درآمد به تفکیک ماه",
+  "description": "درآمد ثبت‌شده در دفتر کل (حساب‌های درآمد، اسناد قطعی، بدون اسناد بستن حساب‌ها) در هر ماه شمسی، با ستون «سود خالص ماه» (درآمد منهای هزینه‌ی همان ماه)؛ جمع سود خالص بازه‌ی «از ابتدای سال مالی تا امروز» همان سود خالص داشبورد مالی است.",
+  "link": "/fn/reports/income-statement",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "month",
+    "title": "ماه",
+    "kind": "text"
+   },
+   {
+    "key": "amount",
+    "title": "درآمد",
+    "kind": "rial"
+   },
+   {
+    "key": "profit",
+    "title": "سود خالص ماه",
+    "kind": "rial"
+   },
+   {
+    "key": "changePercent",
+    "title": "تغییر نسبت به ماه قبل",
+    "kind": "percent"
+   }
+  ],
+  "notes": [
+   "ماه‌ها به‌ترتیب زمان؛ ماه ناقص (اول بازه یا امروز) فقط روزهای بازه را دارد. سود خالص ماه = درآمد منهای هزینه."
+  ]
+ },
+ {
+  "key": "fin.cost_by_month",
+  "module": "finance",
+  "title": "هزینه به تفکیک ماه",
+  "description": "هزینه‌ی ثبت‌شده در دفتر کل (حساب‌های هزینه، اسناد قطعی، بدون اسناد بستن حساب‌ها) در هر ماه شمسی، با ستون «سود خالص ماه» (درآمد منهای هزینه‌ی همان ماه).",
+  "link": "/fn/reports/income-statement",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "month",
+    "title": "ماه",
+    "kind": "text"
+   },
+   {
+    "key": "amount",
+    "title": "هزینه",
+    "kind": "rial"
+   },
+   {
+    "key": "profit",
+    "title": "سود خالص ماه",
+    "kind": "rial"
+   },
+   {
+    "key": "changePercent",
+    "title": "تغییر نسبت به ماه قبل",
+    "kind": "percent"
+   }
+  ],
+  "notes": [
+   "ماه‌ها به‌ترتیب زمان؛ ماه ناقص (اول بازه یا امروز) فقط روزهای بازه را دارد. سود خالص ماه = درآمد منهای هزینه."
+  ]
+ },
+ {
+  "key": "fin.cash_accounts",
+  "module": "finance",
+  "title": "حساب‌های نقد و بانک",
+  "description": "موجودی هر حساب بانکی، صندوق و تنخواه‌دار با جمع کل (از رویدادهای حسابداری)؛ بیشترین موجودی اول.",
+  "link": "/fn/treasury/cash-position",
+  "params": [],
+  "columns": [
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "status"
+   },
+   {
+    "key": "balance",
+    "title": "موجودی",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "«نقد و بانک» داشبورد = صندوق‌ها + حساب‌های بانکی (تنخواه جدا شمرده می‌شود)."
+  ]
+ },
+ {
+  "key": "fin.receivables_by_customer",
+  "module": "finance",
+  "title": "مطالبات به تفکیک مشتری",
+  "description": "مانده‌ی باز فاکتورهای فروش هر مشتری به تفکیک سن (جاری تا ۳۰ روز، ۳۱ تا ۶۰، ۶۱ تا ۹۰ و بالای ۹۰ روز از سررسید)؛ بیشترین مانده اول.",
+  "link": "/fn/receivables/ageing",
+  "params": [],
+  "columns": [
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "current",
+    "title": "جاری (تا ۳۰ روز)",
+    "kind": "rial"
+   },
+   {
+    "key": "days31To60",
+    "title": "۳۱ تا ۶۰ روز",
+    "kind": "rial"
+   },
+   {
+    "key": "days61To90",
+    "title": "۶۱ تا ۹۰ روز",
+    "kind": "rial"
+   },
+   {
+    "key": "over90",
+    "title": "بالای ۹۰ روز",
+    "kind": "rial"
+   },
+   {
+    "key": "total",
+    "title": "جمع مانده",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "سن از سررسید فاکتور حساب می‌شود (بدون سررسید: از تاریخ فاکتور)."
+  ]
+ },
+ {
+  "key": "fin.receivable_invoices_overdue",
+  "module": "finance",
+  "title": "فاکتورهای فروش سررسیدگذشته",
+  "description": "فاکتورهای فروش قطعی‌شده که مانده‌ی باز دارند و سررسیدشان (بدون سررسید: تاریخ فاکتور) گذشته است؛ بیشترین تأخیر اول.",
+  "link": "/fn/receivables/invoices",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "dueDate",
+    "title": "سررسید",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "openAmount",
+    "title": "مانده‌ی باز",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "پیوند هر ردیف صورت‌حساب مشتری است."
+  ]
+ },
+ {
+  "key": "fin.payables_by_supplier",
+  "module": "finance",
+  "title": "بدهی به تفکیک تأمین‌کننده",
+  "description": "فاکتورهای تأییدشده‌ی هر تأمین‌کننده منهای پرداخت‌های انجام‌شده بابت فاکتور؛ مانده‌ی بدهی باز، بیشترین اول (هم‌پایه با «بدهی باز» داشبورد مدیرعامل).",
+  "link": "/procurement/invoices",
+  "params": [],
+  "columns": [
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "invoices",
+    "title": "تعداد فاکتور تأییدشده",
+    "kind": "num"
+   },
+   {
+    "key": "invoiced",
+    "title": "فاکتورهای تأییدشده",
+    "kind": "rial"
+   },
+   {
+    "key": "paid",
+    "title": "پرداخت‌شده بابت فاکتور",
+    "kind": "rial"
+   },
+   {
+    "key": "open",
+    "title": "مانده‌ی بدهی",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "پرداخت بابت فاکتور فقط درخواست‌های پرداخت «پرداخت‌شده»ی دارای فاکتور است."
+  ]
+ },
+ {
+  "key": "fin.payables_overdue",
+  "module": "finance",
+  "title": "بدهی سررسیدگذشته به تأمین‌کنندگان (سن بدهی)",
+  "description": "سن بدهی به تأمین‌کنندگان از دفتر کل به تاریخ امروز، یک ردیف برای هر تأمین‌کننده: جاری (تا ۳۰ روز)، ۳۱ تا ۶۰، ۶۱ تا ۹۰ و بیش از ۹۰ روز. «سررسیدگذشته» جمع سه ستون بالای ۳۰ روز است و همان رقم سرفصل «بدهی سررسیدگذشته» داشبورد مدیرعامل است (جدول یادداشت‌های صورت‌های مالی)؛ پیش‌پرداخت و علی‌الحساب تا وصول با فاکتور در این رقم نیستند. بیشترین سررسیدگذشته اول.",
+  "link": "/fn/financial-statements",
+  "params": [],
+  "columns": [
+   {
+    "key": "supplier",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "current",
+    "title": "جاری (تا ۳۰ روز)",
+    "kind": "rial"
+   },
+   {
+    "key": "days31To60",
+    "title": "۳۱ تا ۶۰ روز",
+    "kind": "rial"
+   },
+   {
+    "key": "days61To90",
+    "title": "۶۱ تا ۹۰ روز",
+    "kind": "rial"
+   },
+   {
+    "key": "over90",
+    "title": "بیش از ۹۰ روز",
+    "kind": "rial"
+   },
+   {
+    "key": "overdue",
+    "title": "سررسیدگذشته",
+    "kind": "rial"
+   },
+   {
+    "key": "total",
+    "title": "جمع بدهی",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "سن بدهی از دفتر کل به تاریخ امروز؛ «سررسیدگذشته» = ۳۱ تا ۶۰ + ۶۱ تا ۹۰ + بیش از ۹۰ روز، هم‌پایه با رقم سرفصل داشبورد."
+  ]
+ },
+ {
+  "key": "fin.cheques_due",
+  "module": "finance",
+  "title": "چک‌های نزدیک به سررسید",
+  "description": "چک‌های صادرشده (پیش‌فرض) یا دریافتی در صندوق که تا چند روز آینده سررسید دارند یا سررسیدشان گذشته است؛ نزدیک‌ترین سررسید اول.",
+  "link": "/fn/treasury/cheques",
+  "params": [
+   {
+    "name": "kind",
+    "type": "string",
+    "desc": "نوع چک: issued (صادرشده) یا received (دریافتی در صندوق)؛ پیش‌فرض issued",
+    "default": "issued",
+    "allowed": [
+     "issued",
+     "received"
+    ]
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "چک‌هایی که تا این تعداد روز آینده سررسید دارند؛ پیش‌فرض 7 روز",
+    "default": 7,
+    "min": 1,
+    "max": 365
+   }
+  ],
+  "columns": [
+   {
+    "key": "serial",
+    "title": "شماره‌ی چک",
+    "kind": "text"
+   },
+   {
+    "key": "bank",
+    "title": "بانک / حساب",
+    "kind": "text"
+   },
+   {
+    "key": "party",
+    "title": "گیرنده / صادرکننده",
+    "kind": "text"
+   },
+   {
+    "key": "dueDate",
+    "title": "سررسید",
+    "kind": "date"
+   },
+   {
+    "key": "daysToDue",
+    "title": "روز تا سررسید (منفی: گذشته)",
+    "kind": "num"
+   },
+   {
+    "key": "amount",
+    "title": "مبلغ",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "شامل چک‌هایی است که سررسیدشان گذشته و هنوز وصول نشده است."
+  ]
+ },
+ {
+  "key": "fin.project_profitability",
+  "module": "finance",
+  "title": "سودآوری پروژه‌ها",
+  "description": "درآمد، هزینه و حاشیه‌ی سود هر پروژه از اسناد دفتر کل؛ بیشترین درآمد اول. بازه‌ی پیش‌فرض: سال مالی جاری.",
+  "link": "/fn/reports/project-profitability",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ (میلادی یا شمسی)؛ پیش‌فرض ابتدای سال مالی جاری"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ (میلادی یا شمسی)؛ پیش‌فرض پایان سال مالی جاری"
+   }
+  ],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "revenue",
+    "title": "درآمد",
+    "kind": "rial"
+   },
+   {
+    "key": "cost",
+    "title": "هزینه",
+    "kind": "rial"
+   },
+   {
+    "key": "margin",
+    "title": "حاشیه‌ی سود",
+    "kind": "rial"
+   },
+   {
+    "key": "marginPercent",
+    "title": "درصد حاشیه",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "فقط اسنادی که به پروژه وصل شده‌اند شمرده می‌شوند (درآمد: حساب‌های ۶۰۱، هزینه: حساب‌های ۷)."
+  ]
+ },
+ {
+  "key": "fin.bank_unreconciled",
+  "module": "finance",
+  "title": "مغایرت‌گیری بانکی تأییدنشده",
+  "description": "مغایرت‌گیری‌های بانکی که هنوز تأیید نشده‌اند، با مانده‌ی دفتر، مانده‌ی بانک و اختلاف؛ بیشترین اختلاف اول.",
+  "link": "/fn/treasury/reconciliations",
+  "params": [],
+  "columns": [
+   {
+    "key": "bankAccountTitle",
+    "title": "حساب بانکی",
+    "kind": "text"
+   },
+   {
+    "key": "asOfDate",
+    "title": "تا تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "bookBalance",
+    "title": "مانده‌ی دفتر",
+    "kind": "rial"
+   },
+   {
+    "key": "bankBalance",
+    "title": "مانده‌ی بانک",
+    "kind": "rial"
+   },
+   {
+    "key": "difference",
+    "title": "اختلاف",
+    "kind": "rial"
+   },
+   {
+    "key": "unmatchedLines",
+    "title": "ردیف بدون تطبیق",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "اختلاف کل در جمع، قدر مطلق اختلاف هر مغایرت‌گیری است."
+  ]
+ },
+ {
+  "key": "fin.vouchers_waiting",
+  "module": "finance",
+  "title": "اسناد حسابداری منتظر",
+  "description": "اسناد پیش‌نویس (منتظر بررسی) و بررسی‌شده (منتظر قطعی‌سازی) در همه‌ی واحدهای حقوقی، همان شمارنده‌ی داشبورد مالی و داشبورد مدیرعامل؛ قدیمی‌ترین اول.",
+  "link": "/fn/vouchers",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "date",
+    "title": "تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "state",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "description",
+    "title": "شرح",
+    "kind": "text"
+   },
+   {
+    "key": "amount",
+    "title": "مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "creatorName",
+    "title": "ثبت‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "daysWaiting",
+    "title": "روز انتظار",
+    "kind": "num"
+   }
+  ],
+  "notes": []
+ },
+ {
+  "key": "sl.pipeline_by_stage",
+  "module": "sales",
+  "title": "خط لوله‌ی فروش به تفکیک مرحله",
+  "description": "استعلام‌های باز (دریافت‌شده، در حال بررسی، در حال تهیه پیشنهاد، ارسال‌شده) با تعداد و ارزش هر مرحله؛ ارزش هر استعلام آخرین پیشنهاد فعال و در نبود آن آخرین برآورد قیمت‌دار است (هم‌پایه با داشبورد فروش). می‌شود به‌جای مرحله، به تفکیک نوع محصول هم خواست.",
+  "link": "/sales/inquiries",
+  "params": [
+   {
+    "name": "by",
+    "type": "string",
+    "desc": "گروه‌بندی: stage (مرحله) یا product (نوع محصول)؛ پیش‌فرض stage",
+    "default": "stage",
+    "allowed": [
+     "stage",
+     "product"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "name",
+    "title": "گروه",
+    "kind": "text"
+   },
+   {
+    "key": "count",
+    "title": "تعداد استعلام",
+    "kind": "num"
+   },
+   {
+    "key": "value",
+    "title": "ارزش",
+    "kind": "rial"
+   },
+   {
+    "key": "sharePercent",
+    "title": "سهم از ارزش",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "ارزش خط لوله جمع آخرین پیشنهاد فعال (یا برآورد) استعلام‌های باز است."
+  ]
+ },
+ {
+  "key": "sl.inquiries_open",
+  "module": "sales",
+  "title": "استعلام‌های باز",
+  "description": "استعلام‌های دریافت‌شده، در حال بررسی، در حال تهیه پیشنهاد و ارسال‌شده با ارزش هر استعلام؛ بیشترین ارزش اول.",
+  "link": "/sales/inquiries",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "product",
+    "title": "محصول",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "receivedDate",
+    "title": "تاریخ دریافت",
+    "kind": "date"
+   },
+   {
+    "key": "proposalDueDate",
+    "title": "مهلت پیشنهاد",
+    "kind": "date"
+   },
+   {
+    "key": "daysToDue",
+    "title": "روز تا مهلت (منفی: گذشته)",
+    "kind": "num"
+   },
+   {
+    "key": "value",
+    "title": "ارزش",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "ارزش: آخرین پیشنهاد فعال، در نبود آن آخرین برآورد قیمت‌دار، وگرنه صفر."
+  ]
+ },
+ {
+  "key": "sl.proposals_waiting",
+  "module": "sales",
+  "title": "پیشنهادهای منتظر تأیید",
+  "description": "پیشنهادهای پیش‌نویس که منتظر تأیید هستند (زیر قیمت تمام‌شده و نیازمند تأیید مدیرعامل اول، سپس بیشترین مبلغ).",
+  "link": "/sales/proposals",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "revision",
+    "title": "بازنگری",
+    "kind": "num"
+   },
+   {
+    "key": "inquiryNumber",
+    "title": "استعلام",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "price",
+    "title": "مبلغ (بدون مالیات)",
+    "kind": "rial"
+   },
+   {
+    "key": "estimateTotalCost",
+    "title": "قیمت تمام‌شده‌ی برآورد",
+    "kind": "rial"
+   },
+   {
+    "key": "flags",
+    "title": "هشدار",
+    "kind": "status"
+   }
+  ],
+  "notes": [
+   "پیشنهاد زیر قیمت تمام‌شده یا بالاتر از آستانه را فقط مدیرعامل تأیید می‌کند."
+  ]
+ },
+ {
+  "key": "sl.proposals_due",
+  "module": "sales",
+  "title": "مهلت ارسال پیشنهاد",
+  "description": "استعلام‌هایی که پیشنهادشان هنوز ارسال نشده و مهلت ارسال تا چند روز آینده می‌رسد یا گذشته است (هم‌پایه با «پیشنهاد در آستانه‌ی مهلت» داشبورد مدیرعامل)؛ نزدیک‌ترین مهلت اول.",
+  "link": "/sales/inquiries",
+  "params": [
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "مهلت ارسال پیشنهاد تا این تعداد روز آینده (مهلت‌های گذشته هم می‌آید)؛ پیش‌فرض 3 روز",
+    "default": 3,
+    "min": 1,
+    "max": 90
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "proposalDueDate",
+    "title": "مهلت پیشنهاد",
+    "kind": "date"
+   },
+   {
+    "key": "daysToDue",
+    "title": "روز تا مهلت (منفی: گذشته)",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "فقط استعلام‌های دریافت‌شده، در حال بررسی و در حال تهیه پیشنهاد شمرده می‌شود."
+  ]
+ },
+ {
+  "key": "sl.quotations_expiring",
+  "module": "sales",
+  "title": "پیش‌فاکتورهای در آستانه‌ی انقضا",
+  "description": "پیش‌فاکتورهای ارسال‌شده‌ای که اعتبارشان تا چند روز آینده تمام می‌شود (هم‌پایه با داشبورد فروش)؛ نزدیک‌ترین انقضا اول.",
+  "link": "/sales/quotations",
+  "params": [
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "پیش‌فاکتورهایی که اعتبارشان تا این تعداد روز آینده تمام می‌شود؛ پیش‌فرض 7 روز",
+    "default": 7,
+    "min": 1,
+    "max": 90
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "quotationDate",
+    "title": "تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "validUntil",
+    "title": "اعتبار تا",
+    "kind": "date"
+   },
+   {
+    "key": "daysLeft",
+    "title": "روز مانده",
+    "kind": "num"
+   },
+   {
+    "key": "netAmount",
+    "title": "مبلغ",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "فقط پیش‌فاکتورهای «ارسال‌شده»ای که اعتبارشان هنوز تمام نشده است."
+  ]
+ },
+ {
+  "key": "sl.orders_open",
+  "module": "sales",
+  "title": "سفارش‌های فروش باز",
+  "description": "سفارش‌های فروش تأییدشده و در حال تحویل بخشی با درصد تحویل (بر پایه‌ی مبلغ ردیف‌ها) و مانده‌ی فاکتورنشده؛ نزدیک‌ترین تاریخ تحویل درخواستی اول. جمع مانده‌ی فاکتورنشده بخش سفارش‌ها در شاخص «سفارش‌های در جریان» داشبورد مدیرعامل است.",
+  "link": "/sales/orders",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "orderDate",
+    "title": "تاریخ سفارش",
+    "kind": "date"
+   },
+   {
+    "key": "requestedDeliveryDate",
+    "title": "تحویل درخواستی",
+    "kind": "date"
+   },
+   {
+    "key": "daysToDelivery",
+    "title": "روز تا تحویل (منفی: گذشته)",
+    "kind": "num"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "netAmount",
+    "title": "مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "remainingAmount",
+    "title": "مانده‌ی فاکتورنشده",
+    "kind": "rial"
+   },
+   {
+    "key": "deliveredPercent",
+    "title": "درصد تحویل",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "باز یعنی «تأییدشده» یا «تحویل بخشی» (هم‌پایه با داشبورد فروش). مانده‌ی فاکتورنشده: مبلغ هر ردیف ضرب در سهم مقدار فاکتورنشده‌ی آن؛ جمع آن یک بار گرد می‌شود و بخش سفارش‌های رقم «سفارش‌های در جریان» داشبورد است (بخش قراردادهای آن رقم در این فهرست نیست)."
+  ]
+ },
+ {
+  "key": "sl.orders_waiting_credit",
+  "module": "sales",
+  "title": "سفارش‌های منتظر تأیید اعتبار",
+  "description": "سفارش‌های پیش‌نویسی که به‌خاطر سقف اعتبار مشتری منتظر تأیید مدیر مالی هستند؛ بیشترین مبلغ مازاد بر سقف اول.",
+  "link": "/sales/orders",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "orderDate",
+    "title": "تاریخ سفارش",
+    "kind": "date"
+   },
+   {
+    "key": "netAmount",
+    "title": "مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "creditExcess",
+    "title": "مازاد بر سقف اعتبار",
+    "kind": "rial"
+   },
+   {
+    "key": "creditReason",
+    "title": "دلیل",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "مازاد خالی یعنی مالی سقف اعتبار مشتری را هنوز تعیین نکرده است."
+  ]
+ },
+ {
+  "key": "sl.customers_top",
+  "module": "sales",
+  "title": "مشتریان برتر",
+  "description": "مشتریان به ترتیب فروش خالص (فاکتورهای قطعی‌شده منهای اصلاحیه‌ها، بدون مالیات) در بازه، همراه با مانده‌ی مطالبات باز. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر.",
+  "link": "/sales/customers",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ فاکتور؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ فاکتور؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "invoices",
+    "title": "تعداد فاکتور",
+    "kind": "num"
+   },
+   {
+    "key": "sales",
+    "title": "فروش خالص",
+    "kind": "rial"
+   },
+   {
+    "key": "sharePercent",
+    "title": "سهم از فروش",
+    "kind": "pct"
+   },
+   {
+    "key": "openAmount",
+    "title": "مطالبات باز",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "فروش خالص = مبلغ خالص فاکتورهای قطعی‌شده منهای اصلاحیه‌ها (بدون مالیات)."
+  ]
+ },
+ {
+  "key": "sl.hit_rate_by_month",
+  "module": "sales",
+  "title": "نرخ برد پیشنهادها به تفکیک ماه",
+  "description": "تعداد و ارزش پیشنهادهای برنده و بازنده و نرخ برد هر ماه شمسی (بر پایه‌ی تاریخ نتیجه). بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ نرخ برد داشبورد روی کل سابقه است.",
+  "link": "/sales/proposals",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ نتیجه؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ نتیجه؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "month",
+    "title": "ماه",
+    "kind": "text"
+   },
+   {
+    "key": "won",
+    "title": "برنده",
+    "kind": "num"
+   },
+   {
+    "key": "lost",
+    "title": "بازنده",
+    "kind": "num"
+   },
+   {
+    "key": "hitRatePercent",
+    "title": "نرخ برد",
+    "kind": "pct"
+   },
+   {
+    "key": "wonValue",
+    "title": "ارزش برنده",
+    "kind": "rial"
+   },
+   {
+    "key": "lostValue",
+    "title": "ارزش بازنده",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "نرخ برد = برنده / (برنده + بازنده)؛ ماه بدون نتیجه نرخ ندارد."
+  ]
+ },
+ {
+  "key": "sl.lost_by_reason",
+  "module": "sales",
+  "title": "پیشنهادهای بازنده به تفکیک دلیل",
+  "description": "تعداد و ارزش پیشنهادهای بازنده به تفکیک دلیل ثبت‌شده‌ی نتیجه؛ بیشترین تعداد اول. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر (بر پایه‌ی تاریخ نتیجه).",
+  "link": "/sales/proposals",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ نتیجه؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ نتیجه؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "reason",
+    "title": "دلیل",
+    "kind": "text"
+   },
+   {
+    "key": "lost",
+    "title": "بازنده",
+    "kind": "num"
+   },
+   {
+    "key": "lostValue",
+    "title": "ارزش بازنده",
+    "kind": "rial"
+   },
+   {
+    "key": "sharePercent",
+    "title": "سهم از بازنده‌ها",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "دلیل را کاربر هنگام ثبت نتیجه‌ی پیشنهاد انتخاب می‌کند."
+  ]
+ },
+ {
+  "key": "pc.portfolio",
+  "module": "projects",
+  "title": "سبد پروژه‌ها",
+  "description": "همه‌ی پروژه‌های فعال با پیشرفت فیزیکی و برنامه‌ای، شاخص‌های SPI و CPI، وضعیت (قرمز/زرد/سبز)، تأخیرها و هشدارها؛ بدترین SPI اول (هم‌پایه با داشبورد پروژه‌ها). می‌شود فقط پروژه‌های یک وضعیت را خواست: قرمز (SPI یا CPI قرمز)، زرد (SPI یا CPI زرد و هیچ‌کدام قرمز نباشد) یا سبز (نه قرمز و نه زرد، شامل پروژه‌ی بدون داده‌ی شاخص)؛ هر پروژه یک رنگ دارد، پس قرمز + زرد + سبز = شمار پروژه‌ها (هم‌پایه با شاخص‌های «پروژه‌های قرمز/زرد» و نمودار «وضعیت پروژه‌ها» داشبورد مدیرعامل).",
+  "link": "/project-control/portfolio",
+  "params": [
+   {
+    "name": "status",
+    "type": "string",
+    "desc": "فقط پروژه‌های یک وضعیت: danger (قرمز)، warn (زرد) یا ok (سبز)؛ پیش‌فرض همه‌ی پروژه‌های فعال",
+    "allowed": [
+     "danger",
+     "warn",
+     "ok"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "projectTitle",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "physicalPercent",
+    "title": "پیشرفت فیزیکی",
+    "kind": "pct"
+   },
+   {
+    "key": "plannedPercent",
+    "title": "پیشرفت برنامه‌ای",
+    "kind": "pct"
+   },
+   {
+    "key": "spi",
+    "title": "SPI",
+    "kind": "num"
+   },
+   {
+    "key": "spiStatus",
+    "title": "رنگ SPI",
+    "kind": "status"
+   },
+   {
+    "key": "cpi",
+    "title": "CPI",
+    "kind": "num"
+   },
+   {
+    "key": "cpiStatus",
+    "title": "رنگ CPI",
+    "kind": "status"
+   },
+   {
+    "key": "forecastFinish",
+    "title": "پیش‌بینی پایان",
+    "kind": "date"
+   },
+   {
+    "key": "lateActivities",
+    "title": "فعالیت دیرکرد",
+    "kind": "num"
+   },
+   {
+    "key": "openChanges",
+    "title": "تغییر باز",
+    "kind": "num"
+   },
+   {
+    "key": "guaranteeAlerts",
+    "title": "هشدار تضمین",
+    "kind": "num"
+   },
+   {
+    "key": "overdueMilestones",
+    "title": "مایل‌استون معوق",
+    "kind": "num"
+   },
+   {
+    "key": "penaltyExposure",
+    "title": "جریمه‌ی محاسبه‌شده",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "SPI و CPI کمتر از یک یعنی عقب از برنامه / بیش از بودجه؛ رنگ از آستانه‌های تنظیمات پروژه می‌آید. شمارنده‌های خلاصه همیشه برای همه‌ی پروژه‌های فعال است، نه فقط وضعیت انتخاب‌شده."
+  ]
+ },
+ {
+  "key": "pc.late_activities",
+  "module": "projects",
+  "title": "فعالیت‌های دارای تأخیر",
+  "description": "فعالیت‌های پروژه‌های سبد که پیش‌بینی پایانشان از پایان برنامه‌ریزی‌شده دیرتر است (فلگ تأخیر برنامه‌ریزی)؛ بیشترین روز تأخیر اول. می‌شود فقط فعالیت‌های مسیر بحرانی را خواست.",
+  "link": "/project-control/activities",
+  "params": [
+   {
+    "name": "onlyCritical",
+    "type": "bool",
+    "desc": "فقط فعالیت‌های مسیر بحرانی؛ پیش‌فرض false"
+   }
+  ],
+  "columns": [
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "code",
+    "title": "کد فعالیت",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "percent",
+    "title": "پیشرفت",
+    "kind": "pct"
+   },
+   {
+    "key": "plannedFinish",
+    "title": "پایان برنامه",
+    "kind": "date"
+   },
+   {
+    "key": "forecastFinish",
+    "title": "پیش‌بینی پایان",
+    "kind": "date"
+   },
+   {
+    "key": "lateDays",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "critical",
+    "title": "بحرانی",
+    "kind": "status"
+   }
+  ],
+  "notes": [
+   "روز تأخیر = پیش‌بینی پایان منهای پایان برنامه‌ریزی‌شده (روز تقویمی)؛ فقط پروژه‌های سبد، همان‌طور که شمارنده‌ی داشبورد می‌شمارد."
+  ]
+ },
+ {
+  "key": "pc.milestones_next",
+  "module": "projects",
+  "title": "مایل‌استون‌های پرداخت پیش‌رو",
+  "description": "مایل‌استون‌های پرداخت قراردادها که هنوز صورت‌وضعیت نشده‌اند (برنامه‌ریزی‌شده یا سررسیده) و تاریخ برنامه‌شان تا چند روز آینده است یا گذشته است؛ نزدیک‌ترین تاریخ اول.",
+  "link": "/project-control/milestones",
+  "params": [
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "مایل‌استون‌هایی که تاریخ برنامه‌شان تا این تعداد روز آینده است (معوق‌ها هم می‌آید)؛ پیش‌فرض 30 روز",
+    "default": 30,
+    "min": 1,
+    "max": 365
+   }
+  ],
+  "columns": [
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "seq",
+    "title": "ردیف",
+    "kind": "num"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "plannedDate",
+    "title": "تاریخ برنامه",
+    "kind": "date"
+   },
+   {
+    "key": "daysTo",
+    "title": "روز تا تاریخ (منفی: معوق)",
+    "kind": "num"
+   },
+   {
+    "key": "amount",
+    "title": "مبلغ",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "معوق: مایل‌استون برنامه‌ریزی‌شده‌ای که تاریخ برنامه‌اش گذشته است (هم‌پایه با «مایل‌استون معوق» داشبورد)."
+  ]
+ },
+ {
+  "key": "pc.change_requests_open",
+  "module": "projects",
+  "title": "درخواست‌های تغییر باز",
+  "description": "درخواست‌های تغییر ثبت‌شده و در حال تحلیل (هم‌پایه با «تغییر باز» داشبورد) با مهلت تحلیل و اثر درخواستی بر مبلغ و زمان؛ نزدیک‌ترین مهلت اول.",
+  "link": "/project-control/changes",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "type",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "description",
+    "title": "شرح",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "dueDate",
+    "title": "مهلت تحلیل",
+    "kind": "date"
+   },
+   {
+    "key": "daysToDue",
+    "title": "روز تا مهلت (منفی: معوق)",
+    "kind": "num"
+   },
+   {
+    "key": "priceDelta",
+    "title": "اثر مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "daysDelta",
+    "title": "اثر زمان (روز)",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "معوق: مهلت تحلیل گذشته است؛ شمارنده‌ی داشبورد تعداد پروژه‌های دارای درخواست معوق است."
+  ]
+ },
+ {
+  "key": "pc.guarantees_expiring",
+  "module": "projects",
+  "title": "ضمانت‌نامه‌های در آستانه‌ی انقضا",
+  "description": "ضمانت‌نامه‌های صادرشده/فعال/در انتظار تمدید که تا آخرین آستانه‌ی هشدار تنظیمات پروژه (پیش‌فرض ۳۰ روز) منقضی می‌شوند یا منقضی شده‌اند؛ نزدیک‌ترین انقضا اول.",
+  "link": "/project-control/guarantees",
+  "params": [],
+  "columns": [
+   {
+    "key": "no",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "type",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "bank",
+    "title": "بانک / صادرکننده",
+    "kind": "text"
+   },
+   {
+    "key": "amount",
+    "title": "مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "expiryDate",
+    "title": "تاریخ انقضا",
+    "kind": "date"
+   },
+   {
+    "key": "daysToExpiry",
+    "title": "روز تا انقضا (منفی: منقضی)",
+    "kind": "num"
+   },
+   {
+    "key": "alert",
+    "title": "هشدار",
+    "kind": "status"
+   }
+  ],
+  "notes": [
+   "فقط ضمانت‌نامه‌های وابسته به قرارداد پروژه‌های فعال می‌آید، همان‌طور که شمارنده‌ی داشبورد می‌شمارد."
+  ]
+ },
+ {
+  "key": "pc.penalty_exposure",
+  "module": "projects",
+  "title": "ریسک جریمه‌ی تأخیر",
+  "description": "جریمه‌های تأخیر محاسبه‌شده‌ی پروژه‌های سبد که هنوز بخشوده یا توافق نشده‌اند (مجموع = «ریسک جریمه» داشبورد)؛ بیشترین مبلغ اول.",
+  "link": "/project-control/penalties",
+  "params": [],
+  "columns": [
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "subject",
+    "title": "موضوع",
+    "kind": "text"
+   },
+   {
+    "key": "dueDate",
+    "title": "سررسید تعهد",
+    "kind": "date"
+   },
+   {
+    "key": "actualDate",
+    "title": "تاریخ تحقق",
+    "kind": "date"
+   },
+   {
+    "key": "lateDays",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "ratePercentPerWeek",
+    "title": "نرخ هفتگی (درصد)",
+    "kind": "num"
+   },
+   {
+    "key": "baseAmount",
+    "title": "مبنای محاسبه",
+    "kind": "rial"
+   },
+   {
+    "key": "amount",
+    "title": "مبلغ جریمه",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "فقط جریمه‌های محاسبه‌شده با مبلغ بیشتر از صفر؛ بخشوده‌شده و توافقی شمرده نمی‌شود."
+  ]
+ },
+ {
+  "key": "pc.initiation_overdue",
+  "module": "projects",
+  "title": "گام‌های راه‌اندازی پروژه‌ی عقب‌افتاده",
+  "description": "گام‌های راه‌اندازی پروژه (کدگذاری، انتخاب مدیر پروژه، منشور، PEP، جلسه‌ی KOM و ...) که مهلت سطح خدمت‌شان گذشته و انجام نشده‌اند؛ بیشترین تأخیر اول.",
+  "link": "/project-control/project",
+  "params": [],
+  "columns": [
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "step",
+    "title": "گام",
+    "kind": "text"
+   },
+   {
+    "key": "gateRole",
+    "title": "نقش مسئول",
+    "kind": "text"
+   },
+   {
+    "key": "slaDays",
+    "title": "مهلت (روز)",
+    "kind": "num"
+   },
+   {
+    "key": "dueDate",
+    "title": "مهلت انجام",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "شمارنده‌ی داشبورد تعداد پروژه‌هایی است که دست‌کم یک گام عقب‌افتاده دارند."
+  ]
+ },
+ {
+  "key": "pc.client_responses_overdue",
+  "module": "projects",
+  "title": "پاسخ‌های معوق کارفرما",
+  "description": "ترنسمیتال‌های ارسالی برای تأیید که مهلت پاسخ کارفرما گذشته و دست‌کم یک سندشان پاسخ نگرفته است؛ بیشترین تأخیر اول (مجموع اسناد بدون پاسخ = «پاسخ معوق کارفرما» داشبورد).",
+  "link": "/project-control/transmittals",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "projectCode",
+    "title": "کد پروژه",
+    "kind": "text"
+   },
+   {
+    "key": "transmittalDate",
+    "title": "تاریخ ارسال",
+    "kind": "date"
+   },
+   {
+    "key": "responseDue",
+    "title": "مهلت پاسخ",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "overdueDocuments",
+    "title": "سند بدون پاسخ",
+    "kind": "num"
+   },
+   {
+    "key": "reference",
+    "title": "ارجاع",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "هر ردیف یک ترنسمیتال است؛ شمارنده‌ی داشبورد مجموع اسناد بدون پاسخ آن‌هاست."
+  ]
+ },
+ {
+  "key": "mf.orders_late",
+  "module": "production",
+  "title": "دستورهای تولید دارای تأخیر",
+  "description": "دستورهای تولید آزادشده و در حال تولید که آخرین اجرای زمان‌بند پایان پیش‌بینی‌شده‌شان را دیرتر از تاریخ نیاز یافته است (هم‌پایه با داشبورد تولید)؛ بیشترین روز تأخیر اول.",
+  "link": "/production/orders",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "workOrderCode",
+    "title": "دستور کار",
+    "kind": "text"
+   },
+   {
+    "key": "itemCode",
+    "title": "کد کالا",
+    "kind": "text"
+   },
+   {
+    "key": "itemTitle",
+    "title": "کالا",
+    "kind": "text"
+   },
+   {
+    "key": "quantity",
+    "title": "تعداد",
+    "kind": "num"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "needDate",
+    "title": "تاریخ نیاز",
+    "kind": "date"
+   },
+   {
+    "key": "plannedFinish",
+    "title": "پایان پیش‌بینی",
+    "kind": "date"
+   },
+   {
+    "key": "daysLate",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "operationsDone",
+    "title": "عملیات انجام‌شده",
+    "kind": "num"
+   },
+   {
+    "key": "operationCount",
+    "title": "کل عملیات",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "تأخیر نتیجه‌ی آخرین اجرای زمان‌بند ظرفیت محدود است."
+  ]
+ },
+ {
+  "key": "mf.orders_by_status",
+  "module": "production",
+  "title": "دستورهای تولید به تفکیک وضعیت",
+  "description": "تعداد دستورهای تولید در هر وضعیت (پیش‌نویس، آزادشده، در حال تولید، تکمیل‌شده، بسته‌شده، لغوشده) و تعداد دارای تأخیر در وضعیت‌های باز.",
+  "link": "/production/orders",
+  "params": [],
+  "columns": [
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "count",
+    "title": "تعداد",
+    "kind": "num"
+   },
+   {
+    "key": "late",
+    "title": "دارای تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "sharePercent",
+    "title": "سهم از کل",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "تأخیر فقط برای دستورهای آزادشده و در حال تولید شمرده می‌شود."
+  ]
+ },
+ {
+  "key": "mf.work_center_load",
+  "module": "production",
+  "title": "بار مراکز کار",
+  "description": "بار و ظرفیت هر مرکز کار در هفته‌های آینده (از امروز) با اوج بار و تعداد هفته‌های بیش از آستانه؛ پیش‌فرض ۴ هفته و آستانه‌ی ۱۱۰ درصد (هم‌پایه با «هفته‌ی اضافه‌بار» داشبورد مدیرعامل).",
+  "link": "/production/schedule",
+  "params": [
+   {
+    "name": "weeks",
+    "type": "int",
+    "desc": "تعداد هفته‌های پیش‌رو؛ پیش‌فرض 4 هفته",
+    "default": 4,
+    "min": 1,
+    "max": 26
+   },
+   {
+    "name": "threshold",
+    "type": "int",
+    "desc": "آستانه‌ی اضافه‌بار بر حسب درصد ظرفیت؛ پیش‌فرض 110 درصد",
+    "default": 110,
+    "min": 50,
+    "max": 500
+   }
+  ],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد مرکز کار",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "مرکز کار",
+    "kind": "text"
+   },
+   {
+    "key": "capacityHours",
+    "title": "ظرفیت (ساعت)",
+    "kind": "num"
+   },
+   {
+    "key": "loadHours",
+    "title": "بار (ساعت)",
+    "kind": "num"
+   },
+   {
+    "key": "loadPercent",
+    "title": "بار به ظرفیت",
+    "kind": "pct"
+   },
+   {
+    "key": "peakPercent",
+    "title": "اوج بار هفتگی",
+    "kind": "pct"
+   },
+   {
+    "key": "peakWeek",
+    "title": "هفته‌ی اوج (شروع)",
+    "kind": "date"
+   },
+   {
+    "key": "overloadedWeeks",
+    "title": "هفته‌ی اضافه‌بار",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "بار = ساعت‌های موردنیاز دستورهای باز اگر هر عملیات در زودترین تاریخ شروع شود؛ ظرفیت = شیفت × ساعت × منابع × بهره‌وری منهای خرابی."
+  ]
+ },
+ {
+  "key": "mf.machines_down",
+  "module": "production",
+  "title": "ماشین‌های خراب",
+  "description": "ماشین‌هایی که وضعیتشان «خراب» است، با مرکز کار، زمان شروع خرابی و سفارش نگهداری باز؛ طولانی‌ترین خرابی اول (هم‌پایه با «ماشین خراب» داشبورد).",
+  "link": "/production/maintenance",
+  "params": [],
+  "columns": [
+   {
+    "key": "title",
+    "title": "ماشین",
+    "kind": "text"
+   },
+   {
+    "key": "workCenterCode",
+    "title": "مرکز کار",
+    "kind": "text"
+   },
+   {
+    "key": "model",
+    "title": "سازنده / مدل",
+    "kind": "text"
+   },
+   {
+    "key": "downSince",
+    "title": "خراب از",
+    "kind": "date"
+   },
+   {
+    "key": "daysDown",
+    "title": "روز خرابی",
+    "kind": "num"
+   },
+   {
+    "key": "maintenanceOrder",
+    "title": "سفارش نگهداری",
+    "kind": "text"
+   },
+   {
+    "key": "task",
+    "title": "شرح کار",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "زمان خرابی از سفارش نگهداری باز نوع «خرابی» خوانده می‌شود؛ بدون آن خالی است."
+  ]
+ },
+ {
+  "key": "mf.maintenance_overdue",
+  "module": "production",
+  "title": "سفارش‌های نگهداری معوق",
+  "description": "سفارش‌های نگهداری باز یا در حال انجام که سررسیدشان گذشته است (هم‌پایه با «نگهداری معوق» داشبورد)؛ بیشترین تأخیر اول.",
+  "link": "/production/maintenance",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "machine",
+    "title": "ماشین",
+    "kind": "text"
+   },
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "task",
+    "title": "شرح کار",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "dueDate",
+    "title": "سررسید",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "estimatedHours",
+    "title": "ساعت برآوردی",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "معوق: سفارش باز یا در حال انجام با سررسید قبل از امروز."
+  ]
+ },
+ {
+  "key": "mf.oee_by_work_center",
+  "module": "production",
+  "title": "اثربخشی کلی تجهیزات (OEE) به تفکیک مرکز کار",
+  "description": "دسترس‌پذیری، عملکرد، کیفیت و OEE هر مرکز کار در بازه؛ کمترین OEE اول. بازه‌ی پیش‌فرض: از اول ماه شمسی جاری تا امروز (هم‌پایه با داشبورد تولید).",
+  "link": "/production/oee",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ؛ پیش‌فرض اول ماه شمسی جاری"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد مرکز کار",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "مرکز کار",
+    "kind": "text"
+   },
+   {
+    "key": "plannedHours",
+    "title": "ساعت برنامه‌ای",
+    "kind": "num"
+   },
+   {
+    "key": "downtimeHours",
+    "title": "ساعت توقف",
+    "kind": "num"
+   },
+   {
+    "key": "bookedRunHours",
+    "title": "ساعت کارکرد",
+    "kind": "num"
+   },
+   {
+    "key": "goodQty",
+    "title": "تعداد سالم",
+    "kind": "num"
+   },
+   {
+    "key": "scrapQty",
+    "title": "تعداد ضایعات",
+    "kind": "num"
+   },
+   {
+    "key": "availabilityPercent",
+    "title": "دسترس‌پذیری",
+    "kind": "pct"
+   },
+   {
+    "key": "performancePercent",
+    "title": "عملکرد",
+    "kind": "pct"
+   },
+   {
+    "key": "qualityPercent",
+    "title": "کیفیت",
+    "kind": "pct"
+   },
+   {
+    "key": "oeePercent",
+    "title": "OEE",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "OEE = دسترس‌پذیری × عملکرد × کیفیت؛ بدون کارکرد یا تعداد ثبت‌شده خالی است."
+  ]
+ },
+ {
+  "key": "qc.ncr_open",
+  "module": "quality",
+  "title": "گزارش‌های عدم انطباق باز",
+  "description": "گزارش‌های عدم انطباق (NCR) که هنوز بسته یا لغو نشده‌اند (باز، تصمیم‌تأییدشده، تصمیم‌اجراشده)؛ شدیدترین اول و در هر شدت قدیمی‌ترین اول، با سن گزارش، مهلت تصمیم و روز تأخیر. می‌شود به یک شدت (عمده، جزئی، طبقه‌بندی‌نشده) یا فقط به گزارش‌های گذشته از مهلت تصمیم (هم‌پایه با شاخص «عدم انطباق‌های گذشته از مهلت تصمیم») محدود کرد؛ پیش‌فرض همه‌ی گزارش‌های باز.",
+  "link": "/inventory/ncr",
+  "params": [
+   {
+    "name": "severity",
+    "type": "string",
+    "desc": "فقط یک شدت: Major (عمده)، Minor (جزئی) یا NotClassified (طبقه‌بندی‌نشده)؛ پیش‌فرض همه",
+    "allowed": [
+     "Major",
+     "Minor",
+     "NotClassified"
+    ]
+   },
+   {
+    "name": "onlyOverdue",
+    "type": "bool",
+    "desc": "فقط گزارش‌هایی که مهلت تصمیمشان گذشته است؛ پیش‌فرض نه"
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "reportDate",
+    "title": "تاریخ گزارش",
+    "kind": "date"
+   },
+   {
+    "key": "ageDays",
+    "title": "سن (روز)",
+    "kind": "num"
+   },
+   {
+    "key": "severity",
+    "title": "شدت",
+    "kind": "status"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "source",
+    "title": "منبع",
+    "kind": "text"
+   },
+   {
+    "key": "disposition",
+    "title": "تصمیم",
+    "kind": "text"
+   },
+   {
+    "key": "itemCode",
+    "title": "کد کالا",
+    "kind": "text"
+   },
+   {
+    "key": "itemTitle",
+    "title": "کالا",
+    "kind": "text"
+   },
+   {
+    "key": "quantity",
+    "title": "تعداد",
+    "kind": "num"
+   },
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "workOrderCode",
+    "title": "دستور کار",
+    "kind": "text"
+   },
+   {
+    "key": "dueDate",
+    "title": "مهلت تصمیم",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "باز یعنی بسته یا لغو نشده؛ مهلت تصمیم و روز تأخیر فقط برای گزارش‌هایی است که هنوز تصمیم نگرفته‌اند (وضعیت «باز»)."
+  ]
+ },
+ {
+  "key": "qc.capa_overdue",
+  "module": "quality",
+  "title": "اقدام‌های اصلاحی و پیشگیرانه‌ی عقب‌افتاده",
+  "description": "اقدام‌های اصلاحی و پیشگیرانه (CAPA) که مهلتشان گذشته است: باز یا اقدام‌تعریف‌شده با مهلت اجرای گذشته، و اجراشده با مهلت بررسی اثربخشی گذشته (هم‌پایه با داشبورد کیفیت)؛ بیشترین روز تأخیر اول.",
+  "link": "/quality/capa",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "source",
+    "title": "منبع",
+    "kind": "text"
+   },
+   {
+    "key": "problem",
+    "title": "مسئله",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "ownerName",
+    "title": "مسئول",
+    "kind": "text"
+   },
+   {
+    "key": "dueDate",
+    "title": "مهلت اجرا",
+    "kind": "date"
+   },
+   {
+    "key": "effectivenessDueDate",
+    "title": "مهلت بررسی اثربخشی",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "autoDrafted",
+    "title": "پیش‌نویس خودکار",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "روز تأخیر برای اقدام‌های اجراشده از مهلت بررسی اثربخشی و برای بقیه از مهلت اجرا شمرده می‌شود."
+  ]
+ },
+ {
+  "key": "qc.calibration_due",
+  "module": "quality",
+  "title": "کالیبراسیون سررسیدشده و نزدیک به سررسید",
+  "description": "تجهیزهای اندازه‌گیری که کالیبراسیونشان سررسیدگذشته یا بدون تاریخ است، یا تا چند روز آینده سررسید می‌شود (تجهیز از رده خارج و بدون نیاز به کالیبراسیون نمی‌آید)؛ قدیمی‌ترین سررسید اول. پیش‌فرض ۳۰ روز؛ صفر روز فقط سررسیدگذشته‌ها و بدون تاریخ‌ها را می‌دهد (هم‌پایه با شاخص «تجهیزات اندازه‌گیری با کالیبراسیون سررسیدگذشته»).",
+  "link": "/quality/calibration",
+  "params": [
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "تجهیزهایی که تا این تعداد روز آینده سررسید کالیبراسیون دارند؛ 0 فقط سررسیدگذشته‌ها و بدون تاریخ‌ها؛ پیش‌فرض 30 روز",
+    "default": 30,
+    "min": 0,
+    "max": 365
+   }
+  ],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد",
+    "kind": "text"
+   },
+   {
+    "key": "name",
+    "title": "نام",
+    "kind": "text"
+   },
+   {
+    "key": "type",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "location",
+    "title": "محل",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "lastCalibrated",
+    "title": "آخرین کالیبراسیون",
+    "kind": "date"
+   },
+   {
+    "key": "nextDue",
+    "title": "سررسید بعدی",
+    "kind": "date"
+   },
+   {
+    "key": "daysToDue",
+    "title": "روز تا سررسید",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "روز تا سررسید منفی یعنی سررسید گذشته؛ تجهیز بدون تاریخ سررسید هرگز کالیبره نشده است."
+  ]
+ },
+ {
+  "key": "qc.complaints_open",
+  "module": "quality",
+  "title": "شکایت‌های مشتری باز",
+  "description": "شکایت‌های مشتری که هنوز بسته نشده‌اند (دریافت‌شده، در بررسی، پاسخ‌داده‌شده)؛ دارای تأخیر در پاسخ اول و سپس به ترتیب مهلت پاسخ. می‌شود فقط شکایت‌های گذشته از مهلت پاسخ را خواست؛ پیش‌فرض همه‌ی شکایت‌های باز.",
+  "link": "/quality/complaints",
+  "params": [
+   {
+    "name": "overdueOnly",
+    "type": "bool",
+    "desc": "فقط شکایت‌هایی که از مهلت پاسخ گذشته‌اند؛ پیش‌فرض نه"
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "workOrderCode",
+    "title": "دستور کار",
+    "kind": "text"
+   },
+   {
+    "key": "receivedDate",
+    "title": "تاریخ دریافت",
+    "kind": "date"
+   },
+   {
+    "key": "severity",
+    "title": "شدت",
+    "kind": "status"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "responseDue",
+    "title": "مهلت پاسخ",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "ncr",
+    "title": "NCR مرتبط",
+    "kind": "text"
+   },
+   {
+    "key": "capa",
+    "title": "CAPA مرتبط",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "تأخیر یعنی هنوز پاسخ داده نشده و مهلت پاسخ گذشته است؛ شکایت پاسخ‌داده‌شده تا بسته شدن باز می‌ماند."
+  ]
+ },
+ {
+  "key": "qc.h_points_pending",
+  "module": "quality",
+  "title": "نقاط توقف (H) منتظر رهاسازی",
+  "description": "فعالیت‌های برنامه‌ی بازرسی و آزمون (ITP) تأییدشده‌ی کارفرما یا در حال استفاده که نقطه‌ی توقف H دارند و هنوز انجام نشده‌اند (برنامه‌ریزی‌شده یا اعلام‌شده)؛ هم‌پایه با شمارنده‌ی «نقاط توقف» داشبورد؛ زودترین تاریخ برنامه اول.",
+  "link": "/quality/itp",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره‌ی ITP",
+    "kind": "text"
+   },
+   {
+    "key": "workOrderCode",
+    "title": "دستور کار",
+    "kind": "text"
+   },
+   {
+    "key": "itemNo",
+    "title": "ردیف",
+    "kind": "text"
+   },
+   {
+    "key": "activity",
+    "title": "فعالیت",
+    "kind": "text"
+   },
+   {
+    "key": "points",
+    "title": "نقاط توقف و شاهد",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "plannedDate",
+    "title": "تاریخ برنامه",
+    "kind": "date"
+   },
+   {
+    "key": "daysLate",
+    "title": "روز تأخیر از برنامه",
+    "kind": "num"
+   },
+   {
+    "key": "witnessDeadline",
+    "title": "مهلت اعلام به شاهد",
+    "kind": "date"
+   }
+  ],
+  "notes": [
+   "فقط برنامه‌های بازرسی تأییدشده‌ی کارفرما یا در حال استفاده شمرده می‌شوند؛ نقطه‌ی شاهد (W) بدون H در این جدول نمی‌آید."
+  ]
+ },
+ {
+  "key": "qc.documents_waiting",
+  "module": "quality",
+  "title": "اسناد منتظر بررسی یا تأیید",
+  "description": "اسنادی که منتظر تصمیم‌اند: اسناد انبار پیش‌نویس که تأیید می‌خواهند (تعدیل افزایشی و کاهشی، موجودی اول دوره، فروش ضایعات؛ همان عدد «اسناد منتظر تأیید» داشبورد) و بازنگری‌های اسناد کنترل‌شده‌ی کیفیت که پیش‌نویس یا در بررسی‌اند؛ قدیمی‌ترین اول. می‌شود فقط اسناد انبار یا فقط اسناد کنترل‌شده را خواست؛ پیش‌فرض هر دو.",
+  "link": "/quality/documents",
+  "params": [
+   {
+    "name": "source",
+    "type": "string",
+    "desc": "منبع اسناد: all (هر دو)، inventory (اسناد انبار) یا controlled (اسناد کنترل‌شده‌ی کیفیت)؛ پیش‌فرض all",
+    "default": "all",
+    "allowed": [
+     "all",
+     "inventory",
+     "controlled"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "number",
+    "title": "شماره یا کد",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "since",
+    "title": "از تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "waitingDays",
+    "title": "روز انتظار",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "اسناد انبار پیش‌نویس‌اند و تأیید می‌خواهند (source=inventory همان عدد داشبورد است)؛ اسناد کنترل‌شده بازنگری پیش‌نویس (منتظر بررسی) یا بررسی‌شده (منتظر تأیید) دارند (source=controlled)."
+  ]
+ },
+ {
+  "key": "inv.items_below_minimum",
+  "module": "inventory",
+  "title": "کالاهای زیر حداقل موجودی",
+  "description": "کالاهای فعالی که حداقل موجودی دارند و موجودی کل‌شان بدون انبار ضایعات از آن کمتر است (هم‌پایه با شمارنده‌ی داشبورد)؛ کمترین پوشش اول. کمبود = حداقل منهای موجودی؛ پوشش = موجودی به حداقل.",
+  "link": "/inventory/stock",
+  "params": [],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد کالا",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "کالا",
+    "kind": "text"
+   },
+   {
+    "key": "group",
+    "title": "گروه",
+    "kind": "text"
+   },
+   {
+    "key": "unit",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "onHand",
+    "title": "موجودی",
+    "kind": "num"
+   },
+   {
+    "key": "minStock",
+    "title": "حداقل موجودی",
+    "kind": "num"
+   },
+   {
+    "key": "shortage",
+    "title": "کمبود",
+    "kind": "num"
+   },
+   {
+    "key": "coverPercent",
+    "title": "پوشش",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "موجودی، جمع همه‌ی انبارها به‌جز انبار ضایعات است؛ کالای غیرفعال یا بدون حداقل موجودی تعریف‌شده نمی‌آید."
+  ]
+ },
+ {
+  "key": "inv.stock_value_by_warehouse",
+  "module": "inventory",
+  "title": "ارزش موجودی به تفکیک انبار",
+  "description": "ارزش ریالی موجودی هر انبار = مقدار مثبت هر کالا در آن انبار × بهای میانگین موزون کالا (همان تابعی که نمودار «ارزش موجودی به تفکیک انبار» داشبورد از آن می‌آید)؛ بیشترین ارزش اول. اموال مشتری ارزش‌گذاری نمی‌شود و نمی‌آید.",
+  "link": "/inventory/stock",
+  "params": [],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد انبار",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "انبار",
+    "kind": "text"
+   },
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "items",
+    "title": "تعداد کالا",
+    "kind": "num"
+   },
+   {
+    "key": "value",
+    "title": "ارزش موجودی",
+    "kind": "rial"
+   },
+   {
+    "key": "sharePercent",
+    "title": "سهم از کل",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "ارزش هر انبار با بهای میانگین موزون کالا حساب می‌شود؛ تفاوت با ارزش کل دفتر موجودی (موجودی منفی یا کالای بدون بها) در «تفاوت» می‌آید."
+  ]
+ },
+ {
+  "key": "inv.slow_moving",
+  "module": "inventory",
+  "title": "کالاهای کم‌گردش",
+  "description": "کالاهایی که موجودی دارند ولی دست‌کم به تعداد روز داده‌شده هیچ گردشی (ورود یا خروج) نداشته‌اند؛ بیشترین سرمایه‌ی خوابیده اول. پیش‌فرض ۱۸۰ روز.",
+  "link": "/inventory/stock",
+  "params": [
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "کالاهایی که دست‌کم این تعداد روز گردش نداشته‌اند؛ پیش‌فرض 180 روز",
+    "default": 180,
+    "min": 1,
+    "max": 3650
+   }
+  ],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد کالا",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "کالا",
+    "kind": "text"
+   },
+   {
+    "key": "group",
+    "title": "گروه",
+    "kind": "text"
+   },
+   {
+    "key": "unit",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "quantity",
+    "title": "موجودی",
+    "kind": "num"
+   },
+   {
+    "key": "value",
+    "title": "ارزش موجودی",
+    "kind": "rial"
+   },
+   {
+    "key": "lastMovement",
+    "title": "آخرین گردش",
+    "kind": "date"
+   },
+   {
+    "key": "daysSince",
+    "title": "روز از آخرین گردش",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "گردش یعنی هر ورود یا خروج تأییدشده‌ی انبار (سند لغوشده شمرده نمی‌شود)؛ کالای بدون هیچ گردش ثبت‌شده هم می‌آید."
+  ]
+ },
+ {
+  "key": "inv.top_movements",
+  "module": "inventory",
+  "title": "پرگردش‌ترین کالاها",
+  "description": "کالاهایی که در بازه بیشترین ارزش گردش انبار (ورود + خروج به بهای میانگین موزون) را داشته‌اند؛ انتقال بین انبارها و تبدیل مرحله شمرده نمی‌شود. می‌شود فقط ورودها (رسید خرید و برگشت به تأمین‌کننده؛ همان «رسید خرید» نمودار جریان موجودی داشبورد) یا فقط خروج‌ها (خروج برای مصرف و برگشت از تولید؛ همان «مصرف تولید» نمودار) را خواست. بازه حداکثر ۳۶۶ روز؛ پیش‌فرض ۳۰ روز اخیر.",
+  "link": "/inventory/kardex",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ؛ پیش‌فرض ۳۰ روز پیش"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ؛ پیش‌فرض امروز"
+   },
+   {
+    "name": "kind",
+    "type": "string",
+    "desc": "نوع حرکت: receipt (رسید خرید)، issue (مصرف تولید) یا all (همه)؛ پیش‌فرض all",
+    "default": "all",
+    "allowed": [
+     "receipt",
+     "issue",
+     "all"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "code",
+    "title": "کد کالا",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "کالا",
+    "kind": "text"
+   },
+   {
+    "key": "unit",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "receivedQuantity",
+    "title": "ورود",
+    "kind": "num"
+   },
+   {
+    "key": "issuedQuantity",
+    "title": "خروج",
+    "kind": "num"
+   },
+   {
+    "key": "receivedValue",
+    "title": "ارزش ورود",
+    "kind": "rial"
+   },
+   {
+    "key": "issuedValue",
+    "title": "ارزش خروج",
+    "kind": "rial"
+   },
+   {
+    "key": "totalValue",
+    "title": "جمع ارزش گردش",
+    "kind": "rial"
+   },
+   {
+    "key": "documents",
+    "title": "تعداد سند",
+    "kind": "num"
+   }
+  ],
+  "notes": []
+ },
+ {
+  "key": "inv.quarantine",
+  "module": "inventory",
+  "title": "موجودی در قرنطینه",
+  "description": "ردیف‌های موجودی مثبت در انبارهای قرنطینه که منتظر بازرسی ورودی یا تصمیم عدم انطباق‌اند (هم‌پایه با شمارنده‌ی «ردیف‌های قرنطینه» داشبورد)؛ قدیمی‌ترین ورود اول.",
+  "link": "/inventory/inspections",
+  "params": [],
+  "columns": [
+   {
+    "key": "warehouse",
+    "title": "انبار",
+    "kind": "text"
+   },
+   {
+    "key": "code",
+    "title": "کد کالا",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "کالا",
+    "kind": "text"
+   },
+   {
+    "key": "unit",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "lot",
+    "title": "بچ",
+    "kind": "text"
+   },
+   {
+    "key": "heat",
+    "title": "شماره‌ی ذوب",
+    "kind": "text"
+   },
+   {
+    "key": "location",
+    "title": "محل",
+    "kind": "text"
+   },
+   {
+    "key": "quantity",
+    "title": "مقدار",
+    "kind": "num"
+   },
+   {
+    "key": "since",
+    "title": "آخرین ورود",
+    "kind": "date"
+   },
+   {
+    "key": "daysWaiting",
+    "title": "روز انتظار",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "هر ردیف یک کالا و بچ در یک محل است؛ روز انتظار از آخرین رسید همان کالا و بچ به انبار قرنطینه شمرده می‌شود."
+  ]
+ },
+ {
+  "key": "inv.material_requests_open",
+  "module": "inventory",
+  "title": "درخواست‌های مواد باز",
+  "description": "درخواست‌های مواد انبار که ارسال یا تأیید شده‌اند و هنوز بسته نشده‌اند (منتظر تأیید برنامه‌ریزی و ساخت، یا منتظر صدور حواله)؛ قدیمی‌ترین اول.",
+  "link": "/inventory/material-requests",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "requestDate",
+    "title": "تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "workOrderCode",
+    "title": "دستور کار",
+    "kind": "text"
+   },
+   {
+    "key": "warehouse",
+    "title": "انبار",
+    "kind": "text"
+   },
+   {
+    "key": "purpose",
+    "title": "هدف",
+    "kind": "text"
+   },
+   {
+    "key": "lines",
+    "title": "تعداد ردیف",
+    "kind": "num"
+   },
+   {
+    "key": "planningApproved",
+    "title": "تأیید برنامه‌ریزی",
+    "kind": "text"
+   },
+   {
+    "key": "manufacturingApproved",
+    "title": "تأیید ساخت",
+    "kind": "text"
+   },
+   {
+    "key": "waitingDays",
+    "title": "روز انتظار",
+    "kind": "num"
+   }
+  ],
+  "notes": []
+ },
+ {
+  "key": "pr.requests_open",
+  "module": "procurement",
+  "title": "درخواست‌های خرید باز",
+  "description": "درخواست‌های خرید ارسال‌شده (منتظر تأیید برنامه‌ریزی یا مدیریت) و تأییدشده (منتظر سفارش)؛ پیش‌فرض هر دو، هم‌پایه با شمارنده‌ی «درخواست‌های خرید باز» داشبورد؛ می‌شود فقط منتظر تأیید را خواست (شاخص «درخواست‌های خرید منتظر تأیید»)؛ قدیمی‌ترین اول.",
+  "link": "/procurement/requests",
+  "params": [
+   {
+    "name": "status",
+    "type": "string",
+    "desc": "submitted (ارسال‌شده، منتظر تأیید)، approved (تأییدشده، منتظر سفارش) یا all (هر دو)؛ پیش‌فرض all",
+    "default": "all",
+    "allowed": [
+     "submitted",
+     "approved",
+     "all"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "requestDate",
+    "title": "تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "source",
+    "title": "منبع",
+    "kind": "text"
+   },
+   {
+    "key": "projectCode",
+    "title": "پروژه / دستور کار",
+    "kind": "text"
+   },
+   {
+    "key": "description",
+    "title": "شرح",
+    "kind": "text"
+   },
+   {
+    "key": "lines",
+    "title": "تعداد ردیف",
+    "kind": "num"
+   },
+   {
+    "key": "estimatedAmount",
+    "title": "برآورد",
+    "kind": "rial"
+   },
+   {
+    "key": "neededBy",
+    "title": "نیاز تا",
+    "kind": "date"
+   },
+   {
+    "key": "approval",
+    "title": "نیازمند تأیید",
+    "kind": "text"
+   },
+   {
+    "key": "waitingDays",
+    "title": "روز انتظار",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "روز انتظار از ارسال درخواست (و برای درخواست‌های ارسال‌نشده از تاریخ درخواست) شمرده می‌شود."
+  ]
+ },
+ {
+  "key": "pr.orders_open",
+  "module": "procurement",
+  "title": "سفارش‌های خرید باز",
+  "description": "سفارش‌های خرید تأییدشده، ابلاغ‌شده و در حال تحویل (هم‌پایه با شمارنده و مبلغ «سفارش‌های خرید باز» داشبورد)؛ بیشترین مبلغ اول، با درصد تحویل، مبلغ فاکتورنشده و ردیف‌های دارای تأخیر.",
+  "link": "/procurement/orders",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "orderDate",
+    "title": "تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "grade",
+    "title": "رتبه",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "projectCode",
+    "title": "پروژه / دستور کار",
+    "kind": "text"
+   },
+   {
+    "key": "amount",
+    "title": "مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "receivedPercent",
+    "title": "درصد تحویل",
+    "kind": "pct"
+   },
+   {
+    "key": "uninvoiced",
+    "title": "تحویل‌شده‌ی فاکتورنشده",
+    "kind": "rial"
+   },
+   {
+    "key": "paid",
+    "title": "پرداخت‌شده",
+    "kind": "rial"
+   },
+   {
+    "key": "deliveryDate",
+    "title": "تحویل",
+    "kind": "date"
+   },
+   {
+    "key": "lateLines",
+    "title": "ردیف دارای تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "daysLate",
+    "title": "بیشترین روز تأخیر",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "درصد تحویل بر پایه‌ی مقدار پذیرفته‌شده‌ی کنترل کیفیت و قیمت سفارش است؛ مبلغ فاکتورنشده برای همین سفارش‌های باز تخمین بر پایه‌ی قیمت سفارش است (نه حساب دفتر کل)."
+  ]
+ },
+ {
+  "key": "pr.late_lines",
+  "module": "procurement",
+  "title": "ردیف‌های سفارش خرید دارای تأخیر",
+  "description": "ردیف‌های سفارش‌های ابلاغ‌شده و در حال تحویل که تاریخ تحویل (ردیف یا سفارش) گذشته و هنوز کامل تحویل نشده‌اند (هم‌پایه با «ردیف‌های سفارش دارای تأخیر» داشبورد)؛ بیشترین روز تأخیر اول.",
+  "link": "/procurement/orders",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "سفارش",
+    "kind": "text"
+   },
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "row",
+    "title": "ردیف",
+    "kind": "num"
+   },
+   {
+    "key": "item",
+    "title": "کالا یا خدمت",
+    "kind": "text"
+   },
+   {
+    "key": "unit",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "quantity",
+    "title": "سفارش",
+    "kind": "num"
+   },
+   {
+    "key": "received",
+    "title": "تحویل‌شده",
+    "kind": "num"
+   },
+   {
+    "key": "openQuantity",
+    "title": "باقی‌مانده",
+    "kind": "num"
+   },
+   {
+    "key": "dueDate",
+    "title": "تاریخ تحویل",
+    "kind": "date"
+   },
+   {
+    "key": "daysLate",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "openAmount",
+    "title": "مبلغ باقی‌مانده",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "هر ردیف جدا شمرده می‌شود؛ تاریخ تحویل ردیف، و اگر نداشت تاریخ تحویل سفارش، ملاک است."
+  ]
+ },
+ {
+  "key": "pr.supplier_on_time",
+  "module": "procurement",
+  "title": "تحویل به‌موقع تأمین‌کنندگان",
+  "description": "درصد ردیف‌های تحویل‌شده‌ی هر تأمین‌کننده که تا تاریخ تحویل رسیده‌اند (همه‌ی دوران)، با تعداد سفارش، عدم انطباق و مرجوعی؛ کم‌ترین درصد به‌موقع اول. فقط تأمین‌کنندگانی که دست‌کم یک ردیف تحویل داده‌اند.",
+  "link": "/procurement/suppliers",
+  "params": [],
+  "columns": [
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "grade",
+    "title": "رتبه",
+    "kind": "text"
+   },
+   {
+    "key": "score",
+    "title": "امتیاز",
+    "kind": "num"
+   },
+   {
+    "key": "orders",
+    "title": "تعداد سفارش",
+    "kind": "num"
+   },
+   {
+    "key": "receiptLines",
+    "title": "ردیف تحویل‌شده",
+    "kind": "num"
+   },
+   {
+    "key": "lateReceiptLines",
+    "title": "ردیف دیرکرد",
+    "kind": "num"
+   },
+   {
+    "key": "onTimePercent",
+    "title": "درصد به‌موقع",
+    "kind": "pct"
+   },
+   {
+    "key": "ncrs",
+    "title": "عدم انطباق",
+    "kind": "num"
+   },
+   {
+    "key": "returns",
+    "title": "مرجوعی",
+    "kind": "num"
+   },
+   {
+    "key": "blocked",
+    "title": "مسدود",
+    "kind": "text"
+   },
+   {
+    "key": "evaluationDue",
+    "title": "ارزیابی سررسید",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "دیرکرد یعنی تاریخ آخرین تحویل ردیف از تاریخ تحویل مقرر گذشته است؛ ارزیابی سررسید شده فقط برای تأمین‌کنندگان مسدودنشده در شمارنده‌ی داشبورد می‌آید."
+  ]
+ },
+ {
+  "key": "pr.spend_by_supplier",
+  "module": "procurement",
+  "title": "خرید به تفکیک تأمین‌کننده",
+  "description": "ارزش سفارش‌های خرید هر تأمین‌کننده با تاریخ سفارش در بازه (مبنای نمودار «بیشترین خرید از تأمین‌کنندگان»؛ بدون پیش‌نویس و لغوشده)، جمع فاکتورهای تأییدشده‌ی او (با مالیات ارزش افزوده) با تاریخ فاکتور در بازه، و مبلغ خالص پرداخت‌های انجام‌شده در همان بازه؛ بیشترین سفارش اول. پیش‌فرض ۱۲ ماه شمسی اخیر.",
+  "link": "/procurement/invoices",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "ordered",
+    "title": "ارزش سفارش‌ها",
+    "kind": "rial"
+   },
+   {
+    "key": "invoices",
+    "title": "تعداد فاکتور",
+    "kind": "num"
+   },
+   {
+    "key": "invoiced",
+    "title": "جمع فاکتورهای تأییدشده",
+    "kind": "rial"
+   },
+   {
+    "key": "sharePercent",
+    "title": "سهم از جمع فاکتورها",
+    "kind": "pct"
+   },
+   {
+    "key": "paid",
+    "title": "پرداخت‌شده در بازه",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "سفارش بر پایه‌ی تاریخ سفارش، فاکتور بر پایه‌ی تاریخ فاکتور تأمین‌کننده و پرداخت بر پایه‌ی تاریخ پرداخت شمرده می‌شود؛ پرداخت پیش‌پرداخت و صورت‌وضعیت هم در «پرداخت‌شده» می‌آید."
+  ]
+ },
+ {
+  "key": "pr.blocked_suppliers",
+  "module": "procurement",
+  "title": "تأمین‌کنندگان مسدود",
+  "description": "تأمین‌کنندگانی که از فهرست تأمین‌کنندگان تأییدشده مسدود شده‌اند (هم‌پایه با شمارنده‌ی داشبورد)، با علت مسدودی، رتبه، هشدارها و میزان سفارش‌های گذشته؛ بیشترین مبلغ سفارش اول.",
+  "link": "/procurement/suppliers",
+  "params": [],
+  "columns": [
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "grade",
+    "title": "رتبه",
+    "kind": "text"
+   },
+   {
+    "key": "score",
+    "title": "امتیاز",
+    "kind": "num"
+   },
+   {
+    "key": "warnings",
+    "title": "هشدار",
+    "kind": "num"
+   },
+   {
+    "key": "blockReason",
+    "title": "علت مسدودی",
+    "kind": "text"
+   },
+   {
+    "key": "orders",
+    "title": "تعداد سفارش",
+    "kind": "num"
+   },
+   {
+    "key": "orderedAmount",
+    "title": "جمع سفارش‌ها",
+    "kind": "rial"
+   },
+   {
+    "key": "ncrs",
+    "title": "عدم انطباق",
+    "kind": "num"
+   },
+   {
+    "key": "returns",
+    "title": "مرجوعی",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "رفع مسدودی تأمین‌کننده‌ی رتبه‌ی D یا هشدارداده‌شده با مدیرعامل است."
+  ]
+ },
+ {
+  "key": "pr.invoices_waiting",
+  "module": "procurement",
+  "title": "فاکتورهای تأمین‌کننده منتظر تأیید",
+  "description": "فاکتورهای تأمین‌کننده که با سفارش و رسید تطبیق داده شده‌اند (مطابق یا دارای مغایرت) و منتظر تأیید مالی یا مدیریت‌اند (هم‌پایه با «فاکتورهای منتظر تأیید» داشبورد)؛ قدیمی‌ترین اول.",
+  "link": "/procurement/invoices",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "invoiceNumber",
+    "title": "شماره‌ی فاکتور تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "invoiceDate",
+    "title": "تاریخ فاکتور",
+    "kind": "date"
+   },
+   {
+    "key": "orderNumber",
+    "title": "سفارش",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "netAmount",
+    "title": "مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "vatAmount",
+    "title": "مالیات",
+    "kind": "rial"
+   },
+   {
+    "key": "totalAmount",
+    "title": "جمع",
+    "kind": "rial"
+   },
+   {
+    "key": "priceVariance",
+    "title": "مغایرت قیمت",
+    "kind": "rial"
+   },
+   {
+    "key": "matchNote",
+    "title": "یادداشت تطبیق",
+    "kind": "text"
+   },
+   {
+    "key": "waitingDays",
+    "title": "روز انتظار",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "روز انتظار از ثبت فاکتور در سامانه شمرده می‌شود."
+  ]
+ },
+ {
+  "key": "pr.payments_waiting",
+  "module": "procurement",
+  "title": "درخواست‌های پرداخت منتظر",
+  "description": "درخواست‌های پرداخت به تأمین‌کننده که پیش‌نویس‌اند (منتظر تأیید) یا تأیید شده‌اند و پرداخت نشده‌اند (هم‌پایه با تعداد و مبلغ «پرداخت‌های منتظر» داشبورد)؛ قدیمی‌ترین اول. مبلغ خالص = مبلغ منهای کسورات.",
+  "link": "/procurement/payments",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "type",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "providerName",
+    "title": "تأمین‌کننده",
+    "kind": "text"
+   },
+   {
+    "key": "orderNumber",
+    "title": "سفارش",
+    "kind": "text"
+   },
+   {
+    "key": "invoiceNumber",
+    "title": "فاکتور",
+    "kind": "text"
+   },
+   {
+    "key": "requestDate",
+    "title": "تاریخ درخواست",
+    "kind": "date"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "amount",
+    "title": "مبلغ",
+    "kind": "rial"
+   },
+   {
+    "key": "deductions",
+    "title": "کسورات",
+    "kind": "rial"
+   },
+   {
+    "key": "netAmount",
+    "title": "مبلغ خالص",
+    "kind": "rial"
+   },
+   {
+    "key": "qcApproved",
+    "title": "تأیید کنترل کیفیت",
+    "kind": "text"
+   },
+   {
+    "key": "waitingDays",
+    "title": "روز انتظار",
+    "kind": "num"
+   }
+  ],
+  "notes": []
+ },
+ {
+  "key": "sv.requests_open",
+  "module": "service",
+  "title": "درخواست‌های خدمات باز",
+  "description": "درخواست‌های خدمات پس از فروش که هنوز رفع نشده‌اند (باز، واگذارشده، در حال انجام، منتظر مشتری؛ هم‌پایه با «درخواست باز» داشبورد خدمات)؛ اول نقض‌شده‌های SLA، بعد بحرانی‌ترین و قدیمی‌ترین. می‌شود به یک اولویت محدود کرد.",
+  "link": "/service/requests",
+  "params": [
+   {
+    "name": "priority",
+    "type": "string",
+    "desc": "فقط یک اولویت (Critical بحرانی، High بالا، Normal عادی، Low پایین)؛ پیش‌فرض همه‌ی اولویت‌ها",
+    "allowed": [
+     "Critical",
+     "High",
+     "Normal",
+     "Low"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "unitTag",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "type",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "priority",
+    "title": "اولویت",
+    "kind": "status"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "receivedAt",
+    "title": "دریافت",
+    "kind": "date"
+   },
+   {
+    "key": "ageDays",
+    "title": "روز از دریافت",
+    "kind": "num"
+   },
+   {
+    "key": "responseDue",
+    "title": "مهلت پاسخ",
+    "kind": "date"
+   },
+   {
+    "key": "resolutionDue",
+    "title": "مهلت رفع",
+    "kind": "date"
+   },
+   {
+    "key": "sla",
+    "title": "SLA",
+    "kind": "status"
+   },
+   {
+    "key": "assignedTo",
+    "title": "مسئول",
+    "kind": "text"
+   },
+   {
+    "key": "description",
+    "title": "شرح",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "نقض SLA: مهلت پاسخ یا رفع گذشته یا دیر انجام شده است؛ درخواست رفع‌شده و بسته‌شده در این فهرست نیست."
+  ]
+ },
+ {
+  "key": "sv.sla_breaches",
+  "module": "service",
+  "title": "نقض SLA درخواست‌های خدمات",
+  "description": "درخواست‌های خدمات باز که مهلت پاسخ یا مهلت رفعشان گذشته یا دیر انجام شده (هم‌پایه با «نقض SLA» داشبورد خدمات)، با ساعت‌های تأخیر؛ بیشترین تأخیر اول.",
+  "link": "/service/requests",
+  "params": [],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "unitTag",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "priority",
+    "title": "اولویت",
+    "kind": "status"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "breachKind",
+    "title": "نقض در",
+    "kind": "text"
+   },
+   {
+    "key": "responseDue",
+    "title": "مهلت پاسخ",
+    "kind": "date"
+   },
+   {
+    "key": "resolutionDue",
+    "title": "مهلت رفع",
+    "kind": "date"
+   },
+   {
+    "key": "hoursOver",
+    "title": "ساعت تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "assignedTo",
+    "title": "مسئول",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "ساعت تأخیر تا همین لحظه حساب می‌شود؛ پاسخی که دیر داده شده یا رفعی که منتظر مانده هر دو نقض‌اند."
+  ]
+ },
+ {
+  "key": "sv.orders_open",
+  "module": "service",
+  "title": "دستورهای خدمات باز",
+  "description": "دستورهای خدمات پس از فروش پیش‌نویس، برنامه‌ریزی‌شده و در حال انجام (هم‌پایه با «دستور خدمات باز» داشبورد)؛ اول دارای تأخیر نسبت به پایان برنامه. می‌شود فقط دستورهایی را خواست که درخواست حسن نیتشان منتظر تصمیم مدیرعامل است (شاخص «درخواست‌های حسن نیت منتظر تصمیم»). مبلغ دستمزد نمایش داده نمی‌شود.",
+  "link": "/service/orders",
+  "params": [
+   {
+    "name": "goodwillOnly",
+    "type": "bool",
+    "desc": "فقط دستورهایی که درخواست حسن نیت دارند و هنوز تصمیم‌گیری نشده؛ پیش‌فرض false"
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "requestNumber",
+    "title": "درخواست",
+    "kind": "text"
+   },
+   {
+    "key": "unitTag",
+    "title": "واحد",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "decision",
+    "title": "تصمیم گارانتی",
+    "kind": "status"
+   },
+   {
+    "key": "plannedStart",
+    "title": "شروع برنامه",
+    "kind": "date"
+   },
+   {
+    "key": "plannedEnd",
+    "title": "پایان برنامه",
+    "kind": "date"
+   },
+   {
+    "key": "daysLate",
+    "title": "روز تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "goodwill",
+    "title": "حسن نیت",
+    "kind": "status"
+   },
+   {
+    "key": "totalHours",
+    "title": "ساعت ثبت‌شده",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "تأخیر = گذشتن از پایان برنامه‌ی دستور باز؛ ساعت‌ها جمع ساعت‌های سفر، کار و انتظار ثبت‌شده است."
+  ]
+ },
+ {
+  "key": "sv.warranty_cost_by_month",
+  "module": "service",
+  "title": "هزینه‌ی گارانتی به تفکیک ماه",
+  "description": "تعداد و هزینه‌ی (دستمزد + قطعات) دستورهای خدمات گارانتی بسته‌شده در هر ماه شمسی. هزینه‌ی ماهی که دستمزدش به کمتر از سه نفر برمی‌گردد برای نقشی که حقوق را نمی‌بیند (و برای هر کار هوش مصنوعی) پنهان است و فقط هزینه‌ی قطعات می‌آید. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ جمع «از ابتدای سال» هم‌پایه با داشبورد خدمات است.",
+  "link": "/service/dashboard",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ بسته‌شدن دستور؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ بسته‌شدن دستور؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "month",
+    "title": "ماه",
+    "kind": "text"
+   },
+   {
+    "key": "orders",
+    "title": "دستور گارانتی",
+    "kind": "num"
+   },
+   {
+    "key": "partsAmount",
+    "title": "هزینه‌ی قطعات",
+    "kind": "rial"
+   },
+   {
+    "key": "totalCost",
+    "title": "هزینه‌ی کل",
+    "kind": "rial"
+   },
+   {
+    "key": "visibility",
+    "title": "نمایش",
+    "kind": "status"
+   }
+  ],
+  "notes": []
+ },
+ {
+  "key": "sv.units_by_customer",
+  "module": "service",
+  "title": "واحدهای نصب‌شده به تفکیک مشتری",
+  "description": "تعداد واحدهای نصب‌شده‌ی هر مشتری به تفکیک وضعیت (در گارانتی، تحت قرارداد خدمات، خارج از گارانتی) و واحدهای در انتظار تأیید؛ واحد از رده خارج شمرده نمی‌شود و جمع‌ها با داشبورد خدمات هم‌پایه‌اند. بیشترین واحد اول.",
+  "link": "/service/units",
+  "params": [],
+  "columns": [
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "units",
+    "title": "واحد نصب‌شده",
+    "kind": "num"
+   },
+   {
+    "key": "inWarranty",
+    "title": "در گارانتی",
+    "kind": "num"
+   },
+   {
+    "key": "underLtsa",
+    "title": "تحت قرارداد خدمات",
+    "kind": "num"
+   },
+   {
+    "key": "outOfWarranty",
+    "title": "خارج از گارانتی",
+    "kind": "num"
+   },
+   {
+    "key": "toConfirm",
+    "title": "در انتظار تأیید",
+    "kind": "num"
+   },
+   {
+    "key": "nextWarrantyEnd",
+    "title": "نزدیک‌ترین پایان گارانتی",
+    "kind": "date"
+   }
+  ],
+  "notes": [
+   "وضعیت هر واحد امروز سنجیده می‌شود: گارانتی بر قرارداد خدمات مقدم است."
+  ]
+ },
+ {
+  "key": "sv.survey_by_month",
+  "module": "service",
+  "title": "رضایت مشتریان به تفکیک ماه",
+  "description": "تعداد نظرسنجی‌های پاسخ‌داده‌شده و میانگین امتیاز (۱ تا ۵) هر ماه شمسی (بر پایه‌ی تاریخ پاسخ)، به تفکیک نظرسنجی تحویل و خدمات و تعداد امتیازهای زیر ۳. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ میانگین شاخص داشبورد روی کل سابقه است و جدا در جمع‌ها می‌آید.",
+  "link": "/service/surveys",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ پاسخ؛ پیش‌فرض اول ماه شمسی ۱۱ ماه پیش (۱۲ ماه شمسی اخیر)"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ پاسخ؛ پیش‌فرض امروز"
+   }
+  ],
+  "columns": [
+   {
+    "key": "month",
+    "title": "ماه",
+    "kind": "text"
+   },
+   {
+    "key": "answered",
+    "title": "پاسخ‌داده‌شده",
+    "kind": "num"
+   },
+   {
+    "key": "averageScore",
+    "title": "میانگین امتیاز",
+    "kind": "num"
+   },
+   {
+    "key": "deliveryAverage",
+    "title": "میانگین تحویل",
+    "kind": "num"
+   },
+   {
+    "key": "serviceAverage",
+    "title": "میانگین خدمات",
+    "kind": "num"
+   },
+   {
+    "key": "lowScores",
+    "title": "امتیاز زیر ۳",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "امتیاز هر نظرسنجی میانگین پاسخ‌های ۱ تا ۵ مشتری است؛ ماه بدون پاسخ میانگین ندارد."
+  ]
+ },
+ {
+  "key": "sv.ltsa_expiring",
+  "module": "service",
+  "title": "قراردادهای خدمات در حال پایان",
+  "description": "قراردادهای خدمات بلندمدت (LTSA) فعال که تا چند روز آینده تمام می‌شوند یا پایانشان گذشته ولی هنوز فعال مانده‌اند؛ نزدیک‌ترین پایان اول. پیش‌فرض ۶۰ روز.",
+  "link": "/service/contracts",
+  "params": [
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "تعداد روز تا پایان قرارداد؛ پیش‌فرض 60 روز",
+    "default": 60,
+    "min": 1,
+    "max": 730
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "customerName",
+    "title": "مشتری",
+    "kind": "text"
+   },
+   {
+    "key": "endDate",
+    "title": "پایان",
+    "kind": "date"
+   },
+   {
+    "key": "daysLeft",
+    "title": "روز مانده",
+    "kind": "num"
+   },
+   {
+    "key": "nextVisitDate",
+    "title": "بازدید بعدی",
+    "kind": "date"
+   },
+   {
+    "key": "units",
+    "title": "واحد",
+    "kind": "num"
+   },
+   {
+    "key": "priceRial",
+    "title": "مبلغ قرارداد",
+    "kind": "rial"
+   }
+  ],
+  "notes": [
+   "روز مانده‌ی منفی یعنی پایان قرارداد گذشته ولی کار شبانه هنوز آن را منقضی نکرده است."
+  ]
+ },
+ {
+  "key": "of.decisions_overdue",
+  "module": "office",
+  "title": "مصوبات جلسه‌ی معوق",
+  "description": "مصوبات باز صورت‌جلسه‌های تأییدشده که موعدشان گذشته است (هم‌پایه با «مصوبات جلسه‌ی معوق» داشبورد مدیرعامل)؛ قدیمی‌ترین موعد اول. مدیرعامل همه را می‌بیند؛ نقش‌های دیگر فقط مصوبات جلسه‌هایی که در آن‌ها نقش دارند.",
+  "link": "/office/decisions",
+  "params": [],
+  "columns": [
+   {
+    "key": "title",
+    "title": "مصوبه",
+    "kind": "text"
+   },
+   {
+    "key": "meetingNumber",
+    "title": "شماره‌ی جلسه",
+    "kind": "text"
+   },
+   {
+    "key": "meetingTitle",
+    "title": "جلسه",
+    "kind": "text"
+   },
+   {
+    "key": "ownerPosition",
+    "title": "مسئول",
+    "kind": "text"
+   },
+   {
+    "key": "dueDate",
+    "title": "موعد",
+    "kind": "date"
+   },
+   {
+    "key": "daysOverdue",
+    "title": "روز تأخیر",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "فقط مصوبات باز از صورت‌جلسه‌های تأییدشده؛ موعد گذشته یعنی قبل از امروز."
+  ]
+ },
+ {
+  "key": "of.letters_waiting",
+  "module": "office",
+  "title": "نامه‌های منتظر اقدام",
+  "description": "نامه‌هایی که در یک گام مانده‌اند: در جریان تأیید یا امضا (هم‌پایه با شاخص «نامه‌های منتظر تأیید و امضا»)، امضاشده و منتظر ثبت دبیرخانه، ثبت‌شده و منتظر ارسال؛ بدون محدودیت گام هر سه گام می‌آید؛ فوری‌ترین و قدیمی‌ترین اول. می‌شود فقط نامه‌های منتظر تأیید یا امضای خود کاربر را خواست. محرمانگی نامه‌ها را سرویس مکاتبات اعمال می‌کند: نامه‌ی در جریان تأیید را فقط نویسنده و زنجیره‌ی تأیید و امضا می‌بینند و موضوع نامه‌ی سری یا محرمانه‌ی غیرقابل‌خواندن نمایش داده نمی‌شود؛ شمار نامه‌های در جریان تأییدی که برای این کاربر پنهان مانده در جمع‌ها می‌آید.",
+  "link": "/office/letters",
+  "params": [
+   {
+    "name": "stage",
+    "type": "string",
+    "desc": "approval (در جریان تأیید یا امضا)، signature (امضاشده، منتظر ثبت دبیرخانه)، registered (ثبت‌شده، منتظر ارسال) یا all (هر سه)؛ پیش‌فرض all",
+    "default": "all",
+    "allowed": [
+     "approval",
+     "signature",
+     "registered",
+     "all"
+    ]
+   },
+   {
+    "name": "mineOnly",
+    "type": "bool",
+    "desc": "فقط نامه‌هایی که منتظر تأیید یا امضای خود شما هستند (گام نادیده گرفته می‌شود)؛ پیش‌فرض false"
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "title",
+    "title": "موضوع",
+    "kind": "text"
+   },
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "classification",
+    "title": "طبقه‌بندی",
+    "kind": "status"
+   },
+   {
+    "key": "urgency",
+    "title": "فوریت",
+    "kind": "status"
+   },
+   {
+    "key": "senderName",
+    "title": "فرستنده",
+    "kind": "text"
+   },
+   {
+    "key": "recipientNames",
+    "title": "گیرنده",
+    "kind": "text"
+   },
+   {
+    "key": "date",
+    "title": "تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "ageDays",
+    "title": "روز از تاریخ نامه",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "نامه‌ی در جریان تأیید را فقط نویسنده و اعضای زنجیره‌ی تأیید و امضا می‌بینند؛ گام‌های بعدی را دبیرخانه انجام می‌دهد."
+  ]
+ },
+ {
+  "key": "of.attendance_month",
+  "module": "office",
+  "title": "حضور و غیاب ماه",
+  "description": "شمار روزهای حاضر، غایب، مرخصی، ماموریت، استراحت و تردد ناقص و روزهای دارای تأخیر در بازه، فقط به‌صورت شمارش (بدون مبلغ و حقوق). تفکیک پیش‌فرض روز است؛ تفکیک واحد سازمانی هم هست. برای نقشی که پرسنل را نمی‌بیند، واحد یا روزی که کمتر از ۳ نفر دارد فقط شمارش روز نشان می‌دهد (دقیقه‌ی تأخیر و ساعت کارکرد نمی‌آید) و واحدهای کمتر از ۳ نفر در «سایر واحدها» جمع می‌شوند. تفکیک پرسنل فقط برای نقش‌هایی است که سرویس حضور و غیاب نمایش پرسنل را به آن‌ها می‌دهد (منابع انسانی و مدیرعامل). بازه‌ی پیش‌فرض: از اول ماه شمسی جاری تا امروز.",
+  "link": "/office/attendance",
+  "params": [
+   {
+    "name": "from",
+    "type": "date",
+    "desc": "از تاریخ؛ پیش‌فرض اول ماه شمسی جاری"
+   },
+   {
+    "name": "to",
+    "type": "date",
+    "desc": "تا تاریخ؛ پیش‌فرض امروز"
+   },
+   {
+    "name": "by",
+    "type": "string",
+    "desc": "تفکیک: day روز، unit واحد سازمانی، person پرسنل (فقط منابع انسانی و مدیرعامل)؛ پیش‌فرض day",
+    "default": "day",
+    "allowed": [
+     "day",
+     "unit",
+     "person"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "label",
+    "title": "روز / واحد / پرسنل",
+    "kind": "text"
+   },
+   {
+    "key": "employees",
+    "title": "پرسنل",
+    "kind": "num"
+   },
+   {
+    "key": "present",
+    "title": "حاضر",
+    "kind": "num"
+   },
+   {
+    "key": "absent",
+    "title": "غایب",
+    "kind": "num"
+   },
+   {
+    "key": "leave",
+    "title": "مرخصی",
+    "kind": "num"
+   },
+   {
+    "key": "mission",
+    "title": "ماموریت",
+    "kind": "num"
+   },
+   {
+    "key": "rest",
+    "title": "استراحت",
+    "kind": "num"
+   },
+   {
+    "key": "incomplete",
+    "title": "تردد ناقص",
+    "kind": "num"
+   },
+   {
+    "key": "late",
+    "title": "روز دارای تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "lateMinutes",
+    "title": "دقیقه‌ی تأخیر",
+    "kind": "num"
+   },
+   {
+    "key": "workedHours",
+    "title": "ساعت کارکرد",
+    "kind": "num"
+   },
+   {
+    "key": "presentPercent",
+    "title": "درصد حضور",
+    "kind": "pct"
+   }
+  ],
+  "notes": [
+   "شمارش از روزهای محاسبه‌شده‌ی حضور و غیاب است؛ روز دارای تأخیر یعنی تأخیر بیش از مهلت مجاز. درصد حضور = حاضر / (حاضر + غایب + مرخصی + ماموریت + تردد ناقص)."
+  ]
+ },
+ {
+  "key": "of.leave_requests_pending",
+  "module": "office",
+  "title": "درخواست‌های مرخصی و ماموریت منتظر تصمیم",
+  "description": "درخواست‌های مرخصی، ماموریت، اضافه‌کار و فراموشی تردد که منتظر تأیید مدیر واحدند (پیش‌فرض، هم‌پایه با شاخص «درخواست‌های مرخصی و ماموریت منتظر تصمیم»)، یا تأییدشده و منتظر ثبت منابع انسانی، یا هر دو؛ زودترین شروع اول. علت درخواست نمایش داده نمی‌شود. مدیرعامل و منابع انسانی همه را می‌بینند؛ نقش‌های دیگر فقط درخواست‌های خود یا درخواست‌هایی که تأییدکننده‌ی آن‌اند.",
+  "link": "/office/leaves",
+  "params": [
+   {
+    "name": "status",
+    "type": "string",
+    "desc": "submitted (منتظر تأیید مدیر)، approved (تأییدشده، منتظر ثبت منابع انسانی) یا all (هر دو)؛ پیش‌فرض submitted",
+    "default": "submitted",
+    "allowed": [
+     "submitted",
+     "approved",
+     "all"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "number",
+    "title": "شماره",
+    "kind": "text"
+   },
+   {
+    "key": "employeeName",
+    "title": "پرسنل",
+    "kind": "text"
+   },
+   {
+    "key": "kind",
+    "title": "نوع",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "fromDate",
+    "title": "از تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "toDate",
+    "title": "تا تاریخ",
+    "kind": "date"
+   },
+   {
+    "key": "days",
+    "title": "روز",
+    "kind": "num"
+   },
+   {
+    "key": "approver",
+    "title": "تأییدکننده",
+    "kind": "text"
+   },
+   {
+    "key": "daysToStart",
+    "title": "روز تا شروع",
+    "kind": "num"
+   }
+  ],
+  "notes": [
+   "روز تا شروع منفی یعنی بازه‌ی درخواست شروع شده ولی هنوز تصمیم یا ثبت نهایی نشده است."
+  ]
+ },
+ {
+  "key": "ai.notes_new",
+  "module": "ai",
+  "title": "یادداشت‌های جدید هوش مصنوعی",
+  "description": "یادداشت‌هایی که صندلی‌های هوش مصنوعی گذاشته‌اند و هنوز کسی درباره‌شان تصمیم نگرفته است (پذیرش یا رد)؛ تازه‌ترین اول. هر نقش فقط یادداشت‌های ماژول‌های خودش را می‌بیند. می‌شود فقط یک نوع یادداشت یا فقط یادداشت‌های یک صندلی را خواست.",
+  "link": "/ai/notes",
+  "params": [
+   {
+    "name": "type",
+    "type": "string",
+    "desc": "فقط یک نوع یادداشت (مثلا OfficeLetter، QualityNcr، CeoBrief)؛ پیش‌فرض همه‌ی نوع‌ها",
+    "allowed": [
+     "QualityNcr",
+     "FinanceJournal",
+     "BankLine",
+     "SupplierIbanChange",
+     "PurchaseRfq",
+     "OfficeLetter",
+     "OfficeMeeting",
+     "PcWeeklyReport",
+     "CeoBrief"
+    ]
+   },
+   {
+    "name": "seat",
+    "type": "string",
+    "desc": "فقط یادداشت‌های یک صندلی (کد صندلی)؛ پیش‌فرض همه‌ی صندلی‌ها"
+   }
+  ],
+  "columns": [
+   {
+    "key": "title",
+    "title": "عنوان",
+    "kind": "text"
+   },
+   {
+    "key": "seat",
+    "title": "صندلی",
+    "kind": "text"
+   },
+   {
+    "key": "type",
+    "title": "درباره‌ی",
+    "kind": "text"
+   },
+   {
+    "key": "text",
+    "title": "متن",
+    "kind": "text"
+   },
+   {
+    "key": "createdAt",
+    "title": "زمان ثبت",
+    "kind": "date"
+   },
+   {
+    "key": "ageDays",
+    "title": "روز از ثبت",
+    "kind": "num"
+   },
+   {
+    "key": "verified",
+    "title": "راستی‌آزمایی",
+    "kind": "status"
+   },
+   {
+    "key": "rule",
+    "title": "قاعده",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "پذیرش یا رد یادداشت فقط آن را می‌بندد و رکورد اصلی را تغییر نمی‌دهد؛ راستی‌آزمایی‌شده یعنی عددهای متن با داده‌ی سامانه تطبیق داده شده است."
+  ]
+ },
+ {
+  "key": "ai.seat_runs",
+  "module": "ai",
+  "title": "اجراهای صندلی‌های هوش مصنوعی",
+  "description": "اجراهای اخیر صندلی‌های هوش مصنوعی با وضعیت، زمان و خطا؛ تازه‌ترین اول. پیش‌فرض ۱۴ روز اخیر؛ می‌شود فقط اجراهای یک صندلی یا فقط یک وضعیت (در حال اجرا، موفق، ناموفق، ردشده) را خواست. در جمع‌ها شمار صندلی‌های فعالی که آخرین اجرایشان ناموفق بوده هم می‌آید (هم‌پایه با هشدار داشبورد مدیرعامل).",
+  "link": "/ai/admin/seats",
+  "params": [
+   {
+    "name": "days",
+    "type": "int",
+    "desc": "تعداد روز اخیر؛ پیش‌فرض 14 روز",
+    "default": 14,
+    "min": 1,
+    "max": 365
+   },
+   {
+    "name": "seat",
+    "type": "string",
+    "desc": "فقط اجراهای یک صندلی (کد صندلی)؛ پیش‌فرض همه‌ی صندلی‌ها"
+   },
+   {
+    "name": "status",
+    "type": "string",
+    "desc": "فقط یک وضعیت (Running در حال اجرا، Succeeded موفق، Failed ناموفق، Skipped ردشده)؛ پیش‌فرض همه",
+    "allowed": [
+     "Running",
+     "Succeeded",
+     "Failed",
+     "Skipped"
+    ]
+   }
+  ],
+  "columns": [
+   {
+    "key": "seat",
+    "title": "صندلی",
+    "kind": "text"
+   },
+   {
+    "key": "status",
+    "title": "وضعیت",
+    "kind": "status"
+   },
+   {
+    "key": "startedAt",
+    "title": "شروع",
+    "kind": "date"
+   },
+   {
+    "key": "finishedAt",
+    "title": "پایان",
+    "kind": "date"
+   },
+   {
+    "key": "durationSeconds",
+    "title": "مدت (ثانیه)",
+    "kind": "num"
+   },
+   {
+    "key": "asOf",
+    "title": "روز داده",
+    "kind": "date"
+   },
+   {
+    "key": "error",
+    "title": "خطا",
+    "kind": "text"
+   }
+  ],
+  "notes": [
+   "بازه از شروع اجرا شمرده می‌شود؛ اجرای «ردشده» یعنی صندلی بررسی کرد و کاری برای انجام نبود."
+  ]
+ }
+]
