@@ -208,9 +208,13 @@ namespace Services.NasbNiro.Finance
 
         // ------------------------------------------------------------------------------------------ actuals and reports
 
-        private async Task<List<ActualRow>> ActualsAsync(int fiscalYearId, int entityId, CancellationToken ct)
+        /// <summary>
+        /// The actual movement per account, cost centre, contract and day. R1p C1: the voucher lines flagged as confidential labour are summed only when <paramref name="seesProtected"/> (PAYROLL, FINANCEMANAGER, CEO read the report);
+        /// the commitment check of the purchasing gate passes false, so that its answer does not depend on who asks and cannot be differenced into the flagged amount.
+        /// </summary>
+        private async Task<List<ActualRow>> ActualsAsync(int fiscalYearId, int entityId, bool seesProtected, CancellationToken ct)
         {
-            var rows = await _uow.Set<FnVoucherLine>().AsNoTracking()
+            var rows = await FnLabourMask.Visible(_uow.Set<FnVoucherLine>().AsNoTracking(), seesProtected)
                 .Where(l => l.Voucher.FiscalYearId == fiscalYearId && l.Voucher.Status != FnVoucherStatus.Draft
                     && l.Voucher.Type != FnVoucherType.Opening && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
                     && (l.Account.Type == FnAccountType.Expense || l.Account.Type == FnAccountType.Revenue || l.Account.Code.StartsWith("20")))
@@ -260,7 +264,7 @@ namespace Services.NasbNiro.Finance
             }
             decimal unbudgeted = 0;
             var ytd = keys.Values.ToDictionary(k => k.Id, k => 0m);
-            foreach (ActualRow a in await ActualsAsync(b.FiscalYearId, b.LegalEntityId, ct))
+            foreach (ActualRow a in await ActualsAsync(b.FiscalYearId, b.LegalEntityId, FnLabourMask.Sees(_user), ct))
             {
                 int p = PeriodOf(periods, a.Date);
                 if (p == 0 || p > to) continue;
@@ -324,7 +328,7 @@ namespace Services.NasbNiro.Finance
             result.BudgetToDate = keyed.Where(x => x.Key.Id == best.Id).Sum(x => x.Line.Amount);
             var periods = await _uow.Set<FnPeriod>().AsNoTracking().Where(p => p.FiscalYearId == year.Id).ToListAsync(ct);
             var allKeys = lines.Select(l => new BudgetKey { AccountCode = l.AccountId.HasValue ? accountCodes[l.AccountId.Value] : null, CostCenterId = l.CostCenterId, ContractId = l.ContractId }).GroupBy(k => k.Id).Select(g => g.First()).ToList();
-            foreach (ActualRow a in await ActualsAsync(year.Id, b.LegalEntityId, ct))
+            foreach (ActualRow a in await ActualsAsync(year.Id, b.LegalEntityId, false, ct))   // R1p C1: the same answer for every asker
             {
                 BudgetKey owner = allKeys.Where(k => k.Matches(a.Code, a.CostCenterId, a.ContractId)).OrderByDescending(k => k.Score).FirstOrDefault();
                 if (owner != null && owner.Id == best.Id) result.ActualToDate += a.Value;

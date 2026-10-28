@@ -104,8 +104,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.HasIndex(x => x.Status);
                 b.HasIndex(x => x.UnitId);
                 b.HasIndex(x => x.RequestId);
-                // the protected labour waiting for (or taken by) a monthly aggregate posting
-                b.HasIndex(x => x.LabourPendingPeriod).HasFilter("[LabourPendingPeriod] IS NOT NULL");
+                // the orders whose labour waits for the month-end run (round 3: an order taken into a pool leaves the index)
+                b.HasIndex(x => x.LabourPendingPeriod).HasFilter("[LabourPendingPeriod] IS NOT NULL AND [LabourAggregatedAt] IS NULL");
                 // one visit order for a unit and a visit date of an agreement (the job is idempotent)
                 b.HasIndex(x => new { x.LtsaContractId, x.UnitId, x.PlannedStart }).IsUnique().HasFilter("[Deleted] = 0 AND [LtsaContractId] IS NOT NULL AND [Status] <> 5");
                 b.Property(x => x.Title).HasMaxLength(Title).IsRequired();
@@ -118,6 +118,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.Property(x => x.RunningHoursReading).HasPrecision(18, 2);
                 b.Property(x => x.LabourHours).HasPrecision(18, 4);
                 b.Property(x => x.LabourAmount).HasPrecision(22, 2);
+                b.Property(x => x.LabourPayrollCost).HasPrecision(28, 10);
+                b.Property(x => x.LabourPooledAmount).HasPrecision(22, 2);
                 b.Property(x => x.PartsAmount).HasPrecision(22, 2);
                 b.Property(x => x.BillableLabourRateRial).HasPrecision(22, 2);
                 b.Property(x => x.DraftNote).HasMaxLength(Text);
@@ -206,6 +208,12 @@ namespace DataLayer.Configurations.EF.NasbNiro.AfterSales
                 b.HasIndex(x => x.ShipmentId).IsUnique().HasFilter("[Deleted] = 0 AND [ShipmentId] IS NOT NULL");
                 b.Property(x => x.Comments).HasMaxLength(LongText);
                 b.Property(x => x.AverageScore).HasPrecision(5, 2);
+                b.Property(x => x.SkipReason).HasMaxLength(Text);
+                b.Property(x => x.RecordedByRole).HasMaxLength(Code);
+                b.Property(x => x.VerifyNote).HasMaxLength(Text);
+                // R1p D25: one complaint draft per survey, so a re-saved answer never opens a second one
+                b.HasIndex(x => x.ComplaintId).IsUnique().HasFilter("[ComplaintId] IS NOT NULL");
+                b.HasOne(x => x.Complaint).WithMany().HasForeignKey(x => x.ComplaintId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<FnCustomer>().WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<PcShipment>().WithMany().HasForeignKey(x => x.ShipmentId).OnDelete(DeleteBehavior.Restrict);

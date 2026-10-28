@@ -187,6 +187,8 @@ jobs:
         env:
           ASPNETCORE_ENVIRONMENT: Development
           Production__Jobs: 'false'  # the 02:00 production jobs must not interfere with the fixed smoke data
+          Production__MaxBackdateDays: '3650'  # this scenario only, and for one step: the correction bookings (production/bookings/correct) of the completed order C are dated 2026-06-27, the day of the seeded Tir attendance of ATT01 (a correction must fit in the attendance of its day, and the attendance of the smoke is seeded on fixed dates), far more than the 7 days a correction may reach back by default; every other booking, edit and correction of the scenario is inside the default (the supervisor's bookings are not limited by it at all); the scenario breaks about ten years after that date
+          Production__PoolMinPeople: '3'  # this scenario only: it has three people with a payslip, so the monthly labour variance is published from 3 payroll-rated people, the lowest value the code accepts (the default is 5); the dominance limits stay at their defaults (0.50 and 0.80)
           Service__Jobs: 'false'  # the 03:00 after-sales service jobs must not interfere with the fixed smoke data
           Quality__Jobs: 'false'  # the 04:00 quality jobs (CAPA escalation, scheduled document revisions) must not interfere with the fixed smoke data
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)

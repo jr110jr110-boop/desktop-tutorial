@@ -181,7 +181,10 @@ namespace Entities.Model.NasbNiro.AfterSales
 
         // ----- cost (posted when the order is closed)
         public decimal LabourHours { get; set; }
+
+        /// <summary>R1p D2 (round 3): hours x the STANDARD rate of the after-sales labour work centre, for every engineer alike (an order closed by the earlier release holds the engineers' own pay here; see SvLegacyLabour).</summary>
         public decimal LabourAmount { get; set; }
+
         public int LabourEmployeeCount { get; set; }
         public int LabourPayrollEmployeeCount { get; set; }
         public decimal PartsAmount { get; set; }
@@ -191,11 +194,24 @@ namespace Entities.Model.NasbNiro.AfterSales
         /// <summary>Set together with <see cref="WarrantyEventId"/> so the close is one save (the id exists only after it).</summary>
         public Finance.AccountingEvent WarrantyEvent { get; set; }
 
-        /// <summary>Protected labour (one or two payroll employees behind it) is not posted per order: the Persian month (yyyymm) whose monthly aggregate posting will carry it. Empty when the labour was posted with the order.</summary>
+        /// <summary>
+        /// R1p D2 (standard rate, round 3): the Persian month (yyyymm) whose variance takes this order at the month-end run; set when the order is closed with hours of payroll-rated engineers (the first month that is not closed
+        /// at or after the close). The monthly run moves it to a later month while the month does not pass the publication gate. Empty when no payroll-rated engineer worked on the order.
+        /// </summary>
         public int? LabourPendingPeriod { get; set; }
 
-        /// <summary>When the monthly aggregate posting took the labour of this order (empty while it is pending).</summary>
+        /// <summary>When the month-end run took this order into the pool of its month (empty while it waits).</summary>
         public DateTimeOffset? LabourAggregatedAt { get; set; }
+
+        /// <summary>R1p D2: hours x the own hourly payroll cost of the payroll-rated engineers of the order, unrounded. It only goes into the cost total of a pool; no API shows it (on its own it is one person's pay).</summary>
+        public decimal? LabourPayrollCost { get; set; }
+
+        /// <summary>
+        /// R1p D2: the part of <see cref="LabourAmount"/> absorbed for the payroll-rated engineers at the standard rate (the rest is the hours of engineers without a payslip, at the same standard rate). It is the amount the pool takes
+        /// off its cost. Positive on every order of this release that has payroll-rated hours; empty or not positive only on an order of the earlier release (see SvLegacyLabour); a waiting order the backfill converted holds minus
+        /// the standard-rate part of its labour here, so that the variance of its month carries that part too.
+        /// </summary>
+        public decimal? LabourPooledAmount { get; set; }
 
         // ----- billing (Billable)
         public decimal? BillableLabourRateRial { get; set; }
@@ -311,6 +327,26 @@ namespace Entities.Model.NasbNiro.AfterSales
 
         /// <summary>Average of the scores, two decimals; empty until answered.</summary>
         public decimal? AverageScore { get; set; }
+
+        /// <summary>Why a survey was skipped (R1p D25: skipping without a reason hides a customer who would have scored low).</summary>
+        public string SkipReason { get; set; }
+
+        /// <summary>
+        /// R1p D25: the role of the person who typed the customer's scores in (SERVICE or SALES, the people the scores are about). Such answers are unverified until QA checks a sample of them with the customer.
+        /// </summary>
+        public string RecordedByRole { get; set; }
+
+        public int? AnsweredByUserId { get; set; }
+
+        /// <summary>Set by QA only (the checker of the person who recorded the answers).</summary>
+        public bool Verified { get; set; }
+        public int? VerifiedByUserId { get; set; }
+        public DateTimeOffset? VerifiedAt { get; set; }
+        public string VerifyNote { get; set; }
+
+        /// <summary>R1p D25: the customer complaint draft the system opened because a score was below the threshold (one per survey).</summary>
+        public int? ComplaintId { get; set; }
+        public Quality.CustomerComplaint Complaint { get; set; }
 
         public ICollection<SlSurveyAnswer> Answers { get; set; } = new List<SlSurveyAnswer>();
 

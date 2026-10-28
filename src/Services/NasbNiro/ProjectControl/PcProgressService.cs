@@ -615,8 +615,17 @@ namespace Services.NasbNiro.ProjectControl
                 .OrderByDescending(e => e.EntryDate).ThenByDescending(e => e.Id).Select(e => new PcCostEntryDto
                 {
                     Id = e.Id, ContractId = e.ContractId, WorkOrderId = e.WorkOrderId, WbsNodeId = e.WbsNodeId, Kind = e.Kind, EntryDate = e.EntryDate, Amount = e.Amount, SourceType = e.SourceType, SourceNumber = e.SourceNumber, Description = e.Description,
+                    LabourHidden = e.Kind == CostKind.Labour && e.LabourProtected,
                 });
-            return ResponseDtoHelper.Ok(await PagedList<PcCostEntryDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
+            PagedList<PcCostEntryDto> page = await PagedList<PcCostEntryDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken);
+            // R1p D1: a protected labour entry (it could show one person's pay) carries its amount only for PAYROLL, FINANCEMANAGER and CEO
+            bool seesPayroll = Production.MfPrivacy.SeesPayroll(_user);
+            foreach (PcCostEntryDto row in page)
+            {
+                if (seesPayroll) row.LabourHidden = false;
+                else if (row.LabourHidden) row.Amount = null;
+            }
+            return ResponseDtoHelper.Ok(page);
         }
 
         // ============================================================================ weekly snapshots

@@ -26,8 +26,13 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public decimal LabourHours { get; set; }
         public decimal MachineHours { get; set; }
 
-        /// <summary>Null (with <see cref="LabourHidden"/>) when the amount would reveal one person's payroll cost to a role that may not see it.</summary>
+        /// <summary>
+        /// The labour absorbed on the day at the standard rate of the work centres (hours x rate): it is never one person's pay. Null (with <see cref="LabourHidden"/>) only for a run of the earlier release that
+        /// absorbed one or two payroll-rated people at their own rate, for a reader who is not PAYROLL, FINANCEMANAGER or CEO.
+        /// </summary>
         public decimal? LabourAmount { get; set; }
+
+        /// <summary>The amount is hidden: the run is from the earlier release (personal rates) and fewer than three payroll-rated people stood behind it.</summary>
         public bool LabourHidden { get; set; }
         public decimal OverheadAmount { get; set; }
         public int? AccountingEventId { get; set; }
@@ -44,15 +49,14 @@ namespace ViewModels.NasbNiro.ProductionDtos
         /// <summary>Bookings without hours: nothing to cost, marked as handled.</summary>
         public int ZeroHourBookings { get; set; }
 
-        /// <summary>Bookings whose labour rate came from the last approved payroll month of the employee.</summary>
+        /// <summary>Posted bookings of employees with an approved payroll month: their own cost is remembered for the month-end variance; the labour is absorbed at the standard rate like every other booking.</summary>
         public int LabourRateFromPayroll { get; set; }
 
-        /// <summary>Bookings whose labour rate came from the standard labour rate of the work centre (no payroll exists for the employee yet).</summary>
+        /// <summary>Posted bookings of employees without an approved payroll month (absorbed at the standard rate; they have no variance).</summary>
         public int LabourRateFromWorkCenter { get; set; }
 
-        /// <summary>Null (with <see cref="LabourHidden"/>) when a posting is too small to show without revealing one person's payroll cost to this role.</summary>
-        public decimal? LabourAmount { get; set; }
-        public bool LabourHidden { get; set; }
+        /// <summary>The labour absorbed by the posted bookings (hours x the standard rate of the work centre).</summary>
+        public decimal LabourAmount { get; set; }
         public decimal OverheadAmount { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
         public string Message { get; set; }
@@ -90,10 +94,97 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public decimal LabourHours { get; set; }
         public decimal MachineHours { get; set; }
 
-        /// <summary>Null (with <see cref="LabourHidden"/>) when fewer than three employees paid by payroll are in the row and the caller is not PAYROLL, FINANCEMANAGER or CEO.</summary>
+        /// <summary>
+        /// The labour absorbed in the row: hours x the standard rate of the work centre (never one person's pay). Null (with <see cref="LabourHidden"/>) only for a posting of the earlier release with one or two
+        /// payroll-rated people behind it, for a reader who is not PAYROLL, FINANCEMANAGER or CEO.
+        /// </summary>
         public decimal? LabourAmount { get; set; }
+
         public bool LabourHidden { get; set; }
+
         public decimal OverheadAmount { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ month-end labour pools and true-up (R1p D1)
+
+    public class MfLabourMonthRunDto
+    {
+        /// <summary>"Today" of the run (default: the server date); a month is closed only when it has ended. A date in the future is accepted only where the service allows it (CI).</summary>
+        public DateTime? AsOf { get; set; }
+    }
+
+    /// <summary>
+    /// The pool of a month with the figures that come from payroll (people, hours, the actual average rate, cost, variance). Returned to PAYROLL, FINANCEMANAGER and CEO ONLY; every other reader gets
+    /// an empty list of pools and the state and absorbed total of the month (<see cref="MfLabourPeriodDto"/>).
+    /// </summary>
+    public class MfLabourPoolDto
+    {
+        /// <summary>Always * (one pool per module and month).</summary>
+        public string PoolKey { get; set; }
+
+        public bool IsCompany { get; set; }
+
+        /// <summary>Distinct payroll-rated employees with hours in the pool.</summary>
+        public int People { get; set; }
+
+        public decimal Hours { get; set; }
+
+        /// <summary>The actual average rate (pool cost / pool hours). Null for a protected pool. It absorbs nothing: the days absorb at the standard rate.</summary>
+        public decimal? Rate { get; set; }
+
+        /// <summary>The payroll cost of the pool.</summary>
+        public decimal Cost { get; set; }
+
+        /// <summary>What the days absorbed for the pool at the standard rates.</summary>
+        public decimal Absorbed { get; set; }
+
+        /// <summary>Pool cost less absorbed: the one company-level variance line of the month.</summary>
+        public decimal Variance { get; set; }
+
+        /// <summary>Posted by the quarter-end cap because the gate (people, dominance) was not passed: the line is flagged protected.</summary>
+        public bool Protected { get; set; }
+    }
+
+    public class MfLabourPeriodDto
+    {
+        /// <summary>The Persian month as yyyymm.</summary>
+        public int Period { get; set; }
+
+        public string PeriodText { get; set; }
+
+        /// <summary>Posted (an ordinary company-level variance line), Protected (the quarter-end line flagged as protected) or Pending (bookings wait for the month to end, or for the gate).</summary>
+        public string State { get; set; }
+
+        public string StateText { get; set; }
+
+        /// <summary>Bookings of the payroll-rated people in the month (posted into the pool, or waiting).</summary>
+        public int Bookings { get; set; }
+
+        /// <summary>What the days absorbed for those bookings at the standard rates: hours x a standard, readable by every reader of the screen.</summary>
+        public decimal Absorbed { get; set; }
+
+        /// <summary>The month was closed by the quarter-end cap: the variance line is flagged protected.</summary>
+        public bool Protected { get; set; }
+
+        /// <summary>The pool of the month with the payroll figures. EMPTY unless the reader is PAYROLL, FINANCEMANAGER or CEO.</summary>
+        public List<MfLabourPoolDto> Pools { get; set; } = new List<MfLabourPoolDto>();
+
+        /// <summary>The variance line of the month (cost less absorbed). Null unless the reader is PAYROLL, FINANCEMANAGER or CEO.</summary>
+        public decimal? Variance { get; set; }
+
+        public int? EventId { get; set; }
+        public DateTimeOffset? PostedAt { get; set; }
+    }
+
+    public class MfLabourMonthResultDto
+    {
+        public DateTime AsOf { get; set; }
+        public List<MfLabourPeriodDto> Periods { get; set; } = new List<MfLabourPeriodDto>();
+
+        /// <summary>Bookings carried to the next month because the gate was not passed (fewer than the minimum number of payroll-rated people, or one person dominates the hours).</summary>
+        public int BookingsCarried { get; set; }
+
+        public string Message { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ scheduling
@@ -468,13 +559,32 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public string WorkCenterCode { get; set; }
         public decimal PlannedHours { get; set; }
         public decimal DowntimeHours { get; set; }
+
+        /// <summary>R1p review 11: planned hours less planned maintenance (the same definition as in the OEE of the work centre).</summary>
+        public decimal PlannedBusyHours { get; set; }
+
+        public decimal PlannedMaintenanceHours { get; set; }
+
+        /// <summary>Unplanned downtime (breakdowns) inside the planned busy time.</summary>
+        public decimal BreakdownHours { get; set; }
+
+        /// <summary>R1p review 11: the hours the machine ran: its run bookings joined (two people on one machine run it once).</summary>
+        public decimal RunHours { get; set; }
+
+        /// <summary>R1p review 11 (ISO 22400-2, the same as in the OEE of the work centre): run hours / planned busy hours. The figure of the earlier releases (planned hours less downtime) is <see cref="TechnicalAvailabilityPercent"/>.</summary>
         public decimal? AvailabilityPercent { get; set; }
+
+        /// <summary>Planned hours less downtime, as a share of the planned hours: whether the machine was fit to run, whether or not it ran.</summary>
+        public decimal? TechnicalAvailabilityPercent { get; set; }
+
         public int Breakdowns { get; set; }
 
-        /// <summary>Mean time between failures: operating hours / breakdowns (empty without a breakdown).</summary>
+        /// <summary>
+        /// Mean time between failures in scheduled SHIFT hours: (planned hours less downtime) / breakdowns (empty without a breakdown). The after-sales MTBF of installed units is in meter hours; the two are not the same unit.
+        /// </summary>
         public decimal? MtbfHours { get; set; }
 
-        /// <summary>Mean time to repair: repair hours / finished breakdowns.</summary>
+        /// <summary>Mean time to repair in CLOCK hours: the time from the stop to the end of the repair, a night included, of the breakdowns that started in the period and were repaired by its end.</summary>
         public decimal? MttrHours { get; set; }
     }
 
@@ -483,8 +593,13 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int WorkCenterId { get; set; }
         public string WorkCenterCode { get; set; }
         public string WorkCenterTitle { get; set; }
+        /// <summary>Planned working hours of the centre in the period (calendar x shift hours x parallel resources).</summary>
         public decimal PlannedHours { get; set; }
+
+        /// <summary>Hours the machines of the centre were down (breakdown and planned maintenance together, as before ISO 22400-2).</summary>
         public decimal DowntimeHours { get; set; }
+
+        /// <summary>Run hours booked by people (kind Run only): the labour side. The production time of the OEE is <see cref="RunHours"/> (machine time).</summary>
         public decimal BookedRunHours { get; set; }
 
         /// <summary>Standard hours earned by the pieces booked (standard run hours per piece x good and scrap pieces).</summary>
@@ -492,12 +607,45 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         public decimal GoodQty { get; set; }
         public decimal ScrapQty { get; set; }
+
+        /// <summary>R1p D29 (ISO 22400-2): run hours / planned busy hours. Planned maintenance is not part of the planned busy time.</summary>
         public decimal AvailabilityPercent { get; set; }
+
+        /// <summary>Ideal cycle time x produced count / run hours.</summary>
         public decimal? PerformancePercent { get; set; }
+
+        /// <summary>Good pieces / produced pieces.</summary>
         public decimal? QualityPercent { get; set; }
 
         /// <summary>Availability x performance x quality (empty when there is no run time or no piece).</summary>
         public decimal? OeePercent { get; set; }
+
+        /// <summary>R1p D29: planned hours less planned maintenance.</summary>
+        public decimal PlannedBusyHours { get; set; }
+
+        public decimal PlannedMaintenanceHours { get; set; }
+
+        /// <summary>Unplanned downtime (breakdowns) inside the planned busy time.</summary>
+        public decimal BreakdownHours { get; set; }
+
+        /// <summary>R1p review 11: the hours the machines of the centre ran (the run intervals of one machine are joined; a booking without a machine counts its own hours). The production time of the OEE.</summary>
+        public decimal RunHours { get; set; }
+
+        /// <summary>Setup time in machine hours (a moment already counted as run time is not counted again).</summary>
+        public decimal SetupHours { get; set; }
+
+        public decimal WaitingHours { get; set; }
+
+        /// <summary>Rework and cleaning bookings, in machine hours.</summary>
+        public decimal OtherBookedHours { get; set; }
+
+        /// <summary>Planned busy time nobody booked and no breakdown explains.</summary>
+        public decimal IdleHours { get; set; }
+
+        /// <summary>
+        /// The figure of the releases before ISO 22400-2 (availability from downtime only, so a centre that ran 40 of 176 planned hours had 100 % availability). Kept for one release; remove it afterwards.
+        /// </summary>
+        public decimal? OeeLegacy { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ dashboard

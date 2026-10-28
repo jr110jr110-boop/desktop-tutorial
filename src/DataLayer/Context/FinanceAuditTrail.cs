@@ -103,14 +103,14 @@ namespace DataLayer.Context
             { typeof(MfReasonCode), null },
             { typeof(MfProductionOrder), new[] { "Status", "Quantity", "RoutingRevisionId", "ReleasedByUserId", "ReleaseOverride", "ReleaseOverrideReason", "KitOverrideReason", "CancelReason" } },
             { typeof(MfOperation), new[] { "Status", "SkipReason", "WorkCenterId", "QcAccepted" } },
-            { typeof(MfTimeBooking), new[] { "OperationId", "EmployeeId", "MachineId", "Kind", "StartAt", "EndAt", "Minutes", "Hours", "GoodQty", "ScrapQty", "ReworkQty", "SupervisorReason", "EditReason", "Source" } },
+            { typeof(MfTimeBooking), new[] { "OperationId", "EmployeeId", "MachineId", "Kind", "StartAt", "EndAt", "Minutes", "Hours", "GoodQty", "ScrapQty", "ReworkQty", "SupervisorReason", "EditReason", "Source", "IsCorrection", "CorrectsBookingId", "CorrectionApprovedByUserId", "CorrectionApprovedAt" } },   // R1p review 9: the maker and the approver of a correction booking
             { typeof(MfMaintenanceRequest), new[] { "MachineId", "Status", "Description" } },
             // release P1 part B: maintenance gates and master data, and the cost runs (one row a day; the per-booking marks are not listed)
             { typeof(MfMaintenancePlan), null },
             { typeof(MfMaintenanceOrder), new[] { "MachineId", "Kind", "Status", "PlanId", "RequestId", "Task", "DueDate", "DowntimeStart", "DowntimeEnd", "Cause", "ActionTaken", "CostCenter", "MaterialRequestId", "IssueDocumentId", "StartedByUserId", "DoneByUserId", "CancelReason" } },
             { typeof(MfMaintenanceLabour), new[] { "OrderId", "EmployeeId", "WorkDate", "Hours" } },
             { typeof(MfMaintenancePart), new[] { "OrderId", "ItemId", "Quantity" } },
-            { typeof(MfCostRun), new[] { "Number", "PostingDate", "RunByUserId", "BookingCount", "MachineHours", "OverheadAmount", "AccountingEventId" } }, // not the labour amount or hours: with one employee they give his hourly payroll cost
+            { typeof(MfCostRun), new[] { "Number", "PostingDate", "RunByUserId", "BookingCount", "MachineHours", "OverheadAmount", "AccountingEventId" } }, // the labour amount is hours x the standard rate (R1p), no one person's pay; it stays off this list only because the accounting event of the run carries it
             // sales (release S1): the thresholds, the credit limit, the reason codes and the gates (bid decision, proposal approval, price list approval, credit approval); contacts and sites hold personal data and are not listed
             { typeof(SlSetting), null },
             { typeof(SlReasonCode), null },
@@ -128,7 +128,8 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.AfterSales.SvServiceRequest), new[] { "CustomerId", "UnitId", "Type", "Priority", "Status", "ResponseDue", "ResolutionDue", "AssignedToUserId", "ClosedAt" } },
             { typeof(Entities.Model.NasbNiro.AfterSales.SvServiceOrder), new[] { "Status", "UnitId", "RequestId", "Decision", "CauseIsMisuse", "DecidedByUserId", "GoodwillRequestedByUserId", "ReportDocumentId", "ClosedByUserId", "InvoiceId", "WarrantyEventId" } },
             { typeof(Entities.Model.NasbNiro.AfterSales.SvContract), new[] { "Status", "StartDate", "EndDate", "VisitIntervalMonths", "PriceRial", "ActivatedByUserId" } },
-            { typeof(Entities.Model.NasbNiro.AfterSales.SlSurvey), new[] { "Status", "Kind", "AverageScore" } },
+            // R1p D25: who typed the scores in (the role and the user), the reason of a skip and the QA verification (who checked the answers with the customer) leave a trail too
+            { typeof(Entities.Model.NasbNiro.AfterSales.SlSurvey), new[] { "Status", "Kind", "AverageScore", "RecordedByRole", "AnsweredByUserId", "SkipReason", "Verified", "VerifiedByUserId" } },
             { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays" } },
             // R1a: user administration. Created, changed and deleted users, their roles and the claims that carry the temporary-password flag and the requests for sensitive roles.
             // Never listed: the password hash, the security stamp, the token serial, the confirmation codes and the birth date. The national code and the phone number are masked.
@@ -219,6 +220,14 @@ namespace DataLayer.Context
         };
 
         private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban", "NationalCode", "PhoneNumber" };
+
+        /// <summary>
+        /// R1p C1: a voucher line flagged as confidential labour (LabourProtected) is read by PAYROLL, FINANCEMANAGER and CEO only, but the audit trail is read by the auditor too, so the amounts of such a line
+        /// are never written to it: the trail says that the line was added, changed or deleted and shows this text instead of the amounts. The total of a voucher that holds such a line is the sum of its debits and
+        /// would give the amounts away (total less the visible lines), so it is replaced by the same text.
+        /// </summary>
+        internal const string ConfidentialText = "محرمانه (حقوق)";
+        private static readonly HashSet<string> ConfidentialAmounts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Debit", "Credit", "CurrencyAmount", "Quantity", "TotalAmount" };
         private static readonly HashSet<string> Skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RowVersion" };
 
         public static void Capture(DbContext context, IHttpContextAccessor accessor)
@@ -276,6 +285,7 @@ namespace DataLayer.Context
 
                 var before = new Dictionary<string, object>();
                 var after = new Dictionary<string, object>();
+                bool confidentialLine = IsConfidential(entry);
                 foreach (PropertyEntry p in entry.Properties)
                 {
                     string name = p.Metadata.Name;
@@ -283,19 +293,19 @@ namespace DataLayer.Context
                     if (only != null && !only.Contains(name)) continue;
                     if (entry.State == EntityState.Added)
                     {
-                        after[name] = Shape(name, p.CurrentValue);
+                        after[name] = Shape(name, p.CurrentValue, confidentialLine);
                         if (Masked.Contains(name)) AddHash(after, name, p.CurrentValue);
                     }
                     else if (entry.State == EntityState.Deleted)
                     {
-                        before[name] = Shape(name, p.OriginalValue);
+                        before[name] = Shape(name, p.OriginalValue, confidentialLine);
                         if (Masked.Contains(name)) AddHash(before, name, p.OriginalValue);
                     }
                     else
                     {
                         if (!p.IsModified || Equals(p.OriginalValue, p.CurrentValue)) continue;
-                        before[name] = Shape(name, p.OriginalValue);
-                        after[name] = Shape(name, p.CurrentValue);
+                        before[name] = Shape(name, p.OriginalValue, confidentialLine);
+                        after[name] = Shape(name, p.CurrentValue, confidentialLine);
                         // a keyed hash of the full value (R1a2, M4): a change that keeps the visible last digits is still detectable; no key, no hash
                         if (Masked.Contains(name)) { AddHash(before, name, p.OriginalValue); AddHash(after, name, p.CurrentValue); }
                     }
@@ -369,9 +379,26 @@ namespace DataLayer.Context
             if (hash != null) target[name + "Hash"] = hash;
         }
 
-        private static object Shape(string name, object value)
+        /// <summary>
+        /// True for a voucher line that is flagged as confidential labour now or was before the change, and for a voucher that holds such a line (its lines are in memory when it is made or reversed, or are tracked
+        /// by the context when it is changed).
+        /// </summary>
+        private static bool IsConfidential(EntityEntry entry)
+        {
+            if (entry.Entity is FnVoucher voucher)
+            {
+                if (voucher.Lines != null && voucher.Lines.Any(l => l.LabourProtected)) return true;
+                return voucher.Id != 0 && entry.Context.ChangeTracker.Entries<FnVoucherLine>().Any(e => e.Entity.VoucherId == voucher.Id && e.Entity.LabourProtected);
+            }
+            if (!(entry.Entity is FnVoucherLine line)) return false;
+            if (line.LabourProtected) return true;
+            return entry.State != EntityState.Added && entry.Property(nameof(FnVoucherLine.LabourProtected)).OriginalValue is true;
+        }
+
+        private static object Shape(string name, object value, bool confidentialLine = false)
         {
             if (value == null) return null;
+            if (confidentialLine && ConfidentialAmounts.Contains(name)) return ConfidentialText;
             if (Masked.Contains(name) && value is string s) return s.Length <= 4 ? "****" : "****" + s.Substring(s.Length - 4);
             if (value is Enum) return value.ToString();
             if (value is DateTime dt) return PersianText(dt);

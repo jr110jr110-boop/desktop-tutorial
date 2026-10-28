@@ -200,7 +200,7 @@ namespace Services.NasbNiro.Finance
                             RowNumber = row++, Account = accounts[i], Detail1 = d1, Detail2 = d2, Debit = R(l.Debit), Credit = R(l.Credit),
                             CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity,
                             Description = Trunc((lateNote + (l.Description ?? "")).Trim(), 500),
-                            WorkOrderId = l.WorkOrderId, ContractId = contractId, CostCenterId = costCenterId, SourceRole = l.AccountRole,
+                            WorkOrderId = l.WorkOrderId, ContractId = contractId, CostCenterId = costCenterId, SourceRole = l.AccountRole, LabourProtected = l.LabourProtected,
                         };
                         voucher.Lines.Add(line);
                     }

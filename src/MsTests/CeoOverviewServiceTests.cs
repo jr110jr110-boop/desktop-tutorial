@@ -1212,9 +1212,11 @@ namespace MsTests
                 Request(1, today.AddHours(8), today.AddHours(9)),
                 Request(2, today.AddDays(-40).AddHours(8), today.AddDays(-38).AddHours(8)),
                 Request(3, today.AddHours(10), null));
-            SlSurvey Survey(int id, SlSurveyStatus status, DateTimeOffset? answered, decimal? score) => new SlSurvey { Id = id, Number = "SU-" + id, CustomerId = 1, DraftedOn = today, Status = status, AnsweredAt = answered, AverageScore = score };
+            // R1p D25: the chart averages the VERIFIED answers only; the fifth survey is answered but not verified, so it is counted apart and never averaged
+            SlSurvey Survey(int id, SlSurveyStatus status, DateTimeOffset? answered, decimal? score, bool verified = true) => new SlSurvey { Id = id, Number = "SU-" + id, CustomerId = 1, DraftedOn = today, Status = status, AnsweredAt = answered, AverageScore = score, Verified = verified && status == SlSurveyStatus.Answered };
             db.Set<SlSurvey>().AddRange(
-                Survey(1, SlSurveyStatus.Answered, now, 4.00m), Survey(2, SlSurveyStatus.Answered, now, 3.00m), Survey(3, SlSurveyStatus.Answered, now.AddDays(-40), 5.00m), Survey(4, SlSurveyStatus.Drafted, null, null));
+                Survey(1, SlSurveyStatus.Answered, now, 4.00m), Survey(2, SlSurveyStatus.Answered, now, 3.00m), Survey(3, SlSurveyStatus.Answered, now.AddDays(-40), 5.00m), Survey(4, SlSurveyStatus.Drafted, null, null),
+                Survey(5, SlSurveyStatus.Answered, now, 1.00m, verified: false));
             await db.SaveChangesAsync();
         }
 
@@ -1246,8 +1248,9 @@ namespace MsTests
             Assert.AreEqual(1400m, labour.Values.Sum());
 
             CeoChartDto survey = ChartOf(overview, "service", "surveyScoreByMonth");
-            Assert.AreEqual(2, survey.Labels.Count, "only the months with an answered survey");
-            CollectionAssert.AreEqual(new[] { 5.00m, 3.50m }, survey.Series[0].Values.ToArray(), "the average of the month, oldest month first");
+            Assert.AreEqual(2, survey.Labels.Count, "only the months with a verified answered survey");
+            CollectionAssert.AreEqual(new[] { 5.00m, 3.50m }, survey.Series[0].Values.ToArray(), "the average of the verified answers of the month, oldest month first (the unverified score of 1 is left out)");
+            StringAssert.Contains(survey.Note, "۱ پاسخ هنوز تأیید نشده", "the chart says how many answers wait for the verification");
             Assert.AreEqual(CeoText.MonthLabel(DateTime.Today), survey.Labels.Last());
             Assert.AreEqual(0, log.Problems.Count, string.Join(Environment.NewLine, log.Problems));
         }

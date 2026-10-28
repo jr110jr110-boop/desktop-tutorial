@@ -28,13 +28,22 @@ namespace Services.NasbNiro.AfterSales
         public const string SettingSetters = "CEO";
         public const string GoodwillDeciders = "CEO";
 
-        /// <summary>Who sees the labour cost of an order when it could show one person's hourly pay.</summary>
+        /// <summary>R1p D25: only QA verifies a sample of the survey answers that SERVICE or SALES typed in (the people the scores are about must not confirm them themselves).</summary>
+        public const string SurveyVerifiers = "QA";
+
+        /// <summary>The roles that read payroll-derived figures (a protected quarter-end labour amount, the names of the pool).</summary>
         public const string PayrollSeers = "PAYROLL,FINANCEMANAGER,CEO";
+
+        /// <summary>R1p D2: who sees the engineers named on an order and on its time entries: SERVICE and the payroll readers (the engineer himself sees his own entries as well). Everybody else sees hours without a name.</summary>
+        public const string NameSeers = Service + "," + PayrollSeers;
 
         /// <summary>
         /// Whether the caller sees the labour cost. A seat or the evaluation user (it acts as CEO, but its text is read by other people) never does: it gets the masked form.
         /// </summary>
         public static bool SeesPayroll(bool inRole) => inRole && !Ai.AiActing.IsActing;
+
+        /// <summary>The same rule for the names of the engineers: a seat of the AI never sees them.</summary>
+        public static bool SeesNames(bool inRole) => inRole && !Ai.AiActing.IsActing;
     }
 
     internal static class SvNumbers
@@ -51,7 +60,10 @@ namespace Services.NasbNiro.AfterSales
         /// <summary>Code of the cost centre «پس از فروش» (created on first use when it does not exist). Default AFTERSALES.</summary>
         public const string CostCenterCode = "CostCenterCode";
 
-        /// <summary>Code of the work centre whose standard labour rate is used for an engineer without an approved payslip. No default: finance sets it.</summary>
+        /// <summary>
+        /// Code of the work centre whose STANDARD hourly labour rate (<see cref="Entities.Model.NasbNiro.Production.MfWorkCenter.LabourRateRial"/>, maintained per Persian year by finance) the labour of every closed service order is absorbed
+        /// at, whoever worked it. No default: finance sets it; without it (or with a centre that has no rate and no Production:StandardLabourRate) closing an order that has hours is refused and names the centre.
+        /// </summary>
         public const string LabourWorkCenterCode = "LabourWorkCenterCode";
 
         /// <summary>Days after the handover when the delivery survey is drafted. Default 30 (the brief; an assumption the company can change).</summary>
@@ -60,16 +72,23 @@ namespace Services.NasbNiro.AfterSales
         /// <summary>Days before the due date of an LTSA visit when its service order is drafted. Default 30 (the brief; an assumption the company can change).</summary>
         public const string VisitLeadDays = "VisitLeadDays";
 
+        /// <summary>
+        /// R1p D25: a customer survey score below this opens a customer complaint draft. The configuration key Service:LowScoreThreshold is the fallback when the CEO has not entered a value here; default 3 (★ provisional decision).
+        /// </summary>
+        public const string LowScoreThreshold = "LowScoreThreshold";
+
         public const string DefaultCostCenter = "AFTERSALES";
         public const int DefaultSurveyLeadDays = 30;
         public const int DefaultVisitLeadDays = 30;
+        public const int DefaultLowScoreThreshold = 3;
 
         public static readonly (string Key, string Title)[] All =
         {
             (CostCenterCode, "کد مرکز هزینه پس از فروش (پیش‌فرض AFTERSALES)"),
-            (LabourWorkCenterCode, "کد مرکز کاری که نرخ ساعتی دستمزد استاندارد آن برای مهندسانِ بدون فیش حقوقی تأییدشده به کار می‌رود (پیش‌فرض ندارد)"),
+            (LabourWorkCenterCode, "کد مرکز کاری که نرخ ساعتی دستمزد استاندارد آن برای جذب دستمزد همه‌ی دستورهای خدمات به کار می‌رود (پیش‌فرض ندارد)"),
             (SurveyLeadDays, "روز بعد از تحویل برای پیش‌نویس نظرسنجی (پیش‌فرض ۳۰)"),
             (VisitLeadDays, "روز قبل از موعد بازدید LTSA برای پیش‌نویس دستور خدمات (پیش‌فرض ۳۰)"),
+            (LowScoreThreshold, "امتیاز آستانه‌ی نظرسنجی: امتیاز کمتر از این مقدار (۱ تا ۵) پیش‌نویس شکایت مشتری باز می‌کند (پیش‌فرض ۳)"),
         };
     }
 
@@ -194,6 +213,57 @@ namespace Services.NasbNiro.AfterSales
         public static bool Breached(DateTime? due, DateTime? doneAt, DateTime asOf) => due.HasValue && (doneAt ?? asOf) > due.Value;
     }
 
+    /// <summary>
+    /// R1p D24: the clocks of the SLA are the server's. An action (first response, resolution, assignment) is stamped with the server time; the client never sends it. The received time of a request is the server time too,
+    /// except that a person registering a phone call or a letter may enter the time it really came in, only within the last 24 hours (★ provisional decision) and not in the future: a request that came in earlier than that is
+    /// registered now and its clock starts now. A channel that is the system itself (e-mail, portal, anything else) always gets the server time. The time of a request is never changed after it is registered.
+    /// </summary>
+    internal static class SvSlaTime
+    {
+        /// <summary>How far back a person may date a registered call or letter.</summary>
+        public const int BackdateHours = 24;
+
+        /// <summary>Clock difference between the client and the server that is not held against the client.</summary>
+        public static readonly TimeSpan FutureTolerance = TimeSpan.FromMinutes(5);
+
+        public const string ActionRefusal = "زمان اقدام از ساعت سرور ثبت می‌شود و قابل تعیین نیست.";
+        public const string ChannelRefusal = "زمان دریافت را فقط برای ثبت تماس تلفنی یا نامه می‌توان وارد کرد؛ برای کانال‌های دیگر (ایمیل، سامانه و غیره) زمان دریافت همان زمان ثبت در سرور است.";
+        public const string FutureRefusal = "زمان دریافت در آینده است.";
+        public const string TooOldRefusal = "زمان دریافت بیش از ۲۴ ساعت قبل است؛ درخواست را بدون زمان دریافت ثبت کنید تا ساعت SLA از زمان ثبت شروع شود.";
+        public const string ChangeRefusal = "زمان دریافت پس از ثبت درخواست تغییر نمی‌کند.";
+
+        private static readonly string[] CallOrLetterWords = { "تلفن", "تماس", "نامه", "فکس", "phone", "call", "letter", "fax" };
+
+        private static string Normal(string text) => (text ?? string.Empty).Replace('ي', 'ی').Replace('ك', 'ک').Trim().ToLowerInvariant();
+
+        /// <summary>A phone call or a letter: the channels in which a person types in what came from outside at some earlier moment.</summary>
+        public static bool IsCallOrLetter(string channel)
+        {
+            string c = Normal(channel);
+            return c.Length > 0 && CallOrLetterWords.Any(w => c.Contains(w));
+        }
+
+        /// <summary>The Persian refusal of a client-supplied received time of a NEW request, or null when it is allowed (or not supplied).</summary>
+        public static string CheckReceived(DateTime? supplied, string channel, DateTime now)
+        {
+            if (!supplied.HasValue) return null;
+            if (!IsCallOrLetter(channel)) return ChannelRefusal;
+            if (supplied.Value > now + FutureTolerance) return FutureRefusal;
+            if (supplied.Value < now.AddHours(-BackdateHours)) return TooOldRefusal;
+            return null;
+        }
+
+        /// <summary>The received time of a new request: the one supplied (a call or a letter, already checked, never later than now) or the server time.</summary>
+        public static DateTime ReceivedOf(DateTime? supplied, DateTime now) => supplied.HasValue ? (supplied.Value > now ? now : supplied.Value) : now;
+
+        /// <summary>An edit may send the stored received time back, but not another one.</summary>
+        public static string CheckUnchanged(DateTime? supplied, DateTime stored) =>
+            supplied.HasValue && Math.Abs((supplied.Value - stored).TotalSeconds) > 1 ? ChangeRefusal : null;
+
+        /// <summary>An action carries no client time.</summary>
+        public static string CheckAction(DateTime? supplied) => supplied.HasValue ? ActionRefusal : null;
+    }
+
     internal static class SvWarranty
     {
         public static DateTime End(DateTime start, int months) => start.Date.AddMonths(months);
@@ -207,11 +277,16 @@ namespace Services.NasbNiro.AfterSales
 
         /// <summary>The rule of a warranty decision. Returns a Persian message, or null when it is allowed.</summary>
         /// <param name="coveredOnTestDate">The warranty covers the day the failure was reported.</param>
-        public static string CheckDecision(SvWarrantyDecision decision, bool coveredOnTestDate, bool misuse, bool requestedGoodwill)
+        /// <param name="datesConfirmed">
+        /// R1p D26: the dates of the unit (handover, commissioning, warranty start and end) were confirmed by a second person. A decision that grants the warranty rests on those dates, so it is refused while they are
+        /// the unchecked entry of one person (a unit edited after its confirmation goes back to unconfirmed). Billable and goodwill decisions do not depend on the dates.
+        /// </param>
+        public static string CheckDecision(SvWarrantyDecision decision, bool coveredOnTestDate, bool misuse, bool requestedGoodwill, bool datesConfirmed = true)
         {
             switch (decision)
             {
                 case SvWarrantyDecision.Warranty:
+                    if (!datesConfirmed) return "تاریخ‌های گارانتی این واحد هنوز توسط شخص دوم تأیید نشده است؛ تصمیم «گارانتی» ممکن نیست.";
                     if (!coveredOnTestDate) return "واحد در تاریخ گزارش خرابی در گارانتی نبوده است؛ تصمیم «گارانتی» ممکن نیست.";
                     if (misuse) return "علت خرابی سوءاستفاده مشتری است؛ تصمیم «گارانتی» ممکن نیست.";
                     return null;
@@ -265,6 +340,26 @@ namespace Services.NasbNiro.AfterSales
         /// <summary>Mean time between failures: operating hours divided by the failures; empty without a failure.</summary>
         public static decimal? Mtbf(decimal operatingHours, int failures) => failures > 0 ? SlText.R2(operatingHours / failures) : (decimal?)null;
 
+        /// <summary>
+        /// R1p D36: the meter hours a unit ran INSIDE the period (the failures of the period are divided by the hours of the same period, not by the whole life of the unit).
+        /// The hours are the meter reading at the end of the period less the reading at its start. The readings are the ones of the closed service orders. The reading at the start is the last one before the period; a unit commissioned
+        /// inside the period started at zero; an open start (no from-date) counts from zero. Empty (the unit is left out of the hours AND of the failures) when the period cannot be measured for the unit: no reading before the period
+        /// for a unit older than the period, or no reading at all inside the period.
+        /// </summary>
+        public static decimal? PeriodHours(IEnumerable<(DateTime Date, decimal Hours)> readings, DateTime? from, DateTime? to, DateTime? commissioned)
+        {
+            List<(DateTime Date, decimal Hours)> list = readings.OrderBy(r => r.Date).ThenBy(r => r.Hours).ToList();
+            DateTime low = from.HasValue ? from.Value.Date : DateTime.MinValue, high = to.HasValue ? to.Value.Date : DateTime.MaxValue;
+            if (!list.Any(r => r.Date >= low && r.Date <= high)) return null;
+            decimal end = list.Last(r => r.Date <= high).Hours;
+            decimal start;
+            if (!from.HasValue) start = 0;
+            else if (list.Any(r => r.Date < low)) start = list.Last(r => r.Date < low).Hours;
+            else if (commissioned.HasValue && commissioned.Value.Date >= low) start = 0;
+            else return null;
+            return Math.Max(0, end - start);
+        }
+
         /// <summary>Failures after the first one.</summary>
         public static int Repeats(int failures) => Math.Max(0, failures - 1);
     }
@@ -272,6 +367,37 @@ namespace Services.NasbNiro.AfterSales
     internal static class SvSurveyMath
     {
         public static bool ValidScore(int score) => score >= 1 && score <= 5;
+
+        public const string ConfigKey = "Service:LowScoreThreshold";
+
+        /// <summary>
+        /// R1p D25: the threshold below which a score opens a complaint draft. The first usable of the CEO's setting, the configuration value and the default (3, ★ provisional); kept between 1 and 5 (a score is 1 to 5, so 1 never complains and 5 complains for 1 to 4).
+        /// </summary>
+        public static int Threshold(string setting, string configured)
+        {
+            foreach (string text in new[] { setting, configured })
+                if (text != null && int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) && v >= 1) return Math.Min(v, 5);
+            return SvSettingKeys.DefaultLowScoreThreshold;
+        }
+
+        /// <summary>The questions scored below the threshold.</summary>
+        public static List<(int RowNumber, string Question, int Score)> LowScores(IEnumerable<(int RowNumber, string Question, int? Score)> answers, int threshold) =>
+            answers.Where(a => a.Score.HasValue && a.Score.Value < threshold).OrderBy(a => a.RowNumber).Select(a => (a.RowNumber, a.Question, a.Score.Value)).ToList();
+
+        /// <summary>A survey is answered only when every question has a score.</summary>
+        public static bool AllAnswered(IEnumerable<int?> scores)
+        {
+            List<int?> list = scores.ToList();
+            return list.Count > 0 && list.All(s => s.HasValue);
+        }
+
+        /// <summary>R1p D25: the surveys whose average is a figure: answered, with a score, and verified by QA with the customer. Every satisfaction average (service dashboard, CEO dashboard, audit review) reads this set.</summary>
+        public static IQueryable<SlSurvey> VerifiedAnswers(IQueryable<SlSurvey> surveys) =>
+            surveys.Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.Verified && s.AverageScore != null);
+
+        /// <summary>The answered surveys nobody has verified yet: counted next to the average, never part of it.</summary>
+        public static IQueryable<SlSurvey> UnverifiedAnswers(IQueryable<SlSurvey> surveys) =>
+            surveys.Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && !s.Verified);
 
         /// <summary>Average of the given scores, two decimals; empty without a score.</summary>
         public static decimal? Average(IEnumerable<int> scores)
@@ -297,12 +423,6 @@ namespace Services.NasbNiro.AfterSales
             var calendar = new PersianCalendar();
             return calendar.ToDateTime(calendar.GetYear(day), 1, 1, 0, 0, 0, 0);
         }
-    }
-
-    /// <summary>Cost privacy: the labour of an order is one person's pay when fewer than three people are behind it.</summary>
-    internal static class SvPrivacy
-    {
-        public static bool LabourProtected(int employees, int payrollEmployees) => Production.MfCostMask.IsProtected(employees, payrollEmployees);
     }
 
     /// <summary>The lengths of the columns of the service tables (the same figures as the model configuration): a longer text is refused with a message instead of failing in the database.</summary>
@@ -363,7 +483,7 @@ namespace Services.NasbNiro.AfterSales
     }
 
     /// <summary>The accounting event of a warranty or goodwill order at its close. Labour absorbed goes to its own service account (70113, not the production labour), the parts left on site are cost of sales (as their delivery document posted) and the parts consumed are material expense.
-    /// The labour passed here is zero for an order whose labour is protected: that labour is not posted per order but in the monthly aggregate (<see cref="SvLabourMonth"/>).</summary>
+    /// The labour passed here is absorbed at the STANDARD rate of the after-sales labour work centre (R1p D2): the difference to the real payroll cost is posted once a month at company level (<see cref="SvLabourService"/>).</summary>
     internal static class SvPosting
     {
         public static List<(string Role, decimal Debit, decimal Credit, string Description)> WarrantyLines(bool warranty, decimal labour, decimal partsConsumed, decimal partsLeftOnSite, string number)
@@ -380,26 +500,9 @@ namespace Services.NasbNiro.AfterSales
         }
     }
 
-    /// <summary>One closed order whose protected labour waits for its monthly aggregate posting (the pure input of <see cref="SvLabourMonth"/>).</summary>
-    internal sealed class SvPendingLabour
-    {
-        public int OrderId { get; set; }
-        public SvWarrantyDecision Decision { get; set; }
-        public int? ContractId { get; set; }
-        public string CostCenter { get; set; }
-        public decimal Labour { get; set; }
-
-        /// <summary>The employees with hours on the order, and those among them paid through an approved payslip (their hourly pay is the personal data).</summary>
-        public HashSet<int> Employees { get; set; } = new HashSet<int>();
-        public HashSet<int> PayrollEmployees { get; set; } = new HashSet<int>();
-    }
-
     /// <summary>
-    /// Monthly aggregate posting of protected labour (the labour of an order that fewer than three payroll-rated employees worked on; binding rule: payroll personal data only PAYROLL / FINANCEMANAGER / CEO).
-    /// A per-order posting of such labour would let every reader of the accounting events (PMO, CEO, FINANCIAL, FINANCEMANAGER, PLANNING) and of the cost entries divide the amount by the visible hours of the order and get one person's hourly pay.
-    /// So at the close the labour of a protected order is only marked pending for a Persian month; the parts part (not personal) is still posted at once. The monthly run posts ONE accounting event per month with the summed labour of all the pending orders
-    /// of the month (no order number, no per-order line) and one labour cost entry per contract and month.
-    /// The month of an order is the month it closes in; when that month already has its aggregate posting (only possible with an injected future day) the order goes to the first later month that has none: a posted month is never touched again.
+    /// Month arithmetic and names of the service labour months (R1p D2; the rule itself is described at the top of <see cref="SvLabourService"/>). Labour of a closed order is absorbed at the standard rate; an order with
+    /// payroll-rated engineers is marked with the Persian month (yyyymm) whose variance includes it: the month of the close, or the first later month that is not closed yet (a closed month is never reopened).
     /// </summary>
     internal static class SvLabourMonth
     {
@@ -412,7 +515,7 @@ namespace Services.NasbNiro.AfterSales
 
         public static int Next(int period) => period % 100 == 12 ? (period / 100 + 1) * 100 + 1 : period + 1;
 
-        /// <summary>The last day of the Persian month; the date of its aggregate posting.</summary>
+        /// <summary>The last day of the Persian month; the date of its true-up posting.</summary>
         public static DateTime End(int period)
         {
             int year = period / 100, month = period % 100;
@@ -422,68 +525,46 @@ namespace Services.NasbNiro.AfterSales
         public static string Text(int period) => $"{period / 100}/{(period % 100).ToString("00", CultureInfo.InvariantCulture)}";
         public static string Number(int period) => "SVL-" + period.ToString(CultureInfo.InvariantCulture);
 
-        /// <summary>The labour of the order is not posted at its close: it is protected and not zero.</summary>
-        public static bool Deferred(decimal labour, bool labourProtected) => labourProtected && labour != 0;
-
-        /// <summary>The month an order closed on <paramref name="closeDay"/> is aggregated in: the month of the close, or the first later month without a posting.</summary>
-        public static int Assign(DateTime closeDay, IEnumerable<int> postedPeriods)
+        /// <summary>The month an order closed on <paramref name="closeDay"/> is trued up in: the month of the close, or the first later month that is not closed yet.</summary>
+        public static int Assign(DateTime closeDay, IEnumerable<int> closedPeriods)
         {
-            HashSet<int> posted = postedPeriods.ToHashSet();
+            HashSet<int> closed = closedPeriods.ToHashSet();
             int period = Of(closeDay);
-            while (posted.Contains(period)) period = Next(period);
+            while (closed.Contains(period)) period = Next(period);
             return period;
         }
 
-        /// <summary>A month is posted by a run on <paramref name="asOf"/> only when it has ended (the run day is in a later month).</summary>
+        /// <summary>A month is closed by a run on <paramref name="asOf"/> only when it has ended (the run day is in a later month).</summary>
         public static bool Due(int period, DateTime asOf) => period < Of(asOf);
 
-        private static bool Protected(IEnumerable<SvPendingLabour> orders)
+        /// <summary>The month a carried pool waits in: the next one, or the first later one that is not closed (a closed month is never reopened).</summary>
+        public static int NextOpen(int period, IEnumerable<int> closed)
         {
-            List<SvPendingLabour> list = orders.ToList();
-            return SvPrivacy.LabourProtected(list.SelectMany(o => o.Employees).Distinct().Count(), list.SelectMany(o => o.PayrollEmployees).Distinct().Count());
+            HashSet<int> set = closed.ToHashSet();
+            int next = Next(period);
+            while (set.Contains(next)) next = Next(next);
+            return next;
         }
+    }
 
-        /// <summary>
-        /// The lines of the one accounting event of a month (warranty and goodwill orders only; a billable order and the visit of an agreement are paid by the customer and post no event). Debit: the warranty provision for the warranty labour and the
-        /// goodwill expense for the goodwill labour; credit: the service labour absorbed. Never an order number, never a per-order line. When both kinds exist but one of them comes from fewer than three payroll-rated employees, that split would show
-        /// a person's pay again, so both go to one debit line of the larger kind (warranty on a tie): the books get the exact month total, the split is not published.
-        /// </summary>
-        public static List<(string Role, decimal Debit, decimal Credit, string Description)> EventLines(IEnumerable<SvPendingLabour> orders, int period)
-        {
-            List<SvPendingLabour> warranty = orders.Where(o => o.Decision == SvWarrantyDecision.Warranty).ToList();
-            List<SvPendingLabour> goodwill = orders.Where(o => o.Decision == SvWarrantyDecision.Goodwill).ToList();
-            decimal w = warranty.Sum(o => o.Labour), g = goodwill.Sum(o => o.Labour);
-            var lines = new List<(string, decimal, decimal, string)>();
-            string label = "ماه " + Text(period);
-            if (w + g == 0) return lines;
-            bool split = w != 0 && g != 0 && !Protected(warranty) && !Protected(goodwill);
-            if (split)
-            {
-                lines.Add((AccountRoles.WarrantyProvision, w, 0m, "هزینه خدمات گارانتی " + label));
-                lines.Add((AccountRoles.WarrantyExpense, g, 0m, "هزینه خدمات حسن نیت " + label));
-            }
-            else if (w != 0 && g != 0)
-                lines.Add((w >= g ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, w + g, 0m, "هزینه خدمات پس از فروش " + label));
-            else
-                lines.Add((w != 0 ? AccountRoles.WarrantyProvision : AccountRoles.WarrantyExpense, w + g, 0m, "هزینه خدمات " + (w != 0 ? "گارانتی" : "حسن نیت") + " " + label));
-            lines.Add((AccountRoles.ServiceLabourAbsorbed, 0m, w + g, "دستمزد جذب‌شده در خدمات پس از فروش " + label));
-            return lines;
-        }
+    /// <summary>
+    /// R1p H3 (round 3): the read-side mask for service orders closed by the EARLIER release, which absorbed the labour at the engineers' own hourly pay. When only one or two of the engineers were paid through payroll
+    /// the order's labour (and its total cost) is one person's pay and is returned as hidden to every reader but PAYROLL, FINANCEMANAGER and CEO. The marker only an old row has: nothing was absorbed through the pool
+    /// (<c>LabourPooledAmount</c> empty or not positive: an order of this release always holds the positive amount its payroll-rated hours absorbed at the standard rate) AND the earlier release's group rule
+    /// (<see cref="Production.MfLegacyLabour.Group"/>) holds for its engineer counts. A row converted by the backfill keeps a pooled amount of zero or less, so it stays masked. The CEO overview and drill use the same helper.
+    /// </summary>
+    internal static class SvLegacyLabour
+    {
+        public static bool IsProtected(decimal? pooledAmount, int employees, int payrollEmployees) => (pooledAmount ?? 0m) <= 0m && Production.MfLegacyLabour.Group(employees, payrollEmployees);
 
-        /// <summary>
-        /// The labour cost entries of a month (every kind of order): one per contract and cost centre. A contract whose own share comes from fewer than three payroll-rated employees would show a person's pay in the contract cost list, so its share
-        /// joins the entry without a contract of the same cost centre (the cost stays in the cost centre and the books; only the contract allocation of that small share is lost).
-        /// </summary>
-        public static List<(int? ContractId, string CostCenter, decimal Amount)> CostGroups(IEnumerable<SvPendingLabour> orders)
-        {
-            var result = new Dictionary<(int?, string), decimal>();
-            foreach (var group in orders.Where(o => o.Labour != 0).GroupBy(o => (o.ContractId, o.CostCenter)))
-            {
-                (int?, string) key = group.Key.ContractId.HasValue && !Protected(group) ? (group.Key.ContractId, group.Key.CostCenter) : ((int?)null, group.Key.CostCenter);
-                result[key] = result.GetValueOrDefault(key) + group.Sum(o => o.Labour);
-            }
-            return result.OrderBy(x => x.Key.Item1 ?? int.MaxValue).ThenBy(x => x.Key.Item2, StringComparer.Ordinal).Select(x => (x.Key.Item1, x.Key.Item2, x.Value)).ToList();
-        }
+        public static bool IsProtected(SvServiceOrder order) => order != null && IsProtected(order.LabourPooledAmount, order.LabourEmployeeCount, order.LabourPayrollEmployeeCount);
+
+        /// <summary>The same rule as a query condition (the dashboards and the CEO overview filter the closed orders with it).</summary>
+        public static readonly System.Linq.Expressions.Expression<Func<SvServiceOrder, bool>> Filter =
+            o => (o.LabourPooledAmount ?? 0m) <= 0m && o.LabourPayrollEmployeeCount > 0 && (o.LabourEmployeeCount < Production.MfLegacyLabour.MinEmployees || o.LabourPayrollEmployeeCount < Production.MfLegacyLabour.MinEmployees);
+
+        /// <summary>The amount for a reader: empty (zero in the order DTO) when the order is protected and the reader is not a payroll reader.</summary>
+        public static decimal Visible(decimal amount, bool isProtected, bool seesPayroll) => isProtected && !seesPayroll ? 0m : amount;
     }
 
     /// <summary>The price of a spare part on the invoice of a billable order: the approved price list valid on the day (never an invented price).</summary>

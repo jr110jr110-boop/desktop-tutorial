@@ -30,7 +30,13 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string ExternalReference { get; set; }
         public string Error { get; set; }
         public int? ReversesEventId { get; set; }
-        public decimal Amount { get; set; }
+
+        /// <summary>Total debit. Null (with <see cref="LabourHidden"/>) when a line of the event is a protected labour amount and the reader is not PAYROLL, FINANCEMANAGER or CEO (R1p D1).</summary>
+        public decimal? Amount { get; set; }
+
+        /// <summary>R1p D1: at least one line of the event is a protected labour amount hidden from this reader.</summary>
+        public bool LabourHidden { get; set; }
+
         public List<AccountingEventLineDto> Lines { get; set; } = new List<AccountingEventLineDto>();
     }
 
@@ -38,8 +44,15 @@ namespace ViewModels.NasbNiro.FinanceDtos
     {
         public int RowNumber { get; set; }
         public string AccountRole { get; set; }
-        public decimal Debit { get; set; }
-        public decimal Credit { get; set; }
+
+        /// <summary>Null (with <see cref="LabourHidden"/>) for a protected labour amount seen by a reader who may not (R1p D1).</summary>
+        public decimal? Debit { get; set; }
+
+        public decimal? Credit { get; set; }
+
+        /// <summary>R1p D1: the amount of this line is a protected labour amount (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate).</summary>
+        public bool LabourHidden { get; set; }
+
         public int? ProviderId { get; set; }
         public string ProviderName { get; set; }
         public int? WorkOrderId { get; set; }
@@ -106,9 +119,16 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal Material { get; set; }
         public decimal Subcontract { get; set; }
         public decimal Services { get; set; }
-        public decimal Labour { get; set; }
+
+        /// <summary>Null (with <see cref="LabourHidden"/>) when a labour entry of the row is protected and the reader is not PAYROLL, FINANCEMANAGER or CEO (R1p D1).</summary>
+        public decimal? Labour { get; set; }
+
         public decimal Overhead { get; set; }
-        public decimal Total { get; set; }
+
+        /// <summary>Null together with <see cref="Labour"/> (the total would reveal it).</summary>
+        public decimal? Total { get; set; }
+
+        public bool LabourHidden { get; set; }
     }
 
     public class ItemValuationDto

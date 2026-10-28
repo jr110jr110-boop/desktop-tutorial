@@ -191,6 +191,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Production.IMfProductionService, Services.NasbNiro.Production.MfProductionService>();
             services.AddScoped<Services.NasbNiro.Production.IMfShopFloorService, Services.NasbNiro.Production.MfShopFloorService>();
             services.AddScoped<Services.NasbNiro.Production.IMfCostService, Services.NasbNiro.Production.MfCostService>();
+            services.AddScoped<Services.NasbNiro.Production.IMfLabourService, Services.NasbNiro.Production.MfLabourService>();
             services.AddScoped<Services.NasbNiro.Production.IMfScheduleService, Services.NasbNiro.Production.MfScheduleService>();
             services.AddScoped<Services.NasbNiro.Production.IMfMaintenanceService, Services.NasbNiro.Production.MfMaintenanceService>();
             services.AddScoped<Services.NasbNiro.Production.IMfDashboardService, Services.NasbNiro.Production.MfDashboardService>();

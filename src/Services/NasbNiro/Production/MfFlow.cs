@@ -32,7 +32,7 @@ namespace Services.NasbNiro.Production
         private readonly INotificationService _notify;
 
         /// <summary>Outside-work drafts and receipts that need a document of the inventory module; they are made by <see cref="AfterSaveAsync"/> once the caller's own save went through.</summary>
-        private readonly List<(MfProductionOrder Order, MfOperation Op, PurchaseRequest Request)> _pendingIssues = new List<(MfProductionOrder, MfOperation, PurchaseRequest)>();
+        private readonly List<(MfProductionOrder Order, MfOperation Op, PurchaseRequest Request, decimal Quantity)> _pendingIssues = new List<(MfProductionOrder, MfOperation, PurchaseRequest, decimal)>();
         private readonly List<(MfProductionOrder Order, List<MfOperation> Chain)> _pendingReceipts = new List<(MfProductionOrder, List<MfOperation>)>();
 
         public MfFlow(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, INotificationService notify = null)
@@ -100,7 +100,11 @@ namespace Services.NasbNiro.Production
                         op.ModifyDate = now;
                         op.ModifierUserId = _user.UserId;
                     }
-                    if (ok && op.IsOutside && !op.OutsideDrafted) await DraftOutsideAsync(order, op, ct);
+                    if (ok && op.IsOutside && !op.OutsideDrafted)
+                    {
+                        string problem = await DraftOutsideAsync(order, op, chain, ct);
+                        if (problem != null) notes.Add(problem);
+                    }
                 }
                 previous = op;
             }
@@ -159,10 +163,17 @@ namespace Services.NasbNiro.Production
 
         // ================================================================================== outside work
 
-        private async Task DraftOutsideAsync(MfProductionOrder order, MfOperation op, CancellationToken ct)
+        /// <summary>Drafts the purchase request of an outside operation that became ready; returns the persian reason when nothing is drafted (the step before handed over no good piece).</summary>
+        private async Task<string> DraftOutsideAsync(MfProductionOrder order, MfOperation op, List<MfOperation> chain, CancellationToken ct)
         {
             DateTimeOffset now = DateTimeOffset.Now;
             string job = MfNames.Operation(order.Number, op.Sequence);
+
+            // R1p D7: what goes to the contractor is what the operation before it finished (good pieces), not the whole order quantity again after earlier scrap or a write-off;
+            // when the step before produced nothing there is nothing to send, and no request is drafted for pieces that do not exist
+            decimal quantity = MfQuantityRules.Expected(chain, op, order.Quantity);
+            if (quantity <= 0)
+                return $"کار بیرونی عملیات {job} آماده شد ولی مرحله‌ی قبل هیچ قطعه‌ی سالمی تحویل نداده است؛ درخواست خرید و حواله ارسال به پیمانکار ساخته نشد.";
 
             // purchase request: a subcontract line, drafted for procurement (existing approvals apply). It is only added to the context here; the caller's save stores it with the operation.
             Provider supplier = op.OutsideSupplierId.HasValue ? await _uow.Set<Provider>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == op.OutsideSupplierId.Value, ct) : null;
@@ -177,15 +188,16 @@ namespace Services.NasbNiro.Production
             };
             request.Lines.Add(new PurchaseRequestLine
             {
-                RowNumber = 1, Description = $"{op.Title} - دستور تولید {order.Number}", Unit = string.IsNullOrWhiteSpace(order.Unit) ? "عدد" : order.Unit, Quantity = order.Quantity,
+                RowNumber = 1, Description = $"{op.Title} - دستور تولید {order.Number}", Unit = string.IsNullOrWhiteSpace(order.Unit) ? "عدد" : order.Unit, Quantity = quantity,
                 NeededBy = DateTime.Today.AddDays(Math.Max(op.OutsideLeadDays, 0)),
                 TechnicalRequirements = supplier?.Name == null ? null : $"پیمانکار پیشنهادی طبق استاندارد عملیات: {supplier.Name}",
             });
             _uow.Set<PurchaseRequest>().Add(request);
             op.PurchaseRequest = request;
             op.PurchaseRequestLine = request.Lines.First();
-            _pendingIssues.Add((order, op, request));
+            _pendingIssues.Add((order, op, request, quantity));
             op.OutsideDrafted = true;
+            return null;
         }
 
         /// <summary>
@@ -227,7 +239,7 @@ namespace Services.NasbNiro.Production
                             Type = InventoryDocumentType.SubcontractIssue, DocumentDate = DateTime.Today, WarehouseId = source.Id, DestinationWarehouseId = destination.Id,
                             ProviderId = op.OutsideSupplierId, WorkOrderId = order.WorkOrderId, ContractId = order.ContractId, ReferenceNumber = job,
                             Description = $"ارسال به پیمانکار برای عملیات {job} ({op.Title})",
-                            Lines = new List<SaveDocumentLineDto> { new SaveDocumentLineDto { ItemId = order.ItemId.Value, Quantity = order.Quantity, Description = op.Title } },
+                            Lines = new List<SaveDocumentLineDto> { new SaveDocumentLineDto { ItemId = order.ItemId.Value, Quantity = pending.Quantity, Description = op.Title } },
                         }, ct);
                         if (saved != null && saved.Success && saved.Data != null) { op.SubcontractIssueId = saved.Data.Id; changed = true; }
                         else problem = saved?.Message ?? "پیش‌نویس حواله ارسال ساخته نشد.";
@@ -290,8 +302,9 @@ namespace Services.NasbNiro.Production
             if (item.TrackingMode == ItemTrackingMode.Lot) line.LotNumber = order.Number;
             else if (item.TrackingMode == ItemTrackingMode.Serial)
             {
-                List<string> serials = (order.SerialsPlanned ?? string.Empty).Split(new[] { '\n', '\r', ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToList();
-                if (serials.Count != (int)quantity) { notes.Add("رسید ساخت ساخته نشد: تعداد سریال‌های برنامه‌ریزی‌شده با تعداد سالم برابر نیست."); return false; }
+                // R1p D6/D33: scrapped pieces left the planned serials when they were written off, so the planned serials are the serials of the good pieces
+                List<string> serials = MfSerialRules.Planned(order.SerialsPlanned);
+                if (serials.Count != (int)quantity) { notes.Add($"رسید ساخت ساخته نشد: تعداد سریال‌های برنامه‌ریزی‌شده ({serials.Count}) با تعداد سالم ({Num(quantity)}) برابر نیست؛ سریال‌های دستور را اصلاح کنید."); return false; }
                 line.SerialNumbers = serials;
             }
             ResponseDto<DocumentDto> saved = await _documents.SaveDraftAsync(new SaveDocumentDto

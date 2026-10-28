@@ -194,21 +194,44 @@ namespace MsTests
         [TestMethod]
         public void Oee_Of_A_Small_Case_Is_Availability_Times_Performance_Times_Quality()
         {
-            OeeDto o = MfKpi.Compute(new OeeDto { PlannedHours = 40, DowntimeHours = 4, BookedRunHours = 10, StandardHours = 7, GoodQty = 6, ScrapQty = 1 });
-            Assert.AreEqual(90.0m, o.AvailabilityPercent);
+            // R1p D29 (ISO 22400-2): the availability is the run time over the planned busy time (10 / 40 = 25.0 %), no longer (planned - downtime) / planned (36 / 40 = 90 %).
+            // The OEE is availability x performance x quality = 25.0 % x 70.0 % x 85.7 % = 15.0 %; the figure of the earlier releases (90 % x 70 % x 85.7 % = 54.0 %) stays one release as OeeLegacy.
+            // R1p review 11: the run time is MACHINE time (RunHours); BookedRunHours are the person-hours (the legacy figure keeps using them). Here one person per machine: both are 10 h.
+            OeeDto o = MfKpi.Compute(new OeeDto { PlannedHours = 40, DowntimeHours = 4, RunHours = 10, BookedRunHours = 10, StandardHours = 7, GoodQty = 6, ScrapQty = 1 });
+            Assert.AreEqual(25.0m, o.AvailabilityPercent);
             Assert.AreEqual(70.0m, o.PerformancePercent);
             Assert.AreEqual(85.7m, o.QualityPercent);
-            Assert.AreEqual(54.0m, o.OeePercent);
+            Assert.AreEqual(15.0m, o.OeePercent);
+            Assert.AreEqual(54.0m, o.OeeLegacy);
+        }
+
+        [TestMethod]
+        public void Oee_Uses_The_Machine_Run_Time_Not_The_Person_Hours_When_Two_People_Work_One_Machine()
+        {
+            // two welders on one machine booked 8 person-hours, the machine itself ran 6 h: availability 6 / 8 = 75.0 (not 8 / 8 = 100.0), performance 5.4 / 6 = 90.0, quality 9 / 10 = 90.0,
+            // OEE = 5.4 x 9 / (10 x 8) = 60.75 -> 60.8 (half away from zero); the legacy figure of the earlier releases still reads the person-hours: 100.0 x 67.5 x 90.0 = 60.8 as well here
+            OeeDto o = MfKpi.Compute(new OeeDto { PlannedHours = 8, RunHours = 6, BookedRunHours = 8, StandardHours = 5.4m, GoodQty = 9, ScrapQty = 1 });
+            Assert.AreEqual(75.0m, o.AvailabilityPercent);
+            Assert.AreEqual(90.0m, o.PerformancePercent);
+            Assert.AreEqual(90.0m, o.QualityPercent);
+            Assert.AreEqual(60.8m, o.OeePercent);
+            Assert.AreEqual(60.8m, o.OeeLegacy);
+            Assert.AreEqual(8m, o.PlannedBusyHours);
+            Assert.AreEqual(2m, o.IdleHours, "8 planned - 6 run");
+            Assert.AreEqual(8m, MfKpi.Total(new[] { o }).BookedRunHours, "the person-hours stay as they were booked");
+            Assert.AreEqual(6m, MfKpi.Total(new[] { o }).RunHours);
         }
 
         [TestMethod]
         public void Oee_Is_Empty_Without_Run_Time_Or_Pieces()
         {
+            // R1p D29: a centre that was planned for 40 hours and ran none has availability 0 % (before ISO 22400-2 it showed 100 % because no downtime was recorded)
             OeeDto o = MfKpi.Compute(new OeeDto { PlannedHours = 40, DowntimeHours = 0 });
-            Assert.AreEqual(100.0m, o.AvailabilityPercent);
+            Assert.AreEqual(0.0m, o.AvailabilityPercent);
             Assert.IsNull(o.PerformancePercent);
             Assert.IsNull(o.QualityPercent);
             Assert.IsNull(o.OeePercent);
+            Assert.IsNull(o.OeeLegacy);
         }
     }
 }
