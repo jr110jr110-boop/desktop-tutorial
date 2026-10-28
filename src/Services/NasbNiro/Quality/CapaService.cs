@@ -105,6 +105,7 @@ namespace Services.NasbNiro.Quality
         {
             Id = c.Id, Number = c.Number, Source = c.Source, SourceId = c.SourceId, Problem = c.Problem, Status = c.Status, OwnerUserId = c.OwnerUserId,
             OwnerName = names.Name(c.OwnerUserId), DueDate = c.DueDate, EffectivenessDueDate = c.EffectivenessDueDate, Overdue = IsOverdue(c, today), AutoDrafted = c.AutoDrafted,
+            Mandatory = c.Mandatory || CapaRules.IsMandatory(c.AutoDrafted, c.Source), Iteration = c.Iteration, EscalationLevel = c.EscalationLevel, CancelReason = c.CancelReason,
         };
 
         private async Task<ResponseDto<PagedList<CapaListDto>>> PageAsync(IQueryable<Capa> rows, CapaQuery query, CancellationToken cancellationToken)

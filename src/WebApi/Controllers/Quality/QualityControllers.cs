@@ -449,8 +449,8 @@ namespace WebApi.Controllers
         [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> DashboardAsync(CancellationToken ct) => Ok(await _dashboard.GetDashboardAsync(ct));
 
+        /// <summary>Every signed-in user may read the settings: the back-date window and the other limits apply to action owners who are not quality readers (front R1q review).</summary>
         [HttpGet("settings")]
-        [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _dashboard.GetSettingsAsync(ct));
 
         [HttpPost("settings")]
