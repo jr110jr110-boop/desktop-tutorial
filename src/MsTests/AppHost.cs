@@ -40,7 +40,8 @@ namespace MsTests
             public Task<Guid> UploadDocumentAsync(UploadFileDto uploadFileDto) => Task.FromResult(Guid.NewGuid());
             public Task<ResponseDocumentDto> DownloadDocumentAsync(Guid documentId) => throw new NotSupportedException();
             public Task<bool> DeleteDocumentAsync(Guid image) => Task.FromResult(true);
-            public Task<bool> UpdateDocumentAsync(UpdateDocumentDto updateDocumentDto) => throw new NotSupportedException();
+            public Task<bool> UpdateDocumentAsync(UpdateDocumentDto updateDocumentDto) => Task.FromResult(true);
+            public Task<ResponseDto<bool>> UpdateDocumentByUserAsync(UpdateDocumentDto updateDocumentDto) => throw new NotSupportedException();
             public Task<ResponseDto<string>> ChangeFileAsync(ChangeFileDto dto) => throw new NotSupportedException();
             public Task<ResponseDto<ResponseFileDto>> GetFileInfoAsync(Guid fileId) => throw new NotSupportedException();
             public Task<bool> IsLetterFileAsync(Guid documentId) => Task.FromResult(false);

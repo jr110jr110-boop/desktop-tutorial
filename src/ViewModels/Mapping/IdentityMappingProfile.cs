@@ -14,7 +14,11 @@ namespace ViewModels.Mapping
                 .ForMember(dest => dest.ProfilePhoto, opt => opt.MapFrom(src => src.ProfilePhoto))
                 // secrets of the account: the token serial and the SMS confirmation code are never sent to a screen
                 .ForMember(dest => dest.SerialNumber, opt => opt.Ignore())
-                .ForMember(dest => dest.MobileConfirmCode, opt => opt.Ignore());
+                .ForMember(dest => dest.MobileConfirmCode, opt => opt.Ignore())
+                // the pending-request members are filled by the register and update calls only
+                .ForMember(dest => dest.Pending, opt => opt.Ignore())
+                .ForMember(dest => dest.GrantId, opt => opt.Ignore())
+                .ForMember(dest => dest.GrantIds, opt => opt.Ignore());
 
             CreateMap<User, ResponseDashboardUserDto>()
                 .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => src.Name + " " + src.LastName))

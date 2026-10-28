@@ -34,6 +34,9 @@ namespace Services.NasbNiro.ProjectControl
         /// <summary>R1a: the release of a guarantee (COMMERCIAL, FINANCEMANAGER, PMO); the date and the note are required.</summary>
         Task<ResponseDto<PcGuaranteeDto>> ReleaseGuaranteeAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken);
 
+        /// <summary>R1a2 (M-3): takes back the open request for the release or the cancellation; the one who asked, or a PMO user.</summary>
+        Task<ResponseDto<PcGuaranteeDto>> WithdrawGuaranteeRequestAsync(PcGuaranteeWithdrawDto dto, CancellationToken cancellationToken);
+
         /// <summary>R1a: marks the guarantees whose expiry date has passed as Expired; the daily job calls it. Returns how many were marked.</summary>
         Task<int> ExpireGuaranteesAsync(CancellationToken cancellationToken);
         Task<List<PcGuaranteeAlertDto>> GuaranteeAlertsAsync(int? contractId, CancellationToken cancellationToken);
@@ -318,6 +321,7 @@ namespace Services.NasbNiro.ProjectControl
             List<int> infoIds = infos.Select(i => i.Id).ToList();
             List<PcGuaranteeEvent> events = withEvents ? await _uow.Set<PcGuaranteeEvent>().AsNoTracking().Where(e => infoIds.Contains(e.GuaranteeInfoId)).OrderBy(e => e.Id).ToListAsync(cancellationToken) : new List<PcGuaranteeEvent>();
             DateTime today = DateTime.Today;
+            DateTime nowLocal = DateTime.Now;
             var list = new List<PcGuaranteeDto>();
             foreach (PcGuaranteeInfo i in infos)
             {
@@ -330,6 +334,8 @@ namespace Services.NasbNiro.ProjectControl
                     GuaranteeType = i.GuaranteeType, AmountDecimal = i.AmountDecimal, CurrencyCode = i.CurrencyCode, IssuerKind = i.IssuerKind, ValidFrom = i.ValidFrom, ExpiryDate = i.ExpiryDate,
                     ReleaseTrigger = i.ReleaseTrigger, Status = i.Status, ParseFailed = i.ParseFailed, ParseNote = i.ParseNote,
                     DaysToExpiry = i.ExpiryDate.HasValue ? (int)(i.ExpiryDate.Value.Date - today).TotalDays : (int?)null,
+                    ReleaseRequestedByUserId = i.ReleaseRequestedByUserId, ReleaseRequestedAt = i.ReleaseRequestedAt, ReleaseRequestedKind = i.ReleaseRequestedKind,
+                    ReleaseRequestedNote = i.ReleaseRequestedNote, ReleaseRequestedDate = i.ReleaseRequestedDate, ReleaseRequestOpen = RequestIsOpen(i, nowLocal),
                     Events = events.Where(e => e.GuaranteeInfoId == i.Id).Select(e => new PcGuaranteeEventDto { Id = e.Id, Kind = e.Kind, EventDate = e.EventDate, NewExpiryDate = e.NewExpiryDate, Fee = e.Fee, DocumentId = e.DocumentId, Note = e.Note }).ToList(),
                 });
             }
@@ -362,6 +368,10 @@ namespace Services.NasbNiro.ProjectControl
             // R1a (finding M7): Released and Expired are never set from here; the release has its own action and the expiry is automatic
             string statusProblem = StatusChangeProblem(info?.Status ?? PcGuaranteeStatus.Requested, dto.Status);
             if (statusProblem != null) return Bad<PcGuaranteeDto>(statusProblem);
+            // R1a2 (M2): once the guarantee is issued its expiry date is what the bank holds; it changes only through an extension event that carries its evidence (a note and, when there is one, the letter).
+            // A date that is still missing (an old row the parser could not read) may be filled in once.
+            if (info != null && info.Status != PcGuaranteeStatus.Requested && info.ExpiryDate.HasValue && dto.ExpiryDate?.Date != info.ExpiryDate.Value.Date)
+                return Bad<PcGuaranteeDto>("پس از صدور ضمانت‌نامه، تاریخ انقضا فقط با رویداد «تمدید» (با توضیح و در صورت وجود، فایل نامه) تغییر می‌کند.");
             if (info == null)
             {
                 bool exists = dto.SourceKind == PcGuaranteeSource.ContractGuaranty
@@ -392,14 +402,132 @@ namespace Services.NasbNiro.ProjectControl
             if (requested == 0 || !Enum.IsDefined(typeof(PcGuaranteeStatus), requested) || requested == current) return null;
             if (requested == PcGuaranteeStatus.Released) return "آزادسازی ضمانت‌نامه از این مسیر ثبت نمی‌شود؛ از عمل «آزادسازی» (با تاریخ و توضیح) استفاده کنید.";
             if (requested == PcGuaranteeStatus.Expired) return "انقضای ضمانت‌نامه پس از گذشتن تاریخ انقضا به‌صورت خودکار ثبت می‌شود؛ تاریخ انقضا را اصلاح یا ضمانت‌نامه را تمدید کنید.";
+            // R1a2 (M2): the cancellation is an event of its own (date, note, two people), not a status that one person types in
+            if (requested == PcGuaranteeStatus.Cancelled) return "ابطال ضمانت‌نامه از این مسیر ثبت نمی‌شود؛ از رویداد «ابطال» (با تاریخ، توضیح و تأیید شخص دوم) استفاده کنید.";
             if (current == PcGuaranteeStatus.Released) return "ضمانت‌نامه آزادشده دوباره باز نمی‌شود.";
+            if (current == PcGuaranteeStatus.Cancelled) return "ضمانت‌نامه ابطال‌شده دوباره باز نمی‌شود.";
+            // an expired guarantee leaves that status only through an extension event (evidence and a new date) or the release; any other status would hide it from the alerts
+            if (current == PcGuaranteeStatus.Expired)
+                return "ضمانت‌نامه منقضی‌شده با تغییر وضعیت دوباره فعال نمی‌شود؛ آن را با رویداد «تمدید» (با توضیح و تاریخ جدید) تمدید کنید.";
             return null;
+        }
+
+        /// <summary>Roles of the release and the cancellation: the money side signs these too, so the list differs from the other guarantee actions (★ to be confirmed by the company).</summary>
+        private const string CloseRoles = "COMMERCIAL,FINANCEMANAGER,PMO";
+
+        /// <summary>A request that nobody confirmed within this many days is forgotten: the next call records a new one (the older values stay in the audit trail).</summary>
+        private const int RequestValidDays = 7;
+
+        /// <summary>The longest note: the column of the request and the column of the event it becomes are both nvarchar(1000).</summary>
+        private const int MaxNoteLength = 1000;
+
+        private static string CloseName(PcGuaranteeCloseKind kind) => kind == PcGuaranteeCloseKind.Release ? "آزادسازی" : "ابطال";
+
+        /// <summary>
+        /// R1a2 (M-3): the guarantee has a request that a second person can still confirm: it says which action it asks for, it is not older than <see cref="RequestValidDays"/> days
+        /// and the guarantee is not closed. A row whose request has no kind (it cannot exist outside a test: the column is new) is not open, so nobody confirms what nobody described.
+        /// </summary>
+        internal static bool RequestIsOpen(PcGuaranteeInfo info, DateTime now) =>
+            info.ReleaseRequestedByUserId != null && info.ReleaseRequestedAt != null && info.ReleaseRequestedKind != null
+            && info.ReleaseRequestedAt.Value.AddDays(RequestValidDays) >= now
+            && info.Status != PcGuaranteeStatus.Released && info.Status != PcGuaranteeStatus.Cancelled;
+
+        /// <summary>The result of <see cref="FirstOfTwoAsync"/>: either the answer to give now (the call ends), or the date and the note the confirmed action records.</summary>
+        private sealed class CloseStep
+        {
+            /// <summary>Not null: the request was recorded, or the call was refused; the action does not go on.</summary>
+            public ResponseDto<PcGuaranteeDto> Answer { get; init; }
+
+            /// <summary>The date of the request (the first person's), also when the confirming call gave another one.</summary>
+            public DateTime Date { get; init; }
+
+            /// <summary>The note of the request, followed by the note of the confirming person when it differs.</summary>
+            public string Note { get; init; }
+
+            /// <summary>A sentence for the confirming person when his date was replaced by the date of the request.</summary>
+            public string Remark { get; init; }
+        }
+
+        /// <summary>
+        /// R1a2 (M2, M-3): the release and the cancellation of a guarantee need two people and share one request slot. The first call records who asked, when, for which of the two,
+        /// with which date and note, and changes nothing else. A call by a different user of <see cref="CloseRoles"/> confirms it, but only with the SAME action: the other action is
+        /// refused with the name of the pending one. The confirmed action records the date and the note of the request (a date given by the confirming call that differs is replaced
+        /// and the answer says so; a different note of the confirming person is kept after the note of the request).
+        /// </summary>
+        private async Task<CloseStep> FirstOfTwoAsync(PcGuaranteeInfo info, PcGuaranteeCloseKind kind, DateTime date, string note, DateTimeOffset now, CancellationToken cancellationToken)
+        {
+            string what = CloseName(kind);
+            if (!RequestIsOpen(info, now.DateTime))
+            {
+                info.ReleaseRequestedByUserId = Me; info.ReleaseRequestedAt = now.DateTime;
+                info.ReleaseRequestedKind = kind; info.ReleaseRequestedNote = note; info.ReleaseRequestedDate = date;
+                info.ModifyDate = now; info.ModifierUserId = Me;
+                try { await _uow.SaveChangesAsync(cancellationToken); }
+                catch (DbUpdateConcurrencyException) { return new CloseStep { Answer = Bad<PcGuaranteeDto>(PcText.Concurrency) }; }
+                PcGuaranteeDto recorded = (await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First();
+                return new CloseStep
+                {
+                    Answer = ResponseDtoHelper.Ok(recorded, $"درخواست {what} ثبت شد و منتظر تأیید شخص دیگری از بازرگانی، مدیر مالی یا PMO است (تفکیک وظایف)؛ تأیید باید با همان عمل «{what}» باشد و همین تاریخ و توضیح را ثبت می‌کند. "
+                        + $"این درخواست {RequestValidDays} روز معتبر است و تا آن زمان ضمانت‌نامه تغییر نمی‌کند؛ درخواست‌دهنده یا کاربر PMO می‌تواند آن را پس بگیرد."),
+                };
+            }
+            PcGuaranteeCloseKind pending = info.ReleaseRequestedKind.Value;
+            if (pending != kind)
+            {
+                string pendingName = CloseName(pending);
+                return new CloseStep
+                {
+                    Answer = Bad<PcGuaranteeDto>($"برای این ضمانت‌نامه یک درخواست «{pendingName}» منتظر تأیید است؛ عمل «{what}» آن را تأیید نمی‌کند. "
+                        + $"برای تأیید همان درخواست، عمل «{pendingName}» را بزنید؛ برای انصراف، درخواست را پس بگیرید (guarantees/withdraw) و درخواست تازه ثبت کنید."),
+                };
+            }
+            if (info.ReleaseRequestedByUserId == Me)
+                return new CloseStep { Answer = Bad<PcGuaranteeDto>($"درخواست {what} را خودتان ثبت کرده‌اید؛ تأیید آن باید از شخص دیگری باشد (تفکیک وظایف).") };
+
+            // the confirmation: what the first person asked for is what is recorded
+            DateTime requestedDate = info.ReleaseRequestedDate ?? date;
+            string requestedNote = info.ReleaseRequestedNote;
+            string recordedNote = requestedNote ?? note;
+            if (requestedNote != null && note != null && !string.Equals(requestedNote.Trim(), note.Trim(), StringComparison.Ordinal))
+            {
+                recordedNote = requestedNote + " | تأییدکننده: " + note;
+                if (recordedNote.Length > MaxNoteLength) recordedNote = recordedNote.Substring(0, MaxNoteLength);
+            }
+            return new CloseStep
+            {
+                Date = requestedDate.Date, Note = recordedNote,
+                Remark = requestedDate.Date != date.Date ? "تاریخ واردشده با تاریخ درخواست یکی نبود؛ تاریخ درخواست‌دهنده ثبت شد." : null,
+            };
+        }
+
+        /// <summary>
+        /// R1a2 (M-3): takes back the open request for the release or the cancellation. The one who asked can do it (he changed his mind, or the date or the note was wrong), and so can a PMO user
+        /// (the one who asked is away). All five fields of the request are cleared; the trail of the row keeps what they were and who cleared them.
+        /// </summary>
+        public async Task<ResponseDto<PcGuaranteeDto>> WithdrawGuaranteeRequestAsync(PcGuaranteeWithdrawDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return Bad<PcGuaranteeDto>(PcText.InvalidData);
+            if (!_user.IsInRole(CloseRoles)) return Bad<PcGuaranteeDto>(PcText.NotAllowed + " (پس‌گرفتن درخواست با بازرگانی، مدیر مالی یا PMO است)");
+            PcGuaranteeInfo info = await _uow.Set<PcGuaranteeInfo>().FirstOrDefaultAsync(i => i.Id == dto.GuaranteeId && !i.Deleted, cancellationToken);
+            if (info == null) return PcText.NotFound<PcGuaranteeDto>("اطلاعات ضمانت‌نامه پیدا نشد.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            if (!RequestIsOpen(info, now.DateTime)) return Bad<PcGuaranteeDto>("برای این ضمانت‌نامه درخواستی منتظر تأیید نیست.");
+            if (info.ReleaseRequestedByUserId != Me && !_user.IsInRole("PMO"))
+                return Bad<PcGuaranteeDto>("درخواست را فقط کسی که آن را ثبت کرده یا کاربر PMO می‌تواند پس بگیرد.");
+            string what = CloseName(info.ReleaseRequestedKind.Value);
+            info.ReleaseRequestedByUserId = null; info.ReleaseRequestedAt = null; info.ReleaseRequestedKind = null; info.ReleaseRequestedNote = null; info.ReleaseRequestedDate = null;
+            info.ModifyDate = now; info.ModifierUserId = Me;
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateConcurrencyException) { return Bad<PcGuaranteeDto>(PcText.Concurrency); }
+            return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First(), $"درخواست {what} پس گرفته شد.");
         }
 
         public async Task<ResponseDto<PcGuaranteeDto>> AddGuaranteeEventAsync(PcGuaranteeEventSaveDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || !Enum.IsDefined(typeof(PcGuaranteeEventKind), dto.Kind)) return Bad<PcGuaranteeDto>(PcText.InvalidData);
-            if (!_user.IsInRole("COMMERCIAL,FINANCIAL,PMO")) return Bad<PcGuaranteeDto>(PcText.NotAllowed);
+            bool cancellation = dto.Kind == PcGuaranteeEventKind.Cancellation;
+            if (!_user.IsInRole(cancellation ? CloseRoles : "COMMERCIAL,FINANCIAL,PMO"))
+                return Bad<PcGuaranteeDto>(cancellation ? PcText.NotAllowed + " (ابطال ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)" : PcText.NotAllowed);
             // R1a: these two have their own paths (the release action with its date and note, and the daily expiry job); here they would only leave a row without a state change
             if (dto.Kind == PcGuaranteeEventKind.Release) return Bad<PcGuaranteeDto>("آزادسازی ضمانت‌نامه با عمل «آزادسازی» (guarantees/release) ثبت می‌شود.");
             if (dto.Kind == PcGuaranteeEventKind.Expiry) return Bad<PcGuaranteeDto>("انقضای ضمانت‌نامه به‌صورت خودکار ثبت می‌شود.");
@@ -408,6 +536,9 @@ namespace Services.NasbNiro.ProjectControl
             if (info.Status == PcGuaranteeStatus.Cancelled || info.Status == PcGuaranteeStatus.Released) return Bad<PcGuaranteeDto>("ضمانت‌نامه بسته شده است.");
             if (dto.Fee.HasValue && dto.Fee.Value < 0) return Bad<PcGuaranteeDto>("کارمزد منفی نیست.");
             DateTimeOffset now = DateTimeOffset.Now;
+            DateTime eventDate = dto.EventDate == default ? DateTime.Today : dto.EventDate.Date;
+            string eventNote = Clean(dto.Note);
+            string remark = null;   // a sentence for the one who confirms, when the request decided something he gave differently (M-3)
             switch (dto.Kind)
             {
                 case PcGuaranteeEventKind.Issue:
@@ -415,47 +546,63 @@ namespace Services.NasbNiro.ProjectControl
                     break;
                 case PcGuaranteeEventKind.Extension:
                     if (!dto.NewExpiryDate.HasValue || (info.ExpiryDate.HasValue && dto.NewExpiryDate.Value.Date <= info.ExpiryDate.Value.Date)) return Bad<PcGuaranteeDto>("تاریخ جدید انقضا باید بعد از تاریخ فعلی باشد.");
+                    // R1a2 (M2): the extension is the only way the expiry date changes after the issue, so it carries its evidence: a note, and the letter when there is one
+                    if (Clean(dto.Note) == null) return Bad<PcGuaranteeDto>("برای تمدید ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه یا الحاقیه‌ی بانک) را بنویسید.");
+                    if (dto.DocumentId.HasValue && !await _uow.Set<Entities.Model.Document>().AnyAsync(d => d.Id == dto.DocumentId.Value, cancellationToken)) return Bad<PcGuaranteeDto>("فایل نامه‌ی پیوست پیدا نشد.");
                     info.ExpiryDate = dto.NewExpiryDate.Value.Date; info.Status = PcGuaranteeStatus.Active;
                     break;
                 case PcGuaranteeEventKind.Cancellation:
+                    // R1a2 (M2): the same rules as the release: allowed roles, a date that is not in the future, a note, and a second person
+                    if (dto.EventDate == default) return Bad<PcGuaranteeDto>("تاریخ ابطال را وارد کنید.");
+                    if (dto.EventDate.Date > DateTime.Today) return Bad<PcGuaranteeDto>("تاریخ ابطال نمی‌تواند در آینده باشد.");
+                    if (eventNote == null) return Bad<PcGuaranteeDto>("برای ابطال ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه کارفرما یا بانک) را بنویسید.");
+                    if (eventNote.Length > MaxNoteLength) return Bad<PcGuaranteeDto>($"توضیح ابطال بیش از {MaxNoteLength} نویسه است؛ آن را کوتاه کنید.");
+                    // R1a2 (M-3): the release and the cancellation share one request slot; only the same action confirms, and the confirmation records the date and the note of the request
+                    CloseStep step = await FirstOfTwoAsync(info, PcGuaranteeCloseKind.Cancellation, eventDate, eventNote, now, cancellationToken);
+                    if (step.Answer != null) return step.Answer;
+                    eventDate = step.Date; eventNote = step.Note; remark = step.Remark;
                     info.Status = PcGuaranteeStatus.Cancelled;
                     break;
             }
             _uow.Set<PcGuaranteeEvent>().Add(new PcGuaranteeEvent
             {
-                GuaranteeInfoId = info.Id, Kind = dto.Kind, EventDate = dto.EventDate == default ? DateTime.Today : dto.EventDate.Date, NewExpiryDate = dto.NewExpiryDate?.Date, Fee = dto.Fee,
-                DocumentId = dto.DocumentId, Note = Clean(dto.Note), CreatedAt = now, CreatedByUserId = Me,
+                GuaranteeInfoId = info.Id, Kind = dto.Kind, EventDate = eventDate, NewExpiryDate = dto.NewExpiryDate?.Date, Fee = dto.Fee,
+                DocumentId = dto.DocumentId, Note = eventNote, CreatedAt = now, CreatedByUserId = Me,
             });
             info.ModifyDate = now; info.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcGuaranteeDto>(PcText.Concurrency); }
-            return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First());
+            return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First(), remark);
         }
 
         public async Task<ResponseDto<PcGuaranteeDto>> ReleaseGuaranteeAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return Bad<PcGuaranteeDto>(PcText.InvalidData);
             // the money side signs the release too, so this list differs from the other guarantee actions (★ to be confirmed by the company)
-            if (!_user.IsInRole("COMMERCIAL,FINANCEMANAGER,PMO")) return Bad<PcGuaranteeDto>(PcText.NotAllowed + " (آزادسازی ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)");
+            if (!_user.IsInRole(CloseRoles)) return Bad<PcGuaranteeDto>(PcText.NotAllowed + " (آزادسازی ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)");
             if (dto.ReleaseDate == default) return Bad<PcGuaranteeDto>("تاریخ آزادسازی را وارد کنید.");
             if (dto.ReleaseDate.Date > DateTime.Today) return Bad<PcGuaranteeDto>("تاریخ آزادسازی نمی‌تواند در آینده باشد.");
             string note = Clean(dto.Note);
             if (note == null) return Bad<PcGuaranteeDto>("برای آزادسازی ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه کارفرما یا بانک) را بنویسید.");
+            if (note.Length > MaxNoteLength) return Bad<PcGuaranteeDto>($"توضیح آزادسازی بیش از {MaxNoteLength} نویسه است؛ آن را کوتاه کنید.");
             PcGuaranteeInfo info = await _uow.Set<PcGuaranteeInfo>().FirstOrDefaultAsync(i => i.Id == dto.GuaranteeId && !i.Deleted, cancellationToken);
             if (info == null) return PcText.NotFound<PcGuaranteeDto>("اطلاعات ضمانت‌نامه پیدا نشد.");
             if (info.Status == PcGuaranteeStatus.Released) return Bad<PcGuaranteeDto>("این ضمانت‌نامه قبلاً آزاد شده است.");
             if (info.Status == PcGuaranteeStatus.Cancelled) return Bad<PcGuaranteeDto>("ضمانت‌نامه ابطال‌شده آزاد نمی‌شود.");
             if (info.Status == PcGuaranteeStatus.Requested) return Bad<PcGuaranteeDto>("ضمانت‌نامه‌ای که هنوز صادر نشده آزاد نمی‌شود.");
             DateTimeOffset now = DateTimeOffset.Now;
+            // R1a2 (M2, M-3): a second person confirms with the same action; the first call only records the request (its date and note are what the confirmation records)
+            CloseStep step = await FirstOfTwoAsync(info, PcGuaranteeCloseKind.Release, dto.ReleaseDate.Date, note, now, cancellationToken);
+            if (step.Answer != null) return step.Answer;
             info.Status = PcGuaranteeStatus.Released;
             info.ModifyDate = now; info.ModifierUserId = Me;
             _uow.Set<PcGuaranteeEvent>().Add(new PcGuaranteeEvent
             {
-                GuaranteeInfoId = info.Id, Kind = PcGuaranteeEventKind.Release, EventDate = dto.ReleaseDate.Date, DocumentId = dto.DocumentId, Note = note, CreatedAt = now, CreatedByUserId = Me,
+                GuaranteeInfoId = info.Id, Kind = PcGuaranteeEventKind.Release, EventDate = step.Date, DocumentId = dto.DocumentId, Note = step.Note, CreatedAt = now, CreatedByUserId = Me,
             });
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcGuaranteeDto>(PcText.Concurrency); }
-            return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First());
+            return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First(), step.Remark);
         }
 
         public async Task<int> ExpireGuaranteesAsync(CancellationToken cancellationToken)

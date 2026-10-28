@@ -49,8 +49,9 @@ namespace WebApi.Controllers
         [ProducesResponseType((int)HttpStatusCode.OK)]
         public async Task<ActionResult> UpdateDocumentDescriptionAsync([FromBody] UpdateDocumentDto updateDocumentDescriptionDto)
         {
+            // R1a2 (H3): the generic edit; a file that a record refers to changes only through its owner module, a loose file only by its uploader or the PMO
             return this.Ok(await this._documentServices
-                    .UpdateDocumentAsync(updateDocumentDescriptionDto));
+                    .UpdateDocumentByUserAsync(updateDocumentDescriptionDto));
         }
 
         [Authorize]

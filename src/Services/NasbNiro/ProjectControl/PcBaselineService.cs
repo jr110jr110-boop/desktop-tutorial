@@ -530,7 +530,36 @@ namespace Services.NasbNiro.ProjectControl
         {
             Id = c.Id, Number = c.Number, ContractId = c.ContractId, Direction = c.Direction, Issue = c.Issue, Basis = c.Basis, DaysQuantified = c.DaysQuantified, AmountQuantified = c.AmountQuantified, Status = c.Status,
             IsCrossClaim = c.IsCrossClaim, PmoApproved = c.PmoApproved, DesignManufacturingApproved = c.DesignManufacturingApproved, ReviewNote = c.ReviewNote, RowVersion = c.RowVersion == null ? null : Convert.ToBase64String(c.RowVersion),
+            QuantifiedByUserId = c.QuantifiedByUserId, LastEditedByUserId = c.LastEditedByUserId, PmoApprovedByUserId = c.PmoApprovedByUserId, PmoApprovedAt = c.PmoApprovedAt, DesignApprovedByUserId = c.DesignApprovedByUserId, DesignApprovedAt = c.DesignApprovedAt,
         };
+
+        /// <summary>
+        /// R1a2 (H4): both approvals and the reviewer go back to "not given". A new quantification or an edit of the text means the people approved something else than what the claim now says,
+        /// so the approvals are given again (the audit trail keeps the earlier ones).
+        /// </summary>
+        private static void ResetClaimApprovals(PcClaim c)
+        {
+            c.PmoApproved = false; c.PmoApprovedByUserId = null; c.PmoApprovedAt = null;
+            c.DesignManufacturingApproved = false; c.DesignApprovedByUserId = null; c.DesignApprovedAt = null;
+            c.ReviewedByUserId = null; c.ReviewedAt = null;
+        }
+
+        /// <summary>
+        /// R1a2 (H4, L-7): the problem with an approval that does not depend on which side approves, or null. A claim is approved only on the quantified amount (status Quantified),
+        /// and not by the person who registered it, the person who wrote its text last or the person who quantified it (an approval of one's own work is no approval).
+        /// </summary>
+        private string ClaimApprovalProblem(PcClaim c)
+        {
+            if (c.Status != PcClaimStatus.Quantified) return "تایید فقط برای ادعای برآوردشده ممکن است؛ ابتدا ادعا برآورد شود.";
+            if (c.CreatorUserId == Me || c.QuantifiedByUserId == Me || c.LastEditedByUserId == Me)
+                return PcText.SameUser + " (تایید‌کننده نمی‌تواند ثبت‌کننده، آخرین ویرایش‌کننده‌ی متن یا برآوردکننده‌ی همین ادعا باشد)";
+            return null;
+        }
+
+        /// <summary>The person who gave the PMO approval; a claim approved before R1a2 has no own column, its single approval is in ReviewedByUserId.</summary>
+        private static int? PmoApproverOf(PcClaim c) => c.PmoApprovedByUserId ?? (c.PmoApproved && !c.DesignManufacturingApproved ? c.ReviewedByUserId : null);
+
+        private static int? DesignApproverOf(PcClaim c) => c.DesignApprovedByUserId ?? (c.DesignManufacturingApproved && !c.PmoApproved ? c.ReviewedByUserId : null);
 
         public async Task<ResponseDto<PagedList<PcClaimDto>>> GetClaimsAsync(PcContractQuery query, CancellationToken cancellationToken)
         {
@@ -557,10 +586,17 @@ namespace Services.NasbNiro.ProjectControl
                 c = await _uow.Set<PcClaim>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (c == null) return PcText.NotFound<PcClaimDto>("ادعا پیدا نشد.");
                 if (c.Status == PcClaimStatus.Settled || c.Status == PcClaimStatus.Withdrawn) return Bad<PcClaimDto>("ادعای بسته‌شده ویرایش نمی‌شود.");
+                // R1a2 (H4): what the client was told does not change afterwards; a claim that was notified is withdrawn and registered again
+                if (c.Status == PcClaimStatus.Notified || c.Status == PcClaimStatus.Negotiating || c.Status == PcClaimStatus.Litigation)
+                    return Bad<PcClaimDto>("ادعای ابلاغ‌شده ویرایش نمی‌شود؛ در صورت نیاز آن را پس بگیرید و ادعای تازه ثبت کنید.");
+                bool edited = c.Direction != dto.Direction || c.Issue != Clean(dto.Issue) || c.Basis != Clean(dto.Basis) || c.IsCrossClaim != dto.IsCrossClaim;
+                if (edited && (c.PmoApproved || c.DesignManufacturingApproved)) ResetClaimApprovals(c);
+                // R1a2 (L-7): the person whose save changed the text is remembered; he is barred from both approvals like the creator and the quantifier
+                if (edited) c.LastEditedByUserId = Me;
             }
             else
             {
-                c = new PcClaim { ContractId = dto.ContractId, Status = PcClaimStatus.Issue, CreateDate = now, CreatorUserId = Me, Number = await InventoryNumbers.NextNumberAsync(_uow, PcNumbers.Claim, "CL", DateTime.Today, cancellationToken) };
+                c = new PcClaim { ContractId = dto.ContractId, Status = PcClaimStatus.Issue, CreateDate = now, CreatorUserId = Me, LastEditedByUserId = Me, Number = await InventoryNumbers.NextNumberAsync(_uow, PcNumbers.Claim, "CL", DateTime.Today, cancellationToken) };
                 _uow.Set<PcClaim>().Add(c);
             }
             c.Direction = dto.Direction; c.Issue = Clean(dto.Issue); c.Basis = Clean(dto.Basis); c.IsCrossClaim = dto.IsCrossClaim; c.ModifyDate = now; c.ModifierUserId = Me;
@@ -581,23 +617,29 @@ namespace Services.NasbNiro.ProjectControl
                     if (!_user.IsInRole(ProjectControlRoles.PlanningOrPm + ",COMMERCIAL")) return Bad<PcClaimDto>(PcText.NotAllowed);
                     if (c.Status != PcClaimStatus.Issue && c.Status != PcClaimStatus.Quantified) return Bad<PcClaimDto>("برآورد فقط برای ادعای تازه ممکن است.");
                     if ((dto.Days ?? 0) <= 0 && (dto.Amount ?? 0m) <= 0m) return Bad<PcClaimDto>("زمان یا مبلغ برآورد را وارد کنید.");
-                    c.DaysQuantified = dto.Days; c.AmountQuantified = dto.Amount; c.Status = PcClaimStatus.Quantified;
+                    // R1a2 (H4): a new quantification starts the approvals again, and the quantifier is remembered (he or she cannot approve)
+                    ResetClaimApprovals(c);
+                    c.DaysQuantified = dto.Days; c.AmountQuantified = dto.Amount; c.Status = PcClaimStatus.Quantified; c.QuantifiedByUserId = Me;
                     break;
                 // R1a (finding H9): a claim is notified only after two different people approved it, the PMO deputy and the design and manufacturing side.
                 // The entity keeps one reviewer id: while one approval exists it is that approver's id, so the second approver is compared with it; a repeated
                 // approval is refused so the id is never overwritten before the second approval (the audit trail keeps both approvals).
                 case "approve-pmo":
                     if (!_user.IsInRole(ProjectControlRoles.Pmo)) return Bad<PcClaimDto>(PcText.NotAllowed);
+                    if (ClaimApprovalProblem(c) is string pmoProblem) return Bad<PcClaimDto>(pmoProblem);
                     if (c.PmoApproved) return Bad<PcClaimDto>("تایید PMO برای این ادعا قبلاً ثبت شده است.");
-                    if (c.DesignManufacturingApproved && c.ReviewedByUserId == Me) return Bad<PcClaimDto>(PcText.SameUser + " (تایید PMO و تایید طراحی/ساخت باید از دو نفر مختلف باشد)");
-                    c.PmoApproved = true; c.ReviewedByUserId = Me; c.ReviewedAt = now; c.ReviewNote = Clean(dto.Note) ?? c.ReviewNote;
+                    if (c.DesignManufacturingApproved && DesignApproverOf(c) == Me) return Bad<PcClaimDto>(PcText.SameUser + " (تایید PMO و تایید طراحی/ساخت باید از دو نفر مختلف باشد)");
+                    c.PmoApproved = true; c.PmoApprovedByUserId = Me; c.PmoApprovedAt = now;
+                    c.ReviewedByUserId = Me; c.ReviewedAt = now; c.ReviewNote = Clean(dto.Note) ?? c.ReviewNote;
                     break;
                 case "approve-design":
                     // the PMO deputy does not approve for the design side: the design and manufacturing deputy is engineering (or the project manager) ★ to be confirmed by the company
                     if (!_user.IsInRole("ENGINEERING,PROJECTMANAGER")) return Bad<PcClaimDto>(PcText.NotAllowed + " (تایید طراحی/ساخت با مدیر مهندسی یا مدیر پروژه است)");
+                    if (ClaimApprovalProblem(c) is string designProblem) return Bad<PcClaimDto>(designProblem);
                     if (c.DesignManufacturingApproved) return Bad<PcClaimDto>("تایید طراحی/ساخت برای این ادعا قبلاً ثبت شده است.");
-                    if (c.PmoApproved && c.ReviewedByUserId == Me) return Bad<PcClaimDto>(PcText.SameUser + " (تایید PMO و تایید طراحی/ساخت باید از دو نفر مختلف باشد)");
-                    c.DesignManufacturingApproved = true; c.ReviewedByUserId = Me; c.ReviewedAt = now; c.ReviewNote = Clean(dto.Note) ?? c.ReviewNote;
+                    if (c.PmoApproved && PmoApproverOf(c) == Me) return Bad<PcClaimDto>(PcText.SameUser + " (تایید PMO و تایید طراحی/ساخت باید از دو نفر مختلف باشد)");
+                    c.DesignManufacturingApproved = true; c.DesignApprovedByUserId = Me; c.DesignApprovedAt = now;
+                    c.ReviewedByUserId = Me; c.ReviewedAt = now; c.ReviewNote = Clean(dto.Note) ?? c.ReviewNote;
                     break;
                 case "notify":
                     if (!_user.IsInRole(ProjectControlRoles.PlanningOrPm + ",COMMERCIAL")) return Bad<PcClaimDto>(PcText.NotAllowed);

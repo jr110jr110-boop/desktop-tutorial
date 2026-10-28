@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Entities.Identity.Constants;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
@@ -21,7 +22,7 @@ namespace MsTests
     {
         private static readonly HashSet<string> AnonymousByDesign = new HashSet<string>(StringComparer.Ordinal)
         {
-            "AccountsController.LoginAsync", "AccountsController.LogoutAsync", "AccountsController.RefreshTokenAsync",
+            "AccountsController.LoginAsync", "AccountsController.LogoutAsync", "AccountsController.LogoutByAddressAsync", "AccountsController.RefreshTokenAsync",
             // R1a: the user who signed in with a temporary password has no token yet; the temporary password is the proof
             "AccountsController.ChangeTemporaryPasswordAsync",
             "ApiSettingsController.Get", "OfficeAttendanceController.PushAsync",
@@ -44,14 +45,10 @@ namespace MsTests
             { "AiChatController.ChatAsync", "self-service: the assistant acts as the caller, every tool re-checks its RequiredRoles and a conversation belongs to its user" },
             { "AiChatController.VoiceAsync", "self-service: the same chat by voice; every tool re-checks its RequiredRoles and a conversation belongs to its user" },
 
-            // documents: no owner is stored (a schema change is needed), so an ownership rule cannot be written yet
-            { "DocumentsController.UploadAsync", "FINDING: every module needs attachments, so any signed-in user may upload; the document has no uploader field" },
-            { "DocumentsController.ChangeAsync", "FINDING: any signed-in user can replace the file of any document id; the document has no owner field (needs CreatedByUserId)" },
-            { "DocumentsController.UpdateDocumentDescriptionAsync", "FINDING: any signed-in user can edit the description of any document id; the document has no owner field" },
-
-            // exceptions to [RolesCheckedInService]: the service has no check for this action (or for one branch of it)
-            { "OfficeLettersController.SavePartyAsync", "FINDING: LetterService.SavePartyAsync has no role or owner check; any signed-in user can add or change a correspondent" },
-            { "ProcurementController.InvoiceActionAsync", "FINDING: PayablesService.InvoiceActionAsync has a role check for approve but none for cancel; any signed-in user can cancel an unapproved supplier invoice" },
+            // documents (R1a2, H3): every module needs attachments, so any signed-in user may upload; the uploader is stored on the document
+            { "DocumentsController.UploadAsync", "every module needs attachments, so any signed-in user may upload; the service stores the uploader (Document.UploadedByUserId)" },
+            { "DocumentsController.ChangeAsync", "the service refuses a file that any record refers to and, for a loose file, everybody except its uploader and the PMO (DocumentRulesTests)" },
+            { "DocumentsController.UpdateDocumentDescriptionAsync", "the same rule as change-file: referenced files are refused, a loose file is edited by its uploader or the PMO only (DocumentRulesTests)" },
         };
 
         private static bool NamesRolesOrPolicy(IEnumerable<AuthorizeAttribute> attributes) =>
@@ -128,6 +125,29 @@ namespace MsTests
             Assert.AreEqual(0, noReason.Length, "allow-list entries without a one-line reason: " + string.Join(", ", noReason));
             string[] anonymousListed = OpenWriteActions.Keys.Where(AnonymousByDesign.Contains).ToArray();
             Assert.AreEqual(0, anonymousListed.Length, "anonymous-by-design actions belong to the first test, not to this list: " + string.Join(", ", anonymousListed));
+        }
+
+        [TestMethod]
+        public void EveryRoleNamedInAnAuthorizeAttributeExistsAmongTheSeededRoles()
+        {
+            // R1a2 (L8): a role name with a typo in [Authorize(Roles = "...")] locks every user out of the action without any error; the names are checked against the roles the system seeds
+            var seeded = new HashSet<string>(RoleConstants.GetRoles().Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
+            var unknown = new List<string>();
+            void Check(string where, IEnumerable<AuthorizeAttribute> attributes)
+            {
+                foreach (AuthorizeAttribute attribute in attributes)
+                    foreach (string role in (attribute.Roles ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        if (!seeded.Contains(role)) unknown.Add(where + " -> " + role);
+            }
+
+            foreach (Type controller in Controllers())
+            {
+                Check(controller.Name, controller.GetCustomAttributes<AuthorizeAttribute>(inherit: true));
+                foreach (MethodInfo action in Actions(controller))
+                    Check(controller.Name + "." + action.Name, action.GetCustomAttributes<AuthorizeAttribute>(inherit: true));
+            }
+            Assert.AreEqual(0, unknown.Count, "roles that no seeded role has this name (" + unknown.Count + "):\n" + string.Join("\n", unknown.OrderBy(x => x)));
+            Assert.IsTrue(seeded.Contains("PMO") && seeded.Contains("CEO") && seeded.Count > 20, "the seeded list itself is not empty");
         }
 
         [TestMethod]

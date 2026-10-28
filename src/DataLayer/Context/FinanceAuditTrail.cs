@@ -139,6 +139,8 @@ namespace DataLayer.Context
             // R1a (finding H7): the legacy contract, the project control records that move money, dates or authority, and the procurement headers.
             // Fields that the system recomputes all the time (float, forecast, percent cache, snapshots) and long free text are not listed; "Deleted" is listed so a soft delete leaves a row.
             { typeof(LegacyContracts.ContractEntity), null },
+            // R1a2 (M3): the provisional statements (صورت‌وضعیت) carry the amounts the client is asked to accept; an edit or a delete leaves a row
+            { typeof(LegacyContracts.ProvisionalStatement), new[] { "ContractId", "Number", "Date", "Price", "AcceptedPrice", "Type", "Status", "Deleted" } },
             { typeof(Pc.PcSetting), null },
             { typeof(Pc.PcApprovalAuthority), null },
             { typeof(Pc.PcCalendar), null },
@@ -151,19 +153,21 @@ namespace DataLayer.Context
             { typeof(Pc.PcContractReview), new[] { "ContractId", "TenderCode", "Kind", "Decision", "DecisionNote", "DecidedAt", "DecidedByUserId", "CapabilityCheckedByUserId", "Deleted" } },
             { typeof(Pc.PcContractAmendment), new[] { "Number", "ContractId", "Type", "Origin", "PriceDelta", "DaysDelta", "CeoApprovedAt", "CeoApprovedByUserId", "CustomerApprovalReference", "CustomerApprovalDate", "Deleted" } },
             { typeof(Pc.PcPaymentMilestone), new[] { "ContractId", "Seq", "Title", "Kind", "Trigger", "TriggerPercent", "WorkOrderId", "ActivityId", "PercentOfValue", "Amount", "PlannedDate", "Status", "DueAt", "PaidAt", "ProvisionalStatementId", "FinanceRef", "ClientLetterRef", "Deleted" } },
-            { typeof(Pc.PcGuaranteeInfo), new[] { "SourceKind", "SourceId", "ContractId", "GuaranteeType", "AmountDecimal", "CurrencyCode", "IssuerKind", "ValidFrom", "ExpiryDate", "ReleaseTrigger", "Status", "Deleted" } },
+            { typeof(Pc.PcGuaranteeInfo), new[] { "SourceKind", "SourceId", "ContractId", "GuaranteeType", "AmountDecimal", "CurrencyCode", "IssuerKind", "ValidFrom", "ExpiryDate", "ReleaseTrigger", "Status", "ReleaseRequestedByUserId", "ReleaseRequestedAt", "ReleaseRequestedKind", "ReleaseRequestedNote", "ReleaseRequestedDate", "Deleted" } },
             { typeof(Pc.PcPenaltyAssessment), new[] { "ContractId", "MilestoneId", "WorkOrderId", "Subject", "DueDate", "ActualDate", "LateDays", "GraceDays", "RatePercentPerWeek", "CapPercent", "BaseAmount", "Amount", "Status", "DecisionReason", "DecidedByUserId", "Deleted" } },
             { typeof(Pc.PcVariationOrder), new[] { "Number", "ContractId", "ChangeRequestId", "AmendmentId", "PriceDelta", "DaysDelta", "ClientApprovalReference", "ClientApprovalDate", "Status", "Deleted" } },
             { typeof(Pc.PcChangeRequest), new[] { "Number", "ContractId", "Origin", "Type", "RequesterUserId", "Status", "RegisteredAt", "DueDate", "Escalated", "RequestedPriceDelta", "RequestedDaysDelta", "ImpactDeltaDays", "ImpactDeltaCost", "ImpactOnCriticalPath", "Decision", "DecisionNote", "DecidedByUserId", "DecidedByRole", "DecidedAt", "BaselineId", "Deleted" } },
             { typeof(Pc.PcChangeBoardMember), new[] { "ChangeRequestId", "Role", "UserId", "Vote", "VotedAt" } },
-            { typeof(Pc.PcClaim), new[] { "Number", "ContractId", "Direction", "DaysQuantified", "AmountQuantified", "Status", "IsCrossClaim", "PmoApproved", "DesignManufacturingApproved", "ReviewedByUserId", "ReviewedAt", "Deleted" } },
+            // R1a2 (H3): the stored files (the bytes themselves are not in the trail; the replacement of the bytes under the same name is a row written by the document service with the SHA-256 before and after)
+            { typeof(Entities.Model.Document), new[] { "Path", "MimType", "Name", "Description", "Code", "UploadedByUserId" } },
+            { typeof(Pc.PcClaim), new[] { "Number", "ContractId", "Direction", "Issue", "Basis", "DaysQuantified", "AmountQuantified", "Status", "IsCrossClaim", "PmoApproved", "DesignManufacturingApproved", "ReviewedByUserId", "ReviewedAt", "QuantifiedByUserId", "LastEditedByUserId", "PmoApprovedByUserId", "PmoApprovedAt", "DesignApprovedByUserId", "DesignApprovedAt", "Deleted" } },
             { typeof(Pc.PcManualProgress), new[] { "ActivityId", "Percent", "State", "ProposedByUserId", "DecidedByUserId", "DecidedAt", "DecisionNote" } },
             { typeof(Pc.PcDailyReport), new[] { "ContractId", "Unit", "ReportDate", "State", "ConfirmedByUserId", "ConfirmedAt", "Deleted" } },
             { typeof(Pc.PcShipment), new[] { "Number", "ContractId", "WorkOrderId", "ReleaseNoteId", "Status", "ShippedAt", "DeliveryReceiptNumber", "DeliveredAt", "HandoverMinutesNumber", "HandoverAt", "Deleted" } },
             { typeof(Pc.PcBaseline), new[] { "ContractId", "Number", "Kind", "Status", "Reason", "ChangeRequestId", "ProjectStart", "ProjectFinish", "Bac", "ManagementReserve", "ApprovedAt", "ApprovedByUserId", "Deleted" } },
             { typeof(Pc.PcBaselineSignature), new[] { "BaselineId", "UnitRole", "UserId", "SignedAt" } },
+            // the lines of the cost baseline are written as ONE summary row per baseline (R1a2, L9), see Capture; they are in this table so that the changed lines are found
             { typeof(Pc.PcCostBaselineLine), new[] { "ContractId", "BaselineId", "WbsNodeId", "ActivityId", "CostClass", "ResourceClass", "Amount", "Description" } },
-            // generated in bulk from the legacy BOM tree: the insert is not listed, a later change is
             { typeof(Pc.PcWbsNode), new[] { "ContractId", "Code", "Title", "NodeType", "Weight", "BudgetAmount", "ResponsibleUnit", "ApprovedAt", "ApprovedByUserId", "Deleted" } },
             { typeof(Pc.PcActivity), new[] { "ContractId", "Code", "Title", "DurationDays", "Weight", "BudgetAtCompletion", "ResponsibleUnit", "ConstraintType", "ConstraintDate", "ActualStart", "ActualFinish", "Status", "OnHoldReason", "Deleted" } },
             { typeof(Proc.ProcurementSetting), null },
@@ -178,6 +182,8 @@ namespace DataLayer.Context
         private static readonly Dictionary<Type, string> Labels = new Dictionary<Type, string>
         {
             { typeof(LegacyContracts.ContractEntity), "قرارداد" },
+            { typeof(LegacyContracts.ProvisionalStatement), "صورت‌وضعیت" },
+            { typeof(Entities.Model.Document), "فایل" },
             { typeof(Pc.PcSetting), "تنظیم کنترل پروژه" },
             { typeof(Pc.PcApprovalAuthority), "اختیار تصمیم‌گیری کنترل پروژه" },
             { typeof(Pc.PcCalendar), "تقویم کاری" },
@@ -244,6 +250,9 @@ namespace DataLayer.Context
                 Type type = entry.Entity.GetType();
                 string[] only = Audited[type];
 
+                // the lines of a cost baseline are listed as one row per baseline after this loop (R1a2, L9)
+                if (entry.Entity is Pc.PcCostBaselineLine) continue;
+
                 // system-made records are too many to list one by one (the vouchers keep their own history through the events)
                 if (entry.State == EntityState.Added)
                 {
@@ -257,8 +266,7 @@ namespace DataLayer.Context
                     // items (imports) and ITP activities (copied from a template) are made in bulk; only the changes of their gates are listed
                     if (entry.Entity is Entities.Model.NasbNiro.Inventory.InventoryItem || entry.Entity is Entities.Model.NasbNiro.Quality.ItpActivity) continue;
                     if (entry.Entity is MfTimeBooking tb && tb.Source == MfBookingSource.Terminal) continue;
-                    // the schedule and the WBS are generated in bulk from the legacy BOM tree; a later change of a node is listed
-                    if (entry.Entity is Pc.PcActivity || entry.Entity is Pc.PcWbsNode) continue;
+                    // (R1a2, L9: the inserts of the schedule and the WBS nodes are listed too; a node made by the generator is as much a decision as an edit)
                     // the one-off linker of legacy contracts and tenders links them in bulk; a person's manual link is listed
                     if (entry.Entity is SlCustomerLink link && link.Method == SlLinkMethod.LegacyMatch) continue;
                 }
@@ -276,20 +284,20 @@ namespace DataLayer.Context
                     if (entry.State == EntityState.Added)
                     {
                         after[name] = Shape(name, p.CurrentValue);
-                        if (Masked.Contains(name) && p.CurrentValue is string added) after[name + "Hash"] = Hash(added);
+                        if (Masked.Contains(name)) AddHash(after, name, p.CurrentValue);
                     }
                     else if (entry.State == EntityState.Deleted)
                     {
                         before[name] = Shape(name, p.OriginalValue);
-                        if (Masked.Contains(name) && p.OriginalValue is string removed) before[name + "Hash"] = Hash(removed);
+                        if (Masked.Contains(name)) AddHash(before, name, p.OriginalValue);
                     }
                     else
                     {
                         if (!p.IsModified || Equals(p.OriginalValue, p.CurrentValue)) continue;
                         before[name] = Shape(name, p.OriginalValue);
                         after[name] = Shape(name, p.CurrentValue);
-                        // a one-way hash of the full value: a change that keeps the visible last digits is still detectable
-                        if (Masked.Contains(name)) { before[name + "Hash"] = p.OriginalValue is string o ? Hash(o) : null; after[name + "Hash"] = p.CurrentValue is string c ? Hash(c) : null; }
+                        // a keyed hash of the full value (R1a2, M4): a change that keeps the visible last digits is still detectable; no key, no hash
+                        if (Masked.Contains(name)) { AddHash(before, name, p.OriginalValue); AddHash(after, name, p.CurrentValue); }
                     }
                 }
                 if (entry.State == EntityState.Modified && after.Count == 0) continue;
@@ -315,6 +323,32 @@ namespace DataLayer.Context
                     Ip = ip,
                 });
             }
+
+            // R1a2 (L9): the lines of a cost baseline are written in bulk (hundreds at once). One summary row per baseline says how many lines were added, changed and removed
+            // and what their amounts were; the full lines stay in the baseline itself.
+            foreach (var group in audited.Where(e => e.Entity is Pc.PcCostBaselineLine)
+                         .GroupBy(e => new { ((Pc.PcCostBaselineLine)e.Entity).ContractId, ((Pc.PcCostBaselineLine)e.Entity).BaselineId }))
+            {
+                int added = group.Count(e => e.State == EntityState.Added);
+                int changed = group.Count(e => e.State == EntityState.Modified);
+                int removed = group.Count(e => e.State == EntityState.Deleted);
+                decimal amountBefore = group.Where(e => e.State != EntityState.Added).Sum(e => (decimal)e.Property("Amount").OriginalValue);
+                decimal amountAfter = group.Where(e => e.State != EntityState.Deleted).Sum(e => (decimal)e.Property("Amount").CurrentValue);
+                string text = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "سطرهای خط‌مبنای هزینه: {0} سطر افزوده، {1} سطر تغییر‌یافته، {2} سطر حذف‌شده؛ جمع مبلغ سطرها از {3:N0} به {4:N0}", added, changed, removed, amountBefore, amountAfter);
+                context.Set<FnAuditLog>().Add(new FnAuditLog
+                {
+                    EntityType = typeof(Pc.PcCostBaselineLine).Name,
+                    EntityId = group.Key.BaselineId,
+                    Action = changed == 0 && removed == 0 ? "Added" : changed == 0 && added == 0 ? "Deleted" : "Modified",
+                    Summary = text,
+                    BeforeJson = changed + removed == 0 ? null : JsonSerializer.Serialize(new { contractId = group.Key.ContractId, lines = changed + removed, amount = amountBefore }),
+                    AfterJson = added + changed == 0 ? null : JsonSerializer.Serialize(new { contractId = group.Key.ContractId, added, changed, removed, lines = added + changed, amount = amountAfter }),
+                    UserId = userId,
+                    At = now,
+                    Ip = ip,
+                });
+            }
         }
 
         private static readonly System.Globalization.PersianCalendar Persian = new System.Globalization.PersianCalendar();
@@ -327,10 +361,12 @@ namespace DataLayer.Context
             return dt.TimeOfDay == TimeSpan.Zero ? date : date + " " + dt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        private static string Hash(string value)
+        /// <summary>R1a2 (M4): writes "<c>name</c>Hash" (HMAC-SHA256 with the server key) when a key is set; otherwise nothing is written.</summary>
+        private static void AddHash(Dictionary<string, object> target, string name, object value)
         {
-            string normalised = new string(value.Where(ch => !char.IsWhiteSpace(ch)).ToArray()).ToUpperInvariant();
-            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalised))).Substring(0, 16).ToLowerInvariant();
+            if (!(value is string text)) return;
+            string hash = AuditHmac.Compute(text);
+            if (hash != null) target[name + "Hash"] = hash;
         }
 
         private static object Shape(string name, object value)
@@ -374,6 +410,12 @@ namespace DataLayer.Context
             if (entry.Entity is FnAttendanceSheet) text = "برگه حضور ماهانه";
             if (entry.Entity is OfAttendancePolicy) text = "سیاست حضور و غیاب";
             if (entry.Entity is OfDelegation) text = "نیابت سمت";
+            if (entry.Entity is Entities.Model.Document)
+            {
+                // the key of a file is a Guid, which the integer column of the trail cannot hold; it is part of the text instead
+                object documentId = entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Id")?.CurrentValue;
+                text = (string.IsNullOrWhiteSpace(text) ? null : text + " ") + (documentId == null ? null : "(" + documentId + ")");
+            }
             if (entry.Entity is OfNumberingRule) text = "قاعده شماره‌گذاری نامه";
             if (entry.Entity is OfClockImportProfile) text = "الگوی ستون‌بندی فایل اکسل ترددها";
             if (Labels.TryGetValue(entry.Entity.GetType(), out string label)) text = string.IsNullOrWhiteSpace(text) ? label : label + " " + text;

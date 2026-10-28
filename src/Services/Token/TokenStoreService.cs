@@ -18,8 +18,15 @@ namespace Services.Token
         Task<CustomUserToken> FindTokenAsync(string refreshTokenValue);
         Task DeleteTokenAsync(string refreshTokenValue);
         Task DeleteTokensWithSameRefreshTokenSourceAsync(string refreshTokenIdHashSource);
-        Task InvalidateUserTokensAsync(int userId);
+        /// <summary>Removes every refresh token record of the user. With <paramref name="keepConsumed"/> the records of refresh tokens that were already used stay (they are the tripwire for a reuse) unless they have run out.</summary>
+        Task InvalidateUserTokensAsync(int userId, bool keepConsumed = false);
         Task RevokeUserBearerTokensAsync(string userIdValue, string refreshTokenValue);
+
+        /// <summary>R1a2 (L3): a refresh token that was used is not deleted but marked as used (and when), so presenting it again is recognised.</summary>
+        void MarkConsumed(CustomUserToken token, DateTimeOffset now);
+
+        /// <summary>True for the record of a refresh token that was used.</summary>
+        bool IsConsumed(CustomUserToken token);
     }
 
     public class TokenStoreService : ITokenStoreService
@@ -51,11 +58,23 @@ namespace Services.Token
             _tokenFactoryService.ThrowIfNull(nameof(tokenFactoryService));
         }
 
+        /// <summary>The access-token hash of a record whose refresh token was used (no real hash is empty). The time of the use is kept in AccessTokenExpiresDateTime, which a used record does not need otherwise.</summary>
+        private const string ConsumedMark = "";
+
+        public void MarkConsumed(CustomUserToken token, DateTimeOffset now)
+        {
+            token.AccessTokenHash = ConsumedMark;
+            token.AccessTokenExpiresDateTime = now;
+        }
+
+        public bool IsConsumed(CustomUserToken token) => token != null && token.AccessTokenHash == ConsumedMark;
+
         public async Task AddUserTokenAsync(CustomUserToken userToken)
         {
             if (!_configuration.Value.AllowMultipleLoginsFromTheSameUser)
             {
-                await InvalidateUserTokensAsync(userToken.UserId);
+                // one session per user: the other refresh tokens go, but the used ones stay as the tripwire of a reuse
+                await InvalidateUserTokensAsync(userToken.UserId, keepConsumed: true);
             }
             await DeleteTokensWithSameRefreshTokenSourceAsync(userToken.RefreshTokenIdHashSource);
             _tokens.Add(userToken);
@@ -127,6 +146,8 @@ namespace Services.Token
                 {
                     var refreshTokenIdHashSource = _securityService.GetSha256Hash(refreshTokenSerial);
                     await DeleteTokensWithSameRefreshTokenSourceAsync(refreshTokenIdHashSource);
+                    // R1a2: the presented token itself goes too (only its children were removed before, so a signed-out refresh token still worked)
+                    await DeleteTokenAsync(refreshTokenValue);
                 }
             }
 
@@ -151,11 +172,14 @@ namespace Services.Token
             return _tokens.Include(x => x.User).ThenInclude(x => x.UserProfile).FirstOrDefaultAsync(x => x.RefreshTokenIdHash == refreshTokenIdHash);
         }
 
-        public async Task InvalidateUserTokensAsync(int userId)
+        public async Task InvalidateUserTokensAsync(int userId, bool keepConsumed = false)
         {
+            var now = DateTimeOffset.UtcNow;
             await _tokens.Where(x => x.UserId == userId)
                          .ForEachAsync(userToken =>
                          {
+                             // a used record is only a tripwire until its refresh token would have run out anyway
+                             if (keepConsumed && IsConsumed(userToken) && userToken.RefreshTokenExpiresDateTime >= now) return;
                              _tokens.Remove(userToken);
                          });
         }

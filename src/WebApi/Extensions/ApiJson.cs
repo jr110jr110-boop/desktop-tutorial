@@ -1,3 +1,5 @@
+using System;
+using System.Security.Claims;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
@@ -18,6 +20,15 @@ namespace WebApi.Extensions
             {
                 NamingStrategy = new CamelCaseNamingStrategy(true, true, true)
             };
+        }
+
+        /// <summary>
+        /// R1a2 (M8): the same settings, with the sensitive legacy fields (prices, bank accounts) left out for the roles that do not work with them, see <see cref="LegacyFieldAccess"/>.
+        /// Startup applies this to MVC once the HTTP context is available through DI; the user is asked again for every value that is written.
+        /// </summary>
+        public static void HideSensitiveFields(JsonSerializerSettings settings, Func<ClaimsPrincipal> currentUser)
+        {
+            settings.ContractResolver = new LegacyFieldContractResolver(currentUser);
         }
 
         public static JsonSerializerSettings Create()

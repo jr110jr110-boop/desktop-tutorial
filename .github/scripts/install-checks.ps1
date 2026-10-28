@@ -1,7 +1,10 @@
 # Checks a server installed by install.ps1 (CI only). Writes PASS/FAIL lines to install-output\checks-<Phase>.txt
 param(
     [Parameter(Mandatory)][string]$Phase,
+    # the temporary password given to install.ps1: the seeded Admin must change it at the first sign-in (R1a2, M7)
     [string]$AdminPassword = 'Ci#Adm1n-Install-2026',
+    # what Admin chooses at the first sign-in (phase 1-first); the later phases sign in with it (it is in the database backup of phase 3 too)
+    [string]$NewAdminPassword = 'Own-Chosen-Pass-2026',
     [string]$InstallRoot = 'D:\INNCO',
     [string]$BackupFolder = 'D:\INNCO\Backup'
 )
@@ -10,8 +13,25 @@ $ProgressPreference = 'SilentlyContinue'
 $out = Join-Path $PWD 'install-output'
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $results = New-Object System.Collections.Generic.List[string]
-$base = 'http://localhost'
+$base = 'http://127.0.0.1'   # R1a2 (M6): plain HTTP is bound to the loopback address of the server itself
+$hostName = $env:COMPUTERNAME.ToLowerInvariant()
 $state = Join-Path $out 'state.json'
+
+# The certificate of the install test is self-signed: the HTTPS checks accept any certificate (they check what is served, not who signed it).
+Add-Type -TypeDefinition @'
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class InstallTestTrust
+{
+    public static void AcceptAnyCertificate()
+    {
+        ServicePointManager.ServerCertificateValidationCallback = delegate (object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) { return true; };
+    }
+}
+'@
+[InstallTestTrust]::AcceptAnyCertificate()
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 function Check([string]$Name, [scriptblock]$Test) {
     try { $r = & $Test; $results.Add("PASS  $Name  $r") }
@@ -39,13 +59,58 @@ Check 'unknown API address answers 404' {
     catch [System.Net.WebException] { $code = [int]$_.Exception.Response.StatusCode; if ($code -ne 404) { throw "http=$code" }; 'http=404' }
 }
 
+Check 'https answers with the user interface' {
+    $r = Invoke-WebRequest -UseBasicParsing "https://$hostName/"
+    if ($r.Content -notmatch 'id="app"') { throw 'no <div id="app"> over https' }
+    "https://$hostName/ http=$([int]$r.StatusCode)"
+}
+Check 'https answers carry the HSTS header' {
+    $r = Invoke-WebRequest -UseBasicParsing "https://$hostName/"
+    $value = [string]$r.Headers['Strict-Transport-Security']
+    if ($value -notmatch 'max-age=\d+') { throw "no Strict-Transport-Security header (value: '$value')" }
+    $value
+}
+Check 'plain http is for the server itself only' {
+    $address = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                 Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+                 ForEach-Object { $_.IPAddress }) | Select-Object -First 1
+    if (-not $address) { return 'no network address on this computer (nothing to test)' }
+    try { $r = Invoke-WebRequest -UseBasicParsing "http://$address/" -TimeoutSec 20; throw "http://$address/ answered http=$([int]$r.StatusCode)" }
+    catch [System.Net.WebException] { "http://$address/ is not served ($($_.Exception.Status))" }
+}
+
 $token = $null
-Check 'sign in as Admin' {
-    $body = @{ userName = 'Admin'; password = $AdminPassword } | ConvertTo-Json
-    $r = Invoke-WebRequest -UseBasicParsing -Method Post "$base/api/v1/Accounts/login" -ContentType 'application/json' -Body $body
-    $script:token = [regex]::Match($r.Content, '"accessToken"\s*:\s*"([^"]+)"').Groups[1].Value
-    if (-not $script:token) { throw "no token: $($r.Content)" }
-    "token length=$($script:token.Length)"
+Check 'sign in as Admin (the first time the program asks for a new password)' {
+    if ($Phase -eq '1-first') {
+        # R1a2 (M7): the Admin made by the installer must choose his own password before he gets a token
+        $body = @{ userName = 'Admin'; password = $AdminPassword } | ConvertTo-Json
+        $r = Invoke-WebRequest -UseBasicParsing -Method Post "$base/api/v1/Accounts/login" -ContentType 'application/json' -Body $body
+        if ($r.Content -match '"accessToken"\s*:\s*"[^"]+') { throw 'the installer password gave a token at once; the seeded Admin must change it first' }
+        if ($r.Content -notmatch 'MUST_CHANGE_PASSWORD') { throw "expected MUST_CHANGE_PASSWORD: $($r.Content)" }
+        $body = @{ userName = 'Admin'; temporaryPassword = $AdminPassword; newPassword = $NewAdminPassword } | ConvertTo-Json
+        $r = Invoke-WebRequest -UseBasicParsing -Method Post "$base/api/v1/Accounts/change-temporary-password" -ContentType 'application/json' -Body $body
+        $script:token = [regex]::Match($r.Content, '"accessToken"\s*:\s*"([^"]+)"').Groups[1].Value
+        if (-not $script:token) { throw "no token after choosing the new password: $($r.Content)" }
+        $body = @{ userName = 'Admin'; password = $AdminPassword } | ConvertTo-Json
+        $r = Invoke-WebRequest -UseBasicParsing -Method Post "$base/api/v1/Accounts/login" -ContentType 'application/json' -Body $body
+        if ($r.Content -match '"accessToken"\s*:\s*"[^"]+') { throw 'the installer password still signs in after the new one was chosen' }
+        "new password chosen; the installer password is dead; token length=$($script:token.Length)"
+    }
+    else {
+        $body = @{ userName = 'Admin'; password = $NewAdminPassword } | ConvertTo-Json
+        $r = Invoke-WebRequest -UseBasicParsing -Method Post "$base/api/v1/Accounts/login" -ContentType 'application/json' -Body $body
+        $script:token = [regex]::Match($r.Content, '"accessToken"\s*:\s*"([^"]+)"').Groups[1].Value
+        if (-not $script:token) { throw "no token: $($r.Content)" }
+        "token length=$($script:token.Length)"
+    }
+}
+Check 'the installer password is no longer in the settings file' {
+    $text = Get-Content -Raw -Path "$InstallRoot\app\appsettings.Production.json"
+    if ($text.Contains($AdminPassword)) { throw 'appsettings.Production.json still holds the installer password' }
+    if (-not (Test-Path "$InstallRoot\admin-seed-done.txt")) { throw 'no admin-seed-done.txt marker' }
+    if ($text -notmatch '"https://') { throw 'the token issuer is not an https address' }
+    if ($text -notmatch '"AuditHmacKey"') { throw 'no Identity:AuditHmacKey in the settings file' }
+    'password removed, marker present, https issuer, audit key present'
 }
 $headers = @{ Authorization = "Bearer $token" }
 Check 'contracts list (database query)' {

@@ -18365,6 +18365,12 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
+                    b.Property<DateTimeOffset?>("DesignApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DesignApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("DesignManufacturingApproved")
                         .HasColumnType("bit");
 
@@ -18377,6 +18383,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("Issue")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int?>("LastEditedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<int>("ModifierUserId")
                         .HasColumnType("int");
@@ -18391,6 +18400,15 @@ namespace DataLayer.Migrations
 
                     b.Property<bool>("PmoApproved")
                         .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("PmoApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PmoApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("QuantifiedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<string>("ReviewNote")
                         .HasMaxLength(1000)
@@ -19184,6 +19202,22 @@ namespace DataLayer.Migrations
                         .HasColumnType("bit");
 
                     b.Property<string>("ParseNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ReleaseRequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ReleaseRequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ReleaseRequestedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ReleaseRequestedKind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReleaseRequestedNote")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 

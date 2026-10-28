@@ -312,6 +312,11 @@ namespace WebApi.Controllers.ProjectControl
         [Authorize(Roles = "COMMERCIAL,FINANCEMANAGER,PMO")]
         public async Task<IActionResult> ReleaseGuaranteeAsync([FromBody] PcGuaranteeReleaseDto dto, CancellationToken ct) => Ok(await _commercial.ReleaseGuaranteeAsync(dto, ct));
 
+        // R1a2 (M-3): the release and the cancellation share one request slot; the one who asked (or a PMO user) takes a request back before the second person confirms it
+        [HttpPost("guarantees/withdraw")]
+        [Authorize(Roles = "COMMERCIAL,FINANCEMANAGER,PMO")]
+        public async Task<IActionResult> WithdrawGuaranteeRequestAsync([FromBody] PcGuaranteeWithdrawDto dto, CancellationToken ct) => Ok(await _commercial.WithdrawGuaranteeRequestAsync(dto, ct));
+
         [HttpGet("guarantees/alerts")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
         public async Task<IActionResult> GuaranteeAlertsAsync([FromQuery] int? contractId, CancellationToken ct) => Ok(ResponseDtoHelper.Ok(await _commercial.GuaranteeAlertsAsync(contractId, ct)));

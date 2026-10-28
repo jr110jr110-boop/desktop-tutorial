@@ -6,6 +6,12 @@ OUT="$PWD/smoke-output"
 BASE=http://127.0.0.1:5080
 mkdir -p "$OUT"
 
+# R1a2 review (L-8b): an "(expect ...)" echo checks nothing. expect_eq NAME ACTUAL EXPECTED writes a PASS or a FAIL line to the results file, and the script ends with a failing code when one failed.
+pass=0; fail=0
+expect_eq() {
+  if [ "$2" = "$3" ]; then echo "PASS $1" | tee -a "$OUT/3-results.txt"; pass=$((pass+1)); else echo "FAIL $1 (got '$2', expected '$3')" | tee -a "$OUT/3-results.txt"; fail=$((fail+1)); fi
+}
+
 cd src/WebApi
 dotnet bin/Release/net10.0/WebApi.dll > "$OUT/2-app.log" 2>&1 &
 APP_PID=$!
@@ -31,8 +37,12 @@ if [ -f src/WebApi/wwwroot/index.html ]; then
   asset=$(grep -o -m1 '/assets/index\.[0-9a-f]*\.js' src/WebApi/wwwroot/index.html)
   echo "ui_asset $asset $(curl -s -o /dev/null -w 'http=%{http_code} type=%{content_type}' "$BASE$asset")" | tee -a "$OUT/3-results.txt"
   echo "ui_favicon $(curl -s -o /dev/null -w 'http=%{http_code}' "$BASE/favicon.ico")" | tee -a "$OUT/3-results.txt"
-  echo "api_unknown_path $(curl -s -o /dev/null -w 'http=%{http_code}' "$BASE/api/v1/NoSuchThing/xyz") (expect 404)" | tee -a "$OUT/3-results.txt"
-  echo "ui_post_to_page $(curl -s -o /dev/null -w 'http=%{http_code}' -X POST "$BASE/contract/list") (expect 404)" | tee -a "$OUT/3-results.txt"
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/NoSuchThing/xyz")
+  echo "api_unknown_path http=$code" | tee -a "$OUT/3-results.txt"
+  expect_eq "an unknown API path answers 404 (not the front-end page)" "$code" "404"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/contract/list")
+  echo "ui_post_to_page http=$code" | tee -a "$OUT/3-results.txt"
+  expect_eq "a POST to a front-end page answers 404" "$code" "404"
   echo "swagger_ui $(curl -s -o /dev/null -w 'http=%{http_code}' "$BASE/swagger/index.html")" | tee -a "$OUT/3-results.txt"
   rm -f "$OUT/page.tmp"
 fi
@@ -74,11 +84,28 @@ while IFS= read -r ep; do
 done < .github/scripts/get-endpoints.txt
 rm -f "$OUT/body.tmp"
 
-curl -s "$BASE/api/v1/Accounts/logout/$REFRESH" -H "Authorization: Bearer $TOKEN" -o "$OUT/logout.json" -w 'logout_http=%{http_code}\n' | tee -a "$OUT/3-results.txt"
+# logout (R1a2, M6): POST with the refresh token in the body; the address form is kept for one release only (deprecated) and is no longer used here
+# R1a2 review (L-8b): every expectation is a check now. The control comes first: the access token works right up to the sign-out, so its refusal afterwards is the effect of the sign-out.
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/Accounts/get-current-user-info")
+expect_eq "(control) the access token works right before the sign-out" "$code" "200"
+curl -s -X POST "$BASE/api/v1/Accounts/logout" -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d "{\"refreshToken\":\"$REFRESH\"}" -o "$OUT/logout.json" -w 'logout_http=%{http_code}\n' | tee -a "$OUT/3-results.txt"
+echo "logout_success=$(jq -r '.success' "$OUT/logout.json" 2>/dev/null)" | tee -a "$OUT/3-results.txt"
+expect_eq "the sign-out answers success" "$(jq -r '.success' "$OUT/logout.json" 2>/dev/null)" "true"
+# the refresh token of a signed-out user is dead, and so is the access token it was issued with (the security stamp moved on, R1a2 H2)
+curl -s -X POST "$BASE/api/v1/Accounts/refresh-token" -H 'Content-Type: application/json' \
+  -d "{\"refreshToken\":\"$REFRESH\"}" -o "$OUT/refresh-after-logout.json" -w 'refresh_after_logout_http=%{http_code}\n' | tee -a "$OUT/3-results.txt"
+echo "refresh_after_logout_success=$(jq -r '.success' "$OUT/refresh-after-logout.json" 2>/dev/null)" | tee -a "$OUT/3-results.txt"
+expect_eq "the refresh token of the signed-out session is refused" "$(jq -r '.success' "$OUT/refresh-after-logout.json" 2>/dev/null)" "false"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/Accounts/get-current-user-info")
+echo "old_access_token_after_logout http=$code" | tee -a "$OUT/3-results.txt"
+expect_eq "the access token of the signed-out session is refused at once (401)" "$code" "401"
 
 echo "--- status codes:" >> "$OUT/3-results.txt"
 awk '{print $1}' "$OUT/4-endpoints.txt" | sort | uniq -c >> "$OUT/3-results.txt"
+echo "--- checks: $pass passed, $fail failed" >> "$OUT/3-results.txt"
 cat "$OUT/3-results.txt"
 
 kill "$APP_PID" 2>/dev/null; sleep 3; kill -9 "$APP_PID" 2>/dev/null || true
+[ "$fail" = "0" ] || exit 1
 exit 0

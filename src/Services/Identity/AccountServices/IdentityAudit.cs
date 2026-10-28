@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Finance;
+using Entities.Model.NasbNiro.Office;
 using Microsoft.AspNetCore.Http;
 
 namespace Services.Identity.AccountServices
@@ -41,6 +44,24 @@ namespace Services.Identity.AccountServices
         public const string Refused = "Refused";
         public const string PhotoChanged = "PhotoChanged";
 
+        // R1a2
+        public const string Bootstrap = "Bootstrap";                 // the second PMO user was given the role at once (fewer than two active PMO users existed)
+        public const string ResetRequested = "ResetRequested";       // a PMO user asked for the password reset of a PMO or sensitive-role holder
+        public const string GrantVoid = "GrantVoid";                 // a pending request that can no longer be approved (requester or user not valid any more, role dropped)
+        public const string TokenReuse = "TokenReuse";               // a refresh token that was already used was presented again: every session of the user was ended
+        public const string UnknownUsers = "UnknownUsers";           // sign-in attempts with names that do not exist, counted per address and minute
+        public const string LoopbackSignIn = "LoopbackSignIn";       // a locked PMO account signed in from the server itself (the documented recovery)
+        public const string Logout = "Logout";
+        public const string UpgradeForced = "UpgradeForced";         // the one-time forced password change of the upgrade ran (this row is its marker)
+        public const string FileReplaced = "FileReplaced";           // the bytes of a stored file were replaced through the generic Documents endpoint (SHA-256 before and after)
+
+        // R1a2, review fixes
+        public const string RevokeRequested = "RevokeRequested";     // M-1: a PMO user asked to take the PMO role from somebody, or to delete a PMO user
+        public const string RevokeApproved = "RevokeApproved";       // M-1: a different PMO user approved it and it was done
+        public const string SteppedDown = "SteppedDown";             // M-1: a PMO user took the PMO role from himself (allowed unless he is the last active one)
+        public const string LegacyPmoRecord = "LegacyPmoRecord";     // L-5: the upgrade wrote a record for a PMO user of before R1a2 (this row, with no user, is its marker)
+        public const string LoopbackCapped = "LoopbackCapped";       // L-1: too many wrong passwords from the server itself; its sign-in is held back by the lock-out like any other
+
         /// <param name="userId">The person the row is about: the actor of an administrator's action, the user who signs in for a sign-in event (0 when unknown).</param>
         /// <param name="entityId">The user the event concerns (the target of an administrator's action).</param>
         public static void Add(IUnitOfWork uow, IHttpContextAccessor http, int userId, string entityType, int? entityId, string action, string summary, object before = null, object after = null)
@@ -57,6 +78,121 @@ namespace Services.Identity.AccountServices
                 UserId = userId,
                 At = DateTimeOffset.Now,
                 Ip = IdentityRules.Clip(ip, 60),
+            });
+        }
+    }
+
+    /// <summary>
+    /// R1a2 (M1): sign-in attempts with a name that does not exist are counted per client address and minute, and a row of the append-only trail is written only for the
+    /// first one and when the count of the minute reaches 10, 100, 1000 (and so on), instead of one row per attempt. An attacker who floods the sign-in with made-up
+    /// names can no longer fill the database (the rate limiter keeps the count low in the first place). The counter lives in memory: a restart only starts it again.
+    /// </summary>
+    public static class UnknownUserTally
+    {
+        private static readonly object Gate = new object();
+        private static readonly Dictionary<string, (long Minute, int Count)> ByAddress = new Dictionary<string, (long, int)>(StringComparer.Ordinal);
+
+        /// <summary>Counts one more attempt of this address in the minute of <paramref name="now"/> and returns the count of that minute.</summary>
+        public static int Add(string address, DateTimeOffset now)
+        {
+            string key = address ?? "?";
+            long minute = now.UtcDateTime.Ticks / TimeSpan.TicksPerMinute;
+            lock (Gate)
+            {
+                if (ByAddress.Count > 5000)
+                    foreach (string stale in ByAddress.Where(kv => kv.Value.Minute < minute - 1).Select(kv => kv.Key).ToList()) ByAddress.Remove(stale);
+                int count = ByAddress.TryGetValue(key, out var entry) && entry.Minute == minute ? entry.Count + 1 : 1;
+                ByAddress[key] = (minute, count);
+                return count;
+            }
+        }
+
+        /// <summary>True for the first attempt of a minute and for 10, 100, 1000 ... attempts: the counts that get a row.</summary>
+        public static bool IsRowWorthy(int count)
+        {
+            if (count <= 1) return count == 1;
+            while (count % 10 == 0) count /= 10;
+            return count == 1;
+        }
+
+        /// <summary>For the tests: forget every count.</summary>
+        public static void Reset()
+        {
+            lock (Gate) ByAddress.Clear();
+        }
+    }
+
+    /// <summary>
+    /// R1a2 (L-1): wrong passwords from the server itself (loopback address) are counted per user over a sliding window. A locked PMO account may be opened from the server
+    /// (the documented recovery), but only while the count stays at or below <see cref="IdentityRules.LoopbackFailureCap"/>: a local process that guesses without end
+    /// would otherwise get 20 tries a minute for ever. The counter lives in memory (a restart only starts it again), like <see cref="UnknownUserTally"/>.
+    /// </summary>
+    public static class LoopbackFailureTally
+    {
+        private static readonly object Gate = new object();
+        private static readonly Dictionary<string, List<DateTimeOffset>> ByUser = new Dictionary<string, List<DateTimeOffset>>(StringComparer.OrdinalIgnoreCase);
+
+        private static void Prune(List<DateTimeOffset> list, DateTimeOffset now) => list.RemoveAll(t => now - t >= IdentityRules.LoopbackFailureWindow);
+
+        /// <summary>Counts one more wrong password of <paramref name="user"/> and returns the count inside the window.</summary>
+        public static int Add(string user, DateTimeOffset now)
+        {
+            string key = user ?? "?";
+            lock (Gate)
+            {
+                if (!ByUser.TryGetValue(key, out List<DateTimeOffset> list)) ByUser[key] = list = new List<DateTimeOffset>();
+                Prune(list, now);
+                list.Add(now);
+                if (list.Count > 1000) list.RemoveRange(0, list.Count - 1000);
+                return list.Count;
+            }
+        }
+
+        /// <summary>The wrong passwords of <paramref name="user"/> inside the window.</summary>
+        public static int Count(string user, DateTimeOffset now)
+        {
+            lock (Gate)
+            {
+                if (!ByUser.TryGetValue(user ?? "?", out List<DateTimeOffset> list)) return 0;
+                Prune(list, now);
+                return list.Count;
+            }
+        }
+
+        /// <summary>True while the sign-in from the server itself may still open a locked PMO account.</summary>
+        public static bool RecoveryOpen(string user, DateTimeOffset now) => Count(user, now) <= IdentityRules.LoopbackFailureCap;
+
+        /// <summary>A right password forgets the wrong ones.</summary>
+        public static void Clear(string user)
+        {
+            lock (Gate) ByUser.Remove(user ?? "?");
+        }
+
+        /// <summary>For the tests: forget every count.</summary>
+        public static void Reset()
+        {
+            lock (Gate) ByUser.Clear();
+        }
+    }
+
+    /// <summary>R1a2: security alerts to the inbox of the office module. The row is only added to the context; the caller's next SaveChanges stores it.</summary>
+    internal static class IdentityInbox
+    {
+        public static void Alert(IUnitOfWork uow, string sourceKey, string title, string recipientRole = null, int? recipientUserId = null)
+        {
+            string text = IdentityRules.Clip(title, 290);
+            uow.Set<OfInboxItem>().Add(new OfInboxItem
+            {
+                Kind = OfInboxKind.Alert,
+                Title = text,
+                SourceModule = "Identity",
+                SourceType = "Security",
+                SourceKey = IdentityRules.Clip(sourceKey, 190),
+                Priority = OfUrgency.Urgent,
+                Status = OfInboxStatus.Unread,
+                CreatedAt = DateTimeOffset.Now,
+                RecipientRole = string.IsNullOrWhiteSpace(recipientRole) ? null : recipientRole.Trim().ToUpperInvariant(),
+                RecipientUserId = recipientUserId,
             });
         }
     }

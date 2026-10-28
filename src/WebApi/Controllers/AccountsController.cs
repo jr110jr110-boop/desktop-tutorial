@@ -8,6 +8,7 @@ using Common.Results;
 using Entities.Identity.Constants;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Services.Identity.AccountServices;
 using ViewModels.Identity.UserDtos;
 using ViewModels.NasbNiro.Pagination;
@@ -41,9 +42,11 @@ namespace Controllers
             return Ok(await _accountService.RegisterAsync(registerUserDto, cancellationToken));
         }
 
+        // R1a2 (M1): the calls that need no token (login, refresh-token, change-temporary-password, logout) are limited per client address (Identity:RateLimitPerMinute).
         [HttpPost("login")]
         [ProducesResponseType(typeof(ResponseDto<ResponseLoginUserDto>), 200)]
         [AllowAnonymous]
+        [EnableRateLimiting(WebApi.Startup.IdentityRateLimitPolicy)]
         public async ValueTask<ActionResult<ResponseDto<ResponseLoginUserDto>>> LoginAsync(
             [FromBody] LoginUserDto loginUserDto, CancellationToken cancellationToken)
         {
@@ -53,6 +56,7 @@ namespace Controllers
         // Anonymous by design: the access token it replaces has usually expired, so the refresh token (signed, stored hashed, one use) is the proof.
         [HttpPost("refresh-token")]
         [AllowAnonymous]
+        [EnableRateLimiting(WebApi.Startup.IdentityRateLimitPolicy)]
         [ProducesResponseType(typeof(ResponseDto<ResponseLoginUserDto>), 200)]
         public async ValueTask<ActionResult<ResponseDto<ResponseLoginUserDto>>> RefreshTokenAsync(
             [FromBody] RefreshTokenDto refreshTokenDto, CancellationToken cancellationToken)
@@ -60,13 +64,33 @@ namespace Controllers
             return Ok(await _accountService.RefreshTokenAsync(refreshTokenDto, cancellationToken));
         }
 
+        // R1a2 (M6): the refresh token travels in the body, not in the address (addresses end up in server and proxy logs).
+        // Anonymous by design: the access token has usually expired, so the refresh token is the proof; the service signs out the owner of the token.
+        [AllowAnonymous]
+        [HttpPost("logout")]
+        [EnableRateLimiting(WebApi.Startup.IdentityRateLimitPolicy)]
+        [ProducesResponseType(typeof(ResponseDto<bool>), 200)]
+        public async Task<ActionResult<ResponseDto<bool>>> LogoutAsync([FromBody] LogoutDto logoutDto, CancellationToken cancellationToken)
+        {
+            var claimsIdentity = this.User?.Identity as ClaimsIdentity;
+            var userIdValue = claimsIdentity?.FindFirst(ClaimTypes.UserData)?.Value;
+
+            ResponseDto<bool> responseContract =
+                await _accountService.LogoutAsync(userIdValue, logoutDto?.RefreshToken, cancellationToken);
+
+            return Ok(responseContract);
+        }
+
+        // DEPRECATED (R1a2, M6): kept for one release so the front-end that was built before can still sign out. It puts the refresh token in the address, which
+        // servers and proxies write to their logs; the front-end must call POST logout with {"refreshToken": ...} instead. This action will be removed in the next release.
         [AllowAnonymous]
         [HttpGet("logout/{refreshToken}")]
+        [EnableRateLimiting(WebApi.Startup.IdentityRateLimitPolicy)]
         [ProducesResponseType(typeof(ResponseDto<bool>), 200)]
-        public async Task<ActionResult<ResponseDto<bool>>> LogoutAsync(string refreshToken, CancellationToken cancellationToken)
+        public async Task<ActionResult<ResponseDto<bool>>> LogoutByAddressAsync(string refreshToken, CancellationToken cancellationToken)
         {
-            var claimsIdentity = this.User.Identity as ClaimsIdentity;
-            var userIdValue = claimsIdentity.FindFirst(ClaimTypes.UserData)?.Value;
+            var claimsIdentity = this.User?.Identity as ClaimsIdentity;
+            var userIdValue = claimsIdentity?.FindFirst(ClaimTypes.UserData)?.Value;
 
             ResponseDto<bool> responseContract =
                 await _accountService.LogoutAsync(userIdValue, refreshToken, cancellationToken);
@@ -113,6 +137,7 @@ namespace Controllers
         // (a wrong one counts toward the sign-in lock-out).
         [HttpPost("change-temporary-password")]
         [AllowAnonymous]
+        [EnableRateLimiting(WebApi.Startup.IdentityRateLimitPolicy)]
         [ProducesResponseType(typeof(ResponseDto<ResponseLoginUserDto>), 200)]
         public async ValueTask<ActionResult<ResponseDto<ResponseLoginUserDto>>> ChangeTemporaryPasswordAsync(
             [FromBody] ChangeTemporaryPasswordDto dto, CancellationToken cancellationToken)
@@ -120,11 +145,13 @@ namespace Controllers
             return Ok(await _accountService.ChangeTemporaryPasswordAsync(dto, cancellationToken));
         }
 
-        // ★ PMO only, and never the own roles. A sensitive role is only requested here; a second PMO user approves it (role-grants).
+        // ★ PMO only, and never the own roles (a PMO user may only step down from PMO himself, unless he is the last active one).
+        // A sensitive role, and the removal of the PMO role, are only requested here; a second PMO user approves them (role-grants).
+        // R1a2 (L-9): data is { roles, pending, grantId, grantIds } (it was the comma-joined roles string).
         [HttpPost("edit-user-roles")]
         [Authorize(Roles = RoleConstants.PMO)]
-        [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
-        public async ValueTask<ActionResult<ResponseDto<string>>> EditRolesAsync(
+        [ProducesResponseType(typeof(ResponseDto<ChangeRoleResultDto>), (int)HttpStatusCode.OK)]
+        public async ValueTask<ActionResult<ResponseDto<ChangeRoleResultDto>>> EditRolesAsync(
             ChangeRoleDto changeRoleDto, CancellationToken cancellationToken)
         {
             return Ok(await _accountService.ChangeRoleAsync(changeRoleDto, cancellationToken));

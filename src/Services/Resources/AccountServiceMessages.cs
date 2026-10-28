@@ -46,5 +46,37 @@
         public const string GrantApproved = "نقش تأیید و به کاربر داده شد.";
         public const string GrantRejected = "درخواست نقش رد شد.";
         public const string AccountRefreshForbidden = "این حساب کاربری اجازه‌ی تمدید ورود ندارد.";
+
+        // ---- R1a2: the second review (independent approvers, reset requests, expiring temporary passwords, one-use refresh tokens)
+        public const string TemporaryPasswordExpired = "مهلت رمز موقت شما تمام شده است؛ از یک مدیر (PMO) بخواهید رمز موقت تازه‌ای بدهد.";
+        public const string TemporaryPasswordExpiredCode = "TEMPORARY_PASSWORD_EXPIRED";
+        public const string RefreshTokenReused = "این توکن تجدید قبلاً استفاده شده بود؛ برای امنیت همه‌ی نشست‌های این کاربر بسته شد. دوباره وارد شوید.";
+        public const string GrantApproverGrantedByRequester = "نقش PMO تأییدکننده به درخواست خود همین درخواست‌کننده داده شده است؛ مدیر (PMO) مستقل دیگری باید تأیید کند.";
+        public const string GrantApproverTooNew = "تأییدکننده هنوز به‌اندازه‌ی کافی (چند روز) نقش PMO را نداشته است؛ پس از گذشت این مدت می‌تواند تأیید کند.";
+        public const string GrantVoid = "این درخواست دیگر معتبر نیست (کاربر غیرفعال شده یا درخواست‌کننده دیگر PMO نیست) و کنار گذاشته شد.";
+        public const string GrantWithdrawnByEdit = "درخواست نقش حساسی که در ویرایش نیامده بود پس گرفته شد: ";
+        public const string PmoBootstrapApplied = "نقش PMO بدون تأیید دوم داده شد، چون هنوز دو مدیر (PMO) فعال وجود ندارد؛ این کار در پرونده‌ی ممیزی ثبت و به مدیرعامل اعلام شد. از این پس هر نقش PMO تأیید مدیر دیگری می‌خواهد.";
+        public const string ResetNeedsApproval = "رمز این کاربر حساس است؛ درخواست بازنشانی ثبت شد و پس از تأیید یک مدیر (PMO) دیگر انجام می‌شود.";
+        public const string ResetAlreadyPending = "برای این کاربر از قبل درخواست بازنشانی رمز عبور ثبت شده و منتظر تأیید است.";
+        public const string ResetNoApprover = "بازنشانی رمز یک کاربر حساس دست‌کم یک مدیر (PMO) دیگر لازم دارد، غیر از شما و غیر از خود آن کاربر؛ ابتدا یک PMO سوم تعریف کنید.";
+        public const string ResetApproved = "بازنشانی رمز عبور تأیید شد؛ رمز موقت را به کاربر برسانید (فقط همین یک بار نشان داده می‌شود).";
+        public const string ResetRequestedInbox = "درخواست بازنشانی رمز عبور حساب شما ثبت شد و منتظر تأیید یک مدیر (PMO) دیگر است. اگر شما چنین چیزی نخواسته‌اید، همین حالا به مدیر امنیت خبر دهید.";
+        public const string ResetDoneInbox = "رمز عبور حساب شما با تأیید دو مدیر بازنشانی شد؛ در ورود بعدی باید رمز جدید بگذارید.";
+        public const string BootstrapInbox = "نقش PMO بدون تأیید دوم به یک کاربر داده شد (راه‌اندازی مدیر دوم): ";
+
+        // ---- R1a2, review fixes: removing the PMO role / deleting a PMO user is a request (M-1), the receiver of a sensitive role chooses his own password first (M-2)
+        public const string RevokePending = "برداشتن نقش PMO پس از تأیید یک مدیر (PMO) دیگر انجام می‌شود: ";
+        public const string RevokeAlreadyPending = "برای برداشتن نقش PMO این کاربر از قبل درخواست ثبت شده و منتظر تأیید است.";
+        public const string RevokeNoApprover = "برداشتن نقش PMO یا حذف یک مدیر (PMO) دست‌کم یک مدیر (PMO) دیگر لازم دارد، غیر از شما و غیر از خود آن کاربر؛ ابتدا یک PMO دیگر تعریف کنید (یا خود کاربر نقش را از خودش بردارد).";
+        public const string RevokeWithdrawnByEdit = "درخواست برداشتن نقش PMO که در ویرایش دیگر نیامده بود پس گرفته شد: ";
+        public const string DeleteNeedsApproval = "حذف یک مدیر (PMO) پس از تأیید یک مدیر (PMO) دیگر انجام می‌شود؛ درخواست حذف ثبت شد.";
+        public const string DeleteAlreadyPending = "برای حذف این مدیر (PMO) از قبل درخواست ثبت شده و منتظر تأیید است.";
+        public const string RevokeApproved = "درخواست تأیید و انجام شد.";
+        public const string RevokeRequestedInbox = "برای حساب شما درخواست برداشتن نقش PMO (یا حذف حساب) ثبت شد و منتظر تأیید یک مدیر (PMO) دیگر است. اگر شما چنین چیزی نخواسته‌اید، همین حالا به مدیر امنیت خبر دهید.";
+        public const string LastPmoCannotStepDown = "شما آخرین مدیر (PMO) فعال هستید؛ پیش از کنار رفتن باید مدیر (PMO) فعال دیگری وجود داشته باشد.";
+        public const string SteppedDown = "نقش PMO از خودتان برداشته شد (در پرونده‌ی ممیزی ثبت شد)؛ از این پس مدیریت کاربران برای شما بسته است و باید دوباره وارد شوید.";
+        public const string CannotRejectOwnRequest = "درخواستی که درباره‌ی حساب خودتان است (بازنشانی رمز عبور، برداشتن نقش یا حذف) را خودتان نمی‌توانید رد کنید؛ مدیر (PMO) دیگری باید این کار را بکند.";
+        public const string GrantReceiverMustChangeOwnPassword = "گیرنده‌ی نقش هنوز رمز عبور خودش را عوض نکرده است و مدیری که او را ثبت کرده یا رمزش را بازنشانی کرده آن رمز را می‌داند؛ تا گیرنده با «تغییر رمز عبور» (با وارد کردن رمز فعلی) رمز تازه‌ی خودش را نگذارد، این نقش حساس تأیید نمی‌شود.";
+        public const string GrantNeedsOwnPasswordInbox = "برای حساب شما یک نقش حساس درخواست شده است؛ تا وقتی رمز عبور خودتان را با «تغییر رمز عبور» (با وارد کردن رمز فعلی) عوض نکنید، این نقش تأیید نمی‌شود. اگر شما چنین چیزی نخواسته‌اید، به مدیر امنیت خبر دهید.";
     }
 }

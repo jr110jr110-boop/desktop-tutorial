@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -13,11 +14,14 @@ using Entities.Identity.Constants;
 using Entities.Model;
 using Entities.Model.NasbNiro.Finance;
 using IocConfig;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.Contracts;
 using Services.Contracts.Identity;
@@ -29,6 +33,7 @@ using ViewModels.Identity.UserDtos;
 using ViewModels.Mapping;
 using ViewModels.NasbNiro.DocumentDtos;
 using ViewModels.NasbNiro.Pagination;
+using WebApi.Extensions;
 
 namespace MsTests
 {
@@ -39,7 +44,7 @@ namespace MsTests
     /// The tests run the real AccountService with the real Identity services on the in-memory database.
     /// </summary>
     [TestClass]
-    public class IdentityTests
+    public partial class IdentityTests
     {
         private const string AdminPassword = "SET-BY-INSTALL-ps1"; // the placeholder of appsettings.json (the seed user's password in the tests)
         private const string GoodPassword = "Zx-Secret-2026k";
@@ -59,10 +64,39 @@ namespace MsTests
             public Task<ResponseDocumentDto> DownloadDocumentAsync(Guid documentId) => throw new NotSupportedException();
             public Task<bool> DeleteDocumentAsync(Guid image) => Task.FromResult(true);
             public Task<bool> UpdateDocumentAsync(UpdateDocumentDto updateDocumentDto) => throw new NotSupportedException();
+            public Task<ResponseDto<bool>> UpdateDocumentByUserAsync(UpdateDocumentDto updateDocumentDto) => throw new NotSupportedException();
             public Task<ResponseDto<string>> ChangeFileAsync(ChangeFileDto dto) => throw new NotSupportedException();
             public Task<ResponseDto<ResponseFileDto>> GetFileInfoAsync(Guid fileId) => throw new NotSupportedException();
             public Task<bool> IsLetterFileAsync(Guid documentId) => Task.FromResult(false);
             public Task<string> GetFileHashAsync(Guid documentId) => Task.FromResult<string>(null);
+        }
+
+        /// <summary>Keeps what the services write to the log, so a test can look at the level of a message.</summary>
+        private sealed class LogCollector : ILoggerProvider
+        {
+            private readonly List<(LogLevel Level, string Category, string Text)> _entries = new List<(LogLevel, string, string)>();
+
+            public IReadOnlyList<(LogLevel Level, string Category, string Text)> Entries
+            {
+                get { lock (_entries) return _entries.ToList(); }
+            }
+
+            public ILogger CreateLogger(string categoryName) => new Sink(this, categoryName);
+
+            public void Dispose() { }
+
+            private sealed class Sink : ILogger
+            {
+                private readonly LogCollector _owner;
+                private readonly string _category;
+                public Sink(LogCollector owner, string category) { _owner = owner; _category = category; }
+                public IDisposable BeginScope<TState>(TState state) where TState : notnull => null;
+                public bool IsEnabled(LogLevel logLevel) => true;
+                public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
+                {
+                    lock (_owner._entries) _owner._entries.Add((logLevel, _category, formatter(state, exception)));
+                }
+            }
         }
 
         private sealed class Host
@@ -71,17 +105,25 @@ namespace MsTests
             public IHttpContextAccessor Http { get; }
             public int AdminId { get; }
 
-            public Host()
+            /// <summary>The settings of this host; a test may change a value (the options are read again for every scope).</summary>
+            public IConfigurationRoot Configuration { get; }
+
+            /// <summary>What the services wrote to the log (level and text), for the tests that look at the level of a message.</summary>
+            public LogCollector Logs { get; } = new LogCollector();
+
+            /// <summary>A host with its own in-memory database: the seeded administrator is the only PMO user, so tests that depend on the number of PMO users start from a known state.</summary>
+            public Host(string databaseName = null, IDictionary<string, string> settings = null)
             {
                 var services = new ServiceCollection();
                 services.AddOptions();
-                services.AddLogging();
+                services.AddLogging(logging => logging.AddProvider(Logs));
                 services.AddScoped<IWebHostEnvironment, TestWebHostEnvironment>();
 
                 var configuration = new ConfigurationBuilder()
                     .AddJsonFile("appsettings.json", reloadOnChange: false, optional: false)
-                    .AddInMemoryCollection(new[] { new KeyValuePair<string, string>("UseInMemoryDatabase", "true") })
+                    .AddInMemoryCollection(new[] { new KeyValuePair<string, string>("UseInMemoryDatabase", "true") }.Concat(settings ?? new Dictionary<string, string>()))
                     .Build();
+                Configuration = configuration;
                 services.AddSingleton<IConfigurationRoot>(provider => configuration);
                 services.Configure<SiteSettings>(options => configuration.Bind(options));
                 services.Configure<BearerTokensOptions>(options =>
@@ -110,7 +152,8 @@ namespace MsTests
 
                 var siteSettings = services.GetSiteSettings();
                 siteSettings.ActiveDatabase = ActiveDatabase.InMemoryDatabase;
-                siteSettings.ConnectionStrings.LocalDb ??= new Localdb { InitialCatalog = "IRNNCO_IdentityTests" };
+                if (databaseName != null || siteSettings.ConnectionStrings.LocalDb == null)
+                    siteSettings.ConnectionStrings.LocalDb = new Localdb { InitialCatalog = databaseName ?? "IRNNCO_IdentityTests" };
                 services.AddRequiredEfInternalServices(siteSettings);
                 services.AddDbContextPool<ApplicationDbContext>((serviceProvider, optionsBuilder) =>
                 {
@@ -135,15 +178,86 @@ namespace MsTests
             }
 
             /// <summary>Calls the account service the way a request would: a new scope and a signed-in (or anonymous) user.</summary>
-            public async Task<T> As<T>(ClaimsPrincipal who, Func<IAccountService, Task<T>> call)
+            public Task<T> As<T>(ClaimsPrincipal who, Func<IAccountService, Task<T>> call) => From(ClientIp, who, call);
+
+            /// <summary>The same call from another client address; <paramref name="forwardedFor"/> adds the header a reverse proxy would add.</summary>
+            public async Task<T> From<T>(IPAddress address, ClaimsPrincipal who, Func<IAccountService, Task<T>> call, string forwardedFor = null)
             {
                 using (IServiceScope scope = Provider.CreateScope())
                 {
                     var context = new DefaultHttpContext { User = who ?? new ClaimsPrincipal(new ClaimsIdentity()) };
-                    context.Connection.RemoteIpAddress = ClientIp;
+                    context.Connection.RemoteIpAddress = address;
+                    if (forwardedFor != null) context.Request.Headers["X-Forwarded-For"] = forwardedFor;
                     Http.HttpContext = context;
                     var service = scope.ServiceProvider.GetRequiredService<IAccountService>();
                     return await call(service);
+                }
+            }
+
+            /// <summary>
+            /// A PMO user made the way the seeded administrator was: the role is put in directly (no request, no bootstrap, no second approval), so a test can have exactly the PMO users it needs.
+            /// With <paramref name="grantedBy"/> the record of who gave the role is kept as well (and how long ago, for the minimum-days rule).
+            /// </summary>
+            public async Task<int> AddPmoAsync(string userName, int grantedBy = 0, bool bootstrap = false, int ageDays = 30)
+            {
+                int id = await RegisterAsync(Admin, userName, new[] { WarehouseRole });
+                using (IServiceScope scope = Provider.CreateScope())
+                {
+                    var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    // the registration needs a role; the user is to hold the PMO role alone
+                    uow.Set<UserRole>().RemoveRange(uow.Set<UserRole>().Where(r => r.UserId == id).ToList());
+                    uow.Set<UserRole>().Add(new UserRole { UserId = id, RoleId = PmoRole });
+                    if (grantedBy > 0)
+                        uow.Set<UserClaim>().Add(new UserClaim
+                        {
+                            UserId = id, ClaimType = IdentityRules.RoleGrantedClaimType,
+                            ClaimValue = new RoleGrantRecord { Role = "PMO", GrantedBy = grantedBy, ApprovedBy = bootstrap ? 0 : grantedBy + 1000, At = DateTimeOffset.Now.AddDays(-ageDays), Bootstrap = bootstrap }.ToClaimValue(),
+                        });
+                    uow.SaveChanges();
+                }
+                return id;
+            }
+
+            /// <summary>Makes the record of the PMO role of a user <paramref name="days"/> days older (the approver rule asks how long the role has been held).</summary>
+            public void AgeGrantRecord(int userId, int days) => Write(uow =>
+            {
+                foreach (UserClaim row in uow.Set<UserClaim>().Where(c => c.UserId == userId && c.ClaimType == IdentityRules.RoleGrantedClaimType).ToList())
+                    if (RoleGrantRecord.TryParse(row.ClaimValue, out RoleGrantRecord record))
+                    {
+                        record.At = record.At.AddDays(-days);
+                        row.ClaimValue = record.ToClaimValue();
+                    }
+            });
+
+            public string[] RolesOf(int userId) => Provider.RunScopedService<string[], IApplicationUserManager>(m =>
+                m.GetRolesAsync(m.Users.First(u => u.Id == userId)).GetAwaiter().GetResult().OrderBy(x => x).ToArray());
+
+            /// <summary>Changes a row of the database directly (to make a request or a record old, to deactivate a user ...).</summary>
+            public void Write(Action<IUnitOfWork> change)
+            {
+                using (IServiceScope scope = Provider.CreateScope())
+                {
+                    var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    change(uow);
+                    uow.SaveChanges();
+                }
+            }
+
+            /// <summary>
+            /// The account check that every request with a bearer token goes through (the code Startup assigns to OnTokenValidated), run for this access token against the database.
+            /// Returns the reason the token is refused, or null when it is accepted.
+            /// </summary>
+            public async Task<string> TokenProblemAsync(string accessToken, string path = "/api/v1/Contracts")
+            {
+                var jwt = new JwtSecurityTokenHandler().ReadJwtToken(accessToken);
+                var principal = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "test"));
+                using (IServiceScope scope = Provider.CreateScope())
+                {
+                    var http = new DefaultHttpContext { RequestServices = scope.ServiceProvider, User = principal };
+                    http.Request.Path = path;
+                    var context = new TokenValidatedContext(http, new AuthenticationScheme("Bearer", null, typeof(JwtBearerHandler)), new JwtBearerOptions()) { Principal = principal };
+                    await JwtAccountStatus.ValidateAsync(context);
+                    return context.Result?.Failure?.Message;
                 }
             }
 
@@ -178,20 +292,21 @@ namespace MsTests
         private static readonly int FinanceManagerRole = RoleConstants.FinanceManagerResponseRole.Id;
         private static readonly int CeoRole = RoleConstants.CeoResponseRole.Id;
 
-        private static string[] RolesOf(int userId) => H.Provider.RunScopedService<string[], IApplicationUserManager>(m =>
-            m.GetRolesAsync(m.Users.First(u => u.Id == userId)).GetAwaiter().GetResult().OrderBy(x => x).ToArray());
+        private static string[] RolesOf(int userId) => H.RolesOf(userId);
 
         private static ClaimsPrincipal Signed(int id, string name, params string[] roles) => Host.Principal(id, name, roles);
 
         // ---------------------------------------------------------------------------------------------------- pure rules
 
         [TestMethod]
-        public void Sensitive_Roles_Are_The_Six_Of_The_Review()
+        public void Sensitive_Roles_Are_The_Seven_Of_The_Review_Pmo_Included()
         {
-            foreach (string role in new[] { "FINANCEMANAGER", "PAYROLL", "CEO", "AUDITOR", "HR", "SECRETARIAT", "ceo", " Hr " })
+            // the six of the first review and (R1a2, H1) the PMO role itself
+            foreach (string role in new[] { "PMO", "pmo", "FINANCEMANAGER", "PAYROLL", "CEO", "AUDITOR", "HR", "SECRETARIAT", "ceo", " Hr " })
                 Assert.IsTrue(IdentityRules.IsSensitiveRole(role), role);
-            foreach (string role in new[] { "PMO", "FINANCIAL", "WAREHOUSE", "ENGINEERING", "", null })
+            foreach (string role in new[] { "FINANCIAL", "WAREHOUSE", "ENGINEERING", "", null })
                 Assert.IsFalse(IdentityRules.IsSensitiveRole(role), role ?? "null");
+            Assert.AreEqual(7, IdentityRules.SensitiveRoles.Length);
         }
 
         [TestMethod]
@@ -332,114 +447,129 @@ namespace MsTests
         [TestMethod]
         public async Task Nobody_Changes_His_Own_Roles()
         {
+            // a host of its own: how many PMO users there are decides whether the PMO role is given at once (bootstrap) or waits for a second user
+            var h = new Host(Unique("roles"));
             string pmoName = Unique("pmo");
-            int second = await H.RegisterAsync(H.Admin, pmoName, new[] { PmoRole });
+            int second = await h.AddPmoAsync(pmoName);
             ClaimsPrincipal pmo = Signed(second, pmoName, "PMO");
-            CollectionAssert.AreEqual(new[] { "PMO" }, RolesOf(second));
+            CollectionAssert.AreEqual(new[] { "PMO" }, h.RolesOf(second));
 
-            ResponseDto<string> own = await H.As(pmo, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { PmoRole, WarehouseRole } }, default).AsTask());
+            ResponseDto<ChangeRoleResultDto> own = await h.As(pmo, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { PmoRole, WarehouseRole } }, default).AsTask());
             Assert.IsFalse(own.Success);
             Assert.AreEqual(HttpStatusCode.Forbidden, own.HttpStatusCode);
             Assert.AreEqual(AccountServiceMessages.CannotChangeOwnRoles, own.Message);
 
+            // R1a2 (M-1): the one thing he may do to himself is to step down; a step-down that also gives him a role is something else and is refused
+            ResponseDto<ChangeRoleResultDto> mixed = await h.As(pmo, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { WarehouseRole } }, default).AsTask());
+            Assert.IsFalse(mixed.Success);
+            Assert.AreEqual(HttpStatusCode.Forbidden, mixed.HttpStatusCode);
+            CollectionAssert.AreEqual(new[] { "PMO" }, h.RolesOf(second));
+
             // the same through the edit-user screen: other fields yes, the list of roles no
             UpdateUserDto edit = Edit(second, pmoName + "@example.com", new[] { PmoRole, WarehouseRole });
-            Assert.IsFalse((await H.As(pmo, s => s.UpdateUserAsync(edit, default).AsTask())).Success);
+            Assert.IsFalse((await h.As(pmo, s => s.UpdateUserAsync(edit, default).AsTask())).Success);
             edit.RoleIds = new[] { PmoRole };
             edit.Name = "changed";
-            ResponseDto<ResponseUserDto> edited = await H.As(pmo, s => s.UpdateUserAsync(edit, default).AsTask());
+            ResponseDto<ResponseUserDto> edited = await h.As(pmo, s => s.UpdateUserAsync(edit, default).AsTask());
             Assert.IsTrue(edited.Success, edited.Message);
             Assert.AreEqual("changed", edited.Data.Name);
-            CollectionAssert.AreEqual(new[] { "PMO" }, RolesOf(second));
+            CollectionAssert.AreEqual(new[] { "PMO" }, h.RolesOf(second));
 
             // another PMO user can change them (ordinary role: at once)
-            Assert.IsTrue((await H.As(H.Admin, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { PmoRole, WarehouseRole } }, default).AsTask())).Success);
-            CollectionAssert.AreEqual(new[] { "PMO", "WAREHOUSE" }, RolesOf(second));
+            Assert.IsTrue((await h.As(h.Admin, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = second, RoleIds = new[] { PmoRole, WarehouseRole } }, default).AsTask())).Success);
+            CollectionAssert.AreEqual(new[] { "PMO", "WAREHOUSE" }, h.RolesOf(second));
         }
 
         [TestMethod]
         public async Task A_Sensitive_Role_Waits_For_A_Second_Pmo_User()
         {
+            // a host of its own: how many PMO users there are decides whether the PMO role is given at once (bootstrap) or waits for a second user
+            var h = new Host(Unique("roles"));
             string name = Unique("fin");
-            int fin = await H.RegisterAsync(H.Admin, name, new[] { WarehouseRole, FinanceManagerRole });
-            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, RolesOf(fin), "FINANCEMANAGER is not given at registration");
+            int fin = await h.RegisterAsync(h.Admin, name, new[] { WarehouseRole, FinanceManagerRole });
+            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, h.RolesOf(fin), "FINANCEMANAGER is not given at registration");
 
-            var list = (await H.As(H.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data;
+            var list = (await h.As(h.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data;
             RoleGrantDto grant = list.Single(g => g.UserId == fin);
             Assert.AreEqual("FINANCEMANAGER", grant.Role);
-            Assert.AreEqual(H.AdminId, grant.RequestedByUserId);
+            Assert.AreEqual(h.AdminId, grant.RequestedByUserId);
             Assert.IsFalse(grant.CanApprove, "the one who asked cannot approve");
 
             // asking again does not make a second request
-            Assert.IsTrue((await H.As(H.Admin, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = fin, RoleIds = new[] { WarehouseRole, FinanceManagerRole } }, default).AsTask())).Success);
-            Assert.AreEqual(1, (await H.As(H.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Count(g => g.UserId == fin));
+            Assert.IsTrue((await h.As(h.Admin, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = fin, RoleIds = new[] { WarehouseRole, FinanceManagerRole } }, default).AsTask())).Success);
+            Assert.AreEqual(1, (await h.As(h.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Count(g => g.UserId == fin));
 
             // the requester cannot approve it
-            ResponseDto<RoleGrantDto> self = await H.As(H.Admin, s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
+            ResponseDto<RoleGrantDto> self = await h.As(h.Admin, s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
             Assert.IsFalse(self.Success);
             Assert.AreEqual(AccountServiceMessages.GrantSameApprover, self.Message);
-            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, RolesOf(fin));
+            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, h.RolesOf(fin));
 
             // a user who is not a PMO user cannot approve it
-            Assert.IsFalse((await H.As(Signed(fin, name, "WAREHOUSE"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask())).Success);
+            Assert.IsFalse((await h.As(Signed(fin, name, "WAREHOUSE"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask())).Success);
 
-            // a second PMO user can
-            int second = await H.RegisterAsync(H.Admin, Unique("pmo"), new[] { PmoRole });
+            // a second PMO user can, once the receiver has chosen a password of his own (R1a2, M-2: the PMO user who registered him chose the first one; see the tests of M-2)
+            await ChoosePasswordAsync(h, fin, name);
+            int second = await h.AddPmoAsync(Unique("pmo"));
             ClaimsPrincipal pmo2 = Signed(second, "pmo2", "PMO");
-            Assert.IsTrue((await H.As(pmo2, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.Id == grant.Id).CanApprove);
-            ResponseDto<RoleGrantDto> approved = await H.As(pmo2, s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
+            Assert.IsTrue((await h.As(pmo2, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.Id == grant.Id).CanApprove);
+            ResponseDto<RoleGrantDto> approved = await h.As(pmo2, s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
             Assert.IsTrue(approved.Success, approved.Message);
-            CollectionAssert.AreEqual(new[] { "FINANCEMANAGER", "WAREHOUSE" }, RolesOf(fin));
-            Assert.IsFalse((await H.As(H.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Any(g => g.UserId == fin));
-            Assert.IsFalse((await H.As(pmo2, s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask())).Success, "an approved request is gone");
+            CollectionAssert.AreEqual(new[] { "FINANCEMANAGER", "WAREHOUSE" }, h.RolesOf(fin));
+            Assert.IsFalse((await h.As(h.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Any(g => g.UserId == fin));
+            Assert.IsFalse((await h.As(pmo2, s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask())).Success, "an approved request is gone");
 
             // taking a sensitive role away is immediate
-            Assert.IsTrue((await H.As(pmo2, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = fin, RoleIds = new[] { WarehouseRole } }, default).AsTask())).Success);
-            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, RolesOf(fin));
+            Assert.IsTrue((await h.As(pmo2, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = fin, RoleIds = new[] { WarehouseRole } }, default).AsTask())).Success);
+            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, h.RolesOf(fin));
         }
 
         [TestMethod]
         public async Task The_Receiver_Of_A_Sensitive_Role_Cannot_Approve_It_And_A_Request_Can_Be_Rejected()
         {
+            // a host of its own: how many PMO users there are decides whether the PMO role is given at once (bootstrap) or waits for a second user
+            var h = new Host(Unique("roles"));
             // a PMO user who is to receive the CEO role asked for by another PMO user cannot approve it himself
-            int receiver = await H.RegisterAsync(H.Admin, Unique("pmo"), new[] { PmoRole });
-            int third = await H.RegisterAsync(H.Admin, Unique("pmo"), new[] { PmoRole });
-            Assert.IsTrue((await H.As(H.Admin, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = receiver, RoleIds = new[] { PmoRole, CeoRole } }, default).AsTask())).Success);
-            RoleGrantDto grant = (await H.As(H.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.UserId == receiver);
+            int receiver = await h.AddPmoAsync(Unique("pmo"));
+            int third = await h.AddPmoAsync(Unique("pmo"));
+            Assert.IsTrue((await h.As(h.Admin, s => s.ChangeRoleAsync(new ChangeRoleDto { UserId = receiver, RoleIds = new[] { PmoRole, CeoRole } }, default).AsTask())).Success);
+            RoleGrantDto grant = (await h.As(h.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.UserId == receiver);
 
-            ResponseDto<RoleGrantDto> byReceiver = await H.As(Signed(receiver, "r", "PMO"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
+            ResponseDto<RoleGrantDto> byReceiver = await h.As(Signed(receiver, "r", "PMO"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
             Assert.IsFalse(byReceiver.Success);
             Assert.AreEqual(AccountServiceMessages.GrantApproverIsTarget, byReceiver.Message);
-            Assert.IsFalse((await H.As(Signed(receiver, "r", "PMO"), s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.Id == grant.Id).CanApprove);
+            Assert.IsFalse((await h.As(Signed(receiver, "r", "PMO"), s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.Id == grant.Id).CanApprove);
 
             // any PMO user can reject it (the requester takes it back)
-            Assert.IsTrue((await H.As(H.Admin, s => s.RejectRoleGrantAsync(grant.Id, default).AsTask())).Success);
-            Assert.IsFalse((await H.As(Signed(third, "t", "PMO"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask())).Success);
-            CollectionAssert.AreEqual(new[] { "PMO" }, RolesOf(receiver));
+            Assert.IsTrue((await h.As(h.Admin, s => s.RejectRoleGrantAsync(grant.Id, default).AsTask())).Success);
+            Assert.IsFalse((await h.As(Signed(third, "t", "PMO"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask())).Success);
+            CollectionAssert.AreEqual(new[] { "PMO" }, h.RolesOf(receiver));
         }
 
         [TestMethod]
         public async Task A_Request_Nobody_Approves_Within_Seven_Days_Is_Void()
         {
-            int user = await H.RegisterAsync(H.Admin, Unique("old"), new[] { WarehouseRole, CeoRole });
-            int second = await H.RegisterAsync(H.Admin, Unique("pmo"), new[] { PmoRole });
-            RoleGrantDto grant = (await H.As(H.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.UserId == user);
+            // a host of its own: how many PMO users there are decides whether the PMO role is given at once (bootstrap) or waits for a second user
+            var h = new Host(Unique("roles"));
+            int user = await h.RegisterAsync(h.Admin, Unique("old"), new[] { WarehouseRole, CeoRole });
+            int second = await h.AddPmoAsync(Unique("pmo"));
+            RoleGrantDto grant = (await h.As(h.Admin, s => s.GetRoleGrantsAsync(default).AsTask())).Data.Single(g => g.UserId == user);
 
             // make the request eight days old
-            using (IServiceScope scope = H.Provider.CreateScope())
+            using (IServiceScope scope = h.Provider.CreateScope())
             {
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 UserClaim row = uow.Set<UserClaim>().Single(c => c.Id == grant.Id);
-                var old = new PendingRoleGrant { Role = "CEO", RequestedBy = H.AdminId, RequestedAt = DateTimeOffset.Now.AddDays(-8) };
+                var old = new PendingRoleGrant { Role = "CEO", RequestedBy = h.AdminId, RequestedAt = DateTimeOffset.Now.AddDays(-8) };
                 row.ClaimValue = old.ToClaimValue();
                 uow.SaveChanges();
             }
 
-            Assert.IsFalse((await H.As(Signed(second, "p2", "PMO"), s => s.GetRoleGrantsAsync(default).AsTask())).Data.Any(g => g.Id == grant.Id), "an expired request is not listed");
-            ResponseDto<RoleGrantDto> late = await H.As(Signed(second, "p2", "PMO"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
+            Assert.IsFalse((await h.As(Signed(second, "p2", "PMO"), s => s.GetRoleGrantsAsync(default).AsTask())).Data.Any(g => g.Id == grant.Id), "an expired request is not listed");
+            ResponseDto<RoleGrantDto> late = await h.As(Signed(second, "p2", "PMO"), s => s.ApproveRoleGrantAsync(grant.Id, default).AsTask());
             Assert.IsFalse(late.Success);
             Assert.AreEqual(AccountServiceMessages.GrantExpired, late.Message);
-            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, RolesOf(user));
+            CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, h.RolesOf(user));
         }
 
         // ---------------------------------------------------------------------------------------------------- passwords
@@ -609,8 +739,10 @@ namespace MsTests
             Assert.IsFalse(H.Query(uow => uow.Set<User>().Single(u => u.UserName == "Admin").LockoutEnabled));
             H.Provider.GetRequiredService<IIdentityDbInitializer>().SeedData();
             Assert.IsTrue(H.Query(uow => uow.Set<User>().Single(u => u.UserName == "Admin").LockoutEnabled));
-            // the right password still works (nothing was locked)
-            Assert.IsTrue((await H.As(null, s => s.LoginAsync(new LoginUserDto { UserName = "Admin", Password = AdminPassword }, default).AsTask())).Success);
+            // the right password is still accepted (nothing was locked); the seeded administrator has to choose a password of his own first (R1a2, M7)
+            ResponseDto<ResponseLoginUserDto> first = await H.As(null, s => s.LoginAsync(new LoginUserDto { UserName = "Admin", Password = AdminPassword }, default).AsTask());
+            Assert.IsFalse(first.Success);
+            Assert.AreEqual(AccountServiceMessages.MustChangePasswordCode, first.Data.Code);
         }
 
         // ---------------------------------------------------------------------------------------------------- sign-in details
@@ -672,11 +804,13 @@ namespace MsTests
         [TestMethod]
         public async Task Sign_In_Password_And_Role_Events_Are_In_The_Audit_Trail_With_The_Address()
         {
+            UnknownUserTally.Reset();
+            string ghost = Unique("ghost");
             string name = Unique("aud");
             int id = await H.RegisterAsync(H.Admin, name, new[] { WarehouseRole, CeoRole });
             await H.As(null, s => s.LoginAsync(new LoginUserDto { UserName = name, Password = "Wrong-Pass-2026" }, default).AsTask());
             await H.As(null, s => s.LoginAsync(new LoginUserDto { UserName = name, Password = GoodPassword }, default).AsTask());
-            await H.As(null, s => s.LoginAsync(new LoginUserDto { UserName = Unique("ghost"), Password = GoodPassword }, default).AsTask());
+            await H.As(null, s => s.LoginAsync(new LoginUserDto { UserName = ghost, Password = GoodPassword }, default).AsTask());
             await H.As(Signed(id, name, "WAREHOUSE"), s => s.ChangePasswordAsync(new ChangePasswordDto { UserId = H.AdminId, CurrentPassword = GoodPassword, NewPassword = "Next-Secret-2027z" }, default).AsTask());
             await H.As(Signed(id, name, "WAREHOUSE"), s => s.ChangePasswordAsync(new ChangePasswordDto { CurrentPassword = GoodPassword, NewPassword = "Next-Secret-2027z" }, default).AsTask());
             await H.As(H.Admin, s => s.AdminResetPasswordAsync(new AdminResetPasswordDto { UserId = id }, default).AsTask());
@@ -688,7 +822,9 @@ namespace MsTests
 
             Assert.IsTrue(Has("Identity.SignIn", "Failure", a => a.EntityId == id && a.UserId == id && a.Ip == "10.1.2.3"), "failed sign-in: user, time and address");
             Assert.IsTrue(Has("Identity.SignIn", "Success", a => a.EntityId == id && a.UserId == id && a.Ip == "10.1.2.3" && a.At > DateTimeOffset.Now.AddMinutes(-5)), "successful sign-in");
-            Assert.IsTrue(Has("Identity.SignIn", "Failure", a => a.EntityId == null && a.UserId == 0 && a.Summary.Contains("ghost")), "unknown user name");
+            // an unknown name is kept as its length and first two characters only (R1a2, M5): a password typed into the name field never reaches the trail
+            Assert.IsTrue(Has("Identity.SignIn", "Failure", a => a.EntityId == null && a.UserId == 0 && a.Summary.Contains("«gh»") && a.Summary.Contains(ghost.Length + " ")), "unknown user name");
+            Assert.IsFalse(log.Any(a => (a.Summary ?? "").Contains(ghost) || (a.AfterJson ?? "").Contains(ghost) || (a.BeforeJson ?? "").Contains(ghost)), "the whole unknown name is nowhere in the trail");
             Assert.IsTrue(Has("Identity.Password", "ChangeRefused", a => a.UserId == id && a.EntityId == H.AdminId), "an attempt on another user's password");
             Assert.IsTrue(Has("Identity.Password", "Changed", a => a.UserId == id && a.EntityId == id), "password change by the owner");
             Assert.IsTrue(Has("Identity.Password", "AdminReset", a => a.UserId == H.AdminId && a.EntityId == id), "administrator's reset: who and for whom");

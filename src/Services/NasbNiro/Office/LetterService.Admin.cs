@@ -40,6 +40,8 @@ namespace Services.NasbNiro.Office
 
         public async Task<ResponseDto<ExternalPartyDto>> SavePartyAsync(SaveExternalPartyDto dto, CancellationToken ct)
         {
+            // R1a2 (C1): the correspondents list was open to every signed-in user; only the secretariat and the PMO keep it (the reading above stays open)
+            if (!_user.IsInRole(OfficeRoles.PartyEditors)) return Bad<ExternalPartyDto>(OfficeText.NotAllowed);
             if (dto == null || Clean(dto.Name) == null) return Bad<ExternalPartyDto>("نام سازمان یا شخص را وارد کنید.");
             if (!Enum.IsDefined(typeof(OfPartyKind), dto.Kind)) return Bad<ExternalPartyDto>(OfficeText.InvalidData);
             if (dto.ProviderId.HasValue && !await _uow.Set<Provider>().AnyAsync(p => p.Id == dto.ProviderId.Value, ct)) return Bad<ExternalPartyDto>("تامین‌کننده پیدا نشد.");
