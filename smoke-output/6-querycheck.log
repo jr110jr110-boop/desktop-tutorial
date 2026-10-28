@@ -1,0 +1,298 @@
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/ViewModels/ViewModels.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/ViewModels/ViewModels.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/ViewModels/ViewModels.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/WebApi/WebApi.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/WebApi/WebApi.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/WebApi/WebApi.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/IocConfig/IocConfig.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/IocConfig/IocConfig.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/IocConfig/IocConfig.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Entities/Entities.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Entities/Entities.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Services/Services.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Services/Services.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Services/Services.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/DataLayer/DataLayer.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/DataLayer/DataLayer.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7 [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/DataLayer/DataLayer.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx [/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj]
+/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/.github/ci-tools/QueryCheck/QueryCheck.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/DataLayer/DataLayer.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/DataLayer/DataLayer.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/DataLayer/DataLayer.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Entities/Entities.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Entities/Entities.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/WebApi/WebApi.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/WebApi/WebApi.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/WebApi/WebApi.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Services/Services.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Services/Services.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/Services/Services.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/ViewModels/ViewModels.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/ViewModels/ViewModels.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/ViewModels/ViewModels.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/IocConfig/IocConfig.csproj : warning NU1903: Package 'AutoMapper' 10.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-rvv3-g6hj-g44x
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/IocConfig/IocConfig.csproj : warning NU1902: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-2fmv-rv2c-59x7
+/home/runner/work/desktop-tutorial/desktop-tutorial/src/IocConfig/IocConfig.csproj : warning NU1903: Package 'System.Security.Cryptography.Pkcs' 9.0.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-846f-f764-76mx
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'NotWetWeight' on entity type 'Bom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'NotWetWeightUnit' on entity type 'Bom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WetWeight' on entity type 'Bom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WetWeightUnit' on entity type 'Bom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'FinancePrice' on entity type 'BuyOrder'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'Price' on entity type 'ContractEntity'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'Price' on entity type 'Inquiry'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ProgramPrice' on entity type 'ProcessEntity'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WeightPercent' on entity type 'ProcessEntity'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'AcceptedPrice' on entity type 'ProvisionalStatement'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'Price' on entity type 'ProvisionalStatement'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WeightPercent' on entity type 'WorkOrder'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'NotWetWeight' on entity type 'EquipmentBom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'NotWetWeightUnit' on entity type 'EquipmentBom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WetWeight' on entity type 'EquipmentBom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WetWeightUnit' on entity type 'EquipmentBom'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ProgramPrice' on entity type 'EquipmentProcess'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WeightPercent' on entity type 'EquipmentProcess'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'NonRecoverableVatAmount' on entity type 'FnSupplierNote'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'EvaluationScore' on entity type 'Provider'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ActualPrice' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ActualWeightPercent' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ContractActualPrice' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ContractActualWeightPercent' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ContractLevelActualProgress' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ContractLevelPlannedProgress' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ContractPlannedPrice' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'ContractPlannedWeightPercent' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'PlannedPrice' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'PlannedWeightPercent' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WorkOrderLevelActualProgress' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[30000]
+      No store type was specified for the decimal property 'WorkOrderLevelPlannedProgress' on entity type 'ProgressReport'. This will cause values to be silently truncated if they do not fit in the default precision and scale. Explicitly specify the SQL server column type that can accommodate all the values in 'OnModelCreating' using 'HasColumnType', specify precision and scale using 'HasPrecision', or configure a value converter using 'HasConversion'.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (163ms) [Parameters=[@processId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='180']
+      SELECT TOP(2) [p].[Title], [w].[ContractId], [w].[Id], [w].[Title], (
+          SELECT COALESCE(SUM([p1].[ProgramPrice]), 0.0)
+          FROM [Boms] AS [b0]
+          INNER JOIN [Processes] AS [p1] ON [b0].[Id] = [p1].[BomId]
+          WHERE [a].[Id] = [b0].[AssemblyId] AND NOT EXISTS (
+              SELECT 1
+              FROM [Processes] AS [p0]
+              WHERE [b0].[Id] = [p0].[BomId] AND CASE
+                  WHEN [p0].[ProgramEndDate] <= CAST(SYSUTCDATETIME() AS datetimeoffset) THEN CAST(0 AS bit)
+                  ELSE CAST(1 AS bit)
+              END = CAST(1 AS bit))), (
+          SELECT COALESCE(SUM([i].[Price]), 0.0)
+          FROM [BuyOrders] AS [b1]
+          INNER JOIN [Inquiries] AS [i] ON [b1].[Id] = [i].[BuyOrderId]
+          WHERE [w].[Id] = [b1].[WorkOrderId] AND [b1].[Deleted] = CAST(0 AS bit) AND [b1].[Status] = 100 AND [i].[IsAccept] = CAST(1 AS bit)), [p].[ProgramStartDate], [p].[ActualStartDate], [p].[ProgramEndDate], [p].[ActualEndDate], (
+          SELECT COALESCE(SUM([p2].[WeightPercent]), 0.0)
+          FROM [Processes] AS [p2]
+          WHERE [b].[Id] = [p2].[BomId] AND [p2].[Deleted] = CAST(0 AS bit) AND [p2].[ProcessStatus] = 100), (
+          SELECT COALESCE(SUM([p4].[WeightPercent]), 0.0)
+          FROM [Boms] AS [b2]
+          INNER JOIN [Processes] AS [p4] ON [b2].[Id] = [p4].[BomId]
+          WHERE [a].[Id] = [b2].[AssemblyId] AND NOT EXISTS (
+              SELECT 1
+              FROM [Processes] AS [p3]
+              WHERE [b2].[Id] = [p3].[BomId] AND CASE
+                  WHEN [p3].[ProgramEndDate] <= CAST(SYSUTCDATETIME() AS datetimeoffset) THEN CAST(0 AS bit)
+                  ELSE CAST(1 AS bit)
+              END = CAST(1 AS bit))), CASE
+          WHEN (
+              SELECT COUNT(*)
+              FROM [Assemblies] AS [a0]
+              INNER JOIN [Boms] AS [b3] ON [a0].[Id] = [b3].[AssemblyId]
+              WHERE [w].[Id] = [a0].[WorkOrderId] AND [a0].[Deleted] = CAST(0 AS bit) AND [b3].[Deleted] = CAST(0 AS bit)) = 0 THEN 0.0E0
+          ELSE (CAST((
+              SELECT COUNT(*)
+              FROM [Assemblies] AS [a1]
+              INNER JOIN [Boms] AS [b4] ON [a1].[Id] = [b4].[AssemblyId]
+              WHERE [w].[Id] = [a1].[WorkOrderId] AND [a1].[Deleted] = CAST(0 AS bit) AND [b4].[Deleted] = CAST(0 AS bit) AND NOT EXISTS (
+                  SELECT 1
+                  FROM [Processes] AS [p5]
+                  WHERE [b4].[Id] = [p5].[BomId] AND [p5].[Deleted] = CAST(0 AS bit) AND ([p5].[ProgramEndDate] IS NULL OR CASE
+                      WHEN [p5].[ActualEndDate] <= CAST(SYSUTCDATETIME() AS datetimeoffset) THEN CAST(0 AS bit)
+                      ELSE CAST(1 AS bit)
+                  END = CAST(1 AS bit)))) AS float) * 100.0E0) / CAST((
+              SELECT COUNT(*)
+              FROM [Assemblies] AS [a2]
+              INNER JOIN [Boms] AS [b5] ON [a2].[Id] = [b5].[AssemblyId]
+              WHERE [w].[Id] = [a2].[WorkOrderId] AND [a2].[Deleted] = CAST(0 AS bit) AND [b5].[Deleted] = CAST(0 AS bit)) AS float)
+      END, CASE
+          WHEN (
+              SELECT COUNT(*)
+              FROM [Assemblies] AS [a3]
+              INNER JOIN [Boms] AS [b6] ON [a3].[Id] = [b6].[AssemblyId]
+              WHERE [w].[Id] = [a3].[WorkOrderId] AND [a3].[Deleted] = CAST(0 AS bit) AND [b6].[Deleted] = CAST(0 AS bit)) = 0 THEN 0.0E0
+          ELSE (CAST((
+              SELECT COUNT(*)
+              FROM [Assemblies] AS [a4]
+              INNER JOIN [Boms] AS [b7] ON [a4].[Id] = [b7].[AssemblyId]
+              WHERE [w].[Id] = [a4].[WorkOrderId] AND [a4].[Deleted] = CAST(0 AS bit) AND [b7].[Deleted] = CAST(0 AS bit) AND NOT EXISTS (
+                  SELECT 1
+                  FROM [Processes] AS [p6]
+                  WHERE [b7].[Id] = [p6].[BomId] AND [p6].[Deleted] = CAST(0 AS bit) AND ([p6].[ProgramEndDate] IS NULL OR [p6].[ProgramEndDate] > CAST(SYSUTCDATETIME() AS datetimeoffset)))) AS float) * 100.0E0) / CAST((
+              SELECT COUNT(*)
+              FROM [Assemblies] AS [a5]
+              INNER JOIN [Boms] AS [b8] ON [a5].[Id] = [b8].[AssemblyId]
+              WHERE [w].[Id] = [a5].[WorkOrderId] AND [a5].[Deleted] = CAST(0 AS bit) AND [b8].[Deleted] = CAST(0 AS bit)) AS float)
+      END, CASE
+          WHEN (
+              SELECT COUNT(*)
+              FROM [WorkOrders] AS [w0]
+              INNER JOIN [Assemblies] AS [a6] ON [w0].[Id] = [a6].[WorkOrderId]
+              INNER JOIN [Boms] AS [b9] ON [a6].[Id] = [b9].[AssemblyId]
+              INNER JOIN [Processes] AS [p7] ON [b9].[Id] = [p7].[BomId]
+              WHERE [c].[Id] = [w0].[ContractId] AND [w0].[Deleted] = CAST(0 AS bit) AND [a6].[Deleted] = CAST(0 AS bit) AND [b9].[Deleted] = CAST(0 AS bit) AND [p7].[Deleted] = CAST(0 AS bit)) = 0 THEN 0.0E0
+          ELSE (CAST((
+              SELECT COUNT(*)
+              FROM [WorkOrders] AS [w1]
+              INNER JOIN [Assemblies] AS [a7] ON [w1].[Id] = [a7].[WorkOrderId]
+              INNER JOIN [Boms] AS [b10] ON [a7].[Id] = [b10].[AssemblyId]
+              INNER JOIN [Processes] AS [p8] ON [b10].[Id] = [p8].[BomId]
+              WHERE [c].[Id] = [w1].[ContractId] AND [w1].[Deleted] = CAST(0 AS bit) AND [a7].[Deleted] = CAST(0 AS bit) AND [b10].[Deleted] = CAST(0 AS bit) AND [p8].[Deleted] = CAST(0 AS bit) AND [p8].[ProgramEndDate] IS NOT NULL AND [p8].[ProgramEndDate] < CAST(SYSUTCDATETIME() AS datetimeoffset)) AS float) * 100.0E0) / CAST((
+              SELECT COUNT(*)
+              FROM [WorkOrders] AS [w2]
+              INNER JOIN [Assemblies] AS [a8] ON [w2].[Id] = [a8].[WorkOrderId]
+              INNER JOIN [Boms] AS [b11] ON [a8].[Id] = [b11].[AssemblyId]
+              INNER JOIN [Processes] AS [p9] ON [b11].[Id] = [p9].[BomId]
+              WHERE [c].[Id] = [w2].[ContractId] AND [w2].[Deleted] = CAST(0 AS bit) AND [a8].[Deleted] = CAST(0 AS bit) AND [b11].[Deleted] = CAST(0 AS bit) AND [p9].[Deleted] = CAST(0 AS bit)) AS float)
+      END, CASE
+          WHEN (
+              SELECT COUNT(*)
+              FROM [WorkOrders] AS [w3]
+              INNER JOIN [Assemblies] AS [a9] ON [w3].[Id] = [a9].[WorkOrderId]
+              INNER JOIN [Boms] AS [b12] ON [a9].[Id] = [b12].[AssemblyId]
+              INNER JOIN [Processes] AS [p10] ON [b12].[Id] = [p10].[BomId]
+              WHERE [c].[Id] = [w3].[ContractId] AND [w3].[Deleted] = CAST(0 AS bit) AND [a9].[Deleted] = CAST(0 AS bit) AND [b12].[Deleted] = CAST(0 AS bit) AND [p10].[Deleted] = CAST(0 AS bit)) = 0 THEN 0.0E0
+          ELSE (CAST((
+              SELECT COUNT(*)
+              FROM [WorkOrders] AS [w4]
+              INNER JOIN [Assemblies] AS [a10] ON [w4].[Id] = [a10].[WorkOrderId]
+              INNER JOIN [Boms] AS [b13] ON [a10].[Id] = [b13].[AssemblyId]
+              INNER JOIN [Processes] AS [p11] ON [b13].[Id] = [p11].[BomId]
+              WHERE [c].[Id] = [w4].[ContractId] AND [w4].[Deleted] = CAST(0 AS bit) AND [a10].[Deleted] = CAST(0 AS bit) AND [b13].[Deleted] = CAST(0 AS bit) AND [p11].[Deleted] = CAST(0 AS bit) AND [p11].[ActualEndDate] IS NOT NULL AND [p11].[ActualEndDate] <= CAST(SYSUTCDATETIME() AS datetimeoffset)) AS float) * 100.0E0) / CAST((
+              SELECT COUNT(*)
+              FROM [WorkOrders] AS [w5]
+              INNER JOIN [Assemblies] AS [a11] ON [w5].[Id] = [a11].[WorkOrderId]
+              INNER JOIN [Boms] AS [b14] ON [a11].[Id] = [b14].[AssemblyId]
+              INNER JOIN [Processes] AS [p12] ON [b14].[Id] = [p12].[BomId]
+              WHERE [c].[Id] = [w5].[ContractId] AND [w5].[Deleted] = CAST(0 AS bit) AND [a11].[Deleted] = CAST(0 AS bit) AND [b14].[Deleted] = CAST(0 AS bit) AND [p12].[Deleted] = CAST(0 AS bit)) AS float)
+      END, (
+          SELECT COUNT(*)
+          FROM [Assemblies] AS [a12]
+          INNER JOIN [Boms] AS [b15] ON [a12].[Id] = [b15].[AssemblyId]
+          INNER JOIN [Processes] AS [p13] ON [b15].[Id] = [p13].[BomId]
+          WHERE [w].[Id] = [a12].[WorkOrderId] AND [a12].[Deleted] = CAST(0 AS bit) AND [b15].[Deleted] = CAST(0 AS bit) AND [p13].[Deleted] = CAST(0 AS bit)), (
+          SELECT MAX([p14].[ProgramEndDate])
+          FROM [Assemblies] AS [a13]
+          INNER JOIN [Boms] AS [b16] ON [a13].[Id] = [b16].[AssemblyId]
+          INNER JOIN [Processes] AS [p14] ON [b16].[Id] = [p14].[BomId]
+          WHERE [w].[Id] = [a13].[WorkOrderId] AND [a13].[Deleted] = CAST(0 AS bit) AND [b16].[Deleted] = CAST(0 AS bit) AND [p14].[Deleted] = CAST(0 AS bit)), CAST(SYSUTCDATETIME() AS datetimeoffset), [c].[EndDate], (
+          SELECT TOP(1) [w6].[StartDate]
+          FROM [WorkOrders] AS [w6]
+          WHERE [c].[Id] = [w6].[ContractId]
+          ORDER BY [w6].[Id]), (
+          SELECT TOP(1) [w7].[StartDate]
+          FROM [WorkOrders] AS [w7]
+          WHERE [c].[Id] = [w7].[ContractId]
+          ORDER BY [w7].[Id]), (
+          SELECT MAX([a14].[ActualEndDate])
+          FROM [WorkOrders] AS [w8]
+          INNER JOIN [Assemblies] AS [a14] ON [w8].[Id] = [a14].[WorkOrderId]
+          WHERE [c].[Id] = [w8].[ContractId] AND [a14].[Deleted] = CAST(0 AS bit)), (
+          SELECT COALESCE(SUM([p17].[c]), 0.0)
+          FROM (
+              SELECT (
+                  SELECT TOP(1) [p16].[ActualPrice]
+                  FROM [ProgressReports] AS [p16]
+                  WHERE [p16].[ContractId] = [c].[Id] AND [p15].[WorkOrderId] = [p16].[WorkOrderId]
+                  ORDER BY [p16].[ReportDate] DESC) AS [c]
+              FROM [ProgressReports] AS [p15]
+              WHERE [p15].[ContractId] = [c].[Id]
+              GROUP BY [p15].[WorkOrderId]
+          ) AS [p17]), (
+          SELECT COALESCE(SUM([p20].[c]), 0.0)
+          FROM (
+              SELECT COALESCE((
+                  SELECT TOP(1) [p19].[PlannedPrice]
+                  FROM [ProgressReports] AS [p19]
+                  WHERE [p19].[ContractId] = [c].[Id] AND [p18].[WorkOrderId] = [p19].[WorkOrderId]
+                  ORDER BY [p19].[ReportDate] DESC), 0.0) AS [c]
+              FROM [ProgressReports] AS [p18]
+              WHERE [p18].[ContractId] = [c].[Id]
+              GROUP BY [p18].[WorkOrderId]
+          ) AS [p20]), (
+          SELECT COALESCE(SUM([p23].[c]), 0.0)
+          FROM (
+              SELECT COALESCE((
+                  SELECT TOP(1) ([p22].[ActualWeightPercent] * [w9].[WeightPercent]) / 100.0
+                  FROM [ProgressReports] AS [p22]
+                  INNER JOIN [WorkOrders] AS [w9] ON [p22].[WorkOrderId] = [w9].[Id]
+                  WHERE [p22].[ContractId] = [c].[Id] AND [p21].[WorkOrderId] = [p22].[WorkOrderId]
+                  ORDER BY [p22].[ReportDate] DESC), 0.0) AS [c]
+              FROM [ProgressReports] AS [p21]
+              WHERE [p21].[ContractId] = [c].[Id]
+              GROUP BY [p21].[WorkOrderId]
+          ) AS [p23]), (
+          SELECT COALESCE(SUM([p26].[c]), 0.0)
+          FROM (
+              SELECT COALESCE((
+                  SELECT TOP(1) ([p25].[PlannedWeightPercent] * [w10].[WeightPercent]) / 100.0
+                  FROM [ProgressReports] AS [p25]
+                  INNER JOIN [WorkOrders] AS [w10] ON [p25].[WorkOrderId] = [w10].[Id]
+                  WHERE [p25].[ContractId] = [c].[Id] AND [p24].[WorkOrderId] = [p25].[WorkOrderId]
+                  ORDER BY [p25].[ReportDate] DESC), 0.0) AS [c]
+              FROM [ProgressReports] AS [p24]
+              WHERE [p24].[ContractId] = [c].[Id]
+              GROUP BY [p24].[WorkOrderId]
+          ) AS [p26])
+      FROM [Processes] AS [p]
+      INNER JOIN [Boms] AS [b] ON [p].[BomId] = [b].[Id]
+      INNER JOIN [Assemblies] AS [a] ON [b].[AssemblyId] = [a].[Id]
+      INNER JOIN [WorkOrders] AS [w] ON [a].[WorkOrderId] = [w].[Id]
+      INNER JOIN [Contracts] AS [c] ON [w].[ContractId] = [c].[Id]
+      WHERE [p].[Deleted] = CAST(0 AS bit) AND [p].[Id] = @processId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (7ms) [Parameters=[@p0='?' (DbType = DateTimeOffset), @p1='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p2='?' (DbType = DateTimeOffset), @p3='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p4='?' (DbType = DateTimeOffset), @p5='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p6='?' (DbType = DateTimeOffset), @p7='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p8='?' (DbType = Int32), @p9='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p10='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p11='?' (DbType = DateTimeOffset), @p12='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p13='?' (DbType = DateTimeOffset), @p14='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p15='?' (DbType = Int32), @p16='?' (DbType = DateTimeOffset), @p17='?' (DbType = Int32), @p18='?' (DbType = Boolean), @p19='?' (DbType = Int32), @p20='?' (DbType = DateTimeOffset), @p21='?' (DbType = DateTimeOffset), @p22='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p23='?' (DbType = DateTimeOffset), @p24='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p25='?' (DbType = Int32), @p26='?' (Size = 4000), @p27='?' (DbType = DateTimeOffset), @p28='?' (DbType = Int32), @p29='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p30='?' (Precision = 18) (Scale = 2) (DbType = Decimal), @p31='?' (DbType = Int32), @p32='?' (Size = 4000)], CommandType='Text', CommandTimeout='180']
+      SET IMPLICIT_TRANSACTIONS OFF;
+      SET NOCOUNT ON;
+      INSERT INTO [ProgressReports] ([ActualEndDate], [ActualPrice], [ActualStartDate], [ActualWeightPercent], [ContractActualEndtDate], [ContractActualPrice], [ContractActualStartDate], [ContractActualWeightPercent], [ContractId], [ContractLevelActualProgress], [ContractLevelPlannedProgress], [ContractPlannedEndDate], [ContractPlannedPrice], [ContractPlannedStartDate], [ContractPlannedWeightPercent], [ContractRemainingDays], [CreateDate], [CreatorUserId], [Deleted], [ModifierUserId], [ModifyDate], [PlannedEndDate], [PlannedPrice], [PlannedStartDate], [PlannedWeightPercent], [ProcessId], [ProcessTitle], [ReportDate], [WorkOrderId], [WorkOrderLevelActualProgress], [WorkOrderLevelPlannedProgress], [WorkOrderRemainingDays], [WorkOrderTitle])
+      OUTPUT INSERTED.[Id]
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25, @p26, @p27, @p28, @p29, @p30, @p31, @p32);
+OK    BuyOrderService.AddProgressReportAsync (progress report query)
+query-check: all passed

@@ -1,0 +1,39 @@
+startup_ok=1 swagger_http=200
+ui_page / http=200 body=index.html
+ui_page /login http=200 body=index.html
+ui_page /contract/list http=200 body=index.html
+ui_page /contract/update/12 http=200 body=index.html
+ui_page /workflowGroup/list http=200 body=index.html
+ui_page /inventory/documents/new http=200 body=index.html
+ui_page /inventory/trace http=200 body=index.html
+ui_page /inventory/ncr/new http=200 body=index.html
+ui_page /inventory/material-requests/new http=200 body=index.html
+ui_page /inventory/counts http=200 body=index.html
+ui_page /inventory/inspections http=200 body=index.html
+ui_page /inventory/item-requests http=200 body=index.html
+ui_page /inventory/coding http=200 body=index.html
+ui_asset /assets/index.dab26c9e.js http=200 type=text/javascript
+ui_favicon http=200
+api_unknown_path http=404
+PASS an unknown API path answers 404 (not the front-end page)
+ui_post_to_page http=404
+PASS a POST to a front-end page answers 404
+swagger_ui http=200
+login_http=200
+access_token_length=885 refresh_token_length=409
+refresh_http=200
+refreshed_access_token_length=885
+PASS (control) the access token works right before the sign-out
+logout_http=200
+logout_success=true
+PASS the sign-out answers success
+refresh_after_logout_http=200
+refresh_after_logout_success=false
+PASS the refresh token of the signed-out session is refused
+old_access_token_after_logout http=401
+PASS the access token of the signed-out session is refused at once (401)
+--- status codes:
+     61 200
+      2 400
+      1 404
+--- checks: 6 passed, 0 failed
