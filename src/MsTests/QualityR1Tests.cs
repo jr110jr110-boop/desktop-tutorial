@@ -292,6 +292,11 @@ namespace MsTests
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Executed, NcrDisposition.Scrap, true)), "executed: the stock document moved the goods");
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Closed, NcrDisposition.Scrap, true)));
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Cancelled, NcrDisposition.None, false)));
+            // a production receipt (the good pieces of the order, R1p D7) is held by an open report only: an approved rework or scrap report is carried out by the production module itself
+            Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Open, NcrDisposition.None, false), InventoryDocumentType.ProductionReceipt));
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Scrap, true), InventoryDocumentType.ProductionReceipt), "approved scrap: the pieces were written off and are not in the receipt");
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Rework, true), InventoryDocumentType.ProductionReceipt), "approved rework: the step is run again and accepted by QC before it counts as good");
+            Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Scrap, true), InventoryDocumentType.Issue), "an issue of the held goods is still refused");
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true, Today.AddDays(-2))), "a valid concession is the permission to use the goods");
             Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true)), "a concession without its permit still holds");
             NonConformance deleted = Ncr(NcrStatus.Open, NcrDisposition.None, false);

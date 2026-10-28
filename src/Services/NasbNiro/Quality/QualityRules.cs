@@ -280,6 +280,14 @@ namespace Services.NasbNiro.Quality
         public static bool Holds(NonConformance n) =>
             n != null && !n.Deleted && (n.Status == NcrStatus.Open || n.Status == NcrStatus.Approved) && !ConcessionRules.IsValid(n, false);
 
+        /// <summary>
+        /// The same rule for one kind of document. A production receipt (the good pieces of a finished production order, R1p D7: the good quantity of the last step only) is held by an
+        /// OPEN report alone: once the report is approved its disposition is carried out by the production module itself — a rework step is run again and accepted by QC before it counts
+        /// as good, scrapped pieces are written off and never enter the receipt — so an approved report of the order's lot does not keep the conforming pieces out of stock.
+        /// </summary>
+        public static bool Holds(NonConformance n, InventoryDocumentType type) =>
+            type == InventoryDocumentType.ProductionReceipt ? n != null && !n.Deleted && n.Status == NcrStatus.Open && !ConcessionRules.IsValid(n, false) : Holds(n);
+
         /// <summary>The serial numbers an NCR lists, trimmed.</summary>
         public static List<string> SerialsOf(NonConformance n) =>
             (n?.SerialNumbers ?? string.Empty).Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
