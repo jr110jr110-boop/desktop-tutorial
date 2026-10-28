@@ -11,8 +11,10 @@ using DataLayer.Context;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
 using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.OfficeDtos;
 using static Services.NasbNiro.Finance.LedgerMath;
+using IdentityUserRole = Entities.Identity.UserRole;
 
 namespace Services.NasbNiro.Finance
 {
@@ -254,6 +256,88 @@ namespace Services.NasbNiro.Finance
             List<FnEmployeeWage> rows = await uow.Set<FnEmployeeWage>().AsNoTracking().Where(w => ids.Contains(w.EmployeeId)).ToListAsync(ct);
             return rows.GroupBy(w => w.EmployeeId).ToDictionary(g => g.Key, g => g.ToList());
         }
+
+        /// <summary>
+        /// Keeps the cached current wage (FnEmployee.DailyWage) in step with the history (release R1f review L2): an approved wage that was future-dated takes effect when its month starts, so the nightly job sets
+        /// the cached value of every employee with a history to the wage in force this month. Payroll runs and the bonus read the history by month anyway; the cache is what the master screens and the rest of the
+        /// system show. Returns the number of employees whose cached value changed.
+        /// </summary>
+        public static async Task<int> RefreshCachedWagesAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            DateTime monthStart = MonthStart(today);
+            List<int> ids = await uow.Set<FnEmployeeWage>().AsNoTracking().Select(w => w.EmployeeId).Distinct().ToListAsync(ct);
+            if (ids.Count == 0) return 0;
+            Dictionary<int, List<FnEmployeeWage>> history = await LoadAsync(uow, ids, ct);
+            int changed = 0;
+            foreach (FnEmployee e in await uow.Set<FnEmployee>().Where(x => ids.Contains(x.Id)).ToListAsync(ct))
+            {
+                if (!history.TryGetValue(e.Id, out List<FnEmployeeWage> rows)) continue;
+                decimal wage = WageAt(rows, e.DailyWage, monthStart, out bool _);
+                if (wage <= 0m || wage == e.DailyWage) continue;
+                e.DailyWage = wage;
+                changed++;
+            }
+            if (changed > 0) await uow.SaveChangesAsync(ct);
+            return changed;
+        }
+    }
+
+    /// <summary>
+    /// Release R1f review H2: the person a request is about never decides it. The employee record is linked to a user (FnEmployee.UserId): a caller who is that user is refused, and the records of a finance manager
+    /// (the usual approver of loans, openings and changes) cannot be decided by finance, so they go to the CEO (★ company decision: the CEO may act on these actions for that case only).
+    /// </summary>
+    internal static class SelfApproval
+    {
+        public const string OwnRecord = "این درخواست مربوط به پرونده خودِ شماست و نمی‌توانید خودتان درباره آن تصمیم بگیرید؛ کاربر دیگری تصمیم می‌گیرد.";
+        public const string OwnRecordPropose = "این کارمند پرونده خودِ شماست؛ درخواست مربوط به خودتان را نمی‌توانید ثبت کنید و کاربر دیگری باید آن را ثبت کند.";
+        public const string FinanceManagerRecord = "این درخواست مربوط به پرونده مدیر مالی است؛ تصمیم‌گیری درباره آن با مدیرعامل است.";
+
+        /// <summary>The user holds the finance-manager role.</summary>
+        public static async Task<bool> HoldsFinanceManagerRoleAsync(IUnitOfWork uow, int? userId, CancellationToken ct)
+        {
+            if (!userId.HasValue || userId.Value <= 0) return false;
+            int user = userId.Value;
+            return await uow.Set<IdentityUserRole>().AsNoTracking().AnyAsync(ur => ur.UserId == user && ur.Role.Name == FinanceRoles.Managers, ct);
+        }
+
+        /// <summary>The employee ids (of the given records) whose linked user holds the finance-manager role.</summary>
+        public static async Task<HashSet<int>> FinanceManagerEmployeesAsync(IUnitOfWork uow, IEnumerable<FnEmployee> employees, CancellationToken ct)
+        {
+            var result = new HashSet<int>();
+            if (employees == null) return result;
+            List<FnEmployee> linked = employees.Where(e => e != null && e.UserId.HasValue).ToList();
+            if (linked.Count == 0) return result;
+            List<int> userIds = linked.Select(e => e.UserId.Value).Distinct().ToList();
+            HashSet<int> managers = (await uow.Set<IdentityUserRole>().AsNoTracking().Where(ur => userIds.Contains(ur.UserId) && ur.Role.Name == FinanceRoles.Managers).Select(ur => ur.UserId).ToListAsync(ct)).ToHashSet();
+            foreach (FnEmployee e in linked) if (managers.Contains(e.UserId.Value)) result.Add(e.Id);
+            return result;
+        }
+
+        /// <summary>
+        /// Null when the caller may decide the request about <paramref name="subject"/>; otherwise the Persian refusal.
+        /// <paramref name="hasUsualRole"/>: the caller holds the role the action normally needs. <paramref name="notAllowed"/>: the refusal for a caller without it.
+        /// <paramref name="ceoOnlyForFinanceManager"/>: true = the records of a finance manager are decided by the CEO alone (loans, openings, employee changes); false = the usual role or the CEO (corrections, which HR decides).
+        /// </summary>
+        public static async Task<string> RefusalAsync(IUnitOfWork uow, IInventoryUserContext user, FnEmployee subject, bool hasUsualRole, string notAllowed, bool ceoOnlyForFinanceManager, CancellationToken ct)
+        {
+            int me = user.UserId;
+            if (subject != null && subject.UserId.HasValue && me > 0 && subject.UserId.Value == me) return OwnRecord;
+            bool financeManagerRecord = subject != null && await HoldsFinanceManagerRoleAsync(uow, subject.UserId, ct);
+            bool ceo = user.IsInRole(FinanceRoles.Ceo);
+            if (financeManagerRecord)
+            {
+                if (ceo) return null;
+                if (ceoOnlyForFinanceManager) return FinanceManagerRecord;
+            }
+            return hasUsualRole ? null : notAllowed;
+        }
+
+        /// <summary>The roles of the inbox item of a request about <paramref name="subject"/>: the usual ones, or only the CEO when the subject is a finance manager.</summary>
+        public static async Task<string> GateRolesAsync(IUnitOfWork uow, FnEmployee subject, string usualRoles, bool ceoOnlyForFinanceManager, CancellationToken ct)
+        {
+            if (subject == null || !await HoldsFinanceManagerRoleAsync(uow, subject.UserId, ct)) return usualRoles;
+            return ceoOnlyForFinanceManager ? FinanceRoles.Ceo : usualRoles + "," + FinanceRoles.Ceo;
+        }
     }
 
     /// <summary>
@@ -283,6 +367,69 @@ namespace Services.NasbNiro.Finance
                 if (employees < MinEmployees) result.Add(g.Key);
             }
             return result;
+        }
+    }
+
+    /// <summary>
+    /// The rule of three per account role and cost centre (release R1f review M4). The payroll voucher posts the debit side per account role and cost centre; a cost centre in which fewer than three
+    /// payroll employees contribute to one role (direct, indirect, employer insurance, severance ...) would show one person's pay on its line, so the amount of that (role, centre) moves to one
+    /// company-level line of the same role (no cost centre). The totals per account do not change, only the cost-centre dimension of the small groups.
+    /// </summary>
+    internal static class PayrollPooling
+    {
+        public sealed class DebitLine
+        {
+            public string Role;
+            public int? WorkOrderId;
+            public string CostCenter;
+            public decimal Amount;
+            public HashSet<int> Employees = new HashSet<int>();
+
+            /// <summary>True for a line that received the amount of a pooled cost centre.</summary>
+            public bool Pooled;
+        }
+
+        /// <summary>Adds an amount to the line of (role, work order, cost centre), creating it when it does not exist yet, and remembers the employee who contributed.</summary>
+        public static void Add(List<DebitLine> lines, int employeeId, string role, int? workOrderId, string costCenter, decimal amount)
+        {
+            if (amount == 0) return;
+            DebitLine line = lines.FirstOrDefault(d => d.Role == role && d.WorkOrderId == workOrderId && d.CostCenter == costCenter);
+            if (line == null)
+            {
+                line = new DebitLine { Role = role, WorkOrderId = workOrderId, CostCenter = costCenter };
+                lines.Add(line);
+            }
+            line.Amount += amount;
+            line.Employees.Add(employeeId);
+        }
+
+        /// <summary>
+        /// Pools every (role, cost centre) of the lines that carry a cost centre and fewer than <see cref="PayrollProtection.MinEmployees"/> distinct employees into the company-level line of the same role.
+        /// Returns the pooled (role, cost centre) pairs, in the order of their first appearance.
+        /// </summary>
+        public static List<(string Role, string CostCenter)> PoolSmallCentres(List<DebitLine> lines)
+        {
+            var pooled = new List<(string Role, string CostCenter)>();
+            var groups = lines.Where(l => l.CostCenter != null).GroupBy(l => (l.Role, l.CostCenter)).ToList();
+            foreach (var g in groups)
+            {
+                if (g.SelectMany(l => l.Employees).Distinct().Count() >= PayrollProtection.MinEmployees) continue;
+                pooled.Add((g.Key.Role, g.Key.CostCenter));
+                foreach (DebitLine small in g.ToList())
+                {
+                    lines.Remove(small);
+                    DebitLine company = lines.FirstOrDefault(d => d.Role == small.Role && d.WorkOrderId == small.WorkOrderId && d.CostCenter == null);
+                    if (company == null)
+                    {
+                        company = new DebitLine { Role = small.Role, WorkOrderId = small.WorkOrderId, CostCenter = null };
+                        lines.Add(company);
+                    }
+                    company.Amount += small.Amount;
+                    foreach (int employee in small.Employees) company.Employees.Add(employee);
+                    company.Pooled = true;
+                }
+            }
+            return pooled;
         }
     }
 
@@ -338,6 +485,10 @@ namespace Services.NasbNiro.Finance
             return sb.Append(']').ToString();
         }
 
+        /// <summary>The frozen text of the sheets the HR close wrote (the sheets typed or imported by payroll are not part of it).</summary>
+        public static string SnapshotOfHrClose(IEnumerable<FnAttendanceSheet> sheets) =>
+            Snapshot(sheets.Where(s => s.Source == FnSheetSource.HrClose).Select(s => new KeyValuePair<int, SheetNumbersDto>(s.EmployeeId, Of(s))));
+
         /// <summary>
         /// A Persian message when the numbers cannot belong to the month, else null. <paramref name="overtimeCapHours"/> is the monthly cap of the attendance policy:
         /// the overtime and the holiday work sit in one bucket and share it.
@@ -376,11 +527,111 @@ namespace Services.NasbNiro.Finance
         }
 
         public static async Task<string> RefusalAsync(IUnitOfWork uow, int year, int month, CancellationToken ct) => Refusal(year, month, await GetAsync(uow, year, month, ct));
+
+        /// <summary>
+        /// Release R1f review M2: once HR has prepared the month (or the second person confirmed it) the attendance numbers of its sheets come from the close: a sheet that payroll types or imports for such a month
+        /// (a new one, or one whose numbers would change) is refused and the Persian message points to the way that remains. Null while the month is open (never closed, or its close was rejected).
+        /// </summary>
+        public static string SheetEntryRefusal(int year, int month, OfAttendanceMonth row, bool sheetExists)
+        {
+            if (row == null || row.Status == OfMonthStatus.Rejected) return null;
+            string label = $"{year}/{month:00}";
+            if (row.Status == OfMonthStatus.Prepared)
+                return $"بستن حضور و غیاب ماه {label} آماده شده و منتظر تایید است؛ ارقام کارکرد دستی یا واردات برای این ماه پذیرفته نمی‌شود. اگر کارکردی باید تغییر کند، بستن ماه را رد کنید تا منابع انسانی دوباره آماده کند.";
+            return sheetExists
+                ? $"حضور و غیاب ماه {label} تایید و بسته شده است؛ ارقام کارکرد با ثبت دستی یا واردات تغییر نمی‌کند. «درخواست اصلاح کارکرد» ثبت کنید تا منابع انسانی (نفر دیگری) آن را تایید کند."
+                : $"حضور و غیاب ماه {label} تایید و بسته شده و برای این کارمند برگه‌ای در آن نیست؛ برگه جدید دستی یا واردات پذیرفته نمی‌شود. بستن ماه را رد کنید تا منابع انسانی کارمند را در آماده‌سازی دوباره بیاورد.";
+        }
+
+        /// <summary>
+        /// Release R1f review M2: the warning that the run result carries when sheets of the month were typed or imported by payroll (not written by the HR close): count and personnel codes. Null when there are none.
+        /// </summary>
+        public static string OutsideCloseWarning(IEnumerable<string> personnelCodes)
+        {
+            List<string> codes = (personnelCodes ?? Enumerable.Empty<string>()).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c, StringComparer.Ordinal).ToList();
+            if (codes.Count == 0) return null;
+            return $"{codes.Count.ToString(CultureInfo.InvariantCulture)} برگه کارکرد این ماه خارج از بستن حضور و غیاب منابع انسانی (ثبت دستی یا واردات) آمده و در snapshot تاییدشده نیست؛ پیش از تایید درستی آن‌ها را بررسی کنید (کد پرسنلی): " + string.Join("، ", codes);
+        }
+
+        /// <summary>
+        /// Null when the month is confirmed AND its sheets still hold exactly the numbers frozen at the preparation (the stored snapshot also has to match its own hash); otherwise the Persian refusal.
+        /// A month closed before the snapshot existed has none: it passes (the status then reports "no snapshot").
+        /// </summary>
+        public static async Task<string> VerifiedRefusalAsync(IUnitOfWork uow, int year, int month, CancellationToken ct)
+        {
+            OfAttendanceMonth row = await GetAsync(uow, year, month, ct);
+            string refusal = Refusal(year, month, row);
+            if (refusal != null || row.SnapshotJson == null) return refusal;
+            string label = $"{year}/{month:00}";
+            if (!string.Equals(PayrollHash.OfMonth(row.SnapshotJson, row.PolicyJson), row.SnapshotHash, StringComparison.Ordinal))
+                return $"snapshot ثبت‌شده برای بستن حضور و غیاب ماه {label} با مهر (hash) خود یکی نیست؛ بستن ماه را رد کنید تا منابع انسانی دوباره آماده کند.";
+            List<FnAttendanceSheet> sheets = await uow.Set<FnAttendanceSheet>().AsNoTracking().Where(x => x.Year == year && x.Month == month).ToListAsync(ct);
+            if (!string.Equals(SheetNumbers.SnapshotOfHrClose(sheets), row.SnapshotJson, StringComparison.Ordinal))
+                return $"ارقام برگه‌های کارکرد ماه {label} با آنچه هنگام بستن و تایید ماه ثبت شد یکی نیست؛ حقوق محاسبه یا تایید نمی‌شود. تغییر کارکرد فقط با درخواست اصلاح کارکرد (به تایید منابع انسانی) ممکن است یا مدیر مالی ماه را رد کند.";
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// One-time upgrade steps of release R1f for installations that already hold data (idempotent, each guarded by a marker row in FnSetting with the key "Upgrade:R1f:..."; the changes are audited like any save,
+    /// with the user whose call triggered the step):
+    /// (1) the overtime approval switch is turned ON on the existing policy rows (the old upgrade had written OFF; the starred default is ON), (2) the sheets of the months closed before the two-step close
+    /// (status Confirmed, no snapshot) become HrClose rows and are locked, so payroll can no longer type over them.
+    /// </summary>
+    internal static class R1fUpgrades
+    {
+        public const string OvertimeApprovalMarker = "Upgrade:R1f:OvertimeApproval";
+        public const string ClosedSheetsMarker = "Upgrade:R1f:ClosedSheets";
+
+        public static Task<bool> OvertimeApprovalDoneAsync(IUnitOfWork uow, CancellationToken ct) =>
+            uow.Set<FnSetting>().AsNoTracking().AnyAsync(s => s.Key == OvertimeApprovalMarker, ct);
+
+        public static async Task EnsureAsync(IUnitOfWork uow, int userId, CancellationToken ct)
+        {
+            HashSet<string> done = (await uow.Set<FnSetting>().AsNoTracking().Where(s => s.Key == OvertimeApprovalMarker || s.Key == ClosedSheetsMarker).Select(s => s.Key).ToListAsync(ct)).ToHashSet();
+            if (done.Count == 2) return;
+            var touched = new List<object>();
+            DateTimeOffset now = DateTimeOffset.Now;
+            if (!done.Contains(OvertimeApprovalMarker))
+            {
+                foreach (OfAttendancePolicy p in await uow.Set<OfAttendancePolicy>().ToListAsync(ct))
+                {
+                    if (p.OvertimeRequiresApproval) continue;
+                    p.OvertimeRequiresApproval = true; p.UpdatedAt = now; p.UpdatedByUserId = userId;
+                    touched.Add(p);
+                }
+                var marker = new FnSetting { Key = OvertimeApprovalMarker, Value = "1", Title = "ارتقای R1f: تایید پیشینی اضافه‌کار روی سیاست‌های موجود روشن شد (یک‌بار)" };
+                uow.Set<FnSetting>().Add(marker);
+                touched.Add(marker);
+            }
+            if (!done.Contains(ClosedSheetsMarker))
+            {
+                var months = await uow.Set<OfAttendanceMonth>().AsNoTracking().Where(m => m.Status == OfMonthStatus.Confirmed && m.SnapshotJson == null).Select(m => new { m.Year, m.Month }).ToListAsync(ct);
+                foreach (var m in months)
+                    foreach (FnAttendanceSheet sheet in await uow.Set<FnAttendanceSheet>().Where(x => x.Year == m.Year && x.Month == m.Month && (x.Source != FnSheetSource.HrClose || !x.Locked)).ToListAsync(ct))
+                    {
+                        sheet.Source = FnSheetSource.HrClose; sheet.Locked = true; sheet.UpdatedAt = now; sheet.UpdatedByUserId = userId;
+                        touched.Add(sheet);
+                    }
+                var marker = new FnSetting { Key = ClosedSheetsMarker, Value = "1", Title = "ارتقای R1f: برگه‌های ماه‌های بسته‌شده پیشین قفل و از نوع بستن منابع انسانی شد (یک‌بار)" };
+                uow.Set<FnSetting>().Add(marker);
+                touched.Add(marker);
+            }
+            try { await uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException)
+            {
+                // another request wrote the markers first: leave the changes out, the next call finds the markers and does nothing
+                foreach (object entity in touched) uow.Entry(entity).State = EntityState.Detached;
+            }
+        }
     }
 
     /// <summary>SHA-256 helpers for the frozen month snapshot and the payload hashes.</summary>
     internal static class PayrollHash
     {
         public static string Hex(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text ?? ""))).ToLowerInvariant();
+
+        /// <summary>The hash of a prepared month: the sheets' snapshot and, when the month froze them, the policy values used ("snapshot|policy"); a legacy month hashes the snapshot alone.</summary>
+        public static string OfMonth(string snapshotJson, string policyJson) => Hex(policyJson == null ? snapshotJson : snapshotJson + "|" + policyJson);
     }
 }

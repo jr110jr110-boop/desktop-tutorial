@@ -106,8 +106,9 @@ namespace Services.NasbNiro.Finance
         private static bool IsPayroll(FnOutboxKind kind) => kind == FnOutboxKind.PayrollInsuranceList || kind == FnOutboxKind.PayrollTaxList;
         private bool CanSee(FnOutboxKind kind) => IsPayroll(kind) ? _user.IsInRole(FinanceRoles.PayrollReaders) : _user.IsInRole(FinanceRoles.OutboxReaders);
         private bool CanPrepare(FnOutboxKind kind) => IsPayroll(kind) ? _user.IsInRole(FinanceRoles.PayrollUsers) : _user.IsInRole(FinanceRoles.Accountants);
-        // release R1f: every package, the payroll lists included, is approved by the finance manager (not by any payroll peer), consistent with the monthly run
-        private bool CanApprove(FnOutboxKind kind) => _user.IsInRole(FinanceRoles.Managers);
+        // release R1f: every package, the payroll lists included, is approved by the finance manager (not by any payroll peer), consistent with the monthly run; the CEO may approve too (review M7),
+        // so a company with one finance manager who made the package is never stuck
+        private bool CanApprove(FnOutboxKind kind) => _user.IsInRole(FinanceRoles.ManagersOrCeo);
 
         private static bool ValidYear(int y) => y >= 1300 && y <= 1600;
 
@@ -176,8 +177,9 @@ namespace Services.NasbNiro.Finance
         }
 
         /// <summary>
-        /// The people whose actions produced the content of a package that the background job drafted (",5,7,"): the creator, preparer, editors, approver and poster of the payroll runs of the month, or the creator, editors and
-        /// approver of the posted invoices of the period. None of them may approve the package (a system-made package has no creator that the rule could name).
+        /// The people whose actions produced the content of a package that the background job drafted (",5,7,"): the makers only - the creator, preparer, editors and poster of the payroll runs of the month, or the creator
+        /// and editors of the posted invoices of the period. None of them may approve the package (a system-made package has no creator that the rule could name). The people who approved a run or an invoice are not makers
+        /// of the package: the package is the second look at their work (review M7), so they may approve it - a company with one finance manager is never stuck.
         /// </summary>
         private async Task<string> TriggerUsersAsync(FnOutboxKind kind, int year, int? month, DateTime from, DateTime to, CancellationToken ct)
         {
@@ -192,14 +194,14 @@ namespace Services.NasbNiro.Finance
             if (IsPayroll(kind))
             {
                 var runs = await _uow.Set<FnPayrollRun>().AsNoTracking().Where(r => r.Year == year && r.Month == month && r.Status >= FnPayrollStatus.Approved)
-                    .Select(r => new { r.CreatedByUserId, r.PreparedByUserId, r.ApprovedByUserId, r.PostedByUserId, r.EditorUserIds }).ToListAsync(ct);
-                foreach (var r in runs) { Add(r.CreatedByUserId); Add(r.PreparedByUserId); Add(r.ApprovedByUserId); Add(r.PostedByUserId); AddList(r.EditorUserIds); }
+                    .Select(r => new { r.CreatedByUserId, r.PreparedByUserId, r.PostedByUserId, r.EditorUserIds }).ToListAsync(ct);
+                foreach (var r in runs) { Add(r.CreatedByUserId); Add(r.PreparedByUserId); Add(r.PostedByUserId); AddList(r.EditorUserIds); }
             }
             else
             {
                 var invoices = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Date >= from && i.Date <= to)
-                    .Select(i => new { i.CreatedByUserId, i.ApprovedByUserId, i.EditorUserIds }).ToListAsync(ct);
-                foreach (var i in invoices) { Add(i.CreatedByUserId); Add(i.ApprovedByUserId); AddList(i.EditorUserIds); }
+                    .Select(i => new { i.CreatedByUserId, i.EditorUserIds }).ToListAsync(ct);
+                foreach (var i in invoices) { Add(i.CreatedByUserId); AddList(i.EditorUserIds); }
             }
             return ids.Count == 0 ? null : "," + string.Join(",", ids.OrderBy(x => x)) + ",";
         }
@@ -421,7 +423,7 @@ namespace Services.NasbNiro.Finance
                     if (p.Status != FnOutboxStatus.Draft) return Bad<OutboxPackageDto>("فقط بسته پیش‌نویس تایید می‌شود.");
                     if (p.CreatedByUserId != 0 && p.CreatedByUserId == Me) return Bad<OutboxPackageDto>("تایید باید توسط شخص دیگری غیر از تهیه‌کننده بسته انجام شود.");
                     if (p.CreatedByUserId == 0 && p.TriggerUserIds != null && p.TriggerUserIds.Contains("," + Me + ","))
-                        return Bad<OutboxPackageDto>("این بسته را سیستم تهیه کرده است اما محتوای آن حاصل کار شماست (ثبت، محاسبه یا تایید حقوق و اسناد دوره)؛ باید شخص دیگری آن را تایید کند.");
+                        return Bad<OutboxPackageDto>("این بسته را سیستم تهیه کرده است اما محتوای آن حاصل کار شماست (ثبت، محاسبه، ویرایش یا ثبت در دفتر حقوق و اسناد دوره)؛ باید شخص دیگری (مدیر مالی دیگر یا مدیرعامل) آن را تایید کند.");
                     p.Status = FnOutboxStatus.Ready; p.ApprovedByUserId = Me; p.ApprovedAt = DateTimeOffset.Now;
                     break;
                 case "send":

@@ -11,6 +11,7 @@ using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.FinanceDtos;
 using ViewModels.NasbNiro.Pagination;
 using OfficeDtos = ViewModels.NasbNiro.OfficeDtos;
+using OfficeEntities = Entities.Model.NasbNiro.Office;
 using static Services.NasbNiro.Finance.LedgerMath;
 
 namespace Services.NasbNiro.Finance
@@ -118,7 +119,8 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<EmployeeChangeDto>> EmployeeChangeActionAsync(EmployeeChangeActionDto dto, CancellationToken ct)
         {
-            if (!CanWrite) return Bad<EmployeeChangeDto>(NotAllowed);
+            // the usual deciders are PAYROLL and FINANCEMANAGER; the CEO decides only the record of a finance manager (review H2)
+            if (!CanWrite && !_user.IsInRole(FinanceRoles.Ceo)) return Bad<EmployeeChangeDto>(NotAllowed);
             if (dto == null || dto.Id <= 0) return Bad<EmployeeChangeDto>("اطلاعات ارسال‌شده کامل نیست.");
             string action = (dto.Action ?? "").Trim().ToLowerInvariant();
             if (action != "approve" && action != "reject") return Bad<EmployeeChangeDto>("عملیات باید تایید یا رد باشد.");
@@ -127,6 +129,9 @@ namespace Services.NasbNiro.Finance
             if (c.Status != FnChangeStatus.Pending) return Bad<EmployeeChangeDto>("درباره این درخواست قبلاً تصمیم گرفته شده است.");
             FnEmployee e = await _uow.Set<FnEmployee>().FirstOrDefaultAsync(x => x.Id == c.EmployeeId, ct);
             if (e == null) return ResponseDtoHelper.NotFound<EmployeeChangeDto>("کارمند پیدا نشد.");
+            // the employee concerned never decides his own request, and a finance manager's own request goes to the CEO
+            string selfRefusal = await SelfApproval.RefusalAsync(_uow, _user, e, CanWrite, NotAllowed, true, ct);
+            if (selfRefusal != null) return Bad<EmployeeChangeDto>(selfRefusal);
             // maker-checker: the person who proposed (or, for a new employee, anyone who edited the row since) does not decide
             if (c.ProposedByUserId == Me || (c.Kind == FnEmployeeChangeKind.Create && Touched(0, e.EditorUserIds, Me)))
                 return Bad<EmployeeChangeDto>("کسی که این کارمند یا تغییر را ثبت یا ویرایش کرده نمی‌تواند آن را تایید یا رد کند؛ نفر دوم تصمیم می‌گیرد.");
@@ -187,13 +192,18 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<LoanDto>> LoanActionAsync(LoanActionDto dto, CancellationToken ct)
         {
-            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<LoanDto>(NotAllowed + " (تایید وام و مساعده فقط توسط مدیر مالی)");
+            const string loanDeciders = NotAllowed + " (تایید وام و مساعده فقط توسط مدیر مالی)";
+            bool manager = _user.IsInRole(FinanceRoles.Managers);
+            if (!manager && !_user.IsInRole(FinanceRoles.Ceo)) return Bad<LoanDto>(loanDeciders);
             if (dto == null || dto.Id <= 0) return Bad<LoanDto>("اطلاعات ارسال‌شده کامل نیست.");
             string action = (dto.Action ?? "").Trim().ToLowerInvariant();
             if (action != "approve" && action != "reject") return Bad<LoanDto>("عملیات باید تایید یا رد باشد.");
             FnEmployeeLoan l = await _uow.Set<FnEmployeeLoan>().Include(x => x.Employee).FirstOrDefaultAsync(x => x.Id == dto.Id, ct);
             if (l == null) return ResponseDtoHelper.NotFound<LoanDto>("وام پیدا نشد.");
             if (l.ApprovalStatus != FnLoanApproval.Pending) return Bad<LoanDto>("درباره این وام قبلاً تصمیم گرفته شده است.");
+            // the borrower never decides his own loan, and the loan of a finance manager goes to the CEO (review H2)
+            string selfRefusal = await SelfApproval.RefusalAsync(_uow, _user, l.Employee, manager, loanDeciders, true, ct);
+            if (selfRefusal != null) return Bad<LoanDto>(selfRefusal);
             if (Touched(l.CreatedByUserId, l.EditorUserIds, Me)) return Bad<LoanDto>("کسی که وام را ثبت یا ویرایش کرده نمی‌تواند آن را تایید یا رد کند.");
             string note = Clean(dto.Note);
             if (action == "reject" && note == null) return Bad<LoanDto>("دلیل رد را بنویسید.");
@@ -223,12 +233,19 @@ namespace Services.NasbNiro.Finance
             if (reason == null) return Bad<OfficeDtos.AttendanceCorrectionDto>("دلیل اصلاح کارکرد را بنویسید.");
             FnAttendanceSheet sheet = await _uow.Set<FnAttendanceSheet>().AsNoTracking().FirstOrDefaultAsync(s => s.EmployeeId == dto.EmployeeId && s.Year == dto.Year && s.Month == dto.Month, ct);
             if (sheet == null) return ResponseDtoHelper.NotFound<OfficeDtos.AttendanceCorrectionDto>("برگه کارکرد این کارمند در این ماه پیدا نشد.");
-            if (!sheet.Locked) return Bad<OfficeDtos.AttendanceCorrectionDto>("این برگه قفل نیست؛ کارکرد را مستقیم در صفحه کارکرد اصلاح کنید.");
             FnEmployee emp = await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(e => e.Id == sheet.EmployeeId, ct);
             if (emp == null) return ResponseDtoHelper.NotFound<OfficeDtos.AttendanceCorrectionDto>("کارمند پیدا نشد.");
+            // nobody proposes a correction of his own attendance (review H2)
+            if (emp.UserId.HasValue && Me > 0 && emp.UserId.Value == Me) return Bad<OfficeDtos.AttendanceCorrectionDto>(SelfApproval.OwnRecordPropose);
             if (await LockedAsync(sheet.Year, sheet.Month, emp.WorkshopId, ct)) return Bad<OfficeDtos.AttendanceCorrectionDto>("فیش حقوق این ماه تایید شده و کارکرد قابل اصلاح نیست.");
-            string closeRefusal = await HrClose.RefusalAsync(_uow, sheet.Year, sheet.Month, ct);
-            if (closeRefusal != null) return Bad<OfficeDtos.AttendanceCorrectionDto>("اصلاح کارکرد فقط برای ماهی است که بستن حضور و غیاب آن تایید شده؛ " + closeRefusal);
+            // a month HR has not closed yet (or whose close was rejected) takes the numbers directly on the attendance page; once the close is prepared or confirmed, the numbers change only through this flow (review M2),
+            // also for a sheet that payroll typed and that is not locked: its approved correction brings it under the close
+            OfficeEntities.OfAttendanceMonth monthRow = await HrClose.GetAsync(_uow, sheet.Year, sheet.Month, ct);
+            string closeRefusal = HrClose.Refusal(sheet.Year, sheet.Month, monthRow);
+            if (closeRefusal != null)
+                return Bad<OfficeDtos.AttendanceCorrectionDto>(!sheet.Locked && (monthRow == null || monthRow.Status == OfficeEntities.OfMonthStatus.Rejected)
+                    ? "این برگه قفل نیست؛ کارکرد را مستقیم در صفحه کارکرد اصلاح کنید."
+                    : "اصلاح کارکرد فقط برای ماهی است که بستن حضور و غیاب آن تایید شده؛ " + closeRefusal);
             if (await _uow.Set<FnAttendanceCorrection>().AnyAsync(c => c.SheetId == sheet.Id && c.Status == FnChangeStatus.Pending, ct))
                 return Bad<OfficeDtos.AttendanceCorrectionDto>("برای این برگه درخواست اصلاح دیگری در انتظار تصمیم منابع انسانی است.");
             string numberError = SheetNumbers.Validate(dto.Proposed, sheet.Year, sheet.Month, await OvertimeCapHoursAsync(ct));
@@ -245,7 +262,8 @@ namespace Services.NasbNiro.Finance
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Bad<OfficeDtos.AttendanceCorrectionDto>(Conflict); }
             await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "att:corr:" + row.Id, true, "office", "attendance", row.Id,
-                $"اصلاح کارکرد {row.Year}/{row.Month:00} کارمند با کد پرسنلی {emp.PersonnelCode}", "/office/attendance/corrections", global::Services.NasbNiro.Office.OfficeRoles.Hr, ct);
+                $"اصلاح کارکرد {row.Year}/{row.Month:00} کارمند با کد پرسنلی {emp.PersonnelCode}", "/office/attendance/corrections",
+                await SelfApproval.GateRolesAsync(_uow, emp, global::Services.NasbNiro.Office.OfficeRoles.Hr, false, ct), ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { row.ProposedByUserId }, ct);
             return ResponseDtoHelper.Ok(new OfficeDtos.AttendanceCorrectionDto
             {
@@ -317,9 +335,10 @@ namespace Services.NasbNiro.Finance
             return (null, row, emp);
         }
 
-        private Task OpeningGateAsync(FnLeaveOpening o, bool waiting, string personnelCode, CancellationToken ct) =>
-            global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "leaveopen:" + o.Id, waiting, "finance", "leave-opening", o.Id,
-                waiting ? $"تایید مانده اول دوره مرخصی کارمند با کد پرسنلی {personnelCode}" : null, waiting ? "/finance/payroll/leave-openings" : null, waiting ? FinanceRoles.Managers : null, ct);
+        private async Task OpeningGateAsync(FnLeaveOpening o, bool waiting, FnEmployee employee, CancellationToken ct) =>
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "leaveopen:" + o.Id, waiting, "finance", "leave-opening", o.Id,
+                waiting ? $"تایید مانده اول دوره مرخصی کارمند با کد پرسنلی {employee?.PersonnelCode}" : null, waiting ? "/finance/payroll/leave-openings" : null,
+                waiting ? await SelfApproval.GateRolesAsync(_uow, employee, FinanceRoles.Managers, true, ct) : null, ct);
 
         public async Task<ResponseDto<LeaveOpeningDto>> SaveLeaveOpeningAsync(SaveLeaveOpeningDto dto, CancellationToken ct)
         {
@@ -328,7 +347,7 @@ namespace Services.NasbNiro.Finance
             if (made.Error != null) return Bad<LeaveOpeningDto>(made.Error);
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Bad<LeaveOpeningDto>(Conflict); }
-            await OpeningGateAsync(made.Row, true, made.Employee.PersonnelCode, ct);
+            await OpeningGateAsync(made.Row, true, made.Employee, ct);
             return ResponseDtoHelper.Ok((await OpeningDtosAsync(new List<FnLeaveOpening> { made.Row }, ct))[0]);
         }
 
@@ -350,20 +369,26 @@ namespace Services.NasbNiro.Finance
                     outcome.Errors.Add($"ردیف {n}: ذخیره نشد؛ ورود متوقف شد (ردیف‌های قبلی ثبت شده‌اند).");
                     break;
                 }
-                await OpeningGateAsync(made.Row, true, made.Employee.PersonnelCode, ct);
+                await OpeningGateAsync(made.Row, true, made.Employee, ct);
             }
             return ResponseDtoHelper.Ok(outcome);
         }
 
         public async Task<ResponseDto<LeaveOpeningDto>> LeaveOpeningActionAsync(LeaveOpeningActionDto dto, CancellationToken ct)
         {
-            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<LeaveOpeningDto>(NotAllowed + " (تایید مانده اول دوره مرخصی فقط توسط مدیر مالی)");
+            const string openingDeciders = NotAllowed + " (تایید مانده اول دوره مرخصی فقط توسط مدیر مالی)";
+            bool manager = _user.IsInRole(FinanceRoles.Managers);
+            if (!manager && !_user.IsInRole(FinanceRoles.Ceo)) return Bad<LeaveOpeningDto>(openingDeciders);
             if (dto == null || dto.Id <= 0) return Bad<LeaveOpeningDto>("اطلاعات ارسال‌شده کامل نیست.");
             string action = (dto.Action ?? "").Trim().ToLowerInvariant();
             if (action != "approve" && action != "reject") return Bad<LeaveOpeningDto>("عملیات باید تایید یا رد باشد.");
             FnLeaveOpening o = await _uow.Set<FnLeaveOpening>().FirstOrDefaultAsync(x => x.Id == dto.Id, ct);
             if (o == null) return ResponseDtoHelper.NotFound<LeaveOpeningDto>("مانده اول دوره پیدا نشد.");
             if (o.Status != FnChangeStatus.Pending) return Bad<LeaveOpeningDto>("درباره این مانده قبلاً تصمیم گرفته شده است.");
+            // the employee concerned never decides his own opening balance, and a finance manager's goes to the CEO (review H2)
+            FnEmployee openingSubject = await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == o.EmployeeId, ct);
+            string selfRefusal = await SelfApproval.RefusalAsync(_uow, _user, openingSubject, manager, openingDeciders, true, ct);
+            if (selfRefusal != null) return Bad<LeaveOpeningDto>(selfRefusal);
             if (o.EnteredByUserId == Me) return Bad<LeaveOpeningDto>("واردکننده مانده اول دوره نمی‌تواند آن را تایید یا رد کند.");
             string note = Cap(Clean(dto.Note), 500);
             if (action == "reject" && note == null) return Bad<LeaveOpeningDto>("دلیل رد را بنویسید.");

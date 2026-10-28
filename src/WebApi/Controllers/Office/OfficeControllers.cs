@@ -256,8 +256,17 @@ namespace WebApi.Controllers
         [HttpPost("clock/request-action")]
         public async Task<IActionResult> ClockRequestActionAsync([FromBody] ClockRequestActionDto dto, CancellationToken ct) => Ok(await _attendance.ClockRequestActionAsync(dto, ct));
 
+        /// <summary>Imports rows as a PENDING batch: nothing counts until a second HR user (not the importer, not an employee in the batch) approves it. Rows of the importer's own employee record are refused.</summary>
         [HttpPost("clock/import")]
         public async Task<IActionResult> ImportAsync([FromBody] ImportClockDto dto, CancellationToken ct) => Ok(await _attendance.ImportEventsAsync(dto, ct));
+
+        /// <summary>The import batches (HR and CEO); WaitingForMe lists the pending ones the signed-in user may decide.</summary>
+        [HttpGet("clock/import-batches")]
+        public async Task<IActionResult> ImportBatchesAsync([FromQuery] ClockBatchQuery query, CancellationToken ct) => Ok((await _attendance.GetImportBatchesAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>Approves or rejects a whole import batch (another HR user than the importer, with no punch inside the batch); audited.</summary>
+        [HttpPost("clock/import-batches/action")]
+        public async Task<IActionResult> ImportBatchActionAsync([FromBody] ClockBatchActionDto dto, CancellationToken ct) => Ok(await _attendance.ImportBatchActionAsync(dto, ct));
 
         /// <summary>Excel export of the attendance software (PW Kara): the sheets, columns, sample rows and a guessed column mapping (multipart: File, optional Sheet).</summary>
         [HttpPost("clock/import-file/preview")]
@@ -282,7 +291,7 @@ namespace WebApi.Controllers
             }
             if (form?.File != null && form.File.Length > ClockFileForm.MaxFileBytes) return Ok(ResponseDtoHelper.BadRequest<ClockImportResultDto>(ClockFileForm.TooBig));
             byte[] data = await ReadAsync(form?.File, ct);
-            return Ok(await _attendance.ImportClockFileAsync(data, new ClockFileImportDto { ProfileId = form?.ProfileId, Mapping = mapping, SaveProfileAs = form?.SaveProfileAs }, ct));
+            return Ok(await _attendance.ImportClockFileAsync(data, new ClockFileImportDto { ProfileId = form?.ProfileId, Mapping = mapping, SaveProfileAs = form?.SaveProfileAs, Reason = form?.Reason }, ct));
         }
 
         [HttpGet("clock/import-profiles")]
@@ -299,14 +308,14 @@ namespace WebApi.Controllers
             return stream.ToArray();
         }
 
-        /// <summary>For devices and middleware on the LAN. Headers X-Device-Code and X-Device-Key; a wrong code or key gives 401.</summary>
+        /// <summary>For devices and middleware on the LAN. Headers X-Device-Code and X-Device-Key; a wrong code, key or (for a device bound to addresses) source address gives 401.</summary>
         [HttpPost("push")]
         [AllowAnonymous]
         public async Task<IActionResult> PushAsync([FromBody] DevicePushDto dto, CancellationToken ct)
         {
             string deviceCode = Request.Headers["X-Device-Code"].ToString();
             string deviceKey = Request.Headers["X-Device-Key"].ToString();
-            ResponseDto<DevicePushResultDto> result = await _attendance.PushAsync(deviceCode, deviceKey, dto, ct);
+            ResponseDto<DevicePushResultDto> result = await _attendance.PushAsync(deviceCode, deviceKey, dto, ct, HttpContext.Connection.RemoteIpAddress?.ToString());
             if (result.HttpStatusCode == HttpStatusCode.Unauthorized) return StatusCode(401, result);
             return Ok(result);
         }
@@ -367,6 +376,9 @@ namespace WebApi.Controllers
         /// <summary>JSON of ClockFileMappingDto.</summary>
         public string Mapping { get; set; }
         public string SaveProfileAs { get; set; }
+
+        /// <summary>Optional note of the importer (what the file is); kept on the pending batch.</summary>
+        public string Reason { get; set; }
     }
 
     [ApiController]

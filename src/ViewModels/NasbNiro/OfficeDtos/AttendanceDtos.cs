@@ -87,6 +87,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string LastPushAtText { get; set; }
         public DateTimeOffset? KeyRotatedAt { get; set; }
         public string KeyRotatedAtText { get; set; }
+
+        /// <summary>The LAN addresses the device may push from (comma separated IPv4 or IPv4/CIDR); empty = any address.</summary>
+        public string AllowedAddresses { get; set; }
     }
 
     /// <summary>Creates a device (the key is returned once) or edits its title, place and state. The key is never issued by an edit: rotating it is its own action.</summary>
@@ -97,6 +100,12 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string Title { get; set; }
         public string Location { get; set; }
         public bool IsActive { get; set; } = true;
+
+        /// <summary>
+        /// The LAN addresses the device may push from, comma separated IPv4 or IPv4/CIDR ("192.168.1.20,10.0.5.0/24"); at most 10 entries and 200 characters. Empty text = any address.
+        /// Null on an edit = keep the stored list.
+        /// </summary>
+        public string AllowedAddresses { get; set; }
     }
 
     /// <summary>The key is shown once (on creation and on rotation); only its hash is stored. ApiKey is null when an existing device was only edited.</summary>
@@ -160,7 +169,12 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public DateTimeOffset? ApprovedAt { get; set; }
         public string RejectReason { get; set; }
 
-        /// <summary>approve / reject, for the signed-in user (a manual request waiting for a second person who is neither its author nor its subject).</summary>
+        /// <summary>The import batch the row belongs to (imported rows are decided with their batch, never one by one); null for every other source.</summary>
+        public int? ImportBatchId { get; set; }
+
+        /// <summary>
+        /// approve / reject, for the signed-in user: a manual request, or a device punch held for the key holder, waiting for a second person who is neither its author, nor its subject, nor a holder of the device key.
+        /// </summary>
         public List<string> AllowedActions { get; set; } = new List<string>();
     }
 
@@ -202,6 +216,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
     {
         public string DeviceCode { get; set; }
 
+        /// <summary>Optional note of the importer (what the file is); kept on the batch.</summary>
+        public string Reason { get; set; }
+
         /// <summary>Rows read from the Excel/CSV file by the front.</summary>
         public List<ClockRowDto> Rows { get; set; } = new List<ClockRowDto>();
 
@@ -223,9 +240,67 @@ namespace ViewModels.NasbNiro.OfficeDtos
         /// <summary>Rows read from the file (Excel import).</summary>
         public int RowsRead { get; set; }
 
-        /// <summary>Events refused: in the future, or in a month whose payroll is approved.</summary>
+        /// <summary>Events refused: in the future, in a month that is closed, or the importer's own employee record.</summary>
         public int Rejected { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
+
+        /// <summary>The Pending batch the new rows were stored in (null when nothing new was stored). Nothing counts until a second HR user approves it.</summary>
+        public int? BatchId { get; set; }
+
+        /// <summary>True while the stored rows wait for the second person.</summary>
+        public bool PendingApproval { get; set; }
+    }
+
+    public class ClockBatchQuery : OfficePageQuery
+    {
+        /// <summary>0 = Pending, 1 = Approved, 2 = Rejected.</summary>
+        public OfClockBatchStatus? Status { get; set; }
+
+        /// <summary>The pending batches the signed-in user may decide (another HR user than the importer, with no punch inside the batch).</summary>
+        public bool? WaitingForMe { get; set; }
+    }
+
+    public class ClockImportBatchDto
+    {
+        public int Id { get; set; }
+        public string ImportedByName { get; set; }
+        public DateTimeOffset ImportedAt { get; set; }
+        public string ImportedAtText { get; set; }
+        public int Rows { get; set; }
+
+        /// <summary>Json or Excel.</summary>
+        public string Source { get; set; }
+        public string DeviceCode { get; set; }
+        public string PayloadHash { get; set; }
+        public string Reason { get; set; }
+
+        /// <summary>Pending, Approved or Rejected.</summary>
+        public string Status { get; set; }
+        public string DecidedByName { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecidedAtText { get; set; }
+        public string DecisionNote { get; set; }
+
+        /// <summary>How many different employees and which period the batch covers.</summary>
+        public int EmployeeCount { get; set; }
+        public DateTime? FirstTimestamp { get; set; }
+        public DateTime? LastTimestamp { get; set; }
+        public string FirstTimestampText { get; set; }
+        public string LastTimestampText { get; set; }
+
+        /// <summary>approve / reject, for the signed-in user.</summary>
+        public List<string> AllowedActions { get; set; } = new List<string>();
+    }
+
+    public class ClockBatchActionDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>approve or reject.</summary>
+        public string Action { get; set; }
+
+        /// <summary>Required for a rejection.</summary>
+        public string Note { get; set; }
     }
 
     public class DevicePushEventDto
@@ -242,9 +317,13 @@ namespace ViewModels.NasbNiro.OfficeDtos
 
     public class DevicePushResultDto
     {
+        /// <summary>Punches stored (Approved, or Pending for the key holder: see Held).</summary>
         public int Accepted { get; set; }
         public int Duplicates { get; set; }
         public int Rejected { get; set; }
+
+        /// <summary>Of the accepted punches, those stored Pending because their employee created or last rotated the key of this device: a second person decides them.</summary>
+        public int Held { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
     }
 
@@ -398,6 +477,41 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string EmployeeName { get; set; }
     }
 
+    /// <summary>A request of the month that nobody has decided yet (a manual or held clock punch, an imported batch, a submitted leave).</summary>
+    public class PendingRequestDto
+    {
+        /// <summary>ClockRequest, ImportBatch or Leave.</summary>
+        public string Kind { get; set; }
+        public int Id { get; set; }
+
+        /// <summary>A short Persian line: who, what and when.</summary>
+        public string Text { get; set; }
+    }
+
+    /// <summary>The days of an employee that fall between his shift assignments (inside the first and last assignment, covered by none): counted as absence.</summary>
+    public class GapDaysDto
+    {
+        public int EmployeeId { get; set; }
+        public string PersonnelCode { get; set; }
+        public string EmployeeName { get; set; }
+        public int Count { get; set; }
+        public List<DateTime> Dates { get; set; } = new List<DateTime>();
+        public List<string> DateTexts { get; set; } = new List<string>();
+    }
+
+    /// <summary>The attendance policy values a month was prepared with; frozen with the snapshot.</summary>
+    public class PolicySnapshotDto
+    {
+        public int GraceMinutes { get; set; }
+        public int? MaxOvertimeMinutesPerDay { get; set; }
+        public bool OvertimeRequiresApproval { get; set; }
+        public int RoundingMinutes { get; set; }
+        public bool EarlyLeaveDeduction { get; set; }
+        public bool MonthConfirmByHrPeer { get; set; }
+        public int MonthlyOvertimeCapMinutes { get; set; }
+        public decimal DelayPenaltyFactor { get; set; }
+    }
+
     public class CloseMonthResultDto
     {
         public int Year { get; set; }
@@ -412,6 +526,20 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public List<string> Warnings { get; set; } = new List<string>();
         public List<NoWorkshopEmployeeDto> NoWorkshop { get; set; } = new List<NoWorkshopEmployeeDto>();
         public List<SheetRowDto> Rows { get; set; } = new List<SheetRowDto>();
+
+        /// <summary>The state of the three company switches at the preparation (the numbers of the sheets were computed under them).</summary>
+        public bool OvertimeRequiresApproval { get; set; }
+        public bool EarlyLeaveDeduction { get; set; }
+        public bool MonthConfirmByHrPeer { get; set; }
+
+        /// <summary>All the policy values used, as frozen into the snapshot.</summary>
+        public PolicySnapshotDto Policy { get; set; }
+
+        /// <summary>Requests of the month nobody has decided yet: they count nowhere. Confirmation is refused while any is open.</summary>
+        public List<PendingRequestDto> PendingRequests { get; set; } = new List<PendingRequestDto>();
+
+        /// <summary>Per employee, the days between his shift assignments that were counted as absence.</summary>
+        public List<GapDaysDto> GapDays { get; set; } = new List<GapDaysDto>();
     }
 
     public class ConfirmMonthDto
@@ -448,12 +576,24 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string ConfirmedByName { get; set; }
         public string RejectReason { get; set; }
 
-        /// <summary>SHA-256 of the numbers frozen at preparation, and whether the sheets still hold exactly those numbers.</summary>
+        /// <summary>SHA-256 of the numbers frozen at preparation, and whether the sheets still hold exactly those numbers (null for a month closed before the snapshot existed: SnapshotNote says so).</summary>
         public string SnapshotHash { get; set; }
-        public bool SnapshotMatches { get; set; }
+        public bool? SnapshotMatches { get; set; }
+
+        /// <summary>«بدون snapshot — ماه قدیمی» for a legacy month; null otherwise.</summary>
+        public string SnapshotNote { get; set; }
+
+        /// <summary>The policy values the month was prepared with (null for a legacy month) and the three switches among them.</summary>
+        public PolicySnapshotDto Policy { get; set; }
+        public bool? OvertimeRequiresApproval { get; set; }
+        public bool? EarlyLeaveDeduction { get; set; }
+        public bool? MonthConfirmByHrPeer { get; set; }
 
         /// <summary>The signed-in user may confirm / reject the prepared month.</summary>
         public bool CanConfirm { get; set; }
+
+        /// <summary>For a prepared month: the requests of the month nobody has decided yet (the confirmation is refused while any is open).</summary>
+        public List<PendingRequestDto> PendingRequests { get; set; } = new List<PendingRequestDto>();
         public List<NoWorkshopEmployeeDto> NoWorkshop { get; set; } = new List<NoWorkshopEmployeeDto>();
         public int Sheets { get; set; }
 
@@ -762,5 +902,8 @@ namespace ViewModels.NasbNiro.OfficeDtos
 
         /// <summary>Save the mapping under this name as a profile (new or the same name replaced).</summary>
         public string SaveProfileAs { get; set; }
+
+        /// <summary>Optional note of the importer (what the file is); kept on the batch.</summary>
+        public string Reason { get; set; }
     }
 }

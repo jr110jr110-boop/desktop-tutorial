@@ -41,11 +41,14 @@ namespace Services.NasbNiro.Finance
     {
         private readonly IUnitOfWork _uow;
         private readonly ICostingService _costing;
+        private readonly IInventoryUserContext _user;
 
-        public FinanceLinkService(IUnitOfWork uow, ICostingService costing)
+        /// <param name="user">The caller (release R1f review M4): readers who may not see persons get the employee-level lines of an event merged. Absent in a context without a caller, which then counts as such a reader.</param>
+        public FinanceLinkService(IUnitOfWork uow, ICostingService costing, IInventoryUserContext user = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
+            _user = user;
         }
 
         private static readonly AccountingEventStatus[] Waiting = { AccountingEventStatus.Pending, AccountingEventStatus.Failed };
@@ -72,9 +75,12 @@ namespace Services.NasbNiro.Finance
                     {
                         RowNumber = l.RowNumber, AccountRole = l.AccountRole, Debit = l.Debit, Credit = l.Credit,
                         ProviderId = l.ProviderId, ProviderName = l.Provider.Name, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId,
-                        CostCenter = l.CostCenter, Description = l.Description,
+                        CostCenter = l.CostCenter, Description = l.Description, PartyType = l.PartyType,
                     }).ToList(),
                 }), query.PageNumber, query.PageSize, cancellationToken);
+            // the loan and advance recoveries of a payroll run (and any other employee-level line) are one person's money each: readers outside payroll, the finance manager and the CEO get them merged per account and side
+            if (!PersonalLedger.Sees(_user))
+                foreach (AccountingEventDto ev in page) ev.Lines = PersonalLedger.MergeEventLines(ev.Lines);
             return ResponseDtoHelper.Ok(page);
         }
 
@@ -199,14 +205,15 @@ namespace Services.NasbNiro.Finance
                 "کلید رویداد", "شماره رویداد", "نوع", "تاریخ", "سند مبدا", "شرح سند", "ردیف", "نقش حساب", "عنوان حساب", "کد حساب سپیدار",
                 "بدهکار", "بستانکار", "تفصیلی طرف حساب", "طرف حساب", "تفصیلی پروژه", "مرکز هزینه", "شرح ردیف",
             }));
+            bool seesPersons = PersonalLedger.Sees(_user);
             foreach (AccountingEvent e in events)
             {
-                foreach (AccountingEventLine l in e.Lines.OrderBy(x => x.RowNumber))
+                foreach ((int rowNumber, AccountingEventLine l) in PersonalLedger.MergeEventLines(e.Lines, seesPersons))
                 {
                     csv.AppendLine(string.Join(",", new[]
                     {
                         e.Key.ToString(), e.Id.ToString(CultureInfo.InvariantCulture), ((int)e.Type).ToString(CultureInfo.InvariantCulture),
-                        InventoryText.PersianDate(e.EventDate), Csv(e.SourceNumber), Csv(e.Description), l.RowNumber.ToString(CultureInfo.InvariantCulture),
+                        InventoryText.PersianDate(e.EventDate), Csv(e.SourceNumber), Csv(e.Description), rowNumber.ToString(CultureInfo.InvariantCulture),
                         Csv(l.AccountRole), Csv(titles.TryGetValue(l.AccountRole, out string t) ? t : null), Csv(Lookup(accounts, l.AccountRole)),
                         l.Debit.ToString("0", CultureInfo.InvariantCulture), l.Credit.ToString("0", CultureInfo.InvariantCulture),
                         Csv(Map(SepidarLinkService.ProviderType, l.ProviderId)), Csv(l.Provider?.Name),

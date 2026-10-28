@@ -430,6 +430,12 @@ namespace Entities.Model.NasbNiro.Office
         /// <summary>The key is shown once when the device is created; a new key is only issued by the separate rotate action, which stamps these two fields (they are audited, the key itself never is).</summary>
         public DateTimeOffset? KeyRotatedAt { get; set; }
         public int? KeyRotatedByUserId { get; set; }
+
+        /// <summary>
+        /// The LAN addresses the device may push from: a comma separated list of IPv4 addresses or IPv4/CIDR ranges (for example "192.168.1.20,10.0.5.0/24"). Empty = any address (the key alone authenticates).
+        /// A push from another address is refused and logged. Edited only by HR and PMO; audited.
+        /// </summary>
+        public string AllowedAddresses { get; set; }
     }
 
     /// <summary>
@@ -470,19 +476,59 @@ namespace Entities.Model.NasbNiro.Office
         public int? CreatedByUserId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
 
-        /// <summary>Only an Approved event counts in the day computation. Device pushes and imports are Approved on arrival; a manual event is a request (Pending) until a second person decides.</summary>
+        /// <summary>
+        /// Only an Approved event counts in the day computation. A device punch is Approved on arrival, except the punch of the employee who created or last rotated that device's key (Pending: a second person decides);
+        /// a manual event is a request (Pending) until a second person decides; an imported row is Pending until a second HR user approves its whole batch (ImportBatchId).
+        /// </summary>
         public OfClockApproval Approval { get; set; }
         public int? ApprovedByUserId { get; set; }
         public DateTimeOffset? ApprovedAt { get; set; }
         public string RejectReason { get; set; }
+
+        /// <summary>The import batch an imported row belongs to (JSON or Excel import); null for every other source.</summary>
+        public int? ImportBatchId { get; set; }
+        public OfClockImportBatch ImportBatch { get; set; }
+    }
+
+    /// <summary>
+    /// One import of clock rows (JSON or Excel). The rows are stored as Pending events of this batch; a second HR user - neither the importer nor an employee inside the batch - approves or rejects the batch as a whole,
+    /// and the decision is audited (release R1f).
+    /// </summary>
+    public class OfClockImportBatch
+    {
+        public int Id { get; set; }
+        public int ImportedByUserId { get; set; }
+        public DateTimeOffset ImportedAt { get; set; }
+
+        /// <summary>The number of rows the batch stored (new, non-duplicate events).</summary>
+        public int Rows { get; set; }
+
+        /// <summary>Json or Excel.</summary>
+        public string Source { get; set; }
+        public string DeviceCode { get; set; }
+
+        /// <summary>SHA-256 of the received rows in canonical order (the same hash the push log keeps).</summary>
+        public string PayloadHash { get; set; }
+
+        /// <summary>The importer's reason (optional).</summary>
+        public string Reason { get; set; }
+
+        public OfClockBatchStatus Status { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+
+        /// <summary>The approver's note, or the reason of a rejection (required for a rejection).</summary>
+        public string DecisionNote { get; set; }
     }
 
     /// <summary>
     /// Inputs of the daily computation (one row; defaults apply while no row is saved). Company answers (1405/08): lateness up to 15 minutes is allowed (grace 15);
-    /// lateness beyond it is deducted with coefficient 3; overtime is not pre-approved but counted up to 22 hours a month.
-    /// ★ Stated explicitly for the company to confirm: (1) the 22 hour cap covers the overtime of working days only - work on a holiday or a day off (HolidayMinutes) and night hours (NightMinutes) are
-    /// separate sheet columns and are not capped; (2) early leave is reported but not deducted; (3) the day is the shift's scheduled minutes = end - start - break (08:00-16:00 with a 30 minute
-    /// break = 450), for the lateness deduction (deducted minutes / 450 of a day, at most one day a day) and for an hourly leave (120 minutes = 120/450 of a day); an employee without a shift counts 480.
+    /// lateness beyond it is deducted with coefficient 3; overtime is counted up to 22 hours a month. Release R1f turned the two controls around overtime and early leave into switches whose starred default is ON
+    /// (the company confirms them; switching one OFF is a decision of the CEO): overtime counts only up to an approved overtime request, early leave beyond the grace is deducted like lateness.
+    /// ★ Stated explicitly for the company to confirm: (1) the 22 hour cap covers the overtime and the holiday work (HolidayMinutes) of the month together - they share one bucket, filled in date order -
+    /// and night hours (NightMinutes) are a separate sheet column that is not capped; (2) the day is the shift's scheduled minutes = end - start - break (08:00-16:00 with a 30 minute
+    /// break = 450), for the lateness deduction (deducted minutes / 450 of a day, at most one day a day) and for an hourly leave (120 minutes = 120/450 of a day); an employee without a shift counts the rate-table
+    /// key DefaultDayMinutes.
     /// </summary>
     public class OfAttendancePolicy
     {
@@ -496,7 +542,8 @@ namespace Entities.Model.NasbNiro.Office
 
         /// <summary>
         /// Overtime and holiday work count only up to the hours of an approved overtime request of that day; the rest is reported as unapproved overtime and is not paid. Stored in the long-standing column
-        /// OvertimeNeedsPreApproval (renamed in code only, no migration); a new row starts with the switch on. A row an administrator saved keeps what it was saved with.
+        /// OvertimeNeedsPreApproval (renamed in code only, no migration); a new row starts with the switch on, and the one-time upgrade step "Upgrade:R1f:OvertimeApproval" turns it on for the rows that
+        /// already exist (an audit row records it). Switching it OFF afterwards is a decision of the CEO; the value used is frozen into the month snapshot.
         /// </summary>
         [Column("OvertimeNeedsPreApproval")]
         public bool OvertimeRequiresApproval { get; set; } = true;
@@ -519,8 +566,8 @@ namespace Entities.Model.NasbNiro.Office
         public decimal DelayPenaltyFactor { get; set; } = 3m;
 
         /// <summary>
-        /// Set once the company rules (grace 15, no pre-approval) were applied to this row: either it was created after the rules, or the one-time upgrade moved a row that still had the old
-        /// defaults (grace 0 and pre-approval on). Rows an admin changed otherwise are never touched; the flag stops the upgrade from running again.
+        /// Set once the company rules (grace 15) were applied to this row: either it was created after the rules, or the one-time upgrade moved a row that still had the first-release
+        /// defaults (grace 0 with the overtime approval switch on). Rows an admin changed otherwise are never touched; the flag stops the upgrade from running again. The overtime approval switch has its own one-time step (R1fUpgrades).
         /// </summary>
         public bool CompanyRulesApplied { get; set; }
 
@@ -599,6 +646,9 @@ namespace Entities.Model.NasbNiro.Office
         /// <summary>JSON of the numbers written to the sheets at preparation (frozen) and its SHA-256: confirmation checks that the sheets still hold exactly these numbers.</summary>
         public string SnapshotJson { get; set; }
         public string SnapshotHash { get; set; }
+
+        /// <summary>The attendance policy values the preparation used (grace, caps, coefficients, the three switches), frozen next to the snapshot; the hash covers both. Null for a month closed before this rule.</summary>
+        public string PolicyJson { get; set; }
     }
 
     public class OfLeaveRequest : BaseEntity

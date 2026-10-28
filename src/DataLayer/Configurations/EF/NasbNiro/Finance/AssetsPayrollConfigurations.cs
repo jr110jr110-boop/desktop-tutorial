@@ -293,6 +293,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.ToTable("FnEmployeeWages");
                 b.Property(x => x.DailyWage).HasPrecision(18, 0);
                 b.HasIndex(x => new { x.EmployeeId, x.EffectiveFrom }).IsUnique();
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<FnEmployeeChange>().WithMany().HasForeignKey(x => x.ChangeId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<FnAttendanceCorrection>(b =>
             {
@@ -303,6 +305,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.DecisionNote).HasMaxLength(500);
                 b.HasIndex(x => x.SheetId);
                 b.HasIndex(x => x.Status);
+                b.HasOne<FnAttendanceSheet>().WithMany().HasForeignKey(x => x.SheetId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<FnLeaveOpening>(b =>
             {
@@ -312,6 +316,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.DecisionNote).HasMaxLength(500);
                 b.HasIndex(x => new { x.EmployeeId, x.Year, x.Month });
                 b.HasIndex(x => x.Status);
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ------------------------------------------------------------------ changes to existing tables

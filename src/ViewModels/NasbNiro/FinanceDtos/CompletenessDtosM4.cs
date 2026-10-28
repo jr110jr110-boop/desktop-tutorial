@@ -243,7 +243,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal YearsOfService { get; set; }
         public decimal MonthlyBase { get; set; }
 
-        /// <summary>WageHistory or CurrentWage (no wage history exists yet: the current approved daily wage was used); null on older records.</summary>
+        /// <summary>LastPayslip (the last posted payslip), WageHistory (the approved wage history) or CurrentWage (no wage history exists yet: the current approved daily wage was used); null on older records.</summary>
         public string BaseSource { get; set; }
         public decimal DailyWage { get; set; }
         public decimal SeveranceDaysPerYear { get; set; }

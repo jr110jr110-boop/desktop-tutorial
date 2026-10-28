@@ -54,6 +54,11 @@ namespace Entities.Model.NasbNiro.Office
     public enum OfClockApproval { Approved = 0, Pending = 1, Rejected = 2 }
 
     /// <summary>
+    /// State of an imported clock batch (a JSON or Excel import): the rows wait as Pending until a second HR user approves or rejects the whole batch (release R1f).
+    /// </summary>
+    public enum OfClockBatchStatus { Pending = 0, Approved = 1, Rejected = 2 }
+
+    /// <summary>
     /// State of the HR month close (two steps: HR prepares, a second person confirms). 0 = Confirmed so that the months closed before the two-step rule stay closed.
     /// </summary>
     public enum OfMonthStatus { Confirmed = 0, Prepared = 1, Rejected = 2 }

@@ -89,7 +89,7 @@ namespace Services.NasbNiro.Office
             return await _uow.Set<FnPayrollRun>().AnyAsync(r => r.Year == y && r.Month == m && r.Status >= FnPayrollStatus.Approved && (r.WorkshopId == null || r.WorkshopId == workshopId), ct);
         }
 
-        /// <summary>The leave touches a month whose payroll is approved (any month between the two dates).</summary>
+        /// <summary>The leave touches a month that is closed for requests: its payroll is approved or its attendance close is confirmed (any month between the two dates).</summary>
         private async Task<bool> PayrollLockedRangeAsync(OfLeaveRequest r, int? workshopId, CancellationToken ct)
         {
             for (DateTime d = r.FromDate.Date; d <= r.ToDate.Date; d = PersianCal.End(PersianCal.Year(d), PersianCal.Month(d)).AddDays(1))
@@ -97,7 +97,36 @@ namespace Services.NasbNiro.Office
             return await PayrollLockedAsync(r.ToDate, workshopId, ct);
         }
 
-        private const string LockedMonth = "حضور و غیاب یا حقوق این ماه بسته و تایید شده و این درخواست دیگر تایید، ثبت یا رد نمی‌شود.";
+        /// <summary>A month between the two dates has an APPROVED payroll (the attendance close alone is not meant): the numbers of an approved leave can never change there.</summary>
+        private async Task<bool> PayrollApprovedRangeAsync(OfLeaveRequest r, int? workshopId, CancellationToken ct)
+        {
+            for (DateTime d = r.FromDate.Date; ; d = PersianCal.End(PersianCal.Year(d), PersianCal.Month(d)).AddDays(1))
+            {
+                if (d > r.ToDate.Date) d = r.ToDate.Date;
+                int y = PersianCal.Year(d), m = PersianCal.Month(d);
+                if (await _uow.Set<FnPayrollRun>().AnyAsync(x => x.Year == y && x.Month == m && x.Status >= FnPayrollStatus.Approved && (x.WorkshopId == null || x.WorkshopId == workshopId), ct)) return true;
+                if (d >= r.ToDate.Date) return false;
+            }
+        }
+
+        /// <summary>
+        /// The first date between the two dates that lies in a month whose attendance close is PREPARED (waiting for its confirmation); null when there is none. The days of a prepared month are frozen,
+        /// so an approval, a record or a new submission there would be lost until HR sends the close back (release R1f review M3).
+        /// </summary>
+        private async Task<DateTime?> PreparedMonthInRangeAsync(DateTime from, DateTime to, CancellationToken ct)
+        {
+            for (DateTime d = from.Date; ; d = PersianCal.End(PersianCal.Year(d), PersianCal.Month(d)).AddDays(1))
+            {
+                if (d > to.Date) d = to.Date;
+                int y = PersianCal.Year(d), m = PersianCal.Month(d);
+                if (await _uow.Set<OfAttendanceMonth>().AnyAsync(x => x.Year == y && x.Month == m && x.Status == OfMonthStatus.Prepared, ct)) return d;
+                if (d >= to.Date) return null;
+            }
+        }
+
+        // a request that waits in a closed month is never approved or recorded; it can only be rejected (otherwise it would stay pending for ever). An approved one is already part of the closed numbers
+        private const string LockedMonth = "حضور و غیاب یا حقوق این ماه بسته و تایید شده و این درخواست دیگر تایید یا ثبت نمی‌شود؛ آن را فقط می‌توان رد کرد.";
+        private const string LockedMonthDecided = "حضور و غیاب یا حقوق این ماه بسته و تایید شده و این درخواست تاییدشده جزو ارقام بسته‌شده است و دیگر رد نمی‌شود.";
         private const string LockedMonthNew = "حضور و غیاب یا حقوق این ماه بسته و تایید شده و درخواست جدید برای آن ثبت نمی‌شود.";
 
         /// <summary>The manager position of the employee's unit; the unit above when the employee is the manager (shared with the clock-event approvals).</summary>
@@ -451,6 +480,8 @@ namespace Services.NasbNiro.Office
             {
                 // a request that is saved and submitted in one call is checked as a whole first: a refused call saves nothing and takes no number
                 if (r.Kind == OfLeaveKind.SickLeave && !r.AttachmentDocumentId.HasValue) return Bad<LeaveDto>("برای مرخصی استعلاجی باید گواهی پزشکی پیوست شود.");
+                DateTime? preparedAt = await PreparedMonthInRangeAsync(from, to, ct);
+                if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
                 string submitProblem = await BalanceProblemAsync(r, ct);
                 if (submitProblem != null) return Bad<LeaveDto>(submitProblem);
                 if (!(await FindApproverAsync(emp, ct)).HasValue) return Bad<LeaveDto>("مدیر واحد شما در چارت سازمانی مشخص نیست؛ با واحد اداری تماس بگیرید.");
@@ -516,6 +547,7 @@ namespace Services.NasbNiro.Office
             string comment = Clean(dto.Comment);
             string label = $"{KindText(r.Kind)} {r.Number}";
             bool touchesAttendance = false;
+            bool counted = false;
 
             switch (action)
             {
@@ -526,6 +558,8 @@ namespace Services.NasbNiro.Office
                         if (!(owner || c.IsHr)) return Bad<LeaveDto>(OfficeText.NotAllowed);
                         if (r.Kind == OfLeaveKind.SickLeave && !r.AttachmentDocumentId.HasValue) return Bad<LeaveDto>("برای مرخصی استعلاجی باید گواهی پزشکی پیوست شود.");
                         if (await PayrollLockedAsync(r.FromDate, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonthNew);
+                        DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                        if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
                         string problem = await BalanceProblemAsync(r, ct);
                         if (problem != null) return Bad<LeaveDto>(problem);
                         int? approver = await FindApproverAsync(emp, ct);
@@ -539,6 +573,8 @@ namespace Services.NasbNiro.Office
                         ActingPosition acting = c.Pos.Contains(r.ApproverPositionId ?? -1) ? (await OfficeActors.ActingAsync(_uow, Me, ct)).First(a => a.PositionId == r.ApproverPositionId) : null;
                         if (acting == null || emp.UserId == Me) return Bad<LeaveDto>(OfficeText.NotAllowed);
                         if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
+                        DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                        if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value) + " درخواست را می‌توان همین حالا رد کرد.");
                         string problem = await BalanceProblemAsync(r, ct);
                         if (problem != null) return Bad<LeaveDto>(problem);
                         r.Status = OfLeaveStatus.Approved; r.ApprovedByUserId = Me; r.ApprovedOnBehalf = acting.OnBehalf; r.ApprovedAt = now; r.ApproverComment = comment;
@@ -551,7 +587,10 @@ namespace Services.NasbNiro.Office
                 case "record":
                     {
                         if (r.Status != OfLeaveStatus.Approved || !c.IsHr || emp.UserId == Me) return Bad<LeaveDto>(OfficeText.NotAllowed);
+                        // a request in a closed month is never recorded (it can be rejected); in a prepared month the close is rejected first
                         if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
+                        DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                        if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value) + " درخواست را می‌توان همین حالا رد کرد.");
                         if (r.Kind == OfLeaveKind.ForgotClock)
                         {
                             // four eyes: the unit manager approved the request, HR records the punch; the same person cannot do both
@@ -574,10 +613,19 @@ namespace Services.NasbNiro.Office
                 case "reject":
                     {
                         if (comment == null) return Bad<LeaveDto>("دلیل رد درخواست را بنویسید.");
-                        if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
+                        // a request that waits in a closed month can always be rejected (review L7: it would stay pending for ever otherwise; it is never approved or recorded there).
+                        // An APPROVED leave is already part of the computed days: after the payroll of its month is approved its numbers cannot change, and in a prepared month they are frozen
+                        counted = r.Status == OfLeaveStatus.Approved;
+                        if (counted)
+                        {
+                            if (await PayrollApprovedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonthDecided);
+                            DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                            if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
+                        }
                         r.Status = OfLeaveStatus.Rejected; r.RejectReason = comment;
                         await CloseKeysAsync("رد شد", ct, "leave:" + r.Id, "leave-record:" + r.Id);
                         if (emp.UserId.HasValue) AddInbox("leave-result:" + r.Id, OfInboxKind.Alert, $"{label} شما رد شد: {comment}", r, null, emp.UserId, null);
+                        touchesAttendance = counted;
                         break;
                     }
                 case "cancel":
@@ -586,6 +634,11 @@ namespace Services.NasbNiro.Office
                         bool owner = r.CreatorUserId == Me || emp.UserId == Me;
                         if (wasCounted && !c.IsHr && r.FromDate.Date <= DateTime.Today) return Bad<LeaveDto>("پس از شروع، فقط واحد اداری می‌تواند درخواست تاییدشده را باطل کند.");
                         if (wasCounted && await PayrollLockedAsync(r.FromDate, emp.WorkshopId, ct)) return Bad<LeaveDto>("حضور و غیاب یا حقوق این ماه بسته و تایید شده و درخواست قابل ابطال نیست.");
+                        if (wasCounted)
+                        {
+                            DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                            if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
+                        }
                         if (!(owner || c.IsHr)) return Bad<LeaveDto>(OfficeText.NotAllowed);
                         r.Status = OfLeaveStatus.Cancelled; r.RejectReason = comment;
                         await CloseKeysAsync("باطل شد", ct, "leave:" + r.Id, "leave-record:" + r.Id);

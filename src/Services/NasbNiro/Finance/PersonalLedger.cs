@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using Entities.Model.NasbNiro.Finance;
 using ViewModels.NasbNiro.FinanceDtos;
 
 namespace Services.NasbNiro.Finance
@@ -54,6 +55,65 @@ namespace Services.NasbNiro.Finance
             }
             for (int i = 0; i < result.Count; i++) result[i].RowNumber = i + 1;
             return result;
+        }
+
+        /// <summary>The first-detail party type of the employee lines of an accounting event.</summary>
+        public const string EmployeeParty = "Employee";
+
+        /// <summary>
+        /// The lines of an accounting event for a reader who may not see persons (review M4): the employee-level lines (party type Employee: the loan and advance recoveries, the advances paid) are merged per account role
+        /// and side into one anonymous line placed where the first of them stood; the rows are numbered again. The result is a new list: the merged lines are new objects, the other lines are the same objects as before (their row number is set again).
+        /// </summary>
+        public static List<AccountingEventLineDto> MergeEventLines(IReadOnlyList<AccountingEventLineDto> lines)
+        {
+            var result = new List<AccountingEventLineDto>();
+            var merged = new Dictionary<(string Role, bool Debit), AccountingEventLineDto>();
+            foreach (AccountingEventLineDto l in lines)
+            {
+                if (!string.Equals(l.PartyType, EmployeeParty, StringComparison.Ordinal)) { result.Add(l); continue; }
+                var key = (l.AccountRole ?? "", l.Debit > 0);
+                if (merged.TryGetValue(key, out AccountingEventLineDto into))
+                {
+                    into.Debit += l.Debit;
+                    into.Credit += l.Credit;
+                    continue;
+                }
+                into = new AccountingEventLineDto
+                {
+                    RowNumber = l.RowNumber, AccountRole = l.AccountRole, Debit = l.Debit, Credit = l.Credit, Description = MaskedNote, PartyType = l.PartyType,
+                };
+                merged[key] = into;
+                result.Add(into);
+            }
+            for (int i = 0; i < result.Count; i++) result[i].RowNumber = i + 1;
+            return result;
+        }
+
+        /// <summary>
+        /// The same merge for the lines of an event as stored (the Sepidar voucher file): the rows come back numbered 1..n next to the line, the merged lines are new objects and the tracked originals are never changed.
+        /// A reader who sees persons gets every line as it is.
+        /// </summary>
+        public static List<(int RowNumber, AccountingEventLine Line)> MergeEventLines(IEnumerable<AccountingEventLine> lines, bool seesPersons)
+        {
+            var result = new List<AccountingEventLine>();
+            var merged = new Dictionary<(string Role, bool Debit), AccountingEventLine>();
+            foreach (AccountingEventLine l in lines.OrderBy(x => x.RowNumber))
+            {
+                if (seesPersons || !string.Equals(l.PartyType, EmployeeParty, StringComparison.Ordinal)) { result.Add(l); continue; }
+                var key = (l.AccountRole ?? "", l.Debit > 0);
+                if (merged.TryGetValue(key, out AccountingEventLine into))
+                {
+                    into.Debit += l.Debit;
+                    into.Credit += l.Credit;
+                    continue;
+                }
+                into = new AccountingEventLine { RowNumber = l.RowNumber, AccountRole = l.AccountRole, Debit = l.Debit, Credit = l.Credit, Description = MaskedNote, PartyType = l.PartyType };
+                merged[key] = into;
+                result.Add(into);
+            }
+            var numbered = new List<(int, AccountingEventLine)>();
+            for (int i = 0; i < result.Count; i++) numbered.Add((seesPersons ? result[i].RowNumber : i + 1, result[i]));
+            return numbered;
         }
 
         /// <summary>True when the audit JSON of a voucher line names one of the given detail accounts as its first or second detail.</summary>

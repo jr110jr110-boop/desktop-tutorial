@@ -86,6 +86,7 @@ namespace Services.NasbNiro.Finance
         {
             await FinanceSeed.EnsureAsync(_uow, ct);
             await F2Seed.EnsureAsync(_uow, ct);
+            await R1fUpgrades.EnsureAsync(_uow, Me, ct);
         }
 
         private static bool ValidYear(int y) => y >= 1300 && y <= 1600;
@@ -339,7 +340,8 @@ namespace Services.NasbNiro.Finance
             catch (DbUpdateConcurrencyException) { return Bad<EmployeeDto>(Conflict); }
             if (change != null)
                 await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "empchg:" + change.Id, true, "finance", "employee-change", change.Id,
-                    $"تایید {(change.Kind == FnEmployeeChangeKind.Create ? "کارمند جدید" : "تغییر مشخصات حقوقی کارمند")} با کد پرسنلی {e.PersonnelCode}", "/finance/payroll/employee-changes", FinanceRoles.PayrollUsers, ct);
+                    $"تایید {(change.Kind == FnEmployeeChangeKind.Create ? "کارمند جدید" : "تغییر مشخصات حقوقی کارمند")} با کد پرسنلی {e.PersonnelCode}", "/finance/payroll/employee-changes",
+                    await SelfApproval.GateRolesAsync(_uow, e, FinanceRoles.PayrollUsers, true, ct), ct);
             return await GetEmployeeAsync(e.Id, ct);
         }
 
@@ -428,7 +430,8 @@ namespace Services.NasbNiro.Finance
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<LoanDto>(Conflict); }
             await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "loan:" + l.Id, true, "finance", "payroll-loan", l.Id,
-                $"تایید {(l.Kind == FnLoanKind.Advance ? "مساعده" : "وام")} کارمند با کد پرسنلی {emp.PersonnelCode}", "/finance/payroll/loans", FinanceRoles.Managers, ct);
+                $"تایید {(l.Kind == FnLoanKind.Advance ? "مساعده" : "وام")} کارمند با کد پرسنلی {emp.PersonnelCode}", "/finance/payroll/loans",
+                await SelfApproval.GateRolesAsync(_uow, emp, FinanceRoles.Managers, true, ct), ct);
             return ResponseDtoHelper.Ok(ToDto(l, emp.PersonnelCode, await InventoryUsers.GetNamesAsync(_uow, new int?[] { l.CreatedByUserId, l.ApprovedByUserId }, ct)));
         }
 
@@ -692,6 +695,12 @@ namespace Services.NasbNiro.Finance
             }
 
             FnAttendanceSheet sheet = await _uow.Set<FnAttendanceSheet>().Include(s => s.WorkOrders).FirstOrDefaultAsync(s => s.EmployeeId == emp.Id && s.Year == dto.Year && s.Month == dto.Month, ct);
+            // release R1f review M2: for a month HR has prepared or confirmed, payroll neither types nor imports a new sheet nor changes the numbers of one (inputs and work-order hours stay payroll's own)
+            if (sheet == null || !SheetNumbers.Same(SheetNumbers.Of(sheet), numbers))
+            {
+                string closedRefusal = HrClose.SheetEntryRefusal(dto.Year, dto.Month, await HrClose.GetAsync(_uow, dto.Year, dto.Month, ct), sheet != null);
+                if (closedRefusal != null) return (closedRefusal, null, null);
+            }
             if (sheet != null && sheet.Locked && !SheetNumbers.Same(SheetNumbers.Of(sheet), numbers))
                 return ("ارقام کارکرد این برگه با بستن ماه توسط منابع انسانی قفل شده است؛ برای تغییر آن «درخواست اصلاح کارکرد» ثبت کنید تا منابع انسانی (نفر دیگری) آن را تایید کند.", null, null);
             bool isNew = sheet == null;

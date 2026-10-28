@@ -763,6 +763,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTimeOffset? PaidAt { get; set; }
         public int? AccountingEventId { get; set; }
         public string Note { get; set; }
+
+        /// <summary>Warnings of the approval (release R1f): the attendance sheets of the month typed or imported outside the HR close. Empty on every other read.</summary>
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     public class PayslipQuery : PaginationParams

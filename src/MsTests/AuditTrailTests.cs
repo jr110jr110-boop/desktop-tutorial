@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
+using System.Threading;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
@@ -11,14 +13,19 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Services.NasbNiro.Finance;
+using Services.NasbNiro.Inventory;
+using Services.NasbNiro.Office;
 using ViewModels.Identity.Settings;
+using ViewModels.NasbNiro.FinanceDtos;
 
 namespace MsTests
 {
     /// <summary>
     /// Release R1f: what the finance audit trail writes for the attendance and payroll records, against an in-memory database through the real SaveChanges hook.
-    /// The wage, the exemption flags and the loan amounts are written as one-way hashes, the Input items of a sheet as a hash plus the names of the changed items, the device key never,
-    /// the punches of devices and imported files not per punch. The last test measures what the extra records cost.
+    /// Review H3: a wage, a loan amount, a children count, a free text of a request is written as the fixed marker "changed" (never a value and never a hash: the hash of a small number can be guessed), the Input items of a
+    /// sheet as the marker plus the names of the changed items, the device key never; the punches of devices are not listed per punch, a manual request, an imported row and a held punch are. The audit service hands the
+    /// changes of the payroll record types only to the readers of payroll: an AUDITOR gets metadata. The last test measures what the extra records cost.
     /// </summary>
     [TestClass]
     public class AuditTrailTests
@@ -64,34 +71,63 @@ namespace MsTests
 
         private static string Unique(string prefix) => prefix + Guid.NewGuid().ToString("N").Substring(0, 8);
 
+        /// <summary>The text the trail writes instead of a confidential value (the contract of the audit trail and of the front end).</summary>
+        private const string Marker = "«تغییر کرد»";
+
+        private static string Str(string json, string property) => JsonDocument.Parse(json).RootElement.GetProperty(property).GetString();
+
+        /// <summary>Everything an audit row tells in words (not its time stamp, whose digits could by chance hold a figure the test looks for).</summary>
+        private static string TextOf(IEnumerable<AuditLogDto> rows) => string.Join("|", rows.Select(r => r.Summary + "~" + r.BeforeJson + "~" + r.AfterJson));
+
+        private sealed class Roles : IInventoryUserContext
+        {
+            private readonly string[] _roles;
+            public Roles(params string[] roles) { _roles = roles; }
+            public int UserId => 1;
+            public bool IsInRole(string role) => !string.IsNullOrWhiteSpace(role) && role.Split(',').Any(r => _roles.Contains(r.Trim()));
+        }
+
+        /// <summary>A stand-in for the collaborators of the general ledger service that the audit read never calls.</summary>
+        public class NullStub : DispatchProxy
+        {
+            protected override object Invoke(MethodInfo targetMethod, object[] args) => null;
+        }
+
+        private static GlService LedgerFor(IUnitOfWork uow, params string[] roles) =>
+            new GlService(uow, new Roles(roles), DispatchProxy.Create<IEventPostingService, NullStub>(), DispatchProxy.Create<ILedgerReportService, NullStub>(),
+                DispatchProxy.Create<IReceivablesService, NullStub>(), DispatchProxy.Create<INotificationService, NullStub>());
+
         // ------------------------------------------------------------------------------------------ clock events
 
         [TestMethod]
-        public void A_Manual_Clock_Request_Is_Audited_Its_Decision_Too_But_Device_And_Import_Punches_Are_Not()
+        public void A_Manual_Request_An_Imported_Row_And_A_Held_Device_Punch_Are_Audited_But_An_Approved_Device_Punch_Is_Not()
         {
             InScope(uow =>
             {
                 int before = Trail(uow, "OfClockEvent").Count;
                 DateTime day = new DateTime(2026, 8, 12, 8, 0, 0);
                 uow.Set<OfClockEvent>().Add(new OfClockEvent { EmployeeId = 1, Timestamp = day, Source = OfClockSource.Device, DeviceCode = "D1", Approval = OfClockApproval.Approved });
-                uow.Set<OfClockEvent>().Add(new OfClockEvent { EmployeeId = 1, Timestamp = day.AddHours(1), Source = OfClockSource.Import, DeviceCode = "IMPORT", Approval = OfClockApproval.Approved });
+                uow.Set<OfClockEvent>().Add(new OfClockEvent { EmployeeId = 1, Timestamp = day.AddHours(1), Source = OfClockSource.Import, DeviceCode = "IMPORT", Approval = OfClockApproval.Pending, CreatedByUserId = 6 });
+                uow.Set<OfClockEvent>().Add(new OfClockEvent { EmployeeId = 1, Timestamp = day.AddHours(3), Source = OfClockSource.Device, DeviceCode = "D1", Approval = OfClockApproval.Pending });
                 var manual = new OfClockEvent { EmployeeId = 1, Timestamp = day.AddHours(2), Source = OfClockSource.Manual, Reason = "forgot", CreatedByUserId = 5, Approval = OfClockApproval.Pending };
                 uow.Set<OfClockEvent>().Add(manual);
                 uow.SaveChanges();
 
                 List<FnAuditLog> added = Trail(uow, "OfClockEvent").Skip(before).ToList();
-                Assert.AreEqual(1, added.Count, "only the manual request has a row; the device and import punches are logged per push");
-                Assert.AreEqual("Added", added[0].Action);
-                StringAssert.Contains(added[0].AfterJson, "\"Source\":\"Manual\"");
-                StringAssert.Contains(added[0].AfterJson, "\"Approval\":\"Pending\"");
-                StringAssert.Contains(added[0].AfterJson, "\"CreatedByUserId\":5");
+                Assert.AreEqual(3, added.Count, "the approved device punch has no row (the push log is its trail); the imported row, the held punch and the manual request have one each");
+                Assert.IsTrue(added.All(a => a.Action == "Added"));
+                Assert.AreEqual(1, added.Count(a => a.AfterJson.Contains("\"Source\":\"Import\"") && a.AfterJson.Contains("\"CreatedByUserId\":6")), "an imported row is a person's decision: who imported it is in the trail");
+                Assert.AreEqual(1, added.Count(a => a.AfterJson.Contains("\"Source\":\"Device\"") && a.AfterJson.Contains("\"Approval\":\"Pending\"")), "the held punch is listed with its Pending state");
+                FnAuditLog manualRow = added.Single(a => a.AfterJson.Contains("\"Source\":\"Manual\""));
+                StringAssert.Contains(manualRow.AfterJson, "\"Approval\":\"Pending\"");
+                StringAssert.Contains(manualRow.AfterJson, "\"CreatedByUserId\":5");
 
                 // the second person approves it
                 manual.Approval = OfClockApproval.Approved;
                 manual.ApprovedByUserId = 9;
                 manual.ApprovedAt = DateTimeOffset.Now;
                 uow.SaveChanges();
-                List<FnAuditLog> decided = Trail(uow, "OfClockEvent").Skip(before + 1).ToList();
+                List<FnAuditLog> decided = Trail(uow, "OfClockEvent").Skip(before + 3).ToList();
                 Assert.AreEqual(1, decided.Count);
                 Assert.AreEqual("Modified", decided[0].Action);
                 StringAssert.Contains(decided[0].BeforeJson, "\"Approval\":\"Pending\"");
@@ -101,10 +137,37 @@ namespace MsTests
             });
         }
 
+        [TestMethod]
+        public void An_Import_Batch_And_The_Decision_Of_The_Second_Hr_User_Are_Audited()
+        {
+            InScope(uow =>
+            {
+                string note = Unique("batch");
+                var batch = new OfClockImportBatch { ImportedByUserId = 6, ImportedAt = DateTimeOffset.Now, Rows = 12, Source = "Json", DeviceCode = "IMPORT", PayloadHash = "abc", Status = OfClockBatchStatus.Pending, Reason = note };
+                uow.Set<OfClockImportBatch>().Add(batch);
+                uow.SaveChanges();
+                FnAuditLog added = Trail(uow, "OfClockImportBatch").Last(a => a.Action == "Added" && a.AfterJson.Contains(note));
+                StringAssert.Contains(added.AfterJson, "\"ImportedByUserId\":6");
+                StringAssert.Contains(added.AfterJson, "\"Status\":\"Pending\"");
+                StringAssert.Contains(added.AfterJson, "\"Rows\":12");
+
+                batch.Status = OfClockBatchStatus.Approved;
+                batch.DecidedByUserId = 9;
+                batch.DecidedAt = DateTimeOffset.Now;
+                batch.DecisionNote = "checked against the paper register";
+                uow.SaveChanges();
+                FnAuditLog decided = Trail(uow, "OfClockImportBatch").Last(a => a.Action == "Modified");
+                StringAssert.Contains(decided.BeforeJson, "\"Status\":\"Pending\"");
+                StringAssert.Contains(decided.AfterJson, "\"Status\":\"Approved\"");
+                StringAssert.Contains(decided.AfterJson, "\"DecidedByUserId\":9");
+                Assert.AreEqual(batch.Id, decided.EntityId);
+            });
+        }
+
         // ------------------------------------------------------------------------------------------ the employee master
 
         [TestMethod]
-        public void The_Wage_And_The_Exemption_Flags_Of_An_Employee_Are_Written_As_Hashes_Only()
+        public void The_Wage_The_Exemption_Flags_The_Children_And_The_Hard_Work_Flag_Of_An_Employee_Are_Written_As_A_Marker_Only()
         {
             InScope(uow =>
             {
@@ -117,24 +180,26 @@ namespace MsTests
                 Assert.IsFalse(row.AfterJson.Contains("1234567"), "the wage is never in the trail");
                 Assert.IsFalse(row.AfterJson.Contains("Disabled"), "nor the exemption condition");
                 Assert.IsFalse(row.AfterJson.Contains("012345678"), "the account number is masked");
-                StringAssert.Contains(row.AfterJson, "\"DailyWageHash\"");
-                StringAssert.Contains(row.AfterJson, "\"ExemptionFlagsHash\"");
-                StringAssert.Contains(row.AfterJson, "\"BankIban\":\"****9012\"");
+                Assert.IsFalse(row.AfterJson.Contains("DailyWageHash") || row.AfterJson.Contains("ExemptionFlagsHash"), "no hash of a wage or of a flag: the hash of a small number can be guessed");
+                Assert.AreEqual(Marker, Str(row.AfterJson, "DailyWage"));
+                Assert.AreEqual(Marker, Str(row.AfterJson, "ExemptionFlags"));
+                Assert.AreEqual(Marker, Str(row.AfterJson, "ChildrenCount"), "the number of children is personal data: a marker, not 2");
+                Assert.AreEqual(Marker, Str(row.AfterJson, "HardAndHarmful"));
+                Assert.AreEqual("****9012", Str(row.AfterJson, "BankIban"));
                 StringAssert.Contains(row.AfterJson, "\"BankIbanHash\"");
-                StringAssert.Contains(row.AfterJson, "\"ChildrenCount\":2");
-                StringAssert.Contains(row.AfterJson, "\"HardAndHarmful\":true");
                 StringAssert.Contains(row.AfterJson, "\"PendingApproval\":true");
                 Assert.IsFalse(row.AfterJson.Contains("\"FirstName\""), "no name or other personal data");
 
-                // the approval changes the wage and clears the pending flag: both are in the trail, the wage as two different hashes
+                // the approval changes the wage and clears the pending flag: both are in the trail, the wage as the marker on both sides
                 employee.DailyWage = 1500000m;
                 employee.PendingApproval = false;
                 uow.SaveChanges();
                 FnAuditLog changed = Trail(uow, "FnEmployee").Last(a => a.Action == "Modified");
                 Assert.IsFalse(changed.BeforeJson.Contains("1234567") || changed.AfterJson.Contains("1500000"));
+                Assert.AreEqual(Marker, Str(changed.BeforeJson, "DailyWage"));
+                Assert.AreEqual(Marker, Str(changed.AfterJson, "DailyWage"));
                 var beforeJson = JsonDocument.Parse(changed.BeforeJson).RootElement;
                 var afterJson = JsonDocument.Parse(changed.AfterJson).RootElement;
-                Assert.AreNotEqual(beforeJson.GetProperty("DailyWageHash").GetString(), afterJson.GetProperty("DailyWageHash").GetString());
                 Assert.IsTrue(beforeJson.GetProperty("PendingApproval").GetBoolean());
                 Assert.IsFalse(afterJson.GetProperty("PendingApproval").GetBoolean());
                 Assert.IsFalse(afterJson.TryGetProperty("ChildrenCount", out _), "an unchanged field is not repeated");
@@ -143,7 +208,7 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void The_Same_Wage_Gives_The_Same_Hash_So_A_Rewrite_Without_A_Change_Is_Not_A_Change()
+        public void A_Rewrite_Of_The_Same_Wage_Is_Not_A_Change()
         {
             InScope(uow =>
             {
@@ -156,13 +221,13 @@ namespace MsTests
                 uow.SaveChanges();
                 List<FnAuditLog> after = Trail(uow, "FnEmployee").Skip(rows).ToList();
                 Assert.AreEqual(1, after.Count);
-                Assert.IsFalse(after[0].AfterJson.Contains("DailyWageHash"));
+                Assert.IsFalse(after[0].AfterJson.Contains("DailyWage"), "the wage did not change: no marker either");
                 StringAssert.Contains(after[0].AfterJson, "\"UserId\":3");
             });
         }
 
         [TestMethod]
-        public void Loan_Amounts_And_Wage_History_Are_Hashes_And_The_Approval_Is_Plain()
+        public void Loan_Amounts_Title_And_Wage_History_Are_A_Marker_And_The_Approval_Is_Plain()
         {
             InScope(uow =>
             {
@@ -173,14 +238,18 @@ namespace MsTests
                 uow.Set<FnEmployeeWage>().Add(wage);
                 uow.SaveChanges();
 
-                FnAuditLog loanRow = Trail(uow, "FnEmployeeLoan").Last(a => a.Action == "Added" && a.AfterJson.Contains(title));
+                FnAuditLog loanRow = Trail(uow, "FnEmployeeLoan").Last(a => a.Action == "Added" && a.EntityId == null);
                 Assert.IsFalse(loanRow.AfterJson.Contains("5000000") || loanRow.AfterJson.Contains("500000"));
-                StringAssert.Contains(loanRow.AfterJson, "\"PrincipalHash\"");
-                StringAssert.Contains(loanRow.AfterJson, "\"InstallmentAmountHash\"");
+                Assert.IsFalse(loanRow.AfterJson.Contains(title), "the title of a loan may name the purpose: a marker");
+                Assert.IsFalse(loanRow.AfterJson.Contains("Hash"), "no hashes of the amounts");
+                Assert.AreEqual(Marker, Str(loanRow.AfterJson, "Principal"));
+                Assert.AreEqual(Marker, Str(loanRow.AfterJson, "InstallmentAmount"));
+                Assert.AreEqual(Marker, Str(loanRow.AfterJson, "Balance"));
+                Assert.AreEqual(Marker, Str(loanRow.AfterJson, "Title"));
                 StringAssert.Contains(loanRow.AfterJson, "\"ApprovalStatus\":\"Pending\"");
                 FnAuditLog wageRow = Trail(uow, "FnEmployeeWage").Last();
                 Assert.IsFalse(wageRow.AfterJson.Contains("999888"));
-                StringAssert.Contains(wageRow.AfterJson, "\"DailyWageHash\"");
+                Assert.AreEqual(Marker, Str(wageRow.AfterJson, "DailyWage"));
 
                 loan.ApprovalStatus = FnLoanApproval.Approved;
                 loan.ApprovedByUserId = 8;
@@ -190,13 +259,20 @@ namespace MsTests
                 StringAssert.Contains(decided.BeforeJson, "\"ApprovalStatus\":\"Pending\"");
                 StringAssert.Contains(decided.AfterJson, "\"ApprovalStatus\":\"Approved\"");
                 StringAssert.Contains(decided.AfterJson, "\"ApprovedByUserId\":8");
+
+                // paying an instalment changes the balance: the trail says so without saying how much is left
+                loan.Balance = 4500000m;
+                uow.SaveChanges();
+                FnAuditLog paid = Trail(uow, "FnEmployeeLoan").Last(a => a.Action == "Modified");
+                Assert.IsFalse(paid.AfterJson.Contains("4500000") || paid.BeforeJson.Contains("5000000"));
+                Assert.AreEqual(Marker, Str(paid.AfterJson, "Balance"));
             });
         }
 
         // ------------------------------------------------------------------------------------------ the monthly sheet and the requests
 
         [TestMethod]
-        public void Sheet_Inputs_Are_A_Hash_And_The_Names_Of_The_Items_That_Changed()
+        public void Sheet_Inputs_Are_A_Marker_And_The_Names_Of_The_Items_That_Changed()
         {
             InScope(uow =>
             {
@@ -204,8 +280,9 @@ namespace MsTests
                 uow.Set<FnAttendanceSheet>().Add(sheet);
                 uow.SaveChanges();
                 FnAuditLog added = Trail(uow, "FnAttendanceSheet").Last(a => a.Action == "Added");
-                StringAssert.Contains(added.AfterJson, "\"InputsJsonHash\"");
+                Assert.AreEqual(Marker, Str(added.AfterJson, "InputsJson"));
                 StringAssert.Contains(added.AfterJson, "\"InputsJsonKeys\":\"BONUS,FOOD\"");
+                Assert.IsFalse(added.AfterJson.Contains("Hash"), "no hash of the Input amounts");
                 StringAssert.Contains(added.AfterJson, "\"Source\":\"Manual\"");
                 StringAssert.Contains(added.AfterJson, "\"Locked\":false");
                 Assert.IsFalse(added.AfterJson.Contains("100"), "no amount of an Input item");
@@ -215,9 +292,8 @@ namespace MsTests
                 uow.SaveChanges();
                 FnAuditLog changed = Trail(uow, "FnAttendanceSheet").Last(a => a.Action == "Modified");
                 StringAssert.Contains(changed.AfterJson, "\"InputsJsonKeys\":\"FOOD,MISSION\"");
-                var before = JsonDocument.Parse(changed.BeforeJson).RootElement;
-                var after = JsonDocument.Parse(changed.AfterJson).RootElement;
-                Assert.AreNotEqual(before.GetProperty("InputsJsonHash").GetString(), after.GetProperty("InputsJsonHash").GetString());
+                Assert.AreEqual(Marker, Str(changed.BeforeJson, "InputsJson"));
+                Assert.AreEqual(Marker, Str(changed.AfterJson, "InputsJson"));
                 Assert.IsFalse(changed.AfterJson.Contains("BONUS"));
 
                 // the same members in another layout are no change at all
@@ -237,7 +313,7 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void A_Correction_Request_Shows_The_Names_Of_The_Numbers_It_Changes_Not_Their_Values()
+        public void A_Correction_Request_Shows_The_Names_Of_The_Numbers_It_Changes_Not_Their_Values_Nor_Its_Reason()
         {
             InScope(uow =>
             {
@@ -249,23 +325,28 @@ namespace MsTests
                 };
                 uow.Set<FnAttendanceCorrection>().Add(request);
                 uow.SaveChanges();
-                FnAuditLog row = Trail(uow, "FnAttendanceCorrection").Last(a => a.Action == "Added" && a.AfterJson.Contains(reason));
+                FnAuditLog row = Trail(uow, "FnAttendanceCorrection").Last(a => a.Action == "Added" && a.AfterJson.Contains("NightHours,OvertimeHours"));
                 StringAssert.Contains(row.AfterJson, "\"ProposedJsonKeys\":\"NightHours,OvertimeHours\"");
-                StringAssert.Contains(row.AfterJson, "\"ProposedJsonHash\"");
+                Assert.AreEqual(Marker, Str(row.AfterJson, "ProposedJson"));
+                Assert.IsFalse(row.AfterJson.Contains(reason), "the reason stays on the request, not in the trail");
+                Assert.AreEqual(Marker, Str(row.AfterJson, "Reason"));
                 StringAssert.Contains(row.AfterJson, "\"Status\":\"Pending\"");
 
                 request.Status = FnChangeStatus.Approved;
                 request.DecidedByUserId = 9;
                 request.DecidedAt = DateTimeOffset.Now;
+                request.DecisionNote = Unique("note");
                 uow.SaveChanges();
                 FnAuditLog decided = Trail(uow, "FnAttendanceCorrection").Last(a => a.Action == "Modified");
                 StringAssert.Contains(decided.AfterJson, "\"Status\":\"Approved\"");
                 StringAssert.Contains(decided.AfterJson, "\"DecidedByUserId\":9");
+                Assert.IsFalse(decided.AfterJson.Contains(request.DecisionNote), "nor the decision note");
+                Assert.AreEqual(Marker, Str(decided.AfterJson, "DecisionNote"));
             });
         }
 
         [TestMethod]
-        public void The_Employee_Change_Request_Keeps_Its_Proposed_Values_Out_Of_The_Trail()
+        public void The_Employee_Change_Request_Keeps_Its_Proposed_Values_And_Its_Reason_Out_Of_The_Trail()
         {
             InScope(uow =>
             {
@@ -278,10 +359,51 @@ namespace MsTests
                     ProposedJson = "{\"DailyWage\":9876543,\"ExemptionFlags\":\"Veteran\",\"ChildrenCount\":1,\"HardAndHarmful\":false,\"BankIban\":\"IR000\"}", WageEffectiveFrom = new DateTime(2026, 8, 23),
                 });
                 uow.SaveChanges();
-                FnAuditLog row = Trail(uow, "FnEmployeeChange").Last(a => a.AfterJson.Contains(reason));
+                FnAuditLog row = Trail(uow, "FnEmployeeChange").Last(a => a.AfterJson.Contains("BankIban,ChildrenCount"));
                 Assert.IsFalse(row.AfterJson.Contains("9876543") || row.AfterJson.Contains("Veteran") || row.AfterJson.Contains("IR000"));
-                StringAssert.Contains(row.AfterJson, "\"ProposedJsonHash\"");
+                Assert.IsFalse(row.AfterJson.Contains(reason), "the reason of a raise is personal: it stays on the request");
+                Assert.IsFalse(row.AfterJson.Contains("Hash"));
+                Assert.AreEqual(Marker, Str(row.AfterJson, "ProposedJson"));
+                Assert.AreEqual(Marker, Str(row.AfterJson, "Reason"));
                 StringAssert.Contains(row.AfterJson, "\"ProposedJsonKeys\":\"BankIban,ChildrenCount,DailyWage,ExemptionFlags,HardAndHarmful\"");
+            });
+        }
+
+        [TestMethod]
+        public void An_Auditor_Reads_The_Payroll_Trail_As_Metadata_Only_And_Sees_No_Wage_Loan_Figure_Or_Children_Count()
+        {
+            InScope(uow =>
+            {
+                var employee = new FnEmployee { PersonnelCode = Unique("E"), FirstName = "x", LastName = "y", NationalCode = "0499370899", DailyWage = 8123457m, ExemptionFlags = "Disabled", ChildrenCount = 7, HardAndHarmful = true, HireDate = new DateTime(2020, 1, 1) };
+                uow.Set<FnEmployee>().Add(employee);
+                uow.SaveChanges();
+                uow.Set<FnEmployeeLoan>().Add(new FnEmployeeLoan { EmployeeId = employee.Id, Kind = FnLoanKind.Loan, Title = "wedding-loan", Principal = 7654321m, InstallmentAmount = 654321m, Balance = 7654321m, FirstYear = 1405, FirstMonth = 9, CreatedByUserId = 4 });
+                uow.Set<FnEmployeeWage>().Add(new FnEmployeeWage { EmployeeId = employee.Id, EffectiveFrom = new DateTime(2026, 8, 23), DailyWage = 9998887m, CreatedByUserId = 4 });
+                uow.SaveChanges();
+                employee.DailyWage = 8999991m;
+                employee.ChildrenCount = 8;
+                uow.SaveChanges();
+
+                string[] figures = { "8123457", "8999991", "7654321", "654321", "9998887", "wedding-loan", "Disabled" };
+                var types = new[] { "FnEmployee", "FnEmployeeLoan", "FnEmployeeWage" };
+
+                // the auditor: the rows are there (who, what kind, which record, when) but carry no changes at all
+                List<AuditLogDto> seenByAuditor = types.SelectMany(t => LedgerFor(uow, "AUDITOR").AuditAsync(new AuditQuery { EntityType = t, PageSize = 0 }, CancellationToken.None).GetAwaiter().GetResult().Data).ToList();
+                Assert.IsTrue(seenByAuditor.Count >= 4, "the employee was added and changed, the loan and the wage row were added");
+                Assert.IsTrue(seenByAuditor.All(r => r.BeforeJson == null && r.AfterJson == null), "an auditor gets metadata only for the payroll record types");
+                Assert.IsTrue(seenByAuditor.All(r => !string.IsNullOrEmpty(r.EntityType) && r.At != default && !string.IsNullOrEmpty(r.Action)));
+                string everything = TextOf(LedgerFor(uow, "AUDITOR").AuditAsync(new AuditQuery { PageSize = 0 }, CancellationToken.None).GetAwaiter().GetResult().Data);
+                foreach (string figure in figures) Assert.IsFalse(everything.Contains(figure), "the whole page that an auditor reads holds no " + figure);
+                Assert.IsFalse(everything.Contains("ChildrenCount"), "nor the children count (not even the field name of a payroll record)");
+
+                // the finance manager reads the changes of the same rows: markers, never the figures themselves
+                List<AuditLogDto> seenByManager = types.SelectMany(t => LedgerFor(uow, "FINANCEMANAGER").AuditAsync(new AuditQuery { EntityType = t, PageSize = 0 }, CancellationToken.None).GetAwaiter().GetResult().Data).ToList();
+                Assert.IsTrue(seenByManager.Any(r => r.AfterJson != null && r.AfterJson.Contains("ChildrenCount")));
+                string managerView = TextOf(seenByManager);
+                foreach (string figure in figures) Assert.IsFalse(managerView.Contains(figure), "even the manager reads a marker, not " + figure);
+
+                // another reader of the ledger who is not an auditor: no access to the trail at all
+                Assert.IsFalse(LedgerFor(uow, "FINANCIAL").AuditAsync(new AuditQuery(), CancellationToken.None).GetAwaiter().GetResult().Success);
             });
         }
 

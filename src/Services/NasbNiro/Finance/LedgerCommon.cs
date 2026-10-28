@@ -35,6 +35,8 @@ namespace Services.NasbNiro.Finance
         public const string AuditReaders = "FINANCEMANAGER,CEO,AUDITOR";
         /// <summary>The CEO approves vouchers above the approval threshold.</summary>
         public const string Ceo = "CEO";
+        /// <summary>Release R1f review: the approvals of the finance manager that the CEO may also give (payroll runs, outbox packages, the records of a finance manager), so a company with one finance manager is never stuck.</summary>
+        public const string ManagersOrCeo = "FINANCEMANAGER,CEO";
         public const string OutboxReaders = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL,AUDITOR";
     }
 

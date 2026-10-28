@@ -517,6 +517,12 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal TotalProvisions { get; set; }
         public int? AccountingEventId { get; set; }
         public string Note { get; set; }
+
+        /// <summary>
+        /// Set when the approval of this run copied each employee's bank account onto the payslip (FnPayslip.BankIban), so the bank file reads the account as it was approved.
+        /// A run approved before this rule has the flag off (default) and its bank file reads the current account of the employee.
+        /// </summary>
+        public bool IbanSnapshotted { get; set; }
         public ICollection<FnPayslip> Payslips { get; set; }
 
         [Timestamp]

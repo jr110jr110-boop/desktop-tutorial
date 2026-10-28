@@ -331,26 +331,15 @@ namespace Services.NasbNiro.Office
             if (ambiguousRows > 0) return Bad<ClockImportResultDto>($"{ambiguousRows} ردیف تاریخ مبهم دارد (مثلاً «{ambiguousExample}»): ترتیب تاریخ را در ستون‌بندی انتخاب کنید (روز/ماه/سال یا ماه/روز/سال). چیزی ثبت نشد.");
 
             var unknownCodes = new List<string>();
-            int added, duplicates, unknown, rejected;
-            string fileHash = PayloadHash(rows);
-            // the read of the existing events and the insert of the new ones are one step: two files imported at the same moment cannot both add the same event
-            await ClockStoreLock.WaitAsync(ct);
-            try
-            {
-                (added, duplicates, unknown, rejected) = await StoreAsync(rows, OfClockSource.Import, fallbackDevice, result.Errors, ct, unknownCodes);
-                LogPush(null, fallbackDevice, rows.Count, added, duplicates, fileHash, "Import");
-                if (saveAs != null) await UpsertProfileAsync(saveAs, mapping, ct);
-                try { await _uow.SaveChangesAsync(ct); }
-                catch (DbUpdateException) { return Bad<ClockImportResultDto>("ذخیره ترددها انجام نشد؛ دوباره تلاش کنید."); }
-            }
-            finally { ClockStoreLock.Release(); }
-            result.Imported = added;
-            result.Duplicates = duplicates;
-            result.Unknown = unknown;
-            result.UnknownCodes = unknownCodes;
-            result.Rejected = rejected + badRows;
-            if (result.Errors.Count > 50) result.Errors = result.Errors.Take(50).ToList();
-            if (added > 0) await RecomputeImportedRangeAsync(rows, ct);
+            // release R1f: the rows are stored as a PENDING batch (the read of the existing events and the insert of the new ones are one step under the lock, so two files imported at the same moment
+            // cannot both add the same event); nothing counts, and no day is recomputed, until a second HR user approves the batch
+            await EnsureCompanyPolicyAsync(ct);
+            (StoreResult stored, OfClockImportBatch batch, string storeError) = await StoreImportAsync(rows, "Excel", fallbackDevice, OfficeText.Cap(Clean(dto.Reason), 1000), result.Errors, unknownCodes,
+                async () => { if (saveAs != null) await UpsertProfileAsync(saveAs, mapping, ct); }, ct);
+            if (storeError != null) return Bad<ClockImportResultDto>(storeError);
+            result.Rejected = badRows;
+            FillImportResult(result, stored, batch, unknownCodes, result.RowsRead);
+            if (batch != null) await BatchGateAsync(batch, true, ct);
             return ResponseDtoHelper.Ok(result);
         }
 
@@ -369,16 +358,6 @@ namespace Services.NasbNiro.Office
                 _uow.Set<OfClockImportProfile>().Add(p);
             }
             p.MappingJson = JsonSerializer.Serialize(mapping); p.ModifyDate = now; p.ModifierUserId = Me;
-        }
-
-        /// <summary>Recomputes the days around the imported events (in steps of 60 days; a file spanning more than a year is left to the daily job and the month close).</summary>
-        private async Task RecomputeImportedRangeAsync(List<RawClock> rows, CancellationToken ct)
-        {
-            DateTime min = rows.Min(r => r.Timestamp).Date.AddDays(-1);
-            DateTime max = rows.Max(r => r.Timestamp).Date.AddDays(1);
-            if ((max - min).TotalDays > 400) return;
-            for (DateTime from = min; from <= max; from = from.AddDays(60))
-                await ComputeCoreAsync(from, from.AddDays(59) < max ? from.AddDays(59) : max, null, ct);
         }
     }
 }

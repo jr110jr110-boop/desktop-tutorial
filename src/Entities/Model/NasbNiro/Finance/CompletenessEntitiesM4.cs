@@ -134,7 +134,7 @@ namespace Entities.Model.NasbNiro.Finance
         /// <summary>Last monthly base of the severance items.</summary>
         public decimal MonthlyBase { get; set; }
 
-        /// <summary>Where the monthly base came from: WageHistory (the approved wage history / the last payslip paid from it) or CurrentWage (no wage history exists yet: the current approved daily wage was used). Null on records made before the base was computed this way.</summary>
+        /// <summary>Where the monthly base came from: LastPayslip (the severance items of the last posted payslip), WageHistory (the approved wage history in force at the termination month) or CurrentWage (no wage history exists yet: the current approved daily wage was used). Null on records made before the base was computed this way.</summary>
         public string BaseSource { get; set; }
         public decimal DailyWage { get; set; }
         public decimal SeveranceDaysPerYear { get; set; }

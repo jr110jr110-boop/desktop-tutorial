@@ -10,6 +10,87 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Services.NasbNiro.Office
 {
+    /// <summary>
+    /// The LAN addresses a time-clock device may push from (release R1f): a comma separated list of IPv4 addresses or IPv4/CIDR ranges ("192.168.1.20,10.0.5.0/24"). An empty list means any address.
+    /// </summary>
+    internal static class DeviceAddress
+    {
+        private const int MaxEntries = 10;
+
+        private static bool TryParseEntry(string text, out uint network, out uint mask, out string normalized)
+        {
+            network = 0; mask = 0; normalized = null;
+            string t = OfficeText.Digits(text ?? "").Trim();
+            if (t.Length == 0) return false;
+            int slash = t.IndexOf('/');
+            string ipText = slash < 0 ? t : t.Substring(0, slash);
+            int prefix = 32;
+            if (slash >= 0 && (!int.TryParse(t.Substring(slash + 1), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out prefix) || prefix < 0 || prefix > 32)) return false;
+            // IPAddress.TryParse accepts short forms such as "10.1" and numbers such as "167772161"; only the dotted four-part form is a device address
+            string[] parts = ipText.Split('.');
+            if (parts.Length != 4 || !parts.All(x => x.Length > 0 && x.Length <= 3 && x.All(char.IsAsciiDigit))) return false;
+            if (!System.Net.IPAddress.TryParse(ipText, out System.Net.IPAddress ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
+            uint value = ToUInt(ip);
+            mask = prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
+            network = value & mask;
+            normalized = prefix == 32 ? ip.ToString() : new System.Net.IPAddress(ToBytes(network)).ToString() + "/" + prefix.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        private static uint ToUInt(System.Net.IPAddress ip)
+        {
+            byte[] b = ip.GetAddressBytes();
+            return ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
+        }
+
+        private static byte[] ToBytes(uint v) => new[] { (byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v };
+
+        /// <summary>Validates and normalises the list (null for an empty list). The error is a Persian sentence.</summary>
+        public static bool TryNormalize(string text, out string normalized, out string error)
+        {
+            normalized = null; error = null;
+            if (string.IsNullOrWhiteSpace(text)) return true;
+            string[] items = text.Split(new[] { ',', '،', ';', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var list = new List<string>();
+            foreach (string item in items)
+            {
+                if (!TryParseEntry(item, out _, out _, out string one))
+                {
+                    error = $"نشانی «{item}» نامعتبر است؛ فهرست نشانی‌های مجاز دستگاه را به صورت IPv4 یا بازه CIDR و با ویرگول جدا بنویسید (مثلاً 192.168.1.20 یا 10.0.5.0/24).";
+                    return false;
+                }
+                if (!list.Contains(one)) list.Add(one);
+            }
+            if (list.Count > MaxEntries) { error = $"حداکثر {MaxEntries} نشانی یا بازه برای هر دستگاه مجاز است."; return false; }
+            string joined = string.Join(",", list);
+            if (joined.Length > 200) { error = "فهرست نشانی‌های مجاز از ۲۰۰ نویسه بیشتر است."; return false; }
+            normalized = joined;
+            return true;
+        }
+
+        /// <summary>The address the request came from as an IPv4 number: an IPv4-mapped IPv6 address is unwrapped and the IPv6 loopback counts as 127.0.0.1; any other IPv6 address has no IPv4 form.</summary>
+        private static bool TryParseRemote(string remote, out uint value)
+        {
+            value = 0;
+            if (string.IsNullOrWhiteSpace(remote) || !System.Net.IPAddress.TryParse(remote.Trim(), out System.Net.IPAddress ip)) return false;
+            if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+            if (System.Net.IPAddress.IsLoopback(ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6) ip = System.Net.IPAddress.Loopback;
+            if (ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
+            value = ToUInt(ip);
+            return true;
+        }
+
+        /// <summary>True when the list is empty (any address) or the remote address is inside one of its entries.</summary>
+        public static bool Allows(string allowed, string remote)
+        {
+            if (string.IsNullOrWhiteSpace(allowed)) return true;
+            if (!TryParseRemote(remote, out uint value)) return false;
+            foreach (string item in allowed.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                if (TryParseEntry(item, out uint network, out uint mask, out _) && (value & mask) == network) return true;
+            return false;
+        }
+    }
+
     /// <summary>The company calendar: weekly off days (Friday when nothing is configured) and the holiday dates.</summary>
     internal sealed class OfficeCalendar
     {
@@ -177,10 +258,6 @@ namespace Services.NasbNiro.Office
         /// <summary>Deducted minutes for a delay that is already beyond the grace: the whole delay times the coefficient, rounded to a minute. A negative coefficient counts as 0.</summary>
         public static int DelayDeduction(int delayMinutes, decimal factor) =>
             delayMinutes <= 0 || factor <= 0m ? 0 : (int)Math.Round(delayMinutes * factor, MidpointRounding.AwayFromZero);
-
-        /// <summary>The overtime of a month that counts and is paid: the sum of the days, at most the monthly cap (a cap of 0 or less counts nothing).</summary>
-        public static int MonthlyOvertime(IEnumerable<int> dayMinutes, int capMinutes) =>
-            Math.Min(Math.Max(0, dayMinutes.Sum()), Math.Max(0, capMinutes));
 
         /// <summary>
         /// The overtime and the holiday work of a month that count: holiday work sits in the overtime bucket, so ONE monthly cap covers both. The days are filled in date order until the cap is used up;

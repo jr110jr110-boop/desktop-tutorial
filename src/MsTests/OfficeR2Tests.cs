@@ -154,11 +154,13 @@ namespace MsTests
         [TestMethod]
         public void Monthly_Overtime_Above_The_Cap_Is_Not_Counted()
         {
-            // 25 hours in the month: 22 hours count
-            Assert.AreEqual(22 * 60, AttendanceMath.MonthlyOvertime(new[] { 10 * 60, 8 * 60, 7 * 60 }, 1320));
-            Assert.AreEqual(5 * 60, AttendanceMath.MonthlyOvertime(new[] { 3 * 60, 2 * 60 }, 1320));
-            Assert.AreEqual(0, AttendanceMath.MonthlyOvertime(new[] { 120 }, 0));
-            Assert.AreEqual(0, AttendanceMath.MonthlyOvertime(new int[0], 1320));
+            // 25 hours in the month: 22 hours count (the one function that the month close uses: overtime and holiday work share the cap)
+            var start = new DateTime(2026, 11, 1);
+            (DateTime, int, int)[] Days(params int[] minutes) => minutes.Select((m, i) => (start.AddDays(i), m, 0)).ToArray();
+            Assert.AreEqual((22 * 60, 0), AttendanceMath.MonthlyExtraWork(Days(10 * 60, 8 * 60, 7 * 60), 1320));
+            Assert.AreEqual((5 * 60, 0), AttendanceMath.MonthlyExtraWork(Days(3 * 60, 2 * 60), 1320));
+            Assert.AreEqual((0, 0), AttendanceMath.MonthlyExtraWork(Days(120), 0));
+            Assert.AreEqual((0, 0), AttendanceMath.MonthlyExtraWork(Days(), 1320));
         }
 
         [TestMethod]

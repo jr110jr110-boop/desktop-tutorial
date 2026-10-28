@@ -53,11 +53,14 @@ namespace Services.NasbNiro.Finance
         private readonly IReceivablesService _receivables;
 
         private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+        private readonly global::Services.Token.ITokenStoreService _tokens;
 
+        /// <param name="tokens">Release R1f review M5: the refresh tokens of a leaver are revoked in the same save as the settlement. Optional so a context without a token store (tests) still builds the service.</param>
         public GlService(IUnitOfWork uow, IInventoryUserContext user, IEventPostingService posting, ILedgerReportService reports, IReceivablesService receivables,
-            global::Services.NasbNiro.Office.INotificationService notify)
+            global::Services.NasbNiro.Office.INotificationService notify, global::Services.Token.ITokenStoreService tokens = null)
         {
             _notify = notify;
+            _tokens = tokens;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _posting = posting ?? throw new ArgumentNullException(nameof(posting));

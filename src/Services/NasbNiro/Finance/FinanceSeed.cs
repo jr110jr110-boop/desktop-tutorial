@@ -233,10 +233,14 @@ namespace Services.NasbNiro.Finance
         /// <summary>The Persian month (for example 1405/08) payroll and leave start to count from. Empty (the default): the month of the first confirmed HR attendance close.</summary>
         public const string SettingGoLiveMonth = "Payroll:GoLiveMonth";
 
+        /// <summary>How many days the push log of the time-attendance devices is kept (30..3650, default 90 ★); the nightly job of the office module removes older rows.</summary>
+        public const string SettingPushLogDays = "Attendance:PushLogDays";
+
         public static IEnumerable<FnSetting> SettingSeeds()
         {
             yield return new FnSetting { Key = SettingPayableTerms, Value = "30", Title = "مهلت پرداخت پیش‌فرض (روز) وقتی شرایط پرداخت سفارش عدد ندارد ★" };
             yield return new FnSetting { Key = SettingGoLiveMonth, Value = "", Title = "ماه شروع کار با سامانه برای حقوق و مرخصی (مثلاً ۱۴۰۵/۰۸)؛ خالی = ماه اولین بستن تاییدشده حضور و غیاب ★" };
+            yield return new FnSetting { Key = SettingPushLogDays, Value = "90", Title = "مدت نگهداری گزارش دریافت دستگاه‌های حضور و غیاب (روز، ۳۰ تا ۳۶۵۰)؛ قدیمی‌تر در کار شبانه پاک می‌شود ★" };
             yield return new FnSetting { Key = "BaseCurrency", Value = "IRR", Title = "ارز پایه شرکت" };
             yield return new FnSetting { Key = "Jurisdiction", Value = Iran, Title = "حوزه قضایی (قوانین مالی و مالیاتی)" };
             yield return new FnSetting { Key = "MatchDays", Value = "3", Title = "بازه روز برای تطبیق خودکار صورت‌حساب بانکی (★)" };

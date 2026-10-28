@@ -77,7 +77,8 @@ namespace Services.NasbNiro.Finance
 
         /// <summary>
         /// The settlement figures. Release R1f: the base is never typed. It is the severance items of the last posted payslip (itself calculated from the approved wage history), else the approved daily wage in force
-        /// at the termination month x the payroll month; the record keeps where the base came from (WageHistory, or CurrentWage when the employee has no wage history yet). The 30-day month and the 360-day year are rate-table keys.
+        /// at the termination month x the payroll month; the record keeps where the base came from: LastPayslip (the last posted payslip), WageHistory (the approved wage history), or CurrentWage when the employee has no
+        /// wage history yet. The 30-day month and the 360-day year are rate-table keys.
         /// </summary>
         private async Task<TermCalc> TerminationCalcAsync(FnEmployee e, DateTime termination, decimal? leaveDays, decimal noticeDays, CancellationToken ct)
         {
@@ -100,7 +101,6 @@ namespace Services.NasbNiro.Finance
             Dictionary<int, List<FnEmployeeWage>> history = await WageHistory.LoadAsync(_uow, new[] { e.Id }, ct);
             history.TryGetValue(e.Id, out List<FnEmployeeWage> wageRows);
             decimal wage = WageHistory.WageAt(wageRows, e.DailyWage, WageHistory.MonthStart(termination), out bool fromHistory);
-            c.BaseSource = fromHistory ? "WageHistory" : "CurrentWage";
 
             HashSet<string> baseCodes = (await _uow.Set<FnPayrollItem>().AsNoTracking().Where(i => i.SeveranceBase && i.Kind == FnPayrollItemKind.Earning).Select(i => i.Code).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             FnPayslip slip = await _uow.Set<FnPayslip>().AsNoTracking().Include(p => p.Lines).Include(p => p.Run)
@@ -111,15 +111,18 @@ namespace Services.NasbNiro.Finance
                 decimal sum = slip.Lines.Where(l => l.Kind == FnPayrollItemKind.Earning && baseCodes.Contains(l.ItemCode)).Sum(l => l.Amount);
                 // a part month is scaled to the payroll-month basis
                 c.MonthlyBase = slip.DaysPaid > 0 && slip.DaysPaid != monthDays ? R(sum * monthDays / slip.DaysPaid) : R(sum);
+                c.BaseSource = "LastPayslip";
                 c.Sources.Add($"پایه ماهانه: اقلام مبنای سنوات آخرین فیش حقوقی ثبت‌شده ({slip.Run.Year}/{slip.Run.Month:00}) که از مزد مصوب همان ماه محاسبه شده است");
             }
             else
             {
+                c.BaseSource = fromHistory ? "WageHistory" : "CurrentWage";
                 c.MonthlyBase = R(wage * monthDays);
                 c.Sources.Add(fromHistory ? "پایه ماهانه: مزد روزانه مصوب (سابقه مزد) در ماه پایان کار × روزهای ماه حقوقی (فیش حقوقی ثبت‌شده‌ای نیست)"
                     : "پایه ماهانه: مزد روزانه فعلی تاییدشده × روزهای ماه حقوقی (فیش حقوقی ثبت‌شده‌ای نیست)");
             }
-            c.Sources.Add(fromHistory ? "منبع پایه: سابقه مزد تاییدشده (WageHistory)" : "منبع پایه: مزد روزانه فعلی (CurrentWage)؛ برای این کارمند سابقه مزد ثبت نشده است");
+            c.Sources.Add(c.BaseSource == "LastPayslip" ? "منبع پایه: آخرین فیش حقوقی (LastPayslip)"
+                : fromHistory ? "منبع پایه: سابقه مزد تاییدشده (WageHistory)" : "منبع پایه: مزد روزانه فعلی (CurrentWage)؛ برای این کارمند سابقه مزد ثبت نشده است");
             if (c.MonthlyBase <= 0) { c.Error = "پایه ماهانه محاسبه سنوات صفر است؛ مزد روزانه کارمند را تکمیل و تایید کنید."; return c; }
             c.Daily = R(c.MonthlyBase / monthDays);
             if (leaveDays.HasValue) { c.LeaveDays = leaveDays.Value; c.Sources.Add("روزهای مرخصی استفاده‌نشده: ورودی کاربر"); }
@@ -267,6 +270,8 @@ namespace Services.NasbNiro.Finance
         /// <summary>
         /// A leaver (approved settlement): the linked identity user is deactivated (IsActive off, lockout enabled with an end date far in the future, a new security stamp) and the open shift assignments of the employee end on the last day
         /// (an assignment that would only start after it is removed). Both are written to the audit trail with the settlement number. Returns the lines for the result of the approval.
+        /// Review M5: the refresh tokens of the user are revoked as well (ITokenStoreService, in the same save). The new security stamp invalidates the access tokens at their next request through the per-request
+        /// stamp check of the sign-in pipeline (release R1a/R1a2, on the build branch); this worktree only rotates the stamp.
         /// </summary>
         private async Task<List<string>> ApplyLeaverAsync(FnEmployee e, DateTime terminationDate, string number, CancellationToken ct)
         {
@@ -286,6 +291,12 @@ namespace Services.NasbNiro.Finance
                         u.IsActive = false; u.LockoutEnabled = true; u.LockoutEnd = DateTimeOffset.MaxValue; u.SecurityStamp = Guid.NewGuid().ToString("D");
                         after["userIsActive"] = false; after["userLockoutEnd"] = LockoutText(DateTimeOffset.MaxValue);
                         notes.Add("پایان خدمت: حساب کاربری کارمند غیرفعال و قفل شد.");
+                    }
+                    if (_tokens != null)
+                    {
+                        await _tokens.InvalidateUserTokensAsync(u.Id);
+                        after["refreshTokensRevoked"] = true;
+                        notes.Add("پایان خدمت: توکن‌های ورود (refresh) کارمند باطل شد.");
                     }
                 }
             }
@@ -358,18 +369,22 @@ namespace Services.NasbNiro.Finance
             if (alreadyPaid.Count > 0) { c.Error = $"عیدی سال {year} برای {alreadyPaid.Count} کارمند قبلاً با قلم ANNUAL_BONUS در یک اجرای حقوق ثبت‌شده پرداخت شده است؛ پرداخت دوباره مجاز نیست."; return c; }
             var slips = await _uow.Set<FnPayslip>().AsNoTracking().Where(p => ids.Contains(p.EmployeeId) && p.Run.Year == year && (p.Run.Status == FnPayrollStatus.Posted || p.Run.Status == FnPayrollStatus.Paid))
                 .Select(p => new { p.EmployeeId, p.Run.Month, p.TaxableTotal }).ToListAsync(ct);
+            // review L2: the bonus is computed on the daily wage in force in the last month the employee worked in the year (the approved wage history), not on the cached current value
+            Dictionary<int, List<FnEmployeeWage>> wageHistory = await WageHistory.LoadAsync(_uow, ids, ct);
+            c.Sources.Add("مزد روزانه عیدی: مزد مصوب (سابقه مزد) در آخرین ماه اشتغال کارمند در سال؛ برای کارمند بدون سابقه مزد، مزد روزانه فعلی.");
             foreach (FnEmployee e in employees)
             {
                 DateTime from = e.HireDate.Date > yStart ? e.HireDate.Date : yStart, to = e.EndDate.HasValue && e.EndDate.Value.Date < yEnd ? e.EndDate.Value.Date : yEnd;
                 int employed = (int)(to - from).TotalDays + 1;
-                if (employed <= 0 || e.DailyWage <= 0) continue;
+                decimal dailyWage = WageHistory.WageAt(wageHistory.TryGetValue(e.Id, out List<FnEmployeeWage> wageRows) ? wageRows : null, e.DailyWage, WageHistory.MonthStart(to), out bool _);
+                if (employed <= 0 || dailyWage <= 0) continue;
                 decimal share = (decimal)employed / yearDays;
-                decimal gross = Math.Min(R(e.DailyWage * c.BonusDays * employed / yearDays), R(c.GrossCapDays * c.MinimumDailyWage * share));
+                decimal gross = Math.Min(R(dailyWage * c.BonusDays * employed / yearDays), R(c.GrossCapDays * c.MinimumDailyWage * share));
                 var last = slips.Where(s => s.EmployeeId == e.Id).OrderByDescending(s => s.Month).FirstOrDefault();
                 decimal monthly = last?.TaxableTotal ?? 0;
                 decimal taxableBonus = Math.Max(0, gross - R(c.Cap * share));
                 decimal tax = R(PayrollEngine.BracketTax((monthly + taxableBonus) * 12m, brackets) / 12m - PayrollEngine.BracketTax(monthly * 12m, brackets) / 12m);
-                c.Lines.Add(new FnBonusLine { EmployeeId = e.Id, DailyWage = e.DailyWage, EmployedDays = employed, YearDays = yearDays, Gross = gross, MonthlyTaxable = monthly, Tax = tax, Net = gross - tax });
+                c.Lines.Add(new FnBonusLine { EmployeeId = e.Id, DailyWage = dailyWage, EmployedDays = employed, YearDays = yearDays, Gross = gross, MonthlyTaxable = monthly, Tax = tax, Net = gross - tax });
             }
             return c;
         }
