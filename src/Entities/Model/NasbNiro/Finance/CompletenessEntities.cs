@@ -90,6 +90,15 @@ namespace Entities.Model.NasbNiro.Finance
         public int UserId { get; set; }
         public DateTimeOffset At { get; set; }
         public string Ip { get; set; }
+
+        /// <summary>R1t D20: the place of the row in the hash chain (1, 2, 3 ...); null for the rows written before the chain existed. The chain is read in this order, not in the order of <see cref="Id"/>.</summary>
+        public long? Seq { get; set; }
+
+        /// <summary>R1t D20: the <see cref="Hash"/> of the row before this one in the chain (null for the first row).</summary>
+        public string PrevHash { get; set; }
+
+        /// <summary>R1t D20: "v1:" and the HMAC-SHA256 (keyed with Identity:AuditHmacKey), or "v0:" and the plain SHA-256 when no key is set, over the sequence number, <see cref="PrevHash"/> and every content field of the row.</summary>
+        public string Hash { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ period close
@@ -105,6 +114,30 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTimeOffset OverriddenAt { get; set; }
         /// <summary>The red items that were overridden, for the record.</summary>
         public string RedItems { get; set; }
+    }
+
+    public enum FnCloseOverrideKind { PeriodChecklist = 1, YearReconciliation = 2 }
+
+    public enum FnCloseOverrideStatus { Pending = 1, Approved = 2, Withdrawn = 3 }
+
+    /// <summary>
+    /// R1t D10: passing a close control (the red items of a period checklist, an unclean sub-ledger reconciliation at the year close) takes two finance managers:
+    /// one asks with a reason, a different one approves. The request lists the items it covers; an item that turns red later is not covered.
+    /// </summary>
+    public class FnCloseOverride
+    {
+        public int Id { get; set; }
+        public FnCloseOverrideKind Kind { get; set; }
+        public int? PeriodId { get; set; }
+        public int? FiscalYearId { get; set; }
+        public FnCloseOverrideStatus Status { get; set; }
+        public string Reason { get; set; }
+        /// <summary>Keys of the red items the override covers (" | " separated); the approver's view when approved.</summary>
+        public string Items { get; set; }
+        public int RequestedByUserId { get; set; }
+        public DateTimeOffset RequestedAt { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ voucher controls

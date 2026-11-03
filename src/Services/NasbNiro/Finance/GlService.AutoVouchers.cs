@@ -72,7 +72,7 @@ namespace Services.NasbNiro.Finance
             var voucher = new FnVoucher
             {
                 FiscalYearId = check.Year.Id, Date = date.Date, Type = type, Status = status, Description = description.Length > 1000 ? description.Substring(0, 1000) : description,
-                SourceType = sourceType, SourceNumber = sourceNumber, CreatedByUserId = status == FnVoucherStatus.Draft || userInitiated ? Me : 0, EditorUserIds = userInitiated ? WithEditor(null, Me) : null, CreatedAt = DateTimeOffset.Now, CheckedByUserId = status == FnVoucherStatus.Draft ? (int?)null : 0, CheckedAt = status == FnVoucherStatus.Draft ? (DateTimeOffset?)null : DateTimeOffset.Now,
+                SourceType = sourceType, SourceNumber = sourceNumber, CreatedByUserId = status == FnVoucherStatus.Draft || userInitiated ? Me : 0, EditorUserIds = userInitiated ? WithEditor(null, Me) : null, TriggeredByUserId = Me > 0 ? Me : (int?)null, CreatedAt = DateTimeOffset.Now, CheckedByUserId = status == FnVoucherStatus.Draft ? (int?)null : 0, CheckedAt = status == FnVoucherStatus.Draft ? (DateTimeOffset?)null : DateTimeOffset.Now,
                 TemporaryNumber = await InventoryNumbers.NextAsync(_uow, FinanceNumbers.Voucher, check.Year.Year, ct), TotalAmount = debit, ReversesVoucher = reverses,
                 Lines = new List<FnVoucherLine>(),
             };

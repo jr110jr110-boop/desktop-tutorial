@@ -164,6 +164,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTime? PaidDate { get; set; }
         public string Note { get; set; }
         public List<LcPostingDto> Postings { get; set; } = new List<LcPostingDto>();
+        /// <summary>R1t D7: treasury documents of this letter of credit that are not settled yet.</summary>
+        public List<FnCashLegRefDto> OpenCashLegs { get; set; } = new List<FnCashLegRefDto>();
     }
 
     public class LcPostingDto

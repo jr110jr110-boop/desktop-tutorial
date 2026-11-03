@@ -23,11 +23,12 @@ namespace Services.NasbNiro.Finance
         private async Task<List<ReceiptDto>> LoadReceiptsAsync(IQueryable<FnReceipt> query, CancellationToken ct)
         {
             List<FnReceipt> rows = await query.AsNoTracking().Include(r => r.Customer).Include(r => r.Lines).Include(r => r.Allocations).ThenInclude(a => a.Invoice).AsSplitQuery().ToListAsync(ct);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(r => new int?[] { r.CreatedByUserId, r.PostedByUserId }), ct);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(r => new int?[] { r.CreatedByUserId, r.PostedByUserId, r.ApprovedByUserId }), ct);
             return rows.Select(r => new ReceiptDto
             {
                 Id = r.Id, Number = r.Number, Date = r.Date, Status = r.Status, CustomerId = r.CustomerId, CustomerName = r.Customer?.Name, PayerName = r.PayerName,
                 Description = r.Description, TotalAmount = r.TotalAmount, AllocatedAmount = r.AllocatedAmount, CreatorName = names.Name(r.CreatedByUserId), PostedAt = r.PostedAt,
+                SourceType = r.SourceType, SourceId = r.SourceId, SourceAction = r.SourceAction, ApprovedByName = names.Name(r.ApprovedByUserId), PostedByName = names.Name(r.PostedByUserId),
                 Lines = r.Lines.OrderBy(l => l.RowNumber).Select(l => new ReceiptLineDto
                 {
                     RowNumber = l.RowNumber, Instrument = l.Instrument, Amount = l.Amount, BankAccountId = l.BankAccountId, CashBoxId = l.CashBoxId, Reference = l.Reference,
@@ -66,6 +67,8 @@ namespace Services.NasbNiro.Finance
             if (dto == null) return Bad<ReceiptDto>("اطلاعات ارسال‌شده کامل نیست.");
             await FinanceSeed.EnsureAsync(_uow, ct);
             DateTime date = dto.Date == default ? DateTime.Today : dto.Date.Date;
+            string closedDate = await ClosedPeriodGuard.MessageAsync(_uow, date, ct);   // M7
+            if (closedDate != null) return Bad<ReceiptDto>(closedDate);
             if (!dto.CustomerId.HasValue) return Bad<ReceiptDto>("مشتری (پرداخت‌کننده) را مشخص کنید.");
             FnCustomer customer = await _uow.Set<FnCustomer>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value, ct);
             if (customer == null || !customer.IsActive) return Bad<ReceiptDto>("مشتری پیدا نشد یا غیرفعال است.");
@@ -78,6 +81,7 @@ namespace Services.NasbNiro.Finance
                 receipt = await _uow.Set<FnReceipt>().Include(r => r.Lines).Include(r => r.Allocations).FirstOrDefaultAsync(r => r.Id == dto.Id.Value, ct);
                 if (receipt == null) return ResponseDtoHelper.NotFound<ReceiptDto>("سند دریافت پیدا نشد.");
                 if (receipt.Status != FnDocStatus.Draft) return Bad<ReceiptDto>("فقط پیش‌نویس ویرایش می‌شود.");
+                if (receipt.SourceType != null) return Bad<ReceiptDto>(FacilityOnly);
                 receipt.EditorUserIds = WithEditor(receipt.EditorUserIds, Me);
             }
 
@@ -182,21 +186,29 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(FinanceRoles.TreasuryAndAccountants)) return Bad<ReceiptDto>(NotAllowed);
             FnReceipt r = await _uow.Set<FnReceipt>().Include(x => x.Lines).Include(x => x.Allocations).Include(x => x.Customer).FirstOrDefaultAsync(x => x.Id == dto.Id, ct);
             if (r == null) return ResponseDtoHelper.NotFound<ReceiptDto>("سند دریافت پیدا نشد.");
-            switch (dto.Action.Trim().ToLowerInvariant())
+            string receiptAction = dto.Action.Trim().ToLowerInvariant();
+            if (r.SourceType != null)
+            {
+                string facilityRefusal = await FacilityActionRefusalAsync(receiptAction, r.CreatedByUserId, r.EditorUserIds, r.ApprovedByUserId, r.SourceType, r.SourceId, ct);
+                if (facilityRefusal != null) return Bad<ReceiptDto>(facilityRefusal);
+            }
+            switch (receiptAction)
             {
                 case "approve":
                     if (r.Status != FnDocStatus.Draft) return Bad<ReceiptDto>("فقط پیش‌نویس تایید می‌شود.");
                     if (Touched(r.CreatedByUserId, r.EditorUserIds, Me)) return Bad<ReceiptDto>(SameUser);
                     r.Status = FnDocStatus.Approved;
+                    r.ApprovedByUserId = Me;
                     break;
                 case "post":
                 {
-                    string error = await PostReceiptAsync(r, ct);
+                    string error = r.SourceType != null ? await PostFacilityReceiptAsync(r, dto, ct) : await PostReceiptAsync(r, ct);
                     if (error != null) return Bad<ReceiptDto>(error);
                     break;
                 }
                 case "cancel":
                     if (r.Status != FnDocStatus.Draft && r.Status != FnDocStatus.Approved) return Bad<ReceiptDto>("سند ثبت‌شده باطل نمی‌شود.");
+                    if (r.SourceType != null) await _legs.ReleaseAsync(LegOf(r), ct);   // the loan goes back to the state before the leg was drafted
                     r.Status = FnDocStatus.Cancelled;
                     break;
                 default:

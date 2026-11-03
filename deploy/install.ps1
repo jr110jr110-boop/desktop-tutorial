@@ -72,6 +72,22 @@
     Path or URL of the .NET 10 Hosting Bundle installer (dotnet-hosting-10.x.x-win.exe). Default: the
     "installers" folder, otherwise the latest version is downloaded from Microsoft.
 
+.PARAMETER HardenAudit
+    $true (default): the database updates are applied by this script, with the account that runs it, and the account of the program
+    (the IIS application pool) is NOT given the right to change the database structure. It may read and write, and it may add rows to
+    the audit trail (FnAuditLogs and the AI logs), but it can neither change nor delete one: the database refuses. The program checks at
+    its start that no update is waiting and stops with a clear message when one is (run this script again to update).
+    -HardenAudit $false goes back to the old way: the program is db_owner and updates the database itself when it starts.
+
+.PARAMETER BackupFileKey
+    The escrow copy of the key that encrypts the backup files at file level (base64, shown once by the first installation in its install log). Needed with -RestoreBackup when the
+    backup is a .bak.enc file made on ANOTHER server (the key of this server is then replaced by this one if it has none). On the same server the sealed key in the keys folder is used.
+
+.PARAMETER OffsiteCopyPath
+    A folder on another device, for example \\nas\backup\innco, to which every backup run copies what is new. It is stored as the setting
+    Backup:OffsiteCopyPath of the program (change it there). The backup tasks run as SYSTEM, so on a network share the computer account
+    of this server needs write access.
+
 .EXAMPLE
     .\install.ps1
     First installation with an empty database.
@@ -95,7 +111,10 @@ param(
     [string]$UploadedFilesFrom,
     [string]$AdminPassword,
     [string]$HostingBundle,
-    [switch]$SkipFirstBackup
+    [switch]$SkipFirstBackup,
+    [bool]$HardenAudit = $true,
+    [string]$OffsiteCopyPath,
+    [string]$BackupFileKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -106,6 +125,8 @@ $ScriptVersion = '1.1'
 $SelfSignedName = 'INNCO PMIS (self-signed)'   # friendly name of the certificate this script makes
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 $script:TranscriptOn = $false
+$script:SecretInLog = $false             # R1t (D21): the install log holds the password of the backup key
+$script:AuditProtectionApplied = $false
 
 # Uploaded files live inside the program folder (see DocumentService and UsersPhotoService).
 $DataFolders = @('UploadedDocuments', 'wwwroot\Documents', 'wwwroot\avatars')
@@ -231,6 +252,207 @@ function Get-SqlServiceAccount([string]$InstanceName) {
     if ($null -eq $service) { return $null }
     if ($service.StartName -eq 'LocalSystem') { return 'NT AUTHORITY\SYSTEM' }
     return $service.StartName
+}
+
+# ----------------------------------------------------------------------------------------------
+# Backups (encryption, log chain), database updates and the protection of the audit trail (R1t, D20 and D21)
+# ----------------------------------------------------------------------------------------------
+
+$BackupCertificateName = 'INNCO_BackupCert'
+
+# H2 (review R1t): file-level encryption of backups (SQL Server Express cannot encrypt a backup itself; the copy of the uploaded files is a plain copy on every edition)
+. (Join-Path $PSScriptRoot 'backup-crypto.ps1')
+
+# The WITH list of a safety backup made by this script (a copy-only full backup): compression where the edition has it, encryption when a certificate is given.
+function Get-SafetyBackupOptions([string]$Certificate) {
+    $options = 'COPY_ONLY, INIT, CHECKSUM'
+    $express = [int](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int)") -eq 4   # Express cannot compress backups
+    if (-not $express) { $options += ', COMPRESSION' }
+    if ($Certificate -and -not $express) {   # Express cannot encrypt a backup: the file is encrypted at file level after it is made (Protect-SafetyBackup)
+        $options += ', MAXTRANSFERSIZE = 131072'
+        $options += ', ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = ' + (ConvertTo-SqlName $Certificate) + ')'
+    }
+    return $options
+}
+
+# Makes the certificate that encrypts the backups (SQL Server keeps it in master), writes the certificate and its private key to the keys folder and proves with a test
+# backup of the model database that encrypted backups work on this server. The password of the private key is made here and returned in NewPassword (only when files were written);
+# the caller shows it once. It is never written to a settings file. Available is $false, with the reason, when encrypted backups do not work here.
+function Initialize-BackupCertificate([string]$KeysFolder) {
+    $result = [pscustomobject]@{ Name = $BackupCertificateName; Available = $false; CertificateReady = $false; Reason = $null; NewPassword = $null; KeyFile = $null }
+    try {
+        New-Item -ItemType Directory -Force -Path $KeysFolder | Out-Null
+        $name = ConvertTo-SqlName $BackupCertificateName
+        $nameText = ConvertTo-SqlText $BackupCertificateName
+        if ([int](Invoke-Sql -Scalar -Query "SELECT COUNT(*) FROM master.sys.symmetric_keys WHERE name = N'##MS_DatabaseMasterKey##'") -eq 0) {
+            Invoke-Sql -Query ('CREATE MASTER KEY ENCRYPTION BY PASSWORD = ' + (ConvertTo-SqlText (New-RandomText 32 -Password))) | Out-Null   # protected by the server's own key; the password is not needed again
+        }
+        $created = $false
+        if ([int](Invoke-Sql -Scalar -Query "SELECT COUNT(*) FROM master.sys.certificates WHERE name = $nameText") -eq 0) {
+            Invoke-Sql -Query "CREATE CERTIFICATE $name WITH SUBJECT = N'INNCO PMIS backup encryption', EXPIRY_DATE = '20460101'" | Out-Null
+            $created = $true
+        }
+        $certFile = Join-Path $KeysFolder "$BackupCertificateName.cer"
+        $keyFile = Join-Path $KeysFolder "$BackupCertificateName.pvk"
+        if ($created -or -not ((Test-Path $certFile) -and (Test-Path $keyFile))) {
+            if ((Test-Path $certFile) -or (Test-Path $keyFile)) {
+                $stamp = '-{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+                $certFile = Join-Path $KeysFolder "$BackupCertificateName$stamp.cer"
+                $keyFile = Join-Path $KeysFolder "$BackupCertificateName$stamp.pvk"
+            }
+            $keyPassword = New-RandomText 24 -Password
+            Invoke-Sql -Query ("BACKUP CERTIFICATE $name TO FILE = " + (ConvertTo-SqlText $certFile) + ' WITH PRIVATE KEY (FILE = ' + (ConvertTo-SqlText $keyFile) +
+                               ', ENCRYPTION BY PASSWORD = ' + (ConvertTo-SqlText $keyPassword) + ')') | Out-Null
+            $result.NewPassword = $keyPassword
+            $result.KeyFile = $keyFile
+        }
+        $result.CertificateReady = $true
+        # Express (EngineEdition 4) refuses BACKUP ... WITH ENCRYPTION: no doomed test; the backups are encrypted at file level there (H2)
+        if ([int](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int)") -eq 4) {
+            $result.Reason = 'SQL Server Express cannot encrypt a backup itself'
+            return $result
+        }
+        $test = Join-Path $KeysFolder 'encryption-test.bak'
+        if (Test-Path $test) { Remove-Item -Path $test -Force }
+        try {
+            Invoke-Sql -Query "BACKUP DATABASE [model] TO DISK = @f WITH COPY_ONLY, INIT, CHECKSUM, ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = $name)" -Parameters @{ '@f' = $test } | Out-Null
+            $result.Available = $true
+        }
+        finally { if (Test-Path $test) { Remove-Item -Path $test -Force -ErrorAction SilentlyContinue } }
+    }
+    catch { $result.Reason = $_.Exception.Message }
+    return $result
+}
+
+# The audit key (Identity:AuditHmacKey) is needed to go on checking the hash chain of the audit trail after a restore, and it must not travel in the settings copy of the backup.
+# It is sealed here with the public part of the backup certificate; only the private key and its password open it again. The sealed text goes to the keys folder.
+function Save-SealedAuditKey([string]$SettingsPath, [string]$KeysFolder) {
+    try {
+        if (-not (Test-Path $SettingsPath)) { return }
+        $json = Get-Content -Raw -Encoding UTF8 -Path $SettingsPath | ConvertFrom-Json
+        $identity = $json.PSObject.Properties['Identity']
+        if ($null -eq $identity -or $null -eq $identity.Value) { return }
+        $keyProperty = $identity.Value.PSObject.Properties['AuditHmacKey']
+        if ($null -eq $keyProperty -or -not $keyProperty.Value) { return }
+        $sealed = [string](Invoke-Sql -Scalar -Parameters @{ '@k' = [string]$keyProperty.Value } `
+            -Query ('SELECT CONVERT(varchar(max), ENCRYPTBYCERT(CERT_ID(' + (ConvertTo-SqlText $BackupCertificateName) + '), @k), 2)'))
+        if (-not $sealed) { return }
+        $text = @(
+            "INNCO PMIS: the audit key (Identity:AuditHmacKey), sealed with the backup certificate $BackupCertificateName. Written by install.ps1.",
+            'The audit key is needed to go on checking the hash chain of the audit trail on a restored system. It is not in the settings copy of the backup.',
+            'On a new server: restore the certificate in master (CREATE CERTIFICATE ... FROM FILE ... WITH PRIVATE KEY (FILE = ..., DECRYPTION BY PASSWORD = ...)), then in master run',
+            "    SELECT CONVERT(nvarchar(max), DECRYPTBYCERT(CERT_ID(N'$BackupCertificateName'), 0x<the hex text below>, N'<password of the key>'))",
+            'and put the result into appsettings.Production.json as Identity:AuditHmacKey before the first start of the program.',
+            "sealed: $sealed")
+        Set-Content -Path (Join-Path $KeysFolder 'audit-key.sealed.txt') -Value $text -Encoding ASCII
+    }
+    catch { Write-Warn "The audit key could not be sealed into the keys folder: $($_.Exception.Message)" }
+}
+
+# A copy-only full backup made right before the program is updated (the program applies its database updates when it starts), checked with RESTORE VERIFYONLY.
+function Invoke-PreUpdateBackup([string]$Database, [string]$Folder, [string]$Certificate) {
+    $file = Join-Path $Folder ('database\{0}_pre-update_{1:yyyyMMdd_HHmm}.bak' -f $Database, (Get-Date))
+    New-Item -ItemType Directory -Force -Path (Split-Path $file) | Out-Null
+    Write-Info "Backing up the database before the update: $file"
+    Invoke-Sql -Query ('BACKUP DATABASE ' + (ConvertTo-SqlName $Database) + ' TO DISK = @f WITH ' + (Get-SafetyBackupOptions $Certificate)) -Parameters @{ '@f' = $file } | Out-Null
+    Invoke-Sql -Query 'RESTORE VERIFYONLY FROM DISK = @f WITH CHECKSUM' -Parameters @{ '@f' = $file } | Out-Null
+    if (-not $Certificate -or [int](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int)") -eq 4) { return (Protect-SafetyBackup $file $Folder) }
+    return $file
+}
+
+# Encrypts a plain safety backup at file level (x.bak -> x.bak.enc) and deletes the plain file.
+function Protect-SafetyBackup([string]$File, [string]$Folder) {
+    $key = Get-FileCryptoKey (Join-Path $Folder 'keys') $BackupFileKey -Create
+    return (Protect-BackupFile $File $key.Bytes)
+}
+
+# Sets one key (Section:Name) of appsettings.Production.json; the rest of the file is left as it is.
+function Set-ProgramSetting([string]$SettingsPath, [string]$Section, [string]$Name, $Value) {
+    $json = Get-Content -Raw -Encoding UTF8 -Path $SettingsPath | ConvertFrom-Json
+    $holder = $json.PSObject.Properties[$Section]
+    if ($null -eq $holder) {
+        $json | Add-Member -NotePropertyName $Section -NotePropertyValue ([pscustomobject]@{})
+        $holder = $json.PSObject.Properties[$Section]
+    }
+    elseif ($holder.Value -isnot [System.Management.Automation.PSCustomObject]) { $holder.Value = [pscustomobject]@{} }
+    $leaf = $holder.Value.PSObject.Properties[$Name]
+    if ($null -eq $leaf) { $holder.Value | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
+    else { $leaf.Value = $Value }
+    [IO.File]::WriteAllText($SettingsPath, ($json | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# The two settings of this script's own: whether the program updates the database itself when it starts (not with -HardenAudit), and the off-site folder of the backups.
+function Save-RunSettings([string]$SettingsPath, [bool]$Harden, [string]$Offsite) {
+    Set-ProgramSetting $SettingsPath 'Database' 'MigrateAtStart' (-not $Harden)
+    if ($Offsite) { Set-ProgramSetting $SettingsPath 'Backup' 'OffsiteCopyPath' $Offsite }
+}
+
+# Applies the database updates (EF migrations) of the program with the account that runs this script, which can change the structure. With -HardenAudit the program's own
+# account cannot, and the program does not try (Database:MigrateAtStart is false): it only checks at its start that nothing is waiting.
+function Invoke-DatabaseUpdate([string]$ProgramFolder) {
+    $dotnet = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe'
+    if (-not (Test-Path $dotnet)) { $dotnet = 'dotnet.exe' }
+    $previousPreference = $ErrorActionPreference
+    $previousEnvironment = $env:ASPNETCORE_ENVIRONMENT
+    Push-Location $ProgramFolder
+    try {
+        $env:ASPNETCORE_ENVIRONMENT = 'Production'   # reads appsettings.Production.json of the program folder, like the site
+        $ErrorActionPreference = 'Continue'          # stderr lines of a native program are not errors; its exit code is
+        $output = & $dotnet (Join-Path $ProgramFolder 'WebApi.dll') --migrate-only 2>&1 | Out-String
+        $code = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+        $env:ASPNETCORE_ENVIRONMENT = $previousEnvironment
+        Pop-Location
+    }
+    if ($code -ne 0) { throw "Applying the database updates failed (exit code $code): $($output.Trim())" }
+}
+
+# The tables that only get rows added (the audit trail of the data, and the logs of the AI seats). Their names are checked before they are used.
+$AppendOnlyTables = @('FnAuditLogs', 'AiAuditEvents', 'AiMessages', 'AiToolCallLogs')
+
+# After the database updates: the account of the program (the application pool) may read and write but not change the structure, and may add to the append-only tables
+# but not change or delete a row of them. The database enforces it, whatever the program does.
+function Protect-AuditTrail([string]$Database, [string]$PoolIdentity) {
+    $pool = ConvertTo-SqlName $PoolIdentity
+    $poolText = ConvertTo-SqlText $PoolIdentity
+    $denies = ($AppendOnlyTables | ForEach-Object { "IF OBJECT_ID(N'dbo.$_', N'U') IS NOT NULL DENY UPDATE, DELETE ON OBJECT::dbo.$_ TO [pmis_app];" }) -join "`n"
+    Invoke-Sql -Database $Database -Query @"
+IF DATABASE_PRINCIPAL_ID(N'pmis_app') IS NULL CREATE ROLE [pmis_app];
+GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::dbo TO [pmis_app];
+IF ISNULL(IS_ROLEMEMBER(N'pmis_app', $poolText), 0) = 0 ALTER ROLE [pmis_app] ADD MEMBER $pool;
+IF ISNULL(IS_ROLEMEMBER(N'db_owner', $poolText), 0) = 1 ALTER ROLE db_owner DROP MEMBER $pool;
+$denies
+"@ | Out-Null
+}
+
+# -HardenAudit $false: the account of the program leaves the restricted role (db_owner is given in the database step).
+function Remove-AuditTrailProtection([string]$Database, [string]$PoolIdentity) {
+    $pool = ConvertTo-SqlName $PoolIdentity
+    $poolText = ConvertTo-SqlText $PoolIdentity
+    Invoke-Sql -Database $Database -Query @"
+IF DATABASE_PRINCIPAL_ID(N'pmis_app') IS NOT NULL AND ISNULL(IS_ROLEMEMBER(N'pmis_app', $poolText), 0) = 1 ALTER ROLE [pmis_app] DROP MEMBER $pool;
+"@ | Out-Null
+}
+
+# Proves that the protection works: the database account of the program tries an UPDATE of the audit trail (no row is touched) and must be refused (error 229).
+# Returns the error number: 229 = refused (protected), 0 = the UPDATE was allowed (not protected), anything else = could not be tested.
+function Test-AuditTrailProtected([string]$Database, [string]$PoolIdentity) {
+    $poolText = ConvertTo-SqlText $PoolIdentity
+    return [int](Invoke-Sql -Database $Database -Scalar -Query @"
+DECLARE @n int = 0;
+BEGIN TRY
+    EXECUTE AS USER = $poolText;
+    UPDATE dbo.FnAuditLogs SET Summary = Summary WHERE 1 = 0;
+    REVERT;
+END TRY
+BEGIN CATCH
+    SET @n = ERROR_NUMBER();
+    REVERT;
+END CATCH;
+SELECT @n;
+"@)
 }
 
 function Find-HostingBundleInstaller {
@@ -582,6 +804,7 @@ try {
     Invoke-Robocopy (Join-Path $PackageDir 'app') $AppDir @('/XF', 'appsettings.Production.json')
     foreach ($rel in $DataFolders) { New-Item -ItemType Directory -Force -Path (Join-Path $AppDir $rel) | Out-Null }
     Copy-Item -Path (Join-Path $PackageDir 'backup.ps1') -Destination $ToolsDir -Force
+    Copy-Item -Path (Join-Path $PackageDir 'backup-crypto.ps1') -Destination $ToolsDir -Force
 
     $webConfigPath = Join-Path $AppDir 'web.config'
     [xml]$webConfig = Get-Content -Raw -Path $webConfigPath
@@ -615,6 +838,45 @@ try {
     $dbExists = Test-DatabaseExists $DatabaseName
     $createdNewDatabase = $false
 
+    # R1t (D21): the certificate that encrypts the backups. It must exist before the first backup below is made.
+    $keysFolder = Join-Path $BackupFolder 'keys'
+    $backupCertificate = Initialize-BackupCertificate $keysFolder
+    $backupCertificateName = $null
+    if ($backupCertificate.Available) {
+        $backupCertificateName = $backupCertificate.Name
+        Write-Ok "Database backups are encrypted by SQL Server (AES-256) with the server certificate $backupCertificateName. Certificate and key files: $keysFolder"
+    }
+    elseif ($backupCertificate.CertificateReady) {
+        Write-Ok "$($backupCertificate.Reason): the backup files are encrypted at file level instead (AES-256 with an HMAC seal; key sealed by DPAPI in $keysFolder)."
+    }
+    else { Write-Warn "The backup certificate could not be made ($($backupCertificate.Reason)); the backup files are encrypted at file level instead (AES-256 with an HMAC seal)." }
+    # the file-level key: made once; the same key opens the uploaded-files copy on every edition and the database backups where SQL Server cannot encrypt them
+    $fileCryptoKey = Get-FileCryptoKey $keysFolder $BackupFileKey -Create
+    if ($fileCryptoKey.Created) {
+        $script:SecretInLog = $true
+        Write-Host ''
+        Write-Host '    ====================================================================================' -ForegroundColor Yellow
+        Write-Host '    ESCROW COPY OF THE BACKUP FILE KEY (shown once; it is in this install log and nowhere else)' -ForegroundColor Yellow
+        Write-Host "        $($fileCryptoKey.Escrow)" -ForegroundColor Yellow
+        Write-Host '    The key file in the keys folder is sealed to THIS server (DPAPI). If this server is lost, the encrypted backups and' -ForegroundColor Yellow
+        Write-Host '    files can be opened on a new server only with this text (install.ps1 -BackupFileKey <text>).' -ForegroundColor Yellow
+        Write-Host '    Keep it apart from the backups and from the keys folder (a safe, not the off-site backup target). This log file is secret.' -ForegroundColor Yellow
+        Write-Host '    ====================================================================================' -ForegroundColor Yellow
+        Write-Host ''
+    }
+    if ($backupCertificate.NewPassword) {
+        $script:SecretInLog = $true
+        Write-Host ''
+        Write-Host '    ====================================================================================' -ForegroundColor Yellow
+        Write-Host '    PASSWORD OF THE BACKUP KEY (shown once; it is in this install log and nowhere else)' -ForegroundColor Yellow
+        Write-Host "        $($backupCertificate.NewPassword)" -ForegroundColor Yellow
+        Write-Host "    It protects the private key file $($backupCertificate.KeyFile)." -ForegroundColor Yellow
+        Write-Host '    A backup can be restored on another server only with that file and this password.' -ForegroundColor Yellow
+        Write-Host '    Write the password down and keep it, and the keys folder, apart from the backups. This log file is secret.' -ForegroundColor Yellow
+        Write-Host '    ====================================================================================' -ForegroundColor Yellow
+        Write-Host ''
+    }
+
     if ($RestoreBackup) {
         if (-not (Test-Path $RestoreBackup)) { throw "Backup file not found: $RestoreBackup" }
         if ($dbExists -and -not $ReplaceDatabase) {
@@ -627,11 +889,19 @@ try {
             Write-Info 'Copying the backup file to a folder SQL Server can read...'
             Copy-Item -Path $RestoreBackup -Destination $backupCopy -Force
         }
+        if ($backupCopy.EndsWith('.enc', [StringComparison]::OrdinalIgnoreCase)) {
+            # H2: a backup that was encrypted at file level is opened first (the seal is checked before anything is written)
+            Write-Info 'Decrypting the backup file (file-level encryption)...'
+            $encryptedCopy = $backupCopy
+            $backupCopy = Unprotect-BackupFile $encryptedCopy $fileCryptoKey.Bytes
+            Remove-Item -Path $encryptedCopy -Force
+        }
         if ($dbExists) {
             $safety = Join-Path $BackupFolder ("database\{0}_before-restore_{1:yyyyMMdd_HHmm}.bak" -f $DatabaseName, (Get-Date))
             New-Item -ItemType Directory -Force -Path (Split-Path $safety) | Out-Null
             Write-Info "Backing up the existing database first: $safety"
             Invoke-Sql -Query "BACKUP DATABASE $db TO DISK = @f WITH COPY_ONLY, INIT, CHECKSUM" -Parameters @{ '@f' = $safety } | Out-Null
+            $safety = Protect-SafetyBackup $safety $BackupFolder   # H2: the safety copy holds the real data and is encrypted at file level
             Invoke-Sql -Query "ALTER DATABASE $db SET SINGLE_USER WITH ROLLBACK IMMEDIATE" | Out-Null
         }
         $dataPath = [string](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(260))")
@@ -675,6 +945,8 @@ try {
     }
     else {
         Write-Ok 'The existing database is kept.'
+        $preUpdateBackup = Invoke-PreUpdateBackup $DatabaseName $BackupFolder $backupCertificateName   # R1t (D21): before the program starts and updates the database
+        Write-Ok "Safety backup made and checked before the update: $preUpdateBackup"
     }
 
     $level = [int](Invoke-Sql -Scalar -Query 'SELECT compatibility_level FROM sys.databases WHERE name = @n' -Parameters @{ '@n' = $DatabaseName })
@@ -682,11 +954,13 @@ try {
         Invoke-Sql -Query "ALTER DATABASE $db SET COMPATIBILITY_LEVEL = 150" | Out-Null
         Write-Info "Compatibility level raised from $level to 150 (what the program expects)."
     }
-    Invoke-Sql -Query "ALTER DATABASE $db SET RECOVERY SIMPLE" | Out-Null   # daily full backups; keeps the log file small
+    Invoke-Sql -Query "ALTER DATABASE $db SET RECOVERY FULL" | Out-Null   # R1t (D21): a full backup every day and a log backup every hour; the database can be restored to any moment
 
     # Windows authentication for the program (application pool) and the backup task (SYSTEM).
     $poolName = ConvertTo-SqlName $poolIdentity
     $poolText = ConvertTo-SqlText $poolIdentity
+    # R1t (D20): with -HardenAudit the account of the program is never db_owner; it gets its restricted role after the database updates (step 10)
+    $poolOwnerSql = if ($HardenAudit) { '' } else { "ALTER ROLE db_owner ADD MEMBER $poolName;" }
     Invoke-Sql -Query @"
 IF SUSER_ID($poolText) IS NULL CREATE LOGIN $poolName FROM WINDOWS;
 IF SUSER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE LOGIN [NT AUTHORITY\SYSTEM] FROM WINDOWS;
@@ -694,11 +968,11 @@ IF SUSER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE LOGIN [NT AUTHORITY\SYSTEM] F
     Invoke-Sql -Database $DatabaseName -Query @"
 IF USER_ID($poolText) IS NULL BEGIN CREATE USER $poolName FOR LOGIN $poolName; END
 ELSE BEGIN ALTER USER $poolName WITH LOGIN = $poolName; END
-ALTER ROLE db_owner ADD MEMBER $poolName;
+$poolOwnerSql
 IF USER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE USER [NT AUTHORITY\SYSTEM] FOR LOGIN [NT AUTHORITY\SYSTEM];
 ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
 "@ | Out-Null
-    Write-Ok "'$poolIdentity' can use the database (no password needed); the backup task can back it up."
+    Write-Ok "'$poolIdentity' can use the database (no password needed); the backup tasks can back it up."
 
     # 8. Settings -------------------------------------------------------------------------------
     Write-Step 'Settings (appsettings.Production.json)'
@@ -838,17 +1112,47 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     }
     Write-Ok "Site configured: https on port $HttpsPort (certificate $certificateThumbprint), http on 127.0.0.1:$Port only."
 
-    # 10. Daily backup task ---------------------------------------------------------------------
-    Write-Step 'Daily backup (scheduled task, 01:30)'
+    # 10. Backup tasks --------------------------------------------------------------------------
+    Write-Step 'Backups (scheduled tasks: full backup daily at 01:30, log backup every hour)'
     $taskName = 'INNCO daily backup'
-    $taskArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -SqlServer "{1}" -DatabaseName "{2}" -BackupFolder "{3}" -AppDir "{4}" -KeepDays 14' -f `
+    # the retention is not an argument any more: backup.ps1 reads the setting Backup:RetentionDays (35 days) of the program
+    $taskArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -SqlServer "{1}" -DatabaseName "{2}" -BackupFolder "{3}" -AppDir "{4}"' -f `
                 (Join-Path $ToolsDir 'backup.ps1'), $script:SqlInstance, $DatabaseName, $BackupFolder, $AppDir
+    if ($backupCertificateName) { $taskArgs += " -EncryptionCertificate `"$backupCertificateName`"" }
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $taskArgs
     $trigger = New-ScheduledTaskTrigger -Daily -At '01:30'
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 6)
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $taskSettings -Force | Out-Null
-    Write-Ok "Task '$taskName': database to $BackupFolder\database (kept 14 days), uploaded files to $BackupFolder\files."
+    # the log backup every hour, from the next full hour + 10 minutes; without it the log of the full recovery model would grow
+    $logTaskName = 'INNCO hourly log backup'
+    $logAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ($taskArgs + ' -Mode Log')
+    $logStart = (Get-Date).Date.AddHours((Get-Date).Hour + 1).AddMinutes(10)
+    $logTrigger = New-ScheduledTaskTrigger -Once -At $logStart -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 7300)
+    $logSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+    Register-ScheduledTask -TaskName $logTaskName -Action $logAction -Trigger $logTrigger -Principal $taskPrincipal -Settings $logSettings -Force | Out-Null
+    Write-Ok "Tasks '$taskName' and '$logTaskName': database and log backups to $BackupFolder\database, uploaded files to $BackupFolder\files; kept as long as the setting Backup:RetentionDays says (35 days by default)."
+    if ($OffsiteCopyPath) { Write-Ok "Every backup run also copies to $OffsiteCopyPath (setting Backup:OffsiteCopyPath)." }
+    if ($backupCertificate.CertificateReady) { Save-SealedAuditKey $settingsPath $keysFolder }
+
+    # 10b. Database updates and protection of the audit trail (R1t, D20). The pool is still stopped here, so nothing is written meanwhile.
+    if ($HardenAudit) {
+        Write-Step 'Database updates (applied by this script) and protection of the audit trail'
+        Save-RunSettings $settingsPath $true $OffsiteCopyPath
+        Invoke-DatabaseUpdate $AppDir
+        Write-Ok 'The database structure is up to date; the program does not change it itself any more.'
+        Protect-AuditTrail $DatabaseName $poolIdentity
+        $script:AuditProtectionApplied = $true
+        $refused = Test-AuditTrailProtected $DatabaseName $poolIdentity
+        if ($refused -eq 229) { Write-Ok "The database refuses the program's account to change or delete a row of the audit trail ($($AppendOnlyTables -join ', ')); it may only add rows." }
+        elseif ($refused -eq 0) { throw 'The audit trail is NOT protected: the program account was allowed to update it.' }
+        else { Write-Warn "The protection of the audit trail could not be tested (SQL error $refused). Check it by hand: the account '$poolIdentity' must not be allowed to UPDATE or DELETE in dbo.FnAuditLogs." }
+    }
+    else {
+        Save-RunSettings $settingsPath $false $OffsiteCopyPath
+        Remove-AuditTrailProtection $DatabaseName $poolIdentity
+        Write-Warn 'The audit trail is NOT protected (-HardenAudit $false): the program account is db_owner and updates the database itself when it starts.'
+    }
 
     # 11. Start and check -----------------------------------------------------------------------
     Write-Step 'Start and check'
@@ -908,7 +1212,22 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
         $backupLog = Join-Path $BackupFolder 'backup-log.txt'
         if (Test-Path $backupLog) { Get-Content $backupLog -Tail 4 | ForEach-Object { Write-Info $_ } }
         if ($taskResult -eq 0) { Write-Ok 'Backup works.' } else { Write-Warn "The backup task ended with code $taskResult. See $backupLog" }
+
+        # the log backup once, now that a full backup exists (R1t, D21)
+        $logStarted = (Get-Date).AddSeconds(-5)
+        Start-ScheduledTask -TaskName $logTaskName
+        $logDeadline = (Get-Date).AddMinutes(30)
+        do {
+            Start-Sleep -Seconds 3
+            $logInfo = Get-ScheduledTaskInfo -TaskName $logTaskName
+            $logRunning = (Get-ScheduledTask -TaskName $logTaskName).State -eq 'Running'
+        } while (($logRunning -or $logInfo.LastRunTime -lt $logStarted) -and (Get-Date) -lt $logDeadline)
+        if (Test-Path $backupLog) { Get-Content $backupLog -Tail 2 | ForEach-Object { Write-Info $_ } }
+        if ($logInfo.LastTaskResult -eq 0) { Write-Ok 'Log backup works.' } else { Write-Warn "The log backup task ended with code $($logInfo.LastTaskResult). See $backupLog" }
     }
+
+    # the settings of step 10 once more, in case a step in between rewrote the settings file from its own copy of it
+    Save-RunSettings $settingsPath $HardenAudit $OffsiteCopyPath
 
     $ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
              Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
@@ -924,6 +1243,9 @@ catch {
     if ($LogsDir) {
         Write-Host "    Program logs: $LogsDir (stdout_*.log), and Windows Event Viewer > Application (source: IIS AspNetCore Module V2)."
     }
+    if ($script:AuditProtectionApplied) {
+        Write-Host '    The protection of the audit trail was applied in this run. If the program does not start because of a database permission, run this script again with -HardenAudit $false and send the log.'
+    }
 }
 finally {
     if ($script:Warnings.Count -gt 0) {
@@ -933,8 +1255,14 @@ finally {
     }
     if ($script:TranscriptOn) {
         Write-Host ''
-        Write-Host "Log file (send this one if something went wrong): $logFile"
+        if ($script:SecretInLog) { Write-Host "Log file (it holds the password of the backup key: keep it secret): $logFile" }
+        else { Write-Host "Log file (send this one if something went wrong): $logFile" }
         Stop-Transcript | Out-Null
+        if ($script:SecretInLog) {
+            # only the administrators read it (the application pool may write to the logs folder, but must not read this file)
+            try { Invoke-Icacls @($logFile, '/inheritance:r', '/grant:r', '*S-1-5-32-544:F', '*S-1-5-18:F', '/Q') }
+            catch { Write-Host "WARNING: could not restrict $logFile to administrators: $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
     }
 }
 

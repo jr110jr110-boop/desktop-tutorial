@@ -108,7 +108,7 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<FiscalYearDto>> EnsureYearAsync(EnsureYearDto dto, CancellationToken ct)
         {
-            if (!_user.IsInRole(FinanceRoles.SystemJobs)) return Bad<FiscalYearDto>(NotAllowed);
+            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<FiscalYearDto>(NotAllowed + " (مدیر مالی)");   // R1t D25: PMO no longer opens fiscal years
             if (dto == null || dto.Date == default) return Bad<FiscalYearDto>("تاریخ را وارد کنید.");
             await FinanceSeed.EnsureAsync(_uow, ct);
             int entityId = await EntityScope.ResolveAsync(_uow, dto.LegalEntityId, Me, ct);
@@ -122,11 +122,15 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<FiscalYearDto>> PeriodActionAsync(PeriodActionDto dto, CancellationToken ct)
         {
-            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<FiscalYearDto>(NotAllowed + " (مدیر مالی)");
             if (dto == null || Clean(dto.Action) == null) return Bad<FiscalYearDto>("اطلاعات ارسال‌شده کامل نیست.");
+            string action = dto.Action.Trim().ToLowerInvariant();
+            // R1t D10: locking is the accountants' step, reopening is the finance manager's, and the final close is a second person's (the CEO unless the company chose its finance manager)
+            string closeRole = action == "close" ? await CloseByRoleAsync(ct) : null;
+            string role = action == "lock" ? FinanceRoles.Accountants : action == "close" ? closeRole : FinanceRoles.Managers;
+            if (action != "lock" && action != "reopen" && action != "close") return Bad<FiscalYearDto>("عمل نامعتبر است.");
+            if (!_user.IsInRole(role)) return Bad<FiscalYearDto>(NotAllowed + (action == "lock" ? "" : closeRole == FinanceRoles.Ceo ? " (مدیرعامل)" : " (مدیر مالی)"));
             FnPeriod p = await _uow.Set<FnPeriod>().Include(x => x.FiscalYear).FirstOrDefaultAsync(x => x.Id == dto.Id, ct);
             if (p == null) return ResponseDtoHelper.NotFound<FiscalYearDto>("دوره پیدا نشد.");
-            string action = dto.Action.Trim().ToLowerInvariant();
             switch (action)
             {
                 case "lock":
@@ -146,14 +150,18 @@ namespace Services.NasbNiro.Finance
                 case "close":
                 {
                     if (p.Status == FnPeriodStatus.Closed) return Bad<FiscalYearDto>("دوره قبلاً بسته شده است.");
-                    int open = await _uow.Set<FnVoucher>().CountAsync(v => v.Date >= p.StartDate && v.Date <= p.EndDate && v.Status != FnVoucherStatus.Final, ct);
-                    if (open > 0) return Bad<FiscalYearDto>($"{open} سند قطعی‌نشده در این دوره هست؛ ابتدا همه اسناد قطعی شوند.");
+                    if (p.Status != FnPeriodStatus.Locked) return Bad<FiscalYearDto>("بستن نهایی مرحله دوم است: ابتدا دوره قفل شود و سپس شخص دیگری آن را ببندد.");
+                    int locker = await LastLockerAsync(p.Id, ct);
+                    if (locker == 0) return Bad<FiscalYearDto>("قفل‌کننده این دوره در تاریخچه ثبت نشده است؛ دوره را دوباره باز و قفل کنید تا شخص دیگری بتواند آن را ببندد.");   // L5
+                    if (locker == Me) return Bad<FiscalYearDto>("بستن نهایی دوره باید توسط شخصی غیر از کسی که آن را قفل کرده انجام شود.");
+                    string closeGate = await LockGateAsync(p, ct);
+                    if (closeGate != null) return Bad<FiscalYearDto>(closeGate);
+                    List<string> blockers = await CloseBlockersAsync(p.StartDate, p.EndDate, p.FiscalYear.LegalEntityId, p.FiscalYearId, ct);
+                    if (blockers.Count > 0) return Bad<FiscalYearDto>(BlockersMessage("دوره", blockers));
                     p.Status = FnPeriodStatus.Closed;
                     p.LockedAt ??= DateTimeOffset.Now;
                     break;
                 }
-                default:
-                    return Bad<FiscalYearDto>("عمل نامعتبر است.");
             }
             _uow.Set<FnPeriodLog>().Add(new FnPeriodLog { PeriodId = p.Id, Action = action, Reason = Clean(dto.Reason), UserId = Me, At = DateTimeOffset.Now });
             try { await _uow.SaveChangesAsync(ct); }
@@ -174,12 +182,9 @@ namespace Services.NasbNiro.Finance
             int nonFinal = await _uow.Set<FnVoucher>().CountAsync(v => v.FiscalYearId == year.Id && v.Status != FnVoucherStatus.Final, ct);
             if (nonFinal > 0) return Bad<FiscalYearDto>($"{nonFinal} سند پیش‌نویس یا کنترل‌شده در این سال هست؛ ابتدا قطعی یا حذف شوند.");
 
-            var recon = await _reports.ReconcileAsync(7, ct);
-            if (recon.Success && !recon.Data.Clean)
-            {
-                if (!dto.OverrideReconciliation) return Bad<FiscalYearDto>("تطبیق حساب‌ها با زیرحساب‌ها مغایرت دارد؛ مغایرت را رفع کنید یا با ذکر علت تایید ویژه بدهید.");
-                if (Clean(dto.Reason) == null) return Bad<FiscalYearDto>("برای عبور از مغایرت علت را بنویسید.");
-            }
+            // R1t D10: nothing unfinished may remain in the year (events not posted, treasury documents on the way, open payroll runs)
+            List<string> yearBlockers = await CloseBlockersAsync(year.StartDate, year.EndDate, year.LegalEntityId, year.Id, ct);
+            if (yearBlockers.Count > 0) return Bad<FiscalYearDto>(BlockersMessage("سال مالی", yearBlockers));
 
             Dictionary<string, FnAccount> byCode = await _uow.Set<FnAccount>().ToDictionaryAsync(a => a.Code, ct);
             if (!byCode.TryGetValue("50901", out FnAccount summary) || !byCode.TryGetValue("50301", out FnAccount retained))
@@ -191,6 +196,50 @@ namespace Services.NasbNiro.Finance
             // years close in order: the previous year of the same entity must be closed first (so a later year is never closed before an earlier one)
             FnFiscalYear previous = await _uow.Set<FnFiscalYear>().Where(y => y.LegalEntityId == year.LegalEntityId && y.EndDate < year.StartDate).OrderByDescending(y => y.EndDate).FirstOrDefaultAsync(ct);
             if (previous != null && previous.Status != FnYearStatus.Closed) return Bad<FiscalYearDto>($"ابتدا سال مالی قبل ({previous.Year}) را ببندید؛ سال‌ها به ترتیب بسته می‌شوند.");
+            // R1t D10 (D24): an opening voucher of the next year that already exists (imported or closed from another run) would be doubled by this close
+            if (next.OpeningVoucherId.HasValue || await _uow.Set<FnVoucher>().AnyAsync(v => v.FiscalYearId == next.Id && v.Type == FnVoucherType.Opening, ct))
+                return Bad<FiscalYearDto>($"برای سال مالی {next.Year} قبلاً سند افتتاحیه ثبت شده است؛ بستن این سال یک سند افتتاحیه دوم می‌سازد و مانده‌ها دو بار می‌آید. سند افتتاحیه موجود باید کنار گذاشته شود یا بستن سال لازم نیست.");
+
+            // H1 (review R1t): the year closes only after every period was closed through the two-step close (locked by one person, closed by another with the right role, checklist passed) - a period that is only locked does not count
+            List<int> notClosed = await PeriodsNotClosedProperlyAsync(year, ct);
+            if (notClosed.Count > 0) return Bad<FiscalYearDto>("بستن سال مالی ممکن نیست؛ دوره‌های شماره " + string.Join("، ", notClosed) + " هنوز با بستن دومرحله‌ای (قفل توسط یک نفر و بستن توسط شخص دیگر) بسته نشده‌اند.");
+
+            // the sub-ledger reconciliation: a call that fails blocks the close (it used to be skipped); a difference is passed only on the request of one finance manager and the approval of another
+            var recon = await _reports.ReconcileAsync(7, ct);
+            if (!recon.Success) return Bad<FiscalYearDto>("تطبیق حساب‌ها با زیرحساب‌ها اجرا نشد (" + recon.Message + ")؛ بستن سال بدون آن ممکن نیست.");
+            FnCloseOverride reconOverride = null;
+            if (!recon.Data.Clean)
+            {
+                if (!dto.OverrideReconciliation) return Bad<FiscalYearDto>("تطبیق حساب‌ها با زیرحساب‌ها مغایرت دارد؛ مغایرت را رفع کنید یا با ذکر علت تایید ویژه بدهید.");
+                if (Clean(dto.Reason) == null) return Bad<FiscalYearDto>("برای عبور از مغایرت علت را بنویسید.");
+                string unclean = JoinOverrideItems(recon.Data.Rows.Where(r => !r.Ok).Select(r => r.Key));
+                FnCloseOverride pending = await PendingOverrideAsync(FnCloseOverrideKind.YearReconciliation, null, year.Id, ct);
+                if (pending == null || pending.RequestedByUserId == Me)
+                {
+                    bool changed = pending == null || pending.Reason != Clean(dto.Reason) || pending.Items != unclean;
+                    if (pending == null)
+                    {
+                        pending = new FnCloseOverride { Kind = FnCloseOverrideKind.YearReconciliation, FiscalYearId = year.Id, Status = FnCloseOverrideStatus.Pending, RequestedByUserId = Me, RequestedAt = DateTimeOffset.Now };
+                        _uow.Set<FnCloseOverride>().Add(pending);
+                    }
+                    pending.Reason = Clean(dto.Reason);
+                    pending.Items = unclean;
+                    if (changed) AuditNotes.Add(_uow, Me, nameof(FnFiscalYear), year.Id, "YearOverrideReq", $"درخواست عبور از مغایرت تطبیق حساب‌ها برای بستن سال {year.Title}: {Clean(dto.Reason)}", after: new { Items = unclean, Reason = Clean(dto.Reason) });
+                    await _uow.SaveChangesAsync(ct);
+                    // L4 (review R1t): the request is saved, so the answer is a success that says the year is NOT closed yet
+                    return ResponseDtoHelper.Ok((await LoadYearsAsync(year.Id, null, ct)).First(), "درخواست عبور از مغایرت ثبت شد؛ سال هنوز بسته نشده است و فقط وقتی بسته می‌شود که مدیر مالی دیگری همین درخواست را تایید کند.");
+                }
+                // M3 (review R1t): what the approver sees must be what was requested
+                if (!OverrideCovers(pending.Items, recon.Data.Rows.Where(r => !r.Ok).Select(r => r.Key)))
+                    return Bad<FiscalYearDto>("مغایرتی هست که در درخواست نبوده است؛ درخواست‌دهنده باید درخواست را با فهرست فعلی دوباره ثبت کند.");
+                pending.Status = FnCloseOverrideStatus.Approved;
+                pending.ApprovedByUserId = Me;
+                pending.ApprovedAt = DateTimeOffset.Now;
+                pending.Items = unclean;
+                AuditNotes.Add(_uow, Me, nameof(FnFiscalYear), year.Id, "YearOverrideOk", $"عبور از مغایرت تطبیق حساب‌ها برای بستن سال {year.Title} تایید شد (درخواست‌دهنده: کاربر {pending.RequestedByUserId}).",
+                    before: new { RequestedByUserId = pending.RequestedByUserId, Reason = pending.Reason }, after: new { ApprovedByUserId = Me, Items = unclean, ApproverNote = Clean(dto.Reason) });
+                reconOverride = pending;
+            }
 
             // balances of the year per account and detail. R1p C1: the part that comes from lines flagged as confidential labour is kept apart (hiddenBalances): the closing lines of an account carry the visible balance only,
             // and the confidential part is written as lines of its own, flagged the same way, so that a reader who does not see them neither sees nor can subtract them (they cancel inside each voucher)
@@ -296,7 +345,7 @@ namespace Services.NasbNiro.Finance
             {
                 if (p.Status != FnPeriodStatus.Closed) { p.Status = FnPeriodStatus.Closed; p.LockedAt ??= DateTimeOffset.Now; }
             }
-            _uow.Set<FnAuditLog>().Add(new FnAuditLog { EntityType = "FnFiscalYear", EntityId = year.Id, Action = "YearClose", Summary = $"بستن سال مالی {year.Title}: {created.Count} سند، شماره سند افتتاحیه سال بعد {(created.FirstOrDefault(x => x.Type == FnVoucherType.Opening)?.Number.ToString() ?? "-")}", UserId = Me, At = DateTimeOffset.Now });
+            _uow.Set<FnAuditLog>().Add(new FnAuditLog { EntityType = "FnFiscalYear", EntityId = year.Id, Action = "YearClose", Summary = $"بستن سال مالی {year.Title}: {created.Count} سند، شماره سند افتتاحیه سال بعد {(created.FirstOrDefault(x => x.Type == FnVoucherType.Opening)?.Number.ToString() ?? "-")}" + (reconOverride == null ? "" : $"؛ با عبور از مغایرت (درخواست: کاربر {reconOverride.RequestedByUserId}، تایید: کاربر {reconOverride.ApprovedByUserId})"), UserId = Me, At = DateTimeOffset.Now });
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException ex) { return Bad<FiscalYearDto>("بستن سال انجام نشد: " + (ex.InnerException?.Message ?? ex.Message)); }
             return ResponseDtoHelper.Ok((await LoadYearsAsync(year.Id, null, ct)).First());
@@ -479,7 +528,7 @@ namespace Services.NasbNiro.Finance
             bool seePersonal = PersonalLedger.Sees(_user);
             if (withLines) q = q.Include(v => v.Lines).ThenInclude(l => l.Account).Include(v => v.Lines).ThenInclude(l => l.Detail1).Include(v => v.Lines).ThenInclude(l => l.Detail2);
             List<FnVoucher> rows = await q.Include(v => v.FiscalYear).AsSplitQuery().ToListAsync(ct);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(v => new int?[] { v.CreatedByUserId, v.CheckedByUserId, v.FinalizedByUserId }), ct);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(v => new int?[] { v.CreatedByUserId, v.CheckedByUserId, v.FinalizedByUserId, v.TriggeredByUserId }), ct);
             List<int> ids = rows.Select(v => v.Id).ToList();
             Dictionary<int, int> reversedBy = await _uow.Set<FnVoucher>().Where(v => v.ReversesVoucherId != null && ids.Contains(v.ReversesVoucherId.Value))
                 .ToDictionaryAsync(v => v.ReversesVoucherId.Value, v => v.Id, ct);
@@ -497,9 +546,9 @@ namespace Services.NasbNiro.Finance
                 AccountingEventId = v.AccountingEventId, ReversesVoucherId = v.ReversesVoucherId, ReverseNextPeriod = v.ReverseNextPeriod, AutoReversalVoucherId = v.AutoReversalVoucherId, ReversedByVoucherId = reversedBy.TryGetValue(v.Id, out int rb) ? rb : (int?)null,
                 LatePosting = v.LatePosting, TotalAmount = v.TotalAmount - (hiddenDebit.TryGetValue(v.Id, out decimal hd) ? hd : 0), LabourHidden = hiddenDebit.ContainsKey(v.Id), CreatedByUserId = v.CreatedByUserId,
                 LegalEntityId = v.FiscalYear == null ? 0 : v.FiscalYear.LegalEntityId, IsImported = v.IsImported,
-                CeoApprovedByUserId = v.CeoApprovedByUserId, CeoApprovedAt = v.CeoApprovedAt,
+                CeoApprovedByUserId = v.CeoApprovedByUserId, CeoApprovedAt = v.CeoApprovedAt, LastEditedAt = v.LastEditedAt,
                 AttachmentCount = attachmentCounts.TryGetValue(v.Id, out int ac) ? ac : 0,
-                CreatorName = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId), CreatedAt = v.CreatedAt,
+                CreatorName = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId), TriggeredByUserId = v.TriggeredByUserId, TriggeredByName = names.Name(v.TriggeredByUserId), CreatedAt = v.CreatedAt,
                 CheckedByName = v.CheckedByUserId == 0 ? "سیستم" : names.Name(v.CheckedByUserId), CheckedAt = v.CheckedAt,
                 FinalizedByName = names.Name(v.FinalizedByUserId), FinalizedAt = v.FinalizedAt,
                 Lines = withLines ? LinesOf(v, seePersonal, seesProtected) : new List<VoucherLineDto>(),
@@ -677,6 +726,7 @@ namespace Services.NasbNiro.Finance
                 }
 
             FnVoucher v;
+            string signatureBefore = null;
             if (dto.Id.HasValue)
             {
                 v = await _uow.Set<FnVoucher>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct);
@@ -689,12 +739,15 @@ namespace Services.NasbNiro.Finance
                 {
                     // a reversal mirrors its original: only the date may move (inside an open period of the same year); the lines never change
                     if (date.Year.Id != v.FiscalYearId) return Bad<VoucherDto>("تاریخ سند برگشتی باید در همان سال مالی بماند.");
+                    bool moved = v.Date.Date != dto.Date.Date;
                     v.Date = dto.Date.Date;
                     v.EditorUserIds = WithEditor(v.EditorUserIds, Me);
                     v.Status = FnVoucherStatus.Draft; v.CheckedByUserId = null; v.CheckedAt = null;
+                    if (moved) MarkVoucherEdited(v);   // R1t D9: a new date voids the CEO approval
                     await _uow.SaveChangesAsync(ct);
                     return await GetVoucherAsync(v.Id, ct);
                 }
+                signatureBefore = VoucherSignature(v.Date, v.Description, v.ReverseNextPeriod, v.Lines);
                 _uow.Set<FnVoucherLine>().RemoveRange(v.Lines);
                 v.Lines = new List<FnVoucherLine>();
                 v.EditorUserIds = WithEditor(v.EditorUserIds, Me);
@@ -721,6 +774,8 @@ namespace Services.NasbNiro.Finance
             v.ReverseNextPeriod = dto.ReverseNextPeriod;
             foreach (FnVoucherLine l in built.Lines) v.Lines.Add(l);
             v.TotalAmount = built.Lines.Sum(l => l.Debit);
+            // R1t D9: any change of a header field or of a line after the CEO approved voids the approval (the new content has not been seen by the CEO)
+            if (signatureBefore != null && signatureBefore != VoucherSignature(v.Date, v.Description, v.ReverseNextPeriod, v.Lines)) MarkVoucherEdited(v);
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<VoucherDto>("همزمان توسط کاربر دیگری تغییر کرد؛ دوباره تلاش کنید."); }
             return await GetVoucherAsync(v.Id, ct);
@@ -732,6 +787,8 @@ namespace Services.NasbNiro.Finance
             FnVoucher v = await _uow.Set<FnVoucher>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == id, ct);
             if (v == null) return ResponseDtoHelper.NotFound<bool>("سند پیدا نشد.");
             if (v.Status != FnVoucherStatus.Draft || v.Type != FnVoucherType.Normal) return Bad<bool>("فقط پیش‌نویس دستی حذف می‌شود.");
+            // R1t D26: the creator deletes only his own draft; another accountant's draft is deleted by the finance manager
+            if (v.CreatedByUserId != Me && !IsManager) return Bad<bool>("پیش‌نویس را فقط تهیه‌کننده آن یا مدیر مالی حذف می‌کند.");
             _uow.Set<FnVoucher>().Remove(v);
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(true);
@@ -750,7 +807,7 @@ namespace Services.NasbNiro.Finance
             {
                 case "check":
                     if (v.Status != FnVoucherStatus.Draft) return Bad<VoucherDto>("فقط پیش‌نویس کنترل می‌شود.");
-                    if (v.Type != FnVoucherType.Auto && Touched(v.CreatedByUserId, v.EditorUserIds, Me)) return Bad<VoucherDto>(SameUser);
+                    if (v.Type != FnVoucherType.Auto && VoucherTouched(v, Me)) return Bad<VoucherDto>(SameUser);
                     string checkGate = (await VoucherGateAsync(new List<int> { v.Id }, false, ct)).GetValueOrDefault(v.Id);
                     if (checkGate != null) return Bad<VoucherDto>(checkGate);
                     v.Status = FnVoucherStatus.Checked;
@@ -760,6 +817,8 @@ namespace Services.NasbNiro.Finance
                 case "uncheck":
                     if (v.Status != FnVoucherStatus.Checked) return Bad<VoucherDto>("فقط سند کنترل‌شده به پیش‌نویس برمی‌گردد.");
                     if (v.Type == FnVoucherType.Auto) return Bad<VoucherDto>("سند خودکار به پیش‌نویس برنمی‌گردد.");
+                    // R1t D26: only the person who checked it, or the finance manager, takes a check back
+                    if (v.CheckedByUserId != Me && !IsManager) return Bad<VoucherDto>("فقط کنترل‌کننده سند یا مدیر مالی می‌تواند کنترل را برگرداند.");
                     v.Status = FnVoucherStatus.Draft;
                     v.CheckedByUserId = null;
                     v.CheckedAt = null;
@@ -818,7 +877,7 @@ namespace Services.NasbNiro.Finance
                 FnVoucher v = await _uow.Set<FnVoucher>().FirstOrDefaultAsync(x => x.Id == id, ct);
                 if (v == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
                 if (v.Status != FnVoucherStatus.Checked) return Bad<VoucherDto>("فقط سند کنترل‌شده قطعی می‌شود.");
-                if (Touched(v.CreatedByUserId, v.EditorUserIds, Me)) return Bad<VoucherDto>(SameUser);
+                if (VoucherTouched(v, Me)) return Bad<VoucherDto>(SameUser);
                 string finGate = (await VoucherGateAsync(new List<int> { v.Id }, true, ct)).GetValueOrDefault(v.Id);
                 if (finGate != null) return Bad<VoucherDto>(finGate);
                 var period = await _uow.Set<FnPeriod>().Include(p => p.FiscalYear).FirstOrDefaultAsync(p => p.FiscalYearId == v.FiscalYearId && p.StartDate <= v.Date && p.EndDate >= v.Date, ct);
@@ -872,7 +931,7 @@ namespace Services.NasbNiro.Finance
                     {
                         FnPeriod p = year.Periods.FirstOrDefault(x => x.StartDate <= v.Date && x.EndDate >= v.Date);
                         if (year.Status != FnYearStatus.Open || p == null || p.Status == FnPeriodStatus.Closed) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: دوره بسته است."); continue; }
-                        if (Touched(v.CreatedByUserId, v.EditorUserIds, Me)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: تهیه‌کننده نمی‌تواند قطعی کند."); continue; }
+                        if (VoucherTouched(v, Me)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: تهیه‌کننده یا آغازکننده سند نمی‌تواند قطعی کند."); continue; }
                         if (gates.TryGetValue(v.Id, out string gateMessage)) { result.Skipped.Add($"سند موقت {v.TemporaryNumber}: {gateMessage}"); continue; }
                         v.Number = ++max;
                         v.Status = FnVoucherStatus.Final;

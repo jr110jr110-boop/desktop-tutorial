@@ -312,5 +312,17 @@ namespace Services.NasbNiro.Finance
         public FnPeriod FirstOpenAfter(DateTime date) => OpenPeriods().FirstOrDefault(p => p.StartDate > date.Date);
 
         public FnPeriod FirstOpen() => OpenPeriods().FirstOrDefault();
+
+        /// <summary>
+        /// R1t D11: where a document dated in a closed year goes: the first open period of the year that contains today. When that year has no open period
+        /// (or does not exist yet) the first open period that starts after today. Never an earlier year.
+        /// </summary>
+        public FnPeriod FirstOpenOfCurrentYear(DateTime today)
+        {
+            DateTime d = today.Date;
+            FnFiscalYear current = Years.FirstOrDefault(y => y.Status == FnYearStatus.Open && y.StartDate <= d && d <= y.EndDate);
+            FnPeriod inYear = current?.Periods.Where(p => p.Status == FnPeriodStatus.Open).OrderBy(p => p.StartDate).FirstOrDefault();
+            return inYear ?? OpenPeriods().FirstOrDefault(p => p.StartDate > d);
+        }
     }
 }

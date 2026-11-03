@@ -71,12 +71,14 @@ namespace Services.NasbNiro.Finance
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly ICostingService _costing;
+        private readonly ICashLegService _legs;
 
-        public TreasuryService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing)
+        public TreasuryService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, ICashLegService legs)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
+            _legs = legs ?? throw new ArgumentNullException(nameof(legs));
         }
 
         private int Me => _user.UserId;
@@ -259,7 +261,7 @@ namespace Services.NasbNiro.Finance
         private async Task<List<PaymentDto>> LoadPaymentsAsync(IQueryable<FnPayment> query, CancellationToken ct)
         {
             List<FnPayment> rows = await query.AsNoTracking().Include(p => p.Lines).Include(p => p.Requests).AsSplitQuery().ToListAsync(ct);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(p => new int?[] { p.CreatedByUserId, p.PostedByUserId }), ct);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(p => new int?[] { p.CreatedByUserId, p.PostedByUserId, p.ApprovedByUserId }), ct);
             List<int> providerIds = rows.Where(p => p.ProviderId.HasValue).Select(p => p.ProviderId.Value).Distinct().ToList();
             Dictionary<int, string> providers = await _uow.Set<Provider>().AsNoTracking().Where(p => providerIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name, ct);
             List<int> requestIds = rows.SelectMany(p => p.Requests).Select(k => k.PaymentRequestId).Distinct().ToList();
@@ -272,6 +274,7 @@ namespace Services.NasbNiro.Finance
                 ProviderName = p.ProviderId.HasValue && providers.TryGetValue(p.ProviderId.Value, out string pn) ? pn : null, PettyCashId = p.PettyCashId, PayrollRunId = p.PayrollRunId, BonusRunId = p.BonusRunId, TerminationId = p.TerminationId, EmployeeLoanId = p.EmployeeLoanId,
                 PayeeName = p.PayeeName, Description = p.Description, GrossAmount = p.GrossAmount, DeductionAmount = p.DeductionAmount, NetAmount = p.NetAmount,
                 CreatorName = names.Name(p.CreatedByUserId), PostedByName = names.Name(p.PostedByUserId), PostedAt = p.PostedAt, IbanApprovedByUserId = p.IbanApprovedByUserId,
+                SourceType = p.SourceType, SourceId = p.SourceId, SourceAction = p.SourceAction, ApprovedByName = names.Name(p.ApprovedByUserId),
                 Lines = p.Lines.OrderBy(l => l.RowNumber).Select(l => new PaymentLineDto
                 {
                     RowNumber = l.RowNumber, Instrument = l.Instrument, Amount = l.Amount, BankAccountId = l.BankAccountId, CashBoxId = l.CashBoxId, Reference = l.Reference,
@@ -312,8 +315,11 @@ namespace Services.NasbNiro.Finance
         {
             if (!_user.IsInRole(FinanceRoles.TreasuryUsers)) return Bad<PaymentDto>(NotAllowed + " (خزانه‌داری)");
             if (dto == null) return Bad<PaymentDto>("اطلاعات ارسال‌شده کامل نیست.");
+            if (dto.Purpose == FnPaymentPurpose.FacilityLeg) return Bad<PaymentDto>(FacilityOnly);
             await FinanceSeed.EnsureAsync(_uow, ct);
             DateTime date = dto.Date == default ? DateTime.Today : dto.Date.Date;
+            string closedDate = await ClosedPeriodGuard.MessageAsync(_uow, date, ct);   // M7
+            if (closedDate != null) return Bad<PaymentDto>(closedDate);
             List<PaymentLineDto> input = (dto.Lines ?? new List<PaymentLineDto>()).Where(l => l != null).ToList();
             if (input.Count == 0) return Bad<PaymentDto>("حداقل یک ردیف پرداخت (نقد، حواله، چک یا کارت) لازم است.");
 
@@ -323,6 +329,7 @@ namespace Services.NasbNiro.Finance
                 payment = await _uow.Set<FnPayment>().Include(p => p.Lines).Include(p => p.Requests).FirstOrDefaultAsync(p => p.Id == dto.Id.Value, ct);
                 if (payment == null) return ResponseDtoHelper.NotFound<PaymentDto>("سند پرداخت پیدا نشد.");
                 if (payment.Status != FnDocStatus.Draft) return Bad<PaymentDto>("فقط پیش‌نویس ویرایش می‌شود.");
+                if (payment.SourceType != null) return Bad<PaymentDto>(FacilityOnly);
                 payment.EditorUserIds = WithEditor(payment.EditorUserIds, Me);
             }
 
@@ -514,6 +521,11 @@ namespace Services.NasbNiro.Finance
             FnPayment p = await _uow.Set<FnPayment>().Include(x => x.Lines).Include(x => x.Requests).FirstOrDefaultAsync(x => x.Id == dto.Id, ct);
             if (p == null) return ResponseDtoHelper.NotFound<PaymentDto>("سند پرداخت پیدا نشد.");
             string action = dto.Action.Trim().ToLowerInvariant();
+            if (p.SourceType != null)
+            {
+                string facilityRefusal = await FacilityActionRefusalAsync(action, p.CreatedByUserId, p.EditorUserIds, p.ApprovedByUserId, p.SourceType, p.SourceId, ct);
+                if (facilityRefusal != null) return Bad<PaymentDto>(facilityRefusal);
+            }
             switch (action)
             {
                 case "approve":
@@ -541,6 +553,7 @@ namespace Services.NasbNiro.Finance
                 case "cancel":
                     if (!_user.IsInRole(FinanceRoles.TreasuryUsers)) return Bad<PaymentDto>(NotAllowed + " (خزانه‌داری)");
                     if (p.Status != FnDocStatus.Draft && p.Status != FnDocStatus.Approved) return Bad<PaymentDto>("سند ثبت‌شده باطل نمی‌شود؛ سند اصلاحی صادر کنید.");
+                    if (p.SourceType != null) await _legs.ReleaseAsync(LegOf(p), ct);   // the loan / instalment goes back to the state before the leg was drafted
                     p.Status = FnDocStatus.Cancelled;
                     break;
                 default:
@@ -641,6 +654,7 @@ namespace Services.NasbNiro.Finance
 
         private async Task<string> PostPaymentAsync(FnPayment p, DocActionDto dto, CancellationToken ct)
         {
+            if (p.SourceType != null) return await PostFacilityPaymentAsync(p, dto, ct);   // R1t D7: a cash leg of a loan, letter of credit or guarantee
             if (p.Status != FnDocStatus.Approved) return "فقط سند تاییدشده توسط مدیر مالی ثبت نهایی می‌شود.";
             if (await HasIbanMismatchAsync(p, ct) && !p.IbanApprovedByUserId.HasValue) return "شبای گیرنده با شبای ثبت‌شده فرق دارد و تایید مدیر مالی ندارد.";
             DateTimeOffset now = DateTimeOffset.Now;

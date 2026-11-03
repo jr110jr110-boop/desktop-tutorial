@@ -345,7 +345,7 @@ namespace Services.NasbNiro.Finance
 
         // ------------------------------------------------------------------------------------------ letters of credit
 
-        private async Task<LetterOfCreditDto> LcDtoAsync(FnLetterOfCredit l, CancellationToken ct)
+        private async Task<LetterOfCreditDto> LcDtoAsync(FnLetterOfCredit l, CancellationToken ct, List<FnCashLegRefDto> openLegs = null)
         {
             List<FnLcPosting> postings = await _uow.Set<FnLcPosting>().AsNoTracking().Where(p => p.LcId == l.Id).OrderBy(p => p.Id).ToListAsync(ct);
             return new LetterOfCreditDto
@@ -354,6 +354,7 @@ namespace Services.NasbNiro.Finance
                 OpenDate = l.OpenDate, ExpiryDate = l.ExpiryDate, MarginPercent = l.MarginPercent, MarginPaid = l.MarginPaid, FeesPaid = l.FeesPaid, Status = l.Status,
                 PurchaseOrderId = l.PurchaseOrderId, ForeignInvoiceRef = l.ForeignInvoiceRef, SettlementRate = l.SettlementRate, SettledBase = l.SettledBase, PaidDate = l.PaidDate, Note = l.Note,
                 Postings = postings.Select(p => new LcPostingDto { Kind = p.Kind, Date = p.Date, Amount = p.Amount, VoucherId = p.VoucherId, Note = p.Note }).ToList(),
+                OpenCashLegs = openLegs != null ? openLegs.Where(x => x.SourceId == l.Id).ToList() : await OpenLegsAsync(CashLegSources.LetterOfCredit, new[] { l.Id }, ct),
             };
         }
 
@@ -362,7 +363,8 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<List<LetterOfCreditDto>>(NotAllowed);
             List<FnLetterOfCredit> list = await _uow.Set<FnLetterOfCredit>().AsNoTracking().OrderByDescending(l => l.Id).Take(200).ToListAsync(ct);
             var dtos = new List<LetterOfCreditDto>();
-            foreach (FnLetterOfCredit l in list) dtos.Add(await LcDtoAsync(l, ct));
+            var legs = await OpenLegsAsync(CashLegSources.LetterOfCredit, list.Select(x => x.Id).ToList(), ct);   // L3: one query for the whole list
+            foreach (FnLetterOfCredit l in list) dtos.Add(await LcDtoAsync(l, ct, legs));
             return ResponseDtoHelper.Ok(dtos);
         }
 
@@ -421,6 +423,12 @@ namespace Services.NasbNiro.Finance
             int entityId = bank.Bank.LegalEntityId <= 0 ? FinanceSeed.MainEntityId : bank.Bank.LegalEntityId;
             FnAccount deposit = await AccountByCodeAsync("10402", ct);
             string text;
+            // R1t D7: one open treasury document per letter of credit; the actions that move money or close it wait until treasury has settled or cancelled that document
+            if (action != "documents")
+            {
+                string openLeg = await OpenLegMessageAsync(CashLegSources.LetterOfCredit, l.Id, ct);
+                if (openLeg != null) return Bad<LetterOfCreditDto>(openLeg);
+            }
 
             switch (action)
             {
@@ -433,16 +441,13 @@ namespace Services.NasbNiro.Finance
                     FnAccount debitAccount = action == "margin" ? deposit : await RoleAccountAsync(AccountRoles.BankFees, "80201", ct);
                     if (debitAccount == null) return Bad<LetterOfCreditDto>("حساب سپرده یا کارمزد بانکی در کدینگ نیست.");
                     text = (action == "margin" ? "سپرده اعتبار اسنادی " : "کارمزد اعتبار اسنادی ") + l.Number;
-                    var lines = new List<AutoLine>
+                    // R1t D7: the payment goes through treasury. A payment with the bank account is drafted; the margin or the fee is recorded on the letter of credit when treasury settles it.
+                    string legError = await AddCashLegAsync(new LegSpec
                     {
-                        new AutoLine { Account = debitAccount, Debit = amount, Description = text },
-                        new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = amount, Description = text },
-                    };
-                    var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
-                    if (v.Error != null) return Bad<LetterOfCreditDto>(v.Error);
-                    await _uow.SaveChangesAsync(ct);
-                    if (action == "margin") l.MarginPaid += amount; else l.FeesPaid += amount;
-                    _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = action == "margin" ? FnLcPostingKind.Margin : FnLcPostingKind.Fee, Date = date, Amount = amount, VoucherId = v.Voucher.Id, Note = Clean(dto.Note), CreatedByUserId = Me });
+                        SourceType = CashLegSources.LetterOfCredit, SourceId = l.Id, Action = action, Inflow = false, BankAccountId = bank.Bank.Id, Amount = amount, Date = date, Party = bank.Bank.BankName,
+                        Description = text, Data = new LegData { Note = Clean(dto.Note) },
+                    }, ct);
+                    if (legError != null) return Bad<LetterOfCreditDto>(legError);
                     break;
                 }
                 case "documents":
@@ -459,40 +464,42 @@ namespace Services.NasbNiro.Finance
                     if (rialLc && dto.Rate.HasValue && dto.Rate.Value != 1m) return Bad<LetterOfCreditDto>("اعتبار اسنادی ریالی با نرخ ۱ تسویه می‌شود؛ نرخ دیگری پذیرفته نمی‌شود.");
                     if (rialLc) dto.Rate = 1m;
                     if (!dto.Rate.HasValue || dto.Rate.Value <= 0) return Bad<LetterOfCreditDto>("نرخ تسویه را وارد کنید.");
-                    FnAccount payable = await RoleAccountAsync(AccountRoles.AccountsPayable, "30101", ct);
-                    if (payable == null || deposit == null) return Bad<LetterOfCreditDto>("حساب پرداختنی یا سپرده در کدینگ نیست.");
-                    decimal settled = R(l.Amount * dto.Rate.Value);
-                    decimal release = Math.Min(l.MarginPaid, settled), cash = settled - release;
-                    FnDetailAccount supplier = await details.GetAsync(FnDetailType.Supplier, l.ProviderId, ct);
+                    LcPayPlan plan = await PlanLcPayAsync(l, dto.Rate.Value, ct);
+                    if (plan.Error != null) return Bad<LetterOfCreditDto>(plan.Error);
                     text = "تسویه اعتبار اسنادی " + l.Number;
-                    // the payable leaves the books at its carrying rate (the currency-tagged lines of the supplier in this currency) and the difference to the payment rate is the realised gain or loss
-                    decimal carryBase = settled;
-                    if (supplier.Id > 0)
+                    if (plan.Cash > 0)
                     {
-                        var tagged = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(x => x.AccountId == payable.Id && x.Detail1Id == supplier.Id && x.CurrencyCode == l.CurrencyCode && x.CurrencyAmount != null && x.Voucher.Status != FnVoucherStatus.Draft)
-                            .GroupBy(x => 1).Select(g => new { Base = g.Sum(x => x.Credit - x.Debit), Cur = g.Sum(x => x.Credit > 0 ? x.CurrencyAmount.Value : -x.CurrencyAmount.Value) }).FirstOrDefaultAsync(ct);
-                        if (tagged != null && tagged.Cur >= l.Amount && tagged.Cur > 0) carryBase = R(tagged.Base * l.Amount / tagged.Cur);
+                        // R1t D7: the cash part of the settlement goes through treasury. The letter of credit is settled (status Paid, margin released) when treasury settles the payment.
+                        string supplierName = await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().Where(p => p.Id == l.ProviderId).Select(p => p.Name).FirstOrDefaultAsync(ct);
+                        string legError = await AddCashLegAsync(new LegSpec
+                        {
+                            SourceType = CashLegSources.LetterOfCredit, SourceId = l.Id, Action = "pay", Inflow = false, BankAccountId = bank.Bank.Id, Amount = plan.Cash, Date = date, Party = supplierName,
+                            Description = text, Data = new LegData { Rate = dto.Rate, Note = Clean(dto.Note) },
+                        }, ct);
+                        if (legError != null) return Bad<LetterOfCreditDto>(legError);
+                        break;
                     }
-                    decimal lcDiff = settled - carryBase;   // positive: paid more rials than carried = loss
+                    // the margin deposit covers the whole settlement: no money moves through the bank, so the ledger entry is made at once
+                    FnDetailAccount supplier = await details.GetAsync(FnDetailType.Supplier, l.ProviderId, ct);
+                    bool rialLine = FinanceFeatures.IsRial(l.CurrencyCode);
                     var lines = new List<AutoLine>
                     {
-                        new AutoLine { Account = payable, Detail1 = supplier, Debit = carryBase, Description = text, CurrencyCode = FinanceFeatures.IsRial(l.CurrencyCode) ? null : l.CurrencyCode, CurrencyAmount = FinanceFeatures.IsRial(l.CurrencyCode) ? (decimal?)null : l.Amount, Rate = FinanceFeatures.IsRial(l.CurrencyCode) ? (decimal?)null : (l.Amount == 0 ? dto.Rate : R(carryBase / l.Amount)) },
+                        new AutoLine { Account = plan.Payable, Detail1 = supplier, Debit = plan.CarryBase, Description = text, CurrencyCode = rialLine ? null : l.CurrencyCode, CurrencyAmount = rialLine ? (decimal?)null : l.Amount, Rate = rialLine ? (decimal?)null : (l.Amount == 0 ? dto.Rate : R(plan.CarryBase / l.Amount)) },
                     };
-                    if (lcDiff != 0)
+                    if (plan.Diff != 0)
                     {
                         FnAccount lcGain = await RoleAccountAsync(AccountRoles.FxGain, "60303", ct), lcLoss = await RoleAccountAsync(AccountRoles.FxLoss, "80302", ct);
                         if (lcGain == null || lcLoss == null) return Bad<LetterOfCreditDto>("حساب سود و زیان تسعیر ارز در کدینگ نیست.");
-                        if (lcDiff > 0) lines.Add(new AutoLine { Account = lcLoss, Debit = lcDiff, Description = "زیان تسعیر در تسویه " + text });
-                        else lines.Add(new AutoLine { Account = lcGain, Credit = -lcDiff, Description = "سود تسعیر در تسویه " + text });
+                        if (plan.Diff > 0) lines.Add(new AutoLine { Account = lcLoss, Debit = plan.Diff, Description = "زیان تسعیر در تسویه " + text });
+                        else lines.Add(new AutoLine { Account = lcGain, Credit = -plan.Diff, Description = "سود تسعیر در تسویه " + text });
                     }
-                    if (release > 0) lines.Add(new AutoLine { Account = deposit, Credit = release, Description = text });
-                    if (cash > 0) lines.Add(new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = cash, Description = text });
+                    if (plan.Release > 0) lines.Add(new AutoLine { Account = plan.Deposit, Credit = plan.Release, Description = text });
                     var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
                     if (v.Error != null) return Bad<LetterOfCreditDto>(v.Error);
                     await _uow.SaveChangesAsync(ct);
-                    if (release > 0) _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = FnLcPostingKind.MarginRelease, Date = date, Amount = release, VoucherId = v.Voucher.Id, CreatedByUserId = Me });
-                    _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = FnLcPostingKind.Settlement, Date = date, Amount = settled, VoucherId = v.Voucher.Id, Note = Clean(dto.Note), CreatedByUserId = Me });
-                    l.Status = FnLcStatus.Paid; l.SettlementRate = dto.Rate; l.SettledBase = settled; l.PaidDate = date; l.MarginPaid -= release;
+                    if (plan.Release > 0) _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = FnLcPostingKind.MarginRelease, Date = date, Amount = plan.Release, VoucherId = v.Voucher.Id, CreatedByUserId = Me });
+                    _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = FnLcPostingKind.Settlement, Date = date, Amount = plan.Settled, VoucherId = v.Voucher.Id, Note = Clean(dto.Note), CreatedByUserId = Me });
+                    l.Status = FnLcStatus.Paid; l.SettlementRate = dto.Rate; l.SettledBase = plan.Settled; l.PaidDate = date; l.MarginPaid -= plan.Release;
                     break;
                 }
                 case "expire":
@@ -503,19 +510,17 @@ namespace Services.NasbNiro.Finance
                 case "cancel":
                 {
                     if (!live) return Bad<LetterOfCreditDto>("اعتبار بسته شده است.");
-                    if (l.MarginPaid > 0 && deposit != null)
+                    if (l.MarginPaid > 0)
                     {
-                        text = "استرداد سپرده اعتبار اسنادی " + l.Number;
-                        var lines = new List<AutoLine>
+                        if (deposit == null) return Bad<LetterOfCreditDto>("حساب سپرده اعتبار اسنادی در کدینگ نیست.");
+                        // R1t D7: the refund of the margin comes in through treasury. A receipt is drafted; the letter of credit is cancelled when treasury settles it.
+                        string legError = await AddCashLegAsync(new LegSpec
                         {
-                            new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Debit = l.MarginPaid, Description = text },
-                            new AutoLine { Account = deposit, Credit = l.MarginPaid, Description = text },
-                        };
-                        var v = await AddAutoVoucherAsync(entityId, date, text, "LetterOfCredit", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
-                        if (v.Error != null) return Bad<LetterOfCreditDto>(v.Error);
-                        await _uow.SaveChangesAsync(ct);
-                        _uow.Set<FnLcPosting>().Add(new FnLcPosting { LcId = l.Id, Kind = FnLcPostingKind.MarginRelease, Date = date, Amount = l.MarginPaid, VoucherId = v.Voucher.Id, CreatedByUserId = Me });
-                        l.MarginPaid = 0;
+                            SourceType = CashLegSources.LetterOfCredit, SourceId = l.Id, Action = "refund", Inflow = true, BankAccountId = bank.Bank.Id, Amount = l.MarginPaid, Date = date, Party = bank.Bank.BankName,
+                            Description = "استرداد سپرده اعتبار اسنادی " + l.Number, Data = new LegData { Note = Clean(dto.Note) },
+                        }, ct);
+                        if (legError != null) return Bad<LetterOfCreditDto>(legError);
+                        break;
                     }
                     l.Status = FnLcStatus.Cancelled;
                     break;

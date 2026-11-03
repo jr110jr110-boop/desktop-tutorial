@@ -61,6 +61,8 @@ namespace Services.NasbNiro.Finance
             if (petty.HolderUserId != Me && !_user.IsInRole(FinanceRoles.TreasuryAndAccountants)) return Bad<SettlementDto>(NotAllowed);
             await FinanceSeed.EnsureAsync(_uow, ct);
             DateTime date = dto.Date == default ? DateTime.Today : dto.Date.Date;
+            string closedDate = await ClosedPeriodGuard.MessageAsync(_uow, date, ct);   // M7
+            if (closedDate != null) return Bad<SettlementDto>(closedDate);
             List<SettlementLineDto> input = (dto.Lines ?? new List<SettlementLineDto>()).Where(l => l != null).ToList();
             if (input.Count == 0) return Bad<SettlementDto>("تسویه حداقل یک ردیف هزینه لازم دارد.");
 
@@ -479,8 +481,8 @@ namespace Services.NasbNiro.Finance
 
         private async Task<List<ReconciliationDto>> LoadReconciliationsAsync(IQueryable<FnBankReconciliation> query, CancellationToken ct)
         {
-            List<FnBankReconciliation> rows = await query.AsNoTracking().Include(r => r.BankAccount).ToListAsync(ct);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.ApprovedByUserId }), ct);
+            List<FnBankReconciliation> rows = await query.AsNoTracking().Include(r => r.BankAccount).Include(r => r.Items).AsSplitQuery().ToListAsync(ct);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.ApprovedByUserId, r.ItemsByUserId }), ct);
             List<int> statementIds = rows.Select(r => r.StatementId).ToList();
             Dictionary<int, int> unmatched = (await _uow.Set<FnBankStatementLine>().AsNoTracking().Where(l => statementIds.Contains(l.StatementId) && l.MatchKind == FnStatementMatch.None)
                 .GroupBy(l => l.StatementId).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.Count);
@@ -490,6 +492,8 @@ namespace Services.NasbNiro.Finance
                 BankBalance = r.BankBalance, DepositsInTransit = r.DepositsInTransit, OutstandingPayments = r.OutstandingPayments, OutstandingCheques = r.OutstandingCheques,
                 Difference = r.Difference, Status = r.Status, PreparedByName = names.Name(r.PreparedByUserId), ApprovedByName = names.Name(r.ApprovedByUserId),
                 UnmatchedLines = unmatched.TryGetValue(r.StatementId, out int u) ? u : 0,
+                ExplainedAmount = r.ExplainedAmount, ItemsByName = names.Name(r.ItemsByUserId),
+                Items = (r.Items ?? new List<FnBankReconciliationItem>()).OrderBy(i => i.Id).Select(ToItemDto).ToList(),
             }).ToList();
         }
 
@@ -540,6 +544,12 @@ namespace Services.NasbNiro.Finance
                     rec.OutstandingCheques = f.OutstandingCheques; rec.Difference = f.Difference;
                     break;
                 }
+                case "items":
+                {
+                    string refusal = await SaveReconItemsAsync(rec, dto.Items, ct);
+                    if (refusal != null) return Bad<ReconciliationDto>(refusal);
+                    break;
+                }
                 case "approve":
                 {
                     if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<ReconciliationDto>(NotAllowed + " (مدیر مالی)");
@@ -547,10 +557,12 @@ namespace Services.NasbNiro.Finance
                     if (rec.PreparedByUserId == Me) return Bad<ReconciliationDto>("تهیه‌کننده مغایرت‌گیری نمی‌تواند آن را تایید کند.");
                     FnBankStatement st = await _uow.Set<FnBankStatement>().AsNoTracking().FirstAsync(s => s.Id == rec.StatementId, ct);
                     ReconFigures f = await ComputeAsync(st, rec.AsOfDate, ct);
-                    if (f.Difference != 0) return Bad<ReconciliationDto>($"مغایرت صفر نیست ({f.Difference:0} ریال)؛ ردیف‌های تطبیق‌نخورده را رفع کنید.");
+                    // R1t D7: a difference is accepted only when the saved reconciling items (kind, amount, reason) add up to exactly that difference
+                    string differenceRefusal = await ReconDifferenceRefusalAsync(rec, f.Difference, ct);
+                    if (differenceRefusal != null) return Bad<ReconciliationDto>(differenceRefusal);
                     if (f.Unmatched > 0) return Bad<ReconciliationDto>($"{f.Unmatched} ردیف صورت‌حساب هنوز تطبیق نخورده است.");
                     rec.BookBalance = f.Book; rec.BankBalance = f.Bank; rec.DepositsInTransit = f.DepositsInTransit; rec.OutstandingPayments = f.OutstandingPayments;
-                    rec.OutstandingCheques = f.OutstandingCheques; rec.Difference = 0;
+                    rec.OutstandingCheques = f.OutstandingCheques; rec.Difference = f.Difference; rec.ExplainedAmount = f.Difference;
                     rec.Status = 1; rec.ApprovedByUserId = Me; rec.ApprovedAt = DateTimeOffset.Now;
                     break;
                 }

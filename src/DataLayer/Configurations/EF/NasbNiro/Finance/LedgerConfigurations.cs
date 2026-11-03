@@ -169,6 +169,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.Description).HasMaxLength(1000);
                 b.Property(x => x.TotalAmount).HasPrecision(18, 0);
                 b.Property(x => x.AllocatedAmount).HasPrecision(18, 0);
+                b.Property(x => x.SourceType).HasMaxLength(40);
+                b.Property(x => x.SourceAction).HasMaxLength(40);
+                b.HasIndex(x => new { x.SourceType, x.SourceId });
                 b.HasIndex(x => x.Number).IsUnique();
                 b.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -203,6 +206,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.GrossAmount).HasPrecision(18, 0);
                 b.Property(x => x.DeductionAmount).HasPrecision(18, 0);
                 b.Property(x => x.NetAmount).HasPrecision(18, 0);
+                b.Property(x => x.SourceType).HasMaxLength(40);
+                b.Property(x => x.SourceAction).HasMaxLength(40);
+                b.HasIndex(x => new { x.SourceType, x.SourceId });
                 b.HasIndex(x => x.Number).IsUnique();
             });
             builder.Entity<FnPaymentLine>(b =>
@@ -318,7 +324,16 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.OutstandingPayments).HasPrecision(18, 0);
                 b.Property(x => x.OutstandingCheques).HasPrecision(18, 0);
                 b.Property(x => x.Difference).HasPrecision(18, 0);
+                b.Property(x => x.ExplainedAmount).HasPrecision(18, 0);
                 b.HasOne(x => x.BankAccount).WithMany().HasForeignKey(x => x.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<FnBankReconciliationItem>(b =>
+            {
+                b.ToTable("FnBankReconciliationItems");
+                b.Property(x => x.Amount).HasPrecision(18, 0);
+                b.Property(x => x.Note).HasMaxLength(500).IsRequired();
+                b.HasOne<FnVoucher>().WithMany().HasForeignKey(x => x.CorrectingVoucherId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Reconciliation).WithMany(x => x.Items).HasForeignKey(x => x.ReconciliationId).OnDelete(DeleteBehavior.Cascade);
             });
 
             // ------------------------------------------------------------------ receivables

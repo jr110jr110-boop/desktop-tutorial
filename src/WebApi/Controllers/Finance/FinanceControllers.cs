@@ -29,9 +29,10 @@ namespace WebApi.Controllers
         [Authorize(Roles = Readers)]
         public async Task<IActionResult> CheckAsync(CancellationToken ct) => Ok(await _service.CheckAsync(ct));
 
-        /// <summary>Voucher file of the events waiting for Sepidar (UTF-8 CSV, opens in Excel).</summary>
+        /// <summary>Voucher file of the events waiting for Sepidar (UTF-8 CSV, opens in Excel). R1t D19: a legacy channel, off unless Sepidar:LegacyCsv is on, and then for the finance manager only.</summary>
         [HttpPost("events/export")]
-        [Authorize(Roles = InventoryRoles.Finance)]
+        [Authorize(Roles = SepidarLegacy.Roles)]
+        [WebApi.Filters.LegacySepidarCsv("events-export")]
         public async Task<IActionResult> ExportAsync([FromBody] ExportEventsDto dto, CancellationToken ct)
         {
             var (content, fileName, error) = await _service.ExportEventsAsync(dto, ct);
@@ -40,7 +41,8 @@ namespace WebApi.Controllers
         }
 
         [HttpPost("events/mark")]
-        [Authorize(Roles = InventoryRoles.Finance)]
+        [Authorize(Roles = SepidarLegacy.Roles)]
+        [WebApi.Filters.LegacySepidarCsv("events-mark")]
         public async Task<IActionResult> MarkAsync([FromBody] MarkEventsDto dto, CancellationToken ct) => Ok(await _service.MarkEventsAsync(dto, ct));
 
         [HttpGet("accounts")]

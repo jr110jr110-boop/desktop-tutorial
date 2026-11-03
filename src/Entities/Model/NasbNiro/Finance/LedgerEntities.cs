@@ -161,11 +161,15 @@ namespace Entities.Model.NasbNiro.Finance
         /// <summary>CEO approval, required when the amount reaches an approval threshold.</summary>
         public int? CeoApprovedByUserId { get; set; }
         public DateTimeOffset? CeoApprovedAt { get; set; }
+        /// <summary>R1t D9: when a header field or a line of the voucher last changed after it was created. A CEO approval older than this does not count at finalising.</summary>
+        public DateTimeOffset? LastEditedAt { get; set; }
         /// <summary>Accrual-type manual voucher: the system drafts its reversal on day 1 of the next period (F3).</summary>
         public bool ReverseNextPeriod { get; set; }
         public int? AutoReversalVoucherId { get; set; }
 
         public int CreatedByUserId { get; set; }
+        /// <summary>R1t D12: the person whose action produced a system voucher (the maker of the source event, or the user who started the run). Creator 0 means the system; this person still cannot finalise it.</summary>
+        public int? TriggeredByUserId { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public int? CheckedByUserId { get; set; }
         public DateTimeOffset? CheckedAt { get; set; }
@@ -330,6 +334,13 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTimeOffset CreatedAt { get; set; }
         public int? PostedByUserId { get; set; }
         public DateTimeOffset? PostedAt { get; set; }
+        /// <summary>R1t D7: who approved the draft (a cash leg of a facility is approved by the finance manager and posted by someone else).</summary>
+        public int? ApprovedByUserId { get; set; }
+        /// <summary>R1t D7: the facility record this cash leg belongs to (loan disbursement, letter-of-credit margin refund); null for a customer receipt.</summary>
+        public string SourceType { get; set; }
+        public int? SourceId { get; set; }
+        public string SourceAction { get; set; }
+        public string SourceData { get; set; }
         public ICollection<FnReceiptLine> Lines { get; set; }
         public ICollection<FnReceiptAllocation> Allocations { get; set; }
 
@@ -372,7 +383,11 @@ namespace Entities.Model.NasbNiro.Finance
         public decimal Amount { get; set; }
     }
 
-    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2, Payroll = 3, EmployeeLoan = 4, BonusRun = 5, Termination = 6 }
+    /// <summary>
+    /// FacilityLeg (R1t D7): the cash leg of a bank loan, letter of credit or bank guarantee. It is created by the module that records the facility (never by hand), is approved by the
+    /// finance manager and settled by a treasury user other than the person who recorded it; the accounting event of the other side is built from <see cref="FnPayment.SourceType"/>.
+    /// </summary>
+    public enum FnPaymentPurpose { Supplier = 1, PettyCashTopUp = 2, Payroll = 3, EmployeeLoan = 4, BonusRun = 5, Termination = 6, FacilityLeg = 7 }
 
     public class FnPayment
     {
@@ -406,6 +421,13 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTimeOffset? PostedAt { get; set; }
         /// <summary>FINANCEMANAGER who approved a transfer to an IBAN other than the supplier's registered one.</summary>
         public int? IbanApprovedByUserId { get; set; }
+        /// <summary>R1t D7: the facility record this cash leg belongs to ("Loan", "LetterOfCredit", "BankGuarantee"); null for an ordinary payment.</summary>
+        public string SourceType { get; set; }
+        public int? SourceId { get; set; }
+        /// <summary>What the leg pays: "disburse", "installment", "margin", "fee", "pay", "refund", "guarantee-fee", "extend-fee".</summary>
+        public string SourceAction { get; set; }
+        /// <summary>Parameters of the leg (JSON: instalment number, penalty, rate, note, fee period); the ledger side is built from them when treasury settles the leg.</summary>
+        public string SourceData { get; set; }
         public ICollection<FnPaymentLine> Lines { get; set; }
         public ICollection<FnPaymentRequestLink> Requests { get; set; }
 
@@ -647,6 +669,25 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTimeOffset PreparedAt { get; set; }
         public int? ApprovedByUserId { get; set; }
         public DateTimeOffset? ApprovedAt { get; set; }
+        /// <summary>R1t D7: sum of the reconciling items (each signed like the difference it explains). An approval with a non-zero difference needs this to equal the difference.</summary>
+        public decimal ExplainedAmount { get; set; }
+        /// <summary>The person who last saved the reconciling items: he cannot approve the reconciliation.</summary>
+        public int? ItemsByUserId { get; set; }
+        public ICollection<FnBankReconciliationItem> Items { get; set; }
+    }
+
+    /// <summary>One explained reason why the book and the bank statement differ (R1t D7). Amount is signed like the difference: positive when the bank is above the books.</summary>
+    public class FnBankReconciliationItem
+    {
+        public int Id { get; set; }
+        public int ReconciliationId { get; set; }
+        public FnBankReconciliation Reconciliation { get; set; }
+        /// <summary>1 bank fee or interest not booked yet, 2 deposit or payment in transit, 3 bank error, 4 error in our books, 5 opening balance before go-live, 9 other.</summary>
+        public int Kind { get; set; }
+        public decimal Amount { get; set; }
+        public string Note { get; set; }
+        /// <summary>M8 (review R1t): the voucher that books the correction of a kind 1 (unbooked bank fee or interest) or kind 4 (error in our books) item. Required before the reconciliation is approved; null for the other kinds.</summary>
+        public int? CorrectingVoucherId { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ sales invoices

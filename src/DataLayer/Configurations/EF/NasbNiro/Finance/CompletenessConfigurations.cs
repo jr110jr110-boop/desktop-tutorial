@@ -1,3 +1,4 @@
+using Entities.Model;
 using Entities.Model.NasbNiro.Finance;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
     {
         public static void AddCompletenessConfigurations(this ModelBuilder builder)
         {
+            // R1t D8: SHA-256 (Base64, 44 characters) of the stored bytes of a file
+            builder.Entity<Document>().Property(x => x.Sha256).HasMaxLength(64);
+
             builder.Entity<FnLegalEntity>(b =>
             {
                 b.ToTable("FnLegalEntities");
@@ -53,6 +57,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.Action).HasMaxLength(20).IsRequired();
                 b.Property(x => x.Summary).HasMaxLength(300);
                 b.Property(x => x.Ip).HasMaxLength(60);
+                // R1t D20: the hash chain. "v1:" or "v0:" and 64 hexadecimal characters; the place in the chain is unique, so two writers can never extend the same row
+                b.Property(x => x.PrevHash).HasMaxLength(80);
+                b.Property(x => x.Hash).HasMaxLength(80);
+                b.HasIndex(x => x.Seq).IsUnique().HasFilter("[Seq] IS NOT NULL");
                 b.HasIndex(x => new { x.EntityType, x.EntityId });
                 b.HasIndex(x => x.At);
                 b.HasIndex(x => x.UserId);
@@ -65,6 +73,15 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.RedItems).HasMaxLength(2000);
                 b.HasIndex(x => x.PeriodId).IsUnique();
                 b.HasOne(x => x.Period).WithMany().HasForeignKey(x => x.PeriodId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            builder.Entity<FnCloseOverride>(b =>
+            {
+                b.ToTable("FnCloseOverrides");
+                b.Property(x => x.Reason).HasMaxLength(1000).IsRequired();
+                b.Property(x => x.Items).HasMaxLength(2000);
+                b.HasIndex(x => new { x.Kind, x.PeriodId });
+                b.HasIndex(x => new { x.Kind, x.FiscalYearId });
             });
 
             builder.Entity<FnVoucherAttachment>(b =>

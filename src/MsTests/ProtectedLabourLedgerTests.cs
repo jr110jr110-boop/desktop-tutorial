@@ -130,7 +130,13 @@ namespace MsTests
 
             public async Task CloseAllPeriodsAsync()
             {
-                foreach (FnPeriod p in Year.Periods) p.Status = FnPeriodStatus.Closed;
+                // R1t review H1: the year closes only after the two-step close, so the log carries a lock (accountant 21) and a close (CEO 22)
+                foreach (FnPeriod p in Year.Periods)
+                {
+                    p.Status = FnPeriodStatus.Closed;
+                    Db.Set<FnPeriodLog>().Add(new FnPeriodLog { PeriodId = p.Id, Action = "lock", UserId = 21, At = DateTimeOffset.UtcNow });
+                    Db.Set<FnPeriodLog>().Add(new FnPeriodLog { PeriodId = p.Id, Action = "close", UserId = 22, At = DateTimeOffset.UtcNow });
+                }
                 await Db.SaveChangesAsync();
             }
 

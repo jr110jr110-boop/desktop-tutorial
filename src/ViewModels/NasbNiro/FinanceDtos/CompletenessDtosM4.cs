@@ -103,12 +103,14 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int DaysToExpiry { get; set; }
         public string Note { get; set; }
         public List<FnGuaranteeEventDto> Events { get; set; } = new List<FnGuaranteeEventDto>();
+        /// <summary>R1t D7: treasury documents of this guarantee that are not settled yet (the fee).</summary>
+        public List<FnCashLegRefDto> OpenCashLegs { get; set; } = new List<FnCashLegRefDto>();
     }
 
     public class FnGuaranteeActionDto
     {
         public int Id { get; set; }
-        /// <summary>extend, release, claim, reduce.</summary>
+        /// <summary>extend, release, claim, reduce, fee-leg (drafts again the treasury document of a fee whose document was cancelled).</summary>
         public string Action { get; set; }
         public DateTime? Date { get; set; }
         public DateTime? NewExpiry { get; set; }

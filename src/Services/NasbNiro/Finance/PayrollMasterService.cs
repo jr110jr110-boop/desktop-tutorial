@@ -178,7 +178,7 @@ namespace Services.NasbNiro.Finance
         private static EmployeeDto ToDto(FnEmployee e, string workshop, int? pendingChangeId = null) => new EmployeeDto
         {
             Id = e.Id, PersonnelCode = e.PersonnelCode, FirstName = e.FirstName, LastName = e.LastName, FatherName = e.FatherName, NationalCode = e.NationalCode,
-            BirthDate = e.BirthDate, BirthPlace = e.BirthPlace, Gender = e.Gender, MaritalStatus = e.MaritalStatus, ChildrenCount = e.ChildrenCount,
+            BirthDate = e.BirthDate, BirthPlace = e.BirthPlace, IdentityCardNumber = e.IdentityCardNumber, Nationality = e.Nationality, Gender = e.Gender, MaritalStatus = e.MaritalStatus, ChildrenCount = e.ChildrenCount,
             InsuranceNumber = e.InsuranceNumber, InsuranceJobCode = e.InsuranceJobCode, WorkshopId = e.WorkshopId, WorkshopName = workshop, HireDate = e.HireDate,
             EndDate = e.EndDate, EmploymentType = e.EmploymentType, JobTitle = e.JobTitle, Unit = e.Unit, CostCenterId = e.CostCenterId, DefaultWorkOrderId = e.DefaultWorkOrderId,
             BankIban = e.BankIban, DailyWage = e.DailyWage, ExemptionFlags = e.ExemptionFlags, HardAndHarmful = e.HardAndHarmful, UserId = e.UserId,
@@ -234,6 +234,8 @@ namespace Services.NasbNiro.Finance
             decimal wage = R(dto.DailyWage);
             if (wage <= 0) return Bad<EmployeeDto>("مزد روزانه باید بیشتر از صفر باشد.");
             if (dto.Gender != 1 && dto.Gender != 2) return Bad<EmployeeDto>("جنسیت نامعتبر است (۱ مرد، ۲ زن).");
+            if ((Clean(dto.IdentityCardNumber)?.Length ?? 0) > 20) return Bad<EmployeeDto>("شماره شناسنامه حداکثر ۲۰ نویسه است.");
+            if ((Clean(dto.Nationality)?.Length ?? 0) > 50) return Bad<EmployeeDto>("تابعیت حداکثر ۵۰ نویسه است.");
             if (dto.MaritalStatus != 1 && dto.MaritalStatus != 2) return Bad<EmployeeDto>("وضعیت تاهل نامعتبر است (۱ مجرد، ۲ متاهل).");
             if (dto.ChildrenCount < 0 || dto.ChildrenCount > 20) return Bad<EmployeeDto>("تعداد فرزند نامعتبر است.");
             if (!Enum.IsDefined(typeof(FnEmploymentType), dto.EmploymentType)) return Bad<EmployeeDto>("نوع استخدام نامعتبر است.");
@@ -302,7 +304,7 @@ namespace Services.NasbNiro.Finance
             }
 
             e.PersonnelCode = code; e.FirstName = Clean(dto.FirstName); e.LastName = Clean(dto.LastName); e.FatherName = Clean(dto.FatherName); e.NationalCode = national;
-            e.BirthDate = dto.BirthDate?.Date; e.BirthPlace = Clean(dto.BirthPlace); e.Gender = dto.Gender; e.MaritalStatus = dto.MaritalStatus;
+            e.BirthDate = dto.BirthDate?.Date; e.BirthPlace = Clean(dto.BirthPlace); e.IdentityCardNumber = Clean(dto.IdentityCardNumber); e.Nationality = Clean(dto.Nationality); e.Gender = dto.Gender; e.MaritalStatus = dto.MaritalStatus;
             e.InsuranceNumber = Clean(dto.InsuranceNumber); e.InsuranceJobCode = Clean(dto.InsuranceJobCode); e.WorkshopId = dto.WorkshopId; e.HireDate = dto.HireDate.Date;
             e.EndDate = dto.EndDate?.Date; e.EmploymentType = dto.EmploymentType; e.JobTitle = Clean(dto.JobTitle); e.Unit = Clean(dto.Unit); e.CostCenterId = dto.CostCenterId;
             e.DefaultWorkOrderId = dto.DefaultWorkOrderId;

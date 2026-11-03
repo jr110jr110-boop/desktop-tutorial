@@ -144,11 +144,161 @@ $saved | ConvertTo-Json | Set-Content -Path $state
 Check 'uploaded files on disk' { "$(@(Get-ChildItem "$InstallRoot\app\UploadedDocuments" -File).Count) files in UploadedDocuments" }
 Check 'backup task exists' { "state=$((Get-ScheduledTask -TaskName 'INNCO daily backup').State) lastResult=$((Get-ScheduledTaskInfo -TaskName 'INNCO daily backup').LastTaskResult)" }
 Check 'database backup files' {
-    $files = @(Get-ChildItem "$BackupFolder\database" -Filter '*.bak' | Sort-Object LastWriteTime)
-    if ($files.Count -eq 0) { throw 'no .bak file' }
+    $files = @(Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' } | Sort-Object LastWriteTime)
+    if ($files.Count -eq 0) { throw 'no .bak or .bak.enc file' }
     ($files | ForEach-Object { "$($_.Name)=$($_.Length)" }) -join ' '
 }
 Check 'file backup copy' { "$(@(Get-ChildItem "$BackupFolder\files" -Recurse -File).Count) files" }
+
+# ---- R1t (D20, D21): recovery model and log backups, encrypted backups, settings copy without secrets, protection of the audit trail ----
+$settingsFile = "$InstallRoot\app\appsettings.Production.json"
+function Invoke-CheckSql([string]$Query, [hashtable]$Parameters) {
+    # the connection string of the program, used with the account that runs this script (an administrator of the instance), not with the account of the application pool
+    $program = Get-Content -Raw -Path $settingsFile | ConvertFrom-Json
+    $connection = New-Object System.Data.SqlClient.SqlConnection ([string]$program.ConnectionStrings.SqlServer.ApplicationDbContextConnection)
+    $connection.Open()
+    try {
+        $command = $connection.CreateCommand()
+        $command.CommandText = $Query
+        if ($Parameters) { foreach ($key in $Parameters.Keys) { [void]$command.Parameters.AddWithValue($key, $Parameters[$key]) } }
+        $table = New-Object System.Data.DataTable
+        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter $command
+        [void]$adapter.Fill($table)
+        return , $table
+    }
+    finally { $connection.Dispose() }
+}
+function Get-CheckScalar([string]$Query) { $t = Invoke-CheckSql $Query $null; if ($t.Rows.Count -eq 0) { return $null }; return $t.Rows[0][0] }
+
+$dailyTask = Get-ScheduledTask -TaskName 'INNCO daily backup' -ErrorAction SilentlyContinue
+$encryptionAsked = $dailyTask -and ([string]($dailyTask.Actions | Select-Object -First 1).Arguments) -match '-EncryptionCertificate'
+
+Check 'the database is in the full recovery model' {
+    $model = [string](Get-CheckScalar 'SELECT recovery_model_desc FROM sys.databases WHERE name = DB_NAME()')
+    if ($model -ne 'FULL') { throw "recovery model is '$model'" }
+    $model
+}
+Check 'the hourly log backup task repeats every hour' {
+    $task = Get-ScheduledTask -TaskName 'INNCO hourly log backup'
+    $trigger = $task.Triggers | Select-Object -First 1
+    $interval = [string]$trigger.Repetition.Interval
+    if ($interval -ne 'PT1H') { throw "repetition interval is '$interval'" }
+    if (([string]($task.Actions | Select-Object -First 1).Arguments) -notmatch '-Mode Log') { throw 'the task does not run backup.ps1 -Mode Log' }
+    "state=$($task.State) lastResult=$((Get-ScheduledTaskInfo -TaskName 'INNCO hourly log backup').LastTaskResult)"
+}
+Check 'a log backup was made (database\log)' {
+    $files = @(Get-ChildItem "$BackupFolder\database\log" -File -ErrorAction Stop | Where-Object { $_.Name -match '\.trn(\.enc)?$' } | Sort-Object LastWriteTime)
+    if ($files.Count -eq 0) { throw 'no .trn or .trn.enc file' }
+    ($files | ForEach-Object { "$($_.Name)=$($_.Length)" }) -join ' '
+}
+Check 'the backup log says the full and the log backup were made' {
+    $text = Get-Content -Raw -Path "$BackupFolder\backup-log.txt"
+    if ($text -notmatch 'Database backup OK') { throw 'no "Database backup OK" line' }
+    if ($text -notmatch 'Log backup OK') { throw 'no "Log backup OK" line' }
+    if ($text -match 'BACKUP FAILED') { throw 'the log has a "BACKUP FAILED" line' }
+    'both kinds of backup are in backup-log.txt'
+}
+Check 'database backups are encrypted: by SQL Server where the edition can, else at file level (no plain .bak or .trn stays)' {
+    $newest = Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' -and $_.Name -notlike '*before-restore*' -and $_.Name -notlike '*pre-update*' } | Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($encryptionAsked) {
+        $header = Invoke-CheckSql 'RESTORE HEADERONLY FROM DISK = @f' @{ '@f' = $newest.FullName }
+        $algorithm = [string]$header.Rows[0]['KeyAlgorithm']
+        if ($algorithm -notmatch '(?i)aes_256') { throw "the backup task asks for encryption but $($newest.Name) has KeyAlgorithm '$algorithm'" }
+        return "$($newest.Name): $algorithm, encryptor type $($header.Rows[0]['EncryptorType'])"
+    }
+    # file level: the newest backup is x.bak.enc, with the PMISENC1 header, and no plain .bak / .trn is left in the backup folders (the safety copies are encrypted as well)
+    if ($newest.Name -notlike '*.bak.enc') { throw "the newest backup $($newest.Name) is not encrypted" }
+    $head = New-Object byte[] 8
+    $stream = [IO.File]::OpenRead($newest.FullName); try { [void]$stream.Read($head, 0, 8) } finally { $stream.Dispose() }
+    if ([Text.Encoding]::ASCII.GetString($head) -ne 'PMISENC1') { throw "$($newest.Name) does not start with the PMISENC1 header" }
+    $plain = @(Get-ChildItem "$BackupFolder\database" -Recurse -File | Where-Object { $_.Name -match '\.(bak|trn)$' })
+    if ($plain.Count -gt 0) { throw "plain backup files are left: $(($plain | ForEach-Object Name) -join ', ')" }
+    "$($newest.Name): file level (AES-256 with an HMAC seal), no plain .bak or .trn in the backup folder"
+}
+Check 'the uploaded files in the backup are encrypted at file level' {
+    $copies = @(Get-ChildItem "$BackupFolder\files" -Recurse -File | Where-Object { $_.Name -ne 'appsettings.Production.redacted.json' })
+    if ($copies.Count -eq 0) { throw 'no uploaded file in the files backup' }
+    $plain = @($copies | Where-Object { $_.Name -notlike '*.enc' })
+    if ($plain.Count -gt 0) { throw "$($plain.Count) file(s) of the files backup are not encrypted, for example $($plain[0].FullName)" }
+    "$($copies.Count) files, all .enc"
+}
+Check 'the keys folder holds the file key, and the off-site copy never takes the keys' {
+    if (-not (Test-Path "$BackupFolder\keys\file-encryption.key.dpapi")) { throw "missing $BackupFolder\keys\file-encryption.key.dpapi" }
+    $script = Get-Content -Raw -Path "$InstallRoot\tools\backup.ps1" -ErrorAction SilentlyContinue
+    if ($script -and $script -match "@\('database', 'files', 'keys'\)") { throw 'backup.ps1 still copies the keys folder off-site' }
+    'file-encryption.key.dpapi is there; backup.ps1 copies database and files only'
+}
+Check 'the backup certificate and its key are in the keys folder' {
+    if (-not (Test-Path "$BackupFolder\keys\INNCO_BackupCert.cer")) { return 'no backup certificate on this server (it could not be made; file-level encryption is used)' }
+    foreach ($name in 'INNCO_BackupCert.cer', 'INNCO_BackupCert.pvk', 'audit-key.sealed.txt') {
+        if (-not (Test-Path "$BackupFolder\keys\$name")) { throw "missing $BackupFolder\keys\$name" }
+    }
+    $sealed = Get-Content -Raw -Path "$BackupFolder\keys\audit-key.sealed.txt"
+    $real = Get-Content -Raw -Path $settingsFile | ConvertFrom-Json
+    if ($real.Identity.AuditHmacKey -and $sealed.Contains([string]$real.Identity.AuditHmacKey)) { throw 'audit-key.sealed.txt holds the audit key in clear text' }
+    'INNCO_BackupCert.cer, INNCO_BackupCert.pvk and audit-key.sealed.txt (sealed)'
+}
+Check 'the settings copy of the backup holds no secret' {
+    $copy = "$BackupFolder\files\appsettings.Production.redacted.json"
+    if (-not (Test-Path $copy)) { throw 'no appsettings.Production.redacted.json in the files backup' }
+    if (Test-Path "$BackupFolder\files\appsettings.Production.json") { throw 'the files backup holds appsettings.Production.json itself' }
+    $text = Get-Content -Raw -Path $copy
+    $real = Get-Content -Raw -Path $settingsFile | ConvertFrom-Json
+    foreach ($secret in @($real.BearerTokens.Key, $real.Identity.AuditHmacKey, $real.AdminUserSeed.Password)) {
+        if ($secret -and $text.Contains([string]$secret)) { throw 'a secret of the settings file is in the copy' }
+    }
+    if ($text -notmatch 'REDACTED') { throw 'the copy has no REDACTED marker (nothing was replaced?)' }
+    if ($text -notmatch '(?i)ApplicationDbContextConnection') { throw 'the copy lost the structure of the settings' }
+    'secrets replaced by REDACTED; the real file is not in the backup'
+}
+Check 'the install log that holds the backup key password is readable by administrators only' {
+    $logs = @(Get-ChildItem "$InstallRoot\logs" -Filter 'install-*.log' -ErrorAction Stop | Where-Object { Select-String -Path $_.FullName -SimpleMatch 'PASSWORD OF THE BACKUP KEY' -Quiet })
+    if ($logs.Count -eq 0) { return 'no install log shows a key password (the certificate was made in an earlier run, or encryption is not used)' }
+    foreach ($log in $logs) {
+        $acl = (& icacls.exe $log.FullName) -join ' '
+        if ($acl -match '(?i)APPPOOL|Everyone|BUILTIN\\Users|Authenticated Users') { throw "$($log.Name) can be read by more than administrators: $acl" }
+    }
+    "$($logs.Count) log file(s), access: administrators and SYSTEM"
+}
+Check 'the audit trail is hash-chained' {
+    # R1t review M11: only the rows written after the chain began are counted (the first sealed row marks the start). A database restored from a backup that was taken before the chain
+    # existed has older rows without a place in the chain: they are not an error, and a trail without any sealed row yet is not a failure either.
+    $sealed = [int](Get-CheckScalar 'SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Seq IS NOT NULL')
+    $legacy = [int](Get-CheckScalar 'SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Seq IS NULL')
+    if ($sealed -eq 0) { return "skipped: no row has a place in the chain yet ($legacy rows from before the chain; the chain starts with the next audited change)" }
+    $firstId = [int](Get-CheckScalar 'SELECT MIN(Id) FROM dbo.FnAuditLogs WHERE Seq IS NOT NULL')
+    $after = [int](Get-CheckScalar "SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Id >= $firstId")
+    $loose = [int](Get-CheckScalar "SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Id >= $firstId AND (Seq IS NULL OR Hash IS NULL)")
+    if ($loose -ne 0) { throw "$loose of $after rows written since the chain began have no place in the chain" }
+    $forks = [int](Get-CheckScalar 'SELECT COUNT(*) FROM (SELECT Seq FROM dbo.FnAuditLogs WHERE Seq IS NOT NULL GROUP BY Seq HAVING COUNT(*) > 1) d')
+    if ($forks -ne 0) { throw "$forks places in the chain hold more than one row" }
+    "$after rows since the chain began, every one chained, no fork; $legacy older rows from before the chain are not counted"
+}
+Check 'the database refuses the program account to change or delete a row of the audit trail' {
+    $user = [string](Get-CheckScalar "SELECT TOP 1 u.name FROM sys.database_role_members m JOIN sys.database_principals r ON r.principal_id = m.role_principal_id JOIN sys.database_principals u ON u.principal_id = m.member_principal_id WHERE r.name = N'pmis_app'")
+    if (-not $user) { throw 'no account is a member of the role pmis_app' }
+    $quoted = $user.Replace("'", "''")
+    $denied = [int](Get-CheckScalar "SELECT COUNT(*) FROM sys.database_permissions p JOIN sys.database_principals g ON g.principal_id = p.grantee_principal_id WHERE g.name = N'pmis_app' AND p.class = 1 AND p.major_id = OBJECT_ID(N'dbo.FnAuditLogs') AND p.state = 'D' AND p.permission_name IN ('UPDATE', 'DELETE')")
+    if ($denied -ne 2) { throw "expected DENY UPDATE and DENY DELETE on dbo.FnAuditLogs for the role pmis_app, found $denied" }
+    $owner = [int](Get-CheckScalar "SELECT COUNT(*) FROM sys.database_role_members m JOIN sys.database_principals r ON r.principal_id = m.role_principal_id WHERE r.name = N'db_owner' AND m.member_principal_id = USER_ID(N'$quoted')")
+    if ($owner -ne 0) { throw "$user is db_owner" }
+    $code = [int](Get-CheckScalar "DECLARE @n int = 0; BEGIN TRY EXECUTE AS USER = N'$quoted'; UPDATE dbo.FnAuditLogs SET Summary = Summary WHERE 1 = 0; REVERT; END TRY BEGIN CATCH SET @n = ERROR_NUMBER(); REVERT; END CATCH; SELECT @n;")
+    if ($code -ne 229) { throw "an UPDATE as $user gave SQL error $code (229 = refused was expected)" }
+    "$user is in pmis_app and not db_owner; DENY UPDATE, DELETE on dbo.FnAuditLogs; a test UPDATE was refused (229)"
+}
+Check 'the program does not change the database structure itself (Database:MigrateAtStart is false)' {
+    $real = Get-Content -Raw -Path $settingsFile | ConvertFrom-Json
+    $value = $real.Database.MigrateAtStart
+    if ($null -eq $value -or $value -ne $false) { throw "Database:MigrateAtStart is '$value'" }
+    'Database:MigrateAtStart = false; the installer applied the updates (WebApi.dll --migrate-only)'
+}
+if ($Phase -eq '2-update') {
+    Check 'the update made a checked safety backup of the database before it changed anything' {
+        $f = @(Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match 'pre-update.*\.bak(\.enc)?$' })
+        if ($f.Count -eq 0) { throw 'no pre-update backup file (.bak or .bak.enc)' }
+        ($f | ForEach-Object { "$($_.Name)=$($_.Length)" }) -join ' '
+    }
+}
 
 if ($Phase -eq '3-restore') {
     Check 'old program files were brought over' {
@@ -162,7 +312,7 @@ if ($Phase -eq '3-restore') {
         "http=$([int]$r.StatusCode)"
     }
     Check 'safety backup made before the restore' {
-        $f = @(Get-ChildItem "$BackupFolder\database" -Filter '*before-restore*.bak')
+        $f = @(Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match 'before-restore.*\.bak(\.enc)?$' })
         if ($f.Count -eq 0) { throw 'none' }
         $f[0].Name
     }

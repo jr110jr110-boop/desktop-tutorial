@@ -686,8 +686,9 @@ call GET inventory/sepidar/check; check "sepidar check: RC and IS pending (trans
 call GET "inventory/sepidar/outbox?Status=1"; check "sepidar outbox" '.data.data|length == 2'
 IDS=$(jq -c '[.data.data[].id]' "$B")
 export_csv() {
-  curl -s -D "$OUT/sepidar.hdr" -o "$OUT/sepidar.csv" -X POST "$API/inventory/sepidar/export" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"documentIds\":$1,\"markExported\":true}"
+  curl -s -D "$OUT/sepidar.hdr" -o "$OUT/sepidar.csv" -X POST "$API/inventory/sepidar/export" -H "Authorization: Bearer $FM_TOKEN" -H 'Content-Type: application/json' -d "{\"documentIds\":$1,\"markExported\":true}"
 }
+call POST inventory/sepidar/export "{\"documentIds\":$IDS,\"markExported\":false}"; r403 "r1t d19: the legacy Sepidar CSV of the inventory documents is for the finance manager only (the PMO user is turned away)"
 export_csv "$IDS"
 if grep -qi 'content-type: text/csv' "$OUT/sepidar.hdr" && [ "$(head -c 3 "$OUT/sepidar.csv" | od -An -tx1 | tr -d ' \n')" = "efbbbf" ] && grep -q "RC-" "$OUT/sepidar.csv"; then ok "sepidar CSV export (UTF-8 BOM)"; else cp "$OUT/sepidar.csv" "$B"; bad "sepidar CSV export (UTF-8 BOM)"; fi
 cp "$OUT/sepidar.csv" "$OUT/sepidar-1.csv"
@@ -707,6 +708,7 @@ if [ -n "$TOKEN" ]; then
   ok "login financial user"
   call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[]}"; [ "$CODE" = "403" ] && ok "financial user cannot write documents (403)" || bad "financial user cannot write documents (403) got $CODE"
   call GET inventory/sepidar/check; [ "$CODE" = "200" ] && ok "financial user can use Sepidar page" || bad "financial user can use Sepidar page got $CODE"
+  as "$FIN_TOKEN" POST inventory/sepidar/export '{"documentIds":[],"markExported":false}'; r403 "r1t d19: the financial user cannot download the legacy Sepidar CSV any more (finance manager only)"
   call GET "inventory/stock/items"; [ "$CODE" = "200" ] && ok "financial user can read stock" || bad "financial user can read stock got $CODE"
 else
   bad "login financial user"
@@ -978,8 +980,12 @@ call GET finance/valuation; check "stock value equals the inventory balance of t
 call GET finance/accounts; check "account roles seeded for Sepidar mapping" '.success and ([.data[].role]|index("GRNI")) != null'
 call POST finance/accounts '{"role":"Inventory","title":"موجودی کالا","sepidarAccountCode":"1-105","isActive":true}'; check "Sepidar account code saved" '.success'
 call GET finance/check; check "Sepidar readiness check lists unmapped roles" '.success and (.data.unmappedRoles|length) > 0'
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/finance/events/export" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary '{"markExported":false}')
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/finance/events/export" -H "Authorization: Bearer $FM_TOKEN" -H 'Content-Type: application/json' --data-binary '{"markExported":false}')
 [ "$CODE" = "200" ] && grep -q "کلید رویداد" "$B" && ok "voucher file for Sepidar" || bad "voucher file for Sepidar ($CODE)"
+call POST finance/events/export '{"markExported":false}'; r403 "r1t d19: the legacy voucher CSV of the accounting events is for the finance manager only (the PMO user is turned away)"
+as "$FIN_TOKEN" POST finance/events/export '{"markExported":false}'; r403 "r1t d19: the financial user cannot download the legacy voucher CSV (finance manager only)"
+as "$FIN_TOKEN" POST finance/events/mark '{"eventIds":[],"status":0}'; r403 "r1t d19: the financial user cannot mark events as sent through the legacy channel (finance manager only)"
+call POST finance/events/mark '{"eventIds":[],"status":0}'; r403 "r1t d19: the PMO user cannot mark events as sent through the legacy channel either"
 call GET finance/costs; check "cost report of work orders" '.success'
 
 # ---------------------------------------------------------------- procurement: request -> inquiry -> order -> receipt -> invoice -> payment
@@ -2655,6 +2661,8 @@ FY=$(val .data.id)
 as "$FM_TOKEN" POST $FG/years/ensure "{\"date\":\"${TODAY}T00:00:00\"}"; check "finance: the year of today exists" '.success and .data.id > 0'
 FYT=$(val .data.id)
 as "$PAYR_TOKEN" POST $FG/years/ensure '{"date":"2026-03-21T00:00:00"}'; no "finance: payroll user cannot manage fiscal years"
+call POST $FG/years/ensure '{"date":"2026-03-21T00:00:00"}'; nomsg "r1t d25: the PMO user does not open fiscal years any more (finance manager only)" "مدیر مالی"
+as "$FIN_TOKEN" POST $FG/years/ensure '{"date":"2026-03-21T00:00:00"}'; nomsg "r1t d25: an accountant does not open fiscal years either" "مدیر مالی"
 as "$COM_TOKEN" GET $FG/years; [ "$CODE" = "403" ] && ok "finance: commercial user cannot read the ledger (403)" || bad "finance: commercial user cannot read the ledger (403) got $CODE"
 as "$PAYR_TOKEN" GET finance/dashboard; [ "$CODE" = "403" ] && ok "finance: payroll user has no finance dashboard yet (403)" || bad "finance: payroll user has no finance dashboard yet (403) got $CODE"
 
@@ -2685,6 +2693,13 @@ as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V2,\"action\":\"check\"}"
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$V2,\"action\":\"finalize\"}"; no "finance: the preparer cannot finalize his own voucher"
 as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V2,\"action\":\"uncheck\"}"; check "finance: a checked voucher goes back to draft" '.success and .data.status == 0'
 as "$FM_TOKEN" DELETE "$FG/vouchers/$V2"; check "finance: a draft voucher is deleted" '.success'
+# R1t D26: a draft is deleted by the person who wrote it or by the finance manager; a check is taken back by the checker or by the finance manager
+as "$FIN_TOKEN" POST $FG/vouchers "$MV"; V26=$(val .data.id)
+as "$FIN2_TOKEN" DELETE "$FG/vouchers/$V26"; nomsg "r1t d26: an accountant cannot delete a draft that another accountant wrote" "آن یا مدیر مالی حذف"
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V26,\"action\":\"check\"}"; check "r1t d26: the second accountant checks the draft" '.success and .data.status == 1'
+as "$FIN_TOKEN" POST $FG/vouchers/action "{\"id\":$V26,\"action\":\"uncheck\"}"; nomsg "r1t d26: the preparer cannot take back a check that somebody else made" "سند یا مدیر مالی"
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$V26,\"action\":\"uncheck\"}"; check "r1t d26: the finance manager takes back a check made by an accountant" '.success and .data.status == 0'
+as "$FIN_TOKEN" DELETE "$FG/vouchers/$V26"; check "r1t d26: the creator deletes his own draft" '.success and .data == true'
 as "$FIN_TOKEN" POST $FG/vouchers/action "{\"id\":$V1,\"action\":\"reverse\",\"note\":\"آزمون\"}"; check "finance: reversal of a final voucher is a new draft with swapped lines" '.success and .data.type == 5 and .data.status == 0 and .data.reversesVoucherId == '"$V1"' and ([.data.lines[]|select(.accountCode=="10101")][0].debit) == 1000000'
 V1R=$(val .data.id)
 as "$FIN_TOKEN" POST $FG/vouchers/action "{\"id\":$V1,\"action\":\"reverse\"}"; no "finance: a voucher is reversed only once"
@@ -2692,12 +2707,18 @@ as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V1R,\"action\":\"check\"}"; 
 
 # --- period lock, late posting of events into the next open period
 as "$FM_TOKEN" GET $FG/years; PERIOD7=$(jq -r --argjson y "$FY" '.data[]|select(.id == $y)|.periods[]|select(.startDate[0:10] <= "2026-10-15" and .endDate[0:10] >= "2026-10-15")|.id' "$B")
+# R1t D10: out of the box the close checklist is enforced (CloseChecklist.Enforce = 1) and the final close of a period is the CEO's step (PeriodClose.CloseBy = CEO);
+# the events of this month are not posted yet, so the lock is refused. The rest of the scenario switches the enforcement off explicitly; the f3 section switches it on again.
+as "$FM_TOKEN" GET $FG/settings; check "r1t d10: the defaults are CloseChecklist.Enforce = 1 and PeriodClose.CloseBy = CEO" '.success and ([.data[]|select(.key == "CloseChecklist.Enforce")][0].value) == "1" and ([.data[]|select(.key == "PeriodClose.CloseBy")][0].value) == "CEO"'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PERIOD7,\"action\":\"lock\"}"; nomsg "r1t d10: with the default setting a month with events not yet posted cannot be locked" "فهرست کنترل بستن دوره"
+as "$FM_TOKEN" GET "$FG/close-checklist/$PERIOD7"; check "r1t d10: the checklist of that month shows the unposted events in red, enforced, and cannot be locked" '.success and .data.enforced == true and .data.canLock == false and ([.data.items[]|select(.key == "UnpostedEvents")][0].status) == "Red"'
+as "$FM_TOKEN" POST $FG/settings '{"key":"CloseChecklist.Enforce","value":"0"}'; check "r1t d10: the scenario switches the enforcement off explicitly" '.success and .data.value == "0"'
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PERIOD7,\"action\":\"lock\"}"; check "finance: period of 2026-10-15 locked" '.success'
 as "$FIN_TOKEN" POST $FG/vouchers "$(jq -c '.date = "2026-10-15T00:00:00"' <<< "$MV")"; no "finance: a voucher in a locked period is rejected"
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PERIOD7,\"action\":\"reopen\"}"; no "finance: reopening a period needs a reason"
 
 # --- events into vouchers
-as "$FM_TOKEN" POST $FG/post-events; check "finance: pending events turned into auto vouchers (some late: their period is locked)" '.success and .data.posted > 5 and .data.failed == 0 and .data.latePosted >= 1'
+as "$FM_TOKEN" POST $FG/post-events; echo "LATEPOSTED=$(jq -c ".data" "$B")"; check "finance: pending events turned into auto vouchers (some late: their period is locked)" '.success and .data.posted > 5 and .data.failed == 0 and .data.latePosted >= 1'
 as "$FM_TOKEN" POST $FG/post-events; check "finance: posting events is idempotent" '.success and .data.posted == 0'
 as "$FM_TOKEN" GET "finance/events?PageSize=0"; check "finance: every event is posted (or not required)" '[.data.data[]|select(.status != 4 and .status != 9)]|length == 0'
 as "$FM_TOKEN" GET "$FG/vouchers?FiscalYearId=$FY&Type=3&PageSize=0"; check "finance: auto vouchers are checked and flagged as late posting where needed" '.success and (.data.data|length) > 5 and ([.data.data[]|select(.status != 1)]|length) == 0 and ([.data.data[]|select(.latePosting == true)]|length) >= 1'
@@ -2870,8 +2891,27 @@ as "$FIN_TOKEN" POST $FG/vouchers '{"date":"2021-06-02T00:00:00","description":"
 for V in $VA $VB; do as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V,\"action\":\"check\"}"; as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$V,\"action\":\"finalize\"}"; done
 check "finance: vouchers of year 1400 finalized" '.success and .data.status == 2'
 as "$FM_TOKEN" GET $FG/years; PIDS=$(jq -r --argjson y "$FY0" '.data[]|select(.id == $y)|.periods[].id' "$B")
-for P in $PIDS; do as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; done
-as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"آزمون بستن سال"}'; check "finance: year 1400 closed with closing vouchers and a 1401 opening voucher" '.success and .data.status == 2 and .data.closingVoucherId != null'
+# R1t review H1: the year closes only after every period went through the two-step close - an accountant locks, the CEO closes
+for P in $PIDS; do
+  as "$FIN_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; as "$CEO_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"close\"}"
+  [ "$(jq -r --argjson p "$P" '[.data.periods[]|select(.id == $p)][0].status' "$B")" = "2" ] || bad "r1t h1: period $P of 1400 was not closed by the two-step close ($(jq -r '.message' "$B"))"
+done
+as "$FM_TOKEN" GET "$FG/reports/reconciliation"; Y1400_CLEAN=$(val '.data.clean')
+as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"آزمون بستن سال"}'
+echo "Y1400_CLEAN=$Y1400_CLEAN"
+if [ "$Y1400_CLEAN" != "true" ]; then
+  # R1t D10: the ledger differs from the sub-ledgers: the first manager's call only records the request, the same manager asking again changes nothing, a second manager's call closes the year
+  # R1t review L4: recording the request is a success; the year is still open
+  check "r1t d10: a difference is not passed by one manager: the request is recorded (success) and the year stays open" '.success and .data.status != 2'
+  as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"آزمون بستن سال"}'; check "r1t d10: the same manager asking again does not close the year" '.success and .data.status != 2'
+  as "$FM2_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"تایید دومین مدیر مالی"}'
+fi
+check "finance: year 1400 closed with closing vouchers and a 1401 opening voucher" '.success and .data.status == 2 and .data.closingVoucherId != null'
+if [ "$Y1400_CLEAN" != "true" ]; then
+  as "$FM_TOKEN" GET "finance/audit?EntityType=FnFiscalYear&EntityId=$FY0&PageSize=0"
+  check "r1t d10: the request and the approval of the difference are in the audit trail, written by two different managers" '.success and ([.data.data[]|select(.action == "YearOverrideReq")]|length) == 1 and ([.data.data[]|select(.action == "YearOverrideOk")]|length) == 1 and ([.data.data[]|select(.action == "YearOverrideReq")][0].userId) != ([.data.data[]|select(.action == "YearOverrideOk")][0].userId)'
+fi
+
 as "$FM_TOKEN" GET $FG/years; YC=$(jq -r --argjson y "$FY0" '.data[]|select(.id == $y)|.closingVoucherId' "$B"); YNEXT=$(jq -r '.data[]|select(.year == 1401)|.id' "$B"); YOPEN=$(jq -r '.data[]|select(.year == 1401)|.openingVoucherId' "$B")
 # exact consequences of the close: profit 100,000 - 40,000 = 60,000 moves to retained earnings 50301; temporary accounts are zero; the opening voucher repeats the closing balances
 as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$FY0&Level=2&IncludeDraft=true"
@@ -2883,6 +2923,37 @@ as "$FM_TOKEN" GET $FG/vouchers/$YC
 check "finance: the closing voucher of 1400 mirrors the opening voucher (60000 both sides)" '.success and ([.data.lines[].debit]|add) == 60000 and ([.data.lines[].credit]|add) == 60000'
 as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"دوباره"}'; no "finance: a closed year is not closed twice"
 as "$FIN_TOKEN" POST $FG/vouchers '{"date":"2021-07-01T00:00:00","lines":[{"accountCode":"80108","debit":1},{"accountCode":"10101","credit":1}]}'; no "finance: no voucher can be written into a closed year"
+
+# --- R1t D10: the final close of a period is a second person's step (sandbox year 1395: created after 1400 was closed because years close in order)
+as "$FM_TOKEN" POST $FG/years/ensure '{"date":"2016-06-01T00:00:00"}'; check "r1t d10: sandbox fiscal year 1395 with 12 periods" '.success and .data.year == 1395 and (.data.periods|length) == 12'
+PCA=$(val '.data.periods[0].id'); PCB=$(val '.data.periods[1].id'); PCC=$(val '.data.periods[2].id'); PCCD=$(val '.data.periods[2].startDate[0:10]')
+as "$CEO_TOKEN" POST $FG/periods/action "{\"id\":$PCA,\"action\":\"close\"}"; nomsg "r1t d10: an open month cannot be closed: it is locked first and then closed by somebody else" "مرحله دوم"
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PCA,\"action\":\"lock\"}"; check "r1t d10: the finance manager locks the first month of 1395" '.success and ([.data.periods[]|select(.id == '$PCA')][0].status) == 1'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PCA,\"action\":\"close\"}"; nomsg "r1t d10: with the default setting the final close is the CEO's step, not the finance manager's" "مدیرعامل"
+as "$CEO_TOKEN" POST $FG/periods/action "{\"id\":$PCA,\"action\":\"close\"}"; check "r1t d10: the CEO closes the locked month (status 2)" '.success and ([.data.periods[]|select(.id == '$PCA')][0].status) == 2'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PCA,\"action\":\"reopen\",\"reason\":\"آزمون\"}"; nomsg "r1t d10: a closed month is final: it cannot be reopened" "دوره بسته قطعی است"
+# the company may choose its finance manager as the closer, but never the one who locked
+as "$FM_TOKEN" POST $FG/settings '{"key":"PeriodClose.CloseBy","value":"FINANCEMANAGER"}'; check "r1t d10: the company chooses its finance manager as the closer" '.success and .data.value == "FINANCEMANAGER"'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PCB,\"action\":\"lock\"}"; check "r1t d10: the finance manager locks the second month" '.success and ([.data.periods[]|select(.id == '$PCB')][0].status) == 1'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PCB,\"action\":\"close\"}"; nomsg "r1t d10: the finance manager who locked a month cannot close it" "غیر از کسی که آن را قفل کرده"
+as "$FM2_TOKEN" POST $FG/periods/action "{\"id\":$PCB,\"action\":\"close\"}"; check "r1t d10: a second finance manager closes it" '.success and ([.data.periods[]|select(.id == '$PCB')][0].status) == 2'
+as "$FM_TOKEN" POST $FG/settings '{"key":"PeriodClose.CloseBy","value":"CEO"}'; check "r1t d10: the closer is the CEO again" '.success and .data.value == "CEO"'
+# a month with a draft voucher is not closed (the lock itself is not blocked while the checklist is off); after the voucher is final the CEO closes it
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${PCCD}T00:00:00\",\"description\":\"پیش‌نویس باز ماه سوم\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":4000},{\"accountCode\":\"10101\",\"credit\":4000}]}"; V95=$(val .data.id)
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PCC,\"action\":\"lock\"}"; check "r1t d10: the third month is locked while it still holds the draft" '.success and ([.data.periods[]|select(.id == '$PCC')][0].status) == 1'
+as "$CEO_TOKEN" POST $FG/periods/action "{\"id\":$PCC,\"action\":\"close\"}"; nomsg "r1t d10: the close is refused while a draft voucher is in the month" "بستن دوره ممکن نیست"
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V95,\"action\":\"check\"}"
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$V95,\"action\":\"finalize\"}"; check "r1t d10: the voucher of the third month is final" '.success and .data.status == 2'
+as "$CEO_TOKEN" POST $FG/periods/action "{\"id\":$PCC,\"action\":\"close\"}"; check "r1t d10: once nothing is left open the CEO closes the third month" '.success and ([.data.periods[]|select(.id == '$PCC')][0].status) == 2'
+
+# --- R1t D11 / review M7: a treasury document is not made or edited with a date inside a closed period or year (the bank book and every report of that period would change after the close).
+# The late posting of EVENTS (their source existed before the close) is exercised above (a locked month) and by the unit tests (a closed year); a draft that is dated in the closed year 1400 is refused here.
+as "$FIN_TOKEN" POST $FR/customers '{"name":"مشتری سال بسته آزمون","economicCode":"411111111177","nationalId":"10101010103","postalCode":"1234567893","employerName":"مشتری سال بسته آزمون"}'; CULATE=$(val .data.id)
+as "$TR_TOKEN" POST $FT/receipts "{\"date\":\"2021-06-10T00:00:00\",\"customerId\":$CULATE,\"description\":\"دریافت با تاریخ سال بسته\",\"lines\":[{\"instrument\":1,\"amount\":3000000,\"cashBoxId\":$CB}]}"; nomsg "r1t m7: a cash receipt dated in the closed year 1400 is refused" "بسته‌شده"
+as "$TR_TOKEN" POST $FT/receipts "{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CULATE,\"description\":\"دریافت با تاریخ باز\",\"lines\":[{\"instrument\":1,\"amount\":3000000,\"cashBoxId\":$CB}]}"; check "r1t m7: the same receipt dated today (an open period) is drafted" '.success and .data.status == 0 and .data.totalAmount == 3000000'
+RLATE=$(val .data.id)
+as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$RLATE,\"action\":\"approve\"}"
+as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$RLATE,\"action\":\"post\"}"; check "r1t m7: and posted by treasury" '.success and .data.status == 2'
 
 # =============================================================================================== release F2
 TOKEN=$ADMIN_TOKEN
@@ -2909,6 +2980,22 @@ as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCC,\"action\":\"approv
 as "$TR_TOKEN" POST $FT/statements/import "{\"bankAccountId\":$BA4,\"openingBalance\":0,\"closingBalance\":0,\"rows\":[{\"date\":\"${TODAY}T00:00:00\",\"description\":\"واریز\",\"deposit\":100},{\"date\":\"${TODAY}T00:00:00\",\"description\":\"برداشت\",\"withdrawal\":100}]}"; STD=$(val .data.id)
 as "$FM_TOKEN" POST $FT/reconciliations "{\"statementId\":$STD}"; RCD=$(val .data.id)
 as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCD,\"action\":\"approve\"}"; nomsg "finance: the preparer of a reconciliation cannot approve it" "تهیه‌کننده"
+
+# --- R1t D7: a difference between the books and the statement is accepted only with reconciling items that add up to it
+as "$TR_TOKEN" POST $FT/bank-accounts '{"title":"بانک و - آزمون اقلام مغایرت","bankName":"ملت","accountNumber":"100324200008","iban":"IR320170000000100324200008"}'; RCBA=$(val .data.id)
+as "$TR_TOKEN" POST $FT/statements/import "{\"bankAccountId\":$RCBA,\"openingBalance\":2000,\"closingBalance\":7000,\"rows\":[{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سود روزشمار\",\"deposit\":5000}]}"; RCST=$(val .data.id); RCLINE=$(val '.data.lines[0].id')
+as "$FIN_TOKEN" POST $FT/statements/match "{\"statementId\":$RCST,\"lineId\":$RCLINE,\"kind\":\"interest\"}"
+as "$FM_TOKEN" POST $FG/post-events
+as "$TR_TOKEN" POST $FT/reconciliations "{\"statementId\":$RCST}"; check "r1t d7: the reconciliation of an account whose statement starts 2,000 above the books shows a difference of 2,000" '.success and .data.status == 0 and .data.difference == 2000'
+RCE=$(val .data.id)
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"approve\"}"; nomsg "r1t d7: a difference without items is not approved" "مغایرت صفر نیست"
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"items\",\"items\":[{\"kind\":5,\"amount\":2000,\"note\":\" \"}]}"; nomsg "r1t d7: an item needs a reason" "علت"
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"items\",\"items\":[{\"kind\":5,\"amount\":1500,\"note\":\"مانده قبل از شروع کار سیستم\"}]}"; check "r1t d7: items that do not add up are saved as a draft list" '.success and .data.explainedAmount == 1500'
+as "$FM2_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"approve\"}"; nomsg "r1t d7: items that do not add up to the difference are not accepted" "برابر نیست"
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"items\",\"items\":[{\"kind\":5,\"amount\":2000,\"note\":\"مانده قبل از شروع کار سیستم\"}]}"; check "r1t d7: the items now add up to the difference" '.success and .data.explainedAmount == 2000 and (.data.items|length) == 1'
+as "$FM_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"approve\"}"; nomsg "r1t d7: the manager who saved the items cannot approve the reconciliation" "اقلام مغایرت"
+as "$FIN_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"approve\"}"; nomsg "r1t d7: an accountant does not approve" "مدیر مالی"
+as "$FM2_TOKEN" POST $FT/reconciliations/action "{\"id\":$RCE,\"action\":\"approve\"}"; check "r1t d7: another finance manager approves the explained difference" '.success and .data.status == 1 and .data.difference == 2000 and .data.explainedAmount == 2000'
 
 # --- F1 leftover: cancelling the only cheque of a supplier payment returns the payment requests to Approved (capital purchase, 9900000 with VAT)
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"خرید سرمایه‌ای آزمون\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"estimatedUnitPrice\":9000000,\"technicalRequirements\":\"آزمون\"}]}"; check "f2: capital purchase request submitted" '.success and .data.status == 1'
@@ -2974,6 +3061,11 @@ as "$FIN_TOKEN" POST $FA/depreciation/prepare/$PTIR; no "assets: an approved dep
 as "$FM_TOKEN" GET "$FA/$AS1"; check "assets: accumulated depreciation 1200000, book value 118800000" '.success and .data.accumulatedDepreciation == 1200000 and .data.bookValue == 118800000'
 as "$FM_TOKEN" GET "$FA/$AS2"; check "assets: idle asset depreciated at 30% of the rate: 180000" '.success and .data.accumulatedDepreciation == 180000'
 as "$FM_TOKEN" POST $FG/post-events; as "$FM_TOKEN" GET "$FA/reports/depreciation-schedule?year=1405"; check "assets: depreciation schedule of 1405 totals 1480000 in Tir" '.success and .data.total == 1480000 and ([.data.assets[]|select(.months[3] == 1200000)]|length) == 1'
+# R1t D12: the voucher of the run is the system's; the manager who approved the run (the second one) caused it and cannot finalise it
+FM2ID=$(uid "$FM2_TOKEN")
+as "$FM_TOKEN" GET "$FG/vouchers?Type=3&PageSize=0"; DEPV=$(jq -r --argjson r "$DRN" '[.data.data[]|select(.sourceType == "FnDepreciationRun" and .sourceId == $r)][0].id // empty' "$B")
+as "$FM_TOKEN" GET "$FG/vouchers/$DEPV"; check "r1t d12: the depreciation voucher is the system's (created by nobody, checked) and names the manager who approved the run as its trigger" ".success and .data.createdByUserId == 0 and .data.triggeredByUserId == $FM2ID and .data.status == 1 and .data.sourceType == \"FnDepreciationRun\""
+as "$FM2_TOKEN" POST $FG/vouchers/action "{\"id\":$DEPV,\"action\":\"finalize\"}"; nomsg "r1t d12: the manager who approved the depreciation run cannot finalise its voucher" "شخص دیگری"
 as "$FM_TOKEN" GET "$FA/reports/movement?year=1405"; check "assets: movement report returned" '.success'
 as "$FM_TOKEN" GET "$FA/reports/handover?custodian=x"; check "assets: handover report returned" '.success'
 
@@ -3155,16 +3247,43 @@ as "$FM_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"approve\"}"; check "ou
 BX="$B.xlsx"; XC=$(curl -s -o "$BX" -w '%{http_code}' -H "Authorization: Bearer $PAYR_TOKEN" "$API/$FS/packages/$OP1/export")
 [ "$XC" = "200" ] && [ "$(head -c 2 "$BX")" = "PK" ] && ok "outbox: export is an Excel workbook" || bad "outbox: export is an Excel workbook (http $XC)"
 rm -f "$BX"
+# R1t D6: the insurance list as the text files of the social-security list software: DSKKAR (one record), DSKWOR (one record for the one insured person) and a LAYOUT.TXT with the Verify note
+DX="$B.dsk.zip"; DC=$(curl -s -o "$DX" -w '%{http_code}' -H "Authorization: Bearer $PAYR_TOKEN" "$API/$FS/packages/$OP1/export?format=dsk")
+DSKR=$(python3 -I - "$DX" <<'PY'
+import re, sys, zipfile
+try:
+    z = zipfile.ZipFile(sys.argv[1])
+    lay = z.read('LAYOUT.TXT').decode('utf-8')
+    kw = int(re.search(r'DSKKAR\.TXT[^\n]*record width (\d+)', lay).group(1))
+    ww = int(re.search(r'DSKWOR\.TXT[^\n]*record width (\d+)', lay).group(1))
+    kar = z.read('DSKKAR.TXT').decode('utf-8').split('\r\n')
+    wor = z.read('DSKWOR.TXT').decode('utf-8').split('\r\n')
+    ok = sorted(z.namelist()) == ['DSKKAR.TXT', 'DSKWOR.TXT', 'LAYOUT.TXT'] and 'Verify' in lay and len(kar) == 2 and kar[1] == '' and len(kar[0]) == kw and len(wor) == 2 and wor[1] == '' and len(wor[0]) == ww
+    print('OK' if ok else 'BAD %d %d %d %d' % (kw, ww, len(kar[0]), len(wor[0])))
+except Exception as e:
+    print('ERR', e)
+PY
+)
+[ "$DC" = "200" ] && [ "$DSKR" = "OK" ] && ok "r1t d6: the insurance package is also a zip of DSKKAR.TXT, DSKWOR.TXT and LAYOUT.TXT, the records are as wide as the layout declares and the Verify note is there" || bad "r1t d6: the DSK export of the insurance package (http $DC, $DSKR)"
+rm -f "$DX"
 as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"send\"}"; nomsg "outbox: sending without a configured exchange folder says so" "پیکربندی نشده"
 as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-sent\"}"; no "outbox: marking as sent needs a reference"
-as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-sent\",\"reference\":\"TRK-INS-1\"}"; check "outbox: marked as sent with a reference" '.success and .data.status == 3 and .data.externalReference == "TRK-INS-1"'
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-sent\",\"reference\":\"TRK-INS-1\"}"; nomsg "r1t d6: a manual mark needs a note that says what happened outside the system" "یادداشت را بنویسید"
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-sent\",\"reference\":\"TRK-INS-1\",\"note\":\"ارسال دستی از درگاه سازمان تامین اجتماعی\"}"; check "outbox: marked as sent with a reference and a note" '.success and .data.status == 3 and .data.externalReference == "TRK-INS-1"'
+
 as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-rejected\"}"; no "outbox: a rejection needs a reason"
-as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-accepted\"}"; check "outbox: accepted" '.success and .data.status == 4'
-as "$FM_TOKEN" POST $FS/generate "{\"kind\":3,\"year\":1405,\"month\":1,\"workshopId\":$PWS}"; check "outbox: a new package for the same period (prepared here by the finance manager) is version 2" '.success and .data.version == 2'
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-accepted\"}"; nomsg "r1t d6: the manual acceptance needs a note too" "یادداشت را بنویسید"
+as "$PAYR_TOKEN" POST $FS/action "{\"id\":$OP1,\"action\":\"mark-accepted\",\"note\":\"پذیرش بسته از سازمان تلفنی تایید شد\"}"; check "outbox: accepted (with a note)" '.success and .data.status == 4'
+as "$FM_TOKEN" GET "finance/audit?EntityType=FnOutboxPackage&EntityId=$OP1&PageSize=0"; check "r1t d6: both manual marks are in the audit trail with the note" '.success and ([.data.data[]|select(.action == "OutboxMarkSent" and (.summary|contains("درگاه سازمان")))]|length) == 1 and ([.data.data[]|select(.action == "OutboxMarkOk" and (.summary|contains("پذیرش بسته")))]|length) == 1'
+
+as "$PAYR_TOKEN" POST $FS/generate "{\"kind\":3,\"year\":1405,\"month\":6,\"workshopId\":$PWS}"; nomsg "r1t d6: a package that was sent and accepted is not regenerated or replaced for the same period" "دوباره تولید یا جایگزین"
+as "$PAYR_TOKEN" POST $FS/generate "{\"kind\":3,\"year\":1405,\"month\":6,\"workshopId\":$PWS,\"correctsPackageId\":$OP1}"; nomsg "r1t d6: a correction must say why" "دلیل اصلاح"
+as "$FM_TOKEN" POST $FS/generate "{\"kind\":3,\"year\":1405,\"month\":6,\"workshopId\":$PWS,\"correctsPackageId\":$OP1,\"note\":\"اصلاح ردیف بیمه یک نفر\"}"; check "outbox: a correction package for the same period is version 2 and names the package it corrects" '.success and .data.version == 2 and .data.status == 0 and .data.correctsPackageId == '$OP1
+
 OP2=$(val .data.id)
-as "$PAYR_TOKEN" GET "$FS/packages/$OP1"; check "outbox: the earlier package is superseded" '.success and .data.status == 6 and .data.supersededByPackageId == '$OP2
-as "$FM_TOKEN" POST $FS/action "{\"id\":$OP2,\"action\":\"approve\"}"; nomsg "outbox: the finance manager who prepared a package cannot approve it" "شخص دیگری"
-as "$CEO_TOKEN" POST $FS/action "{\"id\":$OP2,\"action\":\"approve\"}"; check "outbox (review M7): the CEO may approve the package that the finance manager prepared - only its makers are excluded, so a company with one finance manager is never stuck" '.success and .data.status == 1 and .data.approvedByName == "ceo.ci آزمون"'
+as "$PAYR_TOKEN" GET "$FS/packages/$OP1"; check "r1t d6: the accepted package stays as it was (accepted, not superseded)" '.success and .data.status == 4 and .data.supersededByPackageId == null'
+as "$FM_TOKEN" GET "finance/audit?EntityType=FnOutboxPackage&EntityId=$OP1&Action=OutboxCorrection&PageSize=0"; check "r1t d6: the correction is in the audit trail with its reason" '.success and (.data.data|length) == 1 and (.data.data[0].summary|contains("اصلاح ردیف بیمه"))'
+
 as "$FIN_TOKEN" GET "$FS/packages/$OP2"; no "outbox: payroll packages are hidden from the accountants"
 as "$FIN_TOKEN" POST $FS/generate '{"kind":4,"year":1405,"month":1}'; no "outbox: the accountant cannot prepare a payroll package"
 as "$PAYR_TOKEN" POST $FS/generate '{"kind":2,"year":1405,"season":3}'; no "outbox: payroll cannot prepare a VAT package"
@@ -3241,6 +3360,15 @@ HV1=$(val '.data.data[]|select(.number == 1)|.id')
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$HV1,\"action\":\"reverse\"}"; no "f3 migration: an imported voucher cannot be reversed or edited"
 as "$FM_TOKEN" GET "$FG/reports/trial-balance?FiscalYearId=$Y98"; check "f3 migration: the imported year's trial balance is exactly the import" '.success and .data.totalDebit == 3500 and .data.totalCredit == 3500'
 TB98=$(val .data.totalDebit)
+
+# --- R1t D24: a year whose next year already holds an opening voucher (imported from Sepidar) cannot be closed: the close would build a second opening voucher and the balances would come in twice
+as "$FM_TOKEN" POST $FG/years/ensure '{"date":"2014-06-01T00:00:00"}'; check "r1t d24: sandbox fiscal year 1393 with 12 periods" '.success and .data.year == 1393 and (.data.periods|length) == 12'
+Y93=$(val .data.id)
+as "$FM_TOKEN" POST $FG/years/ensure '{"date":"2015-06-01T00:00:00"}'; check "r1t d24: sandbox fiscal year 1394" '.success and .data.year == 1394'
+Y94=$(val .data.id)
+as "$FM_TOKEN" POST "$FM2/opening?commit=true" "{\"fiscalYearId\":$Y94,\"rows\":[{\"accountCode\":\"1019901\",\"debit\":2000000},{\"accountCode\":\"5039901\",\"credit\":2000000}]}"; check "r1t d24: the opening balances of 1394 are imported from Sepidar (an opening voucher in 1394)" '.success and .data.committed == true and .data.voucherId > 0'
+as "$FM_TOKEN" GET $FG/years; for P in $(jq -r --argjson y "$Y93" '.data[]|select(.id == $y)|.periods[].id' "$B"); do as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; done
+as "$FM_TOKEN" POST $FG/years/$Y93/close '{}'; nomsg "r1t d24: year 1393 cannot be closed while 1394 already has an opening voucher (a second one would double the balances)" "قبلاً سند افتتاحیه ثبت شده است"
 
 # --- parallel run
 as "$FM_TOKEN" GET "$FM2/parallel-run/status"; check "f3 parallel run: nothing signed off yet" '.success and .data.requiredMonths == 3 and .data.consecutiveCleanPeriods == 0 and .data.goLiveReady == false'
@@ -3386,7 +3514,11 @@ as "$FM_TOKEN" GET "$FG/close-checklist/$PEND2"; check "f3 close: enforced, the 
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PEND2,\"action\":\"lock\"}"; nomsg "f3 close: the lock is refused while items are red" "فهرست کنترل"
 as "$FIN_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"reason":"x"}'; no "f3 close: only the finance manager overrides"
 as "$FM_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{}'; no "f3 close: an override needs a reason"
-as "$FM_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"reason":"پیش‌نویس به ماه بعد منتقل می‌شود"}'; check "f3 close: override with a reason" '.success and .data.overridden == true and .data.canLock == true and (.data.overrideReason|length) > 0'
+as "$FM_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"reason":"پیش‌نویس به ماه بعد منتقل می‌شود"}'; check "f3 close: one finance manager asks to pass the red item with a reason: the request waits for a second manager (not overridden yet)" '.success and .data.overridden == false and .data.overridePending == true and .data.canLock == false and (.data.overrideRequestReason|length) > 0'
+as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PEND2,\"action\":\"lock\"}"; nomsg "r1t d10: the lock stays refused while the request waits for the second manager" "فهرست کنترل"
+as "$FM_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"action":"approve"}'; nomsg "r1t d10: the manager who asked cannot approve his own request" "مدیر مالی دیگری"
+as "$FM2_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"action":"approve"}'; check "r1t d10: a second finance manager approves: the checklist is overridden and the period can be locked" '.success and .data.overridden == true and .data.overridePending == false and .data.canLock == true'
+
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PEND2,\"action\":\"lock\"}"; check "f3 close: the period locks after the override" '.success'
 as "$FM_TOKEN" POST $FG/settings '{"key":"CloseChecklist.Enforce","value":"0"}'; check "f3 close: enforcement switched off again" '.success and .data.value == "0"'
 
@@ -3400,6 +3532,16 @@ as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"finalize\"}"; 
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"ceo-approve\"}"; no "f3 controls: the finance manager cannot give the CEO approval"
 as "$CEO_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"ceo-approve\"}"; check "f3 controls: CEO approval recorded" '.success and (.data.ceoApprovedByUserId|type) == "number"'
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV,\"action\":\"finalize\"}"; check "f3 controls: the voucher finalizes after the CEO approval" '.success and .data.status == 2'
+# R1t D9: a voucher edited after the CEO approved it goes back to draft and loses the approval; it is finalised only after the CEO has approved the new content
+as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند بالای حد دوم\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":2000000},{\"accountCode\":\"10101\",\"credit\":2000000}]}"; TV2=$(val .data.id)
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$TV2,\"action\":\"check\"}"
+as "$CEO_TOKEN" POST $FG/vouchers/action "{\"id\":$TV2,\"action\":\"ceo-approve\"}"; check "r1t d9: the CEO approves the checked voucher above the threshold" '.success and (.data.ceoApprovedByUserId|type) == "number" and .data.status == 1'
+as "$FIN_TOKEN" POST $FG/vouchers "{\"id\":$TV2,\"date\":\"${TODAY}T00:00:00\",\"description\":\"سند بالای حد دوم\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":2100000},{\"accountCode\":\"10101\",\"credit\":2100000}]}"; check "r1t d9: an edit of the amount sends the voucher back to draft and voids the CEO approval" '.success and .data.status == 0 and .data.ceoApprovedByUserId == null and (.data.lastEditedAt|type) == "string"'
+as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$TV2,\"action\":\"check\"}"; check "r1t d9: the second accountant checks the edited voucher again" '.success and .data.status == 1'
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV2,\"action\":\"finalize\"}"; nomsg "r1t d9: the finance manager cannot finalise it: the CEO has not seen the new amount" "مدیرعامل"
+as "$CEO_TOKEN" POST $FG/vouchers/action "{\"id\":$TV2,\"action\":\"ceo-approve\"}"; check "r1t d9: the CEO approves the new content" '.success and (.data.ceoApprovedByUserId|type) == "number"'
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TV2,\"action\":\"finalize\"}"; check "r1t d9: and the voucher is finalised with the new amount" '.success and .data.status == 2 and .data.totalAmount == 2100000'
+as "$FM_TOKEN" GET "finance/audit?EntityType=FnVoucher&EntityId=$TV2&Action=CeoApprovalVoid&PageSize=0"; check "r1t d9: the voiding of the approval is in the audit trail, written by the person who edited" '.success and (.data.data|length) == 1 and (.data.data[0].userName|length) > 0'
 as "$FM_TOKEN" POST $FG/approval-thresholds "{\"id\":$THR,\"minAmount\":1500000,\"isActive\":false}"; check "f3 controls: threshold deactivated" '.success and .data.isActive == false'
 
 # --- attachment rule
@@ -3417,10 +3559,14 @@ as "$FIN_TOKEN" POST $FG/vouchers/copy "{\"id\":$V1}"; check "f3 controls: copy 
 CPV=$(val .data.id)
 as "$FIN_TOKEN" POST $FG/templates '{"title":"اجاره ماهانه","dayOfMonth":5,"lines":[{"accountCode":"80108","debit":300000},{"accountCode":"10101","credit":300000}]}'; check "f3 controls: voucher template saved" '.success and (.data.lines|length) == 2'
 PCUR=$(as "$FM_TOKEN" GET "$FG/years" >/dev/null; jq -r --arg t "$TODAY" '.data[]|select(.legalEntityId == 1 and .isImported == false)|.periods[]|select((.startDate[0:10] <= $t) and (.endDate[0:10] >= $t))|.id' "$B" | head -n1)
-as "$FIN_TOKEN" POST $FG/templates/generate "{\"periodId\":$PCUR}"; check "f3 controls: the template is drafted once for the period" '.success and .data.drafted == 1 and .data.skipped == 0 and (.data.voucherIds|length) == 1'
+as "$FIN_TOKEN" POST $FG/templates/generate "{\"periodId\":$PCUR}"; nomsg "r1t d25: an accountant does not trigger the template drafts (finance manager only)" "مدیر مالی"
+call POST $FG/templates/generate "{\"periodId\":$PCUR}"; nomsg "r1t d25: neither does the PMO user" "مدیر مالی"
+as "$FM_TOKEN" POST $FG/templates/generate "{\"periodId\":$PCUR}"; check "f3 controls: the template is drafted once for the period (by the finance manager)" '.success and .data.drafted == 1 and .data.skipped == 0 and (.data.voucherIds|length) == 1'
+
 TPV=$(val '.data.voucherIds[0]')
-as "$FIN_TOKEN" POST $FG/templates/generate "{\"periodId\":$PCUR}"; check "f3 controls: generating again drafts nothing" '.success and .data.drafted == 0 and .data.skipped == 1'
+as "$FM_TOKEN" POST $FG/templates/generate "{\"periodId\":$PCUR}"; check "f3 controls: generating again drafts nothing" '.success and .data.drafted == 0 and .data.skipped == 1'
 as "$FIN_TOKEN" GET "$FG/vouchers/$TPV"; check "f3 controls: the drafted voucher is a draft dated on day 5 of the Persian month" '.success and .data.status == 0 and .data.totalAmount == 300000'
+as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$TPV,\"action\":\"check\"}"; nomsg "r1t d12: the finance manager who generated the template draft cannot check it himself" "شخص دیگری"
 MASS="{\"rows\":[{\"group\":\"g1\",\"date\":\"${TODAY}T00:00:00\",\"description\":\"گروه یک\",\"accountCode\":\"80108\",\"debit\":100},{\"group\":\"g1\",\"date\":\"${TODAY}T00:00:00\",\"accountCode\":\"10101\",\"credit\":100},{\"group\":\"g2\",\"date\":\"${TODAY}T00:00:00\",\"description\":\"گروه دو\",\"accountCode\":\"80108\",\"debit\":200},{\"group\":\"g2\",\"date\":\"${TODAY}T00:00:00\",\"accountCode\":\"10101\",\"credit\":200}]}"
 as "$FIN_TOKEN" POST $FG/vouchers/mass-import "$(jq -c '. + {dryRun:true} | .rows += [{group:"g3",date:"'${TODAY}'T00:00:00",accountCode:"7777777",debit:5},{group:"g3",date:"'${TODAY}'T00:00:00",accountCode:"10101",credit:5}]' <<< "$MASS")"; check "f3 controls: mass entry preview counts 2 good vouchers and 1 error and creates nothing" '.success and .data.dryRun == true and .data.vouchers == 2 and .data.lines == 4 and (.data.errors|length) == 1 and (.data.voucherIds|length) == 0'
 as "$FIN_TOKEN" POST $FG/vouchers/mass-import "$(jq -c '. + {dryRun:false}' <<< "$MASS")"; check "f3 controls: mass entry creates 2 drafts" '.success and .data.vouchers == 2 and (.data.voucherIds|length) == 2 and (.data.errors|length) == 0'
@@ -3791,6 +3937,81 @@ as "$FM_TOKEN" POST $FG/post-events
 evlist; check "r1 retention: the event is Dr receivable / Cr retention receivable for the retention, with no revenue and no VAT" '[.data.data[]|select(.sourceNumber == "'$RELNO'")][0].lines as $l | ([$l[]|select(.accountRole == "AccountsReceivable")|.debit]|add) == '$HELD' and ([$l[]|select(.accountRole == "RetentionReceivable")|.credit]|add) == '$HELD' and ($l|length) == 2'
 as "$FIN_TOKEN" POST $FR/invoices "$(jq -c '.advanceRecovery = 1000000' <<< "$INVJ")"; nomsg "r1 sales advance: recovery above the advance received (none) is refused" "پیش‌دریافت"
 
+# --- R1t D6: the taxpayer (Moadian) package of the month: one row for each reportable invoice and its lines; the retention release (RELNO) is not a sale and is left out
+as "$FM_TOKEN" GET $FG/years; read -r MOAY MOAM MOAFROM MOATO <<< "$(jq -r --argjson y "$FYT" --arg t "$TODAY" '.data[]|select(.id == $y)|.year as $yr|.periods[]|select(.startDate[0:10] <= $t and .endDate[0:10] >= $t)|"\($yr) \(.number) \(.startDate[0:10]) \(.endDate[0:10])"' "$B")"
+MOAJ1="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CULATE,\"type\":4,\"description\":\"فروش کالا برای آزمون مودیان\",\"lines\":[{\"description\":\"قطعه الف\",\"quantity\":2,\"unitPrice\":1000000},{\"description\":\"قطعه ب\",\"quantity\":1,\"unitPrice\":500000},{\"description\":\"قطعه ج\",\"quantity\":4,\"unitPrice\":250000}]}"
+MOAJ2="{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CULATE,\"type\":5,\"description\":\"خدمات برای آزمون مودیان\",\"lines\":[{\"description\":\"خدمات نصب\",\"quantity\":1,\"unitPrice\":700000}]}"
+as "$FIN_TOKEN" POST $FR/invoices "$MOAJ1"; check "r1t d6: a sales invoice with three lines is saved: net 3,500,000, VAT 350,000" '.success and .data.status == 0 and (.data.lines|length) == 3 and .data.netAmount == 3500000 and .data.vatAmount == 350000'
+MOA1=$(val .data.id)
+as "$FM_TOKEN" POST $FR/invoices/action "{\"id\":$MOA1,\"action\":\"approve\"}"; MOANO1=$(val .data.number); check "r1t d6: and approved by the finance manager" '.success and .data.status == 2'
+as "$FIN_TOKEN" POST $FR/invoices "$MOAJ2"; check "r1t d6: a second invoice with one line is saved" '.success and .data.status == 0 and (.data.lines|length) == 1 and .data.vatAmount == 70000'
+MOA2=$(val .data.id)
+as "$FM_TOKEN" POST $FR/invoices/action "{\"id\":$MOA2,\"action\":\"approve\"}"; MOANO2=$(val .data.number); check "r1t d6: and approved too" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $FG/post-events
+as "$FM_TOKEN" GET "$FX/taxpayer-sales?From=${MOAFROM}T00:00:00&To=${MOATO}T00:00:00&PageSize=0"; MOAN=$(val '.data.data|length')
+check "r1t d6: the taxpayer sales of the month list both new invoices and not the retention release" '.success and ([.data.data[]|select(.number == "'$MOANO1'")]|length) == 1 and ([.data.data[]|select(.number == "'$MOANO2'")]|length) == 1 and ([.data.data[]|select(.number == "'$RELNO'")]|length) == 0'
+as "$FIN_TOKEN" POST $FS/generate "{\"kind\":1,\"year\":$MOAY,\"month\":$MOAM}"
+MOAP=$(val .data.id); MOALN=$(val '[.data.tables[]|select(.name == "Lines")|.rows]|add')
+check "r1t d6: the package of the month has the Invoices table with one row for each reportable invoice ($MOAN), then the Lines table" '.success and .data.status == 0 and .data.rowCount == '$MOAN' and ([.data.tables[].name]) == ["Invoices","Lines"] and ([.data.tables[]|select(.name == "Lines")|.rows][0]) > '$MOAN
+as "$FM_TOKEN" POST $FS/action "{\"id\":$MOAP,\"action\":\"approve\"}"; check "r1t d6: the finance manager approves the taxpayer package" '.success and .data.status == 1'
+# the rows of the package are read from the Excel file (the sheets Invoices and Lines, header row first); the file is turned into the shape {data:{tables:[{name,columns,rows}]}} for the checks below
+BX="$B.xlsx"; XC=$(curl -s -o "$BX" -w '%{http_code}' -H "Authorization: Bearer $FIN_TOKEN" "$API/$FS/packages/$MOAP/export")
+python3 -I - "$BX" > "$BX.json" <<'PY'
+import html, json, re, sys, zipfile
+
+def col(letters):
+    n = 0
+    for ch in letters:
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+try:
+    z = zipfile.ZipFile(sys.argv[1])
+    names = re.findall(r'<sheet name="([^"]+)"', z.read('xl/workbook.xml').decode('utf-8'))
+    tables = []
+    for i, name in enumerate(names):
+        xml = z.read('xl/worksheets/sheet%d.xml' % (i + 1)).decode('utf-8')
+        grid = []
+        for row in re.findall(r'<row\b.*?</row>', xml, re.S):
+            cells = {}
+            for ref, attrs, body in re.findall(r'<c r="([A-Z]+)\d+"([^>]*)>(.*?)</c>', row, re.S):
+                kind = re.search(r't="(\w+)"', attrs)
+                kind = kind.group(1) if kind else 'n'
+                if kind == 'inlineStr':
+                    value = html.unescape(''.join(re.findall(r'<t[^>]*>(.*?)</t>', body, re.S)))
+                elif kind == 'b':
+                    value = '1' in body
+                else:
+                    number = float(re.search(r'<v>(.*?)</v>', body, re.S).group(1))
+                    value = int(number) if number == int(number) else number
+                cells[col(ref)] = value
+            width = max(cells) + 1 if cells else 0
+            grid.append([cells.get(k) for k in range(width)])
+        tables.append({'name': name, 'columns': grid[0] if grid else [], 'rows': grid[1:]})
+    print(json.dumps({'success': True, 'data': {'tables': tables}}))
+except Exception as e:
+    print(json.dumps({'success': False, 'message': str(e)}))
+PY
+cp "$BX.json" "$B"; rm -f "$BX" "$BX.json"
+MOAVAT=$(val '[.data.tables[]|select(.name == "Invoices")|.rows[]|(if .[2] == "CreditNote" then -.[8] else .[8] end)]|add')
+MOAOTHER=$(jq -c --arg n "$MOANO1" '[.data.tables[]|select(.name == "Invoices")|.rows[]|select(.[0] != $n)|{invoiceNo: .[0], taxId: ("TAX" + (.[0] | gsub("[^0-9A-Za-z]"; ""))), status: "accepted"}]' "$B")
+check "r1t d6: the Excel file has the two sheets Invoices and Lines with a header row, one row for each invoice ($MOAN) and each line ($MOALN)" '.success and ([.data.tables[].name]) == ["Invoices","Lines"] and ([.data.tables[]|select(.name == "Invoices")|.rows|length][0]) == '$MOAN' and ([.data.tables[]|select(.name == "Lines")|.rows|length][0]) == '$MOALN' and ([.data.tables[]|select(.name == "Invoices")|.rows[]|select(.[0] == "'$MOANO1'" or .[0] == "'$MOANO2'")]|length) == 2'
+check "r1t d6: the invoice with three lines has exactly three rows in Lines: rows 1 to 3, net 2,000,000 / 500,000 / 1,000,000, VAT 200,000 / 50,000 / 100,000" '([.data.tables[]|select(.name == "Lines")|.rows[]|select(.[0] == "'$MOANO1'")]|length) == 3 and ([.data.tables[]|select(.name == "Lines")|.rows[]|select(.[0] == "'$MOANO1'")|.[1]]) == [1,2,3] and ([.data.tables[]|select(.name == "Lines")|.rows[]|select(.[0] == "'$MOANO1'")|.[8]]) == [2000000,500000,1000000] and ([.data.tables[]|select(.name == "Lines")|.rows[]|select(.[0] == "'$MOANO1'")|.[10]]) == [200000,50000,100000]'
+check "r1t d6: the retention release is neither an invoice row nor a line of the package, and the other invoice has its one line" '([.data.tables[]|select(.name == "Invoices")|.rows[]|select(.[0] == "'$RELNO'")]|length) == 0 and ([.data.tables[]|select(.name == "Lines")|.rows[]|select(.[0] == "'$RELNO'")]|length) == 0 and ([.data.tables[]|select(.name == "Lines")|.rows[]|select(.[0] == "'$MOANO2'")]|length) == 1'
+[ "$XC" = "200" ] && ok "r1t d6: the Excel export of the package is served" || bad "r1t d6: the Excel export of the package is served (http $XC)"
+rm -f "$BX"
+ack() { CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/$FS/packages/$1/ack" -H "Authorization: Bearer $FIN_TOKEN" -H 'Content-Type: application/json' --data-binary "$2"); }
+ack $MOAP "[{\"invoiceNo\":\"NOPE-1\",\"taxId\":\"X1\",\"status\":\"accepted\"}]"; nomsg "r1t d6: an answer for an invoice that is not in the package is refused" "در این بسته نیست"
+ack $MOAP "[{\"invoiceNo\":\"$MOANO2\",\"status\":\"accepted\"}]"; nomsg "r1t d6: an accepted answer without the tax id is refused" "شناسه مالیاتی لازم است"
+ack $MOAP "[{\"invoiceNo\":\"$MOANO1\",\"taxId\":\"MOATAX1\",\"status\":\"accepted\"}]"; check "r1t d6: the answer of the tax office for one invoice is imported: one accepted, the others wait, the package is sent" '.success and .data.rows == 1 and .data.accepted == 1 and .data.rejected == 0 and .data.unanswered == '$((MOAN - 1))' and .data.status == 3'
+ack $MOAP "[{\"invoiceNo\":\"$MOANO1\",\"taxId\":\"MOATAX1\",\"status\":\"accepted\"}]"; check "r1t d6: the same answer again changes nothing" '.success and .data.unchanged == 1 and .data.accepted == 0 and (.data.message|contains("چیزی تغییر نکرد"))'
+ack $MOAP "[{\"invoiceNo\":\"$MOANO1\",\"taxId\":\"OTHERTAX\",\"status\":\"accepted\"}]"; nomsg "r1t d6: an invoice that was accepted with one tax id is not given another" "با شناسه مالیاتی دیگری"
+as "$FM_TOKEN" GET "$FX/taxpayer-sales?From=${MOAFROM}T00:00:00&To=${MOATO}T00:00:00&PageSize=0"; check "r1t d6: the tax id of the answer is written on the invoice (accepted), the other invoice is not answered yet" '.success and ([.data.data[]|select(.number == "'$MOANO1'" and .taxId == "MOATAX1" and .taxSentStatus == 2)]|length) == 1 and ([.data.data[]|select(.number == "'$MOANO2'" and .taxSentStatus == 0)]|length) == 1'
+ack $MOAP "$MOAOTHER"; check "r1t d6: the answers for the remaining invoices complete the package: it is accepted by the answer of the other side" '.success and .data.status == 4 and .data.accepted == '$((MOAN - 1))' and .data.unanswered == 0'
+as "$FIN_TOKEN" POST $FS/generate "{\"kind\":1,\"year\":$MOAY,\"month\":$MOAM}"; nomsg "r1t d6: a package that the tax office accepted is not regenerated for the month" "دوباره تولید یا جایگزین"
+as "$FM_TOKEN" GET "$FS/packages/$MOAP/tie-out"; check "r1t d6: the tie-out compares the VAT of the package ($MOAVAT) with the ledger account 30205: what the ledger posted from the invoices agrees exactly" '.success and .data.rows[0].key == "VatSales" and .data.rows[0].accountCode == "30205" and .data.rows[0].packageAmount == '$MOAVAT' and .data.rows[0].differenceFromSource == 0'
+as "$FM_TOKEN" GET "finance/audit?EntityType=FnOutboxPackage&EntityId=$MOAP&Action=OutboxAck&PageSize=0"; check "r1t d6: both imports of the answer are in the audit trail" '.success and (.data.data|length) == 2'
+
 # --- 16: the dashboard profit is final vouchers only and reconciles with the income statement
 as "$FM_TOKEN" GET finance/dashboard; N0=$(val .data.netProfitYtd)
 as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${TODAY}T00:00:00\",\"description\":\"پیش‌نویس داشبورد\",\"lines\":[{\"accountCode\":\"10101\",\"debit\":777000},{\"accountCode\":\"60102\",\"credit\":777000}]}"; VDR=$(val .data.id)
@@ -4055,6 +4276,9 @@ fv "{\"date\":\"2024-07-20T00:00:00\",\"description\":\"وصول از مشتری
 fv "{\"date\":\"2024-08-10T00:00:00\",\"description\":\"هزینه اداری\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":50000000},{\"accountCode\":\"10102\",\"credit\":50000000}]}"
 
 
+# R1t D7 helpers: the finance manager approves a treasury leg document and a treasury user (not the recorder, not the approver) posts it
+legs() { as "$FM_TOKEN" POST "$FT/$1/action" "{\"id\":$2,\"action\":\"approve\"}"; as "$TR_TOKEN" POST "$FT/$1/action" "{\"id\":$2,\"action\":\"post\",\"reference\":\"TRK-LEG-$2\"}"; }
+bankbal() { as "$FM_TOKEN" GET "$FT/bank-accounts?PageSize=0"; jq -r --argjson i "$1" '([.data.data[]|select(.id == $i)][0].balance // 0) | round' "$B"; }
 # --- section 6: loans (Persian calendar schedule, exact annuity)
 as "$FM_TOKEN" POST $FLN/limits '{"bankName":"بانک آزمون F3","limitAmount":2000000000,"validFrom":"2025-03-21T00:00:00","validTo":"2026-03-20T00:00:00","note":"سقف آزمون"}'; check "f3 loan: facility limit defined" '.success and .data.limitAmount == 2000000000'
 LIM=$(val .data.id)
@@ -4067,7 +4291,19 @@ LN2=$(val .data.id)
 as "$TR_TOKEN" POST $FLN '{"bankName":"x","amount":0,"startDate":"2025-06-22T00:00:00","ratePercent":10,"installmentCount":3}'; no "f3 loan: amount must be positive"
 as "$AUD_TOKEN" POST $FLN/action "{\"id\":$LN1,\"action\":\"disburse\",\"date\":\"2025-06-22T00:00:00\",\"bankAccountId\":$BA1}"; no "f3 loan: the auditor cannot disburse"
 as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2025-07-23T00:00:00\"}"; no "f3 loan: an instalment cannot be paid before the loan is disbursed"
-as "$TR_TOKEN" POST $FLN/action "{\"id\":$LN1,\"action\":\"disburse\",\"date\":\"2025-06-22T00:00:00\",\"bankAccountId\":$BA1}"; check "f3 loan: disbursement posts a voucher and activates the loan" '.success and .data.status == 1 and .data.disbursementVoucherId > 0 and .data.outstandingPrincipal == 1200000000'
+LB0=$(bankbal $BA1)
+as "$FIN_TOKEN" POST $FLN/action "{\"id\":$LN1,\"action\":\"disburse\",\"date\":\"2025-06-22T00:00:00\",\"bankAccountId\":$BA1}"; LGID=$(val '.data.openCashLegs[0].id')
+check "r1t d7: the disbursement only drafts a treasury receipt of 1,199,000,000 (the loan less the 1,000,000 fee); the loan waits" '.success and .data.status == 4 and (.data.openCashLegs|length) == 1 and .data.openCashLegs[0].kind == "Receipt" and .data.openCashLegs[0].amount == 1199000000'
+[ "$(bankbal $BA1)" = "$LB0" ] && ok "r1t d7: the bank book has not moved while the receipt waits" || bad "r1t d7: the bank book moved before treasury settled the receipt"
+as "$FIN_TOKEN" POST $FT/receipts/action "{\"id\":$LGID,\"action\":\"post\"}"; nomsg "r1t d7: the person who recorded the loan cannot settle its receipt" "مجوز"
+as "$FIN_TOKEN" POST $FT/receipts/action "{\"id\":$LGID,\"action\":\"approve\"}"; nomsg "r1t d7: an accountant does not approve a treasury leg (finance manager only)" "مدیر مالی"
+as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$LGID,\"action\":\"approve\"}"; check "r1t d7: the finance manager approves the receipt" '.success and .data.status == 1'
+as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$LGID,\"action\":\"post\",\"reference\":\"TRK-LN1\"}"; nomsg "r1t d7: the approver cannot settle the receipt" "نهایی کند"
+as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$LGID,\"action\":\"post\",\"reference\":\"TRK-LN1\"}"; check "r1t d7: a treasury user settles the receipt" '.success and .data.status == 2'
+[ "$(bankbal $BA1)" = "$((LB0 + 1199000000))" ] && ok "r1t d7: the bank book shows exactly +1,199,000,000" || bad "r1t d7: the bank book moved $(( $(bankbal $BA1) - LB0 )) instead of 1,199,000,000"
+as "$FM_TOKEN" POST $FG/post-events
+as "$FM_TOKEN" GET $FLN/$LN1; check "f3 loan: the settled receipt activates the loan (no open leg left)" '.success and .data.status == 1 and .data.outstandingPrincipal == 1200000000 and (.data.openCashLegs|length) == 0'
+
 as "$TR_TOKEN" POST $FLN/action "{\"id\":$LN1,\"action\":\"disburse\",\"date\":\"2025-06-22T00:00:00\",\"bankAccountId\":$BA1}"; no "f3 loan: no second disbursement"
 as "$FM_TOKEN" GET $FLN/utilisation; check "f3 loan: the limit shows 1,200,000,000 used and 800,000,000 available" '.success and ([.data.facilities[]|select(.id == '$LIM')][0]|(.utilised == 1200000000 and .available == 800000000))'
 as "$FIN_TOKEN" POST $FLN/accrual/run/$P4; check "f3 loan: accrual for Tir drafts one row" '.success and (.data|length) == 1 and .data[0].status == 0'
@@ -4078,10 +4314,25 @@ as "$FIN_TOKEN" POST $FLN/accrual/$AC1/approve; no "f3 loan: the preparer cannot
 as "$FIN2_TOKEN" POST $FLN/accrual/$AC1/approve; check "f3 loan: the second person approves the accrual; a voucher is posted" '.success and .data.status == 1 and .data.voucherId > 0'
 as "$FIN_TOKEN" POST $FLN/accrual/run/$P4; check "f3 loan: the accrual run is idempotent" '.success and (.data|length) == 0'
 as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":2,\"bankAccountId\":$BA1,\"date\":\"2025-08-23T00:00:00\"}"; no "f3 loan: instalments are paid in order"
-as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2025-07-23T00:00:00\"}"; check "f3 loan: instalment 1 paid (113,471,516) with a voucher" '.success and .data.installments[0].status == 1 and .data.installments[0].voucherId > 0 and .data.outstandingPrincipal == 1110528484'
+LB1=$(bankbal $BA1)
+as "$FIN_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2025-07-23T00:00:00\"}"; LGID=$(val '.data.openCashLegs[0].id')
+check "r1t d7: instalment 1 waits for treasury (status 2) with a payment of 113,471,516" '.success and .data.installments[0].status == 2 and .data.openCashLegs[0].kind == "Payment" and .data.openCashLegs[0].amount == 113471516'
+legs payments $LGID; as "$FM_TOKEN" POST $FG/post-events
+[ "$(bankbal $BA1)" = "$((LB1 - 113471516))" ] && ok "r1t d7: the bank book shows exactly -113,471,516 for instalment 1" || bad "r1t d7: instalment 1 moved the bank book by $(( $(bankbal $BA1) - LB1 ))"
+as "$TR_TOKEN" GET $FLN/$LN1; check "f3 loan: instalment 1 paid (113,471,516) after treasury settled it" '.success and .data.installments[0].status == 1 and .data.outstandingPrincipal == 1110528484'
+
 as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2025-07-23T00:00:00\"}"; no "f3 loan: an instalment is paid once"
-as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":2,\"bankAccountId\":$BA1,\"date\":\"2025-08-23T00:00:00\",\"penalty\":500000}"; check "f3 loan: instalment 2 with a late penalty of 500,000" '.success and .data.installments[1].status == 1 and .data.installments[1].penaltyPaid == 500000'
-as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":3,\"bankAccountId\":$BA1,\"date\":\"2025-09-23T00:00:00\"}"; check "f3 loan: after three payments the outstanding principal is 926,181,373" '.success and .data.outstandingPrincipal == 926181373'
+LB2=$(bankbal $BA1)
+as "$FIN_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":2,\"bankAccountId\":$BA1,\"date\":\"2025-08-23T00:00:00\",\"penalty\":500000}"; LGID=$(val '.data.openCashLegs[0].id')
+check "r1t d7: instalment 2 waits with the penalty included in the payment" '.success and .data.installments[1].status == 2 and .data.openCashLegs[0].amount == (.data.installments[1].total + 500000)'
+legs payments $LGID; as "$FM_TOKEN" POST $FG/post-events
+[ "$(bankbal $BA1)" = "$((LB2 - 113971516))" ] && ok "r1t d7: the bank book shows exactly -113,971,516 (instalment 113,471,516 + penalty 500,000)" || bad "r1t d7: instalment 2 moved the bank book by $(( $(bankbal $BA1) - LB2 ))"
+as "$TR_TOKEN" GET $FLN/$LN1; check "f3 loan: instalment 2 with a late penalty of 500,000" '.success and .data.installments[1].status == 1 and .data.installments[1].penaltyPaid == 500000'
+
+as "$FIN_TOKEN" POST $FLN/pay "{\"loanId\":$LN1,\"sequence\":3,\"bankAccountId\":$BA1,\"date\":\"2025-09-23T00:00:00\"}"; LGID=$(val '.data.openCashLegs[0].id')
+legs payments $LGID; as "$FM_TOKEN" POST $FG/post-events
+as "$TR_TOKEN" GET $FLN/$LN1; check "f3 loan: after three payments the outstanding principal is 926,181,373" '.success and .data.outstandingPrincipal == 926181373'
+
 as "$TR_TOKEN" POST $FLN/action "{\"id\":$LN2,\"action\":\"cancel\"}"; check "f3 loan: a draft loan can be cancelled" '.success and .data.status == 3'
 as "$AUD_TOKEN" GET $FLN; check "f3 loan: the auditor can read loans" '.success and (.data|length) >= 1'
 
@@ -4252,15 +4503,23 @@ GBK=$(cb 90101); GBK2=$(cb 90201); GPP=$(cb 10604)
 as "$FIN_TOKEN" POST $FCM/guarantees/limits '{"bankName":"ملت","limit":8000000000}'; no "f3b guarantee: only the finance manager sets a bank limit"
 as "$FM_TOKEN" POST $FCM/guarantees/limits '{"bankName":"ملت","limit":8000000000,"note":"آزمون"}'; check "f3b guarantee: the finance manager sets the bank limit" '.success'
 as "$FIN_TOKEN" POST $FCM/guarantees "{\"direction\":1,\"kind\":1,\"bankName\":\"ملت\",\"bankAccountId\":$BAR,\"guaranteeNo\":\"G-1\",\"partyName\":\"کارفرمای آزمون\",\"amount\":5000000000,\"issueDate\":\"2026-10-24T00:00:00\",\"expiryDate\":\"2027-10-23T00:00:00\",\"feeAmount\":1200000}"
-check "f3b guarantee: an issued guarantee of 5,000,000,000 is registered with a fee of 1,200,000 and a prepaid balance of 1,200,000" '.success and .data.status == 1 and .data.amount == 5000000000 and .data.feeRemaining == 1200000 and (.data.number|length) > 0'
+GLEG=$(val '.data.openCashLegs[0].id')
+check "f3b guarantee: an issued guarantee of 5,000,000,000 is registered; its fee of 1,200,000 waits as a treasury payment (nothing booked yet)" '.success and .data.status == 1 and .data.amount == 5000000000 and .data.feeAmount == 0 and (.data.openCashLegs|length) == 1 and .data.openCashLegs[0].amount == 1200000 and (.data.number|length) > 0'
+
 GID=$(val .data.id)
 [ "$(cb 90101)" = "$((GBK + 5000000000))" ] && [ "$(cb 90201)" = "$((GBK2 - 5000000000))" ] && ok "f3b guarantee: the memorandum accounts carry exactly 5,000,000,000" || bad "f3b guarantee: the memorandum accounts carry exactly 5,000,000,000"
-[ "$(cb 10604)" = "$((GPP + 1200000))" ] && ok "f3b guarantee: the fee is deferred (prepaid +1,200,000)" || bad "f3b guarantee: the fee is deferred (got $(( $(cb 10604) - GPP )))"
+legs payments $GLEG; as "$FM_TOKEN" POST $FG/post-events
+[ "$(cb 10604)" = "$((GPP + 1200000))" ] && ok "f3b guarantee: the fee is deferred (prepaid +1,200,000) once treasury has paid it" || bad "f3b guarantee: the fee is deferred (got $(( $(cb 10604) - GPP )))"
+
 as "$FIN_TOKEN" POST $FCM/guarantees "{\"direction\":1,\"kind\":1,\"bankName\":\"ملت\",\"bankAccountId\":$BAR,\"guaranteeNo\":\"G-1\",\"partyName\":\"کارفرمای آزمون\",\"amount\":1000,\"issueDate\":\"2026-10-24T00:00:00\",\"expiryDate\":\"2027-10-23T00:00:00\"}"; no "f3b guarantee: the same bank and guarantee number cannot be registered twice"
 as "$FIN_TOKEN" POST $FCM/guarantees "{\"direction\":1,\"kind\":1,\"bankName\":\"ملت\",\"partyName\":\"x\",\"amount\":1000,\"issueDate\":\"2026-10-24T00:00:00\",\"expiryDate\":\"2026-10-01T00:00:00\"}"; no "f3b guarantee: an expiry before the issue date is refused"
 as "$FM_TOKEN" GET "$FCM/guarantees/exposure"; check "f3b guarantee: exposure at the bank is 5,000,000,000 of a limit of 8,000,000,000 (3,000,000,000 available)" '.success and ([.data.banks[]|select(.bankName == "ملت" and .exposure == 5000000000 and .limit == 8000000000 and .available == 3000000000 and .activeCount == 1)]|length) == 1 and .data.totalIssued == 5000000000'
-as "$FIN_TOKEN" POST $FCM/guarantees/action "{\"id\":$GID,\"action\":\"extend\",\"newExpiry\":\"2028-01-20T00:00:00\",\"feeAmount\":300000}"; check "f3b guarantee: an extension with a fee of 300,000 moves the expiry and defers the extra fee" '.success and (.data.expiryDate|tostring|test("2028-01-20|1406/10/30"))'
-[ "$(cb 10604)" = "$((GPP + 1500000))" ] && ok "f3b guarantee: prepaid fee is 1,500,000 after the extension" || bad "f3b guarantee: prepaid fee is 1,500,000 after the extension (got $(( $(cb 10604) - GPP )))"
+as "$FIN_TOKEN" POST $FCM/guarantees/action "{\"id\":$GID,\"action\":\"extend\",\"newExpiry\":\"2028-01-20T00:00:00\",\"feeAmount\":300000}"; GLEG2=$(val '.data.openCashLegs[0].id')
+check "f3b guarantee: an extension with a fee of 300,000 moves the expiry; the extra fee waits as a treasury payment" '.success and (.data.expiryDate|tostring|test("2028-01-20|1406/10/30")) and (.data.openCashLegs|length) == 1 and .data.openCashLegs[0].amount == 300000'
+
+legs payments $GLEG2; as "$FM_TOKEN" POST $FG/post-events
+[ "$(cb 10604)" = "$((GPP + 1500000))" ] && ok "f3b guarantee: prepaid fee is 1,500,000 after the extension fee is paid" || bad "f3b guarantee: prepaid fee is 1,500,000 after the extension (got $(( $(cb 10604) - GPP )))"
+
 as "$FM_TOKEN" GET "$FCM/guarantees?direction=1"; check "f3b guarantee: the register lists the extension event" '.success and ([.data[]|select(.id == '$GID')|.events[]|select(.kind == 1)]|length) == 1'
 as "$FIN_TOKEN" POST $FCM/guarantees/action "{\"id\":$GID,\"action\":\"release\",\"date\":\"2026-10-24T00:00:00\"}"; check "f3b guarantee: release closes the guarantee" '.success and .data.status == 2'
 [ "$(cb 90101)" = "$GBK" ] && [ "$(cb 90201)" = "$GBK2" ] && ok "f3b guarantee: release reverses the memorandum exactly" || bad "f3b guarantee: release reverses the memorandum exactly"
@@ -4452,19 +4711,38 @@ LNR=$(val .data.id)
 as "$FM_TOKEN" POST $FG/post-events
 LS_L0=$(cb 30501); LS_B0=$(cb 10102); LS_X0=$(cb 80302); LS_G0=$(cb 60303)
 CF_L0=$(cfrow Loans)
-as "$TR_TOKEN" POST $FLN/action "{\"id\":$LNR,\"action\":\"disburse\",\"date\":\"2026-10-01T00:00:00\",\"bankAccountId\":$BA1}"; check "scope: the rial loan is disbursed without any rate" '.success and .data.status == 1'
+as "$FIN_TOKEN" POST $FLN/action "{\"id\":$LNR,\"action\":\"disburse\",\"date\":\"2026-10-01T00:00:00\",\"bankAccountId\":$BA1}"; LGID=$(val '.data.openCashLegs[0].id')
+check "r1t d7: the rial loan waits for the treasury receipt of 3,000,000" '.success and .data.status == 4 and .data.openCashLegs[0].amount == 3000000'
+legs receipts $LGID; as "$FM_TOKEN" POST $FG/post-events
+as "$FM_TOKEN" GET $FLN/$LNR; check "scope: the rial loan is disbursed without any rate" '.success and .data.status == 1'
+
 [ "$(cb 30501)" = "$((LS_L0 - 3000000))" ] && [ "$(cb 10102)" = "$((LS_B0 + 3000000))" ] && ok "scope: the rial loan posts exactly 3,000,000 (liability credited, bank debited)" || bad "scope: the rial loan posts 3,000,000 (liability moved $(( LS_L0 - $(cb 30501) )), bank moved $(( $(cb 10102) - LS_B0 )))"
-as "$TR_TOKEN" POST $FLN/pay "{\"loanId\":$LNR,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2026-10-24T00:00:00\"}"; check "scope: the first rial instalment is paid without any rate" '.success'
+as "$FIN_TOKEN" POST $FLN/pay "{\"loanId\":$LNR,\"sequence\":1,\"bankAccountId\":$BA1,\"date\":\"2026-10-24T00:00:00\"}"; LGID=$(val '.data.openCashLegs[0].id')
+check "r1t d7: the first rial instalment waits for treasury" '.success and .data.installments[0].status == 2 and .data.openCashLegs[0].amount == 1000000'
+legs payments $LGID; as "$FM_TOKEN" POST $FG/post-events
+as "$FM_TOKEN" GET $FLN/$LNR; check "scope: the first rial instalment is paid without any rate" '.success and .data.installments[0].status == 1'
+
 [ "$(cb 30501)" = "$((LS_L0 - 3000000 + 1000000))" ] && [ "$(cb 10102)" = "$((LS_B0 + 3000000 - 1000000))" ] && [ "$(cb 80302)" = "$LS_X0" ] && [ "$(cb 60303)" = "$LS_G0" ] && ok "scope: the rial instalment falls exactly 1,000,000 on the liability and the bank, with no exchange difference" || bad "scope: the rial instalment (liability $(( $(cb 30501) - LS_L0 )), bank $(( $(cb 10102) - LS_B0 )))"
 [ "$(cfrow Loans)" = "$((CF_L0 + 2000000))" ] && ok "r3 v: the cash flow row Loans is exactly +3,000,000 received - 1,000,000 repaid" || bad "r3 v: the cash flow row Loans moved $(( $(cfrow Loans) - CF_L0 )), expected 2,000,000"
 as "$TR_TOKEN" POST $FXA/letters-of-credit "{\"providerId\":$PA,\"bankAccountId\":$BA1,\"currencyCode\":\"IRR\",\"amount\":200000000,\"openDate\":\"${TODAY}T00:00:00\",\"expiryDate\":\"2030-01-01T00:00:00\",\"marginPercent\":20}"; check "scope: a rial letter of credit is opened" '.success and .data.status == 1 and .data.amount == 200000000 and .data.currencyCode == "IRR"'
 LCR=$(val .data.id)
 LR_B0=$(cb 10102); LR_D0=$(cb 10402); LR_P0=$(cb 30101); LR_F0=$(cb 80201); LR_G0=$(cb 60303); LR_L0=$(cb 80302)
-as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"margin\",\"amount\":40000000,\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: margin 40,000,000 posted" '.success and .data.marginPaid == 40000000'
-as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"fee\",\"amount\":500000,\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: fee 500,000 posted" '.success and .data.feesPaid == 500000'
+as "$FIN_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"margin\",\"amount\":40000000,\"date\":\"${TODAY}T00:00:00\"}"; LGID=$(val '.data.openCashLegs[0].id')
+check "r1t d7: the margin is only drafted as a treasury payment; nothing is recorded on the letter of credit yet" '.success and .data.marginPaid == 0 and .data.openCashLegs[0].amount == 40000000'
+legs payments $LGID
+as "$FM_TOKEN" GET $FXA/letters-of-credit/$LCR; check "scope: rial letter of credit: margin 40,000,000 posted" '.success and .data.marginPaid == 40000000'
+
+as "$FIN_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"fee\",\"amount\":500000,\"date\":\"${TODAY}T00:00:00\"}"; LGID=$(val '.data.openCashLegs[0].id')
+legs payments $LGID
+as "$FM_TOKEN" GET $FXA/letters-of-credit/$LCR; check "scope: rial letter of credit: fee 500,000 posted" '.success and .data.feesPaid == 500000'
+
 as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"documents\",\"foreignInvoiceRef\":\"INV-RIAL-1\",\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: documents received" '.success and .data.status == 2'
 as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"pay\",\"rate\":1.1,\"date\":\"${TODAY}T00:00:00\"}"; nomsg "r3 h7: a rial letter of credit cannot be paid at a typed rate of 1.1 (it would overpay 20,000,000)" "نرخ ۱"
-as "$TR_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"pay\",\"rate\":1,\"date\":\"${TODAY}T00:00:00\"}"; check "scope: rial letter of credit: payment at rate 1 = 200,000,000, margin 40,000,000 released, status paid" '.success and .data.status == 3 and .data.settledBase == 200000000 and ([.data.postings[]|select(.kind == 3)][0].amount) == 200000000 and ([.data.postings[]|select(.kind == 4)][0].amount) == 40000000'
+as "$FIN_TOKEN" POST $FXA/letters-of-credit/action "{\"id\":$LCR,\"action\":\"pay\",\"rate\":1,\"date\":\"${TODAY}T00:00:00\"}"; LGID=$(val '.data.openCashLegs[0].id')
+check "r1t d7: the settlement waits for treasury and only the cash part (200,000,000 less the 40,000,000 margin) is paid by the bank" '.success and .data.status == 2 and .data.openCashLegs[0].amount == 160000000'
+legs payments $LGID; as "$FM_TOKEN" POST $FG/post-events
+as "$FM_TOKEN" GET $FXA/letters-of-credit/$LCR; check "scope: rial letter of credit: payment at rate 1 = 200,000,000, margin 40,000,000 released, status paid" '.success and .data.status == 3 and .data.settledBase == 200000000 and ([.data.postings[]|select(.kind == 3)][0].amount) == 200000000 and ([.data.postings[]|select(.kind == 4)][0].amount) == 40000000'
+
 [ "$(cb 10402)" = "$LR_D0" ] && ok "scope: rial letter of credit: the margin deposit account is back to its start (40,000,000 in, 40,000,000 released)" || bad "scope: rial letter of credit: the deposit account moved $(( $(cb 10402) - LR_D0 ))"
 [ "$(cb 10102)" = "$((LR_B0 - 200500000))" ] && ok "scope: rial letter of credit: the bank paid exactly 200,500,000 (200,000,000 + 500,000 fee)" || bad "scope: rial letter of credit: the bank paid 200,500,000 (got $(( LR_B0 - $(cb 10102) )))"
 [ "$(cb 30101)" = "$((LR_P0 + 200000000))" ] && [ "$(cb 80201)" = "$((LR_F0 + 500000))" ] && ok "scope: rial letter of credit: the supplier payable is debited 200,000,000 and the fee expense 500,000" || bad "scope: rial letter of credit: payable moved $(( $(cb 30101) - LR_P0 )), fee moved $(( $(cb 80201) - LR_F0 ))"
@@ -4772,18 +5050,6 @@ curl -s -o "$B" -X POST "$API/Documents?Description=att&Name=letter-att&Code=OFC
 curl -s -o "$B" -X POST "$API/Documents?Description=att2&Name=letter-att2&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att2.txt"; OATT2=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 curl -s -o "$B" -X POST "$API/Documents?Description=ctl&Name=letter-ctl&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-ctl.txt"; OCTL=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 [ -n "$OATT" ] && [ -n "$OATT2" ] && [ -n "$OCTL" ] && ok "office r1 C1: three test files uploaded" || bad "office r1 C1: three test files uploaded"
-# R1a2 (H3): a loose file (no record refers to it yet) is changed only by the user who uploaded it or by the PMO; a signed-in stranger is refused and the bytes stay
-OCTLF=$(ls src/WebApi/UploadedDocuments/${OCTL}* 2>/dev/null | head -n1)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: a signed-in stranger cannot replace the bytes of a file somebody else uploaded" "فقط کاربری که بارگذاری کرده"
-{ [ -n "$OCTLF" ] && grep -q "control bytes" "$OCTLF"; } && ok "r1a2 h3: and the stored bytes of the file are unchanged" || bad "r1a2 h3: and the stored bytes of the file are unchanged (file '$OCTLF')"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: a user with an office role but not the uploader is refused as well" "فقط کاربری که بارگذاری کرده"
-curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $QC_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OCTL\",\"name\":\"renamed-by-stranger\",\"description\":\"x\",\"code\":\"X\"}"; nomsg "r1a2 h3: nor can a stranger edit the name and description of the file" "فقط کاربری که بارگذاری کرده"
-# control: change-file works for the uploader on an ordinary document (so the refusals below are not caused by the request format)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "office r1 C1: control: the uploader replaces the bytes of his own ordinary document" || bad "office r1 C1: control: the uploader replaces the bytes of his own ordinary document (code $CODE)"
-{ [ -n "$OCTLF" ] && grep -q "forged bytes" "$OCTLF"; } && ok "r1a2 h3: and the new bytes are stored" || bad "r1a2 h3: and the new bytes are stored (file '$OCTLF')"
-curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $OEMP_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OCTL\",\"name\":\"letter-ctl-renamed\",\"description\":\"ctl\",\"code\":\"OFC\"}"; jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the uploader edits the name and description of his file" || bad "r1a2 h3: the uploader edits the name and description of his file"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-ctl.txt"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the PMO may replace a loose file of somebody else" || bad "r1a2 h3: the PMO may replace a loose file of somebody else (code $CODE)"
-as "$FM_TOKEN" GET "$FAU?EntityType=Document&PageSize=0"; check "r1a2 h3: every replacement of file bytes is in the audit trail with the SHA-256 of the old and the new bytes" '.success and ([.data.data[]|select(.action == "FileReplaced" and ((.beforeJson|fromjson).sha256|test("^[A-Za-z0-9+/]{43}=$")) and ((.afterJson|fromjson).sha256|test("^[A-Za-z0-9+/]{43}=$")) and ((.beforeJson|fromjson).sha256 != (.afterJson|fromjson).sha256))]|length) >= 2'
 as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه داخلی با پیوست\",\"bodyHtml\":\"<p>متن</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CHK}],\"attachments\":[{\"documentId\":\"$OATT\",\"fileName\":\"letter-att.txt\"}]}"; check "office r1 C1: internal draft with an attachment saved" '.success and (.data.attachments|length) == 1'
 OL3=$(val .data.id)
 # R1a2 (H3): once a record refers to a file it is changed only through the owner module: even the uploader, even the PMO is refused while the draft carries it (the refusal names the owner)
@@ -4802,8 +5068,12 @@ OATTF=$(ls src/WebApi/UploadedDocuments/${OATT}* 2>/dev/null | head -n1)
 as "$OCHK_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; { [ "$CODE" = "200" ] && grep -q "attachment bytes C1" "$B"; } && ok "office r1 C1: the recipient position downloads the attachment through the letter" || bad "office r1 C1: the recipient position downloads the attachment through the letter got $CODE"
 as "$OEMP_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; [ "$CODE" = "200" ] && ok "office r1 C1: the writer downloads it" || bad "office r1 C1: the writer downloads it got $CODE"
 as "$QC_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; [ "$CODE" = "404" ] && ok "office r1 C1: somebody who is not a party gets 404 for the attachment" || bad "office r1 C1: somebody who is not a party gets 404 for the attachment got $CODE"
-as "$OCHK_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "404" ] && ok "office r1 C1: the generic download does not serve a letter file even to a party" || bad "office r1 C1: the generic download does not serve a letter file even to a party got $CODE"
+as "$OCHK_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "200" ] && ok "r1t d8: the generic download serves a letter file to a party of the letter" || bad "r1t d8: the generic download serves a letter file to a party of the letter got $CODE"
+as "$QC_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "404" ] && ok "r1t d8: the generic download answers a stranger 404 for a letter file, like the letter endpoint (review L1: it does not tell that the file exists)" || bad "r1t d8: the generic download answers a stranger 404 for a letter file got $CODE"
+as "$QC_TOKEN" GET "Documents/get-file-info?fileId=$OATT"; check "r1t d8: the name and hash of a letter file do not reach a stranger" '.success == false'
+
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: verify: signed, valid, the hashes agree and no file changed" '.success and .data.valid == true and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1t d8: even the writer cannot replace the file of a signed letter" "تغییر یا حذف آن مجاز نیست"
 printf 'forged bytes\n' > "$OATTF"
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: after the bytes of the attachment are swapped on disk verify fails and names the file" ".success and .data.valid == false and (.data.changedDocumentIds|index(\"$OATT\")) != null"
 printf 'attachment bytes C1\n' > "$OATTF"
@@ -5031,9 +5301,8 @@ as "$OHR_TOKEN" POST $OFA/shift-assignments "{\"employeeId\":$OAEMP,\"shiftId\":
 as "$OHR_TOKEN" POST $OFA/shift-assignments "{\"employeeId\":$OAEMP,\"shiftId\":$OSH,\"fromDate\":\"2026-06-01T00:00:00\",\"reason\":\"شروع به کار در واحد\"}"; check "office: shift assigned to the employee; the reason of the back-dating is stored with it and the date text is Shamsi" '.success and .data.shiftId == '$OSH' and .data.reason == "شروع به کار در واحد" and .data.fromDateText == "1405/03/11"'
 as "$OHR_TOKEN" GET $OFA/policy; check "office r1f: the attendance policy starts with the starred defaults: grace 15, overtime counts only up to an approved request, early-leave deduction on, the close confirmed by the finance manager only, 1320 minutes (22 hours) a month, delay x 3, no daily maximum, no rounding" '.success and .data.graceMinutes == 15 and .data.overtimeRequiresApproval == true and .data.earlyLeaveDeduction == true and .data.monthConfirmByHrPeer == false and .data.monthlyOvertimeCapMinutes == 1320 and .data.delayPenaltyFactor == 3 and .data.maxOvertimeMinutesPerDay == null and .data.roundingMinutes == 0'
 as "$OEMP_TOKEN" POST $OFA/policy '{"graceMinutes":5}'; no "office: an ordinary user cannot change the policy"
-as "$OHR_TOKEN" POST $OFA/policy '{"graceMinutes":5,"maxOvertimeMinutesPerDay":120,"overtimeRequiresApproval":false,"roundingMinutes":15}'; nomsg "office r1f (review M6): HR cannot switch the overtime pre-approval off (only the CEO does; switching it on stays with HR)" "تایید پیشینی اضافه"
-as "$OHR_TOKEN" GET $OFA/policy; check "office r1f (review M6): and the refused save changed nothing: grace 15, pre-approval on, no rounding, no daily maximum" '.success and .data.graceMinutes == 15 and .data.overtimeRequiresApproval == true and .data.roundingMinutes == 0 and .data.maxOvertimeMinutesPerDay == null'
-as "$CEO_TOKEN" POST $OFA/policy '{"graceMinutes":5,"maxOvertimeMinutesPerDay":120,"overtimeRequiresApproval":false,"roundingMinutes":15}'; check "office: policy (saved by the CEO, who alone switches the pre-approval off): grace 5, overtime up to 120 minutes a day without a request, rounding 15; the other values keep their defaults" '.success and .data.graceMinutes == 5 and .data.maxOvertimeMinutesPerDay == 120 and .data.overtimeRequiresApproval == false and .data.roundingMinutes == 15 and .data.earlyLeaveDeduction == true and .data.monthlyOvertimeCapMinutes == 1320 and .data.delayPenaltyFactor == 3 and .data.monthConfirmByHrPeer == false'
+call GET $OFA/policy; check "r1t d25: the PMO user reads the attendance policy" '.success and .data.graceMinutes == 5'
+call POST $OFA/policy '{"graceMinutes":20}'; no "r1t d25: the PMO user does not change the attendance policy (HR only)"
 
 # --- leave requests and the balance (Tir 1405 = 2026-06-22 .. 2026-07-22)
 as "$OEMP_TOKEN" GET "$OF/leaves/balance?employeeId=$OAEMP&year=1405&month=4"; check "office: the leave balance of Tir is the projected entitlement of four months" '.success and .data.entitlementRate > 0 and .data.pendingDays == 0 and .data.available == (.data.entitlementRate * 4)'
@@ -8447,16 +8716,16 @@ cdnonempty "ceo drill fin.receivable_invoices_overdue: the scenario has an open 
 cdcheck "ceo drill fin.receivable_invoices_overdue: the rows are the open sales invoices past their due date (number, customer, open amount)" '.success and .data.totalCount == ('"$CDOIX"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.openAmount|n)"]|sort) == ('"$CDOIX"').rows'
 cdcheck "ceo drill fin.receivable_invoices_overdue: the open amount is the overdue receivables of the finance dashboard; the oldest first, with its due date and days" '.success and .data.totals.openAmount == ('"$CDOIX"').sum and .data.totals.openAmount == ('"$CDFD"').receivablesOverdue and .data.rows[0].dueDate == '"$(cdpd "$CDOID")"' and .data.rows[0].daysOverdue == '"$(cdlate "$CDOID")"
 
-# --- fin.payables_by_supplier: the approved supplier invoices less what was paid against an invoice
-as "$CEO_TOKEN" GET "procurement/invoices?Status=3&PageSize=0"; CDPI=$(jq -c '.data.data|map({k:.providerId,name:.providerName,a:.totalAmount})' "$B")
-as "$CEO_TOKEN" GET "procurement/payments?Status=2&PageSize=0"; CDPY=$(jq -c '.data.data|map(select(.invoiceId != null))|map({k:.providerId,name:.providerName,p:.amount})' "$B")
-CDPX=$(jq -nc --argjson i "$CDPI" --argjson p "$CDPY" "$CDJQ"'([$i[].k] + [$p[].k] | unique) as $keys
-  | [$keys[] as $k | ([$i[]|select(.k == $k)]) as $ii | ([$p[]|select(.k == $k)]) as $pp
-     | {k:$k, name:(($ii[0].name) // ($pp[0].name)), count:($ii|length), inv:([$ii[].a]|add // 0), paid:([$pp[].p]|add // 0)} | . + {open:(.inv - .paid)} | select(.open != 0)]
-  | {n:length, invoiced:(map(.inv)|add // 0), paid:(map(.paid)|add // 0), open:(map(.open)|add // 0), max:(map(.open)|max), rows:(map("\(.k)|\(.name)|\(.count)|\(.inv|n)|\(.paid|n)|\(.open|n)")|sort)}')
+# --- fin.payables_by_supplier: R1t review M1 - one source with the finance dashboard and the CEO dashboard: the payables lines of the accounting events, per supplier (credit = recorded, debit = paid or settled)
+as "$CEO_TOKEN" GET "finance/events?PageSize=0"
+CDPX=$(jq -c "$CDJQ"'[.data.data[]|select(.status != 9)|.lines[]?|select(.accountRole == "AccountsPayable" and .providerId != null)] as $l
+  | ($l|map(.providerId)|unique) as $keys
+  | [$keys[] as $k | ([$l[]|select(.providerId == $k)]) as $ll
+     | {k:$k, name:($ll[0].providerName), count:([$ll[]|select((.credit // 0) > 0)]|length), inv:([$ll[].credit // 0]|add // 0), paid:([$ll[].debit // 0]|add // 0)} | . + {open:(.inv - .paid)} | select(.open != 0)]
+  | {n:length, invoiced:(map(.inv)|add // 0), paid:(map(.paid)|add // 0), open:(map(.open)|add // 0), max:(map(.open)|max), rows:(map("\(.k)|\(.name)|\(.count)|\(.inv|n)|\(.paid|n)|\(.open|n)")|sort)}' "$B")
 cdrill fin.payables_by_supplier "top=200"
 cdnonempty "ceo drill fin.payables_by_supplier: the scenario has a supplier with an open balance" "$(jq -r '.n' <<<"$CDPX")"
-cdcheck "ceo drill fin.payables_by_supplier: one row per supplier with invoices, invoiced, paid against an invoice and the open balance, as the invoice and payment lists of procurement" '.success and .data.totalCount == ('"$CDPX"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.invoices)|\(.invoiced|n)|\(.paid|n)|\(.open|n)"]|sort) == ('"$CDPX"').rows'
+cdcheck "ceo drill fin.payables_by_supplier: one row per supplier with invoices, invoiced, paid against an invoice and the open balance, as the payables lines of the accounting events" '.success and .data.totalCount == ('"$CDPX"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.invoices)|\(.invoiced|n)|\(.paid|n)|\(.open|n)"]|sort) == ('"$CDPX"').rows'
 cdcheck "ceo drill fin.payables_by_supplier: the totals are the sums of the lists, and the open total is the open payables of the finance dashboard; the biggest balance first" '.success and .data.totals.invoiced == ('"$CDPX"').invoiced and .data.totals.paid == ('"$CDPX"').paid and .data.totals.open == ('"$CDPX"').open and .data.totals.open == ('"$CDFD"').payablesOpen and .data.rows[0].open == ('"$CDPX"').max'
 
 # --- fin.payables_overdue: the payables ageing of the general ledger as of today (the notes schedule of the financial statements), one row per supplier; overdue = the three buckets over 30 days, the headline figure
@@ -10484,6 +10753,11 @@ as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c share 
 as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c final\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 92)T00:00:00\",\"amount\":1000,\"isFinal\":true}"; check "r1c: the final statement milestone of the contract" '.success and .data.isFinal == true'
 as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c final again\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 93)T00:00:00\",\"amount\":1000,\"isFinal\":true}"; nomsg "r1c: a contract has one final statement milestone" "فقط یک مرحله قطعی می‌تواند باشد"
 
+# --- R1t D19: every pass-through of the legacy CSV actions (2 inventory exports, 1 events export, 1 events/mark) left one audit row, all by the finance manager
+TOKEN=$ADMIN_TOKEN
+as "$FM_TOKEN" GET "finance/audit?EntityType=SepidarLegacyCsv&Action=LegacyCsv&PageSize=0"; check "r1t d19: the legacy CSV pass-throughs are in the audit trail (4 rows, one user)" '.success and (.data.data|length) == 4 and ([.data.data[].userId]|unique|length) == 1'
+# --- R1t D20: the whole audit trail of this run fits the hash chain
+as "$FM_TOKEN" GET finance/audit/verify; check "r1t d20: the audit trail fits the hash chain from the first sealed row to the last" '.success and .data.ok == true and .data.checked > 0'
 [ "$AIMOCK_STARTED" = 1 ] && { pkill -f mock_llm.py 2>/dev/null || true; }
 TOKEN=$ADMIN_TOKEN
 rm -f "$OUT/ai-voice.wav" "$OUT/ai-voice.txt" "$OUT/ai-brief.wav"

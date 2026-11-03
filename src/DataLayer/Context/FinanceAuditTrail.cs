@@ -37,7 +37,7 @@ namespace DataLayer.Context
             // release R1f: the guarded fields of an employee (daily wage, exemption flags, children, hard-and-harmful work, bank account) and the facts a payroll run depends on are audited;
             // the wage, the exemption flags, the children count and the hard-and-harmful flag are written as a "changed" marker only (never a value and never a hash) and the account number masked,
             // so the trail shows that and when they changed, never the amount or the condition. The audit service returns these record types with their changes only to the readers of payroll.
-            { typeof(FnEmployee), new[] { "PersonnelCode", "BankIban", "DailyWage", "ExemptionFlags", "ChildrenCount", "HardAndHarmful", "PendingApproval", "IsActive", "EndDate", "WorkshopId", "CostCenterId", "DefaultWorkOrderId", "UserId" } },
+            { typeof(FnEmployee), new[] { "PersonnelCode", "BankIban", "IdentityCardNumber", "Nationality", "DailyWage", "ExemptionFlags", "ChildrenCount", "HardAndHarmful", "PendingApproval", "IsActive", "EndDate", "WorkshopId", "CostCenterId", "DefaultWorkOrderId", "UserId" } },
             { typeof(FnAsset), null },
             { typeof(FnLegalEntity), null },
             { typeof(FnIntercompanyPair), null },
@@ -45,6 +45,7 @@ namespace DataLayer.Context
             { typeof(FnAttachmentRule), null },
             { typeof(FnSetting), null },
             { typeof(FnCloseChecklist), null },
+            { typeof(FnCloseOverride), null },
             { typeof(FnMigrationAccountMap), null },
             { typeof(FnParallelRun), null },
             { typeof(FnExportLayoutColumn), null },
@@ -67,6 +68,9 @@ namespace DataLayer.Context
             { typeof(FnTaxBracket), null },
             { typeof(FnPayment), null },
             { typeof(FnReceipt), null },
+            // R1t D7: the bank reconciliation (who prepared and approved it, the difference accepted) and the explained items that let one with a difference be approved
+            { typeof(FnBankReconciliation), new[] { "BankAccountId", "StatementId", "AsOfDate", "BookBalance", "BankBalance", "Difference", "ExplainedAmount", "Status", "PreparedByUserId", "ApprovedByUserId", "ItemsByUserId" } },
+            { typeof(FnBankReconciliationItem), null },
             { typeof(FnLoan), null },
             // review 3 (finding 21): payment lines (payee IBAN masked), loan instalments and the F3b records; settlements and bonus runs record status and totals only, never a person's pay
             { typeof(FnPaymentLine), new[] { "PayeeIban", "Amount", "Instrument", "BankAccountId" } },
@@ -246,6 +250,9 @@ namespace DataLayer.Context
             { typeof(Proc.PurchaseOrder), "سفارش خرید" },
             { typeof(Proc.SupplierInvoice), "فاکتور تأمین‌کننده" },
             { typeof(Proc.PaymentRequest), "درخواست پرداخت" },
+            { typeof(FnBankReconciliation), "مغایرت‌گیری بانکی" },
+            { typeof(FnBankReconciliationItem), "قلم مغایرت بانکی" },
+            { typeof(FnCloseOverride), "تایید ویژه بستن دوره یا سال" },
             { typeof(Proc.SupplierQuote), "پیشنهاد قیمت تامین‌کننده" },
             { typeof(Proc.SupplierProfile), "پرونده تامین‌کننده" },
         };
@@ -272,7 +279,7 @@ namespace DataLayer.Context
                     Audited[pair.Key] = have.Concat(pair.Value.Where(c => !have.Contains(c))).ToArray();
         }
 
-        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban", "NationalCode", "PhoneNumber" };
+        private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban", "NationalCode", "PhoneNumber", "IdentityCardNumber" };
 
         /// <summary>
         /// R1p C1: a voucher line flagged as confidential labour (LabourProtected) is read by PAYROLL, FINANCEMANAGER and CEO only, but the audit trail is read by the auditor too, so the amounts of such a line
@@ -303,6 +310,7 @@ namespace DataLayer.Context
             { (typeof(FnEmployee), "DailyWage"), Special.Marker },
             { (typeof(FnEmployee), "ExemptionFlags"), Special.Marker },
             { (typeof(FnEmployee), "ChildrenCount"), Special.Marker },
+            { (typeof(FnEmployee), "Nationality"), Special.Marker },
             { (typeof(FnEmployee), "HardAndHarmful"), Special.Marker },
             { (typeof(FnEmployeeWage), "DailyWage"), Special.Marker },
             { (typeof(FnEmployeeLoan), "Principal"), Special.Marker },

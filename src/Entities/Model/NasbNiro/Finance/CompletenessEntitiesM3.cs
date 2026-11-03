@@ -9,7 +9,8 @@ namespace Entities.Model.NasbNiro.Finance
 
     public enum FnFacilityType { Loan = 1, Murabaha = 2, Overdraft = 3, Leasing = 4 }
     public enum FnScheduleKind { EqualPrincipal = 1, Annuity = 2, Custom = 3 }
-    public enum FnLoanStatus { Draft = 0, Active = 1, Closed = 2, Cancelled = 3 }
+    /// <summary>Disbursing (R1t D7): the receipt of the money is waiting for treasury; the loan becomes Active when treasury settles it.</summary>
+    public enum FnLoanStatus { Draft = 0, Active = 1, Closed = 2, Cancelled = 3, Disbursing = 4 }
 
     /// <summary>The credit limit a bank gave the company; loans point to it for the utilisation report.</summary>
     public class FnFacilityLimit
@@ -66,7 +67,7 @@ namespace Entities.Model.NasbNiro.Finance
         public DateTime DueDate { get; set; }
         public decimal Principal { get; set; }
         public decimal Interest { get; set; }
-        /// <summary>0 due, 1 paid.</summary>
+        /// <summary>0 due, 1 paid, 2 the payment waits for treasury (R1t D7).</summary>
         public int Status { get; set; }
         public DateTime? PaidDate { get; set; }
         public decimal PenaltyPaid { get; set; }

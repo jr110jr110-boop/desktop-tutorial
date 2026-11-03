@@ -193,9 +193,14 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public bool IsImported { get; set; }
         public int? CeoApprovedByUserId { get; set; }
         public DateTimeOffset? CeoApprovedAt { get; set; }
+        /// <summary>Last change of the date, the description or a line (R1t D9); an approval older than this does not count.</summary>
+        public DateTimeOffset? LastEditedAt { get; set; }
         public int AttachmentCount { get; set; }
         public int CreatedByUserId { get; set; }
         public string CreatorName { get; set; }
+        /// <summary>R1t D12: the person whose action produced a system voucher (cannot finalise it).</summary>
+        public int? TriggeredByUserId { get; set; }
+        public string TriggeredByName { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public string CheckedByName { get; set; }
         public DateTimeOffset? CheckedAt { get; set; }
@@ -691,6 +696,12 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string PostedByName { get; set; }
         public DateTimeOffset? PostedAt { get; set; }
         public int? IbanApprovedByUserId { get; set; }
+        /// <summary>R1t D7: set for a cash leg of a loan ("Loan"), letter of credit ("LetterOfCredit") or bank guarantee ("BankGuarantee"); the document is made and cancelled from that record.</summary>
+        public string SourceType { get; set; }
+        public int? SourceId { get; set; }
+        /// <summary>What the leg does: disburse, installment, margin, fee, pay, refund, guarantee-fee, extend-fee.</summary>
+        public string SourceAction { get; set; }
+        public string ApprovedByName { get; set; }
         public List<PaymentLineDto> Lines { get; set; } = new List<PaymentLineDto>();
         public List<PaymentRequestLinkDto> Requests { get; set; } = new List<PaymentRequestLinkDto>();
     }
@@ -742,6 +753,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? BankAccountId { get; set; }
         public int? ProviderId { get; set; }
         public string Reference { get; set; }
+        /// <summary>Action "items" of a bank reconciliation (R1t D7): the full list of explained reconciling items; it replaces the saved list.</summary>
+        public List<ReconciliationItemDto> Items { get; set; }
     }
 
     public class ReceiptLineDto
@@ -785,6 +798,12 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal AllocatedAmount { get; set; }
         public string CreatorName { get; set; }
         public DateTimeOffset? PostedAt { get; set; }
+        /// <summary>R1t D7: set for a cash leg of a loan, letter of credit or bank guarantee (see <see cref="PaymentDto.SourceType"/>).</summary>
+        public string SourceType { get; set; }
+        public int? SourceId { get; set; }
+        public string SourceAction { get; set; }
+        public string ApprovedByName { get; set; }
+        public string PostedByName { get; set; }
         public List<ReceiptLineDto> Lines { get; set; } = new List<ReceiptLineDto>();
         public List<ReceiptAllocationDto> Allocations { get; set; } = new List<ReceiptAllocationDto>();
     }
@@ -1026,6 +1045,22 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string PreparedByName { get; set; }
         public string ApprovedByName { get; set; }
         public int UnmatchedLines { get; set; }
+        /// <summary>R1t D7: sum of the explained reconciling items; an approval with a non-zero difference needs it to equal the difference.</summary>
+        public decimal ExplainedAmount { get; set; }
+        public string ItemsByName { get; set; }
+        public List<ReconciliationItemDto> Items { get; set; } = new List<ReconciliationItemDto>();
+    }
+
+    /// <summary>One explained reason for a reconciliation difference. Amount is signed like the difference (positive: the bank is above the books).</summary>
+    public class ReconciliationItemDto
+    {
+        /// <summary>1 bank fee or interest not booked yet, 2 deposit or payment in transit, 3 bank error, 4 error in our books, 5 opening balance before go-live, 9 other.</summary>
+        public int Kind { get; set; }
+        public string KindTitle { get; set; }
+        public decimal Amount { get; set; }
+        public string Note { get; set; }
+        /// <summary>M8: the voucher that books the correction; required for kinds 1 and 4 before the reconciliation is approved.</summary>
+        public int? CorrectingVoucherId { get; set; }
     }
 
     public class CreateReconciliationDto

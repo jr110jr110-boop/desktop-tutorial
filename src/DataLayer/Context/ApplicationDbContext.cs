@@ -171,8 +171,10 @@ namespace DataLayer.Context
             beforeSaveTriggers();
 
             ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
+            AuditChain.Scope chain = null;
             try
             {
+                chain = AuditChain.Begin(this);   // R1t D20: the new audit rows take their place in the hash chain (holds the chain lock until the save is over)
                 return base.SaveChanges(acceptAllChangesOnSuccess);
             }
             catch
@@ -182,6 +184,7 @@ namespace DataLayer.Context
             }
             finally
             {
+                chain?.Dispose();
                 ChangeTracker.AutoDetectChangesEnabled = true;
             }
         }
@@ -193,8 +196,10 @@ namespace DataLayer.Context
             beforeSaveTriggers();
 
             ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
+            AuditChain.Scope chain = null;
             try
             {
+                chain = await AuditChain.BeginAsync(this, cancellationToken);   // R1t D20: see SaveChanges
                 return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
             }
             catch
@@ -204,6 +209,7 @@ namespace DataLayer.Context
             }
             finally
             {
+                if (chain != null) await chain.DisposeAsync();
                 ChangeTracker.AutoDetectChangesEnabled = true;
             }
         }

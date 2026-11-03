@@ -23,6 +23,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.HasIndex(x => x.Number).IsUnique();
                 b.HasIndex(x => new { x.Kind, x.Year, x.Month, x.Season, x.WorkshopId });
                 b.HasIndex(x => x.Status);
+                b.HasIndex(x => x.CorrectsPackageId);
             });
 
             // ------------------------------------------------------------------ fixed assets
@@ -130,6 +131,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.FatherName).HasMaxLength(100);
                 b.Property(x => x.NationalCode).HasMaxLength(10).IsRequired();
                 b.Property(x => x.BirthPlace).HasMaxLength(100);
+                b.Property(x => x.IdentityCardNumber).HasMaxLength(20);
+                b.Property(x => x.Nationality).HasMaxLength(50);
                 b.Property(x => x.InsuranceNumber).HasMaxLength(20);
                 b.Property(x => x.InsuranceJobCode).HasMaxLength(20);
                 b.Property(x => x.JobTitle).HasMaxLength(200);

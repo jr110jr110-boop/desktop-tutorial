@@ -204,6 +204,11 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string OverrideReason { get; set; }
         public int? OverriddenByUserId { get; set; }
         public DateTimeOffset? OverriddenAt { get; set; }
+        /// <summary>R1t D10: a manager asked to pass the red items and a second manager has not approved yet.</summary>
+        public bool OverridePending { get; set; }
+        public int? OverrideRequestedByUserId { get; set; }
+        public DateTimeOffset? OverrideRequestedAt { get; set; }
+        public string OverrideRequestReason { get; set; }
         /// <summary>Whether the lock is enforced against the checklist (setting CloseChecklist.Enforce).</summary>
         public bool Enforced { get; set; }
         public bool CanLock { get; set; }
@@ -212,6 +217,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
     public class ChecklistOverrideDto
     {
         public string Reason { get; set; }
+        /// <summary>request (default): a manager asks with a reason; approve: a different manager approves the request; withdraw: the request is dropped (R1t D10).</summary>
+        public string Action { get; set; }
     }
 
     public class FinanceSettingDto

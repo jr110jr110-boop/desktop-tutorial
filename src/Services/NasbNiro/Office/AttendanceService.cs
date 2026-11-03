@@ -191,7 +191,7 @@ namespace Services.NasbNiro.Office
 
         public async Task<ResponseDto<ShiftDto>> SaveShiftAsync(SaveShiftDto dto, CancellationToken ct)
         {
-            if (!IsOrgAdmin) return Bad<ShiftDto>(OfficeText.NotAllowed);
+            if (!IsHr) return Bad<ShiftDto>(OfficeText.NotAllowed);   // R1t (D25): shifts are changed by HR only (the PMO reads)
             if (dto == null) return Bad<ShiftDto>(OfficeText.InvalidData);
             string title = Clean(dto.Title);
             if (title == null) return Bad<ShiftDto>("عنوان شیفت را وارد کنید.");
@@ -272,7 +272,7 @@ namespace Services.NasbNiro.Office
 
         public async Task<ResponseDto<ShiftAssignmentDto>> SaveAssignmentAsync(SaveShiftAssignmentDto dto, CancellationToken ct)
         {
-            if (!IsOrgAdmin) return Bad<ShiftAssignmentDto>(OfficeText.NotAllowed);
+            if (!IsHr) return Bad<ShiftAssignmentDto>(OfficeText.NotAllowed);   // R1t (D25): HR only (the PMO reads)
             if (dto == null || dto.EmployeeId <= 0 || dto.ShiftId <= 0) return Bad<ShiftAssignmentDto>(OfficeText.InvalidData);
             DateTime from = dto.FromDate.Date;
             DateTime? to = dto.ToDate?.Date;
@@ -1203,7 +1203,7 @@ namespace Services.NasbNiro.Office
 
         public async Task<ResponseDto<AttendancePolicyDto>> SavePolicyAsync(AttendancePolicyDto dto, CancellationToken ct)
         {
-            if (!IsOrgAdmin) return Bad<AttendancePolicyDto>(OfficeText.NotAllowed);
+            if (!(IsHr || _user.IsInRole(OfficeRoles.Ceo))) return Bad<AttendancePolicyDto>(OfficeText.NotAllowed);   // R1t (D25) + R1f: HR changes the policy, only the CEO switches the two controls off; the PMO reads
             if (dto == null) return Bad<AttendancePolicyDto>(OfficeText.InvalidData);
             if (dto.GraceMinutes < 0 || dto.GraceMinutes > 120) return Bad<AttendancePolicyDto>("مهلت تاخیر باید بین ۰ تا ۱۲۰ دقیقه باشد.");
             if (dto.MaxOvertimeMinutesPerDay.HasValue && (dto.MaxOvertimeMinutesPerDay < 0 || dto.MaxOvertimeMinutesPerDay > 720)) return Bad<AttendancePolicyDto>("سقف اضافه‌کار روزانه نامعتبر است.");

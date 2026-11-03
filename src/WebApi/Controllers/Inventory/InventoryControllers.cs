@@ -412,8 +412,10 @@ namespace WebApi.Controllers
         [HttpGet("check")]
         public async Task<IActionResult> CheckAsync(CancellationToken ct) => Ok(await _service.CheckAsync(ct));
 
-        /// <summary>CSV file of the documents waiting for Sepidar (UTF-8, opens in Excel).</summary>
+        /// <summary>CSV file of the documents waiting for Sepidar (UTF-8, opens in Excel). R1t D19: a legacy channel, off unless Sepidar:LegacyCsv is on, and then for the finance manager only.</summary>
         [HttpPost("export")]
+        [Authorize(Roles = Services.NasbNiro.Finance.SepidarLegacy.Roles)]
+        [WebApi.Filters.LegacySepidarCsv("inventory-documents-export")]
         public async Task<IActionResult> ExportAsync([FromBody] SepidarExportDto dto, CancellationToken ct)
         {
             var (content, fileName, error) = await _service.ExportCsvAsync(dto, ct);

@@ -1685,6 +1685,10 @@ namespace DataLayer.Migrations
                     b.Property<DateTimeOffset>("RegisterDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("Sha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int?>("UploadedByUserId")
                         .HasColumnType("int");
 
@@ -5484,9 +5488,20 @@ namespace DataLayer.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("Hash")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
                     b.Property<string>("Ip")
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("PrevHash")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<long?>("Seq")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Summary")
                         .HasMaxLength(300)
@@ -5498,6 +5513,10 @@ namespace DataLayer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("At");
+
+                    b.HasIndex("Seq")
+                        .IsUnique()
+                        .HasFilter("[Seq] IS NOT NULL");
 
                     b.HasIndex("UserId");
 
@@ -5829,6 +5848,13 @@ namespace DataLayer.Migrations
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
 
+                    b.Property<decimal>("ExplainedAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("ItemsByUserId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("OutstandingCheques")
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
@@ -5854,6 +5880,41 @@ namespace DataLayer.Migrations
                     b.HasIndex("BankAccountId");
 
                     b.ToTable("FnBankReconciliations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankReconciliationItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("CorrectingVoucherId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("ReconciliationId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CorrectingVoucherId");
+
+                    b.HasIndex("ReconciliationId");
+
+                    b.ToTable("FnBankReconciliationItems", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankStatement", b =>
@@ -6290,6 +6351,56 @@ namespace DataLayer.Migrations
                         .IsUnique();
 
                     b.ToTable("FnCloseChecklists", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnCloseOverride", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("FiscalYearId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Items")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PeriodId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "FiscalYearId");
+
+                    b.HasIndex("Kind", "PeriodId");
+
+                    b.ToTable("FnCloseOverrides", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnConfirmationLetter", b =>
@@ -6921,6 +7032,10 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("HireDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("IdentityCardNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<string>("InsuranceJobCode")
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
@@ -6954,6 +7069,10 @@ namespace DataLayer.Migrations
                         .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Nationality")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<bool>("PendingApproval")
                         .HasColumnType("bit");
@@ -8381,6 +8500,9 @@ namespace DataLayer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<int?>("CorrectsPackageId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -8459,6 +8581,8 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CorrectsPackageId");
 
                     b.HasIndex("Number")
                         .IsUnique();
@@ -8767,6 +8891,20 @@ namespace DataLayer.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<string>("SourceAction")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("SourceData")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("SourceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceType")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -8786,6 +8924,8 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("TerminationId")
                         .HasFilter("[TerminationId] IS NOT NULL");
+
+                    b.HasIndex("SourceType", "SourceId");
 
                     b.ToTable("FnPayments", (string)null);
                 });
@@ -9745,6 +9885,9 @@ namespace DataLayer.Migrations
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
 
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -9784,6 +9927,20 @@ namespace DataLayer.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<string>("SourceAction")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("SourceData")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("SourceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceType")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -9797,6 +9954,8 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("Number")
                         .IsUnique();
+
+                    b.HasIndex("SourceType", "SourceId");
 
                     b.ToTable("FnReceipts", (string)null);
                 });
@@ -10987,6 +11146,9 @@ namespace DataLayer.Migrations
                     b.Property<bool>("IsImported")
                         .HasColumnType("bit");
 
+                    b.Property<DateTimeOffset?>("LastEditedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<bool>("LatePosting")
                         .HasColumnType("bit");
 
@@ -11024,6 +11186,9 @@ namespace DataLayer.Migrations
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
+
+                    b.Property<int?>("TriggeredByUserId")
+                        .HasColumnType("int");
 
                     b.Property<int>("Type")
                         .HasColumnType("int");
@@ -27266,6 +27431,22 @@ namespace DataLayer.Migrations
                     b.Navigation("BankAccount");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankReconciliationItem", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnVoucher", null)
+                        .WithMany()
+                        .HasForeignKey("CorrectingVoucherId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnBankReconciliation", "Reconciliation")
+                        .WithMany("Items")
+                        .HasForeignKey("ReconciliationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Reconciliation");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankStatement", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnBankAccount", "BankAccount")
@@ -31334,6 +31515,11 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankGuarantee", b =>
                 {
                     b.Navigation("Events");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankReconciliation", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnBankStatement", b =>

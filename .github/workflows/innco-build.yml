@@ -171,6 +171,7 @@ jobs:
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
+          Sepidar__LegacyCsv: 'true'  # R1t (D19): the old Sepidar CSV channels are off by default and, when on, for FINANCEMANAGER only; the smoke uses them as the finance manager and checks that the PMO is refused
           Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
@@ -195,6 +196,7 @@ jobs:
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
+          Sepidar__LegacyCsv: 'true'  # R1t (D19): the old Sepidar CSV channels are off by default and, when on, for FINANCEMANAGER only; the smoke uses them as the finance manager and checks that the PMO is refused
           Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
@@ -216,6 +218,7 @@ jobs:
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
+          Sepidar__LegacyCsv: 'true'  # R1t (D19): the old Sepidar CSV channels are off by default and, when on, for FINANCEMANAGER only; the smoke uses them as the finance manager and checks that the PMO is refused
           Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
@@ -287,7 +290,7 @@ jobs:
           # a delivered package never carries a password: install.ps1 sets the real one
           grep -q '"Password": "SET-BY-INSTALL-ps1"' package-output/app/appsettings.json || { echo "::error::package appsettings.json must carry the admin password placeholder"; exit 1; }
           if grep -rqF 'Ci#Adm1n-Build-2026' package-output/app; then echo "::error::the CI test password is in the package"; exit 1; fi
-          cp deploy/install.ps1 deploy/backup.ps1 deploy/Install-PMIS-Server.ps1 deploy/Install-PMIS-Server.cmd package-output/
+          cp deploy/install.ps1 deploy/backup.ps1 deploy/backup-crypto.ps1 deploy/Install-PMIS-Server.ps1 deploy/Install-PMIS-Server.cmd package-output/
           mkdir -p package-output/installers
           cp deploy/installers/README.txt package-output/installers/
           {
@@ -366,9 +369,11 @@ jobs:
           do { Start-Sleep -Seconds 5; $info = Get-ScheduledTaskInfo -TaskName 'INNCO daily backup' }
           while ((Get-ScheduledTask -TaskName 'INNCO daily backup').State -eq 'Running' -or $info.LastRunTime -lt $started.AddSeconds(-5))
           "backup task result=$($info.LastTaskResult)" | Tee-Object -FilePath install-output\3-restore-run-backup.txt
-          $bak = Get-ChildItem D:\INNCO\Backup\database -Filter '*.bak' | Sort-Object LastWriteTime | Select-Object -Last 1
-          Copy-Item $bak.FullName D:\Import\IRNNCO.bak
-          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -RestoreBackup D:\Import\IRNNCO.bak -ReplaceDatabase -UploadedFilesFrom D:\Import\old-app | Tee-Object -FilePath install-output\3-restore-run.txt
+          # on SQL Server Express (and whenever the backup is encrypted at file level) the newest backup is x.bak.enc: install.ps1 -RestoreBackup decrypts it with the sealed key of this server
+          $bak = Get-ChildItem D:\INNCO\Backup\database -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' } | Sort-Object LastWriteTime | Select-Object -Last 1
+          $import = if ($bak.Name -like '*.enc') { 'D:\Import\IRNNCO.bak.enc' } else { 'D:\Import\IRNNCO.bak' }
+          Copy-Item $bak.FullName $import
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -RestoreBackup $import -ReplaceDatabase -UploadedFilesFrom D:\Import\old-app | Tee-Object -FilePath install-output\3-restore-run.txt
           "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\3-restore-run.txt
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 3-restore
 

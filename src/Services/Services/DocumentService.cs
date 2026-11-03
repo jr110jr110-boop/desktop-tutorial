@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
@@ -17,6 +17,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.Logging;
 using Services.Contracts;
+using Services.NasbNiro.Files;
 using Services.Identity.AccountServices;
 using Services.Resources;
 using ViewModels.Exceptions;
@@ -122,6 +123,7 @@ namespace Services.Services
             string uniqeFilename = CreateUniqueFileName(uploadFileDto.File.FileName, documentModel.Id);
             string savedPath = await SaveDocumentAsync(uniqeFilename, uploadFileDto.File);
             documentModel.SetPath(savedPath);
+            documentModel.SetSha256(await FileIntegrity.Sha256Async(GetRelativePath(savedPath)));   // R1t D8: the hash of the stored bytes, kept with the file
 
             await this._uow.SaveChangesAsync();
             return documentModel.Id;
@@ -165,12 +167,17 @@ namespace Services.Services
             doc.SetPath(savedPath)
                 .SetMimeType(new FileInfo(dto.File.FileName).Extension);
 
+            // R1t D8: the hash of the new bytes is kept with the file and the replacement leaves a row in the audit trail (who, and the hash before and after)
+            string newSha256 = await FileIntegrity.Sha256Async(GetRelativePath(savedPath));
+            string oldSha256 = doc.Sha256;
+            doc.SetSha256(newSha256);
+
             _documents.Update(doc);
 
             // the row of the generic audit trail only appears when the path or the type changes; the replacement of the bytes under the same name is recorded here
             IdentityAudit.Add(_uow, _http, CallerId ?? 0, "Document", null, IdentityAudit.FileReplaced,
                 "جایگزینی فایل «" + (doc.Name ?? doc.Code ?? doc.Id.ToString()) + "» (" + doc.Id + ")",
-                new { documentId = doc.Id, sha256 = oldHash }, new { documentId = doc.Id, sha256 = await HashOfAsync(GetRelativePath(savedPath)) });
+                new { documentId = doc.Id, sha256 = oldHash ?? oldSha256 }, new { documentId = doc.Id, sha256 = newSha256 });
 
             if (await _uow.SaveChangesAsync() > 0)
             {
@@ -312,8 +319,9 @@ namespace Services.Services
                 || await _uow.Set<OfUserSignature>().AnyAsync(s => s.ImageDocumentId == documentId);
             if (locked) return "این فایل بخشی از یک نامه ارسال‌شده یا امضای ثبت‌شده است و تغییر یا حذف آن مجاز نیست.";
             // R1q M16: a file that proves an inspection and test plan activity was done must not be replaced or deleted afterwards
-            return await _uow.Set<ItpActivity>().AnyAsync(a => a.EvidenceDocumentId == documentId)
-                ? "این فایل مدرک انجام یک فعالیت برنامه بازرسی و آزمون است و تغییر یا حذف آن مجاز نیست." : null;
+            if (await _uow.Set<ItpActivity>().AnyAsync(a => a.EvidenceDocumentId == documentId))
+                return "این فایل مدرک انجام یک فعالیت برنامه بازرسی و آزمون است و تغییر یا حذف آن مجاز نیست.";
+            return null;
         }
 
         private async Task<string> ReferrerLockAsync(Guid documentId)
@@ -419,7 +427,8 @@ namespace Services.Services
                         Code = x.Code,
                         Description = x.Description,
                         MimeType = x.MimType,
-                        Name = x.Name
+                        Name = x.Name,
+                        Sha256 = x.Sha256
                     })
                 //.SingleOrDefaultAsync(x => x.DocumentId == fileId);
                 .SingleOrDefaultAsync(x => x.Id == fileId);

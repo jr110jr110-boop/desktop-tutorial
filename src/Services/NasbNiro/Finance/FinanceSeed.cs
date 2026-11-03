@@ -227,6 +227,8 @@ namespace Services.NasbNiro.Finance
         }
 
         public const string SettingCloseEnforce = "CloseChecklist.Enforce";
+        /// <summary>R1t D10: who takes the second step of a period close (CEO or FINANCEMANAGER; always a different person from the one who locked it).</summary>
+        public const string SettingPeriodCloseBy = "PeriodClose.CloseBy";
         public const string SettingParallelMonths = "ParallelRun.RequiredMonths";
         public const string SettingSepidarExport = "Finance:SepidarFullExport";
         public const string SettingFxRateType = "Fx.RateType";
@@ -247,7 +249,8 @@ namespace Services.NasbNiro.Finance
             yield return new FnSetting { Key = "BaseCurrency", Value = "IRR", Title = "ارز پایه شرکت" };
             yield return new FnSetting { Key = "Jurisdiction", Value = Iran, Title = "حوزه قضایی (قوانین مالی و مالیاتی)" };
             yield return new FnSetting { Key = "MatchDays", Value = "3", Title = "بازه روز برای تطبیق خودکار صورت‌حساب بانکی (★)" };
-            yield return new FnSetting { Key = SettingCloseEnforce, Value = "0", Title = "الزام فهرست کنترل بستن دوره برای قفل کردن دوره (۱ = فعال؛ پیش از راه‌اندازی خاموش است)" };
+            yield return new FnSetting { Key = SettingCloseEnforce, Value = "1", Title = "الزام فهرست کنترل بستن دوره برای قفل کردن و بستن دوره (۱ = فعال ★؛ عبور از مورد قرمز فقط با درخواست یک مدیر مالی و تایید مدیر مالی دیگر)" };
+            yield return new FnSetting { Key = SettingPeriodCloseBy, Value = "CEO", Title = "بستن نهایی دوره قفل‌شده را چه نقشی انجام می‌دهد (CEO ★ یا FINANCEMANAGER)؛ همیشه شخصی غیر از قفل‌کننده" };
             yield return new FnSetting { Key = SettingSepidarExport, Value = "0", Title = "خروجی کامل اسناد برای سپیدار (جایگزین؛ پیش‌فرض خاموش است و مسیر صف خروجی F2 فعال می‌ماند)" };
             yield return new FnSetting { Key = SettingFxRateType, Value = "1", Title = "نوع نرخ ارز برای تسعیر پایان دوره (۱ رسمی، ۲ توافقی، ۳ آزاد) ★" };
             yield return new FnSetting { Key = SettingFxAutoReverse, Value = "1", Title = "برگشت خودکار سند تسعیر در روز اول دوره بعد (۱ = فعال) ★" };
@@ -298,6 +301,28 @@ namespace Services.NasbNiro.Finance
             foreach (FnSetting s in SettingSeeds())
                 if (!keys.Contains(s.Key)) { uow.Set<FnSetting>().Add(s); added = true; }
             if (added) await uow.SaveChangesAsync(ct);
+            await UpgradeCloseEnforceAsync(uow, ct);
+        }
+
+        /// <summary>The marker of the one-time upgrade step of R1t (M2): it ran once and is not run again, so the company can still choose to switch the checklist gate off later.</summary>
+        public const string UpgradeMarkerCloseEnforce = "Upgrade.TreasuryR1.CloseEnforce";
+
+        /// <summary>
+        /// M2 (review R1t): installations that stored CloseChecklist.Enforce = 0 before this release keep it off, because the seed only adds missing keys. Once, this step sets it to 1 and writes an audit row
+        /// (user 0 = the system, action "SeedUpgrade"). Companies that deliberately want it off set it to 0 again afterwards in the finance settings; the marker keeps the step from running a second time.
+        /// </summary>
+        private static async Task UpgradeCloseEnforceAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            if (await uow.Set<FnSetting>().AnyAsync(s => s.Key == UpgradeMarkerCloseEnforce, ct)) return;
+            FnSetting enforce = await uow.Set<FnSetting>().FirstOrDefaultAsync(s => s.Key == SettingCloseEnforce, ct);
+            string before = enforce?.Value;
+            if (enforce != null && enforce.Value != "1")
+            {
+                enforce.Value = "1";
+                AuditNotes.Add(uow, 0, nameof(FnSetting), enforce.Id, "SeedUpgrade", "الزام فهرست کنترل بستن دوره به‌صورت یک‌بار با ارتقای نسخه روشن شد (قبلاً خاموش بود).", before: new { Value = before }, after: new { Value = "1" });
+            }
+            uow.Set<FnSetting>().Add(new FnSetting { Key = UpgradeMarkerCloseEnforce, Value = "done", Title = "نشانه‌ی اجرای یک‌باره‌ی ارتقا: الزام فهرست کنترل بستن دوره (نسخه خزانه R1)" });
+            await uow.SaveChangesAsync(ct);
         }
 
         public static async Task EnsureChartAsync(IUnitOfWork uow, CancellationToken ct)
