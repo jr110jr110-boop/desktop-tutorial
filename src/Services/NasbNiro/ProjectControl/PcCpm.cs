@@ -76,6 +76,14 @@ namespace Services.NasbNiro.ProjectControl
             return d;
         }
 
+        /// <summary>R1c (M2): the date n working days before the given date (the date itself is moved back to a working day first); n may be zero.</summary>
+        public DateTime SubtractWorkingDays(DateTime date, int n)
+        {
+            DateTime d = PreviousWorkingOnOrBefore(date);
+            for (int i = 0; i < n; i++) d = PreviousWorkingOnOrBefore(d.AddDays(-1));
+            return d;
+        }
+
         /// <summary>Number of working days in [from, to) (negative when to is before from).</summary>
         public int WorkingDaysBetween(DateTime from, DateTime to)
         {
@@ -158,6 +166,13 @@ namespace Services.NasbNiro.ProjectControl
 
         /// <summary>The finish cannot be before this date (a purchase order delivery date).</summary>
         public DateTime? FinishNotBefore { get; set; }
+
+        /// <summary>
+        /// R1c (M2): the working calendar of this activity when it differs from the calendar of the contract (for example a site that works seven days a week).
+        /// Null = the calendar of the contract. The offsets of the result stay in working days of the contract calendar; the dates of such an activity
+        /// are the real dates of its own calendar, and an activity that ends on a day off of the contract calendar occupies the offset of the next working day of the contract.
+        /// </summary>
+        public PcWorkCalendar Calendar { get; set; }
     }
 
     public class CpmLink
@@ -303,6 +318,10 @@ namespace Services.NasbNiro.ProjectControl
 
             var s = new Dictionary<int, int>();
             var f = new Dictionary<int, int>();
+            var realStart = new Dictionary<int, DateTime>();
+            var realFinish = new Dictionary<int, DateTime>();
+            var realLateStart = new Dictionary<int, DateTime>();
+            var realLateFinish = new Dictionary<int, DateTime>();
             foreach (int id in order)
             {
                 CpmNode n = byId[id];
@@ -351,11 +370,20 @@ namespace Services.NasbNiro.ProjectControl
                 else
                 {
                     if (useActuals && dataOffset > start && d > 0) start = dataOffset;
-                    finish = start + d;
+                    if (n.Calendar != null && d > 0)
+                    {
+                        // R1c (M2): the activity works on its own calendar: it starts on its first working day on or after the day the network allows and ends on its d-th working day
+                        DateTime sdate = n.Calendar.NextWorkingOnOrAfter(calendar.DayOf(start));
+                        DateTime fdate = n.Calendar.AddWorkingDays(sdate, d - 1);
+                        start = calendar.OffsetOf(sdate);
+                        finish = Math.Max(start + 1, calendar.OffsetOf(fdate) + 1);
+                        realStart[id] = sdate; realFinish[id] = fdate;
+                    }
+                    else finish = start + d;
                     if (useActuals && n.FinishNotBefore.HasValue)
                     {
                         int minFinish = calendar.OffsetOf(n.FinishNotBefore.Value) + 1;
-                        if (finish < minFinish) { finish = minFinish; start = Math.Max(start, finish - d); }
+                        if (finish < minFinish) { finish = minFinish; start = Math.Max(start, finish - d); realStart.Remove(id); realFinish.Remove(id); }
                     }
                 }
                 s[id] = start;
@@ -391,7 +419,8 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     case PcConstraint.StartNoLaterThan:
                     case PcConstraint.MustStartOn:
-                        if (n.ConstraintDate.HasValue) late = Math.Min(late, calendar.OffsetOf(n.ConstraintDate.Value) + dur);
+                        // R1c (L1): a milestone (no duration) that must start on a day completes at the end of that day, as in the forward pass (offset + 1); with "+ dur" it was one day early
+                        if (n.ConstraintDate.HasValue) late = Math.Min(late, calendar.OffsetOf(n.ConstraintDate.Value) + (dur == 0 ? 1 : dur));
                         break;
                     case PcConstraint.FinishNoLaterThan:
                     case PcConstraint.MustFinishOn:
@@ -400,6 +429,16 @@ namespace Services.NasbNiro.ProjectControl
                 }
                 lf[id] = late;
                 ls[id] = late - dur;
+                if (n.Calendar != null && d > 0 && realStart.ContainsKey(id))
+                {
+                    // R1c (M2): the latest start and finish on the own calendar of the activity, brought back to working days of the contract calendar (never later than the real day)
+                    DateTime latest = calendar.DayOf(Math.Max(late - 1, 0));
+                    DateTime fdate = n.Calendar.PreviousWorkingOnOrBefore(latest);
+                    DateTime sdate = n.Calendar.SubtractWorkingDays(fdate, d - 1);
+                    lf[id] = calendar.OffsetOf(calendar.PreviousWorkingOnOrBefore(fdate)) + 1;
+                    ls[id] = calendar.OffsetOf(calendar.PreviousWorkingOnOrBefore(sdate));
+                    realLateStart[id] = sdate; realLateFinish[id] = fdate;
+                }
             }
 
             foreach (int id in order)
@@ -426,8 +465,8 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     Id = id,
                     EarlyStartOffset = s[id], EarlyFinishOffset = f[id], LateStartOffset = ls[id], LateFinishOffset = lf[id],
-                    EarlyStart = StartDate(calendar, s[id], f[id], dur), EarlyFinish = FinishDate(calendar, f[id], dur),
-                    LateStart = StartDate(calendar, ls[id], lf[id], dur), LateFinish = FinishDate(calendar, lf[id], dur),
+                    EarlyStart = realStart.TryGetValue(id, out DateTime rs) ? rs : StartDate(calendar, s[id], f[id], dur), EarlyFinish = realFinish.TryGetValue(id, out DateTime rf) ? rf : FinishDate(calendar, f[id], dur),
+                    LateStart = realLateStart.TryGetValue(id, out DateTime rls) ? rls : StartDate(calendar, ls[id], lf[id], dur), LateFinish = realLateFinish.TryGetValue(id, out DateTime rlf) ? rlf : FinishDate(calendar, lf[id], dur),
                     TotalFloat = total, FreeFloat = free, Critical = total <= criticalThreshold,
                 };
                 result.Items[id] = item;

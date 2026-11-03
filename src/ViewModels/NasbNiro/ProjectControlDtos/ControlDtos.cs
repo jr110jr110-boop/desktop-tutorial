@@ -59,15 +59,77 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public PcResourceClass? ResourceClass { get; set; }
         public decimal Amount { get; set; }
         public string Description { get; set; }
+
+        /// <summary>R1c: the approved baseline this line was frozen with; null while the line is still a draft. Read only.</summary>
+        public int? BaselineId { get; set; }
     }
 
     // ---------------------------------------------------------------- change control
 
+    /// <summary>
+    /// One change of the plan that the approval of a change request carries out (H1). Operation Modify (the default, as before): the activity gets the duration and budget deltas
+    /// and, when given, the new weight. Add: a new activity (code, title, duration, budget, weight, WBS node, links to other activities). Remove: the activity (not started) leaves the plan.
+    /// </summary>
     public class PcChangeScenarioItemDto
     {
+        /// <summary>Modify and Remove: the activity of the contract. Add: leave it 0.</summary>
         public int ActivityId { get; set; }
         public int DurationDelta { get; set; }
         public decimal BudgetDelta { get; set; }
+
+        /// <summary>R1c: 0 = Modify (default), 1 = Add, 2 = Remove.</summary>
+        public PcScenarioOperation Operation { get; set; }
+
+        /// <summary>R1c: Modify only; the new weight of the activity among its siblings (0-100). Null keeps the weight.</summary>
+        public decimal? NewWeight { get; set; }
+
+        // R1c: the fields of an added activity
+        public string Code { get; set; }
+        public string Title { get; set; }
+        public int? WbsNodeId { get; set; }
+        public int DurationDays { get; set; }
+        public decimal BudgetAtCompletion { get; set; }
+        public decimal Weight { get; set; }
+        public PcPhase? Phase { get; set; }
+        public string ResponsibleUnit { get; set; }
+        public PcProgressMethod ProgressMethod { get; set; }
+        public int? WorkOrderId { get; set; }
+        public int? CalendarId { get; set; }
+        public List<PcScenarioLinkDto> Links { get; set; } = new List<PcScenarioLinkDto>();
+    }
+
+    /// <summary>R1c (H1): a dependency of an added activity.</summary>
+    public class PcScenarioLinkDto
+    {
+        /// <summary>An existing activity of the contract; null when <see cref="OtherCode"/> names another activity that the same request adds.</summary>
+        public int? OtherActivityId { get; set; }
+        public string OtherCode { get; set; }
+
+        /// <summary>True: the other activity is the predecessor of the new one; false: its successor.</summary>
+        public bool OtherIsPredecessor { get; set; } = true;
+        public PcDependencyType Type { get; set; } = PcDependencyType.FS;
+        public int LagDays { get; set; }
+    }
+
+    /// <summary>R1c (M3): one frozen row of an approved baseline (the grey bar of the Gantt chart).</summary>
+    public class PcBaselineActivityDto
+    {
+        public int ActivityId { get; set; }
+        public string Code { get; set; }
+        public string Title { get; set; }
+        public int? WbsNodeId { get; set; }
+        public PcPhase? Phase { get; set; }
+        public DateTime Start { get; set; }
+        public DateTime Finish { get; set; }
+        public int DurationDays { get; set; }
+        public decimal Weight { get; set; }
+
+        /// <summary>The share of the whole project (0-1) frozen with the baseline; null for a baseline of before R1c.</summary>
+        public decimal? EffectiveWeight { get; set; }
+        public decimal Budget { get; set; }
+        public PcProgressMethod ProgressMethod { get; set; }
+        public int? CalendarId { get; set; }
+        public string ResponsibleUnit { get; set; }
     }
 
     public class PcChangeBoardDto
@@ -200,6 +262,15 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
 
     // ---------------------------------------------------------------- shipment
 
+    /// <summary>R1c (M8): one line of a shipment. A serial unit is one piece (quantity 1); a work order is delivered when the delivered lines add up to its ordered quantity.</summary>
+    public class PcShipmentLineDto
+    {
+        public int? ItemId { get; set; }
+        public int? SerialUnitId { get; set; }
+        public decimal Quantity { get; set; }
+        public string Description { get; set; }
+    }
+
     public class PcShipmentDto
     {
         public int? Id { get; set; }
@@ -220,6 +291,18 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public Guid? SignedReceiptDocumentId { get; set; }
         public string HandoverMinutesNumber { get; set; }
         public DateTime? HandoverAt { get; set; }
+        public DateTime? CommissionedAt { get; set; }
+
+        // R1c (M8)
+        /// <summary>The items on the shipment; saved with the planned shipment (the list sent replaces the lines).</summary>
+        public List<PcShipmentLineDto> Lines { get; set; } = new List<PcShipmentLineDto>();
+
+        /// <summary>The confirmed customer-delivery document of the warehouse that this shipment ships (set by the "ship" action). Read only here.</summary>
+        public int? InventoryDocumentId { get; set; }
+        public DateTime? PackedAt { get; set; }
+        public int? PackedByUserId { get; set; }
+        public int? PackingCheckedByUserId { get; set; }
+        public DateTimeOffset? PackingCheckedAt { get; set; }
         public string RowVersion { get; set; }
     }
 
@@ -227,8 +310,11 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
     {
         public int Id { get; set; }
 
-        /// <summary>pack, release, ship, deliver, handover</summary>
+        /// <summary>pack, check-packing (QC, a person other than the packer), release, ship, deliver, handover, commission (the commissioning date, after the handover; Date)</summary>
         public string Action { get; set; }
+
+        /// <summary>R1c: ship only; the confirmed customer-delivery document of the warehouse.</summary>
+        public int? InventoryDocumentId { get; set; }
         public string PackingList { get; set; }
         public string PackingVerification { get; set; }
         public Guid? PackingPhotoDocumentId { get; set; }

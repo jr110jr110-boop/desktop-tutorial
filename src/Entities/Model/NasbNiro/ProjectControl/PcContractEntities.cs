@@ -95,6 +95,18 @@ namespace Entities.Model.NasbNiro.ProjectControl
         /// <summary>The server takes the weekly snapshot by itself.</summary>
         public bool AutoSnapshot { get; set; } = true;
 
+        /// <summary>R1c (H5): the delay penalty is counted once, over the whole contract (default) or per work order, never both.</summary>
+        public PcPenaltyBasis PenaltyBasis { get; set; } = PcPenaltyBasis.PerContract;
+
+        /// <summary>R1c (M16): warranty months after commissioning; the warranty ends at the earlier of the two dates (★ 12 / 18, to be verified in the contract).</summary>
+        public int WarrantyMonthsAfterCommissioning { get; set; } = 12;
+
+        /// <summary>R1c (M16): warranty months after delivery.</summary>
+        public int WarrantyMonthsAfterDelivery { get; set; } = 18;
+
+        /// <summary>R1c (H2): set when the contract review was accepted for the first time; from then on the commercial terms change only through a CEO-approved amendment or an approved variation order.</summary>
+        public DateTimeOffset? TermsFrozenAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -207,6 +219,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public DateTimeOffset? ApprovedAt { get; set; }
         public int? ApprovedByUserId { get; set; }
 
+        /// <summary>R1c (M1): everyone who drafted or edited the plan (",5,7,"); none of them approves it.</summary>
+        public string EditorUserIds { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -239,6 +254,22 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public DateTimeOffset? DecidedAt { get; set; }
         public int? DecidedByUserId { get; set; }
 
+        /// <summary>R1c (H8): tender (before the offer), contract (after the win) or change (re-review after an amendment or a variation order).</summary>
+        public PcReviewStage Stage { get; set; } = PcReviewStage.Contract;
+
+        /// <summary>R1c (H8): the amendment or the variation order that re-opened the review (stage Change).</summary>
+        public int? AmendmentId { get; set; }
+        public int? VariationOrderId { get; set; }
+
+        /// <summary>R1c (H8): acceptance needs two different users, one for the PMO and one for the commercial unit; the review is Accepted when both signed.</summary>
+        public int? PmoAcceptedByUserId { get; set; }
+        public DateTimeOffset? PmoAcceptedAt { get; set; }
+        public int? CommercialAcceptedByUserId { get; set; }
+        public DateTimeOffset? CommercialAcceptedAt { get; set; }
+
+        /// <summary>R1c (M1): everyone who saved or edited the review (",5,7,"); neither the creator nor an editor signs it.</summary>
+        public string EditorUserIds { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -257,6 +288,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public int? CeoApprovedByUserId { get; set; }
         public string CustomerApprovalReference { get; set; }
         public DateTime? CustomerApprovalDate { get; set; }
+
+        /// <summary>R1c (H2): the day this amendment authorized a change of the frozen terms; it authorizes one change.</summary>
+        public DateTimeOffset? TermsAppliedAt { get; set; }
 
         public ICollection<PcAmendmentCopy> Copies { get; set; }
     }
@@ -296,6 +330,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public int? ProvisionalStatementId { get; set; }
         public string FinanceRef { get; set; }
         public string ClientLetterRef { get; set; }
+
+        /// <summary>R1c (M8): the final statement of the contract (WI-PL-013 R-CL-1: it is not issued while a claim is open). Explicit: adding a later milestone does not change which one is final.</summary>
+        public bool IsFinal { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -377,6 +414,25 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public string ClientApprovalReference { get; set; }
         public DateTime? ClientApprovalDate { get; set; }
         public PcVariationStatus Status { get; set; }
+
+        // R1c (H3): the commercial unit creates, the PMO deputy or the CEO approves (the CEO when the value change is above the threshold of the settings)
+        public int? SubmittedByUserId { get; set; }
+        public DateTimeOffset? SubmittedAt { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+
+        /// <summary>PMO or CEO: the role the approval was given as.</summary>
+        public string ApprovedByRole { get; set; }
+
+        /// <summary>The client's letter: a letter of the office module (OfLetter) or an uploaded document; one of them is required to approve.</summary>
+        public int? ClientLetterId { get; set; }
+        public Guid? ClientDocumentId { get; set; }
+
+        /// <summary>R1c (H2): the day this order authorized a change of the frozen terms; it authorizes one change.</summary>
+        public DateTimeOffset? TermsAppliedAt { get; set; }
+
+        /// <summary>R1c (H3): the reason of a rejection.</summary>
+        public string DecisionNote { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }

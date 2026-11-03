@@ -25,6 +25,14 @@ namespace WebApi.Controllers.ProjectControl
 
         public ProjectControlSetupController(IPcProjectService project) { _project = project; }
 
+        /// <summary>R1c: the numbers the company can change; a source that starts with the star (★) is a provisional default.</summary>
+        [HttpGet("settings")]
+        [Authorize(Roles = ProjectControlRoles.Readers)]
+        public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _project.GetSettingsAsync(ct));
+
+        [HttpPut("settings")]
+        public async Task<IActionResult> SaveSettingsAsync([FromBody] PcSettingsSaveDto dto, CancellationToken ct) => Ok(await _project.SaveSettingsAsync(dto, ct));
+
         [HttpGet("terms/{contractId:int}")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
         public async Task<IActionResult> TermsAsync(int contractId, CancellationToken ct) => Ok(await _project.GetTermsAsync(contractId, ct));
@@ -239,6 +247,10 @@ namespace WebApi.Controllers.ProjectControl
         [HttpPost("costs")]
         public async Task<IActionResult> AddCostAsync([FromBody] PcCostEntrySaveDto dto, CancellationToken ct) => Ok(await _progress.AddCostAsync(dto, ct));
 
+        /// <summary>R1c (M5): the second FINANCIAL person checks a manual cost entry; only then it counts as actual cost.</summary>
+        [HttpPost("costs/check")]
+        public async Task<IActionResult> CheckCostAsync([FromBody] PcCostCheckDto dto, CancellationToken ct) => Ok(await _progress.CheckCostAsync(dto, ct));
+
         [HttpGet("snapshots")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
         public async Task<IActionResult> SnapshotsAsync([FromQuery] PcSnapshotQuery query, CancellationToken ct) => Ok((await _progress.GetSnapshotsAsync(query, ct)).ToPaginatedResultSafe());
@@ -249,6 +261,17 @@ namespace WebApi.Controllers.ProjectControl
 
         [HttpPost("snapshots")]
         public async Task<IActionResult> TakeSnapshotAsync([FromBody] PcSnapshotRequestDto dto, CancellationToken ct) => Ok(await _progress.TakeSnapshotAsync(dto, ct));
+
+        /// <summary>R1c (H4): a snapshot for a data date in the past is requested by planning and approved by the PMO deputy.</summary>
+        [HttpGet("snapshots/past-requests")]
+        [Authorize(Roles = ProjectControlRoles.Readers)]
+        public async Task<IActionResult> PastSnapshotRequestsAsync([FromQuery] PcPastSnapshotQuery query, CancellationToken ct) => Ok((await _progress.GetPastSnapshotRequestsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpPost("snapshots/past-requests")]
+        public async Task<IActionResult> RequestPastSnapshotAsync([FromBody] PcPastSnapshotRequestDto dto, CancellationToken ct) => Ok(await _progress.RequestPastSnapshotAsync(dto, ct));
+
+        [HttpPost("snapshots/past-requests/decide")]
+        public async Task<IActionResult> DecidePastSnapshotAsync([FromBody] PcPastSnapshotDecisionDto dto, CancellationToken ct) => Ok(await _progress.DecidePastSnapshotAsync(dto, ct));
 
         [HttpPost("snapshots/run-due")]
         public async Task<IActionResult> RunDueAsync([FromBody] PcSnapshotRunDto dto, CancellationToken ct) => Ok(await _progress.RunDueSnapshotsAsync(dto, ct));
@@ -392,6 +415,10 @@ namespace WebApi.Controllers.ProjectControl
         [HttpPost("final-books")]
         public async Task<IActionResult> GenerateFinalBookAsync([FromBody] PcFinalBookRequestDto dto, CancellationToken ct) => Ok(await _mdr.GenerateFinalBookAsync(dto, ct));
 
+        /// <summary>R1c (M1): a final-book revision becomes effective when someone other than its preparer approves it (PMO or QC).</summary>
+        [HttpPost("final-books/{id:int}/approve")]
+        public async Task<IActionResult> ApproveFinalBookAsync(int id, CancellationToken ct) => Ok(await _mdr.ApproveFinalBookAsync(id, ct));
+
         [HttpGet("final-books")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
         public async Task<IActionResult> FinalBooksAsync([FromQuery] PcFinalBookQuery query, CancellationToken ct) => Ok((await _mdr.GetFinalBooksAsync(query, ct)).ToPaginatedResultSafe());
@@ -415,6 +442,11 @@ namespace WebApi.Controllers.ProjectControl
         [HttpGet("baselines/{id:int}")]
         [Authorize(Roles = ProjectControlRoles.Readers)]
         public async Task<IActionResult> BaselineAsync(int id, CancellationToken ct) => Ok(await _baseline.GetBaselineAsync(id, ct));
+
+        /// <summary>R1c (M3): the frozen activities of a baseline (the dates, budget, weight, calendar and constraint as they were approved).</summary>
+        [HttpGet("baselines/{id:int}/activities")]
+        [Authorize(Roles = ProjectControlRoles.Readers)]
+        public async Task<IActionResult> BaselineActivitiesAsync(int id, CancellationToken ct) => Ok(await _baseline.GetBaselineActivitiesAsync(id, ct));
 
         [HttpPost("baselines")]
         public async Task<IActionResult> CreateBaselineAsync([FromBody] PcBaselineCreateDto dto, CancellationToken ct) => Ok(await _baseline.CreateBaselineAsync(dto, ct));

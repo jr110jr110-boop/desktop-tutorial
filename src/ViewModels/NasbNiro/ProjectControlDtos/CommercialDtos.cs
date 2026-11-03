@@ -25,6 +25,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int? ProvisionalStatementId { get; set; }
         public string FinanceRef { get; set; }
         public string ClientLetterRef { get; set; }
+
+        /// <summary>R1c (M8): marks the final statement of the contract (at most one per contract; a retention milestone is always treated as final).</summary>
+        public bool IsFinal { get; set; }
         public string RowVersion { get; set; }
     }
 
@@ -164,6 +167,24 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string ClientApprovalReference { get; set; }
         public DateTime? ClientApprovalDate { get; set; }
         public PcVariationStatus Status { get; set; }
+
+        // R1c (H3): who sent and who approved, the client's letter, and who must approve (read only)
+        public int? SubmittedByUserId { get; set; }
+        public string SubmittedByName { get; set; }
+        public DateTimeOffset? SubmittedAt { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        public string ApprovedByName { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+
+        /// <summary>PMO or CEO: the role the approval was given as.</summary>
+        public string ApprovedByRole { get; set; }
+        public int? ClientLetterId { get; set; }
+        public Guid? ClientDocumentId { get; set; }
+        public DateTimeOffset? TermsAppliedAt { get; set; }
+        public string DecisionNote { get; set; }
+
+        /// <summary>True when the price change is above the threshold of the settings (a share of the contract value): only the CEO approves.</summary>
+        public bool NeedsCeo { get; set; }
         public string RowVersion { get; set; }
     }
 
@@ -171,9 +192,16 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
     {
         public int Id { get; set; }
 
-        /// <summary>submit, approve, reject</summary>
+        /// <summary>submit (the commercial unit), approve (PMO or CEO), reject (PMO or CEO, with a reason in Reference)</summary>
         public string Action { get; set; }
         public string Reference { get; set; }
         public DateTime? Date { get; set; }
+
+        /// <summary>approve: the client's letter (an incoming letter of the office module for this contract) or an uploaded file; one of them is required.</summary>
+        public int? ClientLetterId { get; set; }
+        public Guid? ClientDocumentId { get; set; }
+
+        /// <summary>reject: the reason.</summary>
+        public string Note { get; set; }
     }
 }

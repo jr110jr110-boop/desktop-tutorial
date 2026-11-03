@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -7,6 +8,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
@@ -63,20 +65,64 @@ namespace Services.NasbNiro.ProjectControl
         {
             Id = s.Id, Number = s.Number, ContractId = s.ContractId, WorkOrderId = s.WorkOrderId, WorkOrderCode = woCode, ReleaseNoteId = s.ReleaseNoteId, Status = s.Status, PackingList = s.PackingList,
             PackingVerification = s.PackingVerification, PackingPhotoDocumentId = s.PackingPhotoDocumentId, ShippingDocuments = s.ShippingDocuments, Waybill = s.Waybill, ShippedAt = s.ShippedAt,
-            DeliveryReceiptNumber = s.DeliveryReceiptNumber, DeliveredAt = s.DeliveredAt, SignedReceiptDocumentId = s.SignedReceiptDocumentId, HandoverMinutesNumber = s.HandoverMinutesNumber, HandoverAt = s.HandoverAt,
+            DeliveryReceiptNumber = s.DeliveryReceiptNumber, DeliveredAt = s.DeliveredAt, SignedReceiptDocumentId = s.SignedReceiptDocumentId, HandoverMinutesNumber = s.HandoverMinutesNumber, HandoverAt = s.HandoverAt, CommissionedAt = s.CommissionedAt,
+            Lines = (s.Lines ?? new List<PcShipmentLine>()).OrderBy(l => l.Id).Select(l => new PcShipmentLineDto { ItemId = l.ItemId, SerialUnitId = l.SerialUnitId, Quantity = l.Quantity, Description = l.Description }).ToList(),
+            InventoryDocumentId = s.InventoryDocumentId, PackedAt = s.PackedAt, PackedByUserId = s.PackedByUserId, PackingCheckedByUserId = s.PackingCheckedByUserId, PackingCheckedAt = s.PackingCheckedAt,
             RowVersion = s.RowVersion == null ? null : Convert.ToBase64String(s.RowVersion),
         };
 
         public async Task<ResponseDto<PagedList<PcShipmentDto>>> GetShipmentsAsync(PcShipmentQuery query, CancellationToken cancellationToken)
         {
             query ??= new PcShipmentQuery();
-            IQueryable<PcShipment> q = _uow.Set<PcShipment>().AsNoTracking().Include(s => s.WorkOrder).Where(s => !s.Deleted);
+            IQueryable<PcShipment> q = _uow.Set<PcShipment>().AsNoTracking().Include(s => s.WorkOrder).Include(s => s.Lines).AsSplitQuery().Where(s => !s.Deleted);
             if (query.ContractId.HasValue) q = q.Where(s => s.ContractId == query.ContractId.Value);
             if (query.WorkOrderId.HasValue) q = q.Where(s => s.WorkOrderId == query.WorkOrderId.Value);
             if (query.Status.HasValue) q = q.Where(s => s.Status == query.Status.Value);
             PagedList<PcShipment> page = await PagedList<PcShipment>.CreateAsync(q.OrderByDescending(s => s.Id), query.PageNumber, query.PageSize, cancellationToken);
             List<PcShipmentDto> dtos = page.Select(s => ToDto(s, s.WorkOrder?.Code)).ToList();
             return ResponseDtoHelper.Ok((PagedList<PcShipmentDto>)new PcPage<PcShipmentDto>(dtos, page.TotalCount, page.CurrentPage, page.PageSize));
+        }
+
+        /// <summary>
+        /// R1c (M8): the lines of a shipment (nothing saved). A serial unit is one piece of this work order that is on no other shipment; the delivered quantities of the work order never exceed the ordered quantity.
+        /// Returns the Persian error, or null.
+        /// </summary>
+        private async Task<(List<PcShipmentLine> Lines, string Error)> BuildLinesAsync(WorkOrder wo, int? shipmentId, IList<PcShipmentLineDto> input, CancellationToken cancellationToken)
+        {
+            var lines = new List<PcShipmentLine>();
+            var serials = new HashSet<int>();
+            foreach (PcShipmentLineDto l in input)
+            {
+                if (l.Quantity <= 0m || l.Quantity > 1000000m) return (null, "تعداد هر ردیف محموله باید بیشتر از صفر باشد.");
+                if (!l.ItemId.HasValue && !l.SerialUnitId.HasValue && Clean(l.Description) == null) return (null, "هر ردیف محموله کالا، شماره سریال یا شرح دارد.");
+                if (l.SerialUnitId.HasValue)
+                {
+                    if (l.Quantity != 1m) return (null, "ردیف دارای شماره سریال یک دستگاه است (تعداد ۱).");
+                    if (!serials.Add(l.SerialUnitId.Value)) return (null, "شماره سریال تکراری است.");
+                }
+                lines.Add(new PcShipmentLine { ItemId = l.ItemId, SerialUnitId = l.SerialUnitId, Quantity = l.Quantity, Description = Clean(l.Description) });
+            }
+            List<int> itemIds = lines.Where(l => l.ItemId.HasValue).Select(l => l.ItemId.Value).Distinct().ToList();
+            if (itemIds.Count > 0 && await _uow.Set<InventoryItem>().AsNoTracking().CountAsync(i => itemIds.Contains(i.Id) && !i.Deleted, cancellationToken) != itemIds.Count) return (null, "کالای ردیف محموله پیدا نشد.");
+            if (itemIds.Count > 0)
+            {
+                // R1c (L3): an item of a shipment line belongs to the work order: it is an item of one of its serial units or of a document of the warehouse for it
+                HashSet<int> own = (await _uow.Set<SerialUnit>().AsNoTracking().Where(u => u.WorkOrderId == wo.Id && !u.Deleted).Select(u => u.ItemId).ToListAsync(cancellationToken))
+                    .Concat(await _uow.Set<InventoryDocumentLine>().AsNoTracking().Where(x => x.Document.WorkOrderId == wo.Id && !x.Document.Deleted).Select(x => x.ItemId).ToListAsync(cancellationToken)).ToHashSet();
+                if (itemIds.Any(id => !own.Contains(id))) return (null, "کالای ردیف محموله به این دستور کار تعلق ندارد (نه سریال و نه سند انبار این دستور کار آن را دارد).");
+            }
+            if (serials.Count > 0)
+            {
+                if (await _uow.Set<SerialUnit>().AsNoTracking().CountAsync(u => serials.Contains(u.Id) && u.WorkOrderId == wo.Id && !u.Deleted, cancellationToken) != serials.Count) return (null, "شماره سریال متعلق به این دستور کار نیست.");
+                int self = shipmentId ?? 0;
+                if (await _uow.Set<PcShipmentLine>().AsNoTracking().AnyAsync(x => x.SerialUnitId != null && serials.Contains(x.SerialUnitId.Value) && !x.Shipment.Deleted && x.ShipmentId != self, cancellationToken))
+                    return (null, "شماره سریال در محموله دیگری آمده است.");
+            }
+            int other = shipmentId ?? 0;
+            decimal shippedElsewhere = await _uow.Set<PcShipmentLine>().AsNoTracking().Where(x => x.Shipment.WorkOrderId == wo.Id && !x.Shipment.Deleted && x.ShipmentId != other).SumAsync(x => (decimal?)x.Quantity, cancellationToken) ?? 0m;
+            decimal ordered = wo.Count > 0 ? wo.Count : 1m;
+            if (shippedElsewhere + lines.Sum(l => l.Quantity) > ordered) return (null, "مجموع تعداد محموله‌های این دستور کار از تعداد سفارش (" + ordered.ToString("0.####", CultureInfo.InvariantCulture) + ") بیشتر می‌شود.");
+            return (lines, null);
         }
 
         public async Task<ResponseDto<PcShipmentDto>> SaveShipmentAsync(PcShipmentDto dto, CancellationToken cancellationToken)
@@ -89,14 +135,24 @@ namespace Services.NasbNiro.ProjectControl
             PcShipment s;
             if (dto.Id.HasValue)
             {
-                s = await _uow.Set<PcShipment>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
+                s = await _uow.Set<PcShipment>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (s == null) return PcText.NotFound<PcShipmentDto>("محموله پیدا نشد.");
                 if (s.Status != PcShipmentStatus.Planned) return Bad<PcShipmentDto>("فقط محموله برنامه‌ریزی‌شده ویرایش می‌شود.");
+                if (s.WorkOrderId != wo.Id) return Bad<PcShipmentDto>(PcText.InvalidData);
             }
             else
             {
-                s = new PcShipment { ContractId = dto.ContractId, WorkOrderId = wo.Id, Status = PcShipmentStatus.Planned, CreateDate = now, CreatorUserId = Me, Number = await InventoryNumbers.NextNumberAsync(_uow, PcNumbers.Shipment, "SH", DateTime.Today, cancellationToken) };
+                s = new PcShipment { ContractId = dto.ContractId, WorkOrderId = wo.Id, Status = PcShipmentStatus.Planned, CreateDate = now, CreatorUserId = Me, Lines = new List<PcShipmentLine>(), Number = await InventoryNumbers.NextNumberAsync(_uow, PcNumbers.Shipment, "SH", DateTime.Today, cancellationToken) };
                 _uow.Set<PcShipment>().Add(s);
+            }
+            // R1c (M8): the list sent replaces the lines; a request without lines keeps the lines it has
+            if (dto.Lines != null && dto.Lines.Count > 0)
+            {
+                var built = await BuildLinesAsync(wo, dto.Id, dto.Lines, cancellationToken);
+                if (built.Error != null) return Bad<PcShipmentDto>(built.Error);
+                if (s.Lines.Count > 0) _uow.Set<PcShipmentLine>().RemoveRange(s.Lines.ToList());
+                s.Lines.Clear();
+                foreach (PcShipmentLine line in built.Lines) s.Lines.Add(line);
             }
             s.PackingList = Clean(dto.PackingList); s.ModifyDate = now; s.ModifierUserId = Me;
             DropPortfolioRows();
@@ -108,9 +164,12 @@ namespace Services.NasbNiro.ProjectControl
         public async Task<ResponseDto<PcShipmentDto>> ShipmentActionAsync(PcShipmentActionDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || Clean(dto.Action) == null) return Bad<PcShipmentDto>(PcText.InvalidData);
-            PcShipment s = await _uow.Set<PcShipment>().Include(x => x.WorkOrder).FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
+            PcShipment s = await _uow.Set<PcShipment>().Include(x => x.WorkOrder).Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
             if (s == null) return PcText.NotFound<PcShipmentDto>("محموله پیدا نشد.");
-            DateTime date = (dto.Date ?? DateTime.Today).Date;
+            DateTime today = DateTime.Today;
+            DateTime date = (dto.Date ?? today).Date;
+            // R1c (M8): what happened is dated; the future is not a date of a fact
+            if (date > today) return Bad<PcShipmentDto>("تاریخ در آینده است؛ فقط کاری ثبت می‌شود که انجام شده است.");
             DateTimeOffset now = DateTimeOffset.Now;
             switch (dto.Action.Trim().ToLowerInvariant())
             {
@@ -119,38 +178,75 @@ namespace Services.NasbNiro.ProjectControl
                     if (!_user.IsInRole(ProjectControlRoles.Planning + ",WAREHOUSE,WHSUPERVISOR")) return Bad<PcShipmentDto>(PcText.NotAllowed);
                     if (s.Status != PcShipmentStatus.Planned) return Bad<PcShipmentDto>("محموله قبلاً بسته‌بندی شده است.");
                     // the shipping gate: packing starts only on a released quality release note
-                    int? noteId = await _uow.Set<ReleaseNote>().AsNoTracking().Where(r => r.WorkOrderId == s.WorkOrderId && !r.Deleted && r.Status == ReleaseNoteStatus.Released).OrderByDescending(r => r.Id).Select(r => (int?)r.Id).FirstOrDefaultAsync(cancellationToken);
-                    if (noteId == null) return Bad<PcShipmentDto>("شروع بسته‌بندی بدون برگه ترخیص کیفی صادرشده ممکن نیست (کنترل ترخیص).");
+                    var note = await _uow.Set<ReleaseNote>().AsNoTracking().Where(r => r.WorkOrderId == s.WorkOrderId && !r.Deleted && r.Status == ReleaseNoteStatus.Released).OrderByDescending(r => r.Id)
+                        .Select(r => new { r.Id, r.ReleasedAt }).FirstOrDefaultAsync(cancellationToken);
+                    if (note == null) return Bad<PcShipmentDto>("شروع بسته‌بندی بدون برگه ترخیص کیفی صادرشده ممکن نیست (کنترل ترخیص).");
                     if (Clean(dto.PackingList) == null && Clean(s.PackingList) == null) return Bad<PcShipmentDto>("فهرست بسته‌بندی را وارد کنید.");
                     if (Clean(dto.PackingVerification) == null) return Bad<PcShipmentDto>("نتیجه بازبینی بسته‌بندی را وارد کنید.");
-                    s.ReleaseNoteId = noteId; s.PackingList = Clean(dto.PackingList) ?? s.PackingList; s.PackingVerification = Clean(dto.PackingVerification); s.PackingPhotoDocumentId = dto.PackingPhotoDocumentId; s.Status = PcShipmentStatus.Packed;
+                    if (s.Lines == null || s.Lines.Count == 0) return Bad<PcShipmentDto>("ابتدا اقلام محموله (کالا یا شماره سریال و تعداد) را ثبت کنید.");
+                    if (note.ReleasedAt.HasValue && date < note.ReleasedAt.Value.Date) return Bad<PcShipmentDto>("تاریخ بسته‌بندی پیش از تاریخ ترخیص کیفی (" + global::Services.NasbNiro.Finance.FiscalCalendars.Text(note.ReleasedAt.Value.Date) + ") است.");
+                    s.ReleaseNoteId = note.Id; s.PackingList = Clean(dto.PackingList) ?? s.PackingList; s.PackingVerification = Clean(dto.PackingVerification); s.PackingPhotoDocumentId = dto.PackingPhotoDocumentId; s.Status = PcShipmentStatus.Packed;
+                    s.PackedAt = date; s.PackedByUserId = Me;
                     break;
                 }
+                case "check-packing":
+                    // R1c (M8): quality control checks the packing, and not the person who packed it
+                    if (!_user.IsInRole("QC,QA")) return Bad<PcShipmentDto>(PcText.NotAllowed + " (بازبینی بسته‌بندی با کنترل کیفیت است)");
+                    if (s.Status != PcShipmentStatus.Packed) return Bad<PcShipmentDto>("بازبینی فقط برای محموله بسته‌بندی‌شده ممکن است.");
+                    if (s.PackingCheckedByUserId.HasValue) return Bad<PcShipmentDto>("بازبینی بسته‌بندی قبلاً ثبت شده است.");
+                    if (s.PackedByUserId == Me) return Bad<PcShipmentDto>(PcText.SameUser + " (بسته‌بندی را شخص دیگری بازبینی کند)");
+                    s.PackingCheckedByUserId = Me; s.PackingCheckedAt = now;
+                    break;
                 case "release":
                     if (!_user.IsInRole(ProjectControlRoles.Planning)) return Bad<PcShipmentDto>(PcText.NotAllowed + " (مجوز ارسال با برنامه‌ریزی است)");
                     if (s.Status != PcShipmentStatus.Packed) return Bad<PcShipmentDto>("ابتدا بسته‌بندی کامل شود.");
+                    if (!s.PackingCheckedByUserId.HasValue) return Bad<PcShipmentDto>("بازبینی بسته‌بندی توسط کنترل کیفیت لازم است (کنترل ترخیص).");
+                    if (s.PackedByUserId == Me) return Bad<PcShipmentDto>(PcText.SameUser + " (بسته‌بند محموله مجوز ارسال آن را نمی‌دهد)");
                     if (!await _uow.Set<ReleaseNote>().AnyAsync(r => r.WorkOrderId == s.WorkOrderId && !r.Deleted && r.Status == ReleaseNoteStatus.Released, cancellationToken)) return Bad<PcShipmentDto>("برگه ترخیص کیفی دیگر معتبر نیست.");
                     s.Status = PcShipmentStatus.Released;
                     break;
                 case "ship":
+                {
                     if (!_user.IsInRole(ProjectControlRoles.Planning + ",WAREHOUSE,WHSUPERVISOR")) return Bad<PcShipmentDto>(PcText.NotAllowed);
                     if (s.Status != PcShipmentStatus.Released) return Bad<PcShipmentDto>("ارسال نیازمند مجوز ارسال برنامه‌ریزی است.");
                     if (Clean(dto.Waybill) == null || Clean(dto.ShippingDocuments) == null) return Bad<PcShipmentDto>("بارنامه و اسناد حمل را وارد کنید.");
+                    if (s.PackedAt.HasValue && date < s.PackedAt.Value.Date) return Bad<PcShipmentDto>("تاریخ ارسال پیش از تاریخ بسته‌بندی است.");
+                    // R1c (M8): the shipment is tied to the confirmed customer-delivery document of the warehouse (the stock really left)
+                    if (!dto.InventoryDocumentId.HasValue) return Bad<PcShipmentDto>("سند «تحویل به مشتری» تاییدشده انبار را برای محموله انتخاب کنید.");
+                    var doc = await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => d.Id == dto.InventoryDocumentId.Value && !d.Deleted).Select(d => new { d.Id, d.Type, d.Status, d.ContractId, d.WorkOrderId }).FirstOrDefaultAsync(cancellationToken);
+                    if (doc == null || doc.Type != InventoryDocumentType.CustomerDelivery || doc.Status != InventoryDocumentStatus.Confirmed) return Bad<PcShipmentDto>("سند انبار باید «تحویل به مشتری» تاییدشده باشد.");
+                    if (doc.ContractId != s.ContractId || (doc.WorkOrderId.HasValue && doc.WorkOrderId.Value != s.WorkOrderId)) return Bad<PcShipmentDto>("سند انبار متعلق به این قرارداد و دستور کار نیست.");
+                    if (await _uow.Set<PcShipment>().AnyAsync(x => x.InventoryDocumentId == doc.Id && x.Id != s.Id && !x.Deleted, cancellationToken)) return Bad<PcShipmentDto>("این سند انبار به محموله دیگری وصل شده است.");
+                    s.InventoryDocumentId = doc.Id;
                     s.Waybill = Clean(dto.Waybill); s.ShippingDocuments = Clean(dto.ShippingDocuments); s.ShippedAt = date; s.Status = PcShipmentStatus.Shipped;
                     break;
+                }
                 case "deliver":
                     if (!_user.IsInRole(ProjectControlRoles.Planning + ",COMMERCIAL,WAREHOUSE,WHSUPERVISOR")) return Bad<PcShipmentDto>(PcText.NotAllowed);
                     if (s.Status != PcShipmentStatus.Shipped) return Bad<PcShipmentDto>("محموله هنوز ارسال نشده است.");
                     if (Clean(dto.DeliveryReceiptNumber) == null) return Bad<PcShipmentDto>("شماره رسید تحویل را وارد کنید.");
+                    // R1c (M8): delivered means the client signed the receipt, so the signed copy is attached before the status changes
+                    if (!dto.SignedReceiptDocumentId.HasValue) return Bad<PcShipmentDto>("رسید امضاشده تحویل (پیوست) لازم است؛ تحویل بدون رسید امضاشده ثبت نمی‌شود.");
+                    if (s.ShippedAt.HasValue && date < s.ShippedAt.Value.Date) return Bad<PcShipmentDto>("تاریخ تحویل پیش از تاریخ ارسال است.");
                     s.DeliveryReceiptNumber = Clean(dto.DeliveryReceiptNumber); s.SignedReceiptDocumentId = dto.SignedReceiptDocumentId; s.DeliveredAt = date; s.Status = PcShipmentStatus.Delivered;
                     break;
                 case "handover":
                     if (!_user.IsInRole(ProjectControlRoles.Planning + ",COMMERCIAL")) return Bad<PcShipmentDto>(PcText.NotAllowed);
                     if (s.Status != PcShipmentStatus.Delivered) return Bad<PcShipmentDto>("محموله هنوز تحویل نشده است.");
                     if (Clean(dto.HandoverMinutesNumber) == null) return Bad<PcShipmentDto>("شماره صورتجلسه تحویل را وارد کنید.");
+                    if (s.DeliveredAt.HasValue && date < s.DeliveredAt.Value.Date) return Bad<PcShipmentDto>("تاریخ صورتجلسه تحویل پیش از تاریخ تحویل است.");
                     s.HandoverMinutesNumber = Clean(dto.HandoverMinutesNumber); s.HandoverAt = date; s.Status = PcShipmentStatus.HandoverReceived;
                     // after-sales: the handover creates the draft of the installed unit (service confirms the site, the tag and the warranty); saved together with the shipment
                     await AfterSales.SvUnitDraft.DraftAsync(_uow, s, Me, cancellationToken);
+                    break;
+                case "commission":
+                    // R1c (M5): the commissioning date is recorded on its own (it is usually later than the handover) and decides the "months after commissioning" of the warranty
+                    if (!_user.IsInRole(ProjectControlRoles.Planning + ",COMMERCIAL,SERVICE")) return Bad<PcShipmentDto>(PcText.NotAllowed);
+                    if (s.Status != PcShipmentStatus.HandoverReceived) return Bad<PcShipmentDto>("تاریخ راه‌اندازی پس از صورتجلسه تحویل ثبت می‌شود.");
+                    if (s.CommissionedAt.HasValue) return Bad<PcShipmentDto>("تاریخ راه‌اندازی قبلاً ثبت شده است.");
+                    if (s.HandoverAt.HasValue && date < s.HandoverAt.Value.Date) return Bad<PcShipmentDto>("تاریخ راه‌اندازی پیش از تاریخ صورتجلسه تحویل است.");
+                    s.CommissionedAt = date;
+                    await AfterSales.SvUnitDraft.RefreshWarrantyAsync(_uow, s, cancellationToken);
                     break;
                 default:
                     return Bad<PcShipmentDto>("عملیات نامعتبر است.");
@@ -231,6 +327,8 @@ namespace Services.NasbNiro.ProjectControl
             PcReportIssue r = await _uow.Set<PcReportIssue>().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (r == null) return PcText.NotFound<PcReportDto>("گزارش پیدا نشد.");
             if (r.ReleasedAt.HasValue) return Bad<PcReportDto>("گزارش قبلاً منتشر شده است.");
+            // R1c (M1): the report is released by someone other than the person who generated it
+            if (r.GeneratedByUserId == Me) return Bad<PcReportDto>(PcText.SameUser + " (تولیدکننده گزارش آن را منتشر نمی‌کند)");
             r.ReleasedAt = DateTimeOffset.Now; r.ReleasedByUserId = Me;
             DropPortfolioRows();
             await _uow.SaveChangesAsync(cancellationToken);

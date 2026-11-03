@@ -99,6 +99,18 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.HasOne(x => x.Inquiry).WithMany().HasForeignKey(x => x.InquiryId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.Property(x => x.RevisionReason).HasMaxLength(Text);
+            });
+            // R1c (M13): frozen revisions of an order (append only)
+            builder.Entity<PurchaseOrderRevision>(b =>
+            {
+                b.ToTable("ProcPurchaseOrderRevisions");
+                b.Property(x => x.Reason).HasMaxLength(Text);
+                b.Property(x => x.SnapshotJson).IsRequired();
+                b.Property(x => x.Hash).HasMaxLength(64);
+                b.Property(x => x.TotalAmount).HasPrecision(22, 2);
+                b.HasIndex(x => new { x.PurchaseOrderId, x.Revision }).IsUnique();
+                b.HasOne(x => x.PurchaseOrder).WithMany(x => x.Revisions).HasForeignKey(x => x.PurchaseOrderId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<PurchaseOrderLine>(b =>
             {
@@ -193,6 +205,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.Property(x => x.Question).HasMaxLength(Text).IsRequired();
                 b.Property(x => x.Weight).HasPrecision(9, 2);
                 b.Property(x => x.Score).HasPrecision(9, 2);
+                b.Property(x => x.Basis).HasMaxLength(Text);
                 b.HasOne(x => x.Evaluation).WithMany(x => x.Lines).HasForeignKey(x => x.EvaluationId).OnDelete(DeleteBehavior.Cascade);
             });
 

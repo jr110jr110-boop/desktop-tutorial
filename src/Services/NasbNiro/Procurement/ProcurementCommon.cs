@@ -16,14 +16,21 @@ namespace Services.NasbNiro.Procurement
         public const string Planning = "PLANNING,PMO";
         /// <summary>مدیرعامل (or management): medium/major purchases, committee above the CEO threshold, advance above the limit.</summary>
         public const string Management = "CEO,PMO";
-        public const string Commercial = "COMMERCIAL,PMO";
-        /// <summary>Technical members of the selection committee.</summary>
+        /// <summary>The buyer (inquiries, quotes, selection, orders, payment requests, the vendor list). R1c (M12): the PMO deputy approves purchases and never buys, so it is not in this list.</summary>
+        public const string Commercial = "COMMERCIAL";
+        /// <summary>Technical members of the selection committee (approvers).</summary>
         public const string Technical = "ENGINEERING,QC,CONSTRUCTION,PMO";
+        /// <summary>R1c (M12): only engineering and quality decide that a quote meets the technical requirements ("technically accepted"); neither the buyer nor the PMO deputy does.</summary>
+        public const string TechnicalAcceptance = "ENGINEERING,QC";
         /// <summary>Approves and releases purchase orders and payment requests (PMO deputy).</summary>
         public const string OrderApproval = "PMO,CEO";
         public const string Finance = "FINANCIAL,FINANCEMANAGER,TREASURY,PMO";
-        /// <summary>Accepts services and subcontract work (not the buyer).</summary>
-        public const string ServiceAcceptance = "QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO";
+        /// <summary>R1c (M12): the finance staff who register supplier invoices (the PMO deputy approves, never registers).</summary>
+        public const string FinanceStaff = "FINANCIAL,FINANCEMANAGER,TREASURY";
+        /// <summary>R1c (M13): confirms the deductions that the system proposed from the order terms (late penalty, retention).</summary>
+        public const string DeductionConfirmation = "FINANCIAL,FINANCEMANAGER";
+        /// <summary>Accepts services and subcontract work (not the buyer, not the approver of the order).</summary>
+        public const string ServiceAcceptance = "QC,ENGINEERING,CONSTRUCTION,PLANNING";
         public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION";
     }
 
@@ -45,6 +52,12 @@ namespace Services.NasbNiro.Procurement
         /// <summary>1 = a purchase receipt needs a PMIS purchase order (or is a petty-cash purchase); 0 = off during go-live.</summary>
         public const string EnforcePurchaseOrder = "EnforcePurchaseOrder";
 
+        // R1c (M13): the weights of the scored supplier evaluation (quality, delivery, price, service); they need not add up to 100, the score is the weighted mean of the criteria that have data
+        public const string EvalWeightQuality = "SupplierEvalWeightQuality";
+        public const string EvalWeightDelivery = "SupplierEvalWeightDelivery";
+        public const string EvalWeightPrice = "SupplierEvalWeightPrice";
+        public const string EvalWeightService = "SupplierEvalWeightService";
+
         public static IEnumerable<ProcurementSetting> Defaults()
         {
             yield return new ProcurementSetting { Key = MediumFrom, Value = 10_000_000m, Title = "خرید متوسط از (تایید مدیرعامل)", Source = "BL-006 ماده 2 و 4" };
@@ -60,6 +73,10 @@ namespace Services.NasbNiro.Procurement
             yield return new ProcurementSetting { Key = ReceiptTolerancePercent, Value = 2m, Title = "رواداری مقدار دریافت نسبت به سفارش (درصد)", Source = "پیشنهاد PMIS" };
             yield return new ProcurementSetting { Key = EnforcePurchaseOrder, Value = 1m, Title = "الزام سفارش خرید برای رسید خرید (۱ = بله، ۰ = خیر در دوره راه‌اندازی)", Source = "WI-WH-001 / BL-007" };
             yield return new ProcurementSetting { Key = PriceTolerancePercent, Value = 1m, Title = "رواداری قیمت فاکتور نسبت به سفارش (درصد)", Source = "پیشنهاد PMIS (تطبیق سه‌طرفه)" };
+            yield return new ProcurementSetting { Key = EvalWeightQuality, Value = 40m, Title = "وزن کیفیت در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
+            yield return new ProcurementSetting { Key = EvalWeightDelivery, Value = 30m, Title = "وزن تحویل به‌موقع در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
+            yield return new ProcurementSetting { Key = EvalWeightPrice, Value = 20m, Title = "وزن قیمت در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
+            yield return new ProcurementSetting { Key = EvalWeightService, Value = 10m, Title = "وزن خدمات در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
         }
 
         public static async Task<Dictionary<string, decimal>> LoadAsync(IUnitOfWork uow, CancellationToken cancellationToken)

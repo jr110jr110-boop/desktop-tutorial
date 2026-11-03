@@ -24,6 +24,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public int? DecidedByUserId { get; set; }
         public DateTimeOffset? DecidedAt { get; set; }
         public string DecisionNote { get; set; }
+
+        /// <summary>R1c (H4): the day the percent is valid for (not in the future); null = the day of the approval.</summary>
+        public DateTime? ProgressDate { get; set; }
     }
 
     /// <summary>Weekly snapshot at the data date. Rows are never changed (immutable).</summary>
@@ -249,6 +252,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         /// <summary>A and B: the document counts as approved by the client.</summary>
         public bool CountsAsApproved { get; set; }
         public bool RequiresResubmit { get; set; }
+
+        /// <summary>R1c (L2): a rejection (code D): the issue answered with this code no longer counts, so the document goes back to the previous issue step and its engineering progress falls with it.</summary>
+        public bool ResetsProgress { get; set; }
         public string Source { get; set; }
     }
 
@@ -347,6 +353,23 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public Guid? SignedReceiptDocumentId { get; set; }
         public string HandoverMinutesNumber { get; set; }
         public DateTime? HandoverAt { get; set; }
+
+        /// <summary>R1c (M5): the day the equipment was commissioned at the site; later than the handover as a rule. The warranty "months after commissioning" counts from it; unknown until it is recorded.</summary>
+        public DateTime? CommissionedAt { get; set; }
+
+        // R1c (M8)
+        /// <summary>The confirmed customer-delivery document of the warehouse that this shipment ships (set when the shipment is shipped).</summary>
+        public int? InventoryDocumentId { get; set; }
+
+        /// <summary>The day the shipment was packed (the later dates may not be earlier).</summary>
+        public DateTime? PackedAt { get; set; }
+
+        /// <summary>The QC check of the packing (a person other than the one who packed it).</summary>
+        public int? PackingCheckedByUserId { get; set; }
+        public DateTimeOffset? PackingCheckedAt { get; set; }
+        public int? PackedByUserId { get; set; }
+
+        public ICollection<PcShipmentLine> Lines { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }

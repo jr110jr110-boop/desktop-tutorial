@@ -69,6 +69,10 @@ namespace WebApi.Controllers
         [HttpPost("inquiries/action")]
         public async Task<IActionResult> InquiryActionAsync([FromBody] ProcurementActionDto dto, CancellationToken ct) => Ok(await _service.InquiryActionAsync(dto, ct));
 
+        // R1c (M12): engineering or quality judges whether a quote meets the technical requirements; the buyer cannot
+        [HttpPost("inquiries/technical-review")]
+        public async Task<IActionResult> TechnicalReviewAsync([FromBody] TechnicalReviewDto dto, CancellationToken ct) => Ok(await _service.TechnicalReviewAsync(dto, ct));
+
         // purchase orders
         [HttpGet("orders")]
         [Authorize(Roles = Readers)]
@@ -87,6 +91,11 @@ namespace WebApi.Controllers
 
         [HttpPost("orders/action")]
         public async Task<IActionResult> OrderActionAsync([FromBody] ProcurementActionDto dto, CancellationToken ct) => Ok(await _service.OrderActionAsync(dto, ct));
+
+        // R1c (M13): the frozen earlier revisions of an order
+        [HttpGet("orders/{id:int}/revisions")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> OrderRevisionsAsync(int id, CancellationToken ct) => Ok(await _service.GetOrderRevisionsAsync(id, ct));
 
         [HttpPost("orders/accept-service")]
         public async Task<IActionResult> AcceptServiceAsync([FromBody] SaveServiceAcceptanceDto dto, CancellationToken ct) => Ok(await _service.AcceptServiceAsync(dto, ct));
@@ -134,6 +143,11 @@ namespace WebApi.Controllers
         [HttpGet("suppliers/{providerId:int}/evaluations")]
         [Authorize(Roles = Readers)]
         public async Task<IActionResult> EvaluationsAsync(int providerId, CancellationToken ct) => Ok(await _payables.GetEvaluationsAsync(providerId, ct));
+
+        // R1c (M13): the scored evaluation the system would record now
+        [HttpGet("suppliers/{providerId:int}/evaluation-preview")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> EvaluationPreviewAsync(int providerId, CancellationToken ct) => Ok(await _payables.GetEvaluationPreviewAsync(providerId, ct));
 
         [HttpPost("suppliers/evaluate")]
         public async Task<IActionResult> EvaluateAsync([FromBody] SaveSupplierEvaluationDto dto, CancellationToken ct) => Ok(await _payables.EvaluateAsync(dto, ct));

@@ -32,6 +32,9 @@ namespace Services.NasbNiro.Procurement
         Task<ResponseDto<List<SupplierProfileDto>>> GetSuppliersAsync(string contains, CancellationToken cancellationToken);
         Task<ResponseDto<SupplierProfileDto>> SaveSupplierAsync(SaveSupplierProfileDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<List<SupplierEvaluationDto>>> GetEvaluationsAsync(int providerId, CancellationToken cancellationToken);
+
+        /// <summary>R1c (M13): the scored evaluation the system would record now, criterion by criterion, from the recorded performance of the supplier.</summary>
+        Task<ResponseDto<SupplierEvaluationPreviewDto>> GetEvaluationPreviewAsync(int providerId, CancellationToken cancellationToken);
         /// <summary>Supplier advances paid or requested and not yet recovered from invoice payments, per supplier and order.</summary>
         Task<ResponseDto<List<FnOpenAdvanceDto>>> GetOpenAdvancesAsync(CancellationToken cancellationToken);
         Task<ResponseDto<SupplierEvaluationDto>> EvaluateAsync(SaveSupplierEvaluationDto dto, CancellationToken cancellationToken);
@@ -124,7 +127,8 @@ namespace Services.NasbNiro.Procurement
         public async Task<ResponseDto<SupplierInvoiceDto>> SaveInvoiceAsync(SaveSupplierInvoiceDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return Bad<SupplierInvoiceDto>("اطلاعات ارسال‌شده کامل نیست.");
-            if (!_user.IsInRole(ProcurementRoles.Finance) && !_user.IsInRole(ProcurementRoles.Commercial)) return Bad<SupplierInvoiceDto>(NotAllowed);
+            // R1c (M12): the PMO deputy approves invoices and never registers them (maker-checker)
+            if (!_user.IsInRole(ProcurementRoles.FinanceStaff) && !_user.IsInRole(ProcurementRoles.Commercial)) return Bad<SupplierInvoiceDto>(NotAllowed);
             PurchaseOrder order = await _uow.Set<PurchaseOrder>().Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == dto.PurchaseOrderId && !o.Deleted, cancellationToken);
             if (order == null) return Bad<SupplierInvoiceDto>("سفارش خرید پیدا نشد.");
             if (order.Status < PurchaseOrderStatus.Released || order.Status == PurchaseOrderStatus.Cancelled) return Bad<SupplierInvoiceDto>("فاکتور فقط برای سفارش ابلاغ‌شده ثبت می‌شود.");
@@ -287,7 +291,7 @@ namespace Services.NasbNiro.Procurement
         private async Task<List<PaymentRequestDto>> LoadPaymentsAsync(IQueryable<PaymentRequest> query, CancellationToken cancellationToken)
         {
             List<PaymentRequest> rows = await query.Include(p => p.Provider).Include(p => p.PurchaseOrder).Include(p => p.Invoice).ToListAsync(cancellationToken);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(p => new int?[] { p.CreatorUserId, p.ApprovedByUserId, p.PaidByUserId }), cancellationToken);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(p => new int?[] { p.CreatorUserId, p.ApprovedByUserId, p.PaidByUserId, p.DeductionsConfirmedByUserId }), cancellationToken);
             List<int> requestIds = rows.Select(p => p.Id).ToList();
             List<FnPaymentDeduction> typed = await _uow.Set<FnPaymentDeduction>().AsNoTracking().Where(d => requestIds.Contains(d.PaymentRequestId)).OrderBy(d => d.Id).ToListAsync(cancellationToken);
             return rows.Select(p => new PaymentRequestDto
@@ -298,6 +302,8 @@ namespace Services.NasbNiro.Procurement
                 Description = p.Description, CreateDate = p.CreateDate, CreatorName = names.Name(p.CreatorUserId), ApprovedAt = p.ApprovedAt,
                 ApprovedByName = names.Name(p.ApprovedByUserId), PaidAt = p.PaidAt, PaidByName = names.Name(p.PaidByUserId), PaymentReference = p.PaymentReference,
                 RejectReason = p.RejectReason,
+                DeductionsProposed = p.DeductionsProposedAt.HasValue, DeductionsConfirmed = p.DeductionsConfirmedAt.HasValue, DeductionsConfirmedAt = p.DeductionsConfirmedAt,
+                DeductionsConfirmedByName = names.Name(p.DeductionsConfirmedByUserId),
                 DeductionLines = typed.Where(d => d.PaymentRequestId == p.Id).Select(d => new PaymentDeductionDto { Kind = d.Kind, Base = d.Base, RatePercent = d.RatePercent, Amount = d.Amount, Note = d.Note }).ToList(),
             }).ToList();
         }
@@ -313,6 +319,37 @@ namespace Services.NasbNiro.Procurement
             int size = query.PageSize <= 0 ? Math.Max(total, 1) : query.PageSize, number = query.PageNumber <= 0 ? 1 : query.PageNumber;
             List<PaymentRequestDto> list = await LoadPaymentsAsync(q.OrderByDescending(p => p.Id).Skip((number - 1) * size).Take(size), cancellationToken);
             return ResponseDtoHelper.Ok(Page(list.OrderByDescending(p => p.Id).ToList(), total, number, size));
+        }
+
+        /// <summary>
+        /// R1c (M13): the deductions the terms of the order call for, as proposals: the performance retention (a share of the payment) and the late-delivery penalty (per invoice line,
+        /// from the due date to the day the line was last received or its service accepted, less what other requests of the same invoice already deduct). A kind the buyer typed is not proposed again.
+        /// </summary>
+        private async Task<List<PaymentProposals.Proposal>> ProposalsAsync(PurchaseOrder order, SupplierInvoice invoice, SavePaymentRequestDto dto, List<PaymentDeductionDto> typed, decimal totalDeductions, CancellationToken cancellationToken)
+        {
+            var result = new List<PaymentProposals.Proposal>();
+            decimal room = dto.Amount - totalDeductions;
+            if (!typed.Any(d => d.Kind == FnDeductionKind.PerformanceRetention))
+            {
+                PaymentProposals.Proposal retention = PaymentProposals.Retention(order.RetentionPercent, dto.Amount, room);
+                if (retention != null) { result.Add(retention); room -= retention.Amount; }
+            }
+            if (!typed.Any(d => d.Kind == FnDeductionKind.LatePenalty) && order.LatePenaltyPercentPerWeek.HasValue && invoice != null)
+            {
+                var invoiceLines = await _uow.Set<SupplierInvoiceLine>().AsNoTracking().Where(l => l.InvoiceId == invoice.Id)
+                    .Select(l => new { l.Quantity, l.UnitPrice, l.OrderLineId, Due = l.OrderLine.DeliveryDate ?? l.OrderLine.PurchaseOrder.DeliveryDate, l.OrderLine.LastReceiptDate, Service = l.OrderLine.ItemId == null })
+                    .ToListAsync(cancellationToken);
+                List<int> serviceLineIds = invoiceLines.Where(l => l.Service).Select(l => l.OrderLineId).ToList();
+                var acceptances = await _uow.Set<ServiceAcceptance>().AsNoTracking().Where(a => !a.Deleted && serviceLineIds.Contains(a.PurchaseOrderLineId))
+                    .GroupBy(a => a.PurchaseOrderLineId).Select(g => new { g.Key, Last = g.Max(a => a.AcceptanceDate) }).ToListAsync(cancellationToken);
+                decimal already = await _uow.Set<FnPaymentDeduction>().Where(d => d.Kind == FnDeductionKind.LatePenalty && d.PaymentRequest.InvoiceId == invoice.Id &&
+                                                                                   d.PaymentRequest.Status != PaymentRequestStatus.Rejected && !d.PaymentRequest.Deleted && d.PaymentRequestId != (dto.Id ?? 0))
+                    .SumAsync(d => (decimal?)d.Amount, cancellationToken) ?? 0;
+                PaymentProposals.Proposal penalty = PaymentProposals.LatePenalty(order.LatePenaltyPercentPerWeek,
+                    invoiceLines.Select(l => (Math.Round(l.Quantity * l.UnitPrice, 0), l.Due, l.Service ? acceptances.FirstOrDefault(a => a.Key == l.OrderLineId)?.Last : l.LastReceiptDate)), already, room);
+                if (penalty != null) result.Add(penalty);
+            }
+            return result;
         }
 
         public async Task<ResponseDto<PaymentRequestDto>> SavePaymentAsync(SavePaymentRequestDto dto, CancellationToken cancellationToken)
@@ -334,6 +371,7 @@ namespace Services.NasbNiro.Procurement
             if (invoice != null && order != null && invoice.PurchaseOrderId != order.Id) return Bad<PaymentRequestDto>("فاکتور متعلق به این سفارش نیست.");
             if (invoice != null) order ??= await _uow.Set<PurchaseOrder>().FirstAsync(o => o.Id == invoice.PurchaseOrderId, cancellationToken);
             bool qcApproved = false;
+            bool needsConfirmation = false;
             switch (dto.Type)
             {
                 case PaymentRequestType.Advance:
@@ -374,6 +412,15 @@ namespace Services.NasbNiro.Procurement
                             typedSum += proposal; totalDeductions += proposal;
                         }
                     }
+
+                    // R1c (M13): the retention and the late penalty of the order terms are proposed too (when no line of that kind was typed); any line of these two kinds,
+                    // proposed or typed, must be confirmed by finance before the request can be approved
+                    foreach (PaymentProposals.Proposal pr in await ProposalsAsync(order, invoice, dto, typedLines, totalDeductions, cancellationToken))
+                    {
+                        typedLines.Add(new PaymentDeductionDto { Kind = pr.Kind, Base = pr.Base, RatePercent = pr.RatePercent, Amount = pr.Amount, Note = pr.Note });
+                        typedSum += pr.Amount; totalDeductions += pr.Amount;
+                    }
+                    needsConfirmation = typedLines.Any(d => d.Kind == FnDeductionKind.LatePenalty || d.Kind == FnDeductionKind.PerformanceRetention);
                     qcApproved = true;
                     break;
                 }
@@ -427,11 +474,18 @@ namespace Services.NasbNiro.Procurement
             payment.DeductionNote = Clean(dto.DeductionNote);
             payment.QcApproved = qcApproved;
             payment.Description = Clean(dto.Description);
+
+            // R1c (M13): a saved draft always needs the finance confirmation again when it carries penalty or retention lines
+            payment.DeductionsProposedAt = needsConfirmation ? DateTimeOffset.Now : (DateTimeOffset?)null;
+            payment.DeductionsConfirmedByUserId = null;
+            payment.DeductionsConfirmedAt = null;
             payment.ModifyDate = DateTimeOffset.Now;
             payment.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
-            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payreq:" + payment.Id, payment.Status == PaymentRequestStatus.Draft, "procurement", "payment-request", payment.Id,
-                "تایید درخواست پرداخت " + payment.Number, "/procurement/payments/" + payment.Id, ProcurementRoles.OrderApproval, cancellationToken);
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payreq:" + payment.Id, payment.Status == PaymentRequestStatus.Draft && !needsConfirmation, "procurement", "payment-request", payment.Id,
+                "تایید درخواست پرداخت " + payment.Number, "/procurement/payments?id=" + payment.Id, ProcurementRoles.OrderApproval, cancellationToken);
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "paydeduct:" + payment.Id, payment.Status == PaymentRequestStatus.Draft && needsConfirmation, "procurement", "payment-deductions", payment.Id,
+                "تایید کسورات درخواست پرداخت " + payment.Number, "/procurement/payments?id=" + payment.Id, ProcurementRoles.DeductionConfirmation, cancellationToken);
             return ResponseDtoHelper.Ok((await LoadPaymentsAsync(_uow.Set<PaymentRequest>().Where(p => p.Id == payment.Id), cancellationToken))[0]);
         }
 
@@ -442,10 +496,43 @@ namespace Services.NasbNiro.Procurement
             DateTimeOffset now = DateTimeOffset.Now;
             switch (dto.Action?.Trim().ToLowerInvariant())
             {
+                case "confirm-deductions":
+                {
+                    // R1c (M13): finance confirms (or corrects, with a reason) the late penalty and the retention that the system proposed from the order terms
+                    if (p.Status != PaymentRequestStatus.Draft) return Bad<PaymentRequestDto>("کسورات فقط برای درخواست پیش‌نویس تایید می‌شود.");
+                    if (!p.DeductionsProposedAt.HasValue) return Bad<PaymentRequestDto>("این درخواست جریمه تاخیر یا تضمین حسن انجام کار پیشنهادی ندارد.");
+                    if (!_user.IsInRole(ProcurementRoles.DeductionConfirmation)) return Bad<PaymentRequestDto>(NotAllowed + " (تایید کسورات با مالی است)");
+                    if (p.CreatorUserId == Me) return Bad<PaymentRequestDto>(SameUser);
+                    if (p.DeductionsConfirmedAt.HasValue) return Bad<PaymentRequestDto>("کسورات قبلاً تایید شده است.");
+                    List<PaymentDeductionDto> given = (dto.DeductionLines ?? new List<PaymentDeductionDto>()).Where(d => d != null).ToList();
+                    if (given.Count > 0)
+                    {
+                        if (given.Any(d => (d.Kind != FnDeductionKind.LatePenalty && d.Kind != FnDeductionKind.PerformanceRetention) || d.Amount < 0))
+                            return Bad<PaymentRequestDto>("در این مرحله فقط جریمه تاخیر و تضمین حسن انجام کار، با مبلغ غیرمنفی، ویرایش می‌شود.");
+                        string why = Clean(dto.Note);
+                        if (why == null) return Bad<PaymentRequestDto>("علت تغییر کسورات پیشنهادی را بنویسید.");
+                        List<FnPaymentDeduction> old = await _uow.Set<FnPaymentDeduction>()
+                            .Where(d => d.PaymentRequestId == p.Id && (d.Kind == FnDeductionKind.LatePenalty || d.Kind == FnDeductionKind.PerformanceRetention)).ToListAsync(cancellationToken);
+                        List<PaymentDeductionDto> kept = given.Where(d => Math.Round(d.Amount, 0) != 0).ToList();
+                        decimal total = p.Deductions - old.Sum(d => d.Amount) + kept.Sum(d => Math.Round(d.Amount, 0));
+                        if (total > p.Amount) return Bad<PaymentRequestDto>("مجموع کسورات از مبلغ درخواست بیشتر می‌شود.");
+                        _uow.Set<FnPaymentDeduction>().RemoveRange(old);
+                        foreach (PaymentDeductionDto d in kept)
+                            _uow.Set<FnPaymentDeduction>().Add(new FnPaymentDeduction { PaymentRequestId = p.Id, Kind = d.Kind, Base = Math.Round(d.Base, 0), RatePercent = d.RatePercent, Amount = Math.Round(d.Amount, 0), Note = d.Note?.Trim() });
+                        p.Deductions = total;
+                        string note = string.IsNullOrWhiteSpace(p.DeductionNote) ? "تایید مالی: " + why : p.DeductionNote + " | تایید مالی: " + why;
+                        p.DeductionNote = note.Length > 1000 ? note.Substring(0, 1000) : note;
+                    }
+                    p.DeductionsConfirmedByUserId = Me;
+                    p.DeductionsConfirmedAt = now;
+                    break;
+                }
                 case "approve":
                     if (p.Status != PaymentRequestStatus.Draft) return Bad<PaymentRequestDto>("این درخواست در مرحله تایید نیست.");
                     if (!_user.IsInRole(ProcurementRoles.OrderApproval)) return Bad<PaymentRequestDto>(NotAllowed + " (معاونت PMO)");
-                    if (p.CreatorUserId == Me) return Bad<PaymentRequestDto>(SameUser);
+                    if (p.CreatorUserId == Me || p.DeductionsConfirmedByUserId == Me) return Bad<PaymentRequestDto>(SameUser);
+                    if (p.DeductionsProposedAt.HasValue && !p.DeductionsConfirmedAt.HasValue)
+                        return Bad<PaymentRequestDto>("جریمه تاخیر یا تضمین حسن انجام کار این درخواست پیش از تایید باید توسط مالی تایید شود (تایید کسورات).");
                     p.Status = PaymentRequestStatus.Approved;
                     p.ApprovedAt = now;
                     p.ApprovedByUserId = Me;
@@ -484,8 +571,11 @@ namespace Services.NasbNiro.Procurement
                     return Bad<PaymentRequestDto>("عمل نامعتبر است.");
             }
             await _uow.SaveChangesAsync(cancellationToken);
-            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payreq:" + p.Id, p.Status == PaymentRequestStatus.Draft, "procurement", "payment-request", p.Id,
-                "تایید درخواست پرداخت " + p.Number, "/procurement/payments/" + p.Id, ProcurementRoles.OrderApproval, cancellationToken);
+            bool waitsForDeductions = p.Status == PaymentRequestStatus.Draft && p.DeductionsProposedAt.HasValue && !p.DeductionsConfirmedAt.HasValue;
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payreq:" + p.Id, p.Status == PaymentRequestStatus.Draft && !waitsForDeductions, "procurement", "payment-request", p.Id,
+                "تایید درخواست پرداخت " + p.Number, "/procurement/payments?id=" + p.Id, ProcurementRoles.OrderApproval, cancellationToken);
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "paydeduct:" + p.Id, waitsForDeductions, "procurement", "payment-deductions", p.Id,
+                "تایید کسورات درخواست پرداخت " + p.Number, "/procurement/payments?id=" + p.Id, ProcurementRoles.DeductionConfirmation, cancellationToken);
             return ResponseDtoHelper.Ok((await LoadPaymentsAsync(_uow.Set<PaymentRequest>().Where(x => x.Id == p.Id), cancellationToken))[0]);
         }
 
@@ -540,22 +630,28 @@ namespace Services.NasbNiro.Procurement
 
         public async Task<ResponseDto<SupplierProfileDto>> SaveSupplierAsync(SaveSupplierProfileDto dto, CancellationToken cancellationToken)
         {
-            if (!_user.IsInRole(ProcurementRoles.Commercial)) return Bad<SupplierProfileDto>(NotAllowed);
+            // R1c (M12): the buyer keeps the vendor list (profile, bank data); management (CEO, PMO deputy) only blocks or unblocks, and changes nothing else of the profile
+            bool buyer = _user.IsInRole(ProcurementRoles.Commercial);
+            bool management = _user.IsInRole(ProcurementRoles.Management);
+            if (!buyer && !management) return Bad<SupplierProfileDto>(NotAllowed);
             if (!await _uow.Set<Provider>().AnyAsync(p => p.Id == dto.ProviderId && !p.Deleted, cancellationToken)) return Bad<SupplierProfileDto>("تامین‌کننده پیدا نشد.");
             SupplierProfile profile = await ProfileAsync(dto.ProviderId, cancellationToken);
             // unblocking a grade-D or warned supplier needs management (WI-PO-003)
-            if (profile.Blocked && !dto.Blocked && !_user.IsInRole(ProcurementRoles.Management)) return Bad<SupplierProfileDto>("رفع مسدودی تامین‌کننده با مدیرعامل است.");
+            if (profile.Blocked && !dto.Blocked && !management) return Bad<SupplierProfileDto>("رفع مسدودی تامین‌کننده با مدیرعامل است.");
             if (dto.Blocked && Clean(dto.BlockReason) == null) return Bad<SupplierProfileDto>("علت مسدودی را بنویسید.");
-            profile.Categories = Clean(dto.Categories);
-            profile.IsStrategic = dto.IsStrategic;
+            string iban = Clean(dto.Iban)?.Replace(" ", "").ToUpperInvariant();
+            if (buyer && iban != null && !Finance.LedgerMath.IbanValid(Finance.LedgerMath.Digits(iban))) return Bad<SupplierProfileDto>("شماره شبا نامعتبر است.");
+            if (buyer)
+            {
+                profile.Categories = Clean(dto.Categories);
+                profile.IsStrategic = dto.IsStrategic;
+                profile.SepidarCode = Clean(dto.SepidarCode);
+                profile.NationalId = Clean(dto.NationalId);
+                profile.EconomicCode = Clean(dto.EconomicCode);
+                profile.Iban = iban == null ? null : Finance.LedgerMath.Digits(iban);
+            }
             profile.Blocked = dto.Blocked || profile.Grade == SupplierGrade.D;
             profile.BlockReason = profile.Blocked ? Clean(dto.BlockReason) ?? profile.BlockReason : null;
-            profile.SepidarCode = Clean(dto.SepidarCode);
-            profile.NationalId = Clean(dto.NationalId);
-            profile.EconomicCode = Clean(dto.EconomicCode);
-            string iban = Clean(dto.Iban)?.Replace(" ", "").ToUpperInvariant();
-            if (iban != null && !Finance.LedgerMath.IbanValid(Finance.LedgerMath.Digits(iban))) return Bad<SupplierProfileDto>("شماره شبا نامعتبر است.");
-            profile.Iban = iban == null ? null : Finance.LedgerMath.Digits(iban);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok((await GetSuppliersAsync(null, cancellationToken)).Data.First(p => p.ProviderId == dto.ProviderId));
         }
@@ -591,29 +687,90 @@ namespace Services.NasbNiro.Procurement
             return ResponseDtoHelper.Ok(rows.Select(e => new SupplierEvaluationDto
             {
                 Id = e.Id, ProviderId = e.ProviderId, ProviderName = e.Provider?.Name, Kind = e.Kind, EvaluationDate = e.EvaluationDate, PurchaseOrderId = e.PurchaseOrderId,
-                Score = e.Score, Grade = e.Grade, Notes = e.Notes, EvaluatorName = names.Name(e.CreatorUserId),
-                Lines = e.Lines.Select(l => new EvaluationLineDto { Question = l.Question, Weight = l.Weight, Score = l.Score }).ToList(),
+                Score = e.Score, Grade = e.Grade, Notes = e.Notes, Scored = e.Scored, EvaluatorName = names.Name(e.CreatorUserId),
+                Lines = e.Lines.Select(l => new EvaluationLineDto { Question = l.Question, Weight = l.Weight, Score = l.Score, Basis = l.Basis }).ToList(),
             }).ToList());
+        }
+
+        /// <summary>
+        /// R1c (M13): the recorded performance of one supplier (the same figures the vendor list shows) and the price closeness of its technically accepted quotes
+        /// to the lowest accepted quote of the same inquiry (only inquiries with at least two accepted quotes count: there is nothing to compare otherwise).
+        /// </summary>
+        private async Task<SupplierMetrics> MetricsAsync(int providerId, CancellationToken cancellationToken)
+        {
+            SupplierProfile profile = await _uow.Set<SupplierProfile>().AsNoTracking().FirstOrDefaultAsync(p => p.ProviderId == providerId, cancellationToken);
+            int orders = await _uow.Set<PurchaseOrder>().CountAsync(o => o.ProviderId == providerId && !o.Deleted && o.Status != PurchaseOrderStatus.Cancelled && o.Status != PurchaseOrderStatus.Draft, cancellationToken);
+            var lines = await _uow.Set<PurchaseOrderLine>().Where(l => l.PurchaseOrder.ProviderId == providerId && l.LastReceiptDate.HasValue)
+                .Select(l => new { Late = (l.DeliveryDate ?? l.PurchaseOrder.DeliveryDate) < l.LastReceiptDate }).ToListAsync(cancellationToken);
+            int ncrs = await _uow.Set<NonConformance>().CountAsync(n => !n.Deleted && n.ProviderId == providerId, cancellationToken);
+            int returns = await _uow.Set<InventoryDocument>().CountAsync(d => !d.Deleted && d.Type == InventoryDocumentType.SupplierReturn && d.Status == InventoryDocumentStatus.Confirmed && d.ProviderId == providerId, cancellationToken);
+            var accepted = await _uow.Set<SupplierQuote>().AsNoTracking()
+                .Where(q => q.TechnicallyAccepted && !q.Inquiry.Deleted && q.Inquiry.Status != InquiryStatus.Cancelled &&
+                            q.Inquiry.Quotes.Any(x => x.ProviderId == providerId && x.TechnicallyAccepted))
+                .Select(q => new { q.InquiryId, q.ProviderId, q.TotalAmount }).ToListAsync(cancellationToken);
+            var ratios = new List<decimal>();
+            foreach (var group in accepted.GroupBy(q => q.InquiryId).Where(g => g.Count() >= 2))
+            {
+                decimal mine = group.Where(q => q.ProviderId == providerId).Select(q => q.TotalAmount).DefaultIfEmpty(0).Min();
+                decimal lowest = group.Min(q => q.TotalAmount);
+                if (mine > 0 && lowest > 0) ratios.Add(Math.Min(1m, lowest / mine));
+            }
+            return new SupplierMetrics
+            {
+                Orders = orders, ReceiptLines = lines.Count, LateReceiptLines = lines.Count(l => l.Late), Ncrs = ncrs, Returns = returns, Warnings = profile?.Warnings ?? 0, PriceRatios = ratios,
+            };
+        }
+
+        public async Task<ResponseDto<SupplierEvaluationPreviewDto>> GetEvaluationPreviewAsync(int providerId, CancellationToken cancellationToken)
+        {
+            string name = await _uow.Set<Provider>().Where(p => p.Id == providerId && !p.Deleted).Select(p => p.Name).FirstOrDefaultAsync(cancellationToken);
+            if (name == null) return ResponseDtoHelper.NotFound<SupplierEvaluationPreviewDto>("تامین‌کننده پیدا نشد.");
+            Dictionary<string, decimal> settings = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
+            List<CriterionScore> criteria = SupplierScoring.Criteria(await MetricsAsync(providerId, cancellationToken), settings);
+            decimal? total = SupplierScoring.Total(criteria);
+            return ResponseDtoHelper.Ok(new SupplierEvaluationPreviewDto
+            {
+                ProviderId = providerId, ProviderName = name, HasData = total.HasValue, Score = total, Grade = total.HasValue ? SupplierGrades.FromScore(total.Value) : (SupplierGrade?)null,
+                Criteria = criteria.Select(c => new EvaluationLineDto { Question = c.Title, Weight = c.Weight, Score = c.Score, Basis = c.Basis }).ToList(),
+            });
         }
 
         public async Task<ResponseDto<SupplierEvaluationDto>> EvaluateAsync(SaveSupplierEvaluationDto dto, CancellationToken cancellationToken)
         {
             if (!_user.IsInRole(ProcurementRoles.Commercial) && !_user.IsInRole(ProcurementRoles.Technical)) return Bad<SupplierEvaluationDto>(NotAllowed);
             if (!await _uow.Set<Provider>().AnyAsync(p => p.Id == dto.ProviderId && !p.Deleted, cancellationToken)) return Bad<SupplierEvaluationDto>("تامین‌کننده پیدا نشد.");
-            List<EvaluationLineDto> lines = (dto.Lines ?? new List<EvaluationLineDto>()).Where(l => l != null && Clean(l.Question) != null).ToList();
-            if (lines.Count == 0) return Bad<SupplierEvaluationDto>("سوال‌های ارزیابی را وارد کنید.");
-            if (lines.Any(l => l.Weight <= 0 || l.Score < 0 || l.Score > 100)) return Bad<SupplierEvaluationDto>("وزن باید مثبت و امتیاز بین ۰ تا ۱۰۰ باشد.");
-            List<EvaluationLineDto> applicable = lines.Where(l => l.Score.HasValue).ToList();
-            if (applicable.Count == 0) return Bad<SupplierEvaluationDto>("حداقل یک سوال باید امتیاز داشته باشد.");
-            // WI-PO-003: final score = sum(S x W) / sum(W); N/A questions are left out
-            decimal score = Math.Round(applicable.Sum(l => l.Score.Value * l.Weight) / applicable.Sum(l => l.Weight), 1);
+            List<EvaluationLineDto> lines;
+            decimal score;
+            if (dto.Scored)
+            {
+                // R1c (M13): the four criteria (quality, delivery, price, service) are scored by the system from the recorded performance with the weights of the settings;
+                // the evaluator cannot type the scores and must write a comment
+                if (Clean(dto.Notes) == null) return Bad<SupplierEvaluationDto>("نظر ارزیاب را بنویسید؛ ارزیابی امتیازی بدون توضیح ارزیاب ثبت نمی‌شود.");
+                Dictionary<string, decimal> settings = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
+                List<CriterionScore> criteria = SupplierScoring.Criteria(await MetricsAsync(dto.ProviderId, cancellationToken), settings);
+                decimal? total = SupplierScoring.Total(criteria);
+                if (!total.HasValue)
+                    return Bad<SupplierEvaluationDto>("برای این تامین‌کننده هنوز سفارش، رسید یا استعلامی ثبت نشده یا وزن معیارها صفر است؛ ارزیابی اولیه را با پرسشنامه دستی (FO-PO-003) انجام دهید.");
+                score = total.Value;
+                lines = criteria.Select(c => new EvaluationLineDto { Question = c.Title, Weight = c.Weight, Score = c.Score, Basis = c.Basis }).ToList();
+            }
+            else
+            {
+                lines = (dto.Lines ?? new List<EvaluationLineDto>()).Where(l => l != null && Clean(l.Question) != null).ToList();
+                if (lines.Count == 0) return Bad<SupplierEvaluationDto>("سوال‌های ارزیابی را وارد کنید.");
+                if (lines.Any(l => l.Weight <= 0 || l.Score < 0 || l.Score > 100)) return Bad<SupplierEvaluationDto>("وزن باید مثبت و امتیاز بین ۰ تا ۱۰۰ باشد.");
+                List<EvaluationLineDto> applicable = lines.Where(l => l.Score.HasValue).ToList();
+                if (applicable.Count == 0) return Bad<SupplierEvaluationDto>("حداقل یک سوال باید امتیاز داشته باشد.");
+                // WI-PO-003: final score = sum(S x W) / sum(W); N/A questions are left out
+                score = Math.Round(applicable.Sum(l => l.Score.Value * l.Weight) / applicable.Sum(l => l.Weight), 1);
+            }
             SupplierGrade grade = SupplierGrades.FromScore(score);
             DateTime date = dto.EvaluationDate == default ? DateTime.Today : dto.EvaluationDate.Date;
             var evaluation = new SupplierEvaluation
             {
                 ProviderId = dto.ProviderId, Kind = dto.Kind, EvaluationDate = date, PurchaseOrderId = dto.PurchaseOrderId, Score = score, Grade = grade,
-                Notes = Clean(dto.Notes), CreateDate = DateTimeOffset.Now, CreatorUserId = Me, ModifyDate = DateTimeOffset.Now, ModifierUserId = Me,
-                Lines = lines.Select(l => new SupplierEvaluationLine { Question = l.Question.Trim(), Weight = l.Weight, Score = l.Score }).ToList(),
+                Notes = Clean(dto.Notes), Scored = dto.Scored, CreateDate = DateTimeOffset.Now, CreatorUserId = Me, ModifyDate = DateTimeOffset.Now, ModifierUserId = Me,
+                Lines = lines.Select(l => new SupplierEvaluationLine { Question = l.Question.Trim(), Weight = l.Weight, Score = l.Score, Basis = dto.Scored ? l.Basis : null }).ToList(),
             };
             _uow.Set<SupplierEvaluation>().Add(evaluation);
             SupplierProfile profile = await ProfileAsync(dto.ProviderId, cancellationToken);

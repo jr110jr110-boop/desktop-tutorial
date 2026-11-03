@@ -464,7 +464,7 @@ namespace Services.NasbNiro.Finance
             foreach (FnContractRevenue s in settings.OrderBy(x => x.ContractId))
             {
                 FnRevenueInputDto input = request?.Inputs?.FirstOrDefault(i => i.ContractId == s.ContractId);
-                decimal price = s.ContractPrice ?? await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcContractTerms>().AsNoTracking().Where(t => t.ContractId == s.ContractId).Select(t => t.ValueExVat ?? 0).FirstOrDefaultAsync(ct);
+                decimal price = s.ContractPrice ?? (await global::Services.NasbNiro.ProjectControl.PcEffective.EffectiveContractAsync(_uow, s.ContractId, ct)).Value; // R1c (H4): the effective value (terms + approved variation orders and amendments), the one value everywhere
                 if (price <= 0) return Bad<FnRevenueRunDto>($"مبلغ قرارداد {s.ContractId} مشخص نیست.");
                 decimal progress, eac;
                 var snap = await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcProgressSnapshot>().AsNoTracking().Where(x => x.ContractId == s.ContractId && x.DataDate <= end).OrderByDescending(x => x.DataDate).FirstOrDefaultAsync(ct);

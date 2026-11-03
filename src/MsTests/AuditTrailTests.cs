@@ -128,7 +128,6 @@ namespace MsTests
             { "PcAmendmentCopy", "who received a copy of an amendment: a distribution note, no money, date or authority" },
             { "PcBaselineActivity", "frozen copy of the activities of an approved baseline; the baseline header and its signatures are audited" },
             { "PcBaselineCostPeriod", "frozen copy of the planned cost curve of a baseline; the baseline and its cost lines are audited" },
-            { "PcClientResponseCode", "lookup table of the reply codes of the client" },
             { "PcCodingTable", "lookup table of the project coding (type, option, size)" },
             { "PcDailyReportLine", "lines of a daily report; the confirmation of the report is audited" },
             { "PcDependency", "links between activities, generated with the schedule; the dates and the status of the activities are audited" },
@@ -141,7 +140,8 @@ namespace MsTests
             { "PcReportIssue", "an issued report: its content and hash never change, the hash is the proof" },
             { "PcTransmittal", "transmittals to and from the client carry their own number, date and reply codes" },
             { "PcTransmittalLine", "line of a transmittal; the reply code and date are on the line itself" },
-            { "PcWorkOrderInfo", "parts of the project code of a work order, allocated once; the project code of the contract terms is audited" },
+            { "PcProgressEvent", "append-only observation of the percent of an activity with its own date, user and source; written by the engine and by approved manual progress" },
+            { "PcShipmentLine", "line of a shipment; the shipment (status, warehouse document, packing check, delivery) is audited" },
         };
 
         [TestMethod]
@@ -316,6 +316,115 @@ namespace MsTests
             Assert.AreEqual("Draft", Fields(rows[1].BeforeJson)["Status"].GetString());
             Assert.AreEqual("Approved", Fields(rows[1].AfterJson)["Status"].GetString());
             Assert.AreEqual(7, Fields(rows[1].AfterJson)["ApprovedByUserId"].GetInt32());
+        }
+
+        // ------------------------------------------------------------------------------------------------ R1c
+
+        [TestMethod]
+        public void R1cTermsReviewVariationOrderAndOrderColumnsAreListed()
+        {
+            Dictionary<Type, string[]> audited = AuditedTypes();
+            Dictionary<Type, string> labels = LabelTypes();
+            var expected = new Dictionary<Type, string[]>
+            {
+                { typeof(Pc.PcContractTerms), new[] { "PenaltyBasis", "WarrantyMonthsAfterCommissioning", "WarrantyMonthsAfterDelivery", "TermsFrozenAt" } },
+                { typeof(Pc.PcContractReview), new[] { "Stage", "AmendmentId", "VariationOrderId", "PmoAcceptedByUserId", "PmoAcceptedAt", "CommercialAcceptedByUserId", "CommercialAcceptedAt" } },
+                { typeof(Pc.PcVariationOrder), new[] { "SubmittedByUserId", "ApprovedByUserId", "ApprovedAt", "ApprovedByRole", "ClientLetterId", "ClientDocumentId", "TermsAppliedAt", "DecisionNote" } },
+                { typeof(Pc.PcContractAmendment), new[] { "TermsAppliedAt" } },
+                { typeof(Pc.PcShipment), new[] { "InventoryDocumentId", "PackedAt", "PackingCheckedByUserId" } },
+                { typeof(Pc.PcProjectPlan), new[] { "EditorUserIds" } },
+                { typeof(Pc.PcWorkOrderInfo), new[] { "EquipmentProjectCode", "PlannedDeliveryDate" } },
+                { typeof(Pc.PcSnapshotRequest), new[] { "DataDate", "Reason", "State", "DecidedByUserId" } },
+                { typeof(Proc.PurchaseOrder), new[] { "QuoteId", "Revision", "RevisionReason", "RevisedByUserId" } },
+                { typeof(Proc.PaymentRequest), new[] { "DeductionsProposedAt", "DeductionsConfirmedByUserId", "DeductionsConfirmedAt" } },
+                { typeof(Proc.SupplierQuote), new[] { "TotalAmount", "TechnicallyAccepted", "TechnicalReviewedByUserId", "TechnicalReviewedAt" } },
+                { typeof(Proc.SupplierProfile), new[] { "Grade", "Blocked", "BlockReason" } },
+            };
+            var problems = new List<string>();
+            foreach (KeyValuePair<Type, string[]> item in expected)
+            {
+                if (!audited.TryGetValue(item.Key, out string[] columns)) { problems.Add(item.Key.Name + ": not audited"); continue; }
+                if (columns == null) continue;
+                problems.AddRange(item.Value.Where(n => !columns.Contains(n)).Select(n => item.Key.Name + "." + n + ": not in the trail"));
+            }
+            Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
+            Assert.IsTrue(labels.ContainsKey(typeof(Pc.PcWorkOrderInfo)) && labels.ContainsKey(typeof(Pc.PcSnapshotRequest)) && labels.ContainsKey(typeof(Proc.SupplierQuote)));
+            // the fields a system rewrites all the time stay out of the terms
+            Assert.IsFalse(audited[typeof(Pc.PcContractTerms)].Contains("AutoSnapshot"));
+            Assert.IsFalse(audited[typeof(Pc.PcContractTerms)].Contains("DataDateWeekday"));
+        }
+
+        [TestMethod]
+        public void TheFreezeOfTheTermsAndTheBasisOfThePenaltyLeaveARowWithTheUser()
+        {
+            AppHost host = NewHost();
+            int termsId = 0, requestId = 0, quoteId = 0;
+            host.Write(uow =>
+            {
+                var terms = AppHost.Add(uow, new Pc.PcContractTerms { ContractId = 8, ProjectCode = "P-8", ValueExVat = 100m });
+                uow.SaveChanges();
+                termsId = terms.Id;
+            }, Pmo);
+
+            host.Write(uow =>
+            {
+                var t = uow.Set<Pc.PcContractTerms>().Single(x => x.Id == termsId);
+                t.PenaltyBasis = Pc.PcPenaltyBasis.PerWorkOrder;
+                t.TermsFrozenAt = new DateTimeOffset(2026, 3, 1, 10, 0, 0, TimeSpan.Zero);
+                t.WarrantyMonthsAfterCommissioning = 10;
+                uow.SaveChanges();
+            }, AppHost.Principal(11, "pmo.second", "PMO"));
+
+            List<FnAuditLog> rows = Trail(host, nameof(Pc.PcContractTerms));
+            Assert.AreEqual(2, rows.Count);
+            Assert.AreEqual(11, rows[1].UserId);
+            Dictionary<string, JsonElement> before = Fields(rows[1].BeforeJson), after = Fields(rows[1].AfterJson);
+            Assert.AreEqual("PerContract", before["PenaltyBasis"].GetString());
+            Assert.AreEqual("PerWorkOrder", after["PenaltyBasis"].GetString());
+            Assert.AreEqual(12, before["WarrantyMonthsAfterCommissioning"].GetInt32());
+            Assert.AreEqual(10, after["WarrantyMonthsAfterCommissioning"].GetInt32());
+            Assert.IsTrue(after.ContainsKey("TermsFrozenAt"), "the day the terms froze is in the trail");
+            Assert.IsFalse(after.ContainsKey("ProjectCode"), "an unchanged field is not written");
+
+            // a request for a past data date and its decision
+            host.Write(uow =>
+            {
+                var r = AppHost.Add(uow, new Pc.PcSnapshotRequest { ContractId = 8, DataDate = new DateTime(2026, 2, 5), Reason = "late entry of the week", State = Pc.PcSnapshotRequestState.Requested });
+                uow.SaveChanges();
+                requestId = r.Id;
+            }, AppHost.Principal(12, "planning.user", "PLANNING"));
+            host.Write(uow =>
+            {
+                var r = uow.Set<Pc.PcSnapshotRequest>().Single(x => x.Id == requestId);
+                r.State = Pc.PcSnapshotRequestState.Approved; r.DecidedByUserId = 7; r.DecidedAt = DateTimeOffset.Now;
+                uow.SaveChanges();
+            }, Pmo);
+            List<FnAuditLog> requestRows = Trail(host, nameof(Pc.PcSnapshotRequest));
+            Assert.AreEqual(2, requestRows.Count);
+            Assert.AreEqual(12, requestRows[0].UserId);
+            Assert.AreEqual("Requested", Fields(requestRows[1].BeforeJson)["State"].GetString());
+            Assert.AreEqual("Approved", Fields(requestRows[1].AfterJson)["State"].GetString());
+            Assert.AreEqual(7, requestRows[1].UserId);
+            Assert.IsTrue(requestRows[1].Summary.StartsWith("درخواست برش داده گذشته"), requestRows[1].Summary);
+
+            // the technical judgement of a quote names the reviewer
+            host.Write(uow =>
+            {
+                var q = AppHost.Add(uow, new Proc.SupplierQuote { InquiryId = 1, ProviderId = 2, QuoteNumber = "Q-1", TotalAmount = 50m });
+                uow.SaveChanges();
+                quoteId = q.Id;
+            }, AppHost.Principal(9, "commercial.user", "COMMERCIAL"));
+            host.Write(uow =>
+            {
+                var q = uow.Set<Proc.SupplierQuote>().Single(x => x.Id == quoteId);
+                q.TechnicallyAccepted = true; q.TechnicalReviewedByUserId = 21; q.TechnicalReviewedAt = DateTimeOffset.Now;
+                uow.SaveChanges();
+            }, AppHost.Principal(21, "engineering.user", "ENGINEERING"));
+            List<FnAuditLog> quoteRows = Trail(host, nameof(Proc.SupplierQuote));
+            Assert.AreEqual(2, quoteRows.Count);
+            Assert.AreEqual(21, quoteRows[1].UserId);
+            Assert.IsTrue(Fields(quoteRows[1].AfterJson)["TechnicallyAccepted"].GetBoolean());
+            Assert.AreEqual(21, Fields(quoteRows[1].AfterJson)["TechnicalReviewedByUserId"].GetInt32());
         }
     }
 }
