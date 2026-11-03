@@ -46,10 +46,10 @@ defineExpose({ reload: list.load });
     <div class="table-responsive">
       <table class="table table-sm table-hover">
         <thead>
-          <tr><th>کالا / گروه</th><th>ردیف</th><th>مرحله</th><th>مرکز کار</th><th>راه‌اندازی</th><th>اجرا / واحد</th><th>جابجایی</th><th>صف</th><th>بیرونی</th><th>پیمانکار</th><th>تحویل (روز)</th><th>صلاحیت</th><th>بازرسی</th><th>نمونه اول</th><th></th></tr>
+          <tr><th>کالا / گروه</th><th>ردیف</th><th>مرحله</th><th>مرکز کار</th><th>راه‌اندازی</th><th>اجرا / واحد</th><th>جابجایی</th><th>صف</th><th>بیرونی</th><th>پیمانکار</th><th>تحویل (روز)</th><th>صلاحیت</th><th>بازرسی</th><th>نمونه اول</th><th>جوشکاری / WPS</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-if="!list.rows.value.length"><td colspan="15" class="text-center inv-muted">مرحله‌ای ثبت نشده است.</td></tr>
+          <tr v-if="!list.rows.value.length"><td colspan="16" class="text-center inv-muted">مرحله‌ای ثبت نشده است.</td></tr>
           <tr v-for="r in list.rows.value" :key="r.operationTemplateId">
             <td class="inv-ltr">{{ r.itemCode || r.itemGroupCode }}</td><td>{{ r.sequence }}</td><td>{{ r.templateTitle }}</td>
             <td class="inv-ltr">{{ r.workCenterCode || "-" }}</td>
@@ -58,6 +58,7 @@ defineExpose({ reload: list.load });
             <td>{{ [r.requiredQualificationKind, r.requiredQualificationProcess].filter(Boolean).join(" / ") || "-" }}</td>
             <td>{{ r.id ? inspectionRequirements[r.inspectionRequirement] : "-" }}<span v-if="r.requiresQc" class="inv-muted"> (QC)</span></td>
             <td>{{ r.firstArticleRequired ? "بله" : "-" }}</td>
+            <td class="inv-ltr">{{ r.isWelding ? r.wpsNumber || "جوشکاری" : "-" }}</td>
             <td class="text-nowrap">
               <span v-if="!r.id" class="inv-badge warn me-1">بدون استاندارد</span>
               <button v-if="canEdit" class="btn btn-sm btn-outline-primary" @click="editing = r">{{ r.id ? "ویرایش" : "ثبت استاندارد" }}</button>

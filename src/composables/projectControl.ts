@@ -13,6 +13,8 @@ export const gateRoleTitles: Record<string, string> = {
   COMMERCIAL: "بازرگانی", PLANNING: "برنامه‌ریزی", CEO: "مدیرعامل", PMO: "معاون PMO", PROJECTMANAGER: "مدیر پروژه", SYSTEM: "سیستم",
 };
 export const reviewKinds: Record<number, string> = { 1: "محصول استاندارد", 2: "سفارش خاص" };
+/** PcReviewStage: 1 before the offer, 2 after the win, 3 re-review after an amendment or an approved variation order. */
+export const reviewStages: Record<number, string> = { 1: "مناقصه (پیش از پیشنهاد)", 2: "قرارداد", 3: "بازنگری مجدد پس از تغییر" };
 export const reviewDecisions: Record<number, string> = { 0: "در انتظار", 1: "پذیرش", 2: "رد", 3: "نیاز به اصلاح" };
 export const amendmentTypes: Record<number, string> = { 1: "تعداد", 2: "زمان", 3: "قیمت" };
 export const amendmentOrigins: Record<number, string> = { 1: "کارفرما", 2: "شرکت" };
@@ -66,6 +68,8 @@ export const changeTypes: Record<number, string> = {
   1: "محدوده / WBS", 2: "زمان‌بندی و اولویت‌ها", 3: "مفروضات", 4: "محدودیت‌ها", 5: "تیم پروژه", 6: "روش اجرا", 7: "استانداردها",
   8: "شرایط تایید کارفرما", 9: "برنامه ارتباطات", 10: "سیستم اندازه‌گیری پیشرفت",
 };
+/** PcScenarioOperation of a change-request scenario row. */
+export const scenarioOperations: Record<number, string> = { 0: "اصلاح فعالیت", 1: "افزودن فعالیت", 2: "حذف فعالیت" };
 export const changeStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "ثبت‌شده", 2: "در تحلیل", 3: "تصمیم‌گیری شد", 4: "در حال اجرا", 5: "بسته شد", 6: "ردشده" };
 export const changeDecisions: Record<number, string> = { 0: "—", 1: "تایید", 2: "رد", 3: "تعویق", 4: "نیاز به اطلاعات بیشتر" };
 export const votes: Record<number, string> = { 0: "رای نداده", 1: "موافق", 2: "مخالف" };

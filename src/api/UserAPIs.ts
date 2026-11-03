@@ -111,6 +111,30 @@ export async function editUser(
   }
 }
 
+/**
+ * POST Accounts/edit-user-roles { userId, roleIds } (PMO). The answer data is ChangeRoleResultDto { roles (comma-joined), pending, grantId, grantIds }:
+ * `pending` is true when a sensitive role (or the removal of the PMO role) only waits for a second PMO user. That is a result, never an error: the caller shows it
+ * and sends the second user to the pending grants panel.
+ */
+export async function editUserRoles(
+  userId: number,
+  roleIds: number[]
+): Promise<[any, null] | [null, AxiosError] | undefined> {
+  try {
+    const { data } = await axiosInstance.post("Accounts/edit-user-roles", { userId, roleIds });
+    return [data, null];
+  } catch (error) {
+    return [null, error as AxiosError];
+  }
+}
+
+/** The pending part of an answer of register-user, update-user or edit-user-roles (data.pending / grantId / grantIds). */
+export function pendingGrantOf(answer: any): { pending: boolean; grantIds: number[] } {
+  const d = answer?.data;
+  const ids: number[] = Array.isArray(d?.grantIds) ? d.grantIds.map(Number) : d?.grantId ? [Number(d.grantId)] : [];
+  return { pending: !!d?.pending || ids.length > 0, grantIds: ids };
+}
+
 export async function getUserRoleList(): Promise<
   [any, null] | [null, AxiosError] | undefined
 > {

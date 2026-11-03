@@ -38,6 +38,7 @@ export const serviceSettingTitles: Record<string, string> = {
   LabourWorkCenterCode: "کد مرکز کاری که نرخ ساعتی دستمزد استاندارد آن برای مهندسان بدون فیش حقوقی تاییدشده به کار می‌رود",
   SurveyLeadDays: "روز بعد از تحویل برای پیش‌نویس نظرسنجی (پیش‌فرض ۳۰)",
   VisitLeadDays: "روز قبل از موعد بازدید LTSA برای پیش‌نویس دستور خدمات (پیش‌فرض ۳۰)",
+  LowScoreThreshold: "امتیاز آستانه‌ی نظرسنجی (۱ تا ۵): امتیاز کمتر از این مقدار پیش‌نویس شکایت مشتری باز می‌کند (پیش‌فرض ۳)",
 };
 
 /** Amount that may be hidden (labourAmount / totalCost of an order, warrantyCost of the dashboard and KPIs): «محرمانه (حقوق)» when hidden. */

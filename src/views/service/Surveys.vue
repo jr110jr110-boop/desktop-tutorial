@@ -8,7 +8,7 @@ import { answerSvSurvey, getSvSurvey, getSvSurveys, svSurveyAction } from "@/api
 import { usePagedList } from "@/composables/fn";
 import ReasonDialog from "@/components/quality/ReasonDialog.vue";
 import { fail, ok } from "@/composables/inventory";
-import { hasRole, ServiceRoles } from "@/composables/roles";
+import { hasRole, QualityRoles, ServiceRoles } from "@/composables/roles";
 import { badgeOfScore, badgeOfSurvey, serviceActionTitles, surveyKinds, surveyStatuses } from "@/composables/service";
 
 const route = useRoute();
@@ -24,6 +24,7 @@ const comments = ref("");
 const busy = ref(false);
 const asking = ref<"skip" | "verify" | null>(null);
 const canVerify = hasRole(["QA"]);
+const canQuality = hasRole(QualityRoles.readers);
 
 function take(s: any) {
   survey.value = s;
@@ -133,7 +134,8 @@ onMounted(() => {
           <span v-if="survey.verified" class="inv-badge ok">تأیید شده توسط کیفیت {{ survey.verifiedAtText }}</span><span v-else class="inv-badge warn">تأییدنشده؛ در میانگین‌های رسمی نمی‌آید</span>
           <span v-if="survey.verifyNote" class="ms-2">{{ survey.verifyNote }}</span>
           <button v-if="canVerify && !survey.verified" :disabled="busy" class="btn btn-sm btn-outline-success ms-2" @click="asking = 'verify'">تأیید پاسخ با مشتری</button>
-          <span v-if="survey.complaintNumber" class="ms-2">شکایت: <span class="inv-ltr">{{ survey.complaintNumber }}</span></span>
+          <span v-if="survey.complaintNumber" class="ms-2">شکایت: <span class="inv-ltr">{{ survey.complaintNumber }}</span>
+            <button v-if="canQuality" class="btn btn-sm btn-outline-danger ms-1" @click="router.push('/quality/complaints')">رفتن به شکایت مشتری</button></span>
         </div>
         <div v-if="survey.skipReason" class="small mb-2"><b>دلیل رد:</b> {{ survey.skipReason }}</div>
         <table class="table table-sm">

@@ -33,7 +33,9 @@ defineProps<{ c: any; activities: any[] }>();
         <thead><tr><th>ردیف</th><th>فعالیت متاثر</th><th>تغییر مدت (روز)</th><th>تغییر بودجه (ریال)</th></tr></thead>
         <tbody>
           <tr v-if="!c.scenario.length"><td colspan="4">سناریویی ثبت نشده.</td></tr>
-          <tr v-for="(s, i) in c.scenario" :key="s.activityId"><td>{{ i + 1 }}</td><td>{{ activities.find((a) => a.id === s.activityId)?.title || "#" + s.activityId }}</td><td>{{ s.durationDelta }}</td><td>{{ rial(s.budgetDelta) }}</td></tr>
+          <tr v-for="(s, i) in c.scenario" :key="i"><td>{{ i + 1 }}</td>
+            <td><template v-if="s.operation === 1">فعالیت جدید: {{ s.code }} {{ s.title }}</template><template v-else><template v-if="s.operation === 2">حذف: </template>{{ activities.find((a) => a.id === s.activityId)?.title || "#" + s.activityId }}</template></td>
+            <td>{{ s.operation === 1 ? s.durationDays : s.operation === 2 ? "-" : s.durationDelta }}</td><td>{{ s.operation === 1 ? rial(s.budgetAtCompletion) : s.operation === 2 ? "-" : rial(s.budgetDelta) }}</td></tr>
         </tbody>
       </table>
     </PrintForm>

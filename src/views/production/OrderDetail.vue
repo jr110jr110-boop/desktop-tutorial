@@ -88,6 +88,8 @@ onMounted(load);
         <div class="row g-2 small">
           <div class="col-md-4"><b>کالا:</b> <span class="inv-ltr">{{ order.itemCode }}</span> {{ order.itemTitle }}</div>
           <div class="col-md-2"><b>تعداد:</b> {{ qtyText(order.quantity) }} {{ order.unit }}</div>
+          <div v-if="Number(order.writtenOffQty) > 0" class="col-md-4"><b>کسر ضایعات (تصمیم NCR):</b> <span class="inv-badge bad">{{ qtyText(order.writtenOffQty) }} {{ order.unit }}</span> <b class="ms-2">تعداد مؤثر:</b> {{ qtyText(order.effectiveQuantity) }} {{ order.unit }}</div>
+          <div v-if="order.replacesOrderId" class="col-md-4"><b>جایگزین دستور:</b> <router-link :to="{ name: 'MfOrder', params: { id: order.replacesOrderId } }">مشاهده دستور اصلی</router-link></div>
           <div class="col-md-3"><b>دستور کار:</b> <span class="inv-ltr">{{ order.workOrderCode }}</span></div>
           <div class="col-md-3"><b>اولویت:</b> {{ order.priority ?? "-" }}<span v-if="order.totalFloatDays !== null && order.totalFloatDays !== undefined"> (شناوری {{ order.totalFloatDays }} روز)</span></div>
           <div class="col-md-3"><b>تاریخ نیاز:</b> {{ persianOf(order.needDateText, order.needDate) || "-" }}</div>

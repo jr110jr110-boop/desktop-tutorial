@@ -13,6 +13,7 @@ import {
   getRoleGrants,
   getUserDetail,
   getUserRoleList,
+  pendingGrantOf,
 } from "@/api/UserAPIs";
 import { getDocument } from "@/api/DocumentAPIs";
 import { failureText } from "@/composables/apiMessage";
@@ -115,10 +116,12 @@ function roleIdsToSend(): number[] {
 const PENDING_TEXT = "نقش‌های حساس پس از تأیید";
 
 /** The answer of a save says that a sensitive role waits for a second PMO user: tell it, with the Persian role titles. */
-function announcePendingRoles(message: unknown) {
-  if (typeof message !== "string" || !message.includes(PENDING_TEXT)) return;
-  const names = message
-    .slice(message.lastIndexOf(":") + 1)
+function announcePendingRoles(answer: any) {
+  const message = answer?.message;
+  const structured = pendingGrantOf(answer);
+  if (!structured.pending && !(typeof message === "string" && message.includes(PENDING_TEXT))) return;
+  const names = (typeof message === "string" && message.includes(PENDING_TEXT) ? message : "")
+    .slice(message && typeof message === "string" ? message.lastIndexOf(":") + 1 : 0)
     .split("،")
     .map((name) => name.trim())
     .filter(Boolean);
@@ -126,7 +129,7 @@ function announcePendingRoles(message: unknown) {
   useNotification.addNotification({
     title: "نقش در انتظار تأیید",
     text:
-      `نقش حساس «${titles || "؟"}» هنوز به کاربر داده نشده است؛ یک مدیر (PMO) دیگر باید آن را تأیید کند ` +
+      `نقش حساس ${titles ? "«" + titles + "»" : "درخواست‌شده"} هنوز به کاربر داده نشده است${structured.grantIds.length ? " (شماره درخواست: " + structured.grantIds.join("، ") + ")" : ""}؛ یک مدیر (PMO) دیگر باید آن را تأیید کند ` +
       "(فهرست کاربران، بخش «نقش‌های حساس در انتظار تأیید»).",
     color: "warn",
     duration: 15000,
@@ -279,7 +282,7 @@ async function sendRequest() {
       "کاربر با موفقیت " + (props.id ? "ویرایش شد" : "افزوده شد")
     );
     // a sensitive role is not given at once: the answer says that it waits for a second PMO user
-    announcePendingRoles(data.message);
+    announcePendingRoles(data);
     router.back();
   } finally {
     loadings.value.btnLoading = false;

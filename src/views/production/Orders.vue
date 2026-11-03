@@ -80,7 +80,10 @@ onMounted(async () => {
               <td class="inv-ltr"><router-link :to="{ name: 'MfOrder', params: { id: r.id } }">{{ r.number }}</router-link></td>
               <td class="inv-ltr">{{ r.workOrderCode }}</td>
               <td><span class="inv-ltr">{{ r.itemCode }}</span> {{ r.itemTitle }}</td>
-              <td>{{ qtyText(r.quantity) }} {{ r.unit }}</td>
+              <td>{{ qtyText(r.quantity) }} {{ r.unit }}
+                <div v-if="Number(r.writtenOffQty) > 0" class="small"><span class="inv-badge bad">کسر ضایعات {{ qtyText(r.writtenOffQty) }}</span> <span class="inv-muted">مؤثر: {{ qtyText(r.effectiveQuantity) }}</span></div>
+                <div v-if="r.replacesOrderId" class="small"><router-link :to="{ name: 'MfOrder', params: { id: r.replacesOrderId } }">جایگزین دستور دیگر</router-link></div>
+              </td>
               <td>{{ persianOf(r.needDateText, r.needDate) || "-" }}</td>
               <td>{{ persianOf(r.plannedStartText, r.plannedStart) || "-" }}</td>
               <td>{{ persianOf(r.plannedFinishText, r.plannedFinish) || "-" }}</td>

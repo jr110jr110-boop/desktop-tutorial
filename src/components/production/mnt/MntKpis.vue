@@ -41,6 +41,6 @@ onMounted(list.load);
       </table>
     </div>
     <QPager :page="list.page.value" :total="list.total.value" @go="list.go" />
-    <p class="inv-muted small mb-0">MTBF = ساعت کارکرد ÷ تعداد خرابی؛ MTTR = ساعت تعمیر ÷ خرابی‌های بسته‌شده. بدون خرابی، MTBF خالی است.</p>
+    <p class="inv-muted small mb-0">MTBF = (ساعت برنامه‌ای منهای توقف) ÷ تعداد خرابی، بر حسب ساعت شیفت (با MTBF پس از فروش که بر حسب ساعت کارکرد کنتور است یکی نیست)؛ MTTR = ساعت تعمیر ÷ خرابی‌های بسته‌شده. بدون خرابی، MTBF خالی است.</p>
   </div>
 </template>

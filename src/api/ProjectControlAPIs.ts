@@ -31,8 +31,11 @@ export const approvePlan = (contractId: number, note?: string) => call("post", b
 
 export const getReviews = (params: any) => call("get", base + "reviews", undefined, clean(params));
 export const saveReview = (dto: any) => call("post", base + "reviews", dto);
-/** action: capability-check (planning), decide (CEO; decision 1 accept, 2 reject, 3 modify). */
-export const reviewAction = (id: number, action: string, decision = 0, note?: string) => call("post", base + "reviews/action", { id, action, decision, note: note || null });
+/**
+ * action: capability-check (planning), accept (PMO and COMMERCIAL, two different people; slot pmo / commercial, empty = by the role of the user),
+ * decide (CEO: decision 2 reject or 3 modify, the reason in note; the acceptance itself is never the CEO's and a re-review after a change is accepted only).
+ */
+export const reviewAction = (id: number, action: string, decision = 0, note?: string, slot?: string | null) => call("post", base + "reviews/action", { id, action, decision, note: note || null, slot: slot || null });
 export const getAmendments = (params: any) => call("get", base + "amendments", undefined, clean(params));
 export const saveAmendment = (dto: any) => call("post", base + "amendments", dto);
 /** action: ceo-approve, customer-approve (reference, date), copy-sent (copyId, date). */
@@ -128,7 +131,7 @@ export const getPenalties = (params: any) => call("get", base + "penalties", und
 export const decidePenalty = (id: number, status: number, reason: string, amount?: number | null) => call("post", base + "penalties/decide", { id, status, reason, amount: amount ?? null });
 export const getVariations = (params: any) => call("get", base + "variations", undefined, clean({ PageSize: 0, ...params }));
 export const saveVariation = (dto: any) => call("post", base + "variations", dto);
-/** action: submit, approve (reference, date), reject. */
+/** action: submit (COMMERCIAL), approve (PMO or CEO; reference, date and one of clientLetterId / clientDocumentId), reject (PMO or CEO; note = the reason). */
 export const variationAction = (dto: any) => call("post", base + "variations/action", dto);
 
 // ---------------------------------------------------------------- engineering documents

@@ -66,7 +66,7 @@ function done() {
           <tr v-for="o in order.operations" :key="o.id">
             <td>{{ o.sequence }}</td>
             <td>{{ o.title }}
-              <span v-if="o.isRework" class="inv-badge warn ms-1">دوباره‌کاری</span><span v-if="o.isOutside" class="inv-badge info ms-1">بیرونی</span>
+              <span v-if="o.isRework" class="inv-badge warn ms-1">دوباره‌کاری</span><span v-if="o.isWelding" class="inv-badge info ms-1">جوشکاری</span><span v-if="o.acceptedByConcession" class="inv-badge ok ms-1">پذیرش ارفاقی</span><span v-if="o.acceptanceStale" class="inv-badge warn ms-1" title="مقادیر گزارش‌شده پس از پذیرش تغییر کرده است">پذیرش بازرسی باید دوباره انجام شود</span><span v-if="o.isOutside" class="inv-badge info ms-1">بیرونی</span>
               <div v-if="o.skipReason" class="inv-muted">دلیل رد: {{ o.skipReason }}</div>
             </td>
             <td class="inv-ltr">{{ o.workCenterCode || "-" }}</td>
@@ -75,6 +75,9 @@ function done() {
             <td><span :class="badgeOfOperation(o.status)" class="inv-badge">{{ operationStatuses[o.status] }}</span></td>
             <td>{{ qtyText(o.goodQty) }}</td><td>{{ qtyText(o.scrapQty) }}</td><td>{{ qtyText(o.reworkQty) }}</td><td>{{ hoursText(o.hoursBooked) }}</td>
             <td class="small">
+              <div v-if="o.isWelding">WPS: <span class="inv-ltr">{{ o.wpsNumber || "-" }}</span></div>
+              <div v-if="o.weldLogId">گزارش جوش: <router-link :to="{ name: 'QualityWeldLogs', query: { workOrderId: order.workOrderId } }">مشاهده (پیش‌نویس سیستم)</router-link></div>
+              <div v-if="o.expectedQty">تعداد مورد انتظار: {{ qtyText(o.expectedQty) }}</div>
               <div v-if="o.inspectionRequirement">{{ inspectionRequirements[o.inspectionRequirement] }}<span v-if="o.qcAccepted" class="inv-badge ok ms-1">پذیرفته</span></div>
               <div v-if="o.qcRecordId">بازرسی: <router-link :to="{ name: 'QualityRecordEdit', params: { id: o.qcRecordId } }" class="inv-ltr">{{ o.qcRecordNumber || "مشاهده" }}</router-link></div>
               <div v-if="o.ncrId">عدم انطباق: <router-link :to="{ name: 'InventoryNcrEdit', params: { id: o.ncrId } }" class="inv-ltr">{{ o.ncrNumber || "مشاهده" }}</router-link></div>

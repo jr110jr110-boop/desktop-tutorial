@@ -52,7 +52,9 @@ onMounted(load);
         <div class="sv-tile" @click="go('/service/surveys')"><div class="v">{{ dash.surveysDrafted }}</div><div class="l">نظرسنجی پیش‌نویس</div></div>
         <div class="sv-tile" @click="go('/service/surveys')">
           <div class="v">{{ dash.surveyAverageScore === null || dash.surveyAverageScore === undefined ? "-" : Number(dash.surveyAverageScore).toFixed(2) }}</div><div class="l">میانگین رضایت (از ۵)</div>
+          <div class="l">از {{ dash.surveysVerified ?? 0 }} نظرسنجی تأییدشده</div>
         </div>
+        <div :class="{ warn: dash.surveysUnverified > 0 }" class="sv-tile" @click="go('/service/surveys')"><div class="v">{{ dash.surveysUnverified ?? 0 }}</div><div class="l">نظرسنجی پاسخ‌داده‌شده‌ی تأییدنشده (در میانگین نیست)</div></div>
       </div>
 
       <h3 v-if="dash" class="inv-title mb-2">درخواست‌های باز بر حسب اولویت</h3>
@@ -73,6 +75,9 @@ onMounted(load);
           <div class="col-md-3"><b>میانگین زمان اولین پاسخ:</b> {{ hoursOrDash(kpi.firstResponseHours) }} ساعت</div>
           <div class="col-md-3"><b>میانگین زمان رفع:</b> {{ hoursOrDash(kpi.resolutionHours) }} ساعت</div>
           <div class="col-md-3"><b>MTBF کل:</b> {{ kpi.mtbfHours === null || kpi.mtbfHours === undefined ? "-" : qtyText(kpi.mtbfHours) }} ساعت</div>
+          <div class="col-md-3"><b>خرابی‌های وارد در MTBF:</b> {{ kpi.mtbfFailures ?? 0 }}</div>
+          <div class="col-md-3"><b>واحدهای وارد در MTBF:</b> {{ kpi.mtbfUnits ?? 0 }}</div>
+          <div class="col-md-3"><b>واحدهای خارج از MTBF (دوره قابل اندازه‌گیری نیست):</b> {{ kpi.mtbfUnitsExcluded ?? 0 }}</div>
           <div class="col-md-3"><b>جمع خرابی‌ها:</b> {{ kpi.totalFailures }}</div>
           <div class="col-md-3"><b>جمع کارکرد (ساعت):</b> {{ qtyText(kpi.totalRunningHours) }}</div>
         </div>

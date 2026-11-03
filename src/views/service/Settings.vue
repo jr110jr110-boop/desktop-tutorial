@@ -51,6 +51,11 @@ async function loadSettings() {
   texts.value = Object.fromEntries(settings.value.map((s) => [s.key, s.text ?? ""]));
 }
 async function saveSetting(key: string) {
+  const text = (texts.value[key] || "").trim();
+  if (key === "LowScoreThreshold" && text) {
+    const n = Number(text);
+    if (!Number.isInteger(n) || n < 1 || n > 5) return fail("آستانه‌ی امتیاز باید عددی صحیح بین ۱ تا ۵ باشد.");
+  }
   busy.value = true;
   const [, error] = await saveSvSetting({ key, text: texts.value[key] || null });
   busy.value = false;
@@ -117,7 +122,7 @@ onMounted(() => {
           <tbody>
             <tr v-for="s in settings" :key="s.key">
               <td>{{ s.title || serviceSettingTitles[s.key] || s.key }} <span class="inv-ltr inv-muted">({{ s.key }})</span></td>
-              <td><input v-model="texts[s.key]" :disabled="!canSettings" class="form-control form-control-sm inv-ltr" style="max-width: 14rem" /></td>
+              <td><input v-model="texts[s.key]" :disabled="!canSettings" :inputmode="s.key === 'LowScoreThreshold' ? 'numeric' : undefined" class="form-control form-control-sm inv-ltr" style="max-width: 14rem" /></td>
               <td class="inv-ltr">{{ s.effective ?? "-" }}</td>
               <td><button v-if="canSettings" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="saveSetting(s.key)">ذخیره</button></td>
             </tr>

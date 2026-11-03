@@ -5,11 +5,11 @@ import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
-import { baselineAction, createBaseline, deleteCostLine, getActivities, getBaseline, getBaselines, getCostLines, getTerms, getWbs, saveCostLine } from "@/api/ProjectControlAPIs";
+import { baselineAction, createBaseline, deleteCostLine, getActivities, getBaseline, getBaselineActivities, getBaselines, getCostLines, getTerms, getWbs, saveCostLine } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import BaselinePrint from "@/components/pc/print/BaselinePrint.vue";
 import { fail, jalali, ok, printPage, rial } from "@/composables/inventory";
-import { baselineKinds, baselineStatuses, costClasses, pcContractId, resourceClasses, setPcContract, sumOf, unitTitle, usePcPrint } from "@/composables/projectControl";
+import { baselineKinds, baselineStatuses, costClasses, pcContractId, phases, progressMethods, resourceClasses, setPcContract, sumOf, unitTitle, usePcPrint } from "@/composables/projectControl";
 import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Baselines (WI-PL-009 17): created from the calculated plan by planning, signed by the manager of every unit that owns activities,
@@ -58,6 +58,19 @@ async function act(action: "sign" | "approve") {
   sel.value = data;
   load();
 }
+// the frozen activities of the selected baseline (dates, weight, budget, method and calendar as they were signed)
+const frozen = ref<any[] | null>(null);
+const frozenBusy = ref(false);
+async function showFrozen() {
+  frozenBusy.value = true;
+  const [data, error] = await getBaselineActivities(sel.value.id);
+  frozenBusy.value = false;
+  if (error) return fail(error);
+  frozen.value = rowsOf(data);
+}
+watch(() => sel.value?.id, () => { frozen.value = null; });
+const frozenBudget = computed(() => sumOf(frozen.value || [], "budget"));
+const share = (v: number | null | undefined) => (v === null || v === undefined ? "—" : (Number(v) * 100).toFixed(2) + "٪");
 const mySignatures = computed(() => (sel.value?.signatures || []).filter((s: any) => !s.signedAt && s.unitRole === role));
 const signedCount = computed(() => (sel.value?.signatures || []).filter((s: any) => s.signedAt).length);
 
@@ -155,7 +168,23 @@ watch(pcContractId, () => { sel.value = null; load(); loadCost(); });
           <div v-if="sel" class="border rounded p-3 d-print-none">
             <div class="inv-toolbar">
               <b>خط مبنا R{{ sel.number }} — {{ sel.reason }}</b>
-              <div class="d-flex gap-2"><button class="btn btn-sm btn-outline-secondary" @click="run('baseline', sel)">چاپ برگه تایید</button><button class="btn btn-sm btn-outline-secondary" @click="sel = null">بستن</button></div>
+              <div class="d-flex gap-2"><button :disabled="frozenBusy" class="btn btn-sm btn-outline-primary" @click="showFrozen">فعالیت‌های منجمد خط مبنا</button><button class="btn btn-sm btn-outline-secondary" @click="run('baseline', sel)">چاپ برگه تایید</button><button class="btn btn-sm btn-outline-secondary" @click="sel = null">بستن</button></div>
+            </div>
+            <div v-if="frozen" class="mb-3">
+              <b class="small">فعالیت‌های منجمد R{{ sel.number }} ({{ frozen.length }} فعالیت، مجموع بودجه {{ rial(frozenBudget) }} ریال)</b>
+              <div class="table-responsive">
+                <table class="table table-sm">
+                  <thead><tr><th>کد</th><th>عنوان</th><th>فاز</th><th>شروع</th><th>پایان</th><th>مدت (روز)</th><th>وزن</th><th>سهم از کل پروژه</th><th>بودجه (ریال)</th><th>روش پیشرفت</th><th>واحد مسئول</th></tr></thead>
+                  <tbody>
+                    <tr v-if="!frozen.length"><td colspan="11" class="text-center inv-muted">فعالیتی در این خط مبنا منجمد نشده است.</td></tr>
+                    <tr v-for="a in frozen" :key="a.activityId">
+                      <td class="inv-ltr">{{ a.code }}</td><td>{{ a.title }}</td><td>{{ a.phase ? phases[a.phase] : "—" }}</td><td>{{ jalali(a.start) }}</td><td>{{ jalali(a.finish) }}</td><td>{{ a.durationDays }}</td>
+                      <td>{{ a.weight }}</td><td>{{ share(a.effectiveWeight) }}</td><td>{{ rial(a.budget) }}</td><td>{{ progressMethods[a.progressMethod] }}</td><td>{{ a.responsibleUnit ? unitTitle(a.responsibleUnit) : "—" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="inv-muted small mb-0">«سهم از کل پروژه» برای خط مبناهای پیش از این نسخه خالی است.</p>
             </div>
             <table class="table table-sm">
               <thead><tr><th>امضاکننده (واحد)</th><th>نقش</th><th>امضا‌کننده</th><th>تاریخ امضا</th></tr></thead>

@@ -6,11 +6,11 @@ import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import JDate from "@/components/pc/JDate.vue";
-import { changeAction, getActivities, getAuthorities, getChange, getChanges, saveAuthority, saveChange } from "@/api/ProjectControlAPIs";
+import { changeAction, getActivities, getAuthorities, getChange, getChanges, getWbs, saveAuthority, saveChange } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, rial } from "@/composables/inventory";
 import ChangePrint from "@/components/pc/print/ChangePrint.vue";
-import { changeDecisions, changeOrigins, changeStatuses, changeTypes, contractLabel, pcContractId, unitTitle, usePcPrint, votes } from "@/composables/projectControl";
+import { changeDecisions, changeOrigins, changeStatuses, changeTypes, contractLabel, dependencyTypes, pcContractId, phases, progressMethods, scenarioOperations, unitManagerTitles, unitTitle, usePcPrint, votes } from "@/composables/projectControl";
 import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Change control: register (the change board is formed from the affected units), impact analysis (CPM before/after), PM recommendation, board votes, decision within the
@@ -21,6 +21,7 @@ const tabs = [{ key: "changes", title: "درخواست‌های تغییر" }, {
 const rows = ref<any[]>([]);
 const status = ref<number | null>(null);
 const acts = ref<any[]>([]);
+const nodes = ref<any[]>([]);
 const form = ref<any>(null);
 const d = ref<any>(null);
 const sub = ref<any>(null);
@@ -36,10 +37,11 @@ const isCeo = hasRole(ProjectControlRoles.ceo);
 
 async function load() {
   if (!pcContractId.value) return;
-  const [[c, e], [a]] = await Promise.all([getChanges({ ContractId: pcContractId.value, Status: status.value }), getActivities({ ContractId: pcContractId.value })]);
+  const [[c, e], [a], [n]] = await Promise.all([getChanges({ ContractId: pcContractId.value, Status: status.value }), getActivities({ ContractId: pcContractId.value }), getWbs({ ContractId: pcContractId.value })]);
   if (e) return fail(e);
   rows.value = rowsOf(c);
   acts.value = rowsOf(a);
+  nodes.value = rowsOf(n);
 }
 async function loadAuth() {
   const [a, e] = await getAuthorities();
@@ -47,10 +49,25 @@ async function loadAuth() {
   auth.value = Array.isArray(a) ? a : [];
 }
 const actText = (id: number) => { const a = acts.value.find((x) => x.id === id); return a ? `${a.code} ${a.title}` : "#" + id; };
+// scenario rows: operation 0 modify (the default), 1 add a new activity, 2 remove an activity that has not started
+const blankStep = (operation = 0) => ({ operation, activityId: 0, durationDelta: 0, budgetDelta: 0, newWeight: null as number | null, code: "", title: "", wbsNodeId: null as number | null, durationDays: 1, budgetAtCompletion: 0, weight: 0, phase: null as number | null, responsibleUnit: "", progressMethod: 0, links: [] as any[] });
+const blankLink = () => ({ otherActivityId: null as number | null, otherCode: "", otherIsPredecessor: true, type: 1, lagDays: 0 });
+const addedCodes = (self: any) => (form.value?.scenario || []).filter((x: any) => x.operation === 1 && x !== self && x.code).map((x: any) => x.code);
+const stepInvalid = (x: any) => (x.operation === 1 ? !x.code || !x.title || !(x.durationDays >= 1) : !x.activityId);
+function stepPayload(x: any) {
+  if (x.operation === 1) {
+    return { operation: 1, activityId: 0, durationDelta: 0, budgetDelta: 0, newWeight: null, code: x.code.trim(), title: x.title.trim(), wbsNodeId: x.wbsNodeId || null, durationDays: Number(x.durationDays) || 0, budgetAtCompletion: Number(x.budgetAtCompletion) || 0,
+      weight: Number(x.weight) || 0, phase: x.phase || null, responsibleUnit: x.responsibleUnit || null, progressMethod: Number(x.progressMethod) || 0,
+      links: (x.links || []).map((l: any) => ({ otherActivityId: l.otherActivityId || null, otherCode: l.otherActivityId ? null : l.otherCode || null, otherIsPredecessor: !!l.otherIsPredecessor, type: Number(l.type) || 1, lagDays: Number(l.lagDays) || 0 })) };
+  }
+  if (x.operation === 2) return { operation: 2, activityId: x.activityId, durationDelta: 0, budgetDelta: 0, newWeight: null };
+  return { operation: 0, activityId: x.activityId, durationDelta: Number(x.durationDelta) || 0, budgetDelta: Number(x.budgetDelta) || 0, newWeight: x.newWeight === null || x.newWeight === "" ? null : Number(x.newWeight) };
+}
+const stepText = (s: any) => (s.operation === 1 ? `${s.code} ${s.title}` : actText(s.activityId));
 const blank = () => ({ contractId: pcContractId.value, origin: 2, type: 1, managerAgreement: "", description: "", reason: "", requestedPriceDelta: 0, requestedDaysDelta: 0, scenario: [] as any[] });
 async function save() {
   busy.value = true;
-  const [c, e] = await saveChange(form.value);
+  const [c, e] = await saveChange({ ...form.value, scenario: form.value.scenario.map(stepPayload) });
   busy.value = false;
   if (e) return fail(e);
   ok("ذخیره شد: " + c.number);
@@ -145,19 +162,51 @@ watch(pcContractId, load);
           <div class="col-md-6"><label class="form-label small mb-0">تغییر مبلغ درخواستی (ریال)</label><input v-model.number="form.requestedPriceDelta" class="form-control form-control-sm" type="number" /></div>
           <div class="col-md-6"><label class="form-label small mb-0">تغییر زمان درخواستی (روز)</label><input v-model.number="form.requestedDaysDelta" class="form-control form-control-sm" type="number" /></div>
         </div>
-        <b class="small d-block mt-3">سناریوی تغییر (فعالیت‌های متاثر)</b>
-        <table class="table table-sm mb-1">
-          <thead><tr><th>فعالیت</th><th style="width: 130px">تغییر مدت (روز)</th><th style="width: 170px">تغییر بودجه (ریال)</th><th></th></tr></thead>
-          <tbody>
-            <tr v-for="(s, i) in form.scenario" :key="i">
-              <td><select v-model.number="s.activityId" class="form-select form-select-sm"><option :value="0">-</option><option v-for="a in acts" :key="a.id" :value="a.id">{{ a.code }} {{ a.title }}</option></select></td>
-              <td><input v-model.number="s.durationDelta" class="form-control form-control-sm" type="number" /></td><td><input v-model.number="s.budgetDelta" class="form-control form-control-sm" type="number" /></td>
-              <td><button class="btn btn-sm btn-outline-danger" @click="form.scenario.splice(i, 1)">حذف</button></td>
-            </tr>
-          </tbody>
-        </table>
-        <button class="btn btn-sm btn-outline-primary mb-3" @click="form.scenario.push({ activityId: 0, durationDelta: 0, budgetDelta: 0 })">افزودن فعالیت</button>
-        <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-secondary" @click="form = null">انصراف</button><button :disabled="busy || !form.description || !form.reason || form.scenario.some((s: any) => !s.activityId)" class="btn btn-sm btn-primary" @click="save">ذخیره پیش‌نویس</button></div>
+        <b class="small d-block mt-3">سناریوی تغییر (اصلاح فعالیت موجود، افزودن فعالیت جدید یا حذف فعالیت شروع‌نشده)</b>
+        <div v-for="(s, i) in form.scenario" :key="i" class="border rounded p-2 mb-2">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-3"><label class="form-label small mb-0">عملیات</label><select v-model.number="s.operation" class="form-select form-select-sm"><option v-for="(n, k) in scenarioOperations" :key="k" :value="Number(k)">{{ n }}</option></select></div>
+            <template v-if="s.operation !== 1">
+              <div class="col-md-5"><label class="form-label small mb-0">فعالیت</label><select v-model.number="s.activityId" class="form-select form-select-sm"><option :value="0">-</option><option v-for="a in acts" :key="a.id" :value="a.id">{{ a.code }} {{ a.title }}</option></select></div>
+            </template>
+            <template v-if="s.operation === 0">
+              <div class="col-6 col-md-2"><label class="form-label small mb-0">تغییر مدت (روز)</label><input v-model.number="s.durationDelta" class="form-control form-control-sm" type="number" /></div>
+              <div class="col-6 col-md-3"><label class="form-label small mb-0">تغییر بودجه (ریال)</label><input v-model.number="s.budgetDelta" class="form-control form-control-sm" type="number" /></div>
+              <div class="col-6 col-md-2"><label class="form-label small mb-0">وزن جدید (۰ تا ۱۰۰)</label><input v-model.number="s.newWeight" class="form-control form-control-sm" type="number" min="0" max="100" placeholder="بدون تغییر" /></div>
+            </template>
+            <div v-if="s.operation === 2" class="col-md-4 small inv-muted">فعالیتی که شروع نشده باشد با تایید این درخواست از برنامه خارج می‌شود.</div>
+            <div class="col-auto ms-auto"><button class="btn btn-sm btn-outline-danger" @click="form.scenario.splice(i, 1)">حذف ردیف</button></div>
+          </div>
+          <div v-if="s.operation === 1" class="row g-2 mt-1">
+            <div class="col-md-2"><label class="form-label small mb-0">کد فعالیت</label><input v-model="s.code" class="form-control form-control-sm inv-ltr" /></div>
+            <div class="col-md-5"><label class="form-label small mb-0">عنوان</label><input v-model="s.title" class="form-control form-control-sm" /></div>
+            <div class="col-6 col-md-2"><label class="form-label small mb-0">مدت (روز)</label><input v-model.number="s.durationDays" class="form-control form-control-sm" type="number" min="1" /></div>
+            <div class="col-6 col-md-3"><label class="form-label small mb-0">بودجه (BAC، ریال)</label><input v-model.number="s.budgetAtCompletion" class="form-control form-control-sm" type="number" min="0" /></div>
+            <div class="col-6 col-md-2"><label class="form-label small mb-0">وزن</label><input v-model.number="s.weight" class="form-control form-control-sm" type="number" min="0" max="100" /></div>
+            <div class="col-md-4"><label class="form-label small mb-0">گره WBS</label><select v-model="s.wbsNodeId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.code }} {{ n.title }}</option></select></div>
+            <div class="col-md-3"><label class="form-label small mb-0">فاز</label><select v-model="s.phase" class="form-select form-select-sm"><option :value="null">-</option><option v-for="(n, k) in phases" :key="k" :value="Number(k)">{{ n }}</option></select></div>
+            <div class="col-md-3"><label class="form-label small mb-0">روش پیشرفت</label><select v-model.number="s.progressMethod" class="form-select form-select-sm"><option v-for="(n, k) in progressMethods" :key="k" :value="Number(k)">{{ n }}</option></select></div>
+            <div class="col-md-3"><label class="form-label small mb-0">واحد مسئول</label><select v-model="s.responsibleUnit" class="form-select form-select-sm"><option value="">-</option><option v-for="(n, k) in unitManagerTitles" :key="k" :value="k">{{ n }}</option></select></div>
+            <div class="col-12">
+              <b class="small">وابستگی‌ها</b>
+              <div v-for="(l, j) in s.links" :key="j" class="row g-2 mt-0 mb-1 align-items-end">
+                <div class="col-md-4"><select v-model="l.otherActivityId" class="form-select form-select-sm"><option :value="null">فعالیت جدید همین درخواست</option><option v-for="a in acts" :key="a.id" :value="a.id">{{ a.code }} {{ a.title }}</option></select></div>
+                <div class="col-md-2"><select v-if="!l.otherActivityId" v-model="l.otherCode" class="form-select form-select-sm inv-ltr"><option value="">کد</option><option v-for="c in addedCodes(s)" :key="c" :value="c">{{ c }}</option></select></div>
+                <div class="col-md-2"><select v-model="l.otherIsPredecessor" class="form-select form-select-sm"><option :value="true">پیش‌نیاز این فعالیت</option><option :value="false">پس‌نیاز این فعالیت</option></select></div>
+                <div class="col-md-2"><select v-model.number="l.type" class="form-select form-select-sm"><option v-for="(n, k) in dependencyTypes" :key="k" :value="Number(k)">{{ n }}</option></select></div>
+                <div class="col-md-1"><input v-model.number="l.lagDays" class="form-control form-control-sm" type="number" title="تاخیر (روز)" /></div>
+                <div class="col-md-1"><button class="btn btn-sm btn-outline-danger" @click="s.links.splice(j, 1)">حذف</button></div>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary" @click="s.links.push(blankLink())">افزودن وابستگی</button>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <button class="btn btn-sm btn-outline-primary" @click="form.scenario.push(blankStep(0))">اصلاح فعالیت</button>
+          <button class="btn btn-sm btn-outline-primary" @click="form.scenario.push(blankStep(1))">افزودن فعالیت جدید</button>
+          <button class="btn btn-sm btn-outline-primary" @click="form.scenario.push(blankStep(2))">حذف فعالیت</button>
+        </div>
+        <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-secondary" @click="form = null">انصراف</button><button :disabled="busy || !form.description || !form.reason || form.scenario.some(stepInvalid)" class="btn btn-sm btn-primary" @click="save">ذخیره پیش‌نویس</button></div>
       </div>
     </div>
 
@@ -172,8 +221,23 @@ watch(pcContractId, load);
           <div class="col-md-6">مبلغ درخواستی: {{ rial(d.requestedPriceDelta) }} ریال</div><div class="col-md-6">زمان درخواستی: {{ d.requestedDaysDelta }} روز</div>
         </div>
         <b class="small">سناریو</b>
-        <table class="table table-sm"><thead><tr><th>فعالیت</th><th>تغییر مدت (روز)</th><th>تغییر بودجه</th></tr></thead>
-          <tbody><tr v-if="!d.scenario.length"><td colspan="3" class="inv-muted">سناریویی ثبت نشده است.</td></tr><tr v-for="s in d.scenario" :key="s.activityId"><td>{{ actText(s.activityId) }}</td><td>{{ s.durationDelta }}</td><td>{{ rial(s.budgetDelta) }}</td></tr></tbody></table>
+        <table class="table table-sm"><thead><tr><th>عملیات</th><th>فعالیت</th><th>تغییر مدت (روز)</th><th>تغییر بودجه</th><th>جزئیات</th></tr></thead>
+          <tbody>
+            <tr v-if="!d.scenario.length"><td colspan="5" class="inv-muted">سناریویی ثبت نشده است.</td></tr>
+            <tr v-for="(s, i) in d.scenario" :key="i">
+              <td><span :class="s.operation === 1 ? 'ok' : s.operation === 2 ? 'bad' : 'info'" class="inv-badge">{{ scenarioOperations[s.operation || 0] }}</span></td>
+              <td>{{ stepText(s) }}</td>
+              <td>{{ s.operation === 1 ? s.durationDays : s.operation === 2 ? "-" : s.durationDelta }}</td>
+              <td>{{ s.operation === 1 ? rial(s.budgetAtCompletion) : s.operation === 2 ? "-" : rial(s.budgetDelta) }}</td>
+              <td class="small">
+                <template v-if="s.operation === 1">
+                  <span v-if="s.phase">فاز: {{ phases[s.phase] }}؛ </span><span>روش پیشرفت: {{ progressMethods[s.progressMethod] }}؛ </span><span>وزن: {{ s.weight }}</span><span v-if="s.responsibleUnit">؛ واحد: {{ unitTitle(s.responsibleUnit) }}</span>
+                  <div v-for="(l, j) in s.links || []" :key="j">{{ l.otherIsPredecessor ? "پیش‌نیاز" : "پس‌نیاز" }}: <span class="inv-ltr">{{ l.otherActivityId ? actText(l.otherActivityId) : l.otherCode }}</span> ({{ dependencyTypes[l.type] }}<span v-if="l.lagDays"> {{ l.lagDays > 0 ? "+" : "" }}{{ l.lagDays }}</span>)</div>
+                </template>
+                <template v-else-if="s.operation !== 2 && s.newWeight !== null && s.newWeight !== undefined">وزن جدید: {{ s.newWeight }}</template>
+              </td>
+            </tr>
+          </tbody></table>
 
         <template v-if="d.analysedAt">
           <b class="small">نتیجه تحلیل اثر ({{ jalali(d.analysedAt) }})</b>
@@ -199,7 +263,7 @@ watch(pcContractId, load);
 
         <div class="border-top pt-2 d-print-none">
           <button v-if="d.status === 0" :disabled="busy" class="btn btn-sm btn-primary me-2" @click="act('register')">ثبت رسمی و تشکیل هیئت</button>
-          <button v-if="d.status === 0 && canCreate" class="btn btn-sm btn-outline-secondary" @click="form = { ...d, scenario: d.scenario.map((s: any) => ({ ...s })) }; d = null">ویرایش پیش‌نویس</button>
+          <button v-if="d.status === 0 && canCreate" class="btn btn-sm btn-outline-secondary" @click="form = { ...d, scenario: d.scenario.map((s: any) => ({ ...blankStep(s.operation || 0), ...s, links: (s.links || []).map((l: any) => ({ ...blankLink(), ...l })) })) }; d = null">ویرایش پیش‌نویس</button>
           <template v-if="(d.status === 1 || d.status === 2) && canAnalyze">
             <b class="small d-block mt-2">تحلیل اثر (توضیحات اختیاری؛ اثر زمانی و هزینه‌ای را سیستم محاسبه می‌کند)</b>
             <div class="row g-2 my-1">
