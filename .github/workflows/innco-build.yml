@@ -171,6 +171,7 @@ jobs:
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
+          Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
           Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
@@ -194,6 +195,7 @@ jobs:
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
+          Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
           Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
@@ -214,6 +216,7 @@ jobs:
           Service__AllowFutureAsOf: 'true'  # the smoke runs the service jobs by hand for injected future days (off everywhere else)
           Ai__Jobs: 'false'  # the scheduled AI seats must not run on their own; the smoke runs them by hand
           Ceo__Jobs: 'false'  # the 00:30 CEO dashboard snapshot must not run on its own; the smoke takes it by hand (POST api/v1/ceo/snapshot)
+          Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
           Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)

@@ -47,6 +47,19 @@ namespace Services.NasbNiro.ProjectControl
 
         /// <summary>Plan run on tracked activities (the caller already changed them) that writes the dates and mirrors them to the legacy fields. The caller saves.</summary>
         Task<CpmResult> ApplyPlanNoSaveAsync(int contractId, CancellationToken cancellationToken);
+
+        /// <summary>R1c (H1): the Persian error of the first wrong item of a change-request scenario against the plan of the contract (nothing is computed or written); null when the scenario is correct.</summary>
+        Task<string> ValidateScenarioAsync(int contractId, IList<PcChangeScenarioItemDto> items, CancellationToken cancellationToken);
+
+        /// <summary>R1c (H1): the schedule today and with the scenario of a change request (add, modify, remove activities), for the impact analysis. Nothing is written.</summary>
+        Task<PcScenarioPreview> PreviewScenarioAsync(int contractId, IList<PcChangeScenarioItemDto> items, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// R1c (H1): carries out the scenario of an approved change request on the plan. The plan is first put back to the current baseline (an activity or value that was changed outside the change
+        /// process is not carried into the new baseline), then the scenario is applied, the plan is run and the activities are returned tracked for the caller to build the baseline. The changes of
+        /// the plan are saved here (new activities need their ids); the caller saves the baseline.
+        /// </summary>
+        Task<PcScenarioOutcome> ApplyScenarioAsync(int contractId, IList<PcBaselineActivity> currentRows, IList<PcChangeScenarioItemDto> items, CancellationToken cancellationToken);
         Task<ResponseDto<PagedList<PcExecutivePlanRowDto>>> GetExecutivePlanAsync(PcExecutivePlanQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<string>> ExportMsProjectXmlAsync(int contractId, CancellationToken cancellationToken);
 
@@ -85,6 +98,10 @@ namespace Services.NasbNiro.ProjectControl
         private static string Clean(string s) => PcText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => PcText.Bad<T>(m);
         private static DateTimeOffset? Dto(DateTime? d) => d.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(d.Value.Date, DateTimeKind.Utc)) : (DateTimeOffset?)null;
+
+        /// <summary>R1c (H1): the Persian refusal while the contract has a current baseline (the plan changes only through a change request); null otherwise.</summary>
+        private async Task<string> PlanLockAsync(int contractId, CancellationToken cancellationToken) =>
+            await PcPlanLock.IsLockedAsync(_uow, contractId, cancellationToken) ? PcPlanLock.Refusal : null;
 
         // ============================================================================ calendars
 
@@ -138,7 +155,7 @@ namespace Services.NasbNiro.ProjectControl
         {
             Id = n.Id, ContractId = n.ContractId, ParentId = n.ParentId, Code = n.Code, Title = n.Title, NodeType = n.NodeType, Phase = n.Phase, WorkOrderId = n.WorkOrderId, AssemblyId = n.AssemblyId,
             BomId = n.BomId, ProcessId = n.ProcessId, Weight = n.Weight, BudgetAmount = n.BudgetAmount, Dictionary = n.Dictionary, ResponsibleUnit = n.ResponsibleUnit, Sort = n.Sort,
-            IsGenerated = n.IsGenerated, ApprovedAt = n.ApprovedAt, RowVersion = n.RowVersion == null ? null : Convert.ToBase64String(n.RowVersion),
+            IsGenerated = n.IsGenerated, ApprovedAt = n.ApprovedAt, ApprovedByUserId = n.ApprovedByUserId, RowVersion = n.RowVersion == null ? null : Convert.ToBase64String(n.RowVersion),
         };
 
         public async Task<ResponseDto<PagedList<PcWbsNodeDto>>> GetWbsAsync(PcWbsQuery query, CancellationToken cancellationToken)
@@ -153,7 +170,7 @@ namespace Services.NasbNiro.ProjectControl
             {
                 Id = n.Id, ContractId = n.ContractId, ParentId = n.ParentId, Code = n.Code, Title = n.Title, NodeType = n.NodeType, Phase = n.Phase, WorkOrderId = n.WorkOrderId, AssemblyId = n.AssemblyId,
                 BomId = n.BomId, ProcessId = n.ProcessId, Weight = n.Weight, BudgetAmount = n.BudgetAmount, Dictionary = n.Dictionary, ResponsibleUnit = n.ResponsibleUnit, Sort = n.Sort,
-                IsGenerated = n.IsGenerated, ApprovedAt = n.ApprovedAt,
+                IsGenerated = n.IsGenerated, ApprovedAt = n.ApprovedAt, ApprovedByUserId = n.ApprovedByUserId,
             });
             return ResponseDtoHelper.Ok(await PagedList<PcWbsNodeDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
         }
@@ -190,6 +207,8 @@ namespace Services.NasbNiro.ProjectControl
             if (await _uow.Set<PcWbsNode>().AnyAsync(n => n.ContractId == dto.ContractId && n.Code == code && !n.Deleted && n.Id != (dto.Id ?? 0), cancellationToken)) return Bad<PcWbsNodeDto>("این کد WBS قبلاً در قرارداد استفاده شده است.");
             if (dto.WorkOrderId.HasValue && !await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId.Value && w.ContractId == dto.ContractId && !w.Deleted, cancellationToken)) return Bad<PcWbsNodeDto>("دستور کار متعلق به این قرارداد نیست.");
             DateTimeOffset now = DateTimeOffset.Now;
+            bool planLocked = await PcPlanLock.IsLockedAsync(_uow, dto.ContractId, cancellationToken);
+            if (planLocked && !dto.Id.HasValue) return Bad<PcWbsNodeDto>(PcPlanLock.Refusal);
             PcWbsNode n;
             if (dto.Id.HasValue)
             {
@@ -204,9 +223,17 @@ namespace Services.NasbNiro.ProjectControl
                 n = new PcWbsNode { ContractId = dto.ContractId, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<PcWbsNode>().Add(n);
             }
+            if (dto.Id.HasValue)
+            {
+                // R1c (H1): the structure, the weights and the budget of the nodes are the approved plan while a baseline is current
+                if (planLocked && PcPlanLock.WbsPlanChanged(n, dto, code)) return Bad<PcWbsNodeDto>(PcPlanLock.Refusal);
+                // R1c (M1): the approval of a node is given for what the node says; an edit of anything a reviewer reads takes the approval back
+                if (n.ApprovedAt.HasValue && PcPlanLock.WbsContentChanged(n, dto, code, Clean(dto.Title), Clean(dto.Dictionary), Clean(dto.ResponsibleUnit)?.ToUpperInvariant())) { n.ApprovedAt = null; n.ApprovedByUserId = null; }
+            }
             n.ParentId = dto.ParentId; n.Code = code; n.Title = Clean(dto.Title); n.NodeType = dto.NodeType; n.Phase = dto.Phase; n.WorkOrderId = dto.WorkOrderId;
             n.AssemblyId = dto.AssemblyId; n.BomId = dto.BomId; n.ProcessId = dto.ProcessId; n.Weight = dto.Weight; n.BudgetAmount = dto.BudgetAmount; n.Dictionary = Clean(dto.Dictionary);
             n.ResponsibleUnit = Clean(dto.ResponsibleUnit)?.ToUpperInvariant(); n.Sort = dto.Sort;
+            n.EditorUserIds = PcMaker.WithEditor(n.EditorUserIds, Me);
             n.ModifyDate = now; n.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcWbsNodeDto>(PcText.Concurrency); }
@@ -229,6 +256,7 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.PlanningOrPm)) return Bad<bool>(PcText.NotAllowed);
             PcWbsNode n = await _uow.Set<PcWbsNode>().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
             if (n == null) return PcText.NotFound<bool>("گره WBS پیدا نشد.");
+            if (await PlanLockAsync(n.ContractId, cancellationToken) is string wbsLocked) return Bad<bool>(wbsLocked);
             if (await _uow.Set<PcWbsNode>().AnyAsync(x => x.ParentId == id && !x.Deleted, cancellationToken)) return Bad<bool>("گره زیرمجموعه دارد و حذف نمی‌شود.");
             if (await _uow.Set<PcActivity>().AnyAsync(a => a.WbsNodeId == id && !a.Deleted, cancellationToken)) return Bad<bool>("گره فعالیت دارد و حذف نمی‌شود.");
             if (await _uow.Set<PcBaselineActivity>().AnyAsync(a => a.WbsNodeId == id, cancellationToken)) return Bad<bool>("گره در مبنای زمانی ثبت شده و حذف نمی‌شود.");
@@ -243,6 +271,8 @@ namespace Services.NasbNiro.ProjectControl
             PcWbsNode n = await _uow.Set<PcWbsNode>().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
             if (n == null) return PcText.NotFound<PcWbsNodeDto>("گره WBS پیدا نشد.");
             if (n.ApprovedAt.HasValue) return Bad<PcWbsNodeDto>("قبلاً تایید شده است.");
+            // R1c (M1): the approver is neither the person who created the node nor the one who edited it last
+            if (PcMaker.Touched(n.CreatorUserId, n.EditorUserIds, Me) || n.ModifierUserId == Me) return Bad<PcWbsNodeDto>(PcText.SameUser + " (تایید گره WBS با کسی غیر از ایجادکننده و همه ویرایش‌کنندگان است)");
             if (Clean(n.Dictionary) == null) return Bad<PcWbsNodeDto>("فرهنگ لغت WBS گره را بنویسید.");
             n.ApprovedAt = DateTimeOffset.Now; n.ApprovedByUserId = Me; n.ModifyDate = n.ApprovedAt.Value; n.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
@@ -329,11 +359,12 @@ namespace Services.NasbNiro.ProjectControl
         {
             if (!_user.IsInRole(ProjectControlRoles.PlanningOrPm)) return Bad<int>(PcText.NotAllowed);
             if (!await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == contractId && !c.Deleted, cancellationToken)) return PcText.NotFound<int>(PcText.ContractNotFound);
+            if (await PlanLockAsync(contractId, cancellationToken) is string weightsLocked) return Bad<int>(weightsLocked);
             List<PcWbsNode> nodes = await _uow.Set<PcWbsNode>().Where(n => n.ContractId == contractId && !n.Deleted).ToListAsync(cancellationToken);
             List<PcActivity> acts = await _uow.Set<PcActivity>().Where(a => a.ContractId == contractId && !a.Deleted).ToListAsync(cancellationToken);
             ApplyWeights(nodes, acts);
             DateTimeOffset now = DateTimeOffset.Now;
-            foreach (PcWbsNode n in nodes) { n.ModifyDate = now; n.ModifierUserId = Me; }
+            foreach (PcWbsNode n in nodes) { n.EditorUserIds = PcMaker.WithEditor(n.EditorUserIds, Me); n.ModifyDate = now; n.ModifierUserId = Me; }
             foreach (PcActivity a in acts) { a.ModifyDate = now; a.ModifierUserId = Me; }
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(nodes.Count + acts.Count);
@@ -399,6 +430,9 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.Planning)) return Bad<PcWbsGenerateResultDto>(PcText.NotAllowed);
             ContractEntity contract = await _uow.Set<ContractEntity>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == dto.ContractId && !c.Deleted, cancellationToken);
             if (contract == null) return PcText.NotFound<PcWbsGenerateResultDto>(PcText.ContractNotFound);
+            // R1c (H8) the contract review must be accepted before the WBS exists; (H1) after the baseline the structure changes only through a change request
+            if (await PcGates.RequireReviewAsync(_uow, dto.ContractId, cancellationToken) is string reviewMissing) return Bad<PcWbsGenerateResultDto>(reviewMissing);
+            if (await PlanLockAsync(dto.ContractId, cancellationToken) is string generateLocked) return Bad<PcWbsGenerateResultDto>(generateLocked);
             PcContractTerms terms = await PcContext.TermsAsync(_uow, dto.ContractId, false, cancellationToken);
 
             IQueryable<WorkOrder> woQuery = _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.ContractId == dto.ContractId && !w.Deleted);
@@ -591,6 +625,7 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.Planning)) return Bad<PcWbsGenerateResultDto>(PcText.NotAllowed);
             WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == dto.WorkOrderId && w.ContractId == dto.ContractId && !w.Deleted, cancellationToken);
             if (wo == null) return PcText.NotFound<PcWbsGenerateResultDto>(PcText.WorkOrderNotFound);
+            if (await PlanLockAsync(dto.ContractId, cancellationToken) is string itpLocked) return Bad<PcWbsGenerateResultDto>(itpLocked);
             PcWbsNode product = await _uow.Set<PcWbsNode>().FirstOrDefaultAsync(n => n.ContractId == dto.ContractId && n.WorkOrderId == wo.Id && n.NodeType == PcWbsNodeType.Product && !n.Deleted, cancellationToken);
             if (product == null) return Bad<PcWbsGenerateResultDto>("ابتدا WBS دستور کار را تولید کنید.");
             var g = new GenState { Now = DateTimeOffset.Now };
@@ -625,7 +660,7 @@ namespace Services.NasbNiro.ProjectControl
             Id = a.Id, ContractId = a.ContractId, WbsNodeId = a.WbsNodeId, WbsCode = wbsCode, Code = a.Code, Title = a.Title, SourceType = a.SourceType, SourceId = a.SourceId, WorkOrderId = a.WorkOrderId,
             DurationDays = a.DurationDays, CalendarId = a.CalendarId, Phase = a.Phase, ResponsibleUnit = a.ResponsibleUnit, ConstraintType = a.ConstraintType, ConstraintDate = a.ConstraintDate,
             EarlyStart = a.EarlyStart, EarlyFinish = a.EarlyFinish, LateStart = a.LateStart, LateFinish = a.LateFinish, TotalFloat = a.TotalFloat, FreeFloat = a.FreeFloat, IsCritical = a.IsCritical,
-            ForecastStart = a.ForecastStart, ForecastFinish = a.ForecastFinish, ActualStart = a.ActualStart, ActualFinish = a.ActualFinish, ProgressMethod = a.ProgressMethod, Weight = a.Weight,
+            ForecastStart = a.ForecastStart, ForecastFinish = a.ForecastFinish, ProductionForecastFinish = a.ProductionForecastFinish, ActualStart = a.ActualStart, ActualFinish = a.ActualFinish, ProgressMethod = a.ProgressMethod, Weight = a.Weight,
             BudgetAtCompletion = a.BudgetAtCompletion, Status = a.Status, OnHoldReason = a.OnHoldReason, PurchaseOrderLineId = a.PurchaseOrderLineId, PurchaseRequestLineId = a.PurchaseRequestLineId,
             ItpActivityId = a.ItpActivityId, MilestoneEvent = a.MilestoneEvent, PlannedQuantity = a.PlannedQuantity, SerialItemId = a.SerialItemId, NeedByDate = a.NeedByDate, LeadTimeDays = a.LeadTimeDays,
             IsPackaging = a.IsPackaging, IsLate = a.IsLate, LateKind = a.LateKind, PercentCache = a.PercentCache, Sort = a.Sort, RowVersion = a.RowVersion == null ? null : Convert.ToBase64String(a.RowVersion),
@@ -651,7 +686,7 @@ namespace Services.NasbNiro.ProjectControl
                 Id = a.Id, ContractId = a.ContractId, WbsNodeId = a.WbsNodeId, WbsCode = a.WbsNode.Code, Code = a.Code, Title = a.Title, SourceType = a.SourceType, SourceId = a.SourceId, WorkOrderId = a.WorkOrderId,
                 DurationDays = a.DurationDays, CalendarId = a.CalendarId, Phase = a.Phase, ResponsibleUnit = a.ResponsibleUnit, ConstraintType = a.ConstraintType, ConstraintDate = a.ConstraintDate,
                 EarlyStart = a.EarlyStart, EarlyFinish = a.EarlyFinish, LateStart = a.LateStart, LateFinish = a.LateFinish, TotalFloat = a.TotalFloat, FreeFloat = a.FreeFloat, IsCritical = a.IsCritical,
-                ForecastStart = a.ForecastStart, ForecastFinish = a.ForecastFinish, ActualStart = a.ActualStart, ActualFinish = a.ActualFinish, ProgressMethod = a.ProgressMethod, Weight = a.Weight,
+                ForecastStart = a.ForecastStart, ForecastFinish = a.ForecastFinish, ProductionForecastFinish = a.ProductionForecastFinish, ActualStart = a.ActualStart, ActualFinish = a.ActualFinish, ProgressMethod = a.ProgressMethod, Weight = a.Weight,
                 BudgetAtCompletion = a.BudgetAtCompletion, Status = a.Status, OnHoldReason = a.OnHoldReason, PurchaseOrderLineId = a.PurchaseOrderLineId, PurchaseRequestLineId = a.PurchaseRequestLineId,
                 ItpActivityId = a.ItpActivityId, MilestoneEvent = a.MilestoneEvent, PlannedQuantity = a.PlannedQuantity, SerialItemId = a.SerialItemId, NeedByDate = a.NeedByDate, LeadTimeDays = a.LeadTimeDays,
                 IsPackaging = a.IsPackaging, IsLate = a.IsLate, LateKind = a.LateKind, PercentCache = a.PercentCache, Sort = a.Sort,
@@ -707,6 +742,9 @@ namespace Services.NasbNiro.ProjectControl
 
             string code = Clean(dto.Code);
             DateTimeOffset now = DateTimeOffset.Now;
+            // R1c (H1): while a baseline is current the activities are the approved plan: no new activity, and no change of scope, duration, calendar, constraint, weight or budget here
+            bool planLocked = await PcPlanLock.IsLockedAsync(_uow, dto.ContractId, cancellationToken);
+            if (planLocked && !dto.Id.HasValue) return Bad<PcActivityDto>(PcPlanLock.Refusal);
             PcActivity a;
             if (dto.Id.HasValue)
             {
@@ -729,6 +767,7 @@ namespace Services.NasbNiro.ProjectControl
                 _uow.Set<PcActivity>().Add(a);
             }
             if (await _uow.Set<PcActivity>().AnyAsync(x => x.ContractId == dto.ContractId && x.Code == code && !x.Deleted && x.Id != (dto.Id ?? 0), cancellationToken)) return Bad<PcActivityDto>("این کد فعالیت در قرارداد تکراری است.");
+            if (planLocked && dto.Id.HasValue && PcPlanLock.ActivityPlanChanged(a, dto, code)) return Bad<PcActivityDto>(PcPlanLock.Refusal);
             a.Code = code; a.Title = Clean(dto.Title); a.WbsNodeId = dto.WbsNodeId; a.SourceType = Enum.IsDefined(typeof(PcSourceType), dto.SourceType) ? dto.SourceType : PcSourceType.Manual;
             a.SourceId = dto.SourceId; a.WorkOrderId = dto.WorkOrderId; a.DurationDays = dto.DurationDays; a.CalendarId = dto.CalendarId; a.Phase = dto.Phase;
             a.ResponsibleUnit = Clean(dto.ResponsibleUnit)?.ToUpperInvariant(); a.ConstraintType = dto.ConstraintType; a.ConstraintDate = dto.ConstraintDate?.Date;
@@ -746,6 +785,7 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.PlanningOrPm)) return Bad<bool>(PcText.NotAllowed);
             PcActivity a = await _uow.Set<PcActivity>().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
             if (a == null) return PcText.NotFound<bool>("فعالیت پیدا نشد.");
+            if (await PlanLockAsync(a.ContractId, cancellationToken) is string deleteLocked) return Bad<bool>(deleteLocked);
             if (a.Status != PcActivityStatus.NotStarted || a.ActualStart.HasValue) return Bad<bool>("فعالیت شروع‌شده حذف نمی‌شود.");
             if (await _uow.Set<PcBaselineActivity>().AnyAsync(x => x.ActivityId == id, cancellationToken)) return Bad<bool>("فعالیت در مبنای زمانی ثبت شده و حذف نمی‌شود؛ از مسیر درخواست تغییر اقدام کنید.");
             if (await _uow.Set<PcProgressSnapshotLine>().AnyAsync(x => x.ActivityId == id, cancellationToken) || await _uow.Set<PcManualProgress>().AnyAsync(x => x.ActivityId == id, cancellationToken)) return Bad<bool>("برای فعالیت پیشرفت ثبت شده و حذف نمی‌شود.");
@@ -774,6 +814,8 @@ namespace Services.NasbNiro.ProjectControl
             switch (requested)
             {
                 case "start":
+                    // R1c (H4): an actual date is a fact; it is never in the future
+                    if (date > DateTime.Today) return Bad<PcActivityDto>("تاریخ شروع واقعی در آینده است؛ فقط شروعی ثبت می‌شود که تا امروز انجام شده است.");
                     if (a.ActualStart.HasValue) return Bad<PcActivityDto>("فعالیت قبلاً شروع شده است.");
                     if (a.IsPackaging && a.WorkOrderId.HasValue)
                     {
@@ -849,6 +891,7 @@ namespace Services.NasbNiro.ProjectControl
             PcActivity succ = await _uow.Set<PcActivity>().AsNoTracking().FirstOrDefaultAsync(a => a.Id == dto.SuccessorId && !a.Deleted, cancellationToken);
             if (pred == null || succ == null) return PcText.NotFound<PcDependencyDto>("فعالیت پیدا نشد.");
             if (pred.ContractId != succ.ContractId) return Bad<PcDependencyDto>("دو فعالیت باید در یک قرارداد باشند.");
+            if (await PlanLockAsync(pred.ContractId, cancellationToken) is string dependencyLocked) return Bad<PcDependencyDto>(dependencyLocked);
             PcDependency d = null;
             if (dto.Id.HasValue)
             {
@@ -883,6 +926,7 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.PlanningOrPm)) return Bad<bool>(PcText.NotAllowed);
             PcDependency d = await _uow.Set<PcDependency>().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (d == null) return PcText.NotFound<bool>("وابستگی پیدا نشد.");
+            if (await PlanLockAsync(d.ContractId, cancellationToken) is string removeLocked) return Bad<bool>(removeLocked);
             _uow.Set<PcDependency>().Remove(d);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(true);
@@ -916,11 +960,16 @@ namespace Services.NasbNiro.ProjectControl
                 foreach (var l in lines) delivery[l.Id] = l.Date;
             }
 
-            var nodes = acts.Select(a => new CpmNode
+            // R1c (M2): an activity with its own calendar is scheduled on it
+            Dictionary<int, PcWorkCalendar> activityCalendars = await ActivityCalendarsAsync(acts, cancellationToken);
+            var nodes = acts.Select(a =>
             {
-                Id = a.Id, Duration = a.DurationDays, Constraint = a.ConstraintType, ConstraintDate = a.ConstraintDate,
-                ActualStart = dto.Forecast ? a.ActualStart : null, ActualFinish = dto.Forecast && a.Status == PcActivityStatus.Done ? (a.ActualFinish ?? a.ActualStart) : null,
-                Percent = a.PercentCache, FinishNotBefore = dto.Forecast && a.PurchaseOrderLineId.HasValue && delivery.TryGetValue(a.PurchaseOrderLineId.Value, out DateTime? del) ? del : null,
+                CpmNode node = NodeOf(a, a.DurationDays, activityCalendars);
+                node.ActualStart = dto.Forecast ? a.ActualStart : null;
+                node.ActualFinish = dto.Forecast && a.Status == PcActivityStatus.Done ? (a.ActualFinish ?? a.ActualStart) : null;
+                node.Percent = a.PercentCache;
+                node.FinishNotBefore = dto.Forecast && a.PurchaseOrderLineId.HasValue && delivery.TryGetValue(a.PurchaseOrderLineId.Value, out DateTime? del) ? del : null;
+                return node;
             }).ToList();
             List<PcDependency> deps = await _uow.Set<PcDependency>().AsNoTracking().Where(d => d.ContractId == dto.ContractId).ToListAsync(cancellationToken);
             var links = deps.Select(d => new CpmLink { PredecessorId = d.PredecessorId, SuccessorId = d.SuccessorId, Type = d.Type, Lag = d.LagDays }).ToList();
@@ -934,6 +983,11 @@ namespace Services.NasbNiro.ProjectControl
                 return ResponseDtoHelper.Ok(run);
             }
 
+            // R1c (M3): "late" is measured against the approved plan, the dates of the current baseline, not against the dates of the live plan run
+            var baselineFinish = new Dictionary<int, DateTime>();
+            if (dto.Forecast && terms?.CurrentBaselineId != null)
+                baselineFinish = (await _uow.Set<PcBaselineActivity>().AsNoTracking().Where(r => r.BaselineId == terms.CurrentBaselineId.Value).Select(r => new { r.ActivityId, r.Finish }).ToListAsync(cancellationToken))
+                    .ToDictionary(r => r.ActivityId, r => r.Finish.Date);
             DateTimeOffset now = DateTimeOffset.Now;
             foreach (PcActivity a in acts)
             {
@@ -941,7 +995,8 @@ namespace Services.NasbNiro.ProjectControl
                 if (dto.Forecast)
                 {
                     a.ForecastStart = item.EarlyStart; a.ForecastFinish = item.EarlyFinish;
-                    bool late = a.Status != PcActivityStatus.Done && a.EarlyFinish.HasValue && item.EarlyFinish > a.EarlyFinish.Value;
+                    DateTime? plannedFinish = baselineFinish.TryGetValue(a.Id, out DateTime approvedFinish) ? approvedFinish : a.EarlyFinish;
+                    bool late = a.Status != PcActivityStatus.Done && plannedFinish.HasValue && item.EarlyFinish > plannedFinish.Value;
                     a.IsLate = late; a.LateKind = late ? "FINISH" : null;
                 }
                 else
@@ -965,21 +1020,54 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok(run);
         }
 
-        private async Task<CpmResult> PlanRunAsync(int contractId, List<PcActivity> acts, Dictionary<int, int> durationOverride, CancellationToken cancellationToken)
+        /// <summary>R1c (M2): the calendars of the activities that have their own, loaded once; the key is the calendar id.</summary>
+        private async Task<Dictionary<int, PcWorkCalendar>> ActivityCalendarsAsync(IEnumerable<PcActivity> acts, CancellationToken cancellationToken)
+        {
+            var map = new Dictionary<int, PcWorkCalendar>();
+            foreach (int id in acts.Where(a => a.CalendarId.HasValue).Select(a => a.CalendarId.Value).Distinct())
+                map[id] = await PcContext.CalendarAsync(_uow, id, cancellationToken);
+            return map;
+        }
+
+        private static CpmNode NodeOf(PcActivity a, int duration, Dictionary<int, PcWorkCalendar> calendars) => new CpmNode
+        {
+            Id = a.Id, Duration = Math.Max(0, duration), Constraint = a.ConstraintType, ConstraintDate = a.ConstraintDate,
+            Calendar = a.CalendarId.HasValue && calendars.TryGetValue(a.CalendarId.Value, out PcWorkCalendar own) ? own : null,
+        };
+
+        private sealed class PlanContext
+        {
+            public PcWorkCalendar Calendar;
+            public DateTime Start;
+            public int CriticalFloat;
+            public Dictionary<int, PcWorkCalendar> Calendars;
+            public List<PcDependency> Dependencies;
+        }
+
+        /// <summary>The calendar, the start, the settings, the calendars of the activities and the links between the given activities; null when the contract does not exist.</summary>
+        private async Task<PlanContext> LoadPlanContextAsync(int contractId, List<PcActivity> acts, CancellationToken cancellationToken)
         {
             ContractEntity contract = await _uow.Set<ContractEntity>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == contractId && !c.Deleted, cancellationToken);
-            if (contract == null || acts.Count == 0) return null;
+            if (contract == null) return null;
             PcContractTerms terms = await PcContext.TermsAsync(_uow, contractId, false, cancellationToken);
-            PcWorkCalendar calendar = await PcContext.CalendarForContractAsync(_uow, terms, cancellationToken);
-            DateTime start = PcContext.ScheduleStart(terms, contract);
             Dictionary<string, decimal> settings = await PcSettingKeys.LoadAsync(_uow, cancellationToken);
-            var nodes = acts.Select(a => new CpmNode
-            {
-                Id = a.Id, Duration = durationOverride != null && durationOverride.TryGetValue(a.Id, out int dur) ? Math.Max(0, dur) : a.DurationDays, Constraint = a.ConstraintType, ConstraintDate = a.ConstraintDate,
-            }).ToList();
+            var ids = new HashSet<int>(acts.Select(a => a.Id));
             List<PcDependency> deps = await _uow.Set<PcDependency>().AsNoTracking().Where(d => d.ContractId == contractId).ToListAsync(cancellationToken);
-            var links = deps.Select(d => new CpmLink { PredecessorId = d.PredecessorId, SuccessorId = d.SuccessorId, Type = d.Type, Lag = d.LagDays }).ToList();
-            CpmResult result = PcCpm.Run(nodes, links, calendar, start, false, null, (int)settings[PcSettingKeys.CriticalFloat]);
+            return new PlanContext
+            {
+                Calendar = await PcContext.CalendarForContractAsync(_uow, terms, cancellationToken), Start = PcContext.ScheduleStart(terms, contract), CriticalFloat = (int)settings[PcSettingKeys.CriticalFloat],
+                Calendars = await ActivityCalendarsAsync(acts, cancellationToken), Dependencies = deps.Where(d => ids.Contains(d.PredecessorId) && ids.Contains(d.SuccessorId)).ToList(),
+            };
+        }
+
+        private async Task<CpmResult> PlanRunAsync(int contractId, List<PcActivity> acts, Dictionary<int, int> durationOverride, CancellationToken cancellationToken)
+        {
+            if (acts.Count == 0) return null;
+            PlanContext ctx = await LoadPlanContextAsync(contractId, acts, cancellationToken);
+            if (ctx == null) return null;
+            var nodes = acts.Select(a => NodeOf(a, durationOverride != null && durationOverride.TryGetValue(a.Id, out int dur) ? dur : a.DurationDays, ctx.Calendars)).ToList();
+            var links = ctx.Dependencies.Select(d => new CpmLink { PredecessorId = d.PredecessorId, SuccessorId = d.SuccessorId, Type = d.Type, Lag = d.LagDays }).ToList();
+            CpmResult result = PcCpm.Run(nodes, links, ctx.Calendar, ctx.Start, false, null, ctx.CriticalFloat);
             return result.HasCycle ? null : result;
         }
 
@@ -991,7 +1079,8 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<CpmResult> ApplyPlanNoSaveAsync(int contractId, CancellationToken cancellationToken)
         {
-            List<PcActivity> acts = await _uow.Set<PcActivity>().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken);
+            // an activity that the caller deleted but did not save yet is still returned by the query: the plan is run on the others
+            List<PcActivity> acts = (await _uow.Set<PcActivity>().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken)).Where(a => !a.Deleted).ToList();
             CpmResult result = await PlanRunAsync(contractId, acts, null, cancellationToken);
             if (result == null) return null;
             DateTimeOffset now = DateTimeOffset.Now;
@@ -1005,6 +1094,198 @@ namespace Services.NasbNiro.ProjectControl
             }
             await MirrorToLegacyAsync(acts, result, cancellationToken);
             return result;
+        }
+
+        // ---------------------------------------------------------------- the scenario of a change request (R1c, H1)
+
+        private async Task<(HashSet<int> Wbs, HashSet<int> WorkOrders, HashSet<int> Calendars)> ScenarioReferencesAsync(int contractId, CancellationToken cancellationToken) =>
+            (new HashSet<int>(await _uow.Set<PcWbsNode>().AsNoTracking().Where(n => n.ContractId == contractId && !n.Deleted).Select(n => n.Id).ToListAsync(cancellationToken)),
+             new HashSet<int>(await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.ContractId == contractId && !w.Deleted).Select(w => w.Id).ToListAsync(cancellationToken)),
+             new HashSet<int>(await _uow.Set<PcCalendar>().AsNoTracking().Where(c => !c.Deleted).Select(c => c.Id).ToListAsync(cancellationToken)));
+
+        /// <summary>The temporary node id of the added item whose code is given (case does not matter), or null.</summary>
+        private static int? TempIdOfCode(IList<PcChangeScenarioItemDto> items, string code)
+        {
+            for (int i = 0; i < items.Count; i++)
+                if (items[i].Operation == PcScenarioOperation.Add && string.Equals(PcText.Clean(items[i].Code), PcText.Clean(code), StringComparison.OrdinalIgnoreCase)) return PcScenario.TempId(i);
+            return null;
+        }
+
+        public async Task<string> ValidateScenarioAsync(int contractId, IList<PcChangeScenarioItemDto> items, CancellationToken cancellationToken)
+        {
+            if (items == null || items.Count == 0) return null;
+            List<PcActivity> acts = await _uow.Set<PcActivity>().AsNoTracking().Where(a => a.ContractId == contractId && !a.Deleted).ToListAsync(cancellationToken);
+            var refs = await ScenarioReferencesAsync(contractId, cancellationToken);
+            return PcScenario.Validate(items, acts, refs.Wbs, refs.WorkOrders, refs.Calendars);
+        }
+
+        public async Task<PcScenarioPreview> PreviewScenarioAsync(int contractId, IList<PcChangeScenarioItemDto> items, CancellationToken cancellationToken)
+        {
+            var preview = new PcScenarioPreview();
+            items ??= new List<PcChangeScenarioItemDto>();
+            List<PcActivity> acts = await _uow.Set<PcActivity>().AsNoTracking().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken);
+            if (acts.Count == 0) { preview.Error = "فعالیتی برای تحلیل وجود ندارد."; return preview; }
+            foreach (PcActivity a in acts) { preview.Activities[a.Id] = a; preview.Codes[a.Id] = a.Code; }
+            var refs = await ScenarioReferencesAsync(contractId, cancellationToken);
+            preview.Error = PcScenario.Validate(items, acts, refs.Wbs, refs.WorkOrders, refs.Calendars);
+            if (preview.Error != null) return preview;
+            PlanContext ctx = await LoadPlanContextAsync(contractId, acts, cancellationToken);
+            if (ctx == null) { preview.Error = PcText.ContractNotFound; return preview; }
+            var baseNodes = acts.Select(a => NodeOf(a, a.DurationDays, ctx.Calendars)).ToList();
+            var baseLinks = ctx.Dependencies.Select(d => new CpmLink { PredecessorId = d.PredecessorId, SuccessorId = d.SuccessorId, Type = d.Type, Lag = d.LagDays }).ToList();
+            preview.Before = PcCpm.Run(baseNodes, baseLinks, ctx.Calendar, ctx.Start, false, null, ctx.CriticalFloat);
+            if (preview.Before.HasCycle) { preview.Before = null; preview.Error = "محاسبه برنامه ممکن نیست (حلقه یا نبود تاریخ شروع)."; return preview; }
+
+            var removed = new HashSet<int>(items.Where(i => i.Operation == PcScenarioOperation.Remove).Select(i => i.ActivityId));
+            var nodes = new List<CpmNode>();
+            foreach (PcActivity a in acts.Where(a => !removed.Contains(a.Id)))
+            {
+                PcChangeScenarioItemDto change = items.FirstOrDefault(i => i.Operation == PcScenarioOperation.Modify && i.ActivityId == a.Id);
+                nodes.Add(NodeOf(a, a.DurationDays + (change?.DurationDelta ?? 0), ctx.Calendars));
+            }
+            var links = baseLinks.Where(l => !removed.Contains(l.PredecessorId) && !removed.Contains(l.SuccessorId)).ToList();
+            for (int i = 0; i < items.Count; i++)
+            {
+                PcChangeScenarioItemDto item = items[i];
+                if (item.Operation != PcScenarioOperation.Add) continue;
+                int temp = PcScenario.TempId(i);
+                preview.Codes[temp] = PcText.Clean(item.Code);
+                PcWorkCalendar own = null;
+                if (item.CalendarId.HasValue) { if (!ctx.Calendars.TryGetValue(item.CalendarId.Value, out own)) { own = await PcContext.CalendarAsync(_uow, item.CalendarId.Value, cancellationToken); ctx.Calendars[item.CalendarId.Value] = own; } }
+                nodes.Add(new CpmNode { Id = temp, Duration = Math.Max(0, item.DurationDays), Constraint = PcConstraint.None, Calendar = own });
+                foreach (PcScenarioLinkDto l in item.Links ?? new List<PcScenarioLinkDto>())
+                {
+                    int? other = l.OtherActivityId ?? TempIdOfCode(items, l.OtherCode);
+                    if (!other.HasValue) continue;
+                    links.Add(new CpmLink { PredecessorId = l.OtherIsPredecessor ? other.Value : temp, SuccessorId = l.OtherIsPredecessor ? temp : other.Value, Type = l.Type, Lag = l.LagDays });
+                }
+            }
+            preview.After = PcCpm.Run(nodes, links, ctx.Calendar, ctx.Start, false, null, ctx.CriticalFloat);
+            if (preview.After.HasCycle)
+            {
+                string cycle = string.Join(" ← ", preview.After.CycleNodes.Select(id => preview.Codes.TryGetValue(id, out string c) ? c : id.ToString(CultureInfo.InvariantCulture)));
+                preview.After = null; preview.Error = "سناریو در شبکه فعالیت‌ها حلقه می‌سازد: " + cycle;
+            }
+            return preview;
+        }
+
+        public async Task<PcScenarioOutcome> ApplyScenarioAsync(int contractId, IList<PcBaselineActivity> currentRows, IList<PcChangeScenarioItemDto> items, CancellationToken cancellationToken)
+        {
+            var outcome = new PcScenarioOutcome();
+            PcScenarioOutcome Fail(string message) { outcome.Error = message; return outcome; }
+            items ??= new List<PcChangeScenarioItemDto>();
+            if (currentRows == null || currentRows.Count == 0) return Fail("خط مبنای جاری وجود ندارد؛ تا پیش از تایید خط مبنای اولیه برنامه مستقیم ویرایش می‌شود.");
+            var rowById = currentRows.ToDictionary(r => r.ActivityId);
+            DateTimeOffset now = DateTimeOffset.Now;
+            List<PcActivity> live = await _uow.Set<PcActivity>().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken);
+
+            foreach (PcChangeScenarioItemDto item in items)
+                if (item.Operation != PcScenarioOperation.Add && !rowById.ContainsKey(item.ActivityId)) return Fail("فعالیت سناریو در خط مبنای جاری نیست؛ سناریو فقط فعالیت‌های خط مبنا را تغییر می‌دهد یا فعالیت تازه می‌افزاید.");
+            var refs = await ScenarioReferencesAsync(contractId, cancellationToken);
+            string problem = PcScenario.Validate(items, live, refs.Wbs, refs.WorkOrders, refs.Calendars);
+            if (problem != null) return Fail(problem);
+
+            // 1. the plan goes back to the current baseline: a value changed outside the change process is not carried into the new baseline, and an activity that is not in it leaves the plan
+            var removedIds = new List<int>();
+            foreach (PcActivity a in live.ToList())
+            {
+                if (rowById.TryGetValue(a.Id, out PcBaselineActivity row))
+                {
+                    if (a.DurationDays != row.DurationDays || a.Weight != row.Weight || a.BudgetAtCompletion != row.Budget || a.WbsNodeId != row.WbsNodeId || a.Phase != row.Phase || a.CalendarId != row.CalendarId)
+                    {
+                        a.DurationDays = row.DurationDays; a.Weight = row.Weight; a.BudgetAtCompletion = row.Budget; a.WbsNodeId = row.WbsNodeId; a.Phase = row.Phase; a.CalendarId = row.CalendarId;
+                        a.ModifyDate = now; a.ModifierUserId = Me;
+                        outcome.Notes.Add("فعالیت «" + a.Code + "» که خارج از مسیر تغییر ویرایش شده بود به مقدار خط مبنای جاری برگردانده شد.");
+                    }
+                    continue;
+                }
+                if (!PcScenario.CanBeRemoved(a)) return Fail("فعالیت «" + a.Code + "» در خط مبنای جاری نیست و شروع شده است؛ آن را با PMO بررسی کنید (از مسیر درخواست تغییر وارد برنامه نشده است).");
+                a.Delete(); a.ModifyDate = now; a.ModifierUserId = Me;
+                removedIds.Add(a.Id); live.Remove(a);
+                outcome.Notes.Add("فعالیت «" + a.Code + "» که از مسیر درخواست تغییر وارد برنامه نشده بود از برنامه خارج شد.");
+            }
+
+            // 2. the scenario
+            var byId = live.ToDictionary(a => a.Id);
+            int sort = live.Count == 0 ? 0 : live.Max(a => a.Sort);
+            var added = new List<(PcActivity Activity, PcChangeScenarioItemDto Item, int Temp)>();
+            for (int i = 0; i < items.Count; i++)
+            {
+                PcChangeScenarioItemDto item = items[i];
+                switch (item.Operation)
+                {
+                    case PcScenarioOperation.Remove:
+                    {
+                        PcActivity a = byId[item.ActivityId];
+                        a.Delete(); a.ModifyDate = now; a.ModifierUserId = Me;
+                        removedIds.Add(a.Id); byId.Remove(a.Id); live.Remove(a);
+                        break;
+                    }
+                    case PcScenarioOperation.Add:
+                    {
+                        var n = new PcActivity
+                        {
+                            ContractId = contractId, WbsNodeId = item.WbsNodeId, Code = PcText.Clean(item.Code), Title = PcText.Clean(item.Title), SourceType = PcSourceType.Manual, WorkOrderId = item.WorkOrderId,
+                            DurationDays = item.DurationDays, CalendarId = item.CalendarId, Phase = item.Phase, ResponsibleUnit = PcText.Upper(item.ResponsibleUnit), ConstraintType = PcConstraint.None,
+                            ProgressMethod = item.ProgressMethod, Weight = item.Weight, BudgetAtCompletion = item.BudgetAtCompletion, Status = PcActivityStatus.NotStarted, Sort = ++sort,
+                            CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
+                        };
+                        added.Add((n, item, PcScenario.TempId(i)));
+                        break;
+                    }
+                    default:
+                    {
+                        PcActivity a = byId[item.ActivityId];
+                        a.DurationDays += item.DurationDelta; a.BudgetAtCompletion += item.BudgetDelta;
+                        if (item.NewWeight.HasValue) a.Weight = item.NewWeight.Value;
+                        if (a.DurationDays < 0 || a.DurationDays > PcScenario.MaxDuration || a.BudgetAtCompletion < 0m) return Fail("فعالیت «" + a.Code + "» پس از تغییر مدت یا بودجه نامعتبر دارد.");
+                        a.ModifyDate = now; a.ModifierUserId = Me;
+                        break;
+                    }
+                }
+            }
+
+            // the links: those of a removed activity go; an added activity brings its own (to an activity of the plan or to another added one)
+            List<PcDependency> deps = await _uow.Set<PcDependency>().Where(d => d.ContractId == contractId).ToListAsync(cancellationToken);
+            var removedSet = new HashSet<int>(removedIds);
+            foreach (PcDependency d in deps.Where(d => removedSet.Contains(d.PredecessorId) || removedSet.Contains(d.SuccessorId)).ToList()) { _uow.Set<PcDependency>().Remove(d); deps.Remove(d); }
+            var addedByTemp = added.ToDictionary(x => x.Temp, x => x.Activity);
+            var newLinks = new List<PcDependency>();
+            foreach (var entry in added)
+                foreach (PcScenarioLinkDto l in entry.Item.Links ?? new List<PcScenarioLinkDto>())
+                {
+                    int? tempOther = l.OtherActivityId.HasValue ? (int?)null : TempIdOfCode(items, l.OtherCode);
+                    PcActivity other = l.OtherActivityId.HasValue ? (byId.TryGetValue(l.OtherActivityId.Value, out PcActivity found) ? found : null) : (tempOther.HasValue ? addedByTemp[tempOther.Value] : null);
+                    if (other == null) return Fail("وابستگی فعالیت «" + entry.Activity.Code + "» به فعالیتی اشاره می‌کند که در برنامه نیست.");
+                    newLinks.Add(new PcDependency
+                    {
+                        ContractId = contractId, Predecessor = l.OtherIsPredecessor ? other : entry.Activity, Successor = l.OtherIsPredecessor ? entry.Activity : other, Type = l.Type, LagDays = l.LagDays, Origin = PcDependencyOrigin.Manual,
+                    });
+                }
+
+            // 3. nothing is saved before the network is acyclic and the cost baseline checks pass
+            var tempIds = new Dictionary<PcActivity, int>();
+            foreach (var entry in added) tempIds[entry.Activity] = entry.Temp;
+            int IdOf(PcActivity a) => tempIds.TryGetValue(a, out int temp) ? temp : a.Id;
+            var linkEnds = deps.Select(d => new CpmLink { PredecessorId = d.PredecessorId, SuccessorId = d.SuccessorId }).Concat(newLinks.Select(d => new CpmLink { PredecessorId = IdOf(d.Predecessor), SuccessorId = IdOf(d.Successor) })).ToList();
+            List<int> cycle = PcCpm.FindCycle(live.Select(a => a.Id).Concat(added.Select(x => x.Temp)), linkEnds);
+            if (cycle.Count > 0)
+                return Fail("سناریو در شبکه فعالیت‌ها حلقه می‌سازد: " + string.Join(" ← ", cycle.Select(id => byId.TryGetValue(id, out PcActivity c) ? c.Code : (addedByTemp.TryGetValue(id, out PcActivity ac) ? ac.Code : id.ToString(CultureInfo.InvariantCulture)))));
+            string creation = PcBaselineRows.CreationProblem(live.Concat(added.Select(x => x.Activity)).ToList());
+            if (creation != null) return Fail(creation);
+
+            _uow.Set<PcActivity>().AddRange(added.Select(x => x.Activity));
+            _uow.Set<PcDependency>().AddRange(newLinks);
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateConcurrencyException) { return Fail(PcText.Concurrency); }
+
+            // 4. the plan run on the saved plan; the caller builds and saves the baseline
+            CpmResult result = await ApplyPlanNoSaveAsync(contractId, cancellationToken);
+            if (result == null) return Fail("محاسبه برنامه جدید ممکن نیست.");
+            outcome.Activities = (await _uow.Set<PcActivity>().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken)).Where(a => !a.Deleted).ToList();
+            List<PcWbsNode> nodes = await _uow.Set<PcWbsNode>().AsNoTracking().Where(n => n.ContractId == contractId && !n.Deleted).ToListAsync(cancellationToken);
+            outcome.EffectiveWeights = PcProgressService.EffectiveWeights(nodes, outcome.Activities);
+            return outcome;
         }
 
         /// <summary>Writes the computed dates back to the old process / assembly / work order date fields so the legacy screens show them.</summary>

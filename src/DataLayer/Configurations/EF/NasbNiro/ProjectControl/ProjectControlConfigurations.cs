@@ -16,6 +16,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
 
         public static void AddProjectControlConfigurations(this ModelBuilder builder)
         {
+            builder.AddProjectControlR1Configurations(); // R1c: new tables and columns
+
             // ------------------------------------------------------------------ settings, calendars
             builder.Entity<PcSetting>(b =>
             {
@@ -55,6 +57,11 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.LatePenaltyPercentPerWeek).HasPrecision(9, 4);
                 b.Property(x => x.PenaltyCapPercent).HasPrecision(9, 4);
                 b.Property(x => x.ManagementReserve).HasPrecision(22, 2);
+                // R1c (H1): the new NOT NULL columns whose C# initialiser is not 0 carry an explicit column default, so the migration fills existing rows;
+                // the sentinel is -1 so that an explicit 0 months (no warranty) is stored as 0 and not replaced by the column default.
+                b.Property(x => x.PenaltyBasis).HasDefaultValue(PcPenaltyBasis.PerContract);
+                b.Property(x => x.WarrantyMonthsAfterCommissioning).HasDefaultValue(12).HasSentinel(-1);
+                b.Property(x => x.WarrantyMonthsAfterDelivery).HasDefaultValue(18).HasSentinel(-1);
                 b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.CurrentBaseline).WithMany().HasForeignKey(x => x.CurrentBaselineId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -120,6 +127,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.TenderCode).HasMaxLength(Code);
                 b.Property(x => x.Notes).HasMaxLength(LongText);
                 b.Property(x => x.DecisionNote).HasMaxLength(Text);
+                b.Property(x => x.Stage).HasDefaultValue(PcReviewStage.Contract);
                 b.HasIndex(x => x.ContractId);
                 b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -262,7 +270,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
             builder.Entity<PcBaselineCostPeriod>(b =>
             {
                 b.ToTable("PcBaselineCostPeriods");
-                b.Property(x => x.PlannedCumulative).HasPrecision(22, 2);
+
+                // R1c (M4): the frozen planned value is kept with four decimals (the curve is a sum of fractional progress x budget); migration ProjectControlR1 alters the column from (22,2)
+                b.Property(x => x.PlannedCumulative).HasPrecision(22, 4);
                 b.HasOne(x => x.Baseline).WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Cascade);
             });
             builder.Entity<PcCostBaselineLine>(b =>

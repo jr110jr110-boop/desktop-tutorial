@@ -101,7 +101,7 @@ namespace Services.NasbNiro.Ceo
 
         /// <summary>
         /// ★ Sales backlog = (A) for the confirmed and partly delivered sales orders: each line's amount times the share of its quantity not yet invoiced,
-        /// plus (B) for the contracts in progress whose project-control terms carry a value (before VAT): that value less the net amount of their posted sales invoices
+        /// plus (B) for the contracts in progress whose project-control terms carry a value (before VAT): that value (with the approved variation orders and amendments, R1c) less the net amount of their posted sales invoices
         /// (credit notes deducted; advance and retention-release invoices left out), never below zero.
         /// </summary>
         public static async Task<CeoBacklog> SalesBacklogAsync(IUnitOfWork uow, CancellationToken ct)
@@ -120,12 +120,14 @@ namespace Services.NasbNiro.Ceo
             if (terms.Count > 0)
             {
                 List<int> ids = terms.Select(t => t.ContractId).Distinct().ToList();
+                // R1c (H3): the value of the contract is the effective one (approved variation orders and CEO-approved amendments on top of the terms), as in project control
+                Dictionary<int, decimal> deltas = await global::Services.NasbNiro.ProjectControl.PcEffective.PriceDeltasAsync(uow, ids, ct);
                 var invoiced = await uow.Set<FnSalesInvoice>().AsNoTracking()
                     .Where(i => i.Status == FnDocStatus.Posted && i.ContractId != null && ids.Contains(i.ContractId.Value) && i.Type != FnInvoiceType.Advance && i.Type != FnInvoiceType.RetentionRelease)
                     .GroupBy(i => i.ContractId.Value).Select(g => new { g.Key, Net = g.Sum(i => i.Type == FnInvoiceType.CreditNote ? -i.NetAmount : i.NetAmount) }).ToListAsync(ct);
                 Dictionary<int, decimal> net = invoiced.ToDictionary(x => x.Key, x => x.Net);
                 foreach (var t in terms.GroupBy(t => t.ContractId).Select(g => g.First()))
-                    backlog.Contracts += Math.Max(0m, t.Value - (net.TryGetValue(t.ContractId, out decimal n) ? n : 0m));
+                    backlog.Contracts += Math.Max(0m, t.Value + (deltas.TryGetValue(t.ContractId, out decimal delta) ? delta : 0m) - (net.TryGetValue(t.ContractId, out decimal n) ? n : 0m));
             }
             return backlog;
         }

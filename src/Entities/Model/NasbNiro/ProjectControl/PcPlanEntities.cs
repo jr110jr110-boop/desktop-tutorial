@@ -35,6 +35,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public bool IsGenerated { get; set; }
         public DateTimeOffset? ApprovedAt { get; set; }
         public int? ApprovedByUserId { get; set; }
+
+        /// <summary>R1c (L4): everyone who created or edited the node (",5,7,"); none of them approves it.</summary>
+        public string EditorUserIds { get; set; }
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -76,6 +79,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         // forecast run (actuals + remaining duration + PO delivery dates)
         public DateTime? ForecastStart { get; set; }
         public DateTime? ForecastFinish { get; set; }
+
+        /// <summary>R1c (M9): the finish forecast of the production scheduler (MES). Project control writes only ForecastFinish and shows both; the two are never mixed.</summary>
+        public DateTime? ProductionForecastFinish { get; set; }
 
         public DateTime? ActualStart { get; set; }
         public DateTime? ActualFinish { get; set; }
@@ -181,8 +187,17 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public PcProgressMethod ProgressMethod { get; set; }
         public int? CalendarId { get; set; }
         public string ResponsibleUnit { get; set; }
+
+        /// <summary>R1c (H1): the share of the whole project (0-1, from the WBS weights) frozen with the baseline; progress that follows the baseline uses it. Null = a baseline of before R1c.</summary>
+        public decimal? EffectiveWeight { get; set; }
     }
 
+    /// <summary>
+    /// The frozen planned-value curve of a baseline, written when the baseline is approved (M4). One row per calendar day of the project range:
+    /// CalendarId null = the planned cumulative value of the whole project on that day (<see cref="PlannedCumulative"/>); CalendarId set = the working-day
+    /// index of that day in that calendar (<see cref="WorkingOffset"/>, calendar 0 = the contract calendar), so the planned value of one activity can be read
+    /// later without the calendar of today (a holiday added afterwards does not move the plan).
+    /// </summary>
     public class PcBaselineCostPeriod
     {
         public int Id { get; set; }
@@ -190,6 +205,12 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public PcBaseline Baseline { get; set; }
         public DateTime PeriodStart { get; set; }
         public decimal PlannedCumulative { get; set; }
+
+        /// <summary>R1c: null for the project curve; 0 for the contract calendar; else the id of the activity calendar the offsets belong to.</summary>
+        public int? CalendarId { get; set; }
+
+        /// <summary>R1c: number of working days of that calendar from the first day of the range up to and including this day (0 before the first working day).</summary>
+        public int WorkingOffset { get; set; }
     }
 
     /// <summary>Budget lines of the cost baseline (CBS): contingency and management reserve are kept apart from the activity budgets.</summary>

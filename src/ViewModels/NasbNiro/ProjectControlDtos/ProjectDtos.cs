@@ -38,10 +38,34 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public decimal ManagementReserve { get; set; }
         public bool AutoSnapshot { get; set; } = true;
 
-        /// <summary>Value plus the approved variation orders (read only).</summary>
+        /// <summary>R1c (H5): the delay penalty is counted once, over the whole contract (1, default) or per work order (2).</summary>
+        public PcPenaltyBasis PenaltyBasis { get; set; } = PcPenaltyBasis.PerContract;
+
+        /// <summary>R1c (M16): the warranty ends at the earlier of the two dates (months after commissioning, months after delivery).</summary>
+        public int WarrantyMonthsAfterCommissioning { get; set; } = 12;
+        public int WarrantyMonthsAfterDelivery { get; set; } = 18;
+
+        /// <summary>R1c (H2): set when the contract review was accepted; from then on the frozen terms change only through a CEO-approved amendment or an approved variation order.</summary>
+        public DateTimeOffset? TermsFrozenAt { get; set; }
+
+        /// <summary>
+        /// R1c (H2), request only: the CEO-approved amendment (or the approved variation order) that authorizes a change of the frozen terms (penalty rate, cap, grace days,
+        /// management reserve, report indices, penalty basis, warranty months). Each document authorizes one change. The value and the delivery date are not edited after the freeze.
+        /// </summary>
+        public int? AmendmentId { get; set; }
+        public int? VariationOrderId { get; set; }
+
+        /// <summary>The effective value: the value of the terms plus the approved variation orders plus the CEO-approved amendments (read only).</summary>
         public decimal? CurrentValue { get; set; }
         public decimal ApprovedVariationPrice { get; set; }
         public int ApprovedVariationDays { get; set; }
+
+        /// <summary>R1c: the CEO-approved amendments that no approved variation order carries (read only).</summary>
+        public decimal ApprovedAmendmentPrice { get; set; }
+        public int ApprovedAmendmentDays { get; set; }
+
+        /// <summary>R1c: the delivery date of the terms moved by the approved days (read only).</summary>
+        public DateTime? CurrentDeliveryDate { get; set; }
         public string RowVersion { get; set; }
     }
 
@@ -64,6 +88,10 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string EquipmentProjectCode { get; set; }
         public int RepeatCounter { get; set; }
         public DateTime? PlannedDeliveryDate { get; set; }
+
+        /// <summary>R1c (H2), request only: once the contract review is accepted, a change of the planned delivery date needs a CEO-approved amendment or an approved variation order of the contract.</summary>
+        public int? AmendmentId { get; set; }
+        public int? VariationOrderId { get; set; }
     }
 
     public class PcCodingRowDto
@@ -184,6 +212,19 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public PcReviewDecision Decision { get; set; }
         public string DecisionNote { get; set; }
         public DateTimeOffset? DecidedAt { get; set; }
+
+        /// <summary>R1c (H8): 1 tender (before the offer), 2 contract (after the win), 3 change (re-review after an amendment or a variation order).</summary>
+        public PcReviewStage Stage { get; set; } = PcReviewStage.Contract;
+        public int? AmendmentId { get; set; }
+        public int? VariationOrderId { get; set; }
+
+        /// <summary>R1c (H8): the two signatures of the acceptance (the PMO and the commercial unit, two different people).</summary>
+        public int? PmoAcceptedByUserId { get; set; }
+        public string PmoAcceptedByName { get; set; }
+        public DateTimeOffset? PmoAcceptedAt { get; set; }
+        public int? CommercialAcceptedByUserId { get; set; }
+        public string CommercialAcceptedByName { get; set; }
+        public DateTimeOffset? CommercialAcceptedAt { get; set; }
         public string RowVersion { get; set; }
     }
 
@@ -191,10 +232,13 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
     {
         public int Id { get; set; }
 
-        /// <summary>capability-check (planning), decide (CEO)</summary>
+        /// <summary>capability-check (planning), accept (PMO and COMMERCIAL, two different people), decide (CEO: reject or modify)</summary>
         public string Action { get; set; }
         public PcReviewDecision Decision { get; set; }
         public string Note { get; set; }
+
+        /// <summary>accept: pmo or commercial; left empty, the slot follows the role of the user.</summary>
+        public string Slot { get; set; }
     }
 
     public class PcAmendmentDto
@@ -210,6 +254,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public DateTimeOffset? CeoApprovedAt { get; set; }
         public string CustomerApprovalReference { get; set; }
         public DateTime? CustomerApprovalDate { get; set; }
+
+        /// <summary>R1c (H2): the day the amendment authorized a change of the frozen terms (read only); it authorizes one change.</summary>
+        public DateTimeOffset? TermsAppliedAt { get; set; }
         public List<PcAmendmentCopyDto> Copies { get; set; } = new List<PcAmendmentCopyDto>();
     }
 
@@ -229,6 +276,39 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string Reference { get; set; }
         public DateTime? Date { get; set; }
         public int? CopyId { get; set; }
+    }
+
+    /// <summary>
+    /// R1c (L): one number the company can change (thresholds, alert days, the CEO limit of variation orders, the default warranty...).
+    /// A source that starts with the star (★) is a provisional default that the company has not confirmed yet; saving a value replaces it by the company setting.
+    /// </summary>
+    public class PcSettingDto
+    {
+        public string Key { get; set; }
+        public string Title { get; set; }
+        public string Source { get; set; }
+        public decimal Value { get; set; }
+        public decimal DefaultValue { get; set; }
+
+        /// <summary>True when no value was ever saved: the default of the code is in force.</summary>
+        public bool IsDefault { get; set; }
+
+        /// <summary>False while the source is a provisional (★) default.</summary>
+        public bool Confirmed { get; set; }
+        public decimal Min { get; set; }
+        public decimal Max { get; set; }
+        public bool WholeNumber { get; set; }
+    }
+
+    public class PcSettingValueDto
+    {
+        public string Key { get; set; }
+        public decimal Value { get; set; }
+    }
+
+    public class PcSettingsSaveDto
+    {
+        public List<PcSettingValueDto> Items { get; set; } = new List<PcSettingValueDto>();
     }
 
     public class PcContractQuery : PaginationParams

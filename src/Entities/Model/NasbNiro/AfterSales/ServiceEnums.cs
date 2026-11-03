@@ -8,7 +8,7 @@ namespace Entities.Model.NasbNiro.AfterSales
     public enum SvRequestStatus { Open = 1, Assigned = 2, InProgress = 3, WaitingCustomer = 4, Resolved = 5, Closed = 6 }
 
     /// <summary>Where the warranty period of an installed unit came from.</summary>
-    public enum SvWarrantySource { None = 0, Months = 1, Guarantee = 2, Manual = 3 }
+    public enum SvWarrantySource { None = 0, Months = 1, Guarantee = 2, Manual = 3, /* R1c (M16): from the contract terms (earlier of commissioning + months, delivery + months) */ Terms = 4 }
 
     /// <summary>Status of an installed unit (computed from the dates and the active LTSA, except Decommissioned which a person sets).</summary>
     public enum SvUnitStatus { InWarranty = 1, OutOfWarranty = 2, UnderLtsa = 3, Decommissioned = 4 }
