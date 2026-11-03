@@ -10715,6 +10715,7 @@ as "$ADMIN_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO,\"action\":\"approv
 
 # --- R1c fix round: the creator rule with a user who holds both roles, the positive approval with its exact effective value, one order per change request, and the rest of the brief
 user2 pmocom.ci 1,2 'Ci#PmoCom-User-2026' 09120000098 0012345698
+approve_grants pmocom.ci # PMO is a sensitive role (R1a): the second PMO user approves it before the user signs in
 PMOCOM_TOKEN=$(login pmocom.ci 'Ci#PmoCom-User-2026'); [ -n "$PMOCOM_TOKEN" ] && ok "r1c: login of a user who holds the PMO and the commercial role" || bad "r1c: login of a user who holds the PMO and the commercial role"
 as "$PMOCOM_TOKEN" POST $PC/variations "{\"contractId\":$PCT,\"description\":\"r1c creator rule\",\"priceDelta\":1000,\"daysDelta\":0}"; R1CVO2=$(val .data.id)
 as "$PMOCOM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO2,\"action\":\"submit\"}"; check "r1c: the dual-role user creates and submits a variation order" '.success and .data.status == 1'
