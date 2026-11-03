@@ -159,6 +159,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.AmountDecimal).HasPrecision(22, 2);
                 b.Property(x => x.CurrencyCode).HasMaxLength(10);
                 b.Property(x => x.ParseNote).HasMaxLength(Text);
+                b.Property(x => x.ReleaseRequestedNote).HasMaxLength(Text);   // R1a2 (M-3): nvarchar(1000), the same size as the note of the event it becomes
             });
             builder.Entity<PcGuaranteeEvent>(b =>
             {

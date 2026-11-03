@@ -206,6 +206,12 @@ namespace Entities.Model.NasbNiro.Finance
         public int? CostCenterId { get; set; }
         /// <summary>The sub-ledger account role this line came from (auto vouchers); used for reconciliation.</summary>
         public string SourceRole { get; set; }
+
+        /// <summary>
+        /// R1p D1/D2: the line is a protected labour amount (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate: too few payroll-rated people, or one or two of them dominate the hours; see <see cref="AccountingEventLine.LabourProtected"/>).
+        /// The voucher, ledger and drill-down readers leave such a line out for every role except PAYROLL, FINANCEMANAGER and CEO.
+        /// </summary>
+        public bool LabourProtected { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ tax data
@@ -680,6 +686,8 @@ namespace Entities.Model.NasbNiro.Finance
         public int Kind { get; set; }
         public decimal Amount { get; set; }
         public string Note { get; set; }
+        /// <summary>M8 (review R1t): the voucher that books the correction of a kind 1 (unbooked bank fee or interest) or kind 4 (error in our books) item. Required before the reconciliation is approved; null for the other kinds.</summary>
+        public int? CorrectingVoucherId { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ sales invoices

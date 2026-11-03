@@ -522,7 +522,9 @@ namespace Services.NasbNiro.Quality
 
         private async Task<string> CheckReinspectionAsync(OutOfToleranceItem item, string kind, int recordId, CancellationToken cancellationToken)
         {
-            if (item.Case.Items.Any(i => i.SourceKind == kind && i.SourceId == recordId))
+            // the case stores an incoming inspection as "Inspection" (see the case builder above) while the link kind is NcrReinspection.Inspection ("QcInspection")
+            string sourceKind = kind == NcrReinspection.Inspection ? "Inspection" : kind;
+            if (item.Case.Items.Any(i => i.SourceKind == sourceKind && i.SourceId == recordId))
                 return "این سند خودش از اسناد پرونده است (با همان تجهیز انجام شده)، بازرسی مجدد نیست.";
             // one document proves one re-inspection: a document already linked to another row of any case is not used twice (review H3)
             if (await _uow.Set<OutOfToleranceItem>().AnyAsync(i => i.Id != item.Id && i.ReinspectionKind == kind && i.ReinspectionRecordId == recordId, cancellationToken))

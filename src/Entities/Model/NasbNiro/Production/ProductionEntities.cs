@@ -38,6 +38,12 @@ namespace Entities.Model.NasbNiro.Production
         public decimal QueueDaysDefault { get; set; }
         public bool IsActive { get; set; } = true;
 
+        /// <summary>
+        /// R1p D43: an operation of this centre cannot be started on the terminal without choosing a machine (the machine hours, the machine overhead and the OEE come from it).
+        /// ★ provisional decision: true by default; the rule applies only while the centre has at least one machine that is not retired (a centre without machines has nothing to choose).
+        /// </summary>
+        public bool RequiresMachine { get; set; } = true;
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -91,6 +97,12 @@ namespace Entities.Model.NasbNiro.Production
         public int? ItpTestType { get; set; }
 
         public bool FirstArticleRequired { get; set; }
+
+        /// <summary>R1p D12: a welding step. It starts only with an approved WPS (<see cref="WpsId"/>) and a booking employee who holds a valid welder qualification for the process of that WPS.</summary>
+        public bool IsWelding { get; set; }
+
+        /// <summary>R1p D12: the welding procedure specification (Wps of the quality module) the step is welded by.</summary>
+        public int? WpsId { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -209,6 +221,12 @@ namespace Entities.Model.NasbNiro.Production
         public string CancelReason { get; set; }
         public string Note { get; set; }
 
+        /// <summary>R1p D6: pieces of the order scrapped by an approved NCR decision (the order makes <c>Quantity - WrittenOffQty</c>; a replacement order is drafted for them).</summary>
+        public decimal WrittenOffQty { get; set; }
+
+        /// <summary>R1p D6: the order this one was drafted to replace after a scrap decision.</summary>
+        public int? ReplacesOrderId { get; set; }
+
         /// <summary>The operations and components of the order (so the order and its children are saved together).</summary>
         public ICollection<MfOperation> Operations { get; set; } = new List<MfOperation>();
 
@@ -275,10 +293,34 @@ namespace Entities.Model.NasbNiro.Production
         public bool IsRework { get; set; }
         public int? ReworkOfOperationId { get; set; }
 
+        /// <summary>
+        /// R1p L9 (round 3): the non-conformance reports whose rework this operation does (<c>NonConformance.ReworkOperationId</c>, a column of the quality module). The operation and the link are stored by ONE save: the id of the
+        /// operation exists only after it, and the relationship fills it in. Nothing reads this collection.
+        /// </summary>
+        public ICollection<NonConformance> ReworkedNcrs { get; set; } = new List<NonConformance>();
+
         public string SkipReason { get; set; }
         public DateTimeOffset? StartedAt { get; set; }
         public DateTimeOffset? FinishedAt { get; set; }
         public string Note { get; set; }
+
+        /// <summary>R1p D12: a welding step (copied from the standard when the order is drafted).</summary>
+        public bool IsWelding { get; set; }
+
+        /// <summary>R1p D12: the approved WPS the step is welded by (copied from the standard).</summary>
+        public int? WpsId { get; set; }
+
+        /// <summary>R1p D12: the weld log drafted from the booking when the welding step finished.</summary>
+        public int? WeldLogId { get; set; }
+
+        /// <summary>R1p D6: the production manager let the order continue with this rejected step on the strength of an approved NCR concession (<see cref="NcrId"/>).</summary>
+        public bool AcceptedByConcession { get; set; }
+
+        /// <summary>R1p D38: the reported quantities at the moment QC accepted the step; a finish with other quantities needs a new acceptance.</summary>
+        public decimal? QcAcceptedGoodQty { get; set; }
+
+        public decimal? QcAcceptedScrapQty { get; set; }
+        public decimal? QcAcceptedReworkQty { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -338,6 +380,40 @@ namespace Entities.Model.NasbNiro.Production
         /// <summary>Set when the cost posting has handled the booking (a posted booking is final: a correction goes through finance).</summary>
         public DateTimeOffset? CostPostedAt { get; set; }
 
+        /// <summary>
+        /// R1p D1 (standard rate, round 3): the Persian month (yyyymm) whose variance includes this booking at the month-end run. The daily cost posting sets it for the booking of a payroll-rated employee (an employee without an
+        /// approved payslip is absorbed at the same standard rate and has no variance, so no month; a late booking of a month that is already closed goes to the next open month). The monthly run moves it to a later month
+        /// while the month does not pass the publication gate (too few payroll-rated people, or one or two of them dominate the hours).
+        /// </summary>
+        public int? LabourPendingPeriod { get; set; }
+
+        /// <summary>
+        /// R1p D1: hours x the employee's own hourly payroll cost, unrounded. It only ever goes into the cost total of a pool (the month-end true-up); no API shows it, because on its own it is one person's pay.
+        /// </summary>
+        public decimal? PayrollCost { get; set; }
+
+        /// <summary>R1p D1: the labour the daily cost posting absorbed for this booking: hours x the STANDARD rate of the work centre (else Production:StandardLabourRate), rounded to a whole rial. The variance of the month is the payroll cost of its pool less the sum of these.</summary>
+        public decimal? AbsorbedLabour { get; set; }
+
+        /// <summary>R1p D1: the hourly rate of the employee came from an approved payslip (the employee counts as payroll-rated in the pool test).</summary>
+        public bool RateFromPayroll { get; set; }
+
+        /// <summary>R1p D1: the month-end run took this booking into the pool of its month.</summary>
+        public DateTimeOffset? LabourAggregatedAt { get; set; }
+
+        /// <summary>R1p D39: an extra booking the shop supervisor added to an operation of a completed order, with a reason (bookings of a completed order are never edited).</summary>
+        public bool IsCorrection { get; set; }
+
+        public int? CorrectsBookingId { get; set; }
+
+        /// <summary>
+        /// R1p review 9: a correction booking is pending until a production manager other than the one who made it approves it (maker-checker); the cost posting skips a correction without this approval.
+        /// Null for every other booking.
+        /// </summary>
+        public int? CorrectionApprovedByUserId { get; set; }
+
+        public DateTimeOffset? CorrectionApprovedAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -388,7 +464,10 @@ namespace Entities.Model.NasbNiro.Production
         /// <summary>Distinct employees among them whose labour rate came from payroll.</summary>
         public int PayrollEmployeeCount { get; set; }
 
-        /// <summary>True when one of the postings of the run is too small to show its labour amount without revealing a person's pay (see <c>MfCostMask</c>); the run total is then hidden too.</summary>
+        /// <summary>
+        /// Written by the earlier release (since P1) when a protected group (one or two payroll-rated people) stood behind a day of labour at the employees' own pay. Since R1p labour is absorbed at the STANDARD rate, so no run
+        /// total shows one person's pay: a run of this release is always false. The flag on an old run is the marker the read side keys on (see MfLegacyLabour).
+        /// </summary>
         public bool LabourProtected { get; set; }
 
         public int? AccountingEventId { get; set; }
@@ -419,6 +498,63 @@ namespace Entities.Model.NasbNiro.Production
 
         /// <summary>Distinct employees in the row whose labour rate came from payroll.</summary>
         public int PayrollEmployeeCount { get; set; }
+
+    }
+
+    public enum MfLabourModule
+    {
+        Production = 0,
+        Service = 1,
+    }
+
+    /// <summary>
+    /// R1p D1/D2 (round 3): the labour pool of one Persian month of one module (production or service) and its month-end variance. Labour is absorbed into work orders at a STANDARD rate that finance sets, so no published
+    /// amount is one person's pay. The pool is the payroll-rated employees (an approved payslip exists) with hours in the month: its cost is their own payroll cost, its variance is that cost less what their hours absorbed
+    /// at the standard rate. One row per module and month (<see cref="PoolKey"/> is always "*"). The variance is posted as ONE company-level line without work order, WBS node or day when the pool passes the publication
+    /// gate (at least Production:PoolMinPeople people, nobody over Production:PoolMaxShare of the hours, the two largest over Production:PoolMaxTopTwoShare); a month that fails it is carried into the next, and at a
+    /// Persian quarter end the accumulated variance is posted as one line flagged protected. The row is read only by PAYROLL, FINANCEMANAGER and CEO (the other readers get the month, its state and the absorbed total).
+    /// </summary>
+    public class MfLabourPool
+    {
+        public int Id { get; set; }
+        public MfLabourModule Module { get; set; }
+
+        /// <summary>The Persian month as yyyymm.</summary>
+        public int Period { get; set; }
+
+        /// <summary>Always "*" (one pool per module and month). Kept as part of the unique index (Module, Period, PoolKey).</summary>
+        public string PoolKey { get; set; }
+
+        /// <summary>Distinct payroll-rated employees with hours in the pool (at least the gate's minimum unless the pool is protected).</summary>
+        public int People { get; set; }
+
+        public decimal Hours { get; set; }
+
+        /// <summary>The labour cost of the pool from payroll (the sum of the own hourly cost x hours of its people): the only payroll figure that leaves the payroll boundary.</summary>
+        public decimal Cost { get; set; }
+
+        /// <summary>What the days (production) or the closed orders (service) absorbed for the people of the pool at the standard rate.</summary>
+        public decimal Absorbed { get; set; }
+
+        /// <summary>Cost less absorbed: the one company-level line of the month.</summary>
+        public decimal Variance { get; set; }
+
+        /// <summary>Cost / hours, four decimals: the actual average hourly payroll cost of the pool, shown to the payroll readers only. Null for a protected pool.</summary>
+        public decimal? Rate { get; set; }
+
+        /// <summary>Posted by the quarter-end cap although the gate was not passed (flagged on the cost entry, the event line and the voucher line).</summary>
+        public bool Protected { get; set; }
+
+        /// <summary>Bookings (production) or orders (service) the month-end run took.</summary>
+        public int Items { get; set; }
+
+        public int? AccountingEventId { get; set; }
+        public AccountingEvent AccountingEvent { get; set; }
+
+        public DateTimeOffset PostedAt { get; set; }
+
+        /// <summary>0 = the nightly job.</summary>
+        public int PostedByUserId { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ scheduling (part B)

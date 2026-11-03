@@ -27,6 +27,27 @@ namespace Services.NasbNiro.Finance
         }
 
         /// <summary>The user who locked the period last (0 when unknown, for a period locked before the log existed).</summary>
+        /// <summary>
+        /// H1 (review R1t): the periods of a year that were NOT closed through the two-step period close - still open or only locked, or "closed" without a close row of somebody other than the last locker in the period log.
+        /// A year is closed only when this list is empty. Returns the period numbers.
+        /// </summary>
+        internal async Task<List<int>> PeriodsNotClosedProperlyAsync(FnFiscalYear year, CancellationToken ct)
+        {
+            var bad = new List<int>();
+            List<int> ids = year.Periods.Select(p => p.Id).ToList();
+            var logs = await _uow.Set<FnPeriodLog>().AsNoTracking().Where(l => ids.Contains(l.PeriodId) && (l.Action == "lock" || l.Action == "close")).OrderBy(l => l.Id)
+                .Select(l => new { l.PeriodId, l.Action, l.UserId }).ToListAsync(ct);
+            foreach (FnPeriod p in year.Periods.OrderBy(x => x.Number))
+            {
+                if (p.Status != FnPeriodStatus.Closed) { bad.Add(p.Number); continue; }
+                var mine = logs.Where(l => l.PeriodId == p.Id).ToList();
+                var close = mine.LastOrDefault(l => l.Action == "close");
+                var lockRow = close == null ? null : mine.LastOrDefault(l => l.Action == "lock" && mine.IndexOf(l) < mine.IndexOf(close));
+                if (close == null || lockRow == null || close.UserId == 0 || lockRow.UserId == 0 || close.UserId == lockRow.UserId) bad.Add(p.Number);
+            }
+            return bad;
+        }
+
         private async Task<int> LastLockerAsync(int periodId, CancellationToken ct) =>
             await _uow.Set<FnPeriodLog>().AsNoTracking().Where(l => l.PeriodId == periodId && l.Action == "lock").OrderByDescending(l => l.Id).Select(l => l.UserId).FirstOrDefaultAsync(ct);
 

@@ -52,6 +52,12 @@ namespace Entities.Model
             return this;
         }
 
+        /// <summary>
+        /// R1a2 (H3): the same uploader as <see cref="SetUploader"/> (one column, two names from two remediations). A file that no record refers to yet may be replaced
+        /// or edited only by this user or by the PMO; files uploaded before this column existed have no uploader (null), so only the PMO may change them.
+        /// </summary>
+        public Document SetUploadedBy(int? userId) => SetUploader(userId);
+
         public void SetMimeType(string mimType)
         {
             this.MimType = mimType;

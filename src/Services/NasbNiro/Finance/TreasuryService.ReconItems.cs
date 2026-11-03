@@ -29,7 +29,7 @@ namespace Services.NasbNiro.Finance
 
         private static string ReconKindTitle(int kind) => ReconKinds.TryGetValue(kind, out string title) ? title : "نامشخص";
 
-        private static ReconciliationItemDto ToItemDto(FnBankReconciliationItem i) => new ReconciliationItemDto { Kind = i.Kind, KindTitle = ReconKindTitle(i.Kind), Amount = i.Amount, Note = i.Note };
+        private static ReconciliationItemDto ToItemDto(FnBankReconciliationItem i) => new ReconciliationItemDto { Kind = i.Kind, KindTitle = ReconKindTitle(i.Kind), Amount = i.Amount, Note = i.Note, CorrectingVoucherId = i.CorrectingVoucherId };
 
         /// <summary>Replaces the saved reconciling items of a draft reconciliation. Returns the refusal text, or null (nothing is saved here).</summary>
         private async Task<string> SaveReconItemsAsync(FnBankReconciliation rec, List<ReconciliationItemDto> input, CancellationToken ct)
@@ -48,7 +48,13 @@ namespace Services.NasbNiro.Finance
                 string note = Clean(i.Note);
                 if (note == null) return $"قلم {row}: علت مغایرت را بنویسید.";
                 if (note.Length > 500) return $"قلم {row}: توضیح بیش از ۵۰۰ نویسه است.";
-                rows.Add(new FnBankReconciliationItem { ReconciliationId = rec.Id, Kind = i.Kind, Amount = amount, Note = note });
+                int? voucherId = i.CorrectingVoucherId;
+                if (voucherId.HasValue)
+                {
+                    if (i.Kind != 1 && i.Kind != 4) return $"قلم {row}: سند اصلاحی فقط برای کارمزد یا سود ثبت‌نشده و خطای دفاتر شرکت است.";
+                    if (!await _uow.Set<FnVoucher>().AnyAsync(v => v.Id == voucherId.Value, ct)) return $"قلم {row}: سند اصلاحی پیدا نشد.";
+                }
+                rows.Add(new FnBankReconciliationItem { ReconciliationId = rec.Id, Kind = i.Kind, Amount = amount, Note = note, CorrectingVoucherId = voucherId });
                 row++;
             }
             List<FnBankReconciliationItem> old = await _uow.Set<FnBankReconciliationItem>().Where(x => x.ReconciliationId == rec.Id).ToListAsync(ct);
@@ -63,6 +69,11 @@ namespace Services.NasbNiro.Finance
         private async Task<string> ReconDifferenceRefusalAsync(FnBankReconciliation rec, decimal difference, CancellationToken ct)
         {
             decimal explained = await _uow.Set<FnBankReconciliationItem>().Where(x => x.ReconciliationId == rec.Id).SumAsync(x => (decimal?)x.Amount, ct) ?? 0;
+            // M8 (review R1t): an unbooked bank fee or interest (1) and an error in our books (4) are not left as a permanent plug: the voucher that books the correction must be linked and final
+            var needVoucher = await _uow.Set<FnBankReconciliationItem>().AsNoTracking().Where(x => x.ReconciliationId == rec.Id && (x.Kind == 1 || x.Kind == 4)).Select(x => x.CorrectingVoucherId).ToListAsync(ct);
+            if (needVoucher.Any(v => !v.HasValue)) return "برای قلم‌های «کارمزد یا سود ثبت‌نشده» و «خطا در دفاتر شرکت» سند اصلاحی را وصل کنید؛ بدون آن مغایرت‌گیری تایید نمی‌شود.";
+            List<int> linked = needVoucher.Where(v => v.HasValue).Select(v => v.Value).ToList();
+            if (linked.Count > 0 && await _uow.Set<FnVoucher>().CountAsync(v => linked.Contains(v.Id) && v.Status == FnVoucherStatus.Final, ct) < linked.Distinct().Count()) return "سند اصلاحی وصل‌شده هنوز قطعی نشده است؛ ابتدا سند را قطعی کنید.";
             if (difference == explained)
             {
                 if (difference != 0 && rec.ItemsByUserId.HasValue && rec.ItemsByUserId.Value == Me) return "کسی که اقلام مغایرت را وارد کرده نمی‌تواند همان مغایرت‌گیری را تایید کند.";

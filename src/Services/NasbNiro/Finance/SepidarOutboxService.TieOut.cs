@@ -48,7 +48,7 @@ namespace Services.NasbNiro.Finance
             IQueryable<FnVoucherLine> q = _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.AccountId == accountId && l.Voucher.Status != FnVoucherStatus.Draft
                 && l.Voucher.Type != FnVoucherType.Closing && l.Voucher.Type != FnVoucherType.Opening && l.Voucher.Type != FnVoucherType.YearEndTemporaryClose
                 && l.Voucher.Date >= from && l.Voucher.Date <= to && l.Voucher.FiscalYear.LegalEntityId == FinanceSeed.MainEntityId);
-            return VoucherLineVisibility.Visible(q, VoucherLineVisibility.Sees(_user));
+            return FnLabourMask.Visible(q, FnLabourMask.Sees(_user));
         }
 
         private static async Task<decimal> NetAsync(IQueryable<FnVoucherLine> lines, bool debitNormal, CancellationToken ct)

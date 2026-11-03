@@ -61,6 +61,8 @@ namespace Services.NasbNiro.Finance
             if (petty.HolderUserId != Me && !_user.IsInRole(FinanceRoles.TreasuryAndAccountants)) return Bad<SettlementDto>(NotAllowed);
             await FinanceSeed.EnsureAsync(_uow, ct);
             DateTime date = dto.Date == default ? DateTime.Today : dto.Date.Date;
+            string closedDate = await ClosedPeriodGuard.MessageAsync(_uow, date, ct);   // M7
+            if (closedDate != null) return Bad<SettlementDto>(closedDate);
             List<SettlementLineDto> input = (dto.Lines ?? new List<SettlementLineDto>()).Where(l => l != null).ToList();
             if (input.Count == 0) return Bad<SettlementDto>("تسویه حداقل یک ردیف هزینه لازم دارد.");
 

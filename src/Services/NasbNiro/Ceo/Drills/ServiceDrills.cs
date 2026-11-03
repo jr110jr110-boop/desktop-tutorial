@@ -166,7 +166,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition WarrantyCostByMonth() => new DrillDefinition
         {
             Key = "sv.warranty_cost_by_month", Module = M, Title = "هزینه‌ی گارانتی به تفکیک ماه",
-            Description = "تعداد و هزینه‌ی (دستمزد + قطعات) دستورهای خدمات گارانتی بسته‌شده در هر ماه شمسی. هزینه‌ی ماهی که دستمزدش به کمتر از سه نفر برمی‌گردد برای نقشی که حقوق را نمی‌بیند (و برای هر کار هوش مصنوعی) پنهان است و فقط هزینه‌ی قطعات می‌آید. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ جمع «از ابتدای سال» هم‌پایه با داشبورد خدمات است.",
+            Description = "تعداد و هزینه‌ی (دستمزد + قطعات) دستورهای خدمات گارانتی بسته‌شده در هر ماه شمسی. دستمزد دستورهای تازه با نرخ استاندارد جذب می‌شود و شخصی نیست؛ فقط ماهی که دستوری قدیمی (پیش از نرخ استاندارد) با دستمزد کمتر از سه نفر دارد برای نقشی که حقوق را نمی‌بیند پنهان است و فقط هزینه‌ی قطعات می‌آید. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ جمع «از ابتدای سال» هم‌پایه با داشبورد خدمات است.",
             Link = "/service/dashboard", RecordType = "WarrantyMonth", RecordLabel = "ماه",
             Parameters = Prm.Last12Months(" بسته‌شدن دستور"),
             Columns = new[] { Col.Text("month", "ماه"), Col.Num("orders", "دستور گارانتی"), Col.Rial("partsAmount", "هزینه‌ی قطعات"), Col.Rial("totalCost", "هزینه‌ی کل"), Col.Status("visibility", "نمایش") },
@@ -179,11 +179,12 @@ namespace Services.NasbNiro.Ceo.Drills
                 DateTimeOffset readFrom = Offset(from < yearStart ? from : yearStart), readTo = Offset(to.AddDays(1));
                 var closed = await c.Get<IUnitOfWork>().Set<SvServiceOrder>().AsNoTracking()
                     .Where(o => !o.Deleted && o.Status == SvOrderStatus.Closed && o.Decision == SvWarrantyDecision.Warranty && o.ClosedAt >= readFrom && o.ClosedAt < readTo)
-                    .Select(o => new { o.ClosedAt, o.LabourAmount, o.PartsAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
+                    .Select(o => new { o.ClosedAt, o.LabourAmount, o.PartsAmount, o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
                 var orders = closed.Where(o => o.ClosedAt.HasValue).Select(o => new
                 {
                     Day = o.ClosedAt.Value.LocalDateTime, o.LabourAmount, o.PartsAmount,
-                    Protected = SvPrivacy.LabourProtected(o.LabourEmployeeCount, o.LabourPayrollEmployeeCount),
+                    // R1p: only an order closed under the old personal-rate rule can be protected; new orders are absorbed at a standard rate
+                    Protected = SvLegacyLabour.IsProtected(o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount),
                 }).ToList();
                 var window = orders.Where(o => o.Day.Date >= from && o.Day.Date <= to).ToList();
                 var rows = new List<Row>();
@@ -207,7 +208,7 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["ytdOrders"] = year.Count, ["ytdCost"] = yearHidden ? (decimal?)null : year.Sum(o => o.LabourAmount + o.PartsAmount),
                 };
                 DrillResult result = DrillResult.Slice(rows, c, anyHidden || yearHidden
-                    ? "هزینه‌ی ماه‌هایی که دستمزدشان به کمتر از سه نفر برمی‌گردد برای نقش شما محرمانه است (حقوق)؛ هزینه‌ی قطعات نمایش داده می‌شود."
+                    ? "هزینه‌ی ماه‌هایی که دستوری قدیمی با دستمزد کمتر از سه نفر دارند برای نقش شما محرمانه است (حقوق)؛ هزینه‌ی قطعات نمایش داده می‌شود."
                     : "هزینه = دستمزد + قطعات دستورهای گارانتی بسته‌شده؛ «از ابتدای سال» از اول فروردین سال شمسی است.", totals);
                 result.Hidden = anyHidden || yearHidden;
                 return result;
@@ -261,7 +262,7 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition SurveyByMonth() => new DrillDefinition
         {
             Key = "sv.survey_by_month", Module = M, Title = "رضایت مشتریان به تفکیک ماه",
-            Description = "تعداد نظرسنجی‌های پاسخ‌داده‌شده و میانگین امتیاز (۱ تا ۵) هر ماه شمسی (بر پایه‌ی تاریخ پاسخ)، به تفکیک نظرسنجی تحویل و خدمات و تعداد امتیازهای زیر ۳. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ میانگین شاخص داشبورد روی کل سابقه است و جدا در جمع‌ها می‌آید.",
+            Description = "تعداد نظرسنجی‌های پاسخ‌داده‌شده و تأییدشده و میانگین امتیاز (۱ تا ۵) هر ماه شمسی (بر پایه‌ی تاریخ پاسخ)، به تفکیک نظرسنجی تحویل و خدمات و تعداد امتیازهای زیر ۳؛ پاسخ‌های تأییدنشده فقط شمرده می‌شوند. بازه‌ی پیش‌فرض: ۱۲ ماه شمسی اخیر؛ میانگین شاخص داشبورد روی کل سابقه است و جدا در جمع‌ها می‌آید.",
             Link = "/service/surveys", RecordType = "SurveyMonth", RecordLabel = "ماه",
             Parameters = Prm.Last12Months(" پاسخ"),
             Columns = new[]
@@ -274,9 +275,10 @@ namespace Services.NasbNiro.Ceo.Drills
                 Guard.Require(c, SvRoles.Readers);
                 DateTime from = c.Args.Date("from").Date, to = c.Args.Date("to").Date;
                 var uow = c.Get<IUnitOfWork>();
-                // the date filter is in the query; the average of the whole history (the figure of the dashboard) is the sum and the count of all answered surveys
-                IQueryable<SlSurvey> answeredAll = uow.Set<SlSurvey>().AsNoTracking().Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.AverageScore != null);
+                // the date filter is in the query; the average of the whole history (the figure of the dashboard) is the sum and the count of the VERIFIED answered surveys (R1p D25)
+                IQueryable<SlSurvey> answeredAll = SvSurveyMath.VerifiedAnswers(uow.Set<SlSurvey>().AsNoTracking());
                 int answeredCount = await answeredAll.CountAsync(ct);
+                int unverifiedCount = await SvSurveyMath.UnverifiedAnswers(uow.Set<SlSurvey>().AsNoTracking()).CountAsync(ct);
                 decimal answeredSum = await answeredAll.SumAsync(s => (decimal?)s.AverageScore, ct) ?? 0m;
                 DateTimeOffset fromAt = new DateTimeOffset(from), endAt = new DateTimeOffset(to.AddDays(1));
                 int drafted = await uow.Set<SlSurvey>().AsNoTracking().CountAsync(s => !s.Deleted && s.Status == SlSurveyStatus.Drafted, ct);
@@ -297,10 +299,10 @@ namespace Services.NasbNiro.Ceo.Drills
                         ["lowScores"] = inMonth.Count(s => s.Score < 3m),
                     });
                 }
-                return DrillResult.Slice(rows, c, "امتیاز هر نظرسنجی میانگین پاسخ‌های ۱ تا ۵ مشتری است؛ ماه بدون پاسخ میانگین ندارد.", new Dictionary<string, object>
+                return DrillResult.Slice(rows, c, "امتیاز هر نظرسنجی میانگین پاسخ‌های ۱ تا ۵ مشتری است؛ فقط نظرسنجی‌های تأییدشده شمرده می‌شوند (پاسخ‌های تأییدنشده در جمع‌ها جدا می‌آیند)؛ ماه بدون پاسخ تأییدشده میانگین ندارد.", new Dictionary<string, object>
                 {
                     ["answered"] = inWindow.Count, ["averageScore"] = inWindow.Count == 0 ? (decimal?)null : Round(inWindow.Average(s => s.Score)), ["lowScores"] = inWindow.Count(s => s.Score < 3m),
-                    ["averageAll"] = answeredCount == 0 ? (decimal?)null : Round(answeredSum / answeredCount), ["answeredAll"] = answeredCount, ["drafted"] = drafted, ["sent"] = sent,
+                    ["averageAll"] = answeredCount == 0 ? (decimal?)null : Round(answeredSum / answeredCount), ["answeredAll"] = answeredCount, ["unverified"] = unverifiedCount, ["drafted"] = drafted, ["sent"] = sent,
                 });
             },
         };

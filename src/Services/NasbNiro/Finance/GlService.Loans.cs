@@ -159,6 +159,8 @@ namespace Services.NasbNiro.Finance
         private async Task<FnAccount> LoanAccountAsync(FnLoan l, CancellationToken ct) =>
             await AccountByCodeAsync(l.FacilityType == FnFacilityType.Overdraft || l.InstallmentCount <= 12 ? "30501" : "40101", ct);
 
+        private const string ForeignLoanRefusal = "دریافت وجه و پرداخت قسط تسهیلات ارزی هنوز از مسیر خزانه انجام نمی‌شود و در این نسخه پذیرفته نمی‌شود؛ این تسهیلات را با حساب بانکی ریالی ثبت کنید.";
+
         public async Task<ResponseDto<FnLoanDto>> LoanActionAsync(FnLoanActionDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.TreasuryAndAccountants)) return Bad<FnLoanDto>(NotAllowed);
@@ -199,24 +201,8 @@ namespace Services.NasbNiro.Finance
                 await _uow.SaveChangesAsync(ct);
                 return ResponseDtoHelper.Ok(await LoanDtoAsync(l, ct));
             }
-            // a foreign-currency loan (only possible while Finance:ForeignCurrency is on, which is off in this release) keeps the direct voucher path: its currency legs are not routed through treasury yet
-            if (!dto.Rate.HasValue || dto.Rate.Value <= 0) return Bad<FnLoanDto>($"تسهیلات ارزی ({l.CurrencyCode}) است؛ نرخ تبدیل به ریال در تاریخ دریافت را وارد کنید.");
-            decimal rate = dto.Rate.Value;
-            liability.CurrencyAllowed = true; liability.IsMonetaryForeign = true;
-            FnDetailAccount loanDetail = await LoanDetailAsync(l, ct);
-            decimal baseAmount = R(l.Amount * rate), baseFee = R(l.FeeAmount * rate);
-            var lines = new List<AutoLine>
-            {
-                new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Debit = baseAmount - baseFee, Description = text },
-                new AutoLine { Account = liability, Detail1 = loanDetail, Credit = baseAmount, Description = text, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.Amount, Rate = rate },
-            };
-            if (baseFee > 0) lines.Add(new AutoLine { Account = feeAccount, Debit = baseFee, Description = "کارمزد " + text });
-            var v = await AddAutoVoucherAsync(l.LegalEntityId, date, text, "Loan", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
-            if (v.Error != null) return Bad<FnLoanDto>(v.Error);
-            await _uow.SaveChangesAsync(ct);
-            l.Status = FnLoanStatus.Active; l.BankAccountId = bank.Bank.Id; l.DisbursementVoucherId = v.Voucher.Id; l.DisbursedDate = date;
-            await _uow.SaveChangesAsync(ct);
-            return ResponseDtoHelper.Ok(await LoanDtoAsync(l, ct));
+            // M5 (review R1t): a foreign-currency loan no longer has a direct voucher path (it skipped treasury); until its currency legs are routed through treasury it is refused
+            return Bad<FnLoanDto>(ForeignLoanRefusal);
         }
 
         public async Task<ResponseDto<FnLoanDto>> PayInstallmentAsync(FnLoanPayDto dto, CancellationToken ct)
@@ -247,7 +233,7 @@ namespace Services.NasbNiro.Finance
                 // user other than the person who recorded it settles it, which books the instalment (principal, interest, penalty) and moves the bank balance.
                 string legError = await AddCashLegAsync(new LegSpec
                 {
-                    SourceType = CashLegSources.Loan, SourceId = l.Id, Action = "installment", Inflow = false, BankAccountId = bank.Bank.Id, Amount = inst.Principal + inst.Interest + penalty, Date = date, Party = l.BankName,
+                    SourceType = CashLegSources.Loan, SourceId = l.Id, Action = "installment", Inflow = false, BankAccountId = bank.Bank.Id, Amount = R(inst.Principal + inst.Interest + penalty), Date = date, Party = l.BankName,
                     Description = text, Data = new LegData { Sequence = inst.Sequence, Penalty = penalty },
                 }, ct);
                 if (legError != null) return Bad<FnLoanDto>(legError);
@@ -255,36 +241,7 @@ namespace Services.NasbNiro.Finance
                 await _uow.SaveChangesAsync(ct);
                 return ResponseDtoHelper.Ok(await LoanDtoAsync(l, ct));
             }
-            // a foreign-currency loan (only possible while Finance:ForeignCurrency is on, which is off in this release) keeps the direct voucher path: its currency legs are not routed through treasury yet
-            // foreign-currency loan: everything is converted at the payment rate; the liability leaves the books at its carrying rate and the difference is the realised FX gain or loss
-            if (!dto.Rate.HasValue || dto.Rate.Value <= 0) return Bad<FnLoanDto>($"تسهیلات ارزی ({l.CurrencyCode}) است؛ نرخ تبدیل به ریال در تاریخ پرداخت را وارد کنید.");
-            decimal payRate = dto.Rate.Value;
-            FnDetailAccount loanDetail = await LoanDetailAsync(l, ct);
-            var carry = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(x => x.AccountId == liability.Id && x.Detail1.Code == loanDetail.Code && x.Voucher.Status != FnVoucherStatus.Draft)
-                .GroupBy(x => 1).Select(g => new { Base = g.Sum(x => x.Credit - x.Debit), Cur = g.Sum(x => x.CurrencyAmount == null ? 0 : (x.Credit > 0 ? x.CurrencyAmount.Value : -x.CurrencyAmount.Value)) }).FirstOrDefaultAsync(ct);
-            decimal principalBase = R(inst.Principal * payRate), interestBase = R(inst.Interest * payRate), penaltyBase = R(penalty * payRate);
-            decimal carryBase = carry != null && carry.Cur > 0 ? R(carry.Base * inst.Principal / carry.Cur) : principalBase;
-            decimal fxDiff = principalBase - carryBase;   // positive: more rials paid than carried = loss
-            FnAccount fxGain = await RoleAccountAsync(AccountRoles.FxGain, "60303", ct), fxLoss = await RoleAccountAsync(AccountRoles.FxLoss, "80302", ct);
-            if (fxGain == null || fxLoss == null) return Bad<FnLoanDto>("حساب سود و زیان تسعیر ارز در کدینگ نیست.");
-            var lines = new List<AutoLine> { new AutoLine { Account = liability, Detail1 = loanDetail, Debit = carryBase, Description = text, CurrencyCode = l.CurrencyCode, CurrencyAmount = inst.Principal, Rate = inst.Principal == 0 ? payRate : R(carryBase / inst.Principal) } };
-            lines.Add(new AutoLine { Account = expense, Debit = interestBase, Description = "سود " + text });
-            if (penaltyBase > 0) lines.Add(new AutoLine { Account = penaltyAccount, Debit = penaltyBase, Description = "جریمه " + text });
-            if (fxDiff > 0) lines.Add(new AutoLine { Account = fxLoss, Debit = fxDiff, Description = "زیان تسعیر در تسویه " + text });
-            else if (fxDiff < 0) lines.Add(new AutoLine { Account = fxGain, Credit = -fxDiff, Description = "سود تسعیر در تسویه " + text });
-            lines.Add(new AutoLine { Account = bank.Account, Detail1 = bank.Detail, Credit = principalBase + interestBase + penaltyBase, Description = text });
-            decimal expenseNeeded = inst.Interest;
-            // a pending (not yet approved) accrual for interest that this payment expenses now would be expensed twice: it is superseded
-            if (expenseNeeded > 0)
-                foreach (FnLoanAccrual pend in await _uow.Set<FnLoanAccrual>().Where(a => a.LoanId == l.Id && a.Status == 0).ToListAsync(ct)) pend.Status = 2;
-            var v = await AddAutoVoucherAsync(l.LegalEntityId, date, text, "Loan", l.Number, lines, FnVoucherType.Auto, null, ct, FnVoucherStatus.Checked, true);
-            if (v.Error != null) return Bad<FnLoanDto>(v.Error);
-            await _uow.SaveChangesAsync(ct);
-            inst.Status = 1; inst.PaidDate = date; inst.PenaltyPaid = penalty; inst.VoucherId = v.Voucher.Id;
-            l.InterestExpensed += expenseNeeded; l.InterestPaid += inst.Interest; l.PrincipalPaid += inst.Principal;
-            if (!await _uow.Set<FnLoanInstallment>().AnyAsync(i => i.LoanId == l.Id && i.Status != 1 && i.Id != inst.Id, ct)) l.Status = FnLoanStatus.Closed;
-            await _uow.SaveChangesAsync(ct);
-            return ResponseDtoHelper.Ok(await LoanDtoAsync(l, ct));
+            return Bad<FnLoanDto>(ForeignLoanRefusal);   // M5 (review R1t)
         }
 
         /// <summary>Interest accrued up to a day: every instalment interval contributes in proportion to the days elapsed (inclusive of the day).</summary>

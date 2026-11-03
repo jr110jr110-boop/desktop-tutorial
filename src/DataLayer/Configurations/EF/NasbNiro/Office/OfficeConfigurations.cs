@@ -218,6 +218,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
             builder.Entity<OfShiftAssignment>(b =>
             {
                 b.ToTable("OfShiftAssignments");
+                b.Property(x => x.Reason).HasMaxLength(Text);
                 b.HasIndex(x => new { x.EmployeeId, x.FromDate });
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<OfShift>().WithMany().HasForeignKey(x => x.ShiftId).OnDelete(DeleteBehavior.Restrict);
@@ -230,14 +231,40 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
                 b.Property(x => x.Title).HasMaxLength(Title);
                 b.Property(x => x.Location).HasMaxLength(Name);
                 b.Property(x => x.ApiKeyHash).HasMaxLength(Name).IsRequired();
+                b.Property(x => x.AllowedAddresses).HasMaxLength(200);
+            });
+            builder.Entity<OfDevicePushLog>(b =>
+            {
+                b.ToTable("OfDevicePushLogs");
+                b.Property(x => x.DeviceCode).HasMaxLength(Code);
+                b.Property(x => x.PayloadHash).HasMaxLength(64);
+                b.Property(x => x.Outcome).HasMaxLength(30);
+                b.HasIndex(x => new { x.DeviceId, x.ReceivedAt });
+                // the rejected-push path counts the recent rejected rows on an anonymous endpoint, and the retention job deletes by date: both read (Outcome, ReceivedAt)
+                b.HasIndex(x => new { x.Outcome, x.ReceivedAt });
+                b.HasOne<OfDevice>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<OfClockImportBatch>(b =>
+            {
+                b.ToTable("OfClockImportBatches");
+                b.Property(x => x.Source).HasMaxLength(20);
+                b.Property(x => x.DeviceCode).HasMaxLength(Code);
+                b.Property(x => x.PayloadHash).HasMaxLength(64);
+                b.Property(x => x.Reason).HasMaxLength(Text);
+                b.Property(x => x.DecisionNote).HasMaxLength(Text);
+                b.HasIndex(x => x.Status);
             });
             builder.Entity<OfClockEvent>(b =>
             {
                 b.ToTable("OfClockEvents");
                 b.Property(x => x.DeviceCode).HasMaxLength(Code);
                 b.Property(x => x.Reason).HasMaxLength(Text);
+                b.Property(x => x.RejectReason).HasMaxLength(Text);
                 b.HasIndex(x => new { x.EmployeeId, x.Timestamp });
+                b.HasIndex(x => x.Approval);
+                b.HasIndex(x => x.ImportBatchId);
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.ImportBatch).WithMany().HasForeignKey(x => x.ImportBatchId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<OfAttendancePolicy>(b =>
             {
@@ -265,6 +292,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Office
             builder.Entity<OfAttendanceMonth>(b =>
             {
                 b.ToTable("OfAttendanceMonths");
+                b.Property(x => x.RejectReason).HasMaxLength(Text);
+                b.Property(x => x.SnapshotJson).HasColumnType("nvarchar(max)");
+                b.Property(x => x.SnapshotHash).HasMaxLength(64);
+                b.Property(x => x.PolicyJson).HasColumnType("nvarchar(max)");
                 b.HasIndex(x => new { x.Year, x.Month }).IsUnique();
             });
             builder.Entity<OfLeaveRequest>(b =>

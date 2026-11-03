@@ -24,7 +24,19 @@ namespace WebApi.Extensions
         /// <summary>403: the user is signed in, but none of his roles is listed by the action. Contains «مجوز» like the refusals of the services.</summary>
         public const string NotPermitted = "شما مجوز دسترسی به این عملیات را ندارید.";
 
+        /// <summary>429: the rate limit of the sign-in calls (R1a2, M1) was passed; the same JSON as every other refusal.</summary>
+        public const string TooManyRequests = "تعداد درخواست‌ها از حد مجاز بیشتر است؛ کمی بعد دوباره تلاش کنید.";
+
         private static readonly JsonSerializerSettings Settings = ApiJson.Create();
+
+        /// <summary>The answer of the rate limiter (HTTP 429) with the JSON body and, when the limiter knows it, the Retry-After header.</summary>
+        public static Task WriteTooManyRequestsAsync(HttpResponse response, System.TimeSpan? retryAfter)
+        {
+            if (response.HasStarted) return Task.CompletedTask;
+            if (retryAfter.HasValue) response.Headers[HeaderNames.RetryAfter] = ((int)System.Math.Ceiling(retryAfter.Value.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ResponseDto<object> body = new ResponseDto<object>(false, TooManyRequests, null).HasHttpStatusCode((System.Net.HttpStatusCode)429);
+            return WriteAsync(response, body);
+        }
 
         public static Task OnChallengeAsync(JwtBearerChallengeContext context)
         {

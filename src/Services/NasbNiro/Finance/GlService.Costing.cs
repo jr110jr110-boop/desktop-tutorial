@@ -283,7 +283,20 @@ namespace Services.NasbNiro.Finance
 
         // ------------------------------------------------------------------------------------------ work-order cost sheet and close-out
 
-        private async Task<FnWorkOrderCostDto> BuildCostAsync(WorkOrder wo, CancellationToken ct)
+        /// <summary>The cost sheet figures of a work order as the books hold them. The reader-facing sheet (<see cref="CostSheetAsync"/>) masks them; the close-out and the planned-versus-actual report read them whole.</summary>
+        internal sealed class WoCostNumbers
+        {
+            public int WorkOrderId;
+            public string Code;
+            public int Quantity;
+            public decimal Material, Labour, Overhead, Subcontract, TotalCost, UnitCost, WipBalance, LabourInLedger, TransferredOut;
+            public bool IsClosed;
+
+            /// <summary>R1p D1: a labour entry of the work order is a protected amount (a row of the earlier release, when labour was costed at the person's own rate and fewer than three payroll-rated employees were behind it). New rows never carry the flag.</summary>
+            public bool LabourProtected;
+        }
+
+        private async Task<WoCostNumbers> BuildCostAsync(WorkOrder wo, CancellationToken ct)
         {
             var kinds = await _uow.Set<CostEntry>().AsNoTracking().Where(c => c.WorkOrderId == wo.Id).GroupBy(c => c.Kind).Select(g => new { Kind = g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync(ct);
             decimal K(params CostKind[] k) => kinds.Where(x => k.Contains(x.Kind)).Sum(x => x.Amount);
@@ -299,10 +312,11 @@ namespace Services.NasbNiro.Finance
                 .SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             decimal labourLedger = await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.WorkOrderId == wo.Id && l.Account.Code == "70102" && l.Voucher.Status != FnVoucherStatus.Draft).SumAsync(l => (decimal?)(l.Debit - l.Credit), ct) ?? 0;
             bool closed = await _uow.Set<FnWorkOrderClose>().AnyAsync(c => c.WorkOrderId == wo.Id && c.IsOpen == false, ct);
-            var dto = new FnWorkOrderCostDto
+            bool labourProtected = await _uow.Set<CostEntry>().AsNoTracking().AnyAsync(c => c.WorkOrderId == wo.Id && c.Kind == CostKind.Labour && c.LabourProtected, ct);
+            var dto = new WoCostNumbers
             {
                 WorkOrderId = wo.Id, Code = wo.Code, Quantity = wo.Count, Material = K(CostKind.Material), Labour = K(CostKind.Labour), Overhead = K(CostKind.Overhead), Subcontract = K(CostKind.Subcontract, CostKind.PurchasedService),
-                WipBalance = (wipLines?.Debit ?? 0) - (wipLines?.Credit ?? 0), TransferredOut = transferred, LabourInLedger = labourLedger, IsClosed = closed,
+                WipBalance = (wipLines?.Debit ?? 0) - (wipLines?.Credit ?? 0), TransferredOut = transferred, LabourInLedger = labourLedger, IsClosed = closed, LabourProtected = labourProtected,
             };
             dto.TotalCost = dto.Material + dto.Labour + dto.Overhead + dto.Subcontract;
             dto.UnitCost = dto.Quantity > 0 ? R(dto.TotalCost / dto.Quantity) : dto.TotalCost;
@@ -313,7 +327,17 @@ namespace Services.NasbNiro.Finance
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<FnWorkOrderCostDto>(NotAllowed);
             WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == workOrderId, ct);
-            return wo == null ? ResponseDtoHelper.NotFound<FnWorkOrderCostDto>("دستور کار پیدا نشد.") : ResponseDtoHelper.Ok(await BuildCostAsync(wo, ct));
+            if (wo == null) return ResponseDtoHelper.NotFound<FnWorkOrderCostDto>("دستور کار پیدا نشد.");
+            WoCostNumbers n = await BuildCostAsync(wo, ct);
+            // R1p D1: since labour is absorbed at the standard rate a work order never carries one person's pay; only a row of the earlier release keeps the flag, and its labour is then shown to PAYROLL, FINANCEMANAGER and CEO only.
+            // What has left WIP is hidden with it: total cost = WIP balance + what was transferred, so one visible figure next to the other would give the hidden labour back (R1p C1/H3)
+            bool hide = n.LabourProtected && !Production.MfPrivacy.SeesPayroll(_user);
+            return ResponseDtoHelper.Ok(new FnWorkOrderCostDto
+            {
+                WorkOrderId = n.WorkOrderId, Code = n.Code, Quantity = n.Quantity, Material = n.Material, Overhead = n.Overhead, Subcontract = n.Subcontract, IsClosed = n.IsClosed,
+                LabourHidden = hide, Labour = hide ? (decimal?)null : n.Labour, TotalCost = hide ? (decimal?)null : n.TotalCost, UnitCost = hide ? (decimal?)null : n.UnitCost,
+                WipBalance = hide ? (decimal?)null : n.WipBalance, LabourInLedger = hide ? (decimal?)null : n.LabourInLedger, TransferredOut = hide ? (decimal?)null : n.TransferredOut,
+            });
         }
 
         private static FnWorkOrderCloseDto ToDto(FnWorkOrderClose c) => new FnWorkOrderCloseDto
@@ -332,7 +356,7 @@ namespace Services.NasbNiro.Finance
                 return Bad<FnWorkOrderCloseDto>("قرارداد این دستور کار به روش درصد پیشرفت شناسایی می‌شود؛ بهای آن با اجرای شناسایی درآمد به بهای تمام‌شده منتقل می‌شود و دستور کار به محصول ساخته‌شده بسته نمی‌شود."); 
             if (await _uow.Set<FnWorkOrderClose>().AnyAsync(c => c.WorkOrderId == workOrderId && !c.IsOpen, ct)) return Bad<FnWorkOrderCloseDto>("این دستور کار قبلاً بسته شده است؛ برای تغییر باید توسط مدیر مالی بازگشایی شود.");
             await FinanceSeed.EnsureAsync(_uow, ct);
-            FnWorkOrderCostDto cost = await BuildCostAsync(wo, ct);
+            WoCostNumbers cost = await BuildCostAsync(wo, ct);
             int quantity = request?.Quantity ?? wo.Count;
             if (quantity <= 0) return Bad<FnWorkOrderCloseDto>("تعداد تحویلی باید بیشتر از صفر باشد.");
             DateTime date = (request?.Date ?? DateTime.Today).Date;

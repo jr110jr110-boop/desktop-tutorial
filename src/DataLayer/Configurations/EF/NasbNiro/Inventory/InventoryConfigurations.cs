@@ -108,7 +108,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Property(x => x.BaseCode).HasMaxLength(InventoryColumns.Code);
             builder.Property(x => x.MescCode).HasMaxLength(InventoryColumns.Code);
             builder.Property(x => x.LegacyCode).HasMaxLength(100);
-            builder.Property(x => x.RequiresIncomingInspection).HasDefaultValue(true);
+            // the sentinel is the default itself: without it EF omits a false from the INSERT and the database default (true) is stored, so an item could never be created with "no incoming inspection"
+            builder.Property(x => x.RequiresIncomingInspection).HasDefaultValue(true).HasSentinel(true);
             builder.HasIndex(x => x.Code).IsUnique().HasFilter(InventoryColumns.NotDeleted);
             builder.HasIndex(x => x.Title);
             builder.HasIndex(x => x.BaseCode);

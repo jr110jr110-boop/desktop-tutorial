@@ -54,12 +54,13 @@ namespace Services.NasbNiro.Ceo
             DateTimeOffset from = new DateTimeOffset(ctx.From);
             var warranty = await _uow.Set<SvServiceOrder>().AsNoTracking()
                 .Where(o => !o.Deleted && o.Status == SvOrderStatus.Closed && o.Decision == SvWarrantyDecision.Warranty && o.ClosedAt != null && o.ClosedAt >= from)
-                .Select(o => new { o.ClosedAt, o.LabourAmount, o.PartsAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
+                .Select(o => new { o.ClosedAt, o.LabourAmount, o.PartsAmount, o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
             const string costTitle = "هزینه‌ی گارانتی به تفکیک ماه";
-            if (!ctx.SeesPayroll && warranty.Any(o => SvPrivacy.LabourProtected(o.LabourEmployeeCount, o.LabourPayrollEmployeeCount)))
+            // R1p: the labour of a new order is absorbed at a standard rate (never one person's pay); only orders closed under the old personal-rate rule (SvLegacyLabour) can still hide the chart
+            if (!ctx.SeesPayroll && warranty.Any(o => SvLegacyLabour.IsProtected(o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount)))
             {
                 section.Charts.Add(HiddenChart("warrantyCostByMonth", costTitle, CeoKind.StackedBar, CeoUnit.Rial, CeoLinks.ServiceOrders, CeoDrillRef.SvWarrantyCostByMonth,
-                    "هزینه‌ی نیروی کار برخی سفارش‌ها حقوق یک یا دو نفر است و فقط برای مدیرعامل، مدیر مالی و حقوق و دستمزد نمایش داده می‌شود."));
+                    "هزینه‌ی نیروی کار برخی سفارش‌های قدیمی (پیش از نرخ استاندارد) حقوق یک یا دو نفر است و فقط برای مدیرعامل، مدیر مالی و حقوق و دستمزد نمایش داده می‌شود."));
             }
             else
             {
@@ -69,10 +70,11 @@ namespace Services.NasbNiro.Ceo
                     Series("نیروی کار", CeoTrends.SumByMonth(ctx.Window, warranty.Select(o => (o.ClosedAt.Value.LocalDateTime.Date, o.LabourAmount))), CeoRole.Secondary)), ctx.LatestMonth()));
             }
 
-            // chart 3: the average score of the surveys answered in each month (months without an answer are left out)
-            var surveys = await _uow.Set<SlSurvey>().AsNoTracking()
-                .Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.AverageScore != null && s.AnsweredAt != null && s.AnsweredAt >= from)
+            // chart 3: the average score of the VERIFIED surveys answered in each month (R1p D25: the same answers as the KPI; months without a verified answer are left out)
+            var surveys = await SvSurveyMath.VerifiedAnswers(_uow.Set<SlSurvey>().AsNoTracking())
+                .Where(s => s.AnsweredAt >= from)
                 .Select(s => new { s.AnsweredAt, Score = s.AverageScore.Value }).ToListAsync(ct);
+            int unverified = await SvSurveyMath.UnverifiedAnswers(_uow.Set<SlSurvey>().AsNoTracking()).Where(s => s.AnsweredAt >= from).CountAsync(ct);
             var months = new List<string>();
             var averages = new List<decimal>();
             for (int i = 0; i < ctx.Window.Count; i++)
@@ -83,7 +85,7 @@ namespace Services.NasbNiro.Ceo
                 averages.Add(Math.Round(scores.Average(), 2, MidpointRounding.AwayFromZero));
             }
             section.Charts.Add(WithDrillParams(Chart("surveyScoreByMonth", "میانگین رضایت مشتریان به تفکیک ماه", CeoKind.Line, CeoUnit.Count, months, CeoLinks.ServiceSurveys, CeoDrillRef.SvSurveyByMonth,
-                "میانگین امتیاز از پنج بر پایه‌ی ماه پاسخ؛ ماه‌های بدون پاسخ نمایش داده نمی‌شوند.",
+                "میانگین امتیاز نظرسنجی‌های تأییدشده از پنج بر پایه‌ی ماه پاسخ؛ ماه‌های بدون پاسخ تأییدشده نمایش داده نمی‌شوند" + (unverified > 0 ? "؛ " + CeoText.Number(unverified) + " پاسخ هنوز تأیید نشده است." : "."),
                 Series("میانگین امتیاز", averages)), ctx.LatestMonth()));
             return section;
         }

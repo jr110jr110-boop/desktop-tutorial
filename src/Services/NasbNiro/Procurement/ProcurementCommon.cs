@@ -22,6 +22,8 @@ namespace Services.NasbNiro.Procurement
         /// <summary>Approves and releases purchase orders and payment requests (PMO deputy).</summary>
         public const string OrderApproval = "PMO,CEO";
         public const string Finance = "FINANCIAL,FINANCEMANAGER,TREASURY,PMO";
+        /// <summary>R1a2 (C1): cancels a supplier invoice that is not approved yet (never the person who registered it).</summary>
+        public const string InvoiceCancel = "COMMERCIAL,FINANCIAL,FINANCEMANAGER";
         /// <summary>Accepts services and subcontract work (not the buyer).</summary>
         public const string ServiceAcceptance = "QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO";
         public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION";

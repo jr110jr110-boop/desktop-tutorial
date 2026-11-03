@@ -20,7 +20,8 @@ namespace ViewModels.NasbNiro.BuyOrderDtos
         public bool Deleted { get; set; }
         public string FinanceType { get; set; }
         public string FinanceNumber { get; set; }
-        public decimal FinancePrice { get; set; }
+        /// <summary>R1a2 (M8): null for a user who is not allowed to see prices.</summary>
+        public decimal? FinancePrice { get; set; }
 
         public string StatusDescription { get; protected set; }
         private BuyOrderStatus _status { get; set; }

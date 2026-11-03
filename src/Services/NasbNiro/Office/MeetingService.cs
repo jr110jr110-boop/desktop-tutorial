@@ -69,6 +69,11 @@ namespace Services.NasbNiro.Office
             return (m.Decisions ?? new List<OfDecision>()).Any(d => c.Pos.Contains(d.OwnerPositionId));
         }
 
+        private const string CreateNotAllowed = " (جلسه را دبیرخانه، مدیرعامل، PMO یا دارندگان سمت در چارت سازمانی ایجاد می‌کنند)";
+
+        /// <summary>R1a2 (L10): the secretariat, the PMO and the CEO (by role), or a holder of a position of the organisation chart, the deputy of a holder included.</summary>
+        private bool MayCreateMeeting(Ctx c) => c.IsCeo || c.Pos.Count > 0 || _user.IsInRole(OfficeRoles.MeetingCreators);
+
         private bool CanEdit(OfMeeting m, Ctx c) =>
             m.CreatorUserId == Me || (m.ChairPositionId.HasValue && c.Pos.Contains(m.ChairPositionId.Value)) || (m.SecretaryPositionId.HasValue && c.Pos.Contains(m.SecretaryPositionId.Value));
 
@@ -218,6 +223,9 @@ namespace Services.NasbNiro.Office
             if (dto.EndAt.HasValue && dto.EndAt.Value < dto.StartAt) return Bad<MeetingDto>("پایان جلسه از شروع آن زودتر است.");
             if (!dto.ChairPositionId.HasValue) return Bad<MeetingDto>("رئیس جلسه (سمت) را مشخص کنید.");
             Ctx c = await ContextAsync(ct);
+            // R1a2 (L10): a new meeting is created by the secretariat, the PMO or the CEO, or by somebody who holds (or acts for) a position of the organisation chart, the chair and the
+            // secretary of the meeting among them; not by every signed-in user (a meeting puts decisions into the inboxes of the positions it names). Editing is decided by CanEdit below.
+            if (!dto.Id.HasValue && !MayCreateMeeting(c)) return Bad<MeetingDto>(OfficeText.NotAllowed + CreateNotAllowed);
             var positionIds = new List<int> { dto.ChairPositionId.Value };
             if (dto.SecretaryPositionId.HasValue) positionIds.Add(dto.SecretaryPositionId.Value);
             positionIds.AddRange((dto.Attendees ?? new List<MeetingAttendeeDto>()).Where(a => a.PositionId.HasValue).Select(a => a.PositionId.Value));

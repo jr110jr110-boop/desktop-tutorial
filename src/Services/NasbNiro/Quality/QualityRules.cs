@@ -271,14 +271,21 @@ namespace Services.NasbNiro.Quality
     /// </summary>
     public static class NonconformingHoldRules
     {
-        /// <summary>Documents that refuse held goods: the ones that use goods up, production receipts and returns, and transfers into any warehouse but quarantine or scrap.</summary>
+        /// <summary>
+        /// Documents that refuse held goods: the ones that use goods up, production returns, and transfers into any warehouse but quarantine or scrap. A production receipt is not
+        /// among them (R1p D7/D33): it receives the good pieces of the last step alone — the pieces a report is about were scrapped at the terminal (written off, never in the receipt)
+        /// or are reworked and accepted by QC before they count as good — so a report on the order's lot must not keep the conforming pieces out of stock.
+        /// </summary>
         public static bool Refuses(InventoryDocumentType type, WarehouseKind? destination) =>
-            LotExpiryRules.Consumes(type) || type == InventoryDocumentType.ProductionReceipt || type == InventoryDocumentType.ProductionReturn ||
+            LotExpiryRules.Consumes(type) || type == InventoryDocumentType.ProductionReturn ||
             (global::Services.NasbNiro.Inventory.InventoryDocumentRules.IsTransfer(type) && destination != WarehouseKind.Quarantine && destination != WarehouseKind.Scrap);
 
         /// <summary>The report holds its goods while it is open or approved but not yet executed; a valid concession permit is the permission to use them.</summary>
         public static bool Holds(NonConformance n) =>
             n != null && !n.Deleted && (n.Status == NcrStatus.Open || n.Status == NcrStatus.Approved) && !ConcessionRules.IsValid(n, false);
+
+        /// <summary>The same rule for one kind of document: a production receipt is never held (see <see cref="Refuses"/>), every other document follows <see cref="Holds(NonConformance)"/>.</summary>
+        public static bool Holds(NonConformance n, InventoryDocumentType type) => type != InventoryDocumentType.ProductionReceipt && Holds(n);
 
         /// <summary>The serial numbers an NCR lists, trimmed.</summary>
         public static List<string> SerialsOf(NonConformance n) =>

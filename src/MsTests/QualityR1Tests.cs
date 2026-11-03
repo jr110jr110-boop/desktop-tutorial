@@ -292,6 +292,12 @@ namespace MsTests
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Executed, NcrDisposition.Scrap, true)), "executed: the stock document moved the goods");
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Closed, NcrDisposition.Scrap, true)));
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Cancelled, NcrDisposition.None, false)));
+            // a production receipt (the good pieces of the last step alone, R1p D7/D33) is never held: the pieces a report is about were written off at the terminal or are reworked and accepted before they count as good
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.ProductionReceipt, WarehouseKind.WorkInProgress));
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Open, NcrDisposition.None, false), InventoryDocumentType.ProductionReceipt), "an open report on the scrapped pieces does not keep the good pieces out of stock");
+            Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Scrap, true), InventoryDocumentType.ProductionReceipt));
+            Assert.IsTrue(NonconformingHoldRules.Refuses(InventoryDocumentType.ProductionReturn, WarehouseKind.WorkInProgress), "a return from the shop floor is still held");
+            Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Scrap, true), InventoryDocumentType.Issue), "an issue of the held goods is still refused");
             Assert.IsFalse(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true, Today.AddDays(-2))), "a valid concession is the permission to use the goods");
             Assert.IsTrue(NonconformingHoldRules.Holds(Ncr(NcrStatus.Approved, NcrDisposition.Concession, true)), "a concession without its permit still holds");
             NonConformance deleted = Ncr(NcrStatus.Open, NcrDisposition.None, false);
@@ -304,8 +310,10 @@ namespace MsTests
         public void Held_Goods_Cannot_Be_Used_Up_Produced_Back_Or_Moved_Into_Usable_Stock()
         {
             foreach (InventoryDocumentType type in new[] { InventoryDocumentType.Issue, InventoryDocumentType.CustomerDelivery, InventoryDocumentType.SubcontractIssue, InventoryDocumentType.StageConversion,
-                                                           InventoryDocumentType.ProductionReceipt, InventoryDocumentType.ProductionReturn })
+                                                           InventoryDocumentType.ProductionReturn })
                 Assert.IsTrue(NonconformingHoldRules.Refuses(type, null), type + " must refuse held goods");
+            // the production receipt holds the good pieces of the last step alone (scrap is written off at the terminal, rework is accepted by QC first)
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.ProductionReceipt, null), "the production receipt is outside the hold");
             Assert.IsTrue(NonconformingHoldRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.FinishedGoods), "into stock a customer draws on");
             Assert.IsTrue(NonconformingHoldRules.Refuses(InventoryDocumentType.QcRelease, WarehouseKind.Parts));
             // the way out of the hold: the report's own disposition document (rework into quarantine, scrap, return to the supplier) and the write-offs

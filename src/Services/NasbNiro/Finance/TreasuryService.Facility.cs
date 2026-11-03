@@ -15,6 +15,7 @@ namespace Services.NasbNiro.Finance
     public partial class TreasuryService
     {
         private const string FacilityOnly = "سند پرداخت یا دریافت تسهیلات، اعتبار اسنادی و ضمانت‌نامه فقط از خود آن رکورد ساخته می‌شود و در اینجا ساخته یا ویرایش نمی‌شود؛ در صورت اشتباه، سند را باطل کنید و از رکورد اصلی دوباره ثبت کنید.";
+        private const string FacilityRecorderApprove = "ثبت‌کننده رکورد (تسهیلات، اعتبار اسنادی یا ضمانت‌نامه) نمی‌تواند سند خزانه همان رکورد را تایید کند؛ مدیر مالی دیگری تایید کند.";
         private const string FacilityRecorder = "ثبت‌کننده رکورد (تسهیلات، اعتبار اسنادی یا ضمانت‌نامه) و تاییدکننده سند خزانه نمی‌توانند وجه همان سند را نهایی کنند؛ کاربر دیگری از خزانه آن را ثبت نهایی کند.";
 
         private static CashLegRequest LegOf(FnPayment p) => new CashLegRequest
@@ -33,16 +34,19 @@ namespace Services.NasbNiro.Finance
         /// Who may act on a cash leg. The finance manager approves (never the person who recorded the facility action); treasury posts or cancels; the person who recorded the leg
         /// and the person who approved it cannot post it. Returns the refusal text or null.
         /// </summary>
-        private string FacilityActionRefusal(string action, int creatorUserId, string editorUserIds, int? approvedByUserId)
+        private async Task<string> FacilityActionRefusalAsync(string action, int creatorUserId, string editorUserIds, int? approvedByUserId, string sourceType, int? sourceId, CancellationToken ct)
         {
+            // M4 (review R1t): the person who recorded the loan, the letter of credit or the guarantee itself is barred from approving and posting any leg of it
+            bool facilityRecorder = (action == "approve" || action == "post") && sourceId.HasValue && await _legs.RecorderOfAsync(sourceType, sourceId.Value, ct) == Me;
             switch (action)
             {
                 case "approve":
                     if (!_user.IsInRole(FinanceRoles.Managers)) return NotAllowed + " (مدیر مالی)";
-                    return null;   // the generic code refuses the person who recorded it
+                    if (facilityRecorder) return FacilityRecorderApprove;
+                    return null;   // the generic code refuses the person who recorded the leg
                 case "post":
                     if (!_user.IsInRole(FinanceRoles.TreasuryUsers)) return NotAllowed + " (خزانه‌داری)";
-                    if (Touched(creatorUserId, editorUserIds, Me) || (approvedByUserId.HasValue && approvedByUserId.Value == Me)) return FacilityRecorder;
+                    if (facilityRecorder || Touched(creatorUserId, editorUserIds, Me) || (approvedByUserId.HasValue && approvedByUserId.Value == Me)) return FacilityRecorder;
                     return null;
                 case "cancel":
                     if (!_user.IsInRole(FinanceRoles.TreasuryUsers)) return NotAllowed + " (خزانه‌داری)";

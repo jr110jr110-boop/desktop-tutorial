@@ -448,6 +448,12 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? UserId { get; set; }
         public int? QualifiedPersonId { get; set; }
         public bool IsActive { get; set; }
+
+        /// <summary>A new employee that a second PAYROLL / FINANCEMANAGER user has not approved yet: payroll runs skip him.</summary>
+        public bool PendingApproval { get; set; }
+
+        /// <summary>A change of the guarded fields (daily wage, exemption flags, children, hard-and-harmful, IBAN) waits for approval; the values above are still the approved ones.</summary>
+        public int? PendingChangeId { get; set; }
     }
 
     public class SaveEmployeeDto
@@ -483,6 +489,13 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? UserId { get; set; }
         public int? QualifiedPersonId { get; set; }
         public bool IsActive { get; set; } = true;
+
+        /// <summary>The Persian year and month a changed daily wage applies from (default: the current month). The wage of earlier months does not change.</summary>
+        public int? WageEffectiveYear { get; set; }
+        public int? WageEffectiveMonth { get; set; }
+
+        /// <summary>Required when a guarded field changes (daily wage, exemption flags, children, hard-and-harmful, IBAN): the change is a request that a second person approves.</summary>
+        public string ChangeReason { get; set; }
     }
 
     /// <summary>What other modules may see of an employee: name and job title only.</summary>
@@ -513,6 +526,13 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int FirstYear { get; set; }
         public int FirstMonth { get; set; }
         public bool IsActive { get; set; }
+
+        /// <summary>Approved, Pending or Rejected. A pending loan is neither recovered nor paid out until FINANCEMANAGER approves it.</summary>
+        public string ApprovalStatus { get; set; }
+        public string CreatedByName { get; set; }
+        public string ApprovedByName { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public string RejectReason { get; set; }
     }
 
     public class SaveLoanDto
@@ -664,6 +684,12 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal MissionDays { get; set; }
         public Dictionary<string, decimal> Inputs { get; set; } = new Dictionary<string, decimal>();
         public List<AttendanceWorkOrderDto> WorkOrders { get; set; } = new List<AttendanceWorkOrderDto>();
+
+        /// <summary>HrClose, Manual or Import.</summary>
+        public string Source { get; set; }
+
+        /// <summary>The attendance numbers of a locked row change only through a correction request that HR approves.</summary>
+        public bool Locked { get; set; }
     }
 
     public class SaveAttendanceDto
@@ -679,6 +705,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal HolidayHours { get; set; }
         public int ShiftType { get; set; }
         public decimal PaidLeaveDays { get; set; }
+
+        /// <summary>Sick days (separate bucket: paid per the SickPayBasis key, not taken from the annual leave).</summary>
+        public decimal SickLeaveDays { get; set; }
         public decimal UnpaidLeaveDays { get; set; }
         public decimal AbsenceDays { get; set; }
         public decimal MissionDays { get; set; }
@@ -744,6 +773,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTimeOffset? PaidAt { get; set; }
         public int? AccountingEventId { get; set; }
         public string Note { get; set; }
+
+        /// <summary>Warnings of the approval (release R1f): the attendance sheets of the month typed or imported outside the HR close. Empty on every other read.</summary>
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     public class PayslipQuery : PaginationParams

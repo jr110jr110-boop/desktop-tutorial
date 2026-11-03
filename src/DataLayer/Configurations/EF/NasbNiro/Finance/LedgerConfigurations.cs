@@ -332,6 +332,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.ToTable("FnBankReconciliationItems");
                 b.Property(x => x.Amount).HasPrecision(18, 0);
                 b.Property(x => x.Note).HasMaxLength(500).IsRequired();
+                b.HasOne<FnVoucher>().WithMany().HasForeignKey(x => x.CorrectingVoucherId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Reconciliation).WithMany(x => x.Items).HasForeignKey(x => x.ReconciliationId).OnDelete(DeleteBehavior.Cascade);
             });
 

@@ -11,7 +11,7 @@ namespace WebApi.Controllers
 {
     // Production / shop floor (MES), release P1 part B. Role checks are in the services; rule violations answer 200 with success=false.
 
-    /// <summary>Daily cost posting of the time bookings (finance and the production manager).</summary>
+    /// <summary>Daily cost posting of the time bookings and the month-end run of the labour pools (finance, finance manager and the production manager).</summary>
     [ApiController]
     [Authorize]
     [Route("api/v1/production")]
@@ -19,10 +19,12 @@ namespace WebApi.Controllers
     public class ProductionCostController : ControllerBase
     {
         private readonly IMfCostService _cost;
+        private readonly IMfLabourService _labour;
 
-        public ProductionCostController(IMfCostService cost)
+        public ProductionCostController(IMfCostService cost, IMfLabourService labour)
         {
             _cost = cost;
+            _labour = labour;
         }
 
         [HttpPost("cost/run")]
@@ -33,6 +35,14 @@ namespace WebApi.Controllers
 
         [HttpGet("cost/postings")]
         public async Task<IActionResult> PostingsAsync([FromQuery] CostPostingQuery query, CancellationToken ct) => Ok((await _cost.GetPostingsAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>R1p D1: the month-end run of the labour variance (finance manager, finance, production manager): closes every ended month, stores its pool and posts the variance (actual payroll cost of the payroll-rated people less what the days absorbed at the standard rates) as one company-level line when the publication gate is passed, else carries the month (the quarter end posts it flagged as protected); idempotent.</summary>
+        [HttpPost("cost/labour-month")]
+        public async Task<IActionResult> LabourMonthAsync([FromBody] MfLabourMonthRunDto dto, CancellationToken ct) => Ok(await _labour.RunAsync(dto, ct));
+
+        /// <summary>R1p D1: the months, newest first, with their state (posted, protected, pending) and the amount absorbed at the standard rates for every reader; the pool (people, hours, actual average rate, cost) and the variance only for PAYROLL, FINANCEMANAGER and CEO.</summary>
+        [HttpGet("cost/labour-months")]
+        public async Task<IActionResult> LabourMonthsAsync(CancellationToken ct) => Ok(await _labour.HistoryAsync(ct));
     }
 
     /// <summary>The finite-capacity scheduler, the load report and the dispatch list of a work centre.</summary>

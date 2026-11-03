@@ -239,18 +239,40 @@ namespace WebApi.Controllers
         [HttpGet("devices")]
         public async Task<IActionResult> DevicesAsync(CancellationToken ct) => Ok(await _attendance.GetDevicesAsync(ct));
 
-        /// <summary>The new key is returned once (DeviceKeyDto.ApiKey); only its hash is stored.</summary>
+        /// <summary>HR and PMO only. A new device's key is returned once (DeviceKeyDto.ApiKey); an edit never issues a key; only its hash is stored.</summary>
         [HttpPost("devices")]
         public async Task<IActionResult> SaveDeviceAsync([FromBody] SaveDeviceDto dto, CancellationToken ct) => Ok(await _attendance.SaveDeviceAsync(dto, ct));
+
+        /// <summary>Issues a new key for a device (the old key stops working); the key is returned once. HR and PMO only; audited.</summary>
+        [HttpPost("devices/{id:int}/rotate-key")]
+        public async Task<IActionResult> RotateDeviceKeyAsync(int id, CancellationToken ct) => Ok(await _attendance.RotateDeviceKeyAsync(id, ct));
+
+        /// <summary>The lightweight log of the pushes of the devices (count of events and hash of the payload, not one row per punch).</summary>
+        [HttpGet("device-pushes")]
+        public async Task<IActionResult> DevicePushesAsync([FromQuery] DevicePushLogQuery query, CancellationToken ct) => Ok((await _attendance.GetPushLogsAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpGet("clock")]
         public async Task<IActionResult> ClockAsync([FromQuery] ClockQuery query, CancellationToken ct) => Ok((await _attendance.GetClockEventsAsync(query, ct)).ToPaginatedResultSafe());
 
+        /// <summary>A manual clock event is a request (HR records it for ANOTHER employee, with a reason): it counts only after a second HR user or the unit manager of the employee approved it.</summary>
         [HttpPost("clock/manual")]
         public async Task<IActionResult> ManualAsync([FromBody] ManualClockDto dto, CancellationToken ct) => Ok(await _attendance.AddManualEventAsync(dto, ct));
 
+        /// <summary>Approve or reject a manual clock request (any signed-in user: the service allows another HR user or the unit manager of the employee, never the author or the employee).</summary>
+        [HttpPost("clock/request-action")]
+        public async Task<IActionResult> ClockRequestActionAsync([FromBody] ClockRequestActionDto dto, CancellationToken ct) => Ok(await _attendance.ClockRequestActionAsync(dto, ct));
+
+        /// <summary>Imports rows as a PENDING batch: nothing counts until a second HR user (not the importer, not an employee in the batch) approves it. Rows of the importer's own employee record are refused.</summary>
         [HttpPost("clock/import")]
         public async Task<IActionResult> ImportAsync([FromBody] ImportClockDto dto, CancellationToken ct) => Ok(await _attendance.ImportEventsAsync(dto, ct));
+
+        /// <summary>The import batches (HR and CEO); WaitingForMe lists the pending ones the signed-in user may decide.</summary>
+        [HttpGet("clock/import-batches")]
+        public async Task<IActionResult> ImportBatchesAsync([FromQuery] ClockBatchQuery query, CancellationToken ct) => Ok((await _attendance.GetImportBatchesAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>Approves or rejects a whole import batch (another HR user than the importer, with no punch inside the batch); audited.</summary>
+        [HttpPost("clock/import-batches/action")]
+        public async Task<IActionResult> ImportBatchActionAsync([FromBody] ClockBatchActionDto dto, CancellationToken ct) => Ok(await _attendance.ImportBatchActionAsync(dto, ct));
 
         /// <summary>Excel export of the attendance software (PW Kara): the sheets, columns, sample rows and a guessed column mapping (multipart: File, optional Sheet).</summary>
         [HttpPost("clock/import-file/preview")]
@@ -275,7 +297,7 @@ namespace WebApi.Controllers
             }
             if (form?.File != null && form.File.Length > ClockFileForm.MaxFileBytes) return Ok(ResponseDtoHelper.BadRequest<ClockImportResultDto>(ClockFileForm.TooBig));
             byte[] data = await ReadAsync(form?.File, ct);
-            return Ok(await _attendance.ImportClockFileAsync(data, new ClockFileImportDto { ProfileId = form?.ProfileId, Mapping = mapping, SaveProfileAs = form?.SaveProfileAs }, ct));
+            return Ok(await _attendance.ImportClockFileAsync(data, new ClockFileImportDto { ProfileId = form?.ProfileId, Mapping = mapping, SaveProfileAs = form?.SaveProfileAs, Reason = form?.Reason }, ct));
         }
 
         [HttpGet("clock/import-profiles")]
@@ -292,14 +314,14 @@ namespace WebApi.Controllers
             return stream.ToArray();
         }
 
-        /// <summary>For devices and middleware on the LAN. Headers X-Device-Code and X-Device-Key; a wrong code or key gives 401.</summary>
+        /// <summary>For devices and middleware on the LAN. Headers X-Device-Code and X-Device-Key; a wrong code, key or (for a device bound to addresses) source address gives 401.</summary>
         [HttpPost("push")]
         [AllowAnonymous]
         public async Task<IActionResult> PushAsync([FromBody] DevicePushDto dto, CancellationToken ct)
         {
             string deviceCode = Request.Headers["X-Device-Code"].ToString();
             string deviceKey = Request.Headers["X-Device-Key"].ToString();
-            ResponseDto<DevicePushResultDto> result = await _attendance.PushAsync(deviceCode, deviceKey, dto, ct);
+            ResponseDto<DevicePushResultDto> result = await _attendance.PushAsync(deviceCode, deviceKey, dto, ct, HttpContext.Connection.RemoteIpAddress?.ToString());
             if (result.HttpStatusCode == HttpStatusCode.Unauthorized) return StatusCode(401, result);
             return Ok(result);
         }
@@ -316,8 +338,25 @@ namespace WebApi.Controllers
         [HttpGet("days")]
         public async Task<IActionResult> DaysAsync([FromQuery] DayQuery query, CancellationToken ct) => Ok((await _attendance.GetDaysAsync(query, ct)).ToPaginatedResultSafe());
 
+        /// <summary>Step one of the month close: HR prepares the month (sheets written and locked, a snapshot frozen). Payroll can use the month only after step two.</summary>
         [HttpPost("close-month")]
         public async Task<IActionResult> CloseMonthAsync([FromBody] CloseMonthDto dto, CancellationToken ct) => Ok(await _attendance.CloseMonthAsync(dto, ct));
+
+        /// <summary>Step two: the finance manager (or, if the company policy allows it, a second HR user) confirms the prepared month. The preparer never confirms.</summary>
+        [HttpPost("confirm-month")]
+        public async Task<IActionResult> ConfirmMonthAsync([FromBody] ConfirmMonthDto dto, CancellationToken ct) => Ok(await _attendance.ConfirmMonthAsync(dto, ct));
+
+        /// <summary>Sends a prepared month (or, for the finance manager, a confirmed one while no payroll is approved) back to HR with a reason.</summary>
+        [HttpPost("reject-month")]
+        public async Task<IActionResult> RejectMonthAsync([FromBody] RejectMonthDto dto, CancellationToken ct) => Ok(await _attendance.RejectMonthAsync(dto, ct));
+
+        /// <summary>Corrections of locked attendance sheets that payroll proposed (HR, CEO, payroll and the finance manager read them).</summary>
+        [HttpGet("corrections")]
+        public async Task<IActionResult> CorrectionsAsync([FromQuery] CorrectionQuery query, CancellationToken ct) => Ok((await _attendance.GetCorrectionsAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>HR approves or rejects a correction; never the user who proposed it.</summary>
+        [HttpPost("corrections/action")]
+        public async Task<IActionResult> CorrectionActionAsync([FromBody] CorrectionActionDto dto, CancellationToken ct) => Ok(await _attendance.CorrectionActionAsync(dto, ct));
 
         [HttpGet("month/{year:int}/{month:int}")]
         public async Task<IActionResult> MonthAsync(int year, int month, CancellationToken ct) => Ok(await _attendance.GetMonthStatusAsync(year, month, ct));
@@ -343,6 +382,9 @@ namespace WebApi.Controllers
         /// <summary>JSON of ClockFileMappingDto.</summary>
         public string Mapping { get; set; }
         public string SaveProfileAs { get; set; }
+
+        /// <summary>Optional note of the importer (what the file is); kept on the pending batch.</summary>
+        public string Reason { get; set; }
     }
 
     [ApiController]

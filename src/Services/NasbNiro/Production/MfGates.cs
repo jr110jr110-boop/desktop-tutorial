@@ -16,6 +16,11 @@ namespace Services.NasbNiro.Production
             OfficeGates.SyncAsync(notify, "mf:qc:" + op.Id, op.Status == MfOperationStatus.QcHold && !op.QcAccepted && !op.Deleted, "production", "qc-request", op.Id,
                 $"درخواست بازرسی عملیات {MfNames.Operation(orderNumber, op.Sequence)} ({op.Title})", "/production/operations/" + op.Id, ProductionRoles.Inspectors, ct);
 
+        /// <summary>R1p review 9: a correction booking waits for a production manager other than its creator.</summary>
+        public static Task CorrectionAsync(INotificationService notify, MfTimeBooking booking, string jobCard, CancellationToken ct) =>
+            OfficeGates.SyncAsync(notify, "mf:correction:" + booking.Id, booking.IsCorrection && booking.CorrectionApprovedByUserId == null && !booking.Deleted, "production", "booking-correction", booking.Id,
+                $"ثبت زمان اصلاحی عملیات {jobCard} منتظر تأیید مدیر تولید است", "/production/bookings/" + booking.Id, ProductionRoles.Manager, ct);
+
         public static Task MaintenanceAsync(INotificationService notify, MfMaintenanceRequest request, string machineTitle, CancellationToken ct) =>
             OfficeGates.SyncAsync(notify, "mf:maint:" + request.Id, request.Status == MfMaintenanceRequestStatus.Open && !request.Deleted, "production", "maintenance-request", request.Id,
                 $"خرابی ماشین {machineTitle} گزارش شد ({request.Number})", "/production/maintenance-requests/" + request.Id, ProductionRoles.Maintenance, ct);

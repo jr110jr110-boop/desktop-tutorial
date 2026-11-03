@@ -343,16 +343,24 @@ namespace Services.NasbNiro.Ceo.Drills
                 IQueryable<FnVoucher> waiting = uow.Set<FnVoucher>().AsNoTracking().Where(v => v.Status == FnVoucherStatus.Draft || v.Status == FnVoucherStatus.Checked);
                 int total = await waiting.CountAsync(ct);
                 int drafts = await waiting.CountAsync(v => v.Status == FnVoucherStatus.Draft, ct);
-                decimal amount = await waiting.SumAsync(v => (decimal?)v.TotalAmount, ct) ?? 0m;
+                // R1p C1: a reader outside PAYROLL/FINANCEMANAGER/CEO never sees the amount of a line flagged as confidential labour, so the totals and the amounts
+                // of the vouchers that hold such a line are reduced by the hidden debits (the same way the voucher read of the ledger does)
+                bool seesPayroll = FnLabourMask.Sees(c.User);
+                decimal hiddenAll = seesPayroll ? 0m : await waiting.SelectMany(v => v.Lines).Where(l => l.LabourProtected).SumAsync(l => (decimal?)l.Debit, ct) ?? 0m;
+                decimal amount = (await waiting.SumAsync(v => (decimal?)v.TotalAmount, ct) ?? 0m) - hiddenAll;
                 var page = await waiting.OrderBy(v => v.Date).ThenBy(v => v.Id).Skip(Math.Max(0, c.Page - 1) * c.Top).Take(c.Top)
-                    .Select(v => new { v.Id, v.Number, v.TemporaryNumber, v.Date, v.Status, v.Description, v.TotalAmount, v.CreatedByUserId }).ToListAsync(ct);
+                    .Select(v => new
+                    {
+                        v.Id, v.Number, v.TemporaryNumber, v.Date, v.Status, v.Description, v.TotalAmount, v.CreatedByUserId,
+                        Hidden = seesPayroll ? 0m : v.Lines.Where(l => l.LabourProtected).Sum(l => (decimal?)l.Debit) ?? 0m,
+                    }).ToListAsync(ct);
                 Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(uow, page.Select(v => (int?)v.CreatedByUserId), ct);
                 DateTime today = c.Today;
                 var rows = page.Select(v => (Dictionary<string, object>)new Row("/fn/vouchers/" + Id(v.Id))
                 {
                     ["id"] = v.Id, ["number"] = v.Number.HasValue ? Id(v.Number.Value) : "پیش‌نویس " + Id(v.TemporaryNumber),
                     ["date"] = DrillDates.Text(v.Date), ["state"] = v.Status == FnVoucherStatus.Draft ? "منتظر بررسی" : "منتظر قطعی‌سازی",
-                    ["description"] = Short(v.Description, 80), ["amount"] = v.TotalAmount, ["creatorName"] = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId),
+                    ["description"] = Short(v.Description, 80), ["amount"] = v.TotalAmount - v.Hidden, ["creatorName"] = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId),
                     ["daysWaiting"] = Math.Max(0, DaysBetween(v.Date, today)),
                 }).ToList();
                 return new DrillResult

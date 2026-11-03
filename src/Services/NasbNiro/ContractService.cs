@@ -370,18 +370,8 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<string>(NasbNiroMessages.ContractNotFound);
             }
 
-            if (contract.ProjectCharterFileId.HasValue)
-            {
-                try
-                {
-                    await _documentService.DeleteDocumentAsync(contract.ProjectCharterFileId.Value);
-                }
-                catch (Exception ex)
-                {
-
-                    _logger.LogError(ex.Message, ex);
-                }
-            }
+            // R1a2 (H3): a file that a record refers to cannot be deleted, so the new charter file is linked first and the old file is deleted after the contract stopped referring to it
+            Guid? previousFile = contract.ProjectCharterFileId;
 
             Guid documentId =
                 await _documentService.UploadDocumentAsync(attachProjectCharterFileDto);
@@ -391,7 +381,22 @@ namespace Services.NasbNiro
             _contracts.Update(contract);
 
             if (await this.SaveChangesAsync(cancellationToken))
+            {
+                if (previousFile.HasValue)
+                {
+                    try
+                    {
+                        await _documentService.DeleteDocumentAsync(previousFile.Value);
+                    }
+                    catch (Exception ex)
+                    {
+
+                        _logger.LogError(ex.Message, ex);
+                    }
+                }
+
                 return ResponseDtoHelper.Ok(documentId.ToString());
+            }
 
             return ResponseDtoHelper
                 .BadRequest<string>(NasbNiroMessages.FileNotAdded);
@@ -518,6 +523,11 @@ namespace Services.NasbNiro
             if (contractGuaranty.Deleted == true)
                 return ResponseDtoHelper
                      .BadRequest<ResponseContractGuarantyDto>(NasbNiroMessages.TenderAlreadyIsDeleted);
+
+            // R1a2 (M3): project control keeps the expiry, the alerts and the release of this guaranty; deleting the legacy row would leave that record without its source
+            string blocked = await LegacyDeleteGuard.LegacyGuarantyAsync(_uow, Entities.Model.NasbNiro.ProjectControl.PcGuaranteeSource.ContractGuaranty, contractGuarantyId, cancellationToken);
+            if (blocked != null)
+                return ResponseDtoHelper.BadRequest<ResponseContractGuarantyDto>(blocked);
 
             contractGuaranty.Delete();
 

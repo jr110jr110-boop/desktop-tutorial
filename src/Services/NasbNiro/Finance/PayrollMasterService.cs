@@ -45,21 +45,34 @@ namespace Services.NasbNiro.Finance
         Task<ResponseDto<AttendanceDto>> SaveAttendanceAsync(SaveAttendanceDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<ImportAttendanceResultDto>> ImportAttendanceAsync(ImportAttendanceDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<List<LeaveBalanceDto>>> GetLeaveBalancesAsync(int year, CancellationToken cancellationToken);
+
+        // release R1f: maker-checker controls on the payroll inputs
+        Task<ResponseDto<PagedList<EmployeeChangeDto>>> GetEmployeeChangesAsync(EmployeeChangeQuery query, CancellationToken cancellationToken);
+        Task<ResponseDto<EmployeeChangeDto>> EmployeeChangeActionAsync(EmployeeChangeActionDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<List<EmployeeWageDto>>> GetEmployeeWagesAsync(int employeeId, CancellationToken cancellationToken);
+        Task<ResponseDto<LoanDto>> LoanActionAsync(LoanActionDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<ViewModels.NasbNiro.OfficeDtos.AttendanceCorrectionDto>> ProposeCorrectionAsync(ViewModels.NasbNiro.OfficeDtos.ProposeCorrectionDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<PagedList<LeaveOpeningDto>>> GetLeaveOpeningsAsync(LeaveOpeningQuery query, CancellationToken cancellationToken);
+        Task<ResponseDto<LeaveOpeningDto>> SaveLeaveOpeningAsync(SaveLeaveOpeningDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<ImportLeaveOpeningResultDto>> ImportLeaveOpeningsAsync(ImportLeaveOpeningDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<LeaveOpeningDto>> LeaveOpeningActionAsync(LeaveOpeningActionDto dto, CancellationToken cancellationToken);
     }
 
     /// <summary>
     /// Payroll master data: insurance workshops, employees, loans, payroll items, the dated rate table, tax brackets, attendance and leave.
     /// Confidential: only PAYROLL, FINANCEMANAGER and CEO read it; only PAYROLL and FINANCEMANAGER change it. Wages are never written to the log.
     /// </summary>
-    public class PayrollMasterService : IPayrollMasterService
+    public partial class PayrollMasterService : IPayrollMasterService
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
-        public PayrollMasterService(IUnitOfWork uow, IInventoryUserContext user)
+        public PayrollMasterService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _notify = notify;
         }
 
         private int Me => _user.UserId;
@@ -73,6 +86,7 @@ namespace Services.NasbNiro.Finance
         {
             await FinanceSeed.EnsureAsync(_uow, ct);
             await F2Seed.EnsureAsync(_uow, ct);
+            await R1fUpgrades.EnsureAsync(_uow, Me, ct);
         }
 
         private static bool ValidYear(int y) => y >= 1300 && y <= 1600;
@@ -161,15 +175,24 @@ namespace Services.NasbNiro.Finance
 
         // ================================================================================== employees
 
-        private static EmployeeDto ToDto(FnEmployee e, string workshop) => new EmployeeDto
+        private static EmployeeDto ToDto(FnEmployee e, string workshop, int? pendingChangeId = null) => new EmployeeDto
         {
             Id = e.Id, PersonnelCode = e.PersonnelCode, FirstName = e.FirstName, LastName = e.LastName, FatherName = e.FatherName, NationalCode = e.NationalCode,
             BirthDate = e.BirthDate, BirthPlace = e.BirthPlace, IdentityCardNumber = e.IdentityCardNumber, Nationality = e.Nationality, Gender = e.Gender, MaritalStatus = e.MaritalStatus, ChildrenCount = e.ChildrenCount,
             InsuranceNumber = e.InsuranceNumber, InsuranceJobCode = e.InsuranceJobCode, WorkshopId = e.WorkshopId, WorkshopName = workshop, HireDate = e.HireDate,
             EndDate = e.EndDate, EmploymentType = e.EmploymentType, JobTitle = e.JobTitle, Unit = e.Unit, CostCenterId = e.CostCenterId, DefaultWorkOrderId = e.DefaultWorkOrderId,
             BankIban = e.BankIban, DailyWage = e.DailyWage, ExemptionFlags = e.ExemptionFlags, HardAndHarmful = e.HardAndHarmful, UserId = e.UserId,
-            QualifiedPersonId = e.QualifiedPersonId, IsActive = e.IsActive,
+            QualifiedPersonId = e.QualifiedPersonId, IsActive = e.IsActive, PendingApproval = e.PendingApproval, PendingChangeId = pendingChangeId,
         };
+
+        /// <summary>The open change request of each employee (at most one is allowed at a time).</summary>
+        private async Task<Dictionary<int, int>> PendingChangeIdsAsync(IEnumerable<int> employeeIds, CancellationToken ct)
+        {
+            List<int> ids = employeeIds.Distinct().ToList();
+            if (ids.Count == 0) return new Dictionary<int, int>();
+            var rows = await _uow.Set<FnEmployeeChange>().AsNoTracking().Where(c => c.Status == FnChangeStatus.Pending && ids.Contains(c.EmployeeId)).Select(c => new { c.EmployeeId, c.Id }).ToListAsync(ct);
+            return rows.GroupBy(r => r.EmployeeId).ToDictionary(g => g.Key, g => g.Max(r => r.Id));
+        }
 
         public async Task<ResponseDto<PagedList<EmployeeDto>>> GetEmployeesAsync(EmployeeQuery query, CancellationToken ct)
         {
@@ -184,14 +207,17 @@ namespace Services.NasbNiro.Finance
             int total = await q.CountAsync(ct);
             F2Page.Window(query.PageNumber, query.PageSize, total, out int number, out int size);
             List<FnEmployee> rows = await q.Include(e => e.Workshop).OrderBy(e => e.PersonnelCode).Skip((number - 1) * size).Take(size).ToListAsync(ct);
-            return ResponseDtoHelper.Ok(F2Page.Make(rows.Select(e => ToDto(e, e.Workshop?.Name)).ToList(), total, number, size));
+            Dictionary<int, int> pending = await PendingChangeIdsAsync(rows.Select(e => e.Id), ct);
+            return ResponseDtoHelper.Ok(F2Page.Make(rows.Select(e => ToDto(e, e.Workshop?.Name, pending.TryGetValue(e.Id, out int pc) ? pc : (int?)null)).ToList(), total, number, size));
         }
 
         public async Task<ResponseDto<EmployeeDto>> GetEmployeeAsync(int id, CancellationToken ct)
         {
             if (!CanRead) return Bad<EmployeeDto>(NotAllowed);
             FnEmployee e = await _uow.Set<FnEmployee>().AsNoTracking().Include(x => x.Workshop).FirstOrDefaultAsync(x => x.Id == id, ct);
-            return e == null ? ResponseDtoHelper.NotFound<EmployeeDto>("کارمند پیدا نشد.") : ResponseDtoHelper.Ok(ToDto(e, e.Workshop?.Name));
+            if (e == null) return ResponseDtoHelper.NotFound<EmployeeDto>("کارمند پیدا نشد.");
+            Dictionary<int, int> pending = await PendingChangeIdsAsync(new[] { e.Id }, ct);
+            return ResponseDtoHelper.Ok(ToDto(e, e.Workshop?.Name, pending.TryGetValue(e.Id, out int pc) ? pc : (int?)null));
         }
 
         public async Task<ResponseDto<EmployeeDto>> SaveEmployeeAsync(SaveEmployeeDto dto, CancellationToken ct)
@@ -226,27 +252,98 @@ namespace Services.NasbNiro.Finance
             if (dto.CostCenterId.HasValue && !await _uow.Set<CostCenter>().AnyAsync(c => c.Id == dto.CostCenterId.Value && c.IsActive, ct)) return Bad<EmployeeDto>("مرکز هزینه پیدا نشد.");
             if (dto.DefaultWorkOrderId.HasValue && !await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.DefaultWorkOrderId.Value, ct)) return Bad<EmployeeDto>("دستور کار پیدا نشد.");
 
+            // release R1f: the month a changed daily wage applies from (default: the current Persian month)
+            if (dto.WageEffectiveYear.HasValue != dto.WageEffectiveMonth.HasValue) return Bad<EmployeeDto>("سال و ماه اعمال مزد را با هم وارد کنید.");
+            DateTime? wageFrom = null;
+            if (dto.WageEffectiveYear.HasValue)
+            {
+                if (!ValidYear(dto.WageEffectiveYear.Value) || dto.WageEffectiveMonth.Value < 1 || dto.WageEffectiveMonth.Value > 12) return Bad<EmployeeDto>("ماه اعمال مزد نامعتبر است.");
+                wageFrom = PersianCal.Start(dto.WageEffectiveYear.Value, dto.WageEffectiveMonth.Value);
+            }
+
+            bool created = !dto.Id.HasValue;
             FnEmployee e;
-            if (dto.Id.HasValue)
+            if (!created)
             {
                 e = await _uow.Set<FnEmployee>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct);
                 if (e == null) return ResponseDtoHelper.NotFound<EmployeeDto>("کارمند پیدا نشد.");
             }
             else
             {
-                e = new FnEmployee { CreatedAt = DateTimeOffset.Now, CreatedByUserId = Me };
+                // a new employee is paid by a run only after a second PAYROLL / FINANCEMANAGER user approved it
+                e = new FnEmployee { CreatedAt = DateTimeOffset.Now, CreatedByUserId = Me, PendingApproval = true };
                 _uow.Set<FnEmployee>().Add(e);
             }
             if (await _uow.Set<FnEmployee>().AnyAsync(x => x.PersonnelCode == code && x.Id != e.Id, ct)) return Bad<EmployeeDto>("این کد پرسنلی قبلاً ثبت شده است.");
             if (await _uow.Set<FnEmployee>().AnyAsync(x => x.NationalCode == national && x.Id != e.Id, ct)) return Bad<EmployeeDto>("این کد ملی قبلاً ثبت شده است.");
+
+            // release R1f: the guarded fields (daily wage, exemption flags, children, hard-and-harmful, IBAN) of an approved employee change only through a request that a second user approves;
+            // until then the row keeps the approved values and a payroll run uses them. A new employee holds them on the row but is skipped by the runs until he is approved.
+            var proposed = new GuardedFieldsDto { DailyWage = wage, ExemptionFlags = flags, ChildrenCount = dto.ChildrenCount, HardAndHarmful = dto.HardAndHarmful, BankIban = iban };
+            DateTimeOffset now = DateTimeOffset.Now;
+            bool guardedOnRow = created || e.PendingApproval;
+            FnEmployeeChange change = null;
+            if (!guardedOnRow && !SameGuarded(GuardedOf(e), proposed))
+            {
+                string reason = Clean(dto.ChangeReason);
+                if (reason == null) return Bad<EmployeeDto>("برای تغییر مزد روزانه، پرچم‌های معافیت، تعداد فرزند، سخت و زیان‌آور یا شماره شبا، دلیل تغییر را بنویسید؛ تغییر پس از تایید نفر دوم اعمال می‌شود.");
+                if (await _uow.Set<FnEmployeeChange>().AnyAsync(c => c.EmployeeId == e.Id && c.Status == FnChangeStatus.Pending, ct)) return Bad<EmployeeDto>("تغییر دیگری برای این کارمند در انتظار تایید است؛ ابتدا آن را تایید یا رد کنید.");
+                DateTime? effective = null;
+                if (wage != e.DailyWage)
+                {
+                    effective = wageFrom ?? WageHistory.MonthStart(DateTime.Today);
+                    string guard = await WageMonthGuardAsync(e.Id, effective.Value, ct);
+                    if (guard != null) return Bad<EmployeeDto>(guard);
+                }
+                change = new FnEmployeeChange
+                {
+                    Employee = e, Kind = FnEmployeeChangeKind.Update, Status = FnChangeStatus.Pending, ProposedJson = GuardedJson(proposed), WageEffectiveFrom = effective,
+                    Reason = reason.Length > 500 ? reason.Substring(0, 500) : reason, ProposedByUserId = Me, ProposedAt = now,
+                };
+                _uow.Set<FnEmployeeChange>().Add(change);
+            }
+
             e.PersonnelCode = code; e.FirstName = Clean(dto.FirstName); e.LastName = Clean(dto.LastName); e.FatherName = Clean(dto.FatherName); e.NationalCode = national;
-            e.BirthDate = dto.BirthDate?.Date; e.BirthPlace = Clean(dto.BirthPlace); e.IdentityCardNumber = Clean(dto.IdentityCardNumber); e.Nationality = Clean(dto.Nationality); e.Gender = dto.Gender; e.MaritalStatus = dto.MaritalStatus; e.ChildrenCount = dto.ChildrenCount;
+            e.BirthDate = dto.BirthDate?.Date; e.BirthPlace = Clean(dto.BirthPlace); e.IdentityCardNumber = Clean(dto.IdentityCardNumber); e.Nationality = Clean(dto.Nationality); e.Gender = dto.Gender; e.MaritalStatus = dto.MaritalStatus;
             e.InsuranceNumber = Clean(dto.InsuranceNumber); e.InsuranceJobCode = Clean(dto.InsuranceJobCode); e.WorkshopId = dto.WorkshopId; e.HireDate = dto.HireDate.Date;
             e.EndDate = dto.EndDate?.Date; e.EmploymentType = dto.EmploymentType; e.JobTitle = Clean(dto.JobTitle); e.Unit = Clean(dto.Unit); e.CostCenterId = dto.CostCenterId;
-            e.DefaultWorkOrderId = dto.DefaultWorkOrderId; e.BankIban = iban; e.DailyWage = wage; e.ExemptionFlags = flags; e.HardAndHarmful = dto.HardAndHarmful;
+            e.DefaultWorkOrderId = dto.DefaultWorkOrderId;
             e.UserId = dto.UserId; e.QualifiedPersonId = dto.QualifiedPersonId; e.IsActive = dto.IsActive;
+            if (guardedOnRow) { e.BankIban = iban; e.DailyWage = wage; e.ChildrenCount = dto.ChildrenCount; e.ExemptionFlags = flags; e.HardAndHarmful = dto.HardAndHarmful; }
+
+            if (created || e.PendingApproval)
+            {
+                // the request of the first approval follows what is on the row (a rejected one is submitted again by saving the employee again)
+                FnEmployeeChange open = created ? null : await _uow.Set<FnEmployeeChange>().FirstOrDefaultAsync(c => c.EmployeeId == e.Id && c.Status == FnChangeStatus.Pending && c.Kind == FnEmployeeChangeKind.Create, ct);
+                if (open != null)
+                {
+                    open.ProposedJson = GuardedJson(proposed);
+                    if (wageFrom.HasValue) open.WageEffectiveFrom = wageFrom;
+                    change = open;
+                }
+                else
+                {
+                    string reason = Clean(dto.ChangeReason) ?? "ثبت کارمند جدید";
+                    change = new FnEmployeeChange
+                    {
+                        Employee = e, Kind = FnEmployeeChangeKind.Create, Status = FnChangeStatus.Pending, ProposedJson = GuardedJson(proposed), WageEffectiveFrom = wageFrom ?? WageHistory.MonthStart(e.HireDate),
+                        Reason = reason.Length > 500 ? reason.Substring(0, 500) : reason, ProposedByUserId = Me, ProposedAt = now,
+                    };
+                    _uow.Set<FnEmployeeChange>().Add(change);
+                }
+            }
+
+            // who touched the master row since the last payroll run it was part of (they may not approve the next one)
+            if (created || change != null || _uow.Entry(e).State == EntityState.Modified)
+            {
+                e.EditorUserIds = WithEditor(e.EditorUserIds, Me); e.LastEditedByUserId = Me; e.LastEditedAt = now;
+            }
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<EmployeeDto>(Conflict); }
+            if (change != null)
+                await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "empchg:" + change.Id, true, "finance", "employee-change", change.Id,
+                    $"تایید {(change.Kind == FnEmployeeChangeKind.Create ? "کارمند جدید" : "تغییر مشخصات حقوقی کارمند")} با کد پرسنلی {e.PersonnelCode}", "/finance/payroll/employee-changes",
+                    await SelfApproval.GateRolesAsync(_uow, e, FinanceRoles.PayrollUsers, true, ct), ct);
             return await GetEmployeeAsync(e.Id, ct);
         }
 
@@ -261,10 +358,12 @@ namespace Services.NasbNiro.Finance
 
         // ================================================================================== loans and advances
 
-        private static LoanDto ToDto(FnEmployeeLoan l, string personnel) => new LoanDto
+        private static LoanDto ToDto(FnEmployeeLoan l, string personnel, Dictionary<int, string> names = null) => new LoanDto
         {
             Id = l.Id, EmployeeId = l.EmployeeId, PersonnelCode = personnel, Kind = l.Kind, Title = l.Title, Principal = l.Principal, InstallmentAmount = l.InstallmentAmount,
             Balance = l.Balance, FirstYear = l.FirstYear, FirstMonth = l.FirstMonth, IsActive = l.IsActive,
+            ApprovalStatus = l.ApprovalStatus.ToString(), CreatedByName = names?.Name(l.CreatedByUserId), ApprovedByName = names?.Name(l.ApprovedByUserId), ApprovedAt = l.ApprovedAt,
+            RejectReason = l.RejectReason,
         };
 
         public async Task<ResponseDto<PagedList<LoanDto>>> GetLoansAsync(LoanQuery query, CancellationToken ct)
@@ -277,9 +376,14 @@ namespace Services.NasbNiro.Finance
             int total = await q.CountAsync(ct);
             F2Page.Window(query.PageNumber, query.PageSize, total, out int number, out int size);
             List<FnEmployeeLoan> rows = await q.Include(l => l.Employee).OrderByDescending(l => l.Id).Skip((number - 1) * size).Take(size).ToListAsync(ct);
-            return ResponseDtoHelper.Ok(F2Page.Make(rows.Select(l => ToDto(l, l.Employee?.PersonnelCode)).ToList(), total, number, size));
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(l => (int?)l.CreatedByUserId).Concat(rows.Select(l => l.ApprovedByUserId)), ct);
+            return ResponseDtoHelper.Ok(F2Page.Make(rows.Select(l => ToDto(l, l.Employee?.PersonnelCode, names)).ToList(), total, number, size));
         }
 
+        /// <summary>
+        /// A loan or advance is a request (release R1f): it is recovered from the pay and paid out only after the finance manager - never the person who created or changed it - approved it.
+        /// Changing a loan that is not yet recovered sends it back to the approval; a loan that has instalments behind it can only be switched off (never on again without a new request).
+        /// </summary>
         public async Task<ResponseDto<LoanDto>> SaveLoanAsync(SaveLoanDto dto, CancellationToken ct)
         {
             if (!CanWrite) return Bad<LoanDto>(NotAllowed);
@@ -291,24 +395,46 @@ namespace Services.NasbNiro.Finance
             if (principal <= 0) return Bad<LoanDto>("مبلغ وام یا مساعده باید بیشتر از صفر باشد.");
             if (installment <= 0 || installment > principal) return Bad<LoanDto>("مبلغ قسط باید بیشتر از صفر و حداکثر برابر مبلغ وام باشد.");
             if (!ValidYear(dto.FirstYear) || dto.FirstMonth < 1 || dto.FirstMonth > 12) return Bad<LoanDto>("ماه شروع کسر نامعتبر است.");
+            DateTimeOffset now = DateTimeOffset.Now;
             FnEmployeeLoan l;
             if (dto.Id.HasValue)
             {
                 l = await _uow.Set<FnEmployeeLoan>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value, ct);
                 if (l == null) return ResponseDtoHelper.NotFound<LoanDto>("وام پیدا نشد.");
-                if (l.Balance != l.Principal) return Bad<LoanDto>("از این وام قسطی کسر شده است؛ فقط فعال یا غیرفعال کردن آن ممکن است.");
+                if (l.EmployeeId != emp.Id) return Bad<LoanDto>("کارمند وام تغییر نمی‌کند؛ وام جدید ثبت کنید.");
+                if (l.Balance != l.Principal)
+                {
+                    bool sameTerms = l.EmployeeId == emp.Id && l.Kind == dto.Kind && l.Principal == principal && l.InstallmentAmount == installment && l.FirstYear == dto.FirstYear && l.FirstMonth == dto.FirstMonth;
+                    if (!sameTerms || (dto.IsActive && !l.IsActive)) return Bad<LoanDto>("از این وام قسطی کسر شده است؛ فقط غیرفعال کردن آن ممکن است.");
+                    if (dto.IsActive == l.IsActive) return ResponseDtoHelper.Ok(ToDto(l, emp.PersonnelCode, await InventoryUsers.GetNamesAsync(_uow, new int?[] { l.CreatedByUserId, l.ApprovedByUserId }, ct)));
+                    l.IsActive = false;
+                    l.EditorUserIds = WithEditor(l.EditorUserIds, Me); l.LastEditedByUserId = Me; l.LastEditedAt = now;
+                    await ReopenCalculatedRunsAsync(null, ct);
+                    try { await _uow.SaveChangesAsync(ct); }
+                    catch (DbUpdateConcurrencyException) { return Bad<LoanDto>(Conflict); }
+                    return ResponseDtoHelper.Ok(ToDto(l, emp.PersonnelCode, await InventoryUsers.GetNamesAsync(_uow, new int?[] { l.CreatedByUserId, l.ApprovedByUserId }, ct)));
+                }
+                // saving a loan without a change does not send it back to the approval
+                if (l.Kind == dto.Kind && l.Principal == principal && l.InstallmentAmount == installment && l.FirstYear == dto.FirstYear && l.FirstMonth == dto.FirstMonth && l.IsActive == dto.IsActive && Clean(l.Title) == Clean(dto.Title))
+                    return ResponseDtoHelper.Ok(ToDto(l, emp.PersonnelCode, await InventoryUsers.GetNamesAsync(_uow, new int?[] { l.CreatedByUserId, l.ApprovedByUserId }, ct)));
             }
             else
             {
-                l = new FnEmployeeLoan { EmployeeId = emp.Id, CreatedAt = DateTimeOffset.Now, CreatedByUserId = Me };
+                l = new FnEmployeeLoan { EmployeeId = emp.Id, CreatedAt = now, CreatedByUserId = Me };
                 _uow.Set<FnEmployeeLoan>().Add(l);
             }
             l.Kind = dto.Kind; l.Title = Clean(dto.Title); l.Principal = principal; l.InstallmentAmount = installment; l.Balance = principal;
             l.FirstYear = dto.FirstYear; l.FirstMonth = dto.FirstMonth; l.IsActive = dto.IsActive;
+            // a new or changed loan is a request again
+            l.ApprovalStatus = FnLoanApproval.Pending; l.ApprovedByUserId = null; l.ApprovedAt = null; l.RejectReason = null;
+            l.EditorUserIds = WithEditor(l.EditorUserIds, Me); l.LastEditedByUserId = Me; l.LastEditedAt = now;
             await ReopenCalculatedRunsAsync(null, ct);
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<LoanDto>(Conflict); }
-            return ResponseDtoHelper.Ok(ToDto(l, emp.PersonnelCode));
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "loan:" + l.Id, true, "finance", "payroll-loan", l.Id,
+                $"تایید {(l.Kind == FnLoanKind.Advance ? "مساعده" : "وام")} کارمند با کد پرسنلی {emp.PersonnelCode}", "/finance/payroll/loans",
+                await SelfApproval.GateRolesAsync(_uow, emp, FinanceRoles.Managers, true, ct), ct);
+            return ResponseDtoHelper.Ok(ToDto(l, emp.PersonnelCode, await InventoryUsers.GetNamesAsync(_uow, new int?[] { l.CreatedByUserId, l.ApprovedByUserId }, ct)));
         }
 
         // ================================================================================== payroll items
@@ -429,6 +555,9 @@ namespace Services.NasbNiro.Finance
             if (key == null || !Regex.IsMatch(key, "^[A-Za-z][A-Za-z0-9]{0,59}$")) return Bad<PayrollRateDto>("کلید باید حرف و عدد انگلیسی باشد.");
             if (Clean(dto.Source) == null) return Bad<PayrollRateDto>("منبع قانونی مقدار را وارد کنید (ماده قانون، بخشنامه یا مصوبه).");
             if (dto.Value < 0) return Bad<PayrollRateDto>("مقدار نمی‌تواند منفی باشد.");
+            // release R1f: the keys that replaced hard-coded numbers have a range (the month length, the night window, the sick-pay basis ...)
+            string range = PayrollKeys.Validate(key, dto.Value);
+            if (range != null) return Bad<PayrollRateDto>(range);
             FnPayrollRateTable r = await _uow.Set<FnPayrollRateTable>().FirstOrDefaultAsync(x => x.Year == dto.Year && x.Key == key, ct);
             if (r == null)
             {
@@ -496,6 +625,7 @@ namespace Services.NasbNiro.Finance
                 DaysWorked = s.DaysWorked, OvertimeHours = s.OvertimeHours, NightHours = s.NightHours, HolidayHours = s.HolidayHours, ShiftType = s.ShiftType,
                 PaidLeaveDays = s.PaidLeaveDays, SickLeaveDays = s.SickLeaveDays, UnpaidLeaveDays = s.UnpaidLeaveDays, AbsenceDays = s.AbsenceDays, MissionDays = s.MissionDays, Inputs = inputs,
                 WorkOrders = (s.WorkOrders ?? new List<FnAttendanceWorkOrder>()).Select(w => new AttendanceWorkOrderDto { WorkOrderId = w.WorkOrderId, Hours = w.Hours }).ToList(),
+                Source = s.Source.ToString(), Locked = s.Locked,
             };
         }
 
@@ -511,7 +641,15 @@ namespace Services.NasbNiro.Finance
             return ResponseDtoHelper.Ok(F2Page.Make(rows.Select(s => ToDto(s, s.Employee)).ToList(), total, number, size));
         }
 
-        private async Task<(string Error, FnAttendanceSheet Sheet, FnEmployee Employee)> SaveSheetAsync(SaveAttendanceDto dto, CancellationToken ct)
+        /// <summary>The monthly overtime cap (hours) of the attendance policy: the overtime and the holiday work of a sheet share it.</summary>
+        private async Task<decimal> OvertimeCapHoursAsync(CancellationToken ct)
+        {
+            global::Entities.Model.NasbNiro.Office.OfAttendancePolicy policy = await _uow.Set<global::Entities.Model.NasbNiro.Office.OfAttendancePolicy>().AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct)
+                ?? new global::Entities.Model.NasbNiro.Office.OfAttendancePolicy();
+            return policy.MonthlyOvertimeCapMinutes / 60m;
+        }
+
+        private async Task<(string Error, FnAttendanceSheet Sheet, FnEmployee Employee)> SaveSheetAsync(SaveAttendanceDto dto, FnSheetSource source, decimal capHours, CancellationToken ct)
         {
             if (!ValidYear(dto.Year) || dto.Month < 1 || dto.Month > 12) return ("سال یا ماه نامعتبر است.", null, null);
             FnEmployee emp = null;
@@ -524,14 +662,14 @@ namespace Services.NasbNiro.Finance
             if (emp == null) return ("کارمند پیدا نشد.", null, null);
             if (!emp.IsActive) return ("کارمند غیرفعال است.", null, null);
             if (await LockedAsync(dto.Year, dto.Month, emp.WorkshopId, ct)) return ("فیش حقوق این ماه تایید شده و کارکرد قابل تغییر نیست.", null, null);
-            if (dto.DaysWorked < 0 || dto.DaysWorked > 31 || dto.PaidLeaveDays < 0 || dto.MissionDays < 0 || dto.UnpaidLeaveDays < 0 || dto.AbsenceDays < 0
-                || dto.DaysWorked + dto.PaidLeaveDays + dto.MissionDays > 31)
-                return ("روزهای کارکرد نامعتبر است (حداکثر ۳۱ روز).", null, null);
-            int monthDays = PersianCal.DaysIn(dto.Year, dto.Month);
-            if (dto.DaysWorked + dto.UnpaidLeaveDays + dto.AbsenceDays > monthDays)
-                return ($"روزهای کارکرد و غیبت از تعداد روزهای این ماه ({monthDays} روز) بیشتر است.", null, null);
-            if (dto.OvertimeHours < 0 || dto.NightHours < 0 || dto.HolidayHours < 0 || dto.OvertimeHours > 400 || dto.NightHours > 400 || dto.HolidayHours > 400) return ("ساعات کارکرد نامعتبر است.", null, null);
-            if (dto.ShiftType < 0 || dto.ShiftType > 3) return ("نوع نوبت‌کاری نامعتبر است.", null, null);
+            // release R1f: the same checks as the HR close and a correction (the bound is the policy cap of the month, not a fixed number of hours)
+            var numbers = new ViewModels.NasbNiro.OfficeDtos.SheetNumbersDto
+            {
+                DaysWorked = dto.DaysWorked, OvertimeHours = dto.OvertimeHours, NightHours = dto.NightHours, HolidayHours = dto.HolidayHours, ShiftType = dto.ShiftType, PaidLeaveDays = dto.PaidLeaveDays,
+                SickLeaveDays = dto.SickLeaveDays, UnpaidLeaveDays = dto.UnpaidLeaveDays, AbsenceDays = dto.AbsenceDays, MissionDays = dto.MissionDays,
+            };
+            string numberError = SheetNumbers.Validate(numbers, dto.Year, dto.Month, capHours);
+            if (numberError != null) return (numberError, null, null);
 
             var inputs = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
             if (dto.Inputs != null && dto.Inputs.Count > 0)
@@ -559,16 +697,24 @@ namespace Services.NasbNiro.Finance
             }
 
             FnAttendanceSheet sheet = await _uow.Set<FnAttendanceSheet>().Include(s => s.WorkOrders).FirstOrDefaultAsync(s => s.EmployeeId == emp.Id && s.Year == dto.Year && s.Month == dto.Month, ct);
-            if (sheet == null)
+            // release R1f review M2: for a month HR has prepared or confirmed, payroll neither types nor imports a new sheet nor changes the numbers of one (inputs and work-order hours stay payroll's own)
+            if (sheet == null || !SheetNumbers.Same(SheetNumbers.Of(sheet), numbers))
             {
-                sheet = new FnAttendanceSheet { EmployeeId = emp.Id, Year = dto.Year, Month = dto.Month, WorkOrders = new List<FnAttendanceWorkOrder>() };
+                string closedRefusal = HrClose.SheetEntryRefusal(dto.Year, dto.Month, await HrClose.GetAsync(_uow, dto.Year, dto.Month, ct), sheet != null);
+                if (closedRefusal != null) return (closedRefusal, null, null);
+            }
+            if (sheet != null && sheet.Locked && !SheetNumbers.Same(SheetNumbers.Of(sheet), numbers))
+                return ("ارقام کارکرد این برگه با بستن ماه توسط منابع انسانی قفل شده است؛ برای تغییر آن «درخواست اصلاح کارکرد» ثبت کنید تا منابع انسانی (نفر دیگری) آن را تایید کند.", null, null);
+            bool isNew = sheet == null;
+            string beforeNumbers = isNew ? null : SheetNumbers.ToJson(SheetNumbers.Of(sheet)), beforeInputs = sheet?.InputsJson, beforeOrders = isNew ? null : OrdersKey(sheet.WorkOrders);
+            if (isNew)
+            {
+                sheet = new FnAttendanceSheet { EmployeeId = emp.Id, Year = dto.Year, Month = dto.Month, WorkOrders = new List<FnAttendanceWorkOrder>(), Source = source };
                 _uow.Set<FnAttendanceSheet>().Add(sheet);
             }
-            sheet.DaysWorked = dto.DaysWorked; sheet.OvertimeHours = dto.OvertimeHours; sheet.NightHours = dto.NightHours; sheet.HolidayHours = dto.HolidayHours;
-            sheet.ShiftType = dto.ShiftType; sheet.PaidLeaveDays = dto.PaidLeaveDays; sheet.UnpaidLeaveDays = dto.UnpaidLeaveDays; sheet.AbsenceDays = dto.AbsenceDays;
-            sheet.MissionDays = dto.MissionDays;
+            else if (!sheet.Locked) sheet.Source = source;
+            if (!sheet.Locked) SheetNumbers.Apply(numbers, sheet);
             sheet.InputsJson = inputs.Count == 0 ? null : JsonSerializer.Serialize(inputs);
-            sheet.UpdatedAt = DateTimeOffset.Now; sheet.UpdatedByUserId = Me;
             foreach (FnAttendanceWorkOrder gone in sheet.WorkOrders.Where(x => workOrders.All(w => w.WorkOrderId != x.WorkOrderId)).ToList())
             {
                 sheet.WorkOrders.Remove(gone);
@@ -580,15 +726,25 @@ namespace Services.NasbNiro.Finance
                 if (existing != null) existing.Hours = w.Hours;
                 else sheet.WorkOrders.Add(new FnAttendanceWorkOrder { WorkOrderId = w.WorkOrderId, Hours = w.Hours });
             }
+            // the row is touched only when something changed: the editor may not approve the payroll run that uses the row
+            bool changed = isNew || beforeNumbers != SheetNumbers.ToJson(SheetNumbers.Of(sheet)) || beforeInputs != sheet.InputsJson || beforeOrders != OrdersKey(sheet.WorkOrders);
+            if (changed)
+            {
+                sheet.UpdatedAt = DateTimeOffset.Now; sheet.UpdatedByUserId = Me;
+                sheet.EditorUserIds = WithEditor(sheet.EditorUserIds, Me);
+            }
             return (null, sheet, emp);
         }
+
+        private static string OrdersKey(IEnumerable<FnAttendanceWorkOrder> orders) =>
+            string.Join(";", (orders ?? new List<FnAttendanceWorkOrder>()).OrderBy(w => w.WorkOrderId).Select(w => w.WorkOrderId + ":" + w.Hours.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)));
 
         public async Task<ResponseDto<AttendanceDto>> SaveAttendanceAsync(SaveAttendanceDto dto, CancellationToken ct)
         {
             if (!CanWrite) return Bad<AttendanceDto>(NotAllowed);
             if (dto == null) return Bad<AttendanceDto>("اطلاعات ارسال‌شده کامل نیست.");
             await EnsureAsync(ct);
-            var result = await SaveSheetAsync(dto, ct);
+            var result = await SaveSheetAsync(dto, FnSheetSource.Manual, await OvertimeCapHoursAsync(ct), ct);
             if (result.Error != null) return Bad<AttendanceDto>(result.Error);
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<AttendanceDto>(Conflict); }
@@ -601,13 +757,14 @@ namespace Services.NasbNiro.Finance
             if (dto == null || dto.Rows == null || dto.Rows.Count == 0) return Bad<ImportAttendanceResultDto>("ردیفی برای ورود ارسال نشده است.");
             if (dto.Rows.Count > 2000) return Bad<ImportAttendanceResultDto>("حداکثر ۲۰۰۰ ردیف در هر بار.");
             await EnsureAsync(ct);
+            decimal capHours = await OvertimeCapHoursAsync(ct);
             var outcome = new ImportAttendanceResultDto();
             int row = 0;
             foreach (SaveAttendanceDto r in dto.Rows)
             {
                 row++;
                 r.Year = dto.Year; r.Month = dto.Month;
-                var result = await SaveSheetAsync(r, ct);
+                var result = await SaveSheetAsync(r, FnSheetSource.Import, capHours, ct);
                 if (result.Error != null) { outcome.Errors.Add($"ردیف {row}: {result.Error}"); continue; }
                 try { await _uow.SaveChangesAsync(ct); outcome.Imported++; }
                 catch (DbUpdateException)

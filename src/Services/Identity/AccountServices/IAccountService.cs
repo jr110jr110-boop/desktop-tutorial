@@ -26,8 +26,11 @@ namespace Services.Identity.AccountServices
         ValueTask<ResponseDto<ResponseLoginUserDto>> ChangeTemporaryPasswordAsync(ChangeTemporaryPasswordDto dto, CancellationToken cancellationToken);
         ValueTask<ResponseDto<bool>> LogoutAsync(string userId, string refreshToken, CancellationToken cancellationToken);
 
-        /// <summary>PMO only; nobody changes his or her own roles; a sensitive role becomes a request for a second PMO user to approve.</summary>
-        ValueTask<ResponseDto<string>> ChangeRoleAsync(ChangeRoleDto changeRoleDto, CancellationToken cancellationToken);
+        /// <summary>
+        /// PMO only; nobody changes his or her own roles (the one exception: a PMO user may step down from PMO, unless he is the last active one);
+        /// a sensitive role, and the removal of the PMO role, become a request for a second PMO user to approve.
+        /// </summary>
+        ValueTask<ResponseDto<ChangeRoleResultDto>> ChangeRoleAsync(ChangeRoleDto changeRoleDto, CancellationToken cancellationToken);
         ValueTask<ResponseDto<IEnumerable<ResponseRole>>> GetAllRolesAsync(CancellationToken cancellationToken);
         ValueTask<ResponseDto<ResponseUserDto>> GetUserInfoAsync(CancellationToken cancellationToken);
 
@@ -44,7 +47,7 @@ namespace Services.Identity.AccountServices
         /// <summary>The signed-in user's own record, or any user's record for the PMO.</summary>
         ValueTask<ResponseDto<ResponseUserDto>> GetResponseUserDtoByIdAsync(GetUserDto getUserDto, CancellationToken cancellationToken);
 
-        /// <summary>PMO only; not the own account.</summary>
+        /// <summary>PMO only; not the own account. The deletion of a PMO user is a request that a different PMO user approves (the answer is a success with data false and a message that says so).</summary>
         Task<ResponseDto<bool>> DeleteUserAsync(int userId, CancellationToken cancellationToken);
         ValueTask<ResponseDto<IEnumerable<DeleteUserResultDto>>> DeleteUserCollectionAsync(IEnumerable<int> userIds, CancellationToken cancellationToken);
         Task<ResponseDto<ResponseDashboardUserDto>> GetUserDashboardInfoAsync(CancellationToken cancellationToken);

@@ -67,6 +67,8 @@ namespace Services.NasbNiro.Finance
             if (dto == null) return Bad<ReceiptDto>("اطلاعات ارسال‌شده کامل نیست.");
             await FinanceSeed.EnsureAsync(_uow, ct);
             DateTime date = dto.Date == default ? DateTime.Today : dto.Date.Date;
+            string closedDate = await ClosedPeriodGuard.MessageAsync(_uow, date, ct);   // M7
+            if (closedDate != null) return Bad<ReceiptDto>(closedDate);
             if (!dto.CustomerId.HasValue) return Bad<ReceiptDto>("مشتری (پرداخت‌کننده) را مشخص کنید.");
             FnCustomer customer = await _uow.Set<FnCustomer>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value, ct);
             if (customer == null || !customer.IsActive) return Bad<ReceiptDto>("مشتری پیدا نشد یا غیرفعال است.");
@@ -187,7 +189,7 @@ namespace Services.NasbNiro.Finance
             string receiptAction = dto.Action.Trim().ToLowerInvariant();
             if (r.SourceType != null)
             {
-                string facilityRefusal = FacilityActionRefusal(receiptAction, r.CreatedByUserId, r.EditorUserIds, r.ApprovedByUserId);
+                string facilityRefusal = await FacilityActionRefusalAsync(receiptAction, r.CreatedByUserId, r.EditorUserIds, r.ApprovedByUserId, r.SourceType, r.SourceId, ct);
                 if (facilityRefusal != null) return Bad<ReceiptDto>(facilityRefusal);
             }
             switch (receiptAction)

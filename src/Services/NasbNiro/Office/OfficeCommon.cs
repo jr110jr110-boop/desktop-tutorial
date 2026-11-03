@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
+using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
@@ -26,8 +27,20 @@ namespace Services.NasbNiro.Office
         /// <summary>Organisation chart, positions, shifts and devices.</summary>
         public const string OrgAdmins = "HR,PMO,CEO";
 
+        /// <summary>Who creates and rotates time-clock devices (release R1f): HR and PMO only, the CEO does not.</summary>
+        public const string DeviceAdmins = "HR,PMO";
+
         /// <summary>Numbering rules and letter templates.</summary>
         public const string LetterAdmins = "SECRETARIAT,PMO,CEO";
+
+        /// <summary>R1a2 (C1): the list of correspondents (customers, suppliers, authorities) is kept by the secretariat and the PMO; everybody else only reads it.</summary>
+        public const string PartyEditors = "SECRETARIAT,PMO";
+
+        /// <summary>
+        /// R1a2 (L10): the roles that create a meeting without holding a position of the organisation chart. A holder of a position (or his approved deputy) creates one as well,
+        /// which covers the chair and the secretary of the meeting; a signed-in user with neither does not.
+        /// </summary>
+        public const string MeetingCreators = "SECRETARIAT,PMO,CEO";
 
         /// <summary>Attendance of everybody; ordinary users see their own days only.</summary>
         public const string AttendanceReaders = "HR,CEO";
@@ -48,6 +61,8 @@ namespace Services.NasbNiro.Office
         public const string Concurrency = "اطلاعات هم‌زمان توسط کاربر دیگری تغییر کرد. صفحه را دوباره باز کنید و دوباره تلاش کنید.";
 
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+        /// <summary>A free text cut to the length of its column (the database refuses a longer text; the in-memory test database does not).</summary>
+        public static string Cap(string s, int max) => s != null && s.Length > max ? s.Substring(0, max) : s;
         public static ResponseDto<T> Bad<T>(string message) => ResponseDtoHelper.BadRequest<T>(message);
         public static ResponseDto<T> NotFound<T>(string message) => ResponseDtoHelper.NotFound<T>(message);
 
@@ -152,6 +167,34 @@ namespace Services.NasbNiro.Office
                         result.Add(new ActingPosition { PositionId = id, OnBehalf = true, Since = delegations.Where(d => d.PositionId == id).Min(d => d.FromDate) });
             }
             return result;
+        }
+
+        /// <summary>The manager position of the employee's unit; the unit above when the employee is the manager. Null when the chart does not say.</summary>
+        public static async Task<int?> FindApproverAsync(IUnitOfWork uow, FnEmployee emp, CancellationToken ct)
+        {
+            int employeeId = emp.Id;
+            int? userId = emp.UserId;
+            OfPosition own = await uow.Set<OfPosition>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && (p.EmployeeId == employeeId || (userId != null && p.UserId == userId))).OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
+            if (own == null) return null;
+            int? unitId = own.UnitId;
+            for (int i = 0; i < 12 && unitId.HasValue; i++)
+            {
+                int current = unitId.Value;
+                OfUnit unit = await uow.Set<OfUnit>().AsNoTracking().FirstOrDefaultAsync(u => u.Id == current && !u.Deleted, ct);
+                if (unit == null) return null;
+                if (unit.ManagerPositionId.HasValue && unit.ManagerPositionId.Value != own.Id) return unit.ManagerPositionId;
+                unitId = unit.ParentId;
+            }
+            return null;
+        }
+
+        /// <summary>True when the user holds (or, through an approved delegation, acts for) the unit-manager position of the employee.</summary>
+        public static async Task<bool> IsUnitManagerOfAsync(IUnitOfWork uow, int userId, FnEmployee emp, CancellationToken ct)
+        {
+            int? approver = await FindApproverAsync(uow, emp, ct);
+            if (!approver.HasValue) return false;
+            List<ActingPosition> acting = await ActingAsync(uow, userId, ct);
+            return acting.Any(a => a.PositionId == approver.Value);
         }
 
         public static async Task<Dictionary<int, string>> PositionTitlesAsync(IUnitOfWork uow, IEnumerable<int?> ids, CancellationToken ct)

@@ -18,6 +18,9 @@ namespace Services.NasbNiro.Finance
 
         /// <summary>A pending leg is cancelled: the facility record goes back to the state before the leg was drafted. Nothing is saved here.</summary>
         Task ReleaseAsync(CashLegRequest leg, CancellationToken cancellationToken);
+
+        /// <summary>M4 (review R1t): the user who recorded the facility itself (the loan, the letter of credit or the guarantee); 0 when unknown. That person approves and posts none of its cash legs.</summary>
+        Task<int> RecorderOfAsync(string sourceType, int sourceId, CancellationToken cancellationToken);
     }
 
     /// <summary>The treasury document of a cash leg, as the settlement sees it.</summary>

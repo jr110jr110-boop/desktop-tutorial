@@ -23,6 +23,30 @@ namespace MsTests
     [TestClass]
     public class AuditChainR1Tests
     {
+        [TestMethod]
+        public void H4_The_Chain_Lock_Is_Owned_By_The_Transaction_Inside_An_Outer_Transaction_And_By_The_Session_Outside_One()
+        {
+            string inside = AuditChain.LockSql(true), outside = AuditChain.LockSql(false);
+            StringAssert.Contains(inside, "@LockOwner = N'Transaction'");
+            Assert.IsFalse(inside.Contains("N'Session'"));
+            StringAssert.Contains(outside, "@LockOwner = N'Session'");
+            StringAssert.Contains(inside, AuditChain.LockResource);
+            // the text a refused writer sees is Persian
+            StringAssert.Contains(inside, "ثبت در دفتر حسابرسی ممکن نشد");
+        }
+
+        [TestMethod]
+        public void L2_The_Chain_Key_Is_Derived_From_The_Audit_Key_And_Is_Not_The_Audit_Key()
+        {
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string> { { AuditChain.SettingKey, "test-key-not-a-secret" } }).Build();
+            byte[] chain = AuditChain.KeyFrom(config);
+            Assert.IsNotNull(chain);
+            Assert.AreEqual(32, chain.Length);
+            CollectionAssert.AreNotEqual(System.Text.Encoding.UTF8.GetBytes("test-key-not-a-secret"), chain);
+            CollectionAssert.AreEqual(chain, AuditChain.KeyFrom(config));
+            Assert.IsNull(AuditChain.KeyFrom(new ConfigurationBuilder().Build()));
+        }
+
         private static readonly byte[] KeyOne = System.Text.Encoding.UTF8.GetBytes("chain-test-key-one");
         private static readonly byte[] KeyTwo = System.Text.Encoding.UTF8.GetBytes("chain-test-key-two");
         private static readonly DateTimeOffset T0 = new DateTimeOffset(2026, 10, 28, 9, 30, 0, TimeSpan.FromHours(3.5));
@@ -358,7 +382,7 @@ namespace MsTests
             Log(host, 2, "keyed");
             List<FnAuditLog> rows = Stored(host).OrderBy(r => r.Seq).ToList();
             Assert.IsTrue(rows.All(r => r.Hash.StartsWith("v1:", StringComparison.Ordinal)));
-            byte[] key = System.Text.Encoding.UTF8.GetBytes("a-key-for-the-chain-tests");
+            byte[] key = AuditChain.KeyFrom(new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string> { { AuditChain.SettingKey, "a-key-for-the-chain-tests" } }).Build());   // L2: the derived chain key
             Assert.IsNull(Walk(rows, key));
             Assert.AreEqual(AuditChain.BreakContent, Walk(rows, KeyOne).Kind, "another key does not verify");
             Assert.AreEqual(AuditChain.BreakKeyMissing, Walk(rows, null).Kind);

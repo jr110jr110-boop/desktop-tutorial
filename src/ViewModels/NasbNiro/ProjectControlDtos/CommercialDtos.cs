@@ -66,6 +66,19 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public bool ParseFailed { get; set; }
         public string ParseNote { get; set; }
         public int? DaysToExpiry { get; set; }
+
+        /// <summary>
+        /// R1a2 (M2, M-3): read-only. The request for the release or the cancellation: who asked, when, for which of the two (1 release, 2 cancellation), with which date and note.
+        /// It waits for a different user to confirm with the SAME action (the other action is refused); a request can be withdrawn with guarantees/withdraw.
+        /// <see cref="ReleaseRequestOpen"/> is true while the request can still be confirmed (not older than seven days, the guarantee not closed); after a confirmation the fields stay as the record of who asked.
+        /// </summary>
+        public int? ReleaseRequestedByUserId { get; set; }
+        public DateTime? ReleaseRequestedAt { get; set; }
+        public PcGuaranteeCloseKind? ReleaseRequestedKind { get; set; }
+        public string ReleaseRequestedNote { get; set; }
+        public DateTime? ReleaseRequestedDate { get; set; }
+        public bool ReleaseRequestOpen { get; set; }
+
         public List<PcGuaranteeEventDto> Events { get; set; } = new List<PcGuaranteeEventDto>();
     }
 
@@ -92,6 +105,12 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public DateTime ReleaseDate { get; set; }
         public string Note { get; set; }
         public Guid? DocumentId { get; set; }
+    }
+
+    /// <summary>R1a2 (M-3): takes back the open request for the release or the cancellation. Only the one who asked, or a PMO user, can do it.</summary>
+    public class PcGuaranteeWithdrawDto
+    {
+        public int GuaranteeId { get; set; }
     }
 
     public class PcGuaranteeQuery : PaginationParams

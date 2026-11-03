@@ -9,9 +9,12 @@ using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.ProjectControl;
+using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
+using Services.NasbNiro.Quality;
 using ViewModels.NasbNiro.ProductionDtos;
 
 namespace Services.NasbNiro.Production
@@ -38,12 +41,16 @@ namespace Services.NasbNiro.Production
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly INotificationService _notify;
+        private readonly IItpService _itp;
+        private readonly ILogger<MfDraftingService> _logger;
 
-        public MfDraftingService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify = null)
+        public MfDraftingService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify = null, IItpService itp = null, ILogger<MfDraftingService> logger = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _notify = notify;
+            _itp = itp;
+            _logger = logger;
         }
 
         private int Me
@@ -65,11 +72,14 @@ namespace Services.NasbNiro.Production
                 await DraftOneAsync(process, null, result, added, ct);
                 if (added.Count > 0) await _uow.SaveChangesAsync(ct);
                 FillIds(result, added);
+                await EnsureItpsAsync(result, ct);
                 await SyncGatesAsync(result.OrderIds, ct);
                 return result.Drafted;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // a hook never throws into the process that called it, but a failed drafting must leave a trace (R1p review 19)
+                _logger?.LogWarning(ex, "Production order drafting for process {ProcessId} failed", processId);
                 Detach(added);
                 return 0;
             }
@@ -84,11 +94,13 @@ namespace Services.NasbNiro.Production
                 await DraftWorkOrderAsync(workOrderId, result, added, ct);
                 if (added.Count > 0) await _uow.SaveChangesAsync(ct);
                 FillIds(result, added);
+                await EnsureItpsAsync(result, ct);
                 await SyncGatesAsync(result.OrderIds, ct);
                 return result.Drafted;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger?.LogWarning(ex, "Production order drafting for work order {WorkOrderId} failed", workOrderId);
                 Detach(added);
                 return 0;
             }
@@ -123,6 +135,7 @@ namespace Services.NasbNiro.Production
                 Detach(added);
                 return MfText.Bad<DraftOrdersResultDto>("ثبت دستور تولید ممکن نشد؛ دوباره تلاش کنید.");
             }
+            await EnsureItpsAsync(result, ct);
             await SyncGatesAsync(result.OrderIds, ct);
             return ResponseDtoHelper.Ok(result);
         }
@@ -132,6 +145,36 @@ namespace Services.NasbNiro.Production
             foreach (object e in added)
             {
                 try { _uow.Entry(e).State = EntityState.Detached; } catch (Exception) { /* already detached */ }
+            }
+        }
+
+        /// <summary>
+        /// R1p D19: a production order cannot be released while its work order has no ITP, so the ITP is drafted from the quality template when the orders are drafted (a draft made by the system; the people
+        /// of quality submit it and the client approves it). When quality has no template the note says so, and the release gate refuses the order with the missing ITP named. Never fails the drafting.
+        /// </summary>
+        private async Task EnsureItpsAsync(DraftOrdersResultDto result, CancellationToken ct)
+        {
+            if (_itp == null || result.OrderIds.Count == 0) return;
+            try
+            {
+                var workOrders = await (from o in _uow.Set<MfProductionOrder>().AsNoTracking()
+                                        join w in _uow.Set<WorkOrder>().AsNoTracking() on o.WorkOrderId equals w.Id
+                                        where result.OrderIds.Contains(o.Id)
+                                        select new { w.Id, w.Code }).Distinct().ToListAsync(ct);
+                foreach (var wo in workOrders)
+                {
+                    if (await _uow.Set<Itp>().AnyAsync(i => i.WorkOrderId == wo.Id && !i.Deleted, ct)) continue;
+                    int? created = await _itp.EnsureItpForWorkOrderAsync(wo.Id, ct);
+                    result.Notes.Add(created.HasValue
+                        ? $"برنامه بازرسی و آزمون (ITP) پیش‌نویس دستور کار {wo.Code} از قالب کیفیت ساخته شد؛ پیش از صدور دستور تولید باید به تأیید کارفرما برسد."
+                        : $"برای دستور کار {wo.Code} برنامه بازرسی و آزمون (ITP) ساخته نشد (قالب ITP در ماژول کیفیت پیدا نشد)؛ بدون ITP دستور تولید صادر نمی‌شود.");
+                }
+            }
+            catch (Exception ex)
+            {
+                // the drafting of the orders stands; the release gate names the missing ITP (R1p review 19: the failure is logged and told to the planner instead of being swallowed)
+                _logger?.LogWarning(ex, "Drafting the ITP of the work orders of production orders {OrderIds} failed", string.Join(",", result.OrderIds));
+                result.Notes.Add("ساخت خودکار برنامه بازرسی و آزمون (ITP) با خطا روبه‌رو شد؛ آن را در ماژول کیفیت بسازید، بدون ITP دستور تولید صادر نمی‌شود.");
             }
         }
 
@@ -233,6 +276,7 @@ namespace Services.NasbNiro.Production
                     SetupHoursPlanned = s?.SetupHours ?? 0, RunHoursPlanned = Math.Round((s?.RunHoursPerUnit ?? 0) * quantity, 4),
                     Status = MfOperationStatus.Waiting, InspectionRequirement = inspection, ItpTestType = s?.ItpTestType,
                     IsOutside = s?.IsOutside ?? false, OutsideSupplierId = s?.DefaultSupplierId, OutsideLeadDays = s?.OutsideLeadDays ?? 0,
+                    IsWelding = s?.IsWelding ?? false, WpsId = s != null && s.IsWelding ? s.WpsId : null,
                     CreateDate = now, ModifyDate = now, CreatorUserId = userId, ModifierUserId = userId,
                 });
             }

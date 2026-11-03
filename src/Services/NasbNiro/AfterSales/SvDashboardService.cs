@@ -35,7 +35,11 @@ namespace Services.NasbNiro.AfterSales
             _user = user ?? throw new ArgumentNullException(nameof(user));
         }
 
-        /// <summary>The figures of the service dashboard. The warranty cost is hidden (empty) from a role that is not payroll, finance manager or CEO when an included order's labour came from fewer than three people.</summary>
+        /// <summary>
+        /// The figures of the service dashboard. The warranty cost is a plain figure for every reader: the labour of the orders of this release is absorbed at the standard rate (R1p D2), never one engineer's pay. Only an order
+        /// closed by the earlier release at the engineers' own pay with one or two payslips behind it (<see cref="SvLegacyLabour"/>) hides the cost (empty, flagged) from a reader outside PAYROLL, FINANCEMANAGER and CEO.
+        /// The satisfaction average counts verified answers only (R1p D25: an answer typed in by the people it is about is not a figure until QA has checked it with the customer); the answered but unverified surveys are counted next to it.
+        /// </summary>
         internal static async Task<SvDashboardDto> CoreAsync(IUnitOfWork uow, DateTime asOf, bool seesPayroll, CancellationToken ct)
         {
             var dto = new SvDashboardDto { AsOf = asOf, AsOfText = SlText.Date(asOf) };
@@ -56,17 +60,20 @@ namespace Services.NasbNiro.AfterSales
             DateTimeOffset from = new DateTimeOffset(yearStart, TimeZoneInfo.Local.GetUtcOffset(yearStart));
             var warranty = await uow.Set<SvServiceOrder>().AsNoTracking()
                 .Where(o => !o.Deleted && o.Status == SvOrderStatus.Closed && o.Decision == SvWarrantyDecision.Warranty && o.ClosedAt >= from)
-                .Select(o => new { o.LabourAmount, o.PartsAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
+                .Select(o => new { o.LabourAmount, o.PartsAmount, o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
             dto.WarrantyOrdersYtd = warranty.Count;
-            dto.WarrantyCostHidden = !seesPayroll && warranty.Any(o => SvPrivacy.LabourProtected(o.LabourEmployeeCount, o.LabourPayrollEmployeeCount));
+            dto.WarrantyCostHidden = !seesPayroll && warranty.Any(o => SvLegacyLabour.IsProtected(o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount));
             dto.WarrantyCostYtd = dto.WarrantyCostHidden ? (decimal?)null : warranty.Sum(o => o.LabourAmount + o.PartsAmount);
 
             dto.OpenOrders = await uow.Set<SvServiceOrder>().AsNoTracking().CountAsync(o => !o.Deleted && (o.Status == SvOrderStatus.Draft || o.Status == SvOrderStatus.Planned || o.Status == SvOrderStatus.InProgress), ct);
             dto.OrdersWaitingClose = await uow.Set<SvServiceOrder>().AsNoTracking().CountAsync(o => !o.Deleted && o.Status == SvOrderStatus.InProgress, ct);
             dto.GoodwillWaiting = await uow.Set<SvServiceOrder>().AsNoTracking().CountAsync(o => !o.Deleted && o.GoodwillRequestedAt != null && o.Decision != SvWarrantyDecision.Goodwill && (o.Status == SvOrderStatus.Draft || o.Status == SvOrderStatus.Planned || o.Status == SvOrderStatus.InProgress), ct); // the same orders as the goodwill gate (SvGates.GoodwillAsync): every order that is not closed or cancelled
             dto.SurveysDrafted = await uow.Set<SlSurvey>().AsNoTracking().CountAsync(s => !s.Deleted && s.Status == SlSurveyStatus.Drafted, ct);
-            List<decimal> averages = await uow.Set<SlSurvey>().AsNoTracking().Where(s => !s.Deleted && s.Status == SlSurveyStatus.Answered && s.AverageScore != null).Select(s => s.AverageScore.Value).ToListAsync(ct);
+            // R1p D25: verified answers only; the unverified ones are counted, not averaged
+            List<decimal> averages = await SvSurveyMath.VerifiedAnswers(uow.Set<SlSurvey>().AsNoTracking()).Select(s => s.AverageScore.Value).ToListAsync(ct);
             dto.SurveyAverageScore = averages.Count == 0 ? (decimal?)null : SlText.R2(averages.Average());
+            dto.SurveysVerified = averages.Count;
+            dto.SurveysUnverified = await SvSurveyMath.UnverifiedAnswers(uow.Set<SlSurvey>().AsNoTracking()).CountAsync(ct);
             return dto;
         }
 
@@ -95,17 +102,32 @@ namespace Services.NasbNiro.AfterSales
             dto.RepeatFailures = failures.Where(g => g.Count() > 1).OrderByDescending(g => g.Count()).ThenBy(g => g.Key)
                 .Select(g => new SvRepeatFailureDto { UnitId = g.Key, UnitTag = byId[g.Key].Tag, Failures = g.Count(), Repeats = SvKpiMath.Repeats(g.Count()) }).ToList();
             dto.TotalFailures = failures.Sum(g => g.Count());
-            dto.TotalRunningHours = units.Sum(u => u.RunningHours);
-            dto.MtbfHours = SvKpiMath.Mtbf(dto.TotalRunningHours, dto.TotalFailures);
+
+            // R1p D36: MTBF = the hours the ACTIVE units ran inside the period / the failures of the same units in the same period. The hours come from the meter readings of the closed orders;
+            // a unit whose period cannot be measured (no reading before the period, or none inside it) is left out of the hours and of the failures, and counted in MtbfUnitsExcluded.
+            var readingRows = await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => !o.Deleted && o.Status == SvOrderStatus.Closed && o.RunningHoursReading != null && o.ClosedAt != null)
+                .Select(o => new { o.UnitId, o.ClosedAt, Reading = o.RunningHoursReading.Value }).ToListAsync(ct);
+            var readingsByUnit = readingRows.GroupBy(r => r.UnitId).ToDictionary(g => g.Key, g => g.Select(r => (r.ClosedAt.Value.LocalDateTime.Date, r.Reading)).ToList());
+            var periodHours = new Dictionary<int, decimal>();
+            foreach (SvInstalledUnit u in units.Where(u => !u.Decommissioned))
+            {
+                decimal? h = SvKpiMath.PeriodHours(readingsByUnit.GetValueOrDefault(u.Id) ?? new List<(DateTime, decimal)>(), query.From, query.To, u.CommissioningDate ?? u.HandoverDate);
+                if (h.HasValue) periodHours[u.Id] = h.Value;
+            }
+            dto.MtbfUnits = periodHours.Count;
+            dto.MtbfUnitsExcluded = units.Count(u => !u.Decommissioned) - periodHours.Count;
+            dto.TotalRunningHours = periodHours.Values.Sum();
+            dto.MtbfFailures = failures.Where(g => periodHours.ContainsKey(g.Key)).Sum(g => g.Count());
+            dto.MtbfHours = SvKpiMath.Mtbf(dto.TotalRunningHours, dto.MtbfFailures);
 
             var orders = await _uow.Set<SvServiceOrder>().AsNoTracking().Where(o => !o.Deleted && o.Status == SvOrderStatus.Closed && o.Decision == SvWarrantyDecision.Warranty)
-                .Select(o => new { o.UnitId, o.LabourAmount, o.PartsAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
+                .Select(o => new { o.UnitId, o.LabourAmount, o.PartsAmount, o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount }).ToListAsync(ct);
             foreach (var g in units.GroupBy(u => u.ProductType).OrderBy(g => g.Key))
             {
                 var typeOrders = orders.Where(o => byId.ContainsKey(o.UnitId) && byId[o.UnitId].ProductType == g.Key).ToList();
-                int count = failures.Where(f => byId[f.Key].ProductType == g.Key).Sum(f => f.Count());
-                decimal hours = g.Sum(u => u.RunningHours);
-                bool hidden = !seesPayroll && typeOrders.Any(o => SvPrivacy.LabourProtected(o.LabourEmployeeCount, o.LabourPayrollEmployeeCount));
+                int count = failures.Where(f => byId[f.Key].ProductType == g.Key && periodHours.ContainsKey(f.Key)).Sum(f => f.Count());
+                decimal hours = g.Where(u => periodHours.ContainsKey(u.Id)).Sum(u => periodHours[u.Id]);
+                bool hidden = !seesPayroll && typeOrders.Any(o => SvLegacyLabour.IsProtected(o.LabourPooledAmount, o.LabourEmployeeCount, o.LabourPayrollEmployeeCount));
                 dto.ByProduct.Add(new SvProductKpiDto
                 {
                     ProductType = g.Key, ProductTypeText = SlText.Product(g.Key), Units = g.Count(), RunningHours = hours, Failures = count, MtbfHours = SvKpiMath.Mtbf(hours, count),

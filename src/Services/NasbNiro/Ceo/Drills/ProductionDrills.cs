@@ -212,11 +212,8 @@ namespace Services.NasbNiro.Ceo.Drills
                     ["goodQty"] = o.GoodQty, ["scrapQty"] = o.ScrapQty, ["availabilityPercent"] = o.AvailabilityPercent, ["performancePercent"] = o.PerformancePercent, ["qualityPercent"] = o.QualityPercent,
                     ["oeePercent"] = o.OeePercent,
                 }).ToList();
-                OeeDto total = MfKpi.Compute(new OeeDto
-                {
-                    PlannedHours = oee.Sum(o => o.PlannedHours), DowntimeHours = oee.Sum(o => o.DowntimeHours), BookedRunHours = oee.Sum(o => o.BookedRunHours), StandardHours = oee.Sum(o => o.StandardHours),
-                    GoodQty = oee.Sum(o => o.GoodQty), ScrapQty = oee.Sum(o => o.ScrapQty),
-                });
+                // the plant total is the module's own total (R1p D29: ISO 22400-2 on machine run time), never a second formula
+                OeeDto total = MfKpi.Total(oee);
                 return DrillResult.Slice(rows, c, "OEE = دسترس‌پذیری × عملکرد × کیفیت؛ بدون کارکرد یا تعداد ثبت‌شده خالی است.", new Dictionary<string, object>
                 {
                     ["oeePercent"] = total.OeePercent, ["availabilityPercent"] = total.AvailabilityPercent, ["performancePercent"] = total.PerformancePercent, ["qualityPercent"] = total.QualityPercent,

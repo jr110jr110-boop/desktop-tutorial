@@ -1739,6 +1739,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTimeOffset?>("AnsweredAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("AnsweredByUserId")
+                        .HasColumnType("int");
+
                     b.Property<decimal?>("AverageScore")
                         .HasPrecision(5, 2)
                         .HasColumnType("decimal(5,2)");
@@ -1746,6 +1749,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("Comments")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int?>("ComplaintId")
+                        .HasColumnType("int");
 
                     b.Property<int?>("ContractId")
                         .HasColumnType("int");
@@ -1779,6 +1785,10 @@ namespace DataLayer.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("RecordedByRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -1793,10 +1803,31 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ShipmentId")
                         .HasColumnType("int");
 
+                    b.Property<string>("SkipReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
+                    b.Property<bool>("Verified")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("VerifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("VerifiedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VerifyNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ComplaintId")
+                        .IsUnique()
+                        .HasFilter("[ComplaintId] IS NOT NULL");
 
                     b.HasIndex("ContractId");
 
@@ -2274,11 +2305,19 @@ namespace DataLayer.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<decimal?>("LabourPayrollCost")
+                        .HasPrecision(28, 10)
+                        .HasColumnType("decimal(28,10)");
+
                     b.Property<int>("LabourPayrollEmployeeCount")
                         .HasColumnType("int");
 
                     b.Property<int?>("LabourPendingPeriod")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("LabourPooledAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
 
                     b.Property<int?>("LtsaContractId")
                         .HasColumnType("int");
@@ -2356,7 +2395,7 @@ namespace DataLayer.Migrations
                     b.HasIndex("InvoiceId");
 
                     b.HasIndex("LabourPendingPeriod")
-                        .HasFilter("[LabourPendingPeriod] IS NOT NULL");
+                        .HasFilter("[LabourPendingPeriod] IS NOT NULL AND [LabourAggregatedAt] IS NULL");
 
                     b.HasIndex("Number")
                         .IsUnique()
@@ -4575,6 +4614,9 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ItemId")
                         .HasColumnType("int");
 
+                    b.Property<bool>("LabourProtected")
+                        .HasColumnType("bit");
+
                     b.Property<int?>("PartyId")
                         .HasColumnType("int");
 
@@ -4683,6 +4725,9 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("Kind")
                         .HasColumnType("int");
+
+                    b.Property<bool>("LabourProtected")
+                        .HasColumnType("bit");
 
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
@@ -5232,6 +5277,68 @@ namespace DataLayer.Migrations
                     b.ToTable("FnAttachmentRules", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceCorrection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CurrentJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ProposedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ProposedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProposedJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("SheetId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("SheetId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("FnAttendanceCorrections", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", b =>
                 {
                     b.Property<int>("Id")
@@ -5248,6 +5355,10 @@ namespace DataLayer.Migrations
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<int>("EmployeeId")
                         .HasColumnType("int");
 
@@ -5258,6 +5369,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("InputsJson")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("Locked")
+                        .HasColumnType("bit");
 
                     b.Property<decimal>("MissionDays")
                         .HasPrecision(9, 2)
@@ -5289,6 +5403,9 @@ namespace DataLayer.Migrations
                     b.Property<decimal>("SickLeaveDays")
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
 
                     b.Property<decimal>("UnpaidLeaveDays")
                         .HasPrecision(9, 2)
@@ -6772,6 +6889,10 @@ namespace DataLayer.Migrations
                     b.Property<int?>("DefaultWorkOrderId")
                         .HasColumnType("int");
 
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<int>("EmploymentType")
                         .HasColumnType("int");
 
@@ -6815,6 +6936,12 @@ namespace DataLayer.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<DateTimeOffset?>("LastEditedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("LastEditedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("LastName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -6827,6 +6954,9 @@ namespace DataLayer.Migrations
                         .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
+
+                    b.Property<bool>("PendingApproval")
+                        .HasColumnType("bit");
 
                     b.Property<string>("PersonnelCode")
                         .IsRequired()
@@ -6864,6 +6994,59 @@ namespace DataLayer.Migrations
                     b.ToTable("FnEmployees", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeChange", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ProposedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ProposedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProposedJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("WageEffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("FnEmployeeChanges", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeLoan", b =>
                 {
                     b.Property<int>("Id")
@@ -6871,6 +7054,15 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApprovalStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<decimal>("Balance")
                         .HasPrecision(18)
@@ -6884,6 +7076,10 @@ namespace DataLayer.Migrations
 
                     b.Property<int?>("DisbursementPaymentId")
                         .HasColumnType("int");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<int>("EmployeeId")
                         .HasColumnType("int");
@@ -6904,9 +7100,19 @@ namespace DataLayer.Migrations
                     b.Property<int>("Kind")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("LastEditedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("LastEditedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("Principal")
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -6922,6 +7128,52 @@ namespace DataLayer.Migrations
                     b.HasIndex("EmployeeId");
 
                     b.ToTable("FnEmployeeLoans", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeWage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ChangeId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("DailyWage")
+                        .HasPrecision(18)
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsBaseline")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChangeId");
+
+                    b.HasIndex("EmployeeId", "EffectiveFrom")
+                        .IsUnique();
+
+                    b.ToTable("FnEmployeeWages", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnExchangeRate", b =>
@@ -7703,6 +7955,59 @@ namespace DataLayer.Migrations
                     b.ToTable("FnLeaveBalances", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnLeaveOpening", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("CarriedDays")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("EnteredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EnteredByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("EmployeeId", "Year", "Month");
+
+                    b.ToTable("FnLeaveOpenings", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnLegalEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -8139,6 +8444,10 @@ namespace DataLayer.Migrations
 
                     b.Property<DateTime>("ToDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("TriggerUserIds")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<int>("Version")
                         .HasColumnType("int");
@@ -8871,6 +9180,9 @@ namespace DataLayer.Migrations
                     b.Property<int>("EmployeeCount")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IbanSnapshotted")
+                        .HasColumnType("bit");
+
                     b.Property<int>("Month")
                         .HasColumnType("int");
 
@@ -8964,6 +9276,10 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BankIban")
+                        .HasMaxLength(34)
+                        .HasColumnType("nvarchar(34)");
 
                     b.Property<int?>("CostCenterId")
                         .HasColumnType("int");
@@ -10476,6 +10792,10 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ApprovedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<string>("BaseSource")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<decimal>("DailyWage")
                         .HasPrecision(18)
                         .HasColumnType("decimal(18,0)");
@@ -10869,6 +11189,9 @@ namespace DataLayer.Migrations
 
                     b.Property<int?>("Detail2Id")
                         .HasColumnType("int");
+
+                    b.Property<bool>("LabourProtected")
+                        .HasColumnType("bit");
 
                     b.Property<decimal?>("Quantity")
                         .HasPrecision(18, 4)
@@ -12527,6 +12850,8 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("ProviderId");
 
+                    b.HasIndex("ReworkOperationId");
+
                     b.HasIndex("WarehouseId");
 
                     b.HasIndex("WorkOrderId");
@@ -13378,6 +13703,9 @@ namespace DataLayer.Migrations
                     b.Property<int>("DelayMinutes")
                         .HasColumnType("int");
 
+                    b.Property<int>("EarlyLeaveDeductionMinutes")
+                        .HasColumnType("int");
+
                     b.Property<int>("EarlyLeaveMinutes")
                         .HasColumnType("int");
 
@@ -13423,6 +13751,9 @@ namespace DataLayer.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
+                    b.Property<int>("UnapprovedOvertimeMinutes")
+                        .HasColumnType("int");
+
                     b.Property<int>("UnpaidLeaveDays")
                         .HasColumnType("int");
 
@@ -13451,13 +13782,36 @@ namespace DataLayer.Migrations
                     b.Property<int>("ClosedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Month")
                         .HasColumnType("int");
+
+                    b.Property<string>("PolicyJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<int>("SheetCount")
                         .HasColumnType("int");
 
                     b.Property<int>("SkippedLocked")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SnapshotHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SnapshotJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
                         .HasColumnType("int");
 
                     b.Property<int>("Year")
@@ -13487,18 +13841,25 @@ namespace DataLayer.Migrations
                         .HasColumnType("decimal(5,2)")
                         .HasDefaultValue(3m);
 
+                    b.Property<bool>("EarlyLeaveDeductionDisabled")
+                        .HasColumnType("bit");
+
                     b.Property<int>("GraceMinutes")
                         .HasColumnType("int");
 
                     b.Property<int?>("MaxOvertimeMinutesPerDay")
                         .HasColumnType("int");
 
+                    b.Property<bool>("MonthConfirmByHrPeer")
+                        .HasColumnType("bit");
+
                     b.Property<int>("MonthlyOvertimeCapMinutes")
                         .HasColumnType("int")
                         .HasDefaultValue(1320);
 
-                    b.Property<bool>("OvertimeNeedsPreApproval")
-                        .HasColumnType("bit");
+                    b.Property<bool>("OvertimeRequiresApproval")
+                        .HasColumnType("bit")
+                        .HasColumnName("OvertimeNeedsPreApproval");
 
                     b.Property<int>("RoundingMinutes")
                         .HasColumnType("int");
@@ -13522,6 +13883,15 @@ namespace DataLayer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<int>("Approval")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -13538,7 +13908,14 @@ namespace DataLayer.Migrations
                     b.Property<int>("EmployeeId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("ImportBatchId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("RejectReason")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
@@ -13550,9 +13927,66 @@ namespace DataLayer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Approval");
+
+                    b.HasIndex("ImportBatchId");
+
                     b.HasIndex("EmployeeId", "Timestamp");
 
                     b.ToTable("OfClockEvents", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfClockImportBatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("DeviceCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("ImportedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ImportedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Rows")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("OfClockImportBatches", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfClockImportProfile", b =>
@@ -13727,6 +14161,10 @@ namespace DataLayer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AllowedAddresses")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("ApiKeyHash")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -13748,6 +14186,12 @@ namespace DataLayer.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("KeyRotatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("KeyRotatedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<DateTimeOffset?>("LastPushAt")
                         .HasColumnType("datetimeoffset");
@@ -13773,6 +14217,50 @@ namespace DataLayer.Migrations
                         .HasFilter("[Deleted] = 0");
 
                     b.ToTable("OfDevices", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfDevicePushLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Accepted")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DeviceCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Duplicates")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EventCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("PayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceId", "ReceivedAt");
+
+                    b.HasIndex("Outcome", "ReceivedAt");
+
+                    b.ToTable("OfDevicePushLogs", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfExternalParty", b =>
@@ -15025,6 +15513,10 @@ namespace DataLayer.Migrations
 
                     b.Property<DateTime>("FromDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<int>("ShiftId")
                         .HasColumnType("int");
@@ -16342,6 +16834,73 @@ namespace DataLayer.Migrations
                     b.ToTable("MfCostRuns", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfLabourPool", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Absorbed")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("AccountingEventId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Cost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Hours")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("Items")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Module")
+                        .HasColumnType("int");
+
+                    b.Property<int>("People")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Period")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PoolKey")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("PostedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("PostedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Protected")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal?>("Rate")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("Variance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountingEventId");
+
+                    b.HasIndex("Module", "Period", "PoolKey")
+                        .IsUnique();
+
+                    b.ToTable("MfLabourPools", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineInfo", b =>
                 {
                     b.Property<int>("Id")
@@ -16775,6 +17334,9 @@ namespace DataLayer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("AcceptedByConcession")
+                        .HasColumnType("bit");
+
                     b.Property<DateTimeOffset>("CreateDate")
                         .HasColumnType("datetimeoffset");
 
@@ -16798,6 +17360,9 @@ namespace DataLayer.Migrations
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsRework")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsWelding")
                         .HasColumnType("bit");
 
                     b.Property<int?>("ItpActivityId")
@@ -16852,6 +17417,18 @@ namespace DataLayer.Migrations
                     b.Property<bool>("QcAccepted")
                         .HasColumnType("bit");
 
+                    b.Property<decimal?>("QcAcceptedGoodQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("QcAcceptedReworkQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("QcAcceptedScrapQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<int?>("QcRecordId")
                         .HasColumnType("int");
 
@@ -16903,7 +17480,13 @@ namespace DataLayer.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<int?>("WeldLogId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("WorkCenterId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WpsId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
@@ -16930,7 +17513,11 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("SubcontractIssueId");
 
+                    b.HasIndex("WeldLogId");
+
                     b.HasIndex("WorkCenterId");
+
+                    b.HasIndex("WpsId");
 
                     b.HasIndex("OrderId", "Sequence");
 
@@ -16993,6 +17580,9 @@ namespace DataLayer.Migrations
                     b.Property<bool>("IsOutside")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsWelding")
+                        .HasColumnType("bit");
+
                     b.Property<int?>("ItpTestType")
                         .HasColumnType("int");
 
@@ -17043,6 +17633,9 @@ namespace DataLayer.Migrations
                     b.Property<int?>("WorkInstructionDocumentId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("WpsId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DefaultSupplierId");
@@ -17054,6 +17647,8 @@ namespace DataLayer.Migrations
                     b.HasIndex("WorkCenterId");
 
                     b.HasIndex("WorkInstructionDocumentId");
+
+                    b.HasIndex("WpsId");
 
                     b.ToTable("MfOperationStandards", (string)null);
                 });
@@ -17203,6 +17798,9 @@ namespace DataLayer.Migrations
                     b.Property<int?>("ReleasedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("ReplacesOrderId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("RoutingRevisionId")
                         .HasColumnType("int");
 
@@ -17236,6 +17834,10 @@ namespace DataLayer.Migrations
                     b.Property<int>("WorkOrderId")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("WrittenOffQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ActivityId");
@@ -17255,6 +17857,9 @@ namespace DataLayer.Migrations
                     b.HasIndex("ProcessId");
 
                     b.HasIndex("ProductionReceiptId");
+
+                    b.HasIndex("ReplacesOrderId")
+                        .HasFilter("[ReplacesOrderId] IS NOT NULL");
 
                     b.HasIndex("RoutingRevisionId");
 
@@ -17433,6 +18038,19 @@ namespace DataLayer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<decimal?>("AbsorbedLabour")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTimeOffset?>("CorrectionApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CorrectionApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CorrectsBookingId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("CostPostedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -17466,7 +18084,16 @@ namespace DataLayer.Migrations
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
 
+                    b.Property<bool>("IsCorrection")
+                        .HasColumnType("bit");
+
                     b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("LabourAggregatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("LabourPendingPeriod")
                         .HasColumnType("int");
 
                     b.Property<int?>("MachineId")
@@ -17487,6 +18114,13 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("OperationId")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("PayrollCost")
+                        .HasPrecision(28, 10)
+                        .HasColumnType("decimal(28,10)");
+
+                    b.Property<bool>("RateFromPayroll")
+                        .HasColumnType("bit");
 
                     b.Property<int?>("ReasonCodeId")
                         .HasColumnType("int");
@@ -17519,12 +18153,17 @@ namespace DataLayer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CorrectsBookingId");
+
                     b.HasIndex("CostRunId");
 
                     b.HasIndex("EmployeeId")
                         .IsUnique()
                         .HasDatabaseName("IX_MfTimeBookings_OneRunning")
                         .HasFilter("[Deleted] = 0 AND [EndAt] IS NULL");
+
+                    b.HasIndex("LabourPendingPeriod")
+                        .HasFilter("[LabourPendingPeriod] IS NOT NULL AND [LabourAggregatedAt] IS NULL");
 
                     b.HasIndex("MachineId");
 
@@ -17602,6 +18241,11 @@ namespace DataLayer.Migrations
                     b.Property<decimal>("QueueDaysDefault")
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
+
+                    b.Property<bool>("RequiresMachine")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -18365,6 +19009,12 @@ namespace DataLayer.Migrations
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
 
+                    b.Property<DateTimeOffset?>("DesignApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DesignApprovedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("DesignManufacturingApproved")
                         .HasColumnType("bit");
 
@@ -18377,6 +19027,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("Issue")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int?>("LastEditedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<int>("ModifierUserId")
                         .HasColumnType("int");
@@ -18391,6 +19044,15 @@ namespace DataLayer.Migrations
 
                     b.Property<bool>("PmoApproved")
                         .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("PmoApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PmoApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("QuantifiedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<string>("ReviewNote")
                         .HasMaxLength(1000)
@@ -19184,6 +19846,22 @@ namespace DataLayer.Migrations
                         .HasColumnType("bit");
 
                     b.Property<string>("ParseNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ReleaseRequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ReleaseRequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ReleaseRequestedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ReleaseRequestedKind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReleaseRequestedNote")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
@@ -25468,6 +26146,11 @@ namespace DataLayer.Migrations
 
             modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SlSurvey", b =>
                 {
+                    b.HasOne("Entities.Model.NasbNiro.Quality.CustomerComplaint", "Complaint")
+                        .WithMany()
+                        .HasForeignKey("ComplaintId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
                         .WithMany()
                         .HasForeignKey("ContractId")
@@ -25488,6 +26171,8 @@ namespace DataLayer.Migrations
                         .WithMany()
                         .HasForeignKey("ShipmentId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Complaint");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.AfterSales.SlSurveyAnswer", b =>
@@ -26114,6 +26799,21 @@ namespace DataLayer.Migrations
                     b.Navigation("Account");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceCorrection", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", null)
+                        .WithMany()
+                        .HasForeignKey("SheetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnAttendanceSheet", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", "Employee")
@@ -26357,6 +27057,17 @@ namespace DataLayer.Migrations
                     b.Navigation("Workshop");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeChange", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeLoan", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", "Employee")
@@ -26366,6 +27077,20 @@ namespace DataLayer.Migrations
                         .IsRequired();
 
                     b.Navigation("Employee");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnEmployeeWage", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployeeChange", null)
+                        .WithMany()
+                        .HasForeignKey("ChangeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnFiscalYear", b =>
@@ -26462,6 +27187,15 @@ namespace DataLayer.Migrations
                         .IsRequired();
 
                     b.Navigation("Lc");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnLeaveOpening", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.FnEmployee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Finance.FnLoanInstallment", b =>
@@ -27241,6 +27975,11 @@ namespace DataLayer.Migrations
                         .HasForeignKey("ProviderId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany("ReworkedNcrs")
+                        .HasForeignKey("ReworkOperationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Inventory.Warehouse", "Warehouse")
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -27592,6 +28331,13 @@ namespace DataLayer.Migrations
                         .HasForeignKey("EmployeeId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Office.OfClockImportBatch", "ImportBatch")
+                        .WithMany()
+                        .HasForeignKey("ImportBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ImportBatch");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfDecision", b =>
@@ -27618,6 +28364,14 @@ namespace DataLayer.Migrations
                         .HasForeignKey("PositionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfDevicePushLog", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Office.OfDevice", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Office.OfLeaveRequest", b =>
@@ -28199,6 +28953,16 @@ namespace DataLayer.Migrations
                     b.Navigation("AccountingEvent");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfLabourPool", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Finance.AccountingEvent", "AccountingEvent")
+                        .WithMany()
+                        .HasForeignKey("AccountingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingEvent");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineInfo", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.FnAsset", null)
@@ -28373,9 +29137,19 @@ namespace DataLayer.Migrations
                         .HasForeignKey("SubcontractIssueId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.Quality.WeldLog", null)
+                        .WithMany()
+                        .HasForeignKey("WeldLogId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Production.MfWorkCenter", null)
                         .WithMany()
                         .HasForeignKey("WorkCenterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Quality.Wps", null)
+                        .WithMany()
+                        .HasForeignKey("WpsId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Ncr");
@@ -28425,6 +29199,11 @@ namespace DataLayer.Migrations
                     b.HasOne("Entities.Model.NasbNiro.Quality.ControlledDocument", null)
                         .WithMany()
                         .HasForeignKey("WorkInstructionDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Quality.Wps", null)
+                        .WithMany()
+                        .HasForeignKey("WpsId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -28481,6 +29260,11 @@ namespace DataLayer.Migrations
                         .HasForeignKey("ProductionReceiptId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfProductionOrder", null)
+                        .WithMany()
+                        .HasForeignKey("ReplacesOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Production.MfRoutingRevision", null)
                         .WithMany()
                         .HasForeignKey("RoutingRevisionId")
@@ -28510,6 +29294,11 @@ namespace DataLayer.Migrations
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfTimeBooking", b =>
                 {
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfTimeBooking", null)
+                        .WithMany()
+                        .HasForeignKey("CorrectsBookingId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Production.MfCostRun", "CostRun")
                         .WithMany()
                         .HasForeignKey("CostRunId")
@@ -30359,6 +31148,11 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Procurement.SupplierQuote", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfOperation", b =>
+                {
+                    b.Navigation("ReworkedNcrs");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfProductionOrder", b =>

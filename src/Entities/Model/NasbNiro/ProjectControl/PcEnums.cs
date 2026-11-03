@@ -34,6 +34,11 @@ namespace Entities.Model.NasbNiro.ProjectControl
     public enum PcGuaranteeIssuer { Bank = 1, Fund = 2 }
     /// <summary>Release and Expiry are written only by the release action and the daily expiry job (R1a), never through the generic event call.</summary>
     public enum PcGuaranteeEventKind { Issue = 1, Extension = 2, Cancellation = 3, Release = 4, Expiry = 5 }
+    /// <summary>
+    /// R1a2 (M-3): which action the open request of a guarantee asks for. The release and the cancellation share one request slot of the row,
+    /// so the row says which of the two the first person asked for; only the same action confirms it. Stored as an int (1 release, 2 cancellation).
+    /// </summary>
+    public enum PcGuaranteeCloseKind { Release = 1, Cancellation = 2 }
     public enum PcGuaranteeSource { ContractGuaranty = 1, TenderGuaranty = 2 }
 
     public enum PcPenaltyStatus { Computed = 0, Waived = 1, Negotiated = 2 }

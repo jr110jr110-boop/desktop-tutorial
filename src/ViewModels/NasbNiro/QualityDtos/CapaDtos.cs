@@ -38,12 +38,21 @@ namespace ViewModels.NasbNiro.QualityDtos
         /// <summary>The due date has passed, or the effectiveness check is late.</summary>
         public bool Overdue { get; set; }
         public bool AutoDrafted { get; set; }
+
+        /// <summary>Required by a rule (system-drafted, non-conformance or audit finding source): only the QA manager can cancel it.</summary>
+        public bool Mandatory { get; set; }
+
+        /// <summary>Which round of actions is current (1 at first; +1 every time a failed effectiveness check reopens the CAPA). On the list since the front R1q review.</summary>
+        public int Iteration { get; set; } = 1;
+
+        /// <summary>0 none, 1 QA alerted (late), 2 CEO alerted (CapaCeoEscalationDays late).</summary>
+        public int EscalationLevel { get; set; }
+
+        public string CancelReason { get; set; }
     }
 
     public class CapaDto : CapaListDto
     {
-        /// <summary>Required by a rule (system-drafted, non-conformance or audit finding source): only the QA manager can cancel it.</summary>
-        public bool Mandatory { get; set; }
 
         public string SourceNumber { get; set; }
         public string Containment { get; set; }
@@ -56,14 +65,6 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string ClosedByName { get; set; }
         public string CloseNote { get; set; }
         public string RowVersion { get; set; }
-
-        /// <summary>1 for the first round; 2 and up after a failed effectiveness check.</summary>
-        public int Iteration { get; set; } = 1;
-
-        /// <summary>0 on time, 1 QA was told it is late, 2 the CEO was told as well.</summary>
-        public int EscalationLevel { get; set; }
-
-        public string CancelReason { get; set; }
         public DateTimeOffset? CancelledAt { get; set; }
 
         /// <summary>The first day the effectiveness may be judged (implementation date + the waiting days).</summary>

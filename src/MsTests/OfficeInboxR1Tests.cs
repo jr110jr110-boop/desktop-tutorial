@@ -289,8 +289,8 @@ namespace MsTests
             foreach (ClaimsPrincipal who in new[] { pmo, ceo })
             {
                 Assert.IsFalse((await host.As(who, sp => sp.GetRequiredService<IAttendanceService>().SaveShiftAsync(shift, CancellationToken.None))).Success, "a shift is not saved by PMO or CEO");
-                Assert.IsFalse((await host.As(who, sp => sp.GetRequiredService<IAttendanceService>().SavePolicyAsync(new AttendancePolicyDto { GraceMinutes = 10 }, CancellationToken.None))).Success, "the policy is not saved by PMO or CEO");
-                Assert.IsFalse((await host.As(who, sp => sp.GetRequiredService<IAttendanceService>().SaveDeviceAsync(new SaveDeviceDto { Code = "GATE-1", Title = "gate" }, CancellationToken.None))).Success, "a device is not registered by PMO or CEO");
+                if (who == pmo) Assert.IsFalse((await host.As(who, sp => sp.GetRequiredService<IAttendanceService>().SavePolicyAsync(new AttendancePolicyDto { GraceMinutes = 10 }, CancellationToken.None))).Success, "the policy is not saved by the PMO (the CEO may: only the CEO switches the two controls off, R1f)");
+                if (who == ceo) Assert.IsFalse((await host.As(who, sp => sp.GetRequiredService<IAttendanceService>().SaveDeviceAsync(new SaveDeviceDto { Code = "GATE-1", Title = "gate" }, CancellationToken.None))).Success, "a device is not registered by the CEO (HR and the PMO do, R1f)");
                 Assert.IsFalse((await host.As(who, sp => sp.GetRequiredService<IAttendanceService>().SaveAssignmentAsync(new SaveShiftAssignmentDto { EmployeeId = 1, ShiftId = 1, FromDate = DateTime.Today }, CancellationToken.None))).Success, "a shift assignment is not saved by PMO or CEO");
             }
 

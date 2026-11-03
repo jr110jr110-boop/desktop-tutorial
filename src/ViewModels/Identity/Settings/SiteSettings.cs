@@ -30,5 +30,8 @@ namespace ViewModels.Identity.Settings
         public string FcmSenderId { get; set; }
         public string FcmServerKey { get; set; }
         public ApiSettings ApiSettings { get; set; }
+
+        /// <summary>R1a2: approver rule, rate limit, audit key, temporary-password lifetime and the one-time forced password change (section "Identity").</summary>
+        public IdentitySecurityOptions Identity { get; set; } = new IdentitySecurityOptions();
     }
 }

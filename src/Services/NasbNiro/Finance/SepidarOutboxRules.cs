@@ -97,22 +97,4 @@ namespace Services.NasbNiro.Finance
             return c < 0 ? 0 : table.Rows.Sum(r => Number(r, c));
         }
     }
-
-    /// <summary>
-    /// R1t D6 / R1p merge seam: every sum of voucher lines made by the Sepidar tie-out goes through here. R1p flags the quarter-end labour variance lines (<c>FnVoucherLine.LabourProtected</c>) that only PAYROLL, FINANCEMANAGER and CEO may see;
-    /// where the model has that column this leaves the flagged lines out for everybody else, exactly as <c>FnLabourMask.Visible</c> does. In the branch that does not have the column yet it is a pass-through.
-    /// After the merge the body can simply call <c>FnLabourMask.Visible(lines, FnLabourMask.Sees(user))</c>.
-    /// </summary>
-    internal static class VoucherLineVisibility
-    {
-        private static readonly bool ModelHasLabourFlag = typeof(FnVoucherLine).GetProperty("LabourProtected") != null;
-
-        /// <summary>The roles that read the protected labour lines (the payroll roles of production).</summary>
-        public const string PayrollRoles = "PAYROLL,FINANCEMANAGER,CEO";
-
-        public static bool Sees(IInventoryUserContext user) => user.IsInRole(PayrollRoles) && !AiActing.IsActing;
-
-        public static IQueryable<FnVoucherLine> Visible(IQueryable<FnVoucherLine> lines, bool sees) =>
-            sees || !ModelHasLabourFlag ? lines : lines.Where(l => !EF.Property<bool>(l, "LabourProtected"));
-    }
 }

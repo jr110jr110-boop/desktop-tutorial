@@ -19,6 +19,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.ExternalReference).HasMaxLength(200);
                 b.Property(x => x.Error).HasMaxLength(2000);
                 b.Property(x => x.Note).HasMaxLength(1000);
+                b.Property(x => x.TriggerUserIds).HasMaxLength(4000);
                 b.HasIndex(x => x.Number).IsUnique();
                 b.HasIndex(x => new { x.Kind, x.Year, x.Month, x.Season, x.WorkshopId });
                 b.HasIndex(x => x.Status);
@@ -139,6 +140,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.BankIban).HasMaxLength(34);
                 b.Property(x => x.DailyWage).HasPrecision(18, 0);
                 b.Property(x => x.ExemptionFlags).HasMaxLength(200);
+                b.Property(x => x.EditorUserIds).HasMaxLength(500);
                 b.HasIndex(x => x.PersonnelCode).IsUnique();
                 b.HasIndex(x => x.NationalCode).IsUnique();
                 b.HasOne(x => x.Workshop).WithMany().HasForeignKey(x => x.WorkshopId).OnDelete(DeleteBehavior.Restrict);
@@ -150,6 +152,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.Principal).HasPrecision(18, 0);
                 b.Property(x => x.InstallmentAmount).HasPrecision(18, 0);
                 b.Property(x => x.Balance).HasPrecision(18, 0);
+                b.Property(x => x.RejectReason).HasMaxLength(500);
+                b.Property(x => x.EditorUserIds).HasMaxLength(500);
                 b.HasIndex(x => x.EmployeeId);
                 b.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -202,6 +206,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.AbsenceDays).HasPrecision(9, 2);
                 b.Property(x => x.MissionDays).HasPrecision(9, 2);
                 b.Property(x => x.InputsJson).HasMaxLength(2000);
+                b.Property(x => x.EditorUserIds).HasMaxLength(500);
                 b.HasIndex(x => new { x.EmployeeId, x.Year, x.Month }).IsUnique();
                 b.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -252,6 +257,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.Property(x => x.OtherDeductions).HasPrecision(18, 0);
                 b.Property(x => x.Provisions).HasPrecision(18, 0);
                 b.Property(x => x.Net).HasPrecision(18, 0);
+                b.Property(x => x.BankIban).HasMaxLength(34);
                 b.HasIndex(x => new { x.RunId, x.EmployeeId }).IsUnique();
                 b.HasIndex(x => x.EmployeeId);
                 b.HasOne(x => x.Run).WithMany(x => x.Payslips).HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
@@ -272,6 +278,48 @@ namespace DataLayer.Configurations.EF.NasbNiro.Finance
                 b.ToTable("FnPayslipAllocations");
                 b.Property(x => x.Share).HasPrecision(18, 6);
                 b.HasOne(x => x.Payslip).WithMany(x => x.Allocations).HasForeignKey(x => x.PayslipId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ------------------------------------------------------------------ release R1f: maker-checker controls on the payroll inputs
+            builder.Entity<FnEmployeeChange>(b =>
+            {
+                b.ToTable("FnEmployeeChanges");
+                b.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+                b.Property(x => x.ProposedJson).HasMaxLength(2000);
+                b.Property(x => x.Reason).HasMaxLength(500);
+                b.Property(x => x.DecisionNote).HasMaxLength(500);
+                b.HasIndex(x => x.EmployeeId);
+                b.HasIndex(x => x.Status);
+            });
+            builder.Entity<FnEmployeeWage>(b =>
+            {
+                b.ToTable("FnEmployeeWages");
+                b.Property(x => x.DailyWage).HasPrecision(18, 0);
+                b.HasIndex(x => new { x.EmployeeId, x.EffectiveFrom }).IsUnique();
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<FnEmployeeChange>().WithMany().HasForeignKey(x => x.ChangeId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<FnAttendanceCorrection>(b =>
+            {
+                b.ToTable("FnAttendanceCorrections");
+                b.Property(x => x.ProposedJson).HasMaxLength(2000);
+                b.Property(x => x.CurrentJson).HasMaxLength(2000);
+                b.Property(x => x.Reason).HasMaxLength(500);
+                b.Property(x => x.DecisionNote).HasMaxLength(500);
+                b.HasIndex(x => x.SheetId);
+                b.HasIndex(x => x.Status);
+                b.HasOne<FnAttendanceSheet>().WithMany().HasForeignKey(x => x.SheetId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<FnLeaveOpening>(b =>
+            {
+                b.ToTable("FnLeaveOpenings");
+                b.Property(x => x.CarriedDays).HasPrecision(9, 2);
+                b.Property(x => x.Note).HasMaxLength(500);
+                b.Property(x => x.DecisionNote).HasMaxLength(500);
+                b.HasIndex(x => new { x.EmployeeId, x.Year, x.Month });
+                b.HasIndex(x => x.Status);
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ------------------------------------------------------------------ changes to existing tables

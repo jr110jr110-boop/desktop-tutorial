@@ -16,6 +16,7 @@ namespace WebApi
             {
                 // R1t (D20): install.ps1 applies the database updates with its own (administrator) account and then starts the site, so the account of the program does not need
                 // the right to change the database structure. Nothing is served: the host is built, the updates are applied and the process ends (exit code 0, else an exception).
+                // The start-up security checks of R1a2 (StartupSecurityChecks) run in Startup.Configure, i.e. when the host STARTS; this branch only builds the host, so they never throw here.
                 using (IServiceScope scope = host.Services.CreateScope())
                     scope.ServiceProvider.GetRequiredService<IIdentityDbInitializer>().Initialize();
                 return 0;

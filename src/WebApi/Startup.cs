@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Net;
 using System.Text;
+using System.Threading.RateLimiting;
 using System.Threading.Tasks;
 using AutoMapper;
 using Common.WebToolkit;
@@ -14,6 +16,7 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Localization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +36,9 @@ namespace WebApi
     {
         public const string CorsPolicyName = "CorsPolicy";
 
+        /// <summary>R1a2 (M1): the rate-limit policy of the calls anybody can make without a token (sign in, refresh, temporary password, sign out). Put on the actions with [EnableRateLimiting].</summary>
+        public const string IdentityRateLimitPolicy = "identity";
+
         /// <summary>What a caller reads when the server fails (the details are in the log only).</summary>
         public const string GenericServerErrorText = "خطای داخلی سرور رخ داد و در گزارش‌های سامانه ثبت شد. اگر تکرار شد، به مدیر سامانه اطلاع دهید.";
 
@@ -41,6 +47,8 @@ namespace WebApi
         public Startup(IConfiguration configuration)
         {
             Services.NasbNiro.Finance.FinanceFeatures.Configure(configuration);
+            // R1a2 (M4): the secret of the keyed hash that the audit trail writes next to a masked national code or phone number (absent: only the masked text is written)
+            AuditHmac.Configure(configuration["Identity:AuditHmacKey"]);
             Configuration = configuration;
         }
 
@@ -141,14 +149,32 @@ namespace WebApi
                     }
                     else
                     {
-                        // ASP.NET Core 3+ refuses "*" together with AllowCredentials() at startup.
-                        // The front-end sends the JWT in the Authorization header (no cookies),
-                        // so an open policy without credentials behaves the same for it.
-                        builder.AllowAnyOrigin()
-                               .AllowAnyMethod()
-                               .AllowAnyHeader();
+                        // R1a2 (M1): no origin is listed, so no other origin is allowed (it used to be every origin). The front-end is served from the same
+                        // address as the API, and a call from the same origin is not touched by CORS at all.
+                        builder.SetIsOriginAllowed(origin => false);
                     }
                 });
+            });
+
+            // R1a2 (M1): a fixed window per client address on the calls that anybody can make without a token. The limit is Identity:RateLimitPerMinute (default 20);
+            // the CI smoke raises it because it signs in many test users from one address.
+            IdentitySecurityOptions identityRules = Configuration.GetSection("Identity").Get<IdentitySecurityOptions>() ?? new IdentitySecurityOptions();
+            int permitsPerMinute = Math.Max(1, identityRules.RateLimitPerMinute);
+            services.AddRateLimiter(options =>
+            {
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.AddPolicy(IdentityRateLimitPolicy, httpContext => IdentityRateLimit.Partition(httpContext, permitsPerMinute));
+                options.OnRejected = (context, cancellationToken) =>
+                {
+                    TimeSpan? retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan wait) ? wait : (TimeSpan?)null;
+                    return new ValueTask(JwtBearerRefusals.WriteTooManyRequestsAsync(context.HttpContext.Response, retryAfter));
+                };
+            });
+
+            // R1a2 (M6): the browser is told to use HTTPS only (sent on HTTPS answers; the loopback host names are skipped by default)
+            services.AddHsts(options =>
+            {
+                options.MaxAge = TimeSpan.FromDays(365);
             });
 
             var mappingConfig = new MapperConfiguration(cfg =>
@@ -195,6 +221,10 @@ namespace WebApi
                 // camelCase, nulls written, reference loops ignored (R1a: the same code writes the 401 / 403 of the bearer handler, see JwtBearerRefusals)
                 ApiJson.Apply(jsonOptions.SerializerSettings);
             });
+
+            // R1a2 (M8): the prices and the bank accounts of the legacy DTOs are written only for the roles that work with them (see LegacyFieldAccess); the user is the one of the current request
+            services.AddOptions<Microsoft.AspNetCore.Mvc.MvcNewtonsoftJsonOptions>().Configure<IHttpContextAccessor>((jsonOptions, accessor) =>
+                ApiJson.HideSensitiveFields(jsonOptions.SerializerSettings, () => accessor.HttpContext?.User));
 
             services.AddSwaggerGen(options =>
             {
@@ -250,7 +280,7 @@ namespace WebApi
         {
             string[] origins = Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
             if (origins == null || origins.Length == 0)
-                logger.LogWarning("CORS: Cors:AllowedOrigins is empty, so the API answers browsers of ANY origin. List the front-end address(es) in the settings file.");
+                logger.LogInformation("CORS: Cors:AllowedOrigins is empty, so browsers of other origins are refused (the front-end must be served from the same address as the API). List the front-end address(es) in the settings file to allow another origin.");
             if (string.IsNullOrWhiteSpace(Configuration["BearerTokens:Issuer"]))
                 logger.LogWarning("BearerTokens:Issuer is empty: the issuer of a token is not checked.");
             if (string.IsNullOrWhiteSpace(Configuration["BearerTokens:Audience"]))
@@ -264,6 +294,11 @@ namespace WebApi
             ILogger<Startup> logger)
         {
             WarnAboutOpenSettings(logger);
+
+            // R1a2 (L7): outside Development the server does not start with the signing key that ships with the source code
+            IReadOnlyList<string> fatal = StartupSecurityChecks.Problems(Configuration, env.IsDevelopment());
+            if (fatal.Count > 0)
+                throw new InvalidOperationException("The server does not start with these settings: " + string.Join(" ", fatal));
 
             app.UseExceptionHandler(appBuilder =>
             {
@@ -308,7 +343,10 @@ namespace WebApi
                 app.UseHsts();
             }
 
-            app.UseHttpsRedirection();
+            // R1a2 (M6): the redirect to HTTPS does not apply to the server itself (install checks and the recovery sign-in use the plain loopback address)
+            app.UseWhen(
+                context => context.Connection.RemoteIpAddress != null && !IPAddress.IsLoopback(context.Connection.RemoteIpAddress),
+                branch => branch.UseHttpsRedirection());
 
             app.UseStatusCodePages();
             app.UseResponseCompression();
@@ -352,6 +390,7 @@ namespace WebApi
             // With endpoint routing, CORS must sit between UseRouting and UseEndpoints; otherwise controllers
             // with [EnableCors] (AdminSettings, ApiSettings) fail with "a middleware was not found that supports CORS".
             app.UseCors(CorsPolicyName);
+            app.UseRateLimiter();
             app.UseAuthentication();
             app.UseAuthorization();
 

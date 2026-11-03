@@ -265,6 +265,9 @@ namespace Services.NasbNiro.Procurement
                     break;
                 }
                 case "cancel":
+                    // R1a2 (C1): any signed-in user could cancel an unapproved supplier invoice; now the commercial and finance roles do, and not the person who registered it (maker-checker)
+                    if (!_user.IsInRole(ProcurementRoles.InvoiceCancel)) return Bad<SupplierInvoiceDto>(NotAllowed + " (بازرگانی یا مالی)");
+                    if (invoice.CreatorUserId == Me) return Bad<SupplierInvoiceDto>(SameUser);
                     if (invoice.Status == SupplierInvoiceStatus.Approved) return Bad<SupplierInvoiceDto>("فاکتور تاییدشده باطل نمی‌شود؛ برگشت را در سپیدار ثبت کنید.");
                     if (Clean(dto.Note) == null) return Bad<SupplierInvoiceDto>("علت ابطال را بنویسید.");
                     invoice.Status = SupplierInvoiceStatus.Cancelled;

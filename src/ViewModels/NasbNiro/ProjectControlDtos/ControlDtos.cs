@@ -185,6 +185,14 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public bool DesignManufacturingApproved { get; set; }
         public string ReviewNote { get; set; }
         public string RowVersion { get; set; }
+
+        // R1a2 (H4): read-only (the save ignores them): who quantified and who approved, and when. R1a2 (L-7): and who wrote the text last (none of them can approve)
+        public int? QuantifiedByUserId { get; set; }
+        public int? LastEditedByUserId { get; set; }
+        public int? PmoApprovedByUserId { get; set; }
+        public DateTimeOffset? PmoApprovedAt { get; set; }
+        public int? DesignApprovedByUserId { get; set; }
+        public DateTimeOffset? DesignApprovedAt { get; set; }
     }
 
     public class PcClaimActionDto

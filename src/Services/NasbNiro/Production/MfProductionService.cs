@@ -20,6 +20,7 @@ using Services.NasbNiro.Quality;
 using ViewModels.NasbNiro.Pagination;
 using QcRecordDto = ViewModels.NasbNiro.QualityDtos.QcRecordDto;
 using SaveQcRecordDto = ViewModels.NasbNiro.QualityDtos.SaveQcRecordDto;
+using SaveQcMeasurementDto = ViewModels.NasbNiro.QualityDtos.SaveQcMeasurementDto;
 using ViewModels.NasbNiro.ProductionDtos;
 
 namespace Services.NasbNiro.Production
@@ -46,6 +47,7 @@ namespace Services.NasbNiro.Production
         private readonly IInventoryUserContext _user;
         private readonly INotificationService _notify;
         private readonly IInspectionService _inspections;
+        private readonly IInventoryDocumentService _documents;
         private readonly MfFlow _flow;
 
         public MfProductionService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IInspectionService inspections, INotificationService notify = null)
@@ -54,6 +56,7 @@ namespace Services.NasbNiro.Production
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _inspections = inspections ?? throw new ArgumentNullException(nameof(inspections));
             _notify = notify;
+            _documents = documents;
             _flow = new MfFlow(uow, user, documents, notify);
         }
 
@@ -96,6 +99,7 @@ namespace Services.NasbNiro.Production
                 {
                     Id = o.Id, Number = o.Number, WorkOrderId = o.WorkOrderId, WorkOrderCode = workOrders.TryGetValue(o.WorkOrderId, out string code) ? code : null, ContractId = o.ContractId,
                     ProcessId = o.ProcessId, ItemId = o.ItemId, ItemCode = item?.Code, ItemTitle = item?.Title, Quantity = o.Quantity, Unit = o.Unit, Status = o.Status,
+                    WrittenOffQty = o.WrittenOffQty, EffectiveQuantity = MfQuantityRules.EffectiveOrderQuantity(o.Quantity, o.WrittenOffQty), ReplacesOrderId = o.ReplacesOrderId,
                     RoutingRevisionId = o.RoutingRevisionId, Priority = u != null && u.Priority > 0 ? u.Priority : (int?)null, TotalFloatDays = u?.TotalFloat, NeedDate = u?.NeedDate,
                     NeedDateText = MfText.Date(u?.NeedDate), PlannedStart = o.PlannedStart, PlannedStartText = MfText.Date(o.PlannedStart), PlannedFinish = o.PlannedFinish,
                     PlannedFinishText = MfText.Date(o.PlannedFinish), ActualStartText = MfText.Date(o.ActualStart), ActualFinishText = MfText.Date(o.ActualFinish),
@@ -112,6 +116,7 @@ namespace Services.NasbNiro.Production
             {
                 Id = head.Id, Number = head.Number, WorkOrderId = head.WorkOrderId, WorkOrderCode = head.WorkOrderCode, ContractId = head.ContractId, ProcessId = head.ProcessId,
                 ItemId = head.ItemId, ItemCode = head.ItemCode, ItemTitle = head.ItemTitle, Quantity = head.Quantity, Unit = head.Unit, Status = head.Status,
+                WrittenOffQty = head.WrittenOffQty, EffectiveQuantity = head.EffectiveQuantity, ReplacesOrderId = head.ReplacesOrderId,
                 RoutingRevisionId = head.RoutingRevisionId, Priority = head.Priority, TotalFloatDays = head.TotalFloatDays, NeedDate = head.NeedDate, NeedDateText = head.NeedDateText,
                 PlannedStart = head.PlannedStart, PlannedStartText = head.PlannedStartText, PlannedFinish = head.PlannedFinish, PlannedFinishText = head.PlannedFinishText,
                 ActualStartText = head.ActualStartText, ActualFinishText = head.ActualFinishText, OperationCount = head.OperationCount, OperationsDone = head.OperationsDone,
@@ -120,6 +125,9 @@ namespace Services.NasbNiro.Production
                 KitOverrideReason = o.KitOverrideReason, ReleaseOverride = o.ReleaseOverride, ReleaseOverrideReason = o.ReleaseOverrideReason, ShortageText = o.ShortageText,
                 ReleasedAtText = MfText.Stamp(o.ReleasedAt), ProductionReceiptId = o.ProductionReceiptId, CancelReason = o.CancelReason, Note = o.Note, RowVersion = MfConcurrency.Text(o.RowVersion),
             };
+            if (o.ReplacesOrderId.HasValue)
+                dto.ReplacesOrderNumber = await _uow.Set<MfProductionOrder>().AsNoTracking().Where(x => x.Id == o.ReplacesOrderId.Value).Select(x => x.Number).FirstOrDefaultAsync(ct);
+            dto.ReplacementOrderNumber = await _uow.Set<MfProductionOrder>().AsNoTracking().Where(x => !x.Deleted && x.ReplacesOrderId == o.Id).OrderBy(x => x.Id).Select(x => x.Number).FirstOrDefaultAsync(ct);
             if (o.ReleasedByUserId.HasValue) dto.ReleasedByName = (await InventoryUsers.GetNamesAsync(_uow, new int?[] { o.ReleasedByUserId }, ct)).Name(o.ReleasedByUserId);
             if (o.KitRequestId.HasValue)
             {
@@ -288,14 +296,11 @@ namespace Services.NasbNiro.Production
                 Message = rules.Count == 0 ? "مسیر ساخت نقشه‌ای لازم ندارد." : missing.Count == 0 ? "نقشه‌های لازم در MDR تأیید شده‌اند." : "نقشه تأییدشده در MDR دستور کار پیدا نشد برای: " + Join(missing),
             });
 
-            // 4. the ITP of the work order (when it has one) is approved
+            // 4. the work order has an ITP and it is approved (R1p D19: no ITP at all is a refusal, not a pass; the ITP is drafted from the quality template when the order is drafted)
             Itp itp = await _uow.Set<Itp>().AsNoTracking().Where(i => i.WorkOrderId == order.WorkOrderId && !i.Deleted).OrderByDescending(i => i.Revision).ThenByDescending(i => i.Id).FirstOrDefaultAsync(ct);
-            bool itpOk = itp == null || itp.Status == ItpStatus.ClientApproved || itp.Status == ItpStatus.InUse;
-            result.Checks.Add(new ReleaseCheckDto
-            {
-                Code = "itp", Title = "برنامه بازرسی و آزمون (ITP)", Passed = itpOk,
-                Message = itp == null ? "دستور کار برنامه بازرسی ندارد." : itpOk ? $"ITP شماره {itp.Number} تأیید شده است." : $"ITP شماره {itp.Number} هنوز تأیید کارفرما را ندارد.",
-            });
+            string workOrderCode = itp != null ? null : await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == order.WorkOrderId).Select(w => w.Code).FirstOrDefaultAsync(ct);
+            (bool itpOk, string itpMessage) = MfReleaseRules.Itp(itp != null, itp?.Status ?? ItpStatus.Draft, itp?.Number, workOrderCode);
+            result.Checks.Add(new ReleaseCheckDto { Code = "itp", Title = "برنامه بازرسی و آزمون (ITP)", Passed = itpOk, Message = itpMessage });
 
             // 5. materials: on hand (not reserved) plus open purchase order lines that arrive in time
             result.Shortages = await ShortagesAsync(order, comps, ct);
@@ -589,6 +594,8 @@ namespace Services.NasbNiro.Production
             DateTimeOffset now = DateTimeOffset.Now;
             if (order.Status != MfOrderStatus.Released && order.Status != MfOrderStatus.InProgress) return Bad<OperationDto>("دستور تولید در وضعیتی نیست که عملیات آن تغییر کند.");
             List<string> notes;
+            var actionNotes = new List<string>();
+            var writeOffs = new List<MfWriteOff>();
 
             if (action == "skip")
             {
@@ -627,7 +634,7 @@ namespace Services.NasbNiro.Production
                     ? inspections.Where(q => !order.ItemId.HasValue || q.ItemId == order.ItemId.Value).Sum(q => q.AcceptedQuantity)
                     : op.PurchaseOrderLineId.HasValue ? await _uow.Set<ServiceAcceptance>().AsNoTracking().Where(a => !a.Deleted && a.PurchaseOrderLineId == op.PurchaseOrderLineId.Value).SumAsync(a => a.Quantity, ct) : 0;
                 if (accepted <= 0) return Bad<OperationDto>("پذیرش کیفیت کالای برگشتی لازم است: بازرسی ورودی سند برگشت با مقدار قبول‌شده، یا گواهی پذیرش خدمت سفارش خرید.");
-                op.GoodQty = Math.Min(accepted, order.Quantity);
+                op.GoodQty = Math.Min(accepted, MfQuantityRules.Expected(loaded.All, op, order.Quantity));   // R1p D7: at most what the step before handed over
                 op.FinishedAt = now;
                 op.StartedAt ??= now;
                 if (op.InspectionRequirement == MfInspectionRequirement.Qc || op.InspectionRequirement == MfInspectionRequirement.ItpPoint)
@@ -637,11 +644,60 @@ namespace Services.NasbNiro.Production
                 }
                 else op.Status = MfOperationStatus.Done;
             }
+            else if (action == "accept-by-concession" || action == "scrap-by-ncr")
+            {
+                // R1p D6: a rejected step goes on only on the decision of an approved non-conformance report: a concession lets the pieces continue, a scrap writes them off and drafts a replacement order
+                bool concession = action == "accept-by-concession";
+                if (!_user.IsInRole(ProductionRoles.Manager)) return Bad<OperationDto>("ادامه کار روی عملیات ردشده بر پایه گزارش عدم انطباق فقط با مدیر تولید است.");
+                if (!dto.NcrId.HasValue) return Bad<OperationDto>("گزارش عدم انطباق (NCR) این عملیات را مشخص کنید.");
+                if (op.Status != MfOperationStatus.Rejected) return Bad<OperationDto>("این کار فقط برای عملیاتی است که در بازرسی رد شده است.");
+                NonConformance ncr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == dto.NcrId.Value && !n.Deleted, ct);
+                if (ncr == null) return MfText.NotFound<OperationDto>("گزارش عدم انطباق پیدا نشد.");
+                if (ncr.WorkOrderId != order.WorkOrderId || !op.NcrId.HasValue || op.NcrId.Value != ncr.Id) return Bad<OperationDto>("این گزارش عدم انطباق به همین عملیات مربوط نیست.");
+                string ncrProblem = MfNcrRules.Check(ncr, concession ? NcrDisposition.Concession : NcrDisposition.Scrap);
+                if (ncrProblem != null) return Bad<OperationDto>(ncrProblem);
+                if (loaded.All.Any(o => o.IsRework && o.ReworkOfOperationId == op.Id && o.Status != MfOperationStatus.Rejected && o.Status != MfOperationStatus.Skipped))
+                    return Bad<OperationDto>("برای این عملیات عملیات دوباره‌کاری ساخته شده است؛ ارفاق یا ضایعات روی عملیات دوباره‌کاری ثبت می‌شود.");
+                if (concession)
+                {
+                    op.AcceptedByConcession = true;
+                    op.Status = MfOperationStatus.Done;
+                    op.FinishedAt ??= now;
+                    if (reason != null) op.Note = (string.IsNullOrWhiteSpace(op.Note) ? string.Empty : op.Note + " | ") + "ارفاق: " + reason;
+                }
+                else
+                {
+                    decimal scrapped = ncr.Quantity > 0 ? Math.Min(ncr.Quantity, op.GoodQty) : op.GoodQty;
+                    if (scrapped <= 0) return Bad<OperationDto>("تعداد سالمی که ضایعات شود روی این عملیات ثبت نشده است.");
+                    // R1p D6/D33: the same write-off as the terminal scrap: the order's written-off quantity and planned serials follow, the replacement draft gets its own serials, and the scrap receipt is drafted after the save
+                    var writeOff = new MfWriteOff { Order = order, Op = op, Quantity = scrapped, Job = JobCard(order.Number, op), Ncr = ncr, NcrIsNew = false };
+                    string writeOffProblem = await MfWriteOffs.ApplyAsync(_uow, Me, writeOff, ncr.SerialNumbers, ct);
+                    if (writeOffProblem != null) return Bad<OperationDto>(writeOffProblem);
+                    writeOffs.Add(writeOff);
+                    op.GoodQty -= scrapped;
+                    op.ScrapQty += scrapped;
+                    op.Status = MfOperationStatus.Done;
+                    op.FinishedAt ??= now;
+                    if (op.GoodQty == 0)
+                    {
+                        // nothing is left to make the later steps with
+                        List<MfOperation> chain = MfFlow.Chain(loaded.All);
+                        foreach (MfOperation later in chain.Skip(chain.FindIndex(o => o.Id == op.Id) + 1).Where(o => o.Status == MfOperationStatus.Waiting || o.Status == MfOperationStatus.Ready))
+                        {
+                            later.Status = MfOperationStatus.Skipped;
+                            later.SkipReason = $"ضایعات کامل بر پایه گزارش عدم انطباق {ncr.Number}";
+                            later.ModifyDate = now;
+                            later.ModifierUserId = Me;
+                        }
+                    }
+                }
+            }
             else return Bad<OperationDto>("عمل نامعتبر است.");
 
             op.ModifyDate = now;
             op.ModifierUserId = Me;
             notes = await _flow.ApplyAsync(order, loaded.All, ct);
+            notes.AddRange(actionNotes);
             await _flow.PartSyncAsync(op, ct);
             try
             {
@@ -652,6 +708,7 @@ namespace Services.NasbNiro.Production
                 return Bad<OperationDto>(MfText.Concurrency);
             }
             notes.AddRange(await _flow.AfterSaveAsync(ct));
+            notes.AddRange(await MfWriteOffs.AfterSaveAsync(_uow, _documents, _notify, writeOffs, ct));
             await MfGates.QcAsync(_notify, op, order.Number, ct);
             await MfGates.OrderAsync(_notify, order, ct);
             return ResponseDtoHelper.Ok(await OneAsync(op, ct), notes.Count == 0 ? null : Join(notes));
@@ -674,6 +731,16 @@ namespace Services.NasbNiro.Production
             if (dto.Result != QcResult.Accept && note == null) return Bad<OperationDto>("برای نتیجه غیر از «قبول»، توضیح بنویسید.");
             if (!order.ItemId.HasValue) return Bad<OperationDto>("کالای دستور تولید مشخص نیست.");
 
+            // R1p D16: every measured value names the instrument it was measured with; the quality service then checks that the instrument is calibrated
+            var measurements = new List<SaveQcMeasurementDto>();
+            foreach (QcMeasurementInputDto m in dto.Measurements ?? new List<QcMeasurementInputDto>())
+            {
+                if (Clean(m.Characteristic) == null) return Bad<OperationDto>("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
+                if (!m.InstrumentId.HasValue)
+                    return Bad<OperationDto>($"برای مقدار اندازه‌گیری‌شده «{Clean(m.Characteristic)}» ابزار اندازه‌گیری را انتخاب کنید؛ مقداری که به ابزار کالیبره ردیابی نشود پذیرفته نمی‌شود.");
+                measurements.Add(new SaveQcMeasurementDto { Characteristic = m.Characteristic, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured, Unit = m.Unit, EquipmentId = m.InstrumentId });
+            }
+
             // the inspector never inspects his own work: nobody who booked time on the operation is the signed-in inspector
             List<int> workers = await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.OperationId == op.Id).Select(b => b.EmployeeId).Distinct().ToListAsync(ct);
             if (workers.Count > 0 && await _uow.Set<FnEmployee>().AsNoTracking().AnyAsync(e => workers.Contains(e.Id) && e.UserId == Me, ct))
@@ -693,13 +760,16 @@ namespace Services.NasbNiro.Production
             }
 
             DateTimeOffset now = DateTimeOffset.Now;
-            decimal quantity = op.GoodQty > 0 ? op.GoodQty : order.Quantity;
+            decimal quantity = op.GoodQty > 0 ? op.GoodQty : MfQuantityRules.Expected(loaded.All, op, order.Quantity);
+            // R1p D42: the record (and its NCR) carries the lot or the serial numbers of the pieces
+            (int? lotId, List<string> serials) = await MfTrace.OfOrderAsync(_uow, order, ct);
 
             // the inspection record (and, for a reject or rework, its NCR) is made by the quality service: its rules run (the ITP of the work order is ensured, the ITP point and the calibration rules apply)
             ResponseDto<QcRecordDto> saved = await _inspections.SaveRecordAsync(new SaveQcRecordDto
             {
                 Type = QcRecordType.InProcess, WorkOrderId = order.WorkOrderId, ItpActivityId = activity?.Id, ItemId = order.ItemId, Quantity = quantity,
                 Operation = JobCard(order.Number, op), RecordDate = DateTime.Today, Result = dto.Result, Note = note,
+                LotId = lotId, SerialNumber = MfSerialRules.Joined(serials, 200), Measurements = measurements,
             }, ct);
             if (saved == null || !saved.Success || saved.Data == null) return Bad<OperationDto>(saved?.Message ?? MfText.InvalidData);
             QcRecordDto record = saved.Data;
@@ -710,6 +780,10 @@ namespace Services.NasbNiro.Production
             {
                 case QcResult.Accept:
                     op.QcAccepted = true;
+                    // R1p D38: the acceptance holds for the quantities QC saw now; if they change before the step finishes, QC has to accept again
+                    op.QcAcceptedGoodQty = op.GoodQty;
+                    op.QcAcceptedScrapQty = op.ScrapQty;
+                    op.QcAcceptedReworkQty = op.ReworkQty;
                     op.Status = op.FinishedAt.HasValue ? MfOperationStatus.Done : MfOperationStatus.Paused;
                     break;
                 case QcResult.Hold:
@@ -719,13 +793,16 @@ namespace Services.NasbNiro.Production
                     {
                         if (!record.NcrId.HasValue) return Bad<OperationDto>("گزارش عدم انطباق برای این بازرسی ساخته نشد.");
                         op.NcrId = record.NcrId;
+                        // R1p D42/D6: the report names every serial of the pieces under inspection, one per line (the inspection record keeps the shortened one-line text), so that a later scrap decision can tell which serials it takes
+                        if (serials.Count > 0)
+                        {
+                            NonConformance qcNcr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == record.NcrId.Value, ct);
+                            if (qcNcr != null) { qcNcr.SerialNumbers = MfSerialRules.PerLine(serials); qcNcr.ModifyDate = now; }
+                        }
                         op.Status = MfOperationStatus.Rejected;
                         op.QcAccepted = false;
-                        if (dto.Result == QcResult.Rework)
-                        {
-                            op.ReworkQty = quantity;
-                            loaded.All.Add(NewReworkOperation(order, op, record.NcrId, now));
-                        }
+                        // R1p D8: a rework decision only marks the quantity; the rework operation is made after the NCR is approved with a rework disposition (operations/rework)
+                        if (dto.Result == QcResult.Rework) op.ReworkQty = quantity;
                         break;
                     }
             }
@@ -772,13 +849,20 @@ namespace Services.NasbNiro.Production
             NonConformance ncr = await _uow.Set<NonConformance>().FirstOrDefaultAsync(n => n.Id == dto.NcrId && !n.Deleted, ct);
             if (ncr == null) return MfText.NotFound<OperationDto>("گزارش عدم انطباق پیدا نشد.");
             if (ncr.WorkOrderId != order.WorkOrderId) return Bad<OperationDto>("این گزارش عدم انطباق به همین دستور کار مربوط نیست.");
-            if (ncr.Disposition != NcrDisposition.Rework) return Bad<OperationDto>("تصمیم این گزارش عدم انطباق «دوباره‌کاری» نیست.");
+            if (op.NcrId.HasValue && op.NcrId.Value != ncr.Id) return Bad<OperationDto>("این گزارش عدم انطباق به همین عملیات مربوط نیست.");
+            // R1p D8: the rework operation exists only while the NCR is approved (quality, engineering and production) with a rework disposition
+            string ncrProblem = MfNcrRules.Check(ncr, NcrDisposition.Rework);
+            if (ncrProblem != null) return Bad<OperationDto>(ncrProblem);
             DateTimeOffset now = DateTimeOffset.Now;
-            op.ReworkQty = op.GoodQty > 0 ? op.GoodQty : order.Quantity;
+            op.ReworkQty = op.ReworkQty > 0 ? op.ReworkQty : op.GoodQty > 0 ? op.GoodQty : MfQuantityRules.Expected(loaded.All, op, order.Quantity);
             op.NcrId ??= ncr.Id;
             MfOperation rework = NewReworkOperation(order, op, ncr.Id, now);
             if (Clean(dto.Note) != null) rework.Note = Clean(dto.Note);
             loaded.All.Add(rework);
+            // R1p L9 (round 3): the report learns which operation does its rework in the SAME save as the operation (one transaction): the once-per-report rule can never be lost to a failed second save,
+            // and a conflicting change of the report rolls the whole rework back (the id of the operation is filled in by the save through the relationship)
+            rework.ReworkedNcrs.Add(ncr);
+            ncr.ModifyDate = now;
             List<string> notes = await _flow.ApplyAsync(order, loaded.All, ct);
             try
             {

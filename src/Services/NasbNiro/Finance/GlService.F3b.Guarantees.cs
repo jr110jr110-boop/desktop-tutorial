@@ -142,6 +142,7 @@ namespace Services.NasbNiro.Finance
             if (date < g.IssueDate) return Bad<FnBankGuaranteeDto>("تاریخ رویداد قبل از تاریخ صدور است.");
             string action = dto.Action.Trim().ToLowerInvariant();
             bool issued = g.Direction == FnBankGuaranteeDirection.Issued;
+            if (action == "fee-leg") return await RedraftGuaranteeFeeAsync(g, date, ct);   // M6 (review R1t)
             var lines = new List<AutoLine>();
             var ev = new FnBankGuaranteeEvent { GuaranteeId = g.Id, Date = date, Note = Clean(dto.Note), UserId = Me };
             LegSpec extensionFee = null;
@@ -243,6 +244,44 @@ namespace Services.NasbNiro.Finance
                 string legError = await AddCashLegAsync(extensionFee, ct);
                 if (legError != null) return Bad<FnBankGuaranteeDto>(legError);
             }
+            await _uow.SaveChangesAsync(ct);
+            return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<FnBankGuarantee> { g }, ct))[0]);
+        }
+
+        /// <summary>
+        /// M6 (review R1t): when treasury cancelled the treasury document of a guarantee fee (the initial fee or the fee of an extension), the guarantee stays as it is and nothing re-drafts the fee, so the prepaid expense and the
+        /// deferral would never be booked. This action drafts the first fee that has no live (draft, approved or posted) treasury document again, dated at the date of the action; the fee period stays the original one.
+        /// </summary>
+        private async Task<ResponseDto<FnBankGuaranteeDto>> RedraftGuaranteeFeeAsync(FnBankGuarantee g, DateTime date, CancellationToken ct)
+        {
+            if (g.Direction != FnBankGuaranteeDirection.Issued) return Bad<FnBankGuaranteeDto>("کارمزد فقط برای ضمانت‌نامه صادره است.");
+            var live = await _uow.Set<FnPayment>().AsNoTracking().Where(p => p.SourceType == CashLegSources.BankGuarantee && p.SourceId == g.Id && p.Status != FnDocStatus.Cancelled && (p.SourceAction == "guarantee-fee" || p.SourceAction == "extend-fee"))
+                .Select(p => new { p.SourceAction, p.SourceData }).ToListAsync(ct);
+            var liveLegs = live.Select(p => new { p.SourceAction, Data = UnpackLeg(p.SourceData) }).ToList();
+            LegSpec missing = null;
+            if (g.FeeAmount > 0 && !liveLegs.Any(p => p.SourceAction == "guarantee-fee"))
+            {
+                // the original period of the fee runs from the issue date to the expiry the guarantee had before its first extension
+                DateTime firstExpiry = await _uow.Set<FnBankGuaranteeEvent>().AsNoTracking().Where(e => e.GuaranteeId == g.Id && e.Kind == FnGuaranteeEventKind.Extended).OrderBy(e => e.Id).Select(e => e.OldExpiry).FirstOrDefaultAsync(ct) ?? g.ExpiryDate;
+                missing = GuaranteeFeeLeg(g, "guarantee-fee", g.FeeAmount, date, g.IssueDate, firstExpiry, $"کارمزد ضمانت‌نامه {g.Number}");
+            }
+            else
+            {
+                var extensions = await _uow.Set<FnBankGuaranteeEvent>().AsNoTracking().Where(e => e.GuaranteeId == g.Id && e.Kind == FnGuaranteeEventKind.Extended && e.FeeAmount > 0).OrderBy(e => e.Id).ToListAsync(ct);
+                foreach (var e in extensions)
+                {
+                    DateTime from = e.OldExpiry.Value.AddDays(1);
+                    if (liveLegs.Any(p => p.SourceAction == "extend-fee" && p.Data.From == from && p.Data.To == e.NewExpiry)) continue;
+                    missing = GuaranteeFeeLeg(g, "extend-fee", e.FeeAmount, date, from, e.NewExpiry.Value, $"کارمزد تمدید ضمانت‌نامه {g.Number}");
+                    break;
+                }
+            }
+            if (missing == null) return Bad<FnBankGuaranteeDto>("کارمزدی بدون سند خزانه برای این ضمانت‌نامه نیست.");
+            string feeError = await GuaranteeFeeCheckAsync(g, missing.Data.From.Value, missing.Data.To.Value, ct);
+            if (feeError != null) return Bad<FnBankGuaranteeDto>(feeError);
+            string legError = await AddCashLegAsync(missing, ct);
+            if (legError != null) return Bad<FnBankGuaranteeDto>(legError);
+            AuditNotes.Add(_uow, Me, nameof(FnBankGuarantee), g.Id, "GuaranteeFeeLeg", $"سند خزانه کارمزد ضمانت‌نامه {g.Number} دوباره پیش‌نویس شد ({missing.Description}).", after: new { Action = missing.Action, Amount = missing.Amount });
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<FnBankGuarantee> { g }, ct))[0]);
         }

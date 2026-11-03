@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using DataLayer.Context;
@@ -10,6 +12,7 @@ using Entities.Model.NasbNiro.Office;
 using Microsoft.EntityFrameworkCore;
 using Services.Identity.AccountServices;
 using Services.NasbNiro.Inventory;
+using Services.Services;
 using Services.NasbNiro.Office;
 
 namespace Services.NasbNiro.Files
@@ -35,13 +38,10 @@ namespace Services.NasbNiro.Files
         /// <summary>The file belongs to a letter: the letter's own read rule decided.</summary>
         public bool LetterFile { get; private set; }
 
-        /// <summary>The file is locked (a sent letter, a final voucher ...): a change is refused by the document service with the reason of the lock.</summary>
-        public bool Locked { get; private set; }
-
         public bool IsAllowed => Kind == FileVerdictKind.Allowed;
 
-        internal static FileVerdict Allow(bool owned = false, bool letter = false, bool locked = false) =>
-            new FileVerdict { Kind = FileVerdictKind.Allowed, Owned = owned, LetterFile = letter, Locked = locked };
+        internal static FileVerdict Allow(bool owned = false, bool letter = false) =>
+            new FileVerdict { Kind = FileVerdictKind.Allowed, Owned = owned, LetterFile = letter };
 
         internal static FileVerdict Deny(string message, bool owned = false, bool letter = false) =>
             new FileVerdict { Kind = FileVerdictKind.Denied, Message = message, Owned = owned, LetterFile = letter };
@@ -56,10 +56,7 @@ namespace Services.NasbNiro.Files
         /// <summary>Contains «مجوز» like the other refusals, so one reader of the body recognises it.</summary>
         public const string NoReadAccess = "شما مجوز دسترسی به این فایل را ندارید.";
 
-        /// <summary>The same words as the refusal of the document service for a loose file (R1a2), so a caller sees one text whichever layer refuses.</summary>
-        public const string NotTheUploader = "این فایل را فقط کاربری که بارگذاری کرده یا مدیر دفتر مدیریت پروژه می‌تواند تغییر دهد.";
 
-        public const string OwnedChange = "این فایل به یک سند پیوست شده است و فقط از همان بخش و با نقش مجاز آن قابل تغییر یا حذف است.";
     }
 
     /// <summary>
@@ -185,19 +182,14 @@ namespace Services.NasbNiro.Files
         }
 
         /// <summary>
-        /// Change (replace the bytes, edit the name, description or code):
-        /// a locked file passes (the document service refuses it with the reason of the lock, which is the more useful answer);
-        /// a file that a record holds changes only for somebody who may read that record (the owner module's own action is the normal way);
-        /// a file that no record holds changes only by its uploader or the PMO.
+        /// Change (replace the bytes, edit the name, description or code): the access check comes first, so somebody who may not even read the file learns nothing about it
+        /// (not even what kind of record holds it); an owned file never changes through the generic endpoints (R1a2 referrer lock, so a read role never opens a change),
+        /// and a loose file changes only by its uploader or the PMO. The document service says which of these applies to the caller who passed.
         /// </summary>
-        public static FileVerdict Change(FileCaller caller, FileFacts facts, bool locked)
+        public static FileVerdict Change(FileCaller caller, FileFacts facts)
         {
-            if (!facts.Exists) return FileVerdict.Missing();
-            bool owned = facts.Owners.Count > 0;
-            bool letter = facts.Owners.Any(o => o.Rule == FileOwnerRule.Letter);
-            if (locked) return FileVerdict.Allow(owned, letter, true);
-            if (owned) return facts.Owners.Any(o => o.CallerMayRead) ? FileVerdict.Allow(true, letter) : FileVerdict.Deny(FileText.OwnedChange, true, letter);
-            return Uploader(caller, facts) || caller.IsPmo ? FileVerdict.Allow() : FileVerdict.Deny(FileText.NotTheUploader);
+            FileVerdict read = Read(caller, facts);
+            return read.IsAllowed || read.Kind == FileVerdictKind.NotFound ? read : FileVerdict.Deny(FileText.NoReadAccess, read.Owned, read.LetterFile);
         }
 
         private static bool Uploader(FileCaller caller, FileFacts facts) => caller.UserId > 0 && facts.UploadedByUserId == caller.UserId;
@@ -216,6 +208,45 @@ namespace Services.NasbNiro.Files
             _office = office ?? throw new ArgumentNullException(nameof(office));
         }
 
+        private static readonly HashSet<string> Special = new HashSet<string>(FileOwners.Special, StringComparer.Ordinal);
+
+        private static readonly MethodInfo HoldsMethod = typeof(FileAccessService).GetMethod(nameof(HoldsAsync), BindingFlags.NonPublic | BindingFlags.Instance);
+
+        /// <summary>The columns of the model that hold this file (one cheap existence query per column of <see cref="DocumentLinks"/>).</summary>
+        private async Task<List<DocumentLink>> HoldersAsync(Guid id, CancellationToken ct)
+        {
+            var found = new List<DocumentLink>();
+            if (!(_uow is DbContext context)) return found;
+            foreach (DocumentLink link in DocumentLinks.Of(context.Model))
+            {
+                if (Special.Contains(link.EntityType.Name)) continue;
+                if (await (Task<bool>)HoldsMethod.MakeGenericMethod(link.EntityType).Invoke(this, new object[] { link, id, ct })) found.Add(link);
+            }
+            return found;
+        }
+
+        private async Task<bool> HoldsAsync<T>(DocumentLink link, Guid id, CancellationToken ct) where T : class
+        {
+            ParameterExpression row = Expression.Parameter(typeof(T), "r");
+            Expression body;
+            if (link.IsText)
+            {
+                string text = id.ToString();
+                Expression list = Expression.Call(typeof(EF), nameof(EF.Property), new[] { typeof(string) }, row, Expression.Constant(link.Property));
+                Expression<Func<string>> wanted = () => text;
+                body = Expression.AndAlso(Expression.NotEqual(list, Expression.Constant(null, typeof(string))),
+                    Expression.Call(list, typeof(string).GetMethod(nameof(string.Contains), new[] { typeof(string) }), wanted.Body));
+            }
+            else
+            {
+                Expression<Func<Guid>> value = () => id;
+                Type valueType = link.IsNullable ? typeof(Guid?) : typeof(Guid);
+                Expression column = Expression.Call(typeof(EF), nameof(EF.Property), new[] { valueType }, row, Expression.Constant(link.Property));
+                body = Expression.Equal(column, link.IsNullable ? Expression.Convert(value.Body, typeof(Guid?)) : value.Body);
+            }
+            return await _uow.Set<T>().AsNoTracking().IgnoreQueryFilters().AnyAsync(Expression.Lambda<Func<T, bool>>(body, row), ct);
+        }
+
         private FileCaller Caller() => new FileCaller(_user.UserId, _user.IsInRole(IdentityRules.Pmo));
 
         public async Task<FileVerdict> ReadAsync(Guid documentId, CancellationToken cancellationToken = default)
@@ -227,8 +258,7 @@ namespace Services.NasbNiro.Files
         public async Task<FileVerdict> ChangeAsync(Guid documentId, CancellationToken cancellationToken = default)
         {
             FileFacts facts = await GatherAsync(documentId, stopAtUploader: false, cancellationToken);
-            bool locked = facts.Exists && await FileLocks.ReasonAsync(_uow, documentId, cancellationToken) != null;
-            return FileAccessPolicy.Change(Caller(), facts, locked);
+            return FileAccessPolicy.Change(Caller(), facts);
         }
 
         /// <summary>
@@ -290,11 +320,13 @@ namespace Services.NasbNiro.Files
                 if (may) return facts;
             }
 
-            foreach (FileOwnerProbe probe in FileOwners.Simple)
+            // every other record that holds the file is found from the model (R1a2's DocumentLinks); the read roles come from the map, a type that is not in it fails closed
+            foreach (DocumentLink link in await HoldersAsync(id, ct))
             {
-                if (!await probe.Holds(_uow, id, ct)) continue;
-                bool may = probe.Roles == null || _user.IsInRole(probe.Roles);
-                facts.Owners.Add(new FileOwner(probe.Kind, FileOwnerRule.Record, may));
+                if (Special.Contains(link.EntityType.Name)) continue;
+                bool known = FileOwners.TryRoles(link.EntityType.Name, link.Property, out string roles);
+                bool may = known && (roles == null || _user.IsInRole(roles));
+                facts.Owners.Add(new FileOwner(link.EntityType.Name, FileOwnerRule.Record, may));
                 if (may) return facts;
             }
             return facts;

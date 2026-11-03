@@ -38,6 +38,28 @@ namespace WebApi.Controllers
         /// <summary>Holidays.</summary>
         public const string HolidayWriters = "PMO,HR,PLANNING";
 
+        // ---- sensitive legacy reads (R1a2, M8; see LegacyFieldAccess): the reads stay open to every signed-in user, these two fields are not ----
+
+        /// <summary>
+        /// The bank accounts of a provider (account number, SHABA, card number) in <c>GET Provider</c>, <c>Provider/providers</c>, <c>Provider/vendor-list</c> and wherever a provider is nested in an answer,
+        /// and (R1a2, L-6) the IBAN of the supplier profile in <c>GET procurement/suppliers</c> (the roles that write the profile, COMMERCIAL and PMO, are in the list).
+        /// Everybody else gets the number masked to its last four digits. ★ to be confirmed by the company.
+        /// </summary>
+        public const string ProviderBankReaders = "PMO,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY";
+
+        /// <summary>
+        /// The price of a contract, the price and the accepted price of a provisional statement, the price of an inquiry and the finance price of a buy order
+        /// (R1a2, L-6: and the finance price in the supplier-return report of a non-conformance report).
+        /// Everybody else gets null. ★ to be confirmed by the company.
+        /// </summary>
+        public const string PriceReaders = "PMO,CEO,COMMERCIAL,FINANCIAL,FINANCEMANAGER,PLANNING,PROJECTMANAGER,SALES";
+
+        /// <summary>
+        /// R1a2 (L-6): the price text of a contract guaranty and of a tender guaranty ("500,000,000"): the price roles and the roles that write guaranties. The treasury writes contract guaranties
+        /// but is not a price role; a writer who got null back for the price would send null again with his next edit and erase it. Everybody else gets null. ★ to be confirmed by the company.
+        /// </summary>
+        public const string GuarantyPriceReaders = PriceReaders + "," + GuarantyWriters + "," + TenderWriters;
+
         // ---- legacy buy order / assembly workflow: each stage belongs to the role that sees it on the card board (CardBoardService) ----
 
         /// <summary>Technical score of an inquiry and the "technical scores are complete" step of a buy order (the card board shows the stage to engineering).</summary>

@@ -196,6 +196,10 @@ namespace Services.NasbNiro
         public async ValueTask<bool> UpdateFileToTenderAsync
             (UpdateDocumentDto uploadFileDto, CancellationToken cancellationToken)
         {
+            // R1a2 (H3): this is the owner action for the files of tenders; it must not edit a file that belongs to something else (a contract, a letter ...)
+            if (uploadFileDto is null || !await _tendersFiles.AnyAsync(tenderFile => tenderFile.DocumentId == uploadFileDto.Id, cancellationToken))
+                throw new ViewModels.Exceptions.DomainInvalidException(NasbNiroMessages.TenderFileNotFound);
+
             return await _documentService.UpdateDocumentAsync(uploadFileDto);
         }
 
@@ -380,6 +384,11 @@ namespace Services.NasbNiro
             if (tenderGuaranty.Deleted == true)
                 return ResponseDtoHelper
                      .BadRequest<ResponseTenderGuarantyDto>(NasbNiroMessages.TenderAlreadyIsDeleted);
+
+            // R1a2 (M3): the same rule as for the guaranties of a contract
+            string blocked = await LegacyDeleteGuard.LegacyGuarantyAsync(_uow, Entities.Model.NasbNiro.ProjectControl.PcGuaranteeSource.TenderGuaranty, tenderGuarantyId, cancellationToken);
+            if (blocked != null)
+                return ResponseDtoHelper.BadRequest<ResponseTenderGuarantyDto>(blocked);
 
             tenderGuaranty.Delete();
 

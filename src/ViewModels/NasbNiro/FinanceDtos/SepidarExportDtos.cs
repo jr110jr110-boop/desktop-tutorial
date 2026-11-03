@@ -73,5 +73,7 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTimeOffset ExportedAt { get; set; }
         public int? SupersededByExportId { get; set; }
         public string SupersedeReason { get; set; }
+        /// <summary>True when the period of the export holds confidential labour lines and the reader is not allowed to see them: the counts and totals are left at zero and the file is refused.</summary>
+        public bool LabourHidden { get; set; }
     }
 }

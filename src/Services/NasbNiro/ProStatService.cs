@@ -45,7 +45,7 @@ namespace Services.NasbNiro
 
             if (contractExists is false)
             {
-                ResponseDtoHelper.BadRequest<ResponseProStatDto>("قرارداد یافت نشد.");
+                return ResponseDtoHelper.BadRequest<ResponseProStatDto>("قرارداد یافت نشد.");   // R1a2: the answer was built but never returned, so a statement for a missing contract was saved
             }
 
             ProvisionalStatement proStatToAdd = _mapper.Map<ProvisionalStatement>(addProStatDto);
@@ -67,6 +67,13 @@ namespace Services.NasbNiro
             if (proStatToDelete is null)
             {
                 return ResponseDtoHelper.BadRequest<string>("صورت وضعیت یافت نشد.");
+            }
+
+            // R1a2 (M3): a statement that a payment point or a sales invoice refers to is not deleted
+            string blocked = await LegacyDeleteGuard.ProvisionalStatementAsync(_unitOfWork, proStatToDelete.Id, true, cancellationToken);
+            if (blocked != null)
+            {
+                return ResponseDtoHelper.BadRequest<string>(blocked);
             }
 
             proStatToDelete.Delete();
@@ -130,6 +137,13 @@ namespace Services.NasbNiro
             if (proStatToUpdate is null)
             {
                 return ResponseDtoHelper.BadRequest<ResponseProStatDto>("صورت وضعیت یافت نشد.");
+            }
+
+            // R1a2 (M3): a statement that a payment point or a sales invoice refers to is not edited
+            string blocked = await LegacyDeleteGuard.ProvisionalStatementAsync(_unitOfWork, proStatToUpdate.Id, false, cancellationToken);
+            if (blocked != null)
+            {
+                return ResponseDtoHelper.BadRequest<ResponseProStatDto>(blocked);
             }
 
             _mapper.Map(updateProStatDto, proStatToUpdate);

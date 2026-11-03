@@ -57,7 +57,11 @@ namespace Services.NasbNiro.Production
         /// <summary>Work-centre list: master readers plus the finance roles that set the rates.</summary>
         public const string WorkCenterReaders = MasterReaders + ",FINANCIAL";
 
-        public const string AttendanceCheck = "SHOPSUPERVISOR,PRODUCTIONMANAGER,HR,CEO,PMO";
+        /// <summary>
+        /// The attendance check lists the person's name next to the booked hours, so it is open to the roles that see names behind hours and to nobody else (R1p review 4): PRODUCTIONMANAGER, SHOPSUPERVISOR, PAYROLL, FINANCEMANAGER, CEO.
+        /// The worked hours themselves come from the office attendance service, which has its own role list.
+        /// </summary>
+        public const string AttendanceCheck = MfPrivacy.NamedRoles;
     }
 
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (the production module uses 481..500).</summary>

@@ -53,11 +53,14 @@ namespace Services.NasbNiro.Finance
         private readonly IReceivablesService _receivables;
 
         private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+        private readonly global::Services.Token.ITokenStoreService _tokens;
 
+        /// <param name="tokens">Release R1f review M5: the refresh tokens of a leaver are revoked in the same save as the settlement. Optional so a context without a token store (tests) still builds the service.</param>
         public GlService(IUnitOfWork uow, IInventoryUserContext user, IEventPostingService posting, ILedgerReportService reports, IReceivablesService receivables,
-            global::Services.NasbNiro.Office.INotificationService notify)
+            global::Services.NasbNiro.Office.INotificationService notify, global::Services.Token.ITokenStoreService tokens = null)
         {
             _notify = notify;
+            _tokens = tokens;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _posting = posting ?? throw new ArgumentNullException(nameof(posting));
@@ -149,7 +152,8 @@ namespace Services.NasbNiro.Finance
                     if (p.Status == FnPeriodStatus.Closed) return Bad<FiscalYearDto>("دوره قبلاً بسته شده است.");
                     if (p.Status != FnPeriodStatus.Locked) return Bad<FiscalYearDto>("بستن نهایی مرحله دوم است: ابتدا دوره قفل شود و سپس شخص دیگری آن را ببندد.");
                     int locker = await LastLockerAsync(p.Id, ct);
-                    if (locker != 0 && locker == Me) return Bad<FiscalYearDto>("بستن نهایی دوره باید توسط شخصی غیر از کسی که آن را قفل کرده انجام شود.");
+                    if (locker == 0) return Bad<FiscalYearDto>("قفل‌کننده این دوره در تاریخچه ثبت نشده است؛ دوره را دوباره باز و قفل کنید تا شخص دیگری بتواند آن را ببندد.");   // L5
+                    if (locker == Me) return Bad<FiscalYearDto>("بستن نهایی دوره باید توسط شخصی غیر از کسی که آن را قفل کرده انجام شود.");
                     string closeGate = await LockGateAsync(p, ct);
                     if (closeGate != null) return Bad<FiscalYearDto>(closeGate);
                     List<string> blockers = await CloseBlockersAsync(p.StartDate, p.EndDate, p.FiscalYear.LegalEntityId, p.FiscalYearId, ct);
@@ -174,7 +178,9 @@ namespace Services.NasbNiro.Finance
             FnFiscalYear year = await _uow.Set<FnFiscalYear>().Include(y => y.Periods).FirstOrDefaultAsync(y => y.Id == id, ct);
             if (year == null) return ResponseDtoHelper.NotFound<FiscalYearDto>("سال مالی پیدا نشد.");
             if (year.Status != FnYearStatus.Open) return Bad<FiscalYearDto>("این سال مالی قبلاً بسته شده است.");
-            if (year.Periods.Any(p => p.Status == FnPeriodStatus.Open)) return Bad<FiscalYearDto>("همه دوره‌های سال باید بسته یا قفل شده باشند.");
+            // H1 (review R1t): the year closes only after every period was closed through the two-step close (locked by one person, closed by another with the right role, checklist passed) - a period that is only locked does not count
+            List<int> notClosed = await PeriodsNotClosedProperlyAsync(year, ct);
+            if (notClosed.Count > 0) return Bad<FiscalYearDto>("بستن سال مالی ممکن نیست؛ دوره‌های شماره " + string.Join("، ", notClosed) + " هنوز با بستن دومرحله‌ای (قفل توسط یک نفر و بستن توسط شخص دیگر) بسته نشده‌اند.");
             int nonFinal = await _uow.Set<FnVoucher>().CountAsync(v => v.FiscalYearId == year.Id && v.Status != FnVoucherStatus.Final, ct);
             if (nonFinal > 0) return Bad<FiscalYearDto>($"{nonFinal} سند پیش‌نویس یا کنترل‌شده در این سال هست؛ ابتدا قطعی یا حذف شوند.");
 
@@ -218,8 +224,12 @@ namespace Services.NasbNiro.Finance
                     pending.Items = unclean;
                     if (changed) AuditNotes.Add(_uow, Me, nameof(FnFiscalYear), year.Id, "YearOverrideReq", $"درخواست عبور از مغایرت تطبیق حساب‌ها برای بستن سال {year.Title}: {Clean(dto.Reason)}", after: new { Items = unclean, Reason = Clean(dto.Reason) });
                     await _uow.SaveChangesAsync(ct);
-                    return Bad<FiscalYearDto>("درخواست عبور از مغایرت ثبت شد؛ بستن سال فقط وقتی انجام می‌شود که مدیر مالی دیگری همین درخواست را تایید کند.");
+                    // L4 (review R1t): the request is saved, so the answer is a success that says the year is NOT closed yet
+                    return ResponseDtoHelper.Ok((await LoadYearsAsync(year.Id, null, ct)).First(), "درخواست عبور از مغایرت ثبت شد؛ سال هنوز بسته نشده است و فقط وقتی بسته می‌شود که مدیر مالی دیگری همین درخواست را تایید کند.");
                 }
+                // M3 (review R1t): what the approver sees must be what was requested
+                if (!OverrideCovers(pending.Items, recon.Data.Rows.Where(r => !r.Ok).Select(r => r.Key)))
+                    return Bad<FiscalYearDto>("مغایرتی هست که در درخواست نبوده است؛ درخواست‌دهنده باید درخواست را با فهرست فعلی دوباره ثبت کند.");
                 pending.Status = FnCloseOverrideStatus.Approved;
                 pending.ApprovedByUserId = Me;
                 pending.ApprovedAt = DateTimeOffset.Now;
@@ -229,16 +239,18 @@ namespace Services.NasbNiro.Finance
                 reconOverride = pending;
             }
 
-            // balances of the year per account and detail
+            // balances of the year per account and detail. R1p C1: the part that comes from lines flagged as confidential labour is kept apart (hiddenBalances): the closing lines of an account carry the visible balance only,
+            // and the confidential part is written as lines of its own, flagged the same way, so that a reader who does not see them neither sees nor can subtract them (they cancel inside each voucher)
             var rows = await _uow.Set<FnVoucherLine>().Where(l => l.Voucher.FiscalYearId == year.Id && l.Voucher.Status == FnVoucherStatus.Final)
-                .GroupBy(l => new { l.AccountId, l.Detail1Id, l.Detail2Id })
-                .Select(g => new { g.Key.AccountId, g.Key.Detail1Id, g.Key.Detail2Id, Debit = g.Sum(l => l.Debit), Credit = g.Sum(l => l.Credit) }).ToListAsync(ct);
+                .GroupBy(l => new { l.AccountId, l.Detail1Id, l.Detail2Id, l.LabourProtected })
+                .Select(g => new { g.Key.AccountId, g.Key.Detail1Id, g.Key.Detail2Id, g.Key.LabourProtected, Debit = g.Sum(l => l.Debit), Credit = g.Sum(l => l.Credit) }).ToListAsync(ct);
             Dictionary<int, FnAccount> byId = byCode.Values.ToDictionary(a => a.Id);
             var balances = new Dictionary<(int, int?, int?), decimal>();
+            var hiddenBalances = new Dictionary<(int, int?, int?), decimal>();
             foreach (var r in rows)
             {
                 decimal b = r.Debit - r.Credit;
-                if (b != 0) balances[(r.AccountId, r.Detail1Id, r.Detail2Id)] = b;
+                if (b != 0) (r.LabourProtected ? hiddenBalances : balances)[(r.AccountId, r.Detail1Id, r.Detail2Id)] = b;
             }
 
             DateTime endDate = year.EndDate.Date;
@@ -249,43 +261,50 @@ namespace Services.NasbNiro.Finance
                 CreatedByUserId = Me, CreatedAt = DateTimeOffset.Now, CheckedByUserId = Me, CheckedAt = DateTimeOffset.Now,
                 FinalizedByUserId = Me, FinalizedAt = DateTimeOffset.Now, Lines = new List<FnVoucherLine>(),
             };
-            void AddLine(FnVoucher v, FnAccount account, int? d1, int? d2, decimal amountDebitMinusCredit, string text)
+            void AddLine(FnVoucher v, FnAccount account, int? d1, int? d2, decimal amountDebitMinusCredit, string text, bool confidential = false)
             {
                 if (amountDebitMinusCredit == 0) return;
                 v.Lines.Add(new FnVoucherLine
                 {
                     RowNumber = v.Lines.Count + 1, AccountId = account.Id, Detail1Id = d1, Detail2Id = d2,
-                    Debit = amountDebitMinusCredit > 0 ? amountDebitMinusCredit : 0, Credit = amountDebitMinusCredit < 0 ? -amountDebitMinusCredit : 0, Description = text,
+                    Debit = amountDebitMinusCredit > 0 ? amountDebitMinusCredit : 0, Credit = amountDebitMinusCredit < 0 ? -amountDebitMinusCredit : 0, Description = text, LabourProtected = confidential,
                 });
             }
 
             string note = Clean(dto.Reason) != null ? " — " + Clean(dto.Reason) : "";
 
-            // (1) temporary accounts -> summary account
+            // (1) temporary accounts -> summary account (the confidential part of each account is closed by lines of its own, flagged; it nets to zero because the flagged lines come in equal pairs, so the summary account is the same)
             FnVoucher v1 = MakeVoucher(year, endDate, FnVoucherType.YearEndTemporaryClose, $"بستن حساب‌های موقت سال {year.Title}{note}");
-            var temporary = balances.Where(p => byId[p.Key.Item1].Temporary && p.Key.Item1 != summary.Id)
-                .GroupBy(p => p.Key.Item1).Select(g => new { AccountId = g.Key, Balance = g.Sum(x => x.Value) }).ToList();
-            foreach (var t in temporary) AddLine(v1, byId[t.AccountId], null, null, -t.Balance, "بستن حساب موقت");
-            decimal toSummary = v1.Lines.Sum(l => l.Debit) - v1.Lines.Sum(l => l.Credit);
-            AddLine(v1, summary, null, null, -toSummary, "خلاصه سود و زیان");
+            List<(int AccountId, decimal Balance)> TemporaryOf(Dictionary<(int, int?, int?), decimal> source) => source.Where(p => byId[p.Key.Item1].Temporary && p.Key.Item1 != summary.Id)
+                .GroupBy(p => p.Key.Item1).Select(g => (g.Key, g.Sum(x => x.Value))).ToList();
+            foreach (var t in TemporaryOf(balances)) AddLine(v1, byId[t.AccountId], null, null, -t.Balance, "بستن حساب موقت");
+            foreach (var t in TemporaryOf(hiddenBalances)) AddLine(v1, byId[t.AccountId], null, null, -t.Balance, "بستن حساب موقت", true);
+            decimal toSummaryVisible = v1.Lines.Where(l => !l.LabourProtected).Sum(l => l.Debit - l.Credit);
+            decimal toSummaryHidden = v1.Lines.Where(l => l.LabourProtected).Sum(l => l.Debit - l.Credit);
+            AddLine(v1, summary, null, null, -toSummaryVisible, "خلاصه سود و زیان");
+            AddLine(v1, summary, null, null, -toSummaryHidden, "خلاصه سود و زیان", true);   // only when the flagged lines do not cancel inside the temporary accounts; the visible and the flagged lines each balance by themselves
             if (v1.Lines.Count > 0) created.Add(v1);
 
             // (2) summary account -> retained earnings
-            decimal summaryBalance = balances.Where(p => p.Key.Item1 == summary.Id).Sum(p => p.Value) - toSummary;   // debit minus credit after (1)
+            decimal summaryVisible = balances.Where(p => p.Key.Item1 == summary.Id).Sum(p => p.Value) - toSummaryVisible;   // debit minus credit after (1)
+            decimal summaryHidden = hiddenBalances.Where(p => p.Key.Item1 == summary.Id).Sum(p => p.Value) - toSummaryHidden;
             FnVoucher v2 = MakeVoucher(year, endDate, FnVoucherType.YearEndTemporaryClose, $"انتقال سود (زیان) سال {year.Title} به سود انباشته");
-            AddLine(v2, summary, null, null, -summaryBalance, "انتقال خلاصه سود و زیان");
-            AddLine(v2, retained, null, null, summaryBalance, "سود (زیان) انباشته");
+            AddLine(v2, summary, null, null, -summaryVisible, "انتقال خلاصه سود و زیان");
+            AddLine(v2, retained, null, null, summaryVisible, "سود (زیان) انباشته");
+            AddLine(v2, summary, null, null, -summaryHidden, "انتقال خلاصه سود و زیان", true);
+            AddLine(v2, retained, null, null, summaryHidden, "سود (زیان) انباشته", true);
             if (v2.Lines.Count > 0) created.Add(v2);
 
-            // balances after (1) and (2) for the permanent accounts
+            // balances after (1) and (2) for the permanent accounts, the visible and the confidential part apart
             var closing = new Dictionary<(int, int?, int?), decimal>();
+            var closingHidden = new Dictionary<(int, int?, int?), decimal>();
             foreach (var p in balances)
                 if (!byId[p.Key.Item1].Temporary) closing[p.Key] = p.Value;
-            if (summaryBalance != 0)
-            {
-                var key = (retained.Id, (int?)null, (int?)null);
-                closing[key] = (closing.TryGetValue(key, out decimal old) ? old : 0) + summaryBalance;
-            }
+            foreach (var p in hiddenBalances)
+                if (!byId[p.Key.Item1].Temporary) closingHidden[p.Key] = p.Value;
+            var retainedKey = (retained.Id, (int?)null, (int?)null);
+            if (summaryVisible != 0) closing[retainedKey] = (closing.TryGetValue(retainedKey, out decimal old) ? old : 0) + summaryVisible;
+            if (summaryHidden != 0) closingHidden[retainedKey] = (closingHidden.TryGetValue(retainedKey, out decimal oldHidden) ? oldHidden : 0) + summaryHidden;
 
             // (3) closing voucher of the permanent accounts, (4) opening voucher of the next year
             FnVoucher v3 = MakeVoucher(year, endDate, FnVoucherType.Closing, $"سند اختتامیه سال {year.Title}");
@@ -294,6 +313,11 @@ namespace Services.NasbNiro.Finance
             {
                 AddLine(v3, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, -p.Value, "اختتامیه");
                 AddLine(v4, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, p.Value, "افتتاحیه");
+            }
+            foreach (var p in closingHidden.Where(x => x.Value != 0).OrderBy(x => byId[x.Key.Item1].Code))
+            {
+                AddLine(v3, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, -p.Value, "اختتامیه", true);
+                AddLine(v4, byId[p.Key.Item1], p.Key.Item2, p.Key.Item3, p.Value, "افتتاحیه", true);
             }
             if (v3.Lines.Count > 0) created.Add(v3);
             if (v4.Lines.Count > 0) created.Add(v4);
@@ -423,6 +447,8 @@ namespace Services.NasbNiro.Finance
         {
             query ??= new DetailAccountQuery();
             IQueryable<FnDetailAccount> q = _uow.Set<FnDetailAccount>().AsNoTracking();
+            // release R1f: the employee detail accounts (the loan and advance receivable per person) are listed to the roles that read personal data only
+            if (!PersonalLedger.Sees(_user)) q = q.Where(d => d.Type != FnDetailType.Employee);
             if (query.Type.HasValue) q = q.Where(d => d.Type == query.Type.Value);
             string text = Clean(query.Contains);
             if (text != null) q = q.Where(d => d.Code.Contains(text) || d.Title.Contains(text));
@@ -438,6 +464,8 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<DetailAccountDto>> SaveDetailAsync(SaveDetailAccountDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Accountants)) return Bad<DetailAccountDto>(NotAllowed);
+            // R1f review: the detail of an employee (its code and the employee's name) is personal data; only the payroll readers make sure it exists
+            if (dto != null && dto.Type == FnDetailType.Employee && !PersonalLedger.Sees(_user)) return Bad<DetailAccountDto>(PersonalLedger.NotAllowed);
             if (dto != null && !dto.Id.HasValue && dto.LinkedEntityId.HasValue)
             {
                 // "make sure the detail of this record exists": the system-made kinds get their standard detail here, before a manual voucher names it (the posting job would make the same one)
@@ -495,6 +523,7 @@ namespace Services.NasbNiro.Finance
         private async Task<List<VoucherDto>> LoadVoucherDtosAsync(IQueryable<FnVoucher> query, bool withLines, CancellationToken ct)
         {
             IQueryable<FnVoucher> q = query.AsNoTracking();
+            bool seePersonal = PersonalLedger.Sees(_user);
             if (withLines) q = q.Include(v => v.Lines).ThenInclude(l => l.Account).Include(v => v.Lines).ThenInclude(l => l.Detail1).Include(v => v.Lines).ThenInclude(l => l.Detail2);
             List<FnVoucher> rows = await q.Include(v => v.FiscalYear).AsSplitQuery().ToListAsync(ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(v => new int?[] { v.CreatedByUserId, v.CheckedByUserId, v.FinalizedByUserId, v.TriggeredByUserId }), ct);
@@ -503,33 +532,54 @@ namespace Services.NasbNiro.Finance
                 .ToDictionaryAsync(v => v.ReversesVoucherId.Value, v => v.Id, ct);
             Dictionary<int, int> attachmentCounts = await _uow.Set<FnVoucherAttachment>().Where(a => ids.Contains(a.VoucherId))
                 .GroupBy(a => a.VoucherId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+            // R1p D1/D2: protected labour lines go to PAYROLL, FINANCEMANAGER and CEO only; for anybody else they are left out of the lines and of the total (a debit and a credit of the same amount)
+            bool seesProtected = FnLabourMask.Sees(_user);
+            Dictionary<int, decimal> hiddenDebit = seesProtected ? new Dictionary<int, decimal>()
+                : await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => l.LabourProtected && ids.Contains(l.VoucherId))
+                    .GroupBy(l => l.VoucherId).Select(g => new { g.Key, Debit = g.Sum(x => x.Debit) }).ToDictionaryAsync(x => x.Key, x => x.Debit, ct);
             return rows.Select(v => new VoucherDto
             {
                 Id = v.Id, FiscalYearId = v.FiscalYearId, FiscalYearTitle = v.FiscalYear?.Title, Number = v.Number, TemporaryNumber = v.TemporaryNumber, Date = v.Date,
                 Type = v.Type, Status = v.Status, Description = v.Description, SourceType = v.SourceType, SourceId = v.SourceId, SourceNumber = v.SourceNumber,
                 AccountingEventId = v.AccountingEventId, ReversesVoucherId = v.ReversesVoucherId, ReverseNextPeriod = v.ReverseNextPeriod, AutoReversalVoucherId = v.AutoReversalVoucherId, ReversedByVoucherId = reversedBy.TryGetValue(v.Id, out int rb) ? rb : (int?)null,
-                LatePosting = v.LatePosting, TotalAmount = v.TotalAmount, CreatedByUserId = v.CreatedByUserId,
+                LatePosting = v.LatePosting, TotalAmount = v.TotalAmount - (hiddenDebit.TryGetValue(v.Id, out decimal hd) ? hd : 0), LabourHidden = hiddenDebit.ContainsKey(v.Id), CreatedByUserId = v.CreatedByUserId,
                 LegalEntityId = v.FiscalYear == null ? 0 : v.FiscalYear.LegalEntityId, IsImported = v.IsImported,
                 CeoApprovedByUserId = v.CeoApprovedByUserId, CeoApprovedAt = v.CeoApprovedAt, LastEditedAt = v.LastEditedAt,
                 AttachmentCount = attachmentCounts.TryGetValue(v.Id, out int ac) ? ac : 0,
                 CreatorName = v.CreatedByUserId == 0 ? "سیستم" : names.Name(v.CreatedByUserId), TriggeredByUserId = v.TriggeredByUserId, TriggeredByName = names.Name(v.TriggeredByUserId), CreatedAt = v.CreatedAt,
                 CheckedByName = v.CheckedByUserId == 0 ? "سیستم" : names.Name(v.CheckedByUserId), CheckedAt = v.CheckedAt,
                 FinalizedByName = names.Name(v.FinalizedByUserId), FinalizedAt = v.FinalizedAt,
-                Lines = withLines ? v.Lines.OrderBy(l => l.RowNumber).Select(l => new VoucherLineDto
-                {
-                    RowNumber = l.RowNumber, AccountId = l.AccountId, AccountCode = l.Account?.Code, AccountTitle = l.Account?.Title,
-                    Detail1Id = l.Detail1Id, Detail1Code = l.Detail1?.Code, Detail1Title = l.Detail1?.Title,
-                    Detail2Id = l.Detail2Id, Detail2Code = l.Detail2?.Code, Detail2Title = l.Detail2?.Title,
-                    Debit = l.Debit, Credit = l.Credit, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity,
-                    Description = l.Description, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole,
-                }).ToList() : new List<VoucherLineDto>(),
+                Lines = withLines ? LinesOf(v, seePersonal, seesProtected) : new List<VoucherLineDto>(),
             }).ToList();
+        }
+
+        /// <summary>
+        /// The lines of a voucher as the reader may see them (release R1f): the lines on an employee detail account (the loan and advance receivable kept per employee) show one person's money, so outside
+        /// PAYROLL, FINANCEMANAGER and the CEO they are merged per account and side into one anonymous line; the totals stay.
+        /// </summary>
+        private static List<VoucherLineDto> LinesOf(FnVoucher v, bool seePersonal, bool seesProtected)
+        {
+            // R1p D1/D2: protected labour lines (the quarter-end variance of a small pool) go to PAYROLL, FINANCEMANAGER and CEO only; for anybody else they are left out (and out of the total, see the caller)
+            List<FnVoucherLine> ordered = v.Lines.Where(l => seesProtected || !l.LabourProtected).OrderBy(l => l.RowNumber).ToList();
+            List<VoucherLineDto> lines = ordered.Select(l => new VoucherLineDto
+            {
+                RowNumber = l.RowNumber, AccountId = l.AccountId, AccountCode = l.Account?.Code, AccountTitle = l.Account?.Title,
+                Detail1Id = l.Detail1Id, Detail1Code = l.Detail1?.Code, Detail1Title = l.Detail1?.Title,
+                Detail2Id = l.Detail2Id, Detail2Code = l.Detail2?.Code, Detail2Title = l.Detail2?.Title,
+                Debit = l.Debit, Credit = l.Credit, CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity,
+                Description = l.Description, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole, LabourProtected = l.LabourProtected,
+            }).ToList();
+            if (seePersonal) return lines;
+            return PersonalLedger.Merge(lines, ordered.Select(l => l.Detail1?.Type == FnDetailType.Employee || l.Detail2?.Type == FnDetailType.Employee).ToList());
         }
 
         public async Task<ResponseDto<PagedList<VoucherDto>>> GetVouchersAsync(VoucherQuery query, CancellationToken ct)
         {
             await FinanceSeed.EnsureAsync(_uow, ct);
             query ??= new VoucherQuery();
+            // release R1f: the vouchers of one employee detail account are that person's loan and advance lines: asked for by name they are for PAYROLL, FINANCEMANAGER and the CEO only
+            if (query.Detail1Id.HasValue && !PersonalLedger.Sees(_user) && await _uow.Set<FnDetailAccount>().AnyAsync(d => d.Id == query.Detail1Id.Value && d.Type == FnDetailType.Employee, ct))
+                return Bad<PagedList<VoucherDto>>(PersonalLedger.NotAllowed);
             IQueryable<FnVoucher> q = _uow.Set<FnVoucher>();
             if (query.FiscalYearId.HasValue) q = q.Where(v => v.FiscalYearId == query.FiscalYearId.Value);
             else
@@ -623,6 +673,8 @@ namespace Services.NasbNiro.Finance
                     if (manual && !Has(account.Detail2Types, d2.Type)) return (null, $"ردیف {row}: حساب {account.Code} تفصیلی دوم از نوع {d2.Type} نمی‌پذیرد.");
                 }
                 if (manual && account.RequiresDetail && d1 == null) return (null, $"ردیف {row}: حساب {account.Code} ({account.Title}) تفصیلی اجباری دارد.");
+                // release R1f: an employee detail account is a person's loan or advance; only the roles that read personal data write on it by hand (the others would also never see the line they wrote)
+                if (manual && (d1?.Type == FnDetailType.Employee || d2?.Type == FnDetailType.Employee) && !PersonalLedger.Sees(_user)) return (null, $"ردیف {row}: {PersonalLedger.NotAllowed}");
 
                 bool anyCurrency = Clean(l.CurrencyCode) != null || l.CurrencyAmount.HasValue || l.Rate.HasValue;
                 if (anyCurrency && !FinanceFeatures.ForeignCurrency) return (null, FinanceFeatures.OnlyRial);
@@ -806,7 +858,7 @@ namespace Services.NasbNiro.Finance
                 {
                     RowNumber = l.RowNumber, AccountId = l.AccountId, Detail1Id = l.Detail1Id, Detail2Id = l.Detail2Id, Debit = l.Credit, Credit = l.Debit,
                     CurrencyCode = l.CurrencyCode, CurrencyAmount = l.CurrencyAmount, Rate = l.Rate, Quantity = l.Quantity, Description = l.Description,
-                    WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole,
+                    WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, CostCenterId = l.CostCenterId, SourceRole = l.SourceRole, LabourProtected = l.LabourProtected,
                 }).ToList(),
             };
             _uow.Set<FnVoucher>().Add(reversal);

@@ -80,7 +80,7 @@ namespace MsTests
         {
             Type[] required =
             {
-                typeof(LegacyContracts.ContractEntity),
+                typeof(LegacyContracts.ContractEntity), typeof(LegacyContracts.ProvisionalStatement),
                 typeof(Pc.PcContractTerms), typeof(Pc.PcPaymentMilestone), typeof(Pc.PcGuaranteeInfo), typeof(Pc.PcPenaltyAssessment),
                 typeof(Pc.PcVariationOrder), typeof(Pc.PcContractAmendment), typeof(Pc.PcChangeRequest), typeof(Pc.PcClaim), typeof(Pc.PcBaseline),
                 typeof(Pc.PcBaselineSignature), typeof(Pc.PcCostBaselineLine), typeof(Pc.PcProjectCharter), typeof(Pc.PcProjectPlan), typeof(Pc.PcContractReview),
@@ -100,6 +100,8 @@ namespace MsTests
             Assert.IsTrue(audited[typeof(Proc.PurchaseOrder)].Contains("ApprovedByUserId"));
             Assert.IsTrue(audited[typeof(Proc.PaymentRequest)].Contains("PaidByUserId"));
             Assert.IsNull(audited[typeof(LegacyContracts.ContractEntity)], "the legacy contract is audited field by field");
+            // R1a2 (M3): the amounts of a provisional statement and its delete flag
+            foreach (string field in new[] { "Price", "AcceptedPrice", "Status", "Deleted" }) Assert.IsTrue(audited[typeof(LegacyContracts.ProvisionalStatement)].Contains(field), field);
         }
 
         [TestMethod]
@@ -238,7 +240,7 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void GeneratedScheduleRowsAreNotListedOneByOneButALaterChangeIs()
+        public void TheInsertOfScheduleRowsIsListedAndTheRecomputedFieldsAreNot()
         {
             AppHost host = NewHost();
             int activityId = 0, nodeId = 0;
@@ -249,8 +251,15 @@ namespace MsTests
                 uow.SaveChanges();
                 nodeId = node.Id; activityId = activity.Id;
             }, Pmo);
-            Assert.AreEqual(0, Trail(host, nameof(Pc.PcActivity)).Count, "the schedule is generated in bulk: the insert is not listed");
-            Assert.AreEqual(0, Trail(host, nameof(Pc.PcWbsNode)).Count);
+
+            // R1a2 (L9): the insert of an activity and of a WBS node is a decision (a node made by the generator is as much a decision as an edit): one row each
+            List<FnAuditLog> inserted = Trail(host, nameof(Pc.PcActivity));
+            Assert.AreEqual(1, inserted.Count, "the insert of an activity is listed");
+            Assert.AreEqual("Added", inserted[0].Action);
+            Assert.AreEqual("NotStarted", Fields(inserted[0].AfterJson)["Status"].GetString());
+            List<FnAuditLog> insertedNodes = Trail(host, nameof(Pc.PcWbsNode));
+            Assert.AreEqual(1, insertedNodes.Count, "the insert of a WBS node is listed");
+            Assert.AreEqual("Added", insertedNodes[0].Action);
 
             // the forecast run rewrites these all the time
             host.Write(uow =>
@@ -259,20 +268,61 @@ namespace MsTests
                 a.EarlyStart = new DateTime(2026, 1, 1); a.EarlyFinish = new DateTime(2026, 1, 4); a.TotalFloat = 2; a.IsCritical = true; a.ForecastFinish = new DateTime(2026, 1, 9);
                 uow.SaveChanges();
             }, null);
-            Assert.AreEqual(0, Trail(host, nameof(Pc.PcActivity)).Count, "recomputed schedule fields are not listed");
+            Assert.AreEqual(1, Trail(host, nameof(Pc.PcActivity)).Count, "recomputed schedule fields are not listed");
 
             // a person starts the activity and edits the budget of a node
             host.Write(uow => { var a = uow.Set<Pc.PcActivity>().Single(x => x.Id == activityId); a.Status = Pc.PcActivityStatus.InProgress; a.ActualStart = new DateTime(2026, 1, 2); uow.SaveChanges(); }, Pmo);
             host.Write(uow => { uow.Set<Pc.PcWbsNode>().Single(x => x.Id == nodeId).BudgetAmount = 99m; uow.SaveChanges(); }, Pmo);
 
             List<FnAuditLog> activityRows = Trail(host, nameof(Pc.PcActivity));
-            Assert.AreEqual(1, activityRows.Count);
-            Assert.AreEqual("NotStarted", Fields(activityRows[0].BeforeJson)["Status"].GetString());
-            Assert.AreEqual("InProgress", Fields(activityRows[0].AfterJson)["Status"].GetString());
-            Assert.IsTrue(activityRows[0].Summary.StartsWith("فعالیت برنامه"), activityRows[0].Summary);
+            Assert.AreEqual(2, activityRows.Count);
+            Assert.AreEqual("NotStarted", Fields(activityRows[1].BeforeJson)["Status"].GetString());
+            Assert.AreEqual("InProgress", Fields(activityRows[1].AfterJson)["Status"].GetString());
+            Assert.IsTrue(activityRows[1].Summary.StartsWith("فعالیت برنامه"), activityRows[1].Summary);
             List<FnAuditLog> nodeRows = Trail(host, nameof(Pc.PcWbsNode));
-            Assert.AreEqual(1, nodeRows.Count);
-            Assert.AreEqual(99m, Fields(nodeRows[0].AfterJson)["BudgetAmount"].GetDecimal());
+            Assert.AreEqual(2, nodeRows.Count);
+            Assert.AreEqual(99m, Fields(nodeRows[1].AfterJson)["BudgetAmount"].GetDecimal());
+        }
+
+        [TestMethod]
+        public void TheLinesOfACostBaselineAreOneSummaryRowPerBaseline()
+        {
+            AppHost host = NewHost();
+            host.Write(uow =>
+            {
+                for (int i = 1; i <= 3; i++) AppHost.Add(uow, new Pc.PcCostBaselineLine { ContractId = 5, BaselineId = 11, Amount = 100m * i, Description = "line " + i });
+                uow.SaveChanges();
+            }, Pmo);
+
+            // R1a2 (L9): hundreds of lines are written at once; one summary row per baseline says how many and how much
+            List<FnAuditLog> rows = Trail(host, nameof(Pc.PcCostBaselineLine));
+            Assert.AreEqual(1, rows.Count, "three lines of one baseline, one row");
+            Assert.AreEqual(11, rows[0].EntityId, "the row is about the baseline");
+            Assert.AreEqual("Added", rows[0].Action);
+            StringAssert.Contains(rows[0].Summary, "3 سطر افزوده");
+            Assert.AreEqual(3, Fields(rows[0].AfterJson)["lines"].GetInt32());
+            Assert.AreEqual(600m, Fields(rows[0].AfterJson)["amount"].GetDecimal());
+            Assert.AreEqual(7, rows[0].UserId);
+
+            // a change of one line and the removal of another make one more row, with the amounts before and after
+            host.Write(uow =>
+            {
+                List<Pc.PcCostBaselineLine> lines = uow.Set<Pc.PcCostBaselineLine>().Where(l => l.BaselineId == 11).OrderBy(l => l.Id).ToList();
+                lines[0].Amount = 150m;
+                uow.Set<Pc.PcCostBaselineLine>().Remove(lines[2]);
+                uow.SaveChanges();
+            }, Pmo);
+            rows = Trail(host, nameof(Pc.PcCostBaselineLine));
+            Assert.AreEqual(2, rows.Count);
+            Assert.AreEqual("Modified", rows[1].Action);
+            StringAssert.Contains(rows[1].Summary, "1 سطر تغییر");
+            StringAssert.Contains(rows[1].Summary, "1 سطر حذف");
+            Assert.AreEqual(400m, Fields(rows[1].BeforeJson)["amount"].GetDecimal(), "the lines that were changed or removed, as they were");
+            Assert.AreEqual(150m, Fields(rows[1].AfterJson)["amount"].GetDecimal(), "the line that is left, as it is now");
+
+            // another baseline is its own row
+            host.Write(uow => { AppHost.Add(uow, new Pc.PcCostBaselineLine { ContractId = 5, BaselineId = 12, Amount = 5m, Description = "other" }); uow.SaveChanges(); }, Pmo);
+            Assert.AreEqual(12, Trail(host, nameof(Pc.PcCostBaselineLine)).Last().EntityId);
         }
 
         [TestMethod]

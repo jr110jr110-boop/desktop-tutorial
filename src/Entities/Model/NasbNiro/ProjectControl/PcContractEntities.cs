@@ -321,6 +321,24 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public bool ParseFailed { get; set; }
         public string ParseNote { get; set; }
 
+        /// <summary>
+        /// R1a2 (M2, M-3): the request for the release or the cancellation of the guarantee: who asked, when, for WHICH of the two (<see cref="ReleaseRequestedKind"/>), with which date and
+        /// which note. Both actions need two people: the first call only records the request, a different user of the allowed roles confirms it with the SAME action (the other action is refused);
+        /// the confirmation uses the date and the note of the request. The one who asked, or a PMO user, can withdraw the request before that (all five fields are cleared; the trail keeps them).
+        /// A request nobody confirmed within seven days is forgotten. After the confirmation the request stays on the row as the record of who asked.
+        /// </summary>
+        public int? ReleaseRequestedByUserId { get; set; }
+        public DateTime? ReleaseRequestedAt { get; set; }
+
+        /// <summary>1 = release, 2 = cancellation (int column). Null when no request was made, or after a withdrawal.</summary>
+        public PcGuaranteeCloseKind? ReleaseRequestedKind { get; set; }
+
+        /// <summary>The note of the request (the letter of the client or the bank); at most 1000 characters (column nvarchar(1000)).</summary>
+        public string ReleaseRequestedNote { get; set; }
+
+        /// <summary>The date of the release or the cancellation as the first person gave it; the confirmation records this date.</summary>
+        public DateTime? ReleaseRequestedDate { get; set; }
+
         public ICollection<PcGuaranteeEvent> Events { get; set; }
 
         [Timestamp]

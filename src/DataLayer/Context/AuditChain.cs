@@ -34,10 +34,11 @@ namespace DataLayer.Context
         /// <summary>How long a writer waits for the chain lock before the save is refused (milliseconds).</summary>
         public const int LockTimeoutMs = 20000;
 
+        /// <summary>L2 (review R1t): the chain does not use the audit key itself but a key derived from it for this one purpose, so a hash of the masked-values trail can never be replayed as a chain seal.</summary>
         public static byte[] KeyFrom(IConfiguration configuration)
         {
             string key = configuration?[SettingKey];
-            return string.IsNullOrWhiteSpace(key) ? null : Encoding.UTF8.GetBytes(key.Trim());
+            return string.IsNullOrWhiteSpace(key) ? null : HMACSHA256.HashData(Encoding.UTF8.GetBytes(key.Trim()), Encoding.UTF8.GetBytes("PMIS-AUDIT-CHAIN"));
         }
 
         // ------------------------------------------------------------------------------------------ the hash
@@ -183,8 +184,10 @@ namespace DataLayer.Context
             public string Hash { get; set; }
         }
 
-        private const string LockSql = "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'" + LockResource + "', @LockMode = N'Exclusive', @LockOwner = N'Session', @LockTimeout = 20000; "
-            + "IF @r < 0 THROW 51000, N'The audit trail is busy: the chain lock could not be taken.', 1;";
+        // H4 (review R1t): outside a transaction the lock belongs to the session and is released after the save. Inside an outer transaction (the caller wraps several saves) the lock belongs to the
+        // TRANSACTION and is not released here: it ends with the commit or rollback, so a second writer cannot place rows on the same head between two saves of one transaction.
+        public static string LockSql(bool inTransaction) => "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'" + LockResource + "', @LockMode = N'Exclusive', @LockOwner = N'" + (inTransaction ? "Transaction" : "Session") + "', @LockTimeout = 20000; "
+            + "IF @r < 0 THROW 51000, N'ثبت در دفتر حسابرسی ممکن نشد: نوبت ثبت زنجیره در دسترس نیست؛ لحظه‌ای بعد دوباره تلاش کنید.', 1;";
 
         private const string UnlockSql = "EXEC sp_releaseapplock @Resource = N'" + LockResource + "', @LockOwner = N'Session';";
 
@@ -194,7 +197,7 @@ namespace DataLayer.Context
         public sealed class Scope : IDisposable, IAsyncDisposable
         {
             private readonly DbContext _context;
-            private bool _opened, _locked;
+            private bool _opened, _locked, _transactionLock;
 
             internal Scope(DbContext context) => _context = context;
 
@@ -203,8 +206,9 @@ namespace DataLayer.Context
                 if (!_context.Database.IsSqlServer()) return;
                 _context.Database.OpenConnection();   // the lock belongs to this connection: the head is read and the rows are saved on it too
                 _opened = true;
-                _context.Database.ExecuteSqlRaw(LockSql);
-                _locked = true;
+                _transactionLock = _context.Database.CurrentTransaction != null;
+                _context.Database.ExecuteSqlRaw(LockSql(_transactionLock));
+                _locked = !_transactionLock;
             }
 
             internal async Task LockAsync(CancellationToken ct)
@@ -212,8 +216,9 @@ namespace DataLayer.Context
                 if (!_context.Database.IsSqlServer()) return;
                 await _context.Database.OpenConnectionAsync(ct);
                 _opened = true;
-                await _context.Database.ExecuteSqlRawAsync(LockSql, ct);
-                _locked = true;
+                _transactionLock = _context.Database.CurrentTransaction != null;
+                await _context.Database.ExecuteSqlRawAsync(LockSql(_transactionLock), ct);
+                _locked = !_transactionLock;
             }
 
             public void Dispose()

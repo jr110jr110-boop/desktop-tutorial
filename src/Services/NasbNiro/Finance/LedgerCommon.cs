@@ -35,7 +35,33 @@ namespace Services.NasbNiro.Finance
         public const string AuditReaders = "FINANCEMANAGER,CEO,AUDITOR";
         /// <summary>The CEO approves vouchers above the approval threshold.</summary>
         public const string Ceo = "CEO";
+        /// <summary>Release R1f review: the approvals of the finance manager that the CEO may also give (payroll runs, outbox packages, the records of a finance manager), so a company with one finance manager is never stuck.</summary>
+        public const string ManagersOrCeo = "FINANCEMANAGER,CEO";
         public const string OutboxReaders = "FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL,AUDITOR";
+    }
+
+    /// <summary>
+    /// R1p D1/D2: the voucher lines flagged <c>LabourProtected</c> (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate: too few payroll-rated people, or one or two of them dominate the hours) are read by PAYROLL, FINANCEMANAGER and CEO only.
+    /// Every other reader of voucher lines (voucher view, journal, ledger, trial balance, statements, drill-down) leaves them out. The flagged lines always come in pairs of one debit and one credit of the same amount, so the
+    /// books stay balanced for the readers who do not see them.
+    /// </summary>
+    internal static class FnLabourMask
+    {
+        public static bool Sees(Inventory.IInventoryUserContext user) => Production.MfPrivacy.SeesPayroll(user);
+
+        public static IQueryable<FnVoucherLine> Visible(IQueryable<FnVoucherLine> lines, bool sees) => sees ? lines : lines.Where(l => !l.LabourProtected);
+
+        /// <summary>
+        /// The total of the debits of a set of voucher lines as a reader may see it (a voucher's TotalAmount is the sum of its debits): every line for PAYROLL, FINANCEMANAGER and CEO, the lines that are not flagged for anybody else.
+        /// The CEO drill of the waiting vouchers (<c>fin.vouchers_waiting</c>) uses it, like the voucher list does.
+        /// </summary>
+        public static decimal VisibleTotal(IEnumerable<FnVoucherLine> lines, bool seesPayroll) => lines == null ? 0 : lines.Where(l => seesPayroll || !l.LabourProtected).Sum(l => l.Debit);
+
+        /// <summary>The debits of the flagged lines of a set of voucher lines: what a voucher total has to lose for a reader who does not see them.</summary>
+        public static decimal HiddenDebit(IEnumerable<FnVoucherLine> lines) => lines == null ? 0 : lines.Where(l => l.LabourProtected).Sum(l => l.Debit);
+
+        /// <summary>The Persian text that names the confidential labour lines to a reader who is not allowed to see them (a period or a year is named by the caller).</summary>
+        public static string Refusal(string what) => "در " + what + " سطرهای محرمانه‌ی دستمزد (تفاوت نرخ دستمزد گروه‌های کوچک) هست که فقط برای حقوق و دستمزد، مدیر مالی و مدیرعامل نمایش و صادر می‌شود.";
     }
 
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (the finance module uses 441..480).</summary>
@@ -96,6 +122,8 @@ namespace Services.NasbNiro.Finance
         /// <summary>The user created or edited the document: he cannot be its checker or approver.</summary>
         public static bool Touched(int creator, string ids, int user) => (creator != 0 && creator == user) || (ids != null && ids.Contains("," + user + ","));
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+        /// <summary>A free text cut to the length of its column (the database refuses a longer text; the in-memory test database does not).</summary>
+        public static string Cap(string s, int max) => s != null && s.Length > max ? s.Substring(0, max) : s;
 
         public static string PersianDate(DateTime date) => Inventory.InventoryText.PersianDate(date);
 

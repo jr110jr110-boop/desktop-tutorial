@@ -94,6 +94,8 @@ namespace Services.NasbNiro.Finance
             if (party != null && party.Length > 300) party = party.Substring(0, 300);
             string description = s.Description != null && s.Description.Length > 1000 ? s.Description.Substring(0, 1000) : s.Description;
             DateTime date = s.Date.Date;
+            string closedDate = await ClosedPeriodGuard.MessageAsync(_uow, date, ct);   // M7
+            if (closedDate != null) return closedDate;
             string json = PackLeg(s.Data);
             if (s.Inflow)
             {
@@ -155,6 +157,14 @@ namespace Services.NasbNiro.Finance
                 }
             }
             // letters of credit and guarantees keep their state while a leg is open, so there is nothing to give back
+        }
+
+        public async Task<int> RecorderOfAsync(string sourceType, int sourceId, CancellationToken ct)
+        {
+            if (sourceType == CashLegSources.Loan) return await _uow.Set<FnLoan>().AsNoTracking().Where(x => x.Id == sourceId).Select(x => x.CreatedByUserId).FirstOrDefaultAsync(ct);
+            if (sourceType == CashLegSources.LetterOfCredit) return await _uow.Set<FnLetterOfCredit>().AsNoTracking().Where(x => x.Id == sourceId).Select(x => x.CreatedByUserId).FirstOrDefaultAsync(ct);
+            if (sourceType == CashLegSources.BankGuarantee) return await _uow.Set<FnBankGuarantee>().AsNoTracking().Where(x => x.Id == sourceId).Select(x => x.CreatedByUserId).FirstOrDefaultAsync(ct);
+            return 0;
         }
 
         private async Task<CashLegSettlement> SettleLoanDisbursementAsync(CashLegRequest leg, CancellationToken ct)

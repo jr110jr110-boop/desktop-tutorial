@@ -12,6 +12,7 @@ using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Equipments;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
+using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.Procurement;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.ProjectControl;
@@ -30,6 +31,8 @@ namespace Services.NasbNiro
     /// money, the stock and the documents that belong to it stay. Every method here returns a Persian refusal that names what is in the way,
     /// or <c>null</c> when the delete may go on. The services call them from the single-record delete, which the collection deletes also use,
     /// so every path is covered. Soft delete itself is unchanged.
+    /// R1a2 (M3) widened the lists after the security review: the project start records, the register of documents, the letters, the budget, the complaints,
+    /// the processes, the provisional statements (which also stop being edited once an invoice or a payment point uses them), the legacy guaranties and the buy orders under a work order.
     /// </summary>
     public static class LegacyDeleteGuard
     {
@@ -81,12 +84,29 @@ namespace Services.NasbNiro
             await p.Live<Itp>("طرح‌های بازرسی و آزمون", x => x.ContractId == contractId);
             await p.Live<ReleaseNote>("برگه‌های ترخیص", x => x.ContractId == contractId);
 
+            // R1a2 (M3): the project start, the register of engineering documents, the transmittals and reports, the lines of purchase orders and budgets, deferrals, complaints, controlled documents, letters and the statements
+            await p.Live<PcProjectInitiation>("راه‌اندازی پروژه", x => x.ContractId == contractId);
+            await p.Live<PcProjectCharter>("منشور پروژه", x => x.ContractId == contractId);
+            await p.Live<PcProjectPlan>("برنامه اجرایی پروژه", x => x.ContractId == contractId);
+            await p.Live<PcContractReview>("بازنگری قرارداد", x => x.ContractId == contractId);
+            await p.Live<PcEngineeringDeliverable>("مدارک مهندسی", x => x.ContractId == contractId);
+            await p.Live<PcTransmittal>("ترنسمیتال‌ها", x => x.ContractId == contractId);
+            await p.Any<PcReportIssue>("گزارش‌های صادرشده", x => x.ContractId == contractId);
+            await p.Live<PcDailyReport>("گزارش‌های روزانه", x => x.ContractId == contractId);
+            await p.Any<PurchaseOrderLine>("سفارش‌های خرید", x => x.ContractId == contractId);
+            await p.Any<FnBudgetLine>("بودجه", x => x.ContractId == contractId);
+            await p.Any<FnDeferral>("پیش‌پرداخت‌ها و درآمدهای انتقالی", x => x.ContractId == contractId);
+            await p.Live<CustomerComplaint>("شکایت‌های مشتری", x => x.ContractId == contractId);
+            await p.Live<ControlledDocument>("مدارک کنترل‌شده", x => x.ContractId == contractId);
+            await p.Live<OfLetter>("نامه‌ها", x => x.ContractId == contractId);
+            await p.Live<ProvisionalStatement>("صورت‌وضعیت‌ها", x => x.ContractId == contractId);
+
             // the work orders of the contract are deleted with it: whatever blocks one of them blocks the contract
             List<int> workOrderIds = await uow.Set<WorkOrder>().AsNoTracking()
                 .Where(w => w.ContractId == contractId && !w.Deleted)
                 .Select(w => w.Id)
                 .ToListAsync(cancellationToken);
-            if (workOrderIds.Count > 0) await WorkOrderProbesAsync(p, workOrderIds);
+            if (workOrderIds.Count > 0) await WorkOrderProbesAsync(uow, p, workOrderIds, cancellationToken);
 
             return p.Refusal("حذف قرارداد ممکن نیست؛ برای این قرارداد سوابق ثبت شده است", "قراردادی که سابقه کنترل پروژه، خرید، مالی، تولید، انبار یا خدمات دارد حذف نمی‌شود.");
         }
@@ -97,11 +117,14 @@ namespace Services.NasbNiro
         public static async Task<string> WorkOrderAsync(IUnitOfWork uow, int workOrderId, CancellationToken cancellationToken)
         {
             var p = new Probe(uow, cancellationToken);
-            await WorkOrderProbesAsync(p, new List<int> { workOrderId });
+            await WorkOrderProbesAsync(uow, p, new List<int> { workOrderId }, cancellationToken);
             return p.Refusal("حذف دستور ساخت ممکن نیست؛ برای آن سوابق ثبت شده است", "دستور ساختی که دستور تولید، سند انبار یا هزینه دارد حذف نمی‌شود.");
         }
 
-        private static async Task WorkOrderProbesAsync(Probe p, List<int> ids)
+        /// <summary>The first stages of a buy order: nothing was asked of a supplier yet (the second and third are the starts of the assembler and the constructor routes).</summary>
+        private static readonly BuyOrderStatus[] BuyOrderStartStatuses = { BuyOrderStatus.NewBuyOrder, BuyOrderStatus.NewBuyOrderForAssembler, BuyOrderStatus.NewBuyOrderForConstructor };
+
+        private static async Task WorkOrderProbesAsync(IUnitOfWork uow, Probe p, List<int> ids, CancellationToken cancellationToken)
         {
             // the three kinds the company named first: production orders, inventory documents, cost entries
             await p.Live<MfProductionOrder>("دستورهای تولید", x => ids.Contains(x.WorkOrderId));
@@ -135,6 +158,41 @@ namespace Services.NasbNiro
             await p.Live<Itp>("طرح‌های بازرسی و آزمون", x => ids.Contains(x.WorkOrderId));
             await p.Live<ReleaseNote>("برگه‌های ترخیص", x => ids.Contains(x.WorkOrderId));
             await p.Live<SvInstalledUnit>("تجهیزات نصب‌شده نزد مشتری", x => x.WorkOrderId.HasValue && ids.Contains(x.WorkOrderId.Value));
+
+            // R1a2 (M3): payment points and penalties of the work order, its project code, the lines of purchase orders, complaints and controlled documents
+            await p.Live<PcPaymentMilestone>("نقاط پرداخت", x => x.WorkOrderId.HasValue && ids.Contains(x.WorkOrderId.Value));
+            await p.Live<PcPenaltyAssessment>("ارزیابی‌های جریمه", x => x.WorkOrderId.HasValue && ids.Contains(x.WorkOrderId.Value));
+            await p.Live<PcWorkOrderInfo>("کد پروژه‌ی دستور ساخت", x => ids.Contains(x.WorkOrderId));
+            await p.Any<PurchaseOrderLine>("سفارش‌های خرید", x => x.WorkOrderId.HasValue && ids.Contains(x.WorkOrderId.Value));
+            await p.Live<CustomerComplaint>("شکایت‌های مشتری", x => x.WorkOrderId.HasValue && ids.Contains(x.WorkOrderId.Value));
+            await p.Live<ControlledDocument>("مدارک کنترل‌شده", x => x.WorkOrderId.HasValue && ids.Contains(x.WorkOrderId.Value));
+
+            // the work order takes its buy orders with it (the legacy project purchases): they must not have started, and no stock document or purchase request line may point to them
+            List<int> buyOrderIds = await uow.Set<BuyOrder>().AsNoTracking()
+                .Where(b => !b.Deleted && ids.Contains(b.WorkOrderId))
+                .Select(b => b.Id)
+                .ToListAsync(cancellationToken);
+            if (buyOrderIds.Count > 0)
+            {
+                await p.Live<BuyOrder>("سفارش‌های خرید پروژه که فرایندشان شروع شده است", x => ids.Contains(x.WorkOrderId) && !BuyOrderStartStatuses.Contains(x.Status));
+                await p.Live<InventoryDocument>("اسناد انبار", x => x.BuyOrderId.HasValue && buyOrderIds.Contains(x.BuyOrderId.Value));
+                await p.Any<PurchaseRequestLine>("درخواست‌های خرید", x => x.BuyOrderId.HasValue && buyOrderIds.Contains(x.BuyOrderId.Value) && !x.PurchaseRequest.Deleted);
+            }
+
+            // ... and its assemblies, BOMs and processes, which the schedule and the production orders may point to
+            List<int> assemblyIds = await uow.Set<AssemblyEntity>().AsNoTracking()
+                .Where(a => !a.Deleted && ids.Contains(a.WorkOrderId))
+                .Select(a => a.Id)
+                .ToListAsync(cancellationToken);
+            if (assemblyIds.Count > 0)
+            {
+                await p.Live<PcWbsNode>("ساختار شکست کار (WBS)", x => x.AssemblyId.HasValue && assemblyIds.Contains(x.AssemblyId.Value));
+                List<int> bomIds = await uow.Set<Bom>().AsNoTracking()
+                    .Where(b => !b.Deleted && assemblyIds.Contains(b.AssemblyId))
+                    .Select(b => b.Id)
+                    .ToListAsync(cancellationToken);
+                await BomProbesAsync(uow, p, bomIds, cancellationToken);
+            }
         }
 
         // ------------------------------------------------------------------------------------------ provider
@@ -161,6 +219,12 @@ namespace Services.NasbNiro
             await p.Live<InventoryDocument>("اسناد انبار", x => x.ProviderId == providerId);
             await p.Live<InventoryLot>("محموله‌های انبار", x => x.ProviderId == providerId);
             await p.Live<NonConformance>("گزارش‌های عدم انطباق", x => x.ProviderId == providerId);
+
+            // R1a2 (M3): his evaluations, his entry in the approved vendor list, the qualified people he supplies and the letters' party record
+            await p.Live<SupplierEvaluation>("ارزیابی‌های تأمین‌کننده", x => x.ProviderId == providerId);
+            await p.Any<SupplierProfile>("پرونده‌ی تأمین‌کننده", x => x.ProviderId == providerId);
+            await p.Live<QualifiedPerson>("افراد واجد صلاحیت", x => x.ProviderId == providerId);
+            await p.Live<OfExternalParty>("طرف‌های مکاتبات", x => x.ProviderId == providerId);
             return p.Refusal("حذف تأمین‌کننده ممکن نیست؛ برای او سوابق ثبت شده است", "تأمین‌کننده‌ای که سفارش خرید، فاکتور، پرداخت یا رسید انبار دارد حذف نمی‌شود.");
         }
 
@@ -243,7 +307,42 @@ namespace Services.NasbNiro
                 .Select(x => x.Id)
                 .ToListAsync(cancellationToken);
             if (processIds.Count > 0)
+            {
                 await p.Live<MfProductionOrder>("دستورهای تولید", x => x.ProcessId.HasValue && processIds.Contains(x.ProcessId.Value));
+                await p.Live<PcWbsNode>("ساختار شکست کار (WBS)", x => x.ProcessId.HasValue && processIds.Contains(x.ProcessId.Value));   // R1a2 (M3)
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------ process, provisional statement, guaranties (R1a2, M3)
+
+        /// <summary>A process (a step of a BOM) that a production order or a project control WBS node refers to cannot be deleted.</summary>
+        public static async Task<string> ProcessAsync(IUnitOfWork uow, int processId, CancellationToken cancellationToken)
+        {
+            var p = new Probe(uow, cancellationToken);
+            await p.Live<MfProductionOrder>("دستورهای تولید", x => x.ProcessId == processId);
+            await p.Live<PcWbsNode>("ساختار شکست کار (WBS)", x => x.ProcessId == processId);
+            return p.Refusal("حذف فرایند ممکن نیست؛ از آن استفاده شده است", "فرایندی که دستور تولید یا برنامه کنترل پروژه به آن وصل است حذف نمی‌شود.");
+        }
+
+        /// <summary>
+        /// A provisional statement (صورت‌وضعیت) that a payment point of project control or a sales invoice refers to is neither edited nor deleted: the amounts of the
+        /// invoice and of the payment would no longer agree with it. <paramref name="forDelete"/> only changes the wording of the refusal.
+        /// </summary>
+        public static async Task<string> ProvisionalStatementAsync(IUnitOfWork uow, int statementId, bool forDelete, CancellationToken cancellationToken)
+        {
+            var p = new Probe(uow, cancellationToken);
+            await p.Live<PcPaymentMilestone>("نقاط پرداخت", x => x.ProvisionalStatementId == statementId);
+            await p.Any<FnSalesInvoice>("فاکتورهای فروش", x => x.ProvisionalStatementId == statementId);
+            return p.Refusal(forDelete ? "حذف صورت‌وضعیت ممکن نیست؛ از آن استفاده شده است" : "ویرایش صورت‌وضعیت ممکن نیست؛ از آن استفاده شده است",
+                "صورت‌وضعیتی که نقطه پرداخت یا فاکتور فروش به آن وصل است ویرایش یا حذف نمی‌شود.");
+        }
+
+        /// <summary>A legacy guaranty of a contract (ContractGuaranty) or of a tender (TenderGuaranty) that project control keeps a record for (expiry, alerts, release) cannot be deleted.</summary>
+        public static async Task<string> LegacyGuarantyAsync(IUnitOfWork uow, PcGuaranteeSource kind, int guarantyId, CancellationToken cancellationToken)
+        {
+            var p = new Probe(uow, cancellationToken);
+            await p.Live<PcGuaranteeInfo>("ضمانت‌نامه‌های کنترل پروژه", x => x.SourceKind == kind && x.SourceId == guarantyId);
+            return p.Refusal("حذف ضمانت‌نامه ممکن نیست؛ برای آن سوابق ثبت شده است", "ضمانت‌نامه‌ای که کنترل پروژه برای آن تاریخ انقضا و آزادسازی نگه می‌دارد حذف نمی‌شود.");
         }
 
         // ------------------------------------------------------------------------------------------ plumbing

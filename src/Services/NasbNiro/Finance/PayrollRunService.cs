@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -116,6 +117,8 @@ namespace Services.NasbNiro.Finance
         private static ResponseDto<T> Bad<T>(string m) => ResponseDtoHelper.BadRequest<T>(m);
         private const string NotAllowed = "شما مجوز دسترسی به اطلاعات حقوق و دستمزد را ندارید";
         private const string SameUser = "تایید باید توسط شخص دیگری غیر از محاسبه‌کننده حقوق انجام شود.";
+        private const string SameInputs = "تایید حقوق توسط کسی که کارکرد این ماه، مشخصات کارمندان یا وام‌های این اجرا را ثبت یا ویرایش کرده ممکن نیست؛ مدیر مالی دیگری تایید کند.";
+        private const string OwnPayslip = "این اجرای حقوق شامل فیش حقوق خودِ شماست و تایید آن با مدیرعامل است؛ مدیر مالی اجرایی را که حقوق خودش در آن است تایید نمی‌کند.";
         private const string Conflict = "همزمان توسط کاربر دیگری تغییر کرد؛ دوباره تلاش کنید.";
         private bool CanRead => _user.IsInRole(FinanceRoles.PayrollReaders);
         private bool CanWrite => _user.IsInRole(FinanceRoles.PayrollUsers);
@@ -124,6 +127,7 @@ namespace Services.NasbNiro.Finance
         {
             await FinanceSeed.EnsureAsync(_uow, ct);
             await F2Seed.EnsureAsync(_uow, ct);
+            await R1fUpgrades.EnsureAsync(_uow, Me, ct);
         }
 
         private static bool ValidYear(int y) => y >= 1300 && y <= 1600;
@@ -214,21 +218,48 @@ namespace Services.NasbNiro.Finance
             FnPayrollRun run = await _uow.Set<FnPayrollRun>().FirstOrDefaultAsync(r => r.Id == id, ct);
             if (run == null) return ResponseDtoHelper.NotFound<PayrollCalcResultDto>("اجرای حقوق پیدا نشد.");
             if (run.Status > FnPayrollStatus.Calculated) return Bad<PayrollCalcResultDto>("اجرای تاییدشده تغییر نمی‌کند.");
+            // release R1f: payroll is calculated only for a month whose attendance close was prepared by HR and confirmed by a second person, and whose sheets still hold the frozen numbers (review L6)
+            string closeRefusal = await HrClose.VerifiedRefusalAsync(_uow, run.Year, run.Month, ct);
+            if (closeRefusal != null) return Bad<PayrollCalcResultDto>(closeRefusal);
             DateTime start = PersianCal.Start(run.Year, run.Month), end = PersianCal.End(run.Year, run.Month);
 
-            List<FnEmployee> employees = await _uow.Set<FnEmployee>().AsNoTracking().Where(e => e.IsActive && e.HireDate <= end && (e.EndDate == null || e.EndDate >= start)
-                && (run.WorkshopId == null || e.WorkshopId == run.WorkshopId)).OrderBy(e => e.PersonnelCode).ToListAsync(ct);
+            IQueryable<FnEmployee> inMonth = _uow.Set<FnEmployee>().AsNoTracking().Where(e => e.IsActive && e.HireDate <= end && (e.EndDate == null || e.EndDate >= start)
+                && (run.WorkshopId == null || e.WorkshopId == run.WorkshopId));
+            // a new employee (and the guarded changes of an existing one) is used only after a second user approved it
+            List<string> notApproved = await inMonth.Where(e => e.PendingApproval).OrderBy(e => e.PersonnelCode).Select(e => e.PersonnelCode).ToListAsync(ct);
+            List<FnEmployee> employees = await inMonth.Where(e => !e.PendingApproval).OrderBy(e => e.PersonnelCode).ToListAsync(ct);
             if (employees.Count == 0) return Bad<PayrollCalcResultDto>("کارمند فعالی برای این ماه (و کارگاه) وجود ندارد.");
+            // review L8: a run scoped to one insurance workshop would silently leave out the employees who have no workshop yet: it refuses and names them
+            if (run.WorkshopId.HasValue)
+            {
+                List<int> withSheet = await _uow.Set<FnAttendanceSheet>().AsNoTracking().Where(s => s.Year == run.Year && s.Month == run.Month).Select(s => s.EmployeeId).ToListAsync(ct);
+                List<string> leftOut = await _uow.Set<FnEmployee>().AsNoTracking().Where(e => e.IsActive && !e.PendingApproval && e.WorkshopId == null && e.HireDate <= end && (e.EndDate == null || e.EndDate >= start) && withSheet.Contains(e.Id))
+                    .OrderBy(e => e.PersonnelCode).Select(e => e.PersonnelCode).ToListAsync(ct);
+                if (leftOut.Count > 0)
+                    return Bad<PayrollCalcResultDto>("اجرای مخصوص یک کارگاه بیمه کارمندانی را که کارگاه بیمه ندارند از محاسبه کنار می‌گذارد؛ ابتدا کارگاه بیمه آن‌ها را تعیین کنید (کد پرسنلی): " + string.Join("، ", leftOut));
+            }
             List<int> employeeIds = employees.Select(e => e.Id).ToList();
             List<FnAttendanceSheet> sheets = await _uow.Set<FnAttendanceSheet>().AsNoTracking().Include(s => s.WorkOrders)
                 .Where(s => s.Year == run.Year && s.Month == run.Month && employeeIds.Contains(s.EmployeeId)).AsSplitQuery().ToListAsync(ct);
             Dictionary<int, FnAttendanceSheet> sheetOf = sheets.ToDictionary(s => s.EmployeeId);
+            // employees without an insurance workshop cannot be reported to social security: the run waits until a workshop is assigned
+            List<string> noWorkshop = employees.Where(e => e.WorkshopId == null && sheetOf.ContainsKey(e.Id)).Select(e => e.PersonnelCode).ToList();
+            if (noWorkshop.Count > 0)
+                return Bad<PayrollCalcResultDto>("کارمندان زیر کارگاه بیمه ندارند و تا تعیین کارگاه بیمه نمی‌توان حقوق را محاسبه کرد (کد پرسنلی): " + string.Join("، ", noWorkshop));
+            Dictionary<int, List<FnEmployeeWage>> wageRows = await WageHistory.LoadAsync(_uow, employeeIds, ct);
             List<FnPayrollItem> items = await _uow.Set<FnPayrollItem>().AsNoTracking().Where(i => i.IsActive).OrderBy(i => i.Order).ThenBy(i => i.Id).ToListAsync(ct);
             var rates = new PayrollRates(await _uow.Set<FnPayrollRateTable>().AsNoTracking().Where(r => r.Year == 0 || r.Year == run.Year).ToListAsync(ct), run.Year);
             List<FnTaxBracket> brackets = await _uow.Set<FnTaxBracket>().AsNoTracking().Where(b => b.Year == run.Year).OrderBy(b => b.FromAmount).ToListAsync(ct);
-            List<FnEmployeeLoan> loans = await _uow.Set<FnEmployeeLoan>().AsNoTracking().Where(l => l.IsActive && l.Balance > 0 && employeeIds.Contains(l.EmployeeId)).ToListAsync(ct);
+            // a loan or advance that the finance manager has not approved is neither recovered nor paid out
+            List<FnEmployeeLoan> loans = await _uow.Set<FnEmployeeLoan>().AsNoTracking().Where(l => l.IsActive && l.Balance > 0 && l.ApprovalStatus == FnLoanApproval.Approved && employeeIds.Contains(l.EmployeeId)).ToListAsync(ct);
 
             var warnings = new List<string>();
+            foreach (string pc in notApproved) warnings.Add($"کارمند با کد پرسنلی {pc} هنوز توسط نفر دوم تایید نشده و از محاسبه کنار گذاشته شد.");
+            // review M2: the sheets that payroll typed or imported (outside the HR close and its frozen snapshot) are listed, count and personnel codes
+            string outsideClose = HrClose.OutsideCloseWarning(employees.Where(x => sheetOf.TryGetValue(x.Id, out FnAttendanceSheet typed) && typed.Source != FnSheetSource.HrClose).Select(x => x.PersonnelCode));
+            if (outsideClose != null) warnings.Add(outsideClose);
+            bool minimumUnknown = false;
+            var negativeNet = new List<string>();
             var slips = new List<FnPayslip>();
             foreach (FnEmployee e in employees)
             {
@@ -237,7 +268,9 @@ namespace Services.NasbNiro.Finance
                     warnings.Add($"برای کارمند با کد پرسنلی {e.PersonnelCode} کارکرد این ماه ثبت نشده و از محاسبه کنار گذاشته شد.");
                     continue;
                 }
-                var input = new PayrollInput { Employee = e, Sheet = sheet, Loans = loans.Where(l => l.EmployeeId == e.Id).ToList() };
+                // the wage in force at the month (approved wage history); the cached wage of the employee when the history has not started
+                decimal wage = WageHistory.WageAt(wageRows.TryGetValue(e.Id, out List<FnEmployeeWage> wr) ? wr : null, e.DailyWage, start, out bool _);
+                var input = new PayrollInput { Employee = e, Sheet = sheet, Loans = loans.Where(l => l.EmployeeId == e.Id).ToList(), DailyWage = wage };
                 if (!string.IsNullOrWhiteSpace(sheet.InputsJson))
                 {
                     try { input.Inputs = JsonSerializer.Deserialize<Dictionary<string, decimal>>(sheet.InputsJson) ?? input.Inputs; }
@@ -252,7 +285,11 @@ namespace Services.NasbNiro.Finance
                     warnings.Add($"کارکرد کارمند با کد پرسنلی {e.PersonnelCode} صفر است و فیش صادر نشد.");
                     continue;
                 }
-                if (r.Net < 0) return Bad<PayrollCalcResultDto>($"حقوق خالص کارمند با کد پرسنلی {e.PersonnelCode} منفی می‌شود؛ کسورات (وام، مساعده یا سایر کسورات) را بررسی کنید.");
+                if (r.Net < 0) { negativeNet.Add(e.PersonnelCode); continue; }
+                // minimum wage (rate-table key, Verify flag): a warning only, the run is not blocked
+                if (r.BelowMinimumWage)
+                    warnings.Add($"مزد ماهانه کارمند با کد پرسنلی {e.PersonnelCode} ({r.MonthlyBase.ToString("N0", CultureInfo.InvariantCulture)} ریال) کمتر از حداقل مزد جدول نرخ‌ها ({r.MinimumMonthly.ToString("N0", CultureInfo.InvariantCulture)} ریال) است.");
+                if (r.MinimumWageUnknown) minimumUnknown = true;
 
                 var slip = new FnPayslip
                 {
@@ -282,7 +319,11 @@ namespace Services.NasbNiro.Finance
                 else if (e.DefaultWorkOrderId.HasValue) slip.Allocations.Add(new FnPayslipAllocation { WorkOrderId = e.DefaultWorkOrderId.Value, Share = 1m });
                 slips.Add(slip);
             }
+            // review L5: an absent statutory key can distort every figure, so it is reported before the negative nets
             if (rates.Missing.Count > 0) return Bad<PayrollCalcResultDto>(MissingMessage(run.Year, rates.Missing));
+            if (negativeNet.Count > 0)
+                return Bad<PayrollCalcResultDto>($"حقوق خالص کارمند با کد پرسنلی {string.Join("، ", negativeNet)} منفی می‌شود؛ کسورات (وام، مساعده یا سایر کسورات) را بررسی کنید.");
+            if (minimumUnknown) warnings.Add($"حداقل مزد ({PayrollKeys.MinimumDailyWage}) در جدول نرخ‌های سال {run.Year} وارد نشده است؛ مقایسه با حداقل مزد انجام نشد.");
             if (slips.Count == 0) return Bad<PayrollCalcResultDto>("هیچ کارمندی با کارکرد ثبت‌شده برای محاسبه وجود ندارد.");
 
             // two saves: the old payslips go first (the unique index RunId + EmployeeId), then the new ones and the totals
@@ -311,8 +352,11 @@ namespace Services.NasbNiro.Finance
             run.CalculatedAt = DateTimeOffset.Now;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<PayrollCalcResultDto>(Conflict); }
+            // the finance manager approves; when a finance manager's own payslip is in the run he cannot, so the CEO is asked too (review H2)
+            HashSet<int> managerPay = await SelfApproval.FinanceManagerEmployeesAsync(_uow, employees.Where(x => slips.Any(sl => sl.EmployeeId == x.Id)), ct);
             await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payroll:" + run.Id, run.Status == FnPayrollStatus.Calculated, "finance", "payroll-run", run.Id,
-                $"تایید حقوق {run.Year}/{run.Month:00}" + (string.IsNullOrEmpty(run.Number) ? "" : " (" + run.Number + ")"), "/finance/payroll/runs/" + run.Id, FinanceRoles.Managers, ct);
+                $"تایید حقوق {run.Year}/{run.Month:00}" + (string.IsNullOrEmpty(run.Number) ? "" : " (" + run.Number + ")"), "/finance/payroll/runs/" + run.Id,
+                managerPay.Count > 0 ? FinanceRoles.ManagersOrCeo : FinanceRoles.Managers, ct);
             return ResponseDtoHelper.Ok(new PayrollCalcResultDto { Run = (await RunDtoAsync(run.Id, ct)).Data, Warnings = warnings });
         }
 
@@ -331,16 +375,35 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<PayrollRunDto>> ApproveAsync(int id, CancellationToken ct)
         {
-            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<PayrollRunDto>(NotAllowed + " (فقط مدیر مالی)");
+            // the finance manager approves; the CEO may approve too (a company with one finance manager is never stuck, and a run that pays the finance manager needs him)
+            if (!_user.IsInRole(FinanceRoles.ManagersOrCeo)) return Bad<PayrollRunDto>(NotAllowed + " (فقط مدیر مالی یا مدیرعامل)");
             await EnsureAsync(ct);
             FnPayrollRun run = await _uow.Set<FnPayrollRun>().FirstOrDefaultAsync(r => r.Id == id, ct);
             if (run == null) return ResponseDtoHelper.NotFound<PayrollRunDto>("اجرای حقوق پیدا نشد.");
             if (run.Status != FnPayrollStatus.Calculated) return Bad<PayrollRunDto>("فقط اجرای محاسبه‌شده تایید می‌شود.");
             if (Touched(run.PreparedByUserId, run.EditorUserIds, Me) || run.CreatedByUserId == Me) return Bad<PayrollRunDto>(SameUser);
             DateTimeOffset calculatedAt = run.CalculatedAt ?? DateTimeOffset.MinValue;
+            string closeRefusal = await HrClose.VerifiedRefusalAsync(_uow, run.Year, run.Month, ct);
+            if (closeRefusal != null) return Bad<PayrollRunDto>(closeRefusal);
 
             List<FnPayslip> slips = await _uow.Set<FnPayslip>().Include(p => p.Lines).Where(p => p.RunId == run.Id).AsSplitQuery().ToListAsync(ct);
             List<int> employeeIds = slips.Select(s => s.EmployeeId).ToList();
+            if (slips.Any(s => s.WorkshopId == null)) return Bad<PayrollRunDto>("برای یکی از کارمندان این اجرا کارگاه بیمه تعیین نشده است؛ کارگاه را تعیین کنید و حقوق را دوباره محاسبه کنید.");
+
+            // maker-checker over the inputs: whoever typed a sheet of the month, edited an employee master row or a loan used by this run may not approve it
+            var sheetEditors = await _uow.Set<FnAttendanceSheet>().AsNoTracking().Where(s => s.Year == run.Year && s.Month == run.Month && employeeIds.Contains(s.EmployeeId))
+                .Select(s => new { s.EditorUserIds, s.UpdatedByUserId }).ToListAsync(ct);
+            if (sheetEditors.Any(s => s.UpdatedByUserId == Me || Touched(0, s.EditorUserIds, Me))) return Bad<PayrollRunDto>(SameInputs);
+            List<FnEmployee> employees = await _uow.Set<FnEmployee>().Where(e => employeeIds.Contains(e.Id)).ToListAsync(ct);
+            // review H2: nobody approves a run that pays him; the payslip of a finance manager is approved by the CEO
+            if (Me > 0 && employees.Any(e => e.UserId.HasValue && e.UserId.Value == Me) && !_user.IsInRole(FinanceRoles.Ceo)) return Bad<PayrollRunDto>(OwnPayslip);
+            if (employees.Any(e => Touched(0, e.EditorUserIds, Me))) return Bad<PayrollRunDto>(SameInputs);
+            // review M2: the sheets that payroll typed or imported are not part of the frozen snapshot: the approval carries them as a warning (count and personnel codes)
+            var warnings = new List<string>();
+            List<int> outsideIds = await _uow.Set<FnAttendanceSheet>().AsNoTracking().Where(s => s.Year == run.Year && s.Month == run.Month && s.Source != FnSheetSource.HrClose && employeeIds.Contains(s.EmployeeId))
+                .Select(s => s.EmployeeId).ToListAsync(ct);
+            string outsideClose = HrClose.OutsideCloseWarning(employees.Where(x => outsideIds.Contains(x.Id)).Select(x => x.PersonnelCode));
+            if (outsideClose != null) warnings.Add(outsideClose);
             // the yearly bonus is paid either by a bonus run or by an ANNUAL_BONUS line, not both (review 3, H8)
             List<int> bonusEmployees = slips.Where(s => s.Lines.Any(l => l.ItemCode == "ANNUAL_BONUS" && l.Amount > 0)).Select(s => s.EmployeeId).ToList();
             if (bonusEmployees.Count > 0 && await _uow.Set<FnBonusLine>().AnyAsync(b => bonusEmployees.Contains(b.EmployeeId) && b.Run.Year == run.Year && b.Run.Status == FnSettlementStatus.Posted, ct))
@@ -353,7 +416,8 @@ namespace Services.NasbNiro.Finance
             // loans and advances: the instalments on the payslips must still be what the loan tables say
             int monthIndex = PersianCal.Index(run.Year, run.Month);
             List<FnPayrollItem> loanItems = await _uow.Set<FnPayrollItem>().AsNoTracking().Where(i => i.Calculation == FnPayrollCalc.LoanInstallment).ToListAsync(ct);
-            List<FnEmployeeLoan> loans = await _uow.Set<FnEmployeeLoan>().Where(l => employeeIds.Contains(l.EmployeeId)).ToListAsync(ct);
+            List<FnEmployeeLoan> loans = await _uow.Set<FnEmployeeLoan>().Where(l => employeeIds.Contains(l.EmployeeId) && l.ApprovalStatus == FnLoanApproval.Approved).ToListAsync(ct);
+            if (loans.Any(l => Touched(0, l.EditorUserIds, Me))) return Bad<PayrollRunDto>(SameInputs);
             var balanceChanges = new List<(FnEmployeeLoan Loan, decimal Amount)>();
             foreach (FnPayslip s in slips)
             {
@@ -370,31 +434,41 @@ namespace Services.NasbNiro.Finance
             }
             foreach (var change in balanceChanges) change.Loan.Balance -= change.Amount;
 
-            // leave balances of the year
-            decimal entitlement = (await _uow.Set<FnPayrollRateTable>().AsNoTracking().Where(r => (r.Year == 0 || r.Year == run.Year) && r.Key == "LeaveEntitlementMonthly")
-                .OrderByDescending(r => r.Year).Select(r => (decimal?)r.Value).FirstOrDefaultAsync(ct)) ?? 0m;
-            decimal carryMax = (await _uow.Set<FnPayrollRateTable>().AsNoTracking().Where(r => (r.Year == 0 || r.Year == run.Year) && r.Key == "LeaveCarryForwardMax")
-                .OrderByDescending(r => r.Year).Select(r => (decimal?)r.Value).FirstOrDefaultAsync(ct)) ?? 0m;
+            // leave balances of the year: the one shared accrual function (also used by the office leave balance); the entitlement and the carry-forward limit are rate-table keys, an absent key refuses
+            (LeaveAccrualPlan plan, string planError) = await LeaveAccrualPlan.LoadAsync(_uow, run.Year, employeeIds, ct);
+            if (planError != null) return Bad<PayrollRunDto>(planError);
             Dictionary<int, FnLeaveBalance> balances = await _uow.Set<FnLeaveBalance>().Where(b => b.Year == run.Year && employeeIds.Contains(b.EmployeeId)).ToDictionaryAsync(b => b.EmployeeId, ct);
             Dictionary<int, FnLeaveBalance> previous = await _uow.Set<FnLeaveBalance>().AsNoTracking().Where(b => b.Year == run.Year - 1 && employeeIds.Contains(b.EmployeeId)).ToDictionaryAsync(b => b.EmployeeId, ct);
             Dictionary<int, decimal> paidLeave = await _uow.Set<FnAttendanceSheet>().AsNoTracking().Where(s => s.Year == run.Year && s.Month == run.Month && employeeIds.Contains(s.EmployeeId))
                 .ToDictionaryAsync(s => s.EmployeeId, s => s.PaidLeaveDays, ct);
+            Dictionary<int, FnEmployee> employeeOf = employees.ToDictionary(e => e.Id);
             foreach (int employeeId in employeeIds)
             {
-                if (!balances.TryGetValue(employeeId, out FnLeaveBalance b))
+                balances.TryGetValue(employeeId, out FnLeaveBalance row);
+                previous.TryGetValue(employeeId, out FnLeaveBalance prev);
+                LeaveAccrual.State booked = LeaveAccrual.Book(
+                    row == null ? null : new LeaveAccrual.State { CarriedForward = row.CarriedForward, Entitled = row.Entitled, Used = row.Used, LastMonth = row.LastMonth },
+                    prev == null ? null : new LeaveAccrual.State { CarriedForward = prev.CarriedForward, Entitled = prev.Entitled, Used = prev.Used, LastMonth = prev.LastMonth },
+                    plan.MonthlyRate, plan.CarryMax, plan.FirstMonth(employeeOf[employeeId]), run.Month, paidLeave.TryGetValue(employeeId, out decimal used) ? used : 0m);
+                if (row == null)
                 {
-                    decimal carried = previous.TryGetValue(employeeId, out FnLeaveBalance prev) ? Math.Max(0m, Math.Min(prev.CarriedForward + prev.Entitled - prev.Used, carryMax)) : 0m;
-                    b = new FnLeaveBalance { EmployeeId = employeeId, Year = run.Year, CarriedForward = carried };
-                    _uow.Set<FnLeaveBalance>().Add(b);
-                    balances[employeeId] = b;
+                    row = new FnLeaveBalance { EmployeeId = employeeId, Year = run.Year };
+                    _uow.Set<FnLeaveBalance>().Add(row);
                 }
-                if (b.LastMonth < run.Month)
-                {
-                    b.Entitled += entitlement * (run.Month - b.LastMonth);
-                    b.Used += paidLeave.TryGetValue(employeeId, out decimal used) ? used : 0m;
-                    b.LastMonth = run.Month;
-                }
+                row.CarriedForward = booked.CarriedForward; row.Entitled = booked.Entitled; row.Used = booked.Used; row.LastMonth = booked.LastMonth;
             }
+
+            // the bank file pays the IBAN that was in force when the run was approved (the run flag says the snapshot was taken, even if an employee had no IBAN then);
+            // the edits of the inputs were checked by this approval and are cleared, except that the proposer of a change which still waits for its decision stays on the list (review L1)
+            foreach (FnPayslip slip in slips) slip.BankIban = employeeOf.TryGetValue(slip.EmployeeId, out FnEmployee owner) ? owner.BankIban : null;
+            run.IbanSnapshotted = true;
+            List<FnEmployeeChange> waiting = await _uow.Set<FnEmployeeChange>().AsNoTracking().Where(c => c.Status == FnChangeStatus.Pending && employeeIds.Contains(c.EmployeeId)).ToListAsync(ct);
+            foreach (FnEmployee e in employees)
+            {
+                e.EditorUserIds = null;
+                foreach (FnEmployeeChange pending in waiting.Where(c => c.EmployeeId == e.Id)) e.EditorUserIds = WithEditor(e.EditorUserIds, pending.ProposedByUserId);
+            }
+            foreach (FnEmployeeLoan l in loans) l.EditorUserIds = null;
 
             run.Status = FnPayrollStatus.Approved;
             run.ApprovedByUserId = Me;
@@ -402,7 +476,9 @@ namespace Services.NasbNiro.Finance
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<PayrollRunDto>(Conflict); }
             await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "payroll:" + run.Id, false, "finance", "payroll-run", run.Id, "تایید حقوق", "/finance/payroll/runs/" + run.Id, FinanceRoles.Managers, ct);
-            return await RunDtoAsync(run.Id, ct);
+            ResponseDto<PayrollRunDto> approved = await RunDtoAsync(run.Id, ct);
+            if (approved.Data != null) approved.Data.Warnings = warnings;
+            return approved;
         }
 
         // ================================================================================== posting
@@ -414,7 +490,7 @@ namespace Services.NasbNiro.Finance
             FnPayrollRun run = await _uow.Set<FnPayrollRun>().FirstOrDefaultAsync(r => r.Id == id, ct);
             if (run == null) return ResponseDtoHelper.NotFound<PayrollRunDto>("اجرای حقوق پیدا نشد.");
             if (run.Status != FnPayrollStatus.Approved) return Bad<PayrollRunDto>("فقط اجرای تاییدشده در دفتر ثبت می‌شود.");
-            List<FnPayslip> slips = await _uow.Set<FnPayslip>().AsNoTracking().Include(p => p.Lines).Include(p => p.Allocations).Where(p => p.RunId == run.Id).AsSplitQuery().ToListAsync(ct);
+            List<FnPayslip> slips = await _uow.Set<FnPayslip>().AsNoTracking().Include(p => p.Lines).Include(p => p.Allocations).Where(p => p.RunId == run.Id).OrderBy(p => p.Id).AsSplitQuery().ToListAsync(ct);
             List<int> ccIds = slips.Where(s => s.CostCenterId.HasValue).Select(s => s.CostCenterId.Value).Distinct().ToList();
             Dictionary<int, CostCenter> centers = await _uow.Set<CostCenter>().AsNoTracking().Where(c => ccIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
             List<int> workOrderIds = slips.SelectMany(s => s.Allocations).Select(a => a.WorkOrderId).Distinct().ToList();
@@ -424,7 +500,7 @@ namespace Services.NasbNiro.Finance
             string period = $"{run.Year}/{run.Month:00}";
 
             // totals per account role, work order and cost centre: the voucher never carries a person
-            var debits = new List<(string Role, int? WorkOrder, string Center, decimal Amount)>();
+            var debits = new List<PayrollPooling.DebitLine>();
             var credits = new Dictionary<string, decimal>(StringComparer.Ordinal);
             var order = new List<string>();
             void Credit(string role, decimal amount)
@@ -433,15 +509,22 @@ namespace Services.NasbNiro.Finance
                 if (!credits.ContainsKey(role)) { credits[role] = 0; order.Add(role); }
                 credits[role] += amount;
             }
-            void Debit(string role, int? workOrder, string center, decimal amount)
-            {
-                if (amount == 0) return;
-                int i = debits.FindIndex(d => d.Role == role && d.WorkOrder == workOrder && d.Center == center);
-                if (i < 0) debits.Add((role, workOrder, center, amount));
-                else debits[i] = (role, workOrder, center, debits[i].Amount + amount);
-            }
+            // the employee is remembered per line: a (role, cost centre) with fewer than three employees is pooled at company level below (review M4)
+            void Debit(int employeeId, string role, int? workOrder, string center, decimal amount) => PayrollPooling.Add(debits, employeeId, role, workOrder, center, amount);
             var laborCosts = new Dictionary<int, decimal>();
+            var protectedCosts = new Dictionary<string, decimal>(StringComparer.Ordinal);
             var employeeRecoveries = new List<(int EmployeeId, decimal Amount)>();
+
+            // protected groups (release R1f, the rule the after-sales labour already follows): a cost centre x work order group of the month with fewer than three payroll-rated employees would show
+            // one person's pay on its work-order line, so it is posted at the cost-centre level only (no work-order split, no work-order cost entry)
+            var parts = new List<PayrollProtection.Part>();
+            foreach (FnPayslip s in slips)
+            {
+                string code = s.CostCenterId.HasValue && centers.TryGetValue(s.CostCenterId.Value, out CostCenter c0) ? c0.Code : null;
+                foreach (FnPayslipAllocation a in s.Allocations) parts.Add(new PayrollProtection.Part { EmployeeId = s.EmployeeId, CostCenter = code, WorkOrderId = a.WorkOrderId });
+            }
+            HashSet<(string CostCenter, int WorkOrderId)> protectedGroups = PayrollProtection.ProtectedGroups(parts);
+
             foreach (FnPayslip s in slips)
             {
                 CostCenter cc = s.CostCenterId.HasValue && centers.TryGetValue(s.CostCenterId.Value, out CostCenter c) ? c : null;
@@ -455,7 +538,7 @@ namespace Services.NasbNiro.Finance
                 {
                     decimal amount = g.Sum(l => l.Amount);
                     fromProvision += amount;
-                    Debit(g.Key, null, center, amount);
+                    Debit(s.EmployeeId, g.Key, null, center, amount);
                 }
                 decimal expensed = s.GrossEarnings - fromProvision;
                 if (s.Allocations.Count > 0)
@@ -466,11 +549,17 @@ namespace Services.NasbNiro.Finance
                     {
                         decimal part = i == allocations.Count - 1 ? expensed - given : R(expensed * allocations[i].Share);
                         given += part;
-                        Debit(AccountRoles.PayrollExpenseDirect, allocations[i].WorkOrderId, null, part);
+                        if (protectedGroups.Contains((center ?? "", allocations[i].WorkOrderId)))
+                        {
+                            Debit(s.EmployeeId, AccountRoles.PayrollExpenseDirect, null, center, part);
+                            protectedCosts[center ?? ""] = (protectedCosts.TryGetValue(center ?? "", out decimal curCenter) ? curCenter : 0m) + part;
+                            continue;
+                        }
+                        Debit(s.EmployeeId, AccountRoles.PayrollExpenseDirect, allocations[i].WorkOrderId, null, part);
                         laborCosts[allocations[i].WorkOrderId] = (laborCosts.TryGetValue(allocations[i].WorkOrderId, out decimal cur) ? cur : 0m) + part;
                     }
                 }
-                else Debit(indirect, null, center, expensed);
+                else Debit(s.EmployeeId, indirect, null, center, expensed);
                 foreach (FnPayslipLine l in s.Lines)
                 {
                     switch (l.Kind)
@@ -482,20 +571,28 @@ namespace Services.NasbNiro.Finance
                             else Credit(l.AccountRole ?? AccountRoles.OtherPayable, l.Amount);
                             break;
                         case FnPayrollItemKind.EmployerContribution:
-                            Debit(employer, null, center, l.Amount);
+                            Debit(s.EmployeeId, employer, null, center, l.Amount);
                             Credit(l.AccountRole ?? AccountRoles.InsurancePayable, l.Amount);
                             break;
                         case FnPayrollItemKind.Provision:
-                            Debit(l.ItemCode == "SEVERANCE" ? AccountRoles.SeveranceExpense : indirect, null, center, l.Amount);
+                            Debit(s.EmployeeId, l.ItemCode == "SEVERANCE" ? AccountRoles.SeveranceExpense : indirect, null, center, l.Amount);
                             Credit(l.AccountRole ?? AccountRoles.OtherPayable, l.Amount);
                             break;
                     }
                 }
                 Credit(AccountRoles.PayrollPayable, s.Net);
             }
+            // review M4, the rule of three per account role AND cost centre (direct, indirect, employer insurance, severance ...): a cost centre in which fewer than three employees contribute to one role
+            // would show one person's pay on its line, so that (role, centre) is posted on one company-level line of the same role (no cost centre); the totals per account do not change
+            List<(string Role, string CostCenter)> pooled = PayrollPooling.PoolSmallCentres(debits);
+            HashSet<string> pooledDirectCenters = pooled.Where(x => x.Role == AccountRoles.PayrollExpenseDirect).Select(x => x.CostCenter).ToHashSet(StringComparer.Ordinal);
             var lines = new List<AccountingEventLine>();
-            foreach (var d in debits)
-                lines.Add(new AccountingEventLine { AccountRole = d.Role, Debit = d.Amount, WorkOrderId = d.WorkOrder, CostCenter = d.Center, Description = $"حقوق و دستمزد {period}" });
+            foreach (PayrollPooling.DebitLine d in debits)
+                lines.Add(new AccountingEventLine
+                {
+                    AccountRole = d.Role, Debit = d.Amount, WorkOrderId = d.WorkOrderId, CostCenter = d.CostCenter,
+                    Description = d.Pooled ? $"حقوق و دستمزد {period} (سطح شرکت؛ مرکز هزینه‌های کمتر از ۳ نفر ادغام شده)" : $"حقوق و دستمزد {period}",
+                });
             foreach (string role in order)
                 lines.Add(new AccountingEventLine { AccountRole = role, Credit = credits[role], Description = $"حقوق و دستمزد {period}" });
             foreach (var g in employeeRecoveries.GroupBy(x => x.EmployeeId))
@@ -515,6 +612,24 @@ namespace Services.NasbNiro.Finance
                     EntryDate = date, Kind = CostKind.Labour, WorkOrderId = kv.Key, ContractId = contractOf.TryGetValue(kv.Key, out int contract) && contract > 0 ? contract : (int?)null,
                     Quantity = 0, Amount = kv.Value, SourceType = "PayrollRun", SourceId = run.Id, SourceNumber = run.Number, Description = $"دستمزد مستقیم {period}",
                     CreatedAt = DateTimeOffset.Now, CreatedByUserId = Me,
+                });
+            // the labour of the protected groups: one entry per cost centre and month, without a work order or a contract; a centre whose direct-labour line was pooled (fewer than three employees)
+            // and the amounts without any centre go into ONE company-level entry (no cost centre)
+            decimal companyLevel = 0m;
+            foreach (var kv in protectedCosts.Where(x => x.Value != 0).OrderBy(x => x.Key, StringComparer.Ordinal))
+            {
+                if (kv.Key.Length == 0 || pooledDirectCenters.Contains(kv.Key)) { companyLevel += kv.Value; continue; }
+                _uow.Set<CostEntry>().Add(new CostEntry
+                {
+                    EntryDate = date, Kind = CostKind.Labour, CostCenter = kv.Key, Quantity = 0, Amount = kv.Value, SourceType = "PayrollRun", SourceId = run.Id, SourceNumber = run.Number,
+                    Description = $"دستمزد مستقیم {period} (سطح مرکز هزینه)", CreatedAt = DateTimeOffset.Now, CreatedByUserId = Me,
+                });
+            }
+            if (companyLevel != 0)
+                _uow.Set<CostEntry>().Add(new CostEntry
+                {
+                    EntryDate = date, Kind = CostKind.Labour, CostCenter = null, Quantity = 0, Amount = companyLevel, SourceType = "PayrollRun", SourceId = run.Id, SourceNumber = run.Number,
+                    Description = $"دستمزد مستقیم {period} (سطح شرکت)", CreatedAt = DateTimeOffset.Now, CreatedByUserId = Me,
                 });
             run.Status = FnPayrollStatus.Posted;
             run.PostedByUserId = Me;
@@ -606,11 +721,15 @@ namespace Services.NasbNiro.Finance
             if (run == null) return ResponseDtoHelper.NotFound<List<BankTransferRowDto>>("اجرای حقوق پیدا نشد.");
             if (run.Status < FnPayrollStatus.Posted) return Bad<List<BankTransferRowDto>>("فایل واریز فقط پس از ثبت در دفتر صادر می‌شود.");
             List<FnPayslip> slips = await _uow.Set<FnPayslip>().AsNoTracking().Include(p => p.Employee).Where(p => p.RunId == runId && p.Net > 0).OrderBy(p => p.Employee.PersonnelCode).ToListAsync(ct);
-            List<string> noIban = slips.Where(p => string.IsNullOrWhiteSpace(p.Employee.BankIban)).Select(p => p.Employee.PersonnelCode).ToList();
-            if (noIban.Count > 0) return Bad<List<BankTransferRowDto>>("شماره شبا برای کارمندان با این کدهای پرسنلی ثبت نشده است: " + string.Join("، ", noIban));
+            // release R1f: the file pays the IBAN stored on the payslip when the run was approved. A run approved before the snapshot existed (the run flag is off) falls back to the employee row;
+            // a run with the flag on never does, even when no employee had an IBAN at the approval (review L4)
+            bool legacyRun = !run.IbanSnapshotted;
+            string IbanOf(FnPayslip p) => legacyRun ? p.Employee.BankIban : p.BankIban;
+            List<string> noIban = slips.Where(p => string.IsNullOrWhiteSpace(IbanOf(p))).Select(p => p.Employee.PersonnelCode).ToList();
+            if (noIban.Count > 0) return Bad<List<BankTransferRowDto>>("شماره شبا برای کارمندان با این کدهای پرسنلی در زمان تایید حقوق ثبت نشده بود: " + string.Join("، ", noIban));
             return ResponseDtoHelper.Ok(slips.Select(p => new BankTransferRowDto
             {
-                Iban = p.Employee.BankIban, Amount = p.Net, Name = (p.Employee.FirstName + " " + p.Employee.LastName).Trim(), PersonnelCode = p.Employee.PersonnelCode,
+                Iban = IbanOf(p), Amount = p.Net, Name = (p.Employee.FirstName + " " + p.Employee.LastName).Trim(), PersonnelCode = p.Employee.PersonnelCode,
             }).ToList());
         }
 

@@ -78,6 +78,8 @@ namespace WebApi.Filters
             switch (Kind)
             {
                 case FileGuardKind.Download:
+                    // a letter's file answers like the letter's own endpoint: a stranger gets 404, so the two do not disagree about whether the file exists (L1)
+                    if (verdict.LetterFile) { context.Result = new NotFoundObjectResult("فایلی یافت نشد"); break; }
                     context.Result = new ObjectResult(ResponseDtoHelper.Forbidden<string>(verdict.Message)) { StatusCode = StatusCodes.Status403Forbidden };
                     break;
                 case FileGuardKind.Info:

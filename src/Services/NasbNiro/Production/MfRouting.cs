@@ -69,6 +69,8 @@ namespace Services.NasbNiro.Production
                       .Append('|').Append(s.IsOutside ? 1 : 0).Append('|').Append(s.DefaultSupplierId).Append('|').Append(s.OutsideLeadDays).Append('|').Append(s.WorkInstructionDocumentId)
                       .Append('|').Append(s.DrawingReferenceRule).Append('|').Append(s.RequiredQualificationKind).Append('|').Append(s.RequiredQualificationProcess)
                       .Append('|').Append((int)s.InspectionRequirement).Append('|').Append(s.ItpTestType).Append('|').Append(s.FirstArticleRequired ? 1 : 0);
+                    // R1p D12: the welding procedure is part of the approved content, but only a welding step adds it, so the hash of every other step (and every revision approved before) stays as it was
+                    if (s.IsWelding) sb.Append("|W|").Append(s.WpsId);
                 }
                 sb.Append('\n');
             }

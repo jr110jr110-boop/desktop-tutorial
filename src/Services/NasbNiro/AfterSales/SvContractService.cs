@@ -238,11 +238,13 @@ namespace Services.NasbNiro.AfterSales
 
             await _uow.SaveChangesAsync(ct);
 
-            // 4) the SLA-breach alert of the open requests
+            // 4) the SLA-breach alert of the open requests. The due times are clock times (R1p D24: received time plus the SLA hours), so the run of the real day judges them at the
+            //    real moment, not at the midnight of the day (a response due at 01:30 would otherwise be flagged a day late); a run for another day keeps that day's midnight
+            DateTime slaAt = asOf.Date == DateTime.Today ? DateTime.Now : asOf;
             List<SvServiceRequest> open = await _uow.Set<SvServiceRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status != SvRequestStatus.Closed && r.Status != SvRequestStatus.Resolved).ToListAsync(ct);
             foreach (SvServiceRequest r in open)
             {
-                bool breached = SvSla.Breached(r.ResponseDue, r.FirstResponseAt, asOf) || SvSla.Breached(r.ResolutionDue, r.ResolvedAt, asOf);
+                bool breached = SvSla.Breached(r.ResponseDue, r.FirstResponseAt, slaAt) || SvSla.Breached(r.ResolutionDue, r.ResolvedAt, slaAt);
                 await SvGates.BreachAsync(_notify, r, breached, ct);
                 if (breached) result.BreachAlerts++;
             }

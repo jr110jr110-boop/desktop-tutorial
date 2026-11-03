@@ -266,7 +266,7 @@ namespace Services.NasbNiro.Finance
             }
             Dictionary<int, decimal> rateOf = dto.Entities.ToDictionary(x => x.EntityId, x => x.Rate);
 
-            var sums = await _uow.Set<FnVoucherLine>().AsNoTracking()
+            var sums = await FnLabourMask.Visible(_uow.Set<FnVoucherLine>().AsNoTracking(), FnLabourMask.Sees(_user))   // R1p C1: confidential labour lines are summed only for PAYROLL, FINANCEMANAGER and CEO
                 .Where(l => l.Voucher.Date >= from && l.Voucher.Date <= to && (query.IncludeDraft || l.Voucher.Status == FnVoucherStatus.Final))
                 .GroupBy(l => new { EntityId = l.Voucher.FiscalYear.LegalEntityId, l.AccountId })
                 .Select(g => new { g.Key.EntityId, g.Key.AccountId, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) }).ToListAsync(ct);

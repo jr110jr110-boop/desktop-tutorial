@@ -161,6 +161,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? ContractId { get; set; }
         public int? CostCenterId { get; set; }
         public string SourceRole { get; set; }
+
+        /// <summary>R1p D1/D2: the line is a protected labour amount; only PAYROLL, FINANCEMANAGER and CEO receive such a line at all.</summary>
+        public bool LabourProtected { get; set; }
     }
 
     public class VoucherDto
@@ -203,6 +206,12 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public DateTimeOffset? CheckedAt { get; set; }
         public string FinalizedByName { get; set; }
         public DateTimeOffset? FinalizedAt { get; set; }
+
+        /// <summary>
+        /// R1p D1/D2: true when the voucher has protected labour lines that this reader does not receive (only PAYROLL, FINANCEMANAGER and CEO do): <see cref="Lines"/> and <see cref="TotalAmount"/> then leave them out
+        /// (they are a debit and a credit of the same amount, so what is shown still balances).
+        /// </summary>
+        public bool LabourHidden { get; set; }
         public List<VoucherLineDto> Lines { get; set; } = new List<VoucherLineDto>();
     }
 
@@ -373,6 +382,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int TotalRows { get; set; }
         public int PageNumber { get; set; }
         public int PageSize { get; set; }
+
+        /// <summary>R1p D1/D2: true when protected labour lines of this account are left out for this reader (only PAYROLL, FINANCEMANAGER and CEO see them).</summary>
+        public bool LabourHidden { get; set; }
         public List<LedgerRowDto> Rows { get; set; } = new List<LedgerRowDto>();
     }
 
@@ -1047,6 +1059,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string KindTitle { get; set; }
         public decimal Amount { get; set; }
         public string Note { get; set; }
+        /// <summary>M8: the voucher that books the correction; required for kinds 1 and 4 before the reconciliation is approved.</summary>
+        public int? CorrectingVoucherId { get; set; }
     }
 
     public class CreateReconciliationDto

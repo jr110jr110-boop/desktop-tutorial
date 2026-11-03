@@ -148,7 +148,9 @@ namespace Services.NasbNiro.Finance
         public async Task<ResponseDto<List<ExportMappingRowDto>>> GetDetailMappingAsync(bool onlyUnmapped, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<List<ExportMappingRowDto>>(NotAllowed);
-            var list = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => d.IsActive).OrderBy(d => d.Code)
+            // release R1f: the employee detail accounts are listed to the roles that read personal data only
+            bool seePersonal = PersonalLedger.Sees(_user);
+            var list = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => d.IsActive && (seePersonal || d.Type != FnDetailType.Employee)).OrderBy(d => d.Code)
                 .Select(d => new { d.Id, d.Code, d.Title }).Take(5000).ToListAsync(ct);
             Dictionary<int, string> maps = await _uow.Set<FnDetailSepidarMap>().AsNoTracking().ToDictionaryAsync(m => m.DetailAccountId, m => m.SepidarCode, ct);
             var rows = list.Select(d => new ExportMappingRowDto { Code = d.Code, Title = d.Title, SepidarCode = maps.TryGetValue(d.Id, out string s) ? s : null, Mapped = maps.ContainsKey(d.Id) }).ToList();
@@ -286,9 +288,32 @@ namespace Services.NasbNiro.Finance
             return value.IndexOfAny(new[] { ',', '"' }) >= 0 ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;
         }
 
+        /// <summary>
+        /// R1p C1: the periods (of the given ones) that hold voucher lines flagged as confidential labour. The preview totals, the rows and the file of such a period contain the flagged amounts, so everybody except PAYROLL,
+        /// FINANCEMANAGER and CEO is refused them (the same rule as the events export). Empty for a reader who sees the lines.
+        /// </summary>
+        private async Task<Dictionary<int, string>> ProtectedPeriodsAsync(IEnumerable<int> periodIds, CancellationToken ct)
+        {
+            var result = new Dictionary<int, string>();
+            if (FnLabourMask.Sees(_user)) return result;
+            List<int> ids = periodIds.Distinct().ToList();
+            var periods = await _uow.Set<FnPeriod>().AsNoTracking().Where(p => ids.Contains(p.Id)).Select(p => new { p.Id, p.Title, p.FiscalYearId, p.StartDate, p.EndDate }).ToListAsync(ct);
+            foreach (var p in periods)
+            {
+                if (await _uow.Set<FnVoucherLine>().AsNoTracking().AnyAsync(l => l.LabourProtected && l.Voucher.FiscalYearId == p.FiscalYearId && l.Voucher.Date >= p.StartDate && l.Voucher.Date <= p.EndDate, ct))
+                    result[p.Id] = p.Title;
+            }
+            return result;
+        }
+
+        private static string ProtectedRefusal(string periodTitle) =>
+            "دوره‌ی " + periodTitle + " شامل مبلغ محرمانه‌ی دستمزد (تفاوت نرخ دستمزد) است؛ پیش‌نمایش، جمع‌ها و فایل خروجی کامل آن را فقط مدیر مالی، مدیرعامل یا حقوق و دستمزد می‌بینند و صدور آن با مدیر مالی است.";
+
         public async Task<ResponseDto<ExportPreviewDto>> PreviewAsync(int periodId, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<ExportPreviewDto>(NotAllowed);
+            Dictionary<int, string> hidden = await ProtectedPeriodsAsync(new[] { periodId }, ct);
+            if (hidden.TryGetValue(periodId, out string hiddenTitle)) return Bad<ExportPreviewDto>(ProtectedRefusal(hiddenTitle));
             Built b = await BuildAsync(periodId, false, ct);
             return ResponseDtoHelper.Ok(b.Preview);
         }
@@ -349,19 +374,36 @@ namespace Services.NasbNiro.Finance
                 e.ExportedByUserId, e.ExportedAt, e.SupersededByExportId, e.SupersedeReason,
             }).ToListAsync(ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => (int?)r.ExportedByUserId), ct);
-            return ResponseDtoHelper.Ok(rows.Select(e => new VoucherExportDto
-            {
-                Id = e.Id, Number = e.Number, LegalEntityId = e.LegalEntityId, PeriodId = e.PeriodId, PeriodTitle = e.PeriodTitle, Status = e.Status, Vouchers = e.Vouchers, Rows = e.Rows,
-                TotalDebit = e.TotalDebit, TotalCredit = e.TotalCredit, Sha256 = e.Sha256, ExportedByUserId = e.ExportedByUserId, ExportedByName = names.Name(e.ExportedByUserId),
-                ExportedAt = e.ExportedAt, SupersededByExportId = e.SupersededByExportId, SupersedeReason = e.SupersedeReason,
-            }).ToList());
+            // R1p C1: of an export of a period that holds confidential labour lines, a reader who does not see them gets neither the counts nor the totals (they contain the flagged amounts)
+            Dictionary<int, string> hidden = await ProtectedPeriodsAsync(rows.Select(r => r.PeriodId), ct);
+            return ResponseDtoHelper.Ok(rows.Select(e => hidden.ContainsKey(e.PeriodId)
+                ? new VoucherExportDto
+                {
+                    Id = e.Id, Number = e.Number, LegalEntityId = e.LegalEntityId, PeriodId = e.PeriodId, PeriodTitle = e.PeriodTitle, Status = e.Status, Sha256 = e.Sha256,
+                    ExportedByUserId = e.ExportedByUserId, ExportedByName = names.Name(e.ExportedByUserId), ExportedAt = e.ExportedAt, SupersededByExportId = e.SupersededByExportId, SupersedeReason = e.SupersedeReason,
+                    LabourHidden = true,
+                }
+                : new VoucherExportDto
+                {
+                    Id = e.Id, Number = e.Number, LegalEntityId = e.LegalEntityId, PeriodId = e.PeriodId, PeriodTitle = e.PeriodTitle, Status = e.Status, Vouchers = e.Vouchers, Rows = e.Rows,
+                    TotalDebit = e.TotalDebit, TotalCredit = e.TotalCredit, Sha256 = e.Sha256, ExportedByUserId = e.ExportedByUserId, ExportedByName = names.Name(e.ExportedByUserId),
+                    ExportedAt = e.ExportedAt, SupersededByExportId = e.SupersededByExportId, SupersedeReason = e.SupersedeReason,
+                }).ToList());
         }
 
         public async Task<ResponseDto<byte[]>> DownloadAsync(int id, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<byte[]>(NotAllowed);
-            string content = await _uow.Set<FnVoucherExport>().AsNoTracking().Where(e => e.Id == id).Select(e => e.Content).FirstOrDefaultAsync(ct);
-            if (content == null) return ResponseDtoHelper.NotFound<byte[]>("خروجی پیدا نشد.");
+            var stored = await _uow.Set<FnVoucherExport>().AsNoTracking().Where(e => e.Id == id).Select(e => new { e.Content, e.PeriodId, e.Period.FiscalYearId, e.Period.StartDate, e.Period.EndDate }).FirstOrDefaultAsync(ct);
+            if (stored == null || stored.Content == null) return ResponseDtoHelper.NotFound<byte[]>("خروجی پیدا نشد.");
+            // R1p C1: a period with a protected labour line (the quarter-end variance of a small pool) is exported to PAYROLL, FINANCEMANAGER and CEO only
+            Dictionary<int, string> hidden = await ProtectedPeriodsAsync(new[] { stored.PeriodId }, ct);
+            if (hidden.TryGetValue(stored.PeriodId, out string hiddenTitle)) return Bad<byte[]>(ProtectedRefusal(hiddenTitle));
+            string content = stored.Content;
+            // release R1f: the file carries the detail code of every line, so the lines on an employee detail account (a person's loan or advance) are in it: the roles that may not see persons do not get such a file
+            if (!PersonalLedger.Sees(_user) && await _uow.Set<FnVoucherLine>().AsNoTracking().AnyAsync(l => l.Voucher.FiscalYearId == stored.FiscalYearId && l.Voucher.Date >= stored.StartDate && l.Voucher.Date <= stored.EndDate
+                && l.Voucher.Status == FnVoucherStatus.Final && ((l.Detail1 != null && l.Detail1.Type == FnDetailType.Employee) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Employee)), ct))
+                return Bad<byte[]>("این خروجی ردیف‌های پرسنلی (وام و مساعده کارکنان) دارد؛ دریافت فایل فقط برای حقوق و دستمزد، مدیر مالی و مدیرعامل مجاز است.");
             byte[] body = Encoding.UTF8.GetBytes(content);
             return ResponseDtoHelper.Ok(Encoding.UTF8.GetPreamble().Concat(body).ToArray());
         }

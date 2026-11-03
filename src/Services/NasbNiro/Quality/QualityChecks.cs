@@ -90,7 +90,7 @@ namespace Services.NasbNiro.Quality
             List<NonConformance> candidates = (await uow.Set<NonConformance>()
                 .Where(n => !n.Deleted && (n.Status == NcrStatus.Open || n.Status == NcrStatus.Approved) && n.Id != own &&
                             ((n.LotId != null && lotIds.Contains(n.LotId.Value)) || (n.SerialNumbers != null && itemIds.Contains(n.ItemId))))
-                .ToListAsync(cancellationToken)).Where(NonconformingHoldRules.Holds).ToList();
+                .ToListAsync(cancellationToken)).Where(n => NonconformingHoldRules.Holds(n, type)).ToList();
             if (candidates.Count == 0) return null;
 
             Dictionary<int, string> codes = await uow.Set<InventoryItem>().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, cancellationToken);

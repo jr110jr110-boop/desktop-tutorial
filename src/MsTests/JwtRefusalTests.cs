@@ -2,8 +2,10 @@ using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using System.Threading.Tasks;
 using Common.Results;
 using Microsoft.AspNetCore.Authentication;
@@ -34,6 +36,7 @@ namespace MsTests
             public string ContentType;
             public string Body;
             public string WwwAuthenticate;
+            public string RetryAfter;
             public JObject Json => JObject.Parse(Body);
         }
 
@@ -86,6 +89,7 @@ namespace MsTests
                 ContentType = http.Response.ContentType,
                 Body = Encoding.UTF8.GetString(body.ToArray()),
                 WwwAuthenticate = http.Response.Headers["WWW-Authenticate"].ToString(),
+                RetryAfter = http.Response.Headers["Retry-After"].ToString(),
             };
         }
 
@@ -163,6 +167,51 @@ namespace MsTests
             string service = JsonConvert.SerializeObject(ResponseDtoHelper.Forbidden<object>(JwtBearerRefusals.NotPermitted), ApiJson.Create());
 
             Assert.AreEqual("{\"success\":false,\"message\":\"" + JwtBearerRefusals.NotPermitted + "\",\"data\":null,\"httpStatusCode\":403}", service);
+        }
+
+        [TestMethod]
+        public async Task TheRateLimitAnswersTheStandardJsonWith429AndTheWaitInRetryAfter()
+        {
+            // R1a2 (M1): the same four properties as every other refusal; the wait is rounded up to whole seconds
+            Answer answer = await RunAsync(http => JwtBearerRefusals.WriteTooManyRequestsAsync(http.Response, TimeSpan.FromSeconds(41.2)));
+
+            AssertStandardRefusal(answer, 429, JwtBearerRefusals.TooManyRequests);
+            Assert.AreEqual("42", answer.RetryAfter);
+            Assert.AreEqual(JsonConvert.SerializeObject(new ResponseDto<object>(false, JwtBearerRefusals.TooManyRequests, null).HasHttpStatusCode((HttpStatusCode)429), ApiJson.Create()), answer.Body);
+
+            Answer unknownWait = await RunAsync(http => JwtBearerRefusals.WriteTooManyRequestsAsync(http.Response, null));
+            AssertStandardRefusal(unknownWait, 429, JwtBearerRefusals.TooManyRequests);
+            Assert.AreEqual("", unknownWait.RetryAfter, "no header when the limiter does not know the wait");
+        }
+
+        [TestMethod]
+        public void TheSignInLimitCountsPerClientAddressAndTellsTheWait()
+        {
+            // the partition Startup puts on login, refresh-token, change-temporary-password and logout (Identity:RateLimitPerMinute)
+            using PartitionedRateLimiter<HttpContext> limiter = PartitionedRateLimiter.Create<HttpContext, string>(context => IdentityRateLimit.Partition(context, 3));
+            HttpContext From(string ip)
+            {
+                var context = new DefaultHttpContext();
+                context.Connection.RemoteIpAddress = ip == null ? null : IPAddress.Parse(ip);
+                return context;
+            }
+
+            for (int i = 0; i < 3; i++)
+                using (RateLimitLease lease = limiter.AttemptAcquire(From("10.0.0.1")))
+                    Assert.IsTrue(lease.IsAcquired, "attempt " + (i + 1));
+            using (RateLimitLease refused = limiter.AttemptAcquire(From("10.0.0.1")))
+            {
+                Assert.IsFalse(refused.IsAcquired, "the fourth attempt of the minute");
+                Assert.IsTrue(refused.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan wait));
+                Assert.IsTrue(wait > TimeSpan.Zero && wait <= TimeSpan.FromMinutes(1));
+            }
+            using (RateLimitLease other = limiter.AttemptAcquire(From("10.0.0.2")))
+                Assert.IsTrue(other.IsAcquired, "another address has its own window");
+
+            // a request without an address shares one window; a limit of zero or less is raised to one (the limiter would refuse to start otherwise)
+            using PartitionedRateLimiter<HttpContext> tiny = PartitionedRateLimiter.Create<HttpContext, string>(context => IdentityRateLimit.Partition(context, 0));
+            using (RateLimitLease one = tiny.AttemptAcquire(From(null))) Assert.IsTrue(one.IsAcquired);
+            using (RateLimitLease two = tiny.AttemptAcquire(From(null))) Assert.IsFalse(two.IsAcquired);
         }
 
         [TestMethod]

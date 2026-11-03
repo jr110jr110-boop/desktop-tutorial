@@ -126,8 +126,9 @@ namespace Services.Token
             }
             catch (Exception ex)
             {
-                // R1a: the token itself is a credential and is never written to the log
-                _logger.LogWarning(ex, "A refresh token could not be validated (expired, tampered or malformed).");
+                // R1a: the token itself is a credential and is never written to the log.
+                // R1a2 (M1): Information, not Warning: the database log stores warnings, and an anonymous caller can send malformed tokens without limit
+                _logger.LogInformation(ex, "A refresh token could not be validated (expired, tampered or malformed).");
             }
 
             return decodedRefreshTokenPrincipal?.Claims?.FirstOrDefault(c => c.Type == ClaimTypes.SerialNumber)?.Value;
@@ -159,6 +160,9 @@ namespace Services.Token
                
                 // to invalidate the cookie
                 new Claim(ClaimTypes.SerialNumber, user.SerialNumber ?? "1", ClaimValueTypes.String, _configuration.Value.Issuer),
+                // R1a2 (H2): a keyed hash of the security stamp; every request compares it with the stamp in the database, so a password change, a reset,
+                // a change of roles, a deletion or a logout ends the access tokens that were made before it
+                new Claim(TokenStamp.ClaimType, TokenStamp.Compute(user.SecurityStamp, _configuration.Value.Key), ClaimValueTypes.String, _configuration.Value.Issuer),
                 // custom data
                 new Claim(ClaimTypes.UserData, user.Id.ToString(), ClaimValueTypes.String, _configuration.Value.Issuer)
             };
@@ -170,14 +174,6 @@ namespace Services.Token
             {
                 claims.Add(new Claim(ClaimTypes.Role, role.Name, ClaimValueTypes.String, _configuration.Value.Issuer));
             }
-
-            //shoud be 16 characters
-            var encryptionkey = Encoding.UTF8.GetBytes("16CharEncryptKey");
-
-            var encryptingCredentials = new EncryptingCredentials
-                (new SymmetricSecurityKey(encryptionkey),
-                    SecurityAlgorithms.Aes128KW,
-                    SecurityAlgorithms.Aes128CbcHmacSha256);
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration.Value.Key));
 

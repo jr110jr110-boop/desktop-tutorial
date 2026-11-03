@@ -78,7 +78,7 @@ namespace Services.NasbNiro.Production
                 CalendarName = r.CalendarId.HasValue && calendars.TryGetValue(r.CalendarId.Value, out string cn) ? cn : null,
                 ShiftsPerDay = r.ShiftsPerDay, HoursPerShift = r.HoursPerShift, EfficiencyPercent = r.EfficiencyPercent, UtilisationPercent = r.UtilisationPercent,
                 ParallelResources = r.ParallelResources, MachineRateRial = rates ? r.MachineRateRial : null, LabourRateRial = rates ? r.LabourRateRial : null,
-                CostCenter = r.CostCenter, QueueDaysDefault = r.QueueDaysDefault, IsActive = r.IsActive,
+                CostCenter = r.CostCenter, QueueDaysDefault = r.QueueDaysDefault, IsActive = r.IsActive, RequiresMachine = r.RequiresMachine,
                 MachineCount = machineCounts.FirstOrDefault(m => m.Id == r.Id)?.Count ?? 0, RowVersion = MfConcurrency.Text(r.RowVersion),
             }).ToList();
         }
@@ -149,7 +149,7 @@ namespace Services.NasbNiro.Production
             }
             row.Code = code; row.Title = title; row.Kind = dto.Kind; row.CalendarId = dto.CalendarId; row.ShiftsPerDay = dto.ShiftsPerDay; row.HoursPerShift = dto.HoursPerShift;
             row.EfficiencyPercent = dto.EfficiencyPercent; row.UtilisationPercent = dto.UtilisationPercent; row.ParallelResources = dto.ParallelResources;
-            row.CostCenter = Clean(dto.CostCenter); row.QueueDaysDefault = dto.QueueDaysDefault; row.IsActive = dto.IsActive;
+            row.CostCenter = Clean(dto.CostCenter); row.QueueDaysDefault = dto.QueueDaysDefault; row.IsActive = dto.IsActive; row.RequiresMachine = dto.RequiresMachine;
             row.ModifyDate = now; row.ModifierUserId = Me;
             try
             {
@@ -259,6 +259,9 @@ namespace Services.NasbNiro.Production
             List<int> supplierIds = rows.Where(r => r.S != null && r.S.DefaultSupplierId.HasValue).Select(r => r.S.DefaultSupplierId.Value).Distinct().ToList();
             Dictionary<int, string> suppliers = supplierIds.Count == 0 ? new Dictionary<int, string>()
                 : await _uow.Set<Provider>().AsNoTracking().Where(p => supplierIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name, ct);
+            List<int> wpsIds = rows.Where(r => r.S != null && r.S.WpsId.HasValue).Select(r => r.S.WpsId.Value).Distinct().ToList();
+            Dictionary<int, string> wpsNumbers = wpsIds.Count == 0 ? new Dictionary<int, string>()
+                : (await _uow.Set<Wps>().AsNoTracking().Where(w => wpsIds.Contains(w.Id)).Select(w => new { w.Id, w.Number, w.Revision }).ToListAsync(ct)).ToDictionary(w => w.Id, w => w.Number + "/" + w.Revision);
             return rows.Select(r => new OperationStandardDto
             {
                 OperationTemplateId = r.T.Id, ItemId = r.T.ItemId, ItemCode = r.ItemCode, ItemGroupId = r.T.ItemGroupId, ItemGroupCode = r.GroupCode, Sequence = r.T.Sequence,
@@ -270,6 +273,7 @@ namespace Services.NasbNiro.Production
                 OutsideLeadDays = r.S?.OutsideLeadDays ?? 0, WorkInstructionDocumentId = r.S?.WorkInstructionDocumentId, DrawingReferenceRule = r.S?.DrawingReferenceRule,
                 RequiredQualificationKind = r.S?.RequiredQualificationKind, RequiredQualificationProcess = r.S?.RequiredQualificationProcess,
                 InspectionRequirement = r.S?.InspectionRequirement ?? MfInspectionRequirement.None, ItpTestType = r.S?.ItpTestType, FirstArticleRequired = r.S?.FirstArticleRequired ?? false,
+                IsWelding = r.S?.IsWelding ?? false, WpsId = r.S?.WpsId, WpsNumber = r.S?.WpsId != null && wpsNumbers.TryGetValue(r.S.WpsId.Value, out string wn) ? wn : null,
             }).OrderBy(d => d.ItemCode ?? d.ItemGroupCode).ThenBy(d => d.Sequence).ToList();
         }
 
@@ -303,6 +307,10 @@ namespace Services.NasbNiro.Production
             if (dto.WorkCenterId.HasValue && !await _uow.Set<MfWorkCenter>().AnyAsync(w => w.Id == dto.WorkCenterId.Value && !w.Deleted, ct)) return Bad<OperationStandardDto>("مرکز کار پیدا نشد.");
             if (!dto.IsOutside && !dto.WorkCenterId.HasValue) return Bad<OperationStandardDto>("مرکز کار مرحله را انتخاب کنید (یا مرحله را «بیرونی» علامت بزنید).");
             if (dto.DefaultSupplierId.HasValue && !await _uow.Set<Provider>().AnyAsync(p => p.Id == dto.DefaultSupplierId.Value && !p.Deleted, ct)) return Bad<OperationStandardDto>("تامین‌کننده پیدا نشد.");
+            // R1p D12: a welding step names the welding procedure it is welded by; the terminal starts it only while that WPS is approved
+            if (dto.IsWelding && dto.IsOutside) return Bad<OperationStandardDto>("مرحله جوشکاری بیرونی روی ترمینال شروع نمی‌شود؛ علامت «جوشکاری» فقط برای مرحله داخلی است.");
+            if (dto.IsWelding && !dto.WpsId.HasValue) return Bad<OperationStandardDto>("برای مرحله جوشکاری، WPS (دستورالعمل جوشکاری) را انتخاب کنید.");
+            if (dto.IsWelding && !await _uow.Set<Wps>().AnyAsync(w => w.Id == dto.WpsId.Value && !w.Deleted, ct)) return Bad<OperationStandardDto>("WPS انتخاب‌شده پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             MfOperationStandard row = await _uow.Set<MfOperationStandard>().FirstOrDefaultAsync(s => s.OperationTemplateId == dto.OperationTemplateId && !s.Deleted, ct);
             if (row == null)
@@ -314,7 +322,7 @@ namespace Services.NasbNiro.Production
             row.IsOutside = dto.IsOutside; row.DefaultSupplierId = dto.DefaultSupplierId; row.OutsideLeadDays = dto.OutsideLeadDays; row.WorkInstructionDocumentId = dto.WorkInstructionDocumentId;
             row.DrawingReferenceRule = Clean(dto.DrawingReferenceRule); row.RequiredQualificationKind = Clean(dto.RequiredQualificationKind);
             row.RequiredQualificationProcess = Clean(dto.RequiredQualificationProcess); row.InspectionRequirement = dto.InspectionRequirement; row.ItpTestType = dto.ItpTestType;
-            row.FirstArticleRequired = dto.FirstArticleRequired; row.ModifyDate = now; row.ModifierUserId = Me;
+            row.FirstArticleRequired = dto.FirstArticleRequired; row.IsWelding = dto.IsWelding; row.WpsId = dto.IsWelding ? dto.WpsId : null; row.ModifyDate = now; row.ModifierUserId = Me;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await StandardRowsAsync(_uow.Set<OperationTemplate>().Where(t => t.Id == dto.OperationTemplateId), ct))[0]);
         }

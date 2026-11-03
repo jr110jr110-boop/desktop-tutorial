@@ -318,6 +318,8 @@ namespace Services.NasbNiro.Finance
             if (dto.Purpose == FnPaymentPurpose.FacilityLeg) return Bad<PaymentDto>(FacilityOnly);
             await FinanceSeed.EnsureAsync(_uow, ct);
             DateTime date = dto.Date == default ? DateTime.Today : dto.Date.Date;
+            string closedDate = await ClosedPeriodGuard.MessageAsync(_uow, date, ct);   // M7
+            if (closedDate != null) return Bad<PaymentDto>(closedDate);
             List<PaymentLineDto> input = (dto.Lines ?? new List<PaymentLineDto>()).Where(l => l != null).ToList();
             if (input.Count == 0) return Bad<PaymentDto>("حداقل یک ردیف پرداخت (نقد، حواله، چک یا کارت) لازم است.");
 
@@ -409,6 +411,8 @@ namespace Services.NasbNiro.Finance
                 if (!dto.EmployeeLoanId.HasValue) return Bad<PaymentDto>("وام یا مساعده کارمند را مشخص کنید.");
                 FnEmployeeLoan loan = await _uow.Set<FnEmployeeLoan>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == dto.EmployeeLoanId.Value, ct);
                 if (loan == null || !loan.IsActive) return Bad<PaymentDto>("وام یا مساعده پیدا نشد یا غیرفعال است.");
+                // release R1f: a loan or advance is paid out only after the finance manager approved it
+                if (loan.ApprovalStatus != FnLoanApproval.Approved) return Bad<PaymentDto>("این وام یا مساعده هنوز توسط مدیر مالی تایید نشده است؛ پس از تایید می‌توان آن را پرداخت کرد.");
                 int selfLoan = payment?.Id ?? 0;
                 if (loan.DisbursementPaymentId.HasValue || await _uow.Set<FnPayment>().AnyAsync(x => x.EmployeeLoanId == loan.Id && x.Status != FnDocStatus.Cancelled && x.Id != selfLoan, ct))
                     return Bad<PaymentDto>("این وام یا مساعده قبلاً پرداخت شده یا در سند پرداخت دیگری آمده است.");
@@ -519,7 +523,7 @@ namespace Services.NasbNiro.Finance
             string action = dto.Action.Trim().ToLowerInvariant();
             if (p.SourceType != null)
             {
-                string facilityRefusal = FacilityActionRefusal(action, p.CreatedByUserId, p.EditorUserIds, p.ApprovedByUserId);
+                string facilityRefusal = await FacilityActionRefusalAsync(action, p.CreatedByUserId, p.EditorUserIds, p.ApprovedByUserId, p.SourceType, p.SourceId, ct);
                 if (facilityRefusal != null) return Bad<PaymentDto>(facilityRefusal);
             }
             switch (action)
@@ -714,6 +718,7 @@ namespace Services.NasbNiro.Finance
                 type = AccountingEventType.PettyCashTopUp; // booked like any cash advance: Dr employee advances (with the employee detail) / Cr bank
                 loanPaid = await _uow.Set<FnEmployeeLoan>().FirstOrDefaultAsync(x => x.Id == p.EmployeeLoanId, ct);
                 if (loanPaid == null || loanPaid.DisbursementPaymentId.HasValue) return "وام یا مساعده پیدا نشد یا قبلاً پرداخت شده است.";
+                if (loanPaid.ApprovalStatus != FnLoanApproval.Approved) return "وام یا مساعده توسط مدیر مالی تایید نشده است.";
                 if (loanPaid.Principal != p.NetAmount) return "مبلغ پرداخت با اصل وام فرق دارد.";
                 eventLines.Add(new AccountingEventLine { AccountRole = AccountRoles.EmployeeAdvance, Debit = p.NetAmount, PartyType = "Employee", PartyId = loanPaid.EmployeeId, Description = "پرداخت وام/مساعده " + p.Number });
             }
