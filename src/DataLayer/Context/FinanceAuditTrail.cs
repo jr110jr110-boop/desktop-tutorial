@@ -43,6 +43,7 @@ namespace DataLayer.Context
             { typeof(FnAttachmentRule), null },
             { typeof(FnSetting), null },
             { typeof(FnCloseChecklist), null },
+            { typeof(FnCloseOverride), null },
             { typeof(FnMigrationAccountMap), null },
             { typeof(FnParallelRun), null },
             { typeof(FnExportLayoutColumn), null },
@@ -65,6 +66,9 @@ namespace DataLayer.Context
             { typeof(FnTaxBracket), null },
             { typeof(FnPayment), null },
             { typeof(FnReceipt), null },
+            // R1t D7: the bank reconciliation (who prepared and approved it, the difference accepted) and the explained items that let one with a difference be approved
+            { typeof(FnBankReconciliation), new[] { "BankAccountId", "StatementId", "AsOfDate", "BookBalance", "BankBalance", "Difference", "ExplainedAmount", "Status", "PreparedByUserId", "ApprovedByUserId", "ItemsByUserId" } },
+            { typeof(FnBankReconciliationItem), null },
             { typeof(FnLoan), null },
             // review 3 (finding 21): payment lines (payee IBAN masked), loan instalments and the F3b records; settlements and bonus runs record status and totals only, never a person's pay
             { typeof(FnPaymentLine), new[] { "PayeeIban", "Amount", "Instrument", "BankAccountId" } },
@@ -210,6 +214,9 @@ namespace DataLayer.Context
             { typeof(Proc.PurchaseOrder), "سفارش خرید" },
             { typeof(Proc.SupplierInvoice), "فاکتور تأمین‌کننده" },
             { typeof(Proc.PaymentRequest), "درخواست پرداخت" },
+            { typeof(FnBankReconciliation), "مغایرت‌گیری بانکی" },
+            { typeof(FnBankReconciliationItem), "قلم مغایرت بانکی" },
+            { typeof(FnCloseOverride), "تایید ویژه بستن دوره یا سال" },
         };
 
         private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban", "NationalCode", "PhoneNumber" };

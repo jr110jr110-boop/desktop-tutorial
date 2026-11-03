@@ -48,7 +48,9 @@ if ($task) {
         Start-Sleep -Seconds 10
     }
     $result = (Get-ScheduledTaskInfo -TaskName 'INNCO daily backup').LastTaskResult
-    if ($result -ne 0) { Say "Backup failed (code $result). Update stopped; nothing was changed." Red; exit 1 }
+    # R1t (D21): code 2 = the backup was made but not as asked (not encrypted, or the off-site copy failed): the update goes on, install.ps1 makes a checked backup of its own right before it changes anything
+    if ($result -eq 2) { Say 'The backup was made, but not as asked (not encrypted, or the off-site copy failed). See backup-log.txt in the backup folder. The update goes on.' Yellow }
+    elseif ($result -ne 0) { Say "Backup failed (code $result). Update stopped; nothing was changed." Red; exit 1 }
     Say 'Backup finished. If the update must be undone, the backup is in the backup folder (database\*.bak).' Green
 } else {
     Say 'No earlier installation found: this is a first installation.' Cyan

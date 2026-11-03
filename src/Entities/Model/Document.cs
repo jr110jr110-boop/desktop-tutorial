@@ -56,5 +56,17 @@ namespace Entities.Model
         {
             this.MimType = mimType;
         }
+
+        /// <summary>
+        /// R1t D8: SHA-256 (Base64) of the stored bytes, written at upload and at every replacement of the file; null for files uploaded before this was recorded.
+        /// Letters keep their own hash of each attachment at signature; this one lets anybody check later that the stored bytes are still the uploaded ones.
+        /// </summary>
+        public string Sha256 { get; protected set; }
+
+        public Document SetSha256(string hash)
+        {
+            Sha256 = hash;
+            return this;
+        }
     }
 }

@@ -304,11 +304,12 @@ namespace Services.NasbNiro.Office
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Bad<LetterDto>("ثبت ارجاع انجام نشد."); }
             string label = dto.Action == OfReferralAction.ForAction ? "ارجاع برای اقدام: " : dto.Action == OfReferralAction.ForComment ? "ارجاع برای نظر: " : "ارجاع برای اطلاع: ";
+            string named = label + InboxLabel(l);   // R1t (D23): a Secret letter is named by its number only
             foreach (OfReferral r in created)
             {
                 _uow.Set<OfInboxItem>().Add(new OfInboxItem
                 {
-                    RecipientPositionId = r.ToPositionId, Kind = OfInboxKind.Referral, Title = (label + l.Subject).Length > 300 ? (label + l.Subject).Substring(0, 300) : label + l.Subject, SourceModule = "office",
+                    RecipientPositionId = r.ToPositionId, Kind = OfInboxKind.Referral, Title = named.Length > 300 ? named.Substring(0, 300) : named, SourceModule = "office",
                     SourceType = "letter", SourceId = l.Id, SourceKey = "referral:" + r.Id, Link = "/office/letters/" + l.Id, DueDate = r.DueDate, Priority = l.Urgency, Status = OfInboxStatus.Unread, CreatedAt = now,
                 });
             }
@@ -346,7 +347,7 @@ namespace Services.NasbNiro.Office
                     if (r.FromPositionId.HasValue)
                         _uow.Set<OfInboxItem>().Add(new OfInboxItem
                         {
-                            RecipientPositionId = r.FromPositionId, Kind = OfInboxKind.Alert, Title = ("ارجاع شما بسته شد: " + l.Subject).Length > 300 ? "ارجاع شما بسته شد" : "ارجاع شما بسته شد: " + l.Subject,
+                            RecipientPositionId = r.FromPositionId, Kind = OfInboxKind.Alert, Title = ("ارجاع شما بسته شد: " + InboxLabel(l)).Length > 300 ? "ارجاع شما بسته شد" : "ارجاع شما بسته شد: " + InboxLabel(l),
                             SourceModule = "office", SourceType = "letter", SourceId = l.Id, SourceKey = "referral-done:" + r.Id, Link = "/office/letters/" + l.Id, Status = OfInboxStatus.Unread, CreatedAt = now,
                         });
                     break;

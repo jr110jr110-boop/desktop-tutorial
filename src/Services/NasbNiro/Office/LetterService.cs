@@ -151,6 +151,18 @@ namespace Services.NasbNiro.Office
         /// <summary>The secretariat reads the content of Normal and Confidential letters; Secret letters stay restricted to their parties and the CEO. Keep <see cref="FullExpr"/> in step.</summary>
         internal static bool SecretariatReadsContent(OfClassification classification) => classification != OfClassification.Secret;
 
+        /// <summary>
+        /// R1t (D23): how a letter is named in the title of an inbox item (the text is stored with the item and shown to everybody who holds or acts for the position). A Secret letter is named by its
+        /// classification and number only, the metadata-only rule of the register: the subject is content. Every other letter is named by its subject. The inbox also masks the stored title of a
+        /// Confidential or Secret letter for a person who may not read the letter in full (<see cref="InboxService"/>, the deputy rule included).
+        /// </summary>
+        internal static string InboxLabel(OfLetter l) => l.Classification == OfClassification.Secret ? InboxRegisterName(l.Classification, l.Number) : l.Subject;
+
+        /// <summary>The name of a letter that is shown as register data only: «نامه سری شماره …» or «نامه محرمانه شماره …» (a letter without a number yet says so).</summary>
+        internal static string InboxRegisterName(OfClassification classification, string number) =>
+            (classification == OfClassification.Secret ? "نامه سری" : classification == OfClassification.Confidential ? "نامه محرمانه" : "نامه")
+            + (string.IsNullOrWhiteSpace(number) ? " (هنوز شماره ندارد)" : " شماره " + number.Trim());
+
         private static Expression<Func<OfLetter, bool>> PartyOf(List<int> pos, int me) =>
             l => (l.SenderPositionId != null && pos.Contains(l.SenderPositionId.Value))
                 || (l.SignerPositionId != null && pos.Contains(l.SignerPositionId.Value))
@@ -445,7 +457,7 @@ namespace Services.NasbNiro.Office
         private void DeliverToPositions(OfLetter l)
         {
             foreach (OfLetterRecipient r in l.Recipients.Where(x => x.PositionId.HasValue).GroupBy(x => x.PositionId.Value).Select(g => g.OrderBy(x => x.Type).First()))
-                AddInbox("letter:" + l.Id + ":delivery", OfInboxKind.Letter, (r.Type == OfRecipientType.Cc ? "رونوشت نامه: " : "نامه جدید: ") + l.Subject, l.Id, r.PositionId, null, null, null, l.Urgency);
+                AddInbox("letter:" + l.Id + ":delivery", OfInboxKind.Letter, (r.Type == OfRecipientType.Cc ? "رونوشت نامه: " : "نامه جدید: ") + InboxLabel(l), l.Id, r.PositionId, null, null, null, l.Urgency);
         }
 
         // -------------------------------------------------------------------------------- tender / project link

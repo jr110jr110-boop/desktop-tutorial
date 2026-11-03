@@ -52,6 +52,8 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int RowCount { get; set; }
         public List<OutboxTableInfoDto> Tables { get; set; } = new List<OutboxTableInfoDto>();
         public int? SupersededByPackageId { get; set; }
+        /// <summary>R1t D6: the sent or accepted package this one corrects (null for an ordinary package).</summary>
+        public int? CorrectsPackageId { get; set; }
         public string ExternalReference { get; set; }
         public string Error { get; set; }
         public string Note { get; set; }
@@ -71,12 +73,14 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? Season { get; set; }
         public int? WorkshopId { get; set; }
         public string Note { get; set; }
+        /// <summary>R1t D6: needed when a package of the period was already sent or accepted: the id of that package. The new package is then a correction that refers to it; the reason goes in the note.</summary>
+        public int? CorrectsPackageId { get; set; }
     }
 
     public class OutboxActionDto
     {
         public int Id { get; set; }
-        /// <summary>approve, send, mark-sent, mark-accepted, mark-rejected</summary>
+        /// <summary>approve, send, mark-sent, mark-accepted, mark-rejected. The three manual marks need a note (R1t D6): they are the way to record what happened outside the system, and each one is audited.</summary>
         public string Action { get; set; }
         public string Note { get; set; }
         public string Reference { get; set; }
@@ -420,6 +424,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string NationalCode { get; set; }
         public DateTime? BirthDate { get; set; }
         public string BirthPlace { get; set; }
+        /// <summary>R1t D6: identity card number and nationality, written on the social-security list.</summary>
+        public string IdentityCardNumber { get; set; }
+        public string Nationality { get; set; }
         public int Gender { get; set; }
         public int MaritalStatus { get; set; }
         public int ChildrenCount { get; set; }
@@ -453,6 +460,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public string NationalCode { get; set; }
         public DateTime? BirthDate { get; set; }
         public string BirthPlace { get; set; }
+        /// <summary>R1t D6: identity card number and nationality, written on the social-security list.</summary>
+        public string IdentityCardNumber { get; set; }
+        public string Nationality { get; set; }
         public int Gender { get; set; } = 1;
         public int MaritalStatus { get; set; } = 1;
         public int ChildrenCount { get; set; }

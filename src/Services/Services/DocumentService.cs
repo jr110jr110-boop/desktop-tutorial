@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.Logging;
 using Services.Contracts;
+using Services.NasbNiro.Files;
 using Services.Resources;
 using ViewModels.Exceptions;
 using ViewModels.NasbNiro.DocumentDtos;
@@ -91,6 +92,7 @@ namespace Services.Services
             string uniqeFilename = CreateUniqueFileName(uploadFileDto.File.FileName, documentModel.Id);
             string savedPath = await SaveDocumentAsync(uniqeFilename, uploadFileDto.File);
             documentModel.SetPath(savedPath);
+            documentModel.SetSha256(await FileIntegrity.Sha256Async(GetRelativePath(savedPath)));   // R1t D8: the hash of the stored bytes, kept with the file
 
             await this._uow.SaveChangesAsync();
             return documentModel.Id;
@@ -123,6 +125,11 @@ namespace Services.Services
 
             doc.SetPath(savedPath)
                 .SetMimeType(new FileInfo(dto.File.FileName).Extension);
+
+            // R1t D8: the hash of the new bytes is kept with the file and the replacement leaves a row in the audit trail (who, and the hash before and after)
+            string newSha256 = await FileIntegrity.Sha256Async(GetRelativePath(savedPath));
+            FileIntegrity.AuditReplaced(_uow, doc, doc.Sha256, newSha256);
+            doc.SetSha256(newSha256);
 
             _documents.Update(doc);
 
@@ -234,8 +241,10 @@ namespace Services.Services
                 || await _uow.Set<OfUserSignature>().AnyAsync(s => s.ImageDocumentId == documentId);
             if (locked) return "این فایل بخشی از یک نامه ارسال‌شده یا امضای ثبت‌شده است و تغییر یا حذف آن مجاز نیست.";
             // R1q M16: a file that proves an inspection and test plan activity was done must not be replaced or deleted afterwards
-            return await _uow.Set<ItpActivity>().AnyAsync(a => a.EvidenceDocumentId == documentId)
-                ? "این فایل مدرک انجام یک فعالیت برنامه بازرسی و آزمون است و تغییر یا حذف آن مجاز نیست." : null;
+            if (await _uow.Set<ItpActivity>().AnyAsync(a => a.EvidenceDocumentId == documentId))
+                return "این فایل مدرک انجام یک فعالیت برنامه بازرسی و آزمون است و تغییر یا حذف آن مجاز نیست.";
+            // R1t D8: the attachment of a final voucher, the receipts of an approved or posted settlement, a clearance letter, the attachment of an approved leave request
+            return await FileLocks.RecordLockAsync(_uow, documentId);
         }
 
         public async Task<bool> IsLetterFileAsync(Guid documentId) =>
@@ -269,7 +278,8 @@ namespace Services.Services
                         Code = x.Code,
                         Description = x.Description,
                         MimeType = x.MimType,
-                        Name = x.Name
+                        Name = x.Name,
+                        Sha256 = x.Sha256
                     })
                 //.SingleOrDefaultAsync(x => x.DocumentId == fileId);
                 .SingleOrDefaultAsync(x => x.Id == fileId);

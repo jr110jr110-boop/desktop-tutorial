@@ -18,7 +18,7 @@ namespace Services.NasbNiro.Finance
     // approval thresholds, template vouchers, voucher copy and mass entry.
     public partial class GlService
     {
-        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse, FinanceSeed.SettingPayableTerms };
+        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingPeriodCloseBy, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse, FinanceSeed.SettingPayableTerms };
 
         // ------------------------------------------------------------------------------------------ audit trail
 
@@ -69,6 +69,11 @@ namespace Services.NasbNiro.Finance
             if (key == FinanceSeed.SettingParallelMonths)
             {
                 if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int months) || months < 1 || months > 12) return Bad<FinanceSettingDto>("تعداد ماه باید بین ۱ تا ۱۲ باشد.");
+            }
+            else if (key == FinanceSeed.SettingPeriodCloseBy)
+            {
+                value = value.ToUpperInvariant();
+                if (value != "CEO" && value != "FINANCEMANAGER") return Bad<FinanceSettingDto>("مقدار باید CEO یا FINANCEMANAGER باشد.");
             }
             else if (value != "0" && value != "1") return Bad<FinanceSettingDto>("مقدار باید ۰ یا ۱ باشد.");
             await FinanceSeed.EnsureAsync(_uow, ct);
@@ -161,14 +166,18 @@ namespace Services.NasbNiro.Finance
         {
             int entityId = p.FiscalYear?.LegalEntityId ?? await _uow.Set<FnFiscalYear>().Where(y => y.Id == p.FiscalYearId).Select(y => y.LegalEntityId).FirstAsync(ct);
             List<CloseItemDto> items = await ComputeChecklistAsync(p, entityId, ct);
-            FnCloseChecklist ov = await _uow.Set<FnCloseChecklist>().AsNoTracking().FirstOrDefaultAsync(x => x.PeriodId == p.Id, ct);
-            bool enforced = await SettingAsync(FinanceSeed.SettingCloseEnforce, "0", ct) == "1";
+            bool enforced = await SettingAsync(FinanceSeed.SettingCloseEnforce, "1", ct) == "1";
             int red = items.Count(i => i.Status == "Red");
+            // R1t D10: an override counts when a second manager approved it and it covers every item that is red now
+            FnCloseOverride approved = await ApprovedOverrideAsync(FnCloseOverrideKind.PeriodChecklist, p.Id, null, ct);
+            FnCloseOverride pending = await _uow.Set<FnCloseOverride>().AsNoTracking().Where(o => o.Kind == FnCloseOverrideKind.PeriodChecklist && o.PeriodId == p.Id && o.Status == FnCloseOverrideStatus.Pending).OrderByDescending(o => o.Id).FirstOrDefaultAsync(ct);
+            bool overridden = approved != null && OverrideCovers(approved.Items, items.Where(i => i.Status == "Red").Select(i => i.Key));
             return new CloseChecklistDto
             {
                 PeriodId = p.Id, PeriodTitle = p.Title, LegalEntityId = entityId, Items = items, RedCount = red, AllGreen = red == 0,
-                Overridden = ov != null, OverrideReason = ov?.OverrideReason, OverriddenByUserId = ov?.OverriddenByUserId, OverriddenAt = ov?.OverriddenAt,
-                Enforced = enforced, CanLock = !enforced || red == 0 || ov != null,
+                Overridden = overridden, OverrideReason = approved?.Reason, OverriddenByUserId = approved?.ApprovedByUserId, OverriddenAt = approved?.ApprovedAt,
+                OverridePending = pending != null, OverrideRequestedByUserId = pending?.RequestedByUserId, OverrideRequestedAt = pending?.RequestedAt, OverrideRequestReason = pending?.Reason,
+                Enforced = enforced, CanLock = !enforced || red == 0 || overridden,
             };
         }
 
@@ -181,31 +190,66 @@ namespace Services.NasbNiro.Finance
             return ResponseDtoHelper.Ok(await BuildChecklistAsync(p, ct));
         }
 
+        /// <summary>
+        /// R1t D10: passing the red items of a close checklist takes two finance managers. One asks with a reason (action "request", the default),
+        /// a different one approves (action "approve"); the requester may withdraw. Both steps and the items they cover are written to the audit trail.
+        /// </summary>
         public async Task<ResponseDto<CloseChecklistDto>> OverrideChecklistAsync(int periodId, ChecklistOverrideDto dto, CancellationToken ct)
         {
             if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<CloseChecklistDto>(NotAllowed + " (مدیر مالی)");
-            if (dto == null || Clean(dto.Reason) == null) return Bad<CloseChecklistDto>("علت عبور از فهرست کنترل را بنویسید.");
+            if (dto == null) return Bad<CloseChecklistDto>("اطلاعات ارسال‌شده کامل نیست.");
+            string action = (Clean(dto.Action) ?? "request").ToLowerInvariant();
+            if (action != "request" && action != "approve" && action != "withdraw") return Bad<CloseChecklistDto>("عمل نامعتبر است.");
             FnPeriod p = await _uow.Set<FnPeriod>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == periodId, ct);
             if (p == null) return ResponseDtoHelper.NotFound<CloseChecklistDto>("دوره پیدا نشد.");
             CloseChecklistDto current = await BuildChecklistAsync(p, ct);
-            string reds = string.Join(" | ", current.Items.Where(i => i.Status == "Red").Select(i => i.Key));
-            FnCloseChecklist ov = await _uow.Set<FnCloseChecklist>().FirstOrDefaultAsync(x => x.PeriodId == periodId, ct);
-            if (ov == null) { ov = new FnCloseChecklist { PeriodId = periodId }; _uow.Set<FnCloseChecklist>().Add(ov); }
-            ov.OverrideReason = Clean(dto.Reason);
-            ov.OverriddenByUserId = Me;
-            ov.OverriddenAt = DateTimeOffset.Now;
-            ov.RedItems = reds.Length > 2000 ? reds.Substring(0, 2000) : reds;
+            List<string> reds = current.Items.Where(i => i.Status == "Red").Select(i => i.Key).ToList();
+            FnCloseOverride pending = await PendingOverrideAsync(FnCloseOverrideKind.PeriodChecklist, periodId, null, ct);
+
+            if (action == "request")
+            {
+                if (Clean(dto.Reason) == null) return Bad<CloseChecklistDto>("علت عبور از فهرست کنترل را بنویسید.");
+                if (reds.Count == 0) return Bad<CloseChecklistDto>("فهرست کنترل مورد قرمز ندارد؛ نیازی به تایید ویژه نیست.");
+                if (pending != null && pending.RequestedByUserId != Me) return Bad<CloseChecklistDto>("درخواست مدیر مالی دیگری در انتظار تایید است؛ آن را تایید یا رد کنید.");
+                bool changed = pending == null || pending.Reason != Clean(dto.Reason) || pending.Items != JoinOverrideItems(reds);
+                if (pending == null)
+                {
+                    pending = new FnCloseOverride { Kind = FnCloseOverrideKind.PeriodChecklist, PeriodId = periodId, Status = FnCloseOverrideStatus.Pending, RequestedByUserId = Me, RequestedAt = DateTimeOffset.Now };
+                    _uow.Set<FnCloseOverride>().Add(pending);
+                }
+                pending.Reason = Clean(dto.Reason);
+                pending.Items = JoinOverrideItems(reds);
+                if (changed) AuditNotes.Add(_uow, Me, nameof(FnPeriod), periodId, "CloseOverrideReq", $"درخواست عبور از مورد قرمز فهرست کنترل {p.Title}: {pending.Reason}", after: new { Items = reds, Reason = pending.Reason });
+            }
+            else if (action == "approve")
+            {
+                if (pending == null) return Bad<CloseChecklistDto>("درخواستی برای تایید وجود ندارد.");
+                if (pending.RequestedByUserId == Me) return Bad<CloseChecklistDto>("تایید باید توسط مدیر مالی دیگری غیر از درخواست‌دهنده انجام شود.");
+                if (reds.Count == 0) return Bad<CloseChecklistDto>("فهرست کنترل مورد قرمز ندارد؛ نیازی به تایید ویژه نیست.");
+                pending.Status = FnCloseOverrideStatus.Approved;
+                pending.ApprovedByUserId = Me;
+                pending.ApprovedAt = DateTimeOffset.Now;
+                pending.Items = JoinOverrideItems(reds);   // what the approver saw
+                AuditNotes.Add(_uow, Me, nameof(FnPeriod), periodId, "CloseOverrideOk", $"عبور از مورد قرمز فهرست کنترل {p.Title} تایید شد (درخواست‌دهنده: کاربر {pending.RequestedByUserId}): {pending.Reason}",
+                    before: new { RequestedByUserId = pending.RequestedByUserId, Reason = pending.Reason }, after: new { ApprovedByUserId = Me, Items = reds, ApproverNote = Clean(dto.Reason) });
+            }
+            else
+            {
+                if (pending == null) return Bad<CloseChecklistDto>("درخواستی برای پس‌گرفتن وجود ندارد.");
+                pending.Status = FnCloseOverrideStatus.Withdrawn;
+                AuditNotes.Add(_uow, Me, nameof(FnPeriod), periodId, "CloseOverrideNo", $"درخواست عبور از فهرست کنترل {p.Title} کنار گذاشته شد.", before: new { RequestedByUserId = pending.RequestedByUserId, Reason = pending.Reason });
+            }
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(await BuildChecklistAsync(p, ct));
         }
 
-        /// <summary>Null when the period may be locked; otherwise the reason (enforced checklist with red items and no override).</summary>
+        /// <summary>Null when the period may be locked or closed; otherwise the reason (enforced checklist with red items and no approved override that covers them).</summary>
         private async Task<string> LockGateAsync(FnPeriod p, CancellationToken ct)
         {
-            if (await SettingAsync(FinanceSeed.SettingCloseEnforce, "0", ct) != "1") return null;
+            if (await SettingAsync(FinanceSeed.SettingCloseEnforce, "1", ct) != "1") return null;
             CloseChecklistDto list = await BuildChecklistAsync(p, ct);
             if (list.AllGreen || list.Overridden) return null;
-            return $"فهرست کنترل بستن دوره {list.RedCount} مورد قرمز دارد ({string.Join("، ", list.Items.Where(i => i.Status == "Red").Select(i => i.Title))}). مدیر مالی باید با ذکر علت تایید ویژه بدهد.";
+            return $"فهرست کنترل بستن دوره {list.RedCount} مورد قرمز دارد ({string.Join("، ", list.Items.Where(i => i.Status == "Red").Select(i => i.Title))}). یک مدیر مالی باید با ذکر علت درخواست عبور بدهد و مدیر مالی دیگری آن را تایید کند.";
         }
 
         // ------------------------------------------------------------------------------------------ attachments, rules, thresholds
@@ -313,7 +357,7 @@ namespace Services.NasbNiro.Finance
             if (rules.Count == 0 && !threshold.HasValue) return result;
 
             var vouchers = await _uow.Set<FnVoucher>().AsNoTracking().Where(v => ids.Contains(v.Id))
-                .Select(v => new { v.Id, v.Type, v.TotalAmount, v.CeoApprovedByUserId, v.IsImported }).ToListAsync(ct);
+                .Select(v => new { v.Id, v.Type, v.TotalAmount, v.CeoApprovedByUserId, v.CeoApprovedAt, v.LastEditedAt, v.IsImported }).ToListAsync(ct);
             Dictionary<int, int> attachments = await _uow.Set<FnVoucherAttachment>().AsNoTracking().Where(a => ids.Contains(a.VoucherId))
                 .GroupBy(a => a.VoucherId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
             List<int> ruleAccounts = rules.Where(r => r.AccountId.HasValue).Select(r => r.AccountId.Value).Distinct().ToList();
@@ -328,6 +372,8 @@ namespace Services.NasbNiro.Finance
                 if (needs && !attachments.ContainsKey(v.Id)) { result[v.Id] = "پیوست الزامی است؛ قاعده پیوست اجباری برای این سند اعمال می‌شود."; continue; }
                 if (finalize && threshold.HasValue && v.TotalAmount >= threshold.Value && !v.CeoApprovedByUserId.HasValue)
                     result[v.Id] = "مبلغ سند به حد نیازمند تایید مدیرعامل رسیده است؛ ابتدا مدیرعامل تایید کند.";
+                else if (finalize && threshold.HasValue && v.TotalAmount >= threshold.Value && !CeoApprovalIsCurrent(v.CeoApprovedByUserId, v.CeoApprovedAt, v.LastEditedAt))
+                    result[v.Id] = "سند پس از تایید مدیرعامل ویرایش شده است؛ تایید مدیرعامل معتبر نیست و باید دوباره گرفته شود.";   // R1t D9
             }
             return result;
         }
@@ -338,9 +384,12 @@ namespace Services.NasbNiro.Finance
             FnVoucher v = await _uow.Set<FnVoucher>().FirstOrDefaultAsync(x => x.Id == id, ct);
             if (v == null) return ResponseDtoHelper.NotFound<VoucherDto>("سند پیدا نشد.");
             if (v.Status == FnVoucherStatus.Final) return Bad<VoucherDto>("سند قطعی شده است.");
-            if (v.CeoApprovedByUserId.HasValue) return Bad<VoucherDto>("این سند قبلاً تایید مدیرعامل را گرفته است.");
+            if (CeoApprovalIsCurrent(v.CeoApprovedByUserId, v.CeoApprovedAt, v.LastEditedAt)) return Bad<VoucherDto>("این سند قبلاً تایید مدیرعامل را گرفته است.");
+            // R1t D9: an approval older than the last edit (made before the edit voided approvals) is replaced; the new one is always later than the edit
+            DateTimeOffset at = DateTimeOffset.Now;
+            if (v.LastEditedAt.HasValue && at <= v.LastEditedAt.Value) at = v.LastEditedAt.Value.AddTicks(1);
             v.CeoApprovedByUserId = Me;
-            v.CeoApprovedAt = DateTimeOffset.Now;
+            v.CeoApprovedAt = at;
             await _uow.SaveChangesAsync(ct);
             return await GetVoucherAsync(v.Id, ct);
         }
@@ -436,7 +485,8 @@ namespace Services.NasbNiro.Finance
 
         public async Task<ResponseDto<GenerateTemplatesResultDto>> GenerateTemplatesAsync(GenerateTemplatesDto dto, CancellationToken ct)
         {
-            if (!_user.IsInRole(FinanceRoles.SystemJobs)) return Bad<GenerateTemplatesResultDto>(NotAllowed);
+            // R1t D25: the drafts are made by the finance manager (PMO no longer triggers them); R1t D12: the person who generates them is their creator and cannot check or finalise them
+            if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<GenerateTemplatesResultDto>(NotAllowed + " (مدیر مالی)");
             FnPeriod p = dto == null ? null : await _uow.Set<FnPeriod>().Include(x => x.FiscalYear).FirstOrDefaultAsync(x => x.Id == dto.PeriodId, ct);
             if (p == null) return ResponseDtoHelper.NotFound<GenerateTemplatesResultDto>("دوره پیدا نشد.");
             if (p.Status != FnPeriodStatus.Open || p.FiscalYear.Status != FnYearStatus.Open) return Bad<GenerateTemplatesResultDto>("دوره باز نیست.");
@@ -451,7 +501,7 @@ namespace Services.NasbNiro.Finance
                 var v = new FnVoucher
                 {
                     FiscalYearId = p.FiscalYearId, Date = p.StartDate.Date.AddDays(Math.Min(t.DayOfMonth, days) - 1), Type = FnVoucherType.Normal, Status = FnVoucherStatus.Draft,
-                    Description = Clean(t.Description) ?? t.Title, CreatedByUserId = 0, CreatedAt = DateTimeOffset.Now,
+                    Description = Clean(t.Description) ?? t.Title, CreatedByUserId = Me, EditorUserIds = WithEditor(null, Me), CreatedAt = DateTimeOffset.Now,
                     TemporaryNumber = await InventoryNumbers.NextAsync(_uow, FinanceNumbers.Voucher, p.FiscalYear.Year, ct),
                     Lines = t.Lines.OrderBy(l => l.RowNumber).Select(l => new FnVoucherLine
                     {

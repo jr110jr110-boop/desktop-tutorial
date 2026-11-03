@@ -37,6 +37,8 @@ namespace Entities.Model.NasbNiro.Finance
         public int RowCount { get; set; }
         public Guid? FileDocumentId { get; set; }
         public int? SupersededByPackageId { get; set; }
+        /// <summary>R1t D6: the sent or accepted package that this one corrects. A package that was already sent is never regenerated or replaced; a correction package refers to it.</summary>
+        public int? CorrectsPackageId { get; set; }
         public string ExternalReference { get; set; }
         public string Error { get; set; }
         public string Note { get; set; }
@@ -264,6 +266,10 @@ namespace Entities.Model.NasbNiro.Finance
         public string NationalCode { get; set; }
         public DateTime? BirthDate { get; set; }
         public string BirthPlace { get; set; }
+        /// <summary>R1t D6: the number on the identity card (shenasnameh); the social-security list asks for it next to the national code.</summary>
+        public string IdentityCardNumber { get; set; }
+        /// <summary>R1t D6: nationality as the social-security list writes it (for example the word for Iranian); blank until finance enters it.</summary>
+        public string Nationality { get; set; }
         /// <summary>1 = male, 2 = female.</summary>
         public int Gender { get; set; }
         /// <summary>1 = single, 2 = married.</summary>

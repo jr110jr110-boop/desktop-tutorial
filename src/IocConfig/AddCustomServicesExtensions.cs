@@ -157,6 +157,8 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.IFinanceCompletenessService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.IPayableAgeingService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.ISepidarFullExportService, Services.NasbNiro.Finance.SepidarFullExportService>();
+            // R1t D7: treasury settles the cash legs of loans, letters of credit and guarantees through the finance service (same scoped instance, same unit of work)
+            services.AddScoped<Services.NasbNiro.Finance.ICashLegService>(sp => (Services.NasbNiro.Finance.GlService)sp.GetRequiredService<Services.NasbNiro.Finance.IGlService>());
             services.AddScoped<Services.NasbNiro.Finance.ITreasuryService, Services.NasbNiro.Finance.TreasuryService>();
             services.AddScoped<Services.NasbNiro.Finance.IReceivablesService, Services.NasbNiro.Finance.ReceivablesService>();
             services.AddScoped<Services.NasbNiro.Finance.ITaxService, Services.NasbNiro.Finance.TaxService>();
@@ -168,6 +170,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.IPayrollRunService, Services.NasbNiro.Finance.PayrollRunService>();
             services.AddScoped<Services.NasbNiro.Finance.ISepidarOutboxService, Services.NasbNiro.Finance.SepidarOutboxService>();
             services.AddSingleton<Services.NasbNiro.Finance.ISepidarClient, Services.NasbNiro.Finance.FileSepidarClient>();
+            services.AddScoped<Services.NasbNiro.Finance.IAuditChainService, Services.NasbNiro.Finance.AuditChainService>();   // R1t D20: check of the hash chain of the audit trail
             services.AddHostedService<Services.NasbNiro.Finance.FinanceF2HostedService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
@@ -264,6 +267,9 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Office.IAttendanceService, Services.NasbNiro.Office.AttendanceService>();
             services.AddScoped<Services.NasbNiro.Office.ILeaveService, Services.NasbNiro.Office.LeaveService>();
             services.AddScoped<Services.NasbNiro.Office.IRequestService, Services.NasbNiro.Office.RequestService>();
+            // R1t D8: who may read or change a stored file (the owning module's rule), asked by the guard of the Documents endpoints
+            services.AddScoped<Services.NasbNiro.Files.IFileOfficeRules, Services.NasbNiro.Files.FileOfficeRules>();
+            services.AddScoped<Services.NasbNiro.Files.IFileAccessService, Services.NasbNiro.Files.FileAccessService>();
             services.AddHostedService<Services.NasbNiro.Office.OfficeHostedService>();
             services.AddCeoOverview();
 

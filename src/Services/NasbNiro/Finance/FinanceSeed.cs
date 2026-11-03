@@ -224,6 +224,8 @@ namespace Services.NasbNiro.Finance
         }
 
         public const string SettingCloseEnforce = "CloseChecklist.Enforce";
+        /// <summary>R1t D10: who takes the second step of a period close (CEO or FINANCEMANAGER; always a different person from the one who locked it).</summary>
+        public const string SettingPeriodCloseBy = "PeriodClose.CloseBy";
         public const string SettingParallelMonths = "ParallelRun.RequiredMonths";
         public const string SettingSepidarExport = "Finance:SepidarFullExport";
         public const string SettingFxRateType = "Fx.RateType";
@@ -236,7 +238,8 @@ namespace Services.NasbNiro.Finance
             yield return new FnSetting { Key = "BaseCurrency", Value = "IRR", Title = "ارز پایه شرکت" };
             yield return new FnSetting { Key = "Jurisdiction", Value = Iran, Title = "حوزه قضایی (قوانین مالی و مالیاتی)" };
             yield return new FnSetting { Key = "MatchDays", Value = "3", Title = "بازه روز برای تطبیق خودکار صورت‌حساب بانکی (★)" };
-            yield return new FnSetting { Key = SettingCloseEnforce, Value = "0", Title = "الزام فهرست کنترل بستن دوره برای قفل کردن دوره (۱ = فعال؛ پیش از راه‌اندازی خاموش است)" };
+            yield return new FnSetting { Key = SettingCloseEnforce, Value = "1", Title = "الزام فهرست کنترل بستن دوره برای قفل کردن و بستن دوره (۱ = فعال ★؛ عبور از مورد قرمز فقط با درخواست یک مدیر مالی و تایید مدیر مالی دیگر)" };
+            yield return new FnSetting { Key = SettingPeriodCloseBy, Value = "CEO", Title = "بستن نهایی دوره قفل‌شده را چه نقشی انجام می‌دهد (CEO ★ یا FINANCEMANAGER)؛ همیشه شخصی غیر از قفل‌کننده" };
             yield return new FnSetting { Key = SettingSepidarExport, Value = "0", Title = "خروجی کامل اسناد برای سپیدار (جایگزین؛ پیش‌فرض خاموش است و مسیر صف خروجی F2 فعال می‌ماند)" };
             yield return new FnSetting { Key = SettingFxRateType, Value = "1", Title = "نوع نرخ ارز برای تسعیر پایان دوره (۱ رسمی، ۲ توافقی، ۳ آزاد) ★" };
             yield return new FnSetting { Key = SettingFxAutoReverse, Value = "1", Title = "برگشت خودکار سند تسعیر در روز اول دوره بعد (۱ = فعال) ★" };

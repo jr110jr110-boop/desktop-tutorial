@@ -157,7 +157,14 @@ namespace Services.NasbNiro.Finance
                         Description = Trunc((lateNote + (e.Description ?? "")).Trim(), 1000), SourceType = e.SourceType, SourceId = e.SourceId, SourceNumber = e.SourceNumber,
                         AccountingEventId = e.Id, LatePosting = resolved.Late, CreatedByUserId = 0, CreatedAt = DateTimeOffset.Now,
                         CheckedByUserId = 0, CheckedAt = DateTimeOffset.Now, Lines = new List<FnVoucherLine>(),
+                        // R1t D12: the voucher is the system's, but the person whose action made the event cannot finalise it
+                        TriggeredByUserId = e.CreatedByUserId > 0 ? e.CreatedByUserId : (int?)null,
                     };
+                    if (resolved.Late)
+                        AuditNotes.Add(_uow, 0, nameof(AccountingEvent), e.Id, "LatePosting",
+                            $"رویداد {e.SourceNumber} با تاریخ {PersianDate(e.EventDate)} در دوره یا سالی بسته بود و در {resolved.Period.Title} ثبت شد.",
+                            before: new { EventDate = AuditNotes.Iso(e.EventDate), e.SourceType, e.SourceNumber },
+                            after: new { PeriodId = resolved.Period.Id, PeriodStart = AuditNotes.Iso(resolved.Period.StartDate), VoucherTemporaryNumber = voucher.TemporaryNumber });
                     if (e.ReversesEventId.HasValue && originalVoucher.TryGetValue(e.ReversesEventId.Value, out int origId) && alreadyReversed.Contains(origId))
                     {
                         // the voucher of the source document was reversed by hand: a second reversal would break the one-reversal rule and block posting
@@ -285,7 +292,11 @@ namespace Services.NasbNiro.Finance
                 if (p == null) return (null, null, false, $"سال مالی {y} تعریف نشده است.");
             }
             if (p.Status == FnPeriodStatus.Open && p.FiscalYear.Status == FnYearStatus.Open) return (p.FiscalYear, p, false, null);
-            FnPeriod target = cache.FirstOpenAfter(date) ?? cache.FirstOpen();
+            // R1t D11: a document dated in a closed year goes to the first open period of the current year (never to an old period that was left open);
+            // one dated in a locked or closed period of an open year goes to the first open period after it, or else to the current year
+            FnPeriod target = p.FiscalYear.Status != FnYearStatus.Open
+                ? cache.FirstOpenOfCurrentYear(DateTime.Today)
+                : cache.FirstOpenAfter(date) ?? cache.FirstOpenOfCurrentYear(DateTime.Today);
             if (target == null) return (null, null, false, "هیچ دوره مالی بازی برای ثبت وجود ندارد.");
             return (target.FiscalYear, target, true, null);
         }

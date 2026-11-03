@@ -68,6 +68,12 @@ namespace Services.NasbNiro.Finance
         Task<ResponseDto<OutboxSummaryDto>> GetSummaryAsync(CancellationToken cancellationToken);
         /// <summary>The background job: drafts the packages of the last Persian month that do not exist yet. Returns a short log line.</summary>
         Task<string> GenerateMonthlyAsync(CancellationToken cancellationToken);
+        /// <summary>R1t D6: the answer of the tax office (through Sepidar) as JSON or CSV rows of invoiceNo, taxId, status, message. Writes the tax id and status on the invoices and the status of the package.</summary>
+        Task<ResponseDto<OutboxAckResultDto>> AckAsync(int id, string content, CancellationToken cancellationToken);
+        /// <summary>R1t D6: the package totals against the ledger postings of the period, with the difference per account.</summary>
+        Task<ResponseDto<OutboxTieOutDto>> TieOutAsync(int id, CancellationToken cancellationToken);
+        /// <summary>R1t D6: the insurance list in the fixed-width text layout of the social-security list software (a zip of two files and a layout description). Layout to be verified.</summary>
+        Task<ResponseDto<byte[]>> ExportDskAsync(int id, CancellationToken cancellationToken);
     }
 
     internal sealed class OutboxTable
@@ -84,7 +90,7 @@ namespace Services.NasbNiro.Finance
         public List<List<JsonElement>> Rows { get; set; } = new List<List<JsonElement>>();
     }
 
-    public class SepidarOutboxService : ISepidarOutboxService
+    public partial class SepidarOutboxService : ISepidarOutboxService
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -101,6 +107,7 @@ namespace Services.NasbNiro.Finance
         private static ResponseDto<T> Bad<T>(string m) => ResponseDtoHelper.BadRequest<T>(m);
         private const string NotAllowed = "شما مجوز این کار را ندارید";
         private const string Conflict = "همزمان توسط کاربر دیگری تغییر کرد؛ دوباره تلاش کنید.";
+        private const string ManualNoteRequired = "یادداشت را بنویسید: ثبت دستی وضعیت باید دلیل و توضیح داشته باشد (مثلاً چگونگی ارسال یا پاسخ سازمان).";
         private static readonly JsonSerializerOptions Json = new JsonSerializerOptions { WriteIndented = false };
 
         private static bool IsPayroll(FnOutboxKind kind) => kind == FnOutboxKind.PayrollInsuranceList || kind == FnOutboxKind.PayrollTaxList;
@@ -109,6 +116,9 @@ namespace Services.NasbNiro.Finance
         private bool CanApprove(FnOutboxKind kind) => IsPayroll(kind) ? _user.IsInRole(FinanceRoles.PayrollUsers) : _user.IsInRole(FinanceRoles.Managers);
 
         private static bool ValidYear(int y) => y >= 1300 && y <= 1600;
+
+        /// <summary>R1t D6: the package reached the office (or Sepidar for it) and is kept as it was.</summary>
+        internal static bool IsDelivered(FnOutboxStatus status) => status == FnOutboxStatus.Sent || status == FnOutboxStatus.Accepted;
 
         // ================================================================================== content of the packages
 
@@ -126,11 +136,13 @@ namespace Services.NasbNiro.Finance
                 case FnOutboxKind.SalesInvoicesTaxpayer:
                 {
                     OutboxTable t = Table("Invoices", "Number", "Date", "Type", "CustomerName", "EconomicCode", "NationalId", "PostalCode", "NetAmount", "VatAmount", "GrossAmount", "TaxId");
-                    var rows = await _uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Date >= from && i.Date <= to)
+                    // R1t D6: the same invoices as the VAT return (the release of a retention is not a sale and is left out), and below them their lines
+                    var rows = await MoadianRules.Reportable(_uow.Set<FnSalesInvoice>().AsNoTracking().Where(i => i.Status == FnDocStatus.Posted && i.Date >= from && i.Date <= to))
                         .OrderBy(i => i.Date).ThenBy(i => i.Id)
                         .Select(i => new { i.Number, i.Date, i.Type, i.Customer.Name, i.Customer.EconomicCode, i.Customer.NationalId, i.Customer.PostalCode, i.NetAmount, i.VatAmount, i.GrossAmount, i.TaxId }).ToListAsync(ct);
                     foreach (var r in rows) Add(t, r.Number, D(r.Date), r.Type.ToString(), r.Name, r.EconomicCode, r.NationalId, r.PostalCode, r.NetAmount, r.VatAmount, r.GrossAmount, r.TaxId);
                     tables.Add(t);
+                    tables.Add(await MoadianRules.LinesTableAsync(_uow, from, to, ct));
                     break;
                 }
                 case FnOutboxKind.VatSeason:
@@ -146,30 +158,12 @@ namespace Services.NasbNiro.Finance
                     break;
                 }
                 case FnOutboxKind.PayrollInsuranceList:
-                {
-                    InsuranceListDto list = await PayrollReports.InsuranceListAsync(_uow, year, month.Value, workshopId, ct);
-                    OutboxTable header = Table("Workshop", "WorkshopCode", "WorkshopName", "Year", "Month", "Employees", "TotalInsurable", "TotalEmployeeShare", "TotalEmployerShare", "TotalUnemployment");
-                    Add(header, list.WorkshopCode, list.WorkshopName, list.Year, list.Month, list.Employees, list.TotalInsurable, list.TotalEmployeeShare, list.TotalEmployerShare, list.TotalUnemployment);
-                    OutboxTable workers = Table("Workers", "PersonnelCode", "InsuranceNumber", "NationalCode", "FirstName", "LastName", "FatherName", "BirthDate", "JobCode", "Days", "DailyWage",
-                        "MonthlyWage", "Benefits", "InsurableTotal", "InsurableCapped", "EmployeeShare", "EmployerShare", "Unemployment", "HardAndHarmful");
-                    foreach (InsuranceListRowDto r in list.Rows)
-                        Add(workers, r.PersonnelCode, r.InsuranceNumber, r.NationalCode, r.FirstName, r.LastName, r.FatherName, r.BirthDate.HasValue ? D(r.BirthDate.Value) : null, r.JobCode,
-                            r.DaysWorked, r.DailyWage, r.MonthlyWage, r.Benefits, r.InsurableTotal, r.InsurableCapped, r.EmployeeShare, r.EmployerShare, r.Unemployment, r.HardAndHarmful);
-                    tables.Add(header);
-                    tables.Add(workers);
+                    // R1t D6: the social-security columns (identity card, gender, nationality, contract dates, row number, whole insured days) live in PayrollRunService.Lists.cs
+                    tables.AddRange(await PayrollListsR1.InsuranceTablesAsync(_uow, year, month.Value, workshopId, ct));
                     break;
-                }
                 case FnOutboxKind.PayrollTaxList:
-                {
-                    TaxListDto list = await PayrollReports.TaxListAsync(_uow, year, month.Value, ct);
-                    OutboxTable header = Table("Summary", "Year", "Month", "Employees", "TotalTaxable", "TotalTax");
-                    Add(header, list.Year, list.Month, list.Employees, list.TotalTaxable, list.TotalTax);
-                    OutboxTable rows = Table("Employees", "PersonnelCode", "NationalCode", "FirstName", "LastName", "TaxableTotal", "EmployeeInsurance", "Tax");
-                    foreach (TaxListRowDto r in list.Rows) Add(rows, r.PersonnelCode, r.NationalCode, r.FirstName, r.LastName, r.TaxableTotal, r.EmployeeInsurance, r.Tax);
-                    tables.Add(header);
-                    tables.Add(rows);
+                    tables.AddRange(await PayrollListsR1.TaxTablesAsync(_uow, year, month.Value, ct));
                     break;
-                }
             }
             return tables;
         }
@@ -205,24 +199,43 @@ namespace Services.NasbNiro.Finance
             int? workshopId = dto.Kind == FnOutboxKind.PayrollInsuranceList ? dto.WorkshopId : null;
             if (workshopId.HasValue && !await _uow.Set<FnInsuranceWorkshop>().AnyAsync(w => w.Id == workshopId.Value, ct)) return Bad<FnOutboxPackage>("کارگاه بیمه پیدا نشد.");
 
+            List<FnOutboxPackage> previous = await _uow.Set<FnOutboxPackage>().Where(p => p.Kind == dto.Kind && p.Year == dto.Year && p.Month == month && p.Season == season
+                && p.WorkshopId == workshopId).ToListAsync(ct);
+            // R1t D6: a package that was sent or accepted is the record of what the office received. It is never regenerated or replaced; a new package for the period is a
+            // correction that names the package it corrects, with the reason in the note.
+            List<FnOutboxPackage> delivered = previous.Where(p => IsDelivered(p.Status)).ToList();
+            FnOutboxPackage corrected = null;
+            if (dto.CorrectsPackageId.HasValue)
+            {
+                corrected = delivered.FirstOrDefault(p => p.Id == dto.CorrectsPackageId.Value);
+                if (corrected == null) return Bad<FnOutboxPackage>("بسته‌ای که باید اصلاح شود پیدا نشد یا هنوز ارسال نشده است؛ بسته اصلاحی فقط برای بسته ارسال‌شده یا پذیرفته‌شده همین دوره ساخته می‌شود (بسته پیش‌نویس را دوباره تولید کنید).");
+                if (Clean(dto.Note) == null) return Bad<FnOutboxPackage>("دلیل اصلاح را در یادداشت بنویسید.");
+            }
+            else if (delivered.Count > 0)
+            {
+                FnOutboxPackage last = delivered.OrderByDescending(p => p.Version).First();
+                return Bad<FnOutboxPackage>($"بسته {last.Number} برای این دوره قبلاً ارسال شده است و دوباره تولید یا جایگزین نمی‌شود؛ برای اصلاح، بسته اصلاحی بسازید (شناسه بسته اصلی و دلیل اصلاح را بدهید).");
+            }
+
             List<OutboxTable> tables = await BuildAsync(dto.Kind, dto.Year, month, season, workshopId, from, to, ct);
-            int rowCount = tables.Where(t => t.Name != "Summary" && t.Name != "Workshop").Sum(t => t.Rows.Count);
+            int rowCount = tables.Where(t => !OutboxTables.NotRows.Contains(t.Name)).Sum(t => t.Rows.Count);
             if (rowCount == 0 && dto.Kind != FnOutboxKind.VatSeason) return Bad<FnOutboxPackage>("برای این دوره داده‌ای برای ارسال وجود ندارد (برای حقوق، فقط اجرای تاییدشده).");
             string json = JsonSerializer.Serialize(tables, Json);
 
-            List<FnOutboxPackage> previous = await _uow.Set<FnOutboxPackage>().Where(p => p.Kind == dto.Kind && p.Year == dto.Year && p.Month == month && p.Season == season
-                && p.WorkshopId == workshopId).ToListAsync(ct);
             var package = new FnOutboxPackage
             {
                 Number = await InventoryNumbers.NextNumberAsync(_uow, FinanceNumbers.OutboxPackage, "SEP", to, ct), Kind = dto.Kind, Year = dto.Year, Month = month, Season = season,
                 WorkshopId = workshopId, Status = FnOutboxStatus.Draft, Version = previous.Count == 0 ? 1 : previous.Max(p => p.Version) + 1, FromDate = from, ToDate = to,
-                ContentHash = Hash(json), PayloadJson = json, RowCount = rowCount, Note = Clean(dto.Note), CreatedByUserId = userId, CreatedAt = DateTimeOffset.Now,
+                ContentHash = Hash(json), PayloadJson = json, RowCount = rowCount, Note = Clean(dto.Note), CorrectsPackageId = corrected?.Id, CreatedByUserId = userId, CreatedAt = DateTimeOffset.Now,
             };
             _uow.Set<FnOutboxPackage>().Add(package);
+            if (corrected != null)
+                AuditNotes.Add(_uow, userId, "FnOutboxPackage", corrected.Id, "OutboxCorrection", $"بسته اصلاحی {package.Number} برای بسته {corrected.Number} ساخته شد: {Clean(dto.Note)}",
+                    new { number = corrected.Number, status = corrected.Status.ToString(), hash = corrected.ContentHash }, new { number = package.Number, version = package.Version, hash = package.ContentHash, reason = Clean(dto.Note) });
             await _uow.SaveChangesAsync(ct);
-            // the new package supersedes the old ones (second save: the new id is known)
+            // the new package supersedes the old ones that were never delivered (second save: the new id is known); a delivered package stays as it was
             bool changed = false;
-            foreach (FnOutboxPackage old in previous.Where(p => p.Status != FnOutboxStatus.Superseded))
+            foreach (FnOutboxPackage old in previous.Where(p => p.Status != FnOutboxStatus.Superseded && !IsDelivered(p.Status)))
             {
                 old.Status = FnOutboxStatus.Superseded;
                 old.SupersededByPackageId = package.Id;
@@ -289,7 +302,7 @@ namespace Services.NasbNiro.Finance
                 var dto = new OutboxPackageDto
                 {
                     Id = p.Id, Number = p.Number, Kind = p.Kind, Year = p.Year, Month = p.Month, Season = p.Season, WorkshopId = p.WorkshopId, Status = p.Status, Version = p.Version,
-                    FromDate = p.FromDate, ToDate = p.ToDate, ContentHash = p.ContentHash, RowCount = p.RowCount, SupersededByPackageId = p.SupersededByPackageId,
+                    FromDate = p.FromDate, ToDate = p.ToDate, ContentHash = p.ContentHash, RowCount = p.RowCount, SupersededByPackageId = p.SupersededByPackageId, CorrectsPackageId = p.CorrectsPackageId,
                     ExternalReference = p.ExternalReference, Error = p.Error, Note = p.Note, CreatorName = p.CreatedByUserId == 0 ? "سیستم (کار زمان‌بندی‌شده)" : names.Name(p.CreatedByUserId),
                     CreatedAt = p.CreatedAt, ApprovedByName = names.Name(p.ApprovedByUserId), ApprovedAt = p.ApprovedAt, ExportedAt = p.ExportedAt, SentAt = p.SentAt,
                 };
@@ -364,14 +377,18 @@ namespace Services.NasbNiro.Finance
             if (p.Status == FnOutboxStatus.Draft) return Bad<byte[]>("بسته هنوز تایید نشده است.");
             if (p.Status == FnOutboxStatus.Superseded) return Bad<byte[]>("این بسته با نسخه جدیدتر جایگزین شده است.");
             byte[] file = Workbook(p);
-            if (p.Status == FnOutboxStatus.Ready)
-            {
-                p.Status = FnOutboxStatus.Exported;
-                p.ExportedAt = DateTimeOffset.Now;
-                try { await _uow.SaveChangesAsync(ct); }
-                catch (DbUpdateConcurrencyException) { /* exported by someone else at the same time: the file is identical */ }
-            }
+            await MarkExportedAsync(p, ct);
             return ResponseDtoHelper.Ok(file);
+        }
+
+        /// <summary>The first file taken from an approved package marks it exported (the second file type of R1t D6 does the same).</summary>
+        private async Task MarkExportedAsync(FnOutboxPackage p, CancellationToken ct)
+        {
+            if (p.Status != FnOutboxStatus.Ready) return;
+            p.Status = FnOutboxStatus.Exported;
+            p.ExportedAt = DateTimeOffset.Now;
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { /* exported by someone else at the same time: the file is identical */ }
         }
 
         public async Task<ResponseDto<OutboxPackageDto>> ActionAsync(OutboxActionDto dto, CancellationToken ct)
@@ -381,6 +398,8 @@ namespace Services.NasbNiro.Finance
             if (p == null) return ResponseDtoHelper.NotFound<OutboxPackageDto>("بسته پیدا نشد.");
             if (!CanSee(p.Kind)) return Bad<OutboxPackageDto>(NotAllowed);
             string action = dto.Action.Trim().ToLowerInvariant();
+            FnOutboxStatus before = p.Status;
+            string auditAction, auditText;
             switch (action)
             {
                 case "approve":
@@ -388,6 +407,7 @@ namespace Services.NasbNiro.Finance
                     if (p.Status != FnOutboxStatus.Draft) return Bad<OutboxPackageDto>("فقط بسته پیش‌نویس تایید می‌شود.");
                     if (p.CreatedByUserId != 0 && p.CreatedByUserId == Me) return Bad<OutboxPackageDto>("تایید باید توسط شخص دیگری غیر از تهیه‌کننده بسته انجام شود.");
                     p.Status = FnOutboxStatus.Ready; p.ApprovedByUserId = Me; p.ApprovedAt = DateTimeOffset.Now;
+                    auditAction = "OutboxApprove"; auditText = $"بسته {p.Number} تایید شد.";
                     break;
                 case "send":
                 {
@@ -401,29 +421,37 @@ namespace Services.NasbNiro.Finance
                         return Bad<OutboxPackageDto>(result.Message);
                     }
                     p.Status = FnOutboxStatus.Sent; p.SentAt = DateTimeOffset.Now; p.ExternalReference = result.Reference; p.Error = null;
+                    auditAction = "OutboxSend"; auditText = $"بسته {p.Number} به پوشه تبادل سپیدار ارسال شد.";
                     break;
                 }
                 case "mark-sent":
+                    // R1t D6: the manual marks record what happened outside the system. They stay, but each one needs a note and leaves an audit row.
                     if (!CanPrepare(p.Kind)) return Bad<OutboxPackageDto>(NotAllowed);
                     if (p.Status != FnOutboxStatus.Ready && p.Status != FnOutboxStatus.Exported) return Bad<OutboxPackageDto>("فقط بسته تاییدشده یا دریافت‌شده «ارسال‌شده» می‌شود.");
                     if (Clean(dto.Reference) == null) return Bad<OutboxPackageDto>("شماره پیگیری یا مرجع ارسال را وارد کنید.");
+                    if (Clean(dto.Note) == null) return Bad<OutboxPackageDto>(ManualNoteRequired);
                     p.Status = FnOutboxStatus.Sent; p.SentAt = DateTimeOffset.Now; p.ExternalReference = Clean(dto.Reference); p.Error = null;
+                    auditAction = "OutboxMarkSent"; auditText = $"ثبت دستی «ارسال‌شده» برای بسته {p.Number} (مرجع {p.ExternalReference}): {Clean(dto.Note)}";
                     break;
                 case "mark-accepted":
                     if (!CanPrepare(p.Kind)) return Bad<OutboxPackageDto>(NotAllowed);
                     if (p.Status != FnOutboxStatus.Sent) return Bad<OutboxPackageDto>("فقط بسته ارسال‌شده پذیرفته می‌شود.");
+                    if (Clean(dto.Note) == null) return Bad<OutboxPackageDto>(ManualNoteRequired);
                     p.Status = FnOutboxStatus.Accepted; p.Error = null;
                     if (Clean(dto.Reference) != null) p.ExternalReference = Clean(dto.Reference);
+                    auditAction = "OutboxMarkOk"; auditText = $"ثبت دستی «پذیرفته‌شده» برای بسته {p.Number}: {Clean(dto.Note)}";
                     break;
                 case "mark-rejected":
                     if (!CanPrepare(p.Kind)) return Bad<OutboxPackageDto>(NotAllowed);
                     if (p.Status != FnOutboxStatus.Sent) return Bad<OutboxPackageDto>("فقط بسته ارسال‌شده رد می‌شود.");
                     if (Clean(dto.Note) == null) return Bad<OutboxPackageDto>("دلیل رد را بنویسید.");
                     p.Status = FnOutboxStatus.Rejected; p.Error = Clean(dto.Note);
+                    auditAction = "OutboxMarkNo"; auditText = $"ثبت دستی «ردشده» برای بسته {p.Number}: {Clean(dto.Note)}";
                     break;
                 default:
                     return Bad<OutboxPackageDto>("عمل نامعتبر است.");
             }
+            AuditNotes.Add(_uow, Me, "FnOutboxPackage", p.Id, auditAction, auditText, new { status = before.ToString() }, new { status = p.Status.ToString(), reference = p.ExternalReference, note = Clean(dto.Note) });
             if (Clean(dto.Note) != null && action != "mark-rejected") p.Note = Clean(dto.Note);
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<OutboxPackageDto>(Conflict); }

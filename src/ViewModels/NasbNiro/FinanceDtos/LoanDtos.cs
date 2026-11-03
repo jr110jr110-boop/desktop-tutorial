@@ -81,6 +81,24 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public decimal OutstandingPrincipal { get; set; }
         public decimal AccruedInterestPayable { get; set; }
         public List<FnInstallmentDto> Installments { get; set; } = new List<FnInstallmentDto>();
+        /// <summary>R1t D7: treasury documents of this loan that are not settled yet (the receipt of the money, an instalment payment).</summary>
+        public List<FnCashLegRefDto> OpenCashLegs { get; set; } = new List<FnCashLegRefDto>();
+    }
+
+    /// <summary>R1t D7: a treasury document that carries the cash leg of a loan, letter of credit or bank guarantee.</summary>
+    public class FnCashLegRefDto
+    {
+        /// <summary>"Payment" or "Receipt": the treasury list the document is in.</summary>
+        public string Kind { get; set; }
+        public int Id { get; set; }
+        /// <summary>The loan, letter of credit or guarantee the document belongs to.</summary>
+        public int SourceId { get; set; }
+        public string Number { get; set; }
+        /// <summary>0 draft, 1 approved by the finance manager, 2 settled, 3 cancelled.</summary>
+        public int Status { get; set; }
+        public decimal Amount { get; set; }
+        public string Action { get; set; }
+        public DateTime Date { get; set; }
     }
 
     public class FnLoanActionDto

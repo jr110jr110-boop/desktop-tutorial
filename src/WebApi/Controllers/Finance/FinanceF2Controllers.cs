@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -241,13 +244,37 @@ namespace WebApi.Controllers
         [HttpPost("action")]
         public async Task<IActionResult> ActionAsync([FromBody] OutboxActionDto dto, CancellationToken ct) => Ok(await _outbox.ActionAsync(dto, ct));
 
+        /// <summary>The package as a spreadsheet; <c>?format=dsk</c> gives an insurance list package as the zip of the text files of the social-security list software (R1t D6, layout to be verified).</summary>
         [HttpGet("packages/{id:int}/export")]
-        public async Task<IActionResult> ExportAsync(int id, CancellationToken ct)
+        public async Task<IActionResult> ExportAsync(int id, [FromQuery] string format, CancellationToken ct)
         {
+            if (string.Equals(format, "dsk", StringComparison.OrdinalIgnoreCase))
+            {
+                var dsk = await _outbox.ExportDskAsync(id, ct);
+                if (!dsk.Success) return Ok(dsk);
+                return File(dsk.Data, "application/zip", $"sepidar-package-{id}-dsk.zip");
+            }
             var result = await _outbox.ExportAsync(id, ct);
             if (!result.Success) return Ok(result);
             return File(result.Data, F2Files.Xlsx, $"sepidar-package-{id}.xlsx");
         }
+
+        /// <summary>
+        /// R1t D6: the answer of the tax office as the body of the request: JSON (an array of rows, or an object with a "rows" array) or CSV, rows of invoiceNo, taxId, status, message.
+        /// Writes the tax id and the tax status on the invoices of the package and moves the package to Accepted or Rejected.
+        /// </summary>
+        [HttpPost("packages/{id:int}/ack")]
+        [RequestSizeLimit(4000000)]
+        public async Task<IActionResult> AckAsync(int id, CancellationToken ct)
+        {
+            string body;
+            using (var reader = new StreamReader(Request.Body, Encoding.UTF8, true, 1024, true)) body = await reader.ReadToEndAsync(ct);
+            return Ok(await _outbox.AckAsync(id, body, ct));
+        }
+
+        /// <summary>R1t D6: the totals of the package against the ledger postings of its period, with the difference for each account.</summary>
+        [HttpGet("packages/{id:int}/tie-out")]
+        public async Task<IActionResult> TieOutAsync(int id, CancellationToken ct) => Ok(await _outbox.TieOutAsync(id, ct));
 
         [HttpGet("summary")]
         public async Task<IActionResult> SummaryAsync(CancellationToken ct) => Ok(await _outbox.GetSummaryAsync(ct));

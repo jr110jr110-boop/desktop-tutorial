@@ -50,8 +50,31 @@ namespace MsTests
         public IServiceProvider Provider { get; }
         public IHttpContextAccessor Http { get; }
 
-        public AppHost(string databaseName)
+        public AppHost(string databaseName) : this(databaseName, null)
         {
+        }
+
+        /// <summary>The name of the in-memory database of this host.</summary>
+        public string DatabaseName { get; }
+
+        private readonly SiteSettings _siteSettings;
+
+        /// <summary>
+        /// Options for a context of another type on the same in-memory database and the same internal service provider, built the way the application's own context is. For tests that must change
+        /// what the application's context refuses to change (a row of the append-only audit trail).
+        /// </summary>
+        public DbContextOptions<T> RawOptions<T>() where T : DbContext
+        {
+            var builder = new DbContextOptionsBuilder<T>();
+            builder.SetDbContextOptions(_siteSettings);
+            builder.UseInternalServiceProvider(Provider);
+            return builder.Options;
+        }
+
+        /// <param name="settings">Extra configuration values (for example <c>Identity:AuditHmacKey</c>) that win over appsettings.json.</param>
+        public AppHost(string databaseName, IDictionary<string, string> settings)
+        {
+            DatabaseName = databaseName;
             var services = new ServiceCollection();
             services.AddOptions();
             services.AddLogging();
@@ -60,6 +83,7 @@ namespace MsTests
             var configuration = new ConfigurationBuilder()
                 .AddJsonFile("appsettings.json", reloadOnChange: false, optional: false)
                 .AddInMemoryCollection(new[] { new KeyValuePair<string, string>("UseInMemoryDatabase", "true") })
+                .AddInMemoryCollection(settings ?? new Dictionary<string, string>())
                 .Build();
             services.AddSingleton<IConfigurationRoot>(provider => configuration);
             services.AddSingleton<IConfiguration>(provider => configuration);
@@ -102,6 +126,7 @@ namespace MsTests
             services.AddSingleton(mapper);
 
             var siteSettings = services.GetSiteSettings();
+            _siteSettings = siteSettings;
             siteSettings.ActiveDatabase = ActiveDatabase.InMemoryDatabase;
             siteSettings.ConnectionStrings.LocalDb = new Localdb { InitialCatalog = databaseName };
             services.AddRequiredEfInternalServices(siteSettings);

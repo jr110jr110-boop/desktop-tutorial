@@ -131,6 +131,8 @@ namespace Entities.Model.NasbNiro.Finance
         AssetCommissioned = 54,
         PayrollRun = 60,
         PayrollPayment = 61,
+        /// <summary>R1t D7: the cash leg of a bank loan, letter of credit or bank guarantee, settled by treasury (the other side of the event comes from the facility record).</summary>
+        FacilityLeg = 80,
         Reversal = 99,
     }
 

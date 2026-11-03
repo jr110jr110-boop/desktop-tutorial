@@ -434,11 +434,13 @@ namespace Services.NasbNiro.Office
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
+        private readonly ILetterService _letters;
 
-        public InboxService(IUnitOfWork uow, IInventoryUserContext user)
+        public InboxService(IUnitOfWork uow, IInventoryUserContext user, ILetterService letters)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _letters = letters ?? throw new ArgumentNullException(nameof(letters));
         }
 
         private int Me => _user.UserId;
@@ -456,13 +458,35 @@ namespace Services.NasbNiro.Office
                 || (i.RecipientRole != null && roles.Contains(i.RecipientRole)));
         }
 
+        /// <summary>
+        /// R1t (D23): an item that comes from a Confidential or Secret letter shows the stored title only to a person who may read that letter in full. The test is the access function of the
+        /// letter itself (<see cref="ILetterService.ReadableLetterIdsAsync"/>: the writer, the parties, the CEO, the secretariat for Confidential letters, and the deputy rule: a deputy does not read a Secret
+        /// letter dated before his delegation started). Anybody else sees the register name of the letter (classification and number), never the subject that the stored title may carry.
+        /// </summary>
+        private async Task<Dictionary<int, string>> MaskedLetterNamesAsync(IEnumerable<OfInboxItem> rows, CancellationToken ct)
+        {
+            var masked = new Dictionary<int, string>();
+            List<int> ids = rows.Where(i => i.SourceModule == "office" && i.SourceType == "letter" && i.SourceId.HasValue).Select(i => i.SourceId.Value).Distinct().ToList();
+            if (ids.Count == 0) return masked;
+            var sensitive = await _uow.Set<OfLetter>().AsNoTracking().Where(l => ids.Contains(l.Id) && l.Classification != OfClassification.Normal)
+                .Select(l => new { l.Id, l.Classification, l.Number }).ToListAsync(ct);
+            if (sensitive.Count == 0) return masked;
+            List<int> sensitiveIds = sensitive.Select(l => l.Id).ToList();
+            IQueryable<int> readable = await _letters.ReadableLetterIdsAsync(ct);
+            HashSet<int> mayRead = new HashSet<int>(await readable.Where(id => sensitiveIds.Contains(id)).ToListAsync(ct));
+            foreach (var l in sensitive)
+                if (!mayRead.Contains(l.Id)) masked[l.Id] = LetterService.InboxRegisterName(l.Classification, l.Number);
+            return masked;
+        }
+
         private async Task<List<InboxItemDto>> MapAsync(List<OfInboxItem> rows, CancellationToken ct)
         {
             Dictionary<int, string> titles = await OfficeActors.PositionTitlesAsync(_uow, rows.Select(r => r.RecipientPositionId), ct);
+            Dictionary<int, string> maskedLetters = await MaskedLetterNamesAsync(rows, ct);
             DateTime today = DateTime.Today;
             return rows.Select(i => new InboxItemDto
             {
-                Id = i.Id, Kind = i.Kind, Title = i.Title, SourceModule = i.SourceModule, SourceType = i.SourceType, SourceId = i.SourceId, SourceKey = i.SourceKey, Link = i.Link,
+                Id = i.Id, Kind = i.Kind, Title = i.SourceId.HasValue && i.SourceType == "letter" && maskedLetters.TryGetValue(i.SourceId.Value, out string registerName) ? registerName : i.Title, SourceModule = i.SourceModule, SourceType = i.SourceType, SourceId = i.SourceId, SourceKey = i.SourceKey, Link = i.Link,
                 DueDate = i.DueDate, DueDateText = OfficeText.Date(i.DueDate), Overdue = i.DueDate.HasValue && i.DueDate.Value.Date < today && (i.Status == OfInboxStatus.Unread || i.Status == OfInboxStatus.Read),
                 Priority = i.Priority, Status = i.Status, CreatedAt = i.CreatedAt, CreatedAtText = OfficeText.Stamp(i.CreatedAt), ReadAt = i.ReadAt, ClosedAt = i.ClosedAt,
                 RecipientPositionId = i.RecipientPositionId, RecipientPositionTitle = titles.Title(i.RecipientPositionId), RecipientRole = i.RecipientRole, ClosedReason = i.ClosedReason,
@@ -479,7 +503,14 @@ namespace Services.NasbNiro.Office
             if (!string.IsNullOrWhiteSpace(query.SourceModule)) { string m = query.SourceModule.Trim(); q = q.Where(i => i.SourceModule == m); }
             if (!string.IsNullOrWhiteSpace(query.SourceKey)) { string k = query.SourceKey.Trim(); q = q.Where(i => i.SourceKey == k); }
             string text = OfficeText.Clean(query.Contains);
-            if (text != null) q = q.Where(i => i.Title.Contains(text));
+            if (text != null)
+            {
+                // R1t (D23): the search sees the stored title only where the person may see it: a word of the subject of a Confidential or Secret letter that the person may not read finds nothing
+                IQueryable<int> readable = await _letters.ReadableLetterIdsAsync(ct);
+                IQueryable<int> sensitive = _uow.Set<OfLetter>().AsNoTracking().Where(l => l.Classification != OfClassification.Normal).Select(l => l.Id);
+                q = q.Where(i => i.Title.Contains(text)
+                    && (i.SourceType != "letter" || i.SourceId == null || !sensitive.Contains(i.SourceId.Value) || readable.Contains(i.SourceId.Value)));
+            }
             int total = await q.CountAsync(ct);
             F2Page.Window(query.PageNumber, query.PageSize, total, out int number, out int size);
             List<OfInboxItem> rows = await q.OrderByDescending(i => i.Priority).ThenByDescending(i => i.CreatedAt).Skip((number - 1) * size).Take(size).ToListAsync(ct);
