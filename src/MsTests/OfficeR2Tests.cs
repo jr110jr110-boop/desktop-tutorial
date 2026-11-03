@@ -87,7 +87,7 @@ namespace MsTests
             return new DayInput
             {
                 Date = date, HasShift = true, StartMinute = 8 * 60, EndMinute = 16 * 60, BreakMinutes = 30, GraceMinutes = grace, DelayPenaltyFactor = factor,
-                OvertimeNeedsPreApproval = false, Punches = new System.Collections.Generic.List<DateTime> { date.AddMinutes(inMinute), date.AddMinutes(outMinute) },
+                OvertimeRequiresApproval = false, Punches = new System.Collections.Generic.List<DateTime> { date.AddMinutes(inMinute), date.AddMinutes(outMinute) },
             };
         }
 
@@ -96,7 +96,11 @@ namespace MsTests
         {
             var p = new OfAttendancePolicy();
             Assert.AreEqual(15, p.GraceMinutes);
-            Assert.IsFalse(p.OvertimeNeedsPreApproval);
+            // release R1f: overtime counts only up to an approved request unless the policy switch is turned off (starred default on)
+            Assert.IsTrue(p.OvertimeRequiresApproval);
+            // early leave is deducted like lateness unless the company switches it off (stored inverted: the default of an old row means on)
+            Assert.IsFalse(p.EarlyLeaveDeductionDisabled);
+            Assert.IsFalse(p.MonthConfirmByHrPeer);
             Assert.AreEqual(1320, p.MonthlyOvertimeCapMinutes);
             Assert.AreEqual(3m, p.DelayPenaltyFactor);
             Assert.IsNull(p.MaxOvertimeMinutesPerDay);
@@ -110,12 +114,12 @@ namespace MsTests
         [TestMethod]
         public void Old_Policy_Defaults_Are_Upgraded_Once_And_An_Admins_Row_Is_Not_Touched()
         {
-            Assert.IsTrue(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = true }));
+            Assert.IsTrue(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeRequiresApproval = true }));
             // an admin changed it: grace 5, or pre-approval off
-            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 5, OvertimeNeedsPreApproval = true }));
-            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = false }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 5, OvertimeRequiresApproval = true }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeRequiresApproval = false }));
             // already upgraded (the marker): an admin who chose grace 0 again is not overwritten
-            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeNeedsPreApproval = true, CompanyRulesApplied = true }));
+            Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(new OfAttendancePolicy { GraceMinutes = 0, OvertimeRequiresApproval = true, CompanyRulesApplied = true }));
             Assert.IsFalse(AttendanceService.NeedsCompanyUpgrade(null));
         }
 
@@ -150,11 +154,13 @@ namespace MsTests
         [TestMethod]
         public void Monthly_Overtime_Above_The_Cap_Is_Not_Counted()
         {
-            // 25 hours in the month: 22 hours count
-            Assert.AreEqual(22 * 60, AttendanceMath.MonthlyOvertime(new[] { 10 * 60, 8 * 60, 7 * 60 }, 1320));
-            Assert.AreEqual(5 * 60, AttendanceMath.MonthlyOvertime(new[] { 3 * 60, 2 * 60 }, 1320));
-            Assert.AreEqual(0, AttendanceMath.MonthlyOvertime(new[] { 120 }, 0));
-            Assert.AreEqual(0, AttendanceMath.MonthlyOvertime(new int[0], 1320));
+            // 25 hours in the month: 22 hours count (the one function that the month close uses: overtime and holiday work share the cap)
+            var start = new DateTime(2026, 11, 1);
+            (DateTime, int, int)[] Days(params int[] minutes) => minutes.Select((m, i) => (start.AddDays(i), m, 0)).ToArray();
+            Assert.AreEqual((22 * 60, 0), AttendanceMath.MonthlyExtraWork(Days(10 * 60, 8 * 60, 7 * 60), 1320));
+            Assert.AreEqual((5 * 60, 0), AttendanceMath.MonthlyExtraWork(Days(3 * 60, 2 * 60), 1320));
+            Assert.AreEqual((0, 0), AttendanceMath.MonthlyExtraWork(Days(120), 0));
+            Assert.AreEqual((0, 0), AttendanceMath.MonthlyExtraWork(Days(), 1320));
         }
 
         [TestMethod]

@@ -50,8 +50,6 @@ namespace Services.NasbNiro.Office
         private static ResponseDto<T> Bad<T>(string m) => OfficeText.Bad<T>(m);
 
         private const string NoRecord = "پرونده پرسنلی شما در سامانه ثبت نشده است؛ با واحد اداری تماس بگیرید.";
-        /// <summary>The day of an employee without a shift: 8 hours. With a shift the day is the scheduled minutes of the shift (end - start - break).</summary>
-        private const int DefaultDayMinutes = 480;
 
         private static bool IsDayKind(OfLeaveKind k, int? fromMinute) =>
             k == OfLeaveKind.DailyLeave || k == OfLeaveKind.SickLeave || k == OfLeaveKind.UnpaidLeave || (k == OfLeaveKind.Mission && !fromMinute.HasValue);
@@ -80,13 +78,18 @@ namespace Services.NasbNiro.Office
         private async Task<FnEmployee> MyEmployeeAsync(CancellationToken ct) =>
             Me <= 0 ? null : await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(e => e.UserId == Me && e.IsActive, ct);
 
+        /// <summary>
+        /// The month of the date is closed for requests: its payroll is approved (for the workshop), or its attendance close is confirmed (release R1f: the sheets of a confirmed month are frozen,
+        /// so a leave, a mission or a forgotten punch that is approved afterwards could not reach payroll; it goes through a correction request instead).
+        /// </summary>
         private async Task<bool> PayrollLockedAsync(DateTime date, int? workshopId, CancellationToken ct)
         {
             int y = PersianCal.Year(date), m = PersianCal.Month(date);
+            if (await _uow.Set<OfAttendanceMonth>().AnyAsync(x => x.Year == y && x.Month == m && x.Status == OfMonthStatus.Confirmed, ct)) return true;
             return await _uow.Set<FnPayrollRun>().AnyAsync(r => r.Year == y && r.Month == m && r.Status >= FnPayrollStatus.Approved && (r.WorkshopId == null || r.WorkshopId == workshopId), ct);
         }
 
-        /// <summary>The leave touches a month whose payroll is approved (any month between the two dates).</summary>
+        /// <summary>The leave touches a month that is closed for requests: its payroll is approved or its attendance close is confirmed (any month between the two dates).</summary>
         private async Task<bool> PayrollLockedRangeAsync(OfLeaveRequest r, int? workshopId, CancellationToken ct)
         {
             for (DateTime d = r.FromDate.Date; d <= r.ToDate.Date; d = PersianCal.End(PersianCal.Year(d), PersianCal.Month(d)).AddDays(1))
@@ -94,36 +97,58 @@ namespace Services.NasbNiro.Office
             return await PayrollLockedAsync(r.ToDate, workshopId, ct);
         }
 
-        private const string LockedMonth = "حقوق این ماه تایید شده و این درخواست دیگر تایید، ثبت یا رد نمی‌شود.";
-
-        /// <summary>The manager position of the employee's unit; the unit above when the employee is the manager.</summary>
-        private async Task<int?> FindApproverAsync(FnEmployee emp, CancellationToken ct)
+        /// <summary>A month between the two dates has an APPROVED payroll (the attendance close alone is not meant): the numbers of an approved leave can never change there.</summary>
+        private async Task<bool> PayrollApprovedRangeAsync(OfLeaveRequest r, int? workshopId, CancellationToken ct)
         {
-            int employeeId = emp.Id;
-            int? userId = emp.UserId;
-            OfPosition own = await _uow.Set<OfPosition>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && (p.EmployeeId == employeeId || (userId != null && p.UserId == userId))).OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
-            if (own == null) return null;
-            int? unitId = own.UnitId;
-            for (int i = 0; i < 12 && unitId.HasValue; i++)
+            for (DateTime d = r.FromDate.Date; ; d = PersianCal.End(PersianCal.Year(d), PersianCal.Month(d)).AddDays(1))
             {
-                int current = unitId.Value;
-                OfUnit unit = await _uow.Set<OfUnit>().AsNoTracking().FirstOrDefaultAsync(u => u.Id == current && !u.Deleted, ct);
-                if (unit == null) return null;
-                if (unit.ManagerPositionId.HasValue && unit.ManagerPositionId.Value != own.Id) return unit.ManagerPositionId;
-                unitId = unit.ParentId;
+                if (d > r.ToDate.Date) d = r.ToDate.Date;
+                int y = PersianCal.Year(d), m = PersianCal.Month(d);
+                if (await _uow.Set<FnPayrollRun>().AnyAsync(x => x.Year == y && x.Month == m && x.Status >= FnPayrollStatus.Approved && (x.WorkshopId == null || x.WorkshopId == workshopId), ct)) return true;
+                if (d >= r.ToDate.Date) return false;
             }
-            return null;
         }
 
-        private async Task<int> DayMinutesAsync(int employeeId, DateTime date, CancellationToken ct)
+        /// <summary>
+        /// The first date between the two dates that lies in a month whose attendance close is PREPARED (waiting for its confirmation); null when there is none. The days of a prepared month are frozen,
+        /// so an approval, a record or a new submission there would be lost until HR sends the close back (release R1f review M3).
+        /// </summary>
+        private async Task<DateTime?> PreparedMonthInRangeAsync(DateTime from, DateTime to, CancellationToken ct)
+        {
+            for (DateTime d = from.Date; ; d = PersianCal.End(PersianCal.Year(d), PersianCal.Month(d)).AddDays(1))
+            {
+                if (d > to.Date) d = to.Date;
+                int y = PersianCal.Year(d), m = PersianCal.Month(d);
+                if (await _uow.Set<OfAttendanceMonth>().AnyAsync(x => x.Year == y && x.Month == m && x.Status == OfMonthStatus.Prepared, ct)) return d;
+                if (d >= to.Date) return null;
+            }
+        }
+
+        // a request that waits in a closed month is never approved or recorded; it can only be rejected (otherwise it would stay pending for ever). An approved one is already part of the closed numbers
+        private const string LockedMonth = "حضور و غیاب یا حقوق این ماه بسته و تایید شده و این درخواست دیگر تایید یا ثبت نمی‌شود؛ آن را فقط می‌توان رد کرد.";
+        private const string LockedMonthDecided = "حضور و غیاب یا حقوق این ماه بسته و تایید شده و این درخواست تاییدشده جزو ارقام بسته‌شده است و دیگر رد نمی‌شود.";
+        private const string LockedMonthNew = "حضور و غیاب یا حقوق این ماه بسته و تایید شده و درخواست جدید برای آن ثبت نمی‌شود.";
+
+        /// <summary>The manager position of the employee's unit; the unit above when the employee is the manager (shared with the clock-event approvals).</summary>
+        private Task<int?> FindApproverAsync(FnEmployee emp, CancellationToken ct) => OfficeActors.FindApproverAsync(_uow, emp, ct);
+
+        /// <summary>
+        /// The minutes of one working day of the employee: the scheduled minutes of the shift (end - start - break, the same basis the lateness deduction uses, e.g. 08:00-16:00 with a 30 minute break is 450);
+        /// for an employee without a shift the rate-table key DefaultDayMinutes (★ 480, Verify). A missing key is returned as a Persian error naming it.
+        /// </summary>
+        private async Task<(int Minutes, string Error)> DayMinutesAsync(int employeeId, DateTime date, CancellationToken ct)
         {
             OfShiftAssignment a = await _uow.Set<OfShiftAssignment>().AsNoTracking().Where(x => x.EmployeeId == employeeId && x.FromDate <= date && (x.ToDate == null || x.ToDate >= date)).OrderByDescending(x => x.FromDate).FirstOrDefaultAsync(ct);
-            if (a == null) return DefaultDayMinutes;
-            OfShift s = await _uow.Set<OfShift>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == a.ShiftId, ct);
-            if (s == null) return DefaultDayMinutes;
-            // ★ the day of a shift is its scheduled minutes: end - start - break (the same basis the lateness deduction uses), e.g. 08:00-16:00 with a 30 minute break is 450 minutes
-            int scheduled = (s.EndMinute > s.StartMinute ? s.EndMinute - s.StartMinute : s.EndMinute + 1440 - s.StartMinute) - s.BreakMinutes;
-            return scheduled > 0 ? scheduled : DefaultDayMinutes;
+            OfShift s = a == null ? null : await _uow.Set<OfShift>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == a.ShiftId, ct);
+            if (s != null)
+            {
+                int scheduled = (s.EndMinute > s.StartMinute ? s.EndMinute - s.StartMinute : s.EndMinute + 1440 - s.StartMinute) - s.BreakMinutes;
+                if (scheduled > 0) return (scheduled, null);
+            }
+            int year = PersianCal.Year(date);
+            PayrollRates rates = await PayrollRateLoader.LoadAsync(_uow, year, ct);
+            string error = rates.Require(year, PayrollKeys.DefaultDayMinutes);
+            return error != null ? (0, error) : ((int)rates.Get(PayrollKeys.DefaultDayMinutes), null);
         }
 
         private async Task<int> WorkingDaysAsync(int employeeId, DateTime from, DateTime to, CancellationToken ct)
@@ -143,14 +168,19 @@ namespace Services.NasbNiro.Office
 
         // -------------------------------------------------------------------------------- balance
 
-        private async Task<LeaveBalanceDto> BalanceAsync(int employeeId, int year, int month, int? excludeLeaveId, CancellationToken ct)
+        /// <summary>
+        /// The balance of an employee at a month. The accrual is THE shared function of payroll and the office (LeaveAccrual): the entitlement runs from the latest of the hire month, the first month of the year,
+        /// the go-live month and the month of an approved opening balance, at the monthly rate of the rate table; the carry-forward limit is a rate-table key too. A missing key is returned as a Persian error.
+        /// </summary>
+        private async Task<(LeaveBalanceDto Balance, string Error)> BalanceAsync(int employeeId, int year, int month, int? excludeLeaveId, CancellationToken ct)
         {
-            decimal rate = (await _uow.Set<FnPayrollRateTable>().AsNoTracking().Where(r => (r.Year == 0 || r.Year == year) && r.Key == "LeaveEntitlementMonthly").OrderByDescending(r => r.Year)
-                .Select(r => (decimal?)r.Value).FirstOrDefaultAsync(ct)) ?? 2.5m;
-            decimal carryMax = (await _uow.Set<FnPayrollRateTable>().AsNoTracking().Where(r => (r.Year == 0 || r.Year == year) && r.Key == "LeaveCarryForwardMax").OrderByDescending(r => r.Year)
-                .Select(r => (decimal?)r.Value).FirstOrDefaultAsync(ct)) ?? 0m;
+            FnEmployee emp = await EmployeeAsync(employeeId, ct);
+            if (emp == null) return (null, "پرسنل پیدا نشد.");
+            (LeaveAccrualPlan plan, string planError) = await LeaveAccrualPlan.LoadAsync(_uow, year, new[] { employeeId }, ct);
+            if (planError != null) return (null, planError);
+            int firstMonth = plan.FirstMonth(emp);
             FnLeaveBalance b = await _uow.Set<FnLeaveBalance>().AsNoTracking().FirstOrDefaultAsync(x => x.EmployeeId == employeeId && x.Year == year, ct);
-            var dto = new LeaveBalanceDto { EmployeeId = employeeId, Year = year, EntitlementRate = rate };
+            var dto = new LeaveBalanceDto { EmployeeId = employeeId, Year = year, EntitlementRate = plan.MonthlyRate, FirstAccrualMonth = firstMonth };
             if (b != null)
             {
                 dto.CarriedForward = b.CarriedForward; dto.Entitled = b.Entitled; dto.Used = b.Used; dto.LastMonth = b.LastMonth;
@@ -158,9 +188,9 @@ namespace Services.NasbNiro.Office
             else
             {
                 FnLeaveBalance prev = await _uow.Set<FnLeaveBalance>().AsNoTracking().FirstOrDefaultAsync(x => x.EmployeeId == employeeId && x.Year == year - 1, ct);
-                dto.CarriedForward = prev == null ? 0m : Math.Max(0m, Math.Min(prev.CarriedForward + prev.Entitled - prev.Used, carryMax));
+                dto.CarriedForward = prev == null ? 0m : LeaveAccrual.Carry(prev.CarriedForward, prev.Entitled, prev.Used, plan.CarryMax);
             }
-            dto.ProjectedEntitlement = rate * Math.Max(0, month - dto.LastMonth);
+            dto.ProjectedEntitlement = LeaveAccrual.Entitlement(plan.MonthlyRate, firstMonth, dto.LastMonth, month);
             DateTime ys = PersianCal.Start(year, 1), ye = PersianCal.End(year, 12);
             var pendingRows = await _uow.Set<OfLeaveRequest>().AsNoTracking()
                 .Where(r => !r.Deleted && r.EmployeeId == employeeId && (r.Status == OfLeaveStatus.Approved || r.Status == OfLeaveStatus.Recorded) && r.FromDate >= ys && r.FromDate <= ye
@@ -182,7 +212,7 @@ namespace Services.NasbNiro.Office
             }
             dto.PendingDays = pending;
             dto.Available = dto.CarriedForward + dto.Entitled - dto.Used + dto.ProjectedEntitlement - dto.PendingDays;
-            return dto;
+            return (dto, null);
         }
 
         public async Task<ResponseDto<LeaveBalanceDto>> GetBalanceAsync(int? employeeId, int? year, int? month, CancellationToken ct)
@@ -205,7 +235,8 @@ namespace Services.NasbNiro.Office
             int y = year ?? PersianCal.Year(today);
             int m = month ?? (y == PersianCal.Year(today) ? PersianCal.Month(today) : 12);
             if (y < 1300 || y > 1600 || m < 1 || m > 12) return Bad<LeaveBalanceDto>(OfficeText.InvalidData);
-            return ResponseDtoHelper.Ok(await BalanceAsync(id, y, m, null, ct));
+            (LeaveBalanceDto balance, string error) = await BalanceAsync(id, y, m, null, ct);
+            return error != null ? Bad<LeaveBalanceDto>(error) : ResponseDtoHelper.Ok(balance);
         }
 
         // -------------------------------------------------------------------------------- reading
@@ -372,7 +403,7 @@ namespace Services.NasbNiro.Office
             if (from == default) return Bad<LeaveDto>("تاریخ شروع را وارد کنید.");
             if (to < from) return Bad<LeaveDto>("تاریخ پایان از تاریخ شروع زودتر است.");
             if ((to - from).TotalDays > 120) return Bad<LeaveDto>("بازه درخواست حداکثر ۱۲۰ روز است.");
-            if (await PayrollLockedAsync(from, emp.WorkshopId, ct) || await PayrollLockedAsync(to, emp.WorkshopId, ct)) return Bad<LeaveDto>("حقوق این ماه تایید شده و درخواست جدید برای آن ثبت نمی‌شود.");
+            if (await PayrollLockedAsync(from, emp.WorkshopId, ct) || await PayrollLockedAsync(to, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonthNew);
 
             int? fromMinute = null, toMinute = null;
             decimal days = 0m;
@@ -405,15 +436,25 @@ namespace Services.NasbNiro.Office
                         if (!AttendanceService.TryParseTime(dto.FromTime, out int hf) || !AttendanceService.TryParseTime(dto.ToTime, out int ht) || ht <= hf) return Bad<LeaveDto>("ساعت شروع و پایان مرخصی نامعتبر است.");
                         int working = await WorkingDaysAsync(emp.Id, from, to, ct);
                         if (working == 0) return Bad<LeaveDto>("این روز، روز کاری نیست.");
-                        int dayMinutes = await DayMinutesAsync(emp.Id, from, ct);
+                        (int dayMinutes, string dayError) = await DayMinutesAsync(emp.Id, from, ct);
+                        if (dayError != null) return Bad<LeaveDto>(dayError);
                         fromMinute = hf; toMinute = ht;
                         days = Math.Round((decimal)(ht - hf) / dayMinutes, 4);
                         break;
                     }
                 case OfLeaveKind.Overtime:
-                    if (!dto.Hours.HasValue || dto.Hours.Value <= 0m || dto.Hours.Value > 12m) return Bad<LeaveDto>("ساعت اضافه‌کار باید بین ۰ و ۱۲ ساعت در روز باشد.");
-                    hours = Math.Round(dto.Hours.Value, 2);
-                    break;
+                    {
+                        // the cap of one request per day is a rate-table key (OvertimeRequestMaxHoursPerDay: ★ 4 hours, labour law art. 59 - to be verified), not a literal
+                        int otYear = PersianCal.Year(from);
+                        PayrollRates otRates = await PayrollRateLoader.LoadAsync(_uow, otYear, ct);
+                        string otMissing = otRates.Require(otYear, PayrollKeys.OvertimeRequestMaxHours);
+                        if (otMissing != null) return Bad<LeaveDto>(otMissing);
+                        decimal otCap = otRates.Get(PayrollKeys.OvertimeRequestMaxHours);
+                        if (!dto.Hours.HasValue || dto.Hours.Value <= 0m || dto.Hours.Value > otCap)
+                            return Bad<LeaveDto>($"ساعت اضافه‌کار باید بیشتر از صفر و حداکثر {otCap.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} ساعت در روز باشد (سقف از جدول نرخ‌ها، کلید {PayrollKeys.OvertimeRequestMaxHours}).");
+                        hours = Math.Round(dto.Hours.Value, 2);
+                        break;
+                    }
                 case OfLeaveKind.ForgotClock:
                     {
                         if (to != from) return Bad<LeaveDto>("فراموشی تردد برای یک روز ثبت می‌شود.");
@@ -439,6 +480,8 @@ namespace Services.NasbNiro.Office
             {
                 // a request that is saved and submitted in one call is checked as a whole first: a refused call saves nothing and takes no number
                 if (r.Kind == OfLeaveKind.SickLeave && !r.AttachmentDocumentId.HasValue) return Bad<LeaveDto>("برای مرخصی استعلاجی باید گواهی پزشکی پیوست شود.");
+                DateTime? preparedAt = await PreparedMonthInRangeAsync(from, to, ct);
+                if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
                 string submitProblem = await BalanceProblemAsync(r, ct);
                 if (submitProblem != null) return Bad<LeaveDto>(submitProblem);
                 if (!(await FindApproverAsync(emp, ct)).HasValue) return Bad<LeaveDto>("مدیر واحد شما در چارت سازمانی مشخص نیست؛ با واحد اداری تماس بگیرید.");
@@ -479,7 +522,8 @@ namespace Services.NasbNiro.Office
         private async Task<string> BalanceProblemAsync(OfLeaveRequest r, CancellationToken ct)
         {
             if (!UsesBalance(r.Kind)) return null;
-            LeaveBalanceDto b = await BalanceAsync(r.EmployeeId, PersianCal.Year(r.FromDate), PersianCal.Month(r.FromDate), r.Id, ct);
+            (LeaveBalanceDto b, string balanceError) = await BalanceAsync(r.EmployeeId, PersianCal.Year(r.FromDate), PersianCal.Month(r.FromDate), r.Id, ct);
+            if (balanceError != null) return balanceError;
             return r.Days > b.Available ? $"مانده مرخصی کافی نیست؛ مانده قابل استفاده {b.Available:0.##} روز و درخواست {r.Days:0.##} روز است." : null;
         }
 
@@ -503,6 +547,7 @@ namespace Services.NasbNiro.Office
             string comment = Clean(dto.Comment);
             string label = $"{KindText(r.Kind)} {r.Number}";
             bool touchesAttendance = false;
+            bool counted = false;
 
             switch (action)
             {
@@ -512,7 +557,9 @@ namespace Services.NasbNiro.Office
                         bool owner = r.CreatorUserId == Me || emp.UserId == Me;
                         if (!(owner || c.IsHr)) return Bad<LeaveDto>(OfficeText.NotAllowed);
                         if (r.Kind == OfLeaveKind.SickLeave && !r.AttachmentDocumentId.HasValue) return Bad<LeaveDto>("برای مرخصی استعلاجی باید گواهی پزشکی پیوست شود.");
-                        if (await PayrollLockedAsync(r.FromDate, emp.WorkshopId, ct)) return Bad<LeaveDto>("حقوق این ماه تایید شده و درخواست جدید برای آن ثبت نمی‌شود.");
+                        if (await PayrollLockedAsync(r.FromDate, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonthNew);
+                        DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                        if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
                         string problem = await BalanceProblemAsync(r, ct);
                         if (problem != null) return Bad<LeaveDto>(problem);
                         int? approver = await FindApproverAsync(emp, ct);
@@ -526,6 +573,8 @@ namespace Services.NasbNiro.Office
                         ActingPosition acting = c.Pos.Contains(r.ApproverPositionId ?? -1) ? (await OfficeActors.ActingAsync(_uow, Me, ct)).First(a => a.PositionId == r.ApproverPositionId) : null;
                         if (acting == null || emp.UserId == Me) return Bad<LeaveDto>(OfficeText.NotAllowed);
                         if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
+                        DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                        if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value) + " درخواست را می‌توان همین حالا رد کرد.");
                         string problem = await BalanceProblemAsync(r, ct);
                         if (problem != null) return Bad<LeaveDto>(problem);
                         r.Status = OfLeaveStatus.Approved; r.ApprovedByUserId = Me; r.ApprovedOnBehalf = acting.OnBehalf; r.ApprovedAt = now; r.ApproverComment = comment;
@@ -538,13 +587,23 @@ namespace Services.NasbNiro.Office
                 case "record":
                     {
                         if (r.Status != OfLeaveStatus.Approved || !c.IsHr || emp.UserId == Me) return Bad<LeaveDto>(OfficeText.NotAllowed);
+                        // a request in a closed month is never recorded (it can be rejected); in a prepared month the close is rejected first
                         if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
+                        DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                        if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value) + " درخواست را می‌توان همین حالا رد کرد.");
                         if (r.Kind == OfLeaveKind.ForgotClock)
                         {
+                            // four eyes: the unit manager approved the request, HR records the punch; the same person cannot do both
+                            if (r.ApprovedByUserId == Me) return Bad<LeaveDto>("ثبت تردد فراموش‌شده را باید یکی از همکاران منابع انسانی غیر از تاییدکننده درخواست انجام دهد.");
                             DateTime ts = r.FromDate.Date.AddMinutes(r.FromMinute ?? 0);
-                            if (await PayrollLockedAsync(ts, emp.WorkshopId, ct)) return Bad<LeaveDto>("حقوق این ماه تایید شده و ترددها قابل تغییر نیست.");
-                            if (!await _uow.Set<OfClockEvent>().AnyAsync(e => e.EmployeeId == r.EmployeeId && e.Timestamp == ts, ct))
-                                _uow.Set<OfClockEvent>().Add(new OfClockEvent { EmployeeId = r.EmployeeId, Timestamp = ts, Direction = r.Direction ?? OfClockDirection.Unknown, Source = OfClockSource.Manual, Reason = $"{r.Number}: {r.Reason}", CreatedByUserId = Me, CreatedAt = now });
+                            if (await PayrollLockedAsync(ts, emp.WorkshopId, ct)) return Bad<LeaveDto>("حضور و غیاب یا حقوق این ماه بسته شده و ترددها قابل تغییر نیست.");
+                            if (!await _uow.Set<OfClockEvent>().AnyAsync(e => e.EmployeeId == r.EmployeeId && e.Timestamp == ts && e.Approval == OfClockApproval.Approved, ct))
+                                _uow.Set<OfClockEvent>().Add(new OfClockEvent
+                                {
+                                    EmployeeId = r.EmployeeId, Timestamp = ts, Direction = r.Direction ?? OfClockDirection.Unknown, Source = OfClockSource.Manual, Reason = $"{r.Number}: {r.Reason}", CreatedByUserId = Me, CreatedAt = now,
+                                    // the approval of the unit manager is the second pair of eyes of this punch
+                                    Approval = OfClockApproval.Approved, ApprovedByUserId = r.ApprovedByUserId, ApprovedAt = r.ApprovedAt,
+                                });
                         }
                         r.Status = OfLeaveStatus.Recorded; r.RecordedByUserId = Me; r.RecordedAt = now;
                         await CloseKeysAsync("ثبت شد", ct, "leave-record:" + r.Id);
@@ -554,10 +613,19 @@ namespace Services.NasbNiro.Office
                 case "reject":
                     {
                         if (comment == null) return Bad<LeaveDto>("دلیل رد درخواست را بنویسید.");
-                        if (await PayrollLockedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonth);
+                        // a request that waits in a closed month can always be rejected (review L7: it would stay pending for ever otherwise; it is never approved or recorded there).
+                        // An APPROVED leave is already part of the computed days: after the payroll of its month is approved its numbers cannot change, and in a prepared month they are frozen
+                        counted = r.Status == OfLeaveStatus.Approved;
+                        if (counted)
+                        {
+                            if (await PayrollApprovedRangeAsync(r, emp.WorkshopId, ct)) return Bad<LeaveDto>(LockedMonthDecided);
+                            DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                            if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
+                        }
                         r.Status = OfLeaveStatus.Rejected; r.RejectReason = comment;
                         await CloseKeysAsync("رد شد", ct, "leave:" + r.Id, "leave-record:" + r.Id);
                         if (emp.UserId.HasValue) AddInbox("leave-result:" + r.Id, OfInboxKind.Alert, $"{label} شما رد شد: {comment}", r, null, emp.UserId, null);
+                        touchesAttendance = counted;
                         break;
                     }
                 case "cancel":
@@ -565,7 +633,12 @@ namespace Services.NasbNiro.Office
                         bool wasCounted = r.Status == OfLeaveStatus.Approved || r.Status == OfLeaveStatus.Recorded;
                         bool owner = r.CreatorUserId == Me || emp.UserId == Me;
                         if (wasCounted && !c.IsHr && r.FromDate.Date <= DateTime.Today) return Bad<LeaveDto>("پس از شروع، فقط واحد اداری می‌تواند درخواست تاییدشده را باطل کند.");
-                        if (wasCounted && await PayrollLockedAsync(r.FromDate, emp.WorkshopId, ct)) return Bad<LeaveDto>("حقوق این ماه تایید شده و درخواست قابل ابطال نیست.");
+                        if (wasCounted && await PayrollLockedAsync(r.FromDate, emp.WorkshopId, ct)) return Bad<LeaveDto>("حضور و غیاب یا حقوق این ماه بسته و تایید شده و درخواست قابل ابطال نیست.");
+                        if (wasCounted)
+                        {
+                            DateTime? preparedAt = await PreparedMonthInRangeAsync(r.FromDate, r.ToDate, ct);
+                            if (preparedAt.HasValue) return Bad<LeaveDto>(AttendanceService.PreparedMonthRefusal(preparedAt.Value));
+                        }
                         if (!(owner || c.IsHr)) return Bad<LeaveDto>(OfficeText.NotAllowed);
                         r.Status = OfLeaveStatus.Cancelled; r.RejectReason = comment;
                         await CloseKeysAsync("باطل شد", ct, "leave:" + r.Id, "leave-record:" + r.Id);

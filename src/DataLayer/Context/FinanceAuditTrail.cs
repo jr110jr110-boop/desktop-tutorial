@@ -34,8 +34,10 @@ namespace DataLayer.Context
             { typeof(AccountMapping), null },
             { typeof(FnTaxRate), null },
             { typeof(FnBankAccount), null },
-            // only the bank account number (IBAN) of an employee is audited; no salary or other personal data
-            { typeof(FnEmployee), new[] { "BankIban" } },
+            // release R1f: the guarded fields of an employee (daily wage, exemption flags, children, hard-and-harmful work, bank account) and the facts a payroll run depends on are audited;
+            // the wage, the exemption flags, the children count and the hard-and-harmful flag are written as a "changed" marker only (never a value and never a hash) and the account number masked,
+            // so the trail shows that and when they changed, never the amount or the condition. The audit service returns these record types with their changes only to the readers of payroll.
+            { typeof(FnEmployee), new[] { "PersonnelCode", "BankIban", "DailyWage", "ExemptionFlags", "ChildrenCount", "HardAndHarmful", "PendingApproval", "IsActive", "EndDate", "WorkshopId", "CostCenterId", "DefaultWorkOrderId", "UserId" } },
             { typeof(FnAsset), null },
             { typeof(FnLegalEntity), null },
             { typeof(FnIntercompanyPair), null },
@@ -94,7 +96,22 @@ namespace DataLayer.Context
             { typeof(OfNumberingRule), null },
             { typeof(OfAttendancePolicy), null },
             { typeof(OfClockImportProfile), null },
-            { typeof(OfClockEvent), new[] { "EmployeeId", "Timestamp", "Direction", "Source", "Reason", "DeviceCode" } },
+            // release R1f: a manual event is a request; who made it, who approved or rejected it and when are part of the trail. The punches of the devices are too many to list (their trail is the push log, one row
+            // per push); an imported row is audited one by one (review H1: an import is a person's decision), together with the batch that a second HR user decides, and a punch a device held for the key holder is listed
+            { typeof(OfClockEvent), new[] { "EmployeeId", "Timestamp", "Direction", "Source", "Reason", "DeviceCode", "CreatedByUserId", "Approval", "ApprovedByUserId", "ApprovedAt", "RejectReason", "ImportBatchId" } },
+            { typeof(OfClockImportBatch), null },
+            // release R1f: devices (never the key hash; LastPushAt moves with every push and the push log is its trail), shifts, assignments, leave requests (the reason may be medical and is not copied) and the two-step attendance month close (not the snapshot body: it lists every employee's attendance)
+            { typeof(OfDevice), new[] { "Code", "Title", "Location", "IsActive", "KeyRotatedAt", "KeyRotatedByUserId", "AllowedAddresses" } },
+            { typeof(OfShift), null },
+            { typeof(OfShiftAssignment), null },
+            { typeof(OfLeaveRequest), new[] { "Number", "EmployeeId", "Kind", "FromDate", "ToDate", "FromMinute", "ToMinute", "Hours", "Direction", "Days", "Status", "SubmittedAt", "ApproverPositionId", "ApprovedByUserId", "ApprovedOnBehalf", "ApprovedAt", "RecordedByUserId", "RecordedAt", "RejectReason" } },
+            { typeof(OfAttendanceMonth), new[] { "Year", "Month", "Status", "ClosedAt", "ClosedByUserId", "SheetCount", "SkippedLocked", "ConfirmedAt", "ConfirmedByUserId", "RejectReason", "SnapshotHash", "PolicyJson" } },
+            // release R1f: the maker-checker requests of payroll. The proposed values are confidential (a "changed" marker and the names of the fields are written), the reasons and notes stay on the records, the decision and the people are plain.
+            { typeof(FnEmployeeChange), new[] { "EmployeeId", "Kind", "Status", "WageEffectiveFrom", "Reason", "ProposedByUserId", "ProposedAt", "DecidedByUserId", "DecidedAt", "DecisionNote", "ProposedJson" } },
+            { typeof(FnEmployeeWage), new[] { "EmployeeId", "EffectiveFrom", "DailyWage", "CreatedByUserId", "ApprovedByUserId", "ApprovedAt", "ChangeId", "IsBaseline" } },
+            { typeof(FnAttendanceCorrection), new[] { "SheetId", "EmployeeId", "Year", "Month", "Status", "Reason", "ProposedByUserId", "ProposedAt", "DecidedByUserId", "DecidedAt", "DecisionNote", "ProposedJson" } },
+            { typeof(FnLeaveOpening), null },
+            { typeof(FnEmployeeLoan), new[] { "EmployeeId", "Kind", "Title", "Principal", "InstallmentAmount", "Balance", "DisbursementPaymentId", "FirstYear", "FirstMonth", "IsActive", "CreatedByUserId", "ApprovalStatus", "ApprovedByUserId", "ApprovedAt", "RejectReason" } },
             // production / shop floor (release P1): master data, routing approvals, the release gate, status changes and edits of time bookings
             { typeof(MfWorkCenter), null },
             { typeof(MfMachineInfo), null },
@@ -130,7 +147,8 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.AfterSales.SvContract), new[] { "Status", "StartDate", "EndDate", "VisitIntervalMonths", "PriceRial", "ActivatedByUserId" } },
             // R1p D25: who typed the scores in (the role and the user), the reason of a skip and the QA verification (who checked the answers with the customer) leave a trail too
             { typeof(Entities.Model.NasbNiro.AfterSales.SlSurvey), new[] { "Status", "Kind", "AverageScore", "RecordedByRole", "AnsweredByUserId", "SkipReason", "Verified", "VerifiedByUserId" } },
-            { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays" } },
+            // release R1f: where the numbers came from (HR close / manual / import), whether the row is locked, and the Input items as a "changed" marker plus the names of the items that changed (never the amounts)
+            { typeof(FnAttendanceSheet), new[] { "EmployeeId", "Year", "Month", "DaysWorked", "OvertimeHours", "NightHours", "HolidayHours", "ShiftType", "PaidLeaveDays", "SickLeaveDays", "UnpaidLeaveDays", "AbsenceDays", "MissionDays", "Source", "Locked", "InputsJson" } },
             // R1a: user administration. Created, changed and deleted users, their roles and the claims that carry the temporary-password flag and the requests for sensitive roles.
             // Never listed: the password hash, the security stamp, the token serial, the confirmation codes and the birth date. The national code and the phone number are masked.
             { typeof(Entities.Identity.User), new[] { "UserName", "Email", "EmailConfirmed", "PhoneNumber", "PhoneNumberConfirmed", "Name", "LastName", "NationalCode", "IsActive", "IsDeleted", "LockoutEnabled", "LockoutEnd" } },
@@ -230,6 +248,45 @@ namespace DataLayer.Context
         private static readonly HashSet<string> ConfidentialAmounts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Debit", "Credit", "CurrencyAmount", "Quantity", "TotalAmount" };
         private static readonly HashSet<string> Skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RowVersion" };
 
+        /// <summary>
+        /// What is written instead of a value that must not appear in the trail (a wage, a loan amount, a children count, a free text): this fixed text. The trail shows THAT the field was set or changed and when,
+        /// never what it held, and never a hash of it (a hash of a small number can be guessed).
+        /// </summary>
+        public const string ChangedMarker = "«تغییر کرد»";
+
+        /// <summary>How a property that must not appear in the trail with its value is written.</summary>
+        private enum Special
+        {
+            /// <summary>Only the <see cref="ChangedMarker"/> (wages, exemption flags, children, hard-and-harmful work, loan amounts and title, reasons and decision notes).</summary>
+            Marker = 1,
+            /// <summary>A JSON object of amounts or numbers: the marker, and "NameKeys" with the names of the members that changed; never the values (the names alone show which field a request touches).</summary>
+            MarkerWithKeys = 2,
+        }
+
+        private static readonly Dictionary<(Type, string), Special> SpecialProperties = new Dictionary<(Type, string), Special>
+        {
+            { (typeof(FnEmployee), "DailyWage"), Special.Marker },
+            { (typeof(FnEmployee), "ExemptionFlags"), Special.Marker },
+            { (typeof(FnEmployee), "ChildrenCount"), Special.Marker },
+            { (typeof(FnEmployee), "HardAndHarmful"), Special.Marker },
+            { (typeof(FnEmployeeWage), "DailyWage"), Special.Marker },
+            { (typeof(FnEmployeeLoan), "Principal"), Special.Marker },
+            { (typeof(FnEmployeeLoan), "InstallmentAmount"), Special.Marker },
+            { (typeof(FnEmployeeLoan), "Balance"), Special.Marker },
+            { (typeof(FnEmployeeLoan), "Title"), Special.Marker },
+            { (typeof(FnEmployeeLoan), "RejectReason"), Special.Marker },
+            { (typeof(FnEmployeeChange), "Reason"), Special.Marker },
+            { (typeof(FnEmployeeChange), "DecisionNote"), Special.Marker },
+            { (typeof(FnEmployeeChange), "ProposedJson"), Special.MarkerWithKeys },
+            { (typeof(FnAttendanceCorrection), "Reason"), Special.Marker },
+            { (typeof(FnAttendanceCorrection), "DecisionNote"), Special.Marker },
+            { (typeof(FnAttendanceCorrection), "ProposedJson"), Special.MarkerWithKeys },
+            { (typeof(FnLeaveOpening), "Note"), Special.Marker },
+            { (typeof(FnLeaveOpening), "DecisionNote"), Special.Marker },
+            { (typeof(FnAttendanceSheet), "InputsJson"), Special.MarkerWithKeys },
+            { (typeof(OfLeaveRequest), "RejectReason"), Special.Marker },
+        };
+
         public static void Capture(DbContext context, IHttpContextAccessor accessor)
         {
             List<EntityEntry> entries = context.ChangeTracker.Entries().ToList();
@@ -268,8 +325,10 @@ namespace DataLayer.Context
                     if (entry.Entity is FnVoucher v && (v.Type == FnVoucherType.Auto || v.IsImported)) continue;
                     if (entry.Entity is FnVoucherLine vl && vl.Voucher != null && (vl.Voucher.Type != FnVoucherType.Normal || vl.Voucher.IsImported)) continue;   // only the lines of manual vouchers
                     if (entry.Entity is FnDetailAccount d && d.LinkedEntityId.HasValue) continue;
-                    // the punches of the devices are too many to list; manual and imported events are the ones that need a trail
-                    if (entry.Entity is OfClockEvent ce && ce.Source == OfClockSource.Device) continue;
+                    // the punches of the devices are too many to list one by one (release R1f: their trail is the push log, one row per push with the count, the device and a hash of the payload);
+                    // a manual event is a request that a second person decides, an imported row is a person's decision (review H1) and a punch a device held for the key holder waits for a second person:
+                    // all three need their own trail
+                    if (entry.Entity is OfClockEvent ce && ce.Source == OfClockSource.Device && ce.Approval == OfClockApproval.Approved) continue;
                     // operations and terminal bookings are made by the system or by the floor in bulk; their changes and supervisor edits are the trail
                     if (entry.Entity is MfOperation) continue;
                     // items (imports) and ITP activities (copied from a template) are made in bulk; only the changes of their gates are listed
@@ -291,6 +350,14 @@ namespace DataLayer.Context
                     string name = p.Metadata.Name;
                     if (Skipped.Contains(name) || p.Metadata.ClrType == typeof(byte[])) continue;
                     if (only != null && !only.Contains(name)) continue;
+                    // a key (or a foreign key that points at one) the database has not generated yet is a temporary number, not a fact: it stays out of the row
+                    // (an imported punch is saved together with its batch, so its ImportBatchId is such a number on a real database)
+                    if (entry.State == EntityState.Added && p.IsTemporary) continue;
+                    if (SpecialProperties.TryGetValue((type, name), out Special special))
+                    {
+                        WriteSpecial(entry, p, special, before, after);
+                        continue;
+                    }
                     if (entry.State == EntityState.Added)
                     {
                         after[name] = Shape(name, p.CurrentValue, confidentialLine);
@@ -318,6 +385,7 @@ namespace DataLayer.Context
                 {
                     PropertyEntry idProperty = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "Id");
                     if (idProperty != null && idProperty.CurrentValue is int idValue) entityId = idValue;
+                    else if (idProperty != null && idProperty.CurrentValue is long longId && longId > 0 && longId <= int.MaxValue) entityId = (int)longId;   // the clock events have a long key
                 }
 
                 context.Set<FnAuditLog>().Add(new FnAuditLog
@@ -395,6 +463,80 @@ namespace DataLayer.Context
             return entry.State != EntityState.Added && entry.Property(nameof(FnVoucherLine.LabourProtected)).OriginalValue is true;
         }
 
+
+        private static bool HasContent(object value) => value != null && !(value is string text && string.IsNullOrWhiteSpace(text));
+
+        /// <summary>
+        /// Writes a property that must not appear with its value. Marker: the <see cref="ChangedMarker"/> only. MarkerWithKeys: the marker and "NameKeys" (the names of the members that differ from the old value,
+        /// or from the baseline column of a new row). A modified property whose content did not really change (same members, same values) is left out.
+        /// </summary>
+        private static void WriteSpecial(EntityEntry entry, PropertyEntry p, Special special, Dictionary<string, object> before, Dictionary<string, object> after)
+        {
+            string name = p.Metadata.Name;
+            if (special == Special.Marker)
+            {
+                if (entry.State == EntityState.Added) { if (HasContent(p.CurrentValue)) after[name] = ChangedMarker; }
+                else if (entry.State == EntityState.Deleted) { if (HasContent(p.OriginalValue)) before[name] = ChangedMarker; }
+                else if (p.IsModified && !Equals(p.OriginalValue, p.CurrentValue))
+                {
+                    before[name] = ChangedMarker;
+                    after[name] = ChangedMarker;
+                }
+                return;
+            }
+
+            if (entry.State == EntityState.Deleted) { if (HasContent(p.OriginalValue)) before[name] = ChangedMarker; return; }
+            string newJson = p.CurrentValue as string;
+            if (entry.State == EntityState.Added)
+            {
+                if (newJson == null) return;
+                after[name] = ChangedMarker;
+                after[name + "Keys"] = ChangedKeys(BaselineOf(entry, name), newJson);
+                return;
+            }
+            if (!p.IsModified || Equals(p.OriginalValue, p.CurrentValue)) return;
+            string oldJson = p.OriginalValue as string;
+            string keys = ChangedKeys(oldJson, newJson);
+            if (keys.Length == 0) return;   // the text changed but no member did (formatting only)
+            before[name] = ChangedMarker;
+            after[name] = ChangedMarker;
+            after[name + "Keys"] = keys;
+        }
+
+        /// <summary>A correction request keeps the numbers the sheet held when it was made next to the proposed ones: the keys of a new request are the members that differ between the two.</summary>
+        private static string BaselineOf(EntityEntry entry, string name) =>
+            entry.Entity is FnAttendanceCorrection && name == "ProposedJson" ? entry.Properties.FirstOrDefault(x => x.Metadata.Name == "CurrentJson")?.CurrentValue as string : null;
+
+        private static string NumberText(decimal value) => value.ToString("0.############################", System.Globalization.CultureInfo.InvariantCulture);
+
+        private static Dictionary<string, string> JsonMembers(string json, out bool valid)
+        {
+            var members = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            valid = true;
+            if (string.IsNullOrWhiteSpace(json)) return members;
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) { valid = false; return members; }
+                foreach (JsonProperty m in doc.RootElement.EnumerateObject())
+                    members[m.Name] = m.Value.ValueKind == JsonValueKind.Number && m.Value.TryGetDecimal(out decimal n) ? NumberText(n) : m.Value.GetRawText();
+            }
+            catch (JsonException) { valid = false; }
+            return members;
+        }
+
+        /// <summary>The names (sorted, comma separated, never the values) of the members that exist on one side only or differ between two JSON objects. Text that is not a JSON object counts as changed ("?").</summary>
+        private static string ChangedKeys(string oldJson, string newJson)
+        {
+            Dictionary<string, string> a = JsonMembers(oldJson, out bool okOld), b = JsonMembers(newJson, out bool okNew);
+            if (!okOld || !okNew) return "?";
+            var keys = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, string> m in b) if (!a.TryGetValue(m.Key, out string old) || old != m.Value) keys.Add(m.Key);
+            foreach (KeyValuePair<string, string> m in a) if (!b.ContainsKey(m.Key)) keys.Add(m.Key);
+            string text = string.Join(",", keys);
+            return text.Length <= 400 ? text : text.Substring(0, 400);
+        }
+
         private static object Shape(string name, object value, bool confidentialLine = false)
         {
             if (value == null) return null;
@@ -419,7 +561,7 @@ namespace DataLayer.Context
                 string t = value.ToString();
                 if (!string.IsNullOrWhiteSpace(t)) { text = name == "TemporaryNumber" ? "موقت " + t : t; break; }
             }
-            if (entry.Entity is FnEmployee) text = "کارمند (شماره حساب)";
+            if (entry.Entity is FnEmployee) text = "کارمند (مشخصات حساس)";
             if (entry.Entity is Entities.Identity.User)
             {
                 PropertyEntry un = entry.Properties.FirstOrDefault(x => x.Metadata.Name == "UserName");
@@ -428,9 +570,24 @@ namespace DataLayer.Context
             }
             if (entry.Entity is Entities.Identity.UserRole) text = "نقش کاربر";
             if (entry.Entity is Entities.Identity.UserClaim) text = "ادعای کاربر (رمز موقت یا درخواست نقش حساس)";
+            if (entry.Entity is OfDevice) text = "دستگاه حضور و غیاب " + text;
+            if (entry.Entity is OfShift) text = "شیفت کاری " + text;
+            if (entry.Entity is OfShiftAssignment) text = "تخصیص شیفت به کارمند";
+            if (entry.Entity is OfLeaveRequest) text = "درخواست مرخصی " + text;
+            if (entry.Entity is OfAttendanceMonth) text = "بستن ماه حضور و غیاب " + (entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Year")?.CurrentValue) + "/" + ((entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Month")?.CurrentValue as int?)?.ToString("00") ?? "");
+            if (entry.Entity is FnEmployeeChange) text = "درخواست ایجاد یا تغییر مشخصات حساس کارمند";
+            if (entry.Entity is FnEmployeeWage) text = "سابقه مزد روزانه کارمند";
+            if (entry.Entity is FnAttendanceCorrection) text = "درخواست اصلاح برگه حضور قفل‌شده";
+            if (entry.Entity is FnLeaveOpening) text = "مانده اول دوره مرخصی";
+            if (entry.Entity is FnEmployeeLoan) text = "وام یا مساعده کارمند";
             if (entry.Entity is MfTimeBooking) text = "ثبت زمان کار";
             if (entry.Entity is MfOperation) text = "عملیات دستور تولید";
-            if (entry.Entity is OfClockEvent) text = "تردد " + (entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Source")?.CurrentValue?.ToString() == "Manual" ? "دستی" : "واردشده");
+            if (entry.Entity is OfClockEvent)
+            {
+                string source = entry.Properties.FirstOrDefault(x => x.Metadata.Name == "Source")?.CurrentValue?.ToString();
+                text = source == "Manual" ? "تردد دستی" : source == "Import" ? "تردد واردشده از فایل" : "تردد دستگاه (نگه‌داشته برای تایید نفر دوم)";
+            }
+            if (entry.Entity is OfClockImportBatch) text = "بسته ورود ترددها";
             if (entry.Entity is SlCustomerProfile) text = "پروفایل فروش مشتری (سقف اعتبار)";
             if (entry.Entity is SlBidDecision) text = "تصمیم شرکت در استعلام";
             if (entry.Entity is SlCustomerLink) text = "اتصال قرارداد یا مناقصه به مشتری";

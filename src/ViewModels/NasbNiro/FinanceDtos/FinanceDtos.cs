@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Finance;
+using Newtonsoft.Json;
 using ViewModels.NasbNiro.Pagination;
 
 namespace ViewModels.NasbNiro.FinanceDtos
@@ -59,6 +60,10 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int? ContractId { get; set; }
         public string CostCenter { get; set; }
         public string Description { get; set; }
+
+        /// <summary>The kind of the first-detail party of the line ("Employee", "Customer" ...). Not part of the JSON: the service uses it to merge the employee-level lines for readers who may not see persons.</summary>
+        [JsonIgnore]
+        public string PartyType { get; set; }
     }
 
     public class AccountMappingDto

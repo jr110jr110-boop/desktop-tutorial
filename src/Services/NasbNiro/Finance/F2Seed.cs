@@ -57,7 +57,14 @@ namespace Services.NasbNiro.Finance
             yield return R("BonusDaysPerYear", 60m, "قانون کار و مصوبه عیدی و پاداش — ۶۰ روز مزد ★ — توسط مالی تایید شود");
             yield return R("BonusGrossCapDaysOfMinimumWage", 90m, "سقف مبلغ عیدی — ۹۰ روز حداقل مزد روزانه (به نسبت روزهای اشتغال) ★ — توسط مالی تایید شود");
             yield return R("BonusCapDaysOfMinimumWage", 90m, "سقف معافیت عیدی — ۹۰ روز حداقل مزد روزانه (مبلغ حداقل مزد هر سال در جدول نرخ‌ها وارد می‌شود) ★ — توسط مالی تایید شود");
+            // release R1f: the numbers that were literals in the code (30-day month, 360-day year, the 480-minute day, the night window, the overtime request cap, the child allowance multiple, the holiday premium, sick pay)
+            foreach (FnPayrollRateTable r in PayrollKeys.Seeds()) yield return r;
         }
+
+        /// <summary>Formulas of the starred defaults: the numbers inside them are rate-table keys (release R1f).</summary>
+        public const string ChildFormula = "CHILDREN * RATE_ChildAllowanceMinWageDays * RATE_MinimumDailyWage";
+        public const string BonusProvisionFormula = "min(RATE_BonusDaysPerYear * DAILY_WAGE, RATE_BonusCapDaysOfMinimumWage * RATE_MinimumDailyWage) * RATE_PayrollMonthDays / RATE_PayrollYearDays";
+        public const string SeveranceFormula = "SEVERANCE_BASE * RATE_PayrollMonthDays / RATE_PayrollYearDays";
 
         public static IEnumerable<FnPayrollItem> PayrollItemSeeds()
         {
@@ -76,11 +83,12 @@ namespace Services.NasbNiro.Finance
             yield return I(30, "HOUSING", "حق مسکن", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "HousingAllowance", proRata: true, severanceBase: true);
             yield return I(40, "GROCERY", "بن خواربار", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "GroceryAllowance", proRata: true, severanceBase: true);
             yield return I(50, "MARITAL", "حق تاهل", FnPayrollItemKind.Earning, FnPayrollCalc.FixedMonthly, true, true, notSeeded, rateKey: "MaritalAllowance", proRata: true, condition: "Married", severanceBase: true);
-            yield return I(60, "CHILD", "حق اولاد", FnPayrollItemKind.Earning, FnPayrollCalc.Formula, true, true, "تعداد فرزند × ۳ × حداقل مزد روزانه ★ — توسط مالی تایید شود",
-                formula: "CHILDREN * 3 * RATE_MinimumDailyWage", condition: "HasChildren", severanceBase: true);
+            yield return I(60, "CHILD", "حق اولاد", FnPayrollItemKind.Earning, FnPayrollCalc.Formula, true, true, "تعداد فرزند × ضریب حق اولاد (ChildAllowanceMinWageDays، ★ ۳) × حداقل مزد روزانه — توسط مالی تایید شود",
+                formula: ChildFormula, condition: "HasChildren", severanceBase: true);
             yield return I(70, "OVERTIME", "اضافه‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.PerHour, true, true, "قانون کار ماده ۵۹ — ۱٫۴ برابر ★ — توسط مالی تایید شود", variant: "OVERTIME", factor: 1.4m);
             yield return I(80, "NIGHT", "شب‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.PerHour, true, true, "قانون کار ماده ۵۸ — ۳۵٪ ★ — توسط مالی تایید شود", variant: "NIGHT", factor: 0.35m);
-            yield return I(90, "HOLIDAY", "تعطیل‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.PerHour, true, true, "قانون کار ماده ۶۲ — ۴۰٪ ★ — توسط مالی تایید شود", variant: "HOLIDAY", factor: 0.4m);
+            yield return I(90, "HOLIDAY", "تعطیل‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.PerHour, true, true, "قانون کار ماده ۶۲ — درصد از کلید HolidayPremiumPercent (★ ۴۰٪) — توسط مالی تایید شود",
+                rateKey: PayrollKeys.HolidayPremium, variant: "HOLIDAY", factor: 0.4m);
             yield return I(100, "SHIFT", "حق نوبت‌کاری", FnPayrollItemKind.Earning, FnPayrollCalc.Formula, true, true, "قانون کار ماده ۵۵ — ۱۰ / ۱۵ / ۲۲٫۵٪ بر حسب نوع نوبت ★ — توسط مالی تایید شود",
                 formula: "BASE_WAGE * SHIFT_PERCENT / 100");
             yield return I(110, "MISSION", "ماموریت", FnPayrollItemKind.Earning, FnPayrollCalc.Input, false, true, "مبلغ هر ماه وارد می‌شود — مشمول بیمه و مالیات توسط مالی تایید شود");
@@ -103,10 +111,10 @@ namespace Services.NasbNiro.Finance
                 "قانون تامین اجتماعی — ۴٪ تا سقف ★ — توسط مالی تایید شود", itemCodes: "@INSURABLE", factor: 4, condition: "HardAndHarmful", role: AccountRoles.InsurancePayable);
 
             yield return I(400, "SEVERANCE", "ذخیره سنوات (پایان خدمت)", FnPayrollItemKind.Provision, FnPayrollCalc.Formula, false, false,
-                "قانون کار ماده ۲۴ — یک ماه آخرین حقوق به ازای هر سال، ماهانه یک‌دوازدهم؛ مبنا فقط اقلام دارای نشان «مبنای سنوات» (پایه حقوق، سنوات، مسکن، خواربار، تاهل، اولاد) نه اضافه‌کاری و پاداش ★ — توسط مالی تایید شود", formula: "SEVERANCE_BASE / 12", role: AccountRoles.SeveranceProvision);
+                "قانون کار ماده ۲۴ — یک ماه آخرین حقوق به ازای هر سال، ماهانه یک‌دوازدهم؛ مبنا فقط اقلام دارای نشان «مبنای سنوات» (پایه حقوق، سنوات، مسکن، خواربار، تاهل، اولاد) نه اضافه‌کاری و پاداش ★ — توسط مالی تایید شود", formula: SeveranceFormula, role: AccountRoles.SeveranceProvision);
             yield return I(410, "BONUS_PROV", "ذخیره عیدی و پاداش", FnPayrollItemKind.Provision, FnPayrollCalc.Formula, false, false,
-                "عیدی ۶۰ روز مزد با سقف ۹۰ روز حداقل مزد در سال، ماهانه یک‌دوازدهم ★ — توسط مالی تایید شود",
-                formula: "min(60 * DAILY_WAGE, 90 * RATE_MinimumDailyWage) / 12", role: AccountRoles.BonusProvision);
+                "عیدی (BonusDaysPerYear ★ ۶۰ روز مزد) با سقف BonusCapDaysOfMinimumWage (★ ۹۰ روز حداقل مزد) در سال، سهم یک ماه حقوقی از سال حقوقی (PayrollMonthDays / PayrollYearDays) — توسط مالی تایید شود",
+                formula: BonusProvisionFormula, role: AccountRoles.BonusProvision);
             yield return I(420, "LEAVE_PROV", "ذخیره مرخصی استفاده‌نشده", FnPayrollItemKind.Provision, FnPayrollCalc.Formula, false, false,
                 LabourLaw, formula: "max(LEAVE_ENTITLEMENT - PAID_LEAVE_DAYS, 0) * DAILY_WAGE", role: AccountRoles.LeaveProvision);
         }
@@ -144,6 +152,15 @@ namespace Services.NasbNiro.Finance
                     FnPayrollItem sev = existing.FirstOrDefault(i => i.Code == "SEVERANCE");
                     if (sev != null && sev.Verify && sev.Formula == "INSURABLE / 12") { sev.Formula = "SEVERANCE_BASE / 12"; changed = true; }
                 }
+                // release R1f: the numbers inside the starred items move to the rate table; only an item finance has not reviewed yet (Verify) and that still holds the old text is changed
+                FnPayrollItem childItem = existing.FirstOrDefault(i => i.Code == "CHILD");
+                if (childItem != null && childItem.Verify && childItem.Formula == "CHILDREN * 3 * RATE_MinimumDailyWage") { childItem.Formula = ChildFormula; changed = true; }
+                FnPayrollItem holidayItem = existing.FirstOrDefault(i => i.Code == "HOLIDAY");
+                if (holidayItem != null && holidayItem.Verify && string.IsNullOrWhiteSpace(holidayItem.RateKey) && holidayItem.Factor == 0.4m) { holidayItem.RateKey = PayrollKeys.HolidayPremium; changed = true; }
+                FnPayrollItem bonusProvision = existing.FirstOrDefault(i => i.Code == "BONUS_PROV");
+                if (bonusProvision != null && bonusProvision.Verify && bonusProvision.Formula == "min(60 * DAILY_WAGE, 90 * RATE_MinimumDailyWage) / 12") { bonusProvision.Formula = BonusProvisionFormula; changed = true; }
+                FnPayrollItem severanceProvision = existing.FirstOrDefault(i => i.Code == "SEVERANCE");
+                if (severanceProvision != null && severanceProvision.Verify && severanceProvision.Formula == "SEVERANCE_BASE / 12") { severanceProvision.Formula = SeveranceFormula; changed = true; }
                 if (changed) await uow.SaveChangesAsync(ct);
                 _done = true;
             }

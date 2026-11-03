@@ -18,9 +18,19 @@ namespace Services.NasbNiro.Finance
     // approval thresholds, template vouchers, voucher copy and mass entry.
     public partial class GlService
     {
-        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse, FinanceSeed.SettingPayableTerms };
+        private static readonly string[] SettingKeys = { FinanceSeed.SettingCloseEnforce, FinanceSeed.SettingParallelMonths, FinanceSeed.SettingSepidarExport, FinanceSeed.SettingFxRateType, FinanceSeed.SettingFxAutoReverse, FinanceSeed.SettingPayableTerms, FinanceSeed.SettingGoLiveMonth, FinanceSeed.SettingPushLogDays };
 
         // ------------------------------------------------------------------------------------------ audit trail
+
+        /// <summary>
+        /// The record types that hold a person's pay, loans, attendance or leave (release R1f review H3). A reader who does not pass <see cref="PersonalLedger.Sees"/> (the auditor, for one) gets only the metadata
+        /// of their trail rows - type, id, action, user and time - never the changed fields; the readers of payroll get the changes (which themselves hold "changed" markers instead of wages, amounts and counts).
+        /// </summary>
+        internal static readonly HashSet<string> PersonalAuditTypes = new HashSet<string>
+        {
+            nameof(FnEmployee), nameof(FnEmployeeChange), nameof(FnEmployeeWage), nameof(FnEmployeeLoan), nameof(FnPayslip), nameof(FnPayslipLine), nameof(FnPayslipAllocation), nameof(FnPayrollRun),
+            nameof(FnAttendanceSheet), nameof(FnAttendanceWorkOrder), nameof(FnAttendanceCorrection), nameof(FnLeaveBalance), nameof(FnLeaveOpening), nameof(FnTermination), nameof(FnBonusRun),
+        };
 
         public async Task<ResponseDto<PagedList<AuditLogDto>>> AuditAsync(AuditQuery query, CancellationToken ct)
         {
@@ -38,11 +48,34 @@ namespace Services.NasbNiro.Finance
             int total = await q.CountAsync(ct);
             F2Page.Window(query.PageNumber, query.PageSize, total, out int number, out int size);
             List<FnAuditLog> rows = await q.OrderByDescending(a => a.Id).Skip((number - 1) * size).Take(size).ToListAsync(ct);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => (int?)r.UserId), ct);
-            var dtos = rows.Select(a => new AuditLogDto
+
+            // release R1f: the rows of the personal record types, and the trail of a manual voucher line on an employee detail account (a person's loan or advance, with the person's detail and the amount),
+            // are returned as metadata only to a reader who may not see persons. The decision is made on the rows of the page (a bounded set), never with a list of every hidden row.
+            bool sees = PersonalLedger.Sees(_user);
+            HashSet<int> personalLines = new HashSet<int>();
+            List<int> employeeDetails = new List<int>();
+            if (!sees)
             {
-                Id = a.Id, EntityType = a.EntityType, EntityId = a.EntityId, Action = a.Action, Summary = a.Summary, BeforeJson = a.BeforeJson, AfterJson = a.AfterJson,
-                UserId = a.UserId, UserName = a.UserId == 0 ? "سیستم" : names.Name(a.UserId), At = a.At, Ip = a.Ip,
+                List<int> lineIds = rows.Where(r => r.EntityType == nameof(FnVoucherLine) && r.EntityId.HasValue).Select(r => r.EntityId.Value).Distinct().ToList();
+                if (lineIds.Count > 0)
+                {
+                    employeeDetails = await _uow.Set<FnDetailAccount>().AsNoTracking().Where(d => d.Type == FnDetailType.Employee).Select(d => d.Id).ToListAsync(ct);
+                    personalLines = (await _uow.Set<FnVoucherLine>().AsNoTracking().Where(l => lineIds.Contains(l.Id) && ((l.Detail1 != null && l.Detail1.Type == FnDetailType.Employee) || (l.Detail2 != null && l.Detail2.Type == FnDetailType.Employee)))
+                        .Select(l => l.Id).ToListAsync(ct)).ToHashSet();
+                }
+            }
+            bool MetadataOnly(FnAuditLog a) => !sees && (PersonalAuditTypes.Contains(a.EntityType)
+                || (a.EntityType == nameof(FnVoucherLine) && ((a.EntityId.HasValue && personalLines.Contains(a.EntityId.Value)) || PersonalLedger.MentionsDetail(a.BeforeJson, employeeDetails) || PersonalLedger.MentionsDetail(a.AfterJson, employeeDetails))));
+
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => (int?)r.UserId), ct);
+            var dtos = rows.Select(a =>
+            {
+                bool hidden = MetadataOnly(a);
+                return new AuditLogDto
+                {
+                    Id = a.Id, EntityType = a.EntityType, EntityId = a.EntityId, Action = a.Action, Summary = a.Summary, BeforeJson = hidden ? null : a.BeforeJson, AfterJson = hidden ? null : a.AfterJson,
+                    UserId = a.UserId, UserName = a.UserId == 0 ? "سیستم" : names.Name(a.UserId), At = a.At, Ip = a.Ip,
+                };
             }).ToList();
             return ResponseDtoHelper.Ok(F2Page.Make(dtos, total, number, size));
         }
@@ -64,11 +97,23 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(FinanceRoles.Managers)) return Bad<FinanceSettingDto>(NotAllowed + " (مدیر مالی)");
             if (dto == null || Clean(dto.Key) == null || !SettingKeys.Contains(dto.Key.Trim())) return Bad<FinanceSettingDto>("کلید تنظیم نامعتبر است.");
             string value = Clean(dto.Value);
-            if (value == null) return Bad<FinanceSettingDto>("مقدار را وارد کنید.");
             string key = dto.Key.Trim();
-            if (key == FinanceSeed.SettingParallelMonths)
+            // the go-live month may be emptied: then the month of the first confirmed HR close is used
+            if (value == null && key != FinanceSeed.SettingGoLiveMonth) return Bad<FinanceSettingDto>("مقدار را وارد کنید.");
+            if (key == FinanceSeed.SettingGoLiveMonth)
+            {
+                if (value == null) value = "";
+                else if (!PayrollGoLive.TryParse(value, out int goYear, out int goMonth)) return Bad<FinanceSettingDto>("ماه شروع را به شکل سال/ماه شمسی (مثلاً ۱۴۰۵/۰۸) وارد کنید.");
+                else value = PayrollGoLive.Format(goYear, goMonth);
+            }
+            else if (key == FinanceSeed.SettingParallelMonths)
             {
                 if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int months) || months < 1 || months > 12) return Bad<FinanceSettingDto>("تعداد ماه باید بین ۱ تا ۱۲ باشد.");
+            }
+            else if (key == FinanceSeed.SettingPushLogDays)
+            {
+                if (!int.TryParse(Digits(value), NumberStyles.Integer, CultureInfo.InvariantCulture, out int days) || days < 30 || days > 3650) return Bad<FinanceSettingDto>("مدت نگهداری گزارش دریافت دستگاه‌ها باید بین ۳۰ تا ۳۶۵۰ روز باشد.");
+                value = days.ToString(CultureInfo.InvariantCulture);
             }
             else if (value != "0" && value != "1") return Bad<FinanceSettingDto>("مقدار باید ۰ یا ۱ باشد.");
             await FinanceSeed.EnsureAsync(_uow, ct);

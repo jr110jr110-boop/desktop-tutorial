@@ -43,11 +43,12 @@ namespace Services.NasbNiro.Finance
         private readonly ICostingService _costing;
         private readonly IInventoryUserContext _user;
 
-        public FinanceLinkService(IUnitOfWork uow, ICostingService costing, IInventoryUserContext user)
+        /// <param name="user">The caller (release R1f review M4): readers who may not see persons get the employee-level lines of an event merged. Absent in a context without a caller, which then counts as such a reader.</param>
+        public FinanceLinkService(IUnitOfWork uow, ICostingService costing, IInventoryUserContext user = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
-            _user = user ?? throw new ArgumentNullException(nameof(user));
+            _user = user;
         }
 
         private static readonly AccountingEventStatus[] Waiting = { AccountingEventStatus.Pending, AccountingEventStatus.Failed };
@@ -74,11 +75,14 @@ namespace Services.NasbNiro.Finance
                     {
                         RowNumber = l.RowNumber, AccountRole = l.AccountRole, Debit = l.Debit, Credit = l.Credit, LabourHidden = l.LabourProtected,
                         ProviderId = l.ProviderId, ProviderName = l.Provider.Name, WorkOrderId = l.WorkOrderId, ContractId = l.ContractId,
-                        CostCenter = l.CostCenter, Description = l.Description,
+                        CostCenter = l.CostCenter, Description = l.Description, PartyType = l.PartyType,
                     }).ToList(),
                 }), query.PageNumber, query.PageSize, cancellationToken);
+            // the loan and advance recoveries of a payroll run (and any other employee-level line) are one person's money each: readers outside payroll, the finance manager and the CEO get them merged per account and side
+            if (!PersonalLedger.Sees(_user))
+                foreach (AccountingEventDto ev in page) ev.Lines = PersonalLedger.MergeEventLines(ev.Lines);
             // R1p D1/D2: a protected labour amount (the quarter-end line of a monthly labour variance whose pool did not pass the publication gate) is read by PAYROLL, FINANCEMANAGER and CEO only; for everybody else the line, and so the event total, carries no amount
-            bool seesPayroll = Production.MfPrivacy.SeesPayroll(_user);
+            bool seesPayroll = _user != null && Production.MfPrivacy.SeesPayroll(_user);
             foreach (AccountingEventDto e in page)
             {
                 if (seesPayroll) { foreach (AccountingEventLineDto l in e.Lines) l.LabourHidden = false; continue; }
@@ -197,7 +201,7 @@ namespace Services.NasbNiro.Finance
             if (events.Count == 0) return (null, null, "رویدادی برای ارسال به سپیدار نیست.");
 
             // R1p D1/D2: a protected labour line goes out of the system only through PAYROLL, FINANCEMANAGER or CEO; the refusal names the period so that the finance manager exports exactly those events
-            if (!Production.MfPrivacy.SeesPayroll(_user))
+            if (_user == null || !Production.MfPrivacy.SeesPayroll(_user))
             {
                 string protectedRefusal = ProtectedLabourRefusal(events.Where(e => e.Lines.Any(l => l.LabourProtected)).Select(e => e.EventDate));
                 if (protectedRefusal != null) return (null, null, protectedRefusal);
@@ -216,14 +220,15 @@ namespace Services.NasbNiro.Finance
                 "کلید رویداد", "شماره رویداد", "نوع", "تاریخ", "سند مبدا", "شرح سند", "ردیف", "نقش حساب", "عنوان حساب", "کد حساب سپیدار",
                 "بدهکار", "بستانکار", "تفصیلی طرف حساب", "طرف حساب", "تفصیلی پروژه", "مرکز هزینه", "شرح ردیف",
             }));
+            bool seesPersons = PersonalLedger.Sees(_user);
             foreach (AccountingEvent e in events)
             {
-                foreach (AccountingEventLine l in e.Lines.OrderBy(x => x.RowNumber))
+                foreach ((int rowNumber, AccountingEventLine l) in PersonalLedger.MergeEventLines(e.Lines, seesPersons))
                 {
                     csv.AppendLine(string.Join(",", new[]
                     {
                         e.Key.ToString(), e.Id.ToString(CultureInfo.InvariantCulture), ((int)e.Type).ToString(CultureInfo.InvariantCulture),
-                        InventoryText.PersianDate(e.EventDate), Csv(e.SourceNumber), Csv(e.Description), l.RowNumber.ToString(CultureInfo.InvariantCulture),
+                        InventoryText.PersianDate(e.EventDate), Csv(e.SourceNumber), Csv(e.Description), rowNumber.ToString(CultureInfo.InvariantCulture),
                         Csv(l.AccountRole), Csv(titles.TryGetValue(l.AccountRole, out string t) ? t : null), Csv(Lookup(accounts, l.AccountRole)),
                         l.Debit.ToString("0", CultureInfo.InvariantCulture), l.Credit.ToString("0", CultureInfo.InvariantCulture),
                         Csv(Map(SepidarLinkService.ProviderType, l.ProviderId)), Csv(l.Provider?.Name),
@@ -305,7 +310,7 @@ namespace Services.NasbNiro.Finance
             var rows = (await CostSums(entries).ToListAsync(cancellationToken))
                 .Select(r => new { r.ContractId, r.WorkOrderId, r.CostCenter, r.Kind, r.Amount, Protected = r.ProtectedEntries > 0 })
                 .ToList();
-            bool seesPayroll = Production.MfPrivacy.SeesPayroll(_user);
+            bool seesPayroll = _user != null && Production.MfPrivacy.SeesPayroll(_user);
             List<int> woIds = rows.Where(r => r.WorkOrderId.HasValue).Select(r => r.WorkOrderId.Value).Distinct().ToList();
             List<int> cIds = rows.Where(r => r.ContractId.HasValue).Select(r => r.ContractId.Value).Distinct().ToList();
             var workOrders = await _uow.Set<WorkOrder>().Where(w => woIds.Contains(w.Id)).Select(w => new { w.Id, w.Code, w.Title }).ToDictionaryAsync(w => w.Id, cancellationToken);

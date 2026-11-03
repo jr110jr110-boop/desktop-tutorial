@@ -121,11 +121,25 @@ namespace WebApi.Controllers
         [HttpPost("employees")]
         public async Task<IActionResult> SaveEmployeeAsync([FromBody] SaveEmployeeDto dto, CancellationToken ct) => Ok(await _master.SaveEmployeeAsync(dto, ct));
 
+        // release R1f: the maker-checker requests of the employee master. A new employee and a change of the daily wage, exemption flags, children, hard-and-harmful flag or bank account are used by a run only after a second PAYROLL / FINANCEMANAGER user approved them.
+        [HttpGet("employees/changes")]
+        public async Task<IActionResult> EmployeeChangesAsync([FromQuery] EmployeeChangeQuery query, CancellationToken ct) => Ok((await _master.GetEmployeeChangesAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpPost("employees/changes/action")]
+        public async Task<IActionResult> EmployeeChangeActionAsync([FromBody] EmployeeChangeActionDto dto, CancellationToken ct) => Ok(await _master.EmployeeChangeActionAsync(dto, ct));
+
+        [HttpGet("employees/{id:int}/wages")]
+        public async Task<IActionResult> EmployeeWagesAsync(int id, CancellationToken ct) => Ok(await _master.GetEmployeeWagesAsync(id, ct));
+
         [HttpGet("loans")]
         public async Task<IActionResult> LoansAsync([FromQuery] LoanQuery query, CancellationToken ct) => Ok((await _master.GetLoansAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpPost("loans")]
         public async Task<IActionResult> SaveLoanAsync([FromBody] SaveLoanDto dto, CancellationToken ct) => Ok(await _master.SaveLoanAsync(dto, ct));
+
+        /// <summary>A loan or advance is a request: the finance manager (never its creator) approves or rejects it.</summary>
+        [HttpPost("loans/action")]
+        public async Task<IActionResult> LoanActionAsync([FromBody] LoanActionDto dto, CancellationToken ct) => Ok(await _master.LoanActionAsync(dto, ct));
 
         [HttpGet("items")]
         public async Task<IActionResult> ItemsAsync(CancellationToken ct) => Ok(await _master.GetItemsAsync(ct));
@@ -154,8 +168,25 @@ namespace WebApi.Controllers
         [HttpPost("attendance/import")]
         public async Task<IActionResult> ImportAttendanceAsync([FromBody] ImportAttendanceDto dto, CancellationToken ct) => Ok(await _master.ImportAttendanceAsync(dto, ct));
 
+        /// <summary>Release R1f: payroll may not overwrite a sheet that the HR close locked; it proposes a correction with a reason and HR (never the proposer) decides it.</summary>
+        [HttpPost("attendance/corrections")]
+        public async Task<IActionResult> ProposeCorrectionAsync([FromBody] ViewModels.NasbNiro.OfficeDtos.ProposeCorrectionDto dto, CancellationToken ct) => Ok(await _master.ProposeCorrectionAsync(dto, ct));
+
         [HttpGet("leave-balances")]
         public async Task<IActionResult> LeaveBalancesAsync([FromQuery] int year, CancellationToken ct) => Ok(await _master.GetLeaveBalancesAsync(year, ct));
+
+        // release R1f: opening leave balances (carried days as of a month): PAYROLL enters or imports them, the finance manager approves them
+        [HttpGet("leave-openings")]
+        public async Task<IActionResult> LeaveOpeningsAsync([FromQuery] LeaveOpeningQuery query, CancellationToken ct) => Ok((await _master.GetLeaveOpeningsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpPost("leave-openings")]
+        public async Task<IActionResult> SaveLeaveOpeningAsync([FromBody] SaveLeaveOpeningDto dto, CancellationToken ct) => Ok(await _master.SaveLeaveOpeningAsync(dto, ct));
+
+        [HttpPost("leave-openings/import")]
+        public async Task<IActionResult> ImportLeaveOpeningsAsync([FromBody] ImportLeaveOpeningDto dto, CancellationToken ct) => Ok(await _master.ImportLeaveOpeningsAsync(dto, ct));
+
+        [HttpPost("leave-openings/action")]
+        public async Task<IActionResult> LeaveOpeningActionAsync([FromBody] LeaveOpeningActionDto dto, CancellationToken ct) => Ok(await _master.LeaveOpeningActionAsync(dto, ct));
 
         [HttpGet("runs")]
         public async Task<IActionResult> RunsAsync([FromQuery] PayrollRunQuery query, CancellationToken ct) => Ok((await _runs.GetRunsAsync(query, ct)).ToPaginatedResultSafe());

@@ -35,8 +35,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string Start { get; set; }
         public string End { get; set; }
         public int BreakMinutes { get; set; }
-        public string NightStart { get; set; } = "22:00";
-        public string NightEnd { get; set; } = "06:00";
+        /// <summary>"HH:mm". Empty: the rate-table keys NightWindowStartMinute / NightWindowEndMinute are used (a missing key refuses the save).</summary>
+        public string NightStart { get; set; }
+        public string NightEnd { get; set; }
         public List<int> WorkDays { get; set; } = new List<int>();
         public bool IsActive { get; set; } = true;
     }
@@ -53,6 +54,7 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string FromDateText { get; set; }
         public DateTime? ToDate { get; set; }
         public string ToDateText { get; set; }
+        public string Reason { get; set; }
     }
 
     public class SaveShiftAssignmentDto
@@ -61,6 +63,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int ShiftId { get; set; }
         public DateTime FromDate { get; set; }
         public DateTime? ToDate { get; set; }
+
+        /// <summary>Required when the assignment starts in a month that has already started (back-dating inside the open month). An assignment before the last confirmed month close is refused.</summary>
+        public string Reason { get; set; }
     }
 
     public class ShiftAssignmentQuery : OfficePageQuery
@@ -80,8 +85,14 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public bool IsActive { get; set; }
         public DateTimeOffset? LastPushAt { get; set; }
         public string LastPushAtText { get; set; }
+        public DateTimeOffset? KeyRotatedAt { get; set; }
+        public string KeyRotatedAtText { get; set; }
+
+        /// <summary>The LAN addresses the device may push from (comma separated IPv4 or IPv4/CIDR); empty = any address.</summary>
+        public string AllowedAddresses { get; set; }
     }
 
+    /// <summary>Creates a device (the key is returned once) or edits its title, place and state. The key is never issued by an edit: rotating it is its own action.</summary>
     public class SaveDeviceDto
     {
         public int? Id { get; set; }
@@ -90,15 +101,40 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public string Location { get; set; }
         public bool IsActive { get; set; } = true;
 
-        /// <summary>Issue a new key for an existing device (the old key stops working).</summary>
-        public bool RotateKey { get; set; }
+        /// <summary>
+        /// The LAN addresses the device may push from, comma separated IPv4 or IPv4/CIDR ("192.168.1.20,10.0.5.0/24"); at most 10 entries and 200 characters. Empty text = any address.
+        /// Null on an edit = keep the stored list.
+        /// </summary>
+        public string AllowedAddresses { get; set; }
     }
 
-    /// <summary>The key is shown once; only its hash is stored.</summary>
+    /// <summary>The key is shown once (on creation and on rotation); only its hash is stored. ApiKey is null when an existing device was only edited.</summary>
     public class DeviceKeyDto
     {
         public DeviceDto Device { get; set; }
         public string ApiKey { get; set; }
+    }
+
+    /// <summary>One push of a device: the count of events and the hash of the payload (no punch is written to the audit trail).</summary>
+    public class DevicePushLogDto
+    {
+        public long Id { get; set; }
+        public int? DeviceId { get; set; }
+        public string DeviceCode { get; set; }
+        public DateTimeOffset ReceivedAt { get; set; }
+        public string ReceivedAtText { get; set; }
+        public int EventCount { get; set; }
+        public int Accepted { get; set; }
+        public int Duplicates { get; set; }
+        public string PayloadHash { get; set; }
+        public string Outcome { get; set; }
+    }
+
+    public class DevicePushLogQuery : OfficePageQuery
+    {
+        public int? DeviceId { get; set; }
+        public DateTime? From { get; set; }
+        public DateTime? To { get; set; }
     }
 
     public class ClockQuery : OfficePageQuery
@@ -107,6 +143,12 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
         public OfClockSource? Source { get; set; }
+
+        /// <summary>Only the requests waiting for a decision (Pending), or one state.</summary>
+        public OfClockApproval? Approval { get; set; }
+
+        /// <summary>The manual requests the signed-in user may decide: another HR user (never the author or the person concerned) or the unit manager of the employee.</summary>
+        public bool? WaitingForMe { get; set; }
     }
 
     public class ClockEventDto
@@ -122,16 +164,40 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public OfClockSource Source { get; set; }
         public string Reason { get; set; }
         public string CreatedByName { get; set; }
+        public OfClockApproval Approval { get; set; }
+        public string ApprovedByName { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public string RejectReason { get; set; }
+
+        /// <summary>The import batch the row belongs to (imported rows are decided with their batch, never one by one); null for every other source.</summary>
+        public int? ImportBatchId { get; set; }
+
+        /// <summary>
+        /// approve / reject, for the signed-in user: a manual request, or a device punch held for the key holder, waiting for a second person who is neither its author, nor its subject, nor a holder of the device key.
+        /// </summary>
+        public List<string> AllowedActions { get; set; } = new List<string>();
     }
 
+    /// <summary>A manual clock event is a request: it counts only after a second HR user (or the employee's unit manager) approved it.</summary>
     public class ManualClockDto
     {
         public int EmployeeId { get; set; }
         public DateTime Timestamp { get; set; }
         public OfClockDirection Direction { get; set; }
 
-        /// <summary>Required: manual events are audited.</summary>
+        /// <summary>Required.</summary>
         public string Reason { get; set; }
+    }
+
+    public class ClockRequestActionDto
+    {
+        public long Id { get; set; }
+
+        /// <summary>approve or reject.</summary>
+        public string Action { get; set; }
+
+        /// <summary>Required for a rejection.</summary>
+        public string Note { get; set; }
     }
 
     public class ClockRowDto
@@ -149,6 +215,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
     public class ImportClockDto
     {
         public string DeviceCode { get; set; }
+
+        /// <summary>Optional note of the importer (what the file is); kept on the batch.</summary>
+        public string Reason { get; set; }
 
         /// <summary>Rows read from the Excel/CSV file by the front.</summary>
         public List<ClockRowDto> Rows { get; set; } = new List<ClockRowDto>();
@@ -171,9 +240,67 @@ namespace ViewModels.NasbNiro.OfficeDtos
         /// <summary>Rows read from the file (Excel import).</summary>
         public int RowsRead { get; set; }
 
-        /// <summary>Events refused: in the future, or in a month whose payroll is approved.</summary>
+        /// <summary>Events refused: in the future, in a month that is closed, or the importer's own employee record.</summary>
         public int Rejected { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
+
+        /// <summary>The Pending batch the new rows were stored in (null when nothing new was stored). Nothing counts until a second HR user approves it.</summary>
+        public int? BatchId { get; set; }
+
+        /// <summary>True while the stored rows wait for the second person.</summary>
+        public bool PendingApproval { get; set; }
+    }
+
+    public class ClockBatchQuery : OfficePageQuery
+    {
+        /// <summary>0 = Pending, 1 = Approved, 2 = Rejected.</summary>
+        public OfClockBatchStatus? Status { get; set; }
+
+        /// <summary>The pending batches the signed-in user may decide (another HR user than the importer, with no punch inside the batch).</summary>
+        public bool? WaitingForMe { get; set; }
+    }
+
+    public class ClockImportBatchDto
+    {
+        public int Id { get; set; }
+        public string ImportedByName { get; set; }
+        public DateTimeOffset ImportedAt { get; set; }
+        public string ImportedAtText { get; set; }
+        public int Rows { get; set; }
+
+        /// <summary>Json or Excel.</summary>
+        public string Source { get; set; }
+        public string DeviceCode { get; set; }
+        public string PayloadHash { get; set; }
+        public string Reason { get; set; }
+
+        /// <summary>Pending, Approved or Rejected.</summary>
+        public string Status { get; set; }
+        public string DecidedByName { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecidedAtText { get; set; }
+        public string DecisionNote { get; set; }
+
+        /// <summary>How many different employees and which period the batch covers.</summary>
+        public int EmployeeCount { get; set; }
+        public DateTime? FirstTimestamp { get; set; }
+        public DateTime? LastTimestamp { get; set; }
+        public string FirstTimestampText { get; set; }
+        public string LastTimestampText { get; set; }
+
+        /// <summary>approve / reject, for the signed-in user.</summary>
+        public List<string> AllowedActions { get; set; } = new List<string>();
+    }
+
+    public class ClockBatchActionDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>approve or reject.</summary>
+        public string Action { get; set; }
+
+        /// <summary>Required for a rejection.</summary>
+        public string Note { get; set; }
     }
 
     public class DevicePushEventDto
@@ -190,9 +317,13 @@ namespace ViewModels.NasbNiro.OfficeDtos
 
     public class DevicePushResultDto
     {
+        /// <summary>Punches stored (Approved, or Pending for the key holder: see Held).</summary>
         public int Accepted { get; set; }
         public int Duplicates { get; set; }
         public int Rejected { get; set; }
+
+        /// <summary>Of the accepted punches, those stored Pending because their employee created or last rotated the key of this device: a second person decides them.</summary>
+        public int Held { get; set; }
         public List<string> Errors { get; set; } = new List<string>();
     }
 
@@ -203,8 +334,19 @@ namespace ViewModels.NasbNiro.OfficeDtos
         /// <summary>Delay up to this many minutes is allowed (company: 15). Beyond it the whole delay is deducted.</summary>
         public int GraceMinutes { get; set; } = 15;
         public int? MaxOvertimeMinutesPerDay { get; set; }
-        public bool OvertimeNeedsPreApproval { get; set; }
+
+        /// <summary>
+        /// Overtime and holiday work count only up to the approved overtime request of that day (★ on); the rest is reported as unapproved overtime and is not paid.
+        /// Null on a save = keep the stored value.
+        /// </summary>
+        public bool? OvertimeRequiresApproval { get; set; }
         public int RoundingMinutes { get; set; }
+
+        /// <summary>Early leave beyond the grace is deducted like lateness (same grace and coefficient) (★ on). Null on a save = keep the stored value.</summary>
+        public bool? EarlyLeaveDeduction { get; set; }
+
+        /// <summary>The month close can also be confirmed by a second HR user (★ off: only FINANCEMANAGER confirms). The preparer never confirms. Null on a save = keep the stored value.</summary>
+        public bool? MonthConfirmByHrPeer { get; set; }
 
         /// <summary>Overtime above this many minutes a month is not counted (company: 1320 = 22 hours).</summary>
         /// <summary>Null on a save = keep the stored value (an older client that does not know the field must not reset it).</summary>
@@ -227,6 +369,9 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int Employees { get; set; }
         public int SkippedLocked { get; set; }
         public int EmployeesWithoutShift { get; set; }
+
+        /// <summary>Things the computation could not do silently, for example a missing night-window rate key (the close refuses while it is missing).</summary>
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     public class DayQuery : OfficePageQuery
@@ -256,7 +401,13 @@ namespace ViewModels.NasbNiro.OfficeDtos
         /// <summary>Delay minutes x the coefficient (0 inside the grace).</summary>
         public int DelayDeductionMinutes { get; set; }
         public int EarlyLeaveMinutes { get; set; }
+
+        /// <summary>Early leave minutes x the coefficient (0 inside the grace or when the company switch is off).</summary>
+        public int EarlyLeaveDeductionMinutes { get; set; }
         public int OvertimeMinutes { get; set; }
+
+        /// <summary>Overtime or holiday work without an approved overtime request (reported, not paid).</summary>
+        public int UnapprovedOvertimeMinutes { get; set; }
         public int NightMinutes { get; set; }
         public int HolidayMinutes { get; set; }
         public int AbsenceDays { get; set; }
@@ -302,8 +453,63 @@ namespace ViewModels.NasbNiro.OfficeDtos
         /// <summary>Deducted lateness: delay x coefficient, in hours.</summary>
         public decimal DelayDeductionHours { get; set; }
 
-        /// <summary>The part of AbsenceDays that comes from the lateness deduction (deducted minutes per day / scheduled minutes of the shift, at most 1 a day).</summary>
+        /// <summary>The part of AbsenceDays that comes from the lateness and early-leave deduction (deducted minutes per day / scheduled minutes of the shift, at most 1 a day).</summary>
         public decimal LateDeductionDays { get; set; }
+
+        /// <summary>Early leave beyond the grace, deducted: minutes x the coefficient, in hours.</summary>
+        public decimal EarlyLeaveDeductionHours { get; set; }
+
+        /// <summary>Overtime and holiday work no approved request covered (reported, not paid), in hours.</summary>
+        public decimal UnapprovedOvertimeHours { get; set; }
+
+        /// <summary>HrClose, Manual or Import: where the sheet row came from.</summary>
+        public string Source { get; set; }
+
+        /// <summary>A locked row changes only through a correction request that HR approves.</summary>
+        public bool Locked { get; set; }
+    }
+
+    /// <summary>An employee of the close without an insurance workshop: the payroll run is blocked until the workshop is assigned.</summary>
+    public class NoWorkshopEmployeeDto
+    {
+        public int EmployeeId { get; set; }
+        public string PersonnelCode { get; set; }
+        public string EmployeeName { get; set; }
+    }
+
+    /// <summary>A request of the month that nobody has decided yet (a manual or held clock punch, an imported batch, a submitted leave).</summary>
+    public class PendingRequestDto
+    {
+        /// <summary>ClockRequest, ImportBatch or Leave.</summary>
+        public string Kind { get; set; }
+        public int Id { get; set; }
+
+        /// <summary>A short Persian line: who, what and when.</summary>
+        public string Text { get; set; }
+    }
+
+    /// <summary>The days of an employee that fall between his shift assignments (inside the first and last assignment, covered by none): counted as absence.</summary>
+    public class GapDaysDto
+    {
+        public int EmployeeId { get; set; }
+        public string PersonnelCode { get; set; }
+        public string EmployeeName { get; set; }
+        public int Count { get; set; }
+        public List<DateTime> Dates { get; set; } = new List<DateTime>();
+        public List<string> DateTexts { get; set; } = new List<string>();
+    }
+
+    /// <summary>The attendance policy values a month was prepared with; frozen with the snapshot.</summary>
+    public class PolicySnapshotDto
+    {
+        public int GraceMinutes { get; set; }
+        public int? MaxOvertimeMinutesPerDay { get; set; }
+        public bool OvertimeRequiresApproval { get; set; }
+        public int RoundingMinutes { get; set; }
+        public bool EarlyLeaveDeduction { get; set; }
+        public bool MonthConfirmByHrPeer { get; set; }
+        public int MonthlyOvertimeCapMinutes { get; set; }
+        public decimal DelayPenaltyFactor { get; set; }
     }
 
     public class CloseMonthResultDto
@@ -313,17 +519,82 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int Sheets { get; set; }
         public int SkippedLocked { get; set; }
         public int IncompleteDays { get; set; }
+
+        /// <summary>Prepared after this call: a second person must confirm before payroll can use the month.</summary>
+        public string Status { get; set; }
+        public string SnapshotHash { get; set; }
         public List<string> Warnings { get; set; } = new List<string>();
+        public List<NoWorkshopEmployeeDto> NoWorkshop { get; set; } = new List<NoWorkshopEmployeeDto>();
         public List<SheetRowDto> Rows { get; set; } = new List<SheetRowDto>();
+
+        /// <summary>The state of the three company switches at the preparation (the numbers of the sheets were computed under them).</summary>
+        public bool OvertimeRequiresApproval { get; set; }
+        public bool EarlyLeaveDeduction { get; set; }
+        public bool MonthConfirmByHrPeer { get; set; }
+
+        /// <summary>All the policy values used, as frozen into the snapshot.</summary>
+        public PolicySnapshotDto Policy { get; set; }
+
+        /// <summary>Requests of the month nobody has decided yet: they count nowhere. Confirmation is refused while any is open.</summary>
+        public List<PendingRequestDto> PendingRequests { get; set; } = new List<PendingRequestDto>();
+
+        /// <summary>Per employee, the days between his shift assignments that were counted as absence.</summary>
+        public List<GapDaysDto> GapDays { get; set; } = new List<GapDaysDto>();
+    }
+
+    public class ConfirmMonthDto
+    {
+        public int Year { get; set; }
+        public int Month { get; set; }
+    }
+
+    public class RejectMonthDto
+    {
+        public int Year { get; set; }
+        public int Month { get; set; }
+
+        /// <summary>Required.</summary>
+        public string Reason { get; set; }
     }
 
     public class MonthStatusDto
     {
         public int Year { get; set; }
         public int Month { get; set; }
+
+        /// <summary>The month has been prepared (or confirmed): a row exists.</summary>
         public bool Closed { get; set; }
+
+        /// <summary>None, Prepared, Confirmed or Rejected.</summary>
+        public string Status { get; set; }
+        public bool Confirmed { get; set; }
         public DateTimeOffset? ClosedAt { get; set; }
         public string ClosedAtText { get; set; }
+        public string PreparedByName { get; set; }
+        public DateTimeOffset? ConfirmedAt { get; set; }
+        public string ConfirmedAtText { get; set; }
+        public string ConfirmedByName { get; set; }
+        public string RejectReason { get; set; }
+
+        /// <summary>SHA-256 of the numbers frozen at preparation, and whether the sheets still hold exactly those numbers (null for a month closed before the snapshot existed: SnapshotNote says so).</summary>
+        public string SnapshotHash { get; set; }
+        public bool? SnapshotMatches { get; set; }
+
+        /// <summary>«بدون snapshot — ماه قدیمی» for a legacy month; null otherwise.</summary>
+        public string SnapshotNote { get; set; }
+
+        /// <summary>The policy values the month was prepared with (null for a legacy month) and the three switches among them.</summary>
+        public PolicySnapshotDto Policy { get; set; }
+        public bool? OvertimeRequiresApproval { get; set; }
+        public bool? EarlyLeaveDeduction { get; set; }
+        public bool? MonthConfirmByHrPeer { get; set; }
+
+        /// <summary>The signed-in user may confirm / reject the prepared month.</summary>
+        public bool CanConfirm { get; set; }
+
+        /// <summary>For a prepared month: the requests of the month nobody has decided yet (the confirmation is refused while any is open).</summary>
+        public List<PendingRequestDto> PendingRequests { get; set; } = new List<PendingRequestDto>();
+        public List<NoWorkshopEmployeeDto> NoWorkshop { get; set; } = new List<NoWorkshopEmployeeDto>();
         public int Sheets { get; set; }
 
         /// <summary>A payroll run of the month is approved: the month is locked here too.</summary>
@@ -347,6 +618,79 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public DateTime Date { get; set; }
         public int WorkedMinutes { get; set; }
         public decimal WorkedHours { get; set; }
+    }
+
+    // ------------------------------------------------------------------------------------------ correction of a locked attendance sheet (payroll proposes, HR decides)
+
+    /// <summary>The attendance numbers of a sheet (no money): days, hours, shift type, leave, absence, mission.</summary>
+    public class SheetNumbersDto
+    {
+        public decimal DaysWorked { get; set; }
+        public decimal OvertimeHours { get; set; }
+        public decimal NightHours { get; set; }
+        public decimal HolidayHours { get; set; }
+        public int ShiftType { get; set; }
+        public decimal PaidLeaveDays { get; set; }
+        public decimal SickLeaveDays { get; set; }
+        public decimal UnpaidLeaveDays { get; set; }
+        public decimal AbsenceDays { get; set; }
+        public decimal MissionDays { get; set; }
+    }
+
+    public class AttendanceCorrectionDto
+    {
+        public int Id { get; set; }
+        public int SheetId { get; set; }
+        public int EmployeeId { get; set; }
+        public string PersonnelCode { get; set; }
+        public string EmployeeName { get; set; }
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public SheetNumbersDto Current { get; set; }
+        public SheetNumbersDto Proposed { get; set; }
+        public string Reason { get; set; }
+
+        /// <summary>Pending, Approved or Rejected.</summary>
+        public string Status { get; set; }
+        public string ProposedByName { get; set; }
+        public DateTimeOffset ProposedAt { get; set; }
+        public string DecidedByName { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecisionNote { get; set; }
+        public List<string> AllowedActions { get; set; } = new List<string>();
+    }
+
+    public class CorrectionQuery : OfficePageQuery
+    {
+        public int? Year { get; set; }
+        public int? Month { get; set; }
+        public int? EmployeeId { get; set; }
+
+        /// <summary>0 = Pending, 1 = Approved, 2 = Rejected.</summary>
+        public int? Status { get; set; }
+    }
+
+    /// <summary>Payroll asks HR to change the attendance numbers of a locked sheet.</summary>
+    public class ProposeCorrectionDto
+    {
+        public int EmployeeId { get; set; }
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public SheetNumbersDto Proposed { get; set; }
+
+        /// <summary>Required.</summary>
+        public string Reason { get; set; }
+    }
+
+    public class CorrectionActionDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>approve or reject.</summary>
+        public string Action { get; set; }
+
+        /// <summary>Required for a rejection.</summary>
+        public string Note { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ leave, mission, overtime
@@ -439,8 +783,11 @@ namespace ViewModels.NasbNiro.OfficeDtos
         public int LastMonth { get; set; }
         public decimal EntitlementRate { get; set; }
 
-        /// <summary>Entitlement of the months payroll has not booked yet, up to the month of the leave.</summary>
+        /// <summary>Entitlement of the months payroll has not booked yet, up to the month of the leave (counted only from the first accrual month).</summary>
         public decimal ProjectedEntitlement { get; set; }
+
+        /// <summary>The first month (1..12) of the year the employee accrues leave: the latest of the hire month, the first month of the year, the go-live month and the opening-balance month; 13 = no accrual in this year.</summary>
+        public int FirstAccrualMonth { get; set; }
 
         /// <summary>Approved or recorded leave of months payroll has not booked yet.</summary>
         public decimal PendingDays { get; set; }
@@ -555,5 +902,8 @@ namespace ViewModels.NasbNiro.OfficeDtos
 
         /// <summary>Save the mapping under this name as a profile (new or the same name replaced).</summary>
         public string SaveProfileAs { get; set; }
+
+        /// <summary>Optional note of the importer (what the file is); kept on the batch.</summary>
+        public string Reason { get; set; }
     }
 }

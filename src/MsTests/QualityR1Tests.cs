@@ -310,8 +310,10 @@ namespace MsTests
         public void Held_Goods_Cannot_Be_Used_Up_Produced_Back_Or_Moved_Into_Usable_Stock()
         {
             foreach (InventoryDocumentType type in new[] { InventoryDocumentType.Issue, InventoryDocumentType.CustomerDelivery, InventoryDocumentType.SubcontractIssue, InventoryDocumentType.StageConversion,
-                                                           InventoryDocumentType.ProductionReceipt, InventoryDocumentType.ProductionReturn })
+                                                           InventoryDocumentType.ProductionReturn })
                 Assert.IsTrue(NonconformingHoldRules.Refuses(type, null), type + " must refuse held goods");
+            // the production receipt holds the good pieces of the last step alone (scrap is written off at the terminal, rework is accepted by QC first)
+            Assert.IsFalse(NonconformingHoldRules.Refuses(InventoryDocumentType.ProductionReceipt, null), "the production receipt is outside the hold");
             Assert.IsTrue(NonconformingHoldRules.Refuses(InventoryDocumentType.Transfer, WarehouseKind.FinishedGoods), "into stock a customer draws on");
             Assert.IsTrue(NonconformingHoldRules.Refuses(InventoryDocumentType.QcRelease, WarehouseKind.Parts));
             // the way out of the hold: the report's own disposition document (rework into quarantine, scrap, return to the supplier) and the write-offs
