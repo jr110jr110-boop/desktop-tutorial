@@ -2081,7 +2081,7 @@ PMID=$(uid "$PM_TOKEN"); PLANID=$(uid "$PLAN_TOKEN")
 # R1q D27: the project manager and the document controller work with the controlled documents, the NCRs and the inspections every day, so they read the quality records (they write nothing there)
 as "$PM_TOKEN" GET "quality/records?PageSize=0"; check "r1q D27: the project manager (role 15) reads the inspection records (the record $R1NUM is among them)" ".success and ([.data.data[]|select(.id == $R1 and .number == \"$R1NUM\")]|length) == 1"
 as "$DCC_TOKEN" GET "quality/documents?PageSize=0"; check "r1q D27: the document controller (role 16) reads the controlled documents ($DOC1CODE is among them)" ".success and ([.data.data[]|select(.id == $DOC1 and .code == \"$DOC1CODE\")]|length) == 1"
-as "$DCC_TOKEN" POST quality/settings '{"key":"CalibrationWarnDays","value":31}'; nomsg "r1q D27: ... but reading is all: the document controller cannot change the quality settings" "شما مجوز این کار را ندارید"
+as "$DCC_TOKEN" POST quality/settings '{"key":"CalibrationWarnDays","value":31}'; nomsg "r1q D27: ... but reading is all: the document controller cannot change the quality settings" "شما مجوز دسترسی به این عملیات را ندارید"
 as "$SEC_TOKEN" GET quality/documents; [ "$CODE" = "403" ] && ok "r1q D27: a role outside the list (security) is still refused (403)" || bad "r1q D27: a role outside the list (security) is still refused (403) got $CODE"
 
 as "$PLAN_TOKEN" POST $PC/calendars '{"name":"Mon-Fri","workingWeekdays":62,"hoursPerDay":8,"useCompanyHolidays":false}'; check "pc: working calendar saved (Mon-Fri)" '.success and .data.id > 0 and .data.workingWeekdays == 62'
@@ -3119,7 +3119,7 @@ payrates() {
   as "$PAYR_TOKEN" POST $FP/tax-brackets "{\"year\":$1,\"brackets\":[{\"fromAmount\":0,\"toAmount\":240000000,\"ratePercent\":0},{\"fromAmount\":240000000,\"ratePercent\":10}]}"; check "payroll: tax brackets of $1 saved" '.success and (.data|length) == 2'
 }
 # release R1f (leave accrual): the go-live month is a setting of the finance manager, a Persian year/month; the accrual starts there
-as "$FIN_TOKEN" POST $FG/settings '{"key":"Payroll:GoLiveMonth","value":"1405/01"}'; nomsg "payroll: only the finance manager sets the go-live month" "مدیر مالی"
+as "$FIN_TOKEN" POST $FG/settings '{"key":"Payroll:GoLiveMonth","value":"1405/01"}'; nomsg "payroll: only the finance manager sets the go-live month" "شما مجوز دسترسی به این عملیات را ندارید"
 as "$FM_TOKEN" POST $FG/settings '{"key":"Payroll:GoLiveMonth","value":"1405/13"}'; nomsg "payroll: a go-live month that is not a Persian year/month is refused" "ماه شروع را به شکل"
 as "$FM_TOKEN" POST $FG/settings '{"key":"Payroll:GoLiveMonth","value":"1405/01"}'; check "payroll: the finance manager sets the go-live month to 1405/01" '.success and .data.value == "1405/01"'
 as "$PAYR_TOKEN" POST $FP/rates '{"year":1405,"key":"PayrollMonthDays","value":45,"source":"آزمون","verify":true}'; nomsg "payroll: a payroll month of 45 days is refused (the key accepts 28 to 31 days)" "PayrollMonthDays"
@@ -6759,7 +6759,7 @@ as "$FM_TOKEN" GET "$FX/rates?PageSize=0"; check "sales: setup: the VAT rate fin
 as "$WH_TOKEN" GET $SL/customers; nomsg "sales: a storekeeper cannot read the customers" "مجوز"
 as "$SV_TOKEN" POST $SL/customers '{"name":"مشتری بدون مجوز","status":2}'; nomsg "sales: the service role cannot create customers (sales keeps the customer master)" "مجوز"
 as "$SL_TOKEN" GET $SL/settings; check "sales: the approval ceiling for proposals has no seeded value (the CEO enters it)" '.success and ([.data[]|select(.key == "ProposalApprovalThresholdRial")]|length) == 1 and ([.data[]|select(.key == "ProposalApprovalThresholdRial")][0].value) == null'
-as "$SL_TOKEN" POST $SL/settings '{"key":"ProposalApprovalThresholdRial","value":50000000}'; nomsg "sales: sales cannot set its own approval ceiling (CEO only)" "مدیرعامل"
+as "$SL_TOKEN" POST $SL/settings '{"key":"ProposalApprovalThresholdRial","value":50000000}'; nomsg "sales: sales cannot set its own approval ceiling (CEO only)" "شما مجوز دسترسی به این عملیات را ندارید"
 as "$CEO_TOKEN" POST $SL/settings '{"key":"NoSuchSetting","value":1}'; nomsg "sales: an unknown setting key is refused" "شناخته"
 as "$CEO_TOKEN" POST $SL/settings '{"key":"ProposalApprovalThresholdRial","value":-1}'; nomsg "sales: a negative ceiling is refused" "منفی"
 
@@ -7219,13 +7219,13 @@ as "$SL_TOKEN" POST "$SVC/units" '{"title":"واحد بدون مجوز"}'; nomsg
 as "$WH_TOKEN" POST "$SVC/requests" '{"customerId":1,"description":"x","type":1,"priority":3}'; nomsg "service: a storekeeper cannot register a service request" "مجوز"
 as "$SL_TOKEN" POST "$SVC/jobs/run" '{}'; nomsg "service: sales cannot run the service jobs" "مجوز"
 sva GET "$SVC/settings"; check "service: settings: the cost centre defaults to AFTERSALES, the survey and visit lead days to 30 (the brief's figures, changeable) and the low survey score threshold to 3 (R1p D25, changeable); the labour work centre has no default" '.success and ([.data[]|select(.key == "CostCenterCode")][0].effective) == "AFTERSALES" and ([.data[]|select(.key == "SurveyLeadDays")][0].effective) == "30" and ([.data[]|select(.key == "VisitLeadDays")][0].effective) == "30" and ([.data[]|select(.key == "LowScoreThreshold")][0].effective) == "3" and ([.data[]|select(.key == "LowScoreThreshold")][0].text) == null and ([.data[]|select(.key == "LabourWorkCenterCode")][0].effective) == null and ([.data[]|select(.key == "LabourWorkCenterCode")][0].text) == null'
-sva POST "$SVC/settings" '{"key":"LabourWorkCenterCode","text":"SV-WC"}'; nomsg "service: service cannot enter the labour work centre (CEO only)" "مدیرعامل"
+sva POST "$SVC/settings" '{"key":"LabourWorkCenterCode","text":"SV-WC"}'; nomsg "service: service cannot enter the labour work centre (CEO only)" "شما مجوز دسترسی به این عملیات را ندارید"
 as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"NoSuchSetting","text":"1"}'; nomsg "service: an unknown setting key is refused" "نامعتبر"
 as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"SurveyLeadDays","text":"-1"}'; nomsg "service: a negative number of lead days is refused" "غیرمنفی"
 as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"LabourWorkCenterCode","text":"NO-SUCH-WC"}'; nomsg "service: a work centre that does not exist is refused" "پیدا نشد"
 as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"LowScoreThreshold","text":"0"}'; nomsg "service: D25: the threshold of a low survey score is a whole score from 1 to 5: 0 is refused" "امتیاز آستانه باید عددی صحیح بین ۱ تا ۵"
 as "$CEO_TOKEN" POST "$SVC/settings" '{"key":"LowScoreThreshold","text":"6"}'; nomsg "service: D25: ... and 6 is refused too" "امتیاز آستانه باید عددی صحیح بین ۱ تا ۵"
-sva POST "$SVC/settings" '{"key":"LowScoreThreshold","text":"2"}'; nomsg "service: D25: the threshold is the CEO's setting, not the service user's" "مدیرعامل"
+sva POST "$SVC/settings" '{"key":"LowScoreThreshold","text":"2"}'; nomsg "service: D25: the threshold is the CEO's setting, not the service user's" "شما مجوز دسترسی به این عملیات را ندارید"
 sva GET "$SVC/sla-rules"; check "service: the SLA table has no seeded row (no response or resolution hour is invented)" '.success and (.data|length) == 0'
 
 # --- the installed base: the handover of shipment PCSH1 drafted exactly one unit
