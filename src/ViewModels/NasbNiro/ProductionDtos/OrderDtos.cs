@@ -127,6 +127,12 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? OrderId { get; set; }
         public int? WorkCenterId { get; set; }
         public MfOperationStatus? Status { get; set; }
+
+        /// <summary>R1-gaps: the operations of one NCR (the rework operations it started and the operation that was rejected).</summary>
+        public int? NcrId { get; set; }
+
+        /// <summary>R1-gaps: true = only rework operations; false = only the normal route.</summary>
+        public bool? IsRework { get; set; }
     }
 
     public class OperationDto
@@ -176,6 +182,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public string StartedAtText { get; set; }
         public string FinishedAtText { get; set; }
         public string Note { get; set; }
+
+        /// <summary>R1p D43: the work centre has machines and requires one: the start is refused without <c>machineId</c> (a waiting booking excepted). Filled in every operation list.</summary>
+        public bool MachineRequired { get; set; }
 
         /// <summary>Bookings of the operation that are still running.</summary>
         public int RunningBookings { get; set; }

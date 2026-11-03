@@ -31,9 +31,6 @@ namespace ViewModels.NasbNiro.ProductionDtos
         /// <summary>Start of the operator's running booking (ISO; the terminal timer counts from it).</summary>
         public DateTime? MyRunningSince { get; set; }
 
-        /// <summary>R1p D43: the work centre has machines and requires one: the start is refused without <c>machineId</c> (a waiting booking excepted).</summary>
-        public bool MachineRequired { get; set; }
-
         /// <summary>The signed-in operator has a booking (running or ended) on this operation, so he may report quantities and finish it.</summary>
         public bool HasMyBooking { get; set; }
     }

@@ -412,17 +412,30 @@ namespace Services.NasbNiro.Quality
             WorkOrder wo = await _uow.Set<WorkOrder>().FirstAsync(w => w.Id == r.WorkOrderId, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { r.ReleasedByUserId, r.CreatorUserId }, cancellationToken);
             List<ReleaseNoteLineDto> lines = (await _uow.Set<ReleaseNoteLine>().Where(l => l.ReleaseNoteId == r.Id).OrderBy(l => l.RowNumber)
-                .Select(l => new { l.RowNumber, l.ItemId, l.Item.Code, l.Item.Title, l.Item.Unit, l.Quantity, l.SerialNumbers }).ToListAsync(cancellationToken))
+                .Select(l => new { l.RowNumber, l.ItemId, l.Item.Code, l.Item.Title, l.Item.Unit, l.Item.TrackingMode, l.Quantity, l.SerialNumbers }).ToListAsync(cancellationToken))
                 .Select(l => new ReleaseNoteLineDto
                 {
-                    RowNumber = l.RowNumber, ItemId = l.ItemId, ItemCode = l.Code, ItemTitle = l.Title, Unit = l.Unit, Quantity = l.Quantity,
+                    RowNumber = l.RowNumber, ItemId = l.ItemId, ItemCode = l.Code, ItemTitle = l.Title, Unit = l.Unit, TrackingMode = l.TrackingMode, Quantity = l.Quantity,
                     SerialNumbers = (l.SerialNumbers ?? string.Empty).Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(),
                 }).ToList();
             List<ReleaseCheckDto> checks;
             if (r.Status == ReleaseNoteStatus.Draft) checks = await ComputeChecksAsync(wo, cancellationToken);
             else checks = string.IsNullOrWhiteSpace(r.ChecksSnapshot) ? new List<ReleaseCheckDto>() : JsonSerializer.Deserialize<List<ReleaseCheckDto>>(r.ChecksSnapshot);
+            bool ready = r.Status == ReleaseNoteStatus.Draft && lines.Count > 0 && checks.All(c => c.Passed);
+            // R1-gaps: the caller may sign (release) when the action's own predicate lets him and the note is ready (items valid against the work order now, every check passed)
+            bool canSign = ready && ReleaseNoteRules.SignProblem(r, Me, _user.IsInRole) == null;
+            if (canSign)
+            {
+                List<ReleaseNoteLine> saved = await _uow.Set<ReleaseNoteLine>().Where(l => l.ReleaseNoteId == r.Id).ToListAsync(cancellationToken);
+                Dictionary<int, InventoryItem> savedItems = await _uow.Set<InventoryItem>().Where(i => saved.Select(l => l.ItemId).Contains(i.Id)).ToDictionaryAsync(i => i.Id, cancellationToken);
+                canSign = await LinesProblemAsync(wo, saved, savedItems, cancellationToken) == null;
+            }
             return new ReleaseNoteDto
             {
+                CreatorUserId = r.CreatorUserId,
+                EditorUserIds = (r.EditorUserIds ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => int.TryParse(x.Trim(), out int v) ? v : 0).Where(v => v > 0).Distinct().ToList(),
+                CanSign = canSign,
+                CanCancel = ReleaseNoteRules.CancelProblem(r, _user.IsInRole) == null,
                 Id = r.Id, Number = r.Number, WorkOrderId = r.WorkOrderId, WorkOrderCode = wo.Code, Status = r.Status, ReleasedAt = r.ReleasedAt,
                 CertificateOfConformityNumber = r.CertificateOfConformityNumber, ContractId = r.ContractId, ItemsText = r.ItemsText, Note = r.Note,
                 CancelReason = r.CancelReason, ReleasedByName = names.Name(r.ReleasedByUserId), DraftedByName = names.Name(r.CreatorUserId),
@@ -592,11 +605,9 @@ namespace Services.NasbNiro.Quality
             switch (dto.Action.Trim().ToLowerInvariant())
             {
                 case "release":
-                    if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<ReleaseNoteDto>(QualityText.NotAllowed + " (برگه ترخیص و گواهی انطباق را مدیر QC امضا می‌کند)");
-                    if (r.Status != ReleaseNoteStatus.Draft) return Bad<ReleaseNoteDto>("فقط برگه پیش‌نویس صادر می‌شود.");
-                    // R1q D22: the person who drafted or edited the note cannot release it (maker-checker)
-                    if (global::Services.NasbNiro.Finance.LedgerMath.Touched(r.CreatorUserId, r.EditorUserIds, Me))
-                        return Bad<ReleaseNoteDto>(QualityText.SameUser + " (برگه را کسی که آن را تنظیم یا ویرایش کرده نمی‌تواند صادر کند؛ مدیر QC دیگری امضا کند)");
+                    // R1q D22 and R1-gaps: role, state and maker-checker (the drafter or an editor cannot release) are one predicate, shared with the CanSign flag of the note
+                    string signProblem = ReleaseNoteRules.SignProblem(r, Me, _user.IsInRole);
+                    if (signProblem != null) return Bad<ReleaseNoteDto>(signProblem);
                     if (!await _uow.Set<ReleaseNoteLine>().AnyAsync(l => l.ReleaseNoteId == r.Id, cancellationToken))
                         return Bad<ReleaseNoteDto>("فهرست اقلام برگه ترخیص خالی است؛ کالا، مقدار و سریال‌های ترخیص‌شده را ثبت کنید.");
                     WorkOrder wo = await _uow.Set<WorkOrder>().FirstAsync(w => w.Id == r.WorkOrderId, cancellationToken);
@@ -613,8 +624,8 @@ namespace Services.NasbNiro.Quality
                     r.ChecksSnapshot = JsonSerializer.Serialize(checks);
                     break;
                 case "cancel":
-                    if (!_user.IsInRole(QualityRoles.QualityManagers)) return Bad<ReleaseNoteDto>(QualityText.NotAllowed);
-                    if (r.Status == ReleaseNoteStatus.Cancelled) return Bad<ReleaseNoteDto>("برگه قبلاً لغو شده است.");
+                    string cancelProblem = ReleaseNoteRules.CancelProblem(r, _user.IsInRole);
+                    if (cancelProblem != null) return Bad<ReleaseNoteDto>(cancelProblem);
                     if (Clean(dto.Reason) == null) return Bad<ReleaseNoteDto>("دلیل لغو را بنویسید.");
                     if (Clean(dto.Reason).Length > 1000) return Bad<ReleaseNoteDto>("دلیل لغو نباید بیش از ۱۰۰۰ نویسه باشد.");
                     r.Status = ReleaseNoteStatus.Cancelled; r.CancelReason = Clean(dto.Reason);

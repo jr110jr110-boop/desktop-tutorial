@@ -32,6 +32,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _service.GetSettingsAsync(ct));
 
         [HttpPost("settings")]
+        [Authorize(Roles = ProcurementRoles.Management)]
         public async Task<IActionResult> SaveSettingAsync([FromBody] ProcurementSettingDto dto, CancellationToken ct) => Ok(await _service.SaveSettingAsync(dto, ct));
 
         // purchase requests

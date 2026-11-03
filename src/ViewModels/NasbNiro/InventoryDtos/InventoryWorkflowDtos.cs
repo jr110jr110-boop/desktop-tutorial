@@ -384,6 +384,27 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ClosedByName { get; set; }
         public string CreatorName { get; set; }
 
+        /// <summary>R1-gaps: who raised the report and who edited it (the makers: none of them signs for QC, closes or, as a QC user, cancels it).</summary>
+        public int CreatorUserId { get; set; }
+
+        public List<int> EditorUserIds { get; set; } = new List<int>();
+
+        /// <summary>R1-gaps, for the signed-in caller, computed with the rules the service enforces: may sign the quality part, the engineering part, the manufacturing part, the concession permit.</summary>
+        public bool CanSignQuality { get; set; }
+
+        public bool CanSignEngineering { get; set; }
+        public bool CanSignManufacturing { get; set; }
+        public bool CanSignConcession { get; set; }
+
+        /// <summary>Any of the four signatures is open to the caller.</summary>
+        public bool CanSign { get; set; }
+
+        /// <summary>The report is executed and the caller may close it (not its maker; root cause and corrective action recorded). The effectiveness text and a re-inspection are still asked when closing.</summary>
+        public bool CanClose { get; set; }
+
+        /// <summary>The report is open and the caller may cancel it.</summary>
+        public bool CanCancel { get; set; }
+
         // quality module additions (spec 5.5)
         public DateTime? DueDate { get; set; }
         public bool Overdue { get; set; }

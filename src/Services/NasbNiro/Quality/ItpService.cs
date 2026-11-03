@@ -209,6 +209,14 @@ namespace Services.NasbNiro.Quality
                 TemplateCode = itp.Template?.Code, ClientApprovalReference = itp.ClientApprovalReference, ClientApprovalDate = itp.ClientApprovalDate,
                 NoticeDays = noticeDays, Note = itp.Note, ActivityCount = itp.Activities.Count,
                 DoneCount = itp.Activities.Count(a => IsTerminal(a.Status)),
+                // R1-gaps: who made the plan, and what the caller may do with it (the predicates the plan actions run)
+                CreatorUserId = itp.AutoDrafted ? 0 : itp.CreatorUserId, SubmittedByUserId = itp.SubmittedByUserId,
+                EditorUserIds = (itp.EditorUserIds ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => int.TryParse(x.Trim(), out int v) ? v : 0).Where(v => v > 0).Distinct().ToList(),
+                CanSubmit = ItpRules.SubmitProblem(itp, _user.IsInRole) == null,
+                CanApprove = ItpRules.ApproveProblem(itp, Me, _user.IsInRole) == null,
+                CanUse = ItpRules.UseProblem(itp, _user.IsInRole) == null,
+                CanClose = ItpRules.CloseProblem(itp, _user.IsInRole) == null,
+                CanRevise = ItpRules.ReviseProblem(itp, _user.IsInRole) == null,
             };
             foreach (ItpActivity a in itp.Activities.OrderBy(x => x.Seq).ThenBy(x => x.Id))
             {
@@ -433,20 +441,17 @@ namespace Services.NasbNiro.Quality
             switch (dto.Action.Trim().ToLowerInvariant())
             {
                 case "submit":
-                    if (!_user.IsInRole(QualityRoles.Planners)) return Bad<ItpDto>(QualityText.NotAllowed);
-                    if (itp.Status != ItpStatus.Draft) return Bad<ItpDto>("فقط برنامه پیش‌نویس برای تایید کارفرما ارسال می‌شود.");
-                    if (itp.Activities.Count == 0) return Bad<ItpDto>("برنامه بدون فعالیت ارسال نمی‌شود.");
+                    string submitProblem = ItpRules.SubmitProblem(itp, _user.IsInRole);
+                    if (submitProblem != null) return Bad<ItpDto>(submitProblem);
                     itp.Status = ItpStatus.Submitted; itp.SubmittedAt = DateTimeOffset.Now; itp.SubmittedByUserId = Me;
                     MarkEditor(itp);
                     break;
                 case "client-approve":
-                    if (!_user.IsInRole(QualityRoles.QualityManagers)) return Bad<ItpDto>(QualityText.NotAllowed);
-                    if (itp.Status != ItpStatus.Submitted) return Bad<ItpDto>("ابتدا برنامه را برای کارفرما ارسال کنید.");
+                    string approveProblem = ItpRules.ApproveProblem(itp, Me, _user.IsInRole);
+                    if (approveProblem != null) return Bad<ItpDto>(approveProblem);
                     if (Clean(dto.Reference) == null) return Bad<ItpDto>("شماره نامه یا مرجع تایید کارفرما را وارد کنید.");
                     if (Clean(dto.Reference).Length > ItpNoticeRules.MaxReferenceLength) return Bad<ItpDto>($"مرجع تایید کارفرما حداکثر {ItpNoticeRules.MaxReferenceLength} نویسه است.");
-                    // R1q H6: the plan is approved by somebody who did not prepare, change, revise or submit it (a vendor cannot approve for the client alone)
-                    if (itp.SubmittedByUserId == Me || global::Services.NasbNiro.Finance.LedgerMath.Touched(itp.AutoDrafted ? 0 : itp.CreatorUserId, itp.EditorUserIds, Me))
-                        return Bad<ItpDto>("تایید کارفرما را باید شخصی ثبت کند که برنامه را تهیه، ویرایش، بازنگری یا ارسال نکرده است (تفکیک وظایف).");
+                    // R1q H6 (ItpRules.ApproveProblem above): the plan is approved by somebody who did not prepare, change, revise or submit it
                     DateTime approvalDate = (dto.Date ?? DateTime.Today).Date;
                     string approvalProblem = ItpNoticeRules.CheckApprovalDate(approvalDate, DateTime.Today, (int)(await QualitySettingKeys.LoadAsync(_uow, cancellationToken))[QualitySettingKeys.MaxBackdateDays]);
                     if (approvalProblem != null) return Bad<ItpDto>(approvalProblem);
@@ -462,19 +467,18 @@ namespace Services.NasbNiro.Quality
                     itp.EditorUserIds = null; // the next revision starts with its own makers
                     break;
                 case "use":
-                    if (!_user.IsInRole(QualityRoles.QualityManagers)) return Bad<ItpDto>(QualityText.NotAllowed);
-                    if (itp.Status != ItpStatus.ClientApproved) return Bad<ItpDto>("فقط برنامه تاییدشده در حال اجرا قرار می‌گیرد.");
+                    string useProblem = ItpRules.UseProblem(itp, _user.IsInRole);
+                    if (useProblem != null) return Bad<ItpDto>(useProblem);
                     itp.Status = ItpStatus.InUse;
                     break;
                 case "close":
-                    if (!_user.IsInRole(QualityRoles.QualityManagers)) return Bad<ItpDto>(QualityText.NotAllowed);
-                    if (itp.Status != ItpStatus.ClientApproved && itp.Status != ItpStatus.InUse) return Bad<ItpDto>("فقط برنامه تاییدشده بسته می‌شود.");
-                    if (itp.Activities.Any(a => !IsTerminal(a.Status))) return Bad<ItpDto>("همه فعالیت‌ها باید انجام‌شده، معاف یا غیرقابل‌اجرا باشند.");
+                    string closeProblem = ItpRules.CloseProblem(itp, _user.IsInRole);
+                    if (closeProblem != null) return Bad<ItpDto>(closeProblem);
                     itp.Status = ItpStatus.Closed;
                     break;
                 case "revise":
-                    if (!_user.IsInRole(QualityRoles.Planners)) return Bad<ItpDto>(QualityText.NotAllowed);
-                    if (itp.Status != ItpStatus.ClientApproved && itp.Status != ItpStatus.InUse) return Bad<ItpDto>("بازنگری فقط برای برنامه تاییدشده ثبت می‌شود.");
+                    string reviseProblem = ItpRules.ReviseProblem(itp, _user.IsInRole);
+                    if (reviseProblem != null) return Bad<ItpDto>(reviseProblem);
                     ResponseDto<ItpDto> refused = OpenRevision(itp, dto.Reason);
                     if (refused != null) return refused;
                     break;

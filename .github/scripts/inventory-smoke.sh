@@ -10771,6 +10771,31 @@ as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c share 
 as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c final\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 92)T00:00:00\",\"amount\":1000,\"isFinal\":true}"; check "r1c: the final statement milestone of the contract" '.success and .data.isFinal == true'
 as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c final again\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 93)T00:00:00\",\"amount\":1000,\"isFinal\":true}"; nomsg "r1c: a contract has one final statement milestone" "فقط یک مرحله قطعی می‌تواند باشد"
 
+# --- R1-gaps: per-caller flags, the NCR and rework filters of the operation list, and the release of a guarantee in two actions
+TOKEN=$ADMIN_TOKEN
+as "$QC_TOKEN" POST inventory/quality/ncr "{\"reportDate\":\"$(dd -1)T00:00:00\",\"dueDate\":\"$(dd 6)T00:00:00\",\"source\":1,\"severity\":1,\"disposition\":2,\"itemId\":$RAW,\"quantity\":1,\"description\":\"گزارش آزمون پرچم‌های اقدام\"}"; GPNCR=$(val .data.id)
+as "$QC_TOKEN" GET "inventory/quality/ncr/$GPNCR"; check "r1 gaps: the NCR read by its creator says CanSign false (he is its maker) and names him as the creator" '.success and .data.creatorUserId > 0 and .data.canSign == false and .data.canSignQuality == false and .data.canClose == false'
+as "$QC_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$GPNCR,\"kind\":4}"; nomsg "r1 gaps: and the sign action refuses him for the same reason the flag gives" "ثبت‌کننده یا ویرایشگر"
+as "$QA_TOKEN" GET "inventory/quality/ncr/$GPNCR"; check "r1 gaps: the same NCR read by a QA user who never touched it says CanSign true for the quality part only" '.success and .data.canSign == true and .data.canSignQuality == true and .data.canSignEngineering == false and .data.canSignManufacturing == false'
+as "$QC2_TOKEN" GET "inventory/quality/ncr/$GPNCR"; check "r1 gaps: and so does a second QC user" '.success and .data.canSign == true and .data.canSignQuality == true'
+as "$QC2_TOKEN" POST inventory/quality/ncr/approve "{\"id\":$GPNCR,\"kind\":4}"; check "r1 gaps: the second QC user signs (the action agrees with the flag) and the part is then closed to everybody" '.success and .data.qualityApprovedAt != null and .data.canSignQuality == false'
+
+as "$PMO2_TOKEN" GET "$MF/orders/$MFORDA"; MFRWIDS=$(jq -c "[.data.operations[]|select(.isRework and .ncrId == $MFNCR)|.id]|sort" "$B")
+as "$MPM_TOKEN" GET "$MF/operations?OrderId=$MFORDA&NcrId=$MFNCR&IsRework=true"; check "r1 gaps: the operations of the order filtered by NCR and rework are exactly the rework operations of that NCR, and every row says whether a machine is required" ".success and (.data.data|length) >= 1 and ([.data.data[].id]|sort) == $MFRWIDS and all(.data.data[]; .isRework and .ncrId == $MFNCR and (.machineRequired|type) == \"boolean\")"
+as "$MPM_TOKEN" GET "$MF/operations?OrderId=$MFORDA&IsRework=false"; check "r1 gaps: IsRework=false lists the normal route only" '.success and (.data.data|length) >= 1 and all(.data.data[]; .isRework == false)'
+
+call POST ContractGuaranty "{\"title\":\"ضمانت‌نامه دو مرحله‌ای\",\"bank\":\"ملی\",\"no\":\"PC-G-3\",\"price\":\"150,000,000\",\"regDate\":\"$(dd -100)T00:00:00\",\"dueDate\":\"$(dd 220)T00:00:00\",\"contractEntityId\":$PCT}"; check "r1 gaps: third legacy guaranty created" '.success'
+as "$COM_TOKEN" POST $PC/guarantees/parse; check "r1 gaps: the third guaranty is parsed" '.success and .data.created >= 1'
+as "$COM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; PCG3=$(jq -r '[.data.data[]|select(.no=="PC-G-3")][0].id' "$B")
+GRELB="{\"guaranteeId\":$PCG3,\"releaseDate\":\"$(dd 0)T00:00:00\",\"note\":\"نامه بانک دو مرحله‌ای\"}"
+as "$FM_TOKEN" POST $PC/guarantees/confirm-release "{\"guaranteeId\":$PCG3}"; nomsg "r1 gaps: confirm-release with no request waiting is refused" "منتظر تأیید نیست"
+as "$FIN_TOKEN" POST $PC/guarantees/request-release "$GRELB"; r403 "r1 gaps: the accountant cannot request a release (403)"
+as "$COM_TOKEN" POST $PC/guarantees/request-release "$GRELB"; check "r1 gaps: request-release records the request: the guarantee stays active, the caller may not confirm it himself" '.success and .data.status == 3 and .data.releaseRequestOpen == true and .data.canConfirmRelease == false and .data.canRequestRelease == false and ([.data.events[]|select(.kind == 4)]|length) == 0'
+as "$COM_TOKEN" POST $PC/guarantees/confirm-release "{\"guaranteeId\":$PCG3}"; nomsg "r1 gaps: the requester cannot confirm his own request" "خودتان ثبت کرده"
+as "$FM_TOKEN" POST $PC/guarantees/request-release "$GRELB"; nomsg "r1 gaps: a second request does not overwrite the waiting one" "منتظر تأیید است"
+as "$FM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "r1 gaps: the finance manager reads the guarantee with CanConfirmRelease true" '.success and ([.data.data[]|select(.no=="PC-G-3")][0]|(.canConfirmRelease == true and .canRequestRelease == false))'
+as "$FM_TOKEN" POST $PC/guarantees/confirm-release "{\"guaranteeId\":$PCG3}"; check "r1 gaps: confirm-release by another user releases it with the date and the note of the request" '.success and .data.status == 6 and ([.data.events[]|select(.kind == 4)]|length) == 1 and ([.data.events[]|select(.kind == 4)][0].note|contains("نامه بانک دو مرحله‌ای"))'
+
 # --- R1t D19: every pass-through of the legacy CSV actions (2 inventory exports, 1 events export, 1 events/mark) left one audit row, all by the finance manager
 TOKEN=$ADMIN_TOKEN
 as "$FM_TOKEN" GET "finance/audit?EntityType=SepidarLegacyCsv&Action=LegacyCsv&PageSize=0"; check "r1t d19: the legacy CSV pass-throughs are in the audit trail (5 rows: 2 inventory exports, 2 events exports - one is the finance manager's check of the protected labour event - and 1 events/mark, one user)" '.success and (.data.data|length) == 5 and ([.data.data[].userId]|unique|length) == 1'

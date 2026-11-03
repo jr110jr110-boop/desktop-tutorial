@@ -191,6 +191,13 @@ namespace Services.NasbNiro.Production
             if (query.OrderId.HasValue) q = q.Where(o => o.OrderId == query.OrderId.Value);
             if (query.WorkCenterId.HasValue) q = q.Where(o => o.WorkCenterId == query.WorkCenterId.Value);
             if (query.Status.HasValue) q = q.Where(o => o.Status == query.Status.Value);
+            if (query.NcrId.HasValue)
+            {
+                // the operations that carry the NCR (the rejected step and its rework) and the operation the NCR names as its finished rework
+                int ncrId = query.NcrId.Value;
+                q = q.Where(o => o.NcrId == ncrId || _uow.Set<NonConformance>().Any(n => n.Id == ncrId && n.ReworkOperationId == o.Id));
+            }
+            if (query.IsRework.HasValue) q = q.Where(o => o.IsRework == query.IsRework.Value);
             string text = Clean(query.Contains);
             if (text != null) q = q.Where(o => o.Title.Contains(text) || _uow.Set<MfProductionOrder>().Any(p => p.Id == o.OrderId && p.Number.Contains(text)));
             int total = await q.CountAsync(ct);

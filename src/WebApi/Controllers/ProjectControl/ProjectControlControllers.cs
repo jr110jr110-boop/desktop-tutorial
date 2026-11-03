@@ -31,6 +31,7 @@ namespace WebApi.Controllers.ProjectControl
         public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _project.GetSettingsAsync(ct));
 
         [HttpPut("settings")]
+        [Authorize(Roles = ProjectControlRoles.Pmo + "," + ProjectControlRoles.Ceo)]
         public async Task<IActionResult> SaveSettingsAsync([FromBody] PcSettingsSaveDto dto, CancellationToken ct) => Ok(await _project.SaveSettingsAsync(dto, ct));
 
         [HttpGet("terms/{contractId:int}")]
@@ -128,6 +129,7 @@ namespace WebApi.Controllers.ProjectControl
         public async Task<IActionResult> CalendarsAsync([FromQuery] PaginationParams query, CancellationToken ct) => Ok((await _schedule.GetCalendarsAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpPost("calendars")]
+        [Authorize(Roles = ProjectControlRoles.Planning)]
         public async Task<IActionResult> SaveCalendarAsync([FromBody] PcCalendarDto dto, CancellationToken ct) => Ok(await _schedule.SaveCalendarAsync(dto, ct));
 
         [HttpGet("wbs")]
@@ -330,7 +332,17 @@ namespace WebApi.Controllers.ProjectControl
         [HttpPost("guarantees/events")]
         public async Task<IActionResult> AddGuaranteeEventAsync([FromBody] PcGuaranteeEventSaveDto dto, CancellationToken ct) => Ok(await _commercial.AddGuaranteeEventAsync(dto, ct));
 
+        // R1-gaps: the two steps of the release as two actions (the confirmer is never the requester); the front no longer infers the step from releaseRequestOpen
+        [HttpPost("guarantees/request-release")]
+        [Authorize(Roles = "COMMERCIAL,FINANCEMANAGER,PMO")]
+        public async Task<IActionResult> RequestGuaranteeReleaseAsync([FromBody] PcGuaranteeReleaseDto dto, CancellationToken ct) => Ok(await _commercial.RequestGuaranteeReleaseAsync(dto, ct));
+
+        [HttpPost("guarantees/confirm-release")]
+        [Authorize(Roles = "COMMERCIAL,FINANCEMANAGER,PMO")]
+        public async Task<IActionResult> ConfirmGuaranteeReleaseAsync([FromBody] PcGuaranteeReleaseDto dto, CancellationToken ct) => Ok(await _commercial.ConfirmGuaranteeReleaseAsync(dto, ct));
+
         // R1a: the release has its own roles (the money side signs it too) and needs a date and a note; the expiry is automatic (daily job)
+        // DEPRECATED (R1-gaps): the combined call that decides by state; use guarantees/request-release and guarantees/confirm-release. Removed one release after the front switches.
         [HttpPost("guarantees/release")]
         [Authorize(Roles = "COMMERCIAL,FINANCEMANAGER,PMO")]
         public async Task<IActionResult> ReleaseGuaranteeAsync([FromBody] PcGuaranteeReleaseDto dto, CancellationToken ct) => Ok(await _commercial.ReleaseGuaranteeAsync(dto, ct));

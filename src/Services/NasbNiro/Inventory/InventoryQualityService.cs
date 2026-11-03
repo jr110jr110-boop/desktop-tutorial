@@ -489,6 +489,20 @@ namespace Services.NasbNiro.Inventory
             ncr.ConcessionApprovedByName = names.Name(raw.ConcessionApprovedByUserId);
             ncr.ClosedByName = names.Name(raw.ClosedByUserId);
             ncr.CancelledByName = names.Name(raw.CancelledByUserId);
+            // R1-gaps: the caller's action flags, from the same predicates the sign, close and cancel actions run
+            NonConformance entity = await Ncrs.AsNoTracking().FirstAsync(n => n.Id == id, cancellationToken);
+            int me = _user.UserId;
+            int committeeMin = await CommitteeMinAsync(entity, cancellationToken);
+            ncr.CreatorUserId = raw.CreatorUserId;
+            ncr.EditorUserIds = NcrRules.Editors(entity.EditorUserIds);
+            ncr.CanSignQuality = NcrRules.SignProblem(entity, ApprovalKind.Quality, false, me, _user.IsInRole, committeeMin) == null;
+            ncr.CanSignEngineering = NcrRules.SignProblem(entity, ApprovalKind.Engineering, false, me, _user.IsInRole, committeeMin) == null;
+            ncr.CanSignManufacturing = NcrRules.SignProblem(entity, ApprovalKind.Manufacturing, false, me, _user.IsInRole, committeeMin) == null;
+            ncr.CanSignConcession = NcrRules.SignProblem(entity, ApprovalKind.Quality, true, me, _user.IsInRole, committeeMin) == null;
+            ncr.CanSign = ncr.CanSignQuality || ncr.CanSignEngineering || ncr.CanSignManufacturing || ncr.CanSignConcession;
+            ncr.CanClose = NcrRules.CloseProblem(entity, me) == null && _user.IsInRole(InventoryRoles.QcOrQa);
+            ncr.CanCancel = NcrRules.CancelProblem(entity, me, _user.IsInRole, false, null) == null
+                && await Quality.QualityNcrFactory.CancelBlockAsync(_uow, entity, cancellationToken) == null;
             return ResponseDtoHelper.Ok(ncr);
         }
 
@@ -624,63 +638,25 @@ namespace Services.NasbNiro.Inventory
 
         private static bool NeedsConcession(NcrDisposition disposition) => Quality.NcrGates.NeedsConcession(disposition);
 
+        /// <summary>The minimum committee size of a major NCR (company setting); 0 for a report that needs no committee.</summary>
+        private async Task<int> CommitteeMinAsync(NonConformance ncr, CancellationToken cancellationToken) =>
+            ncr.Severity == NcrSeverity.Major ? (int)(await Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken))[Quality.QualitySettingKeys.MajorNcrCommitteeMin] : 0;
+
         public async Task<ResponseDto<NcrDto>> ApproveNcrAsync(ApproveNcrDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.InvalidData);
             NonConformance ncr = await Ncrs.FirstOrDefaultAsync(n => n.Id == dto.Id && !n.Deleted, cancellationToken);
             if (ncr == null) return ResponseDtoHelper.NotFound<NcrDto>("گزارش عدم انطباق پیدا نشد.");
-            if (ncr.Status != NcrStatus.Open) return ResponseDtoHelper.BadRequest<NcrDto>("فقط گزارش باز تایید می‌شود.");
-            if (ncr.Severity == NcrSeverity.NotClassified) return ResponseDtoHelper.BadRequest<NcrDto>("ابتدا نوع عدم انطباق (جزئی / عمده) را مشخص کنید.");
-            if (ncr.Disposition == NcrDisposition.None) return ResponseDtoHelper.BadRequest<NcrDto>("ابتدا تصمیم (مجوز ارفاقی، دوباره‌کاری، تعمیر، ضایعات، مرجوعی) را مشخص کنید.");
-            if (ncr.Severity == NcrSeverity.Major && (ncr.CommitteeMinutesNumber == null || ncr.CommitteeMembers == null))
-                return ResponseDtoHelper.BadRequest<NcrDto>("عدم انطباق عمده با تصمیم کمیته فنی است؛ شماره صورت‌جلسه و اعضای کمیته را وارد کنید.");
-            if (ncr.Severity == NcrSeverity.Major)
-            {
-                int minMembers = (int)(await Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken))[Quality.QualitySettingKeys.MajorNcrCommitteeMin];
-                if (Quality.QualityText.SplitList(ncr.CommitteeMembers).Count < minMembers)
-                    return ResponseDtoHelper.BadRequest<NcrDto>($"کمیته عدم انطباق عمده باید حداقل {minMembers} عضو (QC، مهندسی، ساخت) داشته باشد؛ اعضا را با ویرگول یا در خط‌های جدا بنویسید.");
-            }
-            if (ncr.Disposition == NcrDisposition.Scrap && ncr.OwnedByContractor)
-                return ResponseDtoHelper.BadRequest<NcrDto>("کالای متعلق به پیمانکار/مشتری ضایعات شرکت نمی‌شود؛ تصمیم «مرجوعی» را انتخاب کنید.");
-
             int me = _user.UserId;
             DateTimeOffset now = DateTimeOffset.Now;
-            var signers = new[] { ncr.QualityApprovedByUserId, ncr.EngineeringApprovedByUserId, ncr.ManufacturingApprovedByUserId };
-            // R1q D3 and review H7: whoever raised or edited the report (the inspector, the examiner, the engineer or operator whose record drafted it, the QC user who classified
-            // it) is its maker; the maker gives none of the signatures and not the permit. The checker is somebody who never touched it.
-            bool maker = global::Services.NasbNiro.Finance.LedgerMath.Touched(ncr.CreatorUserId, ncr.EditorUserIds, me);
-            const string makerMessage = " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند آن را امضا کند؛ کاربر دیگری از همین نقش امضا کند)";
+            // R1q D3 and review H7 and R1-gaps: one predicate decides, here and in the per-caller flags of the NCR read; whoever raised or edited the report is its maker and gives no signature and not the permit
+            string problem = NcrRules.SignProblem(ncr, dto.Kind, dto.Concession, me, _user.IsInRole, await CommitteeMinAsync(ncr, cancellationToken));
+            if (problem != null) return ResponseDtoHelper.BadRequest<NcrDto>(problem);
 
-            if (dto.Concession)
-            {
-                if (!NeedsConcession(ncr.Disposition)) return ResponseDtoHelper.BadRequest<NcrDto>("این تصمیم مجوز ارفاقی لازم ندارد.");
-                if (!_user.IsInRole(InventoryRoles.RoleEngineering)) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.NotAllowed + " (مجوز ارفاقی را معاونت طراحی و ساخت صادر می‌کند)");
-                if (maker) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + makerMessage);
-                // the permit is the last act on a decision the quality department has already signed (review H4): never before the QC signature
-                if (!ncr.QualityApprovedAt.HasValue) return ResponseDtoHelper.BadRequest<NcrDto>("مجوز ارفاقی پس از امضای کنترل کیفیت صادر می‌شود؛ ابتدا QC تصمیم را امضا کند.");
-                if (ncr.ConcessionNumber == null) return ResponseDtoHelper.BadRequest<NcrDto>("شماره مجوز ارفاقی را وارد کنید.");
-                if (ncr.CustomerApprovalRequired && ncr.CustomerApprovalReference == null)
-                    return ResponseDtoHelper.BadRequest<NcrDto>("قرارداد تایید انحراف توسط مشتری را لازم دارد؛ شماره نامه/تایید مشتری را وارد کنید.");
-                ncr.ConcessionApprovedAt = now;
-                ncr.ConcessionApprovedByUserId = me;
-            }
-            else
-            {
-                string role = dto.Kind == ApprovalKind.Quality ? InventoryRoles.RoleQualitySigner
-                    : dto.Kind == ApprovalKind.Engineering ? InventoryRoles.RoleEngineering
-                    : dto.Kind == ApprovalKind.Manufacturing ? InventoryRoles.RoleManufacturing
-                    : null;
-                if (role == null) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.InvalidData);
-                if (!_user.IsInRole(role)) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.NotAllowed);
-                if (signers.Contains(me)) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser);
-                if (maker)
-                    return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + (dto.Kind == ApprovalKind.Quality
-                        ? " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند امضای کنترل کیفیت را بدهد؛ کاربر دیگری از QC یا مدیر QA امضا کند)"
-                        : makerMessage));
-                if (dto.Kind == ApprovalKind.Quality) { ncr.QualityApprovedAt = now; ncr.QualityApprovedByUserId = me; }
-                else if (dto.Kind == ApprovalKind.Engineering) { ncr.EngineeringApprovedAt = now; ncr.EngineeringApprovedByUserId = me; }
-                else { ncr.ManufacturingApprovedAt = now; ncr.ManufacturingApprovedByUserId = me; }
-            }
+            if (dto.Concession) { ncr.ConcessionApprovedAt = now; ncr.ConcessionApprovedByUserId = me; }
+            else if (dto.Kind == ApprovalKind.Quality) { ncr.QualityApprovedAt = now; ncr.QualityApprovedByUserId = me; }
+            else if (dto.Kind == ApprovalKind.Engineering) { ncr.EngineeringApprovedAt = now; ncr.EngineeringApprovedByUserId = me; }
+            else { ncr.ManufacturingApprovedAt = now; ncr.ManufacturingApprovedByUserId = me; }
 
             // PR-QC-002: QC, engineering and manufacturing managers sign; a concession also needs its permit
             if (ncr.QualityApprovedAt.HasValue && ncr.EngineeringApprovedAt.HasValue && ncr.ManufacturingApprovedAt.HasValue &&
@@ -916,17 +892,12 @@ namespace Services.NasbNiro.Inventory
             if (ncr == null) return ResponseDtoHelper.NotFound<NcrDto>("گزارش عدم انطباق پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             int me = _user.UserId;
-            // R1q D3: the person who raised or edited the report is the maker; closing and cancelling are the checker's act
-            bool maker = global::Services.NasbNiro.Finance.LedgerMath.Touched(ncr.CreatorUserId, ncr.EditorUserIds, me);
+            // R1q D3 and R1-gaps: the person who raised or edited the report is the maker; closing and cancelling are the checker's act (one predicate each, shared with the NCR flags)
             if (dto.Cancel)
             {
-                if (!_user.IsInRole("QA,QC")) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.NotAllowed + " (ابطال گزارش عدم انطباق را مدیر QA یا کارشناس QC انجام می‌دهد)");
-                if (ncr.Status != NcrStatus.Open) return ResponseDtoHelper.BadRequest<NcrDto>("فقط گزارش باز ابطال می‌شود.");
                 string reason = InventoryText.Clean(dto.Reason);
-                if (reason == null) return ResponseDtoHelper.BadRequest<NcrDto>("علت ابطال را بنویسید.");
-                if (reason.Length > 1000) return ResponseDtoHelper.BadRequest<NcrDto>("علت ابطال نباید بیش از ۱۰۰۰ نویسه باشد.");
-                // the QA manager may cancel any report (always with a reason, and the cancellation is recorded); a QC user only a report he did not raise or edit
-                if (maker && !_user.IsInRole("QA")) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند آن را ابطال کند؛ مدیر QA یا کاربر دیگری از QC ابطال کند)");
+                string cancelProblem = NcrRules.CancelProblem(ncr, me, _user.IsInRole, true, reason);
+                if (cancelProblem != null) return ResponseDtoHelper.BadRequest<NcrDto>(cancelProblem);
                 string blocked = await Quality.QualityNcrFactory.CancelBlockAsync(_uow, ncr, cancellationToken);
                 if (blocked != null) return ResponseDtoHelper.BadRequest<NcrDto>(blocked);
                 ncr.Status = NcrStatus.Cancelled;
@@ -937,10 +908,8 @@ namespace Services.NasbNiro.Inventory
             }
             else
             {
-                if (ncr.Status != NcrStatus.Executed) return ResponseDtoHelper.BadRequest<NcrDto>("گزارش پس از اجرای تصمیم بسته می‌شود.");
-                if (maker) return ResponseDtoHelper.BadRequest<NcrDto>(InventoryMessages.SameUser + " (ثبت‌کننده یا ویرایشگر گزارش نمی‌تواند آن را ببندد؛ کاربر دیگری از QC یا QA ببندد)");
-                if (ncr.CauseCategory == NcrCauseCategory.None || ncr.RootCause == null || ncr.CorrectiveAction == null)
-                    return ResponseDtoHelper.BadRequest<NcrDto>("پیش از بستن، دسته علت ریشه‌ای، شرح علت و اقدام اصلاحی را ثبت کنید.");
+                string closeProblem = NcrRules.CloseProblem(ncr, me);
+                if (closeProblem != null) return ResponseDtoHelper.BadRequest<NcrDto>(closeProblem);
                 string effectiveness = InventoryText.Clean(dto.EffectivenessCheck);
                 if (effectiveness == null) return ResponseDtoHelper.BadRequest<NcrDto>("نتیجه بررسی اثربخشی اقدام اصلاحی را بنویسید.");
                 if (effectiveness.Length > 4000) return ResponseDtoHelper.BadRequest<NcrDto>("شرح اثربخشی نباید بیش از ۴۰۰۰ نویسه باشد.");

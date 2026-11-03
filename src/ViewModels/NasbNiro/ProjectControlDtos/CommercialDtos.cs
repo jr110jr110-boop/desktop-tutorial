@@ -82,6 +82,12 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public DateTime? ReleaseRequestedDate { get; set; }
         public bool ReleaseRequestOpen { get; set; }
 
+        /// <summary>R1-gaps, for the signed-in caller: may ask for the release now (guarantees/request-release): allowed role, no request waits, the guarantee is not closed.</summary>
+        public bool CanRequestRelease { get; set; }
+
+        /// <summary>R1-gaps, for the signed-in caller: may confirm the waiting request for the release (guarantees/confirm-release): allowed role, the open request is a release and somebody else made it.</summary>
+        public bool CanConfirmRelease { get; set; }
+
         public List<PcGuaranteeEventDto> Events { get; set; } = new List<PcGuaranteeEventDto>();
     }
 
@@ -101,7 +107,10 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int GuaranteeId { get; set; }
     }
 
-    /// <summary>R1a: the release of a guarantee. The date (not in the future) and the note (the letter of the client or the bank) are required.</summary>
+    /// <summary>
+    /// R1a: the release of a guarantee. The date (not in the future) and the note (the letter of the client or the bank) are required by request-release; confirm-release needs neither (the request holds them).
+    /// R1-gaps: guarantees/request-release records the request, guarantees/confirm-release (a different user) closes it; guarantees/release is the deprecated alias that decides by state.
+    /// </summary>
     public class PcGuaranteeReleaseDto
     {
         public int GuaranteeId { get; set; }

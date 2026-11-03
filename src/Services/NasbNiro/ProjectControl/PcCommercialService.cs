@@ -37,6 +37,8 @@ namespace Services.NasbNiro.ProjectControl
 
         /// <summary>R1a: the release of a guarantee (COMMERCIAL, FINANCEMANAGER, PMO); the date and the note are required.</summary>
         Task<ResponseDto<PcGuaranteeDto>> ReleaseGuaranteeAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<PcGuaranteeDto>> RequestGuaranteeReleaseAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<PcGuaranteeDto>> ConfirmGuaranteeReleaseAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken);
 
         /// <summary>R1a2 (M-3): takes back the open request for the release or the cancellation; the one who asked, or a PMO user.</summary>
         Task<ResponseDto<PcGuaranteeDto>> WithdrawGuaranteeRequestAsync(PcGuaranteeWithdrawDto dto, CancellationToken cancellationToken);
@@ -386,6 +388,9 @@ namespace Services.NasbNiro.ProjectControl
                     DaysToExpiry = i.ExpiryDate.HasValue ? (int)(i.ExpiryDate.Value.Date - today).TotalDays : (int?)null,
                     ReleaseRequestedByUserId = i.ReleaseRequestedByUserId, ReleaseRequestedAt = i.ReleaseRequestedAt, ReleaseRequestedKind = i.ReleaseRequestedKind,
                     ReleaseRequestedNote = i.ReleaseRequestedNote, ReleaseRequestedDate = i.ReleaseRequestedDate, ReleaseRequestOpen = RequestIsOpen(i, nowLocal),
+                    // R1-gaps: what the caller may do now, so the screen does not infer it (same checks as the actions: role, open or not, the requester is never the confirmer)
+                    CanRequestRelease = _user.IsInRole(CloseRoles) && !RequestIsOpen(i, nowLocal) && (i.Status == PcGuaranteeStatus.Issued || i.Status == PcGuaranteeStatus.Active || i.Status == PcGuaranteeStatus.ExtensionPending || i.Status == PcGuaranteeStatus.Expired),
+                    CanConfirmRelease = _user.IsInRole(CloseRoles) && RequestIsOpen(i, nowLocal) && i.ReleaseRequestedKind == PcGuaranteeCloseKind.Release && i.ReleaseRequestedByUserId != Me,
                     Events = events.Where(e => e.GuaranteeInfoId == i.Id).Select(e => new PcGuaranteeEventDto { Id = e.Id, Kind = e.Kind, EventDate = e.EventDate, NewExpiryDate = e.NewExpiryDate, Fee = e.Fee, DocumentId = e.DocumentId, Note = e.Note }).ToList(),
                 });
             }
@@ -625,24 +630,45 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok((await GuaranteeDtosAsync(new List<PcGuaranteeInfo> { info }, true, cancellationToken)).First(), remark);
         }
 
-        public async Task<ResponseDto<PcGuaranteeDto>> ReleaseGuaranteeAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken)
+        /// <summary>The two-step release: the first person asks (request-release), a different person confirms (confirm-release). <c>Auto</c> is the old combined call, kept one release as a deprecated alias that decides by state.</summary>
+        private enum ReleaseStep { Auto, Request, Confirm }
+
+        /// <summary>R1-gaps: records the request for the release (the first of the two). Refused when a request (of either action) already waits.</summary>
+        public Task<ResponseDto<PcGuaranteeDto>> RequestGuaranteeReleaseAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken) => ReleaseCoreAsync(dto, ReleaseStep.Request, cancellationToken);
+
+        /// <summary>R1-gaps: confirms the open request for the release (the second of the two): by a different user than the requester; the date and the note are those of the request.</summary>
+        public Task<ResponseDto<PcGuaranteeDto>> ConfirmGuaranteeReleaseAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken) => ReleaseCoreAsync(dto, ReleaseStep.Confirm, cancellationToken);
+
+        /// <summary>Deprecated alias of request-release / confirm-release: records the request when none is open, confirms it when one is. To be removed one release after the front uses the two actions.</summary>
+        public Task<ResponseDto<PcGuaranteeDto>> ReleaseGuaranteeAsync(PcGuaranteeReleaseDto dto, CancellationToken cancellationToken) => ReleaseCoreAsync(dto, ReleaseStep.Auto, cancellationToken);
+
+        private async Task<ResponseDto<PcGuaranteeDto>> ReleaseCoreAsync(PcGuaranteeReleaseDto dto, ReleaseStep stepKind, CancellationToken cancellationToken)
         {
             if (dto == null) return Bad<PcGuaranteeDto>(PcText.InvalidData);
             // the money side signs the release too, so this list differs from the other guarantee actions (★ to be confirmed by the company)
             if (!_user.IsInRole(CloseRoles)) return Bad<PcGuaranteeDto>(PcText.NotAllowed + " (آزادسازی ضمانت‌نامه با بازرگانی، مدیر مالی یا PMO است)");
-            if (dto.ReleaseDate == default) return Bad<PcGuaranteeDto>("تاریخ آزادسازی را وارد کنید.");
-            if (dto.ReleaseDate.Date > DateTime.Today) return Bad<PcGuaranteeDto>("تاریخ آزادسازی نمی‌تواند در آینده باشد.");
-            string note = Clean(dto.Note);
-            if (note == null) return Bad<PcGuaranteeDto>("برای آزادسازی ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه کارفرما یا بانک) را بنویسید.");
-            if (note.Length > MaxNoteLength) return Bad<PcGuaranteeDto>($"توضیح آزادسازی بیش از {MaxNoteLength} نویسه است؛ آن را کوتاه کنید.");
             PcGuaranteeInfo info = await _uow.Set<PcGuaranteeInfo>().FirstOrDefaultAsync(i => i.Id == dto.GuaranteeId && !i.Deleted, cancellationToken);
             if (info == null) return PcText.NotFound<PcGuaranteeDto>("اطلاعات ضمانت‌نامه پیدا نشد.");
             if (info.Status == PcGuaranteeStatus.Released) return Bad<PcGuaranteeDto>("این ضمانت‌نامه قبلاً آزاد شده است.");
             if (info.Status == PcGuaranteeStatus.Cancelled) return Bad<PcGuaranteeDto>("ضمانت‌نامه ابطال‌شده آزاد نمی‌شود.");
             if (info.Status == PcGuaranteeStatus.Requested) return Bad<PcGuaranteeDto>("ضمانت‌نامه‌ای که هنوز صادر نشده آزاد نمی‌شود.");
+            DateTime nowLocal = DateTime.Now;
+            bool open = RequestIsOpen(info, nowLocal);
+            if (stepKind == ReleaseStep.Auto) stepKind = open ? ReleaseStep.Confirm : ReleaseStep.Request;
+            if (stepKind == ReleaseStep.Request && open)
+                return Bad<PcGuaranteeDto>($"برای این ضمانت‌نامه یک درخواست «{CloseName(info.ReleaseRequestedKind.Value)}» منتظر تأیید است؛ آن را تأیید کنید یا پس بگیرید (guarantees/withdraw)، سپس درخواست تازه ثبت کنید.");
+            if (stepKind == ReleaseStep.Confirm && !open)
+                return Bad<PcGuaranteeDto>("برای این ضمانت‌نامه درخواست آزادسازی‌ای منتظر تأیید نیست (یا از هفت روز گذشته است)؛ ابتدا درخواست را ثبت کنید (guarantees/request-release).");
+            // the confirming call needs neither the date nor the note: the request holds them (a date or note it does give is compared with them)
+            DateTime releaseDate = stepKind == ReleaseStep.Confirm && dto.ReleaseDate == default ? (info.ReleaseRequestedDate ?? default) : dto.ReleaseDate;
+            if (stepKind == ReleaseStep.Request && dto.ReleaseDate == default) return Bad<PcGuaranteeDto>("تاریخ آزادسازی را وارد کنید.");
+            if (releaseDate.Date > DateTime.Today) return Bad<PcGuaranteeDto>("تاریخ آزادسازی نمی‌تواند در آینده باشد.");
+            string note = Clean(dto.Note);
+            if (note == null && stepKind == ReleaseStep.Request) return Bad<PcGuaranteeDto>("برای آزادسازی ضمانت‌نامه، توضیح (مثلاً شماره و تاریخ نامه کارفرما یا بانک) را بنویسید.");
+            if (note != null && note.Length > MaxNoteLength) return Bad<PcGuaranteeDto>($"توضیح آزادسازی بیش از {MaxNoteLength} نویسه است؛ آن را کوتاه کنید.");
             DateTimeOffset now = DateTimeOffset.Now;
             // R1a2 (M2, M-3): a second person confirms with the same action; the first call only records the request (its date and note are what the confirmation records)
-            CloseStep step = await FirstOfTwoAsync(info, PcGuaranteeCloseKind.Release, dto.ReleaseDate.Date, note, now, cancellationToken);
+            CloseStep step = await FirstOfTwoAsync(info, PcGuaranteeCloseKind.Release, releaseDate.Date, note, now, cancellationToken);
             if (step.Answer != null) return step.Answer;
             info.Status = PcGuaranteeStatus.Released;
             info.ModifyDate = now; info.ModifierUserId = Me;

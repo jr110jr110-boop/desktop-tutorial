@@ -454,6 +454,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _dashboard.GetSettingsAsync(ct));
 
         [HttpPost("settings")]
+        [Authorize(Roles = QualityRoles.Audit + ",CEO")]
         public async Task<IActionResult> SaveSettingAsync([FromBody] SaveQualitySettingDto dto, CancellationToken ct) => Ok(await _dashboard.SaveSettingAsync(dto, ct));
     }
 }

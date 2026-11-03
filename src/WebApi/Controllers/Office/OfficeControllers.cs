@@ -330,6 +330,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> PolicyAsync(CancellationToken ct) => Ok(await _attendance.GetPolicyAsync(ct));
 
         [HttpPost("policy")]
+        [Authorize(Roles = OfficeRoles.Hr + "," + OfficeRoles.Ceo)]
         public async Task<IActionResult> SavePolicyAsync([FromBody] AttendancePolicyDto dto, CancellationToken ct) => Ok(await _attendance.SavePolicyAsync(dto, ct));
 
         [HttpPost("compute")]

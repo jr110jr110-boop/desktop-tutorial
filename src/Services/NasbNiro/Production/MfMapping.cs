@@ -17,6 +17,20 @@ namespace Services.NasbNiro.Production
     {
         public static string JobCard(string orderNumber, MfOperation op) => MfNames.Operation(orderNumber, op.Sequence) + (op.IsRework ? "-R" : string.Empty);
 
+        /// <summary>
+        /// R1p D43 / R1-gaps: the work centres that make the machine mandatory when time is booked on a running (non-waiting) booking: they require one and still have a machine that is not retired.
+        /// The single source of the <see cref="OperationDto.MachineRequired"/> flag of every operation list.
+        /// </summary>
+        public static async Task<HashSet<int>> MachineRequiredCentersAsync(IUnitOfWork _uow, IEnumerable<MfWorkCenter> centers, CancellationToken ct)
+        {
+            List<MfWorkCenter> requiring = centers.Where(c => c.RequiresMachine).ToList();
+            if (requiring.Count == 0) return new HashSet<int>();
+            List<int> ids = requiring.Select(c => c.Id).ToList();
+            HashSet<int> withMachines = (await _uow.Set<MfMachineInfo>().AsNoTracking().Where(i => !i.Deleted && i.WorkCenterId != null && ids.Contains(i.WorkCenterId.Value) && i.Status != MfMachineStatus.Retired)
+                .Select(i => i.WorkCenterId.Value).Distinct().ToListAsync(ct)).ToHashSet();
+            return requiring.Where(c => MfTerminalRules.MachineRequired(c.RequiresMachine, withMachines.Contains(c.Id) ? 1 : 0, MfBookingKind.Run)).Select(c => c.Id).ToHashSet();
+        }
+
         public static async Task<List<OperationDto>> OperationDtosAsync(IUnitOfWork _uow, List<MfOperation> ops, CancellationToken ct)
         {
             if (ops.Count == 0) return new List<OperationDto>();
@@ -39,6 +53,7 @@ namespace Services.NasbNiro.Production
             Dictionary<int, string> prs = prIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<PurchaseRequest>().AsNoTracking().Where(p => prIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Number, ct);
             List<int> docIds = ops.Where(o => o.SubcontractIssueId.HasValue).Select(o => o.SubcontractIssueId.Value).ToList();
             Dictionary<int, string> docs = docIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => docIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, d => d.Number, ct);
+            HashSet<int> machineRequired = await MachineRequiredCentersAsync(_uow, centers.Values, ct);
             List<int> opIds = ops.Select(o => o.Id).ToList();
             var bookings = await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && opIds.Contains(b.OperationId))
                 .GroupBy(b => b.OperationId).Select(g => new { Id = g.Key, Running = g.Count(b => b.EndAt == null), Hours = g.Sum(b => b.Hours) }).ToListAsync(ct);
@@ -64,6 +79,7 @@ namespace Services.NasbNiro.Production
                     ExpectedQty = MfQuantityRules.Expected(chainRows.Where(x => x.OrderId == o.OrderId), o, orderRows.First(x => x.Id == o.OrderId).Quantity),
                     IsWelding = o.IsWelding, WpsId = o.WpsId, WpsNumber = o.WpsId.HasValue && wpsNumbers.TryGetValue(o.WpsId.Value, out string wn) ? wn : null, WeldLogId = o.WeldLogId,
                     AcceptedByConcession = o.AcceptedByConcession, AcceptanceStale = o.QcAccepted && !MfTerminalRules.AcceptanceStillHolds(o),
+                    MachineRequired = o.WorkCenterId.HasValue && machineRequired.Contains(o.WorkCenterId.Value),
                 };
             }).OrderBy(d => d.OrderId).ThenBy(d => d.Sequence).ThenBy(d => d.IsRework ? 1 : 0).ToList();
         }

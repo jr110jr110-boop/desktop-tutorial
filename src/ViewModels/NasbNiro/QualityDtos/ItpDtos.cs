@@ -162,6 +162,22 @@ namespace ViewModels.NasbNiro.QualityDtos
         public DateTime? ClientApprovalDate { get; set; }
         public int NoticeDays { get; set; }
         public string Note { get; set; }
+
+        /// <summary>R1-gaps: who prepared the plan (0 when the system drafted it), who submitted it and who edited it since the last client approval: none of them records the client's approval.</summary>
+        public int CreatorUserId { get; set; }
+
+        public int? SubmittedByUserId { get; set; }
+        public List<int> EditorUserIds { get; set; } = new List<int>();
+
+        /// <summary>R1-gaps, for the signed-in caller, computed with the rules the plan actions enforce.</summary>
+        public bool CanSubmit { get; set; }
+
+        /// <summary>May record the client's approval (client-approve): quality manager, plan submitted, not a maker of the plan.</summary>
+        public bool CanApprove { get; set; }
+
+        public bool CanUse { get; set; }
+        public bool CanClose { get; set; }
+        public bool CanRevise { get; set; }
         public List<ItpActivityDto> Activities { get; set; } = new List<ItpActivityDto>();
         public List<ItpRevisionDto> Revisions { get; set; } = new List<ItpRevisionDto>();
     }

@@ -32,6 +32,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _requests.GetSettingsAsync(ct));
 
         [HttpPost("settings")]
+        [Authorize(Roles = SvRoles.SettingSetters)]
         public async Task<IActionResult> SaveSettingAsync([FromBody] SvSaveSettingDto dto, CancellationToken ct) => Ok(await _requests.SaveSettingAsync(dto, ct));
 
         [HttpGet("sla-rules")]

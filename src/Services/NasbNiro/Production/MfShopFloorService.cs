@@ -122,13 +122,6 @@ namespace Services.NasbNiro.Production
             var items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).Select(i => new { i.Id, i.Code, i.Title }).ToListAsync(ct);
             Dictionary<int, MfFlow.Urgency> urgency = await MfFlow.UrgencyAsync(_uow, ct);
             List<int> opIds = ops.Select(o => o.Id).ToList();
-            // R1p D43: the work centres that make the machine mandatory at the terminal (they require one and still have a machine that is not retired)
-            List<int> centerIds = ops.Where(o => o.WorkCenterId.HasValue).Select(o => o.WorkCenterId.Value).Distinct().ToList();
-            Dictionary<int, bool> requiresMachine = centerIds.Count == 0 ? new Dictionary<int, bool>()
-                : await _uow.Set<MfWorkCenter>().AsNoTracking().Where(c => centerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.RequiresMachine, ct);
-            HashSet<int> withMachines = centerIds.Count == 0 ? new HashSet<int>()
-                : (await _uow.Set<MfMachineInfo>().AsNoTracking().Where(i => !i.Deleted && i.WorkCenterId != null && centerIds.Contains(i.WorkCenterId.Value) && i.Status != MfMachineStatus.Retired)
-                    .Select(i => i.WorkCenterId.Value).Distinct().ToListAsync(ct)).ToHashSet();
             HashSet<int> booked = employeeId.HasValue
                 ? (await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.EmployeeId == employeeId.Value && opIds.Contains(b.OperationId)).Select(b => b.OperationId).Distinct().ToListAsync(ct)).ToHashSet()
                 : new HashSet<int>();
@@ -156,7 +149,7 @@ namespace Services.NasbNiro.Production
                     NeedDateText = MfText.Date(u?.NeedDate), MyRunning = running != null, MyRunningSinceText = MfText.Stamp(running?.StartAt), MyRunningSince = running?.StartAt,
                     ExpectedQty = d.ExpectedQty, IsWelding = d.IsWelding, WpsId = d.WpsId, WpsNumber = d.WpsNumber, WeldLogId = d.WeldLogId, AcceptedByConcession = d.AcceptedByConcession,
                     AcceptanceStale = d.AcceptanceStale,
-                    MachineRequired = d.WorkCenterId.HasValue && MfTerminalRules.MachineRequired(requiresMachine.GetValueOrDefault(d.WorkCenterId.Value), withMachines.Contains(d.WorkCenterId.Value) ? 1 : 0, MfBookingKind.Run),
+                    MachineRequired = d.MachineRequired,
                     HasMyBooking = booked.Contains(d.Id),
                 };
             }).ToList();

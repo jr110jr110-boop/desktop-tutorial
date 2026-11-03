@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Quality;
 using ViewModels.NasbNiro.Pagination;
 
@@ -40,6 +41,17 @@ namespace ViewModels.NasbNiro.QualityDtos
         /// <summary>Computed now while the note is a draft; the stored snapshot once it is released.</summary>
         public List<ReleaseCheckDto> Checks { get; set; } = new List<ReleaseCheckDto>();
         public bool CanRelease { get; set; }
+
+        /// <summary>R1-gaps: who drafted the note and who saved it (none of them releases it).</summary>
+        public int CreatorUserId { get; set; }
+
+        public List<int> EditorUserIds { get; set; } = new List<int>();
+
+        /// <summary>R1-gaps, for the signed-in caller: may release the note now (QC role, not its drafter or an editor, draft, items valid and every check passed). Same rules as the release action.</summary>
+        public bool CanSign { get; set; }
+
+        /// <summary>The caller may cancel the note (quality manager, not cancelled yet; a reason is asked).</summary>
+        public bool CanCancel { get; set; }
     }
 
     public class ReleaseNoteQuery : PaginationParams
@@ -74,6 +86,10 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string ItemCode { get; set; }
         public string ItemTitle { get; set; }
         public string Unit { get; set; }
+
+        /// <summary>R1-gaps: how the item is tracked (None, Lot, Serial): serial numbers are asked only for a serial item.</summary>
+        public ItemTrackingMode TrackingMode { get; set; }
+
         public decimal Quantity { get; set; }
         public List<string> SerialNumbers { get; set; } = new List<string>();
     }

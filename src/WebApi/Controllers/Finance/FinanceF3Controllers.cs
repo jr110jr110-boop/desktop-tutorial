@@ -48,6 +48,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _controls.GetSettingsAsync(ct));
 
         [HttpPost("settings")]
+        [Authorize(Roles = FinanceRoles.Managers)]
         public async Task<IActionResult> SaveSettingAsync([FromBody] SaveFinanceSettingDto dto, CancellationToken ct) => Ok(await _controls.SaveSettingAsync(dto, ct));
 
         [HttpGet("vouchers/{voucherId:int}/attachments")]
@@ -72,6 +73,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> ThresholdsAsync(CancellationToken ct) => Ok(await _controls.GetThresholdsAsync(ct));
 
         [HttpPost("approval-thresholds")]
+        [Authorize(Roles = FinanceRoles.Managers)]
         public async Task<IActionResult> SaveThresholdAsync([FromBody] SaveApprovalThresholdDto dto, CancellationToken ct) => Ok(await _controls.SaveThresholdAsync(dto, ct));
 
         [HttpPost("vouchers/copy")]
@@ -493,6 +495,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> CurrentPortionAsync(int periodId, CancellationToken ct) => Ok(await _loans.CurrentPortionAsync(periodId, ct));
 
         [HttpPost("limits")]
+        [Authorize(Roles = FinanceRoles.Managers)]
         public async Task<IActionResult> LimitAsync([FromBody] FnFacilityLimitDto dto, CancellationToken ct) => Ok(await _loans.SaveFacilityLimitAsync(dto, ct));
 
         [HttpGet("utilisation")]

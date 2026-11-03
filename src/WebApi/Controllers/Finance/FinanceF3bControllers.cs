@@ -45,6 +45,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> GuaranteeActionAsync([FromBody] FnGuaranteeActionDto dto, CancellationToken ct) => Ok(await _s.BankGuaranteeActionAsync(dto, ct));
 
         [HttpPost("guarantees/limits")]
+        [Authorize(Roles = FinanceRoles.Managers)]
         public async Task<IActionResult> GuaranteeLimitAsync([FromBody] FnGuaranteeLimitDto dto, CancellationToken ct) => Ok(await _s.SetGuaranteeLimitAsync(dto, ct));
 
         [HttpGet("guarantees/exposure")]

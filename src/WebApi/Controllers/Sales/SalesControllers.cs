@@ -73,6 +73,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SettingsAsync(CancellationToken ct) => Ok(await _crm.GetSettingsAsync(ct));
 
         [HttpPost("settings")]
+        [Authorize(Roles = SalesRoles.SettingSetters)]
         public async Task<IActionResult> SaveSettingAsync([FromBody] SlSaveSettingDto dto, CancellationToken ct) => Ok(await _crm.SaveSettingAsync(dto, ct));
 
         [HttpGet("reason-codes")]
