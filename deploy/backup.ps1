@@ -19,10 +19,13 @@
         backup has been made.
 
     Both modes
-      - the backups are encrypted (AES-256) with the server certificate given in -EncryptionCertificate. A backup can be restored only
-        on a server that has that certificate: install.ps1 writes the certificate and its private key to <BackupFolder>\keys and shows
-        the password of the key once (in the install log). Keep the password and the keys folder apart from the backups.
-        If the encrypted backup cannot be made, an unencrypted one is made instead and the run ends with code 2 (see the log).
+      - the database backups are encrypted. Editions that can (Standard, Enterprise, Developer) encrypt the backup itself (AES-256) with the server certificate given in
+        -EncryptionCertificate; a backup can be restored only on a server that has that certificate (install.ps1 writes the certificate and its private key to
+        <BackupFolder>\keys and shows the password of the key once). SQL Server Express cannot encrypt a backup, so there the backup is made plain, encrypted at FILE level right
+        after (x.bak.enc, x.trn.enc; see backup-crypto.ps1: AES-256 with an HMAC seal, key sealed by DPAPI LocalMachine in <BackupFolder>\keys) and the plain file is deleted.
+        If the native encryption fails on another edition, the file is encrypted at file level instead. If no encrypted backup can be made at all, the run fails (code 1): no plain backup stays.
+      - the copy of the uploaded files (files\) is encrypted at file level on every edition (each file becomes <name>.enc); only the redacted settings copy stays readable.
+      - the folder keys is NOT copied to the off-site target: keep an escrow copy of the keys apart from the backups (install.ps1 shows the file key once).
       - backups older than the retention are deleted: setting Backup:RetentionDays (default 35), in appsettings.Production.json or
         appsettings.json of the program, unless -KeepDays is given. The newest two full backups are always kept, and a log backup is
         kept as long as the oldest full backup that is kept.
@@ -30,11 +33,12 @@
         copied there after each run. The task runs as SYSTEM, so on a network share the computer account of this server needs write access.
       - every run adds a line to <BackupFolder>\backup-log.txt.
 
-    Exit code: 0 everything done, 1 the backup failed, 2 the backup was made but not as asked (not encrypted, or the off-site copy failed).
+    Exit code: 0 everything done (encrypted), 1 the backup failed, 2 the backup was made and encrypted but the off-site copy failed or a part could not be copied.
 
-    Restore, in short: restore the certificate first on a new server (CREATE CERTIFICATE ... FROM FILE ... WITH PRIVATE KEY, with the password from
-    the install log), then RESTORE DATABASE from the newest full backup WITH NORECOVERY, the log backups in order WITH NORECOVERY (the last one
-    WITH RECOVERY, optionally STOPAT), or run install.ps1 -RestoreBackup for the full backup alone.
+    Restore, in short: a .bak.enc / .trn.enc file is decrypted first (install.ps1 -RestoreBackup does it for the full backup: on the same server with the sealed key, on another
+    server with -BackupFileKey <escrow key>); a natively encrypted backup needs the certificate first (CREATE CERTIFICATE ... FROM FILE ... WITH PRIVATE KEY, with the password
+    from the install log). Then RESTORE DATABASE from the newest full backup WITH NORECOVERY, the log backups in order WITH NORECOVERY (the last one WITH RECOVERY, optionally
+    STOPAT), or run install.ps1 -RestoreBackup for the full backup alone.
 #>
 [CmdletBinding()]
 param(
@@ -51,6 +55,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $script:LogFile = Join-Path $BackupFolder 'backup-log.txt'
 $script:Degraded = $false
+. (Join-Path $PSScriptRoot 'backup-crypto.ps1')
 
 function Write-Log([string]$Text) {
     $line = '{0:yyyy-MM-dd HH:mm:ss}  {1}' -f (Get-Date), $Text
@@ -146,10 +151,10 @@ function Get-ExpiredBackups($Full, $Log, [int]$Days, [datetime]$Now) {
 
 function Remove-ExpiredBackups([string]$DatabaseFolder, [int]$Days) {
     if (-not (Test-Path $DatabaseFolder)) { return }
-    $full = @(Get-ChildItem -Path $DatabaseFolder -Filter '*.bak' -File -ErrorAction SilentlyContinue)
+    $full = @(Get-ChildItem -Path $DatabaseFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.bak(\.enc)?$' })
     $logFolder = Join-Path $DatabaseFolder 'log'
     $log = @()
-    if (Test-Path $logFolder) { $log = @(Get-ChildItem -Path $logFolder -Filter '*.trn' -File -ErrorAction SilentlyContinue) }
+    if (Test-Path $logFolder) { $log = @(Get-ChildItem -Path $logFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.trn(\.enc)?$' }) }
     $expired = Get-ExpiredBackups $full $log $Days (Get-Date)
     foreach ($file in $expired) { Remove-Item -Path $file.FullName -Force }
     if ($expired.Count -gt 0) { Write-Log "Removed $($expired.Count) backups older than $Days days from $DatabaseFolder" }
@@ -188,22 +193,53 @@ function Invoke-ServerQuery([string]$Query, [hashtable]$Parameters, [switch]$Sca
     finally { $connection.Dispose() }
 }
 
-# Runs BACKUP DATABASE or BACKUP LOG to $File. Encrypted when a certificate is given; when that fails, the backup is made once more without encryption.
+# Runs BACKUP DATABASE or BACKUP LOG to $File and returns the path of the file that holds the (encrypted) backup.
+#  - an edition that can encrypt a backup, with a certificate: native encryption; when it fails the backup is made plain and encrypted at file level (H2);
+#  - SQL Server Express (EngineEdition 4) or no certificate: no doomed SQL encryption; the plain backup is encrypted at file level and the plain file is deleted;
+#  - when the file encryption cannot be done the plain backup is deleted and the run fails (no plain backup stays on disk).
+# $script:BackupHow says how: 'native' or 'file'.
 function Invoke-Backup([string]$Statement, [string]$File, [bool]$IsExpress, [string]$Certificate) {
     $target = $Statement + ' TO DISK = @file WITH '
-    if ($Certificate) {
+    if ($Certificate -and -not $IsExpress) {
         try {
             Invoke-ServerQuery ($target + (Get-BackupOptions $IsExpress $Certificate)) @{ '@file' = $File }
-            return $true
+            $script:BackupHow = 'native'
+            return $File
         }
         catch {
-            Write-Log "WARNING: the encrypted backup failed ($($_.Exception.Message)); an unencrypted backup is made instead. Check the certificate '$Certificate' (install.ps1 creates it)."
-            $script:Degraded = $true
+            Write-Log "WARNING: the native encrypted backup failed ($($_.Exception.Message)); the backup is made plain and encrypted at file level instead. Check the certificate '$Certificate' (install.ps1 creates it)."
             if (Test-Path $File) { Remove-Item -Path $File -Force -ErrorAction SilentlyContinue }
         }
     }
     Invoke-ServerQuery ($target + (Get-BackupOptions $IsExpress $null)) @{ '@file' = $File }
-    return $false
+    try {
+        $key = Get-FileCryptoKey (Join-Path $BackupFolder 'keys') $null
+        $encryptedFile = Protect-BackupFile $File $key.Bytes
+    }
+    catch {
+        if (Test-Path $File) { Remove-Item -Path $File -Force -ErrorAction SilentlyContinue }
+        if (Test-Path ($File + '.enc.partial')) { Remove-Item -Path ($File + '.enc.partial') -Force -ErrorAction SilentlyContinue }
+        throw "The backup could not be encrypted at file level and was deleted (no plain backup is kept): $($_.Exception.Message)"
+    }
+    $script:BackupHow = 'file'
+    return $encryptedFile
+}
+
+# Copies the uploaded files into <FilesFolder>\<relative>\<file>.enc: only new and changed files are encrypted again; nothing is deleted there. A plain copy that an earlier version of
+# this script left next to an encrypted one is removed.
+function Copy-EncryptedFiles([string]$Source, [string]$Target, [byte[]]$Key) {
+    $root = (Resolve-Path $Source).Path.TrimEnd('\')
+    foreach ($file in Get-ChildItem -Path $root -Recurse -File) {
+        $relative = $file.FullName.Substring($root.Length).TrimStart('\')
+        $destination = Join-Path $Target ($relative + '.enc')
+        New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
+        if (-not (Test-Path $destination) -or (Get-Item $destination).LastWriteTimeUtc -lt $file.LastWriteTimeUtc) {
+            [PmisFileCrypto]::Encrypt($file.FullName, $destination, $Key)
+            (Get-Item $destination).LastWriteTimeUtc = [DateTime]::UtcNow
+        }
+        $plain = Join-Path $Target $relative
+        if (Test-Path $plain) { Remove-Item -Path $plain -Force }
+    }
 }
 
 # ----------------------------------------------------------------------------------------------
@@ -213,7 +249,7 @@ function Invoke-Backup([string]$Statement, [string]$File, [bool]$IsExpress, [str
 function Copy-ToOffsite([string]$Target) {
     try {
         if (-not (Test-Path $Target)) { New-Item -ItemType Directory -Force -Path $Target | Out-Null }
-        foreach ($name in @('database', 'files', 'keys')) {
+        foreach ($name in @('database', 'files')) {   # the keys folder is never copied off-site: it would sit next to the data it opens (escrow: see install.ps1)
             $source = Join-Path $BackupFolder $name
             if (-not (Test-Path $source)) { continue }
             & robocopy.exe $source (Join-Path $Target $name) /E /R:2 /W:5 /NP /NFL /NDL /NJH /NJS | Out-Null
@@ -262,25 +298,25 @@ FROM sys.databases d LEFT JOIN sys.database_recovery_status r ON r.database_id =
                 exit 0
             }
             $logFile = Join-Path $logDir ('{0}_{1:yyyyMMdd_HHmmss}.trn' -f $DatabaseName, (Get-Date))
-            $encrypted = Invoke-Backup "BACKUP LOG $database" $logFile $isExpress $EncryptionCertificate
-            Write-Log ('Log backup OK: {0} ({1:N1} MB){2}' -f $logFile, ((Get-Item $logFile).Length / 1MB), $(if ($encrypted) { ', encrypted' } else { ', NOT encrypted' }))
+            $logFile = Invoke-Backup "BACKUP LOG $database" $logFile $isExpress $EncryptionCertificate
+            Write-Log ('Log backup OK: {0} ({1:N1} MB), encrypted ({2})' -f $logFile, ((Get-Item $logFile).Length / 1MB), $(if ($script:BackupHow -eq 'native') { 'SQL Server, AES-256' } else { 'file level, AES-256 + HMAC' }))
         }
         else {
             # 1. Database
             $backupFile = Join-Path $databaseDir ('{0}_{1:yyyyMMdd_HHmm}.bak' -f $DatabaseName, (Get-Date))
-            $encrypted = Invoke-Backup "BACKUP DATABASE $database" $backupFile $isExpress $EncryptionCertificate
-            Write-Log ('Database backup OK: {0} ({1:N1} MB){2}' -f $backupFile, ((Get-Item $backupFile).Length / 1MB), $(if ($encrypted) { ', encrypted' } else { ', NOT encrypted' }))
+            $backupFile = Invoke-Backup "BACKUP DATABASE $database" $backupFile $isExpress $EncryptionCertificate
+            Write-Log ('Database backup OK: {0} ({1:N1} MB), encrypted ({2})' -f $backupFile, ((Get-Item $backupFile).Length / 1MB), $(if ($script:BackupHow -eq 'native') { 'SQL Server, AES-256' } else { 'file level, AES-256 + HMAC' }))
 
             # 2. Uploaded files and the redacted settings
+            $fileKey = Get-FileCryptoKey (Join-Path $BackupFolder 'keys') $null
             foreach ($relative in @('UploadedDocuments', 'wwwroot\Documents', 'wwwroot\avatars')) {
                 $source = Join-Path $AppDir $relative
                 if (-not (Test-Path $source)) { continue }
-                & robocopy.exe $source (Join-Path $filesDir $relative) /E /R:2 /W:5 /NP /NFL /NDL /NJH /NJS | Out-Null
-                if ($LASTEXITCODE -ge 8) { throw "Copying $source failed (robocopy code $LASTEXITCODE)." }
+                Copy-EncryptedFiles $source (Join-Path $filesDir $relative) $fileKey.Bytes
             }
             Save-RedactedSettings $filesDir
             $fileCount = @(Get-ChildItem -Path $filesDir -Recurse -File).Count
-            Write-Log "Uploaded files OK: $filesDir ($fileCount files)"
+            Write-Log "Uploaded files OK: $filesDir ($fileCount files, each encrypted at file level except the redacted settings copy)"
         }
 
         # 3. Retention (the same for both modes) and old program logs

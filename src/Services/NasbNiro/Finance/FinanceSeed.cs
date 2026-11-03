@@ -301,6 +301,28 @@ namespace Services.NasbNiro.Finance
             foreach (FnSetting s in SettingSeeds())
                 if (!keys.Contains(s.Key)) { uow.Set<FnSetting>().Add(s); added = true; }
             if (added) await uow.SaveChangesAsync(ct);
+            await UpgradeCloseEnforceAsync(uow, ct);
+        }
+
+        /// <summary>The marker of the one-time upgrade step of R1t (M2): it ran once and is not run again, so the company can still choose to switch the checklist gate off later.</summary>
+        public const string UpgradeMarkerCloseEnforce = "Upgrade.TreasuryR1.CloseEnforce";
+
+        /// <summary>
+        /// M2 (review R1t): installations that stored CloseChecklist.Enforce = 0 before this release keep it off, because the seed only adds missing keys. Once, this step sets it to 1 and writes an audit row
+        /// (user 0 = the system, action "SeedUpgrade"). Companies that deliberately want it off set it to 0 again afterwards in the finance settings; the marker keeps the step from running a second time.
+        /// </summary>
+        private static async Task UpgradeCloseEnforceAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            if (await uow.Set<FnSetting>().AnyAsync(s => s.Key == UpgradeMarkerCloseEnforce, ct)) return;
+            FnSetting enforce = await uow.Set<FnSetting>().FirstOrDefaultAsync(s => s.Key == SettingCloseEnforce, ct);
+            string before = enforce?.Value;
+            if (enforce != null && enforce.Value != "1")
+            {
+                enforce.Value = "1";
+                AuditNotes.Add(uow, 0, nameof(FnSetting), enforce.Id, "SeedUpgrade", "الزام فهرست کنترل بستن دوره به‌صورت یک‌بار با ارتقای نسخه روشن شد (قبلاً خاموش بود).", before: new { Value = before }, after: new { Value = "1" });
+            }
+            uow.Set<FnSetting>().Add(new FnSetting { Key = UpgradeMarkerCloseEnforce, Value = "done", Title = "نشانه‌ی اجرای یک‌باره‌ی ارتقا: الزام فهرست کنترل بستن دوره (نسخه خزانه R1)" });
+            await uow.SaveChangesAsync(ct);
         }
 
         public static async Task EnsureChartAsync(IUnitOfWork uow, CancellationToken ct)

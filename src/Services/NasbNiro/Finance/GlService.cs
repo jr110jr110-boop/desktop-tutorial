@@ -178,9 +178,7 @@ namespace Services.NasbNiro.Finance
             FnFiscalYear year = await _uow.Set<FnFiscalYear>().Include(y => y.Periods).FirstOrDefaultAsync(y => y.Id == id, ct);
             if (year == null) return ResponseDtoHelper.NotFound<FiscalYearDto>("سال مالی پیدا نشد.");
             if (year.Status != FnYearStatus.Open) return Bad<FiscalYearDto>("این سال مالی قبلاً بسته شده است.");
-            // H1 (review R1t): the year closes only after every period was closed through the two-step close (locked by one person, closed by another with the right role, checklist passed) - a period that is only locked does not count
-            List<int> notClosed = await PeriodsNotClosedProperlyAsync(year, ct);
-            if (notClosed.Count > 0) return Bad<FiscalYearDto>("بستن سال مالی ممکن نیست؛ دوره‌های شماره " + string.Join("، ", notClosed) + " هنوز با بستن دومرحله‌ای (قفل توسط یک نفر و بستن توسط شخص دیگر) بسته نشده‌اند.");
+            if (year.Periods.Any(p => p.Status == FnPeriodStatus.Open)) return Bad<FiscalYearDto>("همه دوره‌های سال باید بسته یا قفل شده باشند.");
             int nonFinal = await _uow.Set<FnVoucher>().CountAsync(v => v.FiscalYearId == year.Id && v.Status != FnVoucherStatus.Final, ct);
             if (nonFinal > 0) return Bad<FiscalYearDto>($"{nonFinal} سند پیش‌نویس یا کنترل‌شده در این سال هست؛ ابتدا قطعی یا حذف شوند.");
 
@@ -201,6 +199,10 @@ namespace Services.NasbNiro.Finance
             // R1t D10 (D24): an opening voucher of the next year that already exists (imported or closed from another run) would be doubled by this close
             if (next.OpeningVoucherId.HasValue || await _uow.Set<FnVoucher>().AnyAsync(v => v.FiscalYearId == next.Id && v.Type == FnVoucherType.Opening, ct))
                 return Bad<FiscalYearDto>($"برای سال مالی {next.Year} قبلاً سند افتتاحیه ثبت شده است؛ بستن این سال یک سند افتتاحیه دوم می‌سازد و مانده‌ها دو بار می‌آید. سند افتتاحیه موجود باید کنار گذاشته شود یا بستن سال لازم نیست.");
+
+            // H1 (review R1t): the year closes only after every period was closed through the two-step close (locked by one person, closed by another with the right role, checklist passed) - a period that is only locked does not count
+            List<int> notClosed = await PeriodsNotClosedProperlyAsync(year, ct);
+            if (notClosed.Count > 0) return Bad<FiscalYearDto>("بستن سال مالی ممکن نیست؛ دوره‌های شماره " + string.Join("، ", notClosed) + " هنوز با بستن دومرحله‌ای (قفل توسط یک نفر و بستن توسط شخص دیگر) بسته نشده‌اند.");
 
             // the sub-ledger reconciliation: a call that fails blocks the close (it used to be skipped); a difference is passed only on the request of one finance manager and the approval of another
             var recon = await _reports.ReconcileAsync(7, ct);

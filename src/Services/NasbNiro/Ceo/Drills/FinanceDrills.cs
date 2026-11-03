@@ -124,35 +124,25 @@ namespace Services.NasbNiro.Ceo.Drills
         private static DrillDefinition PayablesBySupplier() => new DrillDefinition
         {
             Key = "fin.payables_by_supplier", Module = M, Title = "بدهی به تفکیک تأمین‌کننده",
-            Description = "فاکتورهای تأییدشده‌ی هر تأمین‌کننده منهای پرداخت‌های انجام‌شده بابت فاکتور؛ مانده‌ی بدهی باز، بیشترین اول (هم‌پایه با «بدهی باز» داشبورد مدیرعامل).",
-            Link = "/procurement/invoices", RecordType = "Supplier", RecordLabel = "تأمین‌کننده",
+            Description = "بدهی هر تأمین‌کننده از رویدادهای حسابداری حساب پرداختنی: بستانکار (فاکتور و بدهی ثبت‌شده) منهای بدهکار (پرداخت و تسویه، از جمله تسویه اعتبار اسنادی)؛ مانده‌ی بدهی باز، بیشترین اول (هم‌پایه با «بدهی باز» داشبورد مالی و مدیرعامل).",
+            Link = "/fn/financial-statements", RecordType = "Supplier", RecordLabel = "تأمین‌کننده",
             Columns = new[]
             {
-                Col.Text("providerName", "تأمین‌کننده"), Col.Num("invoices", "تعداد فاکتور تأییدشده"), Col.Rial("invoiced", "فاکتورهای تأییدشده"), Col.Rial("paid", "پرداخت‌شده بابت فاکتور"),
+                Col.Text("providerName", "تأمین‌کننده"), Col.Num("invoices", "تعداد بستانکار"), Col.Rial("invoiced", "بدهی ثبت‌شده"), Col.Rial("paid", "پرداخت و تسویه‌شده"),
                 Col.Rial("open", "مانده‌ی بدهی"), Col.Link(),
             },
             Run = async (c, ct) =>
             {
                 Guard.Require(c, ProcurementRoles.Readers);
                 var uow = c.Get<IUnitOfWork>();
-                // summed in the database, one row per supplier (not the invoices and payments of the whole company in memory)
-                var invoiced = await uow.Set<SupplierInvoice>().AsNoTracking().Where(i => !i.Deleted && i.Status == SupplierInvoiceStatus.Approved)
-                    .GroupBy(i => new { i.ProviderId, i.Provider.Name })
-                    .Select(g => new { g.Key.ProviderId, g.Key.Name, Invoices = g.Count(), Amount = g.Sum(i => i.TotalAmount) }).ToListAsync(ct);
-                var paid = await uow.Set<PaymentRequest>().AsNoTracking().Where(p => !p.Deleted && p.Status == PaymentRequestStatus.Paid && p.InvoiceId != null)
-                    .GroupBy(p => new { p.ProviderId, p.Provider.Name })
-                    .Select(g => new { g.Key.ProviderId, g.Key.Name, Amount = g.Sum(p => p.Amount) }).ToListAsync(ct);
-                var bySupplier = new Dictionary<int, (string Name, int Invoices, decimal Invoiced, decimal Paid)>();
-                foreach (var i in invoiced) bySupplier[i.ProviderId] = (i.Name, i.Invoices, i.Amount, 0m);
-                foreach (var p in paid)
-                {
-                    bySupplier.TryGetValue(p.ProviderId, out var v);
-                    bySupplier[p.ProviderId] = (v.Name ?? p.Name, v.Invoices, v.Invoiced, v.Paid + p.Amount);
-                }
-                List<Row> rows = bySupplier.Select(kv => new { Id = kv.Key, kv.Value.Name, kv.Value.Invoices, kv.Value.Invoiced, kv.Value.Paid, Open = kv.Value.Invoiced - kv.Value.Paid })
+                // M1 (review R1t): one source with the finance dashboard and the CEO dashboard - the accounting events of the payables account, summed in the database, one row per supplier
+                var grouped = await uow.Set<AccountingEventLine>().AsNoTracking().Where(l => l.Event.Status != AccountingEventStatus.NotRequired && l.AccountRole == AccountRoles.AccountsPayable && l.ProviderId != null)
+                    .GroupBy(l => new { l.ProviderId, l.Provider.Name })
+                    .Select(g => new { ProviderId = g.Key.ProviderId.Value, g.Key.Name, Invoices = g.Count(l => l.Credit > 0), Invoiced = g.Sum(l => l.Credit), Paid = g.Sum(l => l.Debit) }).ToListAsync(ct);
+                List<Row> rows = grouped.Select(x => new { x.ProviderId, x.Name, x.Invoices, x.Invoiced, x.Paid, Open = x.Invoiced - x.Paid })
                     .Where(x => x.Open != 0).OrderByDescending(x => x.Open).ThenBy(x => x.Name, StringComparer.Ordinal)
-                    .Select(x => new Row("/procurement/suppliers") { ["id"] = x.Id, ["providerName"] = x.Name, ["invoices"] = x.Invoices, ["invoiced"] = x.Invoiced, ["paid"] = x.Paid, ["open"] = x.Open }).ToList();
-                return DrillResult.Slice(rows, c, "پرداخت بابت فاکتور فقط درخواست‌های پرداخت «پرداخت‌شده»ی دارای فاکتور است.", new Dictionary<string, object>
+                    .Select(x => new Row("/procurement/suppliers") { ["id"] = x.ProviderId, ["providerName"] = x.Name, ["invoices"] = x.Invoices, ["invoiced"] = x.Invoiced, ["paid"] = x.Paid, ["open"] = x.Open }).ToList();
+                return DrillResult.Slice(rows, c, "مانده‌ی هر تأمین‌کننده از رویدادهای حساب پرداختنی است؛ ردیف‌های بدون تأمین‌کننده در جمع نیست.", new Dictionary<string, object>
                 {
                     ["invoiced"] = rows.Sum(r => (decimal)r["invoiced"]), ["paid"] = rows.Sum(r => (decimal)r["paid"]), ["open"] = rows.Sum(r => (decimal)r["open"]),
                 });

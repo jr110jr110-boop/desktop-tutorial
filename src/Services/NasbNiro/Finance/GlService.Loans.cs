@@ -59,7 +59,7 @@ namespace Services.NasbNiro.Finance
             return rows;
         }
 
-        private async Task<FnLoanDto> LoanDtoAsync(FnLoan l, CancellationToken ct)
+        private async Task<FnLoanDto> LoanDtoAsync(FnLoan l, CancellationToken ct, List<FnCashLegRefDto> openLegs = null)
         {
             var inst = await _uow.Set<FnLoanInstallment>().AsNoTracking().Where(i => i.LoanId == l.Id).OrderBy(i => i.Sequence).ToListAsync(ct);
             return new FnLoanDto
@@ -69,7 +69,7 @@ namespace Services.NasbNiro.Finance
                 BankAccountId = l.BankAccountId, DisbursementVoucherId = l.DisbursementVoucherId, TotalInterest = inst.Sum(i => i.Interest),
                 OutstandingPrincipal = l.Status == FnLoanStatus.Active ? l.Amount - l.PrincipalPaid : 0, AccruedInterestPayable = l.InterestExpensed - l.InterestPaid,
                 Installments = inst.Select(i => new FnInstallmentDto { Id = i.Id, Sequence = i.Sequence, DueDate = i.DueDate, Principal = i.Principal, Interest = i.Interest, Total = i.Principal + i.Interest, Status = i.Status, PaidDate = i.PaidDate, PenaltyPaid = i.PenaltyPaid, VoucherId = i.VoucherId }).ToList(),
-                OpenCashLegs = await OpenLegsAsync(CashLegSources.Loan, new[] { l.Id }, ct),
+                OpenCashLegs = openLegs != null ? openLegs.Where(x => x.SourceId == l.Id).ToList() : await OpenLegsAsync(CashLegSources.Loan, new[] { l.Id }, ct),
             };
         }
 
@@ -78,7 +78,8 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<List<FnLoanDto>>(NotAllowed);
             var rows = await _uow.Set<FnLoan>().AsNoTracking().OrderByDescending(l => l.Id).Take(200).ToListAsync(ct);
             var list = new List<FnLoanDto>();
-            foreach (FnLoan l in rows) { FnLoanDto d = await LoanDtoAsync(l, ct); d.Installments = new List<FnInstallmentDto>(); list.Add(d); }
+            var legs = await OpenLegsAsync(CashLegSources.Loan, rows.Select(x => x.Id).ToList(), ct);   // L3: one query for the whole list
+            foreach (FnLoan l in rows) { FnLoanDto d = await LoanDtoAsync(l, ct, legs); d.Installments = new List<FnInstallmentDto>(); list.Add(d); }
             return ResponseDtoHelper.Ok(list);
         }
 

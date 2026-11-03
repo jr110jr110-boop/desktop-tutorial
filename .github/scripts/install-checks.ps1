@@ -144,8 +144,8 @@ $saved | ConvertTo-Json | Set-Content -Path $state
 Check 'uploaded files on disk' { "$(@(Get-ChildItem "$InstallRoot\app\UploadedDocuments" -File).Count) files in UploadedDocuments" }
 Check 'backup task exists' { "state=$((Get-ScheduledTask -TaskName 'INNCO daily backup').State) lastResult=$((Get-ScheduledTaskInfo -TaskName 'INNCO daily backup').LastTaskResult)" }
 Check 'database backup files' {
-    $files = @(Get-ChildItem "$BackupFolder\database" -Filter '*.bak' | Sort-Object LastWriteTime)
-    if ($files.Count -eq 0) { throw 'no .bak file' }
+    $files = @(Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' } | Sort-Object LastWriteTime)
+    if ($files.Count -eq 0) { throw 'no .bak or .bak.enc file' }
     ($files | ForEach-Object { "$($_.Name)=$($_.Length)" }) -join ' '
 }
 Check 'file backup copy' { "$(@(Get-ChildItem "$BackupFolder\files" -Recurse -File).Count) files" }
@@ -187,8 +187,8 @@ Check 'the hourly log backup task repeats every hour' {
     "state=$($task.State) lastResult=$((Get-ScheduledTaskInfo -TaskName 'INNCO hourly log backup').LastTaskResult)"
 }
 Check 'a log backup was made (database\log)' {
-    $files = @(Get-ChildItem "$BackupFolder\database\log" -Filter '*.trn' -ErrorAction Stop | Sort-Object LastWriteTime)
-    if ($files.Count -eq 0) { throw 'no .trn file' }
+    $files = @(Get-ChildItem "$BackupFolder\database\log" -File -ErrorAction Stop | Where-Object { $_.Name -match '\.trn(\.enc)?$' } | Sort-Object LastWriteTime)
+    if ($files.Count -eq 0) { throw 'no .trn or .trn.enc file' }
     ($files | ForEach-Object { "$($_.Name)=$($_.Length)" }) -join ' '
 }
 Check 'the backup log says the full and the log backup were made' {
@@ -198,18 +198,38 @@ Check 'the backup log says the full and the log backup were made' {
     if ($text -match 'BACKUP FAILED') { throw 'the log has a "BACKUP FAILED" line' }
     'both kinds of backup are in backup-log.txt'
 }
-Check 'database backups are encrypted (AES-256) when the installer found that this server can' {
-    $newest = Get-ChildItem "$BackupFolder\database" -Filter '*.bak' | Sort-Object LastWriteTime | Select-Object -Last 1
-    $header = Invoke-CheckSql 'RESTORE HEADERONLY FROM DISK = @f' @{ '@f' = $newest.FullName }
-    $algorithm = [string]$header.Rows[0]['KeyAlgorithm']
+Check 'database backups are encrypted: by SQL Server where the edition can, else at file level (no plain .bak or .trn stays)' {
+    $newest = Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' -and $_.Name -notlike '*before-restore*' -and $_.Name -notlike '*pre-update*' } | Sort-Object LastWriteTime | Select-Object -Last 1
     if ($encryptionAsked) {
+        $header = Invoke-CheckSql 'RESTORE HEADERONLY FROM DISK = @f' @{ '@f' = $newest.FullName }
+        $algorithm = [string]$header.Rows[0]['KeyAlgorithm']
         if ($algorithm -notmatch '(?i)aes_256') { throw "the backup task asks for encryption but $($newest.Name) has KeyAlgorithm '$algorithm'" }
-        "$($newest.Name): $algorithm, encryptor type $($header.Rows[0]['EncryptorType'])"
+        return "$($newest.Name): $algorithm, encryptor type $($header.Rows[0]['EncryptorType'])"
     }
-    else { "NOT encrypted: the installer found that encrypted backups do not work on this server (see the Warning in the install log). $($newest.Name): KeyAlgorithm '$algorithm'" }
+    # file level: the newest backup is x.bak.enc, with the PMISENC1 header, and no plain .bak / .trn is left in the backup folders (the safety copies are encrypted as well)
+    if ($newest.Name -notlike '*.bak.enc') { throw "the newest backup $($newest.Name) is not encrypted" }
+    $head = New-Object byte[] 8
+    $stream = [IO.File]::OpenRead($newest.FullName); try { [void]$stream.Read($head, 0, 8) } finally { $stream.Dispose() }
+    if ([Text.Encoding]::ASCII.GetString($head) -ne 'PMISENC1') { throw "$($newest.Name) does not start with the PMISENC1 header" }
+    $plain = @(Get-ChildItem "$BackupFolder\database" -Recurse -File | Where-Object { $_.Name -match '\.(bak|trn)$' })
+    if ($plain.Count -gt 0) { throw "plain backup files are left: $(($plain | ForEach-Object Name) -join ', ')" }
+    "$($newest.Name): file level (AES-256 with an HMAC seal), no plain .bak or .trn in the backup folder"
+}
+Check 'the uploaded files in the backup are encrypted at file level' {
+    $copies = @(Get-ChildItem "$BackupFolder\files" -Recurse -File | Where-Object { $_.Name -ne 'appsettings.Production.redacted.json' })
+    if ($copies.Count -eq 0) { throw 'no uploaded file in the files backup' }
+    $plain = @($copies | Where-Object { $_.Name -notlike '*.enc' })
+    if ($plain.Count -gt 0) { throw "$($plain.Count) file(s) of the files backup are not encrypted, for example $($plain[0].FullName)" }
+    "$($copies.Count) files, all .enc"
+}
+Check 'the keys folder holds the file key, and the off-site copy never takes the keys' {
+    if (-not (Test-Path "$BackupFolder\keys\file-encryption.key.dpapi")) { throw "missing $BackupFolder\keys\file-encryption.key.dpapi" }
+    $script = Get-Content -Raw -Path "$InstallRoot\tools\backup.ps1" -ErrorAction SilentlyContinue
+    if ($script -and $script -match "@\('database', 'files', 'keys'\)") { throw 'backup.ps1 still copies the keys folder off-site' }
+    'file-encryption.key.dpapi is there; backup.ps1 copies database and files only'
 }
 Check 'the backup certificate and its key are in the keys folder' {
-    if (-not $encryptionAsked) { return 'encryption is not used on this server' }
+    if (-not (Test-Path "$BackupFolder\keys\INNCO_BackupCert.cer")) { return 'no backup certificate on this server (it could not be made; file-level encryption is used)' }
     foreach ($name in 'INNCO_BackupCert.cer', 'INNCO_BackupCert.pvk', 'audit-key.sealed.txt') {
         if (-not (Test-Path "$BackupFolder\keys\$name")) { throw "missing $BackupFolder\keys\$name" }
     }
@@ -241,13 +261,18 @@ Check 'the install log that holds the backup key password is readable by adminis
     "$($logs.Count) log file(s), access: administrators and SYSTEM"
 }
 Check 'the audit trail is hash-chained' {
-    $total = [int](Get-CheckScalar 'SELECT COUNT(*) FROM dbo.FnAuditLogs')
-    if ($total -eq 0) { throw 'the audit trail has no row (the sign-in of the checks writes one)' }
-    $loose = [int](Get-CheckScalar 'SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Seq IS NULL OR Hash IS NULL')
-    if ($loose -ne 0) { throw "$loose of $total rows have no place in the chain" }
-    $forks = [int](Get-CheckScalar 'SELECT COUNT(*) FROM (SELECT Seq FROM dbo.FnAuditLogs GROUP BY Seq HAVING COUNT(*) > 1) d')
+    # R1t review M11: only the rows written after the chain began are counted (the first sealed row marks the start). A database restored from a backup that was taken before the chain
+    # existed has older rows without a place in the chain: they are not an error, and a trail without any sealed row yet is not a failure either.
+    $sealed = [int](Get-CheckScalar 'SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Seq IS NOT NULL')
+    $legacy = [int](Get-CheckScalar 'SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Seq IS NULL')
+    if ($sealed -eq 0) { return "skipped: no row has a place in the chain yet ($legacy rows from before the chain; the chain starts with the next audited change)" }
+    $firstId = [int](Get-CheckScalar 'SELECT MIN(Id) FROM dbo.FnAuditLogs WHERE Seq IS NOT NULL')
+    $after = [int](Get-CheckScalar "SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Id >= $firstId")
+    $loose = [int](Get-CheckScalar "SELECT COUNT(*) FROM dbo.FnAuditLogs WHERE Id >= $firstId AND (Seq IS NULL OR Hash IS NULL)")
+    if ($loose -ne 0) { throw "$loose of $after rows written since the chain began have no place in the chain" }
+    $forks = [int](Get-CheckScalar 'SELECT COUNT(*) FROM (SELECT Seq FROM dbo.FnAuditLogs WHERE Seq IS NOT NULL GROUP BY Seq HAVING COUNT(*) > 1) d')
     if ($forks -ne 0) { throw "$forks places in the chain hold more than one row" }
-    "$total rows, every one chained, no fork"
+    "$after rows since the chain began, every one chained, no fork; $legacy older rows from before the chain are not counted"
 }
 Check 'the database refuses the program account to change or delete a row of the audit trail' {
     $user = [string](Get-CheckScalar "SELECT TOP 1 u.name FROM sys.database_role_members m JOIN sys.database_principals r ON r.principal_id = m.role_principal_id JOIN sys.database_principals u ON u.principal_id = m.member_principal_id WHERE r.name = N'pmis_app'")
@@ -269,8 +294,8 @@ Check 'the program does not change the database structure itself (Database:Migra
 }
 if ($Phase -eq '2-update') {
     Check 'the update made a checked safety backup of the database before it changed anything' {
-        $f = @(Get-ChildItem "$BackupFolder\database" -Filter '*pre-update*.bak')
-        if ($f.Count -eq 0) { throw 'no *pre-update*.bak file' }
+        $f = @(Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match 'pre-update.*\.bak(\.enc)?$' })
+        if ($f.Count -eq 0) { throw 'no pre-update backup file (.bak or .bak.enc)' }
         ($f | ForEach-Object { "$($_.Name)=$($_.Length)" }) -join ' '
     }
 }
@@ -287,7 +312,7 @@ if ($Phase -eq '3-restore') {
         "http=$([int]$r.StatusCode)"
     }
     Check 'safety backup made before the restore' {
-        $f = @(Get-ChildItem "$BackupFolder\database" -Filter '*before-restore*.bak')
+        $f = @(Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match 'before-restore.*\.bak(\.enc)?$' })
         if ($f.Count -eq 0) { throw 'none' }
         $f[0].Name
     }

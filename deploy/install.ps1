@@ -79,6 +79,10 @@
     its start that no update is waiting and stops with a clear message when one is (run this script again to update).
     -HardenAudit $false goes back to the old way: the program is db_owner and updates the database itself when it starts.
 
+.PARAMETER BackupFileKey
+    The escrow copy of the key that encrypts the backup files at file level (base64, shown once by the first installation in its install log). Needed with -RestoreBackup when the
+    backup is a .bak.enc file made on ANOTHER server (the key of this server is then replaced by this one if it has none). On the same server the sealed key in the keys folder is used.
+
 .PARAMETER OffsiteCopyPath
     A folder on another device, for example \\nas\backup\innco, to which every backup run copies what is new. It is stored as the setting
     Backup:OffsiteCopyPath of the program (change it there). The backup tasks run as SYSTEM, so on a network share the computer account
@@ -109,7 +113,8 @@ param(
     [string]$HostingBundle,
     [switch]$SkipFirstBackup,
     [bool]$HardenAudit = $true,
-    [string]$OffsiteCopyPath
+    [string]$OffsiteCopyPath,
+    [string]$BackupFileKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -255,13 +260,16 @@ function Get-SqlServiceAccount([string]$InstanceName) {
 
 $BackupCertificateName = 'INNCO_BackupCert'
 
+# H2 (review R1t): file-level encryption of backups (SQL Server Express cannot encrypt a backup itself; the copy of the uploaded files is a plain copy on every edition)
+. (Join-Path $PSScriptRoot 'backup-crypto.ps1')
+
 # The WITH list of a safety backup made by this script (a copy-only full backup): compression where the edition has it, encryption when a certificate is given.
 function Get-SafetyBackupOptions([string]$Certificate) {
     $options = 'COPY_ONLY, INIT, CHECKSUM'
     $express = [int](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int)") -eq 4   # Express cannot compress backups
     if (-not $express) { $options += ', COMPRESSION' }
-    if ($Certificate) {
-        if (-not $express) { $options += ', MAXTRANSFERSIZE = 131072' }
+    if ($Certificate -and -not $express) {   # Express cannot encrypt a backup: the file is encrypted at file level after it is made (Protect-SafetyBackup)
+        $options += ', MAXTRANSFERSIZE = 131072'
         $options += ', ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = ' + (ConvertTo-SqlName $Certificate) + ')'
     }
     return $options
@@ -271,7 +279,7 @@ function Get-SafetyBackupOptions([string]$Certificate) {
 # backup of the model database that encrypted backups work on this server. The password of the private key is made here and returned in NewPassword (only when files were written);
 # the caller shows it once. It is never written to a settings file. Available is $false, with the reason, when encrypted backups do not work here.
 function Initialize-BackupCertificate([string]$KeysFolder) {
-    $result = [pscustomobject]@{ Name = $BackupCertificateName; Available = $false; Reason = $null; NewPassword = $null; KeyFile = $null }
+    $result = [pscustomobject]@{ Name = $BackupCertificateName; Available = $false; CertificateReady = $false; Reason = $null; NewPassword = $null; KeyFile = $null }
     try {
         New-Item -ItemType Directory -Force -Path $KeysFolder | Out-Null
         $name = ConvertTo-SqlName $BackupCertificateName
@@ -297,6 +305,12 @@ function Initialize-BackupCertificate([string]$KeysFolder) {
                                ', ENCRYPTION BY PASSWORD = ' + (ConvertTo-SqlText $keyPassword) + ')') | Out-Null
             $result.NewPassword = $keyPassword
             $result.KeyFile = $keyFile
+        }
+        $result.CertificateReady = $true
+        # Express (EngineEdition 4) refuses BACKUP ... WITH ENCRYPTION: no doomed test; the backups are encrypted at file level there (H2)
+        if ([int](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int)") -eq 4) {
+            $result.Reason = 'SQL Server Express cannot encrypt a backup itself'
+            return $result
         }
         $test = Join-Path $KeysFolder 'encryption-test.bak'
         if (Test-Path $test) { Remove-Item -Path $test -Force }
@@ -342,7 +356,14 @@ function Invoke-PreUpdateBackup([string]$Database, [string]$Folder, [string]$Cer
     Write-Info "Backing up the database before the update: $file"
     Invoke-Sql -Query ('BACKUP DATABASE ' + (ConvertTo-SqlName $Database) + ' TO DISK = @f WITH ' + (Get-SafetyBackupOptions $Certificate)) -Parameters @{ '@f' = $file } | Out-Null
     Invoke-Sql -Query 'RESTORE VERIFYONLY FROM DISK = @f WITH CHECKSUM' -Parameters @{ '@f' = $file } | Out-Null
+    if (-not $Certificate -or [int](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int)") -eq 4) { return (Protect-SafetyBackup $file $Folder) }
     return $file
+}
+
+# Encrypts a plain safety backup at file level (x.bak -> x.bak.enc) and deletes the plain file.
+function Protect-SafetyBackup([string]$File, [string]$Folder) {
+    $key = Get-FileCryptoKey (Join-Path $Folder 'keys') $BackupFileKey -Create
+    return (Protect-BackupFile $File $key.Bytes)
 }
 
 # Sets one key (Section:Name) of appsettings.Production.json; the rest of the file is left as it is.
@@ -783,6 +804,7 @@ try {
     Invoke-Robocopy (Join-Path $PackageDir 'app') $AppDir @('/XF', 'appsettings.Production.json')
     foreach ($rel in $DataFolders) { New-Item -ItemType Directory -Force -Path (Join-Path $AppDir $rel) | Out-Null }
     Copy-Item -Path (Join-Path $PackageDir 'backup.ps1') -Destination $ToolsDir -Force
+    Copy-Item -Path (Join-Path $PackageDir 'backup-crypto.ps1') -Destination $ToolsDir -Force
 
     $webConfigPath = Join-Path $AppDir 'web.config'
     [xml]$webConfig = Get-Content -Raw -Path $webConfigPath
@@ -822,9 +844,26 @@ try {
     $backupCertificateName = $null
     if ($backupCertificate.Available) {
         $backupCertificateName = $backupCertificate.Name
-        Write-Ok "Backups are encrypted (AES-256) with the server certificate $backupCertificateName. Certificate and key files: $keysFolder"
+        Write-Ok "Database backups are encrypted by SQL Server (AES-256) with the server certificate $backupCertificateName. Certificate and key files: $keysFolder"
     }
-    else { Write-Warn "Backups cannot be encrypted on this server and are made WITHOUT encryption ($($backupCertificate.Reason))." }
+    elseif ($backupCertificate.CertificateReady) {
+        Write-Ok "$($backupCertificate.Reason): the backup files are encrypted at file level instead (AES-256 with an HMAC seal; key sealed by DPAPI in $keysFolder)."
+    }
+    else { Write-Warn "The backup certificate could not be made ($($backupCertificate.Reason)); the backup files are encrypted at file level instead (AES-256 with an HMAC seal)." }
+    # the file-level key: made once; the same key opens the uploaded-files copy on every edition and the database backups where SQL Server cannot encrypt them
+    $fileCryptoKey = Get-FileCryptoKey $keysFolder $BackupFileKey -Create
+    if ($fileCryptoKey.Created) {
+        $script:SecretInLog = $true
+        Write-Host ''
+        Write-Host '    ====================================================================================' -ForegroundColor Yellow
+        Write-Host '    ESCROW COPY OF THE BACKUP FILE KEY (shown once; it is in this install log and nowhere else)' -ForegroundColor Yellow
+        Write-Host "        $($fileCryptoKey.Escrow)" -ForegroundColor Yellow
+        Write-Host '    The key file in the keys folder is sealed to THIS server (DPAPI). If this server is lost, the encrypted backups and' -ForegroundColor Yellow
+        Write-Host '    files can be opened on a new server only with this text (install.ps1 -BackupFileKey <text>).' -ForegroundColor Yellow
+        Write-Host '    Keep it apart from the backups and from the keys folder (a safe, not the off-site backup target). This log file is secret.' -ForegroundColor Yellow
+        Write-Host '    ====================================================================================' -ForegroundColor Yellow
+        Write-Host ''
+    }
     if ($backupCertificate.NewPassword) {
         $script:SecretInLog = $true
         Write-Host ''
@@ -850,11 +889,19 @@ try {
             Write-Info 'Copying the backup file to a folder SQL Server can read...'
             Copy-Item -Path $RestoreBackup -Destination $backupCopy -Force
         }
+        if ($backupCopy.EndsWith('.enc', [StringComparison]::OrdinalIgnoreCase)) {
+            # H2: a backup that was encrypted at file level is opened first (the seal is checked before anything is written)
+            Write-Info 'Decrypting the backup file (file-level encryption)...'
+            $encryptedCopy = $backupCopy
+            $backupCopy = Unprotect-BackupFile $encryptedCopy $fileCryptoKey.Bytes
+            Remove-Item -Path $encryptedCopy -Force
+        }
         if ($dbExists) {
             $safety = Join-Path $BackupFolder ("database\{0}_before-restore_{1:yyyyMMdd_HHmm}.bak" -f $DatabaseName, (Get-Date))
             New-Item -ItemType Directory -Force -Path (Split-Path $safety) | Out-Null
             Write-Info "Backing up the existing database first: $safety"
             Invoke-Sql -Query "BACKUP DATABASE $db TO DISK = @f WITH COPY_ONLY, INIT, CHECKSUM" -Parameters @{ '@f' = $safety } | Out-Null
+            $safety = Protect-SafetyBackup $safety $BackupFolder   # H2: the safety copy holds the real data and is encrypted at file level
             Invoke-Sql -Query "ALTER DATABASE $db SET SINGLE_USER WITH ROLLBACK IMMEDIATE" | Out-Null
         }
         $dataPath = [string](Invoke-Sql -Scalar -Query "SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(260))")
@@ -1086,7 +1133,7 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     Register-ScheduledTask -TaskName $logTaskName -Action $logAction -Trigger $logTrigger -Principal $taskPrincipal -Settings $logSettings -Force | Out-Null
     Write-Ok "Tasks '$taskName' and '$logTaskName': database and log backups to $BackupFolder\database, uploaded files to $BackupFolder\files; kept as long as the setting Backup:RetentionDays says (35 days by default)."
     if ($OffsiteCopyPath) { Write-Ok "Every backup run also copies to $OffsiteCopyPath (setting Backup:OffsiteCopyPath)." }
-    if ($backupCertificateName) { Save-SealedAuditKey $settingsPath $keysFolder }
+    if ($backupCertificate.CertificateReady) { Save-SealedAuditKey $settingsPath $keysFolder }
 
     # 10b. Database updates and protection of the audit trail (R1t, D20). The pool is still stopped here, so nothing is written meanwhile.
     if ($HardenAudit) {

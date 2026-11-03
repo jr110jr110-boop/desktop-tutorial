@@ -304,14 +304,41 @@ namespace MsTests
             Assert.IsFalse((await ReconAction(host, Fin, rec, "items", new List<ReconciliationItemDto> { new ReconciliationItemDto { Kind = 77, Amount = 50_000_000m, Note = "x" } })).Success);
             Assert.IsFalse((await ReconAction(host, Fin, rec, "items", new List<ReconciliationItemDto> { new ReconciliationItemDto { Kind = 5, Amount = 0m, Note = "x" } })).Success);
 
-            var right = new List<ReconciliationItemDto>
+            // M8: a kind 1 item (an unbooked bank fee) is not a permanent plug: the voucher that books it must be linked, and final
+            var withoutVoucher = new List<ReconciliationItemDto>
             {
                 new ReconciliationItemDto { Kind = 5, Amount = 60_000_000m, Note = "مانده قبل از شروع کار سیستم" },
                 new ReconciliationItemDto { Kind = 1, Amount = -10_000_000m, Note = "کارمزد بانکی ثبت‌نشده" },
             };
+            Ok(await ReconAction(host, Fin, rec, "items", withoutVoucher));
+            ResponseDto<ReconciliationDto> noLink = await ReconAction(host, Fm2, rec, "approve");
+            Assert.IsFalse(noLink.Success);
+            StringAssert.Contains(noLink.Message, "سند اصلاحی را وصل کنید");
+            Assert.IsFalse((await ReconAction(host, Fin, rec, "items", new List<ReconciliationItemDto> { new ReconciliationItemDto { Kind = 5, Amount = 50_000_000m, Note = "x", CorrectingVoucherId = 1 } })).Success, "a voucher link belongs to kinds 1 and 4 only");
+            Assert.IsFalse((await ReconAction(host, Fin, rec, "items", new List<ReconciliationItemDto> { new ReconciliationItemDto { Kind = 1, Amount = 50_000_000m, Note = "x", CorrectingVoucherId = 99999 } })).Success, "the voucher must exist");
+
+            VoucherDto draft = Ok(await host.As(Fin, sp => sp.GetRequiredService<IGlService>().SaveVoucherAsync(new SaveVoucherDto
+            {
+                Date = DateTime.Today, Description = "کارمزد بانکی",
+                Lines = new List<SaveVoucherLineDto> { new SaveVoucherLineDto { AccountCode = "80201", Debit = 10_000_000m }, new SaveVoucherLineDto { AccountCode = "10101", Credit = 10_000_000m } },
+            }, CancellationToken.None)));
+            var linkedDraft = new List<ReconciliationItemDto>
+            {
+                new ReconciliationItemDto { Kind = 5, Amount = 60_000_000m, Note = "مانده قبل از شروع کار سیستم" },
+                new ReconciliationItemDto { Kind = 1, Amount = -10_000_000m, Note = "کارمزد بانکی ثبت‌نشده", CorrectingVoucherId = draft.Id },
+            };
+            Ok(await ReconAction(host, Fm, rec, "items", linkedDraft));
+            ResponseDto<ReconciliationDto> notFinal = await ReconAction(host, Fm2, rec, "approve");
+            Assert.IsFalse(notFinal.Success);
+            StringAssert.Contains(notFinal.Message, "هنوز قطعی نشده");
+            Ok(await host.As(Fm2, sp => sp.GetRequiredService<IGlService>().VoucherActionAsync(new VoucherActionDto { Id = draft.Id, Action = "check" }, CancellationToken.None)));
+            Ok(await host.As(Fm, sp => sp.GetRequiredService<IGlService>().VoucherActionAsync(new VoucherActionDto { Id = draft.Id, Action = "finalize" }, CancellationToken.None)));
+
+            var right = linkedDraft;
             ReconciliationDto saved = Ok(await ReconAction(host, Fm, rec, "items", right));
             Assert.AreEqual(50_000_000m, saved.ExplainedAmount);
             Assert.AreEqual(2, saved.Items.Count);
+            Assert.AreEqual(draft.Id, saved.Items.Single(i => i.Kind == 1).CorrectingVoucherId);
 
             // the person who saved the items cannot approve; another finance manager can
             ResponseDto<ReconciliationDto> self = await ReconAction(host, Fm, rec, "approve");

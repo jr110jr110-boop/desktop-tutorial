@@ -2635,7 +2635,7 @@ as "$FIN_TOKEN" POST $FG/vouchers "$(jq -c '.date = "2026-10-15T00:00:00"' <<< "
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PERIOD7,\"action\":\"reopen\"}"; no "finance: reopening a period needs a reason"
 
 # --- events into vouchers
-as "$FM_TOKEN" POST $FG/post-events; check "finance: pending events turned into auto vouchers (some late: their period is locked)" '.success and .data.posted > 5 and .data.failed == 0 and .data.latePosted >= 1'
+as "$FM_TOKEN" POST $FG/post-events; echo "LATEPOSTED=$(jq -c ".data" "$B")"; check "finance: pending events turned into auto vouchers (some late: their period is locked)" '.success and .data.posted > 5 and .data.failed == 0 and .data.latePosted >= 1'
 as "$FM_TOKEN" POST $FG/post-events; check "finance: posting events is idempotent" '.success and .data.posted == 0'
 as "$FM_TOKEN" GET "finance/events?PageSize=0"; check "finance: every event is posted (or not required)" '[.data.data[]|select(.status != 4 and .status != 9)]|length == 0'
 as "$FM_TOKEN" GET "$FG/vouchers?FiscalYearId=$FY&Type=3&PageSize=0"; check "finance: auto vouchers are checked and flagged as late posting where needed" '.success and (.data.data|length) > 5 and ([.data.data[]|select(.status != 1)]|length) == 0 and ([.data.data[]|select(.latePosting == true)]|length) >= 1'
@@ -2809,13 +2809,19 @@ as "$FIN_TOKEN" POST $FG/vouchers '{"date":"2021-06-02T00:00:00","description":"
 for V in $VA $VB; do as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V,\"action\":\"check\"}"; as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$V,\"action\":\"finalize\"}"; done
 check "finance: vouchers of year 1400 finalized" '.success and .data.status == 2'
 as "$FM_TOKEN" GET $FG/years; PIDS=$(jq -r --argjson y "$FY0" '.data[]|select(.id == $y)|.periods[].id' "$B")
-for P in $PIDS; do as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; done
+# R1t review H1: the year closes only after every period went through the two-step close - an accountant locks, the CEO closes
+for P in $PIDS; do
+  as "$FIN_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"lock\"}"; as "$CEO_TOKEN" POST $FG/periods/action "{\"id\":$P,\"action\":\"close\"}"
+  [ "$(jq -r --argjson p "$P" '[.data.periods[]|select(.id == $p)][0].status' "$B")" = "2" ] || bad "r1t h1: period $P of 1400 was not closed by the two-step close ($(jq -r '.message' "$B"))"
+done
 as "$FM_TOKEN" GET "$FG/reports/reconciliation"; Y1400_CLEAN=$(val '.data.clean')
 as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"آزمون بستن سال"}'
+echo "Y1400_CLEAN=$Y1400_CLEAN"
 if [ "$Y1400_CLEAN" != "true" ]; then
   # R1t D10: the ledger differs from the sub-ledgers: the first manager's call only records the request, the same manager asking again changes nothing, a second manager's call closes the year
-  nomsg "r1t d10: a difference between the ledger and the sub-ledgers is not passed by one manager: the request is recorded and the year stays open" "درخواست عبور از مغایرت ثبت شد"
-  as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"آزمون بستن سال"}'; nomsg "r1t d10: the same manager asking again does not close the year" "درخواست عبور از مغایرت ثبت شد"
+  # R1t review L4: recording the request is a success; the year is still open
+  check "r1t d10: a difference is not passed by one manager: the request is recorded (success) and the year stays open" '.success and .data.status != 2'
+  as "$FM_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"آزمون بستن سال"}'; check "r1t d10: the same manager asking again does not close the year" '.success and .data.status != 2'
   as "$FM2_TOKEN" POST $FG/years/$FY0/close '{"overrideReconciliation":true,"reason":"تایید دومین مدیر مالی"}'
 fi
 check "finance: year 1400 closed with closing vouchers and a 1401 opening voucher" '.success and .data.status == 2 and .data.closingVoucherId != null'
@@ -2858,20 +2864,14 @@ as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$V95,\"action\":\"check\"}"
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$V95,\"action\":\"finalize\"}"; check "r1t d10: the voucher of the third month is final" '.success and .data.status == 2'
 as "$CEO_TOKEN" POST $FG/periods/action "{\"id\":$PCC,\"action\":\"close\"}"; check "r1t d10: once nothing is left open the CEO closes the third month" '.success and ([.data.periods[]|select(.id == '$PCC')][0].status) == 2'
 
-# --- R1t D11: an event dated in a closed year is not lost and does not reopen the year: it is posted into the first open period of the current year with the late flag and an audit row that keeps the real date
+# --- R1t D11 / review M7: a treasury document is not made or edited with a date inside a closed period or year (the bank book and every report of that period would change after the close).
+# The late posting of EVENTS (their source existed before the close) is exercised above (a locked month) and by the unit tests (a closed year); a draft that is dated in the closed year 1400 is refused here.
 as "$FIN_TOKEN" POST $FR/customers '{"name":"مشتری سال بسته آزمون","economicCode":"411111111177","nationalId":"10101010103","postalCode":"1234567893","employerName":"مشتری سال بسته آزمون"}'; CULATE=$(val .data.id)
-as "$TR_TOKEN" POST $FT/receipts "{\"date\":\"2021-06-10T00:00:00\",\"customerId\":$CULATE,\"description\":\"دریافت با تاریخ سال بسته\",\"lines\":[{\"instrument\":1,\"amount\":3000000,\"cashBoxId\":$CB}]}"; check "r1t d11: a cash receipt dated in the closed year 1400 is drafted" '.success and .data.status == 0 and .data.totalAmount == 3000000'
+as "$TR_TOKEN" POST $FT/receipts "{\"date\":\"2021-06-10T00:00:00\",\"customerId\":$CULATE,\"description\":\"دریافت با تاریخ سال بسته\",\"lines\":[{\"instrument\":1,\"amount\":3000000,\"cashBoxId\":$CB}]}"; nomsg "r1t m7: a cash receipt dated in the closed year 1400 is refused" "بسته‌شده"
+as "$TR_TOKEN" POST $FT/receipts "{\"date\":\"${TODAY}T00:00:00\",\"customerId\":$CULATE,\"description\":\"دریافت با تاریخ باز\",\"lines\":[{\"instrument\":1,\"amount\":3000000,\"cashBoxId\":$CB}]}"; check "r1t m7: the same receipt dated today (an open period) is drafted" '.success and .data.status == 0 and .data.totalAmount == 3000000'
 RLATE=$(val .data.id)
 as "$FM_TOKEN" POST $FT/receipts/action "{\"id\":$RLATE,\"action\":\"approve\"}"
-as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$RLATE,\"action\":\"post\"}"; check "r1t d11: and posted by treasury" '.success and .data.status == 2'
-as "$FM_TOKEN" GET $FG/years; LATEP=$(jq -r --argjson y "$FYT" '.data[]|select(.id == $y)|[.periods[]|select(.status == 0)][0].startDate[0:10]' "$B")
-as "$FM_TOKEN" POST $FG/post-events; check "r1t d11: the posting job posts the late event (it is counted as a late posting)" '.success and .data.latePosted >= 1'
-as "$FM_TOKEN" GET "finance/events?PageSize=0"; EVLATE=$(jq -r --argjson r "$RLATE" '[.data.data[]|select(.sourceType == "FnReceipt" and .sourceId == $r)][0].id // empty' "$B")
-check "r1t d11: the event of the receipt is posted, still dated 2021-06-10" '[.data.data[]|select(.sourceType == "FnReceipt" and .sourceId == '$RLATE' and .status == 4 and (.eventDate|startswith("2021-06-10")))]|length == 1'
-as "$FM_TOKEN" GET "$FG/vouchers?Type=3&PageSize=0"; LATEV=$(jq -r --argjson r "$RLATE" '[.data.data[]|select(.sourceType == "FnReceipt" and .sourceId == $r)][0].id // empty' "$B")
-as "$FM_TOKEN" GET "$FG/vouchers/$LATEV"; check "r1t d11: its voucher is flagged as a late posting, dated the first day of the first open period of the current year ($LATEP), and says so in its description" '.success and .data.latePosting == true and (.data.date|startswith("'$LATEP'")) and .data.status == 1 and .data.createdByUserId == 0 and (.data.description|contains("ثبت با تاخیر"))'
-as "$FM_TOKEN" GET "finance/audit?EntityType=AccountingEvent&EntityId=$EVLATE&Action=LatePosting&PageSize=0"
-check "r1t d11: the audit trail holds one LatePosting row written by the system, with the real event date" '.success and (.data.data|length) == 1 and .data.data[0].userId == 0 and ((.data.data[0].beforeJson|fromjson|.EventDate)|startswith("2021-06-10"))'
+as "$TR_TOKEN" POST $FT/receipts/action "{\"id\":$RLATE,\"action\":\"post\"}"; check "r1t m7: and posted by treasury" '.success and .data.status == 2'
 
 # =============================================================================================== release F2
 TOKEN=$ADMIN_TOKEN
@@ -4982,7 +4982,7 @@ as "$OCHK_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; { [ "$CODE" = "200" ] &
 as "$OEMP_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; [ "$CODE" = "200" ] && ok "office r1 C1: the writer downloads it" || bad "office r1 C1: the writer downloads it got $CODE"
 as "$QC_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; [ "$CODE" = "404" ] && ok "office r1 C1: somebody who is not a party gets 404 for the attachment" || bad "office r1 C1: somebody who is not a party gets 404 for the attachment got $CODE"
 as "$OCHK_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "200" ] && ok "r1t d8: the generic download serves a letter file to a party of the letter" || bad "r1t d8: the generic download serves a letter file to a party of the letter got $CODE"
-as "$QC_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "403" ] && ok "r1t d8: the generic download refuses a stranger with 403" || bad "r1t d8: the generic download refuses a stranger with 403 got $CODE"
+as "$QC_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "404" ] && ok "r1t d8: the generic download answers a stranger 404 for a letter file, like the letter endpoint (review L1: it does not tell that the file exists)" || bad "r1t d8: the generic download answers a stranger 404 for a letter file got $CODE"
 as "$QC_TOKEN" GET "Documents/get-file-info?fileId=$OATT"; check "r1t d8: the name and hash of a letter file do not reach a stranger" '.success == false'
 
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: verify: signed, valid, the hashes agree and no file changed" '.success and .data.valid == true and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
@@ -8621,17 +8621,17 @@ cdnonempty "ceo drill fin.receivable_invoices_overdue: the scenario has an open 
 cdcheck "ceo drill fin.receivable_invoices_overdue: the rows are the open sales invoices past their due date (number, customer, open amount)" '.success and .data.totalCount == ('"$CDOIX"').n and ([.data.rows[]|"\(.id)|\(.number)|\(.customerName)|\(.openAmount|n)"]|sort) == ('"$CDOIX"').rows'
 cdcheck "ceo drill fin.receivable_invoices_overdue: the open amount is the overdue receivables of the finance dashboard; the oldest first, with its due date and days" '.success and .data.totals.openAmount == ('"$CDOIX"').sum and .data.totals.openAmount == ('"$CDFD"').receivablesOverdue and .data.rows[0].dueDate == '"$(cdpd "$CDOID")"' and .data.rows[0].daysOverdue == '"$(cdlate "$CDOID")"
 
-# --- fin.payables_by_supplier: the approved supplier invoices less what was paid against an invoice
-as "$CEO_TOKEN" GET "procurement/invoices?Status=3&PageSize=0"; CDPI=$(jq -c '.data.data|map({k:.providerId,name:.providerName,a:.totalAmount})' "$B")
-as "$CEO_TOKEN" GET "procurement/payments?Status=2&PageSize=0"; CDPY=$(jq -c '.data.data|map(select(.invoiceId != null))|map({k:.providerId,name:.providerName,p:.amount})' "$B")
-CDPX=$(jq -nc --argjson i "$CDPI" --argjson p "$CDPY" "$CDJQ"'([$i[].k] + [$p[].k] | unique) as $keys
-  | [$keys[] as $k | ([$i[]|select(.k == $k)]) as $ii | ([$p[]|select(.k == $k)]) as $pp
-     | {k:$k, name:(($ii[0].name) // ($pp[0].name)), count:($ii|length), inv:([$ii[].a]|add // 0), paid:([$pp[].p]|add // 0)} | . + {open:(.inv - .paid)} | select(.open != 0)]
-  | {n:length, invoiced:(map(.inv)|add // 0), paid:(map(.paid)|add // 0), open:(map(.open)|add // 0), max:(map(.open)|max), rows:(map("\(.k)|\(.name)|\(.count)|\(.inv|n)|\(.paid|n)|\(.open|n)")|sort)}')
+# --- fin.payables_by_supplier: R1t review M1 - one source with the finance dashboard and the CEO dashboard: the payables lines of the accounting events, per supplier (credit = recorded, debit = paid or settled)
+as "$CEO_TOKEN" GET "finance/events?PageSize=0"
+CDPX=$(jq -c "$CDJQ"'[.data.data[]|select(.status != 9)|.lines[]?|select(.accountRole == "AccountsPayable" and .providerId != null)] as $l
+  | ($l|map(.providerId)|unique) as $keys
+  | [$keys[] as $k | ([$l[]|select(.providerId == $k)]) as $ll
+     | {k:$k, name:($ll[0].providerName), count:([$ll[]|select((.credit // 0) > 0)]|length), inv:([$ll[].credit // 0]|add // 0), paid:([$ll[].debit // 0]|add // 0)} | . + {open:(.inv - .paid)} | select(.open != 0)]
+  | {n:length, invoiced:(map(.inv)|add // 0), paid:(map(.paid)|add // 0), open:(map(.open)|add // 0), max:(map(.open)|max), rows:(map("\(.k)|\(.name)|\(.count)|\(.inv|n)|\(.paid|n)|\(.open|n)")|sort)}' "$B")
 cdrill fin.payables_by_supplier "top=200"
 cdnonempty "ceo drill fin.payables_by_supplier: the scenario has a supplier with an open balance" "$(jq -r '.n' <<<"$CDPX")"
-cdcheck "ceo drill fin.payables_by_supplier: one row per supplier with invoices, invoiced, paid against an invoice and the open balance, as the invoice and payment lists of procurement" '.success and .data.totalCount == ('"$CDPX"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.invoices)|\(.invoiced|n)|\(.paid|n)|\(.open|n)"]|sort) == ('"$CDPX"').rows'
-cdcheck "ceo drill fin.payables_by_supplier: the totals are the sums of the lists, and the open total is the open payables of the finance dashboard; the biggest balance first" '.success and .data.totals.invoiced == ('"$CDPX"').invoiced and .data.totals.paid == ('"$CDPX"').paid and .data.totals.open == ('"$CDPX"').open and .data.totals.open == ('"$CDFD"').payablesOpen + 200000000 and .data.rows[0].open == ('"$CDPX"').max'
+cdcheck "ceo drill fin.payables_by_supplier: one row per supplier with invoices, invoiced, paid against an invoice and the open balance, as the payables lines of the accounting events" '.success and .data.totalCount == ('"$CDPX"').n and ([.data.rows[]|"\(.id)|\(.providerName)|\(.invoices)|\(.invoiced|n)|\(.paid|n)|\(.open|n)"]|sort) == ('"$CDPX"').rows'
+cdcheck "ceo drill fin.payables_by_supplier: the totals are the sums of the lists, and the open total is the open payables of the finance dashboard; the biggest balance first" '.success and .data.totals.invoiced == ('"$CDPX"').invoiced and .data.totals.paid == ('"$CDPX"').paid and .data.totals.open == ('"$CDPX"').open and .data.totals.open == ('"$CDFD"').payablesOpen and .data.rows[0].open == ('"$CDPX"').max'
 
 # --- fin.payables_overdue: the payables ageing of the general ledger as of today (the notes schedule of the financial statements), one row per supplier; overdue = the three buckets over 30 days, the headline figure
 as "$FM_TOKEN" GET "$FCM/notes?fiscalYearId=$FYC"

@@ -34,6 +34,8 @@ namespace Services.NasbNiro.Finance
         public const string Roles = "AUDITOR,FINANCEMANAGER";
         public const string NotAllowed = "فقط حسابرس و مدیر مالی می‌توانند سلامت زنجیره سوابق را بررسی کنند.";
         internal const int PageSize = 2000;
+        /// <summary>M12 (review R1t) ★: the most rows one verify call walks. A longer chain is verified in ranges (from = the row after the last range, which starts at the stored hash of its predecessor); the chain is not walked whole by one call that any finance manager can repeat.</summary>
+        public const long MaxRowsPerCall = 50000;
 
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -70,6 +72,9 @@ namespace Services.NasbNiro.Finance
                 KeyConfigured = key != null,
                 VerifiedAt = DateTimeOffset.Now,
             };
+            long last = Math.Min(to ?? long.MaxValue, head?.Seq ?? 0);
+            if (head != null && last - first + 1 > MaxRowsPerCall)
+                return ResponseDtoHelper.BadRequest<AuditChainVerifyDto>($"بازه بررسی بیش از {MaxRowsPerCall.ToString("N0", CultureInfo.InvariantCulture)} ردیف است؛ زنجیره را بازه‌بازه بررسی کنید (مثلاً از {first.ToString(CultureInfo.InvariantCulture)} تا {(first + MaxRowsPerCall - 1).ToString(CultureInfo.InvariantCulture)} و بعد از آن بازه بعدی). آخرین ردیف زنجیره شماره {head.Seq.ToString(CultureInfo.InvariantCulture)} است.");
             dto.WholeChain = first == 1 && (!to.HasValue || (head != null && to.Value >= head.Seq));
 
             AuditChain.ChainBreak broken = await WalkAsync(dto, first, to, key, ct) ?? await UnsealedAsync(ct) ?? await AnchorAsync(anchorSeq, anchor, ct);

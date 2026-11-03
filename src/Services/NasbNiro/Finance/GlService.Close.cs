@@ -88,7 +88,7 @@ namespace Services.NasbNiro.Finance
                 case FnPayrollStatus.Draft: return "پیش‌نویس";
                 case FnPayrollStatus.Calculated: return "محاسبه‌شده";
                 case FnPayrollStatus.Approved: return "تاییدشده و ثبت‌نشده";
-                default: return status.ToString();
+                default: return "نامشخص";   // L6: no English enum name reaches a user
             }
         }
 

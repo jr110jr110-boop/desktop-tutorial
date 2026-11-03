@@ -126,11 +126,9 @@ namespace MsTests
         public async Task The_Supplier_Drills_Sum_And_Group_In_The_Query_With_The_Date_Filter_In_The_Query()
         {
             List<string> payables = await Sql("fin.payables_by_supplier");
-            Assert.AreEqual(2, payables.Count, "one query for the approved invoices and one for the payments against an invoice");
-            AssertAggregates(payables, "ProcSupplierInvoices", "payables");
-            AssertAggregates(payables, "ProcPaymentRequests", "payables");
-            foreach (string sql in payables) Matches(sql, @"SUM\(\[\w+\]\.\[(TotalAmount|Amount)\]\)", "the sum of the amounts");
-            Matches(payables.Single(s => s.Contains("[ProcPaymentRequests]")), @"\[InvoiceId\] IS NOT NULL", "only the payments against an invoice");
+            Assert.AreEqual(1, payables.Count, "one query: the payables lines of the accounting events, grouped by supplier (M1: one source with the dashboards)");
+            AssertAggregates(payables, "FinAccountingEventLines", "payables");
+            Matches(payables.Single(), @"SUM\(\[\w+\]\.\[(Credit|Debit)\]\)", "the sums of the credit and debit");
 
             List<string> spend = await Sql("pr.spend_by_supplier");
             Assert.AreEqual(3, spend.Count, "the ordered value, the approved invoices and the payments, one query each, and nothing else");

@@ -345,7 +345,7 @@ namespace Services.NasbNiro.Finance
 
         // ------------------------------------------------------------------------------------------ letters of credit
 
-        private async Task<LetterOfCreditDto> LcDtoAsync(FnLetterOfCredit l, CancellationToken ct)
+        private async Task<LetterOfCreditDto> LcDtoAsync(FnLetterOfCredit l, CancellationToken ct, List<FnCashLegRefDto> openLegs = null)
         {
             List<FnLcPosting> postings = await _uow.Set<FnLcPosting>().AsNoTracking().Where(p => p.LcId == l.Id).OrderBy(p => p.Id).ToListAsync(ct);
             return new LetterOfCreditDto
@@ -354,7 +354,7 @@ namespace Services.NasbNiro.Finance
                 OpenDate = l.OpenDate, ExpiryDate = l.ExpiryDate, MarginPercent = l.MarginPercent, MarginPaid = l.MarginPaid, FeesPaid = l.FeesPaid, Status = l.Status,
                 PurchaseOrderId = l.PurchaseOrderId, ForeignInvoiceRef = l.ForeignInvoiceRef, SettlementRate = l.SettlementRate, SettledBase = l.SettledBase, PaidDate = l.PaidDate, Note = l.Note,
                 Postings = postings.Select(p => new LcPostingDto { Kind = p.Kind, Date = p.Date, Amount = p.Amount, VoucherId = p.VoucherId, Note = p.Note }).ToList(),
-                OpenCashLegs = await OpenLegsAsync(CashLegSources.LetterOfCredit, new[] { l.Id }, ct),
+                OpenCashLegs = openLegs != null ? openLegs.Where(x => x.SourceId == l.Id).ToList() : await OpenLegsAsync(CashLegSources.LetterOfCredit, new[] { l.Id }, ct),
             };
         }
 
@@ -363,7 +363,8 @@ namespace Services.NasbNiro.Finance
             if (!_user.IsInRole(FinanceRoles.Readers)) return Bad<List<LetterOfCreditDto>>(NotAllowed);
             List<FnLetterOfCredit> list = await _uow.Set<FnLetterOfCredit>().AsNoTracking().OrderByDescending(l => l.Id).Take(200).ToListAsync(ct);
             var dtos = new List<LetterOfCreditDto>();
-            foreach (FnLetterOfCredit l in list) dtos.Add(await LcDtoAsync(l, ct));
+            var legs = await OpenLegsAsync(CashLegSources.LetterOfCredit, list.Select(x => x.Id).ToList(), ct);   // L3: one query for the whole list
+            foreach (FnLetterOfCredit l in list) dtos.Add(await LcDtoAsync(l, ct, legs));
             return ResponseDtoHelper.Ok(dtos);
         }
 

@@ -69,6 +69,16 @@ namespace MsTests
             foreach (PeriodDto p in year.Periods) Ok(await PeriodAct(host, Fin, p.Id, "lock"));
         }
 
+        /// <summary>H1: the two-step close of every period of a year - an accountant locks, the CEO (the default closer) closes. Only then does the year close.</summary>
+        private static async Task CloseAllAsync(AppHost host, FiscalYearDto year)
+        {
+            foreach (PeriodDto p in year.Periods)
+            {
+                Ok(await PeriodAct(host, Fin, p.Id, "lock"));
+                Ok(await PeriodAct(host, Ceo, p.Id, "close"));
+            }
+        }
+
         /// <summary>Check by a second accountant and finalise by the finance manager: a manual voucher becomes final.</summary>
         private static async Task FinalizeAsync(AppHost host, int voucherId)
         {
@@ -345,7 +355,7 @@ namespace MsTests
             await FinalizeAsync(host, v.Id);
             // a stock value without a ledger balance: the inventory row of the reconciliation is not clean
             host.Write(uow => { AppHost.Add(uow, new ItemCost { ItemId = 1, Value = 5000m }); uow.SaveChanges(); });
-            await LockAllAsync(host, y96);
+            await CloseAllAsync(host, y96);
 
             ResponseDto<FiscalYearDto> none = await CloseYear(host, Fm, y96.Id);
             Assert.IsFalse(none.Success);
@@ -353,10 +363,11 @@ namespace MsTests
             Assert.IsFalse((await CloseYear(host, Fm, y96.Id, true, null)).Success, "a reason is needed");
 
             ResponseDto<FiscalYearDto> asked = await CloseYear(host, Fm, y96.Id, true, "مغایرت موجودی در دست بررسی است");
-            Assert.IsFalse(asked.Success, "the first manager only records the request");
+            Assert.IsTrue(asked.Success, "L4: the request is saved, so the answer is a success that says the year is not closed yet");
+            Assert.AreEqual(FnYearStatus.Open, asked.Data.Status);
             StringAssert.Contains(asked.Message, "مدیر مالی دیگری");
             ResponseDto<FiscalYearDto> again = await CloseYear(host, Fm, y96.Id, true, "مغایرت موجودی در دست بررسی است");
-            Assert.IsFalse(again.Success, "the same manager cannot approve his own request");
+            Assert.AreEqual(FnYearStatus.Open, again.Data.Status, "the same manager cannot approve his own request: the year stays open");
             Assert.AreEqual(1, host.Read(uow => uow.Set<FnCloseOverride>().Count(o => o.Kind == FnCloseOverrideKind.YearReconciliation && o.Status == FnCloseOverrideStatus.Pending)), "one request, not two");
 
             FiscalYearDto closed = Ok(await CloseYear(host, Fm2, y96.Id, true, "تایید"));
@@ -371,6 +382,40 @@ namespace MsTests
             Assert.IsTrue(host.Read(uow => uow.Set<FnAuditLog>().Single(a => a.Action == "YearClose").Summary.Contains("عبور از مغایرت")));
         }
 
+        [TestMethod]
+        public async Task H1_TheYearClosesOnlyWhenEveryPeriodWasClosedThroughTheTwoStepCloseAndTheMessageListsTheRest()
+        {
+            AppHost host = NewHost();
+            await SettingAsync(host, "CloseChecklist.Enforce", "0");
+            FiscalYearDto y96 = await EnsureYearAsync(host, new DateTime(2017, 6, 1));
+            await LockAllAsync(host, y96);   // only locked: the year manager alone used to close the year over locked periods
+            ResponseDto<FiscalYearDto> locked = await CloseYear(host, Fm, y96.Id);
+            Assert.IsFalse(locked.Success);
+            StringAssert.Contains(locked.Message, "دوره‌های شماره 1، 2، 3");
+            StringAssert.Contains(locked.Message, "بستن دومرحله‌ای");
+
+            // all but the last are closed properly: the message names the last one only
+            for (int i = 0; i < y96.Periods.Count - 1; i++) Ok(await PeriodAct(host, Ceo, y96.Periods[i].Id, "close"));
+            ResponseDto<FiscalYearDto> one = await CloseYear(host, Fm, y96.Id);
+            Assert.IsFalse(one.Success);
+            StringAssert.Contains(one.Message, "شماره " + y96.Periods.Max(p => p.Number) + " هنوز");
+            Ok(await PeriodAct(host, Ceo, y96.Periods.Last().Id, "close"));
+            Assert.AreEqual(FnYearStatus.Closed, Ok(await CloseYear(host, Fm, y96.Id)).Status);
+        }
+
+        [TestMethod]
+        public async Task L5_APeriodWhoseLockerIsNotInTheHistoryIsNotClosedBlindly()
+        {
+            AppHost host = NewHost();
+            await SettingAsync(host, "CloseChecklist.Enforce", "0");
+            PeriodDto p = await CurrentPeriodAsync(host);
+            Ok(await PeriodAct(host, Fin, p.Id, "lock"));
+            host.Write(uow => { uow.Set<FnPeriodLog>().RemoveRange(uow.Set<FnPeriodLog>().Where(l => l.PeriodId == p.Id)); uow.SaveChanges(); });
+            ResponseDto<FiscalYearDto> refused = await PeriodAct(host, Ceo, p.Id, "close");
+            Assert.IsFalse(refused.Success);
+            StringAssert.Contains(refused.Message, "قفل‌کننده این دوره در تاریخچه ثبت نشده");
+        }
+
         // ------------------------------------------------------------------------------------------------ D11: late posting
 
         [TestMethod]
@@ -379,7 +424,7 @@ namespace MsTests
             AppHost host = NewHost();
             await SettingAsync(host, "CloseChecklist.Enforce", "0");
             FiscalYearDto y96 = await EnsureYearAsync(host, new DateTime(2017, 6, 1));
-            await LockAllAsync(host, y96);
+            await CloseAllAsync(host, y96);
             Ok(await CloseYear(host, Fm, y96.Id));
             FiscalYearDto y97 = (await host.As(Fm, sp => sp.GetRequiredService<IGlService>().GetYearsAsync(null, CancellationToken.None))).Data.Single(y => y.Year == 1397);
             Assert.AreEqual(FnYearStatus.Open, y97.Status, "1397 is open, and an old logic would have picked its first period");

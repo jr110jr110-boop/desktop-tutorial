@@ -108,11 +108,8 @@ namespace Services.NasbNiro.Finance
 
             d.InvoicesWaitingApproval = await _uow.Set<SupplierInvoice>().CountAsync(i => !i.Deleted &&
                 (i.Status == SupplierInvoiceStatus.Matched || i.Status == SupplierInvoiceStatus.NeedsApproval), ct);
-            decimal approvedInvoices = await _uow.Set<SupplierInvoice>().Where(i => !i.Deleted && i.Status == SupplierInvoiceStatus.Approved)
-                .SumAsync(i => (decimal?)i.TotalAmount, ct) ?? 0;
-            decimal paidOnInvoices = await _uow.Set<PaymentRequest>().Where(p => !p.Deleted && p.Status == PaymentRequestStatus.Paid && p.InvoiceId.HasValue)
-                .SumAsync(p => (decimal?)p.Amount, ct) ?? 0;
-            d.PayablesOpen = approvedInvoices - paidOnInvoices;
+            // M1 (review R1t): the same source as the finance dashboard - the payables account of the accounting events (a letter-of-credit settlement that pays the supplier is in it)
+            d.PayablesOpen = await liveLines.Where(l => l.AccountRole == AccountRoles.AccountsPayable).SumAsync(l => (decimal?)(l.Credit - l.Debit), ct) ?? 0;
             IQueryable<PaymentRequest> waiting = _uow.Set<PaymentRequest>().Where(p => !p.Deleted &&
                 (p.Status == PaymentRequestStatus.Draft || p.Status == PaymentRequestStatus.Approved));
             d.PaymentsWaitingApproval = await waiting.CountAsync(ct);
