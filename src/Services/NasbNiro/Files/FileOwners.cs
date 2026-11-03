@@ -53,7 +53,7 @@ namespace Services.NasbNiro.Files
 
             // project control
             ["PcContractTerms"] = ProjectControl.ProjectControlRoles.Readers, ["PcGuaranteeEvent"] = ProjectControl.ProjectControlRoles.Readers,
-            ["PcEngineeringDeliverable"] = ProjectControl.ProjectControlRoles.Readers, ["PcShipment"] = ProjectControl.ProjectControlRoles.Readers,
+            ["PcEngineeringDeliverable"] = ProjectControl.ProjectControlRoles.Readers, ["PcShipment"] = ProjectControl.ProjectControlRoles.Readers, ["PcVariationOrder"] = ProjectControl.ProjectControlRoles.Readers,
 
             // procurement, sales, after-sales
             ["ServiceAcceptance"] = Procurement.ProcurementRoles.Readers, ["SupplierInvoice"] = Procurement.ProcurementRoles.Readers, ["SupplierQuote"] = Procurement.ProcurementRoles.Readers,
