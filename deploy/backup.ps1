@@ -297,9 +297,9 @@ FROM sys.databases d LEFT JOIN sys.database_recovery_status r ON r.database_id =
                 Write-Log 'Log backup skipped: the database is not in the full recovery model yet or no full backup has been made since (the daily backup makes it).'
                 exit 0
             }
-            $logFile = Join-Path $logDir ('{0}_{1:yyyyMMdd_HHmmss}.trn' -f $DatabaseName, (Get-Date))
-            $logFile = Invoke-Backup "BACKUP LOG $database" $logFile $isExpress $EncryptionCertificate
-            Write-Log ('Log backup OK: {0} ({1:N1} MB), encrypted ({2})' -f $logFile, ((Get-Item $logFile).Length / 1MB), $(if ($script:BackupHow -eq 'native') { 'SQL Server, AES-256' } else { 'file level, AES-256 + HMAC' }))
+            $logBackupFile = Join-Path $logDir ('{0}_{1:yyyyMMdd_HHmmss}.trn' -f $DatabaseName, (Get-Date))
+            $logBackupFile = Invoke-Backup "BACKUP LOG $database" $logBackupFile $isExpress $EncryptionCertificate
+            Write-Log ('Log backup OK: {0} ({1:N1} MB), encrypted ({2})' -f $logBackupFile, ((Get-Item $logBackupFile).Length / 1MB), $(if ($script:BackupHow -eq 'native') { 'SQL Server, AES-256' } else { 'file level, AES-256 + HMAC' }))
         }
         else {
             # 1. Database

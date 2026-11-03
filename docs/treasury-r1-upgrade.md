@@ -34,3 +34,7 @@ Applies when the `TreasuryR1` migration is applied on top of the build branch (`
 
 * CI sets a fixed test `Identity__AuditHmacKey` (not a secret); servers get a random one from `install.ps1`.
 * `install.ps1` merges the settings file: `Database:MigrateAtStart` and `Backup:OffsiteCopyPath` are kept. The start-up security checks run when the site starts, not in `WebApi.dll --migrate-only`.
+
+## Audit key copy (CI fix round)
+
+`<Backup>\keys\audit-key.sealed.txt` is written on every edition: it holds the audit key sealed with the backup file key (always) and, where SQL Server allows, also with the backup certificate. The audit key is not in the settings copy of the backup. To read it on a new server use the escrow copy of the backup file key (see above) with `Unprotect-BackupFile` from `backup-crypto.ps1`.

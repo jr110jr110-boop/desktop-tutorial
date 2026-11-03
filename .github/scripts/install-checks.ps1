@@ -217,7 +217,15 @@ Check 'database backups are encrypted: by SQL Server where the edition can, else
 }
 Check 'the uploaded files in the backup are encrypted at file level' {
     $copies = @(Get-ChildItem "$BackupFolder\files" -Recurse -File | Where-Object { $_.Name -ne 'appsettings.Production.redacted.json' })
-    if ($copies.Count -eq 0) { throw 'no uploaded file in the files backup' }
+    $onDisk = @(Get-ChildItem "$InstallRoot\app\UploadedDocuments" -Recurse -File -ErrorAction SilentlyContinue).Count
+    if ($copies.Count -eq 0 -and $onDisk -gt 0) {
+        # the document of the upload check above was written after the installer's own first backup: run the daily backup once more, then look again
+        Start-ScheduledTask -TaskName 'INNCO daily backup'; Start-Sleep -Seconds 5
+        $until = (Get-Date).AddMinutes(10)
+        do { Start-Sleep -Seconds 3 } while ((Get-ScheduledTask -TaskName 'INNCO daily backup').State -eq 'Running' -and (Get-Date) -lt $until)
+        $copies = @(Get-ChildItem "$BackupFolder\files" -Recurse -File | Where-Object { $_.Name -ne 'appsettings.Production.redacted.json' })
+    }
+    if ($copies.Count -eq 0) { throw "no uploaded file in the files backup ($onDisk file(s) are in UploadedDocuments)" }
     $plain = @($copies | Where-Object { $_.Name -notlike '*.enc' })
     if ($plain.Count -gt 0) { throw "$($plain.Count) file(s) of the files backup are not encrypted, for example $($plain[0].FullName)" }
     "$($copies.Count) files, all .enc"
@@ -228,15 +236,19 @@ Check 'the keys folder holds the file key, and the off-site copy never takes the
     if ($script -and $script -match "@\('database', 'files', 'keys'\)") { throw 'backup.ps1 still copies the keys folder off-site' }
     'file-encryption.key.dpapi is there; backup.ps1 copies database and files only'
 }
-Check 'the backup certificate and its key are in the keys folder' {
-    if (-not (Test-Path "$BackupFolder\keys\INNCO_BackupCert.cer")) { return 'no backup certificate on this server (it could not be made; file-level encryption is used)' }
-    foreach ($name in 'INNCO_BackupCert.cer', 'INNCO_BackupCert.pvk', 'audit-key.sealed.txt') {
+Check 'the backup certificate and its key are in the keys folder, and the audit key is sealed there' {
+    $names = @('audit-key.sealed.txt')
+    $hasCertificate = Test-Path "$BackupFolder\keys\INNCO_BackupCert.cer"
+    if ($hasCertificate) { $names = @('INNCO_BackupCert.cer', 'INNCO_BackupCert.pvk') + $names }
+    foreach ($name in $names) {
         if (-not (Test-Path "$BackupFolder\keys\$name")) { throw "missing $BackupFolder\keys\$name" }
     }
     $sealed = Get-Content -Raw -Path "$BackupFolder\keys\audit-key.sealed.txt"
     $real = Get-Content -Raw -Path $settingsFile | ConvertFrom-Json
     if ($real.Identity.AuditHmacKey -and $sealed.Contains([string]$real.Identity.AuditHmacKey)) { throw 'audit-key.sealed.txt holds the audit key in clear text' }
-    'INNCO_BackupCert.cer, INNCO_BackupCert.pvk and audit-key.sealed.txt (sealed)'
+    if ($sealed -notmatch 'sealed-with-file-key: \S+') { throw 'audit-key.sealed.txt has no seal with the backup file key' }
+    if ($hasCertificate) { 'INNCO_BackupCert.cer, INNCO_BackupCert.pvk and audit-key.sealed.txt (sealed with the file key' + $(if ($sealed -match 'sealed-with-certificate: \S+') { ' and the certificate)' } else { ')' }) }
+    else { 'audit-key.sealed.txt (sealed with the file key); no backup certificate on this server' }
 }
 Check 'the settings copy of the backup holds no secret' {
     $copy = "$BackupFolder\files\appsettings.Production.redacted.json"

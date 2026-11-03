@@ -325,25 +325,54 @@ function Initialize-BackupCertificate([string]$KeysFolder) {
 }
 
 # The audit key (Identity:AuditHmacKey) is needed to go on checking the hash chain of the audit trail after a restore, and it must not travel in the settings copy of the backup.
-# It is sealed here with the public part of the backup certificate; only the private key and its password open it again. The sealed text goes to the keys folder.
+# It is sealed here and the sealed text goes to the keys folder (audit-key.sealed.txt). Two seals, so that it works on every edition and survives the loss of the server:
+#  1. with the backup file key (the same key that opens the encrypted backups; its escrow copy is kept apart from the backups): works on SQL Server Express too;
+#  2. where SQL Server can: with the public part of the backup certificate (only the private key and its password open it again).
 function Save-SealedAuditKey([string]$SettingsPath, [string]$KeysFolder) {
     try {
-        if (-not (Test-Path $SettingsPath)) { return }
+        if (-not (Test-Path $SettingsPath)) { Write-Warn "The audit key could not be sealed: $SettingsPath does not exist."; return }
         $json = Get-Content -Raw -Encoding UTF8 -Path $SettingsPath | ConvertFrom-Json
         $identity = $json.PSObject.Properties['Identity']
-        if ($null -eq $identity -or $null -eq $identity.Value) { return }
+        if ($null -eq $identity -or $null -eq $identity.Value) { Write-Warn 'The audit key could not be sealed: the settings have no Identity section.'; return }
         $keyProperty = $identity.Value.PSObject.Properties['AuditHmacKey']
-        if ($null -eq $keyProperty -or -not $keyProperty.Value) { return }
-        $sealed = [string](Invoke-Sql -Scalar -Parameters @{ '@k' = [string]$keyProperty.Value } `
-            -Query ('SELECT CONVERT(varchar(max), ENCRYPTBYCERT(CERT_ID(' + (ConvertTo-SqlText $BackupCertificateName) + '), @k), 2)'))
-        if (-not $sealed) { return }
+        if ($null -eq $keyProperty -or -not $keyProperty.Value) { Write-Warn 'The audit key could not be sealed: the settings have no Identity:AuditHmacKey.'; return }
+        $auditKey = [string]$keyProperty.Value
+
+        # seal 1: the backup file key (AES-256 + HMAC, the format of the encrypted backups), as base64 text
+        $fileSeal = $null
+        $plain = Join-Path $KeysFolder 'audit-key.plain.tmp'
+        try {
+            [System.IO.File]::WriteAllBytes($plain, (New-Object System.Text.UTF8Encoding($false)).GetBytes($auditKey))
+            $key = Get-FileCryptoKey $KeysFolder $BackupFileKey -Create
+            $encrypted = Protect-BackupFile $plain $key.Bytes   # removes the plain file
+            $fileSeal = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($encrypted))
+            Remove-Item -Path $encrypted -Force
+        }
+        finally { if (Test-Path $plain) { Remove-Item -Path $plain -Force -ErrorAction SilentlyContinue } }
+
+        # seal 2: the backup certificate (optional)
+        $certSeal = $null
+        try {
+            $certSeal = [string](Invoke-Sql -Scalar -Parameters @{ '@k' = $auditKey } `
+                -Query ('SELECT CONVERT(varchar(max), ENCRYPTBYCERT(CERT_ID(' + (ConvertTo-SqlText $BackupCertificateName) + '), @k), 2)'))
+        }
+        catch { Write-Info "The audit key was not sealed with the backup certificate: $($_.Exception.Message)" }
+
         $text = @(
-            "INNCO PMIS: the audit key (Identity:AuditHmacKey), sealed with the backup certificate $BackupCertificateName. Written by install.ps1.",
-            'The audit key is needed to go on checking the hash chain of the audit trail on a restored system. It is not in the settings copy of the backup.',
-            'On a new server: restore the certificate in master (CREATE CERTIFICATE ... FROM FILE ... WITH PRIVATE KEY (FILE = ..., DECRYPTION BY PASSWORD = ...)), then in master run',
-            "    SELECT CONVERT(nvarchar(max), DECRYPTBYCERT(CERT_ID(N'$BackupCertificateName'), 0x<the hex text below>, N'<password of the key>'))",
-            'and put the result into appsettings.Production.json as Identity:AuditHmacKey before the first start of the program.',
-            "sealed: $sealed")
+            'INNCO PMIS: the audit key (Identity:AuditHmacKey), sealed. Written by install.ps1. It is not in the settings copy of the backup.',
+            'The audit key is needed to go on checking the hash chain of the audit trail on a restored system.',
+            '',
+            'Seal 1 (always): the backup file key. On a new server: take the escrow copy of the backup file key (shown once by the installer, kept apart from the backups), decode the base64 text below',
+            '  to a file named audit-key.sealed.enc, open it with Unprotect-BackupFile (deploy\backup-crypto.ps1) and the 64-byte key, and put the result into appsettings.Production.json as Identity:AuditHmacKey',
+            '  before the first start of the program.',
+            "sealed-with-file-key: $fileSeal")
+        if ($certSeal) {
+            $text += @(
+                '',
+                "Seal 2 (where SQL Server allows it): the backup certificate $BackupCertificateName. Restore the certificate in master (CREATE CERTIFICATE ... FROM FILE ... WITH PRIVATE KEY (FILE = ..., DECRYPTION BY PASSWORD = ...)), then in master run",
+                "    SELECT CONVERT(nvarchar(max), DECRYPTBYCERT(CERT_ID(N'$BackupCertificateName'), 0x<the hex text below>, N'<password of the key>'))",
+                "sealed-with-certificate: $certSeal")
+        }
         Set-Content -Path (Join-Path $KeysFolder 'audit-key.sealed.txt') -Value $text -Encoding ASCII
     }
     catch { Write-Warn "The audit key could not be sealed into the keys folder: $($_.Exception.Message)" }
@@ -1133,7 +1162,7 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     Register-ScheduledTask -TaskName $logTaskName -Action $logAction -Trigger $logTrigger -Principal $taskPrincipal -Settings $logSettings -Force | Out-Null
     Write-Ok "Tasks '$taskName' and '$logTaskName': database and log backups to $BackupFolder\database, uploaded files to $BackupFolder\files; kept as long as the setting Backup:RetentionDays says (35 days by default)."
     if ($OffsiteCopyPath) { Write-Ok "Every backup run also copies to $OffsiteCopyPath (setting Backup:OffsiteCopyPath)." }
-    if ($backupCertificate.CertificateReady) { Save-SealedAuditKey $settingsPath $keysFolder }
+    Save-SealedAuditKey $settingsPath $keysFolder   # R1t review: on every edition (the file-key seal needs no certificate)
 
     # 10b. Database updates and protection of the audit trail (R1t, D20). The pool is still stopped here, so nothing is written meanwhile.
     if ($HardenAudit) {

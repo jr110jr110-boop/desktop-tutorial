@@ -75,6 +75,14 @@ namespace WebApi.Filters
                 return;
             }
 
+            // R1a2 (H3): a change (replace, edit, delete) is decided by the document service, which refuses a file that a record or a letter holds with the reason of its lock
+            // (the signed-letter text, the owner it is attached to) and a loose file for everybody but the uploader and the PMO. The guard decides the reads only.
+            if (!read)
+            {
+                await next();
+                return;
+            }
+
             switch (Kind)
             {
                 case FileGuardKind.Download:

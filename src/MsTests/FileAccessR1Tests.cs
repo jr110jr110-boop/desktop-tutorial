@@ -433,14 +433,22 @@ namespace MsTests
         [TestMethod]
         public async Task Guard_Change_Reads_The_Id_From_A_Query_Value_Or_A_Body_Object_And_Refuses_In_The_Usual_Shape()
         {
-            (IActionResult replace, bool replaceReached, _) = await RunGuard(FileGuardKind.Replace, "documentId", Guid.NewGuid(), FileVerdict.Deny(FileText.NoReadAccess));
-            Assert.IsFalse(replaceReached);
-            Assert.IsFalse(((ResponseDto<string>)((OkObjectResult)replace).Value).Success);
+            // a change is decided by the document service (the lock text of a held file, the uploader or the PMO for a loose one), so the guard lets a denied change through to it;
+            // the id is still read from the query value or from the body object
+            (IActionResult replace, bool replaceReached, int replaceAsked) = await RunGuard(FileGuardKind.Replace, "documentId", Guid.NewGuid(), FileVerdict.Deny(FileText.NoReadAccess));
+            Assert.IsNull(replace);
+            Assert.IsTrue(replaceReached);
+            Assert.AreEqual(1, replaceAsked);
 
-            (IActionResult edit, bool editReached, int asked) = await RunGuard(FileGuardKind.Edit, "updateDocumentDescriptionDto", new UpdateDocumentDto { Id = Guid.NewGuid() }, FileVerdict.Deny(FileText.NoReadAccess, true));
-            Assert.IsFalse(editReached);
+            (IActionResult edit, bool editReached, int asked) = await RunGuard(FileGuardKind.Edit, "updateDocumentDescriptionDto", new UpdateDocumentDto { Id = Guid.NewGuid() }, FileVerdict.Deny(FileText.NoReadAccess));
+            Assert.IsNull(edit);
+            Assert.IsTrue(editReached);
             Assert.AreEqual(1, asked);
-            Assert.IsFalse(((ResponseDto<bool>)((OkObjectResult)edit).Value).Success);
+
+            // a read is refused by the guard in the usual shape
+            (IActionResult info, bool infoReached, _) = await RunGuard(FileGuardKind.Info, "fileId", Guid.NewGuid(), FileVerdict.Deny(FileText.NoReadAccess));
+            Assert.IsFalse(infoReached);
+            Assert.IsFalse(((ResponseDto<ResponseFileDto>)((OkObjectResult)info).Value).Success);
 
             // no usable id: the action reports it, the guard does not ask
             (IActionResult none, bool noneReached, int noneAsked) = await RunGuard(FileGuardKind.Download, "DocumentId", "not-a-guid", FileVerdict.Deny("x"));
