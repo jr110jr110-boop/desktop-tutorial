@@ -6,7 +6,7 @@ import { getCloseChecklist, overrideChecklist } from "@/api/FnAPIs";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { printSheet, yesNo } from "@/composables/fn";
 import { closeStatuses, usePeriods } from "@/composables/fnF3";
-import { FnRoles, hasRole } from "@/composables/roles";
+import { currentUserId, FnRoles, hasRole } from "@/composables/roles";
 
 // Period close checklist: the controls the finance manager looks at before locking a period. Red items can be passed with a written reason (finance manager).
 const { periods, load: loadPeriods, label } = usePeriods();
@@ -25,14 +25,27 @@ async function load() {
   data.value = d;
 }
 
+/** the request was made by this user: he cannot approve it, only withdraw it */
+const mine = () => data.value?.overrideRequestedByUserId != null && data.value.overrideRequestedByUserId === currentUserId();
+
 async function override(v: any) {
   dialog.value = false;
   busy.value = true;
-  const [d, error] = await overrideChecklist(periodId.value!, v.reason);
+  const [d, error] = await overrideChecklist(periodId.value!, v.reason, "request");
   busy.value = false;
   if (error) return fail(error);
-  ok("عبور از کنترل با علت ثبت شد.");
+  ok("درخواست عبور از موارد قرمز ثبت شد؛ یک مدیر مالی دیگر باید آن را تایید کند.");
   data.value = d;
+}
+
+async function decide(action: "approve" | "withdraw") {
+  busy.value = true;
+  const [d, error] = await overrideChecklist(periodId.value!, "", action);
+  busy.value = false;
+  if (error) return fail(error);
+  ok(action === "approve" ? "عبور از موارد قرمز تایید شد." : "درخواست پس گرفته شد.");
+  if (d) data.value = d;
+  else await load();
 }
 
 async function print() {
@@ -60,7 +73,7 @@ onMounted(async () => {
         <h1 class="inv-title">فهرست کنترل بستن دوره</h1>
         <div class="d-flex gap-2">
           <button :disabled="!data" class="btn btn-sm btn-outline-secondary" @click="print">چاپ</button>
-          <button v-if="canOverride && data && data.redCount > 0 && !data.overridden" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="dialog = true">عبور از موارد قرمز با ثبت علت</button>
+          <button v-if="canOverride && data && data.redCount > 0 && !data.overridden && !data.overridePending" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="dialog = true">درخواست عبور از موارد قرمز (با علت)</button>
         </div>
       </div>
       <div class="inv-filters mb-3">
@@ -72,6 +85,14 @@ onMounted(async () => {
           <span :class="data.allGreen ? 'ok' : 'bad'" class="inv-badge">{{ data.allGreen ? "همه موارد سبز" : data.redCount + " مورد قرمز" }}</span>
           <span class="inv-muted me-2">الزام کنترل برای قفل دوره: {{ yesNo(data.enforced) }} - قفل دوره: {{ data.canLock ? "مجاز" : "مجاز نیست" }}</span>
         </p>
+        <div v-if="data.overridePending && !data.overridden" class="alert alert-warning py-2">
+          <div>درخواست عبور از موارد قرمز منتظر مدیر مالی دوم است: {{ data.overrideRequestReason }} ({{ jalali(data.overrideRequestedAt, true) }})</div>
+          <div v-if="canOverride" class="mt-2 d-flex gap-2">
+            <button v-if="!mine()" :disabled="busy" class="btn btn-sm btn-success" @click="decide('approve')">تایید عبور</button>
+            <button v-if="mine()" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="decide('withdraw')">پس گرفتن درخواست</button>
+            <span v-if="mine()" class="inv-muted small align-self-center">درخواست‌دهنده نمی‌تواند خودش آن را تایید کند.</span>
+          </div>
+        </div>
         <p v-if="data.overridden" class="alert alert-warning py-2">با علت از کنترل عبور شده است: {{ data.overrideReason }} ({{ jalali(data.overriddenAt, true) }})</p>
         <table class="table table-sm">
           <thead><tr><th>مورد کنترل</th><th>وضعیت</th><th>تعداد</th><th>توضیح</th></tr></thead>
@@ -87,7 +108,7 @@ onMounted(async () => {
       <p v-else class="inv-muted">دوره را انتخاب کنید.</p>
     </div>
 
-    <PromptModal v-if="dialog" :fields="[{ key: 'reason', label: 'علت عبور از موارد قرمز', type: 'textarea', required: true }]" confirm-text="ثبت عبور" title="عبور از کنترل بستن دوره" @cancel="dialog = false" @confirm="override" />
+    <PromptModal v-if="dialog" :fields="[{ key: 'reason', label: 'علت عبور از موارد قرمز', type: 'textarea', required: true }]" confirm-text="ثبت درخواست" title="درخواست عبور از کنترل بستن دوره" @cancel="dialog = false" @confirm="override" />
   </div>
 </template>
 

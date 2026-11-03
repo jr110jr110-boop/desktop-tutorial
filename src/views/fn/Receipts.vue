@@ -6,7 +6,7 @@ import ReceiptPrint from "@/components/fn/print/ReceiptPrint.vue";
 import QPager from "@/components/quality/QPager.vue";
 import { getBankAccounts, getCashBoxes, getCustomers, getReceipt, getReceipts, getSalesInvoices, receiptAction, saveReceipt } from "@/api/FnAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
-import { badgeOfDoc, docStatuses, instruments, money, parseAmount, printSheet, usePagedList } from "@/composables/fn";
+import { badgeOfDoc, docStatuses, instruments, money, parseAmount, printSheet, usePagedList, legActions, legSourceTypes } from "@/composables/fn";
 import { FnRoles, hasRole } from "@/composables/roles";
 
 // Receipts from customers: cash, transfer, card or cheque (cheques enter the received-cheque register); settles the oldest open invoices (FIFO) or the ones chosen.
@@ -174,10 +174,12 @@ onMounted(() => {
           <thead><tr><th>فاکتور فروش</th><th>مبلغ تسویه‌شده</th></tr></thead>
           <tbody><tr v-for="(a, i) in detail.allocations" :key="i"><td class="inv-ltr">{{ a.invoiceNumber }}</td><td class="fn-num">{{ money(a.amount) }}</td></tr></tbody>
         </table>
+        <p v-if="detail.sourceType" class="alert alert-info py-2 small">این سند ساق نقدیِ یک «{{ legSourceTypes[detail.sourceType] || detail.sourceType }}» شماره‌ی {{ detail.sourceId }} است ({{ legActions[detail.sourceAction] || detail.sourceAction }}) و ویرایش دستی ندارد. ثبت‌کننده، تاییدکننده و ثبت نهایی‌کننده سه نفر جدا هستند.</p>
+        <p v-if="detail.approvedByName" class="inv-muted small">تایید: {{ detail.approvedByName }}<template v-if="detail.postedByName"> — ثبت نهایی: {{ detail.postedByName }}</template></p>
         <div class="d-flex gap-2 justify-content-end flex-wrap">
           <button class="btn btn-sm btn-outline-secondary" @click="detail = null">بستن</button>
           <button class="btn btn-sm btn-outline-secondary" @click="print">چاپ سند دریافت</button>
-          <button v-if="canWrite && detail.status === 0" class="btn btn-sm btn-outline-primary" @click="edit">ویرایش</button>
+          <button v-if="canWrite && detail.status === 0 && !detail.sourceType" class="btn btn-sm btn-outline-primary" @click="edit">ویرایش</button>
           <button v-if="canWrite && detail.status === 0" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید (غیر از تهیه‌کننده)</button>
           <button v-if="canWrite && detail.status === 1" :disabled="busy" class="btn btn-sm btn-success" @click="act('post')">ثبت نهایی</button>
           <button v-if="canWrite && (detail.status === 0 || detail.status === 1)" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('cancel')">ابطال</button>

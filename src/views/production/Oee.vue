@@ -64,22 +64,23 @@ onMounted(async () => {
       <div class="table-responsive">
         <table class="table table-sm table-hover">
           <thead>
-            <tr><th>مرکز کار</th><th>ساعت برنامه‌ای</th><th>ساعت توقف</th><th>ساعت تولید ثبت‌شده</th><th>ساعت استاندارد</th><th>سالم</th><th>ضایعات</th><th>دسترس‌پذیری</th><th>عملکرد</th><th>کیفیت</th><th>OEE</th></tr>
+            <tr><th>مرکز کار</th><th>ساعت برنامه‌ای</th><th>ساعت توقف</th><th>نگهداری برنامه‌ای</th><th>خرابی</th><th>ساعت کار ماشین</th><th>ساعت تولید ثبت‌شده</th><th>ساعت استاندارد</th><th>سالم</th><th>ضایعات</th><th>دسترس‌پذیری</th><th>عملکرد</th><th>کیفیت</th><th>بیکاری</th><th>OEE</th><th>OEE روش قدیم</th></tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="11" class="text-center inv-muted">در حال بارگذاری...</td></tr>
-            <tr v-if="!loading && !rows.length"><td colspan="11" class="text-center inv-muted">داده‌ای نیست.</td></tr>
+            <tr v-if="loading"><td colspan="16" class="text-center inv-muted">در حال بارگذاری...</td></tr>
+            <tr v-if="!loading && !rows.length"><td colspan="16" class="text-center inv-muted">داده‌ای نیست.</td></tr>
             <tr v-for="r in rows" :key="r.workCenterId">
               <td><span class="inv-ltr">{{ r.workCenterCode }}</span> {{ r.workCenterTitle }}</td>
-              <td>{{ hoursText(r.plannedHours) }}</td><td>{{ hoursText(r.downtimeHours) }}</td><td>{{ hoursText(r.bookedRunHours) }}</td><td>{{ hoursText(r.standardHours) }}</td>
+              <td>{{ hoursText(r.plannedHours) }}</td><td>{{ hoursText(r.downtimeHours) }}</td><td>{{ hoursText(r.plannedMaintenanceHours) }}</td><td>{{ hoursText(r.breakdownHours) }}</td><td>{{ hoursText(r.runHours) }}</td><td>{{ hoursText(r.bookedRunHours) }}</td><td>{{ hoursText(r.standardHours) }}</td>
               <td>{{ qtyText(r.goodQty) }}</td><td>{{ qtyText(r.scrapQty) }}</td>
               <td>{{ percentText(r.availabilityPercent) }}</td><td>{{ percentText(r.performancePercent) }}</td><td>{{ percentText(r.qualityPercent) }}</td>
-              <td><span v-if="r.oeePercent !== null && r.oeePercent !== undefined" :class="badgeOfOee(r.oeePercent)" class="inv-badge">{{ percentText(r.oeePercent) }}</span><span v-else>-</span></td>
+              <td>{{ hoursText(r.idleHours) }}</td><td><span v-if="r.oeePercent !== null && r.oeePercent !== undefined" :class="badgeOfOee(r.oeePercent)" class="inv-badge">{{ percentText(r.oeePercent) }}</span><span v-else>-</span></td>
+              <td class="inv-muted" title="فقط برای مقایسه؛ در نسخه بعد حذف می‌شود">{{ r.oeeLegacy === null || r.oeeLegacy === undefined ? "-" : percentText(r.oeeLegacy) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <p class="inv-muted small mb-0">OEE = دسترس‌پذیری × عملکرد × کیفیت؛ بدون زمان تولید یا بدون قطعه، عملکرد، کیفیت و OEE خالی (-) است. ساعت‌ها به صورت ساعت:دقیقه نمایش داده می‌شوند.</p>
+      <p class="inv-muted small mb-0">طبق ISO 22400-2: دسترس‌پذیری = ساعت کار ماشین به ساعت برنامه‌ای منهای نگهداری برنامه‌ای. OEE = دسترس‌پذیری × عملکرد × کیفیت؛ بدون زمان تولید یا بدون قطعه، عملکرد، کیفیت و OEE خالی (-) است. ساعت‌ها به صورت ساعت:دقیقه نمایش داده می‌شوند.</p>
     </div>
   </div>
 </template>

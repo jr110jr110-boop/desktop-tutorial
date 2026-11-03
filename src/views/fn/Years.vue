@@ -14,6 +14,10 @@ const newDate = ref<string | null>(today());
 const dialog = ref<null | { kind: "reopen" | "close-year"; id: number; title: string }>(null);
 const busy = ref(false);
 const canManage = hasRole(FnRoles.managers);
+/** R1t D10: the accountants lock a period, the finance manager reopens it, and the final close is a SECOND person's (the CEO unless the company chose its finance manager in PeriodClose.CloseBy); the API decides */
+const canLock = hasRole(FnRoles.accountants);
+const canClosePeriod = hasRole(["FINANCEMANAGER", "CEO"]);
+const showActions = canLock || canClosePeriod;
 const canEnsure = hasRole(FnRoles.systemJobs);
 
 async function load() {
@@ -64,8 +68,11 @@ async function closeYear(id: number, v: any) {
   const [data, error] = await closeFiscalYear(id, override, v.reason);
   busy.value = false;
   if (error) return fail(error);
-  ok("سال مالی بسته شد؛ سند اختتامیه و سند افتتاحیه سال بعد صادر شد.");
   replaceYear(data);
+  if (data?.status === 0) {
+    // the first manager's call with a ledger / sub-ledger difference only records the request; another finance manager's call closes the year (R1t L4)
+    ok("درخواست بستن سال با مغایرت ثبت شد؛ سال هنوز باز است و یک مدیر مالی دیگر باید بستن را تایید کند.");
+  } else ok("سال مالی بسته شد؛ سند اختتامیه و سند افتتاحیه سال بعد صادر شد.");
   load();
 }
 
@@ -82,7 +89,7 @@ onMounted(load);
           <button :disabled="busy" class="btn btn-sm btn-primary" @click="ensure">ایجاد / آماده‌سازی سال مالی</button>
         </div>
       </div>
-      <p class="inv-muted">دوره‌ها ماه‌های شمسی هستند. دوره «قفل» فقط برای مدیر مالی باز است؛ دوره «بسته» قطعی است و سندی در آن ثبت نمی‌شود.</p>
+      <p class="inv-muted">دوره‌ها ماه‌های شمسی هستند. بستن دوره دو مرحله دارد: حسابدار دوره را «قفل» می‌کند (تا مدیر مالی بازگشایی کند) و کاربر دیگری (مدیرعامل، یا مدیر مالی اگر شرکت چنین انتخاب کرده باشد؛ هرگز قفل‌کننده) آن را «قطعی» می‌کند. دوره «بسته» قطعی است و سندی در آن ثبت نمی‌شود. بستن سال فقط وقتی ممکن است که همه دوره‌ها این دو مرحله را گذرانده باشند؛ اگر مغایرت دفتر و زیرحساب‌ها باشد، مدیر مالی دوم باید تایید کند.</p>
       <p v-if="!years.length" class="inv-muted">سال مالی تعریف نشده است.</p>
 
       <div v-for="y in years" :key="y.id" class="border rounded mb-2">
@@ -97,7 +104,7 @@ onMounted(load);
         </div>
         <div v-if="openId === y.id" class="p-2">
           <table class="table table-sm table-hover mb-0">
-            <thead><tr><th>#</th><th>دوره</th><th>از</th><th>تا</th><th>وضعیت</th><th>تعداد اسناد</th><th>اسناد قطعی‌نشده</th><th v-if="canManage"></th></tr></thead>
+            <thead><tr><th>#</th><th>دوره</th><th>از</th><th>تا</th><th>وضعیت</th><th>تعداد اسناد</th><th>اسناد قطعی‌نشده</th><th v-if="showActions"></th></tr></thead>
             <tbody>
               <tr v-for="p in y.periods" :key="p.id">
                 <td>{{ p.number }}</td>
@@ -107,10 +114,10 @@ onMounted(load);
                 <td><span :class="p.status === 0 ? 'ok' : p.status === 1 ? 'warn' : 'bad'" class="inv-badge">{{ periodStatuses[p.status] }}</span></td>
                 <td class="fn-num">{{ p.vouchers }}</td>
                 <td class="fn-num">{{ p.nonFinalVouchers }}</td>
-                <td v-if="canManage" class="text-nowrap">
-                  <button v-if="p.status === 0" :disabled="busy" class="btn btn-sm btn-outline-secondary me-1" @click="act(p, 'lock')">قفل</button>
-                  <button v-if="p.status === 1" :disabled="busy" class="btn btn-sm btn-outline-secondary me-1" @click="dialog = { kind: 'reopen', id: p.id, title: 'بازگشایی ' + p.title }">بازگشایی</button>
-                  <button v-if="p.status !== 2" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act(p, 'close')">بستن قطعی</button>
+                <td v-if="showActions" class="text-nowrap">
+                  <button v-if="p.status === 0 && canLock" :disabled="busy" class="btn btn-sm btn-outline-secondary me-1" @click="act(p, 'lock')">قفل (مرحله اول)</button>
+                  <button v-if="p.status === 1 && canManage" :disabled="busy" class="btn btn-sm btn-outline-secondary me-1" @click="dialog = { kind: 'reopen', id: p.id, title: 'بازگشایی ' + p.title }">بازگشایی</button>
+                  <button v-if="p.status === 1 && canClosePeriod" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act(p, 'close')">بستن قطعی (مرحله دوم)</button>
                 </td>
               </tr>
             </tbody>

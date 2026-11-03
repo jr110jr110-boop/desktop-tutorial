@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { addGuaranteeEvent, getGuarantees, parseGuarantees, releaseGuarantee, saveGuarantee } from "@/api/ProjectControlAPIs";
+import { addGuaranteeEvent, getGuarantees, parseGuarantees, releaseGuarantee, saveGuarantee, withdrawGuaranteeRequest } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import JDate from "@/components/pc/JDate.vue";
 import { fail, jalali, ok, rial, today } from "@/composables/inventory";
 import { guaranteeEventKinds, guaranteeEventKindsManual, guaranteeIssuers, guaranteeReleasable, guaranteeReleases, guaranteeSources, guaranteeStatuses, guaranteeStatusesFromActions, guaranteeTypes } from "@/composables/projectControl";
-import { hasRole, ProjectControlRoles } from "@/composables/roles";
+import { currentUserId, hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // Guarantees of the contract: the legacy free-text amount is read once («parse»); then type, issuer, validity, release condition and events (issue, extension, cancellation) are kept here.
 // «آزاد شد» (released) comes only from the release action (guarantees/release: date not in the future + note) and «منقضی» (expired) is set automatically after the
@@ -50,8 +50,17 @@ async function save() {
   form.value = null;
   load();
 }
+// R1a2: the first person records a request (kind release / cancellation, date, note); a different person confirms it with the same call, the same one may withdraw it
+const requestKinds: Record<number, string> = { 1: "آزادسازی", 2: "ابطال" };
+const mine = (r: any) => r.releaseRequestedByUserId === currentUserId();
+async function withdraw(r: any) {
+  const [, e] = await withdrawGuaranteeRequest(r.id);
+  if (e) return fail(e);
+  ok("درخواست پس گرفته شد.");
+  load();
+}
 function openRelease(r: any) {
-  rel.value = { guaranteeId: r.id, title: r.title, no: r.no, releaseDate: today(), note: "" };
+  rel.value = { guaranteeId: r.id, title: r.title, no: r.no, releaseDate: r.releaseRequestOpen && r.releaseRequestedDate ? String(r.releaseRequestedDate).slice(0, 10) : today(), note: r.releaseRequestOpen ? r.releaseRequestedNote || "" : "", confirming: !!r.releaseRequestOpen };
 }
 async function saveRelease() {
   const f = rel.value;
@@ -62,7 +71,7 @@ async function saveRelease() {
   const [, e] = await releaseGuarantee({ guaranteeId: f.guaranteeId, releaseDate: f.releaseDate, note: String(f.note).trim() });
   busy.value = false;
   if (e) return fail(e);
-  ok("ضمانت‌نامه آزاد شد.");
+  ok(f.confirming ? "درخواست تأیید شد." : "درخواست ثبت شد؛ منتظر تأیید نفر دوم است مگر اینکه همین حالا آزاد شده باشد.");
   rel.value = null;
   load();
 }
@@ -102,11 +111,12 @@ watch(() => props.contractId, load);
             <td>{{ r.amountDecimal != null ? rial(r.amountDecimal) : "—" }}<div v-if="r.parseFailed" class="small text-danger">{{ r.parseNote }}</div></td>
             <td>{{ jalali(r.expiryDate) }} <span v-if="r.daysToExpiry != null" :class="level(r.daysToExpiry)" class="inv-badge">{{ r.daysToExpiry < 0 ? "منقضی" : r.daysToExpiry + " روز" }}</span></td>
             <td>{{ guaranteeReleases[r.releaseTrigger] }}</td>
-            <td>{{ guaranteeStatuses[r.status] }}</td>
+            <td>{{ guaranteeStatuses[r.status] }}<div v-if="r.releaseRequestOpen" class="small"><span class="inv-badge warn">درخواست {{ requestKinds[r.releaseRequestedKind] || "" }} باز است</span> <span class="inv-muted">{{ r.releaseRequestedNote }}</span></div></td>
             <td class="d-print-none text-nowrap" v-if="canEdit || canRelease">
               <button v-if="canEdit" class="btn btn-sm btn-outline-secondary me-1" @click="form = { ...r }">ویرایش</button>
               <button v-if="canEdit && r.status !== 6 && r.status !== 7" class="btn btn-sm btn-outline-primary me-1" @click="ev = { guaranteeId: r.id, kind: 2, eventDate: today(), newExpiryDate: null, fee: null, note: '' }">رویداد</button>
-              <button v-if="canRelease && guaranteeReleasable.includes(r.status)" class="btn btn-sm btn-outline-success" @click="openRelease(r)">آزادسازی</button>
+              <button v-if="canRelease && guaranteeReleasable.includes(r.status)" class="btn btn-sm btn-outline-success" @click="openRelease(r)">{{ r.releaseRequestOpen && !mine(r) ? "تأیید " + (requestKinds[r.releaseRequestedKind] || "آزادسازی") : r.releaseRequestOpen ? "ویرایش درخواست" : "آزادسازی" }}</button>
+              <button v-if="canRelease && r.releaseRequestOpen" class="btn btn-sm btn-outline-danger ms-1" @click="withdraw(r)">پس‌گرفتن</button>
             </td>
           </tr>
           <tr v-if="r.events?.length"><td colspan="8" class="small inv-muted py-0">رویدادها: <span v-for="x in r.events" :key="x.id" class="me-3">{{ guaranteeEventKinds[x.kind] }} {{ jalali(x.eventDate) }}<span v-if="x.newExpiryDate"> (تا {{ jalali(x.newExpiryDate) }})</span><span v-if="x.fee"> کارمزد {{ rial(x.fee) }}</span></span></td></tr>
@@ -145,7 +155,7 @@ watch(() => props.contractId, load);
     </div>
     <div v-if="rel" class="inv-modal-backdrop" @click.self="rel = null">
       <div class="inv-modal">
-        <h3 class="h6">آزادسازی ضمانت‌نامه — {{ rel.title }} <span class="inv-ltr">{{ rel.no }}</span></h3>
+        <h3 class="h6">{{ rel.confirming ? "تأیید آزادسازی" : "درخواست آزادسازی" }} ضمانت‌نامه — {{ rel.title }} <span class="inv-ltr">{{ rel.no }}</span></h3>
         <p class="inv-muted">آزادسازی پس از ثبت برگشت‌پذیر نیست. تاریخ نمی‌تواند در آینده باشد و توضیح (شماره و تاریخ نامه کارفرما یا بانک) الزامی است.</p>
         <div class="row g-2">
           <div class="col-6"><label class="form-label small mb-0">تاریخ آزادسازی</label><JDate v-model="rel.releaseDate" :max="today()" /></div>

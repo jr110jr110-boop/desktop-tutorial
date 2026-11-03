@@ -87,7 +87,10 @@ async function ask(action: string) {
   }
   if (action === "paid") dialog.value = { action, title: "ثبت پرداخت", label: "شماره سند پرداخت در سپیدار یا شماره پیگیری بانک *", value: "" };
   else if (action === "reject") dialog.value = { action, title: "رد درخواست پرداخت", label: "علت رد *", value: "" };
-  else act(action);
+  else if (action === "confirm-deductions") {
+    if (!window.confirm("کسورات پیشنهادی سیستم (جریمه تأخیر و حسن انجام کار) همین‌گونه تأیید شود؟")) return;
+    act(action);
+  } else act(action);
 }
 
 async function act(action: string, value?: string) {
@@ -222,6 +225,7 @@ watch(() => route.query.id, openFromLink);
             <tr><td>کسورات</td><td class="num">{{ rial(detail.deductions) }} <span class="inv-muted">{{ detail.deductionNote }}</span><div v-for="(l, i) in detail.deductionLines || []" :key="i" class="small">{{ deductionKinds[l.kind] }}: {{ rial(l.amount) }} <span v-if="l.ratePercent" class="inv-muted">({{ l.ratePercent }}% از {{ rial(l.base) }})</span> {{ l.note }}</div></td></tr>
             <tr><td>خالص قابل پرداخت</td><td class="num fw-bold">{{ rial(detail.netAmount) }}</td></tr>
             <tr><td>سفارش / فاکتور</td><td class="inv-ltr">{{ detail.purchaseOrderNumber }} {{ detail.invoiceNumber }}</td></tr>
+            <tr v-if="detail.deductionsProposed"><td>کسورات پیشنهادی</td><td><span :class="detail.deductionsConfirmed ? 'ok' : 'warn'" class="inv-badge">{{ detail.deductionsConfirmed ? "تأییدشده توسط " + (detail.deductionsConfirmedByName || "مالی") : "منتظر تأیید مالی" }}</span></td></tr>
             <tr v-if="detail.approvedByName"><td>تایید</td><td>{{ detail.approvedByName }} {{ jalali(detail.approvedAt, true) }}</td></tr>
             <tr v-if="detail.paidByName"><td>پرداخت</td><td>{{ detail.paidByName }} {{ jalali(detail.paidAt, true) }} — <span class="inv-ltr">{{ detail.paymentReference }}</span></td></tr>
             <tr v-if="detail.rejectReason"><td>علت رد</td><td>{{ detail.rejectReason }}</td></tr>
@@ -232,6 +236,7 @@ watch(() => route.query.id, openFromLink);
           <button class="btn btn-sm btn-outline-secondary" @click="detail = null">بستن</button>
           <button class="btn btn-sm btn-outline-secondary" @click="nextTick(printPage)">چاپ</button>
           <button v-if="detail.status === 0 && canApprove" :disabled="busy" class="btn btn-sm btn-success" @click="ask('approve')">تایید (معاونت PMO)</button>
+          <button v-if="detail.status === 0 && detail.deductionsProposed && !detail.deductionsConfirmed && canPay" :disabled="busy" class="btn btn-sm btn-outline-success" @click="ask('confirm-deductions')">تأیید کسورات پیشنهادی (مالی)</button>
           <button v-if="detail.status === 1 && canPay" :disabled="busy" class="btn btn-sm btn-primary" @click="ask('paid')">ثبت پرداخت</button>
           <button v-if="detail.status < 2 && (canApprove || canPay)" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="ask('reject')">رد</button>
         </div>

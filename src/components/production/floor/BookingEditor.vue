@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import LookupBox from "@/components/fn/LookupBox.vue";
-import { createBooking, editBooking, getProductionMachines } from "@/api/ProductionAPIs";
+import { correctBooking, createBooking, editBooking, getProductionMachines } from "@/api/ProductionAPIs";
 import { normalizeTime, stamp } from "@/components/office/att/attCommon";
 import { parseAmount } from "@/composables/fn";
 import { fail, ok } from "@/composables/inventory";
@@ -11,7 +11,7 @@ import { employeeLabel, loadReasons, operationLabel, rowsOf, searchEmployees, se
 
 // Supervisor booking for another person (create) and correction of a booking (edit; after the day is closed only SHOPSUPERVISOR, the server checks it).
 // A reason is always required. A booking whose cost is posted is refused by the server with its own message.
-const props = defineProps({ mode: { type: String as () => "create" | "edit", required: true }, row: { type: Object, default: null } });
+const props = defineProps({ mode: { type: String as () => "create" | "edit" | "correct", required: true }, row: { type: Object, default: null } });
 const emit = defineEmits(["close", "saved"]);
 
 const r = props.row;
@@ -46,7 +46,14 @@ async function save() {
   const common = { kind: f.value.kind, startAt, endAt, machineId: f.value.machineId, goodQty: parseAmount(f.value.good) || 0, scrapQty: parseAmount(f.value.scrap) || 0, reworkQty: parseAmount(f.value.rework) || 0, scrapReasonCodeId: f.value.scrapReasonId, note: f.value.note, reason: f.value.reason };
   busy.value = true;
   let result: [any, any];
-  if (props.mode === "create") {
+  if (props.mode === "correct") {
+    // R1p D39: hours only, on an operation of a completed order; waits for the approval of another production manager
+    if (!f.value.employee || !f.value.operation) {
+      busy.value = false;
+      return fail({ message: "کارمند و مرحله را انتخاب کنید." });
+    }
+    result = await correctBooking({ operationId: f.value.operation.id, employeeId: f.value.employee.id, kind: f.value.kind, startAt, endAt, machineId: f.value.machineId, correctsBookingId: r?.id ?? null, note: f.value.note, reason: f.value.reason });
+  } else if (props.mode === "create") {
     if (!f.value.employee || !f.value.operation) {
       busy.value = false;
       return fail({ message: "کارمند و مرحله را انتخاب کنید." });
@@ -55,7 +62,7 @@ async function save() {
   } else result = await editBooking({ ...common, id: r.id, rowVersion: r.rowVersion ?? null });
   busy.value = false;
   if (result[1]) return fail(result[1]);
-  ok(props.mode === "create" ? "ثبت زمان انجام شد." : "ثبت زمان اصلاح شد.");
+  ok(props.mode === "correct" ? "ثبت اصلاحی ثبت شد و منتظر تأیید مدیر تولید دیگری است." : props.mode === "create" ? "ثبت زمان انجام شد." : "ثبت زمان اصلاح شد.");
   emit("saved");
 }
 
@@ -70,9 +77,9 @@ onMounted(async () => {
 <template>
   <div class="inv-modal-backdrop" @click.self="emit('close')">
     <div class="inv-modal wide">
-      <h2 class="inv-title mb-2">{{ mode === "create" ? "ثبت زمان برای یک کارمند (سرپرست)" : r.dayClosed ? "اصلاح ثبت زمان روز بسته‌شده" : "ویرایش ثبت زمان" }}</h2>
+      <h2 class="inv-title mb-2">{{ mode === "correct" ? "ثبت اصلاحی برای سفارش بسته‌شده" : mode === "create" ? "ثبت زمان برای یک کارمند (سرپرست)" : r.dayClosed ? "اصلاح ثبت زمان روز بسته‌شده" : "ویرایش ثبت زمان" }}</h2>
       <div class="row g-2">
-        <template v-if="mode === 'create'">
+        <template v-if="mode !== 'edit'">
           <div class="col-md-6"><label class="form-label small mb-0">کارمند</label><LookupBox v-model="f.employee" :fetch="searchEmployees" :label="employeeLabel" placeholder="نام کارمند" /></div>
           <div class="col-md-6"><label class="form-label small mb-0">مرحله (برگه کار)</label><LookupBox v-model="f.operation" :fetch="searchOperations" :label="operationLabel" placeholder="شماره برگه کار" /></div>
         </template>
@@ -84,10 +91,10 @@ onMounted(async () => {
         <div class="col-md-2"><label class="form-label small mb-0">ساعت شروع</label><input v-model="f.startTime" class="form-control form-control-sm inv-ltr" placeholder="08:00" /></div>
         <div class="col-md-4"><label class="form-label small mb-0">تاریخ پایان (خالی = همان روز)</label><FnDate v-model="f.endDate" /></div>
         <div class="col-md-2"><label class="form-label small mb-0">ساعت پایان</label><input v-model="f.endTime" class="form-control form-control-sm inv-ltr" placeholder="16:30" /></div>
-        <div class="col-md-3"><label class="form-label small mb-0">سالم</label><input v-model="f.good" class="form-control form-control-sm fn-num" /></div>
+        <template v-if="mode !== 'correct'"><div class="col-md-3"><label class="form-label small mb-0">سالم</label><input v-model="f.good" class="form-control form-control-sm fn-num" /></div>
         <div class="col-md-3"><label class="form-label small mb-0">ضایعات</label><input v-model="f.scrap" class="form-control form-control-sm fn-num" /></div>
         <div class="col-md-3"><label class="form-label small mb-0">دوباره‌کاری</label><input v-model="f.rework" class="form-control form-control-sm fn-num" /></div>
-        <div class="col-md-3"><label class="form-label small mb-0">دلیل ضایعات</label><select v-model="f.scrapReasonId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="s in scrapReasons" :key="s.id" :value="s.id">{{ s.title }}</option></select></div>
+        <div class="col-md-3"><label class="form-label small mb-0">دلیل ضایعات</label><select v-model="f.scrapReasonId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="s in scrapReasons" :key="s.id" :value="s.id">{{ s.title }}</option></select></div></template>
         <div class="col-12"><label class="form-label small mb-0">توضیح</label><input v-model="f.note" class="form-control form-control-sm" /></div>
         <div class="col-12"><label class="form-label small mb-0">دلیل {{ mode === "create" ? "ثبت برای دیگری" : "اصلاح" }} (الزامی)</label><input v-model="f.reason" class="form-control form-control-sm" /></div>
       </div>

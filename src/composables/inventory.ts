@@ -1,3 +1,4 @@
+import { apiErrorText } from "@/composables/apiMessage";
 import moment from "moment-jalaali";
 import showErrorNotification from "@/composables/showErrorNotification";
 import showSuccessNotification from "@/composables/showSuccessNotification";
@@ -183,6 +184,16 @@ export function rial(value: number | null | undefined): string {
   return Math.round(Number(value)).toLocaleString("en-US");
 }
 
+/** The word shown instead of an amount or a quantity the API holds back (a null value with a hidden flag, or a masked field): never a zero. */
+export const CONFIDENTIAL = "محرمانه";
+
+/** Rial amount, or «محرمانه» when the API hid it (hidden = the flag of the row, e.g. labourHidden; a null amount is also treated as held back unless allowNull). */
+export function rialOrHidden(value: number | null | undefined, hidden = false, allowNull = false): string {
+  if (hidden) return CONFIDENTIAL;
+  if (value === null || value === undefined) return allowNull ? "" : CONFIDENTIAL;
+  return rial(value);
+}
+
 export function num(value: number | null | undefined): string {
   if (value === null || value === undefined) return "";
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 4 });
@@ -197,7 +208,8 @@ export function ok(message: string) {
 }
 
 export function fail(error: any) {
-  showErrorNotification(error?.message || String(error || "خطا"));
+  // an axios error carries the Persian text of the API in response.data.message (also for 403 / 429); the helpers of ApiClient already return an Error with that text
+  showErrorNotification(typeof error === "string" ? error : apiErrorText(error));
 }
 
 /** Text written into the barcode / QR of a label, read back by the scan boxes. */

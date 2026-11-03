@@ -23,8 +23,8 @@ const seesRates = hasRole(ProductionRoles.rateViewers);
 function edit(r: any | null) {
   form.value = r
     ? { id: r.id, code: r.code, title: r.title, kind: r.kind, calendarId: r.calendarId, shiftsPerDay: r.shiftsPerDay, hoursPerShift: r.hoursPerShift, efficiencyPercent: r.efficiencyPercent,
-        utilisationPercent: r.utilisationPercent, parallelResources: r.parallelResources, costCenter: r.costCenter || "", queueDaysDefault: r.queueDaysDefault, isActive: r.isActive, rowVersion: r.rowVersion }
-    : { id: null, code: "", title: "", kind: 1, calendarId: null, shiftsPerDay: 1, hoursPerShift: 8, efficiencyPercent: 100, utilisationPercent: 85, parallelResources: 1, costCenter: "", queueDaysDefault: 0, isActive: true, rowVersion: null };
+        utilisationPercent: r.utilisationPercent, parallelResources: r.parallelResources, costCenter: r.costCenter || "", queueDaysDefault: r.queueDaysDefault, requiresMachine: r.requiresMachine !== false, isActive: r.isActive, rowVersion: r.rowVersion }
+    : { id: null, code: "", title: "", kind: 1, calendarId: null, shiftsPerDay: 1, hoursPerShift: 8, efficiencyPercent: 100, utilisationPercent: 85, parallelResources: 1, costCenter: "", queueDaysDefault: 0, requiresMachine: true, isActive: true, rowVersion: null };
 }
 
 async function save() {
@@ -95,6 +95,7 @@ defineExpose({ reload: list.load });
           <div class="col-6 col-md-4"><label class="form-label small mb-0">منابع موازی</label><input v-model.number="form.parallelResources" class="form-control form-control-sm" type="number" min="1" /></div>
           <div class="col-6 col-md-4"><label class="form-label small mb-0">مرکز هزینه</label><input v-model="form.costCenter" class="form-control form-control-sm" /></div>
           <div class="col-6 col-md-4"><label class="form-label small mb-0">صف پیش‌فرض (روز)</label><input v-model.number="form.queueDaysDefault" class="form-control form-control-sm" type="number" min="0" step="0.5" /></div>
+          <div class="col-12"><label class="form-check"><input v-model="form.requiresMachine" class="form-check-input" type="checkbox" /> <span class="form-check-label">شروع کار فقط با انتخاب ماشین (اگر مرکز ماشین دارد)</span></label></div>
           <div class="col-12"><label class="form-check"><input v-model="form.isActive" class="form-check-input" type="checkbox" /> <span class="form-check-label">فعال</span></label></div>
         </div>
         <p class="inv-muted mt-2 mb-0">نرخ ساعتی ماشین و نیروی کار فقط توسط مالی در پنجره «نرخ‌ها» ثبت می‌شود.</p>

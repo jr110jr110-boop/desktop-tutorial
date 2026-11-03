@@ -154,6 +154,10 @@ export const OfficeRoles = {
   hr: ["HR"],
   /** shifts, assignments, devices and policy (writes and the admin reads): same as orgAdmins */
   attendanceAdmins: list("HR,PMO,CEO"),
+  /** POST attendance/policy: HR and the CEO (the PMO reads); the CEO alone turns a control off */
+  policyWriters: list("HR,CEO"),
+  /** devices: HR and the PMO write (key, allowed addresses); the CEO reads */
+  deviceWriters: list("HR,PMO"),
   /** attendance of everybody (days, clock events, compute); everyone else sees only their own rows */
   attendanceReaders: list("HR,CEO"),
   /** GET attendance/month/{year}/{month} */
@@ -204,6 +208,8 @@ export const ProductionRoles = {
   rateViewers: list("FINANCEMANAGER,FINANCIAL,PRODUCTIONMANAGER,CEO,PMO,AUDITOR"),
   /** release an order, skip / complete-outside / rework an operation, close, kit-override, create and edit bookings */
   supervisors: list("SHOPSUPERVISOR,PRODUCTIONMANAGER"),
+  /** production managers only: accept-by-concession / scrap-by-ncr, approve a correction booking, labour-month run */
+  managers: list("PRODUCTIONMANAGER"),
   /** draft orders by hand, edit components, cancel a draft order, refresh-routing */
   planners: list("PRODUCTIONMANAGER,SHOPSUPERVISOR,PLANNING,PMO,ENGINEERING,ENGINEER"),
   /** the tablet terminal and the terminal calls (my-operations, scan, start, pause, report, finish, request-qc, machine-down) */

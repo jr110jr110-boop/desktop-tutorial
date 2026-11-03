@@ -1,4 +1,4 @@
-import { call, clean, http, saveBlob } from "@/api/ApiClient";
+import { call, clean, http, saveBlob, fileErrorText } from "@/api/ApiClient";
 
 // Project control (PMO) module (api/v1/projectcontrol/...): contract terms and initiation, WBS and schedule, baselines,
 // progress and earned value, payments / guarantees / penalties, engineering documents, change control and reports.
@@ -76,8 +76,7 @@ export async function downloadMsProject(contractId: number, fileName: string): P
     saveBlob(response.data, fileName);
     return null;
   } catch (error: any) {
-    if (error?.response?.status === 403) return "شما اجازه این کار را ندارید.";
-    return error?.message || "خطا";
+    return fileErrorText(error);
   }
 }
 
@@ -120,6 +119,8 @@ export const saveGuarantee = (dto: any) => call("post", base + "guarantees", dto
 export const addGuaranteeEvent = (dto: any) => call("post", base + "guarantees/events", dto);
 /** POST guarantees/release { guaranteeId, releaseDate (not in the future), note (the letter of the client or the bank), documentId? }: COMMERCIAL, FINANCEMANAGER, PMO. */
 export const releaseGuarantee = (dto: any) => call("post", base + "guarantees/release", dto);
+/** R1a2 M-3: release and cancellation share one request slot; the first call records the request, a second person confirms with the same call. This takes the open request back (the one who asked, or PMO). */
+export const withdrawGuaranteeRequest = (guaranteeId: number) => call("post", base + "guarantees/withdraw", { guaranteeId });
 export const getGuaranteeAlerts = (contractId?: number | null) => call("get", base + "guarantees/alerts", undefined, clean({ contractId }));
 export const computePenalties = (contractId: number) => call("post", base + "penalties/compute/" + contractId);
 export const getPenalties = (params: any) => call("get", base + "penalties", undefined, clean({ PageSize: 0, ...params }));
@@ -171,3 +172,21 @@ export const generateReport = (contractId: number, kind: number, dataDate?: stri
 export const releaseReport = (id: number) => call("post", base + "reports/" + id + "/release");
 export const getPortfolio = () => call("get", base + "portfolio", undefined, { PageSize: 0 });
 export const getPcDashboard = () => call("get", base + "dashboard");
+
+// ---------------------------------------------------------------- R1c: settings, cost check, past snapshots, final book approval, baseline activities
+/** PcSettingDto[] { key, title, source (a source starting with the star is a provisional default), value, defaultValue, isDefault, confirmed, min, max, wholeNumber }. Who: readers. */
+export const getPcSettings = () => call("get", base + "settings");
+/** PcSettingsSaveDto { items: [{ key, value }] }. Who: PMO and CEO only (the service refuses others in Persian). */
+export const savePcSettings = (items: { key: string; value: number }[]) => call("put", base + "settings", { items });
+/** PcCostCheckDto { costEntryId, note? }: the second FINANCIAL person checks a manual cost entry; only then it counts as actual cost. */
+export const checkCostEntry = (costEntryId: number, note?: string | null) => call("post", base + "costs/check", { costEntryId, note: note || null });
+/** params: ContractId, State (0 requested, 1 approved, 2 rejected, 3 used), paging. */
+export const getPastSnapshotRequests = (params: any) => call("get", base + "snapshots/past-requests", undefined, clean({ PageSize: 50, ...params }));
+/** PcPastSnapshotRequestDto { contractId, dataDate (ISO), reason }: planning asks for a snapshot with a data date in the past. */
+export const requestPastSnapshot = (dto: { contractId: number; dataDate: string; reason: string }) => call("post", base + "snapshots/past-requests", dto);
+/** PcPastSnapshotDecisionDto { id, approve, note? }: the PMO deputy decides; after approval planning takes the snapshot with that data date (used once). */
+export const decidePastSnapshot = (id: number, approve: boolean, note?: string | null) => call("post", base + "snapshots/past-requests/decide", { id, approve, note: note || null });
+/** A final-book revision becomes effective when someone other than its preparer approves it (PMO or QC). */
+export const approveFinalBook = (id: number) => call("post", base + "final-books/" + id + "/approve");
+/** The frozen activities of a baseline (dates, budget, weight, calendar, constraint as approved). */
+export const getBaselineActivities = (id: number) => call("get", base + "baselines/" + id + "/activities");

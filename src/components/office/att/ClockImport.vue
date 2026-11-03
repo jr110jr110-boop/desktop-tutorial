@@ -20,6 +20,7 @@ const fields: ImportField[] = [
 const mode = ref<"pw" | "simple">("pw");
 const rows = ref<any[]>([]);
 const deviceCode = ref("");
+const reason = ref("");
 const busy = ref(false);
 const result = ref<any>(null);
 const badRows = computed(() => rows.value.filter((r) => !r.code || !r.date || !normalizeTime(r.time)).length);
@@ -28,11 +29,11 @@ async function run() {
   if (!rows.value.length) return fail("ابتدا فایل را انتخاب کنید.");
   busy.value = true;
   const payload = rows.value.map((r) => ({ code: r.code, date: r.date, time: normalizeTime(r.time) || r.time, device: r.device, direction: r.direction }));
-  const [d, error] = await importClock({ deviceCode: deviceCode.value.trim() || null, rows: payload });
+  const [d, error] = await importClock({ deviceCode: deviceCode.value.trim() || null, rows: payload, reason: reason.value.trim() || null });
   busy.value = false;
   if (error) return fail(error);
   result.value = d;
-  ok(`${d?.imported ?? 0} تردد وارد شد.`);
+  ok(d?.pendingApproval ? `${d?.imported ?? 0} تردد در یک بسته منتظر تایید ذخیره شد؛ تا تایید کاربر دیگری از منابع انسانی در کارکرد نمی‌آید.` : `${d?.imported ?? 0} تردد وارد شد.`);
   emit("done");
 }
 </script>
@@ -52,10 +53,12 @@ async function run() {
       <ExcelRows :fields="fields" :disabled="busy" @rows="rows = $event; result = null" />
       <div class="d-flex align-items-end gap-3 flex-wrap mb-2">
         <div><label class="form-label small mb-0">کد دستگاه (برای ردیف‌های بدون ستون دستگاه)</label><input v-model="deviceCode" class="form-control form-control-sm inv-ltr" style="max-width: 200px" /></div>
+        <div style="min-width: 260px"><label class="form-label small mb-0">توضیح بسته (این فایل چیست؟)</label><input v-model="reason" class="form-control form-control-sm" /></div>
         <span v-if="rows.length" class="small">{{ rows.length }} ردیف خوانده شد</span>
         <span v-if="badRows" class="inv-badge warn">{{ badRows }} ردیف کد، تاریخ یا ساعت خوانا ندارد (سرور آن را خطا می‌شمارد)</span>
       </div>
       <div v-if="result" class="mb-2">
+        <div v-if="result.pendingApproval" class="alert alert-warning small py-2">ردیف‌های ذخیره‌شده در بسته‌ی #{{ result.batchId }} منتظر تایید یک کاربر دیگر از منابع انسانی‌اند (زبانه «تایید درخواست‌ها» در حضور و غیاب). ردیف‌های مربوط به پرونده‌ی خود واردکننده پذیرفته نمی‌شود.</div>
         <span class="inv-badge ok me-1">پذیرفته‌شده: {{ result.imported }}</span>
         <span class="inv-badge info me-1">تکراری: {{ result.duplicates }}</span>
         <span :class="result.rejected ? 'bad' : 'ok'" class="inv-badge me-1">ردشده: {{ result.rejected }}</span>

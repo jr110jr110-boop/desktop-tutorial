@@ -5,7 +5,7 @@ import AiNotesBox from "@/components/ai/AiNotesBox.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { getProviders, rowsOf, uploadFile } from "@/api/InventoryAPIs";
 import {
-  createOrderFromInquiry, getInquiry, getPurchaseRequest, inquiryAction, saveInquiry, selectQuote,
+  createOrderFromInquiry, getInquiry, getPurchaseRequest, inquiryAction, saveInquiry, selectQuote, technicalReview,
 } from "@/api/ProcurementAPIs";
 import { fail, jalali, num, ok, printPage, rial, today } from "@/composables/inventory";
 import { inquiryStatuses, supplierGrades } from "@/composables/procurement";
@@ -84,6 +84,26 @@ async function choose() {
   if (error) return fail(error);
   loadInquiry(data);
   ok("تامین‌کننده انتخاب شد.");
+}
+
+// R1c M12: engineering or quality judges each quote against the technical requirements (accept / reject + score); the buyer cannot
+const review = ref<null | { quote: any; accepted: boolean; score: string; note: string }>(null);
+async function sendReview() {
+  const r = review.value!;
+  const score = r.score.trim() === "" ? null : Number(r.score);
+  if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) return fail("امتیاز فنی باید بین ۰ و ۱۰۰ باشد.");
+  if (!r.accepted && !r.note.trim()) return fail("برای رد فنی، علت را بنویسید.");
+  busy.value = true;
+  const [data, error] = await technicalReview({ inquiryId: inq.value.id, quoteId: r.quote.id, accepted: r.accepted, score, note: r.note.trim() || null });
+  busy.value = false;
+  if (error) return fail(error);
+  review.value = null;
+  ok("بررسی فنی ثبت شد.");
+  if (data?.quotes) loadInquiry(data);
+  else {
+    const [d] = await getInquiry(inq.value.id);
+    if (d) loadInquiry(d);
+  }
 }
 
 async function act(action: string, reference?: string) {
@@ -186,7 +206,8 @@ onMounted(async () => {
         </tbody>
         <tfoot>
           <tr><td colspan="3">جمع (ریال)</td><td v-for="q in inq.quotes" :key="q.id" class="num">{{ rial(q.totalAmount) }}</td></tr>
-          <tr><td colspan="3">تایید فنی / امتیاز</td><td v-for="q in inq.quotes" :key="q.id">{{ q.technicallyAccepted ? "تایید" : "رد" }} {{ q.technicalScore ?? "" }}</td></tr>
+          <tr><td colspan="3">تایید فنی / امتیاز</td><td v-for="q in inq.quotes" :key="q.id">{{ q.technicallyAccepted ? "تایید" : "رد" }} {{ q.technicalScore ?? "" }}
+              <button v-if="canTechnical && inq.status === 0 && inq.id" class="btn btn-sm btn-outline-primary ms-1 d-print-none" @click="review = { quote: q, accepted: q.technicallyAccepted !== false, score: q.technicalScore ?? '', note: '' }">بررسی فنی</button></td></tr>
           <tr><td colspan="3">تحویل (روز) / پرداخت</td><td v-for="q in inq.quotes" :key="q.id">{{ q.deliveryDays ?? "" }} / {{ q.paymentTerms }}</td></tr>
         </tfoot>
       </table>
@@ -336,6 +357,18 @@ onMounted(async () => {
           <button :disabled="busy" class="btn btn-sm btn-primary" @click="act(pendingAction, minutes || undefined), (minutes = null)">ثبت تایید</button>
         </div>
       </div>
+    </div>
+  </div>
+  <div v-if="review" class="inv-modal-backdrop" @click.self="review = null">
+    <div class="inv-modal" style="max-width: 460px">
+      <h2 class="inv-title mb-2">بررسی فنی پیشنهاد {{ review.quote.providerName }}</h2>
+      <label class="form-check d-block"><input v-model="review.accepted" class="form-check-input" type="checkbox" /> <span class="form-check-label">از نظر فنی قابل قبول است</span></label>
+      <label class="form-label small mb-0 mt-2">امتیاز فنی (۰ تا ۱۰۰، اختیاری)</label>
+      <input v-model="review.score" class="form-control form-control-sm inv-ltr" inputmode="decimal" />
+      <label class="form-label small mb-0 mt-2">توضیح {{ review.accepted ? "" : "(الزامی)" }}</label>
+      <textarea v-model="review.note" class="form-control form-control-sm" rows="3"></textarea>
+      <p class="inv-muted small mt-2 mb-0">کارشناس خرید نمی‌تواند بررسی فنی را ثبت کند؛ فقط مهندسی یا کیفیت.</p>
+      <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="review = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="sendReview">ثبت</button></div>
     </div>
   </div>
 </template>

@@ -14,6 +14,7 @@ const profiles = ref<any[]>([]);
 const profileId = ref<number | null>(null);
 const saveAs = ref("");
 const result = ref<any>(null);
+const reason = ref("");
 const busy = ref(false);
 const sheet = ref("");
 const timeMode = ref<"split" | "single">("split");
@@ -109,11 +110,11 @@ async function run() {
   const problem = validate();
   if (problem) return fail(problem);
   busy.value = true;
-  const [d, error] = await importClockFile(file.value as File, { mapping: mappingPayload(), sheet: sheet.value || null, saveProfileAs: saveAs.value });
+  const [d, error] = await importClockFile(file.value as File, { mapping: mappingPayload(), sheet: sheet.value || null, saveProfileAs: saveAs.value, reason: reason.value });
   busy.value = false;
   if (error) return fail(error);
   result.value = d;
-  ok(`${d?.imported ?? 0} تردد وارد شد.`);
+  ok(d?.pendingApproval ? `${d?.imported ?? 0} تردد در یک بسته منتظر تایید ذخیره شد؛ تا تایید کاربر دیگری از منابع انسانی در کارکرد نمی‌آید.` : `${d?.imported ?? 0} تردد وارد شد.`);
   if (saveAs.value.trim()) await loadProfiles();
   emit("done");
 }
@@ -195,6 +196,7 @@ onMounted(loadProfiles);
       </div>
 
       <div class="d-flex align-items-end gap-2 flex-wrap mb-2">
+        <div><label class="form-label small mb-0">توضیح بسته (این فایل چیست؟)</label><input v-model="reason" class="form-control form-control-sm" maxlength="500" style="min-width: 14rem" /></div>
         <div><label class="form-label small mb-0">ذخیره‌ی ستون‌بندی با نام</label><input v-model="saveAs" class="form-control form-control-sm" maxlength="200" placeholder="مثلا PW Kara - دفتر مرکزی" style="min-width: 16rem" /></div>
         <button :disabled="busy || !saveAs.trim()" class="btn btn-sm btn-outline-secondary" @click="saveProfile">فقط ذخیره‌ی الگو</button>
         <button :disabled="busy" class="btn btn-sm btn-primary" @click="run">ورود ترددها{{ saveAs.trim() ? " و ذخیره‌ی الگو" : "" }}</button>
@@ -202,6 +204,7 @@ onMounted(loadProfiles);
     </template>
 
     <div v-if="result" class="mb-2">
+      <div v-if="result.pendingApproval" class="alert alert-warning small py-2">ردیف‌های ذخیره‌شده در بسته‌ی #{{ result.batchId }} منتظر تایید یک کاربر دیگر از منابع انسانی‌اند (حضور و غیاب، زبانه «تایید درخواست‌ها»).</div>
       <span class="inv-badge ok me-1">وارد شده: {{ result.imported }}</span>
       <span class="inv-badge info me-1">تکراری: {{ result.duplicates }}</span>
       <span :class="result.unknown ? 'warn' : 'ok'" class="inv-badge me-1">شماره‌ی ناشناس: {{ result.unknown }}</span>

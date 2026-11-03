@@ -12,6 +12,11 @@ export function apiErrorText(error: any): string {
   const status = error?.response?.status;
   if (status === 401) return "دوباره وارد سامانه شوید.";
   if (status === 403) return "شما مجوز دسترسی به این عملیات را ندارید.";
+  if (status === 429) {
+    // too many sign-in style calls from one address (R1a2): the API says it in { message }; the wait comes from the Retry-After header
+    const wait = Number(error?.response?.headers?.["retry-after"]);
+    return "تعداد درخواست‌ها بیش از حد مجاز است؛ " + (wait > 0 ? "حدود " + Math.ceil(wait) + " ثانیه" : "کمی") + " صبر کنید و دوباره تلاش کنید.";
+  }
   if (status) return "درخواست انجام نشد (کد " + status + ").";
 
   if (error && !error.isAxiosError && typeof error.message === "string" && error.message.trim()) return error.message;

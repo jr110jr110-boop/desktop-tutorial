@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CashLegList from "@/components/fn/CashLegList.vue";
 import { nextTick, onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
@@ -192,6 +193,7 @@ onMounted(async () => {
           جمع سود {{ money(loan.totalInterest) }} - اصل باقی‌مانده {{ money(loan.outstandingPrincipal) }} - سود تعلق‌گرفته پرداخت‌نشده {{ money(loan.accruedInterestPayable) }} - کارمزد {{ money(loan.feeAmount) }} - وثیقه: {{ loan.collateral }}
           <span v-if="loan.disbursementVoucherId"> - سند پرداخت {{ loan.disbursementVoucherId }}</span>
         </p>
+        <CashLegList :legs="loan.openCashLegs" />
         <div class="table-responsive" style="max-height: 320px; overflow: auto">
           <table class="table table-sm">
             <thead><tr><th>قسط</th><th>سررسید</th><th>اصل</th><th>سود</th><th>جمع</th><th>وضعیت</th><th>تاریخ پرداخت</th><th>جریمه</th><th>سند</th><th v-if="canWrite"></th></tr></thead>
@@ -204,7 +206,7 @@ onMounted(async () => {
           <button class="btn btn-sm btn-outline-secondary" @click="loan = null">بستن</button>
           <button class="btn btn-sm btn-outline-secondary" @click="printLoan">چاپ جدول</button>
           <button v-if="canWrite && loan.status === 0" class="btn btn-sm btn-outline-primary" @click="form = { ...loan, amount: String(loan.amount), ratePercent: String(loan.ratePercent), feeAmount: String(loan.feeAmount), customRows: [] }; loan = null">ویرایش</button>
-          <button v-if="canWrite && loan.status === 0" class="btn btn-sm btn-success" @click="act = { action: 'disburse', date: today(), bankAccountId: loan.bankAccountId }">پرداخت وام به حساب</button>
+          <button v-if="canWrite && loan.status === 0" class="btn btn-sm btn-success" title="سند دریافت در خزانه‌داری ساخته می‌شود؛ وام پس از ثبت نهایی آن فعال می‌شود" @click="act = { action: 'disburse', date: today(), bankAccountId: loan.bankAccountId }">پرداخت وام به حساب</button>
           <button v-if="canWrite && loan.status === 0" class="btn btn-sm btn-outline-danger" @click="act = { action: 'cancel', date: today(), bankAccountId: null }">لغو</button>
         </div>
       </div>

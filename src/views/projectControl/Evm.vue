@@ -5,7 +5,7 @@ import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import JDate from "@/components/pc/JDate.vue";
 import LineChart from "@/components/pc/LineChart.vue";
-import { addCostEntry, getCashFlow, getCostEntries, getEvm } from "@/api/ProjectControlAPIs";
+import { addCostEntry, checkCostEntry, getCashFlow, getCostEntries, getEvm } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, printPage, rial, today } from "@/composables/inventory";
 import { costKinds, fx, idx, pcContractId, pct, statusBadge, statusText } from "@/composables/projectControl";
@@ -20,6 +20,12 @@ const form = ref<any>(null);
 const busy = ref(false);
 const canCost = hasRole(ProjectControlRoles.costs);
 
+async function checkCost(c: any) {
+  const [, error] = await checkCostEntry(c.id);
+  if (error) return fail(error);
+  ok("هزینه بررسی شد و در هزینه واقعی حساب می‌شود.");
+  load();
+}
 async function load() {
   if (!pcContractId.value) return;
   const [[e, e1], [c], [k]] = await Promise.all([getEvm(pcContractId.value, asOf.value), getCashFlow(pcContractId.value), getCostEntries({ ContractId: pcContractId.value })]);
@@ -108,10 +114,15 @@ watch(pcContractId, load);
           <button v-if="canCost" class="btn btn-sm btn-primary d-print-none" @click="form = { kind: 1, entryDate: today(), amount: 0, description: '' }">ثبت هزینه</button>
         </div>
         <table class="table table-sm">
-          <thead><tr><th>تاریخ</th><th>نوع</th><th>مبلغ</th><th>منبع</th><th>شرح</th></tr></thead>
+          <thead><tr><th>تاریخ</th><th>نوع</th><th>مبلغ</th><th>منبع</th><th>شرح</th><th>بررسی</th></tr></thead>
           <tbody>
-            <tr v-if="!costs.length"><td colspan="5" class="text-center inv-muted">هزینه‌ای ثبت نشده است.</td></tr>
-            <tr v-for="c in costs" :key="c.id"><td>{{ jalali(c.entryDate) }}</td><td>{{ costKinds[c.kind] }}</td><td>{{ rial(c.amount) }}</td><td>{{ c.sourceType }} {{ c.sourceNumber }}</td><td>{{ c.description }}</td></tr>
+            <tr v-if="!costs.length"><td colspan="6" class="text-center inv-muted">هزینه‌ای ثبت نشده است.</td></tr>
+            <tr v-for="c in costs" :key="c.id"><td>{{ jalali(c.entryDate) }}</td><td>{{ costKinds[c.kind] }}</td><td>{{ rial(c.amount) }}</td><td>{{ c.sourceType }} {{ c.sourceNumber }}</td><td>{{ c.description }}</td>
+              <td class="text-nowrap">
+                <span v-if="c.needsCheck && c.checked" class="inv-badge ok">بررسی‌شده</span>
+                <template v-else-if="c.needsCheck"><span class="inv-badge warn" title="تا بررسی نفر دوم مالی، هزینه واقعی حساب نمی‌شود">منتظر بررسی</span>
+                  <button v-if="canCost" class="btn btn-sm btn-outline-success ms-1 d-print-none" @click="checkCost(c)">تأیید</button></template>
+              </td></tr>
           </tbody>
         </table>
       </template>

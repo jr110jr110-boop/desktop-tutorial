@@ -4,7 +4,7 @@ import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import WorkOrderOfContract from "@/components/pc/WorkOrderOfContract.vue";
-import { generateFinalBook, getFinalBooks } from "@/api/ProjectControlAPIs";
+import { approveFinalBook, generateFinalBook, getFinalBooks } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { contractLabel, pcContractId } from "@/composables/projectControl";
@@ -23,6 +23,14 @@ async function load() {
   const [d, e] = await getFinalBooks({ ContractId: pcContractId.value, WorkOrderId: workOrderId.value });
   if (e) return fail(e);
   rows.value = rowsOf(d);
+}
+const revisionStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "در بازبینی", 2: "تأییدشده", 3: "جاری", 4: "منسوخ", 5: "زمان‌بندی‌شده" };
+// M1: the preparer does not approve the revision (the API refuses it); PMO or QC does, then it becomes the revision in force
+async function approve(r: any) {
+  const [, error] = await approveFinalBook(r.reportIssueId);
+  if (error) return fail(error);
+  ok("نسخه تأیید شد و جاری شد.");
+  load();
 }
 async function generate() {
   busy.value = true;
@@ -55,12 +63,14 @@ watch(pcContractId, () => { workOrderId.value = null; f.value.workOrderId = null
         </div>
         <div class="inv-filters mb-2 d-print-none"><WorkOrderOfContract v-model="workOrderId" :contract-id="pcContractId" @change="load" /></div>
         <table class="table table-sm">
-          <thead><tr><th>شماره صدور</th><th>نسخه</th><th>دستور ساخت</th><th>کد سند کنترل‌شده</th><th>ویرایش</th><th>اقلام</th><th>موارد ناقص</th><th>تاریخ</th><th>هش</th></tr></thead>
+          <thead><tr><th>شماره صدور</th><th>نسخه</th><th>دستور ساخت</th><th>کد سند کنترل‌شده</th><th>ویرایش</th><th>اقلام</th><th>موارد ناقص</th><th>تاریخ</th><th>هش</th><th>وضعیت ویرایش</th><th></th></tr></thead>
           <tbody>
-            <tr v-if="!rows.length"><td colspan="9" class="text-center inv-muted">کتاب نهایی صادر نشده است.</td></tr>
+            <tr v-if="!rows.length"><td colspan="11" class="text-center inv-muted">کتاب نهایی صادر نشده است.</td></tr>
             <tr v-for="r in rows" :key="r.reportIssueId">
               <td class="inv-ltr">{{ r.number }}</td><td>{{ r.variant === "client" ? "کارفرما" : "شرکت" }}</td><td class="inv-ltr">{{ r.workOrderCode }}</td><td class="inv-ltr">{{ r.documentCode || "—" }}</td><td class="inv-ltr">{{ r.revision }}</td>
               <td>{{ r.entryCount }}</td><td><span v-if="r.missingCount" class="inv-badge bad">{{ r.missingCount }}</span><span v-else class="inv-badge ok">کامل</span></td><td>{{ jalali(r.generatedAt) }}</td><td class="inv-ltr small">{{ (r.hash || "").slice(0, 12) }}</td>
+              <td><span v-if="r.revisionStatus !== null && r.revisionStatus !== undefined" :class="r.revisionStatus === 3 ? 'ok' : r.revisionStatus === 1 ? 'warn' : ''" class="inv-badge">{{ revisionStatuses[r.revisionStatus] }}</span></td>
+              <td><button v-if="can && r.revisionStatus === 1" class="btn btn-sm btn-outline-success" title="نسخه‌ی جاری تا تأیید نفر دوم معتبر می‌ماند" @click="approve(r)">تأیید نسخه</button></td>
             </tr>
           </tbody>
         </table>

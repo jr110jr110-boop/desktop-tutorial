@@ -40,7 +40,7 @@ async function saveManual() {
   const [, error] = await addManualClock({ employeeId: f.employee.id, timestamp: stamp(f.date, f.time), direction: Number(f.direction), reason: f.reason.trim() });
   busy.value = false;
   if (error) return fail(error);
-  ok("تردد ثبت شد. برای اعمال در نتیجه روزانه، محاسبه را اجرا کنید.");
+  ok("درخواست تردد ثبت شد. تا تایید یک کاربر دیگر منابع انسانی (یا مدیر واحد کارمند) در کارکرد نمی‌آید.");
   manual.value = null;
   list.load();
 }
@@ -64,15 +64,16 @@ onMounted(search);
     </div>
     <div class="table-responsive">
       <table class="table table-sm table-hover">
-        <thead><tr><th>تاریخ و ساعت</th><th v-if="canAll">کارمند</th><th>جهت</th><th>منبع</th><th>دستگاه</th><th>دلیل</th><th>ثبت‌کننده</th></tr></thead>
+        <thead><tr><th>تاریخ و ساعت</th><th v-if="canAll">کارمند</th><th>جهت</th><th>منبع</th><th>دستگاه</th><th>دلیل</th><th>ثبت‌کننده</th><th>تایید</th></tr></thead>
         <tbody>
-          <tr v-if="!list.rows.value.length"><td :colspan="canAll ? 7 : 6" class="text-center inv-muted">تردد ثبت‌شده‌ای نیست.</td></tr>
+          <tr v-if="!list.rows.value.length"><td :colspan="canAll ? 8 : 7" class="text-center inv-muted">تردد ثبت‌شده‌ای نیست.</td></tr>
           <tr v-for="e in list.rows.value" :key="e.id">
             <td class="inv-ltr">{{ e.timestampText }}</td>
             <td v-if="canAll">{{ e.employeeName }}<div class="inv-muted small inv-ltr">{{ e.personnelCode }}</div></td>
             <td>{{ clockDirections[e.direction] }}</td>
             <td><span :class="e.source === 3 ? 'warn' : 'info'" class="inv-badge">{{ clockSources[e.source] }}</span></td>
             <td class="inv-ltr">{{ e.deviceCode }}</td><td>{{ e.reason }}</td><td>{{ e.createdByName }}</td>
+            <td><span :class="e.approval === 1 ? 'warn' : e.approval === 2 ? 'bad' : 'ok'" class="inv-badge">{{ e.approval === 1 ? "در انتظار" : e.approval === 2 ? "رد شد" : "تاییدشده" }}</span><div v-if="e.rejectReason" class="inv-muted small">{{ e.rejectReason }}</div><div v-if="e.importBatchId" class="inv-muted small">بسته #{{ e.importBatchId }}</div></td>
           </tr>
         </tbody>
       </table>
@@ -82,7 +83,7 @@ onMounted(search);
     <div v-if="manual" class="inv-modal-backdrop" @click.self="manual = null">
       <div class="inv-modal">
         <h2 class="inv-title mb-2">ثبت دستی تردد</h2>
-        <p class="inv-muted small">ثبت دستی در سابقه تغییرات نگهداری می‌شود. ماهی که حقوق آن تایید شده یا زمان آینده پذیرفته نمی‌شود.</p>
+        <p class="inv-muted small">ثبت دستی یک «درخواست» است و فقط برای کارمند دیگری ثبت می‌شود؛ تا تایید کاربر دیگری از منابع انسانی یا مدیر واحد کارمند در کارکرد نمی‌آید (زبانه «تایید درخواست‌ها»). ماهی که حقوق آن تایید شده یا زمان آینده پذیرفته نمی‌شود.</p>
         <div class="row g-2">
           <div class="col-12"><label class="form-label small mb-0">کارمند *</label><EmployeePick v-model="manual.employee" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">تاریخ *</label><FnDate v-model="manual.date" /></div>

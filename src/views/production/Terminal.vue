@@ -23,7 +23,7 @@ const now = ref(Date.now());
 type Dialog = null | { type: "start" | "switch" | "pause" | "qty" | "finish" | "down" | "qc"; op: any | null };
 const dialog = ref<Dialog>(null);
 const machines = ref<any[]>([]);
-const f = ref({ kind: 2, machineId: null as number | null, reasonId: null as number | null, good: "", scrap: "", rework: "", scrapReasonId: null as number | null, note: "", description: "" });
+const f = ref({ kind: 2, machineId: null as number | null, reasonId: null as number | null, good: "", scrap: "", rework: "", scrapReasonId: null as number | null, note: "", description: "", serials: "" });
 
 const downReasons = computed(() => reasons.value.filter((r) => r.kind === 2 || r.kind === 3));
 const scrapReasons = computed(() => reasons.value.filter((r) => r.kind === 1));
@@ -93,7 +93,7 @@ function elapsed(op: any) {
 
 async function openDialog(type: NonNullable<Dialog>["type"], op: any | null) {
   banner.value = null;
-  f.value = { kind: 2, machineId: null, reasonId: null, good: type === "finish" && op ? String(remaining(op)) : "", scrap: "", rework: "", scrapReasonId: null, note: "", description: "" };
+  f.value = { kind: 2, machineId: null, reasonId: null, good: type === "finish" && op ? String(remaining(op)) : "", scrap: "", rework: "", scrapReasonId: null, note: "", description: "", serials: "" };
   machines.value = [];
   dialog.value = { type, op };
   if (type === "start" || type === "switch" || type === "down") {
@@ -119,7 +119,12 @@ async function submit() {
   const op = dlg.op;
   busy.value = true;
   let result: [any, any] = [null, null];
-  const qty = () => ({ operationId: op.id, goodQty: parseAmount(f.value.good) || 0, scrapQty: parseAmount(f.value.scrap) || 0, reworkQty: parseAmount(f.value.rework) || 0, scrapReasonCodeId: f.value.scrapReasonId, note: f.value.note });
+  const qty = () => ({ operationId: op.id, goodQty: parseAmount(f.value.good) || 0, scrapQty: parseAmount(f.value.scrap) || 0, reworkQty: parseAmount(f.value.rework) || 0, scrapReasonCodeId: f.value.scrapReasonId, note: f.value.note, scrapSerials: f.value.serials.trim() || null });
+  if ((dlg.type === "start" || dlg.type === "switch") && op.machineRequired && f.value.kind !== 3 && !f.value.machineId) {
+    busy.value = false;
+    banner.value = { kind: "bad", text: "این مرکز کار ماشین الزامی دارد؛ یک ماشین انتخاب کنید." };
+    return;
+  }
   if (dlg.type === "start" || dlg.type === "switch") result = await startOperation({ operationId: op.id, kind: f.value.kind, machineId: f.value.machineId, note: f.value.note });
   else if (dlg.type === "pause") result = await pauseOperation({ operationId: op.id, reasonCodeId: f.value.reasonId, note: f.value.note });
   else if (dlg.type === "qty") result = await reportQuantity(qty());
@@ -232,7 +237,7 @@ onBeforeUnmount(() => {
             <button v-for="k in kindsForStart" :key="k" :class="{ on: f.kind === k }" class="tm-btn" @click="f.kind = k">{{ bookingKinds[k] }}</button>
           </div>
           <template v-if="machines.length">
-            <div class="tm-label">ماشین</div>
+            <div class="tm-label">ماشین<span v-if="dialog.op?.machineRequired"> (الزامی)</span></div>
             <div class="tm-choices">
               <button v-for="m in machines" :key="m.machineId" :class="{ on: f.machineId === m.machineId }" class="tm-btn" @click="f.machineId = f.machineId === m.machineId ? null : m.machineId">{{ m.title }}</button>
             </div>
@@ -255,6 +260,8 @@ onBeforeUnmount(() => {
             <button class="tm-btn tm-round" @click="bump(row.k as any, 1)">+</button>
           </div>
           <template v-if="(parseAmount(f.scrap) || 0) > 0">
+            <div class="tm-label">شماره سریال قطعات ضایعاتی (هر سطر یکی؛ فقط برای کالای سریال‌دار)</div>
+            <textarea v-model="f.serials" class="tm-input inv-ltr" rows="2"></textarea>
             <div class="tm-label">دلیل ضایعات</div>
             <div class="tm-choices">
               <button v-for="r in scrapReasons" :key="r.id" :class="{ on: f.scrapReasonId === r.id }" class="tm-btn" @click="f.scrapReasonId = r.id">{{ r.title }}</button>
@@ -263,7 +270,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-if="dialog.type === 'down'">
-          <div class="tm-label">ماشین</div>
+          <div class="tm-label">ماشین<span v-if="dialog.op?.machineRequired"> (الزامی)</span></div>
           <div class="tm-choices">
             <button v-for="m in machines" :key="m.machineId" :class="{ on: f.machineId === m.machineId }" class="tm-btn" @click="f.machineId = m.machineId">{{ m.title }}</button>
           </div>

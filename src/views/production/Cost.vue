@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import QPager from "@/components/quality/QPager.vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import { lastDays, todayIso } from "@/components/production/mnt/mntCommon";
-import { getCostPostings, getCostRuns, runCost } from "@/api/ProductionAPIs";
+import { getCostPostings, getCostRuns, getLabourMonths, runCost, runLabourMonth } from "@/api/ProductionAPIs";
 import { money, usePagedList } from "@/composables/fn";
 import { fail, ok } from "@/composables/inventory";
 import { dateText, hoursText, persianOf } from "@/composables/production";
@@ -12,7 +12,9 @@ import { hasRole, ProductionRoles } from "@/composables/roles";
 // Daily production cost posting (MfCost). The server posts the closed bookings with the rates it holds and writes the accounting event; the page never computes a rate.
 // Labour amounts are hidden by the server (labourAmount = null with labourHidden) where a row would reveal one person's pay.
 const canRun = hasRole(ProductionRoles.costRunners);
-const tab = ref<"runs" | "postings">("runs");
+const tab = ref<"runs" | "postings" | "labour">("runs");
+const months = ref<any[]>([]);
+const monthResult = ref<any>(null);
 const range = lastDays(60);
 const filters = ref<any>({ From: range.from, To: range.to, RunId: null as number | null, WorkOrderId: null as number | null });
 const runs = usePagedList(getCostRuns, filters);
@@ -38,7 +40,27 @@ async function run() {
   reload();
 }
 
+// R1p D1: month-end labour variance (pool figures arrive only for PAYROLL / FINANCEMANAGER / CEO; for others they are absent and shown as confidential)
+async function loadMonths() {
+  const [d, e] = await getLabourMonths();
+  if (e) return fail(e);
+  months.value = Array.isArray(d) ? d : d?.periods || d?.data || [];
+}
+async function runMonth() {
+  if (!confirm("بستن ماه‌های تمام‌شده و ثبت اختلاف دستمزد اجرا شود؟")) return;
+  busy.value = true;
+  const [d, e] = await runLabourMonth(null);
+  busy.value = false;
+  if (e) return fail(e);
+  monthResult.value = d;
+  ok(d?.message || "اجرا شد.");
+  loadMonths();
+}
+const poolOf = (m: any) => (m.pools || [])[0] || null;
+const varianceOf = (m: any) => (m.variance === null || m.variance === undefined ? "محرمانه" : money(m.variance));
+
 function reload() {
+  if (tab.value === "labour") return loadMonths();
   return tab.value === "runs" ? runs.search() : postings.search();
 }
 function setTab(t: typeof tab.value) {
@@ -90,9 +112,31 @@ onMounted(runs.load);
 
       <ul class="nav nav-tabs mb-3">
         <li class="nav-item"><button :class="{ active: tab === 'runs' }" class="nav-link" @click="setTab('runs')">اجراها</button></li>
+        <li class="nav-item"><button :class="{ active: tab === 'labour' }" class="nav-link" @click="setTab('labour')">اختلاف دستمزد ماهانه</button></li>
         <li class="nav-item"><button :class="{ active: tab === 'postings' }" class="nav-link" @click="setTab('postings')">ردیف‌های هزینه</button></li>
       </ul>
-      <div class="inv-filters mb-3 align-items-end">
+      <template v-if="tab === 'labour'">
+        <div v-if="canRun" class="mb-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="runMonth">اجرای بستن ماه</button></div>
+        <div v-if="monthResult?.bookingsCarried" class="alert alert-warning small">{{ monthResult.bookingsCarried }} رزرو به ماه بعد منتقل شد (شرط حداقل نفرات یا سهم یک نفر برقرار نبود).</div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover">
+            <thead><tr><th>ماه</th><th>وضعیت</th><th>رزروها</th><th>جذب‌شده با نرخ استاندارد (ریال)</th><th>نفرات</th><th>ساعت</th><th>میانگین نرخ واقعی</th><th>اختلاف (ریال)</th></tr></thead>
+            <tbody>
+              <tr v-if="!months.length"><td colspan="8" class="text-center inv-muted">ماهی ثبت نشده است.</td></tr>
+              <tr v-for="m in months" :key="m.period">
+                <td>{{ m.periodText || m.period }}</td>
+                <td><span :class="m.protected ? 'warn' : m.state === 'Posted' ? 'ok' : ''" class="inv-badge">{{ m.stateText || m.state }}</span></td>
+                <td>{{ m.bookings }}</td><td class="fn-num">{{ money(m.absorbed) }}</td>
+                <template v-if="poolOf(m)"><td>{{ poolOf(m).people }}</td><td>{{ hoursText(poolOf(m).hours) }}</td><td class="fn-num">{{ poolOf(m).rate === null ? "محرمانه" : money(poolOf(m).rate) }}</td></template>
+                <template v-else><td colspan="3" class="inv-muted">محرمانه (حقوق)</td></template>
+                <td class="fn-num">{{ varianceOf(m) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="inv-muted small mb-0">ماه محافظت‌شده یعنی اختلاف در پایان فصل با پرچم محافظت ثبت شده است. ارقام استخر دستمزد فقط برای حقوق و دستمزد، مدیر مالی و مدیرعامل نمایش داده می‌شود.</p>
+      </template>
+      <div v-if="tab !== 'labour'" class="inv-filters mb-3 align-items-end">
         <div><label class="form-label small mb-0">از تاریخ</label><FnDate v-model="filters.From" /></div>
         <div><label class="form-label small mb-0">تا تاریخ</label><FnDate v-model="filters.To" /></div>
         <button class="btn btn-sm btn-secondary" @click="reload">جستجو</button>
@@ -118,7 +162,7 @@ onMounted(runs.load);
         <QPager :page="runs.page.value" :total="runs.total.value" @go="runs.go" />
       </template>
 
-      <template v-else>
+      <template v-else-if="tab === 'postings'">
         <div class="table-responsive">
           <table class="table table-sm table-hover">
             <thead><tr><th>اجرا</th><th>روز</th><th>دستور کار</th><th>گره WBS</th><th>مرکز کار</th><th>تعداد رزرو</th><th>ساعت دستمزد</th><th>ساعت ماشین</th><th>دستمزد (ریال)</th><th>سربار (ریال)</th></tr></thead>

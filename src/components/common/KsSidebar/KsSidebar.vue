@@ -463,6 +463,7 @@ const links = {
     { title: "قالب و کد پاسخ مدارک", routeName: "ProjectControlMdrTemplates", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "کتاب نهایی", routeName: "ProjectControlFinalBooks", disabled: !hasRole(ProjectControlRoles.finalBooks) },
     { title: "کنترل تغییرات", routeName: "ProjectControlChanges", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "تنظیمات کنترل پروژه", routeName: "ProjectControlSettings", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "ادعاها", routeName: "ProjectControlClaims", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "محموله‌ها و ارسال", routeName: "ProjectControlShipments", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "گزارش‌های پروژه", routeName: "ProjectControlReports", disabled: !hasRole(ProjectControlRoles.readers) },

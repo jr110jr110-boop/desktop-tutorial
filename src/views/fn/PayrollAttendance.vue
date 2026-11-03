@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import LookupBox from "@/components/fn/LookupBox.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import QPager from "@/components/quality/QPager.vue";
-import { getAttendance, getLeaveBalances, getPayrollEmployees, importAttendance, saveAttendance } from "@/api/FnAPIs";
+import { getAttendance, getLeaveBalances, getPayrollEmployees, importAttendance, proposeAttendanceCorrection, saveAttendance } from "@/api/FnAPIs";
 import { camelize, jalaliNow, monthNames, parseAmount, usePagedList } from "@/composables/fn";
 import { cellNumber, cellText, readExcel } from "@/composables/fnExcel";
 import type { ExcelField, ExcelSheet } from "@/composables/fnExcel";
@@ -22,21 +22,33 @@ const filters = computed(() => ({ Year: parseAmount(year.value) || 0, Month: mon
 const list = usePagedList((p: any) => getAttendance({ ...p, ...filters.value }), ref({}));
 const rowsOf = (d: any): any[] => (Array.isArray(d) ? d : d?.data || []);
 
-const numericFields: [string, string][] = [["daysWorked", "روز کارکرد"], ["overtimeHours", "اضافه‌کار (ساعت)"], ["nightHours", "شب‌کاری (ساعت)"], ["holidayHours", "تعطیل‌کاری (ساعت)"], ["paidLeaveDays", "مرخصی با حقوق (روز)"], ["unpaidLeaveDays", "مرخصی بدون حقوق (روز)"], ["absenceDays", "غیبت (روز)"], ["missionDays", "ماموریت (روز)"]];
+const numericFields: [string, string][] = [["daysWorked", "روز کارکرد"], ["overtimeHours", "اضافه‌کار (ساعت)"], ["nightHours", "شب‌کاری (ساعت)"], ["holidayHours", "تعطیل‌کاری (ساعت)"], ["paidLeaveDays", "مرخصی با حقوق (روز)"], ["sickLeaveDays", "استعلاجی (روز)"], ["unpaidLeaveDays", "مرخصی بدون حقوق (روز)"], ["absenceDays", "غیبت (روز)"], ["missionDays", "ماموریت (روز)"]];
 const form = ref<any>(null);
 const searchEmployees = async (t: string) => rowsOf(camelize((await getPayrollEmployees({ Contains: t, PageSize: 15, IsActive: true }))[0]));
 const employeeLabel = (e: any) => `${e.personnelCode} - ${e.firstName || ""} ${e.lastName || ""}`.trim();
 
 function edit(a: any | null) {
   form.value = a
-    ? { employee: { id: a.employeeId, personnelCode: a.personnelCode, firstName: a.employeeName, lastName: "" }, shiftType: a.shiftType, ...Object.fromEntries(numericFields.map(([k]) => [k, String(a[k] ?? 0)])), inputs: Object.entries(a.inputs || {}).map(([k, v]) => ({ key: k, value: String(v) })) }
-    : { employee: null, shiftType: 0, ...Object.fromEntries(numericFields.map(([k]) => [k, "0"])), inputs: [] };
+    ? { employee: { id: a.employeeId, personnelCode: a.personnelCode, firstName: a.employeeName, lastName: "" }, locked: !!a.locked, source: a.source, reason: "", shiftType: a.shiftType, ...Object.fromEntries(numericFields.map(([k]) => [k, String(a[k] ?? 0)])), inputs: Object.entries(a.inputs || {}).map(([k, v]) => ({ key: k, value: String(v) })) }
+    : { employee: null, locked: false, source: "Manual", reason: "", shiftType: 0, ...Object.fromEntries(numericFields.map(([k]) => [k, "0"])), inputs: [] };
 }
 async function save() {
   const f = form.value;
   if (!f.employee) return fail("کارمند را انتخاب کنید.");
   const inputs: Record<string, number> = {};
   for (const i of f.inputs) if (String(i.key).trim()) inputs[String(i.key).trim()] = parseAmount(i.value) || 0;
+  // a sheet that the HR close locked is not overwritten by payroll: payroll proposes a correction with a reason and HR (never the proposer) decides it
+  if (f.locked) {
+    if (!String(f.reason).trim()) return fail("برگه با بستن ماه منابع انسانی قفل شده است؛ دلیل اصلاح را بنویسید.");
+    busy.value = true;
+    const proposed: any = { shiftType: Number(f.shiftType) || 0, ...Object.fromEntries(numericFields.map(([k]) => [k, parseAmount(f[k]) || 0])) };
+    const [, err] = await proposeAttendanceCorrection({ employeeId: f.employee.id, year: filters.value.Year, month: month.value, proposed, reason: String(f.reason).trim() });
+    busy.value = false;
+    if (err) return fail(err);
+    ok("درخواست اصلاح ثبت شد؛ پس از تایید یکی از کاربران منابع انسانی (غیر از شما) برگه تغییر می‌کند.");
+    form.value = null;
+    return;
+  }
   busy.value = true;
   const [, error] = await saveAttendance({ employeeId: f.employee.id, year: filters.value.Year, month: month.value, shiftType: Number(f.shiftType) || 0, inputs, ...Object.fromEntries(numericFields.map(([k]) => [k, parseAmount(f[k]) || 0])) });
   busy.value = false;
@@ -56,6 +68,7 @@ const fields: ExcelField[] = [
   { key: "paidLeaveDays", label: "مرخصی با حقوق", words: ["مرخصی با حقوق", "مرخصی", "paidleave"] },
   { key: "unpaidLeaveDays", label: "مرخصی بدون حقوق", words: ["مرخصی بدون حقوق", "unpaidleave"] },
   { key: "absenceDays", label: "غیبت", words: ["غیبت", "absence"] },
+  { key: "sickLeaveDays", label: "استعلاجی", words: ["استعلاجی", "مرخصی استعلاجی", "sickleave"] },
   { key: "missionDays", label: "ماموریت", words: ["ماموریت", "mission"] },
 ];
 const sheet = ref<ExcelSheet | null>(null);
@@ -131,13 +144,14 @@ onMounted(list.load);
       <template v-if="tab === 'attendance'">
         <div class="table-responsive">
           <table class="table table-sm table-hover">
-            <thead><tr><th>کد پرسنلی</th><th>نام</th><th v-for="f in numericFields" :key="f[0]">{{ f[1] }}</th><th>ورودی‌ها</th><th></th></tr></thead>
+            <thead><tr><th>کد پرسنلی</th><th>نام</th><th v-for="f in numericFields" :key="f[0]">{{ f[1] }}</th><th>ورودی‌ها</th><th>منبع</th><th></th></tr></thead>
             <tbody>
-              <tr v-if="!list.rows.value.length"><td :colspan="numericFields.length + 4" class="text-center inv-muted">کارکردی برای این ماه ثبت نشده است.</td></tr>
+              <tr v-if="!list.rows.value.length"><td :colspan="numericFields.length + 5" class="text-center inv-muted">کارکردی برای این ماه ثبت نشده است.</td></tr>
               <tr v-for="a in list.rows.value" :key="a.id">
                 <td class="inv-ltr">{{ a.personnelCode }}</td><td>{{ a.employeeName }}</td><td v-for="f in numericFields" :key="f[0]" class="fn-num">{{ a[f[0]] }}</td>
                 <td class="inv-ltr small">{{ Object.keys(a.inputs || {}).join("، ") }}</td>
-                <td><button v-if="canWrite" class="btn btn-sm btn-outline-secondary" @click="edit(a)">ویرایش</button></td>
+                <td class="small"><span :class="a.source === 'HrClose' ? 'ok' : 'warn'" class="inv-badge">{{ ({ HrClose: "بستن ماه منابع انسانی", Manual: "دستی", Import: "ورود از فایل" } as any)[a.source] || a.source }}</span><span v-if="a.locked" class="inv-badge info ms-1">قفل</span></td>
+                <td><button v-if="canWrite" class="btn btn-sm btn-outline-secondary" @click="edit(a)">{{ a.locked ? "پیشنهاد اصلاح" : "ویرایش" }}</button></td>
               </tr>
             </tbody>
           </table>
@@ -180,6 +194,7 @@ onMounted(list.load);
         <h2 class="inv-title mb-2">کارکرد {{ monthNames[month - 1] }} {{ year }}</h2>
         <div class="row g-2">
           <div class="col-12"><label class="form-label small mb-0">کارمند *</label><LookupBox v-model="form.employee" :fetch="searchEmployees" :label="employeeLabel" placeholder="کد پرسنلی یا نام" /></div>
+          <div v-if="form.locked" class="col-12"><div class="alert alert-warning small py-2 mb-0">این برگه را بستن ماه منابع انسانی نوشته و قفل کرده است. تغییر آن «پیشنهاد اصلاح» است و باید یکی از کاربران منابع انسانی (غیر از شما) آن را تایید کند.</div><label class="form-label small mb-0 mt-2">دلیل اصلاح *</label><input v-model="form.reason" class="form-control form-control-sm" /></div>
           <div v-for="f in numericFields" :key="f[0]" class="col-md-3"><label class="form-label small mb-0">{{ f[1] }}</label><input v-model="form[f[0]]" class="form-control form-control-sm fn-num" /></div>
           <div class="col-12">
             <label class="form-label small mb-0">ورودی‌های اقلام حقوق (کد قلم و مقدار)</label>

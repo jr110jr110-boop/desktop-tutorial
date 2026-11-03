@@ -5,13 +5,14 @@ import { computed, ref } from "vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import AttendanceCompute from "@/components/office/att/AttendanceCompute.vue";
 import AttendanceDays from "@/components/office/att/AttendanceDays.vue";
+import ClockApprovals from "@/components/office/att/ClockApprovals.vue";
 import ClockEvents from "@/components/office/att/ClockEvents.vue";
 import { hasRole, OfficeRoles } from "@/composables/roles";
 
 const canAll = hasRole(OfficeRoles.attendanceReaders);
 const isHr = hasRole(OfficeRoles.hr);
 const tab = ref("days");
-const tabs = computed(() => [{ key: "days", title: "نتیجه روزانه" }, { key: "clock", title: "ترددها" }, { key: "compute", title: "محاسبه", hidden: !canAll }]);
+const tabs = computed(() => [{ key: "days", title: "نتیجه روزانه" }, { key: "clock", title: "ترددها" }, { key: "compute", title: "محاسبه", hidden: !canAll }, { key: "approvals", title: "تایید درخواست‌ها", hidden: !canAll }]);
 </script>
 
 <template>
@@ -25,6 +26,7 @@ const tabs = computed(() => [{ key: "days", title: "نتیجه روزانه" }, 
       <AttendanceDays v-if="tab === 'days'" :can-all="canAll" />
       <ClockEvents v-else-if="tab === 'clock'" :can-all="canAll" :is-hr="isHr" />
       <AttendanceCompute v-else-if="tab === 'compute' && canAll" />
+      <ClockApprovals v-else-if="tab === 'approvals' && canAll" />
     </div>
   </div>
 </template>

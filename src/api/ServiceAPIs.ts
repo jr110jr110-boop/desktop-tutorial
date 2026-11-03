@@ -173,8 +173,9 @@ export const getSvSurveys = (params?: ServicePageParams) => get(sv + "surveys", 
 /** One SlSurveyDto with its answers. Who: readers. */
 export const getSvSurvey = (id: number) => get(sv + "surveys/" + id);
 /** SlSurveyActionDto { id, action, rowVersion }. action: send (the system drafted it), skip. Returns SlSurveyDto. Who: ServiceRoles.surveyWorkers (SERVICE, SALES). */
-export const svSurveyAction = (dto: { id: number; action: "send" | "skip"; rowVersion?: string | null }) =>
-  post(sv + "surveys/action", { id: dto.id, action: dto.action, rowVersion: dto.rowVersion || null });
+export const svSurveyAction = (dto: { id: number; action: "send" | "skip" | "verify"; reason?: string | null; note?: string | null; rowVersion?: string | null }) =>
+  post(sv + "surveys/action", { id: dto.id, action: dto.action, reason: dto.reason || null, note: dto.note || null, rowVersion: dto.rowVersion || null });
+// R1p D25: skip needs a reason; verify (QA only) records what was checked with the customer. SlSurveyQuery also has Verified (bool): QA's sample of answered unverified surveys.
 /** SlSurveyAnswerSaveDto { id, scores: [{ rowNumber, score 1..5 }] (one per question), comments, rowVersion }: records the customer's answers. Returns SlSurveyDto. Who: surveyWorkers (SERVICE, SALES). */
 export const answerSvSurvey = (dto: { id: number; scores: { rowNumber: number; score: number }[]; comments?: string | null; rowVersion?: string | null }) =>
   post(sv + "surveys/answer", { id: dto.id, scores: dto.scores, comments: dto.comments || null, rowVersion: dto.rowVersion || null });

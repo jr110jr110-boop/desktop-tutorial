@@ -2,9 +2,10 @@
 import { onMounted, ref } from "vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
 import QPager from "@/components/quality/QPager.vue";
-import { downloadOutboxPackage, generateOutbox, getOutboxPackage, getOutboxPackages, getOutboxSummary, outboxAction } from "@/api/FnAPIs";
+import { ackOutboxPackage, downloadOutboxDsk, downloadOutboxPackage, generateOutbox, getOutboxPackage, getOutboxPackages, getOutboxSummary, getOutboxTieOut, outboxAction } from "@/api/FnAPIs";
 import { jalaliNow, monthNames, outboxKinds, outboxStatuses, parseAmount, seasonNames, usePagedList } from "@/composables/fn";
 import { fail, jalali, ok } from "@/composables/inventory";
+import { money } from "@/composables/fn";
 import { FnRoles, hasRole } from "@/composables/roles";
 
 // Outbox of the accounting package: tax and insurance data is prepared here, approved by another person and handed to the Sepidar connector (the only external link).
@@ -34,23 +35,28 @@ function refresh() {
 
 async function generate() {
   const f = form.value;
-  const dto: any = { kind: Number(f.kind), year: parseAmount(f.year) || 0, note: f.note || null };
+  const dto: any = { kind: Number(f.kind), year: parseAmount(f.year) || 0, note: f.note || null, correctsPackageId: f.correctsPackageId ? Number(f.correctsPackageId) : null };
+  if (f.correctsPackageId && !String(f.note || "").trim()) return fail("برای بسته‌ی اصلاحی علت اصلاح را در توضیح بنویسید.");
   if (f.kind === 2) dto.season = Number(f.season);
   else dto.month = Number(f.month);
   busy.value = true;
   const [, error] = await generateOutbox(dto);
   busy.value = false;
   if (error) return fail(error);
-  ok("بسته آماده شد؛ پس از بررسی، شخص دیگری آن را تایید کند.");
+  ok(dto.correctsPackageId ? "بسته‌ی اصلاحی ساخته شد؛ پس از بررسی، شخص دیگری آن را تایید کند." : "بسته آماده شد؛ پس از بررسی، شخص دیگری آن را تایید کند.");
   form.value = null;
   refresh();
 }
 
 function ask(pkg: any, action: string) {
-  if (action === "approve" || action === "send" || action === "mark-accepted") return run(pkg, action, {});
+  if (action === "approve" || action === "send") return run(pkg, action, {});
+  // R1t D6: the three manual marks record what happened outside the system: each needs a note and is audited
   const note = { key: "note", label: "دلیل رد *", type: "textarea" as const, required: true };
+  const happened = { key: "note", label: "توضیح (چه اتفاقی بیرون از سیستم افتاد؟) *", type: "textarea" as const, required: true };
   const ref1 = { key: "reference", label: "شماره پیگیری / مرجع ارسال *", required: true };
-  dialog.value = action === "mark-sent" ? { pkg, action, title: "ثبت ارسال دستی", fields: [ref1] } : { pkg, action, title: "ثبت رد بسته", fields: [note] };
+  if (action === "mark-sent") dialog.value = { pkg, action, title: "ثبت ارسال دستی", fields: [ref1, happened] };
+  else if (action === "mark-accepted") dialog.value = { pkg, action, title: "ثبت پذیرش دستی", fields: [happened] };
+  else dialog.value = { pkg, action, title: "ثبت رد بسته", fields: [note] };
 }
 async function run(pkg: any, action: string, v: any) {
   dialog.value = null;
@@ -67,6 +73,32 @@ async function run(pkg: any, action: string, v: any) {
 async function exportFile(pkg: any) {
   const message = await downloadOutboxPackage(pkg.id);
   if (message) return fail(message);
+  refresh();
+}
+async function exportDsk(pkg: any) {
+  const message = await downloadOutboxDsk(pkg.id);
+  if (message) return fail(message);
+  refresh();
+}
+const tieOut = ref<any>(null);
+async function showTieOut(pkg: any) {
+  const [d, error] = await getOutboxTieOut(pkg.id);
+  if (error) return fail(error);
+  tieOut.value = { pkg, ...d };
+}
+const ack = ref<any>(null);
+const ackResult = ref<any>(null);
+async function pickAck(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  busy.value = true;
+  const [d, error] = await ackOutboxPackage(ack.value.id, await file.text());
+  busy.value = false;
+  if (error) return fail(error);
+  ackResult.value = d;
+  ok(d?.message || "پاسخ سازمان امور مالیاتی ثبت شد.");
   refresh();
 }
 async function open(pkg: any) {
@@ -102,11 +134,15 @@ onMounted(refresh);
           <tbody>
             <tr v-if="!list.rows.value.length"><td colspan="10" class="text-center inv-muted">بسته‌ای نیست.</td></tr>
             <tr v-for="p in list.rows.value" :key="p.id">
-              <td class="inv-ltr">{{ p.number }}</td><td>{{ outboxKinds[p.kind] }}</td><td>{{ periodText(p) }}</td><td>{{ p.version }}</td><td>{{ p.rowCount }}</td><td>{{ p.creatorName }}</td><td>{{ p.approvedByName }}</td><td class="inv-ltr">{{ p.externalReference }}</td>
+              <td class="inv-ltr">{{ p.number }}<div v-if="p.correctsPackageId" class="inv-muted small">اصلاحی بسته #{{ p.correctsPackageId }}</div></td><td>{{ outboxKinds[p.kind] }}</td><td>{{ periodText(p) }}</td><td>{{ p.version }}</td><td>{{ p.rowCount }}</td><td>{{ p.creatorName }}</td><td>{{ p.approvedByName }}</td><td class="inv-ltr">{{ p.externalReference }}</td>
               <td><span :class="badge(p.status)" class="inv-badge">{{ outboxStatuses[p.status] }}</span><div v-if="p.error" class="small text-danger">{{ p.error }}</div></td>
               <td class="text-nowrap">
                 <button class="btn btn-sm btn-link p-0 me-2" @click="open(p)">جزئیات</button>
                 <button v-if="p.status >= 1 && p.status <= 5" class="btn btn-sm btn-link p-0 me-2" @click="exportFile(p)">خروجی اکسل</button>
+                <button v-if="p.status >= 1 && p.status <= 5 && p.kind === 3" class="btn btn-sm btn-link p-0 me-2" @click="exportDsk(p)">بسته‌ی لیست بیمه (DSK)</button>
+                <button v-if="p.status >= 1 && p.status <= 5" class="btn btn-sm btn-link p-0 me-2" @click="showTieOut(p)">تطبیق با دفتر</button>
+                <button v-if="p.status === 3 && p.kind === 1 && canPrepare(p.kind)" class="btn btn-sm btn-link p-0 me-2" @click="ack = p; ackResult = null">بارگذاری پاسخ مالیاتی</button>
+                <button v-if="(p.status === 3 || p.status === 4) && canPrepare(p.kind)" class="btn btn-sm btn-link p-0 me-2" @click="form = { kind: p.kind, year: String(p.year), month: p.month || now.month, season: p.season || 1, note: '', correctsPackageId: p.id }">بسته‌ی اصلاحی</button>
                 <template v-if="p.status === 0 && canApprove(p.kind)"><button :disabled="busy" class="btn btn-sm btn-success me-1" @click="ask(p, 'approve')">تایید</button></template>
                 <template v-if="(p.status === 1 || p.status === 2) && canPrepare(p.kind)">
                   <button :disabled="busy" class="btn btn-sm btn-outline-primary me-1" @click="ask(p, 'send')">ارسال به سپیدار</button>
@@ -129,7 +165,8 @@ onMounted(refresh);
 
     <div v-if="form" class="inv-modal-backdrop screen-only" @click.self="form = null">
       <div class="inv-modal">
-        <h2 class="inv-title mb-2">ساخت بسته جدید</h2>
+        <h2 class="inv-title mb-2">{{ form.correctsPackageId ? "ساخت بسته‌ی اصلاحی بسته #" + form.correctsPackageId : "ساخت بسته جدید" }}</h2>
+        <p v-if="form.correctsPackageId" class="inv-muted small">بسته‌ای از این دوره قبلاً ارسال یا پذیرفته شده است؛ بسته‌ی جدید اصلاحی است و به آن اشاره می‌کند. علت اصلاح را در توضیح بنویسید.</p>
         <div class="row g-2">
           <div class="col-12"><label class="form-label small mb-0">نوع</label><select v-model="form.kind" class="form-select form-select-sm"><option v-for="(t, k) in outboxKinds" :key="k" :value="Number(k)" :disabled="!canPrepare(Number(k))">{{ t }}</option></select></div>
           <div class="col-4"><label class="form-label small mb-0">سال</label><input v-model="form.year" class="form-control form-control-sm fn-num" /></div>
@@ -138,6 +175,31 @@ onMounted(refresh);
           <div class="col-12"><label class="form-label small mb-0">توضیح</label><input v-model="form.note" class="form-control form-control-sm" /></div>
         </div>
         <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="generate">ساخت بسته</button></div>
+      </div>
+    </div>
+
+    <div v-if="tieOut" class="inv-modal-backdrop screen-only" @click.self="tieOut = null">
+      <div class="inv-modal wide">
+        <h2 class="inv-title mb-2">تطبیق بسته‌ی {{ tieOut.pkg.number }} با دفتر</h2>
+        <p><span :class="tieOut.ties ? 'ok' : 'bad'" class="inv-badge">{{ tieOut.ties ? "بسته با دفتر یکی است" : "اختلاف دارد: " + money(tieOut.totalAbsoluteDifference) }}</span></p>
+        <table class="table table-sm">
+          <thead><tr><th>حساب</th><th>مبلغ بسته</th><th>دفتر (کل)</th><th>دفتر از اسناد بسته</th><th>دفتر از سایر</th><th>اختلاف</th><th>اختلاف از اسناد بسته</th></tr></thead>
+          <tbody><tr v-for="r in tieOut.rows" :key="r.key" :class="{ 'table-danger': !r.ties }"><td>{{ r.label }}<div class="inv-muted small inv-ltr">{{ r.accountCode }} {{ r.accountTitle }}</div></td><td class="fn-num">{{ money(r.packageAmount) }}</td><td class="fn-num">{{ money(r.ledgerAmount) }}</td><td class="fn-num">{{ money(r.ledgerFromSource) }}</td><td class="fn-num">{{ money(r.ledgerOther) }}</td><td class="fn-num">{{ money(r.difference) }}</td><td class="fn-num">{{ money(r.differenceFromSource) }}</td></tr></tbody>
+        </table>
+        <ul v-if="tieOut.notes?.length" class="small"><li v-for="(n, i) in tieOut.notes" :key="i">{{ n }}</li></ul>
+        <div class="text-end"><button class="btn btn-sm btn-outline-secondary" @click="tieOut = null">بستن</button></div>
+      </div>
+    </div>
+
+    <div v-if="ack" class="inv-modal-backdrop screen-only" @click.self="ack = null">
+      <div class="inv-modal">
+        <h2 class="inv-title mb-2">پاسخ سازمان امور مالیاتی برای {{ ack.number }}</h2>
+        <p class="inv-muted small">فایل JSON (آرایه‌ای از ردیف‌ها یا شیئی با «rows») یا CSV با ستون‌های شماره صورت‌حساب، شناسه مالیاتی، وضعیت و پیام. شناسه و وضعیت مالیاتی روی صورت‌حساب‌های بسته ثبت و بسته پذیرفته یا رد می‌شود؛ ارسال دوباره‌ی همان پاسخ چیزی را عوض نمی‌کند.</p>
+        <label class="btn btn-sm btn-outline-primary">انتخاب فایل پاسخ<input accept=".json,.csv,.txt" class="d-none" type="file" @change="pickAck" /></label>
+        <div v-if="ackResult" class="mt-3 small">
+          <span class="inv-badge ok me-1">پذیرفته: {{ ackResult.accepted }}</span><span :class="ackResult.rejected ? 'bad' : 'ok'" class="inv-badge me-1">ردشده: {{ ackResult.rejected }}</span><span class="inv-badge info me-1">در انتظار: {{ ackResult.pending }}</span><span class="inv-badge me-1">بدون تغییر: {{ ackResult.unchanged }}</span><span :class="ackResult.unanswered ? 'warn' : 'ok'" class="inv-badge">بی‌پاسخ: {{ ackResult.unanswered }}</span>
+        </div>
+        <div class="text-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="ack = null">بستن</button></div>
       </div>
     </div>
 

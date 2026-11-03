@@ -4,7 +4,7 @@
 import { computed, nextTick, onMounted, ref } from "vue";
 import MonthSheetPrint from "@/components/office/att/MonthSheetPrint.vue";
 import { days2 } from "@/components/office/att/attCommon";
-import { closeAttendanceMonth, getAttendanceMonth } from "@/api/OfficeAPIs";
+import { closeAttendanceMonth, confirmAttendanceMonth, getAttendanceMonth, rejectAttendanceMonth } from "@/api/OfficeAPIs";
 import { jalaliNow, jalaliTitle, monthNames, parseAmount, printSheet } from "@/composables/fn";
 import { fail, ok } from "@/composables/inventory";
 import { hasRole, OfficeRoles } from "@/composables/roles";
@@ -21,6 +21,11 @@ const result = ref<any>(null);
 const accept = ref(false);
 const confirming = ref(false);
 const busy = ref(false);
+/** the finance manager may also reopen a confirmed month */
+const isFinanceManager = hasRole(["FINANCEMANAGER"]);
+const rejecting = ref<{ reason: string } | null>(null);
+const statusTitles: Record<string, string> = { None: "آماده‌سازی نشده", Prepared: "آماده‌شده، منتظر تایید", Confirmed: "تاییدشده", Rejected: "ردشده، منتظر آماده‌سازی دوباره" };
+const statusKind = computed(() => (status.value?.status === "Confirmed" ? "ok" : status.value?.status === "Rejected" ? "bad" : status.value?.status === "Prepared" ? "warn" : ""));
 const yearNumber = computed(() => parseAmount(year.value) || 0);
 const cols: [string, string][] = [["daysWorked", "کارکرد (روز)"], ["overtimeHours", "اضافه‌کار (ساعت)"], ["nightHours", "شب‌کاری (ساعت)"], ["holidayHours", "تعطیل‌کاری (ساعت)"], ["paidLeaveDays", "مرخصی با حقوق"], ["sickLeaveDays", "استعلاجی"], ["unpaidLeaveDays", "بدون حقوق"], ["absenceDays", "غیبت"], ["missionDays", "ماموریت"]];
 
@@ -41,9 +46,29 @@ async function close() {
   confirming.value = false;
   if (error) return fail(error);
   result.value = d;
-  ok(`ماه بسته شد؛ برگه کارکرد ${d?.sheets ?? 0} نفر ثبت شد.`);
+  ok(`ماه آماده شد؛ برگه کارکرد ${d?.sheets ?? 0} نفر ثبت شد. تایید نهایی با مدیر مالی است (یا کاربر دیگری از منابع انسانی اگر سیاست اجازه دهد).`);
   const [s] = await getAttendanceMonth(yearNumber.value, month.value);
   if (s) status.value = s;
+}
+async function confirmMonth() {
+  busy.value = true;
+  const [d, error] = await confirmAttendanceMonth(yearNumber.value, month.value);
+  busy.value = false;
+  if (error) return fail(error);
+  status.value = d;
+  ok("حضور و غیاب این ماه تایید شد و حقوق می‌تواند از آن استفاده کند.");
+}
+async function rejectMonth() {
+  const reason = rejecting.value?.reason.trim() || "";
+  if (!reason) return fail("دلیل رد را بنویسید.");
+  busy.value = true;
+  const [d, error] = await rejectAttendanceMonth(yearNumber.value, month.value, reason);
+  busy.value = false;
+  if (error) return fail(error);
+  rejecting.value = null;
+  result.value = null;
+  status.value = d;
+  ok("ماه به منابع انسانی برگردانده شد.");
 }
 // the sheet shown and printed: the fresh close result of this session, else the saved sheet of the closed month
 const sheet = computed(() => (result.value ? result.value : status.value?.closed && status.value.rows?.length ? { year: status.value.year, month: status.value.month, sheets: status.value.rows.length, incompleteDays: null, rows: status.value.rows } : null));
@@ -67,19 +92,37 @@ onMounted(load);
       </div>
 
       <div v-if="status" class="fn-tiles mb-3">
-        <div :class="status.closed ? 'ok' : 'warn'" class="fn-tile"><div class="t">وضعیت {{ jalaliTitle(status.year, status.month) }}</div><div class="v">{{ status.closed ? "بسته‌شده" : "باز" }}</div></div>
-        <div class="fn-tile"><div class="t">آخرین بستن</div><div class="v inv-ltr">{{ status.closedAtText || "-" }}</div></div>
+        <div :class="statusKind || (status.closed ? 'ok' : 'warn')" class="fn-tile"><div class="t">وضعیت {{ jalaliTitle(status.year, status.month) }}</div><div class="v">{{ status.status ? statusTitles[status.status] || status.status : status.closed ? "بسته‌شده" : "باز" }}</div></div>
+        <div class="fn-tile"><div class="t">آخرین آماده‌سازی</div><div class="v inv-ltr">{{ status.closedAtText || "-" }}</div><div class="inv-muted small">{{ status.preparedByName }}</div></div>
+        <div v-if="status.status === 'Confirmed'" class="fn-tile ok"><div class="t">تاییدکننده</div><div class="v">{{ status.confirmedByName || "-" }}</div><div class="inv-muted small inv-ltr">{{ status.confirmedAtText }}</div></div>
         <div class="fn-tile"><div class="t">برگه‌های کارکرد</div><div class="v">{{ status.sheets }}</div></div>
         <div :class="status.lockedByPayroll ? 'bad' : 'ok'" class="fn-tile"><div class="t">قفل حقوق</div><div class="v">{{ status.lockedByPayroll ? "حقوق تایید شده (قفل)" : "قفل نیست" }}</div></div>
       </div>
       <p v-if="status?.lockedByPayroll" class="small text-danger">حقوق این ماه تایید شده است؛ بستن دوباره ماه برگه‌ای را تغییر نمی‌دهد.</p>
+      <div v-if="status?.status === 'Rejected' && status.rejectReason" class="alert alert-danger small py-2">دلیل رد: {{ status.rejectReason }}</div>
+      <div v-if="status?.snapshotNote" class="alert alert-secondary small py-2">{{ status.snapshotNote }}</div>
+      <div v-else-if="status?.snapshotMatches === false" class="alert alert-danger small py-2">ارقام برگه‌های کارکرد با آنچه هنگام آماده‌سازی ثبت شد یکی نیست؛ تایید ممکن نیست و ماه باید رد و دوباره آماده شود.</div>
+      <div v-if="status?.snapshotHash" class="inv-muted small mb-2">مهر snapshot: <span class="inv-ltr">{{ status.snapshotHash }}</span><span v-if="status.snapshotMatches === true" class="inv-badge ok ms-2">با برگه‌ها یکی است</span></div>
+      <div v-if="status?.policy" class="inv-muted small mb-2">سیاست هنگام آماده‌سازی: مهلت {{ status.policy.graceMinutes }} دقیقه، تایید پیشینی اضافه‌کار {{ status.policy.overtimeRequiresApproval ? "روشن" : "خاموش" }}، کسر خروج زودهنگام {{ status.policy.earlyLeaveDeduction ? "روشن" : "خاموش" }}، تایید ماه توسط همکار منابع انسانی {{ status.policy.monthConfirmByHrPeer ? "مجاز" : "غیرمجاز" }}.</div>
+      <div v-if="status?.pendingRequests?.length" class="alert alert-warning small py-2">
+        <div class="fw-bold">{{ status.pendingRequests.length }} درخواست این ماه هنوز تصمیم‌گیری نشده است و تا تعیین تکلیف، تایید ماه ممکن نیست:</div>
+        <ul class="mb-0"><li v-for="r in status.pendingRequests" :key="r.kind + r.id">{{ r.text }}</li></ul>
+      </div>
+      <div v-if="status?.noWorkshop?.length" class="alert alert-warning small py-2">کارگاه بیمه ندارند (محاسبه حقوق آن‌ها تا تعیین کارگاه ممکن نیست): {{ status.noWorkshop.map((e: any) => e.employeeName + " (" + e.personnelCode + ")").join("، ") }}</div>
+
+      <div v-if="status?.canConfirm || (isFinanceManager && status?.status === 'Confirmed') || (canClose && status?.status === 'Prepared')" class="border rounded p-3 mb-3">
+        <div class="fw-bold small mb-2">مرحله دوم: تایید ماه</div>
+        <p class="inv-muted small mb-2">آماده‌کننده‌ی ماه نمی‌تواند همان ماه را تایید کند. تایید با مدیر مالی است (یا کاربر دیگری از منابع انسانی، اگر مدیرعامل در سیاست اجازه داده باشد). رد کردن ماه را برای آماده‌سازی دوباره به منابع انسانی برمی‌گرداند.</p>
+        <button v-if="status.canConfirm" :disabled="busy || status.snapshotMatches === false" class="btn btn-sm btn-success me-2" @click="confirmMonth">تایید ماه</button>
+        <button :disabled="busy" class="btn btn-sm btn-outline-danger" @click="rejecting = { reason: '' }">{{ status.status === "Confirmed" ? "بازگشایی ماه (رد)" : "رد ماه" }}</button>
+      </div>
 
       <div v-if="canClose" class="border rounded p-3 mb-3">
         <label class="small d-block mb-2"><input v-model="accept" type="checkbox" class="form-check-input me-1" />روزهای ناقص به عنوان غیبت پذیرفته شود</label>
         <p class="inv-muted small mb-2">روز ناقص روزی است که فقط یک تردد دارد. بدون این گزینه، تا اصلاح ترددها (ثبت دستی یا درخواست فراموشی تردد) بستن ماه انجام نمی‌شود.</p>
-        <button :disabled="busy" class="btn btn-sm btn-primary" @click="confirming = true">بستن ماه</button>
+        <button :disabled="busy || status?.status === 'Confirmed'" class="btn btn-sm btn-primary" @click="confirming = true">آماده‌سازی ماه (مرحله اول)</button>
       </div>
-      <p v-else class="inv-muted small">بستن ماه فقط توسط واحد اداری و منابع انسانی انجام می‌شود.</p>
+      <p v-else class="inv-muted small">آماده‌سازی ماه فقط توسط منابع انسانی انجام می‌شود و تایید آن با مدیر مالی است.</p>
 
       <template v-if="!result && sheet">
         <div class="d-flex align-items-center gap-2 mb-2">
@@ -106,6 +149,7 @@ onMounted(load);
           <div :class="result.skippedLocked ? 'bad' : ''" class="fn-tile"><div class="t">ردشده به علت قفل حقوق</div><div class="v">{{ result.skippedLocked }}</div></div>
         </div>
         <ul v-if="result.warnings?.length" class="small text-danger"><li v-for="(w, i) in result.warnings" :key="i">{{ w }}</li></ul>
+        <div v-if="result.gapDays?.length" class="small mb-2"><div class="fw-bold">روزهای بدون شیفت میان تخصیص‌ها (غایب حساب شد)</div><ul><li v-for="g in result.gapDays" :key="g.employeeId">{{ g.employeeName }} ({{ g.personnelCode }}): {{ g.count }} روز، {{ g.dateTexts.join("، ") }}</li></ul></div>
         <div class="table-responsive">
           <table class="table table-sm table-hover">
             <thead><tr><th>کد پرسنلی</th><th>کارمند</th><th v-for="c in cols" :key="c[0]">{{ c[1] }}</th></tr></thead>
@@ -118,18 +162,28 @@ onMounted(load);
       </template>
     </div>
 
+    <div v-if="rejecting" class="inv-modal-backdrop screen-only" @click.self="rejecting = null">
+      <div class="inv-modal">
+        <h2 class="inv-title mb-2">{{ status?.status === "Confirmed" ? "بازگشایی" : "رد" }} {{ jalaliTitle(yearNumber, month) }}</h2>
+        <label class="form-label small mb-0">دلیل *</label>
+        <textarea v-model="rejecting.reason" class="form-control form-control-sm" rows="3"></textarea>
+        <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="rejecting = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-danger" @click="rejectMonth">ثبت</button></div>
+      </div>
+    </div>
+
     <div v-if="confirming" class="inv-modal-backdrop screen-only" @click.self="confirming = false">
       <div class="inv-modal">
-        <h2 class="inv-title mb-2">بستن {{ jalaliTitle(yearNumber, month) }}</h2>
+        <h2 class="inv-title mb-2">آماده‌سازی {{ jalaliTitle(yearNumber, month) }}</h2>
         <ul class="small">
           <li>نتیجه روزانه همه کارکنان این ماه دوباره محاسبه می‌شود.</li>
           <li>برگه کارکرد ماهانه هر کارمند (کارکرد، اضافه‌کار، شب‌کاری، تعطیل‌کاری، مرخصی، غیبت و ماموریت) نوشته یا جایگزین می‌شود و ورودی محاسبه حقوق همین ماه است.</li>
           <li v-if="accept" class="text-danger">هر روز ناقص (تک‌تردد) به عنوان یک روز غیبت حساب می‌شود و از حقوق کسر می‌شود.</li>
           <li v-else>اگر روز ناقصی باشد ماه بسته نمی‌شود و ابتدا باید ترددها اصلاح شود.</li>
           <li>برای کارکنانی که حقوق ماه آن‌ها تایید شده، برگه تغییر نمی‌کند.</li>
+          <li>این مرحله‌ی اول است: برگه‌ها نوشته و قفل می‌شوند و ارقام ثابت (snapshot) می‌شوند؛ حقوق فقط پس از تایید مرحله‌ی دوم می‌تواند از ماه استفاده کند.</li>
           <li>بستن ماه جاری یا ماهی که تمام نشده ممکن نیست. بستن دوباره، برگه‌های قبلی را به‌روز می‌کند.</li>
         </ul>
-        <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-outline-secondary" @click="confirming = false">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="close">تایید و بستن ماه</button></div>
+        <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-outline-secondary" @click="confirming = false">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="close">تایید و آماده‌سازی ماه</button></div>
       </div>
     </div>
   </div>

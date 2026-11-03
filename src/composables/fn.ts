@@ -17,13 +17,16 @@ export const voucherStatuses: Record<number, string> = { 0: "پیش‌نویس",
 export const taxKinds: Record<number, string> = { 1: "ارزش افزوده", 2: "مالیات علی‌الحساب پیمان", 3: "کسر بیمه پیمان", 4: "سپرده حسن انجام کار", 9: "سایر" };
 export const docStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "تاییدشده", 2: "ثبت‌شده", 3: "باطل" };
 export const instruments: Record<number, string> = { 1: "نقد", 2: "حواله بانکی", 3: "چک", 4: "کارت", 5: "تهاتر" };
-export const paymentPurposes: Record<number, string> = { 1: "پرداخت به تامین‌کننده", 2: "شارژ تنخواه", 3: "پرداخت حقوق", 4: "پرداخت وام یا مساعده کارمند", 5: "پرداخت عیدی", 6: "پرداخت تسویه پایان خدمت" };
+export const paymentPurposes: Record<number, string> = { 1: "پرداخت به تامین‌کننده", 2: "شارژ تنخواه", 3: "پرداخت حقوق", 4: "پرداخت وام یا مساعده کارمند", 5: "پرداخت عیدی", 6: "پرداخت تسویه پایان خدمت", 7: "ساق نقدی تسهیلات، اعتبار اسنادی یا ضمانت‌نامه" };
 export const receivedChequeStatuses: Record<number, string> = { 1: "در صندوق", 2: "واگذار به بانک", 3: "وصول‌شده", 4: "برگشت‌خورده", 5: "عودت به صادرکننده", 6: "خرج‌شده" };
 export const issuedChequeStatuses: Record<number, string> = { 0: "برگ سفید", 1: "صادرشده", 2: "پاس‌شده", 3: "ابطال‌شده", 4: "خراب" };
 export const guaranteeStatuses: Record<number, string> = { 1: "نزد ما", 2: "مسترد", 3: "وصول‌شده" };
 export const guaranteeKinds: Record<number, string> = { 1: "چک", 2: "سفته" };
 export const guaranteeDirections: Record<number, string> = { 1: "دریافتی", 2: "صادره" };
 export const statementMatches: Record<number, string> = { 0: "تطبیق‌نخورده", 1: "چک", 2: "پرداخت", 3: "دریافت", 4: "سند", 5: "دستی" };
+/** Source of a cash leg made from a loan, a letter of credit or a bank guarantee (R1t D7): the document is made and cancelled from that record. */
+export const legSourceTypes: Record<string, string> = { Loan: "وام تسهیلاتی", LetterOfCredit: "اعتبار اسنادی", BankGuarantee: "ضمانت‌نامه بانکی" };
+export const legActions: Record<string, string> = { disburse: "دریافت وام", installment: "قسط", margin: "سپرده/وجه‌التزام", fee: "کارمزد", pay: "پرداخت", refund: "استرداد", "guarantee-fee": "کارمزد ضمانت‌نامه", "extend-fee": "کارمزد تمدید" };
 export const reconciliationStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "تاییدشده" };
 export const invoiceTypes: Record<number, string> = { 1: "پیش‌دریافت", 2: "صورت‌وضعیت", 3: "صورت‌حساب نهایی", 4: "فروش کالا", 5: "ارائه خدمات", 6: "اعلامیه بستانکار", 7: "آزادسازی حسن انجام کار" };
 /** Typed deductions of a supplier payment request (FnDeductionKind). */

@@ -42,11 +42,21 @@ export const invoiceAction = (id: number, action: string, note?: string) => call
 export const getPaymentRequests = (params: any) => call("get", base + "payments", undefined, clean(params));
 export const savePaymentRequest = (dto: any) => call("post", base + "payments", dto);
 /** action: approve, paid (reference = payment reference), reject (note). */
-export const paymentAction = (id: number, action: string, note?: string, reference?: string, bankAccountId?: number | null) =>
-  call("post", base + "payments/action", { id, action, note: note || null, reference: reference || null, bankAccountId: bankAccountId || null });
+export const paymentAction = (id: number, action: string, note?: string, reference?: string, bankAccountId?: number | null, deductionLines?: any[] | null) =>
+  call("post", base + "payments/action", { id, action, note: note || null, reference: reference || null, bankAccountId: bankAccountId || null, deductionLines: deductionLines ?? null });
+// R1c (M13): action "confirm-deductions" (finance) confirms the late-penalty / retention lines the system proposed from the order terms (null lines = as proposed); approve is refused before that.
 
 // approved vendor list
 export const getSuppliers = (contains?: string) => call("get", base + "suppliers", undefined, clean({ contains }));
 export const saveSupplierProfile = (dto: any) => call("post", base + "suppliers", dto);
 export const getSupplierEvaluations = (providerId: number) => call("get", base + `suppliers/${providerId}/evaluations`);
 export const evaluateSupplier = (dto: any) => call("post", base + "suppliers/evaluate", dto);
+
+// ---------------------------------------------------------------- R1c: technical review, order revisions, evaluation preview
+/** TechnicalReviewDto { inquiryId, quoteId, accepted, score?, note? }: engineering or quality judges a quote against the technical requirements; the buyer cannot. */
+export const technicalReview = (dto: { inquiryId: number; quoteId: number; accepted: boolean; score?: number | null; note?: string | null }) =>
+  call("post", base + "inquiries/technical-review", { score: null, note: null, ...dto });
+/** The frozen earlier revisions of an order: PurchaseOrderRevisionDto[] { revision, reason, statusWhenFrozen, totalAmount, frozenAt, frozenByName, approvedByName, hash }. */
+export const getOrderRevisions = (id: number) => call("get", base + "orders/" + id + "/revisions");
+/** The scored evaluation the system would record now for a supplier (before evaluateSupplier). */
+export const getEvaluationPreview = (providerId: number) => call("get", base + `suppliers/${providerId}/evaluation-preview`);

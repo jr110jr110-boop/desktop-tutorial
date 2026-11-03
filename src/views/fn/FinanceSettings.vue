@@ -18,7 +18,16 @@ async function loadSettings() {
   if (error) return fail(error);
   settings.value = d || [];
 }
-const isFlag = (s: any) => s.value === "0" || s.value === "1";
+const isFlag = (s: any) => (s.value === "0" || s.value === "1") && s.key !== "ParallelRun.RequiredMonths";
+/** the typed value of a setting that is not an on / off switch (CloseBy: CEO or FINANCEMANAGER; go-live month 1405/08; days; months) */
+const typed = ref<Record<string, string>>({});
+const valueOf = (s: any) => (typed.value[s.key] !== undefined ? typed.value[s.key] : s.value ?? "");
+const keyHint: Record<string, string> = {
+  "PeriodClose.CloseBy": "چه نقشی مرحله‌ی دوم (بستن قطعی) دوره‌ی قفل‌شده را انجام می‌دهد؛ هرگز همان کسی که دوره را قفل کرده است.",
+  "CloseChecklist.Enforce": "۱ = قفل دوره فقط با فهرست کنترل سبز یا عبور تاییدشده‌ی دو مدیر مالی ممکن است.",
+  "Payroll:GoLiveMonth": "ماه شمسی شروع حقوق و مرخصی (مثلاً ۱۴۰۵/۰۸)؛ خالی = ماه نخستین بستن تاییدشده‌ی حضور و غیاب.",
+  "ParallelRun.RequiredMonths": "تعداد ماه اجرای موازی (۱ تا ۱۲).",
+};
 async function saveSetting(s: any, value: string) {
   busy.value = true;
   const [, error] = await saveFinanceSetting(s.key, value);
@@ -87,14 +96,15 @@ onMounted(() => {
           <tbody>
             <tr v-if="!settings.length"><td colspan="3" class="text-center inv-muted">تنظیمی نیست.</td></tr>
             <tr v-for="s in settings" :key="s.key">
-              <td>{{ s.title }} <span class="inv-muted inv-ltr">{{ s.key }}</span></td>
-              <td><span :class="isFlag(s) ? (s.value === '1' ? 'ok' : '') : ''" class="inv-badge">{{ isFlag(s) ? yesNo(s.value === "1") : s.value }}</span></td>
+              <td>{{ s.title }} <span class="inv-muted inv-ltr">{{ s.key }}</span><div v-if="keyHint[s.key]" class="inv-muted small">{{ keyHint[s.key] }}</div></td>
+              <td><span :class="isFlag(s) ? (s.value === '1' ? 'ok' : '') : ''" class="inv-badge">{{ isFlag(s) ? yesNo(s.value === "1") : s.key === "PeriodClose.CloseBy" ? (s.value === "CEO" ? "مدیرعامل" : "مدیر مالی") : s.value || "-" }}</span></td>
               <td v-if="canWrite" class="text-nowrap">
                 <button v-if="isFlag(s)" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="saveSetting(s, s.value === '1' ? '0' : '1')">{{ s.value === "1" ? "غیرفعال کن" : "فعال کن" }}</button>
-                <template v-else>
-                  <button class="btn btn-sm btn-outline-secondary me-1" :disabled="busy || Number(s.value) <= 1" @click="saveSetting(s, String(Number(s.value) - 1))">-</button>
-                  <button class="btn btn-sm btn-outline-secondary" :disabled="busy || Number(s.value) >= 12" @click="saveSetting(s, String(Number(s.value) + 1))">+</button>
-                </template>
+                <div v-else class="d-flex gap-1">
+                  <select v-if="s.key === 'PeriodClose.CloseBy'" :value="valueOf(s)" class="form-select form-select-sm" style="width: 11rem" @change="typed[s.key] = ($event.target as HTMLSelectElement).value"><option value="CEO">مدیرعامل</option><option value="FINANCEMANAGER">مدیر مالی</option></select>
+                  <input v-else :value="valueOf(s)" class="form-control form-control-sm inv-ltr" style="width: 9rem" @input="typed[s.key] = ($event.target as HTMLInputElement).value" />
+                  <button :disabled="busy || typed[s.key] === undefined || typed[s.key] === s.value" class="btn btn-sm btn-outline-primary" @click="saveSetting(s, typed[s.key]); delete typed[s.key]">ذخیره</button>
+                </div>
               </td>
             </tr>
           </tbody>

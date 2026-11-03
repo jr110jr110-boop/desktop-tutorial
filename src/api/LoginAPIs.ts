@@ -56,15 +56,17 @@ export async function changeTemporaryPassword(info: {
 }
 
 /**
- * GET Accounts/logout/{refreshToken}: the server forgets the refresh token, so a copy of it cannot be used after the user signed out.
- * Best effort: the caller does not wait for it and a failure changes nothing (the browser session is already gone).
+ * POST Accounts/logout with { refreshToken } (the token is no longer put in the address): the server forgets the refresh token,
+ * so a copy of it cannot be used after the user signed out. Best effort: the caller does not wait for it and a failure changes nothing.
  */
 export async function logoutUser(token: string | null, accessToken?: string | null): Promise<void> {
   if (!token) return;
   try {
-    await axiosInstance.get("Accounts/logout/" + encodeURIComponent(token), {
-      headers: accessToken ? { Authorization: "Bearer " + accessToken } : {},
-    });
+    await axiosInstance.post(
+      "Accounts/logout",
+      { refreshToken: token },
+      { headers: accessToken ? { Authorization: "Bearer " + accessToken } : {} }
+    );
   } catch {
     /* the session is over in this browser either way */
   }

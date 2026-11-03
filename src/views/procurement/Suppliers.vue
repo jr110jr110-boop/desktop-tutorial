@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
 import PrintForm from "@/components/print/PrintForm.vue";
-import { evaluateSupplier, getSupplierEvaluations, getSuppliers, saveSupplierProfile } from "@/api/ProcurementAPIs";
+import { evaluateSupplier, getEvaluationPreview, getSupplierEvaluations, getSuppliers, saveSupplierProfile } from "@/api/ProcurementAPIs";
 import { fail, jalali, ok, printPage, today } from "@/composables/inventory";
 import { evaluationKinds, evaluationQuestions, evaluationScore, gradeOfScore, isUnapproved, supplierGrades } from "@/composables/procurement";
 import { hasRole, ProcurementRoles } from "@/composables/roles";
@@ -12,7 +12,7 @@ const contains = ref("");
 const show = ref<"all" | "approved" | "unapproved">("all");
 const profile = ref<any>(null);
 const evalForm = ref<any>(null);
-const history = ref<{ supplier: any; items: any[] } | null>(null);
+const history = ref<{ supplier: any; items: any[]; preview?: any } | null>(null);
 const printKind = ref<"" | "eval" | "approved" | "unapproved">("");
 const printEval = ref<any>(null);
 const busy = ref(false);
@@ -73,7 +73,8 @@ async function saveEvaluation() {
 async function openHistory(s: any) {
   const [data, error] = await getSupplierEvaluations(s.providerId);
   if (error) return fail(error);
-  history.value = { supplier: s, items: Array.isArray(data) ? data : data?.data || [] };
+  const [preview] = await getEvaluationPreview(s.providerId);
+  history.value = { supplier: s, items: Array.isArray(data) ? data : data?.data || [], preview: preview || null };
 }
 
 function printSheet(e: any) {
@@ -254,12 +255,18 @@ onMounted(load);
     <div v-if="history" class="inv-modal-backdrop screen-only" @click.self="history = null">
       <div class="inv-modal inv-modal-lg">
         <h2 class="inv-title mb-2">سوابق ارزیابی {{ history.supplier.providerName }}</h2>
+        <div v-if="history.preview" class="alert alert-light border small">
+          <b>پیش‌نمایش ارزیابی سیستمی (اگر همین حالا ثبت شود):</b>
+          <span v-if="!history.preview.hasData"> داده‌ی عملکرد کافی نیست.</span>
+          <template v-else> امتیاز {{ history.preview.score }}، درجه {{ supplierGrades[history.preview.grade] }}
+            <ul class="mb-0 mt-1"><li v-for="(c, i) in history.preview.criteria || []" :key="i">{{ c.question }} (وزن {{ c.weight }}): {{ c.score ?? "-" }} <span class="inv-muted">{{ c.basis }}</span></li></ul></template>
+        </div>
         <table class="table table-sm">
           <thead><tr><th>تاریخ</th><th>نوع</th><th>امتیاز</th><th>درجه</th><th>ارزیاب</th><th></th></tr></thead>
           <tbody>
             <tr v-if="!history.items.length"><td colspan="6" class="text-center inv-muted">ارزیابی ثبت نشده است.</td></tr>
             <tr v-for="e in history.items" :key="e.id">
-              <td>{{ jalali(e.evaluationDate) }}</td><td>{{ evaluationKinds[e.kind] }}</td><td class="num">{{ e.score }}</td>
+              <td>{{ jalali(e.evaluationDate) }}</td><td>{{ evaluationKinds[e.kind] }}</td><td class="num">{{ e.score }}<span v-if="e.scored" class="inv-badge info ms-1" title="امتیاز را سیستم از عملکرد ثبت‌شده محاسبه کرده است">سیستمی</span></td>
               <td>{{ supplierGrades[e.grade] }}</td><td>{{ e.evaluatorName }}</td>
               <td><button class="btn btn-sm btn-outline-secondary" @click="printSheet(e)">چاپ FO-PO-007</button></td>
             </tr>

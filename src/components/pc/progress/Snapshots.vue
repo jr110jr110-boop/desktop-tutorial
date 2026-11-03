@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { getSnapshot, getSnapshots, takeSnapshot } from "@/api/ProjectControlAPIs";
+import ApprovalTable from "@/components/common/ApprovalTable.vue";
+import { decidePastSnapshot, getPastSnapshotRequests, getSnapshot, getSnapshots, requestPastSnapshot, takeSnapshot } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import LineChart from "@/components/pc/LineChart.vue";
 import JDate from "@/components/pc/JDate.vue";
@@ -15,6 +16,30 @@ const detail = ref<any>(null);
 const dataDate = ref<string | null>(null);
 const busy = ref(false);
 const canTake = hasRole(ProjectControlRoles.planning);
+// H4: a snapshot for a data date in the past is requested by planning (reason) and approved by the PMO deputy; the approval is used once
+const canDecide = hasRole(["PMO"]);
+const reqDate = ref<string | null>(null);
+const reqReason = ref("");
+const reqTable = ref<any>(null);
+const reqStates: Record<number, string> = { 0: "منتظر تأیید", 1: "تأییدشده", 2: "ردشده", 3: "استفاده‌شده" };
+const reqFilters = computed(() => ({ ContractId: props.contractId }));
+const reqColumns = [
+  { key: "dataDate", title: "تاریخ داده", text: (r: any) => jalali(r.dataDate) },
+  { key: "reason", title: "دلیل" },
+  { key: "requestedByName", title: "درخواست‌کننده" },
+  { key: "state", title: "وضعیت", text: (r: any) => reqStates[r.state] || "", badge: (r: any) => (r.state === 1 ? "ok" : r.state === 2 ? "bad" : r.state === 0 ? "warn" : "info") },
+  { key: "decisionNote", title: "یادداشت تصمیم" },
+];
+const reqActions = (r: any) => (r.state === 0 && canDecide ? [{ key: "approve", label: "تأیید", btn: "btn-success", reason: "optional" as const }, { key: "reject", label: "رد", btn: "btn-outline-danger", reason: true as const }] : []);
+const reqRun = (r: any, action: string, note: string | null) => decidePastSnapshot(r.id, action === "approve", note);
+async function requestPast() {
+  if (!reqDate.value || !reqReason.value.trim()) return fail("تاریخ داده و دلیل را بنویسید.");
+  const [, error] = await requestPastSnapshot({ contractId: props.contractId, dataDate: reqDate.value, reason: reqReason.value.trim() });
+  if (error) return fail(error);
+  ok("درخواست ثبت شد و منتظر تأیید معاون PMO است.");
+  reqReason.value = "";
+  reqTable.value?.reload();
+}
 
 async function load() {
   const [d, e] = await getSnapshots({ ContractId: props.contractId });
@@ -51,6 +76,16 @@ watch(() => props.contractId, load);
     <div v-if="canTake" class="d-flex gap-2 align-items-end my-3 d-print-none">
       <div style="width: 170px"><label class="form-label small mb-0">تاریخ داده (اختیاری)</label><JDate v-model="dataDate" /></div>
       <button :disabled="busy" class="btn btn-sm btn-primary" @click="take">ثبت تصویر لحظه‌ای</button>
+    </div>
+    <div class="inv-card mb-3 d-print-none">
+      <h3 class="h6">تصویر برای تاریخ گذشته</h3>
+      <p class="inv-muted small">تصویر با تاریخ داده‌ی گذشته فقط پس از تأیید معاون PMO گرفته می‌شود؛ پس از تأیید، تاریخ را در بالا وارد و تصویر را ثبت کنید (هر تأیید یک بار).</p>
+      <div v-if="canTake" class="d-flex gap-2 align-items-end flex-wrap mb-2">
+        <div style="width: 170px"><label class="form-label small mb-0">تاریخ داده</label><JDate v-model="reqDate" /></div>
+        <div style="min-width: 18rem; flex: 1"><label class="form-label small mb-0">دلیل</label><input v-model="reqReason" class="form-control form-control-sm" /></div>
+        <button class="btn btn-sm btn-outline-primary" @click="requestPast">ثبت درخواست</button>
+      </div>
+      <ApprovalTable ref="reqTable" :fetcher="getPastSnapshotRequests" :filters="reqFilters" :columns="reqColumns" :actions="reqActions" :run="reqRun" empty-text="درخواستی نیست." @changed="load" />
     </div>
     <table class="table table-sm table-hover">
       <thead><tr><th>تاریخ داده</th><th>واقعی</th><th>برنامه</th><th>BAC</th><th>PV</th><th>EV</th><th>AC</th><th>SPI</th><th>CPI</th><th>پایان پیش‌بینی</th></tr></thead>

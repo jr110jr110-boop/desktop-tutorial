@@ -3,10 +3,11 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import AuditPrint from "@/components/fn/print/AuditPrint.vue";
 import QPager from "@/components/quality/QPager.vue";
-import { getAuditTrail } from "@/api/FnAPIs";
+import { getAuditTrail, verifyAuditChain } from "@/api/FnAPIs";
 import { fail, jalali } from "@/composables/inventory";
 import { printSheet, usePagedList } from "@/composables/fn";
 import { jalaliInText } from "@/composables/fnF3";
+import { hasRole } from "@/composables/roles";
 
 // Audit trail (ردپای حسابرسی): the append-only log of the finance module. Read only for the auditor, the finance manager and the CEO.
 const filters = ref<any>({ EntityType: "", EntityId: "", UserId: "", Action: "", From: null as string | null, To: null as string | null });
@@ -33,6 +34,20 @@ function pretty(text: string | null | undefined): string {
   }
 }
 
+// R1t D20: the check of the hash chain (AUDITOR and the finance manager)
+const chain = ref<any>({ from: "", to: "", anchorSeq: "", anchorHash: "" });
+const chainResult = ref<any>(null);
+const chainBusy = ref(false);
+const canVerify = hasRole(["AUDITOR", "FINANCEMANAGER"]);
+async function verifyChain() {
+  chainBusy.value = true;
+  const c = chain.value;
+  const [d, error] = await verifyAuditChain({ from: c.from || null, to: c.to || null, anchorSeq: c.anchorSeq || null, anchorHash: String(c.anchorHash || "").trim() || null });
+  chainBusy.value = false;
+  if (error) return fail(error);
+  chainResult.value = d;
+}
+
 async function print() {
   const [data, error] = await getAuditTrail({ ...filters.value, PageNumber: 1, PageSize: 500 });
   if (error) return fail(error);
@@ -55,6 +70,23 @@ onMounted(() => list.load());
         <button class="btn btn-sm btn-outline-secondary" @click="print">چاپ گزارش حسابرسی</button>
       </div>
       <p class="inv-muted">فهرست غیرقابل ویرایش رویدادهای سامانه مالی: چه کسی، چه زمانی و چه چیزی را تغییر داده است. حداکثر ۵۰۰ رکورد در چاپ می‌آید.</p>
+      <details v-if="canVerify" class="border rounded p-2 mb-3">
+        <summary class="fw-bold small">بررسی درستی زنجیره‌ی مهر ردپا (hash chain)</summary>
+        <p class="inv-muted small mt-2">هر ردیف ردپا با مهر ردیف پیشین پیوند دارد؛ تغییر، حذف یا اضافه‌کردن ردیف را می‌توان پیدا کرد. «سر زنجیره» (شماره و مهر) را یادداشت یا چاپ کنید و بعدها به‌عنوان لنگر بدهید تا ثابت شود چیزی از ابتدا تا آن ردیف بریده یا بازنویسی نشده است. هر بررسی حداکثر ۵۰٬۰۰۰ ردیف را می‌پیماید.</p>
+        <div class="inv-filters mb-2">
+          <input v-model="chain.from" class="form-control form-control-sm fn-num" placeholder="از جایگاه" style="max-width: 9rem" />
+          <input v-model="chain.to" class="form-control form-control-sm fn-num" placeholder="تا جایگاه" style="max-width: 9rem" />
+          <input v-model="chain.anchorSeq" class="form-control form-control-sm fn-num" placeholder="شماره‌ی لنگر" style="max-width: 9rem" />
+          <input v-model="chain.anchorHash" class="form-control form-control-sm inv-ltr" placeholder="مهر لنگر" style="min-width: 16rem" />
+          <button :disabled="chainBusy" class="btn btn-sm btn-secondary" @click="verifyChain">بررسی زنجیره</button>
+        </div>
+        <div v-if="chainResult">
+          <p><span :class="chainResult.ok ? 'ok' : 'bad'" class="inv-badge">{{ chainResult.ok ? "زنجیره سالم است" : "زنجیره شکسته است" }}</span> {{ chainResult.message }}</p>
+          <p class="small">ردیف بررسی‌شده: {{ chainResult.checked }} — مهرخورده: {{ chainResult.sealedRows }} — ردیف‌های قدیمی بدون مهر: {{ chainResult.legacyRows }} <span v-if="!chainResult.keyConfigured" class="inv-badge warn">کلید مهر تنظیم نشده؛ مهر ساده SHA-256 است</span></p>
+          <p v-if="chainResult.headSeq" class="small">سر زنجیره: جایگاه <b class="fn-num">{{ chainResult.headSeq }}</b> — <span class="inv-ltr">{{ chainResult.headHash }}</span></p>
+          <p v-if="chainResult.firstBreak" class="alert alert-danger py-2 small">نخستین شکست: {{ chainResult.firstBreak.message }} ({{ chainResult.firstBreak.kind }}، جایگاه {{ chainResult.firstBreak.seq ?? "-" }}، ردیف {{ chainResult.firstBreak.id }}، {{ chainResult.firstBreak.entityType }} {{ chainResult.firstBreak.action }})</p>
+        </div>
+      </details>
       <div class="inv-filters mb-3">
         <input v-model="filters.EntityType" class="form-control form-control-sm" placeholder="نوع رکورد (مثلا Voucher)" @keydown.enter="list.search" />
         <input v-model="filters.EntityId" class="form-control form-control-sm" placeholder="شناسه رکورد" type="number" @keydown.enter="list.search" />

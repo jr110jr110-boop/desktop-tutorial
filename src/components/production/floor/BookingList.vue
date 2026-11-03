@@ -4,10 +4,12 @@ import QPager from "@/components/quality/QPager.vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import LookupBox from "@/components/fn/LookupBox.vue";
 import BookingEditor from "./BookingEditor.vue";
-import { getBookings } from "@/api/ProductionAPIs";
+import { approveCorrection, getBookings } from "@/api/ProductionAPIs";
 import { usePagedList } from "@/composables/fn";
 import { bookingKinds, bookingSources, minutesHoursText, persianOf, qtyText } from "@/composables/production";
 import { hasRole, ProductionRoles } from "@/composables/roles";
+import { fail, ok } from "@/composables/inventory";
+import ReasonDialog from "@/components/production/orders/ReasonDialog.vue";
 import { employeeLabel, loadWorkCenters, orderLabel, rowsOf, searchEmployees, searchOrders } from "./floorCommon";
 
 // Bookings list. Readers see everybody; an operator gets only his own rows from the server, so the employee filter is hidden for him.
@@ -25,7 +27,19 @@ const workCenters = ref<any[]>([]);
 
 const filters = computed(() => ({ EmployeeId: employee.value?.id ?? null, OrderId: order.value?.id ?? null, WorkCenterId: wcId.value, From: from.value, To: to.value, RunningOnly: runningOnly.value || null }));
 const list = usePagedList(getBookings, filters, 50);
-const editor = ref<null | { mode: "create" | "edit"; row?: any }>(null);
+const editor = ref<null | { mode: "create" | "edit" | "correct"; row?: any }>(null);
+const isManager = hasRole(ProductionRoles.managers);
+const rejecting = ref<any>(null);
+const busy = ref(false);
+async function decide(row: any, approve: boolean, reason?: string) {
+  busy.value = true;
+  const [, error] = await approveCorrection({ id: row.id, approve, reason: reason || null, rowVersion: row.rowVersion ?? null });
+  busy.value = false;
+  rejecting.value = null;
+  if (error) fail(error);
+  else ok(approve ? "ثبت اصلاحی تأیید شد." : "ثبت اصلاحی رد شد.");
+  list.load();
+}
 
 function saved() {
   editor.value = null;
@@ -49,6 +63,7 @@ onMounted(async () => {
       <label class="small"><input v-model="runningOnly" type="checkbox" /> فقط در حال اجرا</label>
       <button class="btn btn-sm btn-secondary" @click="list.search">جستجو</button>
       <button v-if="canWrite" class="btn btn-sm btn-primary" @click="editor = { mode: 'create' }">ثبت زمان برای دیگری</button>
+      <button v-if="canWrite" class="btn btn-sm btn-outline-primary" title="سفارش تکمیل‌شده: ثبت‌های قبلی قفل است" @click="editor = { mode: 'correct' }">ثبت اصلاحی (سفارش بسته)</button>
     </div>
     <div class="table-responsive">
       <table class="table table-sm table-hover">
@@ -69,9 +84,13 @@ onMounted(async () => {
             <td class="fn-num">{{ qtyText(r.scrapQty) }}</td>
             <td class="fn-num">{{ qtyText(r.reworkQty) }}</td>
             <td><span :title="r.supervisorReason || r.editReason">{{ bookingSources[r.source] }}</span></td>
-            <td><span v-if="r.running" class="inv-badge info">در حال اجرا</span><span v-else-if="r.dayClosed" class="inv-badge warn" title="روز بسته شده؛ تغییر فقط توسط سرپرست کارگاه">روز بسته</span><span v-if="r.costPosted" class="inv-badge ok ms-1" title="هزینه این ثبت در حسابداری ثبت شده و اصلاح نمی‌شود">هزینه ثبت شده</span></td>
+            <td><span v-if="r.running" class="inv-badge info">در حال اجرا</span><span v-else-if="r.dayClosed" class="inv-badge warn" title="روز بسته شده؛ تغییر فقط توسط سرپرست کارگاه">روز بسته</span><span v-if="r.isCorrection" class="inv-badge warn ms-1">اصلاحی</span><span v-if="r.correctionPending" class="inv-badge info ms-1" title="تا تأیید مدیر تولید دیگر، در هزینه و گزارش ساعت و OEE نمی‌آید">منتظر تأیید</span><span v-if="r.costPosted" class="inv-badge ok ms-1" title="هزینه این ثبت در حسابداری ثبت شده و اصلاح نمی‌شود">هزینه ثبت شده</span></td>
             <td v-if="canWrite" class="text-nowrap">
-              <button v-if="!r.running && !r.costPosted && (!r.dayClosed || isSupervisor)" class="btn btn-sm btn-outline-primary" @click="editor = { mode: 'edit', row: r }">{{ r.dayClosed ? "اصلاح روز بسته" : "ویرایش" }}</button>
+              <template v-if="r.correctionPending && isManager">
+                <button :disabled="busy" class="btn btn-sm btn-success me-1" @click="decide(r, true)">تأیید</button>
+                <button :disabled="busy" class="btn btn-sm btn-outline-danger me-1" @click="rejecting = r">رد</button>
+              </template>
+              <button v-if="!r.isCorrection && !r.running && !r.costPosted && (!r.dayClosed || isSupervisor)" class="btn btn-sm btn-outline-primary" @click="editor = { mode: 'edit', row: r }">{{ r.dayClosed ? "اصلاح روز بسته" : "ویرایش" }}</button>
             </td>
           </tr>
         </tbody>
@@ -79,6 +98,7 @@ onMounted(async () => {
     </div>
     <QPager :page="list.page.value" :total="list.total.value" :page-size="list.pageSize" @go="list.go" />
     <p class="inv-muted small mb-0">ثبت‌هایی که هزینه آن‌ها در حسابداری ثبت شده ویرایش نمی‌شوند؛ سامانه هنگام ویرایش پیام لازم را نشان می‌دهد.</p>
+    <ReasonDialog v-if="rejecting" :busy="busy" danger title="رد ثبت اصلاحی" label="دلیل رد" confirm-text="رد" @close="rejecting = null" @confirm="(t: string) => decide(rejecting, false, t)" />
     <BookingEditor v-if="editor" :mode="editor.mode" :row="editor.row" @close="editor = null" @saved="saved" />
   </div>
 </template>

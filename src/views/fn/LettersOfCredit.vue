@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CashLegList from "@/components/fn/CashLegList.vue";
 import { onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
@@ -109,6 +110,7 @@ onMounted(async () => {
 
     <div v-if="detail" class="inv-modal-backdrop screen-only" @click.self="detail = null">
       <div class="inv-modal wide">
+        <CashLegList :legs="detail.openCashLegs" />
         <h2 class="inv-title mb-2">اعتبار <span class="inv-ltr">{{ detail.number }}</span> <span :class="badge(detail.status)" class="inv-badge">{{ lcStatuses[detail.status] }}</span></h2>
         <div class="row g-2 mb-2">
           <div class="col-md-4"><b>شماره LC:</b> <span class="inv-ltr">{{ detail.lcNumber }}</span></div>

@@ -182,6 +182,14 @@ async function sendResetPassword() {
     showErrorNotification(failureText(data, error, "بازنشانی رمز عبور انجام نشد."));
     return;
   }
+  // the user is a PMO user or holds a sensitive role: nothing was reset, a second PMO user must approve the request first (the temporary password
+  // is made at the approval and shown to the approver, see the panel of pending requests in the user list)
+  if (data.data?.pending) {
+    closeResetDialog();
+    resetPassword.value.temporaryPassword = "";
+    showWarnNotification(data.message || "رمز هنوز بازنشانی نشده است؛ یک مدیر (PMO) دیگر باید درخواست را تأیید کند.");
+    return;
+  }
   // the API returns the password only when it made it; the one the admin typed is not sent back
   resetDialog.value.temporaryPassword = data.data?.temporaryPassword || "";
   resetDialog.value.step = "result";

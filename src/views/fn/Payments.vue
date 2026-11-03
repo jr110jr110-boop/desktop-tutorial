@@ -9,7 +9,7 @@ import {
   getBankAccounts, getCashBoxes, getIssuedCheques, getBonusRuns, getLoans, getPayableRequests, getPayment, getPayments, getPayrollRuns, getPettyCashes, getTerminations, paymentAction, savePayment,
 } from "@/api/FnAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
-import { badgeOfDoc, docStatuses, instruments, money, parseAmount, paymentPurposes, printSheet, usePagedList } from "@/composables/fn";
+import { badgeOfDoc, docStatuses, instruments, money, parseAmount, paymentPurposes, printSheet, usePagedList, legActions, legSourceTypes } from "@/composables/fn";
 import { FnRoles, hasRole } from "@/composables/roles";
 
 // Payments: from the approved supplier payment requests (grouped by supplier), petty cash top-ups and payroll.
@@ -303,11 +303,13 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+        <p v-if="detail.sourceType" class="alert alert-info py-2 small">این سند ساق نقدیِ یک «{{ legSourceTypes[detail.sourceType] || detail.sourceType }}» شماره‌ی {{ detail.sourceId }} است ({{ legActions[detail.sourceAction] || detail.sourceAction }}). سند از روی همان رکورد ساخته و باطل می‌شود و ویرایش دستی ندارد. ثبت‌کننده نمی‌تواند آن را تایید کند و ثبت‌کننده و تاییدکننده نمی‌توانند آن را ثبت نهایی کنند (کاربر خزانه‌دار دیگر).</p>
+        <p v-if="detail.approvedByName" class="inv-muted">تایید: {{ detail.approvedByName }}</p>
         <p v-if="detail.postedByName" class="inv-muted">ثبت نهایی: {{ detail.postedByName }} - {{ jalali(detail.postedAt, true) }}</p>
         <div class="d-flex gap-2 justify-content-end flex-wrap">
           <button class="btn btn-sm btn-outline-secondary" @click="detail = null">بستن</button>
           <button class="btn btn-sm btn-outline-secondary" @click="print">چاپ سند پرداخت</button>
-          <button v-if="canWrite && detail.status === 0" class="btn btn-sm btn-outline-primary" @click="edit">ویرایش</button>
+          <button v-if="canWrite && detail.status === 0 && !detail.sourceType" class="btn btn-sm btn-outline-primary" @click="edit">ویرایش</button>
           <button v-if="canApprove && detail.status === 0" :disabled="busy" class="btn btn-sm btn-success" @click="ask('approve')">تایید (مدیر مالی)</button>
           <button v-if="canWrite && detail.status === 1" :disabled="busy" class="btn btn-sm btn-success" @click="ask('post')">ثبت نهایی پرداخت</button>
           <button v-if="canWrite && (detail.status === 0 || detail.status === 1)" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="ask('cancel')">ابطال</button>

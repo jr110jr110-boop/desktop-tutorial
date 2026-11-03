@@ -25,6 +25,7 @@ const canPack = hasRole(ProjectControlRoles.shipmentPack);
 const canRelease = hasRole(ProjectControlRoles.planning);
 const canDeliver = hasRole(ProjectControlRoles.shipmentDeliver);
 const canHandover = hasRole(ProjectControlRoles.shipmentHandover);
+const canCheck = hasRole(["QC", "QA", "PMO"]);
 
 async function load() {
   if (!pcContractId.value) return;
@@ -52,19 +53,21 @@ async function save() {
 }
 const fieldsOf: Record<string, [string, string][]> = {
   pack: [["packingList", "فهرست بسته‌بندی"], ["packingVerification", "نتیجه بازبینی بسته‌بندی"]],
+  "check-packing": [["packingVerification", "نتیجه بازبینی بسته‌بندی"]],
+  commission: [],
   release: [],
   ship: [["waybill", "شماره بارنامه"], ["shippingDocuments", "اسناد حمل"]],
   deliver: [["deliveryReceiptNumber", "شماره رسید تحویل"]],
   handover: [["handoverMinutesNumber", "شماره صورتجلسه تحویل"]],
 };
-const titleOf: Record<string, string> = { pack: "بسته‌بندی", release: "مجوز ارسال (برنامه‌ریزی)", ship: "ارسال", deliver: "تحویل", handover: "صورتجلسه تحویل" };
+const titleOf: Record<string, string> = { "check-packing": "بازبینی بسته‌بندی (کنترل کیفیت)", commission: "تاریخ راه‌اندازی", pack: "بسته‌بندی", release: "مجوز ارسال (برنامه‌ریزی)", ship: "ارسال", deliver: "تحویل", handover: "صورتجلسه تحویل" };
 function ask(r: any, action: string) {
-  act.value = { r, action, date: today(), packingList: r.packingList || "", packingVerification: "", waybill: "", shippingDocuments: "", deliveryReceiptNumber: "", handoverMinutesNumber: "" };
+  act.value = { r, action, date: today(), packingList: r.packingList || "", packingVerification: "", waybill: "", shippingDocuments: "", deliveryReceiptNumber: "", handoverMinutesNumber: "", inventoryDocumentId: r.inventoryDocumentId ?? null };
 }
 async function doAct() {
   const a = act.value;
   busy.value = true;
-  const [, e] = await shipmentAction({ id: a.r.id, action: a.action, date: a.date, packingList: a.packingList, packingVerification: a.packingVerification, waybill: a.waybill, shippingDocuments: a.shippingDocuments, deliveryReceiptNumber: a.deliveryReceiptNumber, handoverMinutesNumber: a.handoverMinutesNumber });
+  const [, e] = await shipmentAction({ id: a.r.id, action: a.action, date: a.date, packingList: a.packingList, packingVerification: a.packingVerification, waybill: a.waybill, shippingDocuments: a.shippingDocuments, deliveryReceiptNumber: a.deliveryReceiptNumber, handoverMinutesNumber: a.handoverMinutesNumber, inventoryDocumentId: a.action === "ship" ? Number(a.inventoryDocumentId) || null : null });
   busy.value = false;
   if (e) return fail(e);
   ok("انجام شد.");
@@ -106,10 +109,12 @@ defineExpose({ rows });
               <td class="small"><span class="inv-ltr">{{ r.handoverMinutesNumber }}</span> {{ jalali(r.handoverAt) }}</td>
               <td class="d-print-none text-nowrap">
                 <button v-if="canPack && r.status === 0" class="btn btn-sm btn-outline-primary me-1" @click="ask(r, 'pack')">بسته‌بندی</button>
+                <button v-if="canCheck && r.status === 1 && r.packedAt && !r.packingCheckedAt" class="btn btn-sm btn-outline-primary me-1" title="باید غیر از بسته‌بندی‌کننده باشد" @click="ask(r, 'check-packing')">بازبینی بسته‌بندی</button>
                 <button v-if="canRelease && r.status === 1" class="btn btn-sm btn-outline-primary me-1" @click="ask(r, 'release')">مجوز ارسال</button>
                 <button v-if="canPack && r.status === 2" class="btn btn-sm btn-outline-primary me-1" @click="ask(r, 'ship')">ارسال</button>
                 <button v-if="canDeliver && r.status === 3" class="btn btn-sm btn-outline-primary me-1" @click="ask(r, 'deliver')">تحویل</button>
                 <button v-if="canHandover && r.status === 4" class="btn btn-sm btn-outline-success me-1" @click="ask(r, 'handover')">صورتجلسه</button>
+                <button v-if="canHandover && r.status === 5 && !r.commissionedAt" class="btn btn-sm btn-outline-success me-1" @click="ask(r, 'commission')">راه‌اندازی</button>
                 <button class="btn btn-sm btn-outline-secondary" @click="run('shipment', r)">چاپ فهرست بسته‌بندی</button>
               </td>
             </tr>
@@ -130,7 +135,8 @@ defineExpose({ rows });
       <div class="inv-modal">
         <h3 class="h6">{{ titleOf[act.action] }} — <span class="inv-ltr">{{ act.r.number }}</span></h3>
         <div v-for="f in fieldsOf[act.action]" :key="f[0]" class="mb-2"><label class="form-label small mb-0">{{ f[1] }}</label><textarea v-if="f[0] === 'packingList'" v-model="act[f[0]]" class="form-control form-control-sm" rows="3"></textarea><input v-else v-model="act[f[0]]" class="form-control form-control-sm" /></div>
-        <div v-if="['ship', 'deliver', 'handover'].includes(act.action)" class="mb-2"><label class="form-label small mb-0">تاریخ</label><JDate v-model="act.date" /></div>
+        <div v-if="['ship', 'deliver', 'handover', 'commission'].includes(act.action)" class="mb-2"><label class="form-label small mb-0">تاریخ</label><JDate v-model="act.date" /></div>
+        <div v-if="act.action === 'ship'" class="mb-2"><label class="form-label small mb-0">شناسه سند تحویل مشتری انبار (تأییدشده)</label><input v-model="act.inventoryDocumentId" class="form-control form-control-sm inv-ltr" inputmode="numeric" /></div>
         <p v-if="act.action === 'release'" class="small">مجوز ارسال را برنامه‌ریزی می‌دهد و مشروط به معتبر ماندن برگه ترخیص کیفی است.</p>
         <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-secondary" @click="act = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="doAct">ثبت</button></div>
       </div>

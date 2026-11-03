@@ -1,4 +1,4 @@
-import { call, clean, http, saveBlob } from "@/api/ApiClient";
+import { call, clean, http, saveBlob, fileErrorText } from "@/api/ApiClient";
 import { camelize } from "@/composables/fn";
 
 // Accounting module F1 + F2 (api/v1/finance/gl, treasury, receivables, tax, dashboard, assets, payroll, sepidar, employees).
@@ -33,8 +33,7 @@ async function download(url: string, params: any, defaultName: string): Promise<
     saveBlob(response.data, match ? decodeURIComponent(match[1]) : defaultName);
     return null;
   } catch (error: any) {
-    if (error?.response?.status === 403) return "شما اجازه این کار را ندارید.";
-    return error?.message || "خطا";
+    return fileErrorText(error);
   }
 }
 
@@ -123,6 +122,12 @@ export const getReconciliations = (params: any) => get(tr + "reconciliations", p
 export const createReconciliation = (statementId: number, asOfDate?: string | null) => post(tr + "reconciliations", { statementId, asOfDate: asOfDate || null });
 /** action: refresh, approve */
 export const reconciliationAction = (dto: any) => docAction(tr + "reconciliations/action", dto);
+/**
+ * R1t D7 action "items": replaces the explained reconciling items of a DRAFT reconciliation (treasury / accountants). ReconciliationItemDto { kind 1 bank fee or interest not booked, 2 in transit, 3 bank error,
+ * 4 error in our books, 5 opening balance before go-live, 9 other; amount (signed like the difference), note (required), correctingVoucherId (kinds 1 and 4 need a FINAL voucher before approval) }.
+ * Approval with a difference needs explainedAmount === difference, and the user who saved the items cannot approve.
+ */
+export const saveReconciliationItems = (id: number, items: any[]) => post(tr + "reconciliations/action", { id, action: "items", items });
 export const getCashPosition = () => get(tr + "cash-position");
 
 // ---------------------------------------------------------------- receivables
@@ -177,6 +182,27 @@ export const getPayrollEmployee = (id: number) => get(pr + "employees/" + id);
 export const savePayrollEmployee = (dto: any) => post(pr + "employees", dto);
 export const getLoans = (params: any) => get(pr + "loans", params);
 export const saveLoan = (dto: any) => post(pr + "loans", dto);
+/**
+ * R1f maker-checker on the payroll inputs. A NEW employee and a change of a guarded field (dailyWage, exemptionFlags, childrenCount, hardAndHarmful, bankIban) are REQUESTS: the employee shows
+ * pendingApproval / pendingChangeId and payroll runs use the approved values only; the save needs changeReason, and a changed daily wage can carry wageEffectiveYear / wageEffectiveMonth.
+ * EmployeeChangeDto { id, employeeId, personnelCode, employeeName, kind Create / Update, status Pending / Approved / Rejected, current, proposed (GuardedFieldsDto), wageEffectiveFrom, reason, proposedByName, decidedByName, decisionNote }.
+ * Decide: PAYROLL or FINANCEMANAGER (never the one who touched the record), the CEO for a finance manager's own record.
+ */
+export const getEmployeeChanges = (params: any) => get(pr + "employees/changes", params);
+export const employeeChangeAction = (id: number, action: "approve" | "reject", note?: string | null) => post(pr + "employees/changes/action", { id, action, note: note || null });
+/** EmployeeWageDto[] { effectiveFrom, dailyWage, isBaseline, approvedByName, approvedAt }: the wage history of an employee. */
+export const getEmployeeWages = (id: number) => get(pr + `employees/${id}/wages`);
+/** LoanActionDto { id, action approve / reject, note }: FINANCEMANAGER (the CEO for a finance manager's own record), never the creator. A pending loan is neither recovered nor paid out. LoanDto has approvalStatus, createdByName, approvedByName, rejectReason. */
+export const loanAction = (id: number, action: "approve" | "reject", note?: string | null) => post(pr + "loans/action", { id, action, note: note || null });
+/** LeaveOpeningDto { id, employeeId, personnelCode, employeeName, year, month, carriedDays, note, status, enteredByName, decidedByName, decisionNote }. params: LeaveOpeningQuery { year, employeeId, status 0 / 1 / 2 }. */
+export const getLeaveOpenings = (params: any) => get(pr + "leave-openings", params);
+/** SaveLeaveOpeningDto { employeeId? | personnelCode?, year, month, carriedDays, note }: PAYROLL / FINANCEMANAGER enter, the FINANCEMANAGER (never the enterer) approves. */
+export const saveLeaveOpening = (dto: any) => post(pr + "leave-openings", dto);
+/** ImportLeaveOpeningDto { rows: SaveLeaveOpeningDto[] } (at most 2000). Returns { imported, errors[] }. */
+export const importLeaveOpenings = (rows: any[]) => post(pr + "leave-openings/import", { rows });
+export const leaveOpeningAction = (id: number, action: "approve" | "reject", note?: string | null) => post(pr + "leave-openings/action", { id, action, note: note || null });
+/** ProposeCorrectionDto { employeeId, year, month, proposed: SheetNumbersDto, reason }: payroll may not overwrite a sheet that the HR close locked; HR (never the proposer) decides it (office attendance corrections). */
+export const proposeAttendanceCorrection = (dto: any) => post(pr + "attendance/corrections", dto);
 export const getPayrollItems = () => get(pr + "items");
 export const savePayrollItem = (dto: any) => post(pr + "items", dto);
 export const getPayrollRates = (params: any) => get(pr + "rates", params);
@@ -210,6 +236,23 @@ export const generateOutbox = (dto: any) => post(sp + "generate", dto);
 export const outboxAction = (id: number, action: string, note?: string, reference?: string) => post(sp + "action", { id, action, note: note || null, reference: reference || null });
 export const downloadOutboxPackage = (id: number) => download(sp + `packages/${id}/export`, {}, `sepidar-package-${id}.xlsx`);
 export const getOutboxSummary = () => get(sp + "summary");
+/** R1t D6: the insurance list package as the zip of the text files of the social-security list software (layout to be verified by the company). */
+export const downloadOutboxDsk = (id: number) => download(sp + `packages/${id}/export`, { format: "dsk" }, `sepidar-package-${id}-dsk.zip`);
+/** OutboxTieOutDto { packageId, ties, totalAbsoluteDifference, rows: [{ key, label, accountCode, accountTitle, packageAmount, ledgerAmount, ledgerFromSource, ledgerOther, settlementMovement, difference, differenceFromSource, ties }], notes[] }. */
+export const getOutboxTieOut = (id: number) => get(sp + `packages/${id}/tie-out`);
+/**
+ * R1t D6: the answer of the tax office as the body of the request (JSON array / { rows }, or CSV with rows invoiceNo, taxId, status, message). Writes the tax id and status on the invoices of the package
+ * and moves it to Accepted or Rejected. Returns OutboxAckResultDto { rows, accepted, rejected, pending, unchanged, unanswered, message }.
+ */
+export const ackOutboxPackage = async (id: number, text: string): Promise<[any, null] | [null, Error | any]> => {
+  try {
+    const { data } = await http.post(sp + `packages/${id}/ack`, text, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    if (data && data.success === false) return [null, new Error(data.message || "خطا")];
+    return [camelize(data && "data" in data ? data.data : data), null];
+  } catch (error: any) {
+    return [null, new Error(await fileErrorText(error))];
+  }
+};
 
 // ---------------------------------------------------------------- F3: controls, audit, migration, Sepidar export
 const ad = "finance/audit";
@@ -228,10 +271,20 @@ const cl = "finance/collections/";
 
 // audit trail (FINANCEMANAGER, CEO, AUDITOR)
 export const getAuditTrail = (params: any) => get(ad, params);
+/**
+ * R1t D20: walks the hash chain of the audit trail (AUDITOR, FINANCEMANAGER). params: from, to (places in the chain), anchorSeq + anchorHash (a head written down earlier). A range above 50,000 rows is refused.
+ * AuditChainVerifyDto { ok, message, checked, fromSeq, toSeq, wholeChain, headSeq, headHash, sealedRows, legacyRows, keyConfigured, firstBreak { kind, seq, id, message, at, entityType, action }, verifiedAt }.
+ */
+export const verifyAuditChain = (params: any) => get(ad + "/verify", params);
 
 // period close checklist, settings, attachments, templates, copy, mass import
 export const getCloseChecklist = (periodId: number) => get(gl + "close-checklist/" + periodId);
-export const overrideChecklist = (periodId: number, reason: string) => post(gl + `close-checklist/${periodId}/override`, { reason });
+/**
+ * R1t D10: passing red items is two steps. action request (default; a finance manager with a reason): records the request; approve: a DIFFERENT finance manager approves it (the red items must still be
+ * the ones that were requested); withdraw: the request is dropped. CloseChecklistDto carries overridePending, overrideRequestedByUserId, overrideRequestReason, overridden, overrideReason.
+ */
+export const overrideChecklist = (periodId: number, reason: string, action: "request" | "approve" | "withdraw" = "request") =>
+  post(gl + `close-checklist/${periodId}/override`, { reason: reason || null, action });
 export const getFinanceSettings = () => get(gl + "settings");
 export const saveFinanceSetting = (key: string, value: string) => post(gl + "settings", { key, value });
 export const getVoucherAttachments = (voucherId: number) => get(gl + `vouchers/${voucherId}/attachments`);

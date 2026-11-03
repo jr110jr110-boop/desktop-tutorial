@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasRole } from "@/composables/roles";
 // Link to Sepidar (finance): documents waiting to be posted, CSV export, and Sepidar codes of providers / work orders / contracts.
 import { computed, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -39,6 +40,9 @@ const allSelected = computed(() => rows.value.length > 0 && selected.value.lengt
 function toggleAll() {
   selected.value = allSelected.value ? [] : rows.value.map((r) => r.id);
 }
+
+/** R1t D19: legacy CSV channel, finance manager only (and only when the company switched it on) */
+const legacyCsv = hasRole(["FINANCEMANAGER"]);
 
 async function doExport() {
   const ids = selected.value.length ? selected.value : rows.value.map((r) => r.id);
@@ -116,7 +120,7 @@ onMounted(() => {
           <option v-for="(t, k) in sepidarStatuses" :key="k" :value="Number(k)">{{ t }}</option>
         </select>
         <div class="form-check"><input id="mk" v-model="markExported" class="form-check-input" type="checkbox" /><label class="form-check-label small" for="mk">پس از خروجی، «خروجی گرفته شد» علامت بخورد</label></div>
-        <button :disabled="busy" class="btn btn-sm btn-success" @click="doExport">خروجی CSV {{ selected.length ? "(" + selected.length + " سند)" : "(همه این صفحه)" }}</button>
+        <button v-if="legacyCsv" :disabled="busy" class="btn btn-sm btn-success" title="کانال قدیمی؛ فقط وقتی تنظیم Sepidar:LegacyCsv روشن باشد و فقط برای مدیر مالی" @click="doExport">خروجی CSV {{ selected.length ? "(" + selected.length + " سند)" : "(همه این صفحه)" }}</button>
       </div>
       <div class="table-responsive">
         <table class="table table-sm table-hover">

@@ -15,6 +15,8 @@ const emit = defineEmits<{ (e: "changed"): void; (e: "print", operation: any): v
 const skipping = ref<any>(null);
 const outside = ref<any>(null);
 const deciding = ref<any>(null);
+const ncrFor = ref<{ op: any; action: "accept-by-concession" | "scrap-by-ncr" } | null>(null);
+const isManager = hasRole(ProductionRoles.managers);
 const reworking = ref<any>(null);
 const busy = ref(false);
 const running = computed(() => props.order.status === 1 || props.order.status === 2);
@@ -32,6 +34,19 @@ async function skip(reason: string) {
   if (error) return fail(error);
   ok("مرحله رد شد.");
   skipping.value = null;
+  emit("changed");
+}
+// R1p D6: production manager; the NCR of the operation must be approved with the matching disposition (concession / scrap) before the service lets the operation move on
+async function byNcr(reason: string) {
+  if (!ncrFor.value) return;
+  const { op, action } = ncrFor.value;
+  if (!op.ncrId) return fail("برای این مرحله گزارش عدم انطباق ثبت نشده است.");
+  busy.value = true;
+  const [, error] = await operationAction({ id: op.id, action, reason, ncrId: op.ncrId });
+  busy.value = false;
+  if (error) return fail(error);
+  ok(action === "scrap-by-ncr" ? "مرحله با ضایعات بسته شد." : "مرحله با مجوز ارفاقی پذیرفته شد.");
+  ncrFor.value = null;
   emit("changed");
 }
 function done() {
@@ -73,6 +88,10 @@ function done() {
                 <button v-if="isSupervisors && o.isOutside && (o.status === 1 || o.status === 2)" class="btn btn-sm btn-outline-primary me-1 mb-1" @click="outside = o">پایان کار بیرونی</button>
                 <button v-if="isInspector && o.status === 5" class="btn btn-sm btn-primary me-1 mb-1" @click="deciding = o">تصمیم بازرسی</button>
                 <button v-if="isSupervisors && o.status === 6 && !o.isRework && !hasOpenRework(o)" class="btn btn-sm btn-outline-warning me-1 mb-1" @click="reworking = o">دوباره‌کاری</button>
+                <template v-if="isManager && o.status === 6 && o.ncrId">
+                  <button class="btn btn-sm btn-outline-success me-1 mb-1" @click="ncrFor = { op: o, action: 'accept-by-concession' }">پذیرش ارفاقی</button>
+                  <button class="btn btn-sm btn-outline-danger me-1 mb-1" @click="ncrFor = { op: o, action: 'scrap-by-ncr' }">ضایعات با NCR</button>
+                </template>
               </template>
             </td>
           </tr>
@@ -80,6 +99,7 @@ function done() {
       </table>
     </div>
     <ReasonDialog v-if="skipping" :busy="busy" danger title="رد کردن مرحله" :hint="`مرحله ${skipping.sequence} - ${skipping.title} اجرا نمی‌شود و مرحله بعد آزاد می‌شود.`" label="دلیل رد کردن" confirm-text="رد کردن مرحله" @close="skipping = null" @confirm="skip" />
+    <ReasonDialog v-if="ncrFor" :busy="busy" :title="ncrFor.action === 'scrap-by-ncr' ? 'ضایعات با گزارش عدم انطباق' : 'پذیرش ارفاقی با گزارش عدم انطباق'" :hint="`گزارش ${ncrFor.op.ncrNumber || ''} باید با تصمیم متناسب توسط کیفیت، مهندسی و تولید تأیید شده باشد؛ در غیر این صورت سرویس رد می‌کند.`" label="دلیل" confirm-text="ثبت" @close="ncrFor = null" @confirm="byNcr" />
     <CompleteOutsideDialog v-if="outside" :operation="outside" :work-order-id="order.workOrderId" @close="outside = null" @done="done" />
     <QcDecisionDialog v-if="deciding" :operation="deciding" :quantity="order.quantity" :work-order-id="order.workOrderId" @close="deciding = null" @done="done" />
     <ReworkDialog v-if="reworking" :operation="reworking" :work-order-code="order.workOrderCode" :item-id="order.itemId" @close="reworking = null" @done="done" />

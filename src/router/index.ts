@@ -562,6 +562,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/mdr-templates", name: "ProjectControlMdrTemplates", component: () => import("@/views/projectControl/DocSetup.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/final-books", name: "ProjectControlFinalBooks", component: () => import("@/views/projectControl/FinalBooks.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/changes", name: "ProjectControlChanges", component: () => import("@/views/projectControl/Changes.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/settings", name: "ProjectControlSettings", component: () => import("@/views/projectControl/Settings.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/claims", name: "ProjectControlClaims", component: () => import("@/views/projectControl/Claims.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/shipments", name: "ProjectControlShipments", component: () => import("@/views/projectControl/Shipments.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/reports", name: "ProjectControlReports", component: () => import("@/views/projectControl/Reports.vue"), meta: { roles: ProjectControlRoles.readers } },

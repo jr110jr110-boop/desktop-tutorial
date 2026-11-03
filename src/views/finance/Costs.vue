@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { getWorkOrderCosts } from "@/api/FinanceAPIs";
 import { getContracts, rowsOf } from "@/api/InventoryAPIs";
-import { fail, printPage, rial } from "@/composables/inventory";
+import { fail, printPage, rial, rialOrHidden } from "@/composables/inventory";
 
 // Cost of every work order and project: material, subcontract, services, labour, overhead.
 const rows = ref<any[]>([]);
@@ -20,11 +20,14 @@ async function load() {
 }
 
 const columns = ["material", "subcontract", "services", "labour", "overhead", "total"] as const;
+// R1p D1: a row whose labour is protected carries labour = null and total = null (labourHidden): it is shown as «محرمانه» and the totals say that they leave it out
 const totals = computed(() => {
   const t: Record<string, number> = {};
   columns.forEach((c) => (t[c] = rows.value.reduce((s, r) => s + (Number(r[c]) || 0), 0)));
   return t;
 });
+const anyHidden = computed(() => rows.value.some((r) => r.labourHidden));
+const cellOf = (r: any, c: string) => (r.labourHidden && (c === "labour" || c === "total") ? rialOrHidden(null, true) : rial(r[c]));
 
 onMounted(async () => {
   getContracts().then(([list]) => (contracts.value = rowsOf(list)));
@@ -75,18 +78,19 @@ onMounted(async () => {
               <td class="num">{{ rial(r.material) }}</td>
               <td class="num">{{ rial(r.subcontract) }}</td>
               <td class="num">{{ rial(r.services) }}</td>
-              <td class="num">{{ rial(r.labour) }}</td>
+              <td class="num">{{ cellOf(r, "labour") }}</td>
               <td class="num">{{ rial(r.overhead) }}</td>
-              <td class="num fw-bold">{{ rial(r.total) }}</td>
+              <td class="num fw-bold">{{ cellOf(r, "total") }}</td>
             </tr>
           </tbody>
           <tfoot v-if="rows.length">
             <tr class="fw-bold">
               <td colspan="3">جمع کل</td>
-              <td v-for="c in columns" :key="c" class="num">{{ rial(totals[c]) }}</td>
+              <td v-for="c in columns" :key="c" class="num">{{ anyHidden && (c === "labour" || c === "total") ? rialOrHidden(null, true) : rial(totals[c]) }}</td>
             </tr>
           </tfoot>
         </table>
+        <p v-if="anyHidden" class="inv-muted small">دستمزد برخی ردیف‌ها (گروه کمتر از ۳ نفر با حقوق‌بگیر) محرمانه است و فقط حقوق، مدیر مالی و مدیرعامل آن را می‌بینند؛ جمع دستمزد و جمع کل نشان داده نمی‌شود.</p>
       </div>
     </div>
   </div>

@@ -6,6 +6,7 @@ import QPager from "@/components/quality/QPager.vue";
 import CustomerPick from "@/components/service/CustomerPick.vue";
 import { answerSvSurvey, getSvSurvey, getSvSurveys, svSurveyAction } from "@/api/ServiceAPIs";
 import { usePagedList } from "@/composables/fn";
+import ReasonDialog from "@/components/quality/ReasonDialog.vue";
 import { fail, ok } from "@/composables/inventory";
 import { hasRole, ServiceRoles } from "@/composables/roles";
 import { badgeOfScore, badgeOfSurvey, serviceActionTitles, surveyKinds, surveyStatuses } from "@/composables/service";
@@ -14,13 +15,15 @@ const route = useRoute();
 const router = useRouter();
 const canWork = hasRole(ServiceRoles.surveyWorkers);
 const customer = ref<any>(null);
-const filters = ref<any>({ Status: null, Kind: null, Contains: "" });
+const filters = ref<any>({ Status: null, Kind: null, Verified: null, Contains: "" });
 const list = usePagedList(getSvSurveys, computed(() => ({ ...filters.value, CustomerId: customer.value?.id ?? null })) as any);
 const surveyId = computed(() => Number(route.params.id) || null);
 const survey = ref<any>(null);
 const scores = ref<Record<number, number | null>>({});
 const comments = ref("");
 const busy = ref(false);
+const asking = ref<"skip" | "verify" | null>(null);
+const canVerify = hasRole(["QA"]);
 
 function take(s: any) {
   survey.value = s;
@@ -39,17 +42,17 @@ const back = () => {
   list.load();
 };
 
-async function act(action: "send" | "skip") {
-  if (action === "skip" && !window.confirm("نظرسنجی رد شود؟")) return;
+async function act(action: "send" | "skip" | "verify", text?: string) {
   busy.value = true;
-  const [data, error] = await svSurveyAction({ id: survey.value.id, action, rowVersion: survey.value.rowVersion });
+  const [data, error] = await svSurveyAction({ id: survey.value.id, action, reason: action === "skip" ? text : null, note: action === "verify" ? text : null, rowVersion: survey.value.rowVersion });
   busy.value = false;
+  asking.value = null;
   if (error) {
     fail(error);
     return load(survey.value.id);
   }
   take(data);
-  ok(serviceActionTitles[action] + " انجام شد.");
+  ok((action === "verify" ? "تأیید کیفی" : serviceActionTitles[action]) + " انجام شد.");
   list.load();
 }
 async function answer() {
@@ -84,17 +87,19 @@ onMounted(() => {
           <div><label class="form-label small mb-0">نوع</label>
             <select v-model="filters.Kind" class="form-select form-select-sm"><option :value="null">همه</option><option v-for="(t, k) in surveyKinds" :key="k" :value="Number(k)">{{ t }}</option></select></div>
           <div><label class="form-label small mb-0">شماره</label><input v-model="filters.Contains" class="form-control form-control-sm" @keyup.enter="list.search" /></div>
+          <div><label class="form-label small mb-0">تأیید کیفی</label>
+            <select v-model="filters.Verified" class="form-select form-select-sm"><option :value="null">همه</option><option :value="false">تأییدنشده</option><option :value="true">تأییدشده</option></select></div>
           <button class="btn btn-sm btn-secondary" @click="list.search">جستجو</button>
         </div>
         <div class="table-responsive">
           <table class="table table-sm table-hover">
-            <thead><tr><th>شماره</th><th>مشتری</th><th>نوع</th><th>پیش‌نویس</th><th>ارسال</th><th>پاسخ</th><th>میانگین</th><th>وضعیت</th><th></th></tr></thead>
+            <thead><tr><th>شماره</th><th>مشتری</th><th>نوع</th><th>پیش‌نویس</th><th>ارسال</th><th>پاسخ</th><th>میانگین</th><th>تأیید</th><th>وضعیت</th><th></th></tr></thead>
             <tbody>
-              <tr v-if="!list.rows.value.length"><td colspan="9" class="text-center inv-muted">نظرسنجی‌ای نیست.</td></tr>
+              <tr v-if="!list.rows.value.length"><td colspan="10" class="text-center inv-muted">نظرسنجی‌ای نیست.</td></tr>
               <tr v-for="s in list.rows.value" :key="s.id">
                 <td class="inv-ltr">{{ s.number }}</td><td>{{ s.customerName }}</td><td>{{ s.kindText }}</td><td>{{ s.draftedOnText }}</td><td>{{ s.sentAtText || "-" }}</td><td>{{ s.answeredAtText || "-" }}</td>
                 <td><span v-if="s.averageScore !== null && s.averageScore !== undefined" :class="badgeOfScore(s.averageScore)" class="inv-badge">{{ Number(s.averageScore).toFixed(2) }}</span><span v-else>-</span></td>
-                <td><span :class="badgeOfSurvey(s.status)" class="inv-badge">{{ s.statusText }}</span></td>
+                <td><span v-if="s.status === 3" :class="s.verified ? 'ok' : 'warn'" class="inv-badge">{{ s.verified ? "تأییدشده" : "تأییدنشده" }}</span></td><td><span :class="badgeOfSurvey(s.status)" class="inv-badge">{{ s.statusText }}</span></td>
                 <td><button class="btn btn-sm btn-outline-primary" @click="open(s)">باز کردن</button></td>
               </tr>
             </tbody>
@@ -122,8 +127,15 @@ onMounted(() => {
         </div>
         <div v-if="canWork && (survey.status === 1 || survey.status === 2)" class="d-flex gap-2 mb-3">
           <button v-if="survey.status === 1" :disabled="busy" class="btn btn-sm btn-primary" @click="act('send')">ارسال برای مشتری</button>
-          <button :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act('skip')">رد کردن</button>
+          <button :disabled="busy" class="btn btn-sm btn-outline-danger" @click="asking = 'skip'">رد کردن</button>
         </div>
+        <div v-if="survey.status === 3" class="small mb-3">
+          <span v-if="survey.verified" class="inv-badge ok">تأیید شده توسط کیفیت {{ survey.verifiedAtText }}</span><span v-else class="inv-badge warn">تأییدنشده؛ در میانگین‌های رسمی نمی‌آید</span>
+          <span v-if="survey.verifyNote" class="ms-2">{{ survey.verifyNote }}</span>
+          <button v-if="canVerify && !survey.verified" :disabled="busy" class="btn btn-sm btn-outline-success ms-2" @click="asking = 'verify'">تأیید پاسخ با مشتری</button>
+          <span v-if="survey.complaintNumber" class="ms-2">شکایت: <span class="inv-ltr">{{ survey.complaintNumber }}</span></span>
+        </div>
+        <div v-if="survey.skipReason" class="small mb-2"><b>دلیل رد:</b> {{ survey.skipReason }}</div>
         <table class="table table-sm">
           <thead><tr><th style="width: 3rem">ردیف</th><th>پرسش</th><th style="width: 12rem">امتیاز (۱ تا ۵)</th></tr></thead>
           <tbody>
@@ -145,6 +157,7 @@ onMounted(() => {
         <p v-else-if="survey.comments" class="small"><b>توضیحات مشتری:</b> {{ survey.comments }}</p>
       </template>
     </div>
+    <ReasonDialog v-if="asking" :title="asking === 'skip' ? 'رد کردن نظرسنجی' : 'تأیید پاسخ نظرسنجی'" :hint="asking === 'skip' ? 'دلیل رد کردن الزامی است.' : 'بنویسید با مشتری چه چیزی بررسی شد.'" :busy="busy" @close="asking = null" @confirm="(t: string) => act(asking!, t)" />
   </div>
 </template>
 

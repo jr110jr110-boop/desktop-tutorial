@@ -148,14 +148,16 @@ export const getProductionOperations = (params?: ProductionPageParams) => get(pr
  * OperationActionDto { id, action, reason?, documentId? }. action: skip (reason required; only SHOPSUPERVISOR; a Waiting or Ready operation), complete-outside (an outside operation; documentId = the
  * confirmed return-from-contractor document; supervisors). Returns OperationDto.
  */
-export const operationAction = (dto: { id: number; action: "skip" | "complete-outside"; reason?: string | null; documentId?: number | null }) =>
-  post(pr + "operations/action", { id: dto.id, action: dto.action, reason: dto.reason || null, documentId: dto.documentId ?? null });
+export const operationAction = (dto: { id: number; action: "skip" | "complete-outside" | "accept-by-concession" | "scrap-by-ncr"; reason?: string | null; documentId?: number | null; ncrId?: number | null }) =>
+  post(pr + "operations/action", { id: dto.id, action: dto.action, reason: dto.reason || null, documentId: dto.documentId ?? null, ncrId: dto.ncrId ?? null });
 /**
  * QcDecisionDto { operationId, result, note?, itpActivityId? }. result: 1 accept, 2 reject, 3 rework, 4 hold (QcResult of the quality module). itpActivityId only for an ITP-point operation
  * (found by the test type when empty). Who: ProductionRoles.inspectors (QC only). Returns OperationDto.
  */
-export const qcDecision = (dto: { operationId: number; result: 1 | 2 | 3 | 4; note?: string | null; itpActivityId?: number | null }) =>
-  post(pr + "operations/qc-decision", { operationId: dto.operationId, result: dto.result, note: dto.note || null, itpActivityId: dto.itpActivityId ?? null });
+export const qcDecision = (dto: { operationId: number; result: 1 | 2 | 3 | 4; note?: string | null; itpActivityId?: number | null; measurements?: QcMeasurementInput[] }) =>
+  post(pr + "operations/qc-decision", { operationId: dto.operationId, result: dto.result, note: dto.note || null, itpActivityId: dto.itpActivityId ?? null, measurements: dto.measurements || [] });
+/** R1p D16: a measured value; instrumentId (calibrated equipment) is mandatory for every value. */
+export interface QcMeasurementInput { characteristic: string; nominal: number; tolPlus: number; tolMinus: number; measured: number; unit?: string | null; instrumentId: number | null }
 /** ReworkOperationDto { operationId, ncrId, note? }: makes a rework operation for an operation rejected in inspection (status 6, not itself a rework). Who: supervisors. Returns OperationDto. */
 export const reworkOperation = (dto: { operationId: number; ncrId: number; note?: string | null }) => post(pr + "operations/rework", dto);
 
@@ -174,11 +176,11 @@ export const startOperation = (dto: { operationId: number; kind?: number; machin
 /** PauseOperationDto { operationId, reasonCodeId? (downtime or waiting reason), note? }. Stops the running booking. Who: terminal. */
 export const pauseOperation = (dto: { operationId: number; reasonCodeId?: number | null; note?: string | null }) => post(pr + "terminal/pause", dto);
 /** ReportQuantityDto { operationId, goodQty, scrapQty, scrapReasonCodeId? (required when scrapQty > 0, a scrap reason), reworkQty, note? }. Who: terminal. */
-export const reportQuantity = (dto: { operationId: number; goodQty: number; scrapQty?: number; scrapReasonCodeId?: number | null; reworkQty?: number; note?: string | null }) =>
-  post(pr + "terminal/report-quantity", { operationId: dto.operationId, goodQty: dto.goodQty, scrapQty: dto.scrapQty || 0, scrapReasonCodeId: dto.scrapReasonCodeId ?? null, reworkQty: dto.reworkQty || 0, note: dto.note || null });
+export const reportQuantity = (dto: { operationId: number; goodQty: number; scrapQty?: number; scrapReasonCodeId?: number | null; reworkQty?: number; note?: string | null; scrapSerials?: string | null }) =>
+  post(pr + "terminal/report-quantity", { operationId: dto.operationId, goodQty: dto.goodQty, scrapQty: dto.scrapQty || 0, scrapReasonCodeId: dto.scrapReasonCodeId ?? null, reworkQty: dto.reworkQty || 0, note: dto.note || null, scrapSerials: dto.scrapSerials || null });
 /** FinishOperationDto: same fields as ReportQuantityDto; finishes the operation (goes to QC hold when the routing requires inspection). Who: terminal. */
-export const finishOperation = (dto: { operationId: number; goodQty: number; scrapQty?: number; scrapReasonCodeId?: number | null; reworkQty?: number; note?: string | null }) =>
-  post(pr + "terminal/finish", { operationId: dto.operationId, goodQty: dto.goodQty, scrapQty: dto.scrapQty || 0, scrapReasonCodeId: dto.scrapReasonCodeId ?? null, reworkQty: dto.reworkQty || 0, note: dto.note || null });
+export const finishOperation = (dto: { operationId: number; goodQty: number; scrapQty?: number; scrapReasonCodeId?: number | null; reworkQty?: number; note?: string | null; scrapSerials?: string | null }) =>
+  post(pr + "terminal/finish", { operationId: dto.operationId, goodQty: dto.goodQty, scrapQty: dto.scrapQty || 0, scrapReasonCodeId: dto.scrapReasonCodeId ?? null, reworkQty: dto.reworkQty || 0, note: dto.note || null, scrapSerials: dto.scrapSerials || null });
 /** RequestQcDto { operationId, note? }: puts a QC request in the inbox of the QC users. Who: terminal. */
 export const requestQc = (dto: { operationId: number; note?: string | null }) => post(pr + "terminal/request-qc", dto);
 /**
@@ -320,3 +322,14 @@ export const getOee = (params?: { From?: string | null; To?: string | null; Work
  * Who: ProductionRoles.dashboard.
  */
 export const getProductionDashboard = (asOf?: string | null) => get(pr + "dashboard", { AsOf: asOf });
+
+// ---------------------------------------------------------------- R1p D39 / D1: correction bookings, labour month
+/** SaveCorrectionBookingDto: an extra booking on a completed order (shop supervisor, reason); waits for another production manager. Dates ISO. */
+export const correctBooking = (dto: { operationId: number; employeeId: number; kind?: number; startAt: string; endAt: string; machineId?: number | null; correctsBookingId?: number | null; note?: string | null; reason: string }) =>
+  post(pr + "bookings/correct", { kind: 2, ...dto });
+/** ApproveCorrectionDto { id, approve, reason?, rowVersion? }: a production manager other than the creator; a rejection needs a reason. */
+export const approveCorrection = (dto: { id: number; approve: boolean; reason?: string | null; rowVersion?: string | null }) => post(pr + "bookings/approve-correction", dto);
+/** MfLabourMonthRunDto { asOf? }: month-end labour variance run. Who: finance manager, finance, production manager. */
+export const runLabourMonth = (asOf?: string | null) => post(pr + "cost/labour-month", { asOf: asOf || null });
+/** Months newest first; pools and variance only for PAYROLL, FINANCEMANAGER, CEO (others get an empty pool list). */
+export const getLabourMonths = () => get(pr + "cost/labour-months");

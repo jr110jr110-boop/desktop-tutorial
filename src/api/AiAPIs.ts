@@ -1,4 +1,4 @@
-import { call, clean, http } from "@/api/ApiClient";
+import { call, clean, http, fileErrorText } from "@/api/ApiClient";
 import { camelize } from "@/composables/fn";
 
 // Local AI (api/v1/ai, release A1): the assistant (text and voice), conversations, the notes the seats leave for people, the CEO brief, and the admin side
@@ -105,8 +105,7 @@ export async function getAiBriefAudio(): Promise<[Blob, null] | [null, Error]> {
     }
     return [response.data as Blob, null];
   } catch (error: any) {
-    if (error?.response?.status === 403) return [null, new Error("شما اجازه این کار را ندارید.")];
-    if (error?.response?.status === 401) return [null, new Error("دوباره وارد سامانه شوید.")];
+    if (error?.response) return [null, new Error(await fileErrorText(error))];
     return [null, error instanceof Error ? error : new Error("خطا")];
   }
 }

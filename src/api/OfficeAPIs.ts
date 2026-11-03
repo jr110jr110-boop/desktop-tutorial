@@ -1,4 +1,4 @@
-import { call, clean, http, rowsOf, saveBlob } from "@/api/ApiClient";
+import { call, clean, http, rowsOf, saveBlob, fileErrorText } from "@/api/ApiClient";
 import { camelize } from "@/composables/fn";
 
 // Office automation (api/v1/office, release O1). Every answer is { success, message, data }; a rule violation answers HTTP 200 with success=false
@@ -134,9 +134,7 @@ export async function downloadLetterFile(letterId: number, documentId: string, f
     return null;
   } catch (error: any) {
     if (error?.response?.status === 404) return "فایل پیدا نشد یا اجازه دسترسی به آن را ندارید.";
-    if (error?.response?.status === 403) return "شما اجازه این کار را ندارید.";
-    if (error?.response?.status === 401) return "دوباره وارد سامانه شوید.";
-    return error?.message || "خطا";
+    return fileErrorText(error);
   }
 }
 
@@ -279,15 +277,30 @@ export const saveShiftAssignment = (dto: any) => post(at + "shift-assignments", 
 
 /** DeviceDto[] (plain array) { id, code, title, location, isActive, lastPushAt, lastPushAtText }. Who: HR, PMO, CEO (the service refuses others on read too). */
 export const getDevices = () => get(at + "devices");
-/** SaveDeviceDto { id?, code, title, location, isActive, rotateKey }. Returns DeviceKeyDto { device, apiKey }: the key is shown ONCE (only its hash is stored). Who: HR, PMO, CEO. */
+/** SaveDeviceDto { id?, code, title, location, isActive, allowedAddresses? (comma / space separated source addresses; empty = any) }. A new device returns DeviceKeyDto { device, apiKey }: the key is shown ONCE (only its hash is stored); an edit never issues a key. Write: HR, PMO. */
 export const saveDevice = (dto: any) => post(at + "devices", dto);
+/** POST devices/{id}/rotate-key (HR, PMO): the old key stops working; returns DeviceKeyDto { device, apiKey } once. */
+export const rotateDeviceKey = (id: number) => post(at + `devices/${id}/rotate-key`, {});
+/** params: DevicePushLogQuery { deviceId, from, to } + paging. DevicePushLogDto { id, deviceCode, receivedAtText, eventCount, accepted, duplicates, payloadHash, outcome }. */
+export const getDevicePushes = (params?: OfficePageParams) => get(at + "device-pushes", params);
 
 /** params: ClockQuery { employeeId, from, to, source 1..3 } + paging. ClockEventDto { id, employeeId, employeeName, personnelCode, timestamp, timestampText, deviceCode, direction, source, reason, createdByName }. Who: HR, CEO see all; others only their own. */
 export const getClockEvents = (params?: OfficePageParams) => get(at + "clock", params);
 /** ManualClockDto { employeeId, timestamp, direction 0 unknown / 1 in / 2 out, reason (required) }. Audited; refused in a month whose payroll is approved or in the future. Who: HR. */
 export const addManualClock = (dto: any) => post(at + "clock/manual", dto);
 /** ImportClockDto { deviceCode?, rows: [{ code, date (Persian or ISO), time, device, direction }] } or { csv } (code, date, time, device, direction). Returns { imported, duplicates, rejected, errors[] }. Who: HR. */
-export const importClock = (dto: { deviceCode?: string | null; rows?: any[]; csv?: string | null }) => post(at + "clock/import", { deviceCode: dto.deviceCode || null, rows: dto.rows || [], csv: dto.csv || null });
+export const importClock = (dto: { deviceCode?: string | null; rows?: any[]; csv?: string | null; reason?: string | null }) => post(at + "clock/import", { deviceCode: dto.deviceCode || null, rows: dto.rows || [], csv: dto.csv || null, reason: dto.reason || null });
+
+/**
+ * R1f: an import (and a manual event) is a REQUEST. ClockImportResultDto carries batchId and pendingApproval: the rows count nowhere until a second HR user (not the importer, no punch of his own in it) approves the batch.
+ * params: ClockBatchQuery { status 0 pending / 1 approved / 2 rejected, waitingForMe } + paging. ClockImportBatchDto { id, importedByName, importedAtText, rows, source, deviceCode, reason, status, decidedByName, decidedAtText,
+ * decisionNote, employeeCount, firstTimestampText, lastTimestampText, allowedActions: approve / reject }. Who: HR, CEO.
+ */
+export const getClockImportBatches = (params?: OfficePageParams) => get(at + "clock/import-batches", params);
+/** ClockBatchActionDto { id, action approve / reject, note (required for reject) }. Who: another HR user than the importer. */
+export const clockBatchAction = (id: number, action: "approve" | "reject", note?: string | null) => post(at + "clock/import-batches/action", { id, action, note: note || null });
+/** ClockRequestActionDto { id (long), action approve / reject, note (required for reject) }: a manual event or a held device punch; another HR user or the unit manager, never the author or the employee. */
+export const clockRequestAction = (id: number, action: "approve" | "reject", note?: string | null) => post(at + "clock/request-action", { id, action, note: note || null });
 
 /**
  * Excel export of the attendance software (PW Kara; devices US 10C and M Face 302), multipart File + Sheet?. Returns ClockFilePreviewDto { sheets[], sheet, rowCount,
@@ -306,13 +319,14 @@ export const previewClockFile = (file: File, sheet?: string | null) => {
  * The file is at most 20 MB (the server answers with a Persian message above it). Send the file with a mapping or a saved profileId; saveProfileAs saves
  * the mapping under that name. Returns { imported, duplicates, unknown, unknownCodes[], rowsRead, rejected, errors[] }; unknown personnel numbers are reported, never created; importing the same file again stores nothing. Who: HR.
  */
-export const importClockFile = (file: File, opts: { mapping?: any; profileId?: number | null; sheet?: string | null; saveProfileAs?: string | null }) => {
+export const importClockFile = (file: File, opts: { mapping?: any; profileId?: number | null; sheet?: string | null; saveProfileAs?: string | null; reason?: string | null }) => {
   const form = new FormData();
   form.append("File", file, file.name);
   if (opts.mapping) form.append("Mapping", JSON.stringify(opts.mapping));
   if (opts.profileId) form.append("ProfileId", String(opts.profileId));
   if (opts.sheet) form.append("Sheet", opts.sheet);
   if (opts.saveProfileAs?.trim()) form.append("SaveProfileAs", opts.saveProfileAs.trim());
+  if (opts.reason?.trim()) form.append("Reason", opts.reason.trim());
   return fcall("post", at + "clock/import-file", form);
 };
 /** The saved column mappings: [{ id, name, mapping }]. Who: HR, CEO. */
@@ -326,13 +340,13 @@ export const saveClockImportProfile = (dto: { id?: number | null; name: string; 
  */
 
 /**
- * AttendancePolicyDto { graceMinutes (15), maxOvertimeMinutesPerDay? (empty = none), overtimeNeedsPreApproval (false), roundingMinutes,
+ * AttendancePolicyDto { graceMinutes (15), maxOvertimeMinutesPerDay? (empty = none), overtimeRequiresApproval (R1f: on by default; renamed from overtimeNeedsPreApproval), earlyLeaveDeduction (on), monthConfirmByHrPeer (off), roundingMinutes,
  * monthlyOvertimeCapMinutes (1320 = 22 hours of WORKING-DAY overtime; holiday and night hours are not capped), delayPenaltyFactor (3: a delay beyond the grace costs delay x factor of working time, 0..10) }.
  * On save, a missing (null) monthlyOvertimeCapMinutes or delayPenaltyFactor keeps the stored value. Early leave is not deducted.
  * Who: read by everyone.
  */
 export const getAttendancePolicy = () => get(at + "policy");
-/** Same DTO. Who: HR, PMO, CEO. */
+/** Same DTO (a null switch keeps the stored value). Who: HR and the CEO; only the CEO turns a control off or changes monthConfirmByHrPeer. */
 export const saveAttendancePolicy = (dto: any) => post(at + "policy", dto);
 
 /** ComputeDaysDto { fromDate, toDate, employeeId? }. Returns { days, employees, skippedLocked, employeesWithoutShift }. Who: HR, CEO (the service uses AttendanceReaders; PMO is refused). */
@@ -350,6 +364,18 @@ export const getAttendanceDays = (params?: OfficePageParams) => get(at + "days",
 export const closeAttendanceMonth = (year: number, month: number, acceptIncompleteAsAbsent = false) => post(at + "close-month", { year, month, acceptIncompleteAsAbsent });
 /** MonthStatusDto { year, month, closed, closedAt, closedAtText, sheets, lockedByPayroll } (Persian year / month). Who: HR, CEO, PAYROLL, FINANCEMANAGER (OfficeRoles.monthReaders). */
 export const getAttendanceMonth = (year: number, month: number) => get(at + `month/${year}/${month}`);
+/**
+ * R1f two-step close: close-month PREPARES the month (HR; sheets written and locked, snapshot frozen). Step two: the finance manager (or a second HR user when the policy monthConfirmByHrPeer is on;
+ * never the preparer) confirms. MonthStatusDto { status None / Prepared / Confirmed / Rejected, preparedByName, confirmedByName, rejectReason, snapshotHash, snapshotMatches, snapshotNote, policy, canConfirm,
+ * pendingRequests [{ kind, id, text }], noWorkshop }. A confirmation is refused while requests of the month are open or the sheets differ from the snapshot.
+ */
+export const confirmAttendanceMonth = (year: number, month: number) => post(at + "confirm-month", { year, month });
+/** RejectMonthDto { year, month, reason (required) }: HR takes the preparation back, the finance manager reopens a confirmed month while no payroll of it is approved. */
+export const rejectAttendanceMonth = (year: number, month: number, reason: string) => post(at + "reject-month", { year, month, reason });
+/** params: CorrectionQuery { year, month, employeeId, status } + paging. AttendanceCorrectionDto { id, employeeName, personnelCode, year, month, current, proposed (SheetNumbersDto), reason, status, proposedByName, decidedByName, decisionNote, allowedActions }. Who: HR, CEO, PAYROLL, FINANCEMANAGER. */
+export const getAttendanceCorrections = (params?: OfficePageParams) => get(at + "corrections", params);
+/** CorrectionActionDto { id, action approve / reject, note (required for reject) }: HR (never the proposer); the CEO for a finance manager's own sheet. */
+export const attendanceCorrectionAction = (id: number, action: "approve" | "reject", note?: string | null) => post(at + "corrections/action", { id, action, note: note || null });
 /** WorkedHoursQuery { employeeIds[], from, to } returns [{ employeeId, date, workedMinutes, workedHours }] for the production time-booking check. Who: HR, CEO, PMO, PROJECTMANAGER, PLANNING, CONSTRUCTION, FINANCEMANAGER. */
 export const getWorkedHours = (employeeIds: number[], from: string, to: string) => post(at + "worked-hours", { employeeIds, from, to });
 

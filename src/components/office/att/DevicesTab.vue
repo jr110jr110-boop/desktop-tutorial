@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Clock devices. The API key (48 hex characters) is shown once in a modal after creating a device or rotating its key; it is never stored by the page.
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { getDevices, saveDevice } from "@/api/OfficeAPIs";
+import { getDevicePushes, getDevices, rotateDeviceKey, saveDevice } from "@/api/OfficeAPIs";
+import { hasRole, OfficeRoles } from "@/composables/roles";
 import { fail, ok } from "@/composables/inventory";
 import { rowsOf } from "./attCommon";
 
@@ -11,16 +12,25 @@ const busy = ref(false);
 const secret = ref<{ code: string; key: string } | null>(null);
 const copied = ref(false);
 const rotating = ref<any>(null);
+/** HR and the PMO write devices (key, allowed addresses); the CEO only reads */
+const canWrite = hasRole(OfficeRoles.deviceWriters);
+const pushes = ref<any[]>([]);
+const showPushes = ref(false);
+async function loadPushes() {
+  const [d, error] = await getDevicePushes({ PageSize: 30 });
+  if (error) return fail(error);
+  pushes.value = rowsOf(d);
+}
 
 async function load() {
   const [d, error] = await getDevices();
   if (error) return fail(error);
   devices.value = rowsOf(d);
 }
-const edit = (d: any | null) => (form.value = d ? { id: d.id, code: d.code, title: d.title, location: d.location || "", isActive: !!d.isActive } : { id: null, code: "", title: "", location: "", isActive: true });
-async function send(dto: any) {
+const edit = (d: any | null) => (form.value = d ? { id: d.id, code: d.code, title: d.title, location: d.location || "", isActive: !!d.isActive, allowedAddresses: d.allowedAddresses || "" } : { id: null, code: "", title: "", location: "", isActive: true, allowedAddresses: "" });
+async function send(dto: any, rotate = false) {
   busy.value = true;
-  const [d, error] = await saveDevice(dto);
+  const [d, error] = rotate ? await rotateDeviceKey(dto.id) : await saveDevice(dto);
   busy.value = false;
   if (error) return fail(error);
   if (d?.apiKey) {
@@ -35,9 +45,9 @@ function save() {
   const f = form.value;
   if (!f.code.trim()) return fail("کد دستگاه را وارد کنید.");
   if (!f.title.trim()) return fail("عنوان دستگاه را وارد کنید.");
-  return send({ id: f.id, code: f.code.trim(), title: f.title.trim(), location: f.location.trim(), isActive: f.isActive, rotateKey: false });
+  return send({ id: f.id, code: f.code.trim(), title: f.title.trim(), location: f.location.trim(), isActive: f.isActive, allowedAddresses: f.allowedAddresses.trim() || null });
 }
-const rotate = () => send({ id: rotating.value.id, code: rotating.value.code, title: rotating.value.title, location: rotating.value.location || "", isActive: rotating.value.isActive, rotateKey: true });
+const rotate = () => send({ id: rotating.value.id }, true);
 
 async function copy() {
   if (!secret.value) return;
@@ -58,16 +68,26 @@ onBeforeUnmount(closeSecret);
 
 <template>
   <div>
-    <div class="inv-toolbar"><span class="inv-muted small">دستگاه‌های تردد در شبکه داخلی با کد و کلید خود ترددها را ارسال می‌کنند. از کلید فقط رمز یک‌طرفه نگهداری می‌شود.</span><button class="btn btn-sm btn-primary" @click="edit(null)">دستگاه جدید</button></div>
+    <div class="inv-toolbar"><span class="inv-muted small">دستگاه‌های تردد در شبکه داخلی با کد و کلید خود ترددها را ارسال می‌کنند. از کلید فقط رمز یک‌طرفه نگهداری می‌شود.</span><span><button class="btn btn-sm btn-outline-secondary me-1" @click="showPushes = !showPushes; if (showPushes) loadPushes()">سابقه ارسال دستگاه‌ها</button><button v-if="canWrite" class="btn btn-sm btn-primary" @click="edit(null)">دستگاه جدید</button></span></div>
+    <div v-if="showPushes" class="table-responsive mb-3">
+      <table class="table table-sm table-hover">
+        <thead><tr><th>زمان</th><th>دستگاه</th><th>تعداد</th><th>پذیرفته</th><th>تکراری</th><th>نتیجه</th><th>مهر محتوا</th></tr></thead>
+        <tbody>
+          <tr v-if="!pushes.length"><td colspan="7" class="text-center inv-muted">ارسالی ثبت نشده است.</td></tr>
+          <tr v-for="p in pushes" :key="p.id"><td class="inv-ltr">{{ p.receivedAtText }}</td><td class="inv-ltr">{{ p.deviceCode }}</td><td>{{ p.eventCount }}</td><td>{{ p.accepted }}</td><td>{{ p.duplicates }}</td><td>{{ p.outcome }}</td><td class="inv-ltr small">{{ (p.payloadHash || "").slice(0, 12) }}</td></tr>
+        </tbody>
+      </table>
+    </div>
     <div class="table-responsive">
       <table class="table table-sm table-hover">
-        <thead><tr><th>کد</th><th>عنوان</th><th>محل</th><th>آخرین ارسال</th><th>وضعیت</th><th></th></tr></thead>
+        <thead><tr><th>کد</th><th>عنوان</th><th>محل</th><th>آخرین ارسال</th><th>آدرس‌های مجاز</th><th>کلید</th><th>وضعیت</th><th></th></tr></thead>
         <tbody>
-          <tr v-if="!devices.length"><td colspan="6" class="text-center inv-muted">دستگاهی تعریف نشده است.</td></tr>
+          <tr v-if="!devices.length"><td colspan="8" class="text-center inv-muted">دستگاهی تعریف نشده است.</td></tr>
           <tr v-for="d in devices" :key="d.id">
             <td class="inv-ltr">{{ d.code }}</td><td>{{ d.title }}</td><td>{{ d.location }}</td><td class="inv-ltr">{{ d.lastPushAtText || "-" }}</td>
+            <td class="inv-ltr small">{{ d.allowedAddresses || "هر آدرس" }}</td><td class="inv-ltr small">{{ d.keyRotatedAtText || "-" }}</td>
             <td><span :class="d.isActive ? 'ok' : 'warn'" class="inv-badge">{{ d.isActive ? "فعال" : "غیرفعال" }}</span></td>
-            <td class="text-nowrap"><button class="btn btn-sm btn-outline-secondary me-1" @click="edit(d)">ویرایش</button><button class="btn btn-sm btn-outline-danger" @click="rotating = d">کلید جدید</button></td>
+            <td class="text-nowrap"><template v-if="canWrite"><button class="btn btn-sm btn-outline-secondary me-1" @click="edit(d)">ویرایش</button><button class="btn btn-sm btn-outline-danger" @click="rotating = d">کلید جدید</button></template></td>
           </tr>
         </tbody>
       </table>
@@ -81,6 +101,7 @@ onBeforeUnmount(closeSecret);
           <div class="col-md-6"><label class="form-label small mb-0">کد دستگاه *</label><input v-model="form.code" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-6"><label class="form-label small mb-0">عنوان *</label><input v-model="form.title" class="form-control form-control-sm" placeholder="مثلا دستگاه ورودی اصلی" /></div>
           <div class="col-12"><label class="form-label small mb-0">محل نصب</label><input v-model="form.location" class="form-control form-control-sm" /></div>
+          <div class="col-12"><label class="form-label small mb-0">آدرس‌های مجاز ارسال (IP، با کاما یا فاصله جدا شود)</label><input v-model="form.allowedAddresses" class="form-control form-control-sm inv-ltr" placeholder="خالی = از هر آدرسی" /><div class="inv-muted small">اگر پر شود، ارسال از آدرس دیگر رد می‌شود (۴۰۱).</div></div>
           <div class="col-12"><label class="small"><input v-model="form.isActive" type="checkbox" class="form-check-input me-1" />فعال</label></div>
         </div>
         <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button></div>

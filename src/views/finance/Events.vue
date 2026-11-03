@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { exportAccountingEvents, getAccountingEvents, markAccountingEvents } from "@/api/FinanceAPIs";
-import { fail, jalali, ok, printPage, rial } from "@/composables/inventory";
+import { fail, jalali, ok, printPage, rial, rialOrHidden } from "@/composables/inventory";
 import { eventStatuses, eventTypes, roleTitle, sourceRoute } from "@/composables/finance";
 import { FinanceRoles, hasRole } from "@/composables/roles";
 
@@ -18,6 +18,8 @@ const markExported = ref(true);
 const reference = ref("");
 const busy = ref(false);
 const canWrite = hasRole(FinanceRoles.writers);
+/** R1t D19: the voucher CSV and the mark-as-sent calls are a legacy channel: off unless the setting Sepidar:LegacyCsv is on, and then for the finance manager only (the API refuses otherwise and says so) */
+const legacyCsv = hasRole(["FINANCEMANAGER"]);
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 
 async function load() {
@@ -73,7 +75,7 @@ onMounted(load);
         <h1 class="inv-title screen-only">رویدادهای حسابداری</h1>
         <div class="d-flex flex-wrap gap-2 align-items-center d-print-none">
           <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ فهرست</button>
-          <template v-if="canWrite">
+          <template v-if="legacyCsv">
             <label class="form-check small mb-0">
               <input v-model="markExported" class="form-check-input" type="checkbox" />
               پس از خروجی، «خروجی گرفته شد» ثبت شود
@@ -101,7 +103,7 @@ onMounted(load);
         <input v-model="filters.To" class="form-control form-control-sm" title="تا تاریخ" type="date" @change="search" />
         <button class="btn btn-sm btn-secondary" @click="search">جستجو</button>
       </div>
-      <div v-if="canWrite && selected.length" class="d-flex flex-wrap gap-2 align-items-center mb-2 d-print-none">
+      <div v-if="legacyCsv && selected.length" class="d-flex flex-wrap gap-2 align-items-center mb-2 d-print-none">
         <input v-model="reference" class="form-control form-control-sm" placeholder="شماره سند سپیدار (اختیاری)" style="max-width: 240px" />
         <button :disabled="busy" class="btn btn-sm btn-outline-primary" @click="mark(1)">ثبت: در سپیدار ثبت شد</button>
         <button :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="mark(3)">ثبت: خروجی گرفته شد</button>
@@ -138,7 +140,7 @@ onMounted(load);
                   <span v-else>{{ r.sourceNumber }}</span>
                 </td>
                 <td>{{ r.description }}<div v-if="r.error" class="text-danger small">{{ r.error }}</div></td>
-                <td class="num">{{ rial(r.amount) }}</td>
+                <td class="num">{{ rialOrHidden(r.amount, r.labourHidden) }}<span v-if="r.labourHidden" class="inv-badge warn ms-1" title="این رویداد خط دستمزد محافظت‌شده دارد که فقط حقوق، مدیر مالی و مدیرعامل می‌بینند">دستمزد محرمانه</span></td>
                 <td>
                   <span class="inv-badge" :class="{ ok: r.status === 1 || r.status === 3, warn: r.status === 0, bad: r.status === 2 }">{{ eventStatuses[r.status] }}</span>
                 </td>
@@ -157,8 +159,8 @@ onMounted(load);
                       <tr v-for="l in r.lines" :key="l.rowNumber">
                         <td>{{ l.rowNumber }}</td>
                         <td>{{ roleTitle(l.accountRole) }} <span class="inv-ltr inv-muted">{{ l.accountRole }}</span></td>
-                        <td class="num">{{ l.debit ? rial(l.debit) : "" }}</td>
-                        <td class="num">{{ l.credit ? rial(l.credit) : "" }}</td>
+                        <td class="num">{{ l.labourHidden || (l.debit === null && l.credit === null) ? rialOrHidden(null, true) : l.debit ? rial(l.debit) : "" }}</td>
+                        <td class="num">{{ l.labourHidden || (l.debit === null && l.credit === null) ? rialOrHidden(null, true) : l.credit ? rial(l.credit) : "" }}</td>
                         <td>{{ l.providerName }}</td>
                         <td class="inv-ltr">{{ l.costCenter }}</td>
                         <td>{{ l.description }}</td>

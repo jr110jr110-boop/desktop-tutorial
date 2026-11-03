@@ -349,6 +349,8 @@ onMounted(async () => {
       <div v-if="v && !isNew" class="inv-muted mt-3">
         ایجاد: {{ v.creatorName }} - {{ jalali(v.createdAt, true) }}
         <span v-if="v.checkedByName"> | کنترل: {{ v.checkedByName }} - {{ jalali(v.checkedAt, true) }}</span>
+        <span v-if="v.triggeredByName" class="inv-badge info" title="سند سیستمی است؛ کسی که عملش آن را ساخته نمی‌تواند آن را قطعی کند"> | ساخته‌شده با اقدام: {{ v.triggeredByName }}</span>
+        <span v-if="v.lastEditedAt" class="inv-muted"> | آخرین ویرایش: {{ jalali(v.lastEditedAt, true) }} (تاییدی که قدیمی‌تر از آن باشد معتبر نیست)</span>
         <span v-if="v.finalizedByName"> | قطعی: {{ v.finalizedByName }} - {{ jalali(v.finalizedAt, true) }}</span>
         <span v-if="v.ceoApprovedAt"> | تایید مدیرعامل: {{ jalali(v.ceoApprovedAt, true) }}</span>
         <span v-if="v.autoReversalVoucherId"> | <router-link :to="{ name: 'FnVoucherEdit', params: { id: v.autoReversalVoucherId } }">برگشت خودکار دوره بعد</router-link></span>

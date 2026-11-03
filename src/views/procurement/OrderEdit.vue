@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { getContracts, getProviders, getWorkOrders, rowsOf, uploadFile } from "@/api/InventoryAPIs";
 import {
-  acceptService, getPurchaseOrder, getPurchaseRequest, getPurchaseRequests, purchaseOrderAction, savePurchaseOrder,
+  acceptService, getOrderRevisions, getPurchaseOrder, getPurchaseRequest, getPurchaseRequests, purchaseOrderAction, savePurchaseOrder,
 } from "@/api/ProcurementAPIs";
 import { fail, jalali, num, ok, printPage, rial, today } from "@/composables/inventory";
 import { orderStatuses, purchaseKinds } from "@/composables/procurement";
@@ -20,6 +20,20 @@ const contracts = ref<any[]>([]);
 const requests = ref<any[]>([]);
 const busy = ref(false);
 const cancelNote = ref<string | null>(null);
+// R1c M13: a new revision of an approved / released order (reason required); the earlier revisions stay frozen and are listed
+const reviseNote = ref<string | null>(null);
+const revisions = ref<any[]>([]);
+async function loadRevisions() {
+  if (!order.value?.id) return;
+  const [d] = await getOrderRevisions(order.value.id);
+  revisions.value = Array.isArray(d) ? d : d?.data || [];
+}
+async function revise() {
+  if (!(reviseNote.value || "").trim()) return fail("علت بازنگری را بنویسید.");
+  await act("revise", reviseNote.value!.trim());
+  reviseNote.value = null;
+  loadRevisions();
+}
 const acceptance = ref<any>(null);
 const printMode = ref<"order" | "service">("order");
 
@@ -43,6 +57,7 @@ function blank() {
 }
 
 function load(dto: any) {
+  if (dto?.id) setTimeout(loadRevisions, 0);
   // the API keeps prices in rial; the form shows them in the currency of the order
   const r = dto.currency && dto.exchangeRate ? Number(dto.exchangeRate) : 1;
   order.value = {
@@ -260,6 +275,7 @@ onMounted(async () => {
           <button v-if="order.status === 1 && canCommercial" :disabled="busy" class="btn btn-sm btn-success" @click="act('release')">ابلاغ به تامین‌کننده</button>
           <button v-if="[2, 3, 4].includes(order.status) && canCommercial" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="act('close')">بستن سفارش</button>
           <button v-if="[0, 1, 2].includes(order.status) && !isNew && (canCommercial || canApprove)" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="cancelNote = ''">ابطال</button>
+          <button v-if="[1, 2].includes(order.status) && !isNew && canCommercial" :disabled="busy" class="btn btn-sm btn-outline-warning" @click="reviseNote = ''">بازنگری سفارش</button>
           <router-link v-if="[2, 3, 4].includes(order.status) && order.kind === 1" :to="{ name: 'InventoryDocumentEdit', params: { id: 'new' }, query: { type: 1, order: order.id } }" class="btn btn-sm btn-outline-primary">رسید انبار</router-link>
         </div>
       </div>
@@ -431,6 +447,24 @@ onMounted(async () => {
       <p v-if="order.id && order.status <= 1" class="inv-muted small mb-0">تاییدکننده سفارش باید غیر از تهیه‌کننده باشد. سفارش ارزی و پیش‌پرداخت بیش از حد مجاز تایید مدیرعامل می‌خواهد.</p>
     </div>
 
+    <div v-if="reviseNote !== null" class="inv-modal-backdrop" @click.self="reviseNote = null">
+      <div class="inv-modal">
+        <h2 class="inv-title mb-2">بازنگری سفارش {{ order.number }}</h2>
+        <p class="inv-muted small">نسخه فعلی منجمد می‌شود و سفارش برای تأیید دوباره به پیش‌نویس برمی‌گردد.</p>
+        <textarea v-model="reviseNote" class="form-control form-control-sm" placeholder="علت بازنگری *" rows="3"></textarea>
+        <div class="d-flex gap-2 justify-content-end mt-3">
+          <button class="btn btn-sm btn-outline-secondary" @click="reviseNote = null">انصراف</button>
+          <button :disabled="busy" class="btn btn-sm btn-warning" @click="revise">ثبت بازنگری</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="revisions.length" class="inv-card mt-3 screen-only">
+      <h2 class="inv-title mb-2">نسخه‌های قبلی سفارش</h2>
+      <table class="table table-sm">
+        <thead><tr><th>نسخه</th><th>علت بازنگری</th><th>مبلغ (ریال)</th><th>منجمد در</th><th>توسط</th><th>تأیید</th></tr></thead>
+        <tbody><tr v-for="v in revisions" :key="v.id"><td>{{ v.revision }}</td><td>{{ v.reason || "-" }}</td><td class="num">{{ rial(v.totalAmount) }}</td><td>{{ jalali(v.frozenAt, true) }}</td><td>{{ v.frozenByName }}</td><td>{{ v.approvedByName || "-" }}</td></tr></tbody>
+      </table>
+    </div>
     <div v-if="cancelNote !== null" class="inv-modal-backdrop" @click.self="cancelNote = null">
       <div class="inv-modal">
         <h2 class="inv-title mb-2">ابطال سفارش {{ order.number }}</h2>

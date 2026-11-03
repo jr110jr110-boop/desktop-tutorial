@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CashLegList from "@/components/fn/CashLegList.vue";
 import { onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import ContractPick from "@/components/fn/ContractPick.vue";
@@ -53,7 +54,7 @@ async function save() {
   detail.value = d;
   load();
 }
-const actionTitles: Record<string, string> = { extend: "تمدید", reduce: "کاهش مبلغ", release: "آزادسازی", expire: "ثبت انقضا", claim: "ثبت مطالبه" };
+const actionTitles: Record<string, string> = { extend: "تمدید", reduce: "کاهش مبلغ", release: "آزادسازی", expire: "ثبت انقضا", claim: "ثبت مطالبه", "fee-leg": "ساخت دوباره سند کارمزد" };
 async function doAct() {
   const a = act.value;
   if (a.action === "extend" && !a.newExpiry) return fail("تاریخ جدید انقضا را وارد کنید.");
@@ -145,6 +146,7 @@ onMounted(async () => {
           کارمزد {{ money(detail.feeAmount) }} (مستهلک‌شده {{ money(detail.feeAmortised) }}، باقی‌مانده {{ money(detail.feeRemaining) }})
           <span v-if="detail.closedDate"> - بسته‌شده در {{ jalali(detail.closedDate) }}</span> - {{ detail.note }}
         </p>
+        <CashLegList :legs="detail.openCashLegs" />
         <table class="table table-sm">
           <thead><tr><th>تاریخ</th><th>رویداد</th><th>انقضای قبلی</th><th>انقضای جدید</th><th>مبلغ</th><th>کارمزد</th><th>توضیح</th></tr></thead>
           <tbody><tr v-for="e in detail.events" :key="e.id"><td>{{ jalali(e.date) }}</td><td>{{ guaranteeEvents[e.kind] }}</td><td>{{ jalali(e.oldExpiry) }}</td><td>{{ jalali(e.newExpiry) }}</td><td class="fn-num">{{ money(e.amount) }}</td><td class="fn-num">{{ money(e.feeAmount) }}</td><td>{{ e.note }}</td></tr></tbody>

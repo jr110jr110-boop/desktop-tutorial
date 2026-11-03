@@ -1,6 +1,7 @@
 import axios, { type AxiosError, type AxiosInstance } from "axios";
 import { refreshToken as requestRefresh } from "@/api/LoginAPIs";
 import { clearSession, sessionExpiryMs, storeSession } from "@/composables/session";
+import { apiErrorText } from "@/composables/apiMessage";
 
 // One axios client for the warehouse, finance and procurement APIs (api/v1/...).
 // The token is read on every request (not once when the file loads), so a refreshed token is used at once.
@@ -232,8 +233,9 @@ export async function call(method: "get" | "post" | "put" | "delete", url: strin
     if (data && data.success === false) return [null, new Error(data.message || "خطا")];
     return [data && "data" in data ? data.data : data, null];
   } catch (error: any) {
-    if (error?.response?.status === 403) return [null, new Error("شما اجازه این کار را ندارید.")];
-    if (error?.response?.status === 401) return [null, new Error("دوباره وارد سامانه شوید.")];
+    // the API answers its own Persian text in { message } also for 401 / 403 / 429 (R1a2): it is shown as it is
+    const status = error?.response?.status;
+    if (status === 401 || status === 403 || status === 429) return [null, new Error(apiErrorText(error))];
     return [null, error];
   }
 }
@@ -246,6 +248,22 @@ export function clean(params: any) {
     if (v !== null && v !== undefined && v !== "") result[k] = v;
   });
   return result;
+}
+
+/** The text of a failed download: a refused call that asked for a file answers JSON in a blob, so the API's own Persian text is read from it. */
+export async function fileErrorText(error: any, fallback = "خطا"): Promise<string> {
+  const blob = error?.response?.data;
+  if (blob && typeof blob.text === "function") {
+    try {
+      const json = JSON.parse(await blob.text());
+      if (json?.message) return String(json.message);
+    } catch {
+      /* not JSON: the usual text below */
+    }
+  }
+  const status = error?.response?.status;
+  if (status === 401 || status === 403 || status === 429) return apiErrorText(error);
+  return error?.message || fallback;
 }
 
 export function saveBlob(blob: Blob, fileName: string) {
@@ -284,8 +302,6 @@ export async function postForFile(url: string, body: any, defaultName: string): 
     saveBlob(response.data, match ? decodeURIComponent(match[1]) : defaultName);
     return null;
   } catch (error: any) {
-    if (error?.response?.status === 403) return "شما اجازه این کار را ندارید.";
-    if (error?.response?.status === 401) return "دوباره وارد سامانه شوید.";
-    return error?.message || "خطا";
+    return fileErrorText(error);
   }
 }
