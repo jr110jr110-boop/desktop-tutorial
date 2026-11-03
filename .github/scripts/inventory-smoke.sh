@@ -150,6 +150,9 @@ check "r1a2 review m-2: the receiver finds a note in his inbox that the role wai
 approve_grants ceo.ci
 COM_TOKEN=$(login com.ci 'Ci#Com-User-2026'); CEO_TOKEN=$(login ceo.ci 'Ci#Ceo-User-2026')
 [ -n "$COM_TOKEN" ] && [ -n "$CEO_TOKEN" ] && ok "login commercial and CEO users" || bad "login commercial and CEO users"
+# R1c (M1): a second commercial user: whoever saved a contract review never signs it, so the commercial signature comes from this one
+user2 com2.ci 2 'Ci#Com2-User-2026' 09120000097 0012345697
+COM2_TOKEN=$(login com2.ci 'Ci#Com2-User-2026'); [ -n "$COM2_TOKEN" ] && ok "login second commercial user" || bad "login second commercial user"
 SUP_TOKEN=$(login sup.ci 'Ci#Sup-User-2026'); PLAN_TOKEN=$(login plan.ci 'Ci#Plan-User-2026')
 [ -n "$SUP_TOKEN" ] && [ -n "$PLAN_TOKEN" ] && ok "login warehouse supervisor and planning users" || bad "login warehouse supervisor and planning users"
 WH_TOKEN=$(login wh.ci 'Ci#Wh-User-2026'); PROD_TOKEN=$(login prod.ci 'Ci#Prod-User-2026'); QC_TOKEN=$(login qc.ci 'Ci#Qc-User-2026')
@@ -178,6 +181,44 @@ LONGREF=$(printf 'R%.0s' $(seq 1 301)); LONG1001=$(printf 'R%.0s' $(seq 1 1001))
 
 # dates relative to today, so the calibration intervals, the welder continuity and the quality windows behave the same on every run
 dd() { date -d "$1 days" +%Y-%m-%d; }
+# R1c (M12): only engineering or quality accepts a quote technically; the buyer cannot. tech_all INQUIRYID: ENG accepts every quote of the inquiry (call after the last save of the quotes).
+tech_all() {
+  as "$COM_TOKEN" GET "procurement/inquiries/$1"
+  local _q; for _q in $(jq -r '.data.quotes[].id' "$B"); do
+    as "$ENG_TOKEN" POST procurement/inquiries/technical-review "{\"inquiryId\":$1,\"quoteId\":$_q,\"accepted\":true,\"score\":85}"
+  done
+}
+# R1c (H8): pcreview CONTRACTID : the contract review of a contract is saved fully ticked by planning, signed for the commercial unit by COM and for the PMO by the admin (three different people);
+# every contract that later gets a project code, a WBS, a baseline or project purchase requests goes through it (the contract needs its value in the terms first)
+PCREVTICKS='"kind":1,"requirementsDefined":true,"differencesResolved":true,"deliveryFeasible":true,"standardsItpAgreed":true,"guaranteesReviewed":true,"penaltiesReviewed":true,"paymentTermsReviewed":true,"currencyReviewed":true'
+pcreview() {
+  as "$PLAN_TOKEN" POST $PC/reviews "{\"contractId\":$1,$PCREVTICKS}"; check "r1c: contract $1: review saved fully ticked" '.success and .data.id > 0'
+  local _rv; _rv=$(val .data.id)
+  as "$COM_TOKEN" POST $PC/reviews/action "{\"id\":$_rv,\"action\":\"accept\"}"; check "r1c: contract $1: the commercial signature" '.success and .data.decision == 0 and .data.commercialAcceptedByUserId > 0'
+  as "$ADMIN_TOKEN" POST $PC/reviews/action "{\"id\":$_rv,\"action\":\"accept\"}"; check "r1c: contract $1: the PMO signature completes the review" '.success and .data.decision == 1'
+}
+# R1c (C6): pcamend CONTRACTID DESCRIPTION : the commercial unit saves an amendment without a price or days change, the CEO approves it (PCAMD = its id). One amendment authorizes one change of the frozen terms,
+# and its approval opens the re-review of the contract; pcrereview CONTRACTID accepts it (planning ticks the change items, the commercial unit and the PMO sign).
+pcamend() {
+  as "$COM_TOKEN" POST $PC/amendments "{\"contractId\":$1,\"type\":2,\"origin\":2,\"description\":\"$2\"}"; check "r1c: amendment ($2) saved by the commercial unit" '.success and .data.id > 0 and .data.ceoApprovedAt == null'
+  PCAMD=$(val .data.id)
+  as "$CEO_TOKEN" POST $PC/amendments/action "{\"id\":$PCAMD,\"action\":\"ceo-approve\"}"; check "r1c: amendment ($2) approved by the CEO" '.success and .data.ceoApprovedAt != null'
+}
+pcrereview() {
+  as "$PLAN_TOKEN" GET "$PC/reviews?ContractId=$1&PageSize=0"; check "r1c: contract $1: the approved amendment opened one re-review" '.success and ([.data.data[]|select(.stage == 3 and .decision == 4)]|length) == 1'
+  local _rr; _rr=$(jq -r '[.data.data[]|select(.stage == 3 and .decision == 4)][0].id' "$B")
+  as "$PLAN_TOKEN" POST $PC/reviews "{\"id\":$_rr,\"contractId\":$1,$PCREVTICKS}"; check "r1c: contract $1: the re-review is ticked by planning" '.success and .data.stage == 3'
+  as "$COM_TOKEN" POST $PC/reviews/action "{\"id\":$_rr,\"action\":\"accept\"}"; check "r1c: contract $1: the re-review, commercial signature" '.success and .data.decision == 4'
+  as "$ADMIN_TOKEN" POST $PC/reviews/action "{\"id\":$_rr,\"action\":\"accept\"}"; check "r1c: contract $1: the re-review, PMO signature completes it" '.success and .data.decision == 1'
+}
+# R1c (H8): tndreview TENDERID : the tender-stage review of a tender code before its proposal is submitted
+tndreview() {
+  call GET Tenders/$1; local _tc; _tc=$(val .data.code)
+  as "$PLAN_TOKEN" POST $PC/reviews "{\"tenderCode\":\"$_tc\",$PCREVTICKS}"; check "r1c: tender $_tc: review saved fully ticked" '.success and .data.id > 0 and .data.stage == 1'
+  local _rv; _rv=$(val .data.id)
+  as "$COM_TOKEN" POST $PC/reviews/action "{\"id\":$_rv,\"action\":\"accept\"}"; check "r1c: tender $_tc: the commercial signature" '.success and .data.decision == 0'
+  as "$ADMIN_TOKEN" POST $PC/reviews/action "{\"id\":$_rv,\"action\":\"accept\"}"; check "r1c: tender $_tc: the PMO signature completes the review" '.success and .data.decision == 1'
+}
 D0=$(dd 0)
 
 # --- no endpoint answers without a token (every controller is protected; the only anonymous routes are login, logout, the API settings and the device push with its own key)
@@ -962,14 +1003,15 @@ as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PRQ,\"action\":\"app
 as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PRQ,\"action\":\"approve-management\"}"; check "CEO approval completes the request" '.success and .data.status == 2'
 as "$COM_TOKEN" POST procurement/suppliers/evaluate "{\"providerId\":$PA,\"kind\":1,\"evaluationDate\":\"2026-10-22T00:00:00\",\"lines\":[{\"question\":\"کیفیت\",\"weight\":3,\"score\":90},{\"question\":\"تحویل به موقع\",\"weight\":2,\"score\":88},{\"question\":\"سابقه\",\"weight\":1}]}"
 check "supplier evaluation: weighted score and grade A" '.success and .data.grade == 1 and .data.score == 89.2'
-QA="{\"providerId\":$PA,\"quoteNumber\":\"Q-A\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL,\"quantity\":100,\"unitPrice\":390000}]}"
-QB="{\"providerId\":$PB,\"quoteNumber\":\"Q-B\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL,\"quantity\":100,\"unitPrice\":380000}]}"
+QA="{\"providerId\":$PA,\"quoteNumber\":\"Q-A\",\"vatPercent\":10,\"deliveryDays\":20,\"lines\":[{\"requestLineId\":$PRL,\"quantity\":100,\"unitPrice\":390000}]}"
+QB="{\"providerId\":$PB,\"quoteNumber\":\"Q-B\",\"vatPercent\":10,\"lines\":[{\"requestLineId\":$PRL,\"quantity\":100,\"unitPrice\":380000}]}"
 as "$WH_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$PRQ,\"quotes\":[$QA]}"; check "only commercial takes quotes" '.success == false'
 as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$PRQ,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA]}"
 check "inquiry needs two quotes for 40M rial" '.success and .data.requiredQuotes == 2'
 INQ=$(val .data.id); QAID=$(val '.data.quotes[0].id')
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$INQ,\"quoteId\":$QAID}"; check "one quote is not enough" '.success == false'
 as "$COM_TOKEN" POST procurement/inquiries "{\"id\":$INQ,\"purchaseRequestId\":$PRQ,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA,$QB]}"; check "second quote added" '.success and (.data.quotes|length) == 2'
+tech_all $INQ; as "$COM_TOKEN" GET "procurement/inquiries/$INQ"; check "r1c: engineering accepted both quotes technically (the buyer did not)" '.success and ([.data.quotes[]|select(.technicallyAccepted and .technicalReviewedByName != null)]|length) == 2'
 QAID=$(val ".data.quotes[] | select(.providerId == $PA) | .id")
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$INQ,\"quoteId\":$QAID}"; check "choosing a dearer quote needs a reason" '.success == false'
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$INQ,\"quoteId\":$QAID,\"reason\":\"گرید A و تحویل 20 روزه\"}"; check "quote selected, inquiry approved" '.success and .data.status == 2'
@@ -1018,7 +1060,7 @@ as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid
 as "$FIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":1}"; nomsg "r1: the old pay action is for treasury or the finance manager only" "خزانه"
 as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\"}"; check "r1: the old pay action needs the paying bank account (the bank side of the entry is always linked)" '.success == false and (.message|contains("حساب بانکی"))'
 as "$TR_TOKEN" POST finance/treasury/bank-accounts '{"title":"بانک مسیر قدیمی","bankName":"ملی","accountNumber":"100324200005","iban":"IR160170000000100324200005"}'; BALEG=$(val .data.id)
-call POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR970170000000100324200002\"}"
+as "$COM_TOKEN" POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR970170000000100324200002\"}"
 as "$TR_TOKEN" POST procurement/payments/action "{\"id\":$PAY,\"action\":\"paid\",\"reference\":\"سند 4521\",\"bankAccountId\":$BALEG}"; check "r2 f23: the old pay action creates a DRAFT treasury payment (request stays approved, not paid)" '.success and .data.status == 1 and (.data.treasuryPaymentId // 0) > 0'
 OLDPM=$(val .data.treasuryPaymentId)
 as "$TR_TOKEN" POST finance/treasury/payments/action "{\"id\":$OLDPM,\"action\":\"post\"}"; no "r2 f23: the draft from the old path cannot be posted without the finance manager's approval"
@@ -2025,6 +2067,11 @@ TOKEN=$ADMIN_TOKEN
 # PCP (late penalty). Schedule dates are fixed (calendar Mon-Fri, start Monday 2026-11-02) so every figure is exact.
 TOKEN=$ADMIN_TOKEN
 PC=projectcontrol
+# R1c (C9): the project-control fixture is anchored on the Monday of this week (on Saturday and Sunday on the next Monday), so every asOf below is today or later and the figures stay exact on any day.
+# pcd N = that Monday plus N days; pcmin D = D, or today when D is still in the future (a cost cannot be dated in the future).
+PCDOW=$(date +%u); if [ "$PCDOW" -ge 6 ]; then PCMON=$(date -d "$((8 - PCDOW)) days" +%Y-%m-%d); else PCMON=$(date -d "$((1 - PCDOW)) days" +%Y-%m-%d); fi
+pcd() { date -d "$PCMON $1 days" +%Y-%m-%d; }
+pcmin() { local t; t=$(date +%Y-%m-%d); if [[ "$1" > "$t" ]]; then echo "$t"; else echo "$1"; fi; }
 call POST Accounts/register-user '{"userName":"pm.ci","name":"pm.ci","lastName":"آزمون","email":"pm.ci@example.com","roleIds":[15],"password":"Ci#Pm-User-2026","phoneNumber":"09120000022","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345622"}'
 call POST Accounts/register-user '{"userName":"dcc.ci","name":"dcc.ci","lastName":"آزمون","email":"dcc.ci@example.com","roleIds":[16],"password":"Ci#Dcc-User-2026","phoneNumber":"09120000023","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345623"}'
 PM_TOKEN=$(login pm.ci 'Ci#Pm-User-2026'); DCC_TOKEN=$(login dcc.ci 'Ci#Dcc-User-2026')
@@ -2049,7 +2096,7 @@ call POST Equipments '{"code":"PC-EQ-PUMP","title":"Process Pump API 610"}'; PEQ
 call POST ContractEquipments "{\"contractId\":$PCT,\"equipmentId\":$PEQ,\"count\":1}"; check "pc: contract equipment" '.success'
 call POST WorkOrders "{\"contractId\":$PCT,\"equipmentId\":$PEQ,\"code\":\"PC-WO-1\",\"title\":\"Pump 1\",\"description\":\"x\",\"count\":1}"; check "pc: work order created" '.success and .data.id > 0'
 PCW1=$(val .data.id)
-PCTERMS="{\"contractId\":$PCT,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000,\"vatPercent\":10,\"advancePercent\":10,\"retentionPercent\":5,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"accrualMode\":1,\"clientReviewDays\":14,\"managementReserve\":0,\"autoSnapshot\":true,\"clientReportShowsIndices\":false}"
+PCTERMS="{\"contractId\":$PCT,\"currencyCode\":\"IRR\",\"valueExVat\":1000000000,\"vatPercent\":10,\"advancePercent\":10,\"retentionPercent\":5,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"$(pcd 0)T00:00:00\",\"accrualMode\":1,\"clientReviewDays\":14,\"managementReserve\":0,\"autoSnapshot\":true,\"clientReportShowsIndices\":false}"
 as "$WH_TOKEN" POST $PC/terms "$PCTERMS"; no "pc: warehouse cannot write contract terms"
 as "$PLAN_TOKEN" POST $PC/terms "$PCTERMS"; check "pc: contract terms saved (value, penalty, calendar, start)" '.success and .data.valueExVat == 1000000000 and .data.dataDateWeekday == 3 and .data.clientReportShowsIndices == false'
 as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.vatPercent = 101')"; no "pc: percentage above 100 rejected"
@@ -2058,6 +2105,14 @@ call DELETE "Contracts/$PCT"; check "r1a legacy: the PMO cannot delete a contrac
 as "$PLAN_TOKEN" DELETE "Contracts/$PCT"; r403 "r1a legacy: planning cannot delete a contract (403)"
 call GET "Contracts/contracts?Id=$PCT"; check "r1a legacy: the contract of the project is still there" ".success and .data.id == $PCT"
 
+# R1c (H8): the contract review is accepted by two different people (PMO and COMMERCIAL) before the project code, the WBS, a baseline or project purchase requests
+as "$COM_TOKEN" POST $PC/reviews "{\"contractId\":$PCT,$PCREVTICKS}"; check "r1c: contract review drafted and ticked by the commercial unit" '.success and .data.id > 0 and .data.stage == 2'
+PCREV=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms/generate-code "{\"contractId\":$PCT,\"category\":1}"; nomsg "r1c: no project code before the contract review is accepted" "بازنگری"
+as "$COM_TOKEN" POST $PC/reviews/action "{\"id\":$PCREV,\"action\":\"accept\"}"; nomsg "r1c: the person who saved the review cannot sign it (maker-checker)" "ثبت‌کننده یا ویرایش‌کننده بازنگری"
+as "$COM2_TOKEN" POST $PC/reviews/action "{\"id\":$PCREV,\"action\":\"accept\"}"; check "r1c: the commercial acceptance of another person alone leaves the review pending" '.success and .data.decision == 0 and .data.commercialAcceptedByUserId > 0'
+as "$COM2_TOKEN" POST $PC/reviews/action "{\"id\":$PCREV,\"action\":\"accept\"}"; nomsg "r1c: the same person cannot give the second signature" "امضا"
+as "$ADMIN_TOKEN" POST $PC/reviews/action "{\"id\":$PCREV,\"action\":\"accept\"}"; check "r1c: the PMO acceptance completes the review (two different people)" '.success and .data.decision == 1'
 # --- initiation (WI-PL-009 sections 3-8) and the 9-character project code
 as "$PLAN_TOKEN" POST $PC/initiation/start/$PCT; check "pc: initiation started: 10 steps" '.success and (.data.steps|length) == 10'
 as "$PLAN_TOKEN" POST $PC/terms/generate-code "{\"contractId\":$PCT,\"category\":1}"; check "pc: project code generated (9 characters, MA)" '.success and (.data.projectCode|length) == 9 and (.data.projectCode|contains("MA"))'
@@ -2150,10 +2205,11 @@ check "pc: purchase request with two lines submitted (40M rial)" '.success and .
 PCPR=$(val .data.id); PRL1=$(val '.data.lines[]|select(.quantity==60)|.id'); PRL2=$(val '.data.lines[]|select(.quantity==40)|.id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PCPR,\"action\":\"approve-planning\"}"
 as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PCPR,\"action\":\"approve-management\"}"; check "pc: purchase request approved" '.success and .data.status == 2'
-PQA="{\"providerId\":$PA,\"quoteNumber\":\"PC-Q-A\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL1,\"quantity\":60,\"unitPrice\":390000},{\"requestLineId\":$PRL2,\"quantity\":40,\"unitPrice\":390000}]}"
-PQB="{\"providerId\":$PB,\"quoteNumber\":\"PC-Q-B\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$PRL1,\"quantity\":60,\"unitPrice\":380000},{\"requestLineId\":$PRL2,\"quantity\":40,\"unitPrice\":380000}]}"
+PQA="{\"providerId\":$PA,\"quoteNumber\":\"PC-Q-A\",\"vatPercent\":10,\"deliveryDays\":20,\"lines\":[{\"requestLineId\":$PRL1,\"quantity\":60,\"unitPrice\":390000},{\"requestLineId\":$PRL2,\"quantity\":40,\"unitPrice\":390000}]}"
+PQB="{\"providerId\":$PB,\"quoteNumber\":\"PC-Q-B\",\"vatPercent\":10,\"lines\":[{\"requestLineId\":$PRL1,\"quantity\":60,\"unitPrice\":380000},{\"requestLineId\":$PRL2,\"quantity\":40,\"unitPrice\":380000}]}"
 as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$PCPR,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$PQA,$PQB]}"; check "pc: inquiry with two quotes" '.success and (.data.quotes|length) == 2'
 PCINQ=$(val .data.id); PQAID=$(val ".data.quotes[]|select(.providerId == $PA)|.id")
+tech_all $PCINQ
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$PCINQ,\"quoteId\":$PQAID,\"reason\":\"گرید A و تحویل 20 روزه\"}"; check "pc: quote selected" '.success and .data.status == 2'
 as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$PCINQ"; check "pc: purchase order draft with two lines" '.success and (.data.lines|length) == 2'
 PCPO=$(val .data.id); POL1=$(val '.data.lines[]|select(.quantity==60)|.id'); POL2=$(val '.data.lines[]|select(.quantity==40)|.id')
@@ -2199,12 +2255,12 @@ pcdep $PCA $PCB; no "pc: duplicate dependency rejected"
 
 # --- CPM: exact dates, float and the critical path
 as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":false,\"mirror\":true}"
-check "pc: CPM finishes on 2026-11-11 after 8 working days, no cycle" '.success and .data.hasCycle == false and .data.projectFinishOffset == 8 and (.data.projectFinish|startswith("2026-11-11")) and (.data.projectStart|startswith("2026-11-02"))'
-check "pc: CPM early dates of A, C and D" '([.data.items[]|select(.code=="PC-A")][0].earlyFinish|startswith("2026-11-04")) and ([.data.items[]|select(.code=="PC-C")][0].earlyFinish|startswith("2026-11-10")) and ([.data.items[]|select(.code=="PC-D")][0].earlyStart|startswith("2026-11-11"))'
-check "pc: activity B has total float 2 (2026-11-05..06)" '[.data.items[]|select(.code=="PC-B")][0]|(.totalFloat == 2 and (.earlyStart|startswith("2026-11-05")) and (.earlyFinish|startswith("2026-11-06")) and .critical == false)'
+check "pc: CPM finishes on the 9th day after the start after 8 working days, no cycle" '.success and .data.hasCycle == false and .data.projectFinishOffset == 8 and (.data.projectFinish|startswith("'"$(pcd 9)"'")) and (.data.projectStart|startswith("'"$(pcd 0)"'"))'
+check "pc: CPM early dates of A, C and D" '([.data.items[]|select(.code=="PC-A")][0].earlyFinish|startswith("'"$(pcd 2)"'")) and ([.data.items[]|select(.code=="PC-C")][0].earlyFinish|startswith("'"$(pcd 8)"'")) and ([.data.items[]|select(.code=="PC-D")][0].earlyStart|startswith("'"$(pcd 9)"'"))'
+check "pc: activity B has total float 2 (day 3 to day 4)" '[.data.items[]|select(.code=="PC-B")][0]|(.totalFloat == 2 and (.earlyStart|startswith("'"$(pcd 3)"'")) and (.earlyFinish|startswith("'"$(pcd 4)"'")) and .critical == false)'
 check "pc: critical path is A, C, D" '.data.criticalPath == ["PC-A","PC-C","PC-D"]'
 as "$PM_TOKEN" GET "$PC/activities?ContractId=$PCT&OnlyCritical=true&PageSize=0"; check "pc: critical activity filter" '(.data.data|length) == 3'
-as "$PLAN_TOKEN" GET "$PC/executive-plan?ContractId=$PCT&From=2026-11-02&Days=14&PageSize=0"; check "pc: executive plan (look-ahead) lists the activities" '.success'
+as "$PLAN_TOKEN" GET "$PC/executive-plan?ContractId=$PCT&From=$(pcd 0)&Days=14&PageSize=0"; check "pc: executive plan (look-ahead) lists the activities" '.success'
 
 # --- baseline 0: signatures of the unit managers, approval by the PMO deputy
 as "$PLAN_TOKEN" POST $PC/baselines "{\"contractId\":$PCT,\"reason\":\"مبنای اولیه\"}"
@@ -2255,30 +2311,42 @@ as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirr
 
 # --- cost entries (actual cost 600,000,000 by 2026-11-06) and manual progress that needs another person's approval
 pccost() { as "$FIN_TOKEN" POST $PC/costs "{\"contractId\":$PCT,\"kind\":$1,\"entryDate\":\"$2T00:00:00\",\"amount\":$3,\"description\":\"$4\"}"; }
-pccost 1 2026-11-03 400000000 "مواد اولیه"; check "pc: cost entry 400M recorded against the contract" '.success and .data.contractId > 0 and .data.amount == 400000000'
-pccost 3 2026-11-05 200000000 "دستمزد"; check "pc: cost entry 200M recorded" '.success'
-as "$PLAN_TOKEN" POST $PC/costs "{\"contractId\":$PCT,\"kind\":1,\"entryDate\":\"2026-11-03T00:00:00\",\"amount\":1,\"description\":\"x\"}"; no "pc: planning cannot post costs (finance only)"
+pccost 1 "$(pcmin "$(pcd 1)")" 400000000 "مواد اولیه"; check "pc: cost entry 400M recorded against the contract" '.success and .data.contractId > 0 and .data.amount == 400000000'
+PCCE1=$(val .data.id)
+pccost 3 "$(pcmin "$(pcd 3)")" 200000000 "دستمزد"; check "pc: cost entry 200M recorded" '.success'
+PCCE2=$(val .data.id)
+# R1c (M5): a manual cost counts as actual cost only after a second financial person checked it (the entering user cannot)
+as "$FIN_TOKEN" POST $PC/costs/check "{\"costEntryId\":$PCCE1}"; nomsg "r1c: the person who entered a manual cost cannot check it" "ثبت‌کننده هزینه نمی‌تواند آن را بررسی کند"
+as "$FM_TOKEN" POST $PC/costs/check "{\"costEntryId\":$PCCE1}"; check "r1c: the finance manager checks the first manual cost" '.success'
+as "$FM_TOKEN" POST $PC/costs/check "{\"costEntryId\":$PCCE2}"; check "r1c: the finance manager checks the second manual cost" '.success'
+as "$FM_TOKEN" POST $PC/costs/check "{\"costEntryId\":$PCCE2}"; nomsg "r1c: a cost is checked once" "قبلاً بررسی شده"
+as "$PLAN_TOKEN" POST $PC/costs "{\"contractId\":$PCT,\"kind\":1,\"entryDate\":\"$(pcmin "$(pcd 1)")T00:00:00\",\"amount\":1,\"description\":\"x\"}"; no "pc: planning cannot post costs (finance only)"
 as "$PLAN_TOKEN" POST $PC/manual-progress "{\"activityId\":$PCC,\"percent\":50,\"comment\":\"نیمی از ساخت انجام شد\"}"; check "pc: manual progress proposed (pending)" '.success and .data.state == 0 and .data.percent == 50'
 PCMP=$(val .data.id)
 as "$PLAN_TOKEN" POST $PC/manual-progress "{\"activityId\":$PCA,\"percent\":50}"; no "pc: manual progress on a system-measured activity rejected"
-as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=2026-11-06"
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=$(pcd 4)"
 check "pc: EVM stage 1: PV 700M, EV 450M (A 80%, B 70%, D 70%, C unapproved excluded), AC 600M" '.success and .data.fromBaseline == true and .data.bac == 1000000000 and .data.pv == 700000000 and .data.ev == 450000000 and .data.ac == 600000000 and .data.cv == -150000000 and .data.sv == -250000000'
 check "pc: EVM stage 1 indices: CPI 0.75, SPI 0.6429, both red, corrective action required" '.data.cpi == 0.75 and .data.spi == 0.6429 and .data.cpiStatus == "red" and .data.spiStatus == "red" and .data.correctiveActionRequired == true'
 as "$PLAN_TOKEN" POST $PC/manual-progress/decide "{\"id\":$PCMP,\"approve\":true}"; no "pc: the proposer cannot approve their own manual progress"
 as "$PM_TOKEN" POST $PC/manual-progress/decide "{\"id\":$PCMP,\"approve\":true}"; no "pc: project manager is not the approver of manual progress"
 call POST $PC/manual-progress/decide "{\"id\":$PCMP,\"approve\":true,\"note\":\"تایید\"}"; check "pc: manual progress approved by a different person" '.success and .data.state == 1'
-as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=2026-11-06"; check "pc: EVM after approving C at 50 percent: EV 650M" '.data.ev == 650000000 and .data.cpi == 1.0833'
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=$(pcd 4)"; check "pc: EVM after approving C at 50 percent: EV 650M" '.data.ev == 650000000 and .data.cpi == 1.0833'
 
 # --- weekly snapshot (immutable) and the scheduled run
 PCSNAPDATE=$(dd -14)
+as "$PLAN_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT,\"dataDate\":\"${PCSNAPDATE}T00:00:00\"}"; nomsg "r1c: a snapshot dated before the weekly data date needs an approved request" "تایید معاون PMO"
+as "$PLAN_TOKEN" POST $PC/snapshots/past-requests "{\"contractId\":$PCT,\"dataDate\":\"${PCSNAPDATE}T00:00:00\",\"reason\":\"عکس هفته گذشته گرفته نشده بود\"}"; check "r1c: planning requests a snapshot of a past data date" '.success and .data.state == 0'
+PCSNREQ=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/snapshots/past-requests/decide "{\"id\":$PCSNREQ,\"approve\":true}"; nomsg "r1c: planning cannot approve its own request (only the PMO deputy decides)" "تایید عکس با تاریخ گذشته با معاون PMO است"
+as "$ADMIN_TOKEN" POST $PC/snapshots/past-requests/decide "{\"id\":$PCSNREQ,\"approve\":true}"; check "r1c: the PMO deputy approves the past snapshot request" '.success and .data.state == 1'
 as "$PLAN_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT,\"dataDate\":\"${PCSNAPDATE}T00:00:00\"}"
 check "pc: weekly snapshot taken with 4 lines, BAC and hash" '.success and (.data.lines|length) == 4 and .data.bac == 1000000000 and (.data.hash|length) > 10'
 PCSNAP=$(val .data.id); PCSNAPHASH=$(val .data.hash)
 as "$PLAN_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT,\"dataDate\":\"${PCSNAPDATE}T00:00:00\"}"; no "pc: second snapshot for the same data date rejected"
 as "$PLAN_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT,\"dataDate\":\"2030-01-02T00:00:00\"}"; no "pc: snapshot with a future data date rejected"
 as "$PLAN_TOKEN" GET "$PC/snapshots/$PCSNAP"; check "pc: snapshot unchanged after later progress (hash identical)" ".data.hash == \"$PCSNAPHASH\""
-as "$PLAN_TOKEN" POST $PC/snapshots/run-due '{"asOf":"2026-11-11T12:00:00"}'; check "pc: scheduled snapshot run takes the Wednesday snapshot" '.success and .data.snapshotsTaken >= 1'
-as "$PLAN_TOKEN" POST $PC/snapshots/run-due '{"asOf":"2026-11-11T12:00:00"}'; check "pc: second run takes nothing (one per data date)" '.success and .data.snapshotsTaken == 0'
+as "$PLAN_TOKEN" POST $PC/snapshots/run-due "{\"asOf\":\"$(date +%Y-%m-%d)T12:00:00\"}"; check "pc: scheduled snapshot run takes the Wednesday snapshot" '.success and .data.snapshotsTaken == 1'
+as "$PLAN_TOKEN" POST $PC/snapshots/run-due "{\"asOf\":\"$(date +%Y-%m-%d)T12:00:00\"}"; check "pc: second run takes nothing (one per data date)" '.success and .data.snapshotsTaken == 0'
 as "$PM_TOKEN" POST $PC/snapshots "{\"contractId\":$PCT}"; no "pc: project manager cannot take snapshots (planning)"
 
 # --- QC accepts plate A; plate B is rejected: NCR classified as rework caps D at 80 percent
@@ -2295,7 +2363,7 @@ as "$QC_TOKEN" POST inventory/quality/ncr "{\"id\":$PCNCR,\"severity\":1,\"dispo
 as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirror\":false}"
 as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
 check "pc: D is capped at 80 percent while the rework NCR is open" '[.data.data[]|select(.code=="PC-D")][0].percentCache == 80'
-as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=2026-11-06"
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=$(pcd 4)"
 check "pc: EVM stage 2 exact: PV 700M, EV 720M, AC 600M, CV 120M, SV 20M" '.data.pv == 700000000 and .data.ev == 720000000 and .data.ac == 600000000 and .data.cv == 120000000 and .data.sv == 20000000'
 check "pc: EVM stage 2 indices: CPI 1.2, SPI 1.0286, EAC 833,333,333.33" '.data.cpi == 1.2 and .data.spi == 1.0286 and .data.eacTypical == 833333333.33 and .data.cpiStatus == "green" and .data.spiStatus == "green" and .data.correctiveActionRequired == false'
 as "$PLAN_TOKEN" GET "$PC/progress/$PCT"; check "pc: physical progress is the average of the four activities" '.success and .data.physicalPercent == 77.5'
@@ -2325,7 +2393,7 @@ check "pc: PMO deputy approves within authority -> implementing, baseline attach
 call GET "$PC/baselines?ContractId=$PCT&PageSize=0"
 check "pc: baseline 1 approved and current (BAC 1.1bn); baseline 0 superseded" '([.data.data[]|select(.number==1)][0]|(.status == 2 and .isCurrent == true and .bac == 1100000000 and .changeRequestId != null)) and ([.data.data[]|select(.number==0)][0].status == 3)'
 as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"
-check "pc: plan re-run: C now 6 days ends 2026-11-12, D 2026-11-13, budget of C 500M" '([.data.data[]|select(.code=="PC-C")][0]|(.durationDays == 6 and (.earlyFinish|startswith("2026-11-12")) and .budgetAtCompletion == 500000000)) and ([.data.data[]|select(.code=="PC-D")][0].earlyFinish|startswith("2026-11-13"))'
+check "pc: plan re-run: C now 6 days ends '"$(pcd 10)"', D '"$(pcd 11)"', budget of C 500M" '([.data.data[]|select(.code=="PC-C")][0]|(.durationDays == 6 and (.earlyFinish|startswith("'"$(pcd 10)"'")) and .budgetAtCompletion == 500000000)) and ([.data.data[]|select(.code=="PC-D")][0].earlyFinish|startswith("'"$(pcd 11)"'"))'
 as "$PM_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"close\"}"; no "pc: only planning closes a change"
 as "$PLAN_TOKEN" POST $PC/changes/action "{\"id\":$PCCHID,\"action\":\"close\"}"; check "pc: change closed" '.success and .data.status == 5'
 as "$PLAN_TOKEN" GET "$PC/changes?ContractId=$PCT"; check "pc: change list is paged" '.success and (.data.data|length) >= 1'
@@ -2496,12 +2564,22 @@ as "$WH_TOKEN" POST $PC/shipments "{\"contractId\":$QCT,\"workOrderId\":$WO2,\"p
 PCSH2=$(val .data.id)
 as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH2,\"action\":\"pack\",\"packingVerification\":\"checked\"}"; nomsg "pc: packing without a released release note is blocked" "بدون برگه ترخیص"
 as "$WH_TOKEN" POST $PC/shipments "{\"contractId\":$QCT,\"workOrderId\":$WO1,\"packingList\":\"2 crates\"}"; PCSH1=$(val .data.id)
-as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"pack\"}"; no "pc: packing needs the verification result"
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"pack\"}"; nomsg "pc: packing needs the verification result" "نتیجه بازبینی بسته‌بندی"
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"pack\",\"packingVerification\":\"matches the packing list\"}"; nomsg "r1c: packing needs the lines of the shipment (items, serial numbers and quantities)" "اقلام محموله"
+as "$WH_TOKEN" POST $PC/shipments "{\"id\":$PCSH1,\"contractId\":$QCT,\"workOrderId\":$WO1,\"packingList\":\"2 crates\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":2}]}"; nomsg "r1c: the lines of a shipment never exceed the ordered quantity of the work order (1)" "از تعداد سفارش"
+as "$WH_TOKEN" POST $PC/shipments "{\"id\":$PCSH1,\"contractId\":$QCT,\"workOrderId\":$WO1,\"packingList\":\"2 crates\",\"lines\":[{\"itemId\":$XSER,\"quantity\":1}]}"; nomsg "r1c (L3): an item that is not an item of the work order is refused as a shipment line" "تعلق ندارد"
+as "$WH_TOKEN" POST $PC/shipments "{\"id\":$PCSH1,\"contractId\":$QCT,\"workOrderId\":$WO1,\"packingList\":\"2 crates\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":1}]}"; check "r1c: the shipment now carries its line (1 bolt of the work order)" '.success and (.data.lines|length) == 1 and .data.lines[0].quantity == 1'
 as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"pack\",\"packingVerification\":\"matches the packing list\"}"; check "pc: released work order packed; release note linked" ".success and .data.status == 1 and .data.releaseNoteId == $RN1"
+as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"release\"}"; nomsg "r1c: the shipping release needs the packing check of quality control first" "بازبینی بسته‌بندی توسط کنترل کیفیت"
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"check-packing\"}"; nomsg "r1c: only quality control checks the packing (warehouse refused)" "بازبینی بسته‌بندی با کنترل کیفیت"
+as "$QC_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"check-packing\"}"; check "r1c: quality control checks the packing (not the packer)" '.success and .data.packingCheckedByUserId > 0'
 as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"release\"}"; no "pc: shipping release belongs to planning"
 as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"release\"}"; check "pc: planning releases the shipment" '.success and .data.status == 2'
-as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"ship\",\"waybill\":\"WB-100\",\"shippingDocuments\":\"packing list, CoC\"}"; check "pc: shipped" '.success and .data.status == 3'
-as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"deliver\",\"deliveryReceiptNumber\":\"DR-1\"}"; check "pc: delivered" '.success and .data.status == 4 and .data.deliveredAt != null'
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"ship\",\"waybill\":\"WB-100\",\"shippingDocuments\":\"packing list, CoC\"}"; nomsg "r1c: shipping needs the confirmed customer-delivery document of the warehouse" "تحویل به مشتری"
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"ship\",\"waybill\":\"WB-100\",\"shippingDocuments\":\"packing list, CoC\",\"inventoryDocumentId\":$DL6}"; nomsg "r1c: a customer-delivery document that was never confirmed does not count" "تاییدشده باشد"
+as "$WH_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"ship\",\"waybill\":\"WB-100\",\"shippingDocuments\":\"packing list, CoC\",\"inventoryDocumentId\":$DL1}"; check "pc: shipped with the confirmed customer-delivery document of the work order" ".success and .data.status == 3 and .data.inventoryDocumentId == $DL1"
+as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"deliver\",\"deliveryReceiptNumber\":\"DR-1\"}"; nomsg "r1c: delivered means the client signed the receipt: the signed copy is attached first" "رسید امضاشده"
+as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"deliver\",\"deliveryReceiptNumber\":\"DR-1\",\"signedReceiptDocumentId\":\"$DOCID\"}"; check "pc: delivered with the signed receipt" '.success and .data.status == 4 and .data.deliveredAt != null'
 as "$PLAN_TOKEN" POST $PC/shipments/action "{\"id\":$PCSH1,\"action\":\"handover\",\"handoverMinutesNumber\":\"HM-1\"}"; check "pc: handover minutes recorded" '.success and .data.status == 5'
 
 # --- reports: client report has no indices unless the contract says so; MS Project export; final book
@@ -2509,9 +2587,13 @@ as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1}"
 check "pc: client monthly report carries progress but no SPI/CPI" '.success and (.data.hash|length) > 10 and (.data.content|fromjson|(.physicalPercent // .PhysicalPercent)) != null and ((.data.content|fromjson|(.spi // .Spi)) == null) and ((.data.content|fromjson|(.cpi // .Cpi)) == null)'
 PCREP=$(val .data.id)
 as "$PM_TOKEN" POST $PC/reports/$PCREP/release; check "pc: project manager releases the client report" '.success and .data.releasedAt != null'
-as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.clientReportShowsIndices = true')"; check "pc: contract allows indices in the client report" '.success and .data.clientReportShowsIndices == true'
-as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1,\"dataDate\":\"2026-11-06T00:00:00\"}"; check "pc: client report shows SPI/CPI only when the contract allows it" '(.data.content|fromjson|(.spi // .Spi)) != null'
-as "$PLAN_TOKEN" POST $PC/terms "$PCTERMS" >/dev/null
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.clientReportShowsIndices = true')"; nomsg "r1c: the report setting of a reviewed contract changes only through a CEO-approved amendment" "فقط با الحاقیه تاییدشده مدیرعامل"
+pcamend $PCT "نمایش شاخص‌ها در گزارش مشتری"
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c --argjson a $PCAMD '.clientReportShowsIndices = true | .amendmentId = $a')"; check "pc: contract allows indices in the client report" '.success and .data.clientReportShowsIndices == true'
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1,\"dataDate\":\"$(pcmin "$(pcd 4)")T00:00:00\"}"; check "pc: client report shows SPI/CPI only when the contract allows it" '(.data.content|fromjson|(.spi // .Spi)) != null'
+pcamend $PCT "بازگرداندن نمایش شاخص‌ها"
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c --argjson a $PCAMD '.amendmentId = $a')"; check "pc: the indices setting is restored by a second amendment" '.success and .data.clientReportShowsIndices == false'
+pcrereview $PCT
 as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":2}"; check "pc: internal weekly report generated" '.success and .data.kind == 2'
 as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":3}"; check "pc: CEO monthly report generated" '.success and .data.kind == 3'
 as "$PM_TOKEN" GET "$PC/reports?ContractId=$PCT"; check "pc: reports are listed (paged)" '.success and (.data.data|length) >= 3'
@@ -2531,14 +2613,15 @@ as "$DCC_TOKEN" GET "$PC/final-books?WorkOrderId=$PCW1"; check "pc: final books 
 call POST Contracts '{"code":"PC-CT-02","title":"قرارداد آزمون WBS","status":1,"employer":"کارفرمای آزمون"}'; PCT2=$(val .data.id)
 call POST ContractEquipments "{\"contractId\":$PCT2,\"equipmentId\":$PEQ,\"count\":1}"
 call POST WorkOrders "{\"contractId\":$PCT2,\"equipmentId\":$PEQ,\"code\":\"PC-WO-3\",\"title\":\"Pump 3\",\"description\":\"x\",\"count\":1}"; PCW3=$(val .data.id)
-as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PCT2,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "pc: second contract terms" '.success'
+as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PCT2,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"$(pcd 0)T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "pc: second contract terms" '.success'
+pcreview $PCT2 # R1c (H8): the review of the contract is accepted before its WBS and purchase requests
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PCW3,\"contractId\":$PCT2,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"25\"}"; check "pc: second equipment code PU1502501 (unique across contracts)" '.success and .data.equipmentProjectCode == "PU1502501"'
 as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$PCT2,\"workOrderIds\":[$PCW3]}"
 check "pc: WBS generated from the work order: 4 nodes, 6 activities, 5 dependencies, 12 MDR lines" '.success and .data.nodesCreated == 4 and .data.activitiesCreated == 6 and .data.dependenciesCreated == 5 and .data.mdrLinesDrafted == 12'
 as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$PCT2,\"workOrderIds\":[$PCW3]}"; check "pc: generating again creates nothing twice" '(.success == false) or (.data.nodesCreated == 0 and .data.activitiesCreated == 0)'
 as "$PLAN_TOKEN" GET "$PC/wbs?ContractId=$PCT2&PageSize=0"; check "pc: generated WBS nodes are listed" '.success and (.data.data|length) == 4'
 as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT2,\"forecast\":false,\"mirror\":true}"
-check "pc: generated plan: MDR 10 + MDL 10 + packing 2 = 22 working days, ends 2026-12-01" '.success and .data.hasCycle == false and .data.projectFinishOffset == 22 and (.data.projectFinish|startswith("2026-12-01"))'
+check "pc: generated plan: MDR 10 + MDL 10 + packing 2 = 22 working days, ends 4 weeks and 1 day after the start" '.success and .data.hasCycle == false and .data.projectFinishOffset == 22 and (.data.projectFinish|startswith("'"$(pcd 29)"'"))'
 as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT2&PageSize=0"
 PCMDRACT=$(jq -r '[.data.data[]|select(.title|contains("MDR"))|select(.title|contains("MDL")|not)][0].id' "$B"); PCDELACT=$(jq -r '[.data.data[]|select(.title|contains("تحویل به کارفرما"))][0].id' "$B")
 as "$PLAN_TOKEN" POST $PC/dependencies "{\"contractId\":$PCT2,\"predecessorId\":$PCDELACT,\"successorId\":$PCMDRACT,\"type\":1,\"lagDays\":0}"; no "pc: cycle delivered -> MDR rejected"
@@ -2723,8 +2806,8 @@ as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SINV2,\"am
 PAY2=$(val .data.id)
 call POST procurement/payments/action "{\"id\":$PAY2,\"action\":\"approve\"}"; check "finance: payment request approved by PMO" '.success and .data.status == 1'
 as "$TR_TOKEN" GET "$FT/payable-requests?PageSize=0"; check "finance: treasury sees the approved request with net 16692000" '.success and ([.data.data[]|select(.id == '$PAY2' and .netAmount == 16692000)]|length) == 1'
-call POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR000000000000000000000000\"}"; no "finance: supplier IBAN with a wrong check digit rejected"
-call POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR970170000000100324200002\"}"; check "finance: supplier IBAN registered" '.success and .data.iban == "IR970170000000100324200002"'
+as "$COM_TOKEN" POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR000000000000000000000000\"}"; no "finance: supplier IBAN with a wrong check digit rejected"
+as "$COM_TOKEN" POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR970170000000100324200002\"}"; check "finance: supplier IBAN registered" '.success and .data.iban == "IR970170000000100324200002"'
 PJ="{\"date\":\"${TODAY}T00:00:00\",\"purpose\":1,\"paymentRequestIds\":[$PAY2],\"lines\":[{\"instrument\":2,\"amount\":9532000,\"bankAccountId\":$BA1,\"reference\":\"PAYREF-77\"},{\"instrument\":3,\"amount\":7160000,\"bankAccountId\":$BA1,\"chequeSerial\":501,\"chequeDueDate\":\"${TODAY}T00:00:00\",\"chequeSayadId\":\"6543210987654321\"}]}"
 as "$TR_TOKEN" POST $FT/payments "$(jq -c '.lines[0].amount = 9000000' <<< "$PJ")"; no "finance: payment lines must add up to the net of the requests"
 as "$TR_TOKEN" POST $FT/payments "$(jq -c '.lines[0].payeeIban = "IR950190000000200000000003"' <<< "$PJ")"; check "finance: payment to another IBAN is drafted" '.success and .data.status == 0'
@@ -2792,9 +2875,8 @@ as "$FM_TOKEN" GET "$FX/rates?PageSize=0"; check "finance: VAT rate table has on
 as "$FM_TOKEN" GET "$FX/vat-season?Year=1405&Season=1"; check "finance: VAT season report returned" '.success and .data.season == 1'
 as "$FM_TOKEN" GET "$FX/taxpayer-sales?From=$(dd -400)T00:00:00&To=$(dd 5)T00:00:00&PageSize=0"; check "finance: taxpayer sales list shows the approved invoice" '.success and ([.data.data[]|select(.invoiceId == '$INV1')]|length) == 1'
 
-# --- draft sales invoices from payment milestones
-as "$FM_TOKEN" POST $FR/invoices/draft-from-milestones; check "finance: due milestones become draft sales invoices" '.success and .data.drafted >= 1'
-as "$FM_TOKEN" POST $FR/invoices/draft-from-milestones; check "finance: a second run drafts nothing new" '.success and .data.drafted == 0'
+# --- the employer of the project contracts is a finance customer (R1c C8: the system no longer makes a customer from the employer text; the legacy linker, further below, links the contracts to it by the exact name, and the draft invoices of the due milestones are made after it)
+as "$FIN_TOKEN" POST $FR/customers '{"name":"کارفرمای آزمون","economicCode":"411111111133","nationalId":"10101010103","postalCode":"1234567892","employerName":"کارفرمای آزمون"}'; check "finance: the employer of the project contracts is saved as a customer" '.success and .data.id > 0'
 
 # --- dashboards
 as "$FM_TOKEN" GET finance/dashboard; check "finance: dashboard returned for the finance manager" '.success and .data.cashTotal >= 0 and (.data.generatedAt|length) > 0'
@@ -3801,9 +3883,10 @@ as "$FM_TOKEN" POST $FG/years/$FY2/close '{"overrideReconciliation":true,"reason
 # --- 2 and 14: supplier advance recovery and late penalty credited to its own account
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"پیش‌پرداخت بازبینی\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":100,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ2=$(val .data.id); RQ2L=$(val '.data.lines[0].id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ2,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ2,\"action\":\"approve-management\"}"; check "r1 advance: purchase request approved" '.success and .data.status == 2'
-QA2="{\"providerId\":$PA,\"quoteNumber\":\"R1-A\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ2L,\"quantity\":100,\"unitPrice\":390000}]}"
-QB2="{\"providerId\":$PB,\"quoteNumber\":\"R1-B\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ2L,\"quantity\":100,\"unitPrice\":380000}]}"
+QA2="{\"providerId\":$PA,\"quoteNumber\":\"R1-A\",\"vatPercent\":10,\"deliveryDays\":20,\"lines\":[{\"requestLineId\":$RQ2L,\"quantity\":100,\"unitPrice\":390000}]}"
+QB2="{\"providerId\":$PB,\"quoteNumber\":\"R1-B\",\"vatPercent\":10,\"lines\":[{\"requestLineId\":$RQ2L,\"quantity\":100,\"unitPrice\":380000}]}"
 as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ2,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA2,$QB2]}"; IQ2=$(val .data.id); QA2ID=$(val ".data.quotes[]|select(.providerId == $PA)|.id")
+tech_all $IQ2
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ2,\"quoteId\":$QA2ID,\"reason\":\"گرید A\"}"
 as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ2"; check "r1 advance: order draft of 39,000,000" '.success and .data.totalAmount == 39000000'
 PO2=$(val .data.id); POL2=$(val '.data.lines[0].id')
@@ -3826,6 +3909,8 @@ as "$COM_TOKEN" POST procurement/payments "{\"type\":3,\"invoiceId\":$SI2,\"amou
 check "r1 advance: the full invoice request gets the 3,900,000 recovery proposed next to the 900,000 penalty: deductions 4,800,000" '.success and .data.deductions == 4800000 and .data.netAmount == 38100000 and ([.data.deductionLines[]|select(.kind == 5 and .amount == 3900000)]|length) == 1 and ([.data.deductionLines[]|select(.kind == 4 and .amount == 900000)]|length) == 1'
 PAY3=$(val .data.id)
 as "$FIN_TOKEN" GET procurement/suppliers/open-advances; check "r1 advance: nothing is left open for the order" '([.data[]|select(.purchaseOrderId == '$PO2')]|length) == 0'
+as "$ADMIN_TOKEN" POST procurement/payments/action "{\"id\":$PAY3,\"action\":\"approve\"}"; nomsg "r1c: a typed late penalty must be confirmed by finance before the request is approved" "باید توسط مالی تایید شود"
+as "$FM_TOKEN" POST procurement/payments/action "{\"id\":$PAY3,\"action\":\"confirm-deductions\"}"; check "r1c: finance confirms the proposed deductions (not the creator, not the approver)" '.success'
 call POST procurement/payments/action "{\"id\":$PAY3,\"action\":\"approve\"}"; check "r1 advance: request approved" '.success and .data.status == 1'
 as "$TR_TOKEN" POST $FT/payments "{\"date\":\"${TODAY}T00:00:00\",\"purpose\":1,\"paymentRequestIds\":[$PAY3],\"lines\":[{\"instrument\":2,\"amount\":36100000,\"bankAccountId\":$BA1,\"reference\":\"PAYREF-R1\"},{\"instrument\":3,\"amount\":2000000,\"bankAccountId\":$BAR,\"chequeSerial\":901,\"chequeDueDate\":\"${TODAY}T00:00:00\",\"chequeSayadId\":\"7777888899990000\"}]}"; check "r1 advance: treasury payment of the net 38,100,000 (transfer 36,100,000 and a 2,000,000 cheque)" '.success and .data.netAmount == 38100000'
 PMA=$(val .data.id)
@@ -4312,9 +4397,10 @@ as "$FM_TOKEN" GET $FCL/dunning; check "f3 dunning: the list is readable" '.succ
 # an approved supplier invoice that no payment request covers yet (10 bolts x 390,000 + 10% VAT = 4,290,000)
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"پیشنهاد پرداخت\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ3=$(val .data.id); RQ3L=$(val '.data.lines[0].id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ3,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ3,\"action\":\"approve-management\"}"
-QA3="{\"providerId\":$PA,\"quoteNumber\":\"P-A\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ3L,\"quantity\":10,\"unitPrice\":390000}]}"
-QB3="{\"providerId\":$PB,\"quoteNumber\":\"P-B\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ3L,\"quantity\":10,\"unitPrice\":380000}]}"
+QA3="{\"providerId\":$PA,\"quoteNumber\":\"P-A\",\"vatPercent\":10,\"deliveryDays\":20,\"lines\":[{\"requestLineId\":$RQ3L,\"quantity\":10,\"unitPrice\":390000}]}"
+QB3="{\"providerId\":$PB,\"quoteNumber\":\"P-B\",\"vatPercent\":10,\"lines\":[{\"requestLineId\":$RQ3L,\"quantity\":10,\"unitPrice\":380000}]}"
 as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ3,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA3,$QB3]}"; IQ3=$(val .data.id); QA3ID=$(val ".data.quotes[]|select(.providerId == $PA)|.id")
+tech_all $IQ3
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ3,\"quoteId\":$QA3ID,\"reason\":\"گرید A\"}"
 as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ3"; PO3=$(val .data.id); POL3=$(val '.data.lines[0].id')
 call POST procurement/orders/action "{\"id\":$PO3,\"action\":\"approve\"}"; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO3,\"action\":\"release\"}"; check "f3 proposal setup: order released" '.success and .data.status == 2'
@@ -4346,7 +4432,7 @@ done
 as "$FM_TOKEN" GET "$FAU?EntityType=FnPeriod&PageSize=0"; check "r2 f20: audit values show Persian dates and no Gregorian date" '.success and ([.data.data[]|(.beforeJson|tostring),(.afterJson|tostring)]|map(select(test("20[0-9]{2}-[0-9]{2}-[0-9]{2}")))|length) == 0 and ([.data.data[]|(.afterJson|tostring)|select(test("14[0-9]{2}/[0-9]{2}/[0-9]{2}"))]|length) >= 1'
 # --- finding 21: audit gaps (manual voucher lines, supplier IBAN with a one-way hash of the full value)
 as "$FM_TOKEN" GET "$FAU?EntityType=FnVoucherLine&PageSize=0"; check "r2 f21: the lines of manual vouchers are in the audit trail" '.success and (.data.data|length) >= 1'
-call POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR950190000000200000000003\"}"; check "r2 f21: supplier IBAN changed" '.success'
+as "$COM_TOKEN" POST procurement/suppliers "{\"providerId\":$PA,\"iban\":\"IR950190000000200000000003\"}"; check "r2 f21: supplier IBAN changed" '.success'
 as "$FM_TOKEN" GET "$FAU?EntityType=SupplierProfile&PageSize=0"; check "r2 f21: the supplier IBAN change is audited masked with a hash and never in full" '.success and ([.data.data[]|select((.afterJson|tostring|contains("IbanHash")) and (.afterJson|tostring|contains("****0003")) and ((.afterJson|tostring|contains("IR950190000000200000000003"))|not) and ((.beforeJson|tostring|contains("IR970170000000100324200002"))|not))]|length) >= 1'
 # --- finding 6: a person who initiated a flow cannot finalise its voucher (system events have creator 0, so they stay unaffected)
 as "$FM_TOKEN" POST $FDF/provisions/movement "{\"provisionId\":$PV1,\"date\":\"2025-06-18T00:00:00\",\"amount\":100000,\"reason\":\"آزمون ایجادکننده\"}"; check "r2 f6: finance manager charges the provision by 100,000" '.success and .data.balance == 3900000'
@@ -4380,9 +4466,10 @@ RA_AP0=$(rec ap); RA_BK0=$(rec bank)
 # --- non-recoverable VAT per purchase line (a second order of 10 bolts at 390,000; the whole VAT of 390,000 is cost)
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"مالیات غیرقابل استرداد\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":10,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ4=$(val .data.id); RQ4L=$(val '.data.lines[0].id')
 as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ4,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ4,\"action\":\"approve-management\"}"
-QA4="{\"providerId\":$PA,\"quoteNumber\":\"P-A4\",\"vatPercent\":10,\"deliveryDays\":20,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ4L,\"quantity\":10,\"unitPrice\":390000}]}"
-QB4="{\"providerId\":$PB,\"quoteNumber\":\"P-B4\",\"vatPercent\":10,\"technicallyAccepted\":true,\"lines\":[{\"requestLineId\":$RQ4L,\"quantity\":10,\"unitPrice\":380000}]}"
+QA4="{\"providerId\":$PA,\"quoteNumber\":\"P-A4\",\"vatPercent\":10,\"deliveryDays\":20,\"lines\":[{\"requestLineId\":$RQ4L,\"quantity\":10,\"unitPrice\":390000}]}"
+QB4="{\"providerId\":$PB,\"quoteNumber\":\"P-B4\",\"vatPercent\":10,\"lines\":[{\"requestLineId\":$RQ4L,\"quantity\":10,\"unitPrice\":380000}]}"
 as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ4,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA4,$QB4]}"; IQ4=$(val .data.id); QA4ID=$(val ".data.quotes[]|select(.providerId == $PA)|.id")
+tech_all $IQ4
 as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ4,\"quoteId\":$QA4ID,\"reason\":\"گرید A\"}"
 as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ4"; PO4=$(val .data.id); POL4=$(val '.data.lines[0].id')
 call POST procurement/orders/action "{\"id\":$PO4,\"action\":\"approve\"}"; as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO4,\"action\":\"release\"}"
@@ -5864,6 +5951,7 @@ curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $MOP_TOKEN" -H
 as "$MOP_TOKEN" DELETE "Contracts/detach-file-from-contract?contractId=$MFCT&fileId=$CTFILE"; r403 "r1a2 h3: an operator cannot detach it through the contract module either (403)"
 call DELETE "Contracts/detach-file-from-contract?contractId=$MFCT&fileId=$CTFILE"; check "r1a2 h3: the PMO detaches it through the contract module (the link goes first, then the file)" '.success and .data == true'
 as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$MFCT,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "mes: contract terms" '.success'
+pcreview $MFCT # R1c (H8): the review of the contract is accepted before its WBS and purchase requests
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$MFWO,\"contractId\":$MFCT,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"26\"}"; check "mes: equipment project code is built from the type, size and option" '.success and (.data.equipmentProjectCode|startswith("PU15026"))'
 call POST Assemblies "{\"title\":\"Pump casing\",\"code\":\"MF-ASM-1\",\"workOrderId\":$MFWO,\"assemblerDuration\":1}"; MFASM=$(val .data.id)
 mfbom() { # mfbom POSITION COUNT TITLE : echoes nothing, sets MFBOM
@@ -6174,6 +6262,7 @@ call POST ContractEquipments "{\"contractId\":$MBCT2,\"equipmentId\":$MBEQ2,\"co
 call POST WorkOrders "{\"contractId\":$MBCT2,\"equipmentId\":$MBEQ2,\"code\":\"MF-WO-2\",\"title\":\"Fan production\",\"description\":\"x\",\"count\":1}"; check "mes B: second work order created" '.success and .data.id > 0'
 MBWO2=$(val .data.id)
 as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$MBCT2,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "mes B: second contract terms" '.success'
+pcreview $MBCT2 # R1c (H8): the review of the contract is accepted before its WBS and purchase requests
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$MBWO2,\"contractId\":$MBCT2,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"26\"}"; check "mes B: second equipment project code" '.success and (.data.equipmentProjectCode|startswith("PU10026"))'
 call POST Assemblies "{\"title\":\"Fan casing\",\"code\":\"MF-ASM-2\",\"workOrderId\":$MBWO2,\"assemblerDuration\":1}"; MBASM2=$(val .data.id)
 MBASM_KEEP=$MFASM; MFASM=$MBASM2
@@ -6212,7 +6301,7 @@ as "$MPM_TOKEN" POST $MF/schedule/run '{"asOf":"2026-08-03T00:00:00"}'
 [ "$(jq -S 'del(.data.id)' "$OUT/mb-schedule-1.json")" = "$(jq -S 'del(.data.id)' "$B")" ] && ok "mes B: the scheduler is deterministic: a second run with the same asOf gives the very same plan" || bad "mes B: the scheduler is deterministic: a second run with the same asOf gives the very same plan"
 as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$MFWO&PageSize=0"; check "mes B: the plan is kept on the orders: D3 is late by 8 days, D1 and D2 are not, all have the run time" ".success and ([.data.data[]|select(.id == $MBO3)][0] | .isLate == true and .daysLate == 8 and .scheduledAtText != null and (.plannedFinish|startswith(\"2026-08-12\"))) and ([.data.data[]|select(.id == $MBO1 or .id == $MBO2)|select(.isLate)]|length) == 0"
 as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$MBCT2&PageSize=0"; MBACTA=$(jq -c "[.data.data[]|select(.id == $MBACT)|{es:.earlyStart,ef:.earlyFinish,ls:.lateStart,lf:.lateFinish,tf:.totalFloat}][0]" "$B")
-check "mes B: the forecast of the project activity of order F is pushed by the scheduler (08-03)" "([.data.data[]|select(.id == $MBACT)][0]) | (.forecastStart|startswith(\"2026-08-03\")) and (.forecastFinish|startswith(\"2026-08-03\"))"
+check "mes B: the production forecast of the project activity of order F is pushed by the scheduler (08-03) into its own field; the project-control forecast is not overwritten (R1c M2)" "([.data.data[]|select(.id == $MBACT)][0]) | (.productionForecastFinish|startswith(\"2026-08-03\")) and (.forecastFinish == null)"
 [ "$MBACTA" = "$MBACTB" ] && ok "mes B: the current schedule of the activity (early, late, float; the baseline side) is untouched by the scheduler" || bad "mes B: the current schedule of the activity (early, late, float; the baseline side) is untouched by the scheduler: $MBACTB against $MBACTA"
 
 # --- load report (12 weeks, Saturday weeks) and the dispatch list
@@ -6703,6 +6792,10 @@ as "$SL_TOKEN" POST $SL/customers/link-legacy; check "sales: running the linker 
 as "$SL_TOKEN" POST $SL/customers/link "{\"sourceType\":1,\"sourceId\":$SLUCT,\"customerId\":$SLCB}"; check "sales: a person links the unmatched contract to customer B by hand" ".success and .data.method == 2 and .data.customerId == $SLCB and .data.sourceId == $SLUCT"
 as "$SL_TOKEN" GET $SL/customers/unlinked; check "sales: the unmatched contract is no longer in the list of unlinked legacy records" ".success and ([.data[]|select(.sourceType == 1 and .sourceId == $SLUCT)]|length) == 0"
 
+# --- draft sales invoices from payment milestones (R1c C8: only a contract that is linked to a customer gets a draft; the linker above linked the project contracts to the employer customer)
+as "$FM_TOKEN" POST $FR/invoices/draft-from-milestones; check "finance: due milestones of linked contracts become draft sales invoices" '.success and .data.drafted >= 1'
+as "$FM_TOKEN" POST $FR/invoices/draft-from-milestones; check "finance: a second run drafts nothing new" '.success and .data.drafted == 0'
+
 # --- stock and prices for the spare parts and the equipment template (the purchase-order rule is switched off only while the opening receipt is made)
 item SLSPA "{\"code\":\"77.30.00.001.1\",\"title\":\"پروانه پمپ یدکی\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "sales: spare part A (impeller)"
 item SLSPB "{\"code\":\"77.30.00.002.1\",\"title\":\"مکانیکال سیل یدکی\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "sales: spare part B (mechanical seal)"
@@ -6758,6 +6851,7 @@ call GET Tenders/$SLT1; check "sales: the drafted tender of the old register car
 as "$SL_TOKEN" GET "$SL/customers/links?CustomerId=$SLCA"; check "sales: the new tender is linked to customer A by the proposal flow (3 links now: 2 legacy and 1 tender from the inquiry)" ".success and (.data.data|length) == 3 and ([.data.data[]|select(.sourceType == 2 and .sourceId == $SLT1 and .method == 3)]|length) == 1"
 ibx "$CEO_TOKEN" "sl:bid:$SLI1"; check "sales: the CEO's bid gate of I1 is closed" '.success and (.data.data|length) == 0'
 as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$SLI1,\"decision\":\"nobid\",\"reason\":\"x\"}"; nomsg "sales: a decided checklist cannot be decided again" "قبلاً تصمیم"
+tndreview "$SLT1" # R1c (H8): the tender of I1 has its review accepted before the proposal P1 is sent
 
 # slbid INQUIRYID LABEL DAYS : checklist, submit, CEO bids (the inquiry becomes "being bid on"); DAYS is the required delivery in days from today: the capacity figure must equal the overloaded weeks of the load report in that window
 slbid() {
@@ -6765,6 +6859,7 @@ slbid() {
   as "$SL_TOKEN" POST $SL/bid-decisions "{\"inquiryId\":$1,\"technicalCapabilityOk\":true,\"commercialRiskReviewed\":true,\"paymentTermsReviewed\":true,\"guaranteesReviewed\":true,\"sanctionCheck\":1,\"expectedMarginPercent\":20}"; check "sales: checklist of $2 saved; the capacity figure equals the overloaded weeks of the load report up to the required delivery" ".success and .data.status == 1 and .data.capacityOverloadWeeks == $SLCAPX"
   as "$SL_TOKEN" POST $SL/bid-decisions/submit "{\"inquiryId\":$1}"; check "sales: checklist of $2 sent to the CEO" '.success and .data.status == 2'
   as "$CEO_TOKEN" POST $SL/bid-decisions/decide "{\"inquiryId\":$1,\"decision\":\"bid\"}"; check "sales: the CEO decides to bid on $2" '.success and .data.status == 3 and .data.tenderId > 0'
+  tndreview "$(val .data.tenderId)" # R1c (H8): the offer of a tender is submitted only after its tender-stage review was accepted
 }
 
 # --- estimate of I1 from the equipment template: 2 pumps = 4 impellers and 8 seals at the average cost of the books
@@ -10579,6 +10674,84 @@ as "$FIN_TOKEN" GET "$FG/vouchers?Contains=SVL-$SVLMP&WithLines=true&PageSize=0"
 as "$FM_TOKEN" GET "finance/statements/drill?account=70114&FiscalYearId=$PVFY&IncludeDraft=true"; check "finance: R1p: the drill-down of the labour rate variance account 70114 for the finance manager lists the protected true-up of 1405/06 with its amount and hides nothing" ".success and .data.labourHidden == false and ([.data.rows[]|select(.sourceNumber == \"MLM-140506\")]|length) == 1 and ([.data.rows[]|select(.sourceNumber == \"MLM-140506\")][0] | (.debit - .credit) == ($MBPV2))"
 as "$FIN_TOKEN" GET "finance/statements/drill?account=70114&FiscalYearId=$PVFY&IncludeDraft=true"; check "finance: R1p: the drill-down of the accountant leaves the protected line of 1405/06 out and says that labour is hidden; the true-up of 1405/05 stays" '.success and .data.labourHidden == true and ([.data.rows[]|select(.sourceNumber == "MLM-140506")]|length) == 0 and ([.data.rows[]|select(.sourceNumber == "MLM-140505")]|length) == 1'
 TOKEN=$ADMIN_TOKEN
+
+# --- R1c: procurement authority, technical review, order revision, terms freeze and variation orders
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"r1c authority\",\"submit\":true,\"lines\":[{\"itemId\":$BOLT,\"quantity\":100,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"ISO 4014\"}]}"; RQ5=$(val .data.id); RQ5L=$(val '.data.lines[0].id')
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$RQ5,\"action\":\"approve-planning\"}"; as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$RQ5,\"action\":\"approve-management\"}"; check "r1c: purchase request approved" '.success and .data.status == 2'
+QA5="{\"providerId\":$PA,\"quoteNumber\":\"R1C-A\",\"vatPercent\":10,\"deliveryDays\":20,\"lines\":[{\"requestLineId\":$RQ5L,\"quantity\":100,\"unitPrice\":390000}]}"
+QB5="{\"providerId\":$PB,\"quoteNumber\":\"R1C-B\",\"vatPercent\":10,\"lines\":[{\"requestLineId\":$RQ5L,\"quantity\":100,\"unitPrice\":380000}]}"
+as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ5,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$(echo "$QA5" | jq -c '.technicallyAccepted = true')]}"; nomsg "r1c: the buyer cannot accept a quote technically" "فقط مهندسی یا کنترل کیفیت"
+as "$COM_TOKEN" POST procurement/inquiries "{\"purchaseRequestId\":$RQ5,\"inquiryDate\":\"2026-10-22T00:00:00\",\"quotes\":[$QA5,$QB5]}"; IQ5=$(val .data.id); QA5ID=$(val ".data.quotes[]|select(.providerId == $PA)|.id"); QB5ID=$(val ".data.quotes[]|select(.providerId == $PB)|.id")
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ5,\"quoteId\":$QA5ID,\"reason\":\"grade A\"}"; nomsg "r1c: a quote nobody judged technically cannot be selected" "پیشنهاد قابل قبول فنی لازم است"
+as "$COM_TOKEN" POST procurement/inquiries/technical-review "{\"inquiryId\":$IQ5,\"quoteId\":$QA5ID,\"accepted\":true}"; nomsg "r1c: the buyer does not do the technical review" "مجوز"
+as "$ADMIN_TOKEN" POST procurement/inquiries/technical-review "{\"inquiryId\":$IQ5,\"quoteId\":$QA5ID,\"accepted\":true}"; nomsg "r1c: the PMO deputy does not do the technical review either" "مجوز"
+as "$ENG_TOKEN" POST procurement/inquiries/technical-review "{\"inquiryId\":$IQ5,\"quoteId\":$QA5ID,\"accepted\":false}"; nomsg "r1c: a technical rejection needs its reason" "علت قابل قبول نبودن فنی"
+tech_all $IQ5
+as "$COM_TOKEN" POST procurement/inquiries/select "{\"inquiryId\":$IQ5,\"quoteId\":$QA5ID,\"reason\":\"grade A\"}"; check "r1c: after the technical review the winner is selected and the inquiry approved" '.success and .data.status == 2'
+as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"providerId\":$PB,\"inquiryId\":$IQ5,\"requirements\":\"x\",\"lines\":[{\"requestLineId\":$RQ5L,\"itemId\":$BOLT,\"quantity\":100,\"unitPrice\":380000}]}"; nomsg "r1c: an order for a supplier that did not win the inquiry is refused" "با برنده استعلام یکی نیست"
+as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"providerId\":$PA,\"inquiryId\":$IQ5,\"requirements\":\"x\",\"lines\":[{\"requestLineId\":$RQ5L,\"itemId\":$BOLT,\"quantity\":100,\"unitPrice\":300000}]}"; nomsg "r1c: order lines that differ from the winning quote are refused" "با قیمت پیشنهاد برنده"
+as "$ADMIN_TOKEN" POST "procurement/orders/from-inquiry/$IQ5"; nomsg "r1c: the PMO deputy approves purchases and does not make orders" "بازرگانی سفارش را تهیه می‌کند"
+as "$COM_TOKEN" POST "procurement/orders/from-inquiry/$IQ5"; check "r1c: the order is built from the winning quote" ".success and .data.quoteId == $QA5ID and .data.revision == 0 and .data.totalAmount == 39000000"
+PO5=$(val .data.id)
+as "$ADMIN_TOKEN" POST procurement/orders/action "{\"id\":$PO5,\"action\":\"approve\"}"; check "r1c: the order is approved by the PMO deputy" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" POST procurement/orders/action "{\"id\":$PO5,\"action\":\"revise\",\"note\":\"x\"}"; nomsg "r1c: the PMO deputy does not revise an order" "(بازرگانی)"
+as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO5,\"action\":\"revise\"}"; nomsg "r1c: a revision needs its reason" "علت بازنگری سفارش را بنویسید"
+as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO5,\"action\":\"revise\",\"note\":\"delivery moved\"}"; check "r1c: a revision goes back to the draft with the next revision number" '.success and .data.status == 0 and .data.revision == 1 and .data.revisionReason == "delivery moved"'
+as "$COM_TOKEN" GET "procurement/orders/$PO5/revisions"; check "r1c: the old revision is frozen with a hash" '.success and (.data|length) == 1 and .data[0].revision == 0 and (.data[0].hash|length) == 64'
+as "$COM_TOKEN" POST procurement/suppliers "{\"providerId\":$PA,\"categories\":\"steel\"}"; check "r1c: the buyer keeps the vendor list" '.success'
+call POST procurement/suppliers "{\"providerId\":$PA,\"categories\":\"changed by the PMO\"}"; check "r1c: the PMO deputy changes nothing of the vendor profile" '.success and .data.categories == "steel"'
+as "$COM_TOKEN" GET "procurement/suppliers/$PA/evaluation-preview"; check "r1c: the scored evaluation preview lists the four criteria with the weights of the settings" '.success and (.data.criteria|length) == 4 and ([.data.criteria[].weight]|add) == 100'
+as "$COM_TOKEN" POST procurement/suppliers/evaluate "{\"providerId\":$PA,\"kind\":2,\"scored\":true}"; nomsg "r1c: a scored evaluation needs the evaluator's comment" "نظر ارزیاب را بنویسید"
+
+# terms freeze after the accepted contract review, and variation orders (commercial creates, somebody else approves)
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.valueExVat = 900000000')"; nomsg "r1c: the value of the contract cannot be edited after the review is accepted (an amendment approved by the CEO is needed)" "مستقیم تغییر نمی‌کند"
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.latePenaltyPercentPerWeek = 2')"; nomsg "r1c: the penalty terms are frozen too" "فقط با الحاقیه تاییدشده مدیرعامل یا دستور تغییر تاییدشده"
+as "$PLAN_TOKEN" POST $PC/variations "{\"contractId\":$PCT,\"description\":\"r1c vo\",\"priceDelta\":1000,\"daysDelta\":0}"; nomsg "r1c: only the commercial unit creates a variation order" "دستور تغییر را بازرگانی ثبت می‌کند"
+as "$COM_TOKEN" POST $PC/variations "{\"contractId\":$PCT,\"description\":\"r1c vo\",\"priceDelta\":1000,\"daysDelta\":0}"; check "r1c: the commercial unit creates a variation order" '.success and .data.status == 0'
+R1CVO=$(val .data.id)
+as "$COM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO,\"action\":\"submit\"}"; check "r1c: the variation order is submitted" '.success and .data.status == 1'
+as "$COM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO,\"action\":\"approve\"}"; nomsg "r1c: the commercial unit does not approve a variation order" "تایید دستور تغییر با معاون PMO یا مدیرعامل است"
+as "$ADMIN_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO,\"action\":\"approve\"}"; nomsg "r1c: approval needs a decided change request or an approved amendment" "نیازمند درخواست تغییر تصمیم‌گرفته‌شده"
+
+# --- R1c fix round: the creator rule with a user who holds both roles, the positive approval with its exact effective value, one order per change request, and the rest of the brief
+user2 pmocom.ci 1,2 'Ci#PmoCom-User-2026' 09120000098 0012345698
+PMOCOM_TOKEN=$(login pmocom.ci 'Ci#PmoCom-User-2026'); [ -n "$PMOCOM_TOKEN" ] && ok "r1c: login of a user who holds the PMO and the commercial role" || bad "r1c: login of a user who holds the PMO and the commercial role"
+as "$PMOCOM_TOKEN" POST $PC/variations "{\"contractId\":$PCT,\"description\":\"r1c creator rule\",\"priceDelta\":1000,\"daysDelta\":0}"; R1CVO2=$(val .data.id)
+as "$PMOCOM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO2,\"action\":\"submit\"}"; check "r1c: the dual-role user creates and submits a variation order" '.success and .data.status == 1'
+as "$PMOCOM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO2,\"action\":\"approve\"}"; nomsg "r1c: the creator cannot approve their own variation order (maker-checker, even with the approver role)" "تفکیک وظایف"
+as "$COM_TOKEN" POST $PC/variations "{\"contractId\":$PCT,\"changeRequestId\":$PCCHID,\"description\":\"r1c vo of the decided change request\",\"priceDelta\":100000000,\"daysDelta\":2}"; check "r1c: a variation order linked to the closed (decided) change request" '.success and .data.status == 0 and .data.changeRequestId > 0'
+R1CVO3=$(val .data.id)
+as "$COM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO3,\"action\":\"submit\"}"; check "r1c: ... submitted" '.success and .data.status == 1'
+as "$CEO_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO3,\"action\":\"approve\",\"reference\":\"نامه کارفرما ۱\"}"; nomsg "r1c: the client's letter or file is part of the approval" "مدرک تایید کارفرما لازم است"
+upload_as "$ADMIN_TOKEN" r1cvo-client
+as "$CEO_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO3,\"action\":\"approve\",\"reference\":\"نامه کارفرما ۱\",\"clientDocumentId\":\"$UPLOADED\"}"; check "r1c: the CEO approves it with the client's file: the order counts" '.success and .data.status == 2 and .data.approvedByRole == "CEO"'
+as "$PLAN_TOKEN" GET "$PC/terms/$PCT"; check "r1c: the effective value of the contract is the terms plus the approved order: 1,100,000,000 and 2 days; the draft order of 1,000 does not count" '.success and .data.valueExVat == 1000000000 and .data.currentValue == 1100000000 and .data.approvedVariationPrice == 100000000 and .data.approvedVariationDays == 2'
+as "$COM_TOKEN" POST $PC/variations "{\"contractId\":$PCT,\"changeRequestId\":$PCCHID,\"description\":\"the same change counted twice\",\"priceDelta\":100000000,\"daysDelta\":2}"; R1CVO4=$(val .data.id)
+as "$COM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO4,\"action\":\"submit\"}"
+as "$CEO_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO4,\"action\":\"approve\",\"reference\":\"نامه کارفرما ۲\",\"clientDocumentId\":\"$UPLOADED\"}"; nomsg "r1c: one approved order per change request (a change is not counted twice)" "یک تغییر دوبار شمرده نمی‌شود"
+pcamend $PCT "الحاقیه بدون مبلغ و روز"
+as "$PLAN_TOKEN" GET "$PC/terms/$PCT"; check "r1c: an amendment without a price changes nothing in the effective value" '.success and .data.currentValue == 1100000000'
+as "$COM_TOKEN" POST $PC/amendments "{\"contractId\":$PCT,\"type\":3,\"origin\":2,\"description\":\"r1c priced amendment\",\"priceDelta\":50000000,\"daysDelta\":1}"; PCAMD3=$(val .data.id)
+as "$CEO_TOKEN" POST $PC/amendments/action "{\"id\":$PCAMD3,\"action\":\"ceo-approve\"}"; check "r1c: the CEO approves a priced amendment" '.success and .data.ceoApprovedAt != null'
+as "$COM_TOKEN" POST $PC/variations "{\"contractId\":$PCT,\"amendmentId\":$PCAMD3,\"description\":\"r1c order of the amendment\",\"priceDelta\":60000000,\"daysDelta\":1}"; R1CVO5=$(val .data.id)
+as "$COM_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO5,\"action\":\"submit\"}"
+as "$CEO_TOKEN" POST $PC/variations/action "{\"id\":$R1CVO5,\"action\":\"approve\",\"reference\":\"نامه کارفرما ۳\",\"clientDocumentId\":\"$UPLOADED\"}"; nomsg "r1c: the price and days of an order that carries an amendment equal the amendment's" "باید با الحاقیه یکی باشد"
+as "$PLAN_TOKEN" GET "$PC/terms/$PCT"; check "r1c: the refused order and the draft ones do not change the effective value (the priced amendment counts once: 1,150,000,000 and 3 days)" '.success and .data.currentValue == 1150000000 and .data.approvedAmendmentPrice == 50000000 and .data.approvedAmendmentDays == 1'
+
+# the plan is frozen by the current baseline: a change of a planned field goes through a change request
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"; PCAJ=$(jq -c --argjson id $PCA '[.data.data[]|select(.id == $id)][0]|.durationDays += 1' "$B")
+as "$PLAN_TOKEN" POST $PC/activities "$PCAJ"; nomsg "r1c: the plan of an activity is not edited directly while a baseline is current" "فقط از مسیر «درخواست تغییر» عوض می‌شود"
+# the frozen baseline: its activities keep the approved figures (the task of the change request: C 6 days, 500M)
+as "$PLAN_TOKEN" GET "$PC/baselines?ContractId=$PCT&PageSize=0"; PCB1=$(jq -r '[.data.data[]|select(.number == 1)][0].id' "$B")
+as "$PLAN_TOKEN" GET "$PC/baselines/$PCB1/activities"; check "r1c: the frozen activities of baseline 1: four rows, C with 6 days and a budget of 500M, the budgets add up to 1.1bn" '.success and (.data|length) == 4 and ([.data[]|select(.code == "PC-C")][0]|(.durationDays == 6 and .budget == 500000000)) and ([.data[].budget]|add) == 1100000000'
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=$(pcd 4)"; PCPVA=$(val .data.pv)
+as "$PLAN_TOKEN" GET "$PC/evm/$PCT?asOf=$(pcd 4)"; check "r1c: the planned value of a day comes from the frozen curve of the baseline and is the same on every read" ".success and .data.fromBaseline == true and .data.pv == $PCPVA"
+# the shares of the payment milestones add up to 100 at most
+as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c share 60\",\"kind\":2,\"trigger\":1,\"plannedDate\":\"$(dd 90)T00:00:00\",\"percentOfValue\":60}"; check "r1c: a milestone of 60 percent of the contract value" '.success and .data.percentOfValue == 60'
+as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c share 50\",\"kind\":2,\"trigger\":1,\"plannedDate\":\"$(dd 91)T00:00:00\",\"percentOfValue\":50}"; nomsg "r1c: the shares of the milestones cannot add up to more than 100 percent" "از ۱۰۰ بیشتر می‌شود"
+as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c final\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 92)T00:00:00\",\"amount\":1000,\"isFinal\":true}"; check "r1c: the final statement milestone of the contract" '.success and .data.isFinal == true'
+as "$COM_TOKEN" POST $PC/milestones "{\"contractId\":$PCT,\"title\":\"r1c final again\",\"kind\":9,\"trigger\":1,\"plannedDate\":\"$(dd 93)T00:00:00\",\"amount\":1000,\"isFinal\":true}"; nomsg "r1c: a contract has one final statement milestone" "فقط یک مرحله قطعی می‌تواند باشد"
+
 # --- R1t D19: every pass-through of the legacy CSV actions (2 inventory exports, 1 events export, 1 events/mark) left one audit row, all by the finance manager
 TOKEN=$ADMIN_TOKEN
 as "$FM_TOKEN" GET "finance/audit?EntityType=SepidarLegacyCsv&Action=LegacyCsv&PageSize=0"; check "r1t d19: the legacy CSV pass-throughs are in the audit trail (4 rows, one user)" '.success and (.data.data|length) == 4 and ([.data.data[].userId]|unique|length) == 1'

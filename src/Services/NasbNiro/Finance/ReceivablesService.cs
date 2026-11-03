@@ -429,21 +429,19 @@ namespace Services.NasbNiro.Finance
                 result.Skipped.Add("نرخ مالیات بر ارزش افزوده در جدول نرخ‌ها ثبت نشده است؛ پیش‌نویس فاکتور ساخته نشد.");
                 return ResponseDtoHelper.Ok(result);
             }
-            var customers = new Dictionary<string, FnCustomer>();
+            // R1c (M6): the customer of the invoice is the one the contract is linked to (the sales customer link: made when a proposal is won, by the legacy linker or by hand).
+            // The employer text is not matched or turned into a customer any more: a contract without a link is reported and waits for sales to link it.
+            List<int> contractIds = milestones.Select(m => m.ContractId).Distinct().ToList();
+            var linkRows = await _uow.Set<Entities.Model.NasbNiro.Sales.SlCustomerLink>().AsNoTracking()
+                .Where(l => !l.Deleted && l.ContractId != null && contractIds.Contains(l.ContractId.Value)).OrderBy(l => l.Id)
+                .Select(l => new { ContractId = l.ContractId.Value, l.CustomerId }).ToListAsync(ct);
+            Dictionary<int, int> linkOf = linkRows.GroupBy(l => l.ContractId).ToDictionary(g => g.Key, g => g.First().CustomerId);
+            List<int> customerIds = linkOf.Values.Distinct().ToList();
+            Dictionary<int, FnCustomer> customers = await _uow.Set<FnCustomer>().Where(c => customerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
             foreach (PcPaymentMilestone m in milestones)
             {
-                string employer = Clean(m.Contract?.Employer);
-                if (employer == null) { result.Skipped.Add($"مرحله «{m.Title}»: کارفرمای قرارداد مشخص نیست."); continue; }
-                if (!customers.TryGetValue(employer, out FnCustomer customer))
-                {
-                    customer = await _uow.Set<FnCustomer>().FirstOrDefaultAsync(x => x.IsActive && (x.EmployerName == employer || x.Name == employer), ct);
-                    if (customer == null)
-                    {
-                        customer = new FnCustomer { Name = employer, EmployerName = employer, IsActive = true, CreatedAt = DateTimeOffset.Now, CreatedByUserId = Me };
-                        _uow.Set<FnCustomer>().Add(customer);
-                    }
-                    customers[employer] = customer;
-                }
+                if (!linkOf.TryGetValue(m.ContractId, out int customerId)) { result.Skipped.Add($"مرحله «{m.Title}»: قرارداد به مشتری مالی وصل نشده است؛ اتصال مشتری را در فروش ثبت کنید."); continue; }
+                if (!customers.TryGetValue(customerId, out FnCustomer customer) || !customer.IsActive) { result.Skipped.Add($"مرحله «{m.Title}»: مشتری متصل به قرارداد فعال نیست."); continue; }
                 decimal net = R(m.Amount);
                 FnInvoiceType invoiceType = MilestoneType(m.Kind);
                 decimal vatRate = invoiceType == FnInvoiceType.RetentionRelease ? 0m : vat.Value;

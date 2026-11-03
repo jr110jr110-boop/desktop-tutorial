@@ -44,6 +44,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int Sort { get; set; }
         public bool IsGenerated { get; set; }
         public DateTimeOffset? ApprovedAt { get; set; }
+
+        /// <summary>R1c (M1): the person who approved the node; the approval is given again after the node is edited.</summary>
+        public int? ApprovedByUserId { get; set; }
         public string RowVersion { get; set; }
     }
 
@@ -98,6 +101,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public bool IsCritical { get; set; }
         public DateTime? ForecastStart { get; set; }
         public DateTime? ForecastFinish { get; set; }
+
+        /// <summary>R1c (M9): the finish forecast of the production scheduler (MES), read only here. It is never mixed with <see cref="ForecastFinish"/>, which project control computes.</summary>
+        public DateTime? ProductionForecastFinish { get; set; }
         public DateTime? ActualStart { get; set; }
         public DateTime? ActualFinish { get; set; }
 

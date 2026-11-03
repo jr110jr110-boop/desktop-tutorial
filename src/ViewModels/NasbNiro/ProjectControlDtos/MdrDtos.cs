@@ -98,6 +98,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string Title { get; set; }
         public bool CountsAsApproved { get; set; }
         public bool RequiresResubmit { get; set; }
+
+        /// <summary>R1c (L2): a rejection: the document goes back to the previous issue step (and its progress falls) when the client answers with this code.</summary>
+        public bool ResetsProgress { get; set; }
         public string Source { get; set; }
     }
 
@@ -167,6 +170,12 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int MissingCount { get; set; }
         public int EntryCount { get; set; }
         public DateTimeOffset GeneratedAt { get; set; }
+
+        /// <summary>R1c (M1): the controlled-document status of the revision: InReview (0 = Draft, 1 = InReview, 2 = Approved, 3 = Effective, 4 = Obsolete, 5 = Scheduled). A revision becomes effective only when someone other than the preparer approves it.</summary>
+        public int? RevisionStatus { get; set; }
+        public int? PreparedByUserId { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
     }
 
     public class PcFinalBookQuery : PcContractQuery

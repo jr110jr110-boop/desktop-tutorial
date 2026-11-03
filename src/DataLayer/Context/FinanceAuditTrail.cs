@@ -193,12 +193,19 @@ namespace DataLayer.Context
             { typeof(Pc.PcCostBaselineLine), new[] { "ContractId", "BaselineId", "WbsNodeId", "ActivityId", "CostClass", "ResourceClass", "Amount", "Description" } },
             { typeof(Pc.PcWbsNode), new[] { "ContractId", "Code", "Title", "NodeType", "Weight", "BudgetAmount", "ResponsibleUnit", "ApprovedAt", "ApprovedByUserId", "Deleted" } },
             { typeof(Pc.PcActivity), new[] { "ContractId", "Code", "Title", "DurationDays", "Weight", "BudgetAtCompletion", "ResponsibleUnit", "ConstraintType", "ConstraintDate", "ActualStart", "ActualFinish", "Status", "OnHoldReason", "Deleted" } },
+            // R1c: the project code parts and the planned delivery date of a work order (frozen with the terms), the requests to snapshot a past data date and the reply codes (a rejection code resets progress)
+            { typeof(Pc.PcWorkOrderInfo), new[] { "WorkOrderId", "ContractId", "EquipmentProjectCode", "PlannedDeliveryDate", "Deleted" } },
+            { typeof(Pc.PcSnapshotRequest), new[] { "ContractId", "DataDate", "Reason", "State", "DecidedByUserId", "DecidedAt", "DecisionNote", "SnapshotId", "Deleted" } },
+            { typeof(Pc.PcClientResponseCode), null },
+            { typeof(Pc.PcCostCheck), new[] { "CostEntryId", "CheckedByUserId", "CheckedAt", "Note" } },
             { typeof(Proc.ProcurementSetting), null },
             { typeof(Proc.PurchaseRequest), new[] { "Number", "Source", "Kind", "Status", "RequestDate", "WorkOrderId", "ContractId", "CostCenter", "EstimatedAmount", "SubmittedAt", "PlanningApprovedAt", "PlanningApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "BoardResolution", "RejectedAt", "RejectedByUserId", "RejectReason", "Deleted" } },
             { typeof(Proc.PurchaseInquiry), new[] { "Number", "Status", "PurchaseRequestId", "RequiredQuotes", "FewerQuotesReason", "SelectedQuoteId", "SelectionReason", "SelectedAt", "SelectedByUserId", "FinancialApprovedAt", "FinancialApprovedByUserId", "CommercialApprovedAt", "CommercialApprovedByUserId", "TechnicalApprovedAt", "TechnicalApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "Deleted" } },
             { typeof(Proc.PurchaseOrder), new[] { "Number", "Status", "Kind", "OrderDate", "ProviderId", "InquiryId", "WorkOrderId", "ContractId", "Currency", "ExchangeRate", "Incoterms", "PaymentTerms", "VatPercent", "AdvancePercent", "AdvanceGuarantee", "AdvanceGuaranteeExpiry", "PerformanceGuarantee", "RetentionPercent", "ContractNumber", "DeliveryDate", "LatePenaltyPercentPerWeek", "TotalAmount", "ApprovedAt", "ApprovedByUserId", "ReleasedAt", "ReleasedByUserId", "ClosedAt", "CancelledAt", "CancelReason", "Deleted" } },
             { typeof(Proc.SupplierInvoice), new[] { "Number", "Status", "ProviderId", "PurchaseOrderId", "InvoiceNumber", "InvoiceDate", "IsOfficial", "NetAmount", "VatAmount", "TotalAmount", "NonRecoverableVatAmount", "PriceVariance", "MatchNote", "ApprovedAt", "ApprovedByUserId", "CancelledAt", "CancelReason", "Deleted" } },
             { typeof(Proc.PaymentRequest), new[] { "Number", "Type", "Status", "RequestDate", "ProviderId", "PurchaseOrderId", "InvoiceId", "Amount", "Deductions", "DeductionNote", "QcApproved", "ApprovedAt", "ApprovedByUserId", "PaidAt", "PaidByUserId", "PaymentReference", "RejectedAt", "RejectReason", "Deleted" } },
+            // R1c (M12): the technical judgement of a quote (who accepted it and when); the quotes of an open inquiry are rewritten when the buyer edits it
+            { typeof(Proc.SupplierQuote), new[] { "InquiryId", "ProviderId", "QuoteNumber", "TotalAmount", "TechnicallyAccepted", "TechnicalScore", "TechnicalNote", "TechnicalReviewedByUserId", "TechnicalReviewedAt" } },
         };
 
         /// <summary>Persian label of the record types added in R1a, put in front of the number or code in the summary of the trail row.</summary>
@@ -233,6 +240,10 @@ namespace DataLayer.Context
             { typeof(Pc.PcCostBaselineLine), "سطر خط‌مبنای هزینه" },
             { typeof(Pc.PcWbsNode), "گره WBS" },
             { typeof(Pc.PcActivity), "فعالیت برنامه" },
+            { typeof(Pc.PcWorkOrderInfo), "اطلاعات پروژه دستور ساخت" },
+            { typeof(Pc.PcSnapshotRequest), "درخواست برش داده گذشته" },
+            { typeof(Pc.PcClientResponseCode), "کد پاسخ کارفرما" },
+            { typeof(Pc.PcCostCheck), "بررسی دوم هزینه دستی پروژه" },
             { typeof(Proc.ProcurementSetting), "تنظیم تدارکات" },
             { typeof(Proc.PurchaseRequest), "درخواست خرید" },
             { typeof(Proc.PurchaseInquiry), "استعلام خرید" },
@@ -242,7 +253,31 @@ namespace DataLayer.Context
             { typeof(FnBankReconciliation), "مغایرت‌گیری بانکی" },
             { typeof(FnBankReconciliationItem), "قلم مغایرت بانکی" },
             { typeof(FnCloseOverride), "تایید ویژه بستن دوره یا سال" },
+            { typeof(Proc.SupplierQuote), "پیشنهاد قیمت تامین‌کننده" },
+            { typeof(Proc.SupplierProfile), "پرونده تامین‌کننده" },
         };
+
+        // R1c: columns added to entries above, kept apart so the entries stay as they were (merge friendly)
+        static FinanceAuditTrail()
+        {
+            var more = new Dictionary<Type, string[]>
+            {
+                { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Grade", "Score", "Blocked", "BlockReason", "Warnings" } },
+                { typeof(Pc.PcContractTerms), new[] { "PenaltyBasis", "WarrantyMonthsAfterCommissioning", "WarrantyMonthsAfterDelivery", "TermsFrozenAt" } },
+                { typeof(Pc.PcProjectPlan), new[] { "EditorUserIds" } },
+                { typeof(Pc.PcPaymentMilestone), new[] { "IsFinal" } },
+                { typeof(Pc.PcWbsNode), new[] { "EditorUserIds" } },
+                { typeof(Pc.PcContractReview), new[] { "EditorUserIds", "Stage", "AmendmentId", "VariationOrderId", "PmoAcceptedByUserId", "PmoAcceptedAt", "CommercialAcceptedByUserId", "CommercialAcceptedAt" } },
+                { typeof(Pc.PcContractAmendment), new[] { "TermsAppliedAt" } },
+                { typeof(Pc.PcVariationOrder), new[] { "SubmittedByUserId", "SubmittedAt", "ApprovedByUserId", "ApprovedAt", "ApprovedByRole", "ClientLetterId", "ClientDocumentId", "TermsAppliedAt", "DecisionNote" } },
+                { typeof(Pc.PcShipment), new[] { "CommissionedAt", "InventoryDocumentId", "PackedAt", "PackedByUserId", "PackingCheckedByUserId", "PackingCheckedAt" } },
+                { typeof(Proc.PurchaseOrder), new[] { "QuoteId", "Revision", "RevisionReason", "RevisedAt", "RevisedByUserId" } },
+                { typeof(Proc.PaymentRequest), new[] { "DeductionsProposedAt", "DeductionsConfirmedByUserId", "DeductionsConfirmedAt" } },
+            };
+            foreach (var pair in more)
+                if (Audited.TryGetValue(pair.Key, out string[] have) && have != null)
+                    Audited[pair.Key] = have.Concat(pair.Value.Where(c => !have.Contains(c))).ToArray();
+        }
 
         private static readonly HashSet<string> Masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "BankIban", "Iban", "PayeeIban", "NationalCode", "PhoneNumber", "IdentityCardNumber" };
 

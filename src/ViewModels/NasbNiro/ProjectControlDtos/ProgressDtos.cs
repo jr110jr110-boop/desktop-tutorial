@@ -11,6 +11,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int ActivityId { get; set; }
         public decimal Percent { get; set; }
         public string Comment { get; set; }
+
+        /// <summary>R1c (H4): the day the percent was reached. Default today; never in the future and never before the last weekly snapshot or the previous approved progress of the activity.</summary>
+        public DateTime? ProgressDate { get; set; }
     }
 
     public class PcManualProgressDto
@@ -21,6 +24,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string ActivityTitle { get; set; }
         public decimal Percent { get; set; }
         public string Comment { get; set; }
+
+        /// <summary>R1c (H4): the day the percent was reached (the day of the approval when none was given).</summary>
+        public DateTime? ProgressDate { get; set; }
         public int ProposedByUserId { get; set; }
         public string ProposedByName { get; set; }
         public DateTimeOffset ProposedAt { get; set; }
@@ -114,6 +120,15 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public DateTime? ForecastFinish { get; set; }
         public DateTime? BaselineFinish { get; set; }
         public string Note { get; set; }
+
+        /// <summary>R1c (M9): the finish forecast of the production scheduler (MES), kept apart from <see cref="ForecastFinish"/> (the project-control forecast).</summary>
+        public DateTime? ProductionForecastFinish { get; set; }
+
+        /// <summary>R1c (M4): true when PV was read from the rows frozen at the approval of the baseline; false for a baseline of before R1c (calculated with today's calendar until the nightly job freezes it).</summary>
+        public bool PvFrozen { get; set; }
+
+        /// <summary>R1c (H4): true when the percents come from the dated progress events of a past data date.</summary>
+        public bool FromEvents { get; set; }
     }
 
     public class PcCashFlowPointDto
@@ -153,6 +168,66 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string SourceType { get; set; }
         public string SourceNumber { get; set; }
         public string Description { get; set; }
+
+        // R1c (M5)
+        /// <summary>True for an entry written by hand in project control; it counts as actual cost only after a second FINANCIAL person checked it.</summary>
+        public bool NeedsCheck { get; set; }
+        public bool Checked { get; set; }
+        public int? CheckedByUserId { get; set; }
+        public DateTimeOffset? CheckedAt { get; set; }
+
+        /// <summary>The person who wrote the entry.</summary>
+        public int? CreatedByUserId { get; set; }
+
+        /// <summary>True when the entry is not counted in actual cost: an after-sales cost, or a manual entry nobody checked yet.</summary>
+        public bool ExcludedFromActual { get; set; }
+    }
+
+    /// <summary>R1c (M5): the second-person check of a manual cost entry.</summary>
+    public class PcCostCheckDto
+    {
+        public int CostEntryId { get; set; }
+        public string Note { get; set; }
+    }
+
+    /// <summary>R1c (H4): a request to take a weekly snapshot for a data date in the past (the planning unit asks, the PMO deputy approves).</summary>
+    public class PcPastSnapshotRequestDto
+    {
+        public int ContractId { get; set; }
+        public DateTime DataDate { get; set; }
+        public string Reason { get; set; }
+    }
+
+    public class PcPastSnapshotDto
+    {
+        public int Id { get; set; }
+        public int ContractId { get; set; }
+        public DateTime DataDate { get; set; }
+        public string Reason { get; set; }
+
+        /// <summary>0 = requested, 1 = approved (not used yet), 2 = rejected, 3 = used (the snapshot was taken).</summary>
+        public PcSnapshotRequestState State { get; set; }
+        public int RequestedByUserId { get; set; }
+        public string RequestedByName { get; set; }
+        public DateTimeOffset RequestedAt { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public string DecidedByName { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecisionNote { get; set; }
+        public int? SnapshotId { get; set; }
+        public string RowVersion { get; set; }
+    }
+
+    public class PcPastSnapshotDecisionDto
+    {
+        public int Id { get; set; }
+        public bool Approve { get; set; }
+        public string Note { get; set; }
+    }
+
+    public class PcPastSnapshotQuery : PcContractQuery
+    {
+        public PcSnapshotRequestState? State { get; set; }
     }
 
     public class PcSnapshotRequestDto

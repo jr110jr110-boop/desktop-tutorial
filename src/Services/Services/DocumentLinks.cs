@@ -142,6 +142,7 @@ namespace Services.Services
             ["PcEngineeringDeliverable"] = "مدرک مهندسی پروژه",
             ["PcGuaranteeEvent"] = "رویداد ضمانت‌نامه",
             ["PcShipment"] = "محموله",
+            ["PcVariationOrder"] = "دستور تغییر (سند پذیرش کارفرما)",
             ["Pqr"] = "گزارش PQR",
             ["QcInspection"] = "بازرسی کیفی",
             ["QcRecord"] = "سابقه کنترل کیفی",

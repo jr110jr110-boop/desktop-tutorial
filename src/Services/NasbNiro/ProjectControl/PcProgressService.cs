@@ -39,6 +39,20 @@ namespace Services.NasbNiro.ProjectControl
         Task<ResponseDto<PcCostEntryDto>> AddCostAsync(PcCostEntrySaveDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PagedList<PcCostEntryDto>>> GetCostsAsync(PcContractQuery query, CancellationToken cancellationToken);
 
+        /// <summary>R1c (M5): the second FINANCIAL person checks a cost entry that was written by hand; only then does it count as actual cost.</summary>
+        Task<ResponseDto<PcCostEntryDto>> CheckCostAsync(PcCostCheckDto dto, CancellationToken cancellationToken);
+
+        /// <summary>R1c (H4): a snapshot for a data date in the past needs a request of planning, approved by the PMO deputy.</summary>
+        Task<ResponseDto<PagedList<PcPastSnapshotDto>>> GetPastSnapshotRequestsAsync(PcPastSnapshotQuery query, CancellationToken cancellationToken);
+        Task<ResponseDto<PcPastSnapshotDto>> RequestPastSnapshotAsync(PcPastSnapshotRequestDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<PcPastSnapshotDto>> DecidePastSnapshotAsync(PcPastSnapshotDecisionDto dto, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// R1c (H4, M4): the nightly run of the engine for every contract with a current baseline: writes the progress events of the day (so the earned value of a past data date can be read back),
+        /// and writes the frozen planned-value rows of a baseline that has none (a baseline of before R1c). Returns the number of contracts done.
+        /// </summary>
+        Task<int> NightlyAsync(CancellationToken cancellationToken);
+
         Task<ResponseDto<PcSnapshotDto>> TakeSnapshotAsync(PcSnapshotRequestDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PcSnapshotRunResultDto>> RunDueSnapshotsAsync(PcSnapshotRunDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PagedList<PcSnapshotDto>>> GetSnapshotsAsync(PcSnapshotQuery query, CancellationToken cancellationToken);
@@ -74,6 +88,9 @@ namespace Services.NasbNiro.ProjectControl
             public Dictionary<int, DateTime?> StartDate = new Dictionary<int, DateTime?>();
             public Dictionary<int, DateTime?> FinishDate = new Dictionary<int, DateTime?>();
             public Dictionary<int, decimal> Weight = new Dictionary<int, decimal>();
+
+            /// <summary>R1c (H1): the weights are the ones frozen with the current baseline (an activity that is not in the baseline weighs nothing).</summary>
+            public bool WeightsFromBaseline;
         }
 
         /// <summary>Percent of one purchase order line from receipts, QC inspections and NCRs (WI-PL-009 sections 19 and 27).</summary>
@@ -246,10 +263,25 @@ namespace Services.NasbNiro.ProjectControl
                 if (target != null && !calc.StartDate[target.Id].HasValue && !target.ActualStart.HasValue) calc.StartDate[target.Id] = issueDate;
             }
 
-            // hierarchical weights
-            List<PcWbsNode> nodes = await _uow.Set<PcWbsNode>().AsNoTracking().Where(n => n.ContractId == contractId && !n.Deleted).ToListAsync(cancellationToken);
-            calc.Weight = EffectiveWeights(nodes, calc.Activities);
+            // hierarchical weights: R1c (H1) the weights frozen with the current baseline when it has them (progress that triggers a payment follows the approved plan, not the live tree), else the live tree
+            Dictionary<int, decimal> frozen = await BaselineWeightsAsync(contractId, cancellationToken);
+            if (frozen != null) { calc.Weight = frozen; calc.WeightsFromBaseline = true; }
+            else
+            {
+                List<PcWbsNode> nodes = await _uow.Set<PcWbsNode>().AsNoTracking().Where(n => n.ContractId == contractId && !n.Deleted).ToListAsync(cancellationToken);
+                calc.Weight = EffectiveWeights(nodes, calc.Activities);
+            }
             return calc;
+        }
+
+        /// <summary>R1c (H1): the share of every activity of the current baseline in the whole project, as frozen with it; null when there is no current baseline or it carries no weights (a baseline of before R1c).</summary>
+        private async Task<Dictionary<int, decimal>> BaselineWeightsAsync(int contractId, CancellationToken cancellationToken)
+        {
+            int? baselineId = await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => t.ContractId == contractId && !t.Deleted).Select(t => t.CurrentBaselineId).FirstOrDefaultAsync(cancellationToken);
+            if (!baselineId.HasValue) return null;
+            var rows = await _uow.Set<PcBaselineActivity>().AsNoTracking().Where(r => r.BaselineId == baselineId.Value).Select(r => new { r.ActivityId, r.EffectiveWeight }).ToListAsync(cancellationToken);
+            if (rows.Count == 0 || rows.Any(r => !r.EffectiveWeight.HasValue)) return null;
+            return rows.ToDictionary(r => r.ActivityId, r => r.EffectiveWeight.Value);
         }
 
         /// <summary>Weight of every activity in the whole project (the fractions add up to one); siblings are normalised, branches without activities are ignored.</summary>
@@ -295,11 +327,14 @@ namespace Services.NasbNiro.ProjectControl
             List<PcActivity> acts = list.ToList();
             if (acts.Count == 0) return 0m;
             decimal total = acts.Sum(a => c.Weight.TryGetValue(a.Id, out decimal w) ? w : 0m);
-            if (total <= 0m) return PcText.Round2(acts.Average(a => c.Percent[a.Id]));
+            if (total <= 0m) return c.WeightsFromBaseline ? 0m : PcText.Round2(acts.Average(a => c.Percent[a.Id]));
             return PcText.Round2(acts.Sum(a => (c.Weight.TryGetValue(a.Id, out decimal w) ? w : 0m) * c.Percent[a.Id]) / total);
         }
 
-        public async Task<List<PcActivity>> ApplyAsync(int contractId, CancellationToken cancellationToken)
+        public Task<List<PcActivity>> ApplyAsync(int contractId, CancellationToken cancellationToken) => ApplyAsync(contractId, DateTime.Today, cancellationToken);
+
+        /// <param name="seenOn">The day the changes are seen: the latest day an event of this run may carry (the nightly run before the working day passes the previous day).</param>
+        private async Task<List<PcActivity>> ApplyAsync(int contractId, DateTime seenOn, CancellationToken cancellationToken)
         {
             DateTime today = DateTime.Today;
             Calc c = await ComputeAsync(contractId, true, today, cancellationToken);
@@ -323,6 +358,15 @@ namespace Services.NasbNiro.ProjectControl
                     if (a.ActualStart.HasValue && a.Status == PcActivityStatus.NotStarted) a.Status = PcActivityStatus.InProgress;
                 }
             }
+            // R1c (H4): every change of the percent is written with the day it was seen, so earned value of a later data date can be read back as it was known on that day
+            // R1c (C9): ... and an event carries the day of the fact behind it (receipt, QC result, approval, release, shipment), not the day the engine happened to run
+            var factDates = new Dictionary<int, DateTime>();
+            foreach (PcActivity a in c.Activities)
+            {
+                DateTime? fact = c.FinishDate[a.Id] ?? c.StartDate[a.Id];
+                if (fact.HasValue) factDates[a.Id] = fact.Value.Date;
+            }
+            await PcProgressEvents.RecordAsync(_uow, contractId, c.Percent, seenOn.Date, Me, PcProgressEvents.SourceEngine, cancellationToken, factDates);
             return c.Activities;
         }
 
@@ -336,13 +380,13 @@ namespace Services.NasbNiro.ProjectControl
             PcWorkCalendar cal = plan.Calendar;
             var dto = new PcProgressDto { ContractId = contractId, AsOf = asOf, Activities = c.Activities.Count, DoneActivities = c.Activities.Count(a => a.Status == PcActivityStatus.Done), LateActivities = c.Activities.Count(a => a.IsLate) };
             if (c.Activities.Count == 0) return ResponseDtoHelper.Ok(dto);
-            decimal PlannedOf(PcActivity a) => plan.Items.TryGetValue(a.Id, out PcPlanItem it) ? plan.Fraction(it, asOf) * 100m : 0m;
+            decimal PlannedOf(PcActivity a) => plan.Items.TryGetValue(a.Id, out PcCurveItem it) ? plan.Fraction(it, asOf) * 100m : 0m;
             decimal Weighted(IEnumerable<PcActivity> list, Func<PcActivity, decimal> value)
             {
                 List<PcActivity> l = list.ToList();
                 decimal total = l.Sum(a => c.Weight.TryGetValue(a.Id, out decimal w) ? w : 0m);
                 if (l.Count == 0) return 0m;
-                if (total <= 0m) return PcText.Round2(l.Average(value));
+                if (total <= 0m) return c.WeightsFromBaseline ? 0m : PcText.Round2(l.Average(value));
                 return PcText.Round2(l.Sum(a => (c.Weight.TryGetValue(a.Id, out decimal w) ? w : 0m) * value(a)) / total);
             }
             dto.PhysicalPercent = Weighted(c.Activities, a => c.Percent[a.Id]);
@@ -372,7 +416,7 @@ namespace Services.NasbNiro.ProjectControl
 
         private static PcManualProgressDto ToDto(PcManualProgress m, Dictionary<int, string> names) => new PcManualProgressDto
         {
-            Id = m.Id, ActivityId = m.ActivityId, ActivityCode = m.Activity?.Code, ActivityTitle = m.Activity?.Title, Percent = m.Percent, Comment = m.Comment, ProposedByUserId = m.ProposedByUserId,
+            Id = m.Id, ActivityId = m.ActivityId, ActivityCode = m.Activity?.Code, ActivityTitle = m.Activity?.Title, Percent = m.Percent, Comment = m.Comment, ProgressDate = m.ProgressDate, ProposedByUserId = m.ProposedByUserId,
             ProposedByName = names.Name(m.ProposedByUserId), ProposedAt = m.ProposedAt, State = m.State, DecidedByName = names.Name(m.DecidedByUserId), DecidedAt = m.DecidedAt, DecisionNote = m.DecisionNote,
         };
 
@@ -385,7 +429,11 @@ namespace Services.NasbNiro.ProjectControl
             if (a == null) return PcText.NotFound<PcManualProgressDto>("فعالیت پیدا نشد.");
             if (a.ProgressMethod != PcProgressMethod.Manual && a.ProgressMethod != PcProgressMethod.Contractor && a.ProgressMethod != PcProgressMethod.Quantity) return Bad<PcManualProgressDto>("پیشرفت این فعالیت از رویدادهای سیستم محاسبه می‌شود و دستی ثبت نمی‌شود.");
             if (await _uow.Set<PcManualProgress>().AnyAsync(m => m.ActivityId == a.Id && m.State == 0, cancellationToken)) return Bad<PcManualProgressDto>("یک پیشنهاد در انتظار تایید برنامه‌ریزی وجود دارد.");
-            var row = new PcManualProgress { ActivityId = a.Id, Percent = PcText.Round2(dto.Percent), Comment = Clean(dto.Comment), ProposedByUserId = Me, ProposedAt = DateTimeOffset.Now, State = 0 };
+            // R1c (H4): the day the progress was reached is dated; the future is refused
+            DateTime progressDate = (dto.ProgressDate ?? DateTime.Today).Date;
+            string dateProblem = await ProgressDateProblemAsync(a.ContractId, a.Id, progressDate, cancellationToken);
+            if (dateProblem != null) return Bad<PcManualProgressDto>(dateProblem);
+            var row = new PcManualProgress { ActivityId = a.Id, Percent = PcText.Round2(dto.Percent), Comment = Clean(dto.Comment), ProgressDate = progressDate, ProposedByUserId = Me, ProposedAt = DateTimeOffset.Now, State = 0 };
             _uow.Set<PcManualProgress>().Add(row);
             await _uow.SaveChangesAsync(cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { Me }, cancellationToken);
@@ -403,23 +451,39 @@ namespace Services.NasbNiro.ProjectControl
             if (m.ProposedByUserId == Me) return Bad<PcManualProgressDto>(PcText.SameUser);
             if (!dto.Approve && Clean(dto.Note) == null) return Bad<PcManualProgressDto>("دلیل رد را بنویسید.");
             m.State = dto.Approve ? 1 : 2; m.DecidedByUserId = Me; m.DecidedAt = DateTimeOffset.Now; m.DecisionNote = Clean(dto.Note);
+            if (dto.Approve)
+            {
+                // R1c (H4): the approved percent is a dated event. It counts from the day it was reached; when a weekly snapshot was taken for that day or later in the meantime, from today
+                DateTime day = (m.ProgressDate ?? DateTime.Today).Date;
+                if (await ProgressDateProblemAsync(m.Activity.ContractId, m.ActivityId, day, cancellationToken) != null) day = DateTime.Today;
+                m.ProgressDate = day;
+                PcProgressEvents.Add(_uow, m.Activity.ContractId, m.ActivityId, day, m.Percent, Me, PcProgressEvents.SourceManual);
+            }
             await _uow.SaveChangesAsync(cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { m.ProposedByUserId, m.DecidedByUserId }, cancellationToken);
             return ResponseDtoHelper.Ok(ToDto(m, names));
         }
 
-        // ============================================================================ plan, earned value
-
-        private sealed class PcPlanItem
+        /// <summary>
+        /// R1c (H4): the problem with the day a progress was reached, or null. It is not in the future; and unless it is today, it is after the data date of the last weekly snapshot
+        /// (that week was reported and does not change) and not before the previous approved progress of the same activity.
+        /// </summary>
+        private async Task<string> ProgressDateProblemAsync(int contractId, int activityId, DateTime day, CancellationToken cancellationToken)
         {
-            public int ActivityId;
-            public DateTime Start;
-            public DateTime Finish;
-            public decimal Budget;
-            public int Duration;
-            public int StartOffset;
-            public int FinishOffset;
+            DateTime today = DateTime.Today;
+            day = day.Date;
+            if (day > today) return "تاریخ پیشرفت در آینده است؛ فقط پیشرفتی ثبت می‌شود که تا امروز انجام شده است.";
+            if (day == today) return null;
+            DateTime? lastSnapshot = await _uow.Set<PcProgressSnapshot>().AsNoTracking().Where(s => s.ContractId == contractId).MaxAsync(s => (DateTime?)s.DataDate, cancellationToken);
+            if (lastSnapshot.HasValue && day <= lastSnapshot.Value.Date)
+                return "تاریخ پیشرفت باید پس از تاریخ داده آخرین عکس هفتگی (" + global::Services.NasbNiro.Finance.FiscalCalendars.Text(lastSnapshot.Value) + ") باشد؛ آن هفته گزارش شده و تغییر نمی‌کند. پیشرفت را با تاریخ امروز ثبت کنید.";
+            DateTime? previous = (await _uow.Set<PcManualProgress>().AsNoTracking().Where(m => m.ActivityId == activityId && m.State == 1).Select(m => new { m.ProgressDate, m.DecidedAt }).ToListAsync(cancellationToken))
+                .Select(m => m.ProgressDate ?? m.DecidedAt?.Date).DefaultIfEmpty().Max();
+            if (previous.HasValue && day < previous.Value.Date) return "تاریخ پیشرفت نمی‌تواند پیش از پیشرفت تاییدشده قبلی همین فعالیت باشد.";
+            return null;
         }
+
+        // ============================================================================ plan, earned value
 
         private sealed class PcPlanSet
         {
@@ -429,34 +493,27 @@ namespace Services.NasbNiro.ProjectControl
             public decimal ManagementReserve;
             public DateTime? Start;
             public DateTime? Finish;
+
+            /// <summary>The calendar of the contract as it is today; used only to count the days after the planned finish (the frozen rows stop there).</summary>
             public PcWorkCalendar Calendar;
             public PcAccrualMode Mode;
-            public Dictionary<int, PcPlanItem> Items = new Dictionary<int, PcPlanItem>();
 
-            public int OffsetAt(DateTime asOf)
-            {
-                if (!Start.HasValue || asOf.Date < Calendar.Origin) return -1;
-                return Calendar.OffsetOf(Calendar.PreviousWorkingOnOrBefore(asOf));
-            }
+            /// <summary>R1c (M4): the planned-value curve; read from the rows frozen at the approval of the baseline when <see cref="Frozen"/>, else computed with today's calendars.</summary>
+            public PcCurve Curve = new PcCurve();
+            public bool Frozen;
+            public Dictionary<int, PcCurveItem> Items = new Dictionary<int, PcCurveItem>();
 
-            public decimal FractionAt(PcPlanItem it, int t)
-            {
-                if (t < it.StartOffset) return 0m;
-                if (t >= it.FinishOffset) return 1m;
-                if (Mode == PcAccrualMode.AtEnd || it.Duration == 0) return 0m;
-                int d = it.FinishOffset - it.StartOffset + 1;
-                return Math.Min(1m, Math.Max(0m, (decimal)(t - it.StartOffset + 1) / d));
-            }
+            public decimal Fraction(PcCurveItem it, DateTime day) => Curve.Fraction(it, day);
 
-            public decimal Fraction(PcPlanItem it, DateTime asOf) => FractionAt(it, OffsetAt(asOf));
-
-            public decimal PvAt(int t) => Items.Values.Sum(i => i.Budget * FractionAt(i, t));
+            /// <summary>The planned value of the whole plan at the end of the day.</summary>
+            public decimal PvOn(DateTime day) => Curve.Pv(day);
         }
 
         private async Task<PcPlanSet> LoadPlanAsync(int contractId, List<PcActivity> acts, CancellationToken cancellationToken)
         {
             PcContractTerms terms = await PcContext.TermsAsync(_uow, contractId, false, cancellationToken);
             var plan = new PcPlanSet { Mode = terms?.AccrualMode ?? PcAccrualMode.Linear, Calendar = await PcContext.CalendarForContractAsync(_uow, terms, cancellationToken) };
+            List<PcBaselineCostPeriod> periods = null;
             if (terms?.CurrentBaselineId != null)
             {
                 PcBaseline b = await _uow.Set<PcBaseline>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == terms.CurrentBaselineId.Value && !x.Deleted, cancellationToken);
@@ -464,59 +521,88 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     plan.FromBaseline = true; plan.BaselineId = b.Id; plan.Bac = b.Bac; plan.ManagementReserve = b.ManagementReserve;
                     List<PcBaselineActivity> rows = await _uow.Set<PcBaselineActivity>().AsNoTracking().Where(x => x.BaselineId == b.Id).ToListAsync(cancellationToken);
-                    foreach (PcBaselineActivity r in rows) plan.Items[r.ActivityId] = new PcPlanItem { ActivityId = r.ActivityId, Start = r.Start.Date, Finish = r.Finish.Date, Budget = r.Budget, Duration = r.DurationDays };
+                    foreach (PcCurveItem item in PcFrozenPlan.ItemsOf(rows)) plan.Items[item.ActivityId] = item;
+                    periods = await _uow.Set<PcBaselineCostPeriod>().AsNoTracking().Where(x => x.BaselineId == b.Id).ToListAsync(cancellationToken);
                 }
             }
             if (!plan.FromBaseline)
             {
                 plan.ManagementReserve = terms?.ManagementReserve ?? 0m;
                 foreach (PcActivity a in acts.Where(a => a.EarlyStart.HasValue && a.EarlyFinish.HasValue))
-                    plan.Items[a.Id] = new PcPlanItem { ActivityId = a.Id, Start = a.EarlyStart.Value.Date, Finish = a.EarlyFinish.Value.Date, Budget = a.BudgetAtCompletion, Duration = a.DurationDays };
+                    plan.Items[a.Id] = new PcCurveItem { ActivityId = a.Id, Start = a.EarlyStart.Value.Date, Finish = a.EarlyFinish.Value.Date, Budget = a.BudgetAtCompletion, Duration = a.DurationDays, CalendarKey = a.CalendarId ?? PcCurve.ContractCalendar };
                 plan.Bac = plan.Items.Values.Sum(i => i.Budget);
             }
             if (plan.Items.Count > 0)
             {
                 plan.Start = plan.Items.Values.Min(i => i.Start); plan.Finish = plan.Items.Values.Max(i => i.Finish);
-                plan.Calendar.SetOrigin(plan.Start.Value);
-                foreach (PcPlanItem i in plan.Items.Values) { i.StartOffset = plan.Calendar.OffsetOf(i.Start); i.FinishOffset = plan.Calendar.OffsetOf(i.Finish); }
+                if (periods != null && periods.Count > 0)
+                {
+                    plan.Curve = PcCurve.FromRows(periods, plan.Mode);
+                    plan.Frozen = true;
+                }
+                else
+                {
+                    var items = plan.Items.Values.ToList();
+                    plan.Curve = PcCurve.Build(items, await PcFrozenPlan.CalendarsAsync(_uow, terms, items.Select(i => i.CalendarKey), cancellationToken), plan.Mode);
+                }
             }
             return plan;
         }
 
-        private async Task<decimal> ActualCostAsync(int contractId, DateTime asOf, CancellationToken cancellationToken)
+        /// <summary>Entries written by hand in project control; they count only after a second person checked them (M5).</summary>
+        internal const string ManualCostSource = "ProjectControl";
+
+        /// <summary>
+        /// R1c (M5): the cost entries that count as the actual cost of a contract up to the end of the day: the after-sales costs (service orders and their monthly labour) are not project cost,
+        /// and an entry written by hand in project control counts only after a second FINANCIAL person checked it.
+        /// </summary>
+        private IQueryable<CostEntry> ActualCosts(int contractId, DateTime asOf)
         {
             DateTime end = asOf.Date.AddDays(1);
-            return await _uow.Set<CostEntry>().AsNoTracking().Where(e => e.EntryDate < end && (e.ContractId == contractId || (e.ContractId == null && e.WorkOrder != null && e.WorkOrder.ContractId == contractId))).SumAsync(e => (decimal?)e.Amount, cancellationToken) ?? 0m;
+            return _uow.Set<CostEntry>().AsNoTracking().Where(e => e.EntryDate < end && (e.ContractId == contractId || (e.ContractId == null && e.WorkOrder != null && e.WorkOrder.ContractId == contractId))
+                && e.SourceType != global::Services.NasbNiro.AfterSales.SvCostSource.Order && e.SourceType != global::Services.NasbNiro.AfterSales.SvLabourMonth.SourceType
+                && (e.SourceType != ManualCostSource || _uow.Set<PcCostCheck>().Any(c => c.CostEntryId == e.Id)));
         }
+
+        private async Task<decimal> ActualCostAsync(int contractId, DateTime asOf, CancellationToken cancellationToken) =>
+            await ActualCosts(contractId, asOf).SumAsync(e => (decimal?)e.Amount, cancellationToken) ?? 0m;
 
         public async Task<PcEvmDto> ComputeEvmAsync(int contractId, DateTime asOf, CancellationToken cancellationToken)
         {
             asOf = asOf.Date;
             Calc c = await ComputeAsync(contractId, false, asOf, cancellationToken);
-            return await EvmFromAsync(contractId, asOf, c, cancellationToken);
+            bool fromEvents = false;
+            string note = null;
+            if (asOf < DateTime.Today)
+            {
+                // R1c (H4): the percents of a past data date are the ones known on that day (the dated progress events), not the module data of today
+                fromEvents = true;
+                if (!await UseEventsAsync(c, contractId, asOf, cancellationToken)) note = "برای این قرارداد هنوز رویداد پیشرفت ثبت نشده است؛ پیشرفت تاریخ‌های گذشته در دسترس نیست (اجرای شبانه یا محاسبه پیشرفت امروز، رویدادها را می‌سازد).";
+            }
+            PcEvmDto dto = await EvmFromAsync(contractId, asOf, c, cancellationToken);
+            dto.FromEvents = fromEvents;
+            if (note != null) dto.Note = dto.Note == null ? note : dto.Note + " " + note;
+            return dto;
         }
 
         private async Task<PcEvmDto> EvmFromAsync(int contractId, DateTime asOf, Calc c, CancellationToken cancellationToken)
         {
             Dictionary<string, decimal> settings = await PcSettingKeys.LoadAsync(_uow, cancellationToken);
             PcPlanSet plan = await LoadPlanAsync(contractId, c.Activities, cancellationToken);
-            var dto = new PcEvmDto { ContractId = contractId, AsOf = asOf, BaselineId = plan.BaselineId, FromBaseline = plan.FromBaseline, Bac = plan.Bac, ManagementReserve = plan.ManagementReserve, SpiStatus = "none", CpiStatus = "none" };
+            var dto = new PcEvmDto { ContractId = contractId, AsOf = asOf, BaselineId = plan.BaselineId, FromBaseline = plan.FromBaseline, Bac = plan.Bac, ManagementReserve = plan.ManagementReserve, SpiStatus = "none", CpiStatus = "none", PvFrozen = plan.Frozen };
+            dto.ProductionForecastFinish = c.Activities.Where(a => a.ProductionForecastFinish.HasValue).Select(a => a.ProductionForecastFinish).DefaultIfEmpty().Max();
             if (plan.Items.Count == 0) { dto.Note = "مبنای زمان‌بندی یا برنامه محاسبه‌شده‌ای وجود ندارد."; dto.Ac = await ActualCostAsync(contractId, asOf, cancellationToken); return dto; }
-            int t = plan.OffsetAt(asOf);
-            decimal pv = 0m, ev = 0m;
-            foreach (PcPlanItem it in plan.Items.Values)
-            {
-                pv += it.Budget * plan.FractionAt(it, t);
+            decimal pv = plan.PvOn(asOf), ev = 0m;
+            foreach (PcCurveItem it in plan.Items.Values)
                 ev += c.Percent.TryGetValue(it.ActivityId, out decimal p) ? it.Budget * p / 100m : 0m;
-            }
             dto.Pv = PcText.Round2(pv); dto.Ev = PcText.Round2(ev); dto.Ac = PcText.Round2(await ActualCostAsync(contractId, asOf, cancellationToken));
             dto.Cv = dto.Ev - dto.Ac; dto.Sv = dto.Ev - dto.Pv;
             if (dto.Ac > 0m) dto.Cpi = PcText.Round4(dto.Ev / dto.Ac);
             if (dto.Pv > 0m) dto.Spi = PcText.Round4(dto.Ev / dto.Pv);
 
-            // earned schedule (working days)
-            int last = plan.Items.Values.Max(i => i.FinishOffset);
-            int at = t < 0 ? 0 : t + 1;
+            // earned schedule (working days of the contract calendar)
+            int last = Math.Max(0, plan.Curve.ContractWorkingDays - 1);
+            int at = plan.Curve.ActualDays(asOf, plan.Calendar);
             decimal es = 0m;
             if (dto.Ev > 0m)
             {
@@ -524,7 +610,7 @@ namespace Services.NasbNiro.ProjectControl
                 es = last + 1;
                 for (int k = 0; k <= last; k++)
                 {
-                    decimal cur = plan.PvAt(k);
+                    decimal cur = plan.Curve.PvAtWorkingDay(k);
                     if (cur >= dto.Ev) { es = k + (cur > prev ? (dto.Ev - prev) / (cur - prev) : 0m); break; }
                     prev = cur;
                 }
@@ -546,9 +632,9 @@ namespace Services.NasbNiro.ProjectControl
 
             // physical and planned percent (weighted)
             decimal totalW = c.Weight.Values.Sum();
-            decimal Weighted(Func<PcActivity, decimal> value) => totalW <= 0m ? (c.Activities.Count == 0 ? 0m : c.Activities.Average(value)) : c.Activities.Sum(a => (c.Weight.TryGetValue(a.Id, out decimal w) ? w : 0m) * value(a)) / totalW;
+            decimal Weighted(Func<PcActivity, decimal> value) => totalW <= 0m ? (c.Activities.Count == 0 || c.WeightsFromBaseline ? 0m : c.Activities.Average(value)) : c.Activities.Sum(a => (c.Weight.TryGetValue(a.Id, out decimal w) ? w : 0m) * value(a)) / totalW;
             dto.PhysicalPercent = PcText.Round2(Weighted(a => c.Percent[a.Id]));
-            dto.PlannedPercent = PcText.Round2(Weighted(a => plan.Items.TryGetValue(a.Id, out PcPlanItem it) ? plan.FractionAt(it, t) * 100m : 0m));
+            dto.PlannedPercent = PcText.Round2(Weighted(a => plan.Items.TryGetValue(a.Id, out PcCurveItem it) ? plan.Fraction(it, asOf) * 100m : 0m));
             decimal delay = dto.PlannedPercent - dto.PhysicalPercent;
             dto.RescheduleRequired = delay > settings[PcSettingKeys.RescheduleDelayPercent];
             dto.BaselineFinish = plan.Finish;
@@ -575,9 +661,8 @@ namespace Services.NasbNiro.ProjectControl
             for (int i = 0; i < 240; i++)
             {
                 DateTime point = cursor > plan.Finish.Value ? plan.Finish.Value : cursor;
-                int t = plan.OffsetAt(point);
                 PcProgressSnapshot snap = snaps.LastOrDefault(s => s.DataDate <= point);
-                points.Add(new PcCashFlowPointDto { Date = point, PlannedCumulative = PcText.Round2(plan.PvAt(t)), ActualCostCumulative = PcText.Round2(await ActualCostAsync(contractId, point, cancellationToken)), EarnedValue = snap?.Ev });
+                points.Add(new PcCashFlowPointDto { Date = point, PlannedCumulative = PcText.Round2(plan.PvOn(point)), ActualCostCumulative = PcText.Round2(await ActualCostAsync(contractId, point, cancellationToken)), EarnedValue = snap?.Ev });
                 if (cursor >= lastDate || point == plan.Finish.Value) break;
                 cursor = new DateTime(cursor.Year, cursor.Month, 1).AddMonths(2).AddDays(-1);
             }
@@ -593,6 +678,10 @@ namespace Services.NasbNiro.ProjectControl
             if (!Enum.IsDefined(typeof(CostKind), dto.Kind)) return Bad<PcCostEntryDto>("نوع هزینه را مشخص کنید.");
             if (dto.Amount == 0m) return Bad<PcCostEntryDto>("مبلغ را وارد کنید.");
             if (Clean(dto.Description) == null) return Bad<PcCostEntryDto>("شرح هزینه را بنویسید.");
+            // R1c (H4): a cost is booked for a day that has happened; the actual cost of a data date cannot be filled in ahead of time
+            if (dto.EntryDate != default && dto.EntryDate.Date > DateTime.Today) return Bad<PcCostEntryDto>("تاریخ هزینه در آینده است؛ هزینه‌ای ثبت می‌شود که تا امروز انجام شده است.");
+            // H5: the entries made before the second check existed are marked as checked once, before the first entry of the new rule is written
+            await PcR1Upgrade.EnsureAsync(_uow, cancellationToken);
             if (!await _uow.Set<ContractEntity>().AnyAsync(x => x.Id == dto.ContractId && !x.Deleted, cancellationToken)) return PcText.NotFound<PcCostEntryDto>(PcText.ContractNotFound);
             if (dto.WorkOrderId.HasValue && !await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId.Value && w.ContractId == dto.ContractId && !w.Deleted, cancellationToken)) return Bad<PcCostEntryDto>("دستور کار متعلق به این قرارداد نیست.");
             if (dto.WbsNodeId.HasValue && !await _uow.Set<PcWbsNode>().AnyAsync(n => n.Id == dto.WbsNodeId.Value && n.ContractId == dto.ContractId && !n.Deleted, cancellationToken)) return Bad<PcCostEntryDto>("گره WBS متعلق به این قرارداد نیست.");
@@ -603,7 +692,32 @@ namespace Services.NasbNiro.ProjectControl
             };
             _uow.Set<CostEntry>().Add(e);
             await _uow.SaveChangesAsync(cancellationToken);
-            return ResponseDtoHelper.Ok(new PcCostEntryDto { Id = e.Id, ContractId = e.ContractId, WorkOrderId = e.WorkOrderId, WbsNodeId = e.WbsNodeId, Kind = e.Kind, EntryDate = e.EntryDate, Amount = e.Amount, SourceType = e.SourceType, SourceNumber = e.SourceNumber, Description = e.Description });
+            return ResponseDtoHelper.Ok(new PcCostEntryDto
+            {
+                Id = e.Id, ContractId = e.ContractId, WorkOrderId = e.WorkOrderId, WbsNodeId = e.WbsNodeId, Kind = e.Kind, EntryDate = e.EntryDate, Amount = e.Amount, SourceType = e.SourceType, SourceNumber = e.SourceNumber, Description = e.Description,
+                NeedsCheck = true, Checked = false, CreatedByUserId = e.CreatedByUserId, ExcludedFromActual = true,
+            });
+        }
+
+        /// <summary>R1c (M5): the second FINANCIAL person checks a manual cost entry; only then it is part of the actual cost. The person who wrote the entry cannot check it.</summary>
+        public async Task<ResponseDto<PcCostEntryDto>> CheckCostAsync(PcCostCheckDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null || dto.CostEntryId <= 0) return Bad<PcCostEntryDto>(PcText.InvalidData);
+            if (!_user.IsInRole("FINANCIAL,FINANCEMANAGER")) return Bad<PcCostEntryDto>(PcText.NotAllowed + " (بررسی هزینه دستی با کارشناس یا مدیر مالی است)");
+            CostEntry e = await _uow.Set<CostEntry>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == dto.CostEntryId, cancellationToken);
+            if (e == null) return PcText.NotFound<PcCostEntryDto>("ردیف هزینه پیدا نشد.");
+            if (e.SourceType != ManualCostSource) return Bad<PcCostEntryDto>("فقط هزینه‌ای که با دست در کنترل پروژه ثبت شده بررسی دوم می‌خواهد؛ هزینه‌های سیستمی از ماژول خودشان می‌آیند.");
+            if (e.CreatedByUserId == Me) return Bad<PcCostEntryDto>(PcText.SameUser + " (ثبت‌کننده هزینه نمی‌تواند آن را بررسی کند)");
+            if (await _uow.Set<PcCostCheck>().AnyAsync(c => c.CostEntryId == e.Id, cancellationToken)) return Bad<PcCostEntryDto>("این هزینه قبلاً بررسی شده است.");
+            var check = new PcCostCheck { CostEntryId = e.Id, CheckedByUserId = Me, CheckedAt = DateTimeOffset.Now, Note = Clean(dto.Note) };
+            _uow.Set<PcCostCheck>().Add(check);
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateException) { return Bad<PcCostEntryDto>("این هزینه هم‌زمان توسط شخص دیگری بررسی شد."); }
+            return ResponseDtoHelper.Ok(new PcCostEntryDto
+            {
+                Id = e.Id, ContractId = e.ContractId, WorkOrderId = e.WorkOrderId, WbsNodeId = e.WbsNodeId, Kind = e.Kind, EntryDate = e.EntryDate, Amount = e.Amount, SourceType = e.SourceType, SourceNumber = e.SourceNumber, Description = e.Description,
+                NeedsCheck = true, Checked = true, CheckedByUserId = check.CheckedByUserId, CheckedAt = check.CheckedAt, CreatedByUserId = e.CreatedByUserId, ExcludedFromActual = false,
+            });
         }
 
         public async Task<ResponseDto<PagedList<PcCostEntryDto>>> GetCostsAsync(PcContractQuery query, CancellationToken cancellationToken)
@@ -614,6 +728,10 @@ namespace Services.NasbNiro.ProjectControl
             IQueryable<PcCostEntryDto> projection = _uow.Set<CostEntry>().AsNoTracking().Where(e => e.ContractId == id || (e.ContractId == null && e.WorkOrder != null && e.WorkOrder.ContractId == id))
                 .OrderByDescending(e => e.EntryDate).ThenByDescending(e => e.Id).Select(e => new PcCostEntryDto
                 {
+                    NeedsCheck = e.SourceType == ManualCostSource, Checked = _uow.Set<PcCostCheck>().Any(c => c.CostEntryId == e.Id), CheckedAt = _uow.Set<PcCostCheck>().Where(c => c.CostEntryId == e.Id).Select(c => (DateTimeOffset?)c.CheckedAt).FirstOrDefault(),
+                    CheckedByUserId = _uow.Set<PcCostCheck>().Where(c => c.CostEntryId == e.Id).Select(c => (int?)c.CheckedByUserId).FirstOrDefault(), CreatedByUserId = e.CreatedByUserId,
+                    ExcludedFromActual = e.SourceType == global::Services.NasbNiro.AfterSales.SvCostSource.Order || e.SourceType == global::Services.NasbNiro.AfterSales.SvLabourMonth.SourceType
+                        || (e.SourceType == ManualCostSource && !_uow.Set<PcCostCheck>().Any(c => c.CostEntryId == e.Id)),
                     Id = e.Id, ContractId = e.ContractId, WorkOrderId = e.WorkOrderId, WbsNodeId = e.WbsNodeId, Kind = e.Kind, EntryDate = e.EntryDate, Amount = e.Amount, SourceType = e.SourceType, SourceNumber = e.SourceNumber, Description = e.Description,
                     LabourHidden = e.Kind == CostKind.Labour && e.LabourProtected,
                 });
@@ -641,15 +759,31 @@ namespace Services.NasbNiro.ProjectControl
             return PcText.Sha256(sb.ToString());
         }
 
+        /// <summary>
+        /// R1c (H4): for a data date before today the percents are the ones known on that day (the dated progress events). Returns false when the contract has no event at all
+        /// (the percents are then zero and the figures of a past date are not available).
+        /// </summary>
+        private async Task<bool> UseEventsAsync(Calc c, int contractId, DateTime asOf, CancellationToken cancellationToken)
+        {
+            List<PcProgressEvent> events = await PcProgressEvents.ListAsync(_uow, contractId, cancellationToken);
+            Dictionary<int, decimal> known = PcProgressEvents.AsOf(events, asOf);
+            foreach (PcActivity a in c.Activities) c.Percent[a.Id] = known.TryGetValue(a.Id, out decimal p) ? p : 0m;
+            return events.Count > 0;
+        }
+
         private async Task<(PcProgressSnapshot Snapshot, string Error)> BuildSnapshotAsync(int contractId, DateTime dataDate, int userId, CancellationToken cancellationToken)
         {
             if (await _uow.Set<PcProgressSnapshot>().AnyAsync(s => s.ContractId == contractId && s.DataDate == dataDate, cancellationToken)) return (null, "برای این تاریخ داده، عکس هفتگی قبلاً گرفته شده و تغییر نمی‌کند.");
+            // R1c (H4): the snapshots are a chain in time; a new one is never dated before the previous one
+            DateTime? previous = await _uow.Set<PcProgressSnapshot>().AsNoTracking().Where(s => s.ContractId == contractId).MaxAsync(s => (DateTime?)s.DataDate, cancellationToken);
+            if (previous.HasValue && dataDate < previous.Value.Date)
+                return (null, "تاریخ داده نمی‌تواند پیش از تاریخ داده آخرین عکس هفتگی (" + global::Services.NasbNiro.Finance.FiscalCalendars.Text(previous.Value) + ") باشد؛ عکس‌ها پشت‌سرهم و تغییرناپذیرند.");
             List<PcActivity> acts = await ApplyAsync(contractId, cancellationToken);
             if (acts.Count == 0) return (null, "فعالیتی برای عکس هفتگی وجود ندارد.");
             Calc c = await ComputeAsync(contractId, false, dataDate, cancellationToken);
+            if (dataDate < DateTime.Today) await UseEventsAsync(c, contractId, dataDate, cancellationToken);
             PcEvmDto evm = await EvmFromAsync(contractId, dataDate, c, cancellationToken);
             PcPlanSet plan = await LoadPlanAsync(contractId, c.Activities, cancellationToken);
-            int t = plan.OffsetAt(dataDate);
             var snap = new PcProgressSnapshot
             {
                 ContractId = contractId, DataDate = dataDate, TakenAt = DateTimeOffset.Now, TakenByUserId = userId, BaselineId = evm.BaselineId, PhysicalPercent = evm.PhysicalPercent, PlannedPercent = evm.PlannedPercent,
@@ -659,7 +793,7 @@ namespace Services.NasbNiro.ProjectControl
             {
                 decimal pct = c.Percent[a.Id];
                 decimal budget = 0m, pv = 0m, planned = 0m;
-                if (plan.Items.TryGetValue(a.Id, out PcPlanItem it)) { budget = it.Budget; planned = plan.FractionAt(it, t) * 100m; pv = it.Budget * plan.FractionAt(it, t); }
+                if (plan.Items.TryGetValue(a.Id, out PcCurveItem it)) { decimal fraction = plan.Fraction(it, dataDate); budget = it.Budget; planned = fraction * 100m; pv = it.Budget * fraction; }
                 snap.Lines.Add(new PcProgressSnapshotLine { ActivityId = a.Id, Percent = pct, PlannedPercent = PcText.Round2(planned), Budget = budget, Ev = PcText.Round2(budget * pct / 100m), Pv = PcText.Round2(pv), ForecastFinish = a.ForecastFinish });
             }
             snap.Hash = HashOf(snap);
@@ -683,12 +817,28 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.Planning)) return Bad<PcSnapshotDto>(PcText.NotAllowed);
             if (!await _uow.Set<ContractEntity>().AnyAsync(x => x.Id == dto.ContractId && !x.Deleted, cancellationToken)) return PcText.NotFound<PcSnapshotDto>(PcText.ContractNotFound);
             PcContractTerms terms = await PcContext.TermsAsync(_uow, dto.ContractId, false, cancellationToken);
-            DateTime dataDate = (dto.DataDate ?? PcText.LastWeekday(DateTime.Today, terms?.DataDateWeekday ?? 3)).Date;
+            DateTime regular = PcText.LastWeekday(DateTime.Today, terms?.DataDateWeekday ?? 3);
+            DateTime dataDate = (dto.DataDate ?? regular).Date;
             if (dataDate > DateTime.Today) return Bad<PcSnapshotDto>("تاریخ داده در آینده است.");
+            // R1c (H4): a data date before the current weekly data date is a back-dated snapshot: it needs the request of planning, approved by the PMO deputy (used once)
+            PcSnapshotRequest approved = null;
+            if (dataDate < regular)
+            {
+                approved = await _uow.Set<PcSnapshotRequest>().FirstOrDefaultAsync(r => r.ContractId == dto.ContractId && r.DataDate == dataDate && !r.Deleted && r.State == PcSnapshotRequestState.Approved, cancellationToken);
+                if (approved == null)
+                    return Bad<PcSnapshotDto>("تاریخ داده (" + global::Services.NasbNiro.Finance.FiscalCalendars.Text(dataDate) + ") پیش از آخرین تاریخ داده هفتگی (" + global::Services.NasbNiro.Finance.FiscalCalendars.Text(regular)
+                        + ") است؛ عکس با تاریخ گذشته فقط پس از درخواست برنامه‌ریزی (با دلیل) و تایید معاون PMO گرفته می‌شود.");
+            }
             var built = await BuildSnapshotAsync(dto.ContractId, dataDate, Me, cancellationToken);
             if (built.Error != null) return Bad<PcSnapshotDto>(built.Error);
+            if (approved != null) { approved.State = PcSnapshotRequestState.Used; approved.ModifyDate = DateTimeOffset.Now; approved.ModifierUserId = Me; }
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateException) { return Bad<PcSnapshotDto>("برای این تاریخ داده، عکس هفتگی قبلاً گرفته شده است."); }
+            if (approved != null)
+            {
+                approved.SnapshotId = built.Snapshot.Id;
+                await _uow.SaveChangesAsync(cancellationToken);
+            }
             Dictionary<int, string> codes = built.Snapshot.Lines.Count > 0 ? await _uow.Set<PcActivity>().AsNoTracking().Where(a => a.ContractId == dto.ContractId).ToDictionaryAsync(a => a.Id, a => a.Code, cancellationToken) : null;
             return ResponseDtoHelper.Ok(ToDto(built.Snapshot, codes));
         }
@@ -707,7 +857,10 @@ namespace Services.NasbNiro.ProjectControl
                 result.ContractsChecked++;
                 DateTime dataDate = PcText.LastWeekday(now, t.DataDateWeekday);
                 if (!simulated && dataDate == now.Date && now.Hour < (int)settings[PcSettingKeys.SnapshotHour]) continue;
-                if (await _uow.Set<PcProgressSnapshot>().AnyAsync(s => s.ContractId == t.ContractId && s.DataDate == dataDate, cancellationToken)) continue;
+                // R1c (H4): the figures of a data date in the future do not exist yet
+                if (dataDate > DateTime.Today) { result.Notes.Add(t.ContractId + ": تاریخ داده در آینده است."); continue; }
+                // one snapshot per data date, and never one dated before the latest (the chain only grows)
+                if (await _uow.Set<PcProgressSnapshot>().AnyAsync(s => s.ContractId == t.ContractId && s.DataDate >= dataDate, cancellationToken)) continue;
                 try
                 {
                     var built = await BuildSnapshotAsync(t.ContractId, dataDate, 0, cancellationToken);
@@ -718,6 +871,115 @@ namespace Services.NasbNiro.ProjectControl
                 catch (DbUpdateException) { result.Notes.Add(t.ContractId + ": عکس هفتگی در همین لحظه توسط فرآیند دیگری گرفته شد."); }
             }
             return ResponseDtoHelper.Ok(result);
+        }
+
+        // ---------------------------------------------------------------- snapshots with a data date in the past (H4): request by planning, approval by the PMO deputy
+
+        private static PcPastSnapshotDto ToDto(PcSnapshotRequest r, Dictionary<int, string> names) => new PcPastSnapshotDto
+        {
+            Id = r.Id, ContractId = r.ContractId, DataDate = r.DataDate, Reason = r.Reason, State = r.State, RequestedByUserId = r.CreatorUserId, RequestedByName = names.Name(r.CreatorUserId), RequestedAt = r.CreateDate,
+            DecidedByUserId = r.DecidedByUserId, DecidedByName = names.Name(r.DecidedByUserId), DecidedAt = r.DecidedAt, DecisionNote = r.DecisionNote, SnapshotId = r.SnapshotId,
+            RowVersion = r.RowVersion == null ? null : Convert.ToBase64String(r.RowVersion),
+        };
+
+        public async Task<ResponseDto<PagedList<PcPastSnapshotDto>>> GetPastSnapshotRequestsAsync(PcPastSnapshotQuery query, CancellationToken cancellationToken)
+        {
+            query ??= new PcPastSnapshotQuery();
+            IQueryable<PcSnapshotRequest> q = _uow.Set<PcSnapshotRequest>().AsNoTracking().Where(r => !r.Deleted);
+            if (query.ContractId.HasValue) q = q.Where(r => r.ContractId == query.ContractId.Value);
+            if (query.State.HasValue) q = q.Where(r => r.State == query.State.Value);
+            PagedList<PcSnapshotRequest> page = await PagedList<PcSnapshotRequest>.CreateAsync(q.OrderByDescending(r => r.Id), query.PageNumber, query.PageSize, cancellationToken);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, page.Select(r => (int?)r.CreatorUserId).Concat(page.Select(r => r.DecidedByUserId)), cancellationToken);
+            List<PcPastSnapshotDto> dtos = page.Select(r => ToDto(r, names)).ToList();
+            return ResponseDtoHelper.Ok((PagedList<PcPastSnapshotDto>)new PcPage<PcPastSnapshotDto>(dtos, page.TotalCount, page.CurrentPage, page.PageSize));
+        }
+
+        public async Task<ResponseDto<PcPastSnapshotDto>> RequestPastSnapshotAsync(PcPastSnapshotRequestDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return Bad<PcPastSnapshotDto>(PcText.InvalidData);
+            if (!_user.IsInRole(ProjectControlRoles.Planning)) return Bad<PcPastSnapshotDto>(PcText.NotAllowed);
+            string reason = Clean(dto.Reason);
+            if (reason == null) return Bad<PcPastSnapshotDto>("دلیل گرفتن عکس با تاریخ گذشته را بنویسید.");
+            if (!await _uow.Set<ContractEntity>().AnyAsync(x => x.Id == dto.ContractId && !x.Deleted, cancellationToken)) return PcText.NotFound<PcPastSnapshotDto>(PcText.ContractNotFound);
+            PcContractTerms terms = await PcContext.TermsAsync(_uow, dto.ContractId, false, cancellationToken);
+            DateTime regular = PcText.LastWeekday(DateTime.Today, terms?.DataDateWeekday ?? 3);
+            DateTime dataDate = dto.DataDate.Date;
+            if (dataDate > DateTime.Today) return Bad<PcPastSnapshotDto>("تاریخ داده در آینده است.");
+            if (dataDate >= regular) return Bad<PcPastSnapshotDto>("این تاریخ داده گذشته نیست؛ عکس را مستقیم بگیرید (درخواست لازم نیست).");
+            DateTime? previous = await _uow.Set<PcProgressSnapshot>().AsNoTracking().Where(s => s.ContractId == dto.ContractId).MaxAsync(s => (DateTime?)s.DataDate, cancellationToken);
+            if (previous.HasValue && dataDate <= previous.Value.Date)
+                return Bad<PcPastSnapshotDto>("تاریخ داده باید پس از تاریخ داده آخرین عکس هفتگی (" + global::Services.NasbNiro.Finance.FiscalCalendars.Text(previous.Value) + ") باشد؛ عکس‌ها پشت‌سرهم و تغییرناپذیرند.");
+            if (await _uow.Set<PcSnapshotRequest>().AnyAsync(r => r.ContractId == dto.ContractId && r.DataDate == dataDate && !r.Deleted && (r.State == PcSnapshotRequestState.Requested || r.State == PcSnapshotRequestState.Approved), cancellationToken))
+                return Bad<PcPastSnapshotDto>("برای این تاریخ داده درخواست باز وجود دارد.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            var r = new PcSnapshotRequest { ContractId = dto.ContractId, DataDate = dataDate, Reason = reason, State = PcSnapshotRequestState.Requested, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me };
+            _uow.Set<PcSnapshotRequest>().Add(r);
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateException) { return Bad<PcPastSnapshotDto>("برای این تاریخ داده درخواست باز وجود دارد."); }
+            return ResponseDtoHelper.Ok(ToDto(r, await InventoryUsers.GetNamesAsync(_uow, new int?[] { Me }, cancellationToken)));
+        }
+
+        public async Task<ResponseDto<PcPastSnapshotDto>> DecidePastSnapshotAsync(PcPastSnapshotDecisionDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return Bad<PcPastSnapshotDto>(PcText.InvalidData);
+            if (!_user.IsInRole(ProjectControlRoles.Pmo)) return Bad<PcPastSnapshotDto>(PcText.NotAllowed + " (تایید عکس با تاریخ گذشته با معاون PMO است)");
+            PcSnapshotRequest r = await _uow.Set<PcSnapshotRequest>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
+            if (r == null) return PcText.NotFound<PcPastSnapshotDto>("درخواست پیدا نشد.");
+            if (r.State != PcSnapshotRequestState.Requested) return Bad<PcPastSnapshotDto>("درباره این درخواست تصمیم گرفته شده است.");
+            if (r.CreatorUserId == Me) return Bad<PcPastSnapshotDto>(PcText.SameUser);
+            if (!dto.Approve && Clean(dto.Note) == null) return Bad<PcPastSnapshotDto>("دلیل رد را بنویسید.");
+            if (dto.Approve && await _uow.Set<PcProgressSnapshot>().AnyAsync(s => s.ContractId == r.ContractId && s.DataDate >= r.DataDate, cancellationToken))
+                return Bad<PcPastSnapshotDto>("پس از ثبت درخواست، عکسی با همین تاریخ داده یا دیرتر گرفته شده است؛ درخواست را رد کنید.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            r.State = dto.Approve ? PcSnapshotRequestState.Approved : PcSnapshotRequestState.Rejected; r.DecidedByUserId = Me; r.DecidedAt = now; r.DecisionNote = Clean(dto.Note); r.ModifyDate = now; r.ModifierUserId = Me;
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateConcurrencyException) { return Bad<PcPastSnapshotDto>(PcText.Concurrency); }
+            return ResponseDtoHelper.Ok(ToDto(r, await InventoryUsers.GetNamesAsync(_uow, new int?[] { r.CreatorUserId, Me }, cancellationToken)));
+        }
+
+        // ---------------------------------------------------------------- the nightly run
+
+        /// <summary>R1c (M4): entities of a failed contract must not stay in the change tracker, or every later contract's save fails again.</summary>
+        private void ClearTracker() => (_uow as Microsoft.EntityFrameworkCore.DbContext)?.ChangeTracker.Clear();
+
+        public async Task<int> NightlyAsync(CancellationToken cancellationToken)
+        {
+            List<int> contractIds = await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => !t.Deleted && t.CurrentBaselineId != null).Select(t => t.ContractId).Distinct().OrderBy(id => id).ToListAsync(cancellationToken);
+            int done = 0;
+            foreach (int contractId in contractIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    // a baseline of before R1c gets its frozen planned-value rows (from the calendars of the night it is first seen)
+                    PcContractTerms terms = await PcContext.TermsAsync(_uow, contractId, false, cancellationToken);
+                    PcBaseline baseline = terms?.CurrentBaselineId == null ? null : await _uow.Set<PcBaseline>().AsNoTracking().FirstOrDefaultAsync(b => b.Id == terms.CurrentBaselineId.Value && !b.Deleted, cancellationToken);
+                    if (baseline != null) await PcFrozenPlan.EnsureAsync(_uow, baseline, cancellationToken);
+                    // R1c (M3): the history of an activity starts from the snapshot lines for the days before its first event (per activity, so an earlier call of the engine does not hide the history)
+                    var firstEvent = (await _uow.Set<PcProgressEvent>().AsNoTracking().Where(e => e.ContractId == contractId).GroupBy(e => e.ActivityId).Select(g => new { ActivityId = g.Key, First = g.Min(e => e.EventDate) }).ToListAsync(cancellationToken))
+                        .ToDictionary(x => x.ActivityId, x => x.First.Date);
+                    var lines = await _uow.Set<PcProgressSnapshotLine>().AsNoTracking().Where(l => l.Snapshot.ContractId == contractId).OrderBy(l => l.Snapshot.DataDate).ThenBy(l => l.Id)
+                        .Select(l => new { l.ActivityId, l.Percent, l.Snapshot.DataDate }).ToListAsync(cancellationToken);
+                    var last = new Dictionary<int, decimal>();
+                    int backfilled = 0;
+                    foreach (var l in lines)
+                    {
+                        if (firstEvent.TryGetValue(l.ActivityId, out DateTime first) && l.DataDate.Date >= first) continue;
+                        if (last.TryGetValue(l.ActivityId, out decimal before) ? before == l.Percent : l.Percent == 0m) continue;
+                        last[l.ActivityId] = l.Percent;
+                        PcProgressEvents.Add(_uow, contractId, l.ActivityId, l.DataDate, l.Percent, 0, PcProgressEvents.SourceBackfill);
+                        backfilled++;
+                    }
+                    if (backfilled > 0) await _uow.SaveChangesAsync(cancellationToken);
+                    // the night run before the working day starts sees the state of the previous day
+                    await ApplyAsync(contractId, DateTime.Now.Hour < 6 ? DateTime.Today.AddDays(-1) : DateTime.Today, cancellationToken);
+                    await _uow.SaveChangesAsync(cancellationToken);
+                    done++;
+                }
+                catch (DbUpdateException) { ClearTracker(); }
+                catch (InvalidOperationException) { ClearTracker(); }
+            }
+            return done;
         }
 
         public async Task<ResponseDto<PagedList<PcSnapshotDto>>> GetSnapshotsAsync(PcSnapshotQuery query, CancellationToken cancellationToken)

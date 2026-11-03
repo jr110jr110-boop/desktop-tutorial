@@ -84,6 +84,14 @@ namespace Services.NasbNiro.ProjectControl
         public const string SlaBom = "SlaBomRequestedDays";
         public const string NoticeLookAheadDays = "NoticeLookAheadDays";
 
+        // R1c
+        /// <summary>A variation order whose price change is above this share of the contract value is approved by the CEO, not by the PMO deputy (H3).</summary>
+        public const string VoCeoThresholdPercent = "VariationCeoThresholdPercent";
+        public const string WarrantyMonthsAfterCommissioning = "WarrantyMonthsAfterCommissioning";
+        public const string WarrantyMonthsAfterDelivery = "WarrantyMonthsAfterDelivery";
+        /// <summary>1 = the delay penalty is counted over the whole contract, 2 = per work order (H5); the default of a new contract.</summary>
+        public const string PenaltyBasisDefault = "PenaltyBasisDefault";
+
         public static IEnumerable<PcSetting> Defaults()
         {
             yield return new PcSetting { Key = AmberThreshold, Value = 0.95m, Title = "آستانه هشدار زرد برای SPI و CPI", Source = "★ تصمیم موقت" };
@@ -109,6 +117,25 @@ namespace Services.NasbNiro.ProjectControl
             yield return new PcSetting { Key = SlaPep, Value = 7, Title = "مهلت تایید برنامه اجرایی پروژه PEP (روز کاری)", Source = "WI-PL-009 بند 3-1" };
             yield return new PcSetting { Key = SlaBom, Value = 3, Title = "مهلت درخواست BOM (روز کاری)", Source = "WI-PL-009 بند 5" };
             yield return new PcSetting { Key = NoticeLookAheadDays, Value = 14, Title = "پیش‌نویس اعلام نقطه بازرسی تا چند روز آینده", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = VoCeoThresholdPercent, Value = 5, Title = "دستور تغییر با تغییر مبلغ بیش از این درصد ارزش قرارداد را مدیرعامل تایید می‌کند", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = WarrantyMonthsAfterCommissioning, Value = 12, Title = "ضمانت: ماه پس از راه‌اندازی (پیش‌فرض قرارداد جدید)", Source = "★ تصمیم موقت؛ با متن هر قرارداد تطبیق داده شود" };
+            yield return new PcSetting { Key = WarrantyMonthsAfterDelivery, Value = 18, Title = "ضمانت: ماه پس از تحویل (پیش‌فرض قرارداد جدید)", Source = "★ تصمیم موقت؛ با متن هر قرارداد تطبیق داده شود" };
+            yield return new PcSetting { Key = PenaltyBasisDefault, Value = 1, Title = "مبنای جریمه تاخیر قرارداد جدید: ۱ کل قرارداد، ۲ هر دستور کار", Source = "★ تصمیم موقت" };
+        }
+
+        /// <summary>R1c: the range a value of the setting may take when the PMO saves it (percentages 0..100, the hour of the day 0..23, day and month counts are whole numbers).</summary>
+        public static (decimal Min, decimal Max, bool Whole) RangeOf(string key)
+        {
+            switch (key)
+            {
+                case AmberThreshold: case RedThreshold: case ActionThreshold: return (0m, 2m, false);
+                case SnapshotHour: return (0m, 23m, true);
+                case EngFirstIssue: case EngSecondIssue: case EngApproved: case SupplyTemporary: case SupplyAccepted: case SupplyRework: case SupplyReject:
+                case RescheduleDelayPercent: case VoCeoThresholdPercent: return (0m, 100m, false);
+                case PenaltyBasisDefault: return (1m, 2m, true);
+                case WarrantyMonthsAfterCommissioning: case WarrantyMonthsAfterDelivery: return (0m, 120m, true);
+                default: return (0m, 3650m, true);
+            }
         }
 
         public static async Task<Dictionary<string, decimal>> LoadAsync(IUnitOfWork uow, CancellationToken cancellationToken)
@@ -138,6 +165,15 @@ namespace Services.NasbNiro.ProjectControl
         public const string SameUser = "این کار باید توسط شخص دیگری انجام شود (تفکیک وظایف).";
         public const string ContractNotFound = "قرارداد پیدا نشد.";
         public const string WorkOrderNotFound = "دستور کار پیدا نشد.";
+
+        /// <summary>R1c (L2): the number of decimals of money in a currency: whole rials for the rial (or no currency), two decimals for any other.</summary>
+        public static int CurrencyDecimals(string currencyCode)
+        {
+            string c = (currencyCode ?? string.Empty).Trim().ToUpperInvariant();
+            return c.Length == 0 || c == "IRR" || c == "IRT" || c == "RIAL" || c == "ریال" ? 0 : 2;
+        }
+
+        public static decimal RoundMoney(decimal value, int decimals) => Math.Round(value, decimals, MidpointRounding.AwayFromZero);
 
         public static string Upper(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
 

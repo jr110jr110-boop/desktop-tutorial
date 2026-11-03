@@ -41,6 +41,7 @@ namespace Services.NasbNiro.ProjectControl
         Task<int> OverdueResponsesAsync(int? contractId, CancellationToken cancellationToken);
 
         Task<ResponseDto<PcFinalBookDto>> GenerateFinalBookAsync(PcFinalBookRequestDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<PcFinalBookDto>> ApproveFinalBookAsync(int reportIssueId, CancellationToken cancellationToken);
         Task<ResponseDto<PagedList<PcFinalBookDto>>> GetFinalBooksAsync(PcFinalBookQuery query, CancellationToken cancellationToken);
     }
 
@@ -75,7 +76,7 @@ namespace Services.NasbNiro.ProjectControl
                 new PcClientResponseCode { Code = "A", Title = "Approved", CountsAsApproved = true, RequiresResubmit = false, Source = "★ company decision (common document review codes)" },
                 new PcClientResponseCode { Code = "B", Title = "Approved with comments", CountsAsApproved = true, RequiresResubmit = false, Source = "★ company decision" },
                 new PcClientResponseCode { Code = "C", Title = "Revise and resubmit", CountsAsApproved = false, RequiresResubmit = true, Source = "★ company decision" },
-                new PcClientResponseCode { Code = "D", Title = "Rejected", CountsAsApproved = false, RequiresResubmit = true, Source = "★ company decision" },
+                new PcClientResponseCode { Code = "D", Title = "Rejected", CountsAsApproved = false, RequiresResubmit = true, ResetsProgress = true, Source = "★ company decision" },
                 new PcClientResponseCode { Code = "I", Title = "For information", CountsAsApproved = false, RequiresResubmit = false, Source = "★ company decision" },
             });
             await _uow.SaveChangesAsync(cancellationToken);
@@ -85,7 +86,7 @@ namespace Services.NasbNiro.ProjectControl
         {
             await EnsureResponseCodesAsync(cancellationToken);
             List<PcResponseCodeDto> list = await _uow.Set<PcClientResponseCode>().AsNoTracking().OrderBy(c => c.Code).Select(c => new PcResponseCodeDto
-                { Id = c.Id, Code = c.Code, Title = c.Title, CountsAsApproved = c.CountsAsApproved, RequiresResubmit = c.RequiresResubmit, Source = c.Source }).ToListAsync(cancellationToken);
+                { Id = c.Id, Code = c.Code, Title = c.Title, CountsAsApproved = c.CountsAsApproved, RequiresResubmit = c.RequiresResubmit, ResetsProgress = c.ResetsProgress, Source = c.Source }).ToListAsync(cancellationToken);
             return ResponseDtoHelper.Ok(list);
         }
 
@@ -99,8 +100,10 @@ namespace Services.NasbNiro.ProjectControl
             PcClientResponseCode row = dto.Id.HasValue ? await _uow.Set<PcClientResponseCode>().FirstOrDefaultAsync(c => c.Id == dto.Id.Value, cancellationToken) : null;
             if (dto.Id.HasValue && row == null) return PcText.NotFound<List<PcResponseCodeDto>>("کد پاسخ پیدا نشد.");
             if (await _uow.Set<PcClientResponseCode>().AnyAsync(c => c.Code == code && c.Id != (dto.Id ?? 0), cancellationToken)) return Bad<List<PcResponseCodeDto>>("این کد قبلاً تعریف شده است.");
+            if (dto.ResetsProgress && dto.CountsAsApproved) return Bad<List<PcResponseCodeDto>>("کدی که سند را تایید می‌کند نمی‌تواند پیشرفت آن را به مرحله قبل برگرداند.");
             if (row == null) { row = new PcClientResponseCode(); _uow.Set<PcClientResponseCode>().Add(row); }
             row.Code = code; row.Title = Clean(dto.Title); row.CountsAsApproved = dto.CountsAsApproved; row.RequiresResubmit = dto.RequiresResubmit; row.Source = Clean(dto.Source);
+            row.ResetsProgress = dto.ResetsProgress;
             await _uow.SaveChangesAsync(cancellationToken);
             return await GetResponseCodesAsync(cancellationToken);
         }
@@ -451,6 +454,11 @@ namespace Services.NasbNiro.ProjectControl
             line.ResponseCode = rc.Code; line.ResponseDate = date; line.ResponseNote = Clean(dto.Note);
             d.ClientResponseCode = rc.Code; d.ClientResponseDate = date;
             if (rc.CountsAsApproved) { d.IssueState = PcIssueState.Approved; d.ApprovedAt = now; d.ApprovedByUserId = Me; }
+            else if (rc.ResetsProgress && (d.IssueState == PcIssueState.FirstIssue || d.IssueState == PcIssueState.SecondIssue))
+            {
+                // R1c (L2): a rejected issue earns nothing: the document goes back to the previous issue step, so its engineering progress (60 / 80 / 100) falls to that step's value
+                d.IssueState = d.IssueState == PcIssueState.SecondIssue ? PcIssueState.FirstIssue : PcIssueState.NotIssued;
+            }
             d.ModifyDate = now; d.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcTransmittalDto>(PcText.Concurrency); }
@@ -463,7 +471,7 @@ namespace Services.NasbNiro.ProjectControl
         private Task SyncTransmittalGateAsync(PcTransmittal t, CancellationToken cancellationToken) =>
             global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "trn:" + t.Id,
                 t.Direction == PcTransmittalDirection.Outgoing && t.ResponseDue.HasValue && t.Lines.Any(l => l.Purpose == PcTransmittalPurpose.ForApproval && l.ResponseCode == null),
-                "project-control", "transmittal", t.Id, "پاسخ کارفرما به ترنسمیتال " + t.Number, "/project-control/transmittals/" + t.Id, ProjectControlRoles.DccOnly, cancellationToken, t.ResponseDue,
+                "project-control", "transmittal", t.Id, "پاسخ کارفرما به ترنسمیتال " + t.Number, "/project-control/transmittals?id=" + t.Id, ProjectControlRoles.DccOnly, cancellationToken, t.ResponseDue,
                 global::Entities.Model.NasbNiro.Office.OfInboxKind.Task);
 
         public async Task<int> OverdueResponsesAsync(int? contractId, CancellationToken cancellationToken)
@@ -508,13 +516,15 @@ namespace Services.NasbNiro.ProjectControl
             }
             int next = doc.Revisions.Count(r => !r.Deleted) + 1;
             string revision = "R" + next.ToString("00", CultureInfo.InvariantCulture);
-            foreach (DocumentRevisionRecord old in doc.Revisions.Where(r => !r.Deleted && r.Status != ControlledDocumentStatus.Obsolete)) { old.Status = ControlledDocumentStatus.Obsolete; old.ModifyDate = now; old.ModifierUserId = Me; }
+            // R1c (M1): the preparer does not approve the revision. It waits in review; the revision in force stays in force until someone else approves the new one (ApproveFinalBookAsync).
+            // R1c (L5): a revision still waiting for approval is superseded by the new one (it can never become effective after it)
+            foreach (DocumentRevisionRecord waiting in doc.Revisions.Where(r => !r.Deleted && r.Status == ControlledDocumentStatus.InReview)) { waiting.Status = ControlledDocumentStatus.Obsolete; waiting.ModifyDate = now; waiting.ModifierUserId = Me; }
             doc.Revisions.Add(new DocumentRevisionRecord
             {
-                Revision = revision, ChangeSummary = $"صدور {(variant == "company" ? "کتاب شرکتی" : "کتاب کارفرما")}؛ مورد ناقص: {book.MissingCount}؛ هش {hash.Substring(0, 12)}", Status = ControlledDocumentStatus.Effective,
-                PreparedByUserId = Me, ApprovedByUserId = Me, ApprovedAt = now, EffectiveDate = now.Date, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
+                Revision = revision, ChangeSummary = $"صدور {(variant == "company" ? "کتاب شرکتی" : "کتاب کارفرما")}؛ مورد ناقص: {book.MissingCount}؛ هش {hash.Substring(0, 12)}", Status = ControlledDocumentStatus.InReview,
+                PreparedByUserId = Me, ReviewedByUserId = Me, ReviewedAt = now, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
             });
-            doc.CurrentRevision = revision; doc.Status = ControlledDocumentStatus.Effective; doc.EffectiveDate = now.Date; doc.ModifyDate = now; doc.ModifierUserId = Me;
+            doc.ModifyDate = now; doc.ModifierUserId = Me;
 
             var issue = new PcReportIssue
             {
@@ -530,6 +540,36 @@ namespace Services.NasbNiro.ProjectControl
             {
                 ReportIssueId = issue.Id, Number = issue.Number, Variant = variant, WorkOrderId = wo.Id, WorkOrderCode = wo.Code, ControlledDocumentId = doc.Id, DocumentCode = doc.Code, Revision = revision,
                 Hash = hash, MissingCount = book.MissingCount, EntryCount = book.Sections.Sum(s => s.Entries.Count), GeneratedAt = now,
+                RevisionStatus = (int)ControlledDocumentStatus.InReview, PreparedByUserId = Me,
+            });
+        }
+
+        /// <summary>
+        /// R1c (M1): the approval of a final-book revision. The revision becomes effective (and the one in force obsolete) only when a person other than the preparer approves it:
+        /// the quality manager or the PMO deputy.
+        /// </summary>
+        public async Task<ResponseDto<PcFinalBookDto>> ApproveFinalBookAsync(int reportIssueId, CancellationToken cancellationToken)
+        {
+            if (!_user.IsInRole(ProjectControlRoles.Pmo + ",QC")) return Bad<PcFinalBookDto>(PcText.NotAllowed + " (تایید کتاب نهایی با مدیر کنترل کیفیت یا معاون PMO است)");
+            PcReportIssue issue = await _uow.Set<PcReportIssue>().FirstOrDefaultAsync(r => r.Id == reportIssueId && (r.Kind == PcReportKind.FinalBookCompany || r.Kind == PcReportKind.FinalBookClient), cancellationToken);
+            if (issue == null || !issue.ControlledDocumentId.HasValue) return PcText.NotFound<PcFinalBookDto>("کتاب نهایی پیدا نشد.");
+            ControlledDocument doc = await _uow.Set<ControlledDocument>().Include(d => d.Revisions).FirstOrDefaultAsync(d => d.Id == issue.ControlledDocumentId.Value && !d.Deleted, cancellationToken);
+            DocumentRevisionRecord rev = doc?.Revisions.FirstOrDefault(r => !r.Deleted && r.Revision == issue.ControlledRevision);
+            if (rev == null) return PcText.NotFound<PcFinalBookDto>("نسخه کتاب نهایی پیدا نشد.");
+            if (rev.Status != ControlledDocumentStatus.InReview) return Bad<PcFinalBookDto>("این نسخه در انتظار تایید نیست.");
+            if (rev.PreparedByUserId == Me || issue.GeneratedByUserId == Me) return Bad<PcFinalBookDto>(PcText.SameUser + " (تهیه‌کننده کتاب نهایی آن را تایید نمی‌کند)");
+            if (doc.Revisions.Any(r => !r.Deleted && r.Id != rev.Id && r.Id > rev.Id && r.Status != ControlledDocumentStatus.Obsolete)) return Bad<PcFinalBookDto>("نسخه جدیدتری از این کتاب صادر شده است؛ آن را تایید کنید.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            foreach (DocumentRevisionRecord old in doc.Revisions.Where(r => !r.Deleted && r.Id != rev.Id && r.Status != ControlledDocumentStatus.Obsolete)) { old.Status = ControlledDocumentStatus.Obsolete; old.ModifyDate = now; old.ModifierUserId = Me; }
+            rev.Status = ControlledDocumentStatus.Effective; rev.ApprovedByUserId = Me; rev.ApprovedAt = now; rev.EffectiveDate = now.Date; rev.ModifyDate = now; rev.ModifierUserId = Me;
+            doc.CurrentRevision = rev.Revision; doc.Status = ControlledDocumentStatus.Effective; doc.EffectiveDate = now.Date; doc.ModifyDate = now; doc.ModifierUserId = Me;
+            try { await _uow.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateConcurrencyException) { return Bad<PcFinalBookDto>(PcText.Concurrency); }
+            WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == issue.WorkOrderId, cancellationToken);
+            return ResponseDtoHelper.Ok(new PcFinalBookDto
+            {
+                ReportIssueId = issue.Id, Number = issue.Number, Variant = issue.Kind == PcReportKind.FinalBookCompany ? "company" : "client", WorkOrderId = issue.WorkOrderId ?? 0, WorkOrderCode = wo?.Code, ControlledDocumentId = doc.Id, DocumentCode = doc.Code,
+                Revision = rev.Revision, Hash = issue.Hash, GeneratedAt = issue.GeneratedAt, RevisionStatus = (int)rev.Status, PreparedByUserId = rev.PreparedByUserId, ApprovedByUserId = rev.ApprovedByUserId, ApprovedAt = rev.ApprovedAt,
             });
         }
 
@@ -543,6 +583,10 @@ namespace Services.NasbNiro.ProjectControl
             {
                 ReportIssueId = r.Id, Number = r.Number, Variant = r.Kind == PcReportKind.FinalBookCompany ? "company" : "client", WorkOrderId = r.WorkOrderId ?? 0, ControlledDocumentId = r.ControlledDocumentId,
                 Revision = r.ControlledRevision, Hash = r.Hash, GeneratedAt = r.GeneratedAt,
+                RevisionStatus = _uow.Set<DocumentRevisionRecord>().Where(d => d.DocumentId == r.ControlledDocumentId && d.Revision == r.ControlledRevision && !d.Deleted).Select(d => (int?)d.Status).FirstOrDefault(),
+                PreparedByUserId = _uow.Set<DocumentRevisionRecord>().Where(d => d.DocumentId == r.ControlledDocumentId && d.Revision == r.ControlledRevision && !d.Deleted).Select(d => (int?)d.PreparedByUserId).FirstOrDefault(),
+                ApprovedByUserId = _uow.Set<DocumentRevisionRecord>().Where(d => d.DocumentId == r.ControlledDocumentId && d.Revision == r.ControlledRevision && !d.Deleted).Select(d => d.ApprovedByUserId).FirstOrDefault(),
+                ApprovedAt = _uow.Set<DocumentRevisionRecord>().Where(d => d.DocumentId == r.ControlledDocumentId && d.Revision == r.ControlledRevision && !d.Deleted).Select(d => d.ApprovedAt).FirstOrDefault(),
             });
             return ResponseDtoHelper.Ok(await PagedList<PcFinalBookDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
         }

@@ -187,10 +187,14 @@ namespace Entities.Model.NasbNiro.Procurement
         public string PaymentTerms { get; set; }
         public decimal? VatPercent { get; set; }
 
-        /// <summary>Engineering / QC: the offer meets the technical requirements.</summary>
+        /// <summary>Engineering / QC: the offer meets the technical requirements. R1c (M12): only ENGINEERING or QC set it (not the buyer), through the technical review.</summary>
         public bool TechnicallyAccepted { get; set; }
         public decimal? TechnicalScore { get; set; }
         public string TechnicalNote { get; set; }
+
+        /// <summary>R1c (M12): who judged the offer technically and when.</summary>
+        public int? TechnicalReviewedByUserId { get; set; }
+        public DateTimeOffset? TechnicalReviewedAt { get; set; }
 
         public Guid? DocumentId { get; set; }
         public string Notes { get; set; }
@@ -286,10 +290,52 @@ namespace Entities.Model.NasbNiro.Procurement
         public DateTimeOffset? CancelledAt { get; set; }
         public string CancelReason { get; set; }
 
+        /// <summary>R1c (H6): the quote of the inquiry that this order was built from (supplier, lines, prices and quantities come from it).</summary>
+        public int? QuoteId { get; set; }
+
+        /// <summary>R1c (M13): the revision number of the order (0 = the original). An approved or released order changes only through a revision: the old revision is frozen and the order needs a new approval.</summary>
+        public int Revision { get; set; }
+        public string RevisionReason { get; set; }
+        public DateTimeOffset? RevisedAt { get; set; }
+        public int? RevisedByUserId { get; set; }
+
         public ICollection<PurchaseOrderLine> Lines { get; set; }
+        public ICollection<PurchaseOrderRevision> Revisions { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>
+    /// R1c (M13): a frozen revision of a purchase order, written when the order is revised. Append only: the snapshot (header, lines, approval) and its hash are never changed,
+    /// so the terms the supplier was given at that time can always be shown.
+    /// </summary>
+    public class PurchaseOrderRevision
+    {
+        public int Id { get; set; }
+
+        public int PurchaseOrderId { get; set; }
+        public PurchaseOrder PurchaseOrder { get; set; }
+
+        /// <summary>The number of the frozen revision (0 for the original order).</summary>
+        public int Revision { get; set; }
+
+        /// <summary>Why the revision that replaced this one was made.</summary>
+        public string Reason { get; set; }
+
+        public PurchaseOrderStatus StatusWhenFrozen { get; set; }
+        public decimal TotalAmount { get; set; }
+
+        /// <summary>The order as it was: JSON of the header and the lines.</summary>
+        public string SnapshotJson { get; set; }
+        public string Hash { get; set; }
+
+        public DateTimeOffset FrozenAt { get; set; }
+        public int FrozenByUserId { get; set; }
+
+        /// <summary>Who approved this revision (the approval that the revision loses).</summary>
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public int? ApprovedByUserId { get; set; }
     }
 
     public class PurchaseOrderLine
@@ -453,6 +499,11 @@ namespace Entities.Model.NasbNiro.Procurement
         public bool QcApproved { get; set; }
         public string Description { get; set; }
 
+        /// <summary>R1c (M13): set when the system proposed deduction lines from the order terms (late penalty, performance retention); the FINANCIAL unit confirms them before the request is approved.</summary>
+        public DateTimeOffset? DeductionsProposedAt { get; set; }
+        public int? DeductionsConfirmedByUserId { get; set; }
+        public DateTimeOffset? DeductionsConfirmedAt { get; set; }
+
         public DateTimeOffset? ApprovedAt { get; set; }
         public int? ApprovedByUserId { get; set; }
         public DateTimeOffset? PaidAt { get; set; }
@@ -528,7 +579,12 @@ namespace Entities.Model.NasbNiro.Procurement
         public int? PurchaseOrderId { get; set; }
         public decimal Score { get; set; }
         public SupplierGrade Grade { get; set; }
+
+        /// <summary>The evaluator's comment (R1c: required with a scored evaluation).</summary>
         public string Notes { get; set; }
+
+        /// <summary>R1c (M13): the criteria (quality, delivery, price, service) were scored by the system from the metrics, with the weights of the settings.</summary>
+        public bool Scored { get; set; }
 
         public ICollection<SupplierEvaluationLine> Lines { get; set; }
     }
@@ -545,6 +601,9 @@ namespace Entities.Model.NasbNiro.Procurement
 
         /// <summary>0..100; empty = not applicable.</summary>
         public decimal? Score { get; set; }
+
+        /// <summary>R1c (M13): what the computed score is based on (counts and dates), in Persian.</summary>
+        public string Basis { get; set; }
     }
 
     /// <summary>Company thresholds and rules (editable by management); amounts in rial.</summary>

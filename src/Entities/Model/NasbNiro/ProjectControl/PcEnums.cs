@@ -20,7 +20,21 @@ namespace Entities.Model.NasbNiro.ProjectControl
     }
 
     public enum PcReviewKind { StandardProduct = 1, SpecialOrder = 2 }
-    public enum PcReviewDecision { Pending = 0, Accept = 1, Reject = 2, Modify = 3 }
+    public enum PcReviewDecision
+    {
+        Pending = 0, Accept = 1, Reject = 2, Modify = 3,
+        /// <summary>R1c (H8): an approved amendment or variation order re-opens the review; new baselines wait until it is accepted again.</summary>
+        ReviewRequired = 4,
+    }
+
+    /// <summary>R1c (H8): the review before the offer (tender code, no contract yet), the review after the win, and the re-review that an amendment or a variation order starts.</summary>
+    public enum PcReviewStage { Tender = 1, Contract = 2, Change = 3 }
+
+    /// <summary>R1c (H5): the penalty for late delivery is counted once, either over the whole contract or per work order, never both.</summary>
+    public enum PcPenaltyBasis { PerContract = 1, PerWorkOrder = 2 }
+
+    /// <summary>R1c (H1): what a change-request scenario item does to the plan when the change is approved.</summary>
+    public enum PcScenarioOperation { Modify = 0, Add = 1, Remove = 2 }
     public enum PcAmendmentType { Quantity = 1, Time = 2, Price = 3 }
     public enum PcAmendmentOrigin { Customer = 1, Company = 2 }
 

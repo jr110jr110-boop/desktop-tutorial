@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
 using Entities.Model.NasbNiro.Tenders;
@@ -24,6 +25,9 @@ namespace Services.NasbNiro.ProjectControl
         Task<ResponseDto<PcMilestoneDto>> SaveMilestoneAsync(PcMilestoneDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PcMilestoneDto>> MilestoneActionAsync(PcMilestoneActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PcMilestoneEvaluateResultDto>> EvaluateMilestonesAsync(int contractId, CancellationToken cancellationToken);
+
+        /// <summary>R1c (M6): the nightly job: evaluates the milestones of every contract that has an open one (due dates, finance status). Returns how many became due.</summary>
+        Task<int> EvaluateAllMilestonesAsync(CancellationToken cancellationToken);
         Task<ResponseDto<bool>> DeleteMilestoneAsync(int id, CancellationToken cancellationToken);
 
         Task<ResponseDto<PagedList<PcGuaranteeDto>>> GetGuaranteesAsync(PcGuaranteeQuery query, CancellationToken cancellationToken);
@@ -68,18 +72,9 @@ namespace Services.NasbNiro.ProjectControl
         private static string Clean(string s) => PcText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => PcText.Bad<T>(m);
 
-        private async Task<decimal> ContractValueAsync(int contractId, CancellationToken cancellationToken)
-        {
-            PcContractTerms t = await PcContext.TermsAsync(_uow, contractId, false, cancellationToken);
-            decimal v = t?.ValueExVat ?? 0m;
-            if (v == 0m)
-            {
-                decimal? price = await _uow.Set<ContractEntity>().Where(c => c.Id == contractId).Select(c => c.Price).FirstOrDefaultAsync(cancellationToken);
-                v = price ?? 0m;
-            }
-            decimal variations = await _uow.Set<PcVariationOrder>().Where(x => x.ContractId == contractId && !x.Deleted && x.Status == PcVariationStatus.Approved).SumAsync(x => (decimal?)x.PriceDelta, cancellationToken) ?? 0m;
-            return v + variations;
-        }
+        /// <summary>H3: the one value of the contract: the terms plus the approved variation orders and the CEO-approved amendments (see <see cref="PcEffective"/>).</summary>
+        private async Task<decimal> ContractValueAsync(int contractId, CancellationToken cancellationToken) =>
+            (await PcEffective.EffectiveContractAsync(_uow, contractId, cancellationToken)).Value;
 
         // ============================================================================ payment milestones
 
@@ -87,7 +82,7 @@ namespace Services.NasbNiro.ProjectControl
         {
             Id = m.Id, ContractId = m.ContractId, Seq = m.Seq, Title = m.Title, Kind = m.Kind, Trigger = m.Trigger, TriggerPercent = m.TriggerPercent, WorkOrderId = m.WorkOrderId,
             ActivityId = m.ActivityId, PercentOfValue = m.PercentOfValue, Amount = m.Amount, PlannedDate = m.PlannedDate, Status = m.Status, DueAt = m.DueAt, PaidAt = m.PaidAt,
-            ProvisionalStatementId = m.ProvisionalStatementId, FinanceRef = m.FinanceRef, ClientLetterRef = m.ClientLetterRef, RowVersion = m.RowVersion == null ? null : Convert.ToBase64String(m.RowVersion),
+            ProvisionalStatementId = m.ProvisionalStatementId, FinanceRef = m.FinanceRef, ClientLetterRef = m.ClientLetterRef, IsFinal = m.IsFinal, RowVersion = m.RowVersion == null ? null : Convert.ToBase64String(m.RowVersion),
         };
 
         public async Task<ResponseDto<PagedList<PcMilestoneDto>>> GetMilestonesAsync(PcContractQuery query, CancellationToken cancellationToken)
@@ -99,7 +94,7 @@ namespace Services.NasbNiro.ProjectControl
             {
                 Id = m.Id, ContractId = m.ContractId, Seq = m.Seq, Title = m.Title, Kind = m.Kind, Trigger = m.Trigger, TriggerPercent = m.TriggerPercent, WorkOrderId = m.WorkOrderId,
                 ActivityId = m.ActivityId, PercentOfValue = m.PercentOfValue, Amount = m.Amount, PlannedDate = m.PlannedDate, Status = m.Status, DueAt = m.DueAt, PaidAt = m.PaidAt,
-                ProvisionalStatementId = m.ProvisionalStatementId, FinanceRef = m.FinanceRef, ClientLetterRef = m.ClientLetterRef,
+                ProvisionalStatementId = m.ProvisionalStatementId, FinanceRef = m.FinanceRef, ClientLetterRef = m.ClientLetterRef, IsFinal = m.IsFinal,
             });
             return ResponseDtoHelper.Ok(await PagedList<PcMilestoneDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
         }
@@ -119,9 +114,14 @@ namespace Services.NasbNiro.ProjectControl
             if (dto.WorkOrderId.HasValue && !await _uow.Set<WorkOrder>().AnyAsync(w => w.Id == dto.WorkOrderId.Value && w.ContractId == dto.ContractId && !w.Deleted, cancellationToken)) return Bad<PcMilestoneDto>("دستور کار متعلق به این قرارداد نیست.");
             if (dto.ActivityId.HasValue && !await _uow.Set<PcActivity>().AnyAsync(a => a.Id == dto.ActivityId.Value && a.ContractId == dto.ContractId && !a.Deleted, cancellationToken)) return Bad<PcMilestoneDto>("فعالیت متعلق به این قرارداد نیست.");
 
+            if (dto.IsFinal && await _uow.Set<PcPaymentMilestone>().AnyAsync(x => x.ContractId == dto.ContractId && !x.Deleted && x.IsFinal && x.Id != (dto.Id ?? 0), cancellationToken))
+                return Bad<PcMilestoneDto>("این قرارداد قبلاً یک مرحله «صورت‌وضعیت قطعی» دارد؛ فقط یک مرحله قطعی می‌تواند باشد.");
             decimal amount = dto.Amount;
             if (dto.PercentOfValue.HasValue)
             {
+                // M6: the shares of the contract value add up to 100 at most
+                decimal others = await _uow.Set<PcPaymentMilestone>().Where(x => x.ContractId == dto.ContractId && !x.Deleted && x.PercentOfValue != null && x.Id != (dto.Id ?? 0)).SumAsync(x => (decimal?)x.PercentOfValue, cancellationToken) ?? 0m;
+                if (others + dto.PercentOfValue.Value > 100m) return Bad<PcMilestoneDto>("مجموع درصدهای مراحل پرداخت این قرارداد (" + (others + dto.PercentOfValue.Value).ToString("0.##", CultureInfo.InvariantCulture) + ") از ۱۰۰ بیشتر می‌شود.");
                 decimal value = await ContractValueAsync(dto.ContractId, cancellationToken);
                 if (value <= 0) return Bad<PcMilestoneDto>("برای محاسبه از درصد، ابتدا مبلغ قرارداد را در شرایط قرارداد ثبت کنید.");
                 amount = PcText.Round2(value * dto.PercentOfValue.Value / 100m);
@@ -141,7 +141,7 @@ namespace Services.NasbNiro.ProjectControl
                 _uow.Set<PcPaymentMilestone>().Add(m);
             }
             m.Title = Clean(dto.Title); m.Kind = dto.Kind; m.Trigger = dto.Trigger; m.TriggerPercent = dto.TriggerPercent; m.WorkOrderId = dto.WorkOrderId; m.ActivityId = dto.ActivityId;
-            m.PercentOfValue = dto.PercentOfValue; m.Amount = amount; m.PlannedDate = dto.PlannedDate?.Date;
+            m.PercentOfValue = dto.PercentOfValue; m.Amount = amount; m.PlannedDate = dto.PlannedDate?.Date; m.IsFinal = dto.IsFinal;
             m.ModifyDate = now; m.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcMilestoneDto>(PcText.Concurrency); }
@@ -186,9 +186,13 @@ namespace Services.NasbNiro.ProjectControl
         public async Task<ResponseDto<PcMilestoneEvaluateResultDto>> EvaluateMilestonesAsync(int contractId, CancellationToken cancellationToken)
         {
             if (!await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == contractId && !c.Deleted, cancellationToken)) return PcText.NotFound<PcMilestoneEvaluateResultDto>(PcText.ContractNotFound);
-            List<PcPaymentMilestone> list = await _uow.Set<PcPaymentMilestone>().Where(m => m.ContractId == contractId && !m.Deleted).OrderBy(m => m.Seq).ToListAsync(cancellationToken);
-            DateTime today = DateTime.Today;
             DateTimeOffset now = DateTimeOffset.Now;
+            // H3: amounts given as a share follow the effective value of the contract (variation orders and amendments)
+            int changed = await PcEffective.RefreshMilestoneAmountsAsync(_uow, contractId, Me, cancellationToken);
+            List<PcPaymentMilestone> list = await _uow.Set<PcPaymentMilestone>().Where(m => m.ContractId == contractId && !m.Deleted).OrderBy(m => m.Seq).ToListAsync(cancellationToken);
+            // M6: invoiced and paid come from the finance records (the sales invoice of the milestone and its receipts), never from a hand entry
+            changed += await SyncFinanceAsync(list, now, cancellationToken);
+            DateTime today = DateTime.Today;
             int became = 0;
             foreach (PcPaymentMilestone m in list.Where(x => x.Status == PcMilestoneStatus.Planned))
             {
@@ -196,8 +200,50 @@ namespace Services.NasbNiro.ProjectControl
                 m.Status = PcMilestoneStatus.Due; m.DueAt = now; m.ModifyDate = now; m.ModifierUserId = Me;
                 became++;
             }
-            if (became > 0) await _uow.SaveChangesAsync(cancellationToken);
+            if (became > 0 || changed > 0) await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(new PcMilestoneEvaluateResultDto { ContractId = contractId, BecameDue = became, Milestones = list.Select(ToDto).ToList() });
+        }
+
+        public async Task<int> EvaluateAllMilestonesAsync(CancellationToken cancellationToken)
+        {
+            List<int> contractIds = await _uow.Set<PcPaymentMilestone>().AsNoTracking().Where(m => !m.Deleted && m.Status != PcMilestoneStatus.Paid).Select(m => m.ContractId).Distinct().OrderBy(id => id).ToListAsync(cancellationToken);
+            int became = 0;
+            foreach (int contractId in contractIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ResponseDto<PcMilestoneEvaluateResultDto> result = await EvaluateMilestonesAsync(contractId, cancellationToken);
+                if (result.Success && result.Data != null) became += result.Data.BecameDue;
+            }
+            return became;
+        }
+
+        /// <summary>
+        /// M6: moves milestones with a posted sales invoice to Invoiced and the ones whose invoice is paid in full to Paid. The link is the invoice's MilestoneId
+        /// (the draft is made from the milestone by the receivables job). Returns how many milestones changed (not saved).
+        /// </summary>
+        private async Task<int> SyncFinanceAsync(List<PcPaymentMilestone> list, DateTimeOffset now, CancellationToken cancellationToken)
+        {
+            List<int> ids = list.Where(m => m.Status == PcMilestoneStatus.Due || m.Status == PcMilestoneStatus.StatementIssued || m.Status == PcMilestoneStatus.Invoiced).Select(m => m.Id).ToList();
+            if (ids.Count == 0) return 0;
+            var invoices = await _uow.Set<Entities.Model.NasbNiro.Finance.FnSalesInvoice>().AsNoTracking()
+                .Where(i => i.MilestoneId != null && ids.Contains(i.MilestoneId.Value) && i.Status == Entities.Model.NasbNiro.Finance.FnDocStatus.Posted && i.Type != Entities.Model.NasbNiro.Finance.FnInvoiceType.CreditNote)
+                .Select(i => new { i.Id, i.Number, MilestoneId = i.MilestoneId.Value }).ToListAsync(cancellationToken);
+            if (invoices.Count == 0) return 0;
+            Dictionary<int, decimal> open = await global::Services.NasbNiro.Finance.ReceivableMath.OpenAsync(_uow, invoices.Select(i => i.Id).ToList(), null, cancellationToken);
+            int changed = 0;
+            foreach (PcPaymentMilestone m in list.Where(x => ids.Contains(x.Id)))
+            {
+                var mine = invoices.Where(i => i.MilestoneId == m.Id).ToList();
+                if (mine.Count == 0) continue;
+                bool paid = mine.All(i => open.TryGetValue(i.Id, out decimal o) && o <= 0m);
+                PcMilestoneStatus target = paid ? PcMilestoneStatus.Paid : PcMilestoneStatus.Invoiced;
+                if ((int)target <= (int)m.Status) continue;
+                m.FinanceRef = mine[0].Number; m.Status = target;
+                if (paid) m.PaidAt = now;
+                m.ModifyDate = now; m.ModifierUserId = Me;
+                changed++;
+            }
+            return changed;
         }
 
         public async Task<ResponseDto<PcMilestoneDto>> MilestoneActionAsync(PcMilestoneActionDto dto, CancellationToken cancellationToken)
@@ -215,18 +261,22 @@ namespace Services.NasbNiro.ProjectControl
                     if (m.Trigger == PcMilestoneTrigger.ClientLetter && m.Status == PcMilestoneStatus.Planned) { m.Status = PcMilestoneStatus.Due; m.DueAt = now; }
                     break;
                 case "statement":
+                {
                     if (m.Status != PcMilestoneStatus.Due) return Bad<PcMilestoneDto>("فقط مرحله سررسیدشده صورت‌وضعیت می‌گیرد.");
                     if (dto.ProvisionalStatementId.HasValue && !await _uow.Set<ProvisionalStatement>().AnyAsync(s => s.Id == dto.ProvisionalStatementId.Value && s.ContractId == m.ContractId, cancellationToken)) return Bad<PcMilestoneDto>("صورت‌وضعیت پیدا نشد.");
+                    // R-CL-1 (WI-PL-013): no final statement while a claim of the contract is still open
+                    // R1c (M8): the final statement is the milestone marked as final (or a retention milestone), not "the highest sequence" that changes when a milestone is added
+                    if (m.Kind == PcMilestoneKind.Retention || m.IsFinal)
+                    {
+                        int openClaims = await PcClaimRules.OpenCountAsync(_uow, m.ContractId, cancellationToken);
+                        if (openClaims > 0) return Bad<PcMilestoneDto>("صورت‌وضعیت قطعی تا زمانی که ادعای باز دارد صادر نمی‌شود (" + openClaims + " ادعای باز، WI-PL-013)؛ ادعاها را مختومه یا مصالحه کنید.");
+                    }
                     m.ProvisionalStatementId = dto.ProvisionalStatementId; m.Status = PcMilestoneStatus.StatementIssued;
                     break;
+                }
                 case "invoiced":
-                    if (m.Status != PcMilestoneStatus.StatementIssued) return Bad<PcMilestoneDto>("ابتدا صورت‌وضعیت باید صادر شود.");
-                    m.FinanceRef = Clean(dto.Reference); m.Status = PcMilestoneStatus.Invoiced;
-                    break;
                 case "paid":
-                    if (m.Status != PcMilestoneStatus.Invoiced) return Bad<PcMilestoneDto>("ابتدا فاکتور باید ثبت شود.");
-                    m.PaidAt = now; m.Status = PcMilestoneStatus.Paid;
-                    break;
+                    return Bad<PcMilestoneDto>("صدور فاکتور و دریافت وجه را مالی ثبت می‌کند (فاکتور فروش مرحله و رسید)؛ وضعیت این مرحله پس از ارزیابی از روی اسناد مالی خوانده می‌شود، نه با ثبت دستی.");
                 default:
                     return Bad<PcMilestoneDto>("عملیات نامعتبر است.");
             }
@@ -659,12 +709,12 @@ namespace Services.NasbNiro.ProjectControl
         };
 
         /// <summary>Delay penalty: base x weekly rate x (late days / 7), after the grace days, never above the cap (WI-PL-005 contract terms).</summary>
-        internal static decimal PenaltyAmount(decimal baseAmount, decimal ratePercentPerWeek, int lateDays, decimal? capPercent)
+        internal static decimal PenaltyAmount(decimal baseAmount, decimal ratePercentPerWeek, int lateDays, decimal? capPercent, int decimals = 0)
         {
             if (lateDays <= 0 || ratePercentPerWeek <= 0 || baseAmount <= 0) return 0m;
             decimal amount = baseAmount * ratePercentPerWeek / 100m * lateDays / 7m;
             if (capPercent.HasValue) amount = Math.Min(amount, baseAmount * capPercent.Value / 100m);
-            return PcText.Round2(amount);
+            return PcText.RoundMoney(amount, decimals);
         }
 
         public async Task<ResponseDto<List<PcPenaltyDto>>> ComputePenaltiesAsync(int contractId, CancellationToken cancellationToken)
@@ -673,49 +723,72 @@ namespace Services.NasbNiro.ProjectControl
             if (!await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == contractId && !c.Deleted, cancellationToken)) return PcText.NotFound<List<PcPenaltyDto>>(PcText.ContractNotFound);
             PcContractTerms terms = await PcContext.TermsAsync(_uow, contractId, false, cancellationToken);
             if (terms == null || !terms.LatePenaltyPercentPerWeek.HasValue || terms.LatePenaltyPercentPerWeek.Value <= 0) return Bad<List<PcPenaltyDto>>("نرخ جریمه تاخیر در شرایط قرارداد ثبت نشده است.");
-            decimal value = await ContractValueAsync(contractId, cancellationToken);
+            // H3/H5: the value and the dates come from the effective contract (terms + approved variation orders + CEO-approved amendments); one basis, one cap
+            PcEffectiveContract effective = await PcEffective.EffectiveContractAsync(_uow, contractId, cancellationToken);
+            decimal value = effective.Value;
             if (value <= 0) return Bad<List<PcPenaltyDto>>("مبلغ قرارداد ثبت نشده است.");
-            int variationDays = await _uow.Set<PcVariationOrder>().Where(v => v.ContractId == contractId && !v.Deleted && v.Status == PcVariationStatus.Approved).SumAsync(v => (int?)v.DaysDelta, cancellationToken) ?? 0;
             DateTime today = DateTime.Today;
             DateTimeOffset now = DateTimeOffset.Now;
+            bool perWorkOrder = terms.PenaltyBasis == PcPenaltyBasis.PerWorkOrder;
+            int decimals = PcText.CurrencyDecimals(terms.CurrencyCode);   // R1c (L2): rial amounts are whole rials
+
+            List<WorkOrder> orders = await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.ContractId == contractId && !w.Deleted).OrderBy(w => w.Id).ToListAsync(cancellationToken);
+            List<PcShipment> shipments = await _uow.Set<PcShipment>().AsNoTracking().Include(s => s.Lines).Where(s => s.ContractId == contractId && !s.Deleted && s.DeliveredAt != null).ToListAsync(cancellationToken);
+            // a work order is delivered on the day its delivered shipments first add up to the ordered quantity
+            DateTime? FullDelivery(WorkOrder wo) => PcDelivery.FullDeliveryDate(wo.Count,
+                shipments.Where(s => s.WorkOrderId == wo.Id).Select(s => (s.DeliveredAt.Value, s.Id, s.Lines != null && s.Lines.Count > 0 ? s.Lines.Sum(l => l.Quantity) : (decimal?)null)));
 
             var subjects = new List<(int? WorkOrderId, string Subject, DateTime Due, DateTime? Actual, decimal Base)>();
-            List<PcWorkOrderInfo> infos = await _uow.Set<PcWorkOrderInfo>().AsNoTracking().Where(i => i.ContractId == contractId && !i.Deleted && i.PlannedDeliveryDate != null).ToListAsync(cancellationToken);
-            List<WorkOrder> orders = await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.ContractId == contractId && !w.Deleted).ToListAsync(cancellationToken);
-            List<PcShipment> shipments = await _uow.Set<PcShipment>().AsNoTracking().Where(s => s.ContractId == contractId && !s.Deleted && s.DeliveredAt != null).ToListAsync(cancellationToken);
-            foreach (PcWorkOrderInfo i in infos)
+            if (perWorkOrder)
             {
-                WorkOrder wo = orders.FirstOrDefault(w => w.Id == i.WorkOrderId);
-                if (wo == null) continue;
-                decimal share = wo.WeightPercent > 0 ? wo.WeightPercent / 100m : 1m / Math.Max(1, orders.Count);
-                DateTime? actual = shipments.Where(s => s.WorkOrderId == wo.Id).Select(s => s.DeliveredAt).Max();
-                subjects.Add((wo.Id, "تحویل دستور کار " + wo.Code, i.PlannedDeliveryDate.Value.Date.AddDays(variationDays), actual?.Date, PcText.Round2(value * share)));
+                List<PcWorkOrderInfo> infos = await _uow.Set<PcWorkOrderInfo>().AsNoTracking().Where(i => i.ContractId == contractId && !i.Deleted && i.PlannedDeliveryDate != null).OrderBy(i => i.WorkOrderId).ToListAsync(cancellationToken);
+                foreach (PcWorkOrderInfo i in infos)
+                {
+                    WorkOrder wo = orders.FirstOrDefault(w => w.Id == i.WorkOrderId);
+                    if (wo == null) continue;
+                    decimal share = wo.WeightPercent > 0 ? wo.WeightPercent / 100m : 1m / Math.Max(1, orders.Count);
+                    subjects.Add((wo.Id, "تحویل دستور کار " + wo.Code, i.PlannedDeliveryDate.Value.Date.AddDays(effective.DaysDelta), FullDelivery(wo), PcText.RoundMoney(value * share, decimals)));
+                }
             }
-            if (terms.ContractDeliveryDate.HasValue)
+            else if (effective.DeliveryDate.HasValue)
             {
-                bool allDelivered = orders.Count > 0 && orders.All(w => shipments.Any(s => s.WorkOrderId == w.Id));
-                DateTime? actual = allDelivered ? shipments.Select(s => s.DeliveredAt).Max()?.Date : null;
-                subjects.Add((null, "تحویل کل قرارداد", terms.ContractDeliveryDate.Value.Date.AddDays(variationDays), actual, value));
+                List<DateTime?> dates = orders.Select(FullDelivery).ToList();
+                DateTime? actual = orders.Count > 0 && dates.All(d => d.HasValue) ? dates.Max() : null;
+                subjects.Add((null, "تحویل کل قرارداد", effective.DeliveryDate.Value.Date, actual, value));
             }
-            if (subjects.Count == 0) return Bad<List<PcPenaltyDto>>("تاریخ تحویل قرارداد یا دستور کار ثبت نشده است.");
+            if (subjects.Count == 0) return Bad<List<PcPenaltyDto>>(perWorkOrder ? "تاریخ تحویل برنامه‌ای دستور کار ثبت نشده است." : "تاریخ تحویل قرارداد ثبت نشده است.");
 
             List<PcPenaltyAssessment> existing = await _uow.Set<PcPenaltyAssessment>().Where(p => p.ContractId == contractId && !p.Deleted).ToListAsync(cancellationToken);
+            // never both bases: an undecided line of the other basis is withdrawn
+            foreach (PcPenaltyAssessment other in existing.Where(p => p.Status == PcPenaltyStatus.Computed && (p.WorkOrderId.HasValue != perWorkOrder)).ToList())
+            {
+                other.Delete(); other.ModifyDate = now; other.ModifierUserId = Me; existing.Remove(other);
+            }
+            // lines already decided (waived or negotiated) count with their amount against the one cap
+            decimal decidedAmount = existing.Where(p => p.Status != PcPenaltyStatus.Computed && p.WorkOrderId.HasValue == perWorkOrder).Sum(p => p.Amount);
+            var open = new List<(int? WorkOrderId, string Subject, DateTime Due, DateTime? Actual, decimal Base, int Late)>();
             foreach (var s in subjects)
             {
+                PcPenaltyAssessment row = existing.FirstOrDefault(p => p.WorkOrderId == s.WorkOrderId && p.Subject == s.Subject);
+                if (row != null && row.Status != PcPenaltyStatus.Computed) continue;
                 DateTime end = s.Actual ?? today;
                 int late = Math.Max(0, (int)(end - s.Due).TotalDays - terms.GraceDays);
-                decimal amount = PenaltyAmount(s.Base, terms.LatePenaltyPercentPerWeek.Value, late, terms.PenaltyCapPercent);
+                open.Add((s.WorkOrderId, s.Subject, s.Due, s.Actual, s.Base, late));
+            }
+            decimal[] amounts = PcDelivery.PenaltyAmounts(value, terms.LatePenaltyPercentPerWeek.Value, terms.PenaltyCapPercent, open.Select(o => (o.Base, o.Late)).ToList(), decidedAmount, decimals);
+            for (int k = 0; k < open.Count; k++)
+            {
+                var s = open[k];
                 PcPenaltyAssessment row = existing.FirstOrDefault(p => p.WorkOrderId == s.WorkOrderId && p.Subject == s.Subject);
                 if (row == null)
                 {
-                    if (late == 0) continue;
+                    if (s.Late == 0) continue;
                     row = new PcPenaltyAssessment { ContractId = contractId, WorkOrderId = s.WorkOrderId, Subject = s.Subject, CreateDate = now, CreatorUserId = Me };
                     _uow.Set<PcPenaltyAssessment>().Add(row);
                     existing.Add(row);
                 }
-                else if (row.Status != PcPenaltyStatus.Computed) continue;
-                row.DueDate = s.Due; row.ActualDate = s.Actual; row.LateDays = late; row.GraceDays = terms.GraceDays; row.RatePercentPerWeek = terms.LatePenaltyPercentPerWeek.Value;
-                row.CapPercent = terms.PenaltyCapPercent; row.BaseAmount = s.Base; row.Amount = amount; row.ComputedAt = now; row.ModifyDate = now; row.ModifierUserId = Me;
+                row.DueDate = s.Due; row.ActualDate = s.Actual; row.LateDays = s.Late; row.GraceDays = terms.GraceDays; row.RatePercentPerWeek = terms.LatePenaltyPercentPerWeek.Value;
+                row.CapPercent = terms.PenaltyCapPercent; row.BaseAmount = s.Base; row.Amount = amounts[k]; row.ComputedAt = now; row.ModifyDate = now; row.ModifierUserId = Me;
             }
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(existing.OrderBy(p => p.Id).Select(ToDto).ToList());
@@ -744,7 +817,7 @@ namespace Services.NasbNiro.ProjectControl
             if (dto.Status == PcPenaltyStatus.Negotiated)
             {
                 if (!dto.Amount.HasValue || dto.Amount.Value < 0 || dto.Amount.Value > p.Amount) return Bad<PcPenaltyDto>("مبلغ مصالحه باید بین صفر و مبلغ محاسبه‌شده باشد.");
-                p.Amount = PcText.Round2(dto.Amount.Value);
+                p.Amount = PcText.RoundMoney(dto.Amount.Value, PcText.CurrencyDecimals(await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => t.ContractId == p.ContractId && !t.Deleted).Select(t => t.CurrencyCode).FirstOrDefaultAsync(cancellationToken)));
             }
             else p.Amount = 0m;
             p.Status = dto.Status; p.DecisionReason = Clean(dto.Reason); p.DecidedByUserId = Me; p.ModifyDate = DateTimeOffset.Now; p.ModifierUserId = Me;
@@ -754,11 +827,42 @@ namespace Services.NasbNiro.ProjectControl
 
         // ============================================================================ variation orders
 
+        /// <summary>
+        /// H3: a variation order whose price change is above the share (settings, ★ 5 %) of the contract value is approved by the CEO, a smaller one by the PMO deputy.
+        /// With no contract value any price change is the CEO's.
+        /// </summary>
+        internal static bool VariationNeedsCeo(decimal contractValue, decimal priceDelta, decimal thresholdPercent)
+        {
+            decimal change = Math.Abs(priceDelta);
+            if (change == 0m) return false;
+            if (contractValue <= 0m) return true;
+            return change > contractValue * thresholdPercent / 100m;
+        }
+
         private static PcVariationDto ToDto(PcVariationOrder v) => new PcVariationDto
         {
             Id = v.Id, Number = v.Number, ContractId = v.ContractId, ChangeRequestId = v.ChangeRequestId, AmendmentId = v.AmendmentId, Description = v.Description, PriceDelta = v.PriceDelta,
-            DaysDelta = v.DaysDelta, ClientApprovalReference = v.ClientApprovalReference, ClientApprovalDate = v.ClientApprovalDate, Status = v.Status, RowVersion = v.RowVersion == null ? null : Convert.ToBase64String(v.RowVersion),
+            DaysDelta = v.DaysDelta, ClientApprovalReference = v.ClientApprovalReference, ClientApprovalDate = v.ClientApprovalDate, Status = v.Status,
+            SubmittedByUserId = v.SubmittedByUserId, SubmittedAt = v.SubmittedAt, ApprovedByUserId = v.ApprovedByUserId, ApprovedAt = v.ApprovedAt, ApprovedByRole = v.ApprovedByRole,
+            ClientLetterId = v.ClientLetterId, ClientDocumentId = v.ClientDocumentId, TermsAppliedAt = v.TermsAppliedAt, DecisionNote = v.DecisionNote,
+            RowVersion = v.RowVersion == null ? null : Convert.ToBase64String(v.RowVersion),
         };
+
+        private async Task FillVariationAsync(IEnumerable<PcVariationDto> dtos, CancellationToken cancellationToken)
+        {
+            List<PcVariationDto> list = dtos.ToList();
+            if (list.Count == 0) return;
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, list.SelectMany(x => new int?[] { x.SubmittedByUserId, x.ApprovedByUserId }), cancellationToken);
+            Dictionary<string, decimal> settings = await PcSettingKeys.LoadAsync(_uow, cancellationToken);
+            var values = new Dictionary<int, decimal>();
+            foreach (PcVariationDto x in list)
+            {
+                x.SubmittedByName = names.Name(x.SubmittedByUserId); x.ApprovedByName = names.Name(x.ApprovedByUserId);
+                if (x.Status == PcVariationStatus.Approved) { x.NeedsCeo = x.ApprovedByRole == "CEO"; continue; }
+                if (!values.TryGetValue(x.ContractId, out decimal value)) values[x.ContractId] = value = (await PcEffective.EffectiveContractAsync(_uow, x.ContractId, cancellationToken)).Value;
+                x.NeedsCeo = VariationNeedsCeo(value, x.PriceDelta, settings[PcSettingKeys.VoCeoThresholdPercent]);
+            }
+        }
 
         public async Task<ResponseDto<PagedList<PcVariationDto>>> GetVariationsAsync(PcContractQuery query, CancellationToken cancellationToken)
         {
@@ -769,17 +873,23 @@ namespace Services.NasbNiro.ProjectControl
             {
                 Id = v.Id, Number = v.Number, ContractId = v.ContractId, ChangeRequestId = v.ChangeRequestId, AmendmentId = v.AmendmentId, Description = v.Description, PriceDelta = v.PriceDelta,
                 DaysDelta = v.DaysDelta, ClientApprovalReference = v.ClientApprovalReference, ClientApprovalDate = v.ClientApprovalDate, Status = v.Status,
+                SubmittedByUserId = v.SubmittedByUserId, SubmittedAt = v.SubmittedAt, ApprovedByUserId = v.ApprovedByUserId, ApprovedAt = v.ApprovedAt, ApprovedByRole = v.ApprovedByRole,
+                ClientLetterId = v.ClientLetterId, ClientDocumentId = v.ClientDocumentId, TermsAppliedAt = v.TermsAppliedAt, DecisionNote = v.DecisionNote,
             });
-            return ResponseDtoHelper.Ok(await PagedList<PcVariationDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken));
+            PagedList<PcVariationDto> page = await PagedList<PcVariationDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken);
+            await FillVariationAsync(page, cancellationToken);
+            return ResponseDtoHelper.Ok(page);
         }
 
         public async Task<ResponseDto<PcVariationDto>> SaveVariationAsync(PcVariationDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || Clean(dto.Description) == null) return Bad<PcVariationDto>(PcText.InvalidData);
-            if (!_user.IsInRole(ProjectControlRoles.Commercial + ",PROJECTMANAGER")) return Bad<PcVariationDto>(PcText.NotAllowed);
+            // H3: the commercial unit creates the order; the PMO deputy or the CEO approves it
+            if (!_user.IsInRole("COMMERCIAL")) return Bad<PcVariationDto>(PcText.NotAllowed + " (دستور تغییر را بازرگانی ثبت می‌کند)");
             if (!await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == dto.ContractId && !c.Deleted, cancellationToken)) return PcText.NotFound<PcVariationDto>(PcText.ContractNotFound);
             if (dto.ChangeRequestId.HasValue && !await _uow.Set<PcChangeRequest>().AnyAsync(c => c.Id == dto.ChangeRequestId.Value && c.ContractId == dto.ContractId && !c.Deleted, cancellationToken)) return Bad<PcVariationDto>("درخواست تغییر متعلق به این قرارداد نیست.");
             if (dto.AmendmentId.HasValue && !await _uow.Set<PcContractAmendment>().AnyAsync(c => c.Id == dto.AmendmentId.Value && c.ContractId == dto.ContractId && !c.Deleted, cancellationToken)) return Bad<PcVariationDto>("الحاقیه متعلق به این قرارداد نیست.");
+            if (dto.DaysDelta < -3650 || dto.DaysDelta > 3650) return Bad<PcVariationDto>("تغییر زمان نامعتبر است.");
             DateTimeOffset now = DateTimeOffset.Now;
             PcVariationOrder v;
             if (dto.Id.HasValue)
@@ -787,6 +897,7 @@ namespace Services.NasbNiro.ProjectControl
                 v = await _uow.Set<PcVariationOrder>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (v == null) return PcText.NotFound<PcVariationDto>("دستور تغییر پیدا نشد.");
                 if (v.Status != PcVariationStatus.Draft) return Bad<PcVariationDto>("دستور تغییر ارسال‌شده تغییر نمی‌کند.");
+                if (v.ContractId != dto.ContractId) return Bad<PcVariationDto>("قرارداد دستور تغییر عوض نمی‌شود.");
             }
             else
             {
@@ -797,37 +908,104 @@ namespace Services.NasbNiro.ProjectControl
             v.ModifyDate = now; v.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcVariationDto>(PcText.Concurrency); }
-            return ResponseDtoHelper.Ok(ToDto(v));
+            PcVariationDto result = ToDto(v);
+            await FillVariationAsync(new[] { result }, cancellationToken);
+            return ResponseDtoHelper.Ok(result);
+        }
+
+        /// <summary>The client's letter of the office module that proves the client agreed: a registered incoming letter of this contract, not dated in the future. Returns the Persian problem, or null.</summary>
+        private async Task<(OfLetter Letter, string Problem)> ClientLetterAsync(int contractId, int letterId, CancellationToken cancellationToken)
+        {
+            OfLetter letter = await _uow.Set<OfLetter>().AsNoTracking().FirstOrDefaultAsync(l => l.Id == letterId && !l.Deleted, cancellationToken);
+            if (letter == null) return (null, "نامه کارفرما پیدا نشد.");
+            if (letter.Kind != OfLetterKind.Incoming || (letter.Status != OfLetterStatus.Received && letter.Status != OfLetterStatus.Archived))
+                return (null, "تایید کارفرما را فقط نامه وارده ثبت‌شده در دبیرخانه اثبات می‌کند (نه نامه صادره، داخلی، پیش‌نویس یا باطل‌شده).");
+            if (letter.ContractId != contractId) return (null, "نامه کارفرما به همین قرارداد وصل نیست؛ آن را در دبیرخانه به قرارداد متصل کنید.");
+            if ((letter.IncomingDate ?? letter.Date).Date > DateTime.Today) return (null, "تاریخ نامه کارفرما در آینده است.");
+            return (letter, null);
         }
 
         public async Task<ResponseDto<PcVariationDto>> VariationActionAsync(PcVariationActionDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || Clean(dto.Action) == null) return Bad<PcVariationDto>(PcText.InvalidData);
-            if (!_user.IsInRole(ProjectControlRoles.Commercial + ",PROJECTMANAGER")) return Bad<PcVariationDto>(PcText.NotAllowed);
             PcVariationOrder v = await _uow.Set<PcVariationOrder>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
             if (v == null) return PcText.NotFound<PcVariationDto>("دستور تغییر پیدا نشد.");
+            DateTimeOffset now = DateTimeOffset.Now;
             switch (dto.Action.Trim().ToLowerInvariant())
             {
                 case "submit":
+                    if (!_user.IsInRole("COMMERCIAL")) return Bad<PcVariationDto>(PcText.NotAllowed + " (ارسال دستور تغییر با بازرگانی است)");
                     if (v.Status != PcVariationStatus.Draft) return Bad<PcVariationDto>("فقط پیش‌نویس ارسال می‌شود.");
-                    v.Status = PcVariationStatus.Submitted;
+                    v.Status = PcVariationStatus.Submitted; v.SubmittedByUserId = Me; v.SubmittedAt = now;
                     break;
                 case "approve":
-                    if (v.Status != PcVariationStatus.Submitted) return Bad<PcVariationDto>("ابتدا دستور تغییر باید برای کارفرما ارسال شود.");
-                    if (Clean(dto.Reference) == null) return Bad<PcVariationDto>("شماره نامه تایید کارفرما را وارد کنید.");
-                    v.ClientApprovalReference = Clean(dto.Reference); v.ClientApprovalDate = (dto.Date ?? DateTime.Today).Date; v.Status = PcVariationStatus.Approved;
+                {
+                    if (!_user.IsInRole("PMO,CEO")) return Bad<PcVariationDto>(PcText.NotAllowed + " (تایید دستور تغییر با معاون PMO یا مدیرعامل است)");
+                    if (v.Status != PcVariationStatus.Submitted) return Bad<PcVariationDto>("ابتدا دستور تغییر باید ارسال شود.");
+                    // maker-checker: not the one who created, edited or sent it
+                    if (v.CreatorUserId == Me || v.SubmittedByUserId == Me || v.ModifierUserId == Me) return Bad<PcVariationDto>(PcText.SameUser);
+                    // authority: the CEO above the threshold of the settings
+                    PcEffectiveContract effective = await PcEffective.EffectiveContractAsync(_uow, v.ContractId, cancellationToken);
+                    decimal threshold = (await PcSettingKeys.LoadAsync(_uow, cancellationToken))[PcSettingKeys.VoCeoThresholdPercent];
+                    bool needsCeo = VariationNeedsCeo(effective.Value, v.PriceDelta, threshold);
+                    bool isCeo = _user.IsInRole(ProjectControlRoles.Ceo);
+                    if (needsCeo && !isCeo) return Bad<PcVariationDto>("تغییر مبلغ این دستور از " + threshold.ToString("0.##", CultureInfo.InvariantCulture) + " درصد ارزش قرارداد بیشتر است؛ تایید با مدیرعامل است.");
+                    // basis: a decided (approved) change request or a CEO-approved amendment
+                    bool basis = false;
+                    if (v.ChangeRequestId.HasValue)
+                    {
+                        PcChangeRequest cr = await _uow.Set<PcChangeRequest>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == v.ChangeRequestId.Value && c.ContractId == v.ContractId && !c.Deleted, cancellationToken);
+                        basis = cr != null && cr.Decision == PcChangeDecision.Approve && (cr.Status == PcChangeStatus.Decided || cr.Status == PcChangeStatus.Implementing || cr.Status == PcChangeStatus.Closed);
+                    }
+                    if (!basis && v.AmendmentId.HasValue)
+                        basis = await _uow.Set<PcContractAmendment>().AsNoTracking().AnyAsync(a => a.Id == v.AmendmentId.Value && a.ContractId == v.ContractId && !a.Deleted && a.CeoApprovedAt != null, cancellationToken);
+                    if (!basis) return Bad<PcVariationDto>("تایید دستور تغییر نیازمند درخواست تغییر تصمیم‌گرفته‌شده (تاییدشده) یا الحاقیه تاییدشده مدیرعامل است؛ آن را به دستور وصل کنید.");
+                    // R1c (H3): one approved variation order per change request and per amendment (the same change is never counted twice), and a variation order built on an amendment carries exactly its price and days
+                    if (v.ChangeRequestId.HasValue && await _uow.Set<PcVariationOrder>().AnyAsync(o => o.Id != v.Id && !o.Deleted && o.Status == PcVariationStatus.Approved && o.ChangeRequestId == v.ChangeRequestId, cancellationToken))
+                        return Bad<PcVariationDto>("برای این درخواست تغییر قبلاً یک دستور تغییر تاییدشده ثبت شده است؛ یک تغییر دوبار شمرده نمی‌شود.");
+                    if (v.AmendmentId.HasValue)
+                    {
+                        if (await _uow.Set<PcVariationOrder>().AnyAsync(o => o.Id != v.Id && !o.Deleted && o.Status == PcVariationStatus.Approved && o.AmendmentId == v.AmendmentId, cancellationToken))
+                            return Bad<PcVariationDto>("برای این الحاقیه قبلاً یک دستور تغییر تاییدشده ثبت شده است؛ یک تغییر دوبار شمرده نمی‌شود.");
+                        PcContractAmendment am = await _uow.Set<PcContractAmendment>().AsNoTracking().FirstAsync(x => x.Id == v.AmendmentId.Value, cancellationToken);
+                        if (v.PriceDelta != (am.PriceDelta ?? 0m) || v.DaysDelta != (am.DaysDelta ?? 0))
+                            return Bad<PcVariationDto>("مبلغ و تعداد روز دستور تغییر باید با الحاقیه یکی باشد (الحاقیه: " + (am.PriceDelta ?? 0m).ToString("0.##", CultureInfo.InvariantCulture) + " و " + (am.DaysDelta ?? 0) + " روز).");
+                    }
+                    // evidence: the client's letter or an uploaded file
+                    int? letterId = dto.ClientLetterId ?? v.ClientLetterId; Guid? documentId = dto.ClientDocumentId ?? v.ClientDocumentId;
+                    if (!letterId.HasValue && !documentId.HasValue) return Bad<PcVariationDto>("مدرک تایید کارفرما لازم است: شناسه نامه وارده دبیرخانه (clientLetterId) یا فایل بارگذاری‌شده (clientDocumentId).");
+                    OfLetter letter = null;
+                    if (letterId.HasValue)
+                    {
+                        (letter, string problem) = await ClientLetterAsync(v.ContractId, letterId.Value, cancellationToken);
+                        if (problem != null) return Bad<PcVariationDto>(problem);
+                    }
+                    if (documentId.HasValue && !await _uow.Set<Entities.Model.Document>().AnyAsync(d => d.Id == documentId.Value, cancellationToken)) return Bad<PcVariationDto>("فایل تایید کارفرما در مخزن اسناد پیدا نشد؛ ابتدا آن را بارگذاری کنید.");
+                    DateTime approvalDate = (dto.Date ?? letter?.IncomingDate ?? letter?.Date ?? DateTime.Today).Date;
+                    if (approvalDate > DateTime.Today) return Bad<PcVariationDto>("تاریخ تایید کارفرما در آینده است.");
+                    string reference = Clean(dto.Reference) ?? Clean(letter?.IncomingNumber) ?? Clean(letter?.Number);
+                    if (reference == null) return Bad<PcVariationDto>("شماره نامه تایید کارفرما را وارد کنید.");
+                    v.ClientLetterId = letterId; v.ClientDocumentId = documentId; v.ClientApprovalReference = reference; v.ClientApprovalDate = approvalDate;
+                    v.Status = PcVariationStatus.Approved; v.ApprovedByUserId = Me; v.ApprovedAt = now; v.ApprovedByRole = needsCeo || isCeo ? "CEO" : "PMO";
+                    // H8: an approved variation order re-opens the review of the contract; new baselines wait until it is accepted again
+                    await PcGates.OpenChangeReviewAsync(_uow, v.ContractId, v.AmendmentId, v.Id, Me, "بازنگری مجدد پس از دستور تغییر " + v.Number, cancellationToken);
                     break;
+                }
                 case "reject":
+                    if (!_user.IsInRole("PMO,CEO")) return Bad<PcVariationDto>(PcText.NotAllowed + " (رد دستور تغییر با معاون PMO یا مدیرعامل است)");
                     if (v.Status != PcVariationStatus.Submitted) return Bad<PcVariationDto>("فقط دستور ارسال‌شده رد می‌شود.");
-                    v.Status = PcVariationStatus.Rejected;
+                    if (Clean(dto.Note) == null) return Bad<PcVariationDto>("دلیل رد دستور تغییر را بنویسید.");
+                    v.Status = PcVariationStatus.Rejected; v.DecisionNote = Clean(dto.Note);
                     break;
                 default:
                     return Bad<PcVariationDto>("عملیات نامعتبر است.");
             }
-            v.ModifyDate = DateTimeOffset.Now; v.ModifierUserId = Me;
+            v.ModifyDate = now; v.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcVariationDto>(PcText.Concurrency); }
-            return ResponseDtoHelper.Ok(ToDto(v));
+            PcVariationDto result = ToDto(v);
+            await FillVariationAsync(new[] { result }, cancellationToken);
+            return ResponseDtoHelper.Ok(result);
         }
     }
 }

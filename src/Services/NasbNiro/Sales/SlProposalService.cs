@@ -231,6 +231,10 @@ namespace Services.NasbNiro.Sales
             {
                 if (!_user.IsInRole(SalesRoles.Writers)) return Bad<SlProposalDto>(SlText.NotAllowed);
                 if (row.Status != SlProposalStatus.Approved) return Bad<SlProposalDto>("فقط پیشنهاد تأییدشده برای مشتری ارسال می‌شود.");
+                // R1c (H8): a tender with a code is reviewed (ISO 9001 8.2.3) by the PMO and the commercial unit before the offer leaves the company
+                string tenderCode = inquiry.TenderId.HasValue ? await _uow.Set<Tender>().AsNoTracking().Where(t => t.Id == inquiry.TenderId.Value && !t.Deleted).Select(t => t.Code).FirstOrDefaultAsync(ct) : null;
+                string reviewError = await PcGates.RequireTenderReviewAsync(_uow, tenderCode, ct);
+                if (reviewError != null) return Bad<SlProposalDto>(reviewError);
                 row.Status = SlProposalStatus.Submitted; row.SubmittedAt = now; row.SubmittedByUserId = Me;
                 inquiry.Status = SlInquiryStatus.Submitted; inquiry.ModifyDate = now; inquiry.ModifierUserId = Me;
                 await TenderAsync(inquiry, t => { t.TechSendDate = now; t.FinanceSendDate = now; t.Result = "پیشنهاد ارسال شد (" + row.Number + " بازنگری " + row.Revision + ")"; }, ct);
@@ -352,11 +356,13 @@ namespace Services.NasbNiro.Sales
             Tender tender = inquiry.TenderId.HasValue ? await _uow.Set<Tender>().AsNoTracking().FirstOrDefaultAsync(t => t.Id == inquiry.TenderId.Value, ct) : null;
             int days = (p.DeliveryWeeks ?? 0) * 7;
             DateTimeOffset delivery = now.AddDays(days);
+            Dictionary<string, decimal> settings = await PcSettingKeys.LoadAsync(_uow, ct);
+            int warrantyAfterCommissioning = (int)settings[PcSettingKeys.WarrantyMonthsAfterCommissioning], warrantyAfterDelivery = (int)settings[PcSettingKeys.WarrantyMonthsAfterDelivery];
             var contract = new ContractEntity
             {
                 Code = await InventoryNumbers.NextNumberAsync(_uow, SlNumbers.Contract, "CT", now.LocalDateTime, ct), Title = inquiry.Title, TenderCode = tender?.Code,
                 EmployerOrderNo = p.CustomerReference ?? inquiry.CustomerReference, Employer = Clean(customer.EmployerName) ?? customer.Name, ContractDate = now, AnnounceDate = now, StartDate = now,
-                PayDate = now, ActualStartDate = now, TempDate = delivery, DeliverDate = delivery, GurantyDate = delivery, EndDate = delivery, Price = p.Price, Duration = p.DeliveryWeeks.HasValue ? days : (int?)null,
+                PayDate = now, ActualStartDate = now, TempDate = delivery, DeliverDate = delivery, GurantyDate = delivery.AddMonths(warrantyAfterDelivery), EndDate = delivery, Price = p.Price, Duration = p.DeliveryWeeks.HasValue ? days : (int?)null,
                 Status = ContractStatus.Current, Services = SlText.Product(inquiry.ProductType), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
             };
             _uow.Set<ContractEntity>().Add(contract);
@@ -365,6 +371,8 @@ namespace Services.NasbNiro.Sales
                 Contract = contract, Category = SlText.Category(inquiry.ProductType), CurrencyCode = "IRR", ValueExVat = p.Price, VatPercent = p.VatPercent, AdvancePercent = p.AdvancePercent,
                 RetentionPercent = p.RetentionPercent, LatePenaltyPercentPerWeek = p.LatePenaltyPercentPerWeek, PenaltyCapPercent = p.PenaltyCapPercent,
                 ClientReviewDays = p.ClientReviewDays ?? 14, ContractDeliveryDate = p.DeliveryWeeks.HasValue ? delivery.Date : (DateTime?)null, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
+                PenaltyBasis = settings[PcSettingKeys.PenaltyBasisDefault] == 2m ? PcPenaltyBasis.PerWorkOrder : PcPenaltyBasis.PerContract,
+                WarrantyMonthsAfterCommissioning = warrantyAfterCommissioning, WarrantyMonthsAfterDelivery = warrantyAfterDelivery,
             });
             List<SlEstimateEquipment> equipments = await _uow.Set<SlEstimateEquipment>().AsNoTracking().Where(e => e.EstimateId == p.EstimateId).OrderBy(e => e.Id).ToListAsync(ct);
             foreach (SlEstimateEquipment e in equipments)

@@ -97,11 +97,11 @@ namespace Services.NasbNiro.Production
                         PlannedFinish = p.Op.PlannedFinish, PlannedFinishText = MfText.Date(p.Op.PlannedFinish), Note = p.Note,
                     });
                 }
-                // the forecast of the project activity (the baseline is never touched)
+                // the production forecast of the project activity (the baseline and the project-control forecast are never touched)
                 if (plan.Activity != null && plan.Finish.HasValue)
                 {
-                    plan.Activity.ForecastStart = plan.Start ?? plan.Activity.ForecastStart;
-                    plan.Activity.ForecastFinish = plan.Finish;
+                    // R1c (M2): the production forecast has its own field; project control's ForecastStart / ForecastFinish (actuals + remaining duration + PO dates) are no longer overwritten by the shop floor
+                    plan.Activity.ProductionForecastFinish = plan.Finish;
                     pushed++;
                 }
                 if (plan.IsLate) result.LateOrders++;
