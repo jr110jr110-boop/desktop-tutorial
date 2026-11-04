@@ -44,6 +44,7 @@ namespace Services.NasbNiro.Inventory
             if (query.ItemId.HasValue) balances = balances.Where(b => b.ItemId == query.ItemId.Value);
             if (query.WarehouseId.HasValue) balances = balances.Where(b => b.WarehouseId == query.WarehouseId.Value);
             if (query.ItemGroupId.HasValue) balances = balances.Where(b => b.Item.ItemGroupId == query.ItemGroupId.Value);
+            balances = ApplyPb5Filters(balances, query);
             string text = InventoryText.Clean(query.Contains);
             if (text != null)
                 balances = balances.Where(b => b.Item.Code.Contains(text) || b.Item.Title.Contains(text) ||
@@ -66,7 +67,34 @@ namespace Services.NasbNiro.Inventory
                     HeatNumber = b.Lot.HeatNumber,
                     Quantity = b.Quantity,
                 });
-            return ResponseDtoHelper.Ok(await PagedList<StockBalanceDto>.CreateAsync(rows, query.PageNumber, query.PageSize, cancellationToken));
+            PagedList<StockBalanceDto> page = await PagedList<StockBalanceDto>.CreateAsync(rows, query.PageNumber, query.PageSize, cancellationToken);
+            if (InventoryPriceAccess.SeesValues(_user))
+            {
+                List<int> itemIds = page.Select(r => r.ItemId).Distinct().ToList();
+                Dictionary<int, decimal> avg = await _uow.Set<Entities.Model.NasbNiro.Finance.ItemCost>().AsNoTracking().Where(c => itemIds.Contains(c.ItemId)).ToDictionaryAsync(c => c.ItemId, c => c.AverageCost, cancellationToken);
+                var customer = (await _uow.Set<Warehouse>().AsNoTracking().Where(w => w.Kind == WarehouseKind.CustomerProperty).Select(w => w.Id).ToListAsync(cancellationToken)).ToHashSet();
+                foreach (StockBalanceDto r in page)
+                {
+                    decimal cost = customer.Contains(r.WarehouseId) ? 0m : avg.TryGetValue(r.ItemId, out decimal a) ? a : 0m;
+                    r.UnitCost = cost;
+                    r.Value = Math.Round(r.Quantity * cost, 0, MidpointRounding.AwayFromZero);
+                }
+            }
+            return ResponseDtoHelper.Ok(page);
+        }
+
+        /// <summary>PB5 (R11, R1): filters of the stock lists by platform, equipment type, valve model, warehouse kind and project.</summary>
+        internal static IQueryable<StockBalance> ApplyPb5Filters(IQueryable<StockBalance> balances, StockQuery query)
+        {
+            string platform = InventoryText.Clean(query.Platform);
+            if (platform != null) balances = balances.Where(b => b.Item.Platform == platform);
+            string equipment = InventoryText.Clean(query.EquipmentType);
+            if (equipment != null) balances = balances.Where(b => b.Item.EquipmentType == equipment);
+            string valve = InventoryText.Clean(query.ValveModel);
+            if (valve != null) balances = balances.Where(b => b.Item.ValveModel == valve);
+            if (query.WarehouseKind.HasValue) balances = balances.Where(b => b.Warehouse.Kind == query.WarehouseKind.Value);
+            if (query.WorkOrderId.HasValue) balances = balances.Where(b => b.Warehouse.WorkOrderId == query.WorkOrderId.Value);
+            return balances;
         }
 
         public async Task<ResponseDto<PagedList<ItemStockDto>>> GetItemStocksAsync(StockQuery query, CancellationToken cancellationToken)
@@ -74,12 +102,23 @@ namespace Services.NasbNiro.Inventory
             query ??= new StockQuery();
             IQueryable<StockBalance> balances = _uow.Set<StockBalance>();
             if (query.WarehouseId.HasValue) balances = balances.Where(b => b.WarehouseId == query.WarehouseId.Value);
+            if (query.WarehouseKind.HasValue) balances = balances.Where(b => b.Warehouse.Kind == query.WarehouseKind.Value);
+            if (query.WorkOrderId.HasValue) balances = balances.Where(b => b.Warehouse.WorkOrderId == query.WorkOrderId.Value);
 
             IQueryable<InventoryItem> items = _uow.Set<InventoryItem>().Where(i => !i.Deleted && i.IsActive);
             if (query.ItemId.HasValue) items = items.Where(i => i.Id == query.ItemId.Value);
             if (query.ItemGroupId.HasValue) items = items.Where(i => i.ItemGroupId == query.ItemGroupId.Value);
+            string platform = InventoryText.Clean(query.Platform);
+            if (platform != null) items = items.Where(i => i.Platform == platform);
+            string equipment = InventoryText.Clean(query.EquipmentType);
+            if (equipment != null) items = items.Where(i => i.EquipmentType == equipment);
+            string valve = InventoryText.Clean(query.ValveModel);
+            if (valve != null) items = items.Where(i => i.ValveModel == valve);
             string text = InventoryText.Clean(query.Contains);
             if (text != null) items = items.Where(i => i.Code.Contains(text) || i.Title.Contains(text));
+
+            // PB5 (R26): an item without its own minimum uses the default of its group (or of a parent group)
+            if (query.LowStockOnly) return await LowStockAsync(items, balances, query, cancellationToken);
 
             IQueryable<ItemStockDto> rows = items
                 .Select(i => new
@@ -100,8 +139,76 @@ namespace Services.NasbNiro.Inventory
                     OnHand = x.OnHand,
                     MinStock = x.Item.MinStock,
                     IsLow = x.OnHand < x.Item.MinStock,
+                    Platform = x.Item.Platform,
+                    EquipmentType = x.Item.EquipmentType,
+                    ValveModel = x.Item.ValveModel,
                 });
-            return ResponseDtoHelper.Ok(await PagedList<ItemStockDto>.CreateAsync(rows, query.PageNumber, query.PageSize, cancellationToken));
+            PagedList<ItemStockDto> page = await PagedList<ItemStockDto>.CreateAsync(rows, query.PageNumber, query.PageSize, cancellationToken);
+            await FillGroupMinimumAsync(page, cancellationToken);
+            await FillItemValuesAsync(page, cancellationToken);
+            return ResponseDtoHelper.Ok(page);
+        }
+
+        private async Task<Dictionary<int, ReorderRules.GroupDefaults>> LoadGroupDefaultsAsync(CancellationToken ct)
+        {
+            var groups = await _uow.Set<ItemGroup>().AsNoTracking().Where(g => !g.Deleted)
+                .Select(g => new ReorderRules.GroupDefaults { Id = g.Id, ParentId = g.ParentId, Min = g.DefaultMinStock, Max = g.DefaultMaxStock, Quantity = g.DefaultReorderQuantity, LeadDays = g.DefaultLeadTimeDays })
+                .ToListAsync(ct);
+            return ReorderRules.Effective(groups);
+        }
+
+        /// <summary>Shows the effective minimum (group default when the item has none) and the low flag on a page.</summary>
+        private async Task FillGroupMinimumAsync(PagedList<ItemStockDto> page, CancellationToken ct)
+        {
+            if (page.Count == 0) return;
+            List<int> ids = page.Select(r => r.ItemId).ToList();
+            var own = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => ids.Contains(i.Id)).Select(i => new { i.Id, i.MinStock, i.ItemGroupId }).ToDictionaryAsync(i => i.Id, ct);
+            Dictionary<int, ReorderRules.GroupDefaults> groups = await LoadGroupDefaultsAsync(ct);
+            foreach (ItemStockDto row in page)
+            {
+                var o = own[row.ItemId];
+                ReorderRules.GroupDefaults g = o.ItemGroupId.HasValue && groups.TryGetValue(o.ItemGroupId.Value, out ReorderRules.GroupDefaults x) ? x : null;
+                row.MinStock = ReorderRules.For(o.MinStock, null, null, null, g).Min;
+                row.IsLow = row.OnHand < row.MinStock;
+            }
+        }
+
+        private async Task FillItemValuesAsync(PagedList<ItemStockDto> page, CancellationToken ct)
+        {
+            if (!InventoryPriceAccess.SeesValues(_user) || page.Count == 0) return;
+            List<int> ids = page.Select(r => r.ItemId).ToList();
+            Dictionary<int, decimal> avg = await _uow.Set<Entities.Model.NasbNiro.Finance.ItemCost>().AsNoTracking().Where(c => ids.Contains(c.ItemId)).ToDictionaryAsync(c => c.ItemId, c => c.AverageCost, ct);
+            foreach (ItemStockDto row in page)
+            {
+                decimal cost = avg.TryGetValue(row.ItemId, out decimal a) ? a : 0m;
+                row.AverageCost = cost;
+                row.Value = Math.Round(row.OnHand * cost, 0, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        private async Task<ResponseDto<PagedList<ItemStockDto>>> LowStockAsync(IQueryable<InventoryItem> items, IQueryable<StockBalance> balances, StockQuery query, CancellationToken ct)
+        {
+            var list = await items.Select(i => new
+            {
+                i.Id, i.Code, i.Title, i.Unit, GroupTitle = i.ItemGroup.Title, i.ItemGroupId, i.TrackingMode, i.MinStock, i.Platform, i.EquipmentType, i.ValveModel,
+                OnHand = balances.Where(b => b.ItemId == i.Id).Sum(b => (decimal?)b.Quantity) ?? 0,
+            }).ToListAsync(ct);
+            Dictionary<int, ReorderRules.GroupDefaults> groups = await LoadGroupDefaultsAsync(ct);
+            var low = new List<ItemStockDto>();
+            foreach (var i in list)
+            {
+                ReorderRules.GroupDefaults g = i.ItemGroupId.HasValue && groups.TryGetValue(i.ItemGroupId.Value, out ReorderRules.GroupDefaults x) ? x : null;
+                decimal min = ReorderRules.For(i.MinStock, null, null, null, g).Min;
+                if (!(i.OnHand < min)) continue;
+                low.Add(new ItemStockDto
+                {
+                    ItemId = i.Id, ItemCode = i.Code, ItemTitle = i.Title, Unit = i.Unit, ItemGroupTitle = i.GroupTitle, TrackingMode = i.TrackingMode, OnHand = i.OnHand,
+                    MinStock = min, IsLow = true, Platform = i.Platform, EquipmentType = i.EquipmentType, ValveModel = i.ValveModel,
+                });
+            }
+            PagedList<ItemStockDto> page = await PagedList<ItemStockDto>.CreateAsync(low.OrderBy(r => r.ItemCode).ToList(), query.PageNumber, query.PageSize, ct);
+            await FillItemValuesAsync(page, ct);
+            return ResponseDtoHelper.Ok(page);
         }
 
         public async Task<ResponseDto<KardexDto>> GetKardexAsync(KardexQuery query, CancellationToken cancellationToken)
@@ -113,17 +220,25 @@ namespace Services.NasbNiro.Inventory
             IQueryable<StockTransaction> transactions = _uow.Set<StockTransaction>().Where(t => t.ItemId == query.ItemId);
             if (query.WarehouseId.HasValue) transactions = transactions.Where(t => t.WarehouseId == query.WarehouseId.Value);
 
-            decimal opening = 0;
+            // PB5: landed cost (approved freight) adds value on its own date without quantity
+            IQueryable<InventoryFreightAllocation> freights = _uow.Set<InventoryFreightAllocation>().Where(a => a.ItemId == query.ItemId && a.Freight.Status == FreightStatus.Approved && !a.Freight.Deleted);
+            if (query.WarehouseId.HasValue) freights = freights.Where(a => a.Freight.ReceiptDocument.WarehouseId == query.WarehouseId.Value);
+
+            decimal opening = 0, openingValue = 0;
             if (query.From.HasValue)
             {
                 DateTime from = query.From.Value.Date;
                 opening = await transactions.Where(t => t.TransactionDate < from).SumAsync(t => (decimal?)t.Quantity, cancellationToken) ?? 0;
+                openingValue = await transactions.Where(t => t.TransactionDate < from).SumAsync(t => t.CostAmount, cancellationToken) ?? 0;
+                openingValue += await freights.Where(a => a.Freight.FreightDate < from).SumAsync(a => (decimal?)a.Amount, cancellationToken) ?? 0;
                 transactions = transactions.Where(t => t.TransactionDate >= from);
+                freights = freights.Where(a => a.Freight.FreightDate >= from);
             }
             if (query.To.HasValue)
             {
                 DateTime to = query.To.Value.Date.AddDays(1);
                 transactions = transactions.Where(t => t.TransactionDate < to);
+                freights = freights.Where(a => a.Freight.FreightDate < to);
             }
 
             var rows = await transactions
@@ -143,17 +258,39 @@ namespace Services.NasbNiro.Inventory
                     Out = t.Quantity < 0 ? -t.Quantity : 0,
                     UnitPrice = t.UnitPrice,
                     IsReversal = t.IsReversal,
+                    UnitCost = t.UnitCost,
+                    Amount = t.CostAmount,
+                    Supplier = t.Lot.Provider.Name ?? t.Document.Provider.Name,
+                    ReceiptNumber = t.Document.Type == InventoryDocumentType.PurchaseReceipt || t.Document.Type == InventoryDocumentType.ConsignmentReceipt ? t.Document.Number : null,
                 })
                 .ToListAsync(cancellationToken);
 
-            decimal balance = opening;
+            var freightRows = await freights.Select(a => new KardexRowDto
+            {
+                Date = a.Freight.FreightDate,
+                DocumentId = a.Freight.ReceiptDocumentId,
+                DocumentNumber = a.Freight.Number,
+                DocumentType = InventoryDocumentType.PurchaseReceipt,
+                WarehouseTitle = a.Freight.ReceiptDocument.Warehouse.Title,
+                Amount = a.Amount,
+                Supplier = a.Freight.CarrierProvider.Name,
+                ReceiptNumber = a.Freight.ReceiptDocument.Number,
+                IsFreight = true,
+                Note = "کرایه حمل (بهای تمام‌شده نهایی)",
+            }).ToListAsync(cancellationToken);
+            rows.AddRange(freightRows);
+            rows = rows.OrderBy(r => r.Date).ThenBy(r => r.IsFreight).ToList();
+
+            decimal balance = opening, value = openingValue;
             foreach (KardexRowDto row in rows)
             {
                 balance += row.In - row.Out;
+                value += row.Amount ?? 0;
                 row.Balance = balance;
+                row.RunningValue = value;
             }
 
-            return ResponseDtoHelper.Ok(new KardexDto
+            var kardex = new KardexDto
             {
                 ItemId = item.Id,
                 ItemCode = item.Code,
@@ -161,8 +298,12 @@ namespace Services.NasbNiro.Inventory
                 Unit = item.Unit,
                 OpeningBalance = opening,
                 ClosingBalance = balance,
+                OpeningValue = openingValue,
+                ClosingValue = value,
                 Rows = rows,
-            });
+            };
+            InventoryPriceAccess.Mask(kardex, InventoryPriceAccess.SeesValues(_user));
+            return ResponseDtoHelper.Ok(kardex);
         }
 
         internal static IQueryable<LotDto> LotProjection(IQueryable<InventoryLot> lots, IQueryable<StockBalance> balances) =>
@@ -200,7 +341,20 @@ namespace Services.NasbNiro.Inventory
                 lots = lots.Where(l => l.LotNumber.Contains(text) || l.HeatNumber.Contains(text) || l.CertificateNumber.Contains(text) ||
                                        l.Item.Code.Contains(text));
             IQueryable<LotDto> rows = LotProjection(lots.OrderByDescending(l => l.Id), _uow.Set<StockBalance>());
-            return ResponseDtoHelper.Ok(await PagedList<LotDto>.CreateAsync(rows, query.PageNumber, query.PageSize, cancellationToken));
+            PagedList<LotDto> page = await PagedList<LotDto>.CreateAsync(rows, query.PageNumber, query.PageSize, cancellationToken);
+            await FillLotValuesAsync(page, cancellationToken);
+            return ResponseDtoHelper.Ok(page);
+        }
+
+        /// <summary>PB5 (R29): value of a lot on hand (weighted-average cost of the item); only readers with price access get it. Customer property is not valued.</summary>
+        private async Task FillLotValuesAsync(IEnumerable<LotDto> lots, CancellationToken ct)
+        {
+            if (!InventoryPriceAccess.SeesValues(_user)) return;
+            List<LotDto> list = lots.ToList();
+            List<int> ids = list.Select(l => l.ItemId).Distinct().ToList();
+            Dictionary<int, decimal> avg = await _uow.Set<Entities.Model.NasbNiro.Finance.ItemCost>().AsNoTracking().Where(c => ids.Contains(c.ItemId)).ToDictionaryAsync(c => c.ItemId, c => c.AverageCost, ct);
+            foreach (LotDto l in list)
+                l.OnHandValue = l.IsCustomerProperty ? 0m : Math.Round(l.OnHand * (avg.TryGetValue(l.ItemId, out decimal a) ? a : 0m), 0, MidpointRounding.AwayFromZero);
         }
 
         public async Task<ResponseDto<LotDto>> SaveLotAsync(SaveLotDto dto, CancellationToken cancellationToken)
@@ -242,6 +396,7 @@ namespace Services.NasbNiro.Inventory
             await _uow.SaveChangesAsync(cancellationToken);
 
             LotDto saved = await LotProjection(_uow.Set<InventoryLot>().Where(l => l.Id == lot.Id), _uow.Set<StockBalance>()).FirstAsync(cancellationToken);
+            await FillLotValuesAsync(new[] { saved }, cancellationToken);
             return ResponseDtoHelper.Ok(saved);
         }
 

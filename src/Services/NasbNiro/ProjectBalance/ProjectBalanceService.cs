@@ -139,7 +139,7 @@ namespace Services.NasbNiro.ProjectBalance
             // company stock of the counted warehouses; customer property (lots marked so) is not ours
             var onHand = await (from sb in Uow.Set<StockBalance>().AsNoTracking()
                                 join w in Uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
-                                where ids.Contains(sb.ItemId) && !w.Deleted && w.IsActive && kinds.Contains(w.Kind) && (sb.Lot == null || !sb.Lot.IsCustomerProperty)
+                                where ids.Contains(sb.ItemId) && !w.Deleted && w.IsActive && kinds.Contains(w.Kind) && w.WorkOrderId == null && (sb.Lot == null || !sb.Lot.IsCustomerProperty)
                                 select new { sb.ItemId, sb.Quantity }).ToListAsync(ct);
             pools.OnHand = onHand.GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
 
@@ -216,6 +216,14 @@ namespace Services.NasbNiro.ProjectBalance
                                       && (d.Type == InventoryDocumentType.Issue || d.Type == InventoryDocumentType.SubcontractIssue || d.Type == InventoryDocumentType.ProductionReturn || d.Type == InventoryDocumentType.SubcontractReturn)
                                 select new { dl.ItemId, d.Type, dl.Quantity }).ToListAsync(ct);
             pools.Issued = issued.GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => Math.Max(0m, g.Sum(x => x.Type == InventoryDocumentType.Issue || x.Type == InventoryDocumentType.SubcontractIssue ? x.Quantity : -x.Quantity)));
+
+            // PB5 (R1): stock held in the warehouses of this project (project, project-consumable and point-of-use) is already with the project: it counts as issued, not as free company stock
+            var inProject = await (from sb in Uow.Set<StockBalance>().AsNoTracking()
+                              join w in Uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
+                              where ids.Contains(sb.ItemId) && !w.Deleted && w.IsActive && w.WorkOrderId == b.WorkOrderId && sb.Quantity > 0 && (sb.Lot == null || !sb.Lot.IsCustomerProperty)
+                              select new { sb.ItemId, sb.Quantity }).ToListAsync(ct);
+            foreach (var h in inProject.GroupBy(x => x.ItemId))
+                pools.Issued[h.Key] = (pools.Issued.TryGetValue(h.Key, out decimal already) ? already : 0m) + h.Sum(x => x.Quantity);
             return pools;
         }
 
@@ -250,6 +258,8 @@ namespace Services.NasbNiro.ProjectBalance
             foreach (int id in firstStage.Values) wanted.Add(id);
             foreach (int id in partItems.Values) wanted.Add(id);
             Dictionary<int, ItemFacts> items = await LoadItemsAsync(wanted, ct);
+            // PB5: the units-of-measure conversions (item-specific first, then general)
+            List<UnitConversionRules.Row> conversions = await UnitConversionRules.LoadAsync(Uow, ct);
 
             // BOM material with no OPC stage item: the one active raw item (group 01) with exactly that material
             List<string> materials = lines.Where(l => l.MakeOrBuy != PbMakeOrBuy.Purchase && l.MakeOrBuy != PbMakeOrBuy.CustomerSupplied && !string.IsNullOrWhiteSpace(l.Material)).Select(l => l.Material.Trim()).Distinct().ToList();
@@ -285,8 +295,20 @@ namespace Services.NasbNiro.ProjectBalance
                     }
                     string itemUnit = items[itemId.Value].Unit;
                     bool mismatch = BalanceRules.UnitsDiffer(l.Unit, itemUnit);
+                    string convertedNote = null;
+                    if (mismatch)
+                    {
+                        decimal? cf = UnitConversionRules.Factor(conversions, itemId, l.Unit, itemUnit);
+                        if (cf.HasValue)
+                        {
+                            gross = BalanceRules.Round(gross * cf.Value);
+                            scrap = BalanceRules.Round(scrap * cf.Value);
+                            mismatch = false;
+                            convertedNote = "تبدیل واحد: " + l.Unit + " به " + itemUnit + " با ضریب " + cf.Value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+                        }
+                    }
                     rows.Add(new Req { Kind = BalanceRequirementKind.Purchased, ItemId = itemId, PartNumber = pn, PartName = l.PartName, Unit = itemUnit ?? l.Unit, MakeOrBuy = (int)l.MakeOrBuy, Gross = gross, Scrap = scrap, AssemblyPartNumber = l.AssemblyPartNumber,
-                        UnitMismatch = mismatch, Note = mismatch ? "واحد BOM (" + l.Unit + ") با واحد کالا (" + itemUnit + ") فرق دارد و تبدیلی تعریف نشده است؛ مقدار تبدیل نشد، بررسی شود." : null });
+                        UnitMismatch = mismatch, Note = mismatch ? "واحد BOM (" + l.Unit + ") با واحد کالا (" + itemUnit + ") فرق دارد و تبدیلی تعریف نشده است؛ مقدار تبدیل نشد، بررسی شود." : convertedNote });
                     continue;
                 }
 

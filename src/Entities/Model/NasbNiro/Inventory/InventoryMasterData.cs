@@ -16,6 +16,12 @@ namespace Entities.Model.NasbNiro.Inventory
         public ICollection<ItemGroup> Children { get; set; }
 
         public ICollection<InventoryItem> Items { get; set; }
+
+        // ----- PB5 (R26): default reorder policy of the group; an item with its own minimum keeps it, a sub-group overrides its parent
+        public decimal? DefaultMinStock { get; set; }
+        public decimal? DefaultMaxStock { get; set; }
+        public decimal? DefaultReorderQuantity { get; set; }
+        public int? DefaultLeadTimeDays { get; set; }
     }
 
     /// <summary>A coded part, material or product (کالا / قطعه).</summary>
@@ -81,6 +87,16 @@ namespace Entities.Model.NasbNiro.Inventory
 
         /// <summary>EN 10204 certificate type the incoming inspection needs before the lot is accepted (empty = none).</summary>
         public CertificateType? RequiredCertificateType { get; set; }
+
+        // ----- PB5 (R11): platform / equipment type / valve model as explicit optional attributes (filters and reports); Iran Code (ایران کد)
+        public string Platform { get; set; }
+        public string EquipmentType { get; set; }
+        public string ValveModel { get; set; }
+        public string IranCode { get; set; }
+
+        // ----- PB5 (R26): reorder quantity and lead time of the item itself (empty = the group default)
+        public decimal? ReorderQuantity { get; set; }
+        public int? LeadTimeDays { get; set; }
     }
 
     /// <summary>
@@ -152,6 +168,13 @@ namespace Entities.Model.NasbNiro.Inventory
 
         /// <summary>Stock (انبار) code in Sepidar.</summary>
         public string SepidarCode { get; set; }
+
+        /// <summary>PB5 (R1): project, project-consumable and point-of-use warehouses are tied to one work order.</summary>
+        public int? WorkOrderId { get; set; }
+        public Entities.Model.NasbNiro.Contracts.WorkOrder WorkOrder { get; set; }
+
+        /// <summary>PB5 (R1): turbine platform / equipment family of a platform warehouse.</summary>
+        public string Platform { get; set; }
 
         public ICollection<WarehouseLocation> Locations { get; set; }
     }

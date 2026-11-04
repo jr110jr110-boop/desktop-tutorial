@@ -107,14 +107,16 @@ namespace Services.NasbNiro.Inventory
             type == InventoryDocumentType.AdjustmentIncrease ||
             type == InventoryDocumentType.ScrapReceipt ||
             type == InventoryDocumentType.OpeningBalance ||
-            type == InventoryDocumentType.CustomerPropertyReceipt;
+            type == InventoryDocumentType.CustomerPropertyReceipt ||
+            type == InventoryDocumentType.ConsignmentReceipt;
 
         public static bool IsOutgoing(InventoryDocumentType type) =>
             type == InventoryDocumentType.Issue ||
             type == InventoryDocumentType.SupplierReturn ||
             type == InventoryDocumentType.AdjustmentDecrease ||
             type == InventoryDocumentType.CustomerDelivery ||
-            type == InventoryDocumentType.ScrapSale;
+            type == InventoryDocumentType.ScrapSale ||
+            type == InventoryDocumentType.ConsignmentIssue;
 
         public static bool IsTransfer(InventoryDocumentType type) =>
             type == InventoryDocumentType.Transfer ||
@@ -134,7 +136,11 @@ namespace Services.NasbNiro.Inventory
             type == InventoryDocumentType.SupplierReturn ||
             type == InventoryDocumentType.SubcontractIssue ||
             type == InventoryDocumentType.CustomerDelivery ||
-            type == InventoryDocumentType.ScrapSale;
+            type == InventoryDocumentType.ScrapSale ||
+            type == InventoryDocumentType.ConsignmentIssue;
+
+        public static bool IsConsignment(InventoryDocumentType type) =>
+            type == InventoryDocumentType.ConsignmentReceipt || type == InventoryDocumentType.ConsignmentIssue;
 
         /// <summary>Needs the warehouse supervisor and the planning manager to approve before it is confirmed.</summary>
         public static bool NeedsApprovals(InventoryDocumentType type) =>
@@ -149,6 +155,7 @@ namespace Services.NasbNiro.Inventory
                 case InventoryDocumentType.Issue: return SerialUnitStatus.InProduction;
                 case InventoryDocumentType.SupplierReturn: return SerialUnitStatus.ReturnedToSupplier;
                 case InventoryDocumentType.CustomerDelivery: return SerialUnitStatus.Delivered;
+                case InventoryDocumentType.ConsignmentIssue: return SerialUnitStatus.ReturnedToSupplier;
                 case InventoryDocumentType.StageConversion: return SerialUnitStatus.Converted;
                 default: return SerialUnitStatus.Scrapped;
             }
@@ -175,6 +182,8 @@ namespace Services.NasbNiro.Inventory
                 case InventoryDocumentType.OpeningBalance: return "OB";
                 case InventoryDocumentType.QcRelease: return "QR";
                 case InventoryDocumentType.CustomerPropertyReceipt: return "CP";
+                case InventoryDocumentType.ConsignmentReceipt: return "CN";
+                case InventoryDocumentType.ConsignmentIssue: return "CO";
                 default: return "DC";
             }
         }
@@ -200,6 +209,8 @@ namespace Services.NasbNiro.Inventory
                 case InventoryDocumentType.OpeningBalance: return "موجودی اول دوره";
                 case InventoryDocumentType.QcRelease: return "ترخیص از قرنطینه";
                 case InventoryDocumentType.CustomerPropertyReceipt: return "رسید اموال مشتری";
+                case InventoryDocumentType.ConsignmentReceipt: return "رسید امانی";
+                case InventoryDocumentType.ConsignmentIssue: return "حواله امانی";
                 default: return type.ToString();
             }
         }
@@ -216,6 +227,7 @@ namespace Services.NasbNiro.Inventory
         public const int MaterialRequest = 95;
         public const int StockCount = 94;
         public const int ItemRequest = 93;
+        public const int Freight = 92;
 
         public static async Task<int> NextAsync(IUnitOfWork uow, int kind, int year, CancellationToken cancellationToken)
         {

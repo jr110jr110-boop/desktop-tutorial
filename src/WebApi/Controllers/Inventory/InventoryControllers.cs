@@ -154,6 +154,21 @@ namespace WebApi.Controllers
         [HttpPost("{id:int}/exit-check")]
         [Authorize(Roles = InventoryRoles.ExitCheck)]
         public async Task<IActionResult> ExitCheckAsync(int id, [FromBody] ExitCheckDto dto, CancellationToken ct) => Ok(await _service.ExitCheckAsync(id, dto, ct));
+
+        /// <summary>PB5 (R32): an approver sends a draft back with a reason.</summary>
+        [HttpPost("{id:int}/reject")]
+        [Authorize(Roles = InventoryRoles.Approvers + ",WHSUPERVISOR")]
+        public async Task<IActionResult> RejectAsync(int id, [FromBody] RejectDocumentDto dto, CancellationToken ct) => Ok(await _service.RejectAsync(id, dto, ct));
+
+        /// <summary>PB5 (R29): the accountant's final price approval of a confirmed purchase receipt.</summary>
+        [HttpPost("{id:int}/approve-price")]
+        [Authorize(Roles = InventoryRoles.Finance)]
+        public async Task<IActionResult> ApprovePriceAsync(int id, CancellationToken ct) => Ok(await _service.ApprovePriceAsync(id, ct));
+
+        /// <summary>PB5 (R31): a draft corrective document from a cancelled one.</summary>
+        [HttpPost("{id:int}/correction")]
+        [Authorize(Roles = InventoryRoles.Documents)]
+        public async Task<IActionResult> CorrectionAsync(int id, CancellationToken ct) => Ok(await _service.CreateCorrectionAsync(id, ct));
     }
 
     [ApiController]
@@ -163,6 +178,10 @@ namespace WebApi.Controllers
     {
         private readonly IInventoryCodingService _service;
         public InventoryCodingController(IInventoryCodingService service) => _service = service;
+
+        /// <summary>PB5 (R3): same or very similar titles among the items and the open item requests.</summary>
+        [HttpGet("title-check")]
+        public async Task<IActionResult> TitleCheckAsync([FromQuery] string title, [FromQuery] int? exceptRequestId, CancellationToken ct) => Ok(await _service.CheckTitleAsync(title, exceptRequestId, ct));
 
         [HttpGet("values")]
         public async Task<IActionResult> ValuesAsync([FromQuery] string scheme, CancellationToken ct) => Ok(await _service.GetValuesAsync(scheme, ct));

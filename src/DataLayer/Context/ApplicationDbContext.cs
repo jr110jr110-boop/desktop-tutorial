@@ -121,6 +121,12 @@ namespace DataLayer.Context
         public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectRouting> PbProjectRoutings { get; set; }
         public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBomChange> PbProjectBomChanges { get; set; }
         public virtual DbSet<Entities.Model.NasbNiro.Inventory.GenealogyLink> GenealogyLinks { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryFreight> InventoryFreights { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryFreightAllocation> InventoryFreightAllocations { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryPackingLine> InventoryPackingLines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Inventory.ItemUnitConversion> ItemUnitConversions { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryAsset> InventoryAssets { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryConsumptionCeiling> InventoryConsumptionCeilings { get; set; }
         #endregion
 
         #region Project material balance (PB2)

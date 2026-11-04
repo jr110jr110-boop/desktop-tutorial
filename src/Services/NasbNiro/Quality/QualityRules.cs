@@ -121,6 +121,15 @@ namespace Services.NasbNiro.Quality
             { QualitySettingKeys.IncomingNcrDueDays, new KeyValuePair<int, int>(1, 30) },
             { QualitySettingKeys.CapaCeoEscalationDays, new KeyValuePair<int, int>(1, 90) },
             { QualitySettingKeys.ExpiryWarnDays, new KeyValuePair<int, int>(1, 365) },
+            { QualitySettingKeys.ConsignmentReturnDays, new KeyValuePair<int, int>(1, 365) },
+            { QualitySettingKeys.ConsignmentAlertDays1, new KeyValuePair<int, int>(1, 60) },
+            { QualitySettingKeys.ConsignmentAlertDays2, new KeyValuePair<int, int>(0, 30) },
+            { QualitySettingKeys.QcPendingWorkDays, new KeyValuePair<int, int>(1, 30) },
+            { QualitySettingKeys.QcEscalateWorkDays, new KeyValuePair<int, int>(1, 60) },
+            { QualitySettingKeys.StagnantSlowDays, new KeyValuePair<int, int>(7, 720) },
+            { QualitySettingKeys.StagnantDays, new KeyValuePair<int, int>(14, 1000) },
+            { QualitySettingKeys.StagnantDeadDays, new KeyValuePair<int, int>(30, 2000) },
+            { QualitySettingKeys.ReorderUseDays, new KeyValuePair<int, int>(7, 730) },
         };
 
         public static bool TryGetBounds(string key, out int min, out int max)

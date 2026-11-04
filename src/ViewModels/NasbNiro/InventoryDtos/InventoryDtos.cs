@@ -16,6 +16,12 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Title { get; set; }
         public string Description { get; set; }
         public int? ParentId { get; set; }
+
+        /// <summary>PB5 (R26): default reorder policy of the group.</summary>
+        public decimal? DefaultMinStock { get; set; }
+        public decimal? DefaultMaxStock { get; set; }
+        public decimal? DefaultReorderQuantity { get; set; }
+        public int? DefaultLeadTimeDays { get; set; }
     }
 
     public class ItemGroupDto
@@ -27,6 +33,10 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? ParentId { get; set; }
         public string ParentTitle { get; set; }
         public int ItemsCount { get; set; }
+        public decimal? DefaultMinStock { get; set; }
+        public decimal? DefaultMaxStock { get; set; }
+        public decimal? DefaultReorderQuantity { get; set; }
+        public int? DefaultLeadTimeDays { get; set; }
     }
 
     public class SaveInventoryItemDto
@@ -56,6 +66,14 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>Why a quality control is reduced (R1q D11); needed when inspection, certificate or shelf life is weakened. Only QC, QA and PMO change these fields.</summary>
         public string QualityChangeReason { get; set; }
+
+        // PB5
+        public string Platform { get; set; }
+        public string EquipmentType { get; set; }
+        public string ValveModel { get; set; }
+        public string IranCode { get; set; }
+        public decimal? ReorderQuantity { get; set; }
+        public int? LeadTimeDays { get; set; }
     }
 
     /// <summary>QC or QA changes the quality fields of an item (inspection on receipt, required certificate, shelf life).</summary>
@@ -150,6 +168,14 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>A change that reduces a quality control is waiting for the second approval of QA; the item keeps its gates until then.</summary>
         public int? PendingQualityChangeId { get; set; }
+
+        // PB5
+        public string Platform { get; set; }
+        public string EquipmentType { get; set; }
+        public string ValveModel { get; set; }
+        public string IranCode { get; set; }
+        public decimal? ReorderQuantity { get; set; }
+        public int? LeadTimeDays { get; set; }
     }
 
     public class InventoryItemQuery : PaginationParams
@@ -160,6 +186,12 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? ItemGroupId { get; set; }
         public ItemTrackingMode? TrackingMode { get; set; }
         public bool? IsActive { get; set; }
+
+        // PB5 (R11)
+        public string Platform { get; set; }
+        public string EquipmentType { get; set; }
+        public string ValveModel { get; set; }
+        public string IranCode { get; set; }
     }
 
     /// <summary>One row of the part coding import (from the Excel file of the current warehouse software).</summary>
@@ -208,6 +240,10 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Description { get; set; }
         public bool IsActive { get; set; } = true;
         public string SepidarCode { get; set; }
+
+        /// <summary>PB5 (R1): project, project-consumable and point-of-use warehouses name their work order.</summary>
+        public int? WorkOrderId { get; set; }
+        public string Platform { get; set; }
     }
 
     public class WarehouseDto
@@ -219,6 +255,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Description { get; set; }
         public bool IsActive { get; set; }
         public string SepidarCode { get; set; }
+        public int? WorkOrderId { get; set; }
+        public string WorkOrderCode { get; set; }
+        public string Platform { get; set; }
         public List<LocationDto> Locations { get; set; } = new List<LocationDto>();
     }
 
@@ -292,7 +331,34 @@ namespace ViewModels.NasbNiro.InventoryDtos
         /// An adjustment that writes off serial pieces (review M10): the scrap NCR (decision scrap, approved or executed) that lists those serial numbers. Not used by other documents.
         /// </summary>
         public int? WriteOffNcrId { get; set; }
+
+        // PB5
+        /// <summary>Consignment receipt: the day the goods go back to their owner (empty: the document date plus the company setting, 30 days).</summary>
+        public DateTime? ConsignmentDueDate { get; set; }
+
+        /// <summary>Consignment issue: the receipt it settles.</summary>
+        public int? ConsignmentOfDocumentId { get; set; }
+
+        /// <summary>The cancelled document this one corrects.</summary>
+        public int? CorrectsDocumentId { get; set; }
+        public string GoodsType { get; set; }
+        public string BillOfLadingNumber { get; set; }
+        public List<PackingLineDto> PackingLines { get; set; } = new List<PackingLineDto>();
         public List<SaveDocumentLineDto> Lines { get; set; } = new List<SaveDocumentLineDto>();
+    }
+
+    /// <summary>PB5 (F16): one row of the packing list of an exit slip.</summary>
+    public class PackingLineDto
+    {
+        public int RowNumber { get; set; }
+        public string BillOfLadingNumber { get; set; }
+        public string PackageNumber { get; set; }
+        public string Description { get; set; }
+        public int? ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public decimal? Quantity { get; set; }
+        public int? PackageCount { get; set; }
+        public decimal? GrossWeight { get; set; }
     }
 
     public class ApproveDocumentDto
@@ -337,6 +403,10 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
         public string Contains { get; set; }
+
+        /// <summary>PB5 (R32): the derived state list (draft, pending approval, approved, rejected, cancelled).</summary>
+        public DocumentState? State { get; set; }
+        public int? ProviderId { get; set; }
     }
 
     public class CancelDocumentDto
@@ -363,6 +433,44 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public decimal TotalQuantity { get; set; }
         public SepidarSyncStatus SepidarStatus { get; set; }
         public DateTimeOffset? SepidarExportedAt { get; set; }
+
+        // PB5 (R32): the derived state
+        public int ApprovalsGiven { get; set; }
+        public DateTimeOffset? RejectedAt { get; set; }
+        public bool HasStockCount { get; set; }
+        public DateTime? ConsignmentDueDate { get; set; }
+        public int? CorrectsDocumentId { get; set; }
+        public DocumentState State => DocumentStateRules.Derive(Type, Status, ApprovalsGiven, RejectedAt.HasValue, HasStockCount);
+        public string StateTitle => DocumentStateRules.Title(State);
+    }
+
+    /// <summary>PB5 (R32): Draft / Pending approval / Approved / Rejected / Cancelled derived from the stored status and the approvals; the stored enum is unchanged.</summary>
+    public static class DocumentStateRules
+    {
+        /// <summary>Documents that wait for the supervisor and the planning manager before they can be confirmed.</summary>
+        public static bool NeedsApprovals(InventoryDocumentType type) =>
+            type == InventoryDocumentType.AdjustmentIncrease || type == InventoryDocumentType.AdjustmentDecrease || type == InventoryDocumentType.OpeningBalance;
+
+        public static DocumentState Derive(InventoryDocumentType type, InventoryDocumentStatus status, int approvalsGiven, bool rejected, bool hasStockCount)
+        {
+            if (status == InventoryDocumentStatus.Cancelled) return DocumentState.Cancelled;
+            if (status == InventoryDocumentStatus.Confirmed) return DocumentState.Approved;
+            if (rejected) return DocumentState.Rejected;
+            // a draft that needs two approvals and already holds one of them is waiting for the other
+            return NeedsApprovals(type) && !hasStockCount && approvalsGiven == 1 ? DocumentState.PendingApproval : DocumentState.Draft;
+        }
+
+        public static string Title(DocumentState state)
+        {
+            switch (state)
+            {
+                case DocumentState.PendingApproval: return "در انتظار تایید";
+                case DocumentState.Approved: return "تایید شده";
+                case DocumentState.Rejected: return "رد شده";
+                case DocumentState.Cancelled: return "ابطال شده";
+                default: return "پیش‌نویس";
+            }
+        }
     }
 
     public class DocumentDto
@@ -436,7 +544,44 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
         /// <summary>The scrap NCR a serial write-off by adjustment is made against (review M10).</summary>
         public int? WriteOffNcrId { get; set; }
+
+        // PB5
+        public DateTime? ConsignmentDueDate { get; set; }
+        public int? ConsignmentOfDocumentId { get; set; }
+        public string ConsignmentOfNumber { get; set; }
+
+        /// <summary>0 none, 1 due within 7 days, 2 within 3 days, 3 overdue (open consignment receipts only).</summary>
+        public int ConsignmentAlertLevel { get; set; }
+        public decimal ConsignmentOpenQuantity { get; set; }
+        public int? CorrectsDocumentId { get; set; }
+        public string CorrectsDocumentNumber { get; set; }
+        public int? CorrectedByDocumentId { get; set; }
+        public string CorrectedByDocumentNumber { get; set; }
+        public DateTimeOffset? RejectedAt { get; set; }
+        public string RejectedByName { get; set; }
+        public string RejectReason { get; set; }
+        public DateTimeOffset? PriceApprovedAt { get; set; }
+        public string PriceApprovedByName { get; set; }
+        public string GoodsType { get; set; }
+        public string BillOfLadingNumber { get; set; }
+        public int ApprovalsGiven { get; set; }
+        public DocumentState State { get; set; }
+        public string StateTitle { get; set; }
+
+        /// <summary>True when the reader's role does not see prices: every UnitPrice is empty.</summary>
+        public bool PricesMasked { get; set; }
+        public List<PackingLineDto> PackingLines { get; set; } = new List<PackingLineDto>();
+        public List<FreightSummaryDto> Freights { get; set; } = new List<FreightSummaryDto>();
         public List<DocumentLineDto> Lines { get; set; } = new List<DocumentLineDto>();
+    }
+
+    public class FreightSummaryDto
+    {
+        public int Id { get; set; }
+        public string Number { get; set; }
+        public FreightStatus Status { get; set; }
+        public DateTime FreightDate { get; set; }
+        public decimal? Amount { get; set; }
     }
 
     public class DocumentLineDto
@@ -477,6 +622,13 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public int? WarehouseId { get; set; }
         public int? ItemGroupId { get; set; }
         public bool LowStockOnly { get; set; }
+
+        // PB5
+        public string Platform { get; set; }
+        public string EquipmentType { get; set; }
+        public string ValveModel { get; set; }
+        public WarehouseKind? WarehouseKind { get; set; }
+        public int? WorkOrderId { get; set; }
     }
 
     public class StockBalanceDto
@@ -493,6 +645,10 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string LotNumber { get; set; }
         public string HeatNumber { get; set; }
         public decimal Quantity { get; set; }
+
+        /// <summary>PB5: weighted-average cost of the item and the value of the row (rial); empty for readers without price access.</summary>
+        public decimal? UnitCost { get; set; }
+        public decimal? Value { get; set; }
     }
 
     public class ItemStockDto
@@ -504,8 +660,15 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ItemGroupTitle { get; set; }
         public ItemTrackingMode TrackingMode { get; set; }
         public decimal OnHand { get; set; }
+
+        /// <summary>The effective minimum: the item's own, else the default of its group (PB5, R26).</summary>
         public decimal MinStock { get; set; }
         public bool IsLow { get; set; }
+        public decimal? AverageCost { get; set; }
+        public decimal? Value { get; set; }
+        public string Platform { get; set; }
+        public string EquipmentType { get; set; }
+        public string ValveModel { get; set; }
     }
 
     public class KardexQuery
@@ -531,6 +694,17 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public decimal Balance { get; set; }
         public decimal? UnitPrice { get; set; }
         public bool IsReversal { get; set; }
+
+        // PB5 (F9): rial amount and running value, supplier, receipt number; masked for readers without price access
+        public decimal? UnitCost { get; set; }
+        public decimal? Amount { get; set; }
+        public decimal? RunningValue { get; set; }
+        public string Supplier { get; set; }
+        public string ReceiptNumber { get; set; }
+
+        /// <summary>A landed-cost (freight) row: it adds value, not quantity.</summary>
+        public bool IsFreight { get; set; }
+        public string Note { get; set; }
     }
 
     public class KardexDto
@@ -541,6 +715,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Unit { get; set; }
         public decimal OpeningBalance { get; set; }
         public decimal ClosingBalance { get; set; }
+        public decimal? OpeningValue { get; set; }
+        public decimal? ClosingValue { get; set; }
+        public bool PricesMasked { get; set; }
         public List<KardexRowDto> Rows { get; set; } = new List<KardexRowDto>();
     }
 
@@ -590,6 +767,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ParentItemCode { get; set; }
         public bool IsCustomerProperty { get; set; }
         public decimal OnHand { get; set; }
+
+        /// <summary>PB5: on-hand value at the average cost of the item (rial); empty for readers without price access.</summary>
+        public decimal? OnHandValue { get; set; }
     }
 
     /// <summary>The expiry report (R1q D32).</summary>
@@ -944,6 +1124,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public List<int> DocumentIds { get; set; } = new List<int>();
 
         public bool MarkExported { get; set; } = true;
+
+        /// <summary>PB5 (F18): only these document lines are sent; a document is marked exported only when all its lines were chosen. Empty: every line of the chosen documents.</summary>
+        public List<int> LineIds { get; set; } = new List<int>();
     }
 
     public class SepidarCheckDto

@@ -194,6 +194,29 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>The scrap NCR (approved or executed, decision scrap) that a write-off of serial pieces by an adjustment is made against (review M10).</summary>
         public int? WriteOffNcrId { get; set; }
 
+        // ----- PB5
+        /// <summary>F1/F3: a consignment receipt must go back to the owner by this day; alerts 7 and 3 days before and when overdue.</summary>
+        public DateTime? ConsignmentDueDate { get; set; }
+
+        /// <summary>F1/F3: the consignment document this one settles (a consignment issue settles a receipt).</summary>
+        public int? ConsignmentOfDocumentId { get; set; }
+
+        /// <summary>R31: the cancelled document this one corrects.</summary>
+        public int? CorrectsDocumentId { get; set; }
+
+        /// <summary>R32: a draft sent back by an approver (derived state Rejected until it is edited again).</summary>
+        public DateTimeOffset? RejectedAt { get; set; }
+        public int? RejectedByUserId { get; set; }
+        public string RejectReason { get; set; }
+
+        /// <summary>R29: the accountant's final price approval of a receipt (never the creator or the confirmer).</summary>
+        public DateTimeOffset? PriceApprovedAt { get; set; }
+        public int? PriceApprovedByUserId { get; set; }
+
+        /// <summary>F1: shipping data of a receipt.</summary>
+        public string GoodsType { get; set; }
+        public string BillOfLadingNumber { get; set; }
+
         public ICollection<InventoryDocumentLine> Lines { get; set; }
 
         [Timestamp]
