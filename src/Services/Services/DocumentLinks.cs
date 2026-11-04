@@ -147,6 +147,7 @@ namespace Services.Services
             ["QcInspection"] = "بازرسی کیفی",
             ["QcRecord"] = "سابقه کنترل کیفی",
             ["Qualification"] = "تأییدیه صلاحیت",
+            ["RecordAttachment"] = "پیوست رکورد",
             ["ServiceAcceptance"] = "پذیرش خدمات",
             ["SlInquiry"] = "استعلام مشتری",
             ["SlProposal"] = "پیشنهاد فروش",

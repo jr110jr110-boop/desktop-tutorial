@@ -27,6 +27,7 @@ namespace Services.NasbNiro
         private readonly ILogger<ContractService> _logger;
         private readonly IUnitOfWork _uow;
         private readonly IDocumentService _documentService;
+        private readonly global::Services.NasbNiro.Attachments.IAttachmentService _attachments;
         private readonly IMapper _mapper;
         private readonly DbSet<ContractEntity> _contracts;
         private readonly DbSet<ContractFile> _contractFiles;
@@ -40,9 +41,11 @@ namespace Services.NasbNiro
                 ILogger<ContractService> logger,
                 IUnitOfWork uow,
                 IDocumentService documentService,
-                IMapper mapper
+                IMapper mapper,
+                global::Services.NasbNiro.Attachments.IAttachmentService attachments = null
             )
         {
+            _attachments = attachments;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
@@ -377,24 +380,14 @@ namespace Services.NasbNiro
                 await _documentService.UploadDocumentAsync(attachProjectCharterFileDto);
 
             contract.ProjectCharterFileId = documentId;
+            // PB3: the replaced charter is kept as a voided attachment of the contract (the file stays stored and downloadable from the history), never deleted
+            if (previousFile.HasValue && _attachments != null)
+                await _attachments.VoidLegacyFileAsync(global::Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.Contract, contract.Id, previousFile.Value, "جایگزینی فایل منشور پروژه با فایل جدید", cancellationToken);
 
             _contracts.Update(contract);
 
             if (await this.SaveChangesAsync(cancellationToken))
             {
-                if (previousFile.HasValue)
-                {
-                    try
-                    {
-                        await _documentService.DeleteDocumentAsync(previousFile.Value);
-                    }
-                    catch (Exception ex)
-                    {
-
-                        _logger.LogError(ex.Message, ex);
-                    }
-                }
-
                 return ResponseDtoHelper.Ok(documentId.ToString());
             }
 
@@ -402,7 +395,7 @@ namespace Services.NasbNiro
                 .BadRequest<string>(NasbNiroMessages.FileNotAdded);
         }
 
-        public async ValueTask<ResponseDto<bool>> DetachFileFromContractAsync(int contractId, Guid documentId, CancellationToken cancellationToken)
+        public async ValueTask<ResponseDto<bool>> DetachFileFromContractAsync(int contractId, Guid documentId, string reason, CancellationToken cancellationToken)
         {
             ContractFile result = await _contractFiles.SingleOrDefaultAsync(contractFile =>
                 contractFile.DocumentId == documentId && contractFile.ContractId == contractId,
@@ -411,20 +404,23 @@ namespace Services.NasbNiro
             if (result is null)
                 return ResponseDtoHelper.NotFound<bool>(NasbNiroMessages.ContractFileNotFound);
 
-            EntityEntry<ContractFile> entityEntry = _contractFiles.Remove(result);
+            // PB3 (ISO 9001 7.5.3, ISO 15489): a file is never deleted. It leaves the list as a VOIDED attachment with the reason, the user and the time; the bytes and the hash stay.
+            ResponseDto<bool> voided = await VoidFirstAsync(Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.Contract, contractId, documentId, reason, cancellationToken);
+            if (voided != null) return voided;
+
+            _contractFiles.Remove(result);
 
             if (!await this.SaveChangesAsync(cancellationToken))
                 return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.ContractFileNotDeleted);
 
-            bool deleteDocumentResult = await _documentService.DeleteDocumentAsync(documentId);
+            return ResponseDtoHelper.Ok<bool>(true, "فایل ابطال شد و با ذکر دلیل در سوابق قرارداد نگهداری می‌شود.");
+        }
 
-            if (!deleteDocumentResult)
-                return ResponseDtoHelper
-                     .BadRequest<bool>(NasbNiroMessages.DocumentNotDeleted);
-
-            return ResponseDtoHelper
-                 .Ok<bool>(true);
-
+        private async ValueTask<ResponseDto<bool>> VoidFirstAsync(Entities.Model.NasbNiro.Attachments.AttachmentOwnerType type, int ownerId, Guid documentId, string reason, CancellationToken cancellationToken)
+        {
+            if (_attachments == null) return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.InvalidData);
+            ResponseDto<bool> voided = await _attachments.VoidLegacyFileAsync(type, ownerId, documentId, reason, cancellationToken);
+            return voided.Success ? null : voided;
         }
 
         public async ValueTask<ContractEntity> GetContractByIdAsync(int contractId, CancellationToken cancellationToken, bool IncludeAllChildren = false)

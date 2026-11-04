@@ -9,6 +9,7 @@ using Common.PersianToolkit;
 using DataLayer.Configurations.EF;
 using DataLayer.Configurations.EF.Identity;
 using DataLayer.Configurations.EF.NasbNiro;
+using DataLayer.Configurations.EF.NasbNiro.Attachments;
 using DataLayer.Configurations.EF.NasbNiro.Inventory;
 using DataLayer.Mappings;
 using Entities.AuditableEntity;
@@ -379,6 +380,9 @@ namespace DataLayer.Context
 
             // Warehouse and part traceability (new "Inv" tables)
             builder.AddInventoryConfigurations();
+
+            // PB3: record attachments (one table for every owner)
+            builder.AddAttachmentConfigurations();
 
             // This should be placed here, at the end.
             builder.AddAuditableShadowProperties();

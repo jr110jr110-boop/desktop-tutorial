@@ -174,6 +174,9 @@ namespace IocConfig
             services.AddHostedService<Services.NasbNiro.Finance.FinanceF2HostedService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
+            // PB3: attachments through the whole chain, the request dossier
+            services.AddScoped<Services.NasbNiro.Attachments.IAttachmentService, Services.NasbNiro.Attachments.AttachmentService>();
+            services.AddScoped<Services.NasbNiro.Attachments.IDossierService, Services.NasbNiro.Attachments.DossierService>();
 
             // quality module (QC + QA)
             services.AddScoped<Services.NasbNiro.Quality.IItpService, Services.NasbNiro.Quality.ItpService>();

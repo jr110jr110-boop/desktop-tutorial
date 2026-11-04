@@ -19,19 +19,29 @@ namespace WebApi.Controllers
     {
         private readonly IDocumentService _documentServices;
         private readonly IConfiguration _configuration;
+        private readonly Services.NasbNiro.Attachments.IAttachmentService _attachments;
 
 
-        public DocumentsController(IDocumentService documentServices, IConfiguration configuration)
+        public DocumentsController(IDocumentService documentServices, IConfiguration configuration, Services.NasbNiro.Attachments.IAttachmentService attachments = null)
         {
             _documentServices = (documentServices == null) ? throw new ServiceInvalidException(nameof(documentServices)) : documentServices;
             _configuration = configuration;
+            _attachments = attachments;
         }
 
         [Authorize]
         [HttpPost]
+        [RequestSizeLimit(209715200)]   // 200 MB ceiling for the request; the real cap (setting AttachmentMaxMegabytes, 50 MB by default) is refused in Persian by the check below
+        [RequestFormLimits(MultipartBodyLengthLimit = 209715200)]
         [ProducesResponseType((int)HttpStatusCode.OK)]
         public async Task<ActionResult> UploadAsync([FromQuery] UploadFileDto uploadFileDto)
         {
+            // PB3: the generic upload takes the same file types and size cap as the record attachments
+            if (_attachments != null)
+            {
+                ResponseDto<string> refusal = await _attachments.CheckUploadAsync(uploadFileDto?.File, HttpContext.RequestAborted, string.Equals(uploadFileDto?.Code, Services.NasbNiro.Attachments.AttachmentRules.LetterContextCode, StringComparison.OrdinalIgnoreCase));
+                if (refusal != null) return this.Ok(refusal);
+            }
             return this.Ok(await this._documentServices.UploadDocumentAsync(uploadFileDto));
         }
 
@@ -41,7 +51,12 @@ namespace WebApi.Controllers
         [ProducesResponseType(typeof(ResponseDto<string>), (int)HttpStatusCode.OK)]
         public async Task<ActionResult> ChangeAsync([FromQuery] Guid documentId, IFormFile file)
         {
-            // the document id comes in the query and the file in the multipart body (as the front sends it)
+            // the document id comes in the query and the file in the multipart body (as the front sends it); the new bytes face the same list, cap and signature check as an upload
+            if (_attachments != null)
+            {
+                ResponseDto<string> refusal = await _attachments.CheckUploadAsync(file, HttpContext.RequestAborted);
+                if (refusal != null) return Ok(refusal);
+            }
             return Ok(await _documentServices.ChangeFileAsync(new ChangeFileDto { DocumentId = documentId, File = file }));
         }
 

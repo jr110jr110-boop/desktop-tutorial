@@ -21,7 +21,7 @@ namespace Services.NasbNiro.Contracts
         ValueTask<ResponseDto<PagedList<ResponseTenderDto>>> GetAllResponseTenderDtosAsync(TenderPaginationParams tenderPaginationParams, CancellationToken cancellationToken);
         ValueTask<ResponseDto<string>> AttachFileToTenderAsync(AttachFileToEntityDto attachFileDto, CancellationToken cancellationToken);
         ValueTask<bool> UpdateFileToTenderAsync(UpdateDocumentDto uploadFileDto, CancellationToken cancellationToken);
-        ValueTask<ResponseDto<bool>> DetachFileFromTenderAsync(int tenderId, Guid documentId, CancellationToken cancellationToken);
+        ValueTask<ResponseDto<bool>> DetachFileFromTenderAsync(int tenderId, Guid documentId, string reason, CancellationToken cancellationToken);
         ValueTask<Tender> GetTenderByIdAsync(int tenderId, CancellationToken cancellationToken);
         ValueTask<TenderGuaranty> GetTenderGuararntyByIdAsync(int tenderGuarantyId, CancellationToken cancellationToken);
         ValueTask<ResponseDto<ResponseTenderGuarantyDto>> AddGuarantyToTenderAsync(GuarantyTenderDtoBase guarantyTenderDtoBase, CancellationToken cancellationToken);

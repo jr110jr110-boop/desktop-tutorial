@@ -34,6 +34,8 @@ namespace Services.NasbNiro
         private readonly DbSet<EquipmentProcess> _equipmentProcesss;
         private readonly DbSet<EquipmentProcessFile> _equipmentProcessFiles;
 
+        private readonly global::Services.NasbNiro.Attachments.IAttachmentService _attachments;
+
         private IQueryable<EquipmentProcess> _equipmentProcesssQueryable
             => _equipmentProcesss.AsNoTracking().AsQueryable();
 
@@ -41,8 +43,10 @@ namespace Services.NasbNiro
                                         IEquipmentBomService equipmentBomService,
                                         ILogger<EquipmentProcessService> logger,
                                         IMapper mapper,
-                                        IDocumentService documentService)
+                                        IDocumentService documentService,
+                                        global::Services.NasbNiro.Attachments.IAttachmentService attachments = null)
         {
+            _attachments = attachments;
             _unitOfWork = unitOfWork.ThrowIfNull(nameof(unitOfWork));
             _equipmentBomService = equipmentBomService.ThrowIfNull(nameof(equipmentBomService));
 
@@ -482,7 +486,7 @@ namespace Services.NasbNiro
             return ResponseDtoHelper.BadRequest<string>(NasbNiroMessages.FileNotAdded);
         }
 
-        public async ValueTask<ResponseDto<bool>> DetachFileAsync(int equipmentProcessId, Guid documentId, CancellationToken cancellationToken)
+        public async ValueTask<ResponseDto<bool>> DetachFileAsync(int equipmentProcessId, Guid documentId, string reason, CancellationToken cancellationToken)
         {
             EquipmentProcessFile result = await _equipmentProcessFiles.SingleOrDefaultAsync
                 (equipmentProcessFile =>
@@ -493,19 +497,18 @@ namespace Services.NasbNiro
             if (result is null)
                 return ResponseDtoHelper.NotFound<bool>(NasbNiroMessages.EquipmentProcessFileNotFound);
 
-            EntityEntry<EquipmentProcessFile> entityEntry = _equipmentProcessFiles.Remove(result);
+            // PB3: a file is never deleted; it leaves the list as a voided attachment (reason, user, time)
+            if (_attachments == null) return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.InvalidData);
+            ResponseDto<bool> voided = await _attachments.VoidLegacyFileAsync(Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.EquipmentProcess, equipmentProcessId, documentId, reason, cancellationToken);
+            if (!voided.Success) return voided;
+
+            _equipmentProcessFiles.Remove(result);
 
             if (!await this.SaveChangesAsync(cancellationToken))
                 return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.EquipmentProcessFileNotDeleted);
 
-            bool deleteDocumentResult = await _documentService.DeleteDocumentAsync(documentId);
-
-            if (!deleteDocumentResult)
-                return ResponseDtoHelper
-                         .BadRequest<bool>(NasbNiroMessages.DocumentNotDeleted);
-
             return ResponseDtoHelper
-                         .Ok(true, message: NasbNiroMessages.EquipmentProcessFileDeleted);
+                         .Ok(true, message: "فایل ابطال شد و با ذکر دلیل در سوابق فرایند تجهیز نگهداری می‌شود.");
         }
 
         public async ValueTask<bool> SaveChangesAsync(CancellationToken cancellationToken)
