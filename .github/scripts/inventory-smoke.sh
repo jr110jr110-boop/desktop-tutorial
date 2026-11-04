@@ -11329,8 +11329,8 @@ TOKEN=$ADMIN_TOKEN
 # --- PB5: freight and landed cost, consignment, derived states, corrective document, reports with Excel, unit conversions, ceilings, assets, title check. Every request is checked; figures are exact.
 PB5ITA=""; PB5ITB=""
 PB5no() { if refused || [ "$CODE" = "403" ]; then ok "$1"; else bad "$1"; fi; } # refused by the service (200 + success=false) or by the role check (403)
-item PB5ITA "{\"code\":\"PB5-A-$$\",\"title\":\"قطعه آزمون پنج الف\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pb5 item A (by value)"
-item PB5ITB "{\"code\":\"PB5-B-$$\",\"title\":\"قطعه آزمون پنج ب\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pb5 item B (by value)"
+item PB5ITA "{\"code\":\"77.10.05.051.1\",\"title\":\"قطعه آزمون پنج الف\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pb5 item A (by value)"
+item PB5ITB "{\"code\":\"77.10.05.052.1\",\"title\":\"قطعه آزمون پنج ب\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pb5 item B (by value)"
 # a receipt of 10 x 1,000 and 10 x 3,000 (values 10,000 and 30,000)
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":10,\"unitPrice\":1000},{\"itemId\":$PB5ITB,\"quantity\":10,\"unitPrice\":3000}]}"
 check "pb5: the receipt of two items is saved as a draft and its derived state is Draft (0)" '.success and .data.status == 0 and .data.state == 0'
