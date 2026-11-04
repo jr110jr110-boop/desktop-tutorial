@@ -11278,6 +11278,11 @@ mfroute "$PB4PART" "pb4 part"
 as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$MFCT,\"workOrderIds\":[$PB4WO]}"; check "pb4 chain: the WBS generation drafts the production order of the new work order" '.success'
 as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$PB4WO&PageSize=0"; check "pb4 chain: exactly one draft production order for the new work order" '.success and (.data.data|length) == 1 and .data.data[0].status == 0 and .data.data[0].itemId == '"$PB4PART"
 PB4ORD=$(val '.data.data[0].id'); PB4ORDN=$(val '.data.data[0].number')
+# the release gate needs the ITP of the work order approved by the client (the work order gets its own ITP draft when its orders are drafted): QC submits it, the QA manager records the client approval
+as "$QC_TOKEN" GET "quality/itps/by-work-order/$PB4WO"; check "pb4 chain: the work order has its own ITP draft" '.success and .data.status == 0 and .data.autoDrafted == true'
+PB4ITP=$(val .data.id)
+as "$QC_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"submit\"}"; check "pb4 chain: QC submits the ITP to the client" '.success and .data.status == 1'
+as "$QA_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"client-approve\",\"reference\":\"CL-PB4-1\"}"; check "pb4 chain: the QA manager records the client approval of the ITP" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-PB4-1"'
 as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$PB4ORD,\"components\":[{\"itemId\":$RAW,\"quantity\":2}]}"; check "pb4 chain: the components of the order are 2 of the raw material" '.success and (.data.components|length) == 1 and .data.components[0].quantity == 2'
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$PB4ORD}"; check "pb4 chain: the order is released with a kit (a draft material request)" '.success and .data.status == 1 and .data.kitRequestId > 0'
 PB4KIT=$(val .data.kitRequestId)
@@ -11305,8 +11310,10 @@ as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781&Depth=1"; check "pb4 reverse: dep
 as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=NO-SUCH-HEAT-PB4"; nomsg "pb4 reverse: an unknown heat number is refused" "پیدا نشد"
 as "$ADMIN_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the lot of heat H-7781 shows exactly 1 purchase receipt node and the prices are not masked for the PMO" '.success and .data.pricesMasked == false and ([.. | objects | select(.kind? == "receipt")]|length) == 1'
 as "$QC_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: QC sees the same chain with the prices masked and no price fact anywhere" '.success and .data.pricesMasked == true and ([.. | objects | select(.kind? == "receipt")]|length) == 1 and ([.. | objects | select(has("label")) | .label | select(contains("قیمت"))]|length) == 0'
-as "$SEC_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the security role reads the trace but the supplier name of the root shows as «محرمانه» (names masked)" '.success and .data.namesMasked == true and (.data.roots|length) == 1 and .data.roots[0].providerName == "محرمانه"'
-as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the PMO sees the supplier name (names not masked)" '.success and .data.namesMasked == false and .data.roots[0].providerName != "محرمانه"'
+as "$SEC_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the security role reads the trace but the customer name of the project shows as «محرمانه» (names masked, the project code stays)" '.success and .data.namesMasked == true and ([.data.projects[]|select(.workOrderCode == "PB4-WO-1" and .customer == "محرمانه")]|length) == 1'
+
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the PMO sees the customer name of the project (names not masked)" '.success and .data.namesMasked == false and ([.data.projects[]|select(.workOrderCode == "PB4-WO-1" and .customer == "کارفرمای آزمون")]|length) == 1'
+
 as "$SEC_TOKEN" GET "$PB4TR/reverse?Q=x&Kind=supplier"; nomsg "pb4 reverse: the security role cannot search by supplier name" "مجاز نیست"
 as "$WH_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the warehouse keeper gets the prices masked too" '.success and .data.pricesMasked == true'
 as "$FM_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the finance manager sees the prices" '.success and .data.pricesMasked == false'
@@ -11315,7 +11322,7 @@ as "$ADMIN_TOKEN" GET "$PB4TR/tree?Q=H-7781&Depth=99"; check "pb4 tree: a depth 
 CODE=$(curl -s -o "$OUT/pb4-tree.xlsx" -w '%{http_code}' "$API/$PB4TR/tree/export?Q=H-7781" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pb4-tree.xlsx")" = "PK" ] && ok "pb4 export: the tree comes as an xlsx file (a zip starting with PK)" || bad "pb4 export: the tree comes as an xlsx file (HTTP $CODE)"
 CODE=$(curl -s -o "$OUT/pb4-reverse.xlsx" -w '%{http_code}' "$API/$PB4TR/reverse/export?Q=H-7781" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pb4-reverse.xlsx")" = "PK" ] && ok "pb4 export: the reverse trace comes as an xlsx file" || bad "pb4 export: the reverse trace comes as an xlsx file (HTTP $CODE)"
 CODE=$(curl -s -o "$B" -w '%{http_code}' "$API/$PB4TR/reverse/export?Q=NO-SUCH-HEAT-PB4" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "400" ] && ok "pb4 export: a failed export answers HTTP 400 with the reason" || bad "pb4 export: a failed export answers HTTP 400 (got $CODE)"
-as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/backfill"; check "pb4 genealogy: the backfill is idempotent after the live links: it removes, creates and updates nothing and its notes are a list" '.success and .data.linksRemoved == 0 and .data.linksCreated == 0 and .data.linksUpdated == 0 and (.data.notes|type) == "array" and .data.ordersLinked == 1'
+as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/backfill"; check "pb4 genealogy: the backfill is idempotent after the live links: it removes, creates and updates nothing and its notes are a list" '.success and .data.linksRemoved == 0 and .data.linksCreated == 0 and .data.linksUpdated == 0 and (.data.notes|type) == "array" and .data.ordersSeen == 5 and .data.ordersLinked == 1 and .data.ordersWithoutKit == 4 and .data.ordersReceiptNotConfirmed == 4'
 as "$WH_TOKEN" POST "$PB4TR/genealogy/backfill"; r403 "pb4 genealogy: the warehouse keeper cannot start the backfill (403)"
 TOKEN=$ADMIN_TOKEN
 
