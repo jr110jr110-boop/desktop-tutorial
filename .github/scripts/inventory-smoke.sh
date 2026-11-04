@@ -11328,7 +11328,7 @@ TOKEN=$ADMIN_TOKEN
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.
-call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":1}]}"; PB2RC=$(val .data.id)
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":1,\"unitPrice\":100000}]}"; check "pb2 fix: the receipt draft of 1 ring part is saved" '.success and .data.id > 0'; PB2RC=$(val .data.id)
 call POST "inventory/documents/$PB2RC/confirm"; check "pb2 fix: 1 piece of the bought ring part is received into the main warehouse" '.success and .data.status == 1'
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"درخواست پروژه آزمون بالانس\",\"workOrderId\":$PB2WO,\"submit\":true,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":2,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"آزمون\"}]}"; check "pb2 fix: the project request for 2 is submitted" '.success and .data.status == 1 and .data.workOrderId == '$PB2WO
 PB2RQ=$(val .data.id); PB2RL=$(val '.data.lines[0].id')
