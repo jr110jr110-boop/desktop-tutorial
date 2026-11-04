@@ -88,7 +88,7 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Iban" } },
             // quality and inventory (R1q): the decisions that release, scrap, waive or relax something; the quality settings; the item quality gates; the calibration waiver
             { typeof(Entities.Model.NasbNiro.Inventory.NonConformance), new[] { "Status", "Severity", "Disposition", "CancelReason", "CancelledByUserId", "QualityApprovedByUserId", "EngineeringApprovedByUserId", "ManufacturingApprovedByUserId", "ConcessionApprovedByUserId", "ExecutedByUserId", "ClosedByUserId", "ScrapDocumentId", "ScrappedSerialUnitId", "ReworkOperationId", "ReinspectionKind", "ReinspectionRecordId", "CapaId", "ResultDocumentId" } },
-            { typeof(Entities.Model.NasbNiro.Inventory.InventoryItem), new[] { "Code", "PartNumber", "StageCode2", "LegacyCode", "RequiresIncomingInspection", "RequiredCertificateType", "ShelfLifeDays" } },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryItem), new[] { "Code", "PartNumber", "StageCode2", "LegacyCode", "IranCode", "RequiresIncomingInspection", "RequiredCertificateType", "ShelfLifeDays" } },
             { typeof(Entities.Model.NasbNiro.Inventory.ItemQualityChange), null },
             { typeof(Entities.Model.NasbNiro.Quality.QualitySetting), null },
             { typeof(Entities.Model.NasbNiro.Quality.MeasuringEquipment), new[] { "Code", "RequiresCalibration", "CalibrationWaiverReason", "CalibrationWaivedByUserId", "CalibrationWaiverRequestReason", "CalibrationWaiverRequestedByUserId", "Status", "OutOfServiceReason" } },
@@ -263,6 +263,13 @@ namespace DataLayer.Context
             { typeof(Pc.PcPartyEvaluation), new[] { "Number", "ContractId", "PartyKind", "ProviderId", "PartyName", "State", "TotalScore", "Grade", "EvaluatorUserId", "Deleted" } },
             { typeof(Pc.PcWeeklyReport), new[] { "Number", "ContractId", "WeekStart", "State", "LastEditorUserId", "ReleasedByUserId", "ReleasedAt", "Deleted" } },
             { typeof(Pc.PcPhaseEvaluation), new[] { "ContractId", "Phase", "OverallScore", "Decision", "State", "DecidedByUserId", "DecisionNote", "Deleted" } },
+            // ---- PB5 (fix round, M5): freight / landed cost (changes the valuation), unit conversions (change the project balance), consumption ceilings, assets and the group reorder defaults. One block.
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreight), new[] { "Number", "ReceiptDocumentId", "FreightDate", "Amount", "Status", "ApprovedAt", "ApprovedByUserId", "VoidedAt", "VoidedByUserId", "VoidReason", "CarrierProviderId", "BillOfLadingNumber" } },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreightAllocation), new[] { "FreightId", "DocumentLineId", "ItemId", "Basis", "Amount", "StockAmount", "RevaluationAmount" } },
+            { typeof(Entities.Model.NasbNiro.Inventory.ItemUnitConversion), null },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryConsumptionCeiling), null },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryAsset), new[] { "Tag", "Title", "ItemId", "SerialUnitId", "WarehouseId", "LocationId", "Status", "PurchaseDate", "CustodianUnit" } }, // the cost is not copied (it is hidden from most roles)
+            { typeof(Entities.Model.NasbNiro.Inventory.ItemGroup), new[] { "Code", "Title", "DefaultMinStock", "DefaultMaxStock", "DefaultReorderQuantity", "DefaultLeadTimeDays" } },
         };
 
         /// <summary>Persian label of the record types added in R1a, put in front of the number or code in the summary of the trail row.</summary>
@@ -355,6 +362,13 @@ namespace DataLayer.Context
             { typeof(Pb.PbProjectBomChange), "انحراف BOM پروژه" },
             { typeof(Pbal.ProjectReservation), "رزرو موجودی برای پروژه" },
             { typeof(Pbal.ItemSubstitute), "کالای جایگزین" },
+            // ---- PB5 (fix round, M5): labels of the warehouse records above
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreight), "کرایه حمل" },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreightAllocation), "سهم کرایه ردیف رسید" },
+            { typeof(Entities.Model.NasbNiro.Inventory.ItemUnitConversion), "تبدیل واحد کالا" },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryConsumptionCeiling), "سقف مصرف کالا برای پروژه" },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryAsset), "دارایی (اموال)" },
+            { typeof(Entities.Model.NasbNiro.Inventory.ItemGroup), "گروه کالا" },
         };
 
         // R1c: columns added to entries above, kept apart so the entries stay as they were (merge friendly)

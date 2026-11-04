@@ -222,6 +222,7 @@ namespace Services.NasbNiro.ProjectBalance
                               join w in Uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
                               where ids.Contains(sb.ItemId) && !w.Deleted && w.IsActive && w.WorkOrderId == b.WorkOrderId && sb.Quantity > 0 && (sb.Lot == null || !sb.Lot.IsCustomerProperty)
                               select new { sb.ItemId, sb.Quantity }).ToListAsync(ct);
+            // H3: a transfer into a warehouse of this work order uses up the reservation of the work order (ProjectReservationRules.ApplyIssueAsync), so the same pieces are never counted as reserved and as issued
             foreach (var h in inProject.GroupBy(x => x.ItemId))
                 pools.Issued[h.Key] = (pools.Issued.TryGetValue(h.Key, out decimal already) ? already : 0m) + h.Sum(x => x.Quantity);
             return pools;

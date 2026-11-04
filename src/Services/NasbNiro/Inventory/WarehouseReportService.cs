@@ -254,6 +254,12 @@ namespace Services.NasbNiro.Inventory
                     var rows = await tx.GroupBy(x => new { x.Warehouse.Kind, Before = from.HasValue && x.TransactionDate < from.Value })
                         .Select(g => new { g.Key.Kind, g.Key.Before, QIn = g.Sum(z => z.Quantity > 0 ? z.Quantity : 0), QOut = g.Sum(z => z.Quantity < 0 ? -z.Quantity : 0), VIn = g.Sum(z => (z.CostAmount ?? 0) > 0 ? (z.CostAmount ?? 0) : 0), VOut = g.Sum(z => (z.CostAmount ?? 0) < 0 ? -(z.CostAmount ?? 0) : 0) })
                         .ToListAsync(ct);
+                    // L6: approved freight adds value (no quantity) on its date, in the kind of the warehouse of the receipt
+                    IQueryable<InventoryFreightAllocation> fr = _uow.Set<InventoryFreightAllocation>().AsNoTracking().Where(a => a.Freight.Status == FreightStatus.Approved && !a.Freight.Deleted);
+                    if (q.WarehouseId.HasValue) fr = fr.Where(a => a.Freight.ReceiptDocument.WarehouseId == q.WarehouseId.Value);
+                    if (toEnd.HasValue) fr = fr.Where(a => a.Freight.FreightDate < toEnd.Value);
+                    var freightRows = await fr.GroupBy(a => new { a.Freight.ReceiptDocument.Warehouse.Kind, Before = from.HasValue && a.Freight.FreightDate < from.Value })
+                        .Select(g => new { g.Key.Kind, g.Key.Before, V = g.Sum(z => z.Amount) }).ToListAsync(ct);
                     var order = new[] { "raw", "wip", "finished", "other" };
                     decimal sumClosing = 0;
                     foreach (string cat in order)
@@ -262,6 +268,8 @@ namespace Services.NasbNiro.Inventory
                         decimal openQ = mine.Where(r => r.Before).Sum(r => r.QIn - r.QOut), openV = mine.Where(r => r.Before).Sum(r => r.VIn - r.VOut);
                         decimal inQ = mine.Where(r => !r.Before).Sum(r => r.QIn), outQ = mine.Where(r => !r.Before).Sum(r => r.QOut);
                         decimal inV = mine.Where(r => !r.Before).Sum(r => r.VIn), outV = mine.Where(r => !r.Before).Sum(r => r.VOut);
+                        openV += freightRows.Where(r => r.Before && Category(r.Kind) == cat).Sum(r => r.V);
+                        inV += freightRows.Where(r => !r.Before && Category(r.Kind) == cat).Sum(r => r.V);
                         sumClosing += openV + inV - outV;
                         t.Rows.Add(new Dictionary<string, object>
                         {
@@ -352,10 +360,11 @@ namespace Services.NasbNiro.Inventory
                     var onHand = await b.GroupBy(x => new { x.ItemId, x.Item.Code, x.Item.Title, x.Item.Unit }).Select(g => new { g.Key.ItemId, g.Key.Code, g.Key.Title, g.Key.Unit, Q = g.Sum(z => z.Quantity) }).ToListAsync(ct);
                     List<int> ids = onHand.Select(x => x.ItemId).ToList();
                     IQueryable<StockTransaction> mv = _uow.Set<StockTransaction>().AsNoTracking().Where(x => ids.Contains(x.ItemId) && !x.IsReversal && x.Quantity < 0);
+                    if (toEnd.HasValue) mv = mv.Where(x => x.TransactionDate < toEnd.Value); // L6: the last movement is looked for up to the end date, so the days are never negative
                     if (q.WarehouseId.HasValue) mv = mv.Where(x => x.WarehouseId == q.WarehouseId.Value);
                     // "movement" = the last time the item left a warehouse (issue, transfer or sale); a receipt alone does not make stock move
                     Dictionary<int, DateTime> last = (await mv.GroupBy(x => x.ItemId).Select(g => new { g.Key, D = g.Max(z => z.TransactionDate) }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.D);
-                    Dictionary<int, DateTime> firstIn = (await _uow.Set<StockTransaction>().AsNoTracking().Where(x => ids.Contains(x.ItemId) && x.Quantity > 0).GroupBy(x => x.ItemId).Select(g => new { g.Key, D = g.Max(z => z.TransactionDate) }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.D);
+                    Dictionary<int, DateTime> firstIn = (await _uow.Set<StockTransaction>().AsNoTracking().Where(x => ids.Contains(x.ItemId) && x.Quantity > 0 && (!toEnd.HasValue || x.TransactionDate < toEnd.Value)).GroupBy(x => x.ItemId).Select(g => new { g.Key, D = g.Max(z => z.TransactionDate) }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.D);
                     Dictionary<int, decimal> avg = await _uow.Set<ItemCost>().AsNoTracking().Where(c => ids.Contains(c.ItemId)).ToDictionaryAsync(c => c.ItemId, c => c.AverageCost, ct);
                     DateTime today = (to ?? DateTime.Today).Date;
                     decimal total = 0;
@@ -363,7 +372,7 @@ namespace Services.NasbNiro.Inventory
                     {
                         DateTime? lm = last.TryGetValue(r.ItemId, out DateTime d1) ? d1 : (firstIn.TryGetValue(r.ItemId, out DateTime d2) ? d2 : (DateTime?)null);
                         if (lm == null) continue;
-                        int days = (int)(today - lm.Value.Date).TotalDays;
+                        int days = Math.Max(0, (int)(today - lm.Value.Date).TotalDays);
                         int bucket = StagnantRules.Bucket(days, slow, stag, dead);
                         if (q.Bucket.HasValue ? bucket != q.Bucket.Value : bucket == 0) continue;
                         decimal value = R(r.Q * (avg.TryGetValue(r.ItemId, out decimal a) ? a : 0m));
@@ -382,7 +391,8 @@ namespace Services.NasbNiro.Inventory
                     if (q.WorkOrderId.HasValue) c = c.Where(x => x.WorkOrderId == q.WorkOrderId.Value);
                     var list = await c.Select(x => new { x.ItemId, x.Item.Code, x.Item.Title, x.WorkOrderId, P = x.WorkOrder.Code, x.MaxQuantity }).ToListAsync(ct);
                     List<int> ids = list.Select(x => x.ItemId).Distinct().ToList();
-                    var tx = await _uow.Set<StockTransaction>().AsNoTracking().Where(x => ids.Contains(x.ItemId) && (x.Document.Type == InventoryDocumentType.Issue || x.Document.Type == InventoryDocumentType.ProductionReturn))
+                    var tx = await _uow.Set<StockTransaction>().AsNoTracking().Where(x => ids.Contains(x.ItemId) && (x.Document.Type == InventoryDocumentType.Issue || x.Document.Type == InventoryDocumentType.ProductionReturn)
+                                    && (!from.HasValue || x.TransactionDate >= from.Value) && (!toEnd.HasValue || x.TransactionDate < toEnd.Value))
                         .GroupBy(x => new { x.ItemId, W = x.Document.WorkOrderId }).Select(g => new { g.Key.ItemId, g.Key.W, Q = -g.Sum(z => z.Quantity) }).ToListAsync(ct);
                     foreach (var r in list.OrderBy(x => x.Code, StringComparer.Ordinal))
                     {
@@ -443,12 +453,13 @@ namespace Services.NasbNiro.Inventory
                     }
                     t.Totals["balance"] = cash.Sum(x => x.Balance);
                     t.Totals["openAmount"] = open.Sum(x => x.A);
+                    t.Note = "مانده تنخواه‌ها در همین لحظه است؛ فیلتر تاریخ ندارد.";
                     return null;
                 }
                 case "contracts":
                 {
                     t.Columns.AddRange(new[] { C("code", "کد"), C("title", "عنوان"), C("employer", "کارفرما"), C("start", "شروع", "date"), C("end", "پایان", "date"), C("price", "مبلغ (ریال)", "money"), C("workOrders", "تعداد دستور کار", "number") });
-                    var rows = await _uow.Set<ContractEntity>().AsNoTracking().Where(x => !x.Deleted && x.Status == ContractStatus.Current).OrderBy(x => x.Code)
+                    var rows = await _uow.Set<ContractEntity>().AsNoTracking().Where(x => !x.Deleted && x.Status == ContractStatus.Current && (!from.HasValue || x.EndDate >= from.Value) && (!toEnd.HasValue || x.StartDate < toEnd.Value)).OrderBy(x => x.Code)
                         .Select(x => new { x.Code, x.Title, x.Employer, x.StartDate, x.EndDate, x.Price, W = x.WorkOrders.Count() }).Take(2000).ToListAsync(ct);
                     foreach (var r in rows)
                         t.Rows.Add(new Dictionary<string, object> { ["code"] = r.Code, ["title"] = r.Title, ["employer"] = r.Employer, ["start"] = r.StartDate.DateTime, ["end"] = r.EndDate.DateTime, ["price"] = r.Price ?? 0m, ["workOrders"] = r.W });
@@ -565,7 +576,7 @@ namespace Services.NasbNiro.Inventory
                     t.Columns.AddRange(new[] { C("number", "بازرسی"), C("receipt", "رسید"), C("item", "کالا"), C("quantity", "مقدار", "number"), C("since", "از تاریخ", "date"), C("workDays", "روز کاری انتظار", "number"), C("level", "وضعیت") });
                     Dictionary<string, decimal> s = await Quality.QualitySettingKeys.LoadAsync(_uow, ct);
                     WorkCalendar cal = await WorkCalendar.LoadAsync(_uow, ct);
-                    var rows = await _uow.Set<QcInspection>().AsNoTracking().Where(x => !x.Deleted && x.Status == InspectionStatus.Pending).OrderBy(x => x.CreateDate).Take(2000)
+                    var rows = await _uow.Set<QcInspection>().AsNoTracking().Where(x => !x.Deleted && x.Status == InspectionStatus.Pending && (!from.HasValue || x.CreateDate >= from.Value) && (!toEnd.HasValue || x.CreateDate < toEnd.Value)).OrderBy(x => x.CreateDate).Take(2000)
                         .Select(x => new { x.Number, R = x.ReceiptDocument.Number, I = x.Item.Code, x.Quantity, x.CreateDate }).ToListAsync(ct);
                     foreach (var r in rows)
                     {
@@ -593,6 +604,8 @@ namespace Services.NasbNiro.Inventory
                     t.Columns.AddRange(new[] { C("tag", "برچسب"), C("title", "عنوان"), C("item", "کالا"), C("warehouse", "انبار"), C("location", "محل"), C("status", "وضعیت"), C("custodian", "تحویل‌گیرنده (واحد)"), C("cost", "بها (ریال)", "money") });
                     IQueryable<InventoryAsset> a = _uow.Set<InventoryAsset>().AsNoTracking().Where(x => !x.Deleted);
                     if (q.WarehouseId.HasValue) a = a.Where(x => x.WarehouseId == q.WarehouseId.Value);
+                    if (from.HasValue) a = a.Where(x => x.PurchaseDate >= from.Value);
+                    if (toEnd.HasValue) a = a.Where(x => x.PurchaseDate < toEnd.Value);
                     var rows = await a.OrderBy(x => x.Tag).Take(5000).Select(x => new { x.Tag, x.Title, I = x.Item.Code, W = x.Warehouse.Title, L = x.Location.Code, x.Status, x.CustodianUnit, x.Cost }).ToListAsync(ct);
                     string[] st = { "", "در خدمت", "در تعمیر", "مفقود", "اسقاط" };
                     foreach (var r in rows)

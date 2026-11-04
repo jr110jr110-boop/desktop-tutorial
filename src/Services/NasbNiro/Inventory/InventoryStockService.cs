@@ -145,7 +145,7 @@ namespace Services.NasbNiro.Inventory
                 });
             PagedList<ItemStockDto> page = await PagedList<ItemStockDto>.CreateAsync(rows, query.PageNumber, query.PageSize, cancellationToken);
             await FillGroupMinimumAsync(page, cancellationToken);
-            await FillItemValuesAsync(page, cancellationToken);
+            await FillItemValuesAsync(page, balances, cancellationToken);
             return ResponseDtoHelper.Ok(page);
         }
 
@@ -173,16 +173,20 @@ namespace Services.NasbNiro.Inventory
             }
         }
 
-        private async Task FillItemValuesAsync(PagedList<ItemStockDto> page, CancellationToken ct)
+        private async Task FillItemValuesAsync(PagedList<ItemStockDto> page, IQueryable<StockBalance> balances, CancellationToken ct)
         {
             if (!InventoryPriceAccess.SeesValues(_user) || page.Count == 0) return;
             List<int> ids = page.Select(r => r.ItemId).ToList();
             Dictionary<int, decimal> avg = await _uow.Set<Entities.Model.NasbNiro.Finance.ItemCost>().AsNoTracking().Where(c => ids.Contains(c.ItemId)).ToDictionaryAsync(c => c.ItemId, c => c.AverageCost, ct);
+            // M2: consigned goods and customer property are not owned stock: they carry no value
+            Dictionary<int, decimal> foreign = (await balances.Where(b => ids.Contains(b.ItemId) && b.Warehouse.Kind == WarehouseKind.CustomerProperty)
+                .GroupBy(b => b.ItemId).Select(g => new { g.Key, Q = g.Sum(x => x.Quantity) }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.Q);
             foreach (ItemStockDto row in page)
             {
                 decimal cost = avg.TryGetValue(row.ItemId, out decimal a) ? a : 0m;
                 row.AverageCost = cost;
-                row.Value = Math.Round(row.OnHand * cost, 0, MidpointRounding.AwayFromZero);
+                decimal owned = Math.Max(0m, row.OnHand - (foreign.TryGetValue(row.ItemId, out decimal f) ? f : 0m));
+                row.Value = Math.Round(owned * cost, 0, MidpointRounding.AwayFromZero);
             }
         }
 
@@ -191,7 +195,9 @@ namespace Services.NasbNiro.Inventory
             var list = await items.Select(i => new
             {
                 i.Id, i.Code, i.Title, i.Unit, GroupTitle = i.ItemGroup.Title, i.ItemGroupId, i.TrackingMode, i.MinStock, i.Platform, i.EquipmentType, i.ValveModel,
-                OnHand = balances.Where(b => b.ItemId == i.Id).Sum(b => (decimal?)b.Quantity) ?? 0,
+                // M2: goods of somebody else, scrap, contractor stock and quarantine are not available stock
+                OnHand = balances.Where(b => b.ItemId == i.Id && b.Warehouse.Kind != WarehouseKind.CustomerProperty && b.Warehouse.Kind != WarehouseKind.Scrap
+                                             && b.Warehouse.Kind != WarehouseKind.Subcontractor && b.Warehouse.Kind != WarehouseKind.Quarantine).Sum(b => (decimal?)b.Quantity) ?? 0,
             }).ToListAsync(ct);
             Dictionary<int, ReorderRules.GroupDefaults> groups = await LoadGroupDefaultsAsync(ct);
             var low = new List<ItemStockDto>();
@@ -207,7 +213,7 @@ namespace Services.NasbNiro.Inventory
                 });
             }
             PagedList<ItemStockDto> page = await PagedList<ItemStockDto>.CreateAsync(low.OrderBy(r => r.ItemCode).ToList(), query.PageNumber, query.PageSize, ct);
-            await FillItemValuesAsync(page, ct);
+            await FillItemValuesAsync(page, balances, ct);
             return ResponseDtoHelper.Ok(page);
         }
 

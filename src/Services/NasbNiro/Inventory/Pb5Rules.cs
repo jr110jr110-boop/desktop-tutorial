@@ -62,7 +62,7 @@ namespace Services.NasbNiro.Inventory
 
         public WorkCalendar(IEnumerable<DayOfWeek> weekend = null, IEnumerable<DateTime> holidays = null)
         {
-            Weekend = new HashSet<DayOfWeek>(weekend == null || !weekend.Any() ? new[] { DayOfWeek.Friday } : weekend);
+            Weekend = new HashSet<DayOfWeek>((weekend ?? Enumerable.Empty<DayOfWeek>()).Append(DayOfWeek.Friday)); // L4: Friday is always a weekend day; the table can only add more
             Holidays = new HashSet<DateTime>((holidays ?? Enumerable.Empty<DateTime>()).Select(d => d.Date));
         }
 

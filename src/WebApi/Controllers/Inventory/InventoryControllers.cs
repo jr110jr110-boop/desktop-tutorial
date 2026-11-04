@@ -162,7 +162,7 @@ namespace WebApi.Controllers
 
         /// <summary>PB5 (R29): the accountant's final price approval of a confirmed purchase receipt.</summary>
         [HttpPost("{id:int}/approve-price")]
-        [Authorize(Roles = InventoryRoles.Finance)]
+        [Authorize(Roles = FreightRoles.Approvers)]
         public async Task<IActionResult> ApprovePriceAsync(int id, CancellationToken ct) => Ok(await _service.ApprovePriceAsync(id, ct));
 
         /// <summary>PB5 (R31): a draft corrective document from a cancelled one.</summary>

@@ -492,13 +492,19 @@ namespace Services.NasbNiro.Inventory
         {
             var result = new TitleCheckDto { Title = InventoryText.Clean(title) };
             if (result.Title == null) return ResponseDtoHelper.Ok(result);
-            var items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted).Select(i => new { i.Code, i.Title }).ToListAsync(cancellationToken);
+            // M8: the comparison runs in memory, so the rows are cut in SQL first: only titles of a similar length can be equal or near (the digit/space/ZWNJ normalisation moves the length a little),
+            // and never more than a few thousand rows are compared
+            int length = result.Title.Length;
+            int shortest = Math.Max(0, (int)(length * 0.7) - 4), longest = (int)(length * 1.45) + 4;
+            var items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted && i.Title.Length >= shortest && i.Title.Length <= longest)
+                .OrderBy(i => i.Id).Select(i => new { i.Code, i.Title }).Take(5000).ToListAsync(cancellationToken);
             foreach (var i in items)
             {
                 ItemTitleRules.Match m = ItemTitleRules.Compare(result.Title, i.Title);
                 if (m != ItemTitleRules.Match.None) result.Matches.Add(new TitleMatchDto { Kind = "item", Code = i.Code, Title = i.Title, Exact = m == ItemTitleRules.Match.Exact });
             }
-            var open = await _uow.Set<ItemRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status == ItemRequestStatus.Submitted && r.Id != (exceptRequestId ?? 0)).Select(r => new { r.Number, r.Title }).ToListAsync(cancellationToken);
+            var open = await _uow.Set<ItemRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status == ItemRequestStatus.Submitted && r.Id != (exceptRequestId ?? 0) && r.Title.Length >= shortest && r.Title.Length <= longest)
+                .OrderBy(r => r.Id).Select(r => new { r.Number, r.Title }).Take(2000).ToListAsync(cancellationToken);
             foreach (var r in open)
             {
                 ItemTitleRules.Match m = ItemTitleRules.Compare(result.Title, r.Title);

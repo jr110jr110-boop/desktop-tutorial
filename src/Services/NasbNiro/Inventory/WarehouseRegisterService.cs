@@ -14,8 +14,8 @@ namespace Services.NasbNiro.Inventory
 {
     public interface IWarehouseRegisterService
     {
-        Task<ResponseDto<PagedList<AssetDto>>> GetAssetsAsync(AssetQuery query, CancellationToken cancellationToken);
-        Task<ResponseDto<AssetDto>> SaveAssetAsync(SaveAssetDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<PagedList<InvAssetDto>>> GetAssetsAsync(InvAssetQuery query, CancellationToken cancellationToken);
+        Task<ResponseDto<InvAssetDto>> SaveAssetAsync(SaveInvAssetDto dto, CancellationToken cancellationToken);
 
         Task<ResponseDto<List<UnitConversionDto>>> GetConversionsAsync(int? itemId, CancellationToken cancellationToken);
         Task<ResponseDto<UnitConversionDto>> SaveConversionAsync(SaveUnitConversionDto dto, CancellationToken cancellationToken);
@@ -45,51 +45,51 @@ namespace Services.NasbNiro.Inventory
 
         public static string NormalizeTag(string tag) => string.IsNullOrWhiteSpace(tag) ? null : tag.Trim().ToUpperInvariant().Replace(" ", "");
 
-        private IQueryable<AssetDto> AssetProjection(IQueryable<InventoryAsset> assets) =>
-            assets.Select(a => new AssetDto
+        private IQueryable<InvAssetDto> AssetProjection(IQueryable<InventoryAsset> assets) =>
+            assets.Select(a => new InvAssetDto
             {
                 Id = a.Id, Tag = a.Tag, Title = a.Title, ItemId = a.ItemId, ItemCode = a.Item.Code, SerialUnitId = a.SerialUnitId, SerialNumber = a.SerialUnit.SerialNumber,
                 WarehouseId = a.WarehouseId, WarehouseTitle = a.Warehouse.Title, LocationId = a.LocationId, LocationCode = a.Location.Code, Status = a.Status, PurchaseDate = a.PurchaseDate,
                 Cost = a.Cost, CustodianUnit = a.CustodianUnit, Description = a.Description, LabelCode = LabelPrefix + a.Tag,
             });
 
-        public async Task<ResponseDto<PagedList<AssetDto>>> GetAssetsAsync(AssetQuery query, CancellationToken ct)
+        public async Task<ResponseDto<PagedList<InvAssetDto>>> GetAssetsAsync(InvAssetQuery query, CancellationToken ct)
         {
-            query ??= new AssetQuery();
+            query ??= new InvAssetQuery();
             IQueryable<InventoryAsset> assets = _uow.Set<InventoryAsset>().AsNoTracking().Where(a => !a.Deleted);
             if (query.Status.HasValue) assets = assets.Where(a => a.Status == query.Status.Value);
             if (query.WarehouseId.HasValue) assets = assets.Where(a => a.WarehouseId == query.WarehouseId.Value);
             string text = InventoryText.Clean(query.Contains);
             if (text != null) assets = assets.Where(a => a.Tag.Contains(text) || a.Title.Contains(text) || a.Item.Code.Contains(text) || a.SerialUnit.SerialNumber.Contains(text));
-            PagedList<AssetDto> page = await PagedList<AssetDto>.CreateAsync(AssetProjection(assets.OrderBy(a => a.Tag)), query.PageNumber, query.PageSize, ct);
-            if (!InventoryPriceAccess.SeesValues(_user)) foreach (AssetDto a in page) a.Cost = null;
+            PagedList<InvAssetDto> page = await PagedList<InvAssetDto>.CreateAsync(AssetProjection(assets.OrderBy(a => a.Tag)), query.PageNumber, query.PageSize, ct);
+            if (!InventoryPriceAccess.SeesValues(_user)) foreach (InvAssetDto a in page) a.Cost = null;
             return ResponseDtoHelper.Ok(page);
         }
 
-        public async Task<ResponseDto<AssetDto>> SaveAssetAsync(SaveAssetDto dto, CancellationToken ct)
+        public async Task<ResponseDto<InvAssetDto>> SaveAssetAsync(SaveInvAssetDto dto, CancellationToken ct)
         {
-            if (dto == null) return ResponseDtoHelper.BadRequest<AssetDto>(InventoryMessages.InvalidData);
-            if (!_user.IsInRole(AssetRoles)) return ResponseDtoHelper.BadRequest<AssetDto>(InventoryMessages.NotAllowed);
+            if (dto == null) return ResponseDtoHelper.BadRequest<InvAssetDto>(InventoryMessages.InvalidData);
+            if (!_user.IsInRole(AssetRoles)) return ResponseDtoHelper.BadRequest<InvAssetDto>(InventoryMessages.NotAllowed);
             string tag = NormalizeTag(dto.Tag);
             string title = InventoryText.Clean(dto.Title);
-            if (tag == null) return ResponseDtoHelper.BadRequest<AssetDto>("برچسب دارایی را وارد کنید.");
-            if (tag.Length > 60) return ResponseDtoHelper.BadRequest<AssetDto>("برچسب دارایی بلند است.");
-            if (title == null) return ResponseDtoHelper.BadRequest<AssetDto>(InventoryMessages.TitleRequired);
-            if (!Enum.IsDefined(typeof(AssetStatus), dto.Status)) return ResponseDtoHelper.BadRequest<AssetDto>("وضعیت نامعتبر است.");
-            if ((dto.Cost ?? 0) < 0) return ResponseDtoHelper.BadRequest<AssetDto>("بها منفی نمی‌شود.");
-            if (await _uow.Set<InventoryAsset>().AnyAsync(a => !a.Deleted && a.Tag == tag && a.Id != (dto.Id ?? 0), ct)) return ResponseDtoHelper.BadRequest<AssetDto>("این برچسب قبلاً ثبت شده است: " + tag);
-            if (dto.ItemId.HasValue && !await _uow.Set<InventoryItem>().AnyAsync(i => i.Id == dto.ItemId.Value && !i.Deleted, ct)) return ResponseDtoHelper.BadRequest<AssetDto>(InventoryMessages.ItemNotFound);
-            if (dto.SerialUnitId.HasValue && !await _uow.Set<SerialUnit>().AnyAsync(s => s.Id == dto.SerialUnitId.Value && !s.Deleted, ct)) return ResponseDtoHelper.BadRequest<AssetDto>("سریال پیدا نشد.");
-            if (dto.WarehouseId.HasValue && !await _uow.Set<Warehouse>().AnyAsync(w => w.Id == dto.WarehouseId.Value && !w.Deleted, ct)) return ResponseDtoHelper.BadRequest<AssetDto>(InventoryMessages.WarehouseNotFound);
+            if (tag == null) return ResponseDtoHelper.BadRequest<InvAssetDto>("برچسب دارایی را وارد کنید.");
+            if (tag.Length > 60) return ResponseDtoHelper.BadRequest<InvAssetDto>("برچسب دارایی بلند است.");
+            if (title == null) return ResponseDtoHelper.BadRequest<InvAssetDto>(InventoryMessages.TitleRequired);
+            if (!Enum.IsDefined(typeof(AssetStatus), dto.Status)) return ResponseDtoHelper.BadRequest<InvAssetDto>("وضعیت نامعتبر است.");
+            if ((dto.Cost ?? 0) < 0) return ResponseDtoHelper.BadRequest<InvAssetDto>("بها منفی نمی‌شود.");
+            if (await _uow.Set<InventoryAsset>().AnyAsync(a => !a.Deleted && a.Tag == tag && a.Id != (dto.Id ?? 0), ct)) return ResponseDtoHelper.BadRequest<InvAssetDto>("این برچسب قبلاً ثبت شده است: " + tag);
+            if (dto.ItemId.HasValue && !await _uow.Set<InventoryItem>().AnyAsync(i => i.Id == dto.ItemId.Value && !i.Deleted, ct)) return ResponseDtoHelper.BadRequest<InvAssetDto>(InventoryMessages.ItemNotFound);
+            if (dto.SerialUnitId.HasValue && !await _uow.Set<SerialUnit>().AnyAsync(s => s.Id == dto.SerialUnitId.Value && !s.Deleted, ct)) return ResponseDtoHelper.BadRequest<InvAssetDto>("سریال پیدا نشد.");
+            if (dto.WarehouseId.HasValue && !await _uow.Set<Warehouse>().AnyAsync(w => w.Id == dto.WarehouseId.Value && !w.Deleted, ct)) return ResponseDtoHelper.BadRequest<InvAssetDto>(InventoryMessages.WarehouseNotFound);
             if (dto.LocationId.HasValue && !await _uow.Set<WarehouseLocation>().AnyAsync(l => l.Id == dto.LocationId.Value && !l.Deleted && (dto.WarehouseId == null || l.WarehouseId == dto.WarehouseId.Value), ct))
-                return ResponseDtoHelper.BadRequest<AssetDto>(InventoryMessages.LocationNotFound);
+                return ResponseDtoHelper.BadRequest<InvAssetDto>(InventoryMessages.LocationNotFound);
 
             InventoryAsset asset;
             DateTimeOffset now = DateTimeOffset.Now;
             if (dto.Id.HasValue)
             {
                 asset = await _uow.Set<InventoryAsset>().FirstOrDefaultAsync(a => a.Id == dto.Id.Value && !a.Deleted, ct);
-                if (asset == null) return ResponseDtoHelper.NotFound<AssetDto>(InventoryMessages.NotFound);
+                if (asset == null) return ResponseDtoHelper.NotFound<InvAssetDto>(InventoryMessages.NotFound);
             }
             else
             {
@@ -104,13 +104,16 @@ namespace Services.NasbNiro.Inventory
             asset.LocationId = dto.LocationId;
             asset.Status = dto.Status;
             asset.PurchaseDate = dto.PurchaseDate?.Date;
-            asset.Cost = dto.Cost.HasValue ? Math.Round(dto.Cost.Value, 0, MidpointRounding.AwayFromZero) : (decimal?)null;
+            // M4: whoever does not see values neither sets nor wipes the cost (their screen shows it empty, so an edit would send nothing)
+            if (InventoryPriceAccess.SeesValues(_user)) asset.Cost = dto.Cost.HasValue ? Math.Round(dto.Cost.Value, 0, MidpointRounding.AwayFromZero) : (decimal?)null;
             asset.CustodianUnit = InventoryText.Clean(dto.CustodianUnit);
             asset.Description = InventoryText.Clean(dto.Description);
             asset.ModifyDate = now;
             asset.ModifierUserId = _user.UserId;
             await _uow.SaveChangesAsync(ct);
-            return ResponseDtoHelper.Ok(await AssetProjection(_uow.Set<InventoryAsset>().Where(a => a.Id == asset.Id)).FirstAsync(ct));
+            InvAssetDto saved = await AssetProjection(_uow.Set<InventoryAsset>().Where(a => a.Id == asset.Id)).FirstAsync(ct);
+            if (!InventoryPriceAccess.SeesValues(_user)) saved.Cost = null;
+            return ResponseDtoHelper.Ok(saved);
         }
 
         // ------------------------------------------------------------------------------------------ unit conversions

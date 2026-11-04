@@ -150,6 +150,19 @@ namespace Services.NasbNiro.Quality
             return whole < min ? min : whole > max ? max : whole;
         }
 
+        /// <summary>L5 (PB5): the settings that belong together must keep their order (the second consignment alert is nearer than the first, the escalation comes after the first QC alert, slow &lt; stagnant &lt; dead).</summary>
+        public static string CheckRelations(IDictionary<string, decimal> values)
+        {
+            decimal V(string k) => values.TryGetValue(k, out decimal v) ? v : 0m;
+            if (values.ContainsKey(QualitySettingKeys.ConsignmentAlertDays1) && V(QualitySettingKeys.ConsignmentAlertDays2) >= V(QualitySettingKeys.ConsignmentAlertDays1))
+                return "هشدار دوم امانی (نزدیک‌تر) باید از هشدار اول کمتر باشد.";
+            if (values.ContainsKey(QualitySettingKeys.QcPendingWorkDays) && V(QualitySettingKeys.QcEscalateWorkDays) <= V(QualitySettingKeys.QcPendingWorkDays))
+                return "مهلت ارجاع به QA و برنامه‌ریزی باید بیشتر از مهلت هشدار QC باشد.";
+            if (values.ContainsKey(QualitySettingKeys.StagnantSlowDays) && !(V(QualitySettingKeys.StagnantSlowDays) < V(QualitySettingKeys.StagnantDays) && V(QualitySettingKeys.StagnantDays) < V(QualitySettingKeys.StagnantDeadDays)))
+                return "روزهای کندگردش، راکد و راکد مرده باید به‌ترتیب افزایش یابند.";
+            return null;
+        }
+
         /// <summary>Null when the value is acceptable, otherwise the Persian reason.</summary>
         public static string Check(string key, string title, decimal value)
         {

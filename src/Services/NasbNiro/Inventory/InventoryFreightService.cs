@@ -59,24 +59,45 @@ namespace Services.NasbNiro.Inventory
 
         // ------------------------------------------------------------------------------------------ reads
 
-        private async Task<FreightDto> ToDtoAsync(InventoryFreight f, CancellationToken ct)
+        private async Task<FreightDto> ToDtoAsync(InventoryFreight f, CancellationToken ct) => (await ToDtosAsync(new List<InventoryFreight> { f }, ct))[0];
+
+        /// <summary>M8: all freights of a page in a fixed number of queries (receipt numbers, carriers, allocations and user names are read once for the whole list).</summary>
+        private async Task<List<FreightDto>> ToDtosAsync(List<InventoryFreight> list, CancellationToken ct)
         {
-            string receiptNumber = await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => d.Id == f.ReceiptDocumentId).Select(d => d.Number).FirstOrDefaultAsync(ct);
-            string carrier = f.CarrierProviderId.HasValue ? await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AsNoTracking().Where(p => p.Id == f.CarrierProviderId.Value).Select(p => p.Name).FirstOrDefaultAsync(ct) : null;
-            var rows = await _uow.Set<InventoryFreightAllocation>().AsNoTracking().Where(a => a.FreightId == f.Id)
-                .Select(a => new FreightAllocationDto
+            if (list.Count == 0) return new List<FreightDto>();
+            List<int> ids = list.Select(f => f.Id).ToList();
+            List<int> receiptIds = list.Select(f => f.ReceiptDocumentId).Distinct().ToList();
+            List<int> carrierIds = list.Where(f => f.CarrierProviderId.HasValue).Select(f => f.CarrierProviderId.Value).Distinct().ToList();
+            Dictionary<int, string> receiptNumbers = await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => receiptIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, d => d.Number, ct);
+            Dictionary<int, string> carriers = carrierIds.Count == 0 ? new Dictionary<int, string>()
+                : await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AsNoTracking().Where(p => carrierIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name, ct);
+            var rows = await _uow.Set<InventoryFreightAllocation>().AsNoTracking().Where(a => ids.Contains(a.FreightId))
+                .Select(a => new
                 {
-                    DocumentLineId = a.DocumentLineId, RowNumber = a.DocumentLine.RowNumber, ItemId = a.ItemId, ItemCode = a.Item.Code, ItemTitle = a.Item.Title,
-                    Basis = a.Basis, BasisAmount = a.BasisAmount, Amount = a.Amount,
+                    a.FreightId,
+                    Row = new FreightAllocationDto
+                    {
+                        DocumentLineId = a.DocumentLineId, RowNumber = a.DocumentLine.RowNumber, ItemId = a.ItemId, ItemCode = a.Item.Code, ItemTitle = a.Item.Title,
+                        Basis = a.Basis, BasisAmount = a.BasisAmount, Amount = a.Amount,
+                    },
                 }).ToListAsync(ct);
-            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { f.CreatorUserId, f.ApprovedByUserId }, ct);
-            return new FreightDto
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, list.SelectMany(f => new int?[] { f.CreatorUserId, f.ApprovedByUserId }).ToArray(), ct);
+            bool sees = InventoryPriceAccess.SeesValues(_user);
+            var result = new List<FreightDto>();
+            foreach (InventoryFreight f in list)
             {
-                Id = f.Id, Number = f.Number, ReceiptDocumentId = f.ReceiptDocumentId, ReceiptNumber = receiptNumber, FreightDate = f.FreightDate, VehiclePlate = f.VehiclePlate,
-                GoodsType = f.GoodsType, BillOfLadingNumber = f.BillOfLadingNumber, CarrierProviderId = f.CarrierProviderId, CarrierName = carrier, Amount = f.Amount,
-                Description = f.Description, Status = f.Status, CreatorName = names.Name(f.CreatorUserId), ApprovedAt = f.ApprovedAt, ApprovedByName = names.Name(f.ApprovedByUserId),
-                VoidedAt = f.VoidedAt, VoidReason = f.VoidReason, Allocations = rows.OrderBy(r => r.RowNumber).ToList(),
-            };
+                List<FreightAllocationDto> mine = rows.Where(r => r.FreightId == f.Id).Select(r => r.Row).OrderBy(r => r.RowNumber).ToList();
+                if (!sees) foreach (FreightAllocationDto a in mine) { a.Amount = null; if (a.Basis == FreightBasis.Value) a.BasisAmount = null; }
+                result.Add(new FreightDto
+                {
+                    Id = f.Id, Number = f.Number, ReceiptDocumentId = f.ReceiptDocumentId, ReceiptNumber = receiptNumbers.TryGetValue(f.ReceiptDocumentId, out string rn) ? rn : null, FreightDate = f.FreightDate,
+                    VehiclePlate = f.VehiclePlate, GoodsType = f.GoodsType, BillOfLadingNumber = f.BillOfLadingNumber, CarrierProviderId = f.CarrierProviderId,
+                    CarrierName = f.CarrierProviderId.HasValue && carriers.TryGetValue(f.CarrierProviderId.Value, out string cn) ? cn : null, Amount = sees ? f.Amount : (decimal?)null,
+                    Description = f.Description, Status = f.Status, CreatorName = names.Name(f.CreatorUserId), ApprovedAt = f.ApprovedAt, ApprovedByName = names.Name(f.ApprovedByUserId),
+                    VoidedAt = f.VoidedAt, VoidReason = f.VoidReason, Allocations = mine,
+                });
+            }
+            return result;
         }
 
         public async Task<ResponseDto<List<FreightDto>>> GetAsync(FreightQuery query, CancellationToken cancellationToken)
@@ -86,9 +107,7 @@ namespace Services.NasbNiro.Inventory
             if (query.ReceiptDocumentId.HasValue) q = q.Where(f => f.ReceiptDocumentId == query.ReceiptDocumentId.Value);
             if (query.Status.HasValue) q = q.Where(f => f.Status == query.Status.Value);
             List<InventoryFreight> list = await q.OrderByDescending(f => f.Id).Take(500).ToListAsync(cancellationToken);
-            var result = new List<FreightDto>();
-            foreach (InventoryFreight f in list) result.Add(await ToDtoAsync(f, cancellationToken));
-            return ResponseDtoHelper.Ok(result);
+            return ResponseDtoHelper.Ok(await ToDtosAsync(list, cancellationToken));
         }
 
         public async Task<ResponseDto<FreightDto>> GetByIdAsync(int id, CancellationToken cancellationToken)
@@ -112,12 +131,18 @@ namespace Services.NasbNiro.Inventory
             return (shares, error);
         }
 
-        private void ReplaceAllocations(InventoryFreight f, List<FreightRules.Share> shares)
+        private List<InventoryFreightAllocation> ReplaceAllocations(InventoryFreight f, List<FreightRules.Share> shares)
         {
             List<InventoryFreightAllocation> old = _uow.Set<InventoryFreightAllocation>().Where(a => a.FreightId == f.Id).ToList();
             _uow.Set<InventoryFreightAllocation>().RemoveRange(old);
+            var created = new List<InventoryFreightAllocation>();
             foreach (FreightRules.Share s in shares)
-                _uow.Set<InventoryFreightAllocation>().Add(new InventoryFreightAllocation { Freight = f, DocumentLineId = s.LineId, ItemId = s.ItemId, Basis = s.Basis, BasisAmount = s.BasisAmount, Amount = s.Amount });
+            {
+                var row = new InventoryFreightAllocation { Freight = f, DocumentLineId = s.LineId, ItemId = s.ItemId, Basis = s.Basis, BasisAmount = s.BasisAmount, Amount = s.Amount };
+                _uow.Set<InventoryFreightAllocation>().Add(row);
+                created.Add(row);
+            }
+            return created;
         }
 
         // ------------------------------------------------------------------------------------------ save
@@ -193,7 +218,7 @@ namespace Services.NasbNiro.Inventory
 
             var computed = await ComputeAsync(receipt, f.Amount, cancellationToken);
             if (computed.Error != null) return ResponseDtoHelper.BadRequest<FreightDto>(computed.Error);
-            ReplaceAllocations(f, computed.Shares);
+            List<InventoryFreightAllocation> allocations = ReplaceAllocations(f, computed.Shares);
 
             // weighted average: the amount joins the value of the item; no quantity is added
             List<int> itemIds = computed.Shares.Select(s => s.ItemId).Distinct().ToList();
@@ -205,7 +230,14 @@ namespace Services.NasbNiro.Inventory
             {
                 decimal amount = g.Sum(s => s.Amount);
                 if (amount == 0) continue;
-                if (costs.TryGetValue(g.Key, out ItemCost cost) && cost.Quantity > 0)
+                bool onStock = costs.TryGetValue(g.Key, out ItemCost cost) && cost.Quantity > 0;
+                // H2: remember per allocation how much went into stock and how much to revaluation; a void reverses exactly those amounts
+                foreach (InventoryFreightAllocation a in allocations.Where(x => x.ItemId == g.Key))
+                {
+                    a.StockAmount = onStock ? a.Amount : 0m;
+                    a.RevaluationAmount = onStock ? 0m : a.Amount;
+                }
+                if (onStock)
                 {
                     cost.Value += amount;
                     cost.AverageCost = Math.Round(cost.Value / cost.Quantity, 4);
@@ -274,15 +306,32 @@ namespace Services.NasbNiro.Inventory
                 List<InventoryFreightAllocation> rows = await _uow.Set<InventoryFreightAllocation>().Where(a => a.FreightId == f.Id).ToListAsync(ct);
                 List<int> itemIds = rows.Select(a => a.ItemId).Distinct().ToList();
                 Dictionary<int, ItemCost> costs = await _uow.Set<ItemCost>().Where(c => itemIds.Contains(c.ItemId)).ToDictionaryAsync(c => c.ItemId, ct);
+                Dictionary<int, string> codes = await _uow.Set<InventoryItem>().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, ct);
+                var leftover = new List<AccountingEventLine>();
                 foreach (var g in rows.GroupBy(a => a.ItemId))
                 {
-                    decimal amount = g.Sum(a => a.Amount);
-                    if (!costs.TryGetValue(g.Key, out ItemCost cost) || cost.Quantity <= 0) continue;
-                    cost.Value = Math.Max(0m, cost.Value - amount);
-                    cost.AverageCost = Math.Round(cost.Value / cost.Quantity, 4);
+                    // exactly the amount that was added at approval, no clamp: the ledger and the item cost move by the same figure
+                    decimal stock = g.Sum(a => a.StockAmount);
+                    if (stock == 0 || !costs.TryGetValue(g.Key, out ItemCost cost)) continue;
+                    cost.Value -= stock;
+                    if (cost.Quantity > 0)
+                    {
+                        cost.AverageCost = Math.Round(cost.Value / cost.Quantity, 4);
+                    }
+                    else if (cost.Value != 0)
+                    {
+                        // no stock is left to carry the difference: it goes to revaluation, as the costing does when the quantity reaches zero
+                        decimal rest = cost.Value;
+                        cost.Value = 0;
+                        string role = AccountRoles.InventoryOf(codes[g.Key]);
+                        leftover.Add(new AccountingEventLine { AccountRole = role, Credit = rest > 0 ? rest : 0, Debit = rest < 0 ? -rest : 0 });
+                        leftover.Add(new AccountingEventLine { AccountRole = AccountRoles.Revaluation, Debit = rest > 0 ? rest : 0, Credit = rest < 0 ? -rest : 0 });
+                    }
                     cost.UpdatedAt = DateTimeOffset.Now;
                 }
                 await ReverseEventsAsync(f, ct);
+                if (leftover.Count > 0)
+                    _costing.AddEvent(AccountingEventType.Reversal, DateTime.Today, SourceType, f.Id, f.Number, "مانده ارزش پس از ابطال کرایه", leftover);
             }
             f.Status = FreightStatus.Voided;
             f.VoidedAt = DateTimeOffset.Now;

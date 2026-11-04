@@ -61,6 +61,12 @@ namespace Entities.Model.NasbNiro.Inventory
 
         /// <summary>Rial, whole numbers; the shares of one document add up to its amount exactly.</summary>
         public decimal Amount { get; set; }
+
+        /// <summary>Fix round (H2): the part of <see cref="Amount"/> that went into the item cost (inventory account) when the freight was approved. Zero before approval.</summary>
+        public decimal StockAmount { get; set; }
+
+        /// <summary>Fix round (H2): the part that went to the revaluation account because the item had no stock at approval. A void reverses exactly these two parts.</summary>
+        public decimal RevaluationAmount { get; set; }
     }
 
     /// <summary>PB5 (F16): a row of the packing list of an exit slip, per bill of lading.</summary>

@@ -661,6 +661,11 @@ namespace Services.NasbNiro.Inventory
                 return "ورود به انبار اموال مشتری فقط با رسید اموال مشتری است.";
             }
 
+            // M1: goods held for somebody else (consignment, customer property) never move into valued stock by a transfer; they leave by their own documents
+            if (source.Kind == WarehouseKind.CustomerProperty && type == InventoryDocumentType.Transfer && destination != null && destination.Kind != WarehouseKind.CustomerProperty)
+                return "کالای امانی یا اموال مشتری به انبار ارزش‌گذاری‌شده منتقل نمی‌شود؛ برگشت امانی یا تحویل به مشتری انجام دهید.";
+            if (type == InventoryDocumentType.ConsignmentIssue && source.Kind != WarehouseKind.CustomerProperty) return "برگشت امانی فقط از انبار اموال مشتری / امانی انجام می‌شود.";
+
             if (type == InventoryDocumentType.CustomerDelivery && !dto.ContractId.HasValue && !dto.SalesOrderId.HasValue && !dto.ServiceOrderId.HasValue) return "قرارداد (مشتری)، سفارش فروش یا دستور خدمات تحویل را انتخاب کنید.";
             if (type == InventoryDocumentType.Issue && source.Kind == WarehouseKind.Subcontractor) return "از انبار پیمانکار حواله صادر نمی‌شود.";
             return null;
@@ -1683,9 +1688,9 @@ namespace Services.NasbNiro.Inventory
                 _uow.Set<StockTransaction>().Add(reversal);
                 reversals.Add(reversal);
             }
-            await _costing.ReverseDocumentAsync(document, transactions, reversals, cancellationToken);
-            // PB5: the freight of this receipt is reversed with it (value back out of the average cost, reversing accounting event)
+            // PB5 (H2): the freight of this receipt is reversed FIRST (its value leaves the average cost and a reversing event mirrors its approval), then the receipt itself
             await _freight.VoidForCancelledReceiptAsync(document, "ابطال رسید " + document.Number, cancellationToken);
+            await _costing.ReverseDocumentAsync(document, transactions, reversals, cancellationToken);
 
             foreach (QcInspection inspection in inspections) inspection.Delete();
 

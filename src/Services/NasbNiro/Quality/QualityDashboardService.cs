@@ -59,6 +59,10 @@ namespace Services.NasbNiro.Quality
             // R1q D30: every setting has its own range (welder continuity 1..12 months, a committee of at least two, whole numbers only)
             string rangeError = QualitySettingRules.Check(def.Key, def.Title, dto.Value);
             if (rangeError != null) return QualityText.Bad<List<QualitySettingDto>>(rangeError);
+            // PB5 (L5): settings that belong together keep their order
+            Dictionary<string, decimal> all = new Dictionary<string, decimal>(await QualitySettingKeys.LoadAsync(_uow, cancellationToken)) { [def.Key] = dto.Value };
+            string relationError = QualitySettingRules.CheckRelations(all);
+            if (relationError != null) return QualityText.Bad<List<QualitySettingDto>>(relationError);
             QualitySetting row = await _uow.Set<QualitySetting>().FirstOrDefaultAsync(s => s.Key == dto.Key, cancellationToken);
             if (row == null)
             {

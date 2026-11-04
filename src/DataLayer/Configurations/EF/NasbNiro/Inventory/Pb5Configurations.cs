@@ -67,6 +67,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.ToTable("InvFreightAllocations");
                 b.Property(x => x.BasisAmount).HasPrecision(18, 4);
                 b.Property(x => x.Amount).HasPrecision(18, 2);
+                b.Property(x => x.StockAmount).HasPrecision(18, 2);
+                b.Property(x => x.RevaluationAmount).HasPrecision(18, 2);
                 b.HasIndex(x => x.FreightId);
                 b.HasIndex(x => x.DocumentLineId);
                 b.HasIndex(x => x.ItemId);

@@ -236,8 +236,19 @@ namespace Services.NasbNiro.Inventory
             {
                 var started = await _workflow.StartCountAsync(new StartStockCountDto { Kind = StockCountKind.Cycle, CountDate = date, WarehouseId = warehouse.Id, Description = request.Description ?? "ورود از اکسل" }, ct);
                 if (!started.Success) return ResponseDtoHelper.BadRequest<ExcelImportResultDto>(started.Message);
-                var saved = await _workflow.SaveCountLinesAsync(new SaveCountLinesDto { Id = started.Data.Id, Lines = counts }, ct);
-                if (!saved.Success) return ResponseDtoHelper.BadRequest<ExcelImportResultDto>(saved.Message);
+                // M7: one unit - when the lines cannot be saved the started count is cancelled, so no empty open count is left to block the warehouse
+                ResponseDto<StockCountDto> saved;
+                try { saved = await _workflow.SaveCountLinesAsync(new SaveCountLinesDto { Id = started.Data.Id, Lines = counts }, ct); }
+                catch (Exception)
+                {
+                    await _workflow.CountActionAsync(new StockCountActionDto { Id = started.Data.Id, Action = "cancel" }, CancellationToken.None);
+                    throw;
+                }
+                if (!saved.Success)
+                {
+                    await _workflow.CountActionAsync(new StockCountActionDto { Id = started.Data.Id, Action = "cancel" }, ct);
+                    return ResponseDtoHelper.BadRequest<ExcelImportResultDto>(saved.Message);
+                }
                 result.DraftId = started.Data.Id;
                 result.DraftKind = "count";
             }

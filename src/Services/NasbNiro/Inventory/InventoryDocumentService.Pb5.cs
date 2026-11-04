@@ -258,7 +258,7 @@ namespace Services.NasbNiro.Inventory
         public async Task<ResponseDto<DocumentDto>> ApprovePriceAsync(int id, CancellationToken cancellationToken)
         {
             if (Ai.AiActing.IsActing) return ResponseDtoHelper.BadRequest<DocumentDto>("تایید نهایی قیمت کار انسان است.");
-            if (!_user.IsInRole(InventoryRoles.Finance)) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + " (نقش مالی لازم است)");
+            if (!_user.IsInRole(FreightRoles.Approvers)) return ResponseDtoHelper.BadRequest<DocumentDto>(InventoryMessages.NotAllowed + " (نقش مالی لازم است)");
             InventoryDocument document = await Documents.FirstOrDefaultAsync(d => d.Id == id && !d.Deleted, cancellationToken);
             if (document == null) return ResponseDtoHelper.NotFound<DocumentDto>(InventoryMessages.DocumentNotFound);
             if (document.Type != InventoryDocumentType.PurchaseReceipt || document.Status != InventoryDocumentStatus.Confirmed)

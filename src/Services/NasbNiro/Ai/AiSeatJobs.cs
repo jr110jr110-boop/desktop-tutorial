@@ -264,56 +264,38 @@ namespace Services.NasbNiro.Ai
     public class WhReorderSeatJob : IAiSeatJob
     {
         public const int MaxLines = 100;
-        private readonly IUnitOfWork _uow;
-        private readonly IInventoryStockService _stock;
+        private readonly Inventory.IWarehouseReorderService _reorder;
         private readonly IProcurementService _procurement;
 
-        public WhReorderSeatJob(IUnitOfWork uow, IInventoryStockService stock, IProcurementService procurement)
+        public WhReorderSeatJob(Inventory.IWarehouseReorderService reorder, IProcurementService procurement)
         {
-            _uow = uow; _stock = stock; _procurement = procurement;
+            _reorder = reorder; _procurement = procurement;
         }
 
         public string Code => AiSeatCodes.WhReorder;
 
-        /// <summary>The quantity to buy: up to the minimum stock, less what is already on order. (★ the item master has no separate reorder quantity.)</summary>
+        /// <summary>The older rule of the seat (up to the minimum stock, less what is on order); kept for reference. The seat now asks the reorder-point list of the warehouse (PB5), one rule for the screen and the seat.</summary>
         public static decimal ReorderQuantity(decimal minStock, decimal onHand, decimal onOrder = 0) => Math.Max(0, minStock - onHand - Math.Max(0, onOrder));
 
         public async Task<AiSeatJobResult> RunAsync(AiSeatRunContext context, CancellationToken ct)
         {
-            var low = await _stock.GetItemStocksAsync(new StockQuery { LowStockOnly = true, PageSize = 0 }, ct);
-            if (!low.Success) return AiSeatJobResult.Fail(low.Message);
-            List<ItemStockDto> rows = low.Data.Where(i => ReorderQuantity(i.MinStock, i.OnHand) > 0).ToList();
-            if (rows.Count == 0) return AiSeatJobResult.Done("drafts=0; lines=0");
-
-            // an item on a request that is not final (draft, submitted, approved or ordered) is covered: it is not asked for again
-            List<int> ids = rows.Select(r => r.ItemId).ToList();
-            List<int> open = await _uow.Set<PurchaseRequestLine>().AsNoTracking()
-                .Where(l => l.ItemId != null && ids.Contains(l.ItemId.Value) && !l.PurchaseRequest.Deleted
-                            && (l.PurchaseRequest.Status == PurchaseRequestStatus.Draft || l.PurchaseRequest.Status == PurchaseRequestStatus.Submitted
-                                || l.PurchaseRequest.Status == PurchaseRequestStatus.Approved || l.PurchaseRequest.Status == PurchaseRequestStatus.Ordered))
-                .Select(l => l.ItemId.Value).Distinct().ToListAsync(ct);
-            // what is on order: the part of an open purchase order line that has not been received yet
-            var onOrderRows = await _uow.Set<PurchaseOrderLine>().AsNoTracking()
-                .Where(l => l.ItemId != null && ids.Contains(l.ItemId.Value) && !l.PurchaseOrder.Deleted
-                            && (l.PurchaseOrder.Status == PurchaseOrderStatus.Draft || l.PurchaseOrder.Status == PurchaseOrderStatus.Approved
-                                || l.PurchaseOrder.Status == PurchaseOrderStatus.Released || l.PurchaseOrder.Status == PurchaseOrderStatus.PartlyReceived))
-                .Select(l => new { ItemId = l.ItemId.Value, Left = l.Quantity - l.ReceivedQuantity }).ToListAsync(ct);
-            Dictionary<int, decimal> onOrder = onOrderRows.Where(x => x.Left > 0).GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => g.Sum(x => x.Left));
-            decimal OnOrder(int itemId) => onOrder.TryGetValue(itemId, out decimal v) ? v : 0m;
-            List<ItemStockDto> todo = rows.Where(r => !open.Contains(r.ItemId) && ReorderQuantity(r.MinStock, r.OnHand, OnOrder(r.ItemId)) > 0)
-                .OrderBy(r => r.ItemCode, StringComparer.Ordinal).Take(MaxLines).ToList();
+            // M2: the same list as the warehouse screen: reorder point = daily use x lead time + safety stock; customer property, scrap and contractor stock do not count as on hand;
+            // an item on an open request is covered and is not asked for again
+            var list = await _reorder.GetAsync(new ViewModels.NasbNiro.InventoryDtos.ReorderQuery(), ct);
+            if (!list.Success) return AiSeatJobResult.Fail(list.Message);
+            var todo = list.Data.Where(r => !r.OpenRequest && r.SuggestedQuantity > 0).OrderBy(r => r.ItemCode, StringComparer.Ordinal).Take(MaxLines).ToList();
             if (todo.Count == 0) return AiSeatJobResult.Done("drafts=0; lines=0");
 
             var dto = new SavePurchaseRequestDto
             {
                 Source = PurchaseRequestSource.ReorderPoint, Kind = PurchaseKind.Goods, RequestDate = context.AsOf.Date, Submit = false,
-                Description = "پیش‌نویس خودکار صندلی انبار: موجودی کالاهای فهرست‌شده از حداقل موجودی کمتر است. مقدار پیشنهادی برابر حداقل موجودی منهای موجودی فعلی و منهای مقدار در راه است. بررسی، ویرایش و ارسال با واحد برنامه‌ریزی است.",
+                Description = "پیش‌نویس خودکار صندلی انبار: موجودی کالاهای فهرست‌شده از نقطه سفارش مجدد کمتر است. مقدار پیشنهادی از فهرست نقطه سفارش انبار گرفته شده و موجودی و مقدار در راه را حساب می‌کند. بررسی، ویرایش و ارسال با واحد برنامه‌ریزی است.",
             };
-            foreach (ItemStockDto i in todo)
+            foreach (var i in todo)
                 dto.Lines.Add(new SavePurchaseRequestLineDto
                 {
-                    ItemId = i.ItemId, Unit = i.Unit, Quantity = ReorderQuantity(i.MinStock, i.OnHand, OnOrder(i.ItemId)),
-                    Description = $"{i.ItemTitle}: موجودی {AiSeatTexts.Num(i.OnHand)} {i.Unit} کمتر از حداقل {AiSeatTexts.Num(i.MinStock)} است{(OnOrder(i.ItemId) > 0 ? $"؛ {AiSeatTexts.Num(OnOrder(i.ItemId))} {i.Unit} در راه است" : string.Empty)}",
+                    ItemId = i.ItemId, Unit = i.Unit, Quantity = i.SuggestedQuantity,
+                    Description = $"{i.ItemTitle}: موجودی {AiSeatTexts.Num(i.OnHand)} {i.Unit} کمتر از نقطه سفارش {AiSeatTexts.Num(i.ReorderPoint)} است{(i.OnOrder > 0 ? $"؛ {AiSeatTexts.Num(i.OnOrder)} {i.Unit} در راه است" : string.Empty)}",
                 });
             var saved = await _procurement.SaveRequestAsync(dto, ct);
             if (!saved.Success) return AiSeatJobResult.Fail(AiText.Cut(saved.Message, 500));

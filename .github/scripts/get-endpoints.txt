@@ -70,3 +70,9 @@ api/v1/tasks/counts
 api/v1/projectcontrol/progress-approval/submissions
 api/v1/projectcontrol/progress-approval/reports/not-updated
 api/v1/projectcontrol/progress-approval/reports/overdue-updates
+api/v1/inventory/freight
+api/v1/inventory/alerts/reorder
+api/v1/inventory/reports/catalog
+api/v1/inventory/register/assets
+api/v1/inventory/register/conversions
+api/v1/inventory/register/ceilings

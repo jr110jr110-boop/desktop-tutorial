@@ -726,6 +726,10 @@ namespace Services.NasbNiro.Inventory
             {
                 warehouse = await Warehouses.FirstOrDefaultAsync(w => w.Id == dto.Id.Value && !w.Deleted, cancellationToken);
                 if (warehouse == null) return ResponseDtoHelper.NotFound<WarehouseDto>(InventoryMessages.WarehouseNotFound);
+                // L9: the kind and the work order decide how the stock is counted (valuation, project balance); they do not change while the warehouse holds stock
+                bool kindChanged = warehouse.Kind != dto.Kind, orderChanged = warehouse.WorkOrderId != (ProjectBound(dto.Kind) ? dto.WorkOrderId : null);
+                if ((kindChanged || orderChanged) && await _uow.Set<StockBalance>().AnyAsync(b => b.WarehouseId == warehouse.Id && b.Quantity != 0, cancellationToken))
+                    return ResponseDtoHelper.BadRequest<WarehouseDto>("این انبار موجودی دارد؛ نوع انبار و دستور کار آن تا خالی‌شدن موجودی تغییر نمی‌کند.");
             }
             else
             {

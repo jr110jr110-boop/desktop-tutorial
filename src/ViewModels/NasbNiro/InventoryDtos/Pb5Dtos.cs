@@ -46,8 +46,10 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string ItemCode { get; set; }
         public string ItemTitle { get; set; }
         public FreightBasis Basis { get; set; }
-        public decimal BasisAmount { get; set; }
-        public decimal Amount { get; set; }
+
+        /// <summary>Empty (hidden) for a value basis when the reader does not see values.</summary>
+        public decimal? BasisAmount { get; set; }
+        public decimal? Amount { get; set; }
     }
 
     public class FreightDto
@@ -62,7 +64,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string BillOfLadingNumber { get; set; }
         public int? CarrierProviderId { get; set; }
         public string CarrierName { get; set; }
-        public decimal Amount { get; set; }
+
+        /// <summary>Rial; empty for a reader whose role does not see values (the same rule as the document freight summary).</summary>
+        public decimal? Amount { get; set; }
         public string Description { get; set; }
         public FreightStatus Status { get; set; }
         public string CreatorName { get; set; }
@@ -126,7 +130,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
     // ------------------------------------------------------------------------------ assets, units, ceilings
 
-    public class SaveAssetDto
+    public class SaveInvAssetDto
     {
         public int? Id { get; set; }
         public string Tag { get; set; }
@@ -142,7 +146,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Description { get; set; }
     }
 
-    public class AssetDto
+    public class InvAssetDto
     {
         public int Id { get; set; }
         public string Tag { get; set; }
@@ -165,7 +169,7 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string LabelCode { get; set; }
     }
 
-    public class AssetQuery : PaginationParams
+    public class InvAssetQuery : PaginationParams
     {
         public string Contains { get; set; }
         public AssetStatus? Status { get; set; }

@@ -122,6 +122,10 @@ namespace Services.NasbNiro.Inventory
             {
                 documents = documents.Where(d => d.Lines.Any(l => selectedLines.Contains(l.Id))).ToList();
                 if (documents.Count == 0) return (null, null, "ردیف انتخاب‌شده در سندهای در انتظار سپیدار نیست.");
+                // M6: there is no per-line state, so a document is sent whole or not at all (a partial selection would send the rest again at the next export)
+                InventoryDocument partial = documents.FirstOrDefault(d => d.Lines.Any(l => !selectedLines.Contains(l.Id)));
+                if (partial != null) return (null, null, "همه ردیف‌های یک سند با هم به سپیدار می‌روند؛ سند " + partial.Number + " را کامل انتخاب کنید یا کل سند را بفرستید.");
+                if (selectedLines.Any(id => !documents.Any(d => d.Lines.Any(l => l.Id == id)))) return (null, null, "یکی از ردیف‌های انتخاب‌شده در سندهای در انتظار سپیدار نیست.");
             }
 
             var csv = new StringBuilder();

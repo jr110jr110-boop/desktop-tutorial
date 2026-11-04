@@ -109,6 +109,7 @@ namespace WebApi.Controllers
         public InventoryExcelController(IWarehouseExcelService excel) => _excel = excel;
 
         [HttpGet("template/{kind}")]
+        [Authorize(Roles = InventoryRoles.Counts + ",ENGINEERING,FINANCEMANAGER")]
         public IActionResult Template(string kind)
         {
             var result = _excel.Template(kind);
@@ -138,13 +139,15 @@ namespace WebApi.Controllers
         public InventoryRegisterController(IWarehouseRegisterService service) => _service = service;
 
         [HttpGet("assets")]
-        public async Task<IActionResult> AssetsAsync([FromQuery] AssetQuery query, CancellationToken ct) => Ok((await _service.GetAssetsAsync(query, ct)).ToPaginatedResultSafe());
+        [Authorize(Roles = WarehouseReportRoles.Readers)]
+        public async Task<IActionResult> AssetsAsync([FromQuery] InvAssetQuery query, CancellationToken ct) => Ok((await _service.GetAssetsAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpPost("assets")]
         [Authorize(Roles = WarehouseRegisterService.AssetRoles)]
-        public async Task<IActionResult> SaveAssetAsync([FromBody] SaveAssetDto dto, CancellationToken ct) => Ok(await _service.SaveAssetAsync(dto, ct));
+        public async Task<IActionResult> SaveAssetAsync([FromBody] SaveInvAssetDto dto, CancellationToken ct) => Ok(await _service.SaveAssetAsync(dto, ct));
 
         [HttpGet("conversions")]
+        [Authorize(Roles = WarehouseReportRoles.Readers)]
         public async Task<IActionResult> ConversionsAsync([FromQuery] int? itemId, CancellationToken ct) => Ok(await _service.GetConversionsAsync(itemId, ct));
 
         [HttpPost("conversions")]
@@ -152,6 +155,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SaveConversionAsync([FromBody] SaveUnitConversionDto dto, CancellationToken ct) => Ok(await _service.SaveConversionAsync(dto, ct));
 
         [HttpGet("ceilings")]
+        [Authorize(Roles = WarehouseReportRoles.Readers)]
         public async Task<IActionResult> CeilingsAsync([FromQuery] int? itemId, [FromQuery] int? workOrderId, CancellationToken ct) => Ok(await _service.GetCeilingsAsync(itemId, workOrderId, ct));
 
         [HttpPost("ceilings")]

@@ -45,6 +45,25 @@ namespace Services.NasbNiro.ProjectBalance
     public static class BalanceSettingKeys
     {
         public const string WarehouseKinds = "Balance:WarehouseKinds";
+
+        /// <summary>M3 (PB5): the kinds counted by default now include the material, tool, consumable, instrument and standard-part warehouses (12, 13, 14, 16, 17).</summary>
+        public const string DefaultWarehouseKinds = "0,1,2,3,4,12,13,14,16,17";
+        private const string OldWarehouseKinds = "0,1,2,3,4";
+
+        /// <summary>M3: an install that stored the old default keeps counting the new kinds: the stored row is moved to the new default once (a deliberate list is never touched).</summary>
+        public static async Task<bool> UpgradeWarehouseKindsAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            PbSetting row = await uow.Set<PbSetting>().FirstOrDefaultAsync(x => x.Key == WarehouseKinds, ct);
+            if (row == null || (row.Value ?? "").Replace(" ", "") != OldWarehouseKinds) return false;
+            row.Value = DefaultWarehouseKinds;
+            await uow.SaveChangesAsync(ct);
+            return true;
+        }
+
+        private static void MoveOldDefault(Dictionary<string, string> values)
+        {
+            if (values.TryGetValue(WarehouseKinds, out string v) && (v ?? "").Replace(" ", "") == OldWarehouseKinds) values[WarehouseKinds] = DefaultWarehouseKinds;
+        }
         public const string ReservationHard = "Balance:ReservationHard";
         public const string ReserveOnRun = "Balance:ReserveOnRun";
         public const string UseSubstitutes = "Balance:UseSubstitutes";
@@ -71,7 +90,7 @@ namespace Services.NasbNiro.ProjectBalance
             PbSetting S(string key, string value, string title, string source) => new PbSetting { Key = key, Value = value, Title = title, Source = source };
             const string assumed = "★ تصمیم برنامه (به تایید شرکت)";
             const string answers = "★ جدول پاسخ‌های شرکت (به تایید شرکت)";
-            yield return S(WarehouseKinds, "0,1,2,3,4", "انواع انباری که موجودی آن در بالانس شمرده می‌شود (۰ عمومی، ۱ مواد اولیه، ۲ قطعات، ۳ در جریان ساخت، ۴ کالای ساخته‌شده؛ قرنطینه، ضایعات، پیمانکار، اموال مشتری و مدل‌ها شمرده نمی‌شود)", assumed);
+            yield return S(WarehouseKinds, DefaultWarehouseKinds, "انواع انباری که موجودی آن در بالانس شمرده می‌شود (۰ عمومی، ۱ مواد اولیه، ۲ قطعات، ۳ در جریان ساخت، ۴ کالای ساخته‌شده، ۱۲ متریال، ۱۳ ابزار، ۱۴ ملزومات، ۱۶ ابزار دقیق، ۱۷ قطعات استاندارد؛ قرنطینه، ضایعات، پیمانکار، اموال مشتری، مدل‌ها و انبارهای پروژه/پای کار شمرده نمی‌شود)", assumed);
             yield return S(ReservationHard, "true", "رزرو موجودی برای پروژه «سخت» باشد (حواله به پروژه دیگر تا آزادسازی تاییدشده رد می‌شود)؛ false = رزرو نرم (فقط در برنامه‌ریزی کم می‌شود)", "★ پیش‌فرض سخت؛ پاسخ شرکت در انتظار است");
             yield return S(ReserveOnRun, "true", "اجرای بالانس موجودی آزاد را برای پروژه رزرو کند", assumed);
             yield return S(UseSubstitutes, "true", "اگر کالای اصلی کم است، جایگزین‌های تاییدشده در بالانس استفاده شود", assumed);
@@ -97,6 +116,7 @@ namespace Services.NasbNiro.ProjectBalance
             Dictionary<string, string> values = Defaults().ToDictionary(d => d.Key, d => d.Value);
             List<PbSetting> rows = await uow.Set<PbSetting>().AsNoTracking().Where(s => s.Key.StartsWith("Balance:")).ToListAsync(ct);
             foreach (PbSetting row in rows) if (row.Value != null) values[row.Key] = row.Value;
+            MoveOldDefault(values);
             return BalanceSettings.From(values);
         }
 
@@ -105,6 +125,7 @@ namespace Services.NasbNiro.ProjectBalance
             Dictionary<string, string> values = Defaults().ToDictionary(d => d.Key, d => d.Value);
             List<PbSetting> rows = await uow.Set<PbSetting>().AsNoTracking().Where(s => s.Key.StartsWith("Balance:")).ToListAsync(ct);
             foreach (PbSetting row in rows) if (row.Value != null) values[row.Key] = row.Value;
+            MoveOldDefault(values);
             return values;
         }
 
@@ -135,7 +156,7 @@ namespace Services.NasbNiro.ProjectBalance
     /// <summary>The typed settings of one run.</summary>
     public sealed class BalanceSettings
     {
-        public HashSet<int> WarehouseKinds { get; private set; } = new HashSet<int> { 0, 1, 2, 3, 4 };
+        public HashSet<int> WarehouseKinds { get; private set; } = new HashSet<int> { 0, 1, 2, 3, 4, 12, 13, 14, 16, 17 };
         public bool ReservationHard { get; private set; } = true;
         public bool ReserveOnRun { get; private set; } = true;
         public bool UseSubstitutes { get; private set; } = true;

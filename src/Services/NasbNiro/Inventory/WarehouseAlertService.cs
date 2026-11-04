@@ -129,6 +129,13 @@ namespace Services.NasbNiro.Inventory
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            // M3: one-time move of a stored old default of the balance warehouse kinds (runs also when the jobs are switched off; it is a data upgrade, not a job)
+            try
+            {
+                using (IServiceScope scope = _scopes.CreateScope())
+                    await ProjectBalance.BalanceSettingKeys.UpgradeWarehouseKindsAsync(scope.ServiceProvider.GetRequiredService<IUnitOfWork>(), stoppingToken);
+            }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Balance warehouse kinds upgrade failed."); }
             try { await Task.Delay(TimeSpan.FromMinutes(4), stoppingToken); }
             catch (OperationCanceledException) { return; }
             while (!stoppingToken.IsCancellationRequested)

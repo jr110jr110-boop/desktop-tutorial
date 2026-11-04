@@ -7989,7 +7989,7 @@ AIWHNUM=${AIWHOUT##*request=}
 as "$ADMIN_TOKEN" GET "procurement/requests?PageSize=0"; AIWHPR=$(jq -r --arg n "$AIWHNUM" '[.data.data[]|select(.number == $n)][0].id // empty' "$B")
 [ -n "$AIWHPR" ] && ok "ai reorder: the draft request named in the outputs exists ($AIWHNUM)" || bad "ai reorder: the draft request named in the outputs exists ($AIWHNUM)"
 as "$ADMIN_TOKEN" GET "procurement/requests/${AIWHPR:-0}"; AIWHLN=$(val '.data.lines|length')
-check "ai reorder: the draft is a draft, from the reorder point, written by the seat user, with the new item for 50 (minimum 50, on hand 0, nothing on order)" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"صندلی هوش مصنوعی\")) and ([.data.lines[]|select(.itemId == $AIWH1 and .quantity == 50)]|length) == 1"
+check "ai reorder: the draft is a draft, from the reorder point, written by the seat user, with the new item for 100 (reorder point 50 = the minimum, no use yet; no maximum, so up to twice the point: 100, on hand 0, nothing on order)" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"صندلی هوش مصنوعی\")) and ([.data.lines[]|select(.itemId == $AIWH1 and .quantity == 100)]|length) == 1"
 [ "$AIWHOUT" = "drafts=1; lines=$AIWHLN; request=$AIWHNUM" ] && ok "ai reorder: the outputs name exactly the lines of the draft ($AIWHLN)" || bad "ai reorder: the outputs name exactly the lines of the draft (got '$AIWHOUT', lines $AIWHLN)"
 airun WH-REORDER "$TODAY"
 check "ai reorder: a second run asks for nothing again (every low item is on the open draft)" '.success and .data.status == 2 and .data.outputs == "drafts=0; lines=0"'
@@ -11359,18 +11359,18 @@ call POST inventory/documents "{\"type\":18,\"documentDate\":\"2026-10-16T00:00:
 check "pb5 consignment: the receipt draft gets the due date 30 days after the document date (2026-11-15)" '.success and .data.consignmentDueDate == "2026-11-15T00:00:00"'
 PB5CN=$(val .data.id)
 call POST "inventory/documents/$PB5CN/confirm"; check "pb5 consignment: the receipt is confirmed" '.success and .data.status == 1'
-call POST inventory/documents "{\"type\":19,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$PB5WC,\"consignmentOfDocumentId\":$PB5CN,\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":4}]}"
+call POST inventory/documents "{\"type\":19,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$PB5WC,\"consignmentOfDocumentId\":$PB5CN,\"driverName\":\"راننده آزمون\",\"vehiclePlate\":\"12الف345\",\"receiverName\":\"تحویل‌گیرنده آزمون\",\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":4}]}"
 check "pb5 consignment: a return of 4 is saved as a draft" '.success and .data.status == 0'
 PB5CI1=$(val .data.id)
 call POST "inventory/documents/$PB5CI1/confirm"; check "pb5 consignment: the return of 4 is confirmed" '.success and .data.status == 1'
 call GET "inventory/documents/$PB5CN"; check "pb5 consignment: 1 piece is still open on the receipt" '.success and .data.consignmentOpenQuantity == 1'
-call POST inventory/documents "{\"type\":19,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$PB5WC,\"consignmentOfDocumentId\":$PB5CN,\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":2}]}"
-if jq -e '.success == true' "$B" >/dev/null 2>&1; then
-  PB5CI2=$(val .data.id); call POST "inventory/documents/$PB5CI2/confirm"; no "pb5 consignment: returning 2 when only 1 is open is refused"
-else ok "pb5 consignment: returning 2 when only 1 is open is refused (already when the draft is saved)"; fi
+call POST inventory/documents "{\"type\":19,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$PB5WC,\"consignmentOfDocumentId\":$PB5CN,\"driverName\":\"راننده آزمون\",\"vehiclePlate\":\"12الف345\",\"receiverName\":\"تحویل‌گیرنده آزمون\",\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":2}]}"
+nomsg "pb5 consignment: returning 2 when only 1 is open is refused when the draft is saved" "مقدار حواله امانی از"
+call POST inventory/documents "{\"type\":6,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$PB5WC,\"destinationWarehouseId\":$W1,\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":1}]}"
+nomsg "pb5 consignment: consigned goods are never transferred into a valued warehouse" "منتقل نمی‌شود"
 # reports
 call GET inventory/reports/catalog; check "pb5 reports: the catalogue lists 22 reports" '.success and (.data|length) == 22'
-call GET "inventory/reports?Report=consignment"; check "pb5 reports: the consignment report has the receipt row with 1 piece open" '.success and ([.data.rows[]|select(.openQuantity == 1)]|length) == 1'
+call GET "inventory/reports?Report=consignment"; check "pb5 reports: the consignment report has the receipt row with 1 piece open" '.success and ([.data.rows[]|select(.open == 1)]|length) == 1'
 call GET "inventory/reports?Report=freight"; check "pb5 reports: the freight report answers" '.success and .data.key == "freight"'
 call GET "inventory/reports?Report=nonexistent"; no "pb5 reports: an unknown report is refused"
 call GET "inventory/reports/export?Report=stock"; [ "$(head -c 2 "$B")" = "PK" ] && ok "pb5 reports: the Excel export is an xlsx file (zip)" || bad "pb5 reports: the Excel export is an xlsx file (zip)"
