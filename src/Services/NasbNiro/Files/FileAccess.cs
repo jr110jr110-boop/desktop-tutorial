@@ -201,12 +201,14 @@ namespace Services.NasbNiro.Files
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IFileOfficeRules _office;
+        private readonly global::Services.NasbNiro.Attachments.IAttachmentRecordRules _records;
 
-        public FileAccessService(IUnitOfWork uow, IInventoryUserContext user, IFileOfficeRules office)
+        public FileAccessService(IUnitOfWork uow, IInventoryUserContext user, IFileOfficeRules office, global::Services.NasbNiro.Attachments.IAttachmentRecordRules records = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _office = office ?? throw new ArgumentNullException(nameof(office));
+            _records = records;
         }
 
         private static readonly HashSet<string> Special = new HashSet<string>(FileOwners.Special, StringComparer.Ordinal);
@@ -289,7 +291,7 @@ namespace Services.NasbNiro.Files
             if (stopAtUploader && me > 0 && uploader == me) return facts;
 
             // PB3: a file that a record attachment holds is read by whoever may read the owner record (a purchase request's technical documents: everyone downstream of it); prices stay with the price readers
-            bool? attachment = await AttachmentAccess.CanReadFileAsync(_uow, _user, id, ct);
+            bool? attachment = await AttachmentAccess.CanReadFileAsync(_uow, _user, id, ct, _records);
             if (attachment.HasValue)
             {
                 facts.Owners.Add(new FileOwner(nameof(Entities.Model.NasbNiro.Attachments.RecordAttachment), FileOwnerRule.Record, attachment.Value));

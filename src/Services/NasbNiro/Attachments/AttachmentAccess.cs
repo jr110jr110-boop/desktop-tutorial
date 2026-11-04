@@ -18,7 +18,7 @@ namespace Services.NasbNiro.Attachments
         /// A file of a price-carrying kind (invoice, payment slip) is hidden from everybody outside the price readers. The technical documents of a purchase request are read by everyone who may read
         /// a record downstream of it (P3); any other attachment by the readers of its owner record.
         /// </summary>
-        public static async Task<bool?> CanReadFileAsync(IUnitOfWork uow, IInventoryUserContext user, Guid documentId, CancellationToken ct)
+        public static async Task<bool?> CanReadFileAsync(IUnitOfWork uow, IInventoryUserContext user, Guid documentId, CancellationToken ct, IAttachmentRecordRules rules = null)
         {
             List<RecordAttachment> rows = await uow.Set<RecordAttachment>().AsNoTracking().IgnoreQueryFilters().Where(a => a.DocumentId == documentId && !a.Deleted).ToListAsync(ct);
             if (rows.Count == 0) return null;
@@ -26,7 +26,7 @@ namespace Services.NasbNiro.Attachments
             foreach (RecordAttachment row in rows)
             {
                 if (AttachmentRules.CarriesPrices(row.Kind) && !seesPrices) continue;
-                OwnerFacts facts = await AttachmentOwners.FactsAsync(uow, row.OwnerType, row.OwnerId, ct);
+                OwnerFacts facts = await AttachmentOwners.FactsAsync(uow, row.OwnerType, row.OwnerId, ct, rules);
                 if (!facts.Exists) continue;
                 bool technicalOfRequest = (row.OwnerType == AttachmentOwnerType.PurchaseRequest || row.OwnerType == AttachmentOwnerType.PurchaseRequestLine) && !AttachmentRules.CarriesPrices(row.Kind);
                 if (!technicalOfRequest)

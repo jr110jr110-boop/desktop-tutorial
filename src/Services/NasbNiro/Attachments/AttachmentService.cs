@@ -53,9 +53,11 @@ namespace Services.NasbNiro.Attachments
         private readonly IInventoryUserContext _user;
         private readonly IDocumentService _documents;
         private readonly IHttpContextAccessor _http;
+        private readonly IAttachmentRecordRules _rules;
 
-        public AttachmentService(IUnitOfWork uow, IInventoryUserContext user, IDocumentService documents, IHttpContextAccessor http)
+        public AttachmentService(IUnitOfWork uow, IInventoryUserContext user, IDocumentService documents, IHttpContextAccessor http, IAttachmentRecordRules rules = null)
         {
+            _rules = rules;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _documents = documents ?? throw new ArgumentNullException(nameof(documents));
@@ -83,7 +85,7 @@ namespace Services.NasbNiro.Attachments
         public async Task<ResponseDto<AttachmentPanelDto>> GetPanelAsync(AttachmentOwnerType type, int ownerId, CancellationToken ct)
         {
             if (!Enum.IsDefined(typeof(AttachmentOwnerType), type)) return Bad<AttachmentPanelDto>(AttachmentText.OwnerNotFound);
-            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, type, ownerId, ct);
+            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, type, ownerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<AttachmentPanelDto>(AttachmentText.OwnerNotFound);
             if (!InRoles(facts.ReadRoles)) return ResponseDtoHelper.Forbidden<AttachmentPanelDto>(AttachmentText.NotAllowed);
 
@@ -119,9 +121,9 @@ namespace Services.NasbNiro.Attachments
                     .OrderBy(a => a.OwnerType).ThenBy(a => a.Id).ToListAsync(ct);
                 if (rows.Count == 0) continue;
                 var cache = new Dictionary<string, OwnerFacts>();
-                cache[Key(AttachmentOwnerType.PurchaseRequest, prId)] = await AttachmentOwners.FactsAsync(_uow, AttachmentOwnerType.PurchaseRequest, prId, ct);
+                cache[Key(AttachmentOwnerType.PurchaseRequest, prId)] = await AttachmentOwners.FactsAsync(_uow, AttachmentOwnerType.PurchaseRequest, prId, ct, _rules);
                 foreach (int lineId in rows.Where(r => r.OwnerType == AttachmentOwnerType.PurchaseRequestLine).Select(r => r.OwnerId).Distinct())
-                    cache[Key(AttachmentOwnerType.PurchaseRequestLine, lineId)] = await AttachmentOwners.FactsAsync(_uow, AttachmentOwnerType.PurchaseRequestLine, lineId, ct);
+                    cache[Key(AttachmentOwnerType.PurchaseRequestLine, lineId)] = await AttachmentOwners.FactsAsync(_uow, AttachmentOwnerType.PurchaseRequestLine, lineId, ct, _rules);
                 List<AttachmentDto> dtos = await ToDtosAsync(rows, cache, ct);
                 // the propagated copy is read-only on this screen: the actions belong to the request's own screen
                 foreach (AttachmentDto d in dtos) { d.CanRemove = false; d.CanVoid = false; d.CanSupersede = false; }
@@ -139,7 +141,7 @@ namespace Services.NasbNiro.Attachments
             foreach (RecordAttachment r in rows)
             {
                 string key = Key(r.OwnerType, r.OwnerId);
-                if (!factsCache.TryGetValue(key, out OwnerFacts facts)) { facts = await AttachmentOwners.FactsAsync(_uow, r.OwnerType, r.OwnerId, ct); factsCache[key] = facts; }
+                if (!factsCache.TryGetValue(key, out OwnerFacts facts)) { facts = await AttachmentOwners.FactsAsync(_uow, r.OwnerType, r.OwnerId, ct, _rules); factsCache[key] = facts; }
                 bool superseded = r.SupersededById.HasValue;
                 AttachmentActions actions = AttachmentRules.Actions(facts.CanWrite(_user) && MayTouch(r.Kind), r.UploadedByUserId == Me && Me > 0, facts.Locked, r.Voided, superseded, r.RemovedAt.HasValue);
                 list.Add(new AttachmentDto
@@ -289,7 +291,7 @@ namespace Services.NasbNiro.Attachments
             if (!Enum.IsDefined(typeof(AttachmentOwnerType), form.OwnerType)) return Bad<AttachmentDto>(AttachmentText.OwnerNotFound);
             if (!Enum.IsDefined(typeof(AttachmentKind), form.Kind)) return Bad<AttachmentDto>(AttachmentText.InvalidKind);
 
-            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, form.OwnerType, form.OwnerId, ct);
+            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, form.OwnerType, form.OwnerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<AttachmentDto>(AttachmentText.OwnerNotFound);
             if (!InRoles(facts.ReadRoles)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed);
             if (facts.Closed) return Bad<AttachmentDto>(AttachmentText.OwnerCancelled);
@@ -373,7 +375,7 @@ namespace Services.NasbNiro.Attachments
             if (dto == null || dto.Id <= 0) return Bad<AttachmentDto>(AttachmentText.NotFound);
             RecordAttachment row = await _uow.Set<RecordAttachment>().FirstOrDefaultAsync(a => a.Id == dto.Id && !a.Deleted && a.RemovedAt == null, ct);
             if (row == null) return ResponseDtoHelper.NotFound<AttachmentDto>(AttachmentText.NotFound);
-            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, row.OwnerType, row.OwnerId, ct);
+            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, row.OwnerType, row.OwnerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<AttachmentDto>(AttachmentText.OwnerNotFound);
             if (!InRoles(facts.ReadRoles) || !facts.CanWrite(_user) || !MayTouch(row.Kind)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed);
             if (row.Voided) return Bad<AttachmentDto>(AttachmentText.AlreadyVoided);
@@ -392,7 +394,7 @@ namespace Services.NasbNiro.Attachments
         {
             RecordAttachment row = await _uow.Set<RecordAttachment>().FirstOrDefaultAsync(a => a.Id == id && !a.Deleted && a.RemovedAt == null, ct);
             if (row == null) return ResponseDtoHelper.NotFound<bool>(AttachmentText.NotFound);
-            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, row.OwnerType, row.OwnerId, ct);
+            OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, row.OwnerType, row.OwnerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<bool>(AttachmentText.OwnerNotFound);
             if (!InRoles(facts.ReadRoles)) return ResponseDtoHelper.Forbidden<bool>(AttachmentText.NotAllowed);
             // an approved record never loses a file: the answer says what to do instead (void with a reason, or supersede)

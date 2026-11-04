@@ -144,6 +144,13 @@ namespace MsTests
             { "PcTransmittalLine", "line of a transmittal; the reply code and date are on the line itself" },
             { "PcProgressEvent", "append-only observation of the percent of an activity with its own date, user and source; written by the engine and by approved manual progress" },
             { "PcShipmentLine", "line of a shipment; the shipment (status, warehouse document, packing check, delivery) is audited" },
+            { "PcDailyManpower", "manpower rows of a daily site report; the confirmation of the report is audited and a confirmed report is read only" },
+            { "PcDailyMaterial", "material rows of a daily site report; the confirmation of the report is audited and a confirmed report is read only" },
+            { "PcDailyMachinery", "machinery rows of a daily site report; the confirmation of the report is audited and a confirmed report is read only" },
+            { "PcDailyObstacle", "obstacle rows of a daily site report; the confirmation of the report is audited and a confirmed report is read only" },
+            { "PcDailyHse", "HSE rows of a daily site report; the confirmation of the report is audited and a confirmed report is read only" },
+            { "PcPartyEvaluationScore", "criteria rows of an evaluation; the evaluation header (state, score, grade, evaluator) is audited" },
+            { "PcProgressSubmissionHistory", "append-only history of a progress report with its own user, time and changed values" },
         };
 
         [TestMethod]

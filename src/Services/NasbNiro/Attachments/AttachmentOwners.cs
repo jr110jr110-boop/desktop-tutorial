@@ -66,6 +66,15 @@ namespace Services.NasbNiro.Attachments
     /// PB3: the one place that knows, for each kind of record, its number, whether it is approved (locked), who reads and who writes its attachments, and which purchase request lies upstream of it.
     /// The rules mirror the modules' own: an owner that is not here cannot get attachments.
     /// </summary>
+    /// <summary>
+    /// P-B7a: the owners whose rule is not a plain role list (a task is read by whoever sees the task; a progress report by its chain; a photo by the project readers).
+    /// The implementation lives with the owning module and is asked for the facts of one record; a missing implementation fails closed (the record does not exist for the layer).
+    /// </summary>
+    public interface IAttachmentRecordRules
+    {
+        Task<OwnerFacts> FactsAsync(AttachmentOwnerType type, int id, CancellationToken cancellationToken);
+    }
+
     public static class AttachmentOwners
     {
         /// <summary>The roles that read the records of one owner type (null = every signed-in user). The same values as in <see cref="FactsAsync"/>, without a database trip: the dossier decides step by step with it.</summary>
@@ -101,11 +110,15 @@ namespace Services.NasbNiro.Attachments
             }
         }
 
-        public static async Task<OwnerFacts> FactsAsync(IUnitOfWork uow, AttachmentOwnerType type, int id, CancellationToken ct)
+        public static async Task<OwnerFacts> FactsAsync(IUnitOfWork uow, AttachmentOwnerType type, int id, CancellationToken ct, IAttachmentRecordRules rules = null)
         {
             var f = new OwnerFacts();
             switch (type)
             {
+                case AttachmentOwnerType.TmTask:
+                case AttachmentOwnerType.PcProgressSubmission:
+                case AttachmentOwnerType.PcProjectPhoto:
+                    return rules == null ? f : await rules.FactsAsync(type, id, ct);
                 case AttachmentOwnerType.PurchaseRequest:
                 {
                     var r = await uow.Set<PurchaseRequest>().AsNoTracking().Where(x => x.Id == id && !x.Deleted).Select(x => new { x.Number, x.Status, x.CreatorUserId }).FirstOrDefaultAsync(ct);

@@ -80,6 +80,9 @@ namespace Services.NasbNiro.Attachments
                 case AttachmentOwnerType.BuyOrder: return "دستور خرید";
                 case AttachmentOwnerType.Process: return "فرایند";
                 case AttachmentOwnerType.EquipmentProcess: return "فرایند تجهیز";
+                case AttachmentOwnerType.TmTask: return "وظیفه";
+                case AttachmentOwnerType.PcProgressSubmission: return "گزارش پیشرفت";
+                case AttachmentOwnerType.PcProjectPhoto: return "عکس پروژه";
                 default: return "رکورد";
             }
         }

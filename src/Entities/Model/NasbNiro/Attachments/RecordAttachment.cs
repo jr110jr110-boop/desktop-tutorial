@@ -35,6 +35,12 @@ namespace Entities.Model.NasbNiro.Attachments
         BuyOrder = 21,
         Process = 22,
         EquipmentProcess = 23,
+        /// <summary>P-B7a: a task (rule of the task module: whoever sees the task reads the files).</summary>
+        TmTask = 24,
+        /// <summary>P-B7a: a progress report of the approval cartable.</summary>
+        PcProgressSubmission = 25,
+        /// <summary>P-B7a: a photo of the project photo library (the picture is the attachment).</summary>
+        PcProjectPhoto = 26,
     }
 
     public enum AttachmentKind

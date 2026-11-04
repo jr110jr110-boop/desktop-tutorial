@@ -3,6 +3,7 @@ using DataLayer.Configurations.EF.NasbNiro.Ai;
 using DataLayer.Configurations.EF.NasbNiro.Ceo;
 using DataLayer.Configurations.EF.NasbNiro.Finance;
 using DataLayer.Configurations.EF.NasbNiro.Office;
+using DataLayer.Configurations.EF.NasbNiro.Tasks;
 using DataLayer.Configurations.EF.NasbNiro.Production;
 using DataLayer.Configurations.EF.NasbNiro.ProjectControl;
 using DataLayer.Configurations.EF.NasbNiro.Quality;
@@ -31,6 +32,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddQualityConfigurations();
             builder.AddProjectControlConfigurations();
             builder.AddOfficeConfigurations();
+            builder.AddTaskConfigurations();
             builder.AddProductionConfigurations();
             builder.AddSalesConfigurations();
             builder.AddAfterSalesConfigurations();

@@ -15,11 +15,41 @@ using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
+using Services.NasbNiro.Office;
 using ViewModels.NasbNiro.Pagination;
 using ViewModels.NasbNiro.ProjectControlDtos;
 
 namespace Services.NasbNiro.ProjectControl
 {
+    public class PcApprovedProgress
+    {
+        public int ActivityId { get; set; }
+        public decimal Percent { get; set; }
+        public DateTime? ActualStart { get; set; }
+        public DateTime? ActualFinish { get; set; }
+        public string Comment { get; set; }
+        public int SubmittedByUserId { get; set; }
+        public int ApprovedByUserId { get; set; }
+        public decimal Cost { get; set; }
+        public int CostKind { get; set; }
+        public string CostNote { get; set; }
+
+        /// <summary>The person who last chose the percent (the submitter, or the approver who corrected it at an intermediate level): the manual proposal records him as the proposer.</summary>
+        public int? ProposerUserId { get; set; }
+
+        /// <summary>The person who last chose the cost amount: the maker of the cost entry. The second finance person must be someone else than him and than everyone who decided the report.</summary>
+        public int? CostSetByUserId { get; set; }
+
+        public int SubmissionId { get; set; }
+        public string SubmissionNumber { get; set; }
+    }
+
+    public class PcAppliedProgress
+    {
+        public PcManualProgress Manual { get; set; }
+        public CostEntry Cost { get; set; }
+    }
+
     public interface IPcProgressService
     {
         /// <summary>Overall physical percent of a contract (or of one work order), recomputed from the module data. Read only.</summary>
@@ -61,6 +91,14 @@ namespace Services.NasbNiro.ProjectControl
         Task<ResponseDto<PcDailyReportDto>> GetDailyAsync(PcDailyQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<PcDailyReportDto>> SaveDailyAsync(PcDailyReportDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<PcDailyReportDto>> ConfirmDailyAsync(int id, CancellationToken cancellationToken);
+        Task<ResponseDto<PcDailyReportDto>> GetDailyByIdAsync(int id, CancellationToken cancellationToken);
+        Task<ResponseDto<PagedList<PcDailyListDto>>> GetDailyListAsync(PcDailyListQuery query, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// P-B7a: writes a progress value that the approval chain of the progress cartable approved. It uses the same dated-event path as the manual proposal (all date rules apply, the method of the activity is not changed,
+        /// so the plan lock is not touched) and adds an unchecked manual cost entry when the report carries a cost. Nothing is saved; the caller saves.
+        /// </summary>
+        Task<ResponseDto<PcAppliedProgress>> ApplyApprovedProgressAsync(PcApprovedProgress input, CancellationToken cancellationToken);
     }
 
     /// <summary>Progress engine, earned value, weekly snapshots and daily reports (WI-PL-009 sections 19-29).</summary>
@@ -164,6 +202,11 @@ namespace Services.NasbNiro.ProjectControl
             var manualRows = await _uow.Set<PcManualProgress>().AsNoTracking().Where(m => manualIds.Contains(m.ActivityId) && m.State == 1).OrderBy(m => m.DecidedAt).ThenBy(m => m.Id)
                 .Select(m => new { m.ActivityId, m.Percent, m.DecidedAt }).ToListAsync(cancellationToken);
 
+            // P-B7a: tasks linked to the activity: weighted by estimated hours, only the percent the approval cartable approved, never a personal task, a rejected task does not count
+            List<int> taskActIds = calc.Activities.Where(a => a.ProgressMethod == PcProgressMethod.Tasks).Select(a => a.Id).ToList();
+            var taskRows = taskActIds.Count == 0 ? null : (await _uow.Set<Entities.Model.NasbNiro.Tasks.TmTask>().AsNoTracking().Where(t => !t.Deleted && t.ActivityId != null && taskActIds.Contains(t.ActivityId.Value) && t.Kind != Entities.Model.NasbNiro.Tasks.TmTaskKind.Personal && t.Status != Entities.Model.NasbNiro.Tasks.TmTaskStatus.Rejected)
+                .Select(t => new { ActivityId = t.ActivityId.Value, t.EstimatedHours, Percent = t.ApprovedPercent, t.Status, t.ClosedAt }).ToListAsync(cancellationToken)).GroupBy(t => t.ActivityId).ToDictionary(g => g.Key, g => g.ToList());
+
             // engineering: the state of the register lines
             List<int> engOrders = calc.Activities.Where(a => a.ProgressMethod == PcProgressMethod.EngineeringIssue && a.WorkOrderId.HasValue).Select(a => a.WorkOrderId.Value).Distinct().ToList();
             var deliverables = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(d => !d.Deleted && d.Required && d.WorkOrderId != null && engOrders.Contains(d.WorkOrderId.Value))
@@ -202,6 +245,18 @@ namespace Services.NasbNiro.ProjectControl
                             pct = mine[mine.Count - 1].Percent;
                             start = mine[0].DecidedAt?.Date;
                             if (pct >= 100m) finish = mine[mine.Count - 1].DecidedAt?.Date;
+                        }
+                        break;
+                    case PcProgressMethod.Tasks:
+                        if (taskRows != null && taskRows.TryGetValue(a.Id, out var mineTasks))
+                        {
+                            decimal? rolled = global::Services.NasbNiro.Tasks.TaskRules.RollUpPercent(mineTasks.Select(t => (t.EstimatedHours, t.Percent, t.Status)));
+                            if (rolled.HasValue)
+                            {
+                                pct = rolled.Value;
+                                // the day of the fact is today (the day the approved value is seen), not the day the first task began: progress reached now is not written into the past
+                                if (pct >= 100m) finish = mineTasks.Where(t => t.ClosedAt.HasValue).Select(t => (DateTime?)t.ClosedAt.Value.LocalDateTime.Date).Max();
+                            }
                         }
                         break;
                     case PcProgressMethod.EngineeringIssue:
@@ -708,6 +763,10 @@ namespace Services.NasbNiro.ProjectControl
             if (e == null) return PcText.NotFound<PcCostEntryDto>("ردیف هزینه پیدا نشد.");
             if (e.SourceType != ManualCostSource) return Bad<PcCostEntryDto>("فقط هزینه‌ای که با دست در کنترل پروژه ثبت شده بررسی دوم می‌خواهد؛ هزینه‌های سیستمی از ماژول خودشان می‌آیند.");
             if (e.CreatedByUserId == Me) return Bad<PcCostEntryDto>(PcText.SameUser + " (ثبت‌کننده هزینه نمی‌تواند آن را بررسی کند)");
+            // a cost that came from a progress report: nobody who touched the amount (the submitter, the person who set it, every approver who decided the report) checks it
+            int me = Me;
+            if (await _uow.Set<PcProgressSubmission>().AsNoTracking().AnyAsync(sub => sub.CostEntryId == e.Id && (sub.SubmittedByUserId == me || sub.CreatorUserId == me || sub.CostSetByUserId == me || sub.Steps.Any(st => st.DecidedByUserId == me)), cancellationToken))
+                return Bad<PcCostEntryDto>(PcText.SameUser + " (کسی که گزارش را ارسال کرده، مبلغ را نوشته یا در زنجیره تایید تصمیم گرفته نمی‌تواند هزینه را بررسی کند)");
             if (await _uow.Set<PcCostCheck>().AnyAsync(c => c.CostEntryId == e.Id, cancellationToken)) return Bad<PcCostEntryDto>("این هزینه قبلاً بررسی شده است.");
             var check = new PcCostCheck { CostEntryId = e.Id, CheckedByUserId = Me, CheckedAt = DateTimeOffset.Now, Note = Clean(dto.Note) };
             _uow.Set<PcCostCheck>().Add(check);
@@ -1011,15 +1070,90 @@ namespace Services.NasbNiro.ProjectControl
         {
             List<int> ids = r.Lines.Select(l => l.ActivityId).ToList();
             var acts = await _uow.Set<PcActivity>().AsNoTracking().Where(a => ids.Contains(a.Id)).Select(a => new { a.Id, a.Code, a.Title }).ToListAsync(cancellationToken);
-            return new PcDailyReportDto
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { r.ConfirmedByUserId, r.CreatorUserId }, cancellationToken);
+            var dto = new PcDailyReportDto
             {
-                Id = r.Id, ContractId = r.ContractId, Unit = r.Unit, ReportDate = r.ReportDate, State = r.State, ConfirmedAt = r.ConfirmedAt,
+                Id = r.Id, ContractId = r.ContractId, Unit = r.Unit, ReportDate = r.ReportDate, ReportDateText = OfficeText.Date(r.ReportDate), State = r.State, ConfirmedAt = r.ConfirmedAt, ConfirmedAtText = OfficeText.Stamp(r.ConfirmedAt),
+                ConfirmedByName = names.Name(r.ConfirmedByUserId), CreatorName = names.Name(r.CreatorUserId), Weather = r.Weather, Notes = r.Notes,
                 Lines = r.Lines.OrderBy(l => l.Id).Select(l => new PcDailyLineDto
                 {
                     ActivityId = l.ActivityId, ActivityCode = acts.FirstOrDefault(a => a.Id == l.ActivityId)?.Code, ActivityTitle = acts.FirstOrDefault(a => a.Id == l.ActivityId)?.Title, EventText = l.EventText,
                     Percent = l.Percent, IsLate = l.IsLate, DelayReasonCode = l.DelayReasonCode, DelayReason = l.DelayReason, PreventiveAction = l.PreventiveAction, CorrectiveAction = l.CorrectiveAction,
                 }).ToList(),
+                Manpower = (r.Manpower ?? new List<PcDailyManpower>()).OrderBy(x => x.Id).Select(x => new PcDailyManpowerDto { Kind = x.Kind, Title = x.Title, ActivityType = x.ActivityType, Count = x.Count, Present = x.Present, Absent = x.Absent, PersonDays = x.PersonDays, Note = x.Note }).ToList(),
+                Materials = (r.Materials ?? new List<PcDailyMaterial>()).OrderBy(x => x.Id).Select(x => new PcDailyMaterialDto { ItemId = x.ItemId, Description = x.Description, Unit = x.Unit, Quantity = x.Quantity, Note = x.Note }).ToList(),
+                Machinery = (r.Machinery ?? new List<PcDailyMachinery>()).OrderBy(x => x.Id).Select(x => new PcDailyMachineryDto { Name = x.Name, Ownership = x.Ownership, Present = x.Present, Active = x.Active, Hours = x.Hours, Note = x.Note }).ToList(),
+                Obstacles = (r.Obstacles ?? new List<PcDailyObstacle>()).OrderBy(x => x.Id).Select(x => new PcDailyObstacleDto { Category = x.Category, Description = x.Description, ActivityId = x.ActivityId, ImpactHours = x.ImpactHours, Resolved = x.Resolved }).ToList(),
+                HseEvents = (r.HseEvents ?? new List<PcDailyHse>()).OrderBy(x => x.Id).Select(x => new PcDailyHseDto { Kind = x.Kind, Description = x.Description, PersonsInvolved = x.PersonsInvolved, ActionTaken = x.ActionTaken }).ToList(),
             };
+            dto.CanConfirm = r.State == 0 && PcDailyRules.MayConfirm(r.CreatorUserId, r.EditorUserIds, Me);
+            return dto;
+        }
+
+        private IQueryable<PcDailyReport> DailyWithChildren() =>
+            _uow.Set<PcDailyReport>().Include(r => r.Lines).Include(r => r.Manpower).Include(r => r.Materials).Include(r => r.Machinery).Include(r => r.Obstacles).Include(r => r.HseEvents).AsSplitQuery();
+
+        public async Task<ResponseDto<PcDailyReportDto>> GetDailyByIdAsync(int id, CancellationToken cancellationToken)
+        {
+            PcDailyReport r = await DailyWithChildren().AsNoTracking().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
+            if (r == null) return PcText.NotFound<PcDailyReportDto>("گزارش روزانه پیدا نشد.");
+            return ResponseDtoHelper.Ok(await DailyDtoAsync(r, cancellationToken));
+        }
+
+        public async Task<ResponseDto<PagedList<PcDailyListDto>>> GetDailyListAsync(PcDailyListQuery query, CancellationToken cancellationToken)
+        {
+            query ??= new PcDailyListQuery();
+            IQueryable<PcDailyReport> q = _uow.Set<PcDailyReport>().AsNoTracking().Where(r => !r.Deleted && r.ContractId == query.ContractId);
+            if (query.State.HasValue) q = q.Where(r => r.State == query.State.Value);
+            if (query.From.HasValue) q = q.Where(r => r.ReportDate >= query.From.Value.Date);
+            if (query.To.HasValue) q = q.Where(r => r.ReportDate <= query.To.Value.Date);
+            PagedList<PcDailyReport> page = await PagedList<PcDailyReport>.CreateAsync(q.OrderByDescending(r => r.ReportDate).ThenBy(r => r.Unit), query.PageNumber, query.PageSize, cancellationToken);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, page.Select(r => r.ConfirmedByUserId), cancellationToken);
+            List<int> pageIds = page.Select(r => r.Id).ToList();
+            Dictionary<int, int> lineCounts = (await _uow.Set<PcDailyReportLine>().AsNoTracking().Where(l => pageIds.Contains(l.ReportId)).GroupBy(l => l.ReportId).Select(g => new { Id = g.Key, N = g.Count() }).ToListAsync(cancellationToken)).ToDictionary(x => x.Id, x => x.N);
+            List<PcDailyListDto> rows = page.Select(r => new PcDailyListDto { Id = r.Id, ContractId = r.ContractId, Unit = r.Unit, ReportDate = r.ReportDate, ReportDateText = OfficeText.Date(r.ReportDate), State = r.State, LineCount = lineCounts.GetValueOrDefault(r.Id), ConfirmedByName = names.Name(r.ConfirmedByUserId) }).ToList();
+            return ResponseDtoHelper.Ok((PagedList<PcDailyListDto>)new PcPage<PcDailyListDto>(rows, page.TotalCount, page.CurrentPage, page.PageSize));
+        }
+
+        public async Task<ResponseDto<PcAppliedProgress>> ApplyApprovedProgressAsync(PcApprovedProgress input, CancellationToken cancellationToken)
+        {
+            if (input == null) return Bad<PcAppliedProgress>(PcText.InvalidData);
+            if (input.Percent < 0m || input.Percent > 100m) return Bad<PcAppliedProgress>("درصد پیشرفت باید بین ۰ و ۱۰۰ باشد.");
+            PcActivity a = await _uow.Set<PcActivity>().FirstOrDefaultAsync(x => x.Id == input.ActivityId && !x.Deleted, cancellationToken);
+            if (a == null) return PcText.NotFound<PcAppliedProgress>("فعالیت پیدا نشد.");
+            // the method of the activity is never changed here: only an activity whose progress is reported by a person takes a report (the plan lock stays where it is)
+            if (a.ProgressMethod != PcProgressMethod.Manual && a.ProgressMethod != PcProgressMethod.Contractor && a.ProgressMethod != PcProgressMethod.Quantity)
+                return Bad<PcAppliedProgress>("پیشرفت این فعالیت از رویدادهای سیستم یا از وظایف محاسبه می‌شود و با گزارش دستی ثبت نمی‌شود.");
+            if (await _uow.Set<PcManualProgress>().AnyAsync(m => m.ActivityId == a.Id && m.State == 0, cancellationToken)) return Bad<PcAppliedProgress>("یک پیشنهاد پیشرفت در انتظار تایید برنامه‌ریزی برای این فعالیت هست.");
+            DateTime day = DateTime.Today;
+            string dateProblem = await ProgressDateProblemAsync(a.ContractId, a.Id, day, cancellationToken);
+            if (dateProblem != null) return Bad<PcAppliedProgress>(dateProblem);
+            if (input.ActualStart.HasValue && input.ActualStart.Value.Date > day) return Bad<PcAppliedProgress>("تاریخ شروع واقعی در آینده است.");
+            if (input.ActualFinish.HasValue && (input.ActualFinish.Value.Date > day || (input.ActualStart.HasValue && input.ActualFinish.Value.Date < input.ActualStart.Value.Date))) return Bad<PcAppliedProgress>("تاریخ پایان واقعی نامعتبر است.");
+            if (input.Cost != 0m && !Enum.IsDefined(typeof(CostKind), input.CostKind)) return Bad<PcAppliedProgress>("نوع هزینه را مشخص کنید.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            // actual dates reported by the resource are taken before the engine fills them from the events
+            if (input.ActualStart.HasValue && !a.ActualStart.HasValue && input.Percent > 0m) a.ActualStart = input.ActualStart.Value.Date;
+            if (input.ActualFinish.HasValue && input.Percent >= 100m && !a.ActualFinish.HasValue) a.ActualFinish = input.ActualFinish.Value.Date;
+            var row = new PcManualProgress
+            {
+                ActivityId = a.Id, Percent = PcText.Round2(input.Percent), Comment = Clean(input.Comment), ProgressDate = day, ProposedByUserId = input.ProposerUserId ?? input.SubmittedByUserId, ProposedAt = now,
+                State = 1, DecidedByUserId = input.ApprovedByUserId, DecidedAt = now, DecisionNote = "تایید زنجیره کارتابل تایید پیشرفت",
+            };
+            _uow.Set<PcManualProgress>().Add(row);
+            PcProgressEvents.Add(_uow, a.ContractId, a.Id, day, row.Percent, input.ApprovedByUserId, PcProgressEvents.SourceManual);
+            CostEntry cost = null;
+            if (input.Cost != 0m)
+            {
+                await PcR1Upgrade.EnsureAsync(_uow, cancellationToken);
+                cost = new CostEntry
+                {
+                    EntryDate = day, Kind = (CostKind)input.CostKind, ContractId = a.ContractId, WbsNodeId = a.WbsNodeId, Amount = PcText.Round2(input.Cost), Quantity = 0m, SourceType = ManualCostSource, SourceId = input.SubmissionId, SourceNumber = Clean(input.SubmissionNumber) ?? "PC",
+                    Description = Clean(input.CostNote) ?? "هزینه گزارش پیشرفت", CreatedAt = now, CreatedByUserId = input.CostSetByUserId ?? input.SubmittedByUserId,
+                };
+                _uow.Set<CostEntry>().Add(cost);
+            }
+            return ResponseDtoHelper.Ok(new PcAppliedProgress { Manual = row, Cost = cost });
         }
 
         public async Task<ResponseDto<PcDailyReportDto>> GetDailyAsync(PcDailyQuery query, CancellationToken cancellationToken)
@@ -1027,7 +1161,7 @@ namespace Services.NasbNiro.ProjectControl
             if (query == null) return Bad<PcDailyReportDto>(PcText.InvalidData);
             DateTime date = (query.Date ?? DateTime.Today).Date;
             string unit = Clean(query.Unit)?.ToUpperInvariant() ?? "ALL";
-            PcDailyReport existing = await _uow.Set<PcDailyReport>().AsNoTracking().Include(r => r.Lines).AsSplitQuery().FirstOrDefaultAsync(r => r.ContractId == query.ContractId && r.Unit == unit && r.ReportDate == date && !r.Deleted, cancellationToken);
+            PcDailyReport existing = await DailyWithChildren().AsNoTracking().FirstOrDefaultAsync(r => r.ContractId == query.ContractId && r.Unit == unit && r.ReportDate == date && !r.Deleted, cancellationToken);
             if (existing != null) return ResponseDtoHelper.Ok(await DailyDtoAsync(existing, cancellationToken));
             // pre-fill from what the modules already know (the unit manager confirms or adds the exceptions)
             IQueryable<PcActivity> q = _uow.Set<PcActivity>().AsNoTracking().Where(a => a.ContractId == query.ContractId && !a.Deleted && a.Status != PcActivityStatus.Done && a.DurationDays > 0
@@ -1055,11 +1189,14 @@ namespace Services.NasbNiro.ProjectControl
             if (!await _uow.Set<ContractEntity>().AnyAsync(x => x.Id == dto.ContractId && !x.Deleted, cancellationToken)) return PcText.NotFound<PcDailyReportDto>(PcText.ContractNotFound);
             string unit = Clean(dto.Unit)?.ToUpperInvariant() ?? "ALL";
             DateTime date = (dto.ReportDate == default ? DateTime.Today : dto.ReportDate).Date;
+            if (date > DateTime.Today) return Bad<PcDailyReportDto>("گزارش روزانه برای روز آینده ثبت نمی‌شود.");
             List<int> actIds = (dto.Lines ?? new List<PcDailyLineDto>()).Select(l => l.ActivityId).Distinct().ToList();
             if (actIds.Count != (dto.Lines ?? new List<PcDailyLineDto>()).Count) return Bad<PcDailyReportDto>("فعالیت تکراری در گزارش روزانه است.");
             if (await _uow.Set<PcActivity>().CountAsync(a => actIds.Contains(a.Id) && a.ContractId == dto.ContractId && !a.Deleted, cancellationToken) != actIds.Count) return Bad<PcDailyReportDto>("فعالیتی از این قرارداد نیست.");
+            string problem = await DailyChildrenProblemAsync(dto, cancellationToken);
+            if (problem != null) return Bad<PcDailyReportDto>(problem);
             DateTimeOffset now = DateTimeOffset.Now;
-            PcDailyReport r = await _uow.Set<PcDailyReport>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.ContractId == dto.ContractId && x.Unit == unit && x.ReportDate == date && !x.Deleted, cancellationToken);
+            PcDailyReport r = await DailyWithChildren().FirstOrDefaultAsync(x => x.ContractId == dto.ContractId && x.Unit == unit && x.ReportDate == date && !x.Deleted, cancellationToken);
             if (r == null)
             {
                 r = new PcDailyReport { ContractId = dto.ContractId, Unit = unit, ReportDate = date, CreateDate = now, CreatorUserId = Me, Lines = new List<PcDailyReportLine>() };
@@ -1069,25 +1206,68 @@ namespace Services.NasbNiro.ProjectControl
             {
                 if (r.State == 1) return Bad<PcDailyReportDto>("گزارش تاییدشده تغییر نمی‌کند.");
                 _uow.Set<PcDailyReportLine>().RemoveRange(r.Lines);
+                _uow.Set<PcDailyManpower>().RemoveRange(r.Manpower);
+                _uow.Set<PcDailyMaterial>().RemoveRange(r.Materials);
+                _uow.Set<PcDailyMachinery>().RemoveRange(r.Machinery);
+                _uow.Set<PcDailyObstacle>().RemoveRange(r.Obstacles);
+                _uow.Set<PcDailyHse>().RemoveRange(r.HseEvents);
                 r.Lines = new List<PcDailyReportLine>();
             }
+            r.Manpower = new List<PcDailyManpower>(); r.Materials = new List<PcDailyMaterial>(); r.Machinery = new List<PcDailyMachinery>(); r.Obstacles = new List<PcDailyObstacle>(); r.HseEvents = new List<PcDailyHse>();
             foreach (PcDailyLineDto l in dto.Lines ?? new List<PcDailyLineDto>())
                 r.Lines.Add(new PcDailyReportLine
                 {
                     ActivityId = l.ActivityId, EventText = Clean(l.EventText), Percent = Math.Min(100m, Math.Max(0m, l.Percent)), IsLate = l.IsLate, DelayReasonCode = Clean(l.DelayReasonCode), DelayReason = Clean(l.DelayReason),
                     PreventiveAction = Clean(l.PreventiveAction), CorrectiveAction = Clean(l.CorrectiveAction),
                 });
+            foreach (PcDailyManpowerDto x in dto.Manpower ?? new List<PcDailyManpowerDto>())
+                r.Manpower.Add(new PcDailyManpower { Kind = x.Kind, Title = OfficeText.Cap(Clean(x.Title), 200), ActivityType = OfficeText.Cap(Clean(x.ActivityType), 200), Count = x.Count, Present = x.Present, Absent = x.Absent, PersonDays = x.PersonDays, Note = OfficeText.Cap(Clean(x.Note), 500) });
+            foreach (PcDailyMaterialDto x in dto.Materials ?? new List<PcDailyMaterialDto>())
+                r.Materials.Add(new PcDailyMaterial { ItemId = x.ItemId, Description = OfficeText.Cap(Clean(x.Description), 300), Unit = OfficeText.Cap(Clean(x.Unit), 30), Quantity = x.Quantity, Note = OfficeText.Cap(Clean(x.Note), 500) });
+            foreach (PcDailyMachineryDto x in dto.Machinery ?? new List<PcDailyMachineryDto>())
+                r.Machinery.Add(new PcDailyMachinery { Name = OfficeText.Cap(Clean(x.Name), 200), Ownership = x.Ownership, Present = x.Present, Active = x.Active, Hours = x.Hours, Note = OfficeText.Cap(Clean(x.Note), 500) });
+            foreach (PcDailyObstacleDto x in dto.Obstacles ?? new List<PcDailyObstacleDto>())
+                r.Obstacles.Add(new PcDailyObstacle { Category = OfficeText.Cap(Clean(x.Category), 100), Description = OfficeText.Cap(Clean(x.Description), 1000), ActivityId = x.ActivityId, ImpactHours = x.ImpactHours, Resolved = x.Resolved });
+            foreach (PcDailyHseDto x in dto.HseEvents ?? new List<PcDailyHseDto>())
+                r.HseEvents.Add(new PcDailyHse { Kind = x.Kind, Description = OfficeText.Cap(Clean(x.Description), 1000), PersonsInvolved = x.PersonsInvolved, ActionTaken = OfficeText.Cap(Clean(x.ActionTaken), 1000) });
+            r.Weather = OfficeText.Cap(Clean(dto.Weather), 100); r.Notes = OfficeText.Cap(Clean(dto.Notes), 4000);
+            r.EditorUserIds = PcDailyRules.AddEditor(r.EditorUserIds, Me);
             r.ModifyDate = now; r.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(await DailyDtoAsync(r, cancellationToken));
         }
 
+        private async Task<string> DailyChildrenProblemAsync(PcDailyReportDto dto, CancellationToken cancellationToken)
+        {
+            foreach (PcDailyManpowerDto x in dto.Manpower ?? new List<PcDailyManpowerDto>())
+            {
+                if (!Enum.IsDefined(typeof(PcManpowerKind), x.Kind) || Clean(x.Title) == null) return "ردیف نیروی انسانی: عنوان (سمت یا شرکت) را بنویسید.";
+                if (x.Count < 0 || x.Present < 0 || x.Absent < 0 || x.PersonDays < 0m) return "ردیف نیروی انسانی: عدد منفی پذیرفته نمی‌شود.";
+                if (x.Kind == PcManpowerKind.Internal && x.Count > 0 && x.Present + x.Absent > x.Count) return "ردیف نیروی انسانی: جمع حاضر و غایب از تعداد بیشتر است.";
+            }
+            foreach (PcDailyMaterialDto x in dto.Materials ?? new List<PcDailyMaterialDto>())
+                if (Clean(x.Description) == null || x.Quantity < 0m) return "ردیف مصالح: شرح را بنویسید و مقدار منفی نباشد.";
+            foreach (PcDailyMachineryDto x in dto.Machinery ?? new List<PcDailyMachineryDto>())
+            {
+                if (Clean(x.Name) == null || !Enum.IsDefined(typeof(PcMachineOwnership), x.Ownership)) return "ردیف ماشین‌آلات: نام و نوع مالکیت (ملکی یا استیجاری) را مشخص کنید.";
+                if (x.Present < 0 || x.Active < 0 || x.Hours < 0m || x.Active > x.Present) return "ردیف ماشین‌آلات: تعداد فعال از تعداد حاضر بیشتر نمی‌شود.";
+            }
+            List<int> obstacleActs = (dto.Obstacles ?? new List<PcDailyObstacleDto>()).Where(o => o.ActivityId.HasValue).Select(o => o.ActivityId.Value).Distinct().ToList();
+            if (obstacleActs.Count > 0 && await _uow.Set<PcActivity>().CountAsync(a => obstacleActs.Contains(a.Id) && a.ContractId == dto.ContractId && !a.Deleted, cancellationToken) != obstacleActs.Count) return "فعالیت مانع از این پروژه نیست.";
+            foreach (PcDailyObstacleDto x in dto.Obstacles ?? new List<PcDailyObstacleDto>())
+                if (Clean(x.Description) == null || x.ImpactHours < 0m) return "ردیف موانع: شرح مانع را بنویسید.";
+            foreach (PcDailyHseDto x in dto.HseEvents ?? new List<PcDailyHseDto>())
+                if (!Enum.IsDefined(typeof(PcHseKind), x.Kind) || Clean(x.Description) == null || x.PersonsInvolved < 0) return "ردیف HSE: نوع و شرح رویداد را بنویسید (بدون نام افراد).";
+            return null;
+        }
+
         public async Task<ResponseDto<PcDailyReportDto>> ConfirmDailyAsync(int id, CancellationToken cancellationToken)
         {
-            PcDailyReport r = await _uow.Set<PcDailyReport>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
+            PcDailyReport r = await DailyWithChildren().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, cancellationToken);
             if (r == null) return PcText.NotFound<PcDailyReportDto>("گزارش روزانه پیدا نشد.");
             if (r.State == 1) return Bad<PcDailyReportDto>("گزارش قبلاً تایید شده است.");
             if (r.Unit != "ALL" ? !_user.IsInRole(r.Unit + ",PMO,PLANNING") : !_user.IsInRole(ProjectControlRoles.UnitManagers + ",PMO")) return Bad<PcDailyReportDto>(PcText.NotAllowed + " (گزارش را مدیر همان واحد تایید می‌کند)");
+            if (!PcDailyRules.MayConfirm(r.CreatorUserId, r.EditorUserIds, Me)) return Bad<PcDailyReportDto>(PcText.SameUser + " (گزارش را کسی غیر از نویسنده یا ویرایشگر آن تایید می‌کند)");
             PcDailyReportLine bad = r.Lines.FirstOrDefault(l => l.IsLate && (Clean(l.DelayReasonCode) == null || Clean(l.DelayReason) == null || Clean(l.CorrectiveAction) == null));
             if (bad != null) return Bad<PcDailyReportDto>("برای فعالیت دارای تاخیر، کد و شرح دلیل تاخیر و اقدام اصلاحی لازم است.");
             r.State = 1; r.ConfirmedByUserId = Me; r.ConfirmedAt = DateTimeOffset.Now; r.ModifyDate = r.ConfirmedAt.Value; r.ModifierUserId = Me;

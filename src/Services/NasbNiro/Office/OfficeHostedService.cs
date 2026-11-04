@@ -89,6 +89,17 @@ namespace Services.NasbNiro.Office
                     }
                     catch (OperationCanceledException) { return; }
                     catch (Exception ex) { _logger?.LogWarning(ex, "Overdue decisions job failed; it will run again tomorrow."); }
+                    try
+                    {
+                        using (IServiceScope scope = _scopes.CreateScope())
+                        {
+                            // P-B7a: task due reminders and overdue alerts, and the progress reports that wait too long at one level
+                            await scope.ServiceProvider.GetRequiredService<global::Services.NasbNiro.Tasks.ITaskService>().RunRemindersAsync(stoppingToken);
+                            await scope.ServiceProvider.GetRequiredService<global::Services.NasbNiro.ProjectControl.IPcProgressApprovalService>().RemindWaitingAsync(stoppingToken);
+                        }
+                    }
+                    catch (OperationCanceledException) { return; }
+                    catch (Exception ex) { _logger?.LogWarning(ex, "Task reminders job failed; it will run again tomorrow."); }
                 }
                 try { await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken); }
                 catch (OperationCanceledException) { return; }

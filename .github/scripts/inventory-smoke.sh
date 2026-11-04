@@ -10999,6 +10999,169 @@ as "$FM_TOKEN" GET finance/audit/verify; check "r1t d20: the audit trail fits th
 TOKEN=$ADMIN_TOKEN
 rm -f "$OUT/ai-voice.wav" "$OUT/ai-voice.txt" "$OUT/ai-brief.wav"
 
+# =====================================================================================================================================================================
+# --- P-B7a: tasks (TMS), the progress-approval cartable, the PMBOK registers, the one-page dashboard and the extended daily site report
+# =====================================================================================================================================================================
+P7TK=tasks; P7RG=projectcontrol/registers; P7PA=projectcontrol/progress-approval
+ADM_UID=$(uid "$ADMIN_TOKEN"); PLAN_UID=$(uid "$PLAN_TOKEN"); P7WH_UID=$(uid "$WH_TOKEN")
+as "$PM_TOKEN" POST $P7TK '{"title":""}'; nomsg "p7a tasks: a task without a title is refused" "عنوان"
+as "$PM_TOKEN" POST $P7TK '{"title":"وظیفه شخصی آزمون","kind":4,"priority":2,"importance":2,"confidentiality":0,"recurrence":0,"recurrenceInterval":1}'; check "p7a tasks: a personal task is created (open, a number TK-, the creator is the only party)" '.success and .data.status == 0 and (.data.number|startswith("TK")) and (.data.assignees|length) == 0'
+P7TKP=$(val .data.id)
+as "$PM_TOKEN" POST $P7TK '{"title":"شخصی با ارجاع","kind":4,"assignees":[{"userId":'$ADM_UID',"role":1}]}'; nomsg "p7a tasks: a personal task cannot be referred to another person" "شخصی"
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKP"; no "p7a tasks: a personal task is invisible to another user (planning)"
+as "$ADMIN_TOKEN" GET "$P7TK/$P7TKP"; no "p7a tasks: and to the PMO"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKP,\"action\":\"approve\"}"; no "p7a tasks: approve from the open state is refused (the machine)"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKP,\"action\":\"start\"}"; check "p7a tasks: start moves the personal task to in-progress" '.success and .data.status == 1'
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKP,\"action\":\"complete\"}"; check "p7a tasks: a personal task needs no approval: complete closes it at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
+as "$PM_TOKEN" GET "$P7TK/$P7TKP"; check "p7a tasks: the history has the created, started and closed rows in order" '.success and ([.data.history[].kind]|length) == 3 and .data.history[0].kind == 1'
+# a project task referred to planning with a checklist
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"بازبینی نقشه‌های پمپ\",\"kind\":2,\"contractId\":$PCT,\"priority\":3,\"importance\":2,\"dueDate\":\"$(dd 5)T00:00:00\",\"estimatedHours\":8,\"checklist\":[\"بررسی نقشه ۱\",\"بررسی نقشه ۲\"],\"assignees\":[{\"userId\":$PLAN_UID,\"role\":1,\"reason\":\"جهت اقدام\"}]}"
+check "p7a tasks: a project task with two assignees fields: status assigned, one referral row with its reason" '.success and .data.status == 3 and (.data.assignees|length) == 1 and .data.assignees[0].reason == "جهت اقدام" and (.data.checklist|length) == 2'
+P7TKA=$(val .data.id); P7TKACHK=$(val '.data.checklist[0].id'); P7TKACHK2=$(val '.data.checklist[1].id')
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKA"; check "p7a tasks: the assignee opens the task with its checklist and the single referral" '.success and .data.id == '$P7TKA' and (.data.checklist|length) == 2 and (.data.assignees|length) == 1'
+as "$PLAN_TOKEN" GET "$P7TK?Cartable=assigned-to-me&PageSize=0"; check "p7a tasks: the task is in the assignee cartable (assigned to me)" '.success and ([.data.data[]|select(.id == '$P7TKA')]|length) == 1'
+as "$PM_TOKEN" GET "$P7TK?Cartable=assigned-by-me&PageSize=0"; check "p7a tasks: and in the cartable of the person who assigned it (assigned by me)" '.success and ([.data.data[]|select(.id == '$P7TKA')]|length) == 1'
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"start\"}"; no "p7a tasks: the creator who is not an assignee cannot start it"
+as "$PLAN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"complete\"}"; nomsg "p7a tasks: complete is refused while the checklist is open" "چک‌لیست"
+as "$PLAN_TOKEN" POST $P7TK/checklist "{\"taskId\":$P7TKA,\"action\":\"toggle\",\"itemId\":$P7TKACHK}"; check "p7a tasks: a checklist item is ticked" '.success and .data.checklist[0].done == true'
+as "$PLAN_TOKEN" POST $P7TK/checklist "{\"taskId\":$P7TKA,\"action\":\"toggle\",\"itemId\":$P7TKACHK2}"; check "p7a tasks: the second item is ticked" '.success and ([.data.checklist[]|select(.done)]|length) == 2'
+as "$PLAN_TOKEN" POST $P7TK/transfer "{\"taskId\":$P7TKA,\"assigneeId\":0,\"toUserId\":$ADM_UID}"; no "p7a tasks: a transfer without a reason / a valid referral is refused"
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKA"; P7TKREF=$(val '.data.assignees[0].id')
+as "$PLAN_TOKEN" POST $P7TK/transfer "{\"taskId\":$P7TKA,\"assigneeId\":$P7TKREF,\"toUserId\":$ADM_UID,\"reason\":\"تخصص لازم نزد مدیر است\"}"
+check "p7a tasks: transfer ends the old referral (transferred, with the reason) and adds a new one that points at it" '.success and ([.data.assignees[]|select(.state == 3)]|length) == 1 and ([.data.assignees[]|select(.parentId != null and .reason == "تخصص لازم نزد مدیر است")]|length) == 1'
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKA"; check "p7a tasks: the first referral keeps who, why and when of its creation after the transfer (immutable history)" '.success and .data.assignees[0].reason == "جهت اقدام" and .data.assignees[0].assignedByName != null and .data.assignees[0].endReason == "تخصص لازم نزد مدیر است"'
+as "$PM_TOKEN" GET "$P7TK/$P7TKA/referrals"; check "p7a tasks: the referral tree has one root with one child" '.success and (.data|length) == 1 and (.data[0].children|length) == 1'
+as "$ADMIN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"start\"}"; check "p7a tasks: the new holder starts the task" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"complete\"}"; check "p7a tasks: complete sends it to pending approval" '.success and .data.status == 2'
+as "$ADMIN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"approve\"}"; nomsg "p7a tasks: the person who reported it done cannot approve it (even as PMO)" "شخص دیگری"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"return\"}"; nomsg "p7a tasks: returning needs a reason" "دلیل"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"approve\"}"; check "p7a tasks: the creator approves: the task is closed at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
+as "$PLAN_TOKEN" GET "$P7TK/counts"; check "p7a tasks: the counts of the cartables are returned" '.success and (.data.assignedToMe|type) == "number"'
+as "$PLAN_TOKEN" GET "$P7TK/agenda?Mode=week"; check "p7a tasks: the weekly agenda has seven days" '.success and (.data|length) == 7'
+as "$PLAN_TOKEN" GET "$P7TK/board"; check "p7a tasks: the board has the seven status columns" '.success and (.data|length) == 7'
+as "$SEC_TOKEN" GET "$P7TK/$P7TKA"; no "p7a tasks: a user who is not a party and not a manager cannot open the task"
+
+# the roll-up: a task linked to an activity whose method is "tasks" moves the activity only through the approval cartable
+call POST Contracts '{"code":"P7-CT-01","title":"قرارداد آزمون بسته هفت","status":1,"employer":"کارفرمای آزمون"}'; check "p7a tasks: the test contract is created" '.success and .data.id > 0'; P7CT=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/activities "{\"contractId\":$P7CT,\"code\":\"P7-ACT\",\"title\":\"فعالیت مبتنی بر وظیفه\",\"sourceType\":7,\"durationDays\":4,\"responsibleUnit\":\"PROJECTMANAGER\",\"progressMethod\":9,\"weight\":0,\"budgetAtCompletion\":1000000,\"phase\":3}"
+check "p7a tasks: an activity with the new progress method «tasks» can be created" '.success and .data.id > 0 and .data.progressMethod == 9'; P7ACT=$(val .data.id)
+as "$WH_TOKEN" POST $P7TK "{\"title\":\"کار ناموجه\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":10}"; no "p7a tasks: a user who is not the unit manager, planning, the PMO or the project manager cannot link a task to an activity"
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"شخصی متصل\",\"kind\":4,\"activityId\":$P7ACT}"; no "p7a tasks: a personal task never links to an activity"
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"کار الف\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":10,\"assignees\":[{\"userId\":$P7WH_UID,\"role\":1}]}"; check "p7a tasks: the unit manager links a task to the activity; it takes its project from it" '.success and .data.activityId == '$P7ACT' and .data.contractId == '$P7CT; P7T1=$(val .data.id)
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"کار ب\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":30,\"assignees\":[{\"userId\":$P7WH_UID,\"role\":1}]}"; check "p7a tasks: the second task is linked" '.success and .data.activityId == '$P7ACT; P7T2=$(val .data.id)
+as "$WH_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"start\"}"; check "p7a tasks: the assignee starts the first task" '.success and .data.status == 1'
+as "$WH_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"complete\"}"; no "p7a tasks: a task linked to an activity cannot be closed before its approved percent is 100"
+as "$WH_TOKEN" POST $P7TK/progress "{\"taskId\":$P7T1,\"percent\":100}"; nomsg "p7a tasks: the percent of a task linked to an activity goes through the approval cartable" "کارتابل تایید پیشرفت"
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$P7CT&PageSize=0"; check "p7a tasks: nothing moved the activity yet (0 percent)" '.success and ([.data.data[]|select(.id == '$P7ACT')][0].percentCache // 0) == 0'
+as "$PLAN_TOKEN" GET "$P7TK/by-activity/$P7ACT"; check "p7a tasks: the activity lists its two tasks" '.success and (.data|length) == 2'
+
+# --- progress-approval cartable
+as "$PM_TOKEN" GET "$P7PA/chain/$P7CT"; check "p7a progress: a project with no chain of its own has the default one (project manager, PMO)" '.success and .data.isDefault == true and (.data.levels|length) == 2'
+as "$PM_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"برنامه‌ریزی\",\"role\":\"PLANNING\"},{\"title\":\"PMO\",\"role\":\"PMO\"}]}"; no "p7a progress: the project manager cannot set the chain (the PMO does)"
+as "$PLAN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"برنامه‌ریزی\",\"role\":\"PLANNING\"},{\"title\":\"PMO\",\"role\":\"PMO\"}]}"; no "p7a progress: planning cannot set the chain it approves in"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"فقط مدیر\",\"role\":\"PROJECTMANAGER\"}]}"; nomsg "p7a progress: the last level must be the PMO or planning" "آخرین سطح"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"},{\"role\":\"PMO\"}]}"; no "p7a progress: the same role twice in a row is refused (one person would approve both)"
+as "$WH_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"}]}"; no "p7a progress: a warehouse user cannot configure the chain"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"برنامه‌ریزی\",\"role\":\"PLANNING\"},{\"title\":\"PMO\",\"role\":\"PMO\"}]}"; check "p7a progress: the PMO configures the chain (planning, then PMO)" '.success and .data.isDefault == false and (.data.levels|length) == 2'
+# the roll-up through the cartable: the assignee reports the task at 100 percent, planning and the PMO approve
+as "$WH_TOKEN" POST $P7PA/submissions "{\"contractId\":$P7CT,\"target\":2,\"taskId\":$P7T1,\"percent\":100,\"comment\":\"کار الف تمام شد\",\"submit\":true}"; check "p7a progress: the assignee reports the task at 100 percent (in approval, level 1)" '.success and .data.state == 1 and .data.currentLevel == 1'; P7TSUB=$(val .data.id)
+as "$PM_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7TSUB,\"approve\":true}"; no "p7a progress: the project manager is not on the chain of this project and cannot decide"
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7TSUB,\"approve\":true}"; check "p7a progress: planning approves level 1" '.success and .data.state == 1 and .data.currentLevel == 2'
+as "$ADMIN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7TSUB,\"approve\":true}"; check "p7a progress: the PMO approves the last level: the task carries the approved 100 percent" '.success and .data.state == 2'
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$P7CT&PageSize=0"; check "p7a tasks: the activity percent is the weighted roll-up of the approved percents: 10 of 40 hours = 25 percent" '.success and ([.data.data[]|select(.id == '$P7ACT')][0].percentCache // 0) == 25'
+as "$WH_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"complete\"}"; check "p7a tasks: now the assignee may report the task done (pending approval)" '.success and .data.status == 2'
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"approve\"}"; check "p7a tasks: the creator approves the closing (a person other than the reporter): closed at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
+as "$PLAN_TOKEN" GET "$P7TK/$P7T2"; check "p7a tasks: the second task is untouched (zero percent)" '.success and .data.percentComplete == 0'
+as "$PLAN_TOKEN" POST $PC/activities "{\"contractId\":$P7CT,\"code\":\"P7-MAN\",\"title\":\"فعالیت با گزارش دستی\",\"sourceType\":7,\"durationDays\":4,\"responsibleUnit\":\"PROJECTMANAGER\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":1000000,\"phase\":3}"; check "p7a progress: the manual-method activity is created" '.success and .data.id > 0'; P7MAN=$(val .data.id)
+as "$PM_TOKEN" POST $P7PA/submissions "{\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"comment\":\"گزارش هفته\",\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":false}"
+check "p7a progress: a draft report is saved (draft, round 0, editable)" '.success and .data.state == 0 and .data.round == 0 and .data.canEdit == true'; P7SUB=$(val .data.id)
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"actualCost\":2000000,\"costKind\":3,\"submit\":true}"; nomsg "p7a progress: a cost without the accrual note is refused" "تعهدی"
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":true}"
+check "p7a progress: sending puts it in approval at level 1, locked for the submitter" '.success and .data.state == 1 and .data.round == 1 and .data.currentLevel == 1 and .data.locked == true and .data.canEdit == false'
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":90,\"submit\":false}"; nomsg "p7a progress: the submitter cannot change a report in approval" "قفل"
+as "$PM_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: the submitter cannot approve his own report"
+as "$ADMIN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: the PMO cannot jump over level 1 (it is planning's turn)"
+as "$PLAN_TOKEN" GET "$P7PA/submissions?Cartable=waiting"; check "p7a progress: the report is in the waiting cartable of planning" '.success and ([.data.data[]|select(.id == '$P7SUB')]|length) == 1'
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":false}"; nomsg "p7a progress: a rejection needs a reason" "دلیل"
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":false,\"note\":\"درصد با گزارش روزانه نمی‌خواند\"}"; check "p7a progress: rejection returns the report with the reason" '.success and .data.state == 3 and .data.resultNote == "درصد با گزارش روزانه نمی‌خواند"'
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":35,\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":true}"; check "p7a progress: the submitter fixes and sends again: round 2, level 1" '.success and .data.state == 1 and .data.round == 2 and .data.currentLevel == 1'
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true,\"percent\":30,\"note\":\"اصلاح درصد\"}"; check "p7a progress: planning edits the percent to 30 and approves level 1: the report moves to level 2" '.success and .data.state == 1 and .data.currentLevel == 2 and .data.percent == 30'
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: planning cannot decide level 2 (the PMO)"
+as "$ADMIN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; check "p7a progress: the PMO approves the last level: the value is applied (approved, a manual progress row, a cost entry)" '.success and .data.state == 2 and .data.manualProgressId > 0 and .data.costEntryId > 0'
+as "$PM_TOKEN" GET "$P7PA/submissions/$P7SUB"; check "p7a progress: the history shows the edit with its changed value, the return and the application" '.success and ([.data.history[].action]|index("edited")) != null and ([.data.history[].action]|index("returned")) != null and ([.data.history[].action]|index("applied")) != null and (.data.history[]|select(.action=="edited").changesJson|contains("percent"))'
+as "$PLAN_TOKEN" GET "$PC/manual-progress?ActivityId=$P7MAN&PageSize=0"; check "p7a progress: the progress row went through the manual path: approved, 30 percent, proposed by planning who corrected it, decided by the PMO" '.success and ([.data.data[]|select(.state == 1 and .percent == 30)]|length) == 1'
+as "$PLAN_TOKEN" GET "$PC/costs?ContractId=$P7CT&PageSize=0"; check "p7a progress: the cost entry waits for the second finance check (needs check, not checked)" '.success and ([.data.data[]|select(.amount == 2000000 and .needsCheck == true and .checked == false)]|length) == 1'
+as "$PM_TOKEN" POST $P7PA/submissions "{\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7ACT,\"percent\":10}"; nomsg "p7a progress: an activity measured from tasks is refused (report the tasks)" "وظایف"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"}]}"; check "p7a progress: with nothing in approval the chain can be changed again" '.success'
+as "$PLAN_TOKEN" GET "$P7PA/reports/not-updated?ContractId=$P7CT&Days=0"; check "p7a progress: the not-updated report answers" '.success'
+as "$PLAN_TOKEN" GET "$P7PA/reports/overdue-updates"; check "p7a progress: the overdue-updates report answers" '.success'
+as "$WH_TOKEN" GET "$P7PA/reports/not-updated"; no "p7a progress: a warehouse user cannot read the not-updated report"
+
+# --- PMBOK registers
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"تاخیر در تحویل ورق\",\"probability\":4,\"impact\":5,\"cause\":\"تحریم\",\"event\":\"دیرکرد\",\"effect\":\"تاخیر در ساخت\"}"
+check "p7a risk: the score is probability x impact (20), level critical or high from the settings, status assessed" '.success and .data.score == 20 and .data.level == "critical" and .data.status == 1 and (.data.number|startswith("RK"))'; P7RK=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":6,\"impact\":2}"; nomsg "p7a risk: a probability above 5 is refused" "۱ و ۵"
+as "$WH_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":1,\"impact\":1}"; no "p7a risk: a warehouse user cannot write the register"
+as "$PLAN_TOKEN" GET "$P7RG/risks/heat-map/$P7CT"; check "p7a risk: the heat map has 25 cells and the risk sits in probability 4 x impact 5" '.success and (.data.cells|length) == 25 and ([.data.cells[]|select(.probability == 4 and .impact == 5)][0].count) == 1'
+as "$PLAN_TOKEN" POST $P7TK "{\"title\":\"اقدام پیشگیرانه ورق\",\"kind\":2,\"contractId\":$P7CT,\"riskId\":$P7RK}"; check "p7a risk: an action is a task linked to the risk" '.success and .data.riskId == '$P7RK; P7RKT=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/risks/status "{\"id\":$P7RK,\"status\":4,\"note\":\"برطرف شد\"}"; nomsg "p7a risk: a risk with an open action cannot be closed" "اقدام"
+as "$PLAN_TOKEN" POST $P7RG/issues "{\"contractId\":$P7CT,\"title\":\"کمبود جرثقیل\",\"priority\":2,\"category\":\"تجهیزات\"}"; check "p7a issue: an issue is logged open" '.success and .data.status == 0 and (.data.number|startswith("IS"))'; P7IS=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"resolve\"}"; nomsg "p7a issue: resolving needs the resolution text" "راه‌حل"
+as "$PLAN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"resolve\",\"note\":\"جرثقیل استیجاری آمد\"}"; check "p7a issue: resolved" '.success and .data.status == 2'
+as "$PLAN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"close\"}"; nomsg "p7a issue: the resolver cannot close it" "شخص دیگری"
+as "$ADMIN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"close\"}"; check "p7a issue: another person closes it" '.success and .data.status == 3'
+as "$PLAN_TOKEN" POST $P7RG/stakeholders "{\"contractId\":$P7CT,\"name\":\"سازمان کارفرما\",\"organization\":\"کارفرما\",\"roleTitle\":\"مدیر پروژه کارفرما\",\"influence\":5,\"interest\":5,\"engagementCurrent\":3,\"engagementDesired\":4}"; check "p7a stakeholder: saved in the manage-closely quadrant with an engagement gap of one" '.success and .data.quadrant == "manage-closely" and .data.engagementGap == 1'
+as "$PLAN_TOKEN" GET "$P7RG/stakeholders/matrix/$P7CT"; check "p7a stakeholder: the matrix lists it under manage-closely" '.success and (.data.manageClosely|length) == 1'
+as "$PLAN_TOKEN" GET "$P7RG/stakeholders/$P7CT"; check "p7a stakeholder: the register carries no phone number or address field" '.success and ([.data[0]|keys[]|select(test("phone|mobile|address";"i"))]|length) == 0'
+as "$PLAN_TOKEN" POST $P7RG/lessons "{\"contractId\":$P7CT,\"phase\":3,\"category\":\"تدارکات\",\"whatHappened\":\"تاخیر در سفارش\",\"recommendation\":\"سفارش زودتر\",\"submit\":true}"; check "p7a lessons: a lesson is saved and sent" '.success and .data.id > 0'; P7LL=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/lessons/decide "{\"id\":$P7LL,\"approve\":true}"; no "p7a lessons: only the PMO approves a lesson"
+as "$ADMIN_TOKEN" POST $P7RG/lessons/decide "{\"id\":$P7LL,\"approve\":true}"; check "p7a lessons: the PMO approves (not the author)" '.success and .data.state == 2'
+as "$PLAN_TOKEN" POST $P7RG/deliverables "{\"contractId\":$P7CT,\"code\":\"d-01\",\"title\":\"نقشه اجرایی پمپ\"}"; check "p7a deliverables: saved with an upper-case code" '.success and .data.code == "D-01" and .data.status == 0'; P7DL=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/deliverables/action "{\"id\":$P7DL,\"action\":\"deliver\"}"; check "p7a deliverables: delivered" '.success and .data.status == 2'; as "$PLAN_TOKEN" POST $P7RG/deliverables/action "{\"id\":$P7DL,\"action\":\"accept\"}"; no "p7a deliverables: the one who delivered cannot accept"
+as "$ADMIN_TOKEN" POST $P7RG/deliverables/action "{\"id\":$P7DL,\"action\":\"accept\"}"; check "p7a deliverables: the PMO accepts" '.success and .data.status == 3'
+as "$ADMIN_TOKEN" GET "$P7RG/evaluations/template?kind=1"; check "p7a evaluation: the contractor questionnaire has criteria with weights summing to 100" '.success and ([.data.criteria[].weight]|add) == 100'
+call POST Provider "{\"name\":\"پیمانکار آزمون بسته هفت\",\"categoryId\":${CAT:-0}}"; P7PRV=$(jq -r '.data.id // empty' "$B")
+as "$ADMIN_TOKEN" POST $P7RG/evaluations "{\"contractId\":$P7CT,\"partyKind\":1,\"partyName\":\"پیمانکار آزمون\",\"submit\":true,\"scores\":[{\"criterion\":\"کیفیت\",\"weight\":50,\"score\":5}]}"; nomsg "p7a evaluation: sending without choosing a provider from the list is refused" "تامین‌کنندگان"
+as "$ADMIN_TOKEN" POST $P7RG/evaluations "{\"contractId\":$P7CT,\"partyKind\":1,\"providerId\":$P7PRV,\"partyName\":\"پیمانکار آزمون\",\"scores\":[{\"criterion\":\"کیفیت\",\"weight\":50,\"score\":5},{\"criterion\":\"زمان\",\"weight\":50,\"score\":3}],\"submit\":true}"; check "p7a evaluation: the weighted score is 80 and a grade is set" '.success and .data.totalScore == 80 and (.data.grade|length) == 1 and .data.state == 1'; P7EV=$(val .data.id)
+as "$ADMIN_TOKEN" POST $P7RG/evaluations/decide "{\"id\":$P7EV,\"approve\":true}"; no "p7a evaluation: the evaluator cannot approve his own evaluation"
+as "$ADMIN_TOKEN" POST $P7RG/weekly/generate "{\"contractId\":$P7CT}"; check "p7a weekly: the report is generated from the registers (draft, numbered WR)" '.success and .data.state == 0 and (.data.number|startswith("WR")) and .data.auto.openRisks == 1'; P7WK=$(val .data.id)
+as "$ADMIN_TOKEN" POST $P7RG/weekly/$P7WK/release; nomsg "p7a weekly: the release needs the summary" "خلاصه"
+as "$PLAN_TOKEN" POST $P7RG/weekly "{\"id\":$P7WK,\"summary\":\"هفته عادی\",\"nextWeekPlan\":\"ادامه کار\"}"; check "p7a weekly: the summary is edited" '.success and .data.summary == "هفته عادی"'
+as "$PLAN_TOKEN" POST $P7RG/weekly/$P7WK/release; no "p7a weekly: planning cannot release (the PMO does)"
+as "$ADMIN_TOKEN" POST $P7RG/weekly/$P7WK/release; check "p7a weekly: the PMO releases it" '.success and .data.state == 1'
+as "$PLAN_TOKEN" POST $P7RG/weekly "{\"id\":$P7WK,\"summary\":\"تغییر بعد از انتشار\"}"; no "p7a weekly: a released report is read only"
+as "$PLAN_TOKEN" POST $P7RG/phase-evaluations "{\"contractId\":$P7CT,\"phase\":3,\"scheduleScore\":4,\"costScore\":3,\"qualityScore\":5,\"scopeScore\":4,\"achievements\":\"پیشرفت خوب\",\"decision\":2,\"submit\":true}"; check "p7a phase: the overall score is the mean of the four (4.00)" '.success and .data.overallScore == 4 and .data.state == 1'; P7PH=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/phase-evaluations/decide "{\"id\":$P7PH,\"approve\":true}"; no "p7a phase: only the PMO approves a phase evaluation"
+as "$ADMIN_TOKEN" POST $P7RG/phase-evaluations/decide "{\"id\":$P7PH,\"approve\":true}"; check "p7a phase: the PMO approves" '.success and .data.state == 2'
+as "$PLAN_TOKEN" POST $P7RG/photos "{\"contractId\":$P7CT,\"caption\":\"عکس پیشرفت\",\"takenDate\":\"$(dd 0)T00:00:00\"}"; check "p7a photos: the photo row is created first (no file field; the file goes through the attachment panel, owner type 26)" '.success and .data.id > 0 and .data.documentId == null and .data.attachmentCount == 0'; P7PH1=$(val .data.id)
+printf '%%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%%%EOF\n' > "$OUT/p7-photo.pdf"
+TOKEN=$PLAN_TOKEN; attach 26 $P7PH1 3 "عکس پیشرفت" A "$OUT/p7-photo.pdf"; TOKEN=$ADMIN_TOKEN; check "p7a photos: the file is attached through the generic panel to the photo (owner type 26)" '.success and .data.id > 0'
+as "$PLAN_TOKEN" GET "$P7RG/photos?ContractId=$P7CT&PageSize=0"; check "p7a photos: the register now shows the document and one attachment" '.success and ([.data.data[]|select(.id == '$P7PH1' and .attachmentCount == 1 and .documentId != null)]|length) == 1'
+# the files of a task go through the same panel: the assignee uploads, a stranger cannot
+TOKEN=$WH_TOKEN; attach 24 $P7T2 3 "برگه کار" A "$OUT/p7-photo.pdf"; TOKEN=$ADMIN_TOKEN; check "p7a tasks: the assignee attaches a file to his task through the generic panel (owner type 24)" '.success and .data.id > 0'
+TOKEN=$SEC_TOKEN; attach 24 $P7T2 3 "فایل غریبه" A "$OUT/p7-photo.pdf"; TOKEN=$ADMIN_TOKEN; check "p7a tasks: somebody who is not a party of the task cannot attach to it" '.success == false'
+as "$PM_TOKEN" GET "$P7TK/$P7T2"; check "p7a tasks: the task shows one attachment" '.success and .data.attachmentCount == 1'
+as "$PLAN_TOKEN" GET "$P7RG/one-page/$P7CT"; check "p7a one-page: the project dashboard carries the registers (risks, deliverables, tasks, an S-curve array)" '.success and .data.risksOpen == 1 and .data.deliverablesTotal == 1 and .data.deliverablesAccepted == 1 and (.data.sCurve|type) == "array" and (.data.topRisks|length) == 1'
+as "$WH_TOKEN" GET "$P7RG/one-page/$P7CT"; no "p7a one-page: a warehouse user cannot read it"
+
+# --- the extended daily site report: children, confirmer is not the author
+DJ="{\"contractId\":$P7CT,\"unit\":\"ALL\",\"reportDate\":\"$(dd 0)T00:00:00\",\"weather\":\"آفتابی\",\"notes\":\"روز عادی\",\"lines\":[],\"manpower\":[{\"kind\":1,\"title\":\"جوشکار\",\"count\":5,\"present\":4,\"absent\":1},{\"kind\":2,\"title\":\"شرکت پیمانکار آزمون\",\"activityType\":\"داربست\",\"personDays\":6}],\"materials\":[{\"description\":\"ورق ۱۰ میلی‌متر\",\"unit\":\"kg\",\"quantity\":120}],\"machinery\":[{\"name\":\"جرثقیل\",\"ownership\":2,\"present\":1,\"active\":1,\"hours\":6}],\"obstacles\":[{\"category\":\"هوا\",\"description\":\"باد شدید\",\"impactHours\":2}],\"hseEvents\":[{\"kind\":1,\"description\":\"سقوط ابزار بدون آسیب\",\"personsInvolved\":0}]}"
+as "$PLAN_TOKEN" POST $PC/daily-report "$DJ"; check "p7a daily: the report keeps manpower (2), materials (1), machinery (1), obstacles (1) and HSE (1) rows and the weather" '.success and (.data.manpower|length) == 2 and (.data.materials|length) == 1 and (.data.machinery|length) == 1 and (.data.obstacles|length) == 1 and (.data.hseEvents|length) == 1 and .data.weather == "آفتابی"'; P7DR=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/daily-report "$(echo "$DJ" | jq -c '.machinery[0].active = 3')"; nomsg "p7a daily: more active machines than present is refused" "فعال"
+as "$PLAN_TOKEN" POST $PC/daily-report "$(echo "$DJ" | jq -c '.hseEvents[0].description = ""')"; no "p7a daily: an HSE row without a description is refused"
+as "$PLAN_TOKEN" POST $PC/daily-report/$P7DR/confirm; nomsg "p7a daily: the author cannot confirm his own report" "شخص دیگری"
+as "$ADMIN_TOKEN" POST $PC/daily-report "$DJ"; as "$ADMIN_TOKEN" POST $PC/daily-report/$P7DR/confirm; nomsg "p7a daily: a person who edited it cannot confirm it either" "شخص دیگری"
+as "$PM_TOKEN" POST $PC/daily-report/$P7DR/confirm; check "p7a daily: a third person (project manager) confirms it" '.success and .data.state == 1 and .data.confirmedByName != null'
+as "$PLAN_TOKEN" POST $PC/daily-report "$DJ"; no "p7a daily: a confirmed report cannot be changed"
+as "$PLAN_TOKEN" GET "$PC/daily-reports?ContractId=$P7CT"; check "p7a daily: the list of the project's reports has the confirmed one" '.success and ([.data.data[]|select(.id == '$P7DR' and .state == 1)]|length) == 1'
+as "$PLAN_TOKEN" GET "$PC/daily-report/$P7DR"; check "p7a daily: one report by id returns its rows" '.success and (.data.manpower|length) == 2 and .data.canConfirm == false'
+
+# --- notifications: the unified inbox carries the assignment, and the gateway is off by default
+as "$ADMIN_TOKEN" GET "$P7TK?Cartable=mine&PageSize=0"; [ "$CODE" = "200" ] && ok "p7a notifications: the task list answers for the PMO" || bad "p7a notifications: the task list answers for the PMO"
+as "$ADMIN_TOKEN" POST $P7TK/reminders/run; check "p7a notifications: the reminder job runs without an external call (counts only)" '.success and (.data.reminders|type) == "number"'
+as "$PLAN_TOKEN" POST $P7TK/reminders/run; r403 "p7a notifications: only the PMO or the CEO runs the reminders by hand (403)"
+TOKEN=$ADMIN_TOKEN
+
 finished=1
 echo "--- inventory: $pass passed, $fail failed" | tee -a "$R"
 rm -f "$B"

@@ -141,6 +141,8 @@ namespace Services.Services
             ["PcContractTerms"] = "شرایط قرارداد (کنترل پروژه)",
             ["PcEngineeringDeliverable"] = "مدرک مهندسی پروژه",
             ["PcGuaranteeEvent"] = "رویداد ضمانت‌نامه",
+            ["PcProgressSubmission"] = "گزارش پیشرفت (کارتابل تایید پیشرفت)",
+            ["PcProjectPhoto"] = "تصویر پروژه",
             ["PcShipment"] = "محموله",
             ["PcVariationOrder"] = "دستور تغییر (سند پذیرش کارفرما)",
             ["Pqr"] = "گزارش PQR",

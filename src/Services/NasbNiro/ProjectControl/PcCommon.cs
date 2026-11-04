@@ -92,6 +92,30 @@ namespace Services.NasbNiro.ProjectControl
         /// <summary>1 = the delay penalty is counted over the whole contract, 2 = per work order (H5); the default of a new contract.</summary>
         public const string PenaltyBasisDefault = "PenaltyBasisDefault";
 
+        // P-B7a (tasks, progress approval, registers, notification gateway)
+        /// <summary>Days before the due date at which a task reminds its assignees when the task names no offsets of its own.</summary>
+        public const string TaskReminderDays = "TaskReminderDays";
+        /// <summary>An overdue task is also shown to its creator after this many days.</summary>
+        public const string TaskOverdueEscalateDays = "TaskOverdueEscalateDays";
+        /// <summary>An assigned activity or task with no progress report for this many days is listed as not updated.</summary>
+        public const string ProgressStaleDays = "ProgressStaleDays";
+        /// <summary>A progress report waiting at one approval level for more days than this is listed as an overdue update.</summary>
+        public const string ProgressApprovalSlaDays = "ProgressApprovalSlaDays";
+        /// <summary>Score (probability x impact) from which a risk is high / critical.</summary>
+        public const string RiskHighScore = "RiskHighScore";
+        public const string RiskCriticalScore = "RiskCriticalScore";
+        /// <summary>Days between two reviews of a risk (the default review date of a new risk).</summary>
+        public const string RiskReviewDays = "RiskReviewDays";
+        /// <summary>Grade limits of the contractor / consultant evaluation (weighted score out of 100).</summary>
+        public const string GradeA = "EvaluationGradeA";
+        public const string GradeB = "EvaluationGradeB";
+        public const string GradeC = "EvaluationGradeC";
+        /// <summary>Decision D9: SMS / e-mail through an offline gateway (GSM modem, internal mail server). Off by default; the in-app inbox is always on.</summary>
+        public const string NotifySmsEnabled = "NotifySmsEnabled";
+        public const string NotifyEmailEnabled = "NotifyEmailEnabled";
+        /// <summary>The lowest priority sent through the gateway: 0 normal, 1 urgent, 2 immediate.</summary>
+        public const string NotifyMinPriority = "NotifyMinPriority";
+
         public static IEnumerable<PcSetting> Defaults()
         {
             yield return new PcSetting { Key = AmberThreshold, Value = 0.95m, Title = "آستانه هشدار زرد برای SPI و CPI", Source = "★ تصمیم موقت" };
@@ -121,6 +145,19 @@ namespace Services.NasbNiro.ProjectControl
             yield return new PcSetting { Key = WarrantyMonthsAfterCommissioning, Value = 12, Title = "ضمانت: ماه پس از راه‌اندازی (پیش‌فرض قرارداد جدید)", Source = "★ تصمیم موقت؛ با متن هر قرارداد تطبیق داده شود" };
             yield return new PcSetting { Key = WarrantyMonthsAfterDelivery, Value = 18, Title = "ضمانت: ماه پس از تحویل (پیش‌فرض قرارداد جدید)", Source = "★ تصمیم موقت؛ با متن هر قرارداد تطبیق داده شود" };
             yield return new PcSetting { Key = PenaltyBasisDefault, Value = 1, Title = "مبنای جریمه تاخیر قرارداد جدید: ۱ کل قرارداد، ۲ هر دستور کار", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = TaskReminderDays, Value = 2, Title = "یادآوری وظیفه: چند روز پیش از مهلت (وقتی وظیفه خودش مقدار نداشته باشد)", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = TaskOverdueEscalateDays, Value = 3, Title = "وظیفه معوق پس از این تعداد روز به ثبت‌کننده هم نمایش داده می‌شود", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = ProgressStaleDays, Value = 7, Title = "فعالیت یا وظیفه بدون گزارش پیشرفت بیش از این تعداد روز «به‌روزنشده» است", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = ProgressApprovalSlaDays, Value = 3, Title = "مهلت تصمیم هر سطح کارتابل تایید پیشرفت (روز)", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = RiskHighScore, Value = 10, Title = "امتیاز ریسک از این مقدار «زیاد» است (احتمال × اثر)", Source = "★ تصمیم موقت (PMBOK)" };
+            yield return new PcSetting { Key = RiskCriticalScore, Value = 17, Title = "امتیاز ریسک از این مقدار «بحرانی» است (احتمال × اثر)", Source = "★ تصمیم موقت (PMBOK)" };
+            yield return new PcSetting { Key = RiskReviewDays, Value = 30, Title = "فاصله بازنگری ریسک (روز)", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = GradeA, Value = 85, Title = "حد نمره درجه A ارزیابی پیمانکار و مشاور (از ۱۰۰)", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = GradeB, Value = 70, Title = "حد نمره درجه B ارزیابی پیمانکار و مشاور (از ۱۰۰)", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = GradeC, Value = 55, Title = "حد نمره درجه C ارزیابی پیمانکار و مشاور (از ۱۰۰)", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = NotifySmsEnabled, Value = 0, Title = "ارسال پیامک اطلاع‌رسانی از طریق درگاه آفلاین (۰ خاموش، ۱ روشن)", Source = "★ تصمیم D9: پیش‌فرض خاموش؛ صندوق درون‌برنامه‌ای همیشه روشن است" };
+            yield return new PcSetting { Key = NotifyEmailEnabled, Value = 0, Title = "ارسال ایمیل اطلاع‌رسانی از طریق سرور ایمیل داخلی (۰ خاموش، ۱ روشن)", Source = "★ تصمیم D9: پیش‌فرض خاموش؛ صندوق درون‌برنامه‌ای همیشه روشن است" };
+            yield return new PcSetting { Key = NotifyMinPriority, Value = 1, Title = "کمترین اولویتی که از درگاه ارسال می‌شود (۰ عادی، ۱ فوری، ۲ آنی)", Source = "★ تصمیم D9" };
         }
 
         /// <summary>R1c: the range a value of the setting may take when the PMO saves it (percentages 0..100, the hour of the day 0..23, day and month counts are whole numbers).</summary>
@@ -133,6 +170,10 @@ namespace Services.NasbNiro.ProjectControl
                 case EngFirstIssue: case EngSecondIssue: case EngApproved: case SupplyTemporary: case SupplyAccepted: case SupplyRework: case SupplyReject:
                 case RescheduleDelayPercent: case VoCeoThresholdPercent: return (0m, 100m, false);
                 case PenaltyBasisDefault: return (1m, 2m, true);
+                case NotifySmsEnabled: case NotifyEmailEnabled: return (0m, 1m, true);
+                case NotifyMinPriority: return (0m, 2m, true);
+                case RiskHighScore: case RiskCriticalScore: return (1m, 25m, true);
+                case GradeA: case GradeB: case GradeC: return (0m, 100m, false);
                 case WarrantyMonthsAfterCommissioning: case WarrantyMonthsAfterDelivery: return (0m, 120m, true);
                 default: return (0m, 3650m, true);
             }

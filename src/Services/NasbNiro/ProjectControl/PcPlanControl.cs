@@ -106,7 +106,7 @@ namespace Services.NasbNiro.ProjectControl
                     if (s.DurationDays < 0 || s.DurationDays > MaxDuration) return at + "مدت فعالیت باید بین ۰ و ۳۶۵۰ روز کاری باشد.";
                     if (s.BudgetAtCompletion < 0m) return at + "بودجه منفی نیست.";
                     if (s.Weight < 0m || s.Weight > 100m) return at + "وزن باید بین ۰ و ۱۰۰ باشد.";
-                    if (s.ProgressMethod != PcProgressMethod.Manual && s.ProgressMethod != PcProgressMethod.Contractor) return at + "فعالیت جدید با روش پیشرفت «دستی» یا «پیمانکار» افزوده می‌شود؛ روش‌های دیگر پس از تایید با اتصال به رویدادهای سیستم تنظیم می‌شوند.";
+                    if (s.ProgressMethod != PcProgressMethod.Manual && s.ProgressMethod != PcProgressMethod.Contractor && s.ProgressMethod != PcProgressMethod.Tasks) return at + "فعالیت جدید با روش پیشرفت «دستی»، «پیمانکار» یا «وظایف» افزوده می‌شود؛ روش‌های دیگر پس از تایید با اتصال به رویدادهای سیستم تنظیم می‌شوند.";
                     if (s.WbsNodeId.HasValue && !wbsNodeIds.Contains(s.WbsNodeId.Value)) return at + "گره WBS متعلق به این قرارداد نیست.";
                     if (s.WorkOrderId.HasValue && !workOrderIds.Contains(s.WorkOrderId.Value)) return at + "دستور کار متعلق به این قرارداد نیست.";
                     if (s.CalendarId.HasValue && !calendarIds.Contains(s.CalendarId.Value)) return at + "تقویم پیدا نشد.";
