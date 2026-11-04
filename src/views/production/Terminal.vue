@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ShopDocuments from "@/components/pc/edms/ShopDocuments.vue";
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
@@ -222,6 +223,7 @@ onBeforeUnmount(() => {
             </template>
           </template>
         </div>
+        <ShopDocuments :order-id="op.orderId" :operation-id="op.id" />
         <AttachmentPanel :owner-type="AttachmentOwner.ProductionOperation" :owner-id="op.id" title="عکس و برگه اندازه‌گیری" collapsed />
       </div>
     </div>

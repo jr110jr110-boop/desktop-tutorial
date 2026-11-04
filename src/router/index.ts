@@ -5,7 +5,7 @@ import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
-import { AccountRoles, AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -573,6 +573,11 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/variations", name: "ProjectControlVariations", component: () => import("@/views/projectControl/Commercial.vue"), props: { tab: "variations" }, meta: { roles: ProjectControlRoles.variations } },
   { path: "/project-control/mdr", name: "ProjectControlMdr", component: () => import("@/views/projectControl/Mdr.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/mdl", name: "ProjectControlMdl", component: () => import("@/views/projectControl/Mdr.vue"), props: { mdl: true }, meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/edms", name: "ProjectControlEdms", component: () => import("@/views/projectControl/Edms.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/commitments", name: "ProjectControlCommitments", component: () => import("@/views/projectControl/Commitments.vue"), meta: { roles: ProjectControlRoles.forecast } },
+  { path: "/project-control/delay-causes", name: "ProjectControlDelayCauses", component: () => import("@/views/projectControl/DelayCauses.vue"), meta: { roles: ProjectControlRoles.forecast } },
+  { path: "/dashboards", name: "Dashboards", component: () => import("@/views/dashboards/Dashboards.vue"), meta: { roles: DashboardRoles.any } },
+  { path: "/dashboards/:key", name: "DashboardsKey", component: () => import("@/views/dashboards/Dashboards.vue"), props: true, meta: { roles: DashboardRoles.any } },
   { path: "/project-control/transmittals", name: "ProjectControlTransmittals", component: () => import("@/views/projectControl/Transmittals.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/mdr-templates", name: "ProjectControlMdrTemplates", component: () => import("@/views/projectControl/DocSetup.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/final-books", name: "ProjectControlFinalBooks", component: () => import("@/views/projectControl/FinalBooks.vue"), meta: { roles: ProjectControlRoles.readers } },

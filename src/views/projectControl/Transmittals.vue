@@ -6,6 +6,7 @@ import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import JDate from "@/components/pc/JDate.vue";
 import { getDeliverables, getResponseCodes, getTransmittal, getTransmittals, recordTransmittalResponse, saveTransmittal } from "@/api/ProjectControlAPIs";
+import { getDocHistory } from "@/api/EdmsAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, today } from "@/composables/inventory";
 import TransmittalPrint from "@/components/pc/print/TransmittalPrint.vue";
@@ -37,10 +38,28 @@ async function openNew() {
   codes.value = Array.isArray(c) ? c : [];
   form.value = { contractId: pcContractId.value, direction: 1, transmittalDate: today(), reference: "", note: "", picked: {} as Record<number, any> };
 }
-const pickedLines = computed(() => (form.value ? docs.value.filter((d) => form.value.picked[d.id]).map((d) => ({ deliverableId: d.id, revision: form.value.picked[d.id].revision || d.revision || "A", purpose: form.value.picked[d.id].purpose || 1 })) : []));
-function toggle(d: any, on: boolean) {
-  if (on) form.value.picked[d.id] = { revision: d.revision || "A", purpose: 1 };
-  else delete form.value.picked[d.id];
+// A document that has revisions is sent by revision (released; for information also approved / under review), not by free text (E7).
+const revOptions = ref<Record<number, any[]>>({});
+const statusText: Record<number, string> = { 2: "در حال بررسی", 3: "تاییدشده", 4: "منتشرشده" };
+const incoming = ref<any[]>([]);
+const pickedLines = computed(() => {
+  if (!form.value) return [];
+  const own = docs.value.filter((d) => form.value.picked[d.id]).map((d) => {
+    const p = form.value.picked[d.id];
+    const r = (revOptions.value[d.id] || []).find((x) => x.id === p.revisionId);
+    return { deliverableId: d.id, revisionId: p.revisionId || null, revision: r?.code || p.revision || d.revision || "A", purpose: p.purpose || 1 };
+  });
+  const added = form.value.direction === 2 ? incoming.value.filter((n) => n.documentNumber && n.title).map((n) => ({ deliverableId: 0, revision: n.revision || "0", purpose: 1, newDocument: { documentNumber: n.documentNumber, title: n.title, discipline: n.discipline, documentType: n.documentType, revision: n.revision } })) : [];
+  return [...own, ...added];
+});
+async function toggle(d: any, on: boolean) {
+  if (!on) { delete form.value.picked[d.id]; return; }
+  form.value.picked[d.id] = { revision: d.revision || "A", purpose: 1, revisionId: null };
+  const [h] = await getDocHistory(d.id);
+  const list = (h?.revisions || []).filter((r: any) => [2, 3, 4].includes(r.status));
+  revOptions.value[d.id] = list;
+  const released = list.find((r: any) => r.status === 4);
+  if (form.value.picked[d.id]) form.value.picked[d.id].revisionId = released?.id ?? list[0]?.id ?? null;
 }
 async function save() {
   busy.value = true;
@@ -50,6 +69,7 @@ async function save() {
   if (e) return fail(e);
   ok("ترنسمیتال " + t.number + " ثبت شد.");
   form.value = null;
+  incoming.value = [];
   load();
 }
 async function show(id: number) {
@@ -151,11 +171,16 @@ watch(pcContractId, load);
               <tr v-for="d in docs" :key="d.id">
                 <td><input :checked="!!form.picked[d.id]" type="checkbox" class="form-check-input" @change="toggle(d, ($event.target as HTMLInputElement).checked)" /></td>
                 <td class="inv-ltr">{{ d.documentNumber }}</td><td>{{ d.title }}</td><td>{{ d.clientResponseCode || "—" }}</td>
-                <td><input v-if="form.picked[d.id]" v-model="form.picked[d.id].revision" class="form-control form-control-sm inv-ltr" style="width: 70px" /></td>
+                <td><template v-if="form.picked[d.id]"><select v-if="(revOptions[d.id] || []).length" v-model.number="form.picked[d.id].revisionId" class="form-select form-select-sm inv-ltr" style="width: 150px"><option v-for="r in revOptions[d.id]" :key="r.id" :value="r.id">{{ r.code }} — {{ statusText[r.status] }}</option></select><input v-else v-model="form.picked[d.id].revision" class="form-control form-control-sm inv-ltr" style="width: 70px" /></template></td>
                 <td><select v-if="form.picked[d.id]" v-model.number="form.picked[d.id].purpose" class="form-select form-select-sm"><option v-for="(n, k) in transmittalPurposes" :key="k" :value="Number(k)">{{ n }}</option></select></td>
               </tr>
             </tbody>
           </table>
+        </div>
+        <div v-if="form.direction === 2" class="border rounded p-2 mb-2">
+          <div class="small mb-1">سند دریافتی جدید از کارفرما (ردیف MDL هنگام ثبت ساخته می‌شود):</div>
+          <div v-for="(n, i) in incoming" :key="i" class="d-flex gap-1 mb-1"><input v-model="n.documentNumber" class="form-control form-control-sm inv-ltr" placeholder="شماره سند" /><input v-model="n.title" class="form-control form-control-sm" placeholder="عنوان" /><input v-model="n.discipline" class="form-control form-control-sm" placeholder="رشته" style="max-width: 110px" /><input v-model="n.revision" class="form-control form-control-sm inv-ltr" placeholder="Rev" style="max-width: 70px" /><button class="btn btn-sm btn-outline-danger" @click="incoming.splice(i, 1)">حذف</button></div>
+          <button class="btn btn-sm btn-outline-secondary" @click="incoming.push({ documentNumber: '', title: '', discipline: '', documentType: '', revision: '0' })">افزودن سند دریافتی</button>
         </div>
         <p class="small inv-muted">مهلت پاسخ از «روزهای بررسی کارفرما» در شرایط قرارداد محاسبه می‌شود. فقط اسناد MDL در ترنسمیتال ارسالی می‌آیند.</p>
         <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-secondary" @click="form = null">انصراف</button><button :disabled="busy || !pickedLines.length" class="btn btn-sm btn-primary" @click="save">ثبت ترنسمیتال ({{ pickedLines.length }} سند)</button></div>

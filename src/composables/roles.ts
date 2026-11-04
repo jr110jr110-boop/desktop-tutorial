@@ -478,6 +478,14 @@ export const ProjectControlRoles = {
   claimSettle: list("COMMERCIAL,PMO,CEO"),
   /** the design and manufacturing approval of a claim: the engineering manager or the project manager (approve-design); the PMO deputy approves for the PMO side only */
   claimDesign: list("ENGINEERING,PROJECTMANAGER"),
+  /** EDMS (P-B7b): the PMO edits the approver matrix; DCC and PMO edit the distribution lists and cancel somebody else's check-out */
+  edmsMatrix: list("PMO"),
+  edmsManagers: list("DCC,PMO"),
+  edmsShop: list("PRODUCTIONMANAGER,SHOPSUPERVISOR,OPERATOR,MAINTENANCE,ASSEMBLER,CONSTRUCTION,QC,QA,PLANNING,PROJECTMANAGER,WAREHOUSE,WHSUPERVISOR,SECURITY,PMO,DCC,ENGINEERING,ENGINEER"),
+  tenderWriters: list("COMMERCIAL,ENGINEERING,ENGINEER,DCC,PMO"),
+  tenderReaders: list("COMMERCIAL,ENGINEERING,ENGINEER,DCC,PMO,CEO,PROJECTMANAGER,PLANNING"),
+  /** commitments forecast, delay causes (R14, R18, R19) */
+  forecast: list("PMO,CEO,PROJECTMANAGER,PLANNING,FINANCIAL,FINANCEMANAGER,TREASURY,COMMERCIAL,AUDITOR"),
   /** release of a guarantee (guarantees/release): the money side signs it too, so FINANCEMANAGER is on the list */
   guaranteeRelease: list("COMMERCIAL,FINANCEMANAGER,PMO"),
 };
@@ -505,4 +513,9 @@ export const TraceRoles = {
   prices: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR"),
   /** rebuild and backfill of the genealogy links */
   admin: list("PMO,PLANNING,WHSUPERVISOR,QA"),
+};
+
+/** Management dashboards (P-B7b): the API lists the dashboards of the role (api/v1/dashboards); this list only shows the menu entry. */
+export const DashboardRoles = {
+  any: list("PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR,WAREHOUSE,WHSUPERVISOR,QC,QA,ENGINEERING,PRODUCTIONMANAGER,SHOPSUPERVISOR,HR,HRMANAGER"),
 };

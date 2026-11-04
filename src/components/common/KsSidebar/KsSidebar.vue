@@ -300,7 +300,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
@@ -495,6 +495,10 @@ const links = {
     { title: "دستور تغییر", routeName: "ProjectControlVariations", disabled: !hasRole(ProjectControlRoles.variations) },
     { title: "فهرست مدارک (MDR)", routeName: "ProjectControlMdr", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "مدارک کارفرما (MDL)", routeName: "ProjectControlMdl", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "کنترل مدارک مهندسی (EDMS)", routeName: "ProjectControlEdms", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "داشبوردهای مدیریتی", routeName: "Dashboards", disabled: !hasRole(DashboardRoles.any) },
+    { title: "پیش‌بینی تعهدات", routeName: "ProjectControlCommitments", disabled: !hasRole(ProjectControlRoles.forecast) },
+    { title: "گزارش علل تاخیر", routeName: "ProjectControlDelayCauses", disabled: !hasRole(ProjectControlRoles.forecast) },
     { title: "ترنسمیتال", routeName: "ProjectControlTransmittals", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "قالب و کد پاسخ مدارک", routeName: "ProjectControlMdrTemplates", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "کتاب نهایی", routeName: "ProjectControlFinalBooks", disabled: !hasRole(ProjectControlRoles.finalBooks) },

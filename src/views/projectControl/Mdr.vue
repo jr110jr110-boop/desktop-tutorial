@@ -8,6 +8,8 @@ import WorkOrderOfContract from "@/components/pc/WorkOrderOfContract.vue";
 import { deliverableAction, draftMdr, getDeliverables, saveDeliverable } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok } from "@/composables/inventory";
+import EdmsDocPanel from "@/components/pc/edms/EdmsDocPanel.vue";
+import { downloadMdrExcel, importMdrExcel } from "@/api/EdmsAPIs";
 import MdrPrint from "@/components/pc/print/MdrPrint.vue";
 import { contractLabel, issueStates, pcContractId, pct, usePcPrint } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
@@ -22,6 +24,23 @@ const text = ref("");
 const form = ref<any>(null);
 const rev = ref<any>(null);
 const busy = ref(false);
+const edmsId = ref<number | null>(null);
+const excelFile = ref<HTMLInputElement | null>(null);
+async function exportExcel(template = false) {
+  const m = await downloadMdrExcel(pcContractId.value as number, { clientOnly: props.mdl, workOrderId: workOrderId.value, template });
+  if (m) fail(m);
+}
+async function importExcel(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0];
+  (e.target as HTMLInputElement).value = "";
+  if (!f) return;
+  busy.value = true;
+  const [d, err] = await importMdrExcel(pcContractId.value as number, f);
+  busy.value = false;
+  if (err) return fail(err);
+  ok(`ایجاد: ${d.created} — به‌روزرسانی: ${d.updated} — ردشده: ${d.skipped}${d.errors?.length ? " — " + d.errors.slice(0, 3).join("؛ ") : ""}`);
+  load();
+}
 const { job, run } = usePcPrint();
 const canDraft = hasRole(ProjectControlRoles.mdrDraft);
 const canEdit = hasRole(ProjectControlRoles.dcc);
@@ -91,6 +110,8 @@ defineExpose({ rows });
           <input v-model="text" class="form-control form-control-sm" placeholder="شماره یا عنوان" />
           <button v-if="canDraft && !mdl" :disabled="busy || !workOrderId" class="btn btn-sm btn-outline-primary" title="دستور ساخت را انتخاب کنید" @click="draft">ساخت پیش‌نویس از قالب</button>
           <button v-if="canEdit" class="btn btn-sm btn-primary" @click="form = blank()">سند جدید</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="exportExcel()">خروجی Excel</button>
+          <template v-if="canEdit"><button class="btn btn-sm btn-outline-secondary" @click="exportExcel(true)">قالب Excel</button><button :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="excelFile?.click()">ورود از Excel</button><input ref="excelFile" type="file" accept=".xlsx" class="d-none" @change="importExcel" /></template>
         </div>
         <p class="mb-2">{{ rows.length }} سند — {{ approved }} تایید شده ({{ pct(rows.length ? (approved * 100) / rows.length : 0, 0) }})</p>
         <div class="table-responsive">
@@ -105,6 +126,7 @@ defineExpose({ rows });
                 <td class="small"><span class="inv-ltr">{{ r.lastTransmittalNumber }}</span> {{ jalali(r.lastTransmittalDate) }}</td>
                 <td v-if="mdl"><b class="inv-ltr">{{ r.clientResponseCode }}</b> {{ jalali(r.clientResponseDate) }}</td>
                 <td class="d-print-none text-nowrap">
+                  <button class="btn btn-sm btn-outline-secondary me-1" @click="edmsId = r.id">بازنگری‌ها</button>
                   <template v-if="canEdit">
                     <button v-if="!r.clientSubmittal && r.issueState === 0" class="btn btn-sm btn-outline-primary me-1" @click="rev = { r, action: 'first-issue', revision: r.revision || 'A' }">ارسال اول</button>
                     <button v-if="!r.clientSubmittal && r.issueState === 1" class="btn btn-sm btn-outline-primary me-1" @click="rev = { r, action: 'second-issue', revision: r.revision }">ارسال دوم</button>
@@ -118,6 +140,7 @@ defineExpose({ rows });
           </table>
         </div>
       </template>
+      <EdmsDocPanel v-if="edmsId" :deliverable-id="edmsId" :contract-id="pcContractId" @close="edmsId = null" @changed="load" />
     </div>
 
     <MdrPrint v-if="job?.kind === 'mdr'" :rows="job.data" :contract-id="pcContractId" :mdl="mdl" :work-order-code="woCode" />

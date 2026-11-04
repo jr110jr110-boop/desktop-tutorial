@@ -7,6 +7,7 @@ import ComponentsEditor from "@/components/production/orders/ComponentsEditor.vu
 import JobCardPrint from "@/components/production/orders/JobCardPrint.vue";
 import OperationsTable from "@/components/production/orders/OperationsTable.vue";
 import ReasonDialog from "@/components/production/orders/ReasonDialog.vue";
+import ShopDocuments from "@/components/pc/edms/ShopDocuments.vue";
 import ReleasePanel from "@/components/production/orders/ReleasePanel.vue";
 import { getProductionOrder, orderAction } from "@/api/ProductionAPIs";
 import { camelize } from "@/composables/fn";
@@ -132,6 +133,7 @@ onMounted(load);
         </div>
       </div>
 
+      <ShopDocuments :order-id="order.id" />
       <ReleasePanel v-if="order.status === 0" class="screen-only" :order="order" @changed="replace" />
       <ComponentsEditor class="screen-only" :order="order" :can-edit="order.status === 0 && isPlanner" @changed="replace" />
       <OperationsTable class="screen-only" :order="order" @changed="load" @print="printing = $event" />
