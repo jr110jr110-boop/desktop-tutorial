@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // Work queue of manufacturing steps: what is waiting for QC, in progress or rejected, across all parts.
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -101,6 +103,7 @@ onMounted(() => {
     <div v-if="qc" class="inv-modal-backdrop" @click.self="qc = null">
       <div class="inv-modal">
         <h2 class="inv-title mb-3">تصمیم QC — {{ qc.op.title }} ({{ qc.op.serialNumber || qc.op.lotNumber }})</h2>
+        <AttachmentPanel :owner-type="AttachmentOwner.PartOperation" :owner-id="qc.op.id" title="گزارش و مدارک این مرحله" />
         <p v-if="qc.op.result" class="small">نتیجه ثبت‌شده: {{ qc.op.result }}</p>
         <div class="d-flex gap-3 mb-2">
           <div v-for="s in [2, 4, 3]" :key="s" class="form-check">

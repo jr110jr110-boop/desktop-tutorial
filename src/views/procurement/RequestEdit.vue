@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { isSeatDraft, SEAT_DRAFT_TEXT } from "@/composables/ai";
@@ -45,6 +47,7 @@ function load(dto: any) {
     requestDate: (dto.requestDate || "").slice(0, 10),
     lines: dto.lines.map((l: any) => ({
       ...newLine(),
+      id: l.id,
       item: l.itemId ? { id: l.itemId, code: l.itemCode, title: l.itemTitle, unit: l.unit } : null,
       description: l.description || "", unit: l.unit || "", quantity: l.quantity, orderedQuantity: l.orderedQuantity,
       neededBy: l.neededBy ? l.neededBy.slice(0, 10) : "", estimatedUnitPrice: l.estimatedUnitPrice, technicalRequirements: l.technicalRequirements || "",
@@ -71,7 +74,7 @@ async function save(submit = false): Promise<boolean> {
     id: r.id, source: r.source, kind: r.kind, requestDate: r.requestDate, workOrderId: r.workOrderId, contractId: r.contractId,
     costCenter: r.costCenter, materialRequestId: r.materialRequestId, description: r.description, submit,
     lines: lines.map((l: any) => ({
-      itemId: l.item?.id ?? null, description: l.description, unit: l.unit || l.item?.unit, quantity: Number(l.quantity) || 0,
+      id: l.id || null, itemId: l.item?.id ?? null, description: l.description, unit: l.unit || l.item?.unit, quantity: Number(l.quantity) || 0,
       neededBy: l.neededBy || null, estimatedUnitPrice: l.estimatedUnitPrice === "" ? null : l.estimatedUnitPrice,
       technicalRequirements: l.technicalRequirements,
     })),
@@ -314,6 +317,10 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    <AttachmentPanel v-if="req?.id" :owner-type="AttachmentOwner.PurchaseRequest" :owner-id="req.id" title="مدارک فنی و پیوست‌های درخواست" />
+    <template v-if="req?.id">
+      <AttachmentPanel v-for="l in req.lines.filter((x: any) => x.id)" :key="'att' + l.id" :owner-type="AttachmentOwner.PurchaseRequestLine" :owner-id="l.id" :title="'مدارک ردیف: ' + (l.item?.title || l.description)" collapsed />
+    </template>
   </div>
 </template>
 

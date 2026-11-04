@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import ComponentsEditor from "@/components/production/orders/ComponentsEditor.vue";
@@ -133,6 +135,7 @@ onMounted(load);
       <ReleasePanel v-if="order.status === 0" class="screen-only" :order="order" @changed="replace" />
       <ComponentsEditor class="screen-only" :order="order" :can-edit="order.status === 0 && isPlanner" @changed="replace" />
       <OperationsTable class="screen-only" :order="order" @changed="load" @print="printing = $event" />
+      <AttachmentPanel v-for="o in (order.operations || [])" :key="'att' + o.id" :owner-type="AttachmentOwner.ProductionOperation" :owner-id="o.id" :title="'پیوست مرحله ' + o.sequence + ' ' + o.title" collapsed />
     </template>
 
     <ReasonDialog v-if="dialog === 'cancel'" :busy="busy" danger title="لغو دستور تولید" hint="دستور پیش‌نویس یا صادرشده‌ای که کاری روی آن شروع نشده لغو می‌شود." label="دلیل لغو" confirm-text="لغو دستور" @close="dialog = null" @confirm="(r) => run('cancel', r)" />

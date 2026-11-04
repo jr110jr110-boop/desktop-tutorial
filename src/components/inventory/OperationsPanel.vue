@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // Manufacturing steps of one serial piece or one lot: start / finish, result, QC decision, attached files.
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { ref } from "vue";
 import { addOperation, addOperationFile, applyRouting, downloadFile, qcOperation, updateOperation, uploadFile } from "@/api/InventoryAPIs";
 import { fail, jalali, ok, operationStatuses, qcStatuses } from "@/composables/inventory";
@@ -132,6 +134,7 @@ async function saveAdd() {
           پیوست‌ها:
           <a v-for="f in op.files" :key="f.id" class="ms-2" href="#" @click.prevent="downloadFile(f.documentId, f.title)">{{ f.title }}</a>
         </div>
+        <AttachmentPanel :owner-type="AttachmentOwner.PartOperation" :owner-id="op.id" title="گزارش‌ها، نقشه و مدارک این مرحله" :readonly="readonly" collapsed />
         <div v-if="!readonly" class="d-flex flex-wrap gap-2 mt-1">
           <button v-if="op.status === 0" :disabled="busy" class="btn btn-sm btn-outline-primary py-0" @click="openEdit(op, 'start')">شروع</button>
           <button v-if="op.status === 1" :disabled="busy" class="btn btn-sm btn-outline-success py-0" @click="openEdit(op, 'finish')">پایان</button>

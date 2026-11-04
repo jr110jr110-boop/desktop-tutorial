@@ -23,7 +23,7 @@ async function onFiles(row: Row, event: any) {
   event.target.value = "";
   busy.value = true;
   for (const f of files) {
-    const [id, error] = await uploadFile(f, f.name);
+    const [id, error] = await uploadFile(f, f.name, "OFC");
     if (error || !id) {
       fail(error || "بارگذاری فایل انجام نشد.");
       continue;

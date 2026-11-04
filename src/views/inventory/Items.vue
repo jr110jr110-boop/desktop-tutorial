@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import readXlsxFile from "read-excel-file";
@@ -422,6 +424,7 @@ onMounted(() => {
     <div v-if="form" class="inv-modal-backdrop" @click.self="form = null">
       <div class="inv-modal">
         <h2 class="inv-title mb-3">{{ form.id ? "ویرایش کالا" : "کالای جدید" }}</h2>
+        <AttachmentPanel v-if="form.id" :owner-type="AttachmentOwner.InventoryItem" :owner-id="form.id" title="دیتاشیت، نقشه و مدارک کالا" collapsed />
         <div class="row g-2">
           <div class="col-md-4"><label class="form-label small">کد * (۱۴ رقم یا MESC)</label><input v-model="form.code" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-8"><label class="form-label small">شرح *</label><input v-model="form.title" class="form-control form-control-sm" /></div>

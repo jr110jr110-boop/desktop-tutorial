@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import PrintForm from "@/components/print/PrintForm.vue";
@@ -204,6 +206,7 @@ onMounted(async () => {
     <div v-if="detail && !form" class="inv-modal-backdrop screen-only" @click.self="detail = null">
       <div class="inv-modal wide">
         <h2 class="inv-title mb-2">فاکتور {{ detail.invoiceNumber }} — <span class="inv-ltr">{{ detail.number }}</span></h2>
+        <AttachmentPanel :owner-type="AttachmentOwner.SupplierInvoice" :owner-id="detail.id" title="مدارک فنی درخواست و پیوست‌های فاکتور" />
         <div class="d-flex flex-wrap gap-2 mb-2">
           <span class="inv-badge" :class="{ ok: detail.status === 1 || detail.status === 3, warn: detail.status === 2 || detail.status === 0, bad: detail.status === 9 }">{{ invoiceStatuses[detail.status] }}</span>
           <span class="inv-badge">{{ detail.providerName }}</span>

@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import type {Ref} from "vue";
 import type {AxiosRequestConfig} from "axios";
 import type ContractProvisionalStatement from "@/types/ContractProvisionalStatement";
@@ -182,10 +184,16 @@ const onDeleteModalSubmit = () => {
 
 const removeAttachedFileForm = async () => {
   if (deleteModal.value.activeId) {
+    const reason = (window.prompt("فایل حذف نمی‌شود و باطل می‌شود؛ دلیل ابطال را بنویسید:") || "").trim();
+    if (reason.length < 3) {
+      if (reason.length > 0) window.alert("دلیل ابطال باید حداقل ۳ حرف باشد؛ فایل باطل نشد.");
+      return;
+    }
     loadings.value.deleteBtnLoading = deleteModal.value.activeIndex;
     const [data, error] = await detachFileContractProvider(
         contract.value.id,
-        deleteModal.value.activeId
+        deleteModal.value.activeId,
+      reason
     );
 
     if (!data?.success) showErrorNotification(data?.message || error.message);
@@ -926,6 +934,7 @@ onMounted(async () => {
 
       </template>
     </KsUpdateForm>
+    <AttachmentPanel v-if="contract?.id" :owner-type="AttachmentOwner.Contract" :owner-id="Number(contract.id)" title="مدارک و پیوست‌های قرارداد (نسخه‌ها و ابطال)" />
 
     <!--    DELETE MODAL   -->
     <DeleteModal

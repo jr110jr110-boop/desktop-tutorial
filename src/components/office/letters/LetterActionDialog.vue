@@ -57,7 +57,7 @@ async function onReceiptFile(event: any) {
   event.target.value = "";
   if (!file) return;
   busy.value = true;
-  const [id, error] = await uploadFile(file, file.name);
+  const [id, error] = await uploadFile(file, file.name, "OFC");
   busy.value = false;
   if (error || !id) return fail(error || "بارگذاری فایل انجام نشد.");
   receiptDoc.value = { id: id as string, name: file.name };

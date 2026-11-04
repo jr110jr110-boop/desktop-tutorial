@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
@@ -358,6 +360,7 @@ onMounted(async () => {
     <div v-if="form" class="inv-modal-backdrop" @click.self="form = null">
       <div class="inv-modal wide" style="max-width: 860px">
         <h2 class="inv-title mb-2">نتیجه بازرسی {{ form.row.number }}</h2>
+        <AttachmentPanel :owner-type="AttachmentOwner.QcInspection" :owner-id="form.row.id" title="گزارش‌ها و مدارک فنی بازرسی" />
         <p class="small mb-2">
           <span class="inv-ltr">{{ form.row.itemCode }}</span> — {{ form.row.itemTitle }} · {{ num(form.row.quantity) }} {{ form.row.unit }} · رسید
           <span class="inv-ltr">{{ form.row.receiptNumber }}</span>

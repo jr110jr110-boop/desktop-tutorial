@@ -130,10 +130,11 @@ export const getContracts = () => call("get", "Contracts", undefined, { PageSize
 export const getMachines = () => call("get", "Machine");
 
 /** Uploads a file with the existing Documents endpoint; returns its id. */
-export async function uploadFile(file: File, title: string): Promise<Result> {
+/** `code` "OFC" marks the attachments of letters, the only place where an archive (zip) is accepted. */
+export async function uploadFile(file: File, title: string, code = "INV"): Promise<Result> {
   const form = new FormData();
   form.append("File", file);
-  const params = { Description: title || file.name, Name: file.name.replace(/\.[^.]+$/, ""), Code: "INV" };
+  const params = { Description: title || file.name, Name: file.name.replace(/\.[^.]+$/, ""), Code: code };
   try {
     const { data } = await http.post("Documents", form, { params });
     const match = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(JSON.stringify(data ?? ""));

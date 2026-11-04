@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { finishOperation, getMyOperations, getProductionMachines, pauseOperation, reportMachineDown, reportQuantity, requestQc, scanOperations, startOperation } from "@/api/ProductionAPIs";
 import { camelize, latinDigits, parseAmount } from "@/composables/fn";
@@ -220,6 +222,7 @@ onBeforeUnmount(() => {
             </template>
           </template>
         </div>
+        <AttachmentPanel :owner-type="AttachmentOwner.ProductionOperation" :owner-id="op.id" title="عکس و برگه اندازه‌گیری" collapsed />
       </div>
     </div>
 
