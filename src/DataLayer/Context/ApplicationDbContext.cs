@@ -120,6 +120,7 @@ namespace DataLayer.Context
         public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBomLine> PbProjectBomLines { get; set; }
         public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectRouting> PbProjectRoutings { get; set; }
         public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBomChange> PbProjectBomChanges { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Inventory.GenealogyLink> GenealogyLinks { get; set; }
         #endregion
 
         #region BaseClass

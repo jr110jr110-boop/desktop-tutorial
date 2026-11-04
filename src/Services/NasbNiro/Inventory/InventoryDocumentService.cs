@@ -323,6 +323,11 @@ namespace Services.NasbNiro.Inventory
                 if (dto.ServiceOrderId.HasValue && request.WorkOrderId.HasValue) return ResponseDtoHelper.BadRequest<DocumentDto>("قطعات دستور خدمات با درخواست کالای بدون دستور کار (مصرف عمومی) صادر می‌شود؛ هزینه آن به مرکز هزینه پس از فروش می‌رود.");
                 dto.WorkOrderId = request.WorkOrderId;
             }
+            else if (dto.Type == InventoryDocumentType.ProductionReturn && dto.MaterialRequestId.HasValue
+                && await _uow.Set<MaterialRequest>().AsNoTracking().AnyAsync(r => r.Id == dto.MaterialRequestId.Value && !r.Deleted, cancellationToken))
+            {
+                // PB4: a return from production keeps the request (the kit of the production order) it gives material back to, so the genealogy can subtract it; it does not count as an issue of the request
+            }
             else
             {
                 dto.MaterialRequestId = null;
@@ -1336,6 +1341,8 @@ namespace Services.NasbNiro.Inventory
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
             await RefreshPurchaseOrderAsync(document, cancellationToken);
+            // PB4: the genealogy links (kit issues -> production receipt) follow the confirmed documents
+            await global::Services.NasbNiro.Trace.GenealogyBuilder.AfterDocumentAsync(_uow, _user.UserId, type, document.Id, document.MaterialRequestId, cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);
         }
 
@@ -1640,7 +1647,7 @@ namespace Services.NasbNiro.Inventory
 
             foreach (QcInspection inspection in inspections) inspection.Delete();
 
-            if (document.MaterialRequestId.HasValue)
+            if (document.MaterialRequestId.HasValue && document.Type == InventoryDocumentType.Issue)
             {
                 MaterialRequest request = await _uow.Set<MaterialRequest>().Include(r => r.Lines)
                     .FirstOrDefaultAsync(r => r.Id == document.MaterialRequestId.Value, cancellationToken);
@@ -1699,6 +1706,8 @@ namespace Services.NasbNiro.Inventory
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
             await RefreshPurchaseOrderAsync(document, cancellationToken);
+            // PB4: the genealogy links (kit issues -> production receipt) follow the confirmed documents
+            await global::Services.NasbNiro.Trace.GenealogyBuilder.AfterDocumentAsync(_uow, _user.UserId, document.Type, document.Id, document.MaterialRequestId, cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);
         }
     }

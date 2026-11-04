@@ -258,6 +258,8 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProductBank.IPbRoutingService, Services.NasbNiro.ProductBank.PbRoutingService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IPbProductService, Services.NasbNiro.ProductBank.PbProductService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IPbSeedService, Services.NasbNiro.ProductBank.PbSeedService>();
+            services.AddScoped<Services.NasbNiro.Trace.ITraceCenterService, Services.NasbNiro.Trace.TraceCenterService>();
+            services.AddScoped<Services.NasbNiro.Trace.IGenealogyService, Services.NasbNiro.Trace.GenealogyService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();
             services.AddScoped<Services.NasbNiro.Tasks.ITaskService, Services.NasbNiro.Tasks.TaskService>();
