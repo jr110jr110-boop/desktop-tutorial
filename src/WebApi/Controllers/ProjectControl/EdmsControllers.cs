@@ -102,9 +102,14 @@ namespace WebApi.Controllers.ProjectControl
         [HttpGet("shop/orders/{orderId:int}/documents")]
         public async Task<IActionResult> ShopDocumentsAsync(int orderId, [FromQuery] int? operationId, CancellationToken ct) => Ok(await _edms.GetShopDocumentsAsync(orderId, operationId, ct));
 
+        // M5: reading the stamp writes nothing (a GET never writes); the print itself is logged by the POST below
         [HttpGet("controlled-copy")]
-        public async Task<IActionResult> ControlledCopyAsync([FromQuery] int revisionId, [FromQuery] Guid? documentId, [FromQuery] bool print, CancellationToken ct) =>
-            Ok(await _edms.ControlledCopyAsync("revision", revisionId, documentId, print, ct));
+        public async Task<IActionResult> ControlledCopyAsync([FromQuery] int revisionId, [FromQuery] Guid? documentId, CancellationToken ct) =>
+            Ok(await _edms.ControlledCopyAsync("revision", revisionId, documentId, false, ct));
+
+        [HttpPost("controlled-copy/print")]
+        public async Task<IActionResult> ControlledCopyPrintAsync([FromBody] PcControlledCopyRequestDto dto, CancellationToken ct) =>
+            Ok(dto == null ? new ResponseDto<PcControlledCopyDto>(false, "داده‌ی ورودی نامعتبر است.") : await _edms.ControlledCopyAsync("revision", dto.RevisionId, dto.DocumentId, true, ct));
 
         // Excel
         [HttpGet("mdr/export")]

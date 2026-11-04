@@ -36,6 +36,12 @@ namespace Services.NasbNiro.ProjectControl
 
         public const string Readers = ProjectControlRoles.Readers + ",PRODUCTIONMANAGER,SHOPSUPERVISOR,OPERATOR,MAINTENANCE,AUDITOR";
 
+        /// <summary>
+        /// H3: who reads the whole history of a document (drafts, superseded revisions, reject reasons, every file), the links and the register export: the engineering and document-control side.
+        /// The floor roles (ShopFloor) are left out on purpose; they read only the released revision through the shop-floor endpoints.
+        /// </summary>
+        public const string DocReaders = "PMO,CEO,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,AUDITOR";
+
         /// <summary>Tender documents: commercial and engineering prepare them, the PMO and the CEO read them.</summary>
         public const string TenderWriters = "COMMERCIAL,ENGINEERING,ENGINEER,DCC,PMO";
         public const string TenderReaders = "COMMERCIAL,ENGINEERING,ENGINEER,DCC,PMO,CEO,PROJECTMANAGER,PLANNING";
@@ -79,9 +85,12 @@ namespace Services.NasbNiro.ProjectControl
             return purpose == PcTransmittalPurpose.ForApproval && (s == PcDocStatus.UnderReview || s == PcDocStatus.Approved);
         }
 
-        /// <summary>The latest released revision of a document (the highest sequence among the Released ones), or null.</summary>
+        /// <summary>M3: a revision is in force when it is Released or As-Built (an as-built drawing is the drawing of what was made).</summary>
+        public static bool InForce(PcDocStatus s) => s == PcDocStatus.Released || s == PcDocStatus.AsBuilt;
+
+        /// <summary>The revision in force of a document (the highest sequence among the Released and As-Built ones), or null.</summary>
         public static T LatestReleased<T>(IEnumerable<T> revisions, Func<T, PcDocStatus> status, Func<T, int> sequence) where T : class =>
-            revisions.Where(r => status(r) == PcDocStatus.Released).OrderByDescending(sequence).FirstOrDefault();
+            revisions.Where(r => InForce(status(r))).OrderByDescending(sequence).FirstOrDefault();
 
         public static string StatusText(PcDocStatus s)
         {
@@ -176,6 +185,13 @@ namespace Services.NasbNiro.ProjectControl
             return keys;
         }
 
+        public const string FrozenText = "سند پیش‌تر منتشر شده است؛ شماره، عنوان، رشته و نوع سند دیگر تغییر نمی‌کند (تغییر با بازنگری تازه انجام می‌شود).";
+
+        /// <summary>M2: any revision of the document has been released (it is released now, or was superseded, retired or made as-built).</summary>
+        public static Task<bool> HasBeenReleasedAsync(IUnitOfWork uow, int deliverableId, CancellationToken ct) =>
+            uow.Set<PcDocumentRevision>().AsNoTracking().AnyAsync(r => !r.Deleted && r.DeliverableId == deliverableId
+                && (r.Status == PcDocStatus.Released || r.Status == PcDocStatus.Superseded || r.Status == PcDocStatus.Obsolete || r.Status == PcDocStatus.AsBuilt), ct);
+
         private static string ViaText(PcDocumentLink l)
         {
             switch (l.Kind)
@@ -232,7 +248,10 @@ namespace Services.NasbNiro.ProjectControl
                     if (!found.ContainsKey("d" + id)) found["d" + id] = new EdmsFoundDocument { Via = PcDocLinkKind.Item, ViaText = "دستور کار", Deliverable = new PcEngineeringDeliverable { Id = id } };
             }
             await FillAsync(uow, found.Values.ToList(), ct);
-            return found.Values.Where(f => f.Number != null).OrderBy(f => f.Number, StringComparer.Ordinal).ToList();
+            // M4 (★): a part drawing is company-wide once it is released, so a released document of another project still counts; a document that is NOT released yet counts only for its own project
+            // (a draft of project A linked to part X must not block the orders of project B)
+            int? orderContract = await uow.Set<Entities.Model.NasbNiro.Contracts.WorkOrder>().AsNoTracking().Where(w => w.Id == order.WorkOrderId).Select(w => (int?)w.ContractId).FirstOrDefaultAsync(ct);
+            return found.Values.Where(f => f.Number != null && (f.Deliverable == null || f.Released != null || f.Deliverable.ContractId == orderContract)).OrderBy(f => f.Number, StringComparer.Ordinal).ToList();
         }
 
         /// <summary>Fills number, title, revisions and files of the found documents with a fixed number of queries.</summary>
@@ -244,7 +263,7 @@ namespace Services.NasbNiro.ProjectControl
                 : (await uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(d => !d.Deleted && dIds.Contains(d.Id)).ToListAsync(ct)).ToDictionary(d => d.Id);
             List<PcDocumentRevision> revisions = dIds.Count == 0 ? new List<PcDocumentRevision>()
                 : await uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted && dIds.Contains(r.DeliverableId)).ToListAsync(ct);
-            List<int> releasedIds = revisions.Where(r => r.Status == PcDocStatus.Released).Select(r => r.Id).ToList();
+            List<int> releasedIds = revisions.Where(r => EdmsRules.InForce(r.Status)).Select(r => r.Id).ToList();
             List<PcDocumentRevisionFile> files = releasedIds.Count == 0 ? new List<PcDocumentRevisionFile>()
                 : await uow.Set<PcDocumentRevisionFile>().AsNoTracking().Where(f => !f.Deleted && releasedIds.Contains(f.RevisionId)).OrderBy(f => f.Id).ToListAsync(ct);
             Dictionary<int, ControlledDocument> controlled = cIds.Count == 0 ? new Dictionary<int, ControlledDocument>()

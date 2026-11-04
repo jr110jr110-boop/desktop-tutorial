@@ -16,7 +16,7 @@ namespace Entities.Model.NasbNiro.ProjectControl
     public enum PcDocEventKind
     {
         RevisionCreated = 1, FileAdded = 2, Submitted = 3, Reviewed = 4, Approved = 5, Rejected = 6, Released = 7, Superseded = 8, Obsoleted = 9, AsBuilt = 10,
-        CheckedOut = 11, CheckedIn = 12, CheckoutCancelled = 13, Viewed = 14, Printed = 15, Linked = 16, Unlinked = 17, Acknowledged = 18, Received = 19,
+        CheckedOut = 11, CheckedIn = 12, CheckoutCancelled = 13, Viewed = 14, Printed = 15, Linked = 16, Unlinked = 17, Acknowledged = 18, Received = 19, FileRemoved = 20,
     }
 
     public enum PcQualityLinkKind { Ncr = 1, QcRecord = 2 }

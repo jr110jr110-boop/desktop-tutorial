@@ -139,6 +139,9 @@ namespace ViewModels.NasbNiro.DashboardDtos
         public DateTime Date { get; set; }
         public decimal Amount { get; set; }
         public string Link { get; set; }
+
+        /// <summary>The date is before the first bucket: the amount is in Overdue, not in a bucket.</summary>
+        public bool IsOverdue { get; set; }
     }
 
     public class CommitmentsForecastDto
@@ -147,7 +150,14 @@ namespace ViewModels.NasbNiro.DashboardDtos
         public DateTime From { get; set; }
         public int? ContractId { get; set; }
         public bool PricesMasked { get; set; }
+        /// <summary>Past due (before the first bucket), kept apart from the buckets and from Total.</summary>
         public decimal Overdue { get; set; }
+
+        /// <summary>Total of the buckets plus Overdue.</summary>
+        public decimal TotalWithOverdue { get; set; }
+
+        /// <summary>Open foreign-currency orders without an exchange rate: left out of every figure (never added at face value).</summary>
+        public int ExcludedForeignOrders { get; set; }
         public decimal OpenOrdersTotal { get; set; }
         public decimal InquiriesTotal { get; set; }
         public decimal StatementsTotal { get; set; }

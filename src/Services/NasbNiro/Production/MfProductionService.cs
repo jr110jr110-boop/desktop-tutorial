@@ -301,7 +301,7 @@ namespace Services.NasbNiro.Production
                 bool ok = found.Any(f => InForce(f) && ((f.DocumentType != null && f.DocumentType.Contains(word)) || (f.Title != null && f.Title.Contains(word))));
                 if (!ok) missing.Add(word);
             }
-            List<string> unreleased = found.Where(f => !InForce(f) && f.ViaText != "دستور کار").Select(f => f.Number).Distinct().ToList();
+            List<string> unreleased = found.Where(f => !InForce(f) && f.ViaText != "دستور کار" && f.LatestStatus != PcDocStatus.Obsolete).Select(f => f.Number).Distinct().ToList();
             result.Checks.Add(new ReleaseCheckDto
             {
                 Code = "drawings", Title = "نقشه‌های منتشرشده", Passed = missing.Count == 0 && unreleased.Count == 0,

@@ -330,6 +330,12 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
     }
 
     /// <summary>The stamp of a controlled copy (E11). No PDF library exists on the server, so the page prints the file under an HTML wrapper that carries these lines.</summary>
+    public class PcControlledCopyRequestDto
+    {
+        public int RevisionId { get; set; }
+        public Guid? DocumentId { get; set; }
+    }
+
     public class PcControlledCopyDto
     {
         public int RevisionId { get; set; }

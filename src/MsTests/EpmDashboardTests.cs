@@ -123,11 +123,13 @@ namespace MsTests
             Assert.AreEqual(600m, f.Buckets[1].OpenOrders, "(10 - 4) x 100 in the second week");
             Assert.AreEqual(500m, f.Buckets[2].Statements);
             Assert.AreEqual(2000m, f.Overdue, "the late order is overdue");
-            Assert.AreEqual(2000m, f.Buckets[0].OpenOrders, "overdue amounts are counted in the first bucket");
-            Assert.AreEqual(600m + 2000m, f.OpenOrdersTotal);
+            Assert.AreEqual(0m, f.Buckets[0].OpenOrders, "overdue amounts are kept apart: they are not added to the first bucket");
+            Assert.AreEqual(600m, f.OpenOrdersTotal);
             Assert.AreEqual(500m, f.StatementsTotal);
-            Assert.AreEqual(3100m, f.Total);
+            Assert.AreEqual(1100m, f.Total, "the buckets only");
+            Assert.AreEqual(3100m, f.TotalWithOverdue);
             Assert.AreEqual(3, f.Items.Count);
+            Assert.AreEqual(1, f.Items.Count(i => i.IsOverdue));
 
             // a project manager sees the forecast page but no money
             var masked = (await Dash(host, ProjectManager, s => s.CommitmentsAsync(new CommitmentsQuery { ContractId = contract }, default))).Data;
@@ -141,9 +143,42 @@ namespace MsTests
             // the monthly view and a bad period
             var month = (await Dash(host, Finance, s => s.CommitmentsAsync(new CommitmentsQuery { ContractId = contract, Period = "month", Count = 3 }, default))).Data;
             Assert.AreEqual(3, month.Buckets.Count);
-            Assert.AreEqual(3100m, month.Total, "all three commitments fall in the next three months");
+            Assert.AreEqual(3100m, month.Total + month.Overdue, "all three commitments are in the three months or overdue");
+            // the monthly buckets are Persian months: each starts on the first day of a Persian month and is labelled in Persian
+            var pc = new System.Globalization.PersianCalendar();
+            Assert.IsTrue(month.Buckets.All(b => pc.GetDayOfMonth(b.From) == 1 && b.Label.Any(ch => ch >= '\u0600' && ch <= '\u06FF')));
             Assert.IsFalse((await Dash(host, Finance, s => s.CommitmentsAsync(new CommitmentsQuery { Period = "year" }, default))).Success);
             Assert.IsFalse((await Dash(host, Operator, s => s.CommitmentsAsync(new CommitmentsQuery(), default))).Success);
+        }
+
+        [TestMethod]
+        public async Task AForeignCurrencyOrderIsConvertedWithItsRateOrLeftOutAndCounted()
+        {
+            var host = new AppHost("P7bDash_fx_" + Guid.NewGuid().ToString("N"));
+            int contract = NewContract(host, "C-FX");
+            DateTime week2 = ThisWeekStart().AddDays(9);
+            host.Write(u =>
+            {
+                var rial = AppHost.Add(u, new PurchaseOrder { Number = "PO-X1", Status = PurchaseOrderStatus.Released, ProviderId = 1, ContractId = contract, OrderDate = DateTime.Today });
+                var usd = AppHost.Add(u, new PurchaseOrder { Number = "PO-X2", Status = PurchaseOrderStatus.Released, ProviderId = 1, ContractId = contract, OrderDate = DateTime.Today, Currency = "USD", ExchangeRate = 50m });
+                var norate = AppHost.Add(u, new PurchaseOrder { Number = "PO-X3", Status = PurchaseOrderStatus.Released, ProviderId = 1, ContractId = contract, OrderDate = DateTime.Today, Currency = "EUR" });
+                u.SaveChanges();
+                foreach (var po in new[] { rial, usd, norate })
+                    u.Set<PurchaseOrderLine>().Add(new PurchaseOrderLine { PurchaseOrderId = po.Id, RowNumber = 1, Description = "x", Unit = "EA", Quantity = 1, ReceivedQuantity = 0, UnitPrice = 100, DeliveryDate = week2, ContractId = contract });
+                u.SaveChanges();
+            }, Seeder);
+            var f = (await Dash(host, Finance, s => s.CommitmentsAsync(new CommitmentsQuery { ContractId = contract, Period = "week", Count = 4 }, default))).Data;
+            Assert.AreEqual(100m + 100m * 50m, f.OpenOrdersTotal, "the dollar order counts with its rate; the euro order without a rate is not added at face value");
+            Assert.AreEqual(1, f.ExcludedForeignOrders);
+        }
+
+        [TestMethod]
+        public async Task OnlyManagementAndFinanceReadTheDelayCauseReport()
+        {
+            var host = new AppHost("P7bDash_dgate_" + Guid.NewGuid().ToString("N"));
+            Assert.IsTrue((await Dash(host, Ceo, s => s.DelayCausesAsync(new DelayCauseQuery(), default))).Success);
+            Assert.IsFalse((await Dash(host, Store, s => s.DelayCausesAsync(new DelayCauseQuery(), default))).Success, "a project-control reader such as the warehouse role is not management");
+            Assert.IsFalse((await Dash(host, Operator, s => s.DelayCausesAsync(new DelayCauseQuery(), default))).Success);
         }
 
         [TestMethod]

@@ -21,6 +21,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.ObsoleteReason).HasMaxLength(1000);
                 b.HasIndex(x => new { x.DeliverableId, x.Sequence }).IsUnique().HasFilter(NotDeleted);
                 b.HasIndex(x => x.ChangeRequestId);
+                // at most one released revision per document (the release supersedes the old one first, in the same transaction)
+                b.HasIndex(x => x.DeliverableId).IsUnique().HasFilter("[Status] = 4 AND [Deleted] = 0").HasDatabaseName("IX_PcDocumentRevisions_OneReleased");
                 b.HasOne(x => x.Deliverable).WithMany().HasForeignKey(x => x.DeliverableId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<PcChangeRequest>().WithMany().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Restrict);
             });

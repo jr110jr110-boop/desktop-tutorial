@@ -384,7 +384,13 @@ namespace MsTests
         {
             AppHost host = NewHost("trn");
             int contract = NewContract(host), doc = NewDeliverable(host, contract, client: true);
-            // free text is refused while the setting is on
+            // the default (0) lets a document without revisions go with a revision text; with the setting on it is refused
+            host.Write(u =>
+            {
+                var row = u.Set<PcSetting>().FirstOrDefault(x => x.Key == PcSettingKeys.EdmsRequireRevision);
+                if (row == null) AppHost.Add(u, new PcSetting { Key = PcSettingKeys.EdmsRequireRevision, Value = 1m, Title = "t" }); else row.Value = 1m;
+                u.SaveChanges();
+            }, Seeder);
             Assert.IsFalse((await host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().SaveTransmittalAsync(Outgoing(contract, doc, null, "A", PcTransmittalPurpose.ForApproval), default))).Success);
             PcRevisionDto draft = await Draft(host, doc);
             // a draft is not sent
@@ -397,6 +403,17 @@ namespace MsTests
             // the revision of another document is refused
             int doc2 = NewDeliverable(host, contract, client: true);
             Assert.IsFalse((await host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().SaveTransmittalAsync(Outgoing(contract, doc2, draft.Id), default))).Success);
+        }
+
+        [TestMethod]
+        public async Task TheTransitionDefaultSendsALegacyDocumentWithTextButAlwaysByRevisionOnceItHasOne()
+        {
+            AppHost host = NewHost("trn0");
+            int contract = NewContract(host), legacy = NewDeliverable(host, contract, client: true), withRevisions = NewDeliverable(host, contract, client: true);
+            var ok = await host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().SaveTransmittalAsync(Outgoing(contract, legacy, null, "A", PcTransmittalPurpose.ForApproval), default));
+            Assert.IsTrue(ok.Success, ok.Message);
+            await Draft(host, withRevisions);
+            Assert.IsFalse((await host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().SaveTransmittalAsync(Outgoing(contract, withRevisions, null, "A", PcTransmittalPurpose.ForApproval), default))).Success);
         }
 
         [TestMethod]
@@ -418,16 +435,16 @@ namespace MsTests
             Assert.IsTrue(d.ClientSubmittal);
             var revs = host.Read(u => u.Set<PcDocumentRevision>().Where(r => r.DeliverableId == d.Id).ToList());
             Assert.AreEqual(1, revs.Count);
-            Assert.AreEqual(PcDocStatus.Released, revs[0].Status);
+            Assert.AreEqual(PcDocStatus.UnderReview, revs[0].Status, "a received copy waits for a second person; it is not released by the receiver");
 
-            // the second receipt of the same number brings a new revision and supersedes the first
+            // the second receipt of the same number brings a new revision; the first copy nobody accepted is replaced
             dto.Lines[0].NewDocument.Revision = "R3";
             var t2 = await host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().SaveTransmittalAsync(dto, default));
             Assert.IsTrue(t2.Success, t2.Message);
             revs = host.Read(u => u.Set<PcDocumentRevision>().Where(r => r.DeliverableId == d.Id).OrderBy(r => r.Sequence).ToList());
             Assert.AreEqual(2, revs.Count);
             Assert.AreEqual(PcDocStatus.Superseded, revs[0].Status);
-            Assert.AreEqual(PcDocStatus.Released, revs[1].Status);
+            Assert.AreEqual(PcDocStatus.UnderReview, revs[1].Status);
             // a received document gets no internal revision
             Assert.IsFalse((await Edms(host, Dcc, s => s.CreateRevisionAsync(new PcRevisionCreateDto { DeliverableId = d.Id, Reason = "x" }, default))).Success);
         }
@@ -547,6 +564,224 @@ namespace MsTests
             int doc = NewDeliverable(host, NewContract(host));
             var guest = AppHost.Principal(99, "guest", "SALES");
             Assert.IsFalse((await Edms(host, guest, s => s.GetHistoryAsync(doc, default))).Success);
+        }
+
+        // ------------------------------------------------------------------------------------------------ fix round (independent review)
+
+        private static readonly ClaimsPrincipal Auditor = AppHost.Principal(38, "auditor.one", "AUDITOR");
+        private static readonly ClaimsPrincipal Production = AppHost.Principal(39, "production.one", "PRODUCTIONMANAGER");
+
+        private static async Task<PcReleaseGate> Gate(AppHost host, int orderId)
+        {
+            var r = await host.As(Pmo, p => p.GetRequiredService<Services.NasbNiro.Production.IMfProductionService>().ReleaseCheckAsync(orderId, default));
+            Assert.IsTrue(r.Success, r.Message);
+            var c = r.Data.Checks.Single(x => x.Code == "drawings");
+            return new PcReleaseGate { Passed = c.Passed, Message = c.Message };
+        }
+
+        private sealed class PcReleaseGate { public bool Passed; public string Message; }
+
+        private static Task Link(AppHost host, int deliverable, string part) =>
+            Edms(host, Dcc, s => s.SaveLinkAsync(new PcDocLinkSaveDto { DeliverableId = deliverable, Kind = PcDocLinkKind.PartNumber, PartNumber = part }, default));
+
+        private static async Task<int> Receive(AppHost host, int contract, string number, string revision)
+        {
+            Guid f = NewFile(host);
+            var dto = new PcTransmittalDto
+            {
+                ContractId = contract, Direction = PcTransmittalDirection.Incoming, TransmittalDate = DateTime.Today,
+                Lines = new List<PcTransmittalLineDto> { new PcTransmittalLineDto { DeliverableId = 0, Purpose = PcTransmittalPurpose.ForInformation, NewDocument = new PcReceivedDocumentDto { DocumentNumber = number, Title = "client doc", Revision = revision, DocumentId = f, FileName = "c.pdf" } } },
+            };
+            var t = await host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().SaveTransmittalAsync(dto, default));
+            Assert.IsTrue(t.Success, t.Message);
+            return host.Read(u => u.Set<PcEngineeringDeliverable>().Where(x => x.DocumentNumber == number).Select(x => x.Id).Single());
+        }
+
+        [TestMethod]
+        public async Task AReceivedClientDocumentWaitsForASecondHumanAndStaysOutOfTheShopFloorAndTheGate()
+        {
+            AppHost host = NewHost("fx_recv");
+            int contract = NewContract(host);
+            var o = NewOrder(host, contract, "PN-RCV");
+            int doc = await Receive(host, contract, "CL-777", "R1");
+            await Link(host, doc, "PN-RCV");
+            PcDocumentRevision rev = host.Read(u => u.Set<PcDocumentRevision>().Single(r => r.DeliverableId == doc));
+            Assert.AreEqual(PcDocStatus.UnderReview, rev.Status);
+            Assert.IsNull(rev.ReleasedAt);
+            // not in force: nothing on the floor, and the linked document blocks the gate
+            Assert.AreEqual(0, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count);
+            Assert.IsFalse((await Gate(host, o.OrderId)).Passed);
+            // the receiver cannot accept it, an AI seat cannot, a second human can
+            Assert.IsFalse((await Edms(host, Dcc, s => s.ActionAsync(new PcRevisionActionDto { Id = rev.Id, Action = "release" }, default))).Success);
+            var seat = new AiActingUser { UserId = 91, UserName = "seat.accept", Roles = new[] { "PMO", "DCC" } };
+            var ai = await AiActing.RunAsync(host.Provider.GetRequiredService<IServiceScopeFactory>(), seat, "DOCS", sp => sp.GetRequiredService<IEdmsService>().ActionAsync(new PcRevisionActionDto { Id = rev.Id, Action = "release" }, default));
+            Assert.IsFalse(ai.Success);
+            Assert.IsTrue((await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = rev.Id, Action = "release" }, default))).Success);
+            Assert.AreEqual(1, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count);
+            Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
+        }
+
+        [TestMethod]
+        public async Task ASecondReceiptReplacesTheCopyNobodyAcceptedAndPointsToIt()
+        {
+            AppHost host = NewHost("fx_recv2");
+            int contract = NewContract(host);
+            int doc = await Receive(host, contract, "CL-888", "R1");
+            await Receive(host, contract, "CL-888", "R2");
+            var revs = host.Read(u => u.Set<PcDocumentRevision>().Where(r => r.DeliverableId == doc).OrderBy(r => r.Sequence).ToList());
+            Assert.AreEqual(PcDocStatus.Superseded, revs[0].Status);
+            Assert.AreEqual(revs[1].Id, revs[0].SupersededByRevisionId);
+            Assert.AreEqual(PcDocStatus.UnderReview, revs[1].Status);
+            Assert.IsTrue(host.Read(u => u.Set<PcDocumentEvent>().Any(e => e.RevisionId == revs[0].Id && e.Kind == PcDocEventKind.Superseded)));
+        }
+
+        [TestMethod]
+        public async Task WhoAddedTheFileOrSubmittedNeverReviewsOrApprovesIt()
+        {
+            AppHost host = NewHost("fx_maker");
+            int doc = NewDeliverable(host, NewContract(host));
+            var r = await Edms(host, Dcc, s => s.CreateRevisionAsync(new PcRevisionCreateDto { DeliverableId = doc, Reason = "x" }, default));
+            Guid f = NewFile(host);
+            Assert.IsTrue((await Edms(host, Dcc2, s => s.AddFileAsync(new PcRevisionFileAddDto { RevisionId = r.Data.Id, DocumentId = f, FileName = "a.pdf" }, default))).Success);
+            Assert.IsTrue((await Edms(host, Dcc, s => s.ActionAsync(new PcRevisionActionDto { Id = r.Data.Id, Action = "submit" }, default))).Success);
+            // Dcc2 uploaded the content: he may not review it, although his role could
+            Assert.IsFalse((await Edms(host, Dcc2, s => s.ActionAsync(new PcRevisionActionDto { Id = r.Data.Id, Action = "review" }, default))).Success);
+            Assert.IsTrue((await Edms(host, Reviewer, s => s.ActionAsync(new PcRevisionActionDto { Id = r.Data.Id, Action = "review" }, default))).Success);
+        }
+
+        [TestMethod]
+        public async Task TheFloorRolesDoNotReadTheHistoryOfADocumentOnlyTheReleasedRevision()
+        {
+            AppHost host = NewHost("fx_read");
+            int doc = NewDeliverable(host, NewContract(host));
+            PcRevisionDto r = await Draft(host, doc);
+            foreach (ClaimsPrincipal floor in new[] { Operator, Production })
+            {
+                Assert.IsFalse((await Edms(host, floor, s => s.GetHistoryAsync(doc, default))).Success);
+                Assert.IsFalse((await Edms(host, floor, s => s.GetRevisionAsync(r.Id, default))).Success);
+                Assert.IsFalse((await Edms(host, floor, s => s.ExportMdrAsync(1, false, null, true, default))).Success);
+            }
+            Assert.IsTrue((await Edms(host, Auditor, s => s.GetHistoryAsync(doc, default))).Success);
+        }
+
+        [TestMethod]
+        public async Task AfterTheFirstReleaseTheIdentityOfTheDocumentIsFrozen()
+        {
+            AppHost host = NewHost("fx_freeze");
+            int contract = NewContract(host), doc = NewDeliverable(host, contract, number: "FRZ-1");
+            await ReleasedRevision(host, doc);
+            var mdr = new Func<string, string, Task<ResponseDto<PcDeliverableDto>>>((title, discipline) => host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().SaveDeliverableAsync(
+                new PcDeliverableDto { Id = doc, ContractId = contract, DocumentNumber = "FRZ-1", Title = title, Discipline = discipline, DocumentType = null, ClientSubmittal = false, Required = true, ProgressWeight = 1m }, default)));
+            var d0 = host.Read(u => u.Set<PcEngineeringDeliverable>().Single(x => x.Id == doc));
+            Assert.IsFalse((await mdr("another title", d0.Discipline)).Success);
+            Assert.IsFalse((await mdr(d0.Title, "Electrical")).Success);
+            // the legacy issue actions are closed once revisions exist
+            var first = await host.As(Dcc, p => p.GetRequiredService<IPcMdrService>().DeliverableActionAsync(new PcDeliverableActionDto { Id = doc, Action = "first-issue", Revision = "Z" }, default));
+            Assert.IsFalse(first.Success);
+        }
+
+        [TestMethod]
+        public async Task AnAsBuiltRevisionIsStillInForceAndIsSupersededByTheNextRelease()
+        {
+            AppHost host = NewHost("fx_asbuilt");
+            int contract = NewContract(host);
+            var o = NewOrder(host, contract, "PN-AB");
+            int doc = NewDeliverable(host, contract);
+            await Link(host, doc, "PN-AB");
+            PcRevisionDto r0 = await ReleasedRevision(host, doc);
+            Assert.IsTrue((await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = r0.Id, Action = "as-built" }, default))).Success);
+            var docs = await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default));
+            Assert.AreEqual(1, docs.Data.Count);
+            Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
+            PcRevisionDto r1 = await Draft(host, doc);
+            await Release(host, r1.Id);
+            var revs = host.Read(u => u.Set<PcDocumentRevision>().Where(r => r.DeliverableId == doc).OrderBy(r => r.Sequence).ToList());
+            Assert.AreEqual(PcDocStatus.Superseded, revs[0].Status);
+            Assert.AreEqual(revs[1].Id, revs[0].SupersededByRevisionId);
+            Assert.AreEqual(PcDocStatus.Released, revs[1].Status);
+        }
+
+        [TestMethod]
+        public async Task AnObsoleteDocumentLosesItsLinksAndNoLongerBlocksTheGate()
+        {
+            AppHost host = NewHost("fx_obs");
+            int contract = NewContract(host);
+            var o = NewOrder(host, contract, "PN-OB");
+            int doc = NewDeliverable(host, contract);
+            await Link(host, doc, "PN-OB");
+            PcRevisionDto r0 = await ReleasedRevision(host, doc);
+            Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
+            Assert.IsTrue((await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = r0.Id, Action = "obsolete", Note = "replaced by the client" }, default))).Success);
+            Assert.AreEqual(0, host.Read(u => u.Set<PcDocumentLink>().Count(l => l.DeliverableId == doc && !l.Deleted)));
+            Assert.AreEqual(0, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count);
+            Assert.IsTrue((await Gate(host, o.OrderId)).Passed, "a retired document does not hold the order");
+        }
+
+        [TestMethod]
+        public async Task TheReleaseGateWantsAReleasedRevisionOfTheLinkedDocument()
+        {
+            AppHost host = NewHost("fx_gate");
+            int contract = NewContract(host);
+            var o = NewOrder(host, contract, "PN-GT");
+            int doc = NewDeliverable(host, contract);
+            await Link(host, doc, "PN-GT");
+            await Draft(host, doc);
+            var blocked = await Gate(host, o.OrderId);
+            Assert.IsFalse(blocked.Passed);
+            StringAssert.Contains(blocked.Message, "نسخه‌ی منتشرشده");
+            PcDocumentRevision rev = host.Read(u => u.Set<PcDocumentRevision>().Single(r => r.DeliverableId == doc));
+            await Release(host, rev.Id);
+            Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
+            // a legacy line without any revision counts when it was approved
+            int legacy = NewDeliverable(host, contract);
+            await Link(host, legacy, "PN-GT");
+            Assert.IsFalse((await Gate(host, o.OrderId)).Passed);
+            host.Write(u => { u.Set<PcEngineeringDeliverable>().Single(d => d.Id == legacy).IssueState = PcIssueState.Approved; u.SaveChanges(); }, Seeder);
+            Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
+        }
+
+        [TestMethod]
+        public async Task ADraftOfAnotherProjectDoesNotBlockButAReleasedPartDrawingOfAnotherProjectCounts()
+        {
+            AppHost host = NewHost("fx_scope");
+            int mine = NewContract(host), other = NewContract(host);
+            var o = NewOrder(host, mine, "PN-SC");
+            int foreignDraft = NewDeliverable(host, other), foreignReleased = NewDeliverable(host, other);
+            await Link(host, foreignDraft, "PN-SC");
+            await Link(host, foreignReleased, "PN-SC");
+            await Draft(host, foreignDraft);
+            Assert.IsTrue((await Gate(host, o.OrderId)).Passed, "a draft of another project is not this order's concern");
+            await ReleasedRevision(host, foreignReleased);
+            Assert.AreEqual(1, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count, "a released part drawing is company-wide");
+        }
+
+        [TestMethod]
+        public async Task ALinkCannotBeVoidedWhileSomebodyElseHoldsTheCheckOutAndAFileRemovalHasItsOwnEvent()
+        {
+            AppHost host = NewHost("fx_lock");
+            int doc = NewDeliverable(host, NewContract(host));
+            var link = await Edms(host, Dcc, s => s.SaveLinkAsync(new PcDocLinkSaveDto { DeliverableId = doc, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-LK" }, default));
+            Assert.IsTrue((await Edms(host, Dcc, s => s.CheckOutAsync(new PcCheckOutDto { DeliverableId = doc }, default))).Success);
+            Assert.IsFalse((await Edms(host, Dcc2, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed" }, default))).Success);
+            Assert.IsTrue((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed" }, default))).Success);
+            PcRevisionDto r = await Draft(host, doc);
+            int fileId = r.Files.Count > 0 ? r.Files[0].Id : (await Edms(host, Dcc, s => s.GetRevisionAsync(r.Id, default))).Data.Files[0].Id;
+            Assert.IsTrue((await Edms(host, Dcc, s => s.RemoveFileAsync(new PcRevisionFileRemoveDto { FileId = fileId, Reason = "wrong file" }, default))).Success);
+            Assert.IsTrue(host.Read(u => u.Set<PcDocumentEvent>().Any(e => e.RevisionId == r.Id && e.Kind == PcDocEventKind.FileRemoved)));
+        }
+
+        [TestMethod]
+        public async Task TheControlledCopyStampCarriesAShamsiDate()
+        {
+            AppHost host = NewHost("fx_stamp");
+            int doc = NewDeliverable(host, NewContract(host));
+            PcRevisionDto rev = await ReleasedRevision(host, doc);
+            var peek = await Edms(host, Operator, s => s.ControlledCopyAsync("revision", rev.Id, null, false, default));
+            StringAssert.Contains(peek.Data.StampText, "/");
+            Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(peek.Data.StampText, @"\b1[34]\d\d/\d\d/\d\d\b"), peek.Data.StampText);
+            Assert.IsFalse(host.Read(u => u.Set<PcDocumentEvent>().Any(e => e.RevisionId == rev.Id && e.Kind == PcDocEventKind.Printed)), "reading the stamp writes nothing");
+            await Edms(host, Operator, s => s.ControlledCopyAsync("revision", rev.Id, null, true, default));
+            Assert.IsTrue(host.Read(u => u.Set<PcDocumentEvent>().Any(e => e.RevisionId == rev.Id && e.Kind == PcDocEventKind.Printed)));
         }
     }
 }

@@ -173,7 +173,7 @@ namespace Services.NasbNiro.ProjectControl
             yield return new PcSetting { Key = NotifyEmailEnabled, Value = 0, Title = "ارسال ایمیل اطلاع‌رسانی از طریق سرور ایمیل داخلی (۰ خاموش، ۱ روشن)", Source = "★ تصمیم D9: پیش‌فرض خاموش؛ صندوق درون‌برنامه‌ای همیشه روشن است" };
             yield return new PcSetting { Key = EdmsRevisionScheme, Value = 1, Title = "کد بازنگری سند: ۱ عددی (00، 01 ...)، ۲ حرفی (A، B ...)", Source = "★ تصمیم موقت" };
             yield return new PcSetting { Key = EdmsReviewRequired, Value = 1, Title = "بازنگری سند پیش از تایید توسط نفر دوم لازم است (۱ بله، ۰ خیر)", Source = "★ تصمیم موقت (ISO 19650)" };
-            yield return new PcSetting { Key = EdmsRequireRevision, Value = 1, Title = "ترنسمیتال باید به یک بازنگری ثبت‌شده سند ارجاع دهد (۱ بله؛ ۰ دوره گذار اسناد قدیمی)", Source = "★ تصمیم موقت (E7)" };
+            yield return new PcSetting { Key = EdmsRequireRevision, Value = 0, Title = "ترنسمیتال باید به یک بازنگری ثبت‌شده سند ارجاع دهد (۱ بله؛ ۰ دوره گذار: اسناد بدون بازنگری با متن آزاد؛ سندی که بازنگری دارد همیشه با بازنگری ارسال می‌شود)", Source = "★ تصمیم موقت (E7): پس از ثبت بازنگری اسناد قدیمی به ۱ تغییر دهید" };
             yield return new PcSetting { Key = EdmsNoticeAckDays, Value = 3, Title = "مهلت تایید دریافت ابلاغ انتشار سند (روز)", Source = "★ تصمیم موقت" };
             yield return new PcSetting { Key = NotifyMinPriority, Value = 1, Title = "کمترین اولویتی که از درگاه ارسال می‌شود (۰ عادی، ۱ فوری، ۲ آنی)", Source = "★ تصمیم D9" };
         }

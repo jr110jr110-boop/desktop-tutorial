@@ -2283,7 +2283,6 @@ as "$DCC_TOKEN" POST $PC/mdr/action "{\"id\":$INT_ID,\"action\":\"internal-appro
 as "$ENG_TOKEN" POST $PC/mdr/action "{\"id\":$INT_ID,\"action\":\"internal-approve\"}"; check "pc: engineering manager approves the internal document = 100 percent" '.success and .data.issueState == 3 and .data.progressPercent == 100'
 PCT_BAD=$(jq -nc --argjson c $PCT --argjson i $INT_ID '{contractId:$c,direction:1,transmittalDate:"2026-10-01T00:00:00",lines:[{deliverableId:$i,purpose:1}]}')
 as "$DCC_TOKEN" POST $PC/transmittals "$PCT_BAD"; no "pc: outgoing transmittal with an internal-only document rejected"
-as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":0}]}'; check "pb7b: the PMO lets the old transmittal block run without revisions (transition setting)" '.success'
 PCT1=$(jq -nc --argjson c $PCT --argjson ids "$CL_IDS" '{contractId:$c,direction:1,transmittalDate:"2026-10-01T00:00:00",reference:"Letter 1",lines:($ids|map({deliverableId:.,purpose:1}))}')
 as "$DCC_TOKEN" POST $PC/transmittals "$PCT1"
 check "pc: transmittal T1 of the 11 client documents, response due 14 days later" '.success and (.data.number|length) > 0 and (.data.lines|length) == 11 and (.data.responseDue|startswith("2026-10-15"))'
@@ -2296,7 +2295,6 @@ as "$DCC_TOKEN" POST $PC/transmittals/response "{\"transmittalLineId\":$TL3,\"re
 as "$DCC_TOKEN" POST $PC/transmittals/response "{\"transmittalLineId\":$TL4,\"responseCode\":\"C\",\"responseDate\":\"2026-10-10T00:00:00\"}"; check "pc: client code C leaves the document unapproved" '.success'
 PCT2L=$(jq -nc --argjson c $PCT --argjson ids "$CL_IDS" '{contractId:$c,direction:1,transmittalDate:"2026-10-12T00:00:00",reference:"Letter 2",lines:($ids[3:7]|map({deliverableId:.,purpose:1}))}')
 as "$DCC_TOKEN" POST $PC/transmittals "$PCT2L"; check "pc: second transmittal re-sends four documents" '.success and (.data.lines|length) == 4'
-as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":1}]}'; check "pb7b: the PMO switches the revision requirement of transmittals back on" '.success'
 as "$DCC_TOKEN" GET "$PC/mdr?WorkOrderId=$PCW1&PageSize=0"
 check "pc: MDR states: 3+1 approved, 4 at second issue, 4 at first issue" '([.data.data[]|select(.issueState==3)]|length) == 4 and ([.data.data[]|select(.issueState==2)]|length) == 4 and ([.data.data[]|select(.issueState==1)]|length) == 4'
 as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$PCT,\"forecast\":true,\"mirror\":false}"
@@ -11351,7 +11349,7 @@ as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PB7BR1,\"documentId\
 as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PB7BD}"; nomsg "pb7b edms: a new revision of a released document needs a reason" "علت بازنگری تازه"
 as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PB7BD,\"reason\":\"Nozzle moved\"}"; check "pb7b edms: the second revision is 01 and a draft" '.success and .data.code == "01" and .data.status == 1'; PB7BR2=$(val .data.id)
 as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PB7BD,\"reason\":\"Second open revision\"}"; nomsg "pb7b edms: only one revision is open at a time" "هنوز باز است"
-as "$DCC_TOKEN" GET "edms/revisions/compare?a=$PB7BR1&b=$PB7BR2"; check "pb7b edms: two revisions are compared (metadata)" '.success'
+as "$DCC_TOKEN" GET "edms/revisions/compare?a=$PB7BR1&b=$PB7BR2"; check "pb7b edms: two revisions are compared (metadata): the code and the status differ" '.success and ([.data.differences[].field]|index("code")) != null and ([.data.differences[].field]|index("status")) != null'
 as "$DCC_TOKEN" POST edms/checkout "{\"deliverableId\":$PB7BD,\"note\":\"editing\"}"; check "pb7b edms: the DCC checks the document out" '.success'
 as "$ADMIN_TOKEN" POST edms/checkout/cancel "{\"deliverableId\":$PB7BD}"; no "pb7b edms: cancelling somebody else's check-out needs a reason"
 as "$ADMIN_TOKEN" POST edms/checkout/cancel "{\"deliverableId\":$PB7BD,\"reason\":\"owner is away\"}"; check "pb7b edms: the PMO cancels the check-out with a reason" '.success'
@@ -11366,12 +11364,16 @@ as "$DCC_TOKEN" POST edms/links/void "{\"id\":$PB7BL,\"reason\":\"wrong tag\"}";
 as "$ADMIN_TOKEN" GET "edms/part-documents?TagId=$PB7BT"; check "pb7b edms: the tag finds no document after the void" '.success and (.data|length) == 0'
 # transmittals cite a revision (E7) and an incoming document is created on receipt (E8)
 PB7BTR=$(jq -nc --argjson c $PCT --argjson d $PB7BD '{contractId:$c,direction:1,transmittalDate:"2026-10-02T00:00:00",reference:"Letter 2",lines:[{deliverableId:$d,purpose:1}]}')
-as "$DCC_TOKEN" POST $PC/transmittals "$PB7BTR"; nomsg "pb7b edms: a transmittal line without a revision is refused" "بازنگری سند"
+as "$DCC_TOKEN" POST $PC/transmittals "$PB7BTR"; nomsg "pb7b edms: a transmittal line without a revision is refused for a document that has revisions (also while the transition setting is 0)" "بازنگری ثبت‌شده دارد"
 PB7BTR=$(jq -nc --argjson c $PCT --argjson d $PB7BD --argjson r $PB7BR1 '{contractId:$c,direction:1,transmittalDate:"2026-10-02T00:00:00",reference:"Letter 2",lines:[{deliverableId:$d,revisionId:$r,purpose:1}]}')
 as "$DCC_TOKEN" POST $PC/transmittals "$PB7BTR"; check "pb7b edms: the transmittal cites the released revision 00" '.success and (.data.lines|length) == 1 and .data.lines[0].revision == "00" and .data.lines[0].revisionId == '"$PB7BR1"
 PB7BIN=$(jq -nc --argjson c $PCT '{contractId:$c,direction:2,transmittalDate:"2026-10-03T00:00:00",reference:"Client letter 1",lines:[{deliverableId:0,revision:"0",purpose:1,newDocument:{documentNumber:"PB7B-CL-001",title:"Client P&ID",discipline:"Process",documentType:"P&ID",revision:"0"}}]}')
 as "$DCC_TOKEN" POST $PC/transmittals "$PB7BIN"; check "pb7b edms: an incoming transmittal creates the client document on receipt" '.success and (.data.lines|length) == 1 and .data.lines[0].revision == "0"'
 as "$DCC_TOKEN" GET "$PC/mdr?ContractId=$PCT&PageSize=0"; check "pb7b edms: the received document is in the client list (MDL) exactly once" '([.data.data[]|select(.documentNumber == "PB7B-CL-001" and .clientSubmittal == true)]|length) == 1'
+as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":1}]}'; check "pb7b edms: the PMO switches the revision requirement of transmittals on (end of the transition)" '.success'
+PB7BFREE=$(jq -nc --argjson c $PCT --argjson ids "$CL_IDS" '{contractId:$c,direction:1,transmittalDate:"2026-10-04T00:00:00",reference:"Free text",lines:[{deliverableId:($ids[0]),revision:"Z",purpose:1}]}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PB7BFREE"; nomsg "pb7b edms: with the requirement on, a free revision text is refused" "از فهرست بازنگری"
+as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":0}]}'; check "pb7b edms: the setting is put back to its default (0) for the rest of the script" '.success'
 # the approver matrix is edited by the PMO only; a distribution row notifies on release
 as "$DCC_TOKEN" POST edms/approvers "{\"discipline\":\"Mechanical\",\"userId\":$PMID,\"canReview\":true,\"canApprove\":false}"; no "pb7b edms: the DCC cannot edit the approver matrix"
 as "$ADMIN_TOKEN" POST edms/approvers "{\"discipline\":\"Electrical\",\"userId\":$PMID,\"canReview\":true,\"canApprove\":true}"; check "pb7b edms: the PMO adds a row to the approver matrix" '.success and .data.id > 0'
@@ -11388,12 +11390,12 @@ CODE=$(curl -s -o "$B" -w '%{http_code}' -H "Authorization: Bearer $DCC_TOKEN" "
 [ "$CODE" = "200" ] && [ "$(head -c 2 "$B")" = "PK" ] && ok "pb7b edms: the Excel template is a real xlsx file" || bad "pb7b edms: the Excel template is a real xlsx file"
 # dashboards: role gate, price masking
 as "$ADMIN_TOKEN" GET dashboards; check "pb7b epm: the PMO is offered all nine dashboards" '.success and (.data|length) == 9'
-as "$ADMIN_TOKEN" GET dashboards/ceo; check "pb7b epm: the CEO dashboard is built for the PMO" '.success and .data.key == "ceo" and (.data.kpis|length) > 0'
+as "$ADMIN_TOKEN" GET dashboards/ceo; check "pb7b epm: the CEO dashboard is built for the PMO and carries the KPIs of the dashboards the PMO may see" '.success and .data.key == "ceo" and .data.pricesMasked == false and (.data.kpis|map(.key)|index("projects")) != null'
 as "$WH_TOKEN" GET dashboards/ceo; no "pb7b epm: the warehouse keeper cannot open the CEO dashboard"
 as "$PROD_TOKEN" GET dashboards/portfolio; no "pb7b epm: the production user cannot open the portfolio dashboard"
-as "$ADMIN_TOKEN" GET dashboards/portfolio-evm; check "pb7b epm: the portfolio EVM has one row per project and shows money to the PMO" '.success and .data.pricesMasked == false and .data.projects == (.data.rows|length) and .data.projects > 0'
+as "$ADMIN_TOKEN" GET dashboards/portfolio-evm; check "pb7b epm: the portfolio EVM has one row per project (no project twice) and its money is the sum of the rows" '.success and .data.pricesMasked == false and .data.projects == (.data.rows|length) and (.data.rows|map(.contractId)|unique|length) == .data.projects and ((.data.ev - ([.data.rows[].ev]|add // 0))|fabs) < 0.01 and ((.data.ac - ([.data.rows[].ac]|add // 0))|fabs) < 0.01'
 as "$PM_TOKEN" GET dashboards/portfolio-evm; check "pb7b epm: the project manager sees the portfolio EVM without money" '.success and .data.pricesMasked == true and ([.data.rows[]|select(.bac != null or .ac != null)]|length) == 0'
-as "$ADMIN_TOKEN" GET dashboards/commitments; check "pb7b epm: the commitments forecast answers for the PMO" '.success'
+as "$ADMIN_TOKEN" GET dashboards/commitments; check "pb7b epm: the commitments forecast has 8 weekly buckets and its totals add up (overdue kept apart)" '.success and .data.period == "week" and .data.pricesMasked == false and (.data.buckets|length) == 8 and ((.data.total - ([.data.buckets[].total]|add))|fabs) < 0.01 and ((.data.totalWithOverdue - .data.total - .data.overdue)|fabs) < 0.01'
 as "$ADMIN_TOKEN" GET dashboards/delay-causes; check "pb7b epm: the delay-cause report answers for the PMO" '.success and (.data.byCause|type) == "array"'
 as "$WH_TOKEN" GET dashboards/delay-causes; no "pb7b epm: the warehouse keeper cannot read the delay-cause report"
 TOKEN=$ADMIN_TOKEN

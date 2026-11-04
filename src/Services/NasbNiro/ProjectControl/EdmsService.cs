@@ -14,6 +14,7 @@ using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
 using ViewModels.NasbNiro.Pagination;
@@ -135,11 +136,13 @@ namespace Services.NasbNiro.ProjectControl
         }
 
         /// <summary>The actions the caller may take on a revision now (the same rules the service enforces).</summary>
-        private List<string> ActionsOf(PcDocumentRevision r, PcEngineeringDeliverable d, Perms p, bool reviewRequired, bool hasFiles)
+        private List<string> ActionsOf(PcDocumentRevision r, PcEngineeringDeliverable d, Perms p, bool reviewRequired, bool hasFiles, HashSet<int> contributors)
         {
             var a = new List<string>();
             bool lockedByOther = d.CheckedOutByUserId.HasValue && d.CheckedOutByUserId != Me;
             bool notPreparer = r.PreparedByUserId != Me;
+            // M1: whoever added or removed a file, submitted or received the revision is a maker of it and never checks it
+            bool independent = notPreparer && !(contributors != null && contributors.Contains(Me));
             switch (r.Status)
             {
                 case PcDocStatus.Draft:
@@ -148,15 +151,23 @@ namespace Services.NasbNiro.ProjectControl
                 case PcDocStatus.UnderReview:
                     if (!IsAi)
                     {
-                        if (p.CanReview && notPreparer && r.ReviewerUserId == null) a.Add("review");
-                        if (p.CanApprove && notPreparer && r.ReviewerUserId != Me && (r.ReviewerUserId != null || !reviewRequired)) a.Add("approve");
-                        if ((p.CanReview || p.CanApprove) && notPreparer) a.Add("reject");
+                        if (r.ReceivedFromClient)
+                        {
+                            if (p.CanRelease && independent) a.Add("release");
+                            if (p.CanRelease && notPreparer) a.Add("reject");
+                        }
+                        else
+                        {
+                            if (p.CanReview && independent && r.ReviewerUserId == null) a.Add("review");
+                            if (p.CanApprove && independent && r.ReviewerUserId != Me && (r.ReviewerUserId != null || !reviewRequired)) a.Add("approve");
+                            if ((p.CanReview || p.CanApprove) && notPreparer) a.Add("reject");
+                        }
                     }
                     break;
                 case PcDocStatus.Approved:
                     if (!IsAi)
                     {
-                        if (p.CanRelease && notPreparer) a.Add("release");
+                        if (p.CanRelease && independent) a.Add("release");
                         if ((p.CanReview || p.CanApprove) && notPreparer) a.Add("reject");
                     }
                     break;
@@ -170,7 +181,11 @@ namespace Services.NasbNiro.ProjectControl
 
         // ============================================================================ DTOs
 
-        private async Task<List<PcRevisionDto>> BuildAsync(List<PcDocumentRevision> revs, PcEngineeringDeliverable d, CancellationToken ct)
+        private Task<List<PcRevisionDto>> BuildAsync(List<PcDocumentRevision> revs, PcEngineeringDeliverable d, CancellationToken ct) =>
+            BuildManyAsync(revs, new Dictionary<int, PcEngineeringDeliverable> { [d.Id] = d }, ct);
+
+        /// <summary>The revisions of one or many documents with a fixed number of queries (L7: no query per document).</summary>
+        private async Task<List<PcRevisionDto>> BuildManyAsync(List<PcDocumentRevision> revs, Dictionary<int, PcEngineeringDeliverable> docs, CancellationToken ct)
         {
             if (revs.Count == 0) return new List<PcRevisionDto>();
             List<int> ids = revs.Select(r => r.Id).ToList();
@@ -183,10 +198,17 @@ namespace Services.NasbNiro.ProjectControl
             List<int> crIds = revs.Where(r => r.ChangeRequestId.HasValue).Select(r => r.ChangeRequestId.Value).Distinct().ToList();
             Dictionary<int, string> crNumbers = crIds.Count == 0 ? new Dictionary<int, string>() : (await _uow.Set<PcChangeRequest>().AsNoTracking().Where(c => crIds.Contains(c.Id)).Select(c => new { c.Id, c.Number }).ToListAsync(ct)).ToDictionary(c => c.Id, c => c.Number);
             Dictionary<int, string> names = await NamesAsync(revs.SelectMany(r => new int?[] { r.PreparedByUserId, r.ReviewerUserId, r.ApproverUserId, r.ReleasedByUserId }), ct);
-            Perms perms = await PermsAsync(d.Discipline, d.ContractId, ct);
+            var permsByKey = new Dictionary<string, Perms>();
+            foreach (PcEngineeringDeliverable dd in docs.Values)
+            {
+                string pk = (dd.Discipline ?? "") + "|" + dd.ContractId;
+                if (!permsByKey.ContainsKey(pk)) permsByKey[pk] = await PermsAsync(dd.Discipline, dd.ContractId, ct);
+            }
             bool reviewRequired = (await PcSettingKeys.LoadAsync(_uow, ct))[PcSettingKeys.EdmsReviewRequired] >= 1m;
+            var makerRows = await _uow.Set<PcDocumentEvent>().AsNoTracking().Where(e => e.RevisionId != null && ids.Contains(e.RevisionId.Value) && MakerKinds.Contains(e.Kind)).Select(e => new { RevisionId = e.RevisionId.Value, e.UserId }).Distinct().ToListAsync(ct);
+            Dictionary<int, HashSet<int>> makers = makerRows.GroupBy(x => x.RevisionId).ToDictionary(g => g.Key, g => g.Select(x => x.UserId).ToHashSet());
 
-            return revs.OrderBy(r => r.Sequence).Select(r => new PcRevisionDto
+            return revs.OrderBy(r => r.DeliverableId).ThenBy(r => r.Sequence).Select(r => { PcEngineeringDeliverable d = docs[r.DeliverableId]; Perms perms = permsByKey[(d.Discipline ?? "") + "|" + d.ContractId]; return new PcRevisionDto
             {
                 Id = r.Id, DeliverableId = r.DeliverableId, DocumentNumber = d.DocumentNumber, Title = d.Title, Discipline = d.Discipline, Sequence = r.Sequence, Code = r.Code, Status = r.Status, Reason = r.Reason,
                 PreparedByUserId = r.PreparedByUserId, PreparedByName = NameOf(names, r.PreparedByUserId), CreatedAt = r.CreateDate, SubmittedAt = r.SubmittedAt,
@@ -199,9 +221,75 @@ namespace Services.NasbNiro.ProjectControl
                 Files = files.Where(f => f.RevisionId == r.Id).Select(f => new PcRevisionFileDto { Id = f.Id, DocumentId = f.DocumentId, Role = f.Role, FileName = f.FileName, Title = f.Title }).ToList(),
                 QualityLinks = qlinks.Where(q => q.RevisionId == r.Id).Select(q => new PcRevisionQualityLinkDto
                     { Id = q.Id, Kind = q.Kind, TargetId = q.TargetId, Note = q.Note, TargetNumber = q.Kind == PcQualityLinkKind.Ncr ? (ncrNumbers.TryGetValue(q.TargetId, out string a) ? a : null) : (qcNumbers.TryGetValue(q.TargetId, out string b) ? b : null) }).ToList(),
-                Actions = ActionsOf(r, d, perms, reviewRequired, files.Any(f => f.RevisionId == r.Id)),
+                Actions = ActionsOf(r, d, perms, reviewRequired, files.Any(f => f.RevisionId == r.Id), makers.TryGetValue(r.Id, out HashSet<int> mk) ? mk : null),
                 RowVersion = r.RowVersion == null ? null : Convert.ToBase64String(r.RowVersion),
-            }).ToList();
+            }; }).ToList();
+        }
+
+        // M1: the events that make a person a maker of a revision
+        private static readonly PcDocEventKind[] MakerKinds = { PcDocEventKind.RevisionCreated, PcDocEventKind.FileAdded, PcDocEventKind.FileRemoved, PcDocEventKind.Submitted, PcDocEventKind.Received };
+        private const string ContributorText = " (کسی که فایل افزوده، حذف، ارسال یا دریافت کرده، همان بازنگری را بررسی، تایید یا منتشر نمی‌کند.)";
+
+        private async Task<bool> IsContributorAsync(PcDocumentRevision r, CancellationToken ct) =>
+            r.PreparedByUserId == Me || await _uow.Set<PcDocumentEvent>().AnyAsync(e => e.RevisionId == r.Id && e.UserId == Me && MakerKinds.Contains(e.Kind), ct);
+
+        /// <summary>
+        /// Releases a revision: the revisions in force (released or as-built) become superseded first, then the new one is released, both in one transaction (the unique index allows one
+        /// released revision per document, so the two steps are ordered). SupersededByRevisionId and the events are written with the first step.
+        /// </summary>
+        private async Task<ResponseDto<PcRevisionDto>> ReleaseAsync(int revisionId, string note, CancellationToken ct)
+        {
+            async Task<ResponseDto<PcRevisionDto>> Work()
+            {
+                PcDocumentRevision r = await _uow.Set<PcDocumentRevision>().FirstOrDefaultAsync(x => x.Id == revisionId && !x.Deleted, ct);
+                if (r == null) return PcText.NotFound<PcRevisionDto>("بازنگری پیدا نشد.");
+                bool received = r.ReceivedFromClient && r.Status == PcDocStatus.UnderReview;
+                if (r.Status != PcDocStatus.Approved && !received) return Bad<PcRevisionDto>("فقط بازنگری تاییدشده منتشر می‌شود.");
+                PcEngineeringDeliverable d = await _uow.Set<PcEngineeringDeliverable>().FirstAsync(x => x.Id == r.DeliverableId, ct);
+                List<PcDocumentRevisionFile> files = await _uow.Set<PcDocumentRevisionFile>().Where(f => !f.Deleted && f.RevisionId == r.Id).OrderBy(f => f.Id).ToListAsync(ct);
+                List<PcDocumentRevision> previous = await _uow.Set<PcDocumentRevision>().Where(x => x.DeliverableId == d.Id && x.Id != r.Id && !x.Deleted && (x.Status == PcDocStatus.Released || x.Status == PcDocStatus.AsBuilt)).ToListAsync(ct);
+                DateTimeOffset now = DateTimeOffset.Now;
+                if (previous.Count > 0)
+                {
+                    foreach (PcDocumentRevision old in previous)
+                    {
+                        old.Status = PcDocStatus.Superseded; old.SupersededAt = now; old.SupersededByRevisionId = r.Id; old.ModifyDate = now; old.ModifierUserId = Me;
+                        Log(d.Id, old.Id, PcDocEventKind.Superseded, "جایگزین‌شده با " + r.Code, now);
+                    }
+                    try { await _uow.SaveChangesAsync(ct); }
+                    catch (DbUpdateConcurrencyException) { return Bad<PcRevisionDto>(PcText.Concurrency); }
+                }
+                r.Status = PcDocStatus.Released; r.ReleasedByUserId = Me; r.ReleasedAt = now;
+                if (received) { r.ApproverUserId = Me; r.ApprovedAt = now; }
+                PcDocumentRevisionFile primary = files.FirstOrDefault(f => f.Role == PcRevisionFileRole.Pdf) ?? files.FirstOrDefault(f => f.Role == PcRevisionFileRole.Native) ?? files.FirstOrDefault();
+                d.Revision = r.Code; if (primary != null) d.DocumentId = primary.DocumentId;
+                if (!d.ClientSubmittal)
+                {
+                    d.IssueState = PcIssueState.Approved; d.ApprovedAt = now; d.ApprovedByUserId = r.ApproverUserId ?? Me;
+                    if (!d.IssuedByUserId.HasValue) d.IssuedByUserId = r.PreparedByUserId;
+                }
+                d.ModifyDate = now; d.ModifierUserId = Me;
+                Log(d.Id, r.Id, PcDocEventKind.Released, note, now);
+                r.ModifyDate = now; r.ModifierUserId = Me;
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateConcurrencyException) { return Bad<PcRevisionDto>(PcText.Concurrency); }
+                catch (DbUpdateException) { return Bad<PcRevisionDto>("هم‌زمان بازنگری دیگری از این سند منتشر شد؛ صفحه را تازه کنید."); }
+                await NoticesAsync(d, r, ct);
+                await _uow.SaveChangesAsync(ct);
+                return await RevisionResultAsync(r, ct);
+            }
+
+            if (!(_uow is DbContext db) || !db.Database.IsRelational()) return await Work();
+            IExecutionStrategy strategy = db.Database.CreateExecutionStrategy();
+            int attempt = 0;
+            return await strategy.ExecuteAsync(async token =>
+            {
+                if (attempt++ > 0) db.ChangeTracker.Clear();
+                await using IDbContextTransaction tx = await db.Database.BeginTransactionAsync(token);
+                ResponseDto<PcRevisionDto> result = await Work();
+                if (result.Success) await tx.CommitAsync(token); else await tx.RollbackAsync(token);
+                return result;
+            }, ct);
         }
 
         private async Task<ResponseDto<PcRevisionDto>> RevisionResultAsync(PcDocumentRevision r, CancellationToken ct)
@@ -215,7 +303,7 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<ResponseDto<PcDeliverableHistoryDto>> GetHistoryAsync(int deliverableId, CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<PcDeliverableHistoryDto>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<PcDeliverableHistoryDto>(PcText.NotAllowed);
             PcEngineeringDeliverable d = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == deliverableId && !x.Deleted, ct);
             if (d == null) return PcText.NotFound<PcDeliverableHistoryDto>("سند پیدا نشد.");
             return ResponseDtoHelper.Ok(await HistoryAsync(d, ct));
@@ -248,7 +336,7 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<ResponseDto<PcRevisionDto>> GetRevisionAsync(int revisionId, CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<PcRevisionDto>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<PcRevisionDto>(PcText.NotAllowed);
             PcDocumentRevision r = await _uow.Set<PcDocumentRevision>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == revisionId && !x.Deleted, ct);
             return r == null ? PcText.NotFound<PcRevisionDto>("بازنگری پیدا نشد.") : await RevisionResultAsync(r, ct);
         }
@@ -283,7 +371,9 @@ namespace Services.NasbNiro.ProjectControl
                 ChangeImpact = dto.ChangeImpact || dto.ChangeRequestId.HasValue, ChangeRequestId = dto.ChangeRequestId, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
             };
             _uow.Set<PcDocumentRevision>().Add(r2);
-            await _uow.SaveChangesAsync(ct);
+            // L3: two people creating the next revision at the same time meet the unique (document, sequence) index: the second gets a plain message, not an error
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { return Bad<PcRevisionDto>("هم‌زمان کاربر دیگری بازنگری تازه ساخت؛ صفحه را تازه کنید."); }
             Log(d.Id, r2.Id, PcDocEventKind.RevisionCreated, $"{r2.Code}: {r2.Reason}", now);
             await _uow.SaveChangesAsync(ct);
             return await RevisionResultAsync(r2, ct);
@@ -338,7 +428,7 @@ namespace Services.NasbNiro.ProjectControl
             if (reason == null || reason.Length < 3) return Bad<PcRevisionDto>("علت حذف فایل را بنویسید (حداقل ۳ حرف).");
             DateTimeOffset now = DateTimeOffset.Now;
             f.Delete(); f.RemoveReason = reason; f.ModifyDate = now; f.ModifierUserId = Me;
-            Log(d.Id, r.Id, PcDocEventKind.FileAdded, "حذف فایل: " + reason, now);
+            Log(d.Id, r.Id, PcDocEventKind.FileRemoved, "حذف فایل: " + reason, now);
             await _uow.SaveChangesAsync(ct);
             return await RevisionResultAsync(r, ct);
         }
@@ -376,8 +466,10 @@ namespace Services.NasbNiro.ProjectControl
                 case "review":
                 {
                     if (r.Status != PcDocStatus.UnderReview) return Bad<PcRevisionDto>("بازنگری در مرحله بررسی نیست.");
+                    if (r.ReceivedFromClient) return Bad<PcRevisionDto>("نسخه‌ی دریافت‌شده از کارفرما بررسی و تایید سه‌مرحله‌ای ندارد؛ نفر دوم آن را می‌پذیرد (انتشار).");
                     if (!p.CanReview) return Bad<PcRevisionDto>(PcText.NotAllowed);
                     if (r.PreparedByUserId == Me) return Bad<PcRevisionDto>(PcText.SameUser);
+                    if (await IsContributorAsync(r, ct)) return Bad<PcRevisionDto>(PcText.SameUser + ContributorText);
                     if (r.ReviewerUserId.HasValue) return Bad<PcRevisionDto>("بازنگری قبلاً بررسی شده است.");
                     r.ReviewerUserId = Me; r.ReviewedAt = now; r.ReviewNote = note;
                     Log(d.Id, r.Id, PcDocEventKind.Reviewed, note, now);
@@ -386,8 +478,10 @@ namespace Services.NasbNiro.ProjectControl
                 case "approve":
                 {
                     if (r.Status != PcDocStatus.UnderReview) return Bad<PcRevisionDto>("بازنگری در مرحله بررسی نیست.");
+                    if (r.ReceivedFromClient) return Bad<PcRevisionDto>("نسخه‌ی دریافت‌شده از کارفرما بررسی و تایید سه‌مرحله‌ای ندارد؛ نفر دوم آن را می‌پذیرد (انتشار).");
                     if (!p.CanApprove) return Bad<PcRevisionDto>(PcText.NotAllowed);
                     if (r.PreparedByUserId == Me || r.ReviewerUserId == Me) return Bad<PcRevisionDto>(PcText.SameUser + " (تهیه‌کننده، بررسی‌کننده و تاییدکننده سه نفر جدا هستند.)");
+                    if (await IsContributorAsync(r, ct)) return Bad<PcRevisionDto>(PcText.SameUser + ContributorText);
                     if (reviewRequired && !r.ReviewerUserId.HasValue) return Bad<PcRevisionDto>("پیش از تایید، نفر دوم باید بازنگری را بررسی کند.");
                     r.Status = PcDocStatus.Approved; r.ApproverUserId = Me; r.ApprovedAt = now;
                     Log(d.Id, r.Id, PcDocEventKind.Approved, note, now);
@@ -396,19 +490,31 @@ namespace Services.NasbNiro.ProjectControl
                 case "reject":
                 {
                     if (r.Status != PcDocStatus.UnderReview && r.Status != PcDocStatus.Approved) return Bad<PcRevisionDto>("فقط بازنگریِ در حال بررسی یا تاییدشده رد می‌شود.");
-                    if (!(p.CanReview || p.CanApprove)) return Bad<PcRevisionDto>(PcText.NotAllowed);
+                    if (!(p.CanReview || p.CanApprove || (r.ReceivedFromClient && p.CanRelease))) return Bad<PcRevisionDto>(PcText.NotAllowed);
                     if (r.PreparedByUserId == Me) return Bad<PcRevisionDto>(PcText.SameUser);
                     if (note == null || note.Length < 3) return Bad<PcRevisionDto>("علت رد الزامی است (حداقل ۳ حرف).");
-                    r.Status = PcDocStatus.Draft; r.RejectedByUserId = Me; r.RejectedAt = now; r.RejectReason = note;
-                    r.ReviewerUserId = null; r.ReviewedAt = null; r.ApproverUserId = null; r.ApprovedAt = null; r.SubmittedAt = null;
+                    r.RejectedByUserId = Me; r.RejectedAt = now; r.RejectReason = note;
+                    if (r.ReceivedFromClient)
+                    {
+                        // a received copy that is not accepted is retired (it was never in force); the next receipt of the client starts a new revision
+                        r.Status = PcDocStatus.Obsolete; r.ObsoleteReason = "دریافت پذیرفته نشد: " + note;
+                    }
+                    else
+                    {
+                        r.Status = PcDocStatus.Draft;
+                        r.ReviewerUserId = null; r.ReviewedAt = null; r.ApproverUserId = null; r.ApprovedAt = null; r.SubmittedAt = null;
+                    }
                     Log(d.Id, r.Id, PcDocEventKind.Rejected, note, now);
                     break;
                 }
                 case "release":
                 {
-                    if (r.Status != PcDocStatus.Approved) return Bad<PcRevisionDto>("فقط بازنگری تاییدشده منتشر می‌شود.");
+                    bool received = r.ReceivedFromClient && r.Status == PcDocStatus.UnderReview;
+                    // H2: a document received from the client is accepted (released) by a second, human person; it never reaches the shop floor or the release gate before that
+                    if (r.Status != PcDocStatus.Approved && !received) return Bad<PcRevisionDto>("فقط بازنگری تاییدشده منتشر می‌شود.");
                     if (!p.CanRelease) return Bad<PcRevisionDto>(PcText.NotAllowed);
                     if (r.PreparedByUserId == Me) return Bad<PcRevisionDto>(PcText.SameUser);
+                    if (await IsContributorAsync(r, ct)) return Bad<PcRevisionDto>(PcText.SameUser + ContributorText);
                     if (r.ChangeImpact)
                     {
                         var c = r.ChangeRequestId.HasValue ? await _uow.Set<PcChangeRequest>().AsNoTracking().Where(x => x.Id == r.ChangeRequestId.Value).Select(x => new { x.Status, x.Decision }).FirstOrDefaultAsync(ct) : null;
@@ -416,27 +522,8 @@ namespace Services.NasbNiro.ProjectControl
                         bool approved = c.Decision == PcChangeDecision.Approve && (c.Status == PcChangeStatus.Decided || c.Status == PcChangeStatus.Implementing || c.Status == PcChangeStatus.Closed);
                         if (!approved) return Bad<PcRevisionDto>("درخواست تغییر این بازنگری هنوز تایید نشده است؛ پس از تصمیم هیئت تغییر منتشر کنید.");
                     }
-                    List<PcDocumentRevisionFile> files = await _uow.Set<PcDocumentRevisionFile>().Where(f => !f.Deleted && f.RevisionId == r.Id).OrderBy(f => f.Id).ToListAsync(ct);
-                    if (files.Count == 0) return Bad<PcRevisionDto>("بازنگری فایلی ندارد.");
-                    List<PcDocumentRevision> previous = await _uow.Set<PcDocumentRevision>().Where(x => x.DeliverableId == d.Id && x.Id != r.Id && !x.Deleted && x.Status == PcDocStatus.Released).ToListAsync(ct);
-                    r.Status = PcDocStatus.Released; r.ReleasedByUserId = Me; r.ReleasedAt = now;
-                    foreach (PcDocumentRevision old in previous) { old.Status = PcDocStatus.Superseded; old.SupersededAt = now; old.ModifyDate = now; old.ModifierUserId = Me; Log(d.Id, old.Id, PcDocEventKind.Superseded, "جایگزین‌شده با " + r.Code, now); }
-                    PcDocumentRevisionFile primary = files.FirstOrDefault(f => f.Role == PcRevisionFileRole.Pdf) ?? files.FirstOrDefault(f => f.Role == PcRevisionFileRole.Native) ?? files[0];
-                    d.Revision = r.Code; d.DocumentId = primary.DocumentId;
-                    if (!d.ClientSubmittal)
-                    {
-                        d.IssueState = PcIssueState.Approved; d.ApprovedAt = now; d.ApprovedByUserId = r.ApproverUserId ?? Me;
-                        if (!d.IssuedByUserId.HasValue) d.IssuedByUserId = r.PreparedByUserId;
-                    }
-                    d.ModifyDate = now; d.ModifierUserId = Me;
-                    Log(d.Id, r.Id, PcDocEventKind.Released, note, now);
-                    r.ModifyDate = now; r.ModifierUserId = Me;
-                    try { await _uow.SaveChangesAsync(ct); }
-                    catch (DbUpdateConcurrencyException) { return Bad<PcRevisionDto>(PcText.Concurrency); }
-                    foreach (PcDocumentRevision old in previous) old.SupersededByRevisionId = r.Id;
-                    await NoticesAsync(d, r, ct);
-                    await _uow.SaveChangesAsync(ct);
-                    return await RevisionResultAsync(r, ct);
+                    if (!received && !await _uow.Set<PcDocumentRevisionFile>().AnyAsync(f => !f.Deleted && f.RevisionId == r.Id, ct)) return Bad<PcRevisionDto>("بازنگری فایلی ندارد.");
+                    return await ReleaseAsync(r.Id, note, ct);
                 }
                 case "as-built":
                 {
@@ -455,6 +542,11 @@ namespace Services.NasbNiro.ProjectControl
                     if (note == null || note.Length < 3) return Bad<PcRevisionDto>("علت منسوخ‌کردن الزامی است (حداقل ۳ حرف).");
                     r.Status = PcDocStatus.Obsolete; r.ObsoleteReason = note;
                     Log(d.Id, r.Id, PcDocEventKind.Obsoleted, note, now);
+                    // M3: a document whose latest revision is retired is no longer a document of any part: its links are voided (with the reason), so no order waits for it
+                    bool latest = !await _uow.Set<PcDocumentRevision>().AnyAsync(x => x.DeliverableId == d.Id && !x.Deleted && x.Sequence > r.Sequence, ct);
+                    if (latest)
+                        foreach (PcDocumentLink l in await _uow.Set<PcDocumentLink>().Where(x => x.DeliverableId == d.Id && !x.Deleted).ToListAsync(ct))
+                        { l.Delete(); l.UnlinkReason = "سند منسوخ شد: " + note; l.UnlinkedByUserId = Me; l.ModifyDate = now; l.ModifierUserId = Me; Log(d.Id, null, PcDocEventKind.Unlinked, "سند منسوخ شد", now); }
                     break;
                 }
                 case "link-change":
@@ -474,6 +566,7 @@ namespace Services.NasbNiro.ProjectControl
                 case "link-quality":
                 {
                     if (!p.CanPrepare) return Bad<PcRevisionDto>(PcText.NotAllowed);
+                    if (d.CheckedOutByUserId.HasValue && d.CheckedOutByUserId != Me) return Bad<PcRevisionDto>(LockedBy);
                     if (r.Status == PcDocStatus.Superseded) return Bad<PcRevisionDto>("بازنگری جایگزین‌شده پیوند تازه نمی‌گیرد.");
                     if (!dto.QualityKind.HasValue || !Enum.IsDefined(typeof(PcQualityLinkKind), dto.QualityKind.Value) || !dto.QualityTargetId.HasValue) return Bad<PcRevisionDto>("NCR یا سابقه کنترل کیفیت را مشخص کنید.");
                     bool exists = dto.QualityKind == PcQualityLinkKind.Ncr
@@ -540,7 +633,7 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<ResponseDto<PcRevisionCompareDto>> CompareAsync(int revisionA, int revisionB, CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<PcRevisionCompareDto>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<PcRevisionCompareDto>(PcText.NotAllowed);
             if (revisionA == revisionB) return Bad<PcRevisionCompareDto>("دو بازنگری متفاوت را انتخاب کنید.");
             List<PcDocumentRevision> revs = await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted && (r.Id == revisionA || r.Id == revisionB)).ToListAsync(ct);
             if (revs.Count != 2) return PcText.NotFound<PcRevisionCompareDto>("بازنگری پیدا نشد.");
@@ -554,7 +647,7 @@ namespace Services.NasbNiro.ProjectControl
         /// <summary>The revisions that cite a change request, an NCR or a QC record (the other direction of the link).</summary>
         public async Task<ResponseDto<List<PcRevisionDto>>> RevisionsOfAsync(string kind, int id, CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<List<PcRevisionDto>>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<List<PcRevisionDto>>(PcText.NotAllowed);
             IQueryable<PcDocumentRevision> q = _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted);
             switch ((kind ?? "").Trim().ToLowerInvariant())
             {
@@ -570,13 +663,9 @@ namespace Services.NasbNiro.ProjectControl
                 default: return Bad<List<PcRevisionDto>>("نوع مرجع نامعتبر است (change، ncr یا qc).");
             }
             List<PcDocumentRevision> revs = await q.OrderBy(r => r.DeliverableId).ThenBy(r => r.Sequence).Take(200).ToListAsync(ct);
-            var result = new List<PcRevisionDto>();
-            foreach (IGrouping<int, PcDocumentRevision> g in revs.GroupBy(r => r.DeliverableId))
-            {
-                PcEngineeringDeliverable d = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().FirstAsync(x => x.Id == g.Key, ct);
-                result.AddRange(await BuildAsync(g.ToList(), d, ct));
-            }
-            return ResponseDtoHelper.Ok(result);
+            List<int> dIds = revs.Select(r => r.DeliverableId).Distinct().ToList();
+            Dictionary<int, PcEngineeringDeliverable> docs = (await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(x => dIds.Contains(x.Id)).ToListAsync(ct)).ToDictionary(x => x.Id);
+            return ResponseDtoHelper.Ok(await BuildManyAsync(revs, docs, ct));
         }
 
         // ============================================================================ check-out

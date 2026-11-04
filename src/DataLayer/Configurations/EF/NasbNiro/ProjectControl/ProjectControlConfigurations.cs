@@ -409,7 +409,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.ProgressWeight).HasPrecision(9, 4).HasDefaultValue(1m);
                 b.Property(x => x.CheckOutNote).HasMaxLength(500);
                 b.HasIndex(x => new { x.ContractId, x.WorkOrderId });
-                b.HasIndex(x => new { x.ContractId, x.DocumentNumber });
+                b.HasIndex(x => new { x.ContractId, x.DocumentNumber }).IsUnique().HasFilter(NotDeleted); // P-B7b fix round: one register line per number and project (the services already refuse a duplicate)
                 b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
             });

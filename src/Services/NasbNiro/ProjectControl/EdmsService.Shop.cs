@@ -44,7 +44,7 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(EdmsRoles.ShopFloor + "," + EdmsRoles.Readers)) return Bad<PcControlledCopyDto>(PcText.NotAllowed);
             PcDocumentRevision r = await _uow.Set<PcDocumentRevision>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == revisionId && !x.Deleted, ct);
             if (r == null) return PcText.NotFound<PcControlledCopyDto>("بازنگری پیدا نشد.");
-            if (r.Status != PcDocStatus.Released) return Bad<PcControlledCopyDto>("فقط نسخه منتشرشده‌ی سند چاپ کنترل‌شده دارد.");
+            if (!EdmsRules.InForce(r.Status)) return Bad<PcControlledCopyDto>("فقط نسخه منتشرشده‌ی سند چاپ کنترل‌شده دارد.");
             var d = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(x => x.Id == r.DeliverableId).Select(x => new { x.DocumentNumber, x.Title }).FirstAsync(ct);
             PcDocumentRevisionFile f = await _uow.Set<PcDocumentRevisionFile>().AsNoTracking().Where(x => x.RevisionId == r.Id && !x.Deleted && (documentId == null || x.DocumentId == documentId)).OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
             if (f == null) return PcText.NotFound<PcControlledCopyDto>("فایلی برای این بازنگری ثبت نشده است.");
@@ -54,26 +54,39 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok(new PcControlledCopyDto
             {
                 RevisionId = r.Id, DocumentNumber = d.DocumentNumber, Title = d.Title, Code = r.Code, PrintedAt = now, PrintedByUserId = Me, PrintedByName = name,
-                StampText = EdmsRules.StampText(d.DocumentNumber, r.Code, now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), name), DocumentId = f.DocumentId, FileName = f.FileName,
+                StampText = EdmsRules.StampText(d.DocumentNumber, r.Code, global::Services.NasbNiro.Finance.FiscalCalendars.Current.TextTime(now.DateTime), name), DocumentId = f.DocumentId, FileName = f.FileName,
             });
         }
 
         // ============================================================================ Excel
 
+        private static readonly System.Text.RegularExpressions.Regex ShamsiDate = new System.Text.RegularExpressions.Regex(@"^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$");
+
+        /// <summary>L8: the planned date in the Excel is Shamsi (1405/01/31); a year above 1700 is read as Gregorian by the caller.</summary>
+        private static bool TryShamsi(string text, out DateTime date)
+        {
+            date = default;
+            System.Text.RegularExpressions.Match m = ShamsiDate.Match(text ?? "");
+            if (!m.Success) return false;
+            int y = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), mo = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture), d = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
+            if (y >= 1700) return false;
+            try { date = new PersianCalendar().ToDateTime(y, mo, d, 0, 0, 0, 0).Date; return true; } catch (ArgumentOutOfRangeException) { return false; }
+        }
+
         private static readonly string[] MdrColumns = { "DocumentNumber", "Title", "Discipline", "DocumentType", "ClientSubmittal", "Required", "PlannedDate", "ProgressWeight", "StandardSource" };
 
         public async Task<ResponseDto<byte[]>> ExportMdrAsync(int contractId, bool clientOnly, int? workOrderId, bool templateOnly, CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<byte[]>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<byte[]>(PcText.NotAllowed);
             var sheet = new FinSheet { Name = "MDR", Header = MdrColumns.ToList() };
-            if (templateOnly) sheet.Rows.Add(new object[] { "PRJ-001-001", "Sample title", "Mechanical", "Drawing", 0, 1, "2030-01-31", 1, "" });
+            if (templateOnly) sheet.Rows.Add(new object[] { "PRJ-001-001", "Sample title", "Mechanical", "Drawing", 0, 1, "1409/11/10", 1, "" });
             else
             {
                 IQueryable<PcEngineeringDeliverable> q = _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(d => !d.Deleted && d.ContractId == contractId);
                 if (clientOnly) q = q.Where(d => d.ClientSubmittal);
                 if (workOrderId.HasValue) q = q.Where(d => d.WorkOrderId == workOrderId.Value);
                 foreach (PcEngineeringDeliverable d in await q.OrderBy(d => d.DocumentNumber).Take(20000).ToListAsync(ct))
-                    sheet.Rows.Add(new object[] { d.DocumentNumber, d.Title, d.Discipline, d.DocumentType, d.ClientSubmittal ? 1 : 0, d.Required ? 1 : 0, d.PlannedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "", d.ProgressWeight, d.StandardSource });
+                    sheet.Rows.Add(new object[] { d.DocumentNumber, d.Title, d.Discipline, d.DocumentType, d.ClientSubmittal ? 1 : 0, d.Required ? 1 : 0, d.PlannedDate.HasValue ? global::Services.NasbNiro.Finance.FiscalCalendars.Current.Text(d.PlannedDate.Value) : "", d.ProgressWeight, d.StandardSource });
             }
             return ResponseDtoHelper.Ok(SimpleXlsx.Build(new List<FinSheet> { sheet }));
         }
@@ -106,9 +119,10 @@ namespace Services.NasbNiro.ProjectControl
                 string pd = Cell(row, "PlannedDate");
                 if (pd != null)
                 {
-                    if (DateTime.TryParse(pd, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dt)) planned = dt.Date;
+                    if (TryShamsi(pd, out DateTime sd)) planned = sd;
+                    else if (DateTime.TryParse(pd, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dt)) planned = dt.Date;
                     else if (double.TryParse(pd, NumberStyles.Float, CultureInfo.InvariantCulture, out double serial) && serial > 20000 && serial < 80000) planned = new DateTime(1899, 12, 30).AddDays(serial);
-                    else { result.Errors.Add(at + "تاریخ برنامه نامعتبر است (قالب yyyy-MM-dd)."); result.Skipped++; continue; }
+                    else { result.Errors.Add(at + "تاریخ برنامه نامعتبر است (قالب شمسی 1405/01/31)."); result.Skipped++; continue; }
                 }
                 decimal weight = 1m;
                 string w = Cell(row, "ProgressWeight");
@@ -117,6 +131,9 @@ namespace Services.NasbNiro.ProjectControl
                 if (existing.TryGetValue(no, out PcEngineeringDeliverable d))
                 {
                     if (d.CheckedOutByUserId.HasValue && d.CheckedOutByUserId != Me) { result.Errors.Add(at + LockedBy); result.Skipped++; continue; }
+                    string newDisc = Cell(row, "Discipline") ?? d.Discipline, newType = Cell(row, "DocumentType") ?? d.DocumentType;
+                    if ((!string.Equals(d.Title ?? "", title, StringComparison.Ordinal) || !string.Equals(d.Discipline ?? "", newDisc ?? "", StringComparison.Ordinal) || !string.Equals(d.DocumentType ?? "", newType ?? "", StringComparison.Ordinal))
+                        && await EdmsResolver.HasBeenReleasedAsync(_uow, d.Id, ct)) { result.Errors.Add(at + EdmsResolver.FrozenText); result.Skipped++; continue; }
                     d.Title = title; d.Discipline = Cell(row, "Discipline") ?? d.Discipline; d.DocumentType = Cell(row, "DocumentType") ?? d.DocumentType; d.Required = required; d.PlannedDate = planned ?? d.PlannedDate; d.ProgressWeight = weight;
                     d.StandardSource = Cell(row, "StandardSource") ?? d.StandardSource; d.ModifyDate = now; d.ModifierUserId = Me;
                     result.Updated++;

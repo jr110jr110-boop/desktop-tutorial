@@ -180,6 +180,11 @@ namespace Services.NasbNiro.ProjectControl
             if (l == null) return PcText.NotFound<bool>("پیوند پیدا نشد.");
             string reason = Clean(dto.Reason);
             if (reason == null || reason.Length < 3) return Bad<bool>("علت حذف پیوند الزامی است (حداقل ۳ حرف).");
+            if (l.DeliverableId.HasValue)
+            {
+                var holder = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(x => x.Id == l.DeliverableId.Value).Select(x => x.CheckedOutByUserId).FirstOrDefaultAsync(ct);
+                if (holder.HasValue && holder != Me) return Bad<bool>(LockedBy);
+            }
             DateTimeOffset now = DateTimeOffset.Now;
             l.Delete(); l.UnlinkReason = reason; l.UnlinkedByUserId = Me; l.ModifyDate = now; l.ModifierUserId = Me;
             if (l.DeliverableId.HasValue) Log(l.DeliverableId.Value, null, PcDocEventKind.Unlinked, reason, now);
@@ -189,7 +194,7 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<ResponseDto<List<PcDocLinkDto>>> GetLinksAsync(PcDocLinkQuery query, CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<List<PcDocLinkDto>>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<List<PcDocLinkDto>>(PcText.NotAllowed);
             query ??= new PcDocLinkQuery();
             IQueryable<PcDocumentLink> q = _uow.Set<PcDocumentLink>().AsNoTracking().Where(l => !l.Deleted);
             if (query.DeliverableId.HasValue) q = q.Where(l => l.DeliverableId == query.DeliverableId.Value);
@@ -243,7 +248,7 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<ResponseDto<List<PcDistributionDto>>> GetDistributionAsync(CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<List<PcDistributionDto>>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<List<PcDistributionDto>>(PcText.NotAllowed);
             List<PcDocumentDistribution> rows = await _uow.Set<PcDocumentDistribution>().AsNoTracking().Where(x => !x.Deleted).OrderBy(x => x.Discipline).ThenBy(x => x.UserId).ToListAsync(ct);
             Dictionary<int, string> names = await NamesAsync(rows.Select(x => (int?)x.UserId), ct);
             return ResponseDtoHelper.Ok(rows.Select(x => new PcDistributionDto { Id = x.Id, Discipline = x.Discipline, UserId = x.UserId, ContractId = x.ContractId, IsActive = x.IsActive, UserName = NameOf(names, x.UserId) }).ToList());
@@ -276,7 +281,7 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<ResponseDto<List<PcApproverDto>>> GetApproversAsync(CancellationToken ct)
         {
-            if (!_user.IsInRole(EdmsRoles.Readers)) return Bad<List<PcApproverDto>>(PcText.NotAllowed);
+            if (!_user.IsInRole(EdmsRoles.DocReaders)) return Bad<List<PcApproverDto>>(PcText.NotAllowed);
             List<PcDisciplineApprover> rows = await _uow.Set<PcDisciplineApprover>().AsNoTracking().Where(x => !x.Deleted).OrderBy(x => x.Discipline).ThenBy(x => x.UserId).ToListAsync(ct);
             Dictionary<int, string> names = await NamesAsync(rows.Select(x => (int?)x.UserId), ct);
             return ResponseDtoHelper.Ok(rows.Select(x => new PcApproverDto { Id = x.Id, Discipline = x.Discipline, UserId = x.UserId, ContractId = x.ContractId, CanReview = x.CanReview, CanApprove = x.CanApprove, IsActive = x.IsActive, UserName = NameOf(names, x.UserId) }).ToList());
