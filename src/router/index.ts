@@ -445,7 +445,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/procurement/tools", name: "ProcurementTools", component: () => import("@/views/pb6/ProcurementTools.vue"), meta: { roles: ProcurementRoles.reports } },
   { path: "/procurement/contracts-system", name: "ProcurementContractsSystem", component: () => import("@/views/pb6/ContractsSystem.vue"), meta: { roles: ProcurementRoles.contractsSystem } },
   { path: "/procurement/statements", name: "ProcurementStatements", component: () => import("@/views/pb6/Statements.vue"), meta: { roles: ProcurementRoles.statements } },
-  { path: "/procurement/petty-flow", name: "ProcurementPettyFlow", component: () => import("@/views/pb6/PettyFlow.vue"), meta: { roles: ProcurementRoles.pettyFlow } },
+  { path: "/procurement/petty-flow", name: "ProcurementPettyFlow", component: () => import("@/views/pb6/PettyFlow.vue") }   /* open to every signed-in user: the holder sees his own petty cash, the API filters the rest */,
   { path: "/procurement/suppliers", name: "ProcurementSuppliers", component: () => import("@/views/procurement/Suppliers.vue"), meta: { roles: ProcurementRoles.readers } },
   // the old CEO dashboard address (links and bookmarks) opens the CEO home page (release D1)
   { path: "/finance/ceo-dashboard", name: "FinanceCeoDashboard", redirect: { name: "CeoHome" } },

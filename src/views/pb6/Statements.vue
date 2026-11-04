@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
+import Pb6Dialog from "@/components/common/Pb6Dialog.vue";
 import Pb6Table from "@/components/common/Pb6Table.vue";
 import { getCashFlow, getCbs, getLegalRates, getStatement, getStatementAnalytics, getStatementPrint, getStatements, legalRateAction, recordStatementPayment, saveCashPlan, saveCbs, saveLegalRate, saveStatement, statementAction } from "@/api/Pb6APIs";
 import { fail, jalali, ok, printPage, rial, today } from "@/composables/inventory";
@@ -99,18 +100,23 @@ function addNcr() {
 }
 
 // rates
-const rate = ref<any>({ code: "", title: "", percent: 0, sourceReference: "", basisNote: "" });
+const rate = ref<any>({ code: "", title: "", percent: 0, deductionKind: 1, sourceReference: "", basisNote: "" });
 async function createRate() {
   const [, e] = await saveLegalRate(rate.value);
   if (e) return fail(e);
   ok("نرخ ثبت شد؛ نفر دوم باید آن را تایید کند.");
   load();
 }
-async function rateAct(r: any, a: string) {
-  const [, e] = await legalRateAction(r.id, a, a === "retire" ? prompt("علت کنار گذاشتن؟") || "" : undefined);
+const retireDlg = ref<{ open: boolean; row: any }>({ open: false, row: null });
+async function sendRateAction(r: any, a: string, reason?: string) {
+  const [, e] = await legalRateAction(r.id, a, reason);
   if (e) return fail(e);
   ok("انجام شد.");
   load();
+}
+function rateAct(r: any, a: string) {
+  if (a === "retire") retireDlg.value = { open: true, row: r };
+  else sendRateAction(r, a);
 }
 
 // cbs and cash flow
@@ -256,6 +262,7 @@ function switchTab(t: any) {
           <input v-model="rate.code" class="form-control form-control-sm inv-ltr" placeholder="کد" />
           <input v-model="rate.title" class="form-control form-control-sm" placeholder="عنوان" />
           <input v-model.number="rate.percent" type="number" class="form-control form-control-sm inv-ltr" placeholder="درصد" />
+          <select v-model.number="rate.deductionKind" class="form-select form-select-sm" title="نوع کسر"><option :value="1">مالیات</option><option :value="2">بیمه</option><option :value="3">حسن انجام کار</option><option :value="9">سایر</option></select>
           <input v-model="rate.sourceReference" class="form-control form-control-sm" placeholder="مرجع (قانون/نامه)" />
           <button class="btn btn-sm btn-primary" @click="createRate">ثبت نرخ</button>
         </div>
@@ -300,6 +307,7 @@ function switchTab(t: any) {
         <Pb6Table :columns="[{ key: 'title', title: 'بند' }, { key: 'count', title: 'تعداد' }, { key: 'amount', title: 'مبلغ', kind: 'money' }]" :rows="analytics.byCbs" />
       </template>
     </div>
+    <Pb6Dialog v-model="retireDlg.open" title="کنار گذاشتن نرخ" text-label="علت کنار گذاشتن" :text-required="true" @confirm="(v: any) => sendRateAction(retireDlg.row, 'retire', v.text)" />
   </div>
 </template>
 

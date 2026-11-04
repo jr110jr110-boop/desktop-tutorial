@@ -451,7 +451,7 @@ const links = {
     { title: "ضمانت‌نامه، الحاقیه، بایگانی و گزارش‌ها", routeName: "ProcurementTools", disabled: !hasRole(ProcurementRoles.reports) },
     { title: "سامانه قراردادها", routeName: "ProcurementContractsSystem", disabled: !hasRole(ProcurementRoles.contractsSystem) },
     { title: "صورت‌وضعیت‌ها", routeName: "ProcurementStatements", disabled: !hasRole(ProcurementRoles.statements) },
-    { title: "گردش تنخواه", routeName: "ProcurementPettyFlow", disabled: !hasRole(ProcurementRoles.pettyFlow) },
+    { title: "گردش تنخواه", routeName: "ProcurementPettyFlow" },
     { title: "تنظیمات و آستانه‌های خرید", routeName: "ProcurementSettings", disabled: !hasRole(ProcurementRoles.readers) },
   ] as Links[],
   quality: [
