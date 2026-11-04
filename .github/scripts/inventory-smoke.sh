@@ -6165,6 +6165,12 @@ as "$MSV_TOKEN" POST $MF/operations/action "{\"id\":$MFOPA30,\"action\":\"skip\"
 call GET "$MF/orders/$MFORDA"; check "mes: order A is completed with a receipt draft (a draft inventory document has no number until it is confirmed) and the actual finish in Persian" '.success and .data.status == 3 and .data.productionReceiptId > 0 and .data.productionReceiptNumber == null and (.data.actualFinishText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
 MFRCT=$(val .data.productionReceiptId)
 call GET "inventory/documents/$MFRCT"; check "mes: the receipt is a draft production receipt of 5 units of item A for the work order" ".success and .data.status == 0 and .data.type == 2 and .data.workOrderId == $MFWO and .data.lines[0].itemId == $MFPA and .data.lines[0].quantity == 5"
+# --- PB4 genealogy: order A has no kit and an unconfirmed receipt draft, so nothing can be linked and the rebuild says exactly why
+PB4TR=trace
+as "$ADMIN_TOKEN" GET "$PB4TR/genealogy/order/$MFORDA"; check "pb4 genealogy: order A has no genealogy link yet" '.success and (.data|length) == 0'
+as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/order/$MFORDA/rebuild"; check "pb4 genealogy: the rebuild of order A sees 1 order, no kit, 1 receipt not confirmed and creates, updates and removes nothing" '.success and .data.ordersSeen == 1 and .data.ordersWithoutKit == 1 and .data.ordersReceiptNotConfirmed == 1 and .data.linksCreated == 0 and .data.linksUpdated == 0 and .data.linksRemoved == 0 and .data.ordersLinked == 0'
+as "$WH_TOKEN" POST "$PB4TR/genealogy/order/$MFORDA/rebuild"; r403 "pb4 genealogy: the warehouse keeper reads the trace but cannot rebuild the links (403)"
+as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/order/99999999/rebuild"; nomsg "pb4 genealogy: the rebuild of an order that does not exist is refused" "دستور تولید پیدا نشد"
 as "$MOP_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"close\"}"; nomsg "mes: the operator cannot close an order" "مجوز"
 as "$MPM_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"close\"}"; check "mes: the production manager closes the completed order A" '.success and .data.status == 4'
 as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDB,\"action\":\"close\"}"; nomsg "mes: only a completed order is closed" "بسته می‌شود"
@@ -11160,6 +11166,22 @@ as "$PLAN_TOKEN" GET "$PC/daily-report/$P7DR"; check "p7a daily: one report by i
 as "$ADMIN_TOKEN" GET "$P7TK?Cartable=mine&PageSize=0"; [ "$CODE" = "200" ] && ok "p7a notifications: the task list answers for the PMO" || bad "p7a notifications: the task list answers for the PMO"
 as "$ADMIN_TOKEN" POST $P7TK/reminders/run; check "p7a notifications: the reminder job runs without an external call (counts only)" '.success and (.data.reminders|type) == "number"'
 as "$PLAN_TOKEN" POST $P7TK/reminders/run; r403 "p7a notifications: only the PMO or the CEO runs the reminders by hand (403)"
+TOKEN=$ADMIN_TOKEN
+
+# --- PB4 trace centre: the heat number of the first receipt (H-7781) was issued to a material request, never to a production order, so the where-used walk finds the root and no consumer
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the heat number H-7781 resolves to exactly 1 lot and no part, assembly, project or delivery consumed it through a production order" '.success and (.data.roots|length) == 1 and .data.roots[0].heatNumber == "H-7781" and .data.counts.nodes == 0 and .data.counts.items == 0 and .data.counts.deliveries == 0 and .data.counts.projects == 0 and .data.truncated == false'
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781&Depth=1"; check "pb4 reverse: a depth limit of 1 is accepted for the same root" '.success and (.data.roots|length) == 1 and .data.maxDepth == 1'
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=NO-SUCH-HEAT-PB4"; check "pb4 reverse: an unknown heat number gives no root and says so" '(.success == false) or ((.data.roots|length) == 0)'
+as "$ADMIN_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the lot of heat H-7781 shows exactly 1 purchase receipt node and the prices are not masked for the PMO" '.success and .data.pricesMasked == false and ([.. | objects | select(.kind? == "receipt")]|length) == 1'
+as "$QC_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: QC sees the same chain with the prices masked and no price fact anywhere" '.success and .data.pricesMasked == true and ([.. | objects | select(.kind? == "receipt")]|length) == 1 and ([.. | objects | select(has("label")) | .label | select(contains("قیمت"))]|length) == 0'
+as "$WH_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the warehouse keeper gets the prices masked too" '.success and .data.pricesMasked == true'
+as "$FM_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the finance manager sees the prices" '.success and .data.pricesMasked == false'
+as "$AUD_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the auditor reads the tree (read only)" '.success and .data.root != null'
+as "$ADMIN_TOKEN" GET "$PB4TR/tree?Q=H-7781&Depth=99"; check "pb4 tree: a depth above the limit is cut to 8" '.success and .data.maxDepth == 8'
+CODE=$(curl -s -o "$OUT/pb4-tree.xlsx" -w '%{http_code}' "$API/$PB4TR/tree/export?Q=H-7781" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pb4-tree.xlsx")" = "PK" ] && ok "pb4 export: the tree comes as an xlsx file (a zip starting with PK)" || bad "pb4 export: the tree comes as an xlsx file (HTTP $CODE)"
+CODE=$(curl -s -o "$OUT/pb4-reverse.xlsx" -w '%{http_code}' "$API/$PB4TR/reverse/export?Q=H-7781" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pb4-reverse.xlsx")" = "PK" ] && ok "pb4 export: the reverse trace comes as an xlsx file" || bad "pb4 export: the reverse trace comes as an xlsx file (HTTP $CODE)"
+as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/backfill"; check "pb4 genealogy: the backfill runs for every order with a production receipt, removes no link and reports its notes as a list" '.success and .data.linksRemoved == 0 and (.data.notes|type) == "array"'
+as "$WH_TOKEN" POST "$PB4TR/genealogy/backfill"; r403 "pb4 genealogy: the warehouse keeper cannot start the backfill (403)"
 TOKEN=$ADMIN_TOKEN
 
 finished=1

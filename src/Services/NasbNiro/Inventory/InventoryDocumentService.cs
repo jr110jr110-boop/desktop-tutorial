@@ -1336,6 +1336,8 @@ namespace Services.NasbNiro.Inventory
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
             await RefreshPurchaseOrderAsync(document, cancellationToken);
+            // PB4: the genealogy links (kit issues -> production receipt) follow the confirmed documents
+            await global::Services.NasbNiro.Trace.GenealogyBuilder.AfterDocumentAsync(_uow, _user.UserId, type, document.Id, document.MaterialRequestId, cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);
         }
 
@@ -1699,6 +1701,8 @@ namespace Services.NasbNiro.Inventory
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
             await RefreshPurchaseOrderAsync(document, cancellationToken);
+            // PB4: the genealogy links (kit issues -> production receipt) follow the confirmed documents
+            await global::Services.NasbNiro.Trace.GenealogyBuilder.AfterDocumentAsync(_uow, _user.UserId, document.Type, document.Id, document.MaterialRequestId, cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);
         }
     }
