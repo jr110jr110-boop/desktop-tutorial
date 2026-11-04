@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
+import { BalanceRoles } from "@/composables/projectBalance";
 import { AccountRoles, AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
@@ -676,6 +677,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/product-bank/stages", name: "ProductBankStages", component: () => import("@/views/productBank/Stages.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/mappings", name: "ProductBankMappings", component: () => import("@/views/productBank/Mappings.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/deviations", name: "ProductBankDeviations", component: () => import("@/views/productBank/Deviations.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/project-balance", name: "ProjectBalance", component: () => import("@/views/projectBalance/Balance.vue"), meta: { roles: BalanceRoles.readers } },
+  { path: "/project-balance/substitutes", name: "ProjectBalanceSubstitutes", component: () => import("@/views/projectBalance/Substitutes.vue"), meta: { roles: BalanceRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

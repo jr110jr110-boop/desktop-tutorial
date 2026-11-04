@@ -437,6 +437,8 @@ const links = {
     { title: "فهرست مواد (BOM)", routeName: "ProductBankBoms" },
     { title: "چارت‌های فرآیند (OPC)", routeName: "ProductBankRoutings" },
     { title: "مبنای BOM پروژه و انحراف‌ها", routeName: "ProductBankDeviations" },
+    { title: "بالانس خودکار مواد پروژه", routeName: "ProjectBalance" },
+    { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes" },
     { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings" },
     { title: "فهرست مراحل OPC و تنظیم کدینگ", routeName: "ProductBankStages" },
   ] as Links[],

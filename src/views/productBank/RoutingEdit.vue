@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { approveRouting, checkRouting, deleteRoutingDraft, getProducts, getRouting, getStages, newRoutingRevision, publishRouting, returnRouting, saveRouting, submitRouting } from "@/api/ProductBankAPIs";
 import { fail, jalali, ok, printPage } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
@@ -188,6 +190,7 @@ const removeDraft = () => run(() => deleteRoutingDraft(routing.value.id), "پی�
       <p v-if="editable && !lanes.length" class="inv-muted">ابتدا شماره مجموعه را بنویسید و «+ ستون قطعه» را بزنید.</p>
       <div class="small inv-muted mt-3">○ عملیات · □ کنترل کیفیت · → حمل · △ انبار · ◇ توقف بازرسی. ★ زمان استاندارد در چارت‌های کاغذی نیست و پس از اندازه‌گیری شرکت وارد می‌شود.</div>
     </div>
+    <AttachmentPanel v-if="routing?.id" :owner-type="AttachmentOwner.PbOpcRouting" :owner-id="routing.id" title="مدارک چارت فرآیند — به درخواست‌های خرید خودکار پیوست می‌شود" />
   </div>
 </template>
 

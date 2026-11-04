@@ -6,6 +6,8 @@ import NeedContract from "@/components/pc/NeedContract.vue";
 import WorkOrderOfContract from "@/components/pc/WorkOrderOfContract.vue";
 import { approveWbsNode, autoWeights, deleteWbsNode, generateWbs, getActivities, getWbs, saveWbsNode } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
+import { getNodeMaterial } from "@/api/ProjectBalanceAPIs";
+import { qty } from "@/composables/projectBalance";
 import { fail, jalali, ok, printPage, rial } from "@/composables/inventory";
 import { pcContractId, phases, unitOptions, unitText, wbsTypes } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
@@ -35,6 +37,13 @@ async function load() {
   nodes.value = rowsOf(n);
   acts.value = rowsOf(a);
   if (!Object.keys(open.value).length) nodes.value.filter((x) => !x.parentId).forEach((x) => (open.value[x.id] = true));
+}
+
+const material = ref<any>(null);
+async function showMaterial(n: any) {
+  const [data, error] = await getNodeMaterial(n.id);
+  if (error) return fail(error);
+  material.value = data;
 }
 
 interface Row { kind: "node" | "act"; item: any; depth: number; hasChildren: boolean; siblingSum?: number }
@@ -183,7 +192,8 @@ watch(pcContractId, () => { open.value = {}; genResult.value = null; load(); });
                 </td>
                 <td class="d-print-none text-nowrap">
                   <template v-if="r.kind === 'node'">
-                    <button v-if="canEdit" class="btn btn-sm btn-outline-secondary" @click="edit = { ...r.item }">ویرایش</button>
+                    <button class="btn btn-sm btn-outline-info" title="مواد: نیاز، رزرو، موجودی، در راه و کمبود" @click="showMaterial(r.item)">مواد</button>
+                    <button v-if="canEdit" class="btn btn-sm btn-outline-secondary ms-1" @click="edit = { ...r.item }">ویرایش</button>
                     <button v-if="canEdit" class="btn btn-sm btn-outline-secondary ms-1" @click="edit = blank(r.item)">زیرگره</button>
                     <button v-if="canApprove && !r.item.approvedAt" class="btn btn-sm btn-outline-success ms-1" @click="approve(r.item)">تایید</button>
                     <button v-if="canEdit" class="btn btn-sm btn-outline-danger ms-1" @click="remove(r.item)">حذف</button>
@@ -198,6 +208,28 @@ watch(pcContractId, () => { open.value = {}; genResult.value = null; load(); });
       </template>
     </div>
 
+    <div v-if="material" class="inv-modal-backdrop d-print-none" @click.self="material = null">
+      <div class="inv-modal" style="max-width: 1100px">
+        <h2 class="inv-title mb-2">مواد گره {{ material.nodeCode }} {{ material.nodeTitle }}</h2>
+        <p v-if="!material.runId" class="inv-muted">برای این گره هنوز بالانس مواد اجرا نشده است.</p>
+        <template v-else>
+          <p class="small">اجرای {{ material.runNumber }} ({{ jalali(material.runAt, true) }}) · {{ material.lineCount }} ردیف · {{ material.shortLineCount }} کمبود</p>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>کالا</th><th>نیاز</th><th>رزرو/حواله</th><th>موجود</th><th>در راه</th><th>کمبود</th><th>نیاز تا</th></tr></thead>
+              <tbody>
+                <tr v-for="l in material.lines" :key="l.id" :class="{ 'table-danger': l.shortQty > 0 }">
+                  <td><span class="inv-ltr fw-bold">{{ l.itemCode || l.partNumber }}</span> {{ l.itemTitle || l.partName }}</td>
+                  <td>{{ qty(l.requiredQty) }}</td><td>{{ qty(l.issuedQty + l.reservedQty) }}</td><td>{{ qty(l.onHandQty) }}</td><td>{{ qty(l.onOrderPrQty + l.onOrderPoQty) }}</td>
+                  <td><b>{{ qty(l.shortQty) }}</b></td><td class="text-nowrap">{{ jalali(l.useByDate) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+        <button class="btn btn-sm btn-outline-secondary mt-2" @click="material = null">بستن</button>
+      </div>
+    </div>
     <div v-if="edit" class="inv-modal-backdrop d-print-none" @click.self="edit = null">
       <div class="inv-modal">
         <h2 class="inv-title mb-3">{{ edit.id ? "ویرایش گره WBS" : "گره WBS جدید" }}</h2>

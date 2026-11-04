@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { deleteBomDraft, diffBoms, getBom, getBoms, getProducts, newBomRevision, obsoleteBom, releaseBom, returnBom, rowsOf, saveBom, signBom, submitBom, whereUsed } from "@/api/ProductBankAPIs";
 import { fail, jalali, ok, printPage } from "@/composables/inventory";
 import { bomStatusClass, bomStatuses, makeOrBuy, makeOrBuyShort, num, revisionText, signatureRoles, signatureTitles } from "@/composables/productBank";
@@ -326,6 +328,7 @@ const fieldName: Record<string, string> = { Qty: "تعداد", Material: "جنس
         </table>
       </div>
     </div>
+    <AttachmentPanel v-if="bom?.id" :owner-type="AttachmentOwner.PbBomHeader" :owner-id="bom.id" title="مدارک فنی BOM (نقشه‌ها و مشخصات) — به درخواست‌های خرید خودکار پیوست می‌شود" />
   </div>
 </template>
 
