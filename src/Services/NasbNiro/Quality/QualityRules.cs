@@ -121,6 +121,15 @@ namespace Services.NasbNiro.Quality
             { QualitySettingKeys.IncomingNcrDueDays, new KeyValuePair<int, int>(1, 30) },
             { QualitySettingKeys.CapaCeoEscalationDays, new KeyValuePair<int, int>(1, 90) },
             { QualitySettingKeys.ExpiryWarnDays, new KeyValuePair<int, int>(1, 365) },
+            { QualitySettingKeys.ConsignmentReturnDays, new KeyValuePair<int, int>(1, 365) },
+            { QualitySettingKeys.ConsignmentAlertDays1, new KeyValuePair<int, int>(1, 60) },
+            { QualitySettingKeys.ConsignmentAlertDays2, new KeyValuePair<int, int>(0, 30) },
+            { QualitySettingKeys.QcPendingWorkDays, new KeyValuePair<int, int>(1, 30) },
+            { QualitySettingKeys.QcEscalateWorkDays, new KeyValuePair<int, int>(1, 60) },
+            { QualitySettingKeys.StagnantSlowDays, new KeyValuePair<int, int>(7, 720) },
+            { QualitySettingKeys.StagnantDays, new KeyValuePair<int, int>(14, 1000) },
+            { QualitySettingKeys.StagnantDeadDays, new KeyValuePair<int, int>(30, 2000) },
+            { QualitySettingKeys.ReorderUseDays, new KeyValuePair<int, int>(7, 730) },
         };
 
         public static bool TryGetBounds(string key, out int min, out int max)
@@ -139,6 +148,19 @@ namespace Services.NasbNiro.Quality
             if (!TryGetBounds(key, out int min, out int max)) return value;
             decimal whole = decimal.Truncate(value);
             return whole < min ? min : whole > max ? max : whole;
+        }
+
+        /// <summary>L5 (PB5): the settings that belong together must keep their order (the second consignment alert is nearer than the first, the escalation comes after the first QC alert, slow &lt; stagnant &lt; dead).</summary>
+        public static string CheckRelations(IDictionary<string, decimal> values)
+        {
+            decimal V(string k) => values.TryGetValue(k, out decimal v) ? v : 0m;
+            if (values.ContainsKey(QualitySettingKeys.ConsignmentAlertDays1) && V(QualitySettingKeys.ConsignmentAlertDays2) >= V(QualitySettingKeys.ConsignmentAlertDays1))
+                return "هشدار دوم امانی (نزدیک‌تر) باید از هشدار اول کمتر باشد.";
+            if (values.ContainsKey(QualitySettingKeys.QcPendingWorkDays) && V(QualitySettingKeys.QcEscalateWorkDays) <= V(QualitySettingKeys.QcPendingWorkDays))
+                return "مهلت ارجاع به QA و برنامه‌ریزی باید بیشتر از مهلت هشدار QC باشد.";
+            if (values.ContainsKey(QualitySettingKeys.StagnantSlowDays) && !(V(QualitySettingKeys.StagnantSlowDays) < V(QualitySettingKeys.StagnantDays) && V(QualitySettingKeys.StagnantDays) < V(QualitySettingKeys.StagnantDeadDays)))
+                return "روزهای کندگردش، راکد و راکد مرده باید به‌ترتیب افزایش یابند.";
+            return null;
         }
 
         /// <summary>Null when the value is acceptable, otherwise the Persian reason.</summary>

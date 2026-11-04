@@ -133,6 +133,13 @@ namespace IocConfig
             services.AddScoped<IInventoryUserContext, InventoryUserContext>();
             services.AddScoped<IInventoryMasterService, InventoryMasterService>();
             services.AddScoped<IInventoryDocumentService, InventoryDocumentService>();
+            services.AddScoped<IInventoryFreightService, InventoryFreightService>();
+            services.AddScoped<IWarehouseAlertService, WarehouseAlertService>();
+            services.AddScoped<IWarehouseReorderService, WarehouseReorderService>();
+            services.AddScoped<IWarehouseReportService, WarehouseReportService>();
+            services.AddScoped<IWarehouseExcelService, WarehouseExcelService>();
+            services.AddScoped<IWarehouseRegisterService, WarehouseRegisterService>();
+            services.AddHostedService<WarehouseHostedService>();   // PB5: off with Warehouse:Jobs=false
             services.AddScoped<IInventoryStockService, InventoryStockService>();
             services.AddScoped<ITraceabilityService, TraceabilityService>();
             services.AddScoped<ISepidarLinkService, SepidarLinkService>();

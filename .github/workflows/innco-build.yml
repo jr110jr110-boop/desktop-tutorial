@@ -174,6 +174,7 @@ jobs:
           Sepidar__LegacyCsv: 'true'  # R1t (D19): the old Sepidar CSV channels are off by default and, when on, for FINANCEMANAGER only; the smoke uses them as the finance manager and checks that the PMO is refused
           Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           Balance__Jobs: 'false'  # the PB2 nightly material balance and kit job must not run on their own; the smoke runs them by hand
+          Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
@@ -201,6 +202,7 @@ jobs:
           Sepidar__LegacyCsv: 'true'  # R1t (D19): the old Sepidar CSV channels are off by default and, when on, for FINANCEMANAGER only; the smoke uses them as the finance manager and checks that the PMO is refused
           Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           Balance__Jobs: 'false'  # the PB2 nightly material balance and kit job must not run on their own; the smoke runs them by hand
+          Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
@@ -225,6 +227,7 @@ jobs:
           Sepidar__LegacyCsv: 'true'  # R1t (D19): the old Sepidar CSV channels are off by default and, when on, for FINANCEMANAGER only; the smoke uses them as the finance manager and checks that the PMO is refused
           Pc__Jobs: 'false'  # the project-control jobs (weekly snapshot, guarantee expiry, 01:00 milestone evaluation) must not run on their own; the smoke runs them by hand
           Balance__Jobs: 'false'  # the PB2 nightly material balance and kit job must not run on their own; the smoke runs them by hand
+          Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change

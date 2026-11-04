@@ -29,6 +29,15 @@ namespace Services.NasbNiro.Inventory
         /// <summary>The guard checks goods leaving the premises against the confirmed document.</summary>
         Task<ResponseDto<DocumentDto>> ExitCheckAsync(int id, ExitCheckDto dto, CancellationToken cancellationToken);
 
+        /// <summary>PB5 (R32): an approver sends a draft back with a reason (derived state Rejected until the draft is edited again).</summary>
+        Task<ResponseDto<DocumentDto>> RejectAsync(int id, RejectDocumentDto dto, CancellationToken cancellationToken);
+
+        /// <summary>PB5 (R29): the accountant's final price approval of a confirmed receipt (never its creator or confirmer).</summary>
+        Task<ResponseDto<DocumentDto>> ApprovePriceAsync(int id, CancellationToken cancellationToken);
+
+        /// <summary>PB5 (R31): a draft corrective document made from a cancelled one, linked to it.</summary>
+        Task<ResponseDto<DocumentDto>> CreateCorrectionAsync(int cancelledId, CancellationToken cancellationToken);
+
         /// <summary>Documents made by quality control (release from quarantine, NCR dispositions) and by stock counts.</summary>
         Task<ResponseDto<DocumentDto>> CreateSystemDocumentAsync(SaveDocumentDto dto, SystemDocumentLinks links, bool confirm, CancellationToken cancellationToken);
     }
@@ -46,7 +55,7 @@ namespace Services.NasbNiro.Inventory
     /// and moves serial units; cancelling a confirmed document writes reversing movements.
     /// Everything of one confirm or cancel is saved in one database transaction.
     /// </summary>
-    public class InventoryDocumentService : IInventoryDocumentService
+    public partial class InventoryDocumentService : IInventoryDocumentService
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -55,10 +64,12 @@ namespace Services.NasbNiro.Inventory
         private readonly Procurement.IProcurementService _procurement;
         private readonly Procurement.IPayablesService _payables;
         private readonly Quality.IReleaseService _release;
+        private readonly IInventoryFreightService _freight;
 
         public InventoryDocumentService(IUnitOfWork uow, IInventoryUserContext user, Finance.ICostingService costing,
-            Procurement.IProcurementService procurement, Procurement.IPayablesService payables, Quality.IReleaseService release)
+            Procurement.IProcurementService procurement, Procurement.IPayablesService payables, Quality.IReleaseService release, IInventoryFreightService freight)
         {
+            _freight = freight ?? throw new ArgumentNullException(nameof(freight));
             _release = release ?? throw new ArgumentNullException(nameof(release));
             _procurement = procurement ?? throw new ArgumentNullException(nameof(procurement));
             _payables = payables ?? throw new ArgumentNullException(nameof(payables));
@@ -80,6 +91,8 @@ namespace Services.NasbNiro.Inventory
             if (query.WarehouseId.HasValue)
                 documents = documents.Where(d => d.WarehouseId == query.WarehouseId.Value || d.DestinationWarehouseId == query.WarehouseId.Value);
             if (query.WorkOrderId.HasValue) documents = documents.Where(d => d.WorkOrderId == query.WorkOrderId.Value);
+            if (query.ProviderId.HasValue) documents = documents.Where(d => d.ProviderId == query.ProviderId.Value);
+            if (query.State.HasValue) documents = FilterByState(documents, query.State.Value);
             if (query.SalesOrderId.HasValue) documents = documents.Where(d => d.SalesOrderId == query.SalesOrderId.Value);
             if (query.ServiceOrderId.HasValue) documents = documents.Where(d => d.ServiceOrderId == query.ServiceOrderId.Value);
             if (query.From.HasValue) documents = documents.Where(d => d.DocumentDate >= query.From.Value.Date);
@@ -115,6 +128,11 @@ namespace Services.NasbNiro.Inventory
                 TotalQuantity = d.Lines.Sum(l => (decimal?)l.Quantity) ?? 0,
                 SepidarStatus = d.SepidarStatus,
                 SepidarExportedAt = d.SepidarExportedAt,
+                ApprovalsGiven = (d.WarehouseApprovedAt != null ? 1 : 0) + (d.PlanningApprovedAt != null ? 1 : 0),
+                RejectedAt = d.RejectedAt,
+                HasStockCount = d.StockCountId != null,
+                ConsignmentDueDate = d.ConsignmentDueDate,
+                CorrectsDocumentId = d.CorrectsDocumentId,
             });
 
         public async Task<ResponseDto<DocumentDto>> GetDocumentAsync(int id, CancellationToken cancellationToken)
@@ -233,6 +251,7 @@ namespace Services.NasbNiro.Inventory
             document.PlanningApprovedByName = names.Name(raw.PlanningApprovedByUserId);
             document.FinanceApprovedByName = names.Name(raw.FinanceApprovedByUserId);
             document.ZeroPriceApprovedByName = names.Name(raw.ZeroPriceApprovedByUserId);
+            await EnrichPb5Async(document, cancellationToken);
             return ResponseDtoHelper.Ok(document);
         }
 
@@ -297,6 +316,11 @@ namespace Services.NasbNiro.Inventory
             string referenceError = await CheckReferencesAsync(dto, cancellationToken);
             if (referenceError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(referenceError);
 
+            string consignmentError = await CheckConsignmentDraftAsync(dto, warehouse, existing?.Id, cancellationToken);
+            if (consignmentError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(consignmentError);
+            string correctsError = await CheckCorrectsAsync(dto, existing?.Id, cancellationToken);
+            if (correctsError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(correctsError);
+
             List<SaveDocumentLineDto> lines = (dto.Lines ?? new List<SaveDocumentLineDto>()).Where(l => l != null).ToList();
             if (lines.Count == 0) return ResponseDtoHelper.BadRequest<DocumentDto>("سند حداقل یک ردیف لازم دارد.");
 
@@ -332,6 +356,9 @@ namespace Services.NasbNiro.Inventory
             {
                 dto.MaterialRequestId = null;
             }
+
+            string projectError = CheckProjectWarehouses(dto, warehouse, destination);
+            if (projectError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(projectError);
 
             List<int> itemIds = lines.Select(l => l.ItemId).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>()
@@ -448,6 +475,7 @@ namespace Services.NasbNiro.Inventory
             document.Description = InventoryText.Clean(dto.Description);
             document.MaterialRequestId = dto.MaterialRequestId;
             SetHeaderExtras(document, dto);
+            await ApplyPb5HeaderAsync(document, dto, existing != null, cancellationToken);
             ClearApprovals(document);
             if (zeroPriceApproved) { document.ZeroPriceApprovedAt = DateTimeOffset.Now; document.ZeroPriceApprovedByUserId = _user.UserId; }
             document.WriteOffNcrId = dto.Type == InventoryDocumentType.AdjustmentDecrease && lines.Any(l => l.SerialNumbers.Count > 0) ? dto.WriteOffNcrId : null;
@@ -507,6 +535,7 @@ namespace Services.NasbNiro.Inventory
             document.PriceQuotes = InventoryText.Clean(dto.PriceQuotes);
             document.CostCenter = dto.Type == InventoryDocumentType.Issue ? InventoryText.Clean(dto.CostCenter) : null;
         }
+
 
         /// <summary>Number of offers in the price inquiry text (one per line or separated by "|").</summary>
         internal static int ScrapQuoteCount(string quotes) =>
@@ -627,10 +656,15 @@ namespace Services.NasbNiro.Inventory
                 if (source.Kind != WarehouseKind.CustomerProperty) return "اموال مشتری در انبار اموال مشتری نگهداری می‌شود.";
                 if (!dto.ContractId.HasValue) return "قرارداد (مشتری) را انتخاب کنید.";
             }
-            else if (source.Kind == WarehouseKind.CustomerProperty && InventoryDocumentRules.IsIncoming(type) && !adjustment)
+            else if (source.Kind == WarehouseKind.CustomerProperty && InventoryDocumentRules.IsIncoming(type) && !adjustment && type != InventoryDocumentType.ConsignmentReceipt)
             {
                 return "ورود به انبار اموال مشتری فقط با رسید اموال مشتری است.";
             }
+
+            // M1: goods held for somebody else (consignment, customer property) never move into valued stock by a transfer; they leave by their own documents
+            if (source.Kind == WarehouseKind.CustomerProperty && type == InventoryDocumentType.Transfer && destination != null && destination.Kind != WarehouseKind.CustomerProperty)
+                return "کالای امانی یا اموال مشتری به انبار ارزش‌گذاری‌شده منتقل نمی‌شود؛ برگشت امانی یا تحویل به مشتری انجام دهید.";
+            if (type == InventoryDocumentType.ConsignmentIssue && source.Kind != WarehouseKind.CustomerProperty) return "برگشت امانی فقط از انبار اموال مشتری / امانی انجام می‌شود.";
 
             if (type == InventoryDocumentType.CustomerDelivery && !dto.ContractId.HasValue && !dto.SalesOrderId.HasValue && !dto.ServiceOrderId.HasValue) return "قرارداد (مشتری)، سفارش فروش یا دستور خدمات تحویل را انتخاب کنید.";
             if (type == InventoryDocumentType.Issue && source.Kind == WarehouseKind.Subcontractor) return "از انبار پیمانکار حواله صادر نمی‌شود.";
@@ -880,7 +914,7 @@ namespace Services.NasbNiro.Inventory
             // where the "in" side of the document goes
             Warehouse inWarehouse = transfer || conversion ? destination ?? source : source;
 
-            string headerError = CheckBeforeConfirm(document) ?? await CheckPurchaseOrderAsync(document, cancellationToken);
+            string headerError = CheckBeforeConfirm(document) ?? await CheckPurchaseOrderAsync(document, cancellationToken) ?? await CheckConsignmentConfirmAsync(document, cancellationToken);
             if (headerError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(headerError);
             if (document.ServiceOrderId.HasValue)
             {
@@ -1335,7 +1369,8 @@ namespace Services.NasbNiro.Inventory
             document.Status = InventoryDocumentStatus.Confirmed;
             document.ConfirmedAt = now;
             document.ConfirmedByUserId = _user.UserId;
-            document.SepidarStatus = SepidarSyncStatus.Pending;
+            // consignment goods are not company property: nothing goes to the books (and so nothing to Sepidar)
+            document.SepidarStatus = InventoryDocumentRules.IsConsignment(type) ? SepidarSyncStatus.NotRequired : SepidarSyncStatus.Pending;
             document.ModifyDate = now;
             document.ModifierUserId = _user.UserId;
 
@@ -1423,6 +1458,7 @@ namespace Services.NasbNiro.Inventory
         private static string CheckBeforeConfirm(InventoryDocument document)
         {
             InventoryDocumentType type = document.Type;
+            if (document.RejectedAt.HasValue) return "این پیش‌نویس رد شده است؛ پس از اصلاح و ذخیره دوباره، تایید می‌شود.";
             var missing = new List<string>();
             if (InventoryDocumentRules.LeavesPremises(type))
             {
@@ -1554,6 +1590,8 @@ namespace Services.NasbNiro.Inventory
                 string serviceRefusal = await AfterSales.SvDocumentLink.CheckCancelAsync(_uow, document, cancellationToken);
                 if (serviceRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(serviceRefusal);
             }
+            string pb5Cancel = await CheckPb5CancelAsync(document, cancellationToken);
+            if (pb5Cancel != null) return ResponseDtoHelper.BadRequest<DocumentDto>(pb5Cancel);
             List<QcInspection> inspections = await _uow.Set<QcInspection>()
                 .Where(q => q.ReceiptDocumentId == id && !q.Deleted).ToListAsync(cancellationToken);
             if (inspections.Any(q => q.Status == InspectionStatus.Done))
@@ -1650,6 +1688,8 @@ namespace Services.NasbNiro.Inventory
                 _uow.Set<StockTransaction>().Add(reversal);
                 reversals.Add(reversal);
             }
+            // PB5 (H2): the freight of this receipt is reversed FIRST (its value leaves the average cost and a reversing event mirrors its approval), then the receipt itself
+            await _freight.VoidForCancelledReceiptAsync(document, "ابطال رسید " + document.Number, cancellationToken);
             await _costing.ReverseDocumentAsync(document, transactions, reversals, cancellationToken);
 
             foreach (QcInspection inspection in inspections) inspection.Delete();

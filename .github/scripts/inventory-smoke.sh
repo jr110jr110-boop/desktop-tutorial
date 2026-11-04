@@ -7989,7 +7989,7 @@ AIWHNUM=${AIWHOUT##*request=}
 as "$ADMIN_TOKEN" GET "procurement/requests?PageSize=0"; AIWHPR=$(jq -r --arg n "$AIWHNUM" '[.data.data[]|select(.number == $n)][0].id // empty' "$B")
 [ -n "$AIWHPR" ] && ok "ai reorder: the draft request named in the outputs exists ($AIWHNUM)" || bad "ai reorder: the draft request named in the outputs exists ($AIWHNUM)"
 as "$ADMIN_TOKEN" GET "procurement/requests/${AIWHPR:-0}"; AIWHLN=$(val '.data.lines|length')
-check "ai reorder: the draft is a draft, from the reorder point, written by the seat user, with the new item for 50 (minimum 50, on hand 0, nothing on order)" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"صندلی هوش مصنوعی\")) and ([.data.lines[]|select(.itemId == $AIWH1 and .quantity == 50)]|length) == 1"
+check "ai reorder: the draft is a draft, from the reorder point, written by the seat user, with the new item for 100 (reorder point 50 = the minimum, no use yet; no maximum, so up to twice the point: 100, on hand 0, nothing on order)" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"صندلی هوش مصنوعی\")) and ([.data.lines[]|select(.itemId == $AIWH1 and .quantity == 100)]|length) == 1"
 [ "$AIWHOUT" = "drafts=1; lines=$AIWHLN; request=$AIWHNUM" ] && ok "ai reorder: the outputs name exactly the lines of the draft ($AIWHLN)" || bad "ai reorder: the outputs name exactly the lines of the draft (got '$AIWHOUT', lines $AIWHLN)"
 airun WH-REORDER "$TODAY"
 check "ai reorder: a second run asks for nothing again (every low item is on the open draft)" '.success and .data.status == 2 and .data.outputs == "drafts=0; lines=0"'
@@ -11326,6 +11326,69 @@ as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/backfill"; check "pb4 genealogy: the ba
 as "$WH_TOKEN" POST "$PB4TR/genealogy/backfill"; r403 "pb4 genealogy: the warehouse keeper cannot start the backfill (403)"
 TOKEN=$ADMIN_TOKEN
 
+# --- PB5: freight and landed cost, consignment, derived states, corrective document, reports with Excel, unit conversions, ceilings, assets, title check. Every request is checked; figures are exact.
+PB5ITA=""; PB5ITB=""
+PB5no() { if refused || [ "$CODE" = "403" ]; then ok "$1"; else bad "$1"; fi; } # refused by the service (200 + success=false) or by the role check (403)
+item PB5ITA "{\"code\":\"PB5-A-$$\",\"title\":\"قطعه آزمون پنج الف\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pb5 item A (by value)"
+item PB5ITB "{\"code\":\"PB5-B-$$\",\"title\":\"قطعه آزمون پنج ب\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pb5 item B (by value)"
+# a receipt of 10 x 1,000 and 10 x 3,000 (values 10,000 and 30,000)
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":10,\"unitPrice\":1000},{\"itemId\":$PB5ITB,\"quantity\":10,\"unitPrice\":3000}]}"
+check "pb5: the receipt of two items is saved as a draft and its derived state is Draft (0)" '.success and .data.status == 0 and .data.state == 0'
+PB5RC=$(val .data.id)
+call POST "inventory/documents/$PB5RC/confirm"; check "pb5: the receipt is confirmed and its derived state is Approved (2)" '.success and .data.status == 1 and .data.state == 2'
+# freight 4,000 spread by value: 1,000 and 3,000
+call POST inventory/freight "{\"receiptDocumentId\":$PB5RC,\"freightDate\":\"2026-10-16T00:00:00\",\"vehiclePlate\":\"آزمون\",\"billOfLadingNumber\":\"BL-PB5\",\"amount\":4000}"
+check "pb5 freight: saved as a draft, spread by value over the two lines: 1,000 and 3,000, adding up to 4,000" '.success and .data.status == 0 and .data.amount == 4000 and (.data.allocations|length) == 2 and ([.data.allocations[]|select(.itemId == '$PB5ITA')][0].amount) == 1000 and ([.data.allocations[]|select(.itemId == '$PB5ITB')][0].amount) == 3000 and ([.data.allocations[]|.basis]|unique) == [1]'
+PB5FR=$(val .data.id)
+call POST "inventory/freight/$PB5FR/approve"; PB5no "pb5 freight: the person who prepared it (admin, not an accountant) cannot approve it"
+as "$FM_TOKEN" POST "inventory/freight/$PB5FR/approve"; check "pb5 freight: the finance manager approves it" '.success and .data.status == 1'
+as "$FM_TOKEN" POST "inventory/freight/$PB5FR/approve"; no "pb5 freight: an approved freight cannot be approved again"
+as "$FM_TOKEN" POST "inventory/freight/$PB5FR/void" '{"reason":"آزمون برگشت کرایه"}'; check "pb5 freight: the accountant voids the approved freight (cost reversed)" '.success and .data.status == 2'
+as "$FM_TOKEN" GET "inventory/freight?ReceiptDocumentId=$PB5RC"; check "pb5 freight: exactly one freight for the receipt and it is voided" '.success and (.data|length) == 1 and .data[0].status == 2'
+call POST inventory/freight "{\"receiptDocumentId\":$PB5RC,\"freightDate\":\"2026-10-16T00:00:00\",\"amount\":0}"; no "pb5 freight: a freight of zero rials is refused"
+# cancel the receipt and make the corrective document: linked to the cancelled one
+call POST "inventory/documents/$PB5RC/cancel" '{"reason":"آزمون سند اصلاحی"}'; check "pb5: the receipt is cancelled and its derived state is Cancelled (4)" '.success and .data.status == 2 and .data.state == 4'
+call POST "inventory/documents/$PB5RC/correction"; check "pb5: the corrective document is a new draft that points to the cancelled one" '.success and .data.status == 0 and .data.correctsDocumentId == '$PB5RC'  and (.data.lines|length) == 2'
+PB5COR=$(val .data.id)
+call POST "inventory/documents/$PB5COR/correction"; no "pb5: a draft document cannot be corrected (only a cancelled one)"
+call DELETE "inventory/documents/$PB5COR"; check "pb5: the corrective draft is removed again" '.success'
+# consignment: goods of a supplier in a customer-property warehouse, due after 30 days by default
+call POST inventory/warehouses '{"code":"WH-CSG","title":"انبار امانی آزمون","kind":8,"sepidarCode":"108"}'; check "pb5: consignment warehouse (kind customer property)" '.success'
+PB5WC=$(val .data.id)
+call POST inventory/documents "{\"type\":18,\"documentDate\":\"2026-10-16T00:00:00\",\"warehouseId\":$PB5WC,\"providerId\":$PA,\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":5}]}"
+check "pb5 consignment: the receipt draft gets the due date 30 days after the document date (2026-11-15)" '.success and .data.consignmentDueDate == "2026-11-15T00:00:00"'
+PB5CN=$(val .data.id)
+call POST "inventory/documents/$PB5CN/confirm"; check "pb5 consignment: the receipt is confirmed" '.success and .data.status == 1'
+call POST inventory/documents "{\"type\":19,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$PB5WC,\"consignmentOfDocumentId\":$PB5CN,\"driverName\":\"راننده آزمون\",\"vehiclePlate\":\"12الف345\",\"receiverName\":\"تحویل‌گیرنده آزمون\",\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":4}]}"
+check "pb5 consignment: a return of 4 is saved as a draft" '.success and .data.status == 0'
+PB5CI1=$(val .data.id)
+call POST "inventory/documents/$PB5CI1/confirm"; check "pb5 consignment: the return of 4 is confirmed" '.success and .data.status == 1'
+call GET "inventory/documents/$PB5CN"; check "pb5 consignment: 1 piece is still open on the receipt" '.success and .data.consignmentOpenQuantity == 1'
+call POST inventory/documents "{\"type\":19,\"documentDate\":\"2026-10-21T00:00:00\",\"warehouseId\":$PB5WC,\"consignmentOfDocumentId\":$PB5CN,\"driverName\":\"راننده آزمون\",\"vehiclePlate\":\"12الف345\",\"receiverName\":\"تحویل‌گیرنده آزمون\",\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":2}]}"
+nomsg "pb5 consignment: returning 2 when only 1 is open is refused when the draft is saved" "مقدار حواله امانی از"
+call POST inventory/documents "{\"type\":6,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$PB5WC,\"destinationWarehouseId\":$W1,\"lines\":[{\"itemId\":$PB5ITA,\"quantity\":1}]}"
+nomsg "pb5 consignment: consigned goods are never transferred into a valued warehouse" "منتقل نمی‌شود"
+# reports
+call GET inventory/reports/catalog; check "pb5 reports: the catalogue lists 22 reports" '.success and (.data|length) == 22'
+call GET "inventory/reports?Report=consignment"; check "pb5 reports: the consignment report has the receipt row with 1 piece open" '.success and ([.data.rows[]|select(.open == 1)]|length) == 1'
+call GET "inventory/reports?Report=freight"; check "pb5 reports: the freight report answers" '.success and .data.key == "freight"'
+call GET "inventory/reports?Report=nonexistent"; no "pb5 reports: an unknown report is refused"
+call GET "inventory/reports/export?Report=stock"; [ "$(head -c 2 "$B")" = "PK" ] && ok "pb5 reports: the Excel export is an xlsx file (zip)" || bad "pb5 reports: the Excel export is an xlsx file (zip)"
+call GET inventory/excel/template/receipt; [ "$(head -c 2 "$B")" = "PK" ] && ok "pb5 excel: the receipt template is an xlsx file" || bad "pb5 excel: the receipt template is an xlsx file"
+call GET inventory/excel/template/unknown; no "pb5 excel: an unknown template kind is refused"
+# unit conversion, ceiling, assets, title check, reorder list
+call POST inventory/register/conversions "{\"itemId\":$PB5ITB,\"fromUnit\":\"شاخه\",\"toUnit\":\"kg\",\"factor\":12}"; check "pb5: unit conversion 1 شاخه = 12 kg" '.success'
+call POST inventory/register/conversions "{\"itemId\":$PB5ITB,\"fromUnit\":\"kg\",\"toUnit\":\"شاخه\",\"factor\":0.0833}"; no "pb5: the reverse of an existing conversion is refused (one row per pair)"
+call POST inventory/register/conversions "{\"itemId\":$PB5ITB,\"fromUnit\":\"a\",\"toUnit\":\"b\",\"factor\":0}"; no "pb5: a conversion factor of zero is refused"
+call GET "inventory/register/conversions?itemId=$PB5ITB"; check "pb5: exactly one conversion for the item" '.success and (.data|length) == 1 and .data[0].factor == 12'
+call POST inventory/register/ceilings "{\"itemId\":$PB5ITB,\"workOrderId\":$PB2WO,\"maxQuantity\":50}"; check "pb5: consumption ceiling of 50 for the item on the work order" '.success'
+call GET "inventory/register/ceilings?itemId=$PB5ITB"; check "pb5: exactly one ceiling of 50" '.success and (.data|length) == 1 and .data[0].maxQuantity == 50'
+call POST inventory/register/assets "{\"tag\":\"pb5-tag-$$\",\"title\":\"دارایی آزمون\",\"warehouseId\":$W1,\"cost\":5000}"; check "pb5: an asset is saved" '.success and .data.id > 0'
+call GET "inventory/coding/title-check?title=قطعه آزمون پنج الف"; check "pb5 title check: an equal title of an item is an exact match" '.success and .data.hasExact == true'
+call GET "inventory/coding/title-check?title=عنوان کاملا تازه و منحصر به فرد"; check "pb5 title check: a new title has no match" '.success and .data.hasExact == false and (.data.matches|length) == 0'
+call GET "inventory/alerts/reorder"; check "pb5 reorder: the list answers" '.success'
+call POST inventory/alerts/run; check "pb5 alerts: the run answers" '.success'
+TOKEN=$ADMIN_TOKEN
 # --- PB7B: engineering document control (EDMS) and the management dashboards (EPM). Exact checks; the preparer (DCC), the reviewer (PMO) and the approver (engineering manager) are three different people.
 PB7BNUM="PB7B-DWG-001"
 as "$DCC_TOKEN" POST $PC/mdr "{\"contractId\":$PCT,\"workOrderId\":$PCW1,\"documentNumber\":\"$PB7BNUM\",\"title\":\"General arrangement\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\",\"clientSubmittal\":true}"

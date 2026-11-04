@@ -96,6 +96,26 @@ namespace Services.NasbNiro.Quality
         /// <summary>Lots expiring within this many days are on the expiry report (D32).</summary>
         public const string ExpiryWarnDays = "ExpiryWarnDays";
 
+        // ---- PB5 (warehouse completion); every default is an assumption of the answers table (★) the company confirms
+        /// <summary>Consignment goods go back to the owner within this many days of the receipt when no due date is typed.</summary>
+        public const string ConsignmentReturnDays = "ConsignmentReturnDays";
+
+        /// <summary>First and second alert before the consignment due date (days).</summary>
+        public const string ConsignmentAlertDays1 = "ConsignmentAlertDays1";
+        public const string ConsignmentAlertDays2 = "ConsignmentAlertDays2";
+
+        /// <summary>A pending incoming inspection older than this many working days is reported to QC; older than the second value it goes to the QA manager and planning.</summary>
+        public const string QcPendingWorkDays = "QcPendingWorkDays";
+        public const string QcEscalateWorkDays = "QcEscalateWorkDays";
+
+        /// <summary>Stock without movement for this many days is slow, stagnant, dead.</summary>
+        public const string StagnantSlowDays = "StagnantSlowDays";
+        public const string StagnantDays = "StagnantDays";
+        public const string StagnantDeadDays = "StagnantDeadDays";
+
+        /// <summary>The period of past issues the average daily use of the reorder point is taken from.</summary>
+        public const string ReorderUseDays = "ReorderUseDays";
+
         /// <summary>The shortest witness notice (days) an ITP may be given (D9, review H6): a notice of 0 days would let the client's witness be waived at once.</summary>
         public const string MinNoticeDays = "MinNoticeDays";
 
@@ -123,6 +143,15 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = CapaCeoEscalationDays, Value = 14, Title = "دیرکرد CAPA تا اطلاع به مدیرعامل (روز)", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = ExpiryWarnDays, Value = 30, Title = "هشدار انقضای بچ‌ها (روز)", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = MinNoticeDays, Value = 1, Title = "حداقل روزهای اعلام نقطه شاهد در برنامه بازرسی (روز)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = ConsignmentReturnDays, Value = 30, Title = "مهلت پیش‌فرض عودت کالای امانی (روز)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = ConsignmentAlertDays1, Value = 7, Title = "هشدار اول عودت کالای امانی (روز مانده به سررسید)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = ConsignmentAlertDays2, Value = 3, Title = "هشدار دوم عودت کالای امانی (روز مانده به سررسید)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = QcPendingWorkDays, Value = 3, Title = "مهلت اعلام نتیجه بازرسی ورودی (روز کاری)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = QcEscalateWorkDays, Value = 5, Title = "ارجاع بازرسی معوق به مدیر تضمین کیفیت و برنامه‌ریزی (روز کاری)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = StagnantSlowDays, Value = 60, Title = "کالای کندگردش: بدون گردش از (روز)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = StagnantDays, Value = 90, Title = "کالای راکد: بدون گردش از (روز)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = StagnantDeadDays, Value = 180, Title = "کالای راکد مرده: بدون گردش از (روز)", Source = "★ جدول پاسخ‌های شرکت" };
+            yield return new QualitySetting { Key = ReorderUseDays, Value = 90, Title = "بازه محاسبه مصرف روزانه برای نقطه سفارش (روز)", Source = "★ پیشنهاد PMIS" };
         }
 
         /// <summary>

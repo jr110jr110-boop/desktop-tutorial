@@ -90,8 +90,26 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Note { get; set; }
     }
 
+    /// <summary>PB5 (R3): a title that already exists (exact) or is very close to an existing item or open request.</summary>
+    public class TitleMatchDto
+    {
+        public string Kind { get; set; }      // item or request
+        public string Code { get; set; }      // item code or request number
+        public string Title { get; set; }
+        public bool Exact { get; set; }
+    }
+
+    public class TitleCheckDto
+    {
+        public string Title { get; set; }
+        public List<TitleMatchDto> Matches { get; set; } = new List<TitleMatchDto>();
+        public bool HasExact { get; set; }
+    }
+
     public class ItemRequestDto
     {
+        /// <summary>PB5 (R3): near-duplicate titles found when the request was saved (an exact duplicate is refused).</summary>
+        public List<TitleMatchDto> TitleWarnings { get; set; } = new List<TitleMatchDto>();
         public int Id { get; set; }
         public string Number { get; set; }
         public string Title { get; set; }

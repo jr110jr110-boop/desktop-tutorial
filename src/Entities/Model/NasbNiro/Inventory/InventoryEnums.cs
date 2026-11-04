@@ -35,8 +35,37 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>اموال مشتری (ISO 9001 8.5.3): customer property and returned goods, kept apart from company stock.</summary>
         CustomerProperty = 8,
 
-        /// <summary>انبار مدل‌های ریخته‌گری</summary>
+        /// <summary>انبار مدل‌های ریخته‌گری (casting patterns)</summary>
         Patterns = 9,
+
+        // ---- PB5 (R1): the kinds of the warehouse text. Quarantine is the temporary warehouse and Patterns the casting-pattern warehouse.
+
+        /// <summary>انبار پروژه: tied to one work order (Warehouse.WorkOrderId); its stock counts for that project.</summary>
+        Project = 10,
+
+        /// <summary>انبار پلتفرم (turbine platform / equipment family).</summary>
+        Platform = 11,
+
+        /// <summary>انبار متریال</summary>
+        Material = 12,
+
+        /// <summary>انبار ابزار</summary>
+        Tool = 13,
+
+        /// <summary>اقلام مصرفی عمومی</summary>
+        Consumable = 14,
+
+        /// <summary>اقلام مصرفی پروژه: tied to one work order.</summary>
+        ProjectConsumable = 15,
+
+        /// <summary>ابزار دقیق</summary>
+        Instrument = 16,
+
+        /// <summary>قطعات استاندارد</summary>
+        StandardPart = 17,
+
+        /// <summary>انبار پای کار (point of use): tied to one work order; its stock is counted as stock of that project.</summary>
+        PointOfUse = 18,
     }
 
     /// <summary>Standard warehouse document types.</summary>
@@ -95,6 +124,45 @@ namespace Entities.Model.NasbNiro.Inventory
 
         /// <summary>رسید اموال مشتری</summary>
         CustomerPropertyReceipt = 17,
+
+        /// <summary>PB5 (F1): رسید امانی: goods of a third party kept in custody; not valued; must go back by the due date.</summary>
+        ConsignmentReceipt = 18,
+
+        /// <summary>PB5 (F3): حواله امانی: the consigned goods go back to their owner (or are handed on with the owner's consent).</summary>
+        ConsignmentIssue = 19,
+    }
+
+    /// <summary>PB5: state of a freight (landed cost) document of a receipt.</summary>
+    public enum FreightStatus
+    {
+        Draft = 0,
+        Approved = 1,
+        Voided = 2,
+    }
+
+    /// <summary>PB5: how a freight amount was spread over the receipt lines (decision D10: weight for metals, value for the rest).</summary>
+    public enum FreightBasis
+    {
+        Weight = 1,
+        Value = 2,
+    }
+
+    public enum AssetStatus
+    {
+        InService = 1,
+        InRepair = 2,
+        Lost = 3,
+        Retired = 4,
+    }
+
+    /// <summary>PB5 (R32): the state list of a warehouse document derived from its status and approvals; the stored status enum is unchanged.</summary>
+    public enum DocumentState
+    {
+        Draft = 0,
+        PendingApproval = 1,
+        Approved = 2,
+        Rejected = 3,
+        Cancelled = 4,
     }
 
     /// <summary>Direction of a line on a stage conversion; other documents take it from their type.</summary>

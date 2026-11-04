@@ -24,55 +24,11 @@ namespace Services.NasbNiro.Procurement
         Task<ResponseDto<byte[]>> ExportAsync(ProcurementReportQuery query, CancellationToken cancellationToken);
     }
 
-    /// <summary>A minimal .xlsx writer (one sheet, inline strings, RTL) so that no outside library is needed.</summary>
+    /// <summary>PB5: kept for the existing callers; the file itself is written by the one shared <see cref="Finance.SimpleXlsx"/> writer.</summary>
     public static class XlsxWriter
     {
-        private static string Col(int i)
-        {
-            string s = "";
-            for (i++; i > 0; i = (i - 1) / 26) s = (char)('A' + (i - 1) % 26) + s;
-            return s;
-        }
-
-        public static byte[] Write(string sheetName, List<string> headers, List<List<object>> rows)
-        {
-            var sb = new StringBuilder();
-            sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetViews><sheetView rightToLeft=\"1\" workbookViewId=\"0\"/></sheetViews><sheetData>");
-            void Row(int r, IList<object> cells, bool head)
-            {
-                sb.Append("<row r=\"").Append(r).Append("\">");
-                for (int c = 0; c < cells.Count; c++)
-                {
-                    object v = cells[c];
-                    string refc = Col(c) + r;
-                    if (v == null) continue;
-                    if (!head && (v is decimal || v is int || v is long || v is double))
-                        sb.Append("<c r=\"").Append(refc).Append("\"><v>").Append(Convert.ToString(v, CultureInfo.InvariantCulture)).Append("</v></c>");
-                    else
-                        sb.Append("<c r=\"").Append(refc).Append("\" t=\"inlineStr\"><is><t>").Append(SecurityElement.Escape(Convert.ToString(v, CultureInfo.InvariantCulture))).Append("</t></is></c>");
-                }
-                sb.Append("</row>");
-            }
-            Row(1, headers.Cast<object>().ToList(), true);
-            for (int i = 0; i < rows.Count; i++) Row(i + 2, rows[i], false);
-            sb.Append("</sheetData></worksheet>");
-            using var ms = new MemoryStream();
-            using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, true))
-            {
-                void Add(string name, string content)
-                {
-                    ZipArchiveEntry e = zip.CreateEntry(name);
-                    using var w = new StreamWriter(e.Open(), new UTF8Encoding(false));
-                    w.Write(content);
-                }
-                Add("[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/></Types>");
-                Add("_rels/.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>");
-                Add("xl/workbook.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"" + SecurityElement.Escape(string.IsNullOrWhiteSpace(sheetName) ? "Sheet1" : sheetName.Length > 31 ? sheetName.Substring(0, 31) : sheetName) + "\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
-                Add("xl/_rels/workbook.xml.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>");
-                Add("xl/worksheets/sheet1.xml", sb.ToString());
-            }
-            return ms.ToArray();
-        }
+        public static byte[] Write(string sheetName, List<string> headers, List<List<object>> rows) =>
+            Finance.SimpleXlsx.Build(new List<Finance.XlsxSheet> { new Finance.XlsxSheet { Name = sheetName, Header = headers, Rows = rows.Select(r => r.ToArray()).ToList() } }, true);
     }
 
     /// <summary>PB6: the procurement reports (request progress, overdue requests, spend by supplier, orders, guarantees, addenda) with an Excel export. Reading only.</summary>

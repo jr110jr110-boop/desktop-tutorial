@@ -303,8 +303,9 @@ namespace MsTests
             foreach (string role in AllRoles)
             {
                 bool allowed = PriceReaders.Contains(role);
-                JToken report = Written(new SupplierReturnReportDto { NcrNumber = "NCR-1", ProviderName = "supplier", Quantity = 3m, BuyOrderId = 8, FinanceNumber = "F-8", FinancePrice = 321m, PaymentState = "waiting" }, User(role));
+                JToken report = Written(new SupplierReturnReportDto { NcrNumber = "NCR-1", ProviderName = "supplier", Quantity = 3m, BuyOrderId = 8, FinanceNumber = "F-8", FinancePrice = 321m, UnitPrice = 40m, Amount = 120m, PaymentState = "waiting" }, User(role));
                 decimal? actual = Number(report["financePrice"]);
+                if (Number(report["unitPrice"]) != (allowed ? 40m : (decimal?)null) || Number(report["amount"]) != (allowed ? 120m : (decimal?)null)) failures.Add(role + " / the receipt line price and amount of the report do not follow the price roles");
                 decimal? expected = allowed ? 321m : (decimal?)null;
                 if (actual != expected) failures.Add(role + " / finance price: " + (actual?.ToString() ?? "null") + " instead of " + (expected?.ToString() ?? "null"));
                 if ((string)report["financeNumber"] != "F-8" || (string)report["ncrNumber"] != "NCR-1" || (decimal)report["quantity"] != 3m) failures.Add(role + " / the other members of the report were touched");

@@ -61,7 +61,7 @@ namespace WebApi.Extensions
             new(typeof(ResponseInquiryDto), new[] { nameof(ResponseInquiryDto.Price) }, LegacyRoles.PriceReaders, false),
             new(typeof(ResponseBuyOrderDto), new[] { nameof(ResponseBuyOrderDto.FinancePrice) }, LegacyRoles.PriceReaders, false),
             new(typeof(ResponseBuyOrderCardBoardDto), new[] { nameof(ResponseBuyOrderCardBoardDto.FinancePrice) }, LegacyRoles.PriceReaders, false),
-            new(typeof(SupplierReturnReportDto), new[] { nameof(SupplierReturnReportDto.FinancePrice) }, LegacyRoles.PriceReaders, false),
+            new(typeof(SupplierReturnReportDto), new[] { nameof(SupplierReturnReportDto.FinancePrice), nameof(SupplierReturnReportDto.UnitPrice), nameof(SupplierReturnReportDto.Amount) }, LegacyRoles.PriceReaders, false),
             new(typeof(ResponseContractGuarantyDto), new[] { nameof(ResponseContractGuarantyDto.Price) }, LegacyRoles.GuarantyPriceReaders, false),
             new(typeof(ResponseTenderGuarantyDto), new[] { nameof(ResponseTenderGuarantyDto.Price) }, LegacyRoles.GuarantyPriceReaders, false),
         };

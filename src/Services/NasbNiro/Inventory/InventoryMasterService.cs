@@ -82,6 +82,8 @@ namespace Services.NasbNiro.Inventory
                     ParentId = g.ParentId,
                     ParentTitle = g.Parent.Title,
                     ItemsCount = g.Items.Count(i => !i.Deleted),
+                    DefaultMinStock = g.DefaultMinStock, DefaultMaxStock = g.DefaultMaxStock,
+                    DefaultReorderQuantity = g.DefaultReorderQuantity, DefaultLeadTimeDays = g.DefaultLeadTimeDays,
                 })
                 .ToListAsync(cancellationToken);
             return ResponseDtoHelper.Ok(groups);
@@ -133,12 +135,22 @@ namespace Services.NasbNiro.Inventory
             group.Title = title;
             group.Description = InventoryText.Clean(dto.Description);
             group.ParentId = dto.ParentId;
+            if ((dto.DefaultMinStock ?? 0) < 0 || (dto.DefaultMaxStock ?? 0) < 0 || (dto.DefaultReorderQuantity ?? 0) < 0 || (dto.DefaultLeadTimeDays ?? 0) < 0)
+                return ResponseDtoHelper.BadRequest<ItemGroupDto>("مقادیر سیاست سفارش مجدد نمی‌تواند منفی باشد.");
+            if (dto.DefaultMaxStock.HasValue && dto.DefaultMinStock.HasValue && dto.DefaultMaxStock.Value < dto.DefaultMinStock.Value)
+                return ResponseDtoHelper.BadRequest<ItemGroupDto>("حداکثر موجودی گروه از حداقل آن کمتر است.");
+            group.DefaultMinStock = dto.DefaultMinStock;
+            group.DefaultMaxStock = dto.DefaultMaxStock;
+            group.DefaultReorderQuantity = dto.DefaultReorderQuantity;
+            group.DefaultLeadTimeDays = dto.DefaultLeadTimeDays;
             Stamp(group, !dto.Id.HasValue);
             await _uow.SaveChangesAsync(cancellationToken);
 
             return ResponseDtoHelper.Ok(new ItemGroupDto
             {
                 Id = group.Id, Code = group.Code, Title = group.Title, Description = group.Description, ParentId = group.ParentId,
+                DefaultMinStock = group.DefaultMinStock, DefaultMaxStock = group.DefaultMaxStock,
+                DefaultReorderQuantity = group.DefaultReorderQuantity, DefaultLeadTimeDays = group.DefaultLeadTimeDays,
             });
         }
 
@@ -193,6 +205,8 @@ namespace Services.NasbNiro.Inventory
                 PendingQualityChangeId = _uow.Set<ItemQualityChange>().Where(c => c.ItemId == i.Id && c.Status == ItemQualityChangeStatus.Pending && !c.Deleted)
                     .OrderByDescending(c => c.Id).Select(c => (int?)c.Id).FirstOrDefault(),
                 OnHand = balances.Where(b => b.ItemId == i.Id).Sum(b => (decimal?)b.Quantity) ?? 0,
+                Platform = i.Platform, EquipmentType = i.EquipmentType, ValveModel = i.ValveModel, IranCode = i.IranCode,
+                ReorderQuantity = i.ReorderQuantity, LeadTimeDays = i.LeadTimeDays,
             });
         }
 
@@ -217,6 +231,14 @@ namespace Services.NasbNiro.Inventory
             }
             if (query.TrackingMode.HasValue) items = items.Where(i => i.TrackingMode == query.TrackingMode.Value);
             if (query.IsActive.HasValue) items = items.Where(i => i.IsActive == query.IsActive.Value);
+            string platformFilter = InventoryText.Clean(query.Platform);
+            if (platformFilter != null) items = items.Where(i => i.Platform == platformFilter);
+            string equipmentFilter = InventoryText.Clean(query.EquipmentType);
+            if (equipmentFilter != null) items = items.Where(i => i.EquipmentType == equipmentFilter);
+            string valveFilter = InventoryText.Clean(query.ValveModel);
+            if (valveFilter != null) items = items.Where(i => i.ValveModel == valveFilter);
+            string iranCodeFilter = InventoryText.Clean(query.IranCode);
+            if (iranCodeFilter != null) items = items.Where(i => i.IranCode == iranCodeFilter);
 
             PagedList<InventoryItemDto> page = await PagedList<InventoryItemDto>.CreateAsync(
                 ItemProjection(items.OrderBy(i => i.Code)), query.PageNumber, query.PageSize, cancellationToken);
@@ -266,6 +288,8 @@ namespace Services.NasbNiro.Inventory
                 return ResponseDtoHelper.BadRequest<InventoryItemDto>("نوع ردیابی نامعتبر است.");
             if (dto.MinStock < 0 || dto.MaxStock < 0)
                 return ResponseDtoHelper.BadRequest<InventoryItemDto>("حداقل و حداکثر موجودی نمی‌تواند منفی باشد.");
+            if ((dto.ReorderQuantity ?? 0) < 0 || (dto.LeadTimeDays ?? 0) < 0)
+                return ResponseDtoHelper.BadRequest<InventoryItemDto>("مقدار و زمان سفارش مجدد نمی‌تواند منفی باشد.");
             if (dto.ItemGroupId.HasValue && !await Groups.AnyAsync(g => g.Id == dto.ItemGroupId.Value && !g.Deleted, cancellationToken))
                 return ResponseDtoHelper.BadRequest<InventoryItemDto>(InventoryMessages.GroupNotFound);
             if (await Items.AnyAsync(i => !i.Deleted && i.Code == code && i.Id != (dto.Id ?? 0), cancellationToken))
@@ -340,6 +364,12 @@ namespace Services.NasbNiro.Inventory
             item.BaseCode = check.BaseCode;
             item.MescCode = mesc;
             item.LegacyCode = InventoryText.Clean(dto.LegacyCode) ?? item.LegacyCode;
+            item.Platform = InventoryText.Clean(dto.Platform);
+            item.EquipmentType = InventoryText.Clean(dto.EquipmentType);
+            item.ValveModel = InventoryText.Clean(dto.ValveModel);
+            item.IranCode = InventoryText.Clean(dto.IranCode);
+            item.ReorderQuantity = dto.ReorderQuantity;
+            item.LeadTimeDays = dto.LeadTimeDays;
             if (quality.Apply)
             {
                 item.RequiresIncomingInspection = dto.RequiresIncomingInspection;
@@ -658,6 +688,9 @@ namespace Services.NasbNiro.Inventory
                     Description = w.Description,
                     IsActive = w.IsActive,
                     SepidarCode = w.SepidarCode,
+                    WorkOrderId = w.WorkOrderId,
+                    WorkOrderCode = w.WorkOrder.Code,
+                    Platform = w.Platform,
                     Locations = w.Locations.Where(l => !l.Deleted).OrderBy(l => l.Code).Select(l => new LocationDto
                     {
                         Id = l.Id, WarehouseId = l.WarehouseId, WarehouseCode = w.Code, Code = l.Code, Title = l.Title, IsActive = l.IsActive,
@@ -666,6 +699,10 @@ namespace Services.NasbNiro.Inventory
                 .ToListAsync(cancellationToken);
             return ResponseDtoHelper.Ok(list);
         }
+
+        /// <summary>PB5 (R1): these warehouses belong to one work order; their stock counts as already with the project.</summary>
+        internal static bool ProjectBound(WarehouseKind kind) =>
+            kind == WarehouseKind.Project || kind == WarehouseKind.ProjectConsumable || kind == WarehouseKind.PointOfUse;
 
         public async Task<ResponseDto<WarehouseDto>> SaveWarehouseAsync(SaveWarehouseDto dto, CancellationToken cancellationToken)
         {
@@ -677,12 +714,22 @@ namespace Services.NasbNiro.Inventory
             if (!Enum.IsDefined(typeof(WarehouseKind), dto.Kind)) return ResponseDtoHelper.BadRequest<WarehouseDto>("نوع انبار نامعتبر است.");
             if (await Warehouses.AnyAsync(w => !w.Deleted && w.Code == code && w.Id != (dto.Id ?? 0), cancellationToken))
                 return ResponseDtoHelper.BadRequest<WarehouseDto>(InventoryMessages.DuplicateCode + code);
+            if (ProjectBound(dto.Kind))
+            {
+                if (!dto.WorkOrderId.HasValue) return ResponseDtoHelper.BadRequest<WarehouseDto>("انبار پروژه، مصرفی پروژه و انبار نقطه مصرف به یک دستور کار (پروژه) وابسته است؛ دستور کار را انتخاب کنید.");
+                if (!await _uow.Set<Entities.Model.NasbNiro.Contracts.WorkOrder>().AnyAsync(o => o.Id == dto.WorkOrderId.Value && !o.Deleted, cancellationToken))
+                    return ResponseDtoHelper.BadRequest<WarehouseDto>("دستور کار پیدا نشد.");
+            }
 
             Warehouse warehouse;
             if (dto.Id.HasValue)
             {
                 warehouse = await Warehouses.FirstOrDefaultAsync(w => w.Id == dto.Id.Value && !w.Deleted, cancellationToken);
                 if (warehouse == null) return ResponseDtoHelper.NotFound<WarehouseDto>(InventoryMessages.WarehouseNotFound);
+                // L9: the kind and the work order decide how the stock is counted (valuation, project balance); they do not change while the warehouse holds stock
+                bool kindChanged = warehouse.Kind != dto.Kind, orderChanged = warehouse.WorkOrderId != (ProjectBound(dto.Kind) ? dto.WorkOrderId : null);
+                if ((kindChanged || orderChanged) && await _uow.Set<StockBalance>().AnyAsync(b => b.WarehouseId == warehouse.Id && b.Quantity != 0, cancellationToken))
+                    return ResponseDtoHelper.BadRequest<WarehouseDto>("این انبار موجودی دارد؛ نوع انبار و دستور کار آن تا خالی‌شدن موجودی تغییر نمی‌کند.");
             }
             else
             {
@@ -695,6 +742,8 @@ namespace Services.NasbNiro.Inventory
             warehouse.Description = InventoryText.Clean(dto.Description);
             warehouse.IsActive = dto.IsActive;
             warehouse.SepidarCode = InventoryText.Clean(dto.SepidarCode);
+            warehouse.WorkOrderId = ProjectBound(dto.Kind) ? dto.WorkOrderId : null;
+            warehouse.Platform = InventoryText.Clean(dto.Platform);
             Stamp(warehouse, !dto.Id.HasValue);
             await _uow.SaveChangesAsync(cancellationToken);
 
@@ -702,6 +751,7 @@ namespace Services.NasbNiro.Inventory
             {
                 Id = warehouse.Id, Code = warehouse.Code, Title = warehouse.Title, Kind = warehouse.Kind,
                 Description = warehouse.Description, IsActive = warehouse.IsActive, SepidarCode = warehouse.SepidarCode,
+                WorkOrderId = warehouse.WorkOrderId, Platform = warehouse.Platform,
             });
         }
 

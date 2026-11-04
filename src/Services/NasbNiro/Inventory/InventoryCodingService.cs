@@ -381,6 +381,9 @@ namespace Services.NasbNiro.Inventory
         Task<ResponseDto<List<CodingValueDto>>> GetValuesAsync(string scheme, CancellationToken cancellationToken);
         Task<ResponseDto<CodingValueDto>> SaveValueAsync(SaveCodingValueDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<CodeCheckDto>> CheckCodeAsync(string code, int? itemId, CancellationToken cancellationToken);
+
+        /// <summary>PB5 (R3): items and open item requests with the same or a very similar title.</summary>
+        Task<ResponseDto<TitleCheckDto>> CheckTitleAsync(string title, int? exceptRequestId, CancellationToken cancellationToken);
         Task<ResponseDto<List<ItemRequestDto>>> GetRequestsAsync(ItemRequestStatus? status, CancellationToken cancellationToken);
         Task<ResponseDto<ItemRequestDto>> SaveRequestAsync(SaveItemRequestDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<ItemRequestDto>> ReviewRequestAsync(ReviewItemRequestDto dto, CancellationToken cancellationToken);
@@ -485,6 +488,33 @@ namespace Services.NasbNiro.Inventory
             return ResponseDtoHelper.Ok(check);
         }
 
+        public async Task<ResponseDto<TitleCheckDto>> CheckTitleAsync(string title, int? exceptRequestId, CancellationToken cancellationToken)
+        {
+            var result = new TitleCheckDto { Title = InventoryText.Clean(title) };
+            if (result.Title == null) return ResponseDtoHelper.Ok(result);
+            // M8: the comparison runs in memory, so the rows are cut in SQL first: only titles of a similar length can be equal or near (the digit/space/ZWNJ normalisation moves the length a little),
+            // and never more than a few thousand rows are compared
+            int length = result.Title.Length;
+            int shortest = Math.Max(0, (int)(length * 0.7) - 4), longest = (int)(length * 1.45) + 4;
+            var items = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted && i.Title.Length >= shortest && i.Title.Length <= longest)
+                .OrderBy(i => i.Id).Select(i => new { i.Code, i.Title }).Take(5000).ToListAsync(cancellationToken);
+            foreach (var i in items)
+            {
+                ItemTitleRules.Match m = ItemTitleRules.Compare(result.Title, i.Title);
+                if (m != ItemTitleRules.Match.None) result.Matches.Add(new TitleMatchDto { Kind = "item", Code = i.Code, Title = i.Title, Exact = m == ItemTitleRules.Match.Exact });
+            }
+            var open = await _uow.Set<ItemRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status == ItemRequestStatus.Submitted && r.Id != (exceptRequestId ?? 0) && r.Title.Length >= shortest && r.Title.Length <= longest)
+                .OrderBy(r => r.Id).Select(r => new { r.Number, r.Title }).Take(2000).ToListAsync(cancellationToken);
+            foreach (var r in open)
+            {
+                ItemTitleRules.Match m = ItemTitleRules.Compare(result.Title, r.Title);
+                if (m != ItemTitleRules.Match.None) result.Matches.Add(new TitleMatchDto { Kind = "request", Code = r.Number, Title = r.Title, Exact = m == ItemTitleRules.Match.Exact });
+            }
+            result.Matches = result.Matches.OrderByDescending(m => m.Exact).ThenBy(m => m.Code, StringComparer.Ordinal).Take(20).ToList();
+            result.HasExact = result.Matches.Any(m => m.Exact);
+            return ResponseDtoHelper.Ok(result);
+        }
+
         // ------------------------------------------------------------------------- item requests
 
         private IQueryable<ItemRequestDto> RequestProjection(IQueryable<ItemRequest> source) => source.Select(r => new ItemRequestDto
@@ -535,6 +565,14 @@ namespace Services.NasbNiro.Inventory
             if (group == "02" && InventoryText.Clean(dto.TechnicalCode) == null)
                 return ResponseDtoHelper.BadRequest<ItemRequestDto>("برای قطعه، شماره نقشه را وارد کنید.");
 
+            // PB5 (R3): an identical title is refused (the item or the open request exists already); a very close one is saved with a warning
+            TitleCheckDto titleCheck = (await CheckTitleAsync(title, dto.Id, cancellationToken)).Data;
+            if (titleCheck.HasExact)
+            {
+                TitleMatchDto same = titleCheck.Matches.First(m => m.Exact);
+                return ResponseDtoHelper.BadRequest<ItemRequestDto>("عنوان تکراری است: " + (same.Kind == "item" ? "کالا " : "درخواست ") + same.Code + " با همین عنوان وجود دارد.");
+            }
+
             ItemRequest request;
             DateTimeOffset now = DateTimeOffset.Now;
             if (dto.Id.HasValue)
@@ -570,7 +608,9 @@ namespace Services.NasbNiro.Inventory
             request.ModifyDate = now;
             request.ModifierUserId = _user.UserId;
             await _uow.SaveChangesAsync(cancellationToken);
-            return ResponseDtoHelper.Ok(await GetRequestAsync(request.Id, cancellationToken));
+            ItemRequestDto saved = await GetRequestAsync(request.Id, cancellationToken);
+            saved.TitleWarnings = titleCheck.Matches;
+            return ResponseDtoHelper.Ok(saved);
         }
 
         public async Task<ResponseDto<ItemRequestDto>> ReviewRequestAsync(ReviewItemRequestDto dto, CancellationToken cancellationToken)

@@ -116,6 +116,18 @@ namespace Services.NasbNiro.Inventory
             List<SepidarMapping> mappings = await _uow.Set<SepidarMapping>().ToListAsync(cancellationToken);
             string Map(string type, int? id) => id.HasValue ? mappings.FirstOrDefault(m => m.EntityType == type && m.EntityId == id.Value)?.SepidarCode : null;
 
+            // PB5 (F18): the user may choose the lines; documents with no chosen line are left out of the file
+            HashSet<int> selectedLines = dto.LineIds != null && dto.LineIds.Count > 0 ? dto.LineIds.ToHashSet() : null;
+            if (selectedLines != null)
+            {
+                documents = documents.Where(d => d.Lines.Any(l => selectedLines.Contains(l.Id))).ToList();
+                if (documents.Count == 0) return (null, null, "ردیف انتخاب‌شده در سندهای در انتظار سپیدار نیست.");
+                // M6: there is no per-line state, so a document is sent whole or not at all (a partial selection would send the rest again at the next export)
+                InventoryDocument partial = documents.FirstOrDefault(d => d.Lines.Any(l => !selectedLines.Contains(l.Id)));
+                if (partial != null) return (null, null, "همه ردیف‌های یک سند با هم به سپیدار می‌روند؛ سند " + partial.Number + " را کامل انتخاب کنید یا کل سند را بفرستید.");
+                if (selectedLines.Any(id => !documents.Any(d => d.Lines.Any(l => l.Id == id)))) return (null, null, "یکی از ردیف‌های انتخاب‌شده در سندهای در انتظار سپیدار نیست.");
+            }
+
             var csv = new StringBuilder();
             csv.AppendLine(string.Join(",", new[]
             {
@@ -129,7 +141,7 @@ namespace Services.NasbNiro.Inventory
                 // a cancelled document that was already sent goes out as a reversal (negative quantities)
                 bool reversal = d.Status == InventoryDocumentStatus.Cancelled;
                 string projectCode = Map(WorkOrderType, d.WorkOrderId) ?? Map(ContractType, d.ContractId);
-                foreach (InventoryDocumentLine l in d.Lines.OrderBy(x => x.RowNumber))
+                foreach (InventoryDocumentLine l in d.Lines.Where(x => selectedLines == null || selectedLines.Contains(x.Id)).OrderBy(x => x.RowNumber))
                 {
                     decimal quantity = reversal ? -l.Quantity : l.Quantity;
                     decimal? amount = l.UnitPrice.HasValue ? quantity * l.UnitPrice.Value : (decimal?)null;
@@ -168,7 +180,7 @@ namespace Services.NasbNiro.Inventory
             if (dto.MarkExported)
             {
                 DateTimeOffset now = DateTimeOffset.Now;
-                foreach (InventoryDocument d in documents.Where(x => Waiting.Contains(x.SepidarStatus)))
+                foreach (InventoryDocument d in documents.Where(x => Waiting.Contains(x.SepidarStatus) && (selectedLines == null || x.Lines.All(l => selectedLines.Contains(l.Id)))))
                 {
                     // a reversal that has been exported needs nothing more
                     d.SepidarStatus = SepidarSyncStatus.Exported;

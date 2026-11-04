@@ -216,7 +216,19 @@ namespace Services.NasbNiro.ProjectBalance
             || t == InventoryDocumentType.StageConversion || t == InventoryDocumentType.CustomerDelivery || t == InventoryDocumentType.ScrapSale;
 
         /// <summary>The documents that hand the stock to a work order and so use up its reservations.</summary>
-        public static bool UsesReservation(InventoryDocumentType t) => t == InventoryDocumentType.Issue || t == InventoryDocumentType.SubcontractIssue;
+        public static bool UsesReservation(InventoryDocumentType t) => t == InventoryDocumentType.Issue || t == InventoryDocumentType.SubcontractIssue || t == InventoryDocumentType.Transfer;
+
+        /// <summary>
+        /// The work order whose reservations the document uses: the work order of an issue or a send to a contractor; for a transfer (H3, PB5) the work order of the destination warehouse
+        /// (a project, project-consumable or point-of-use warehouse), because stock moved there is already with the project.
+        /// </summary>
+        public static async Task<int?> ReservationWorkOrderAsync(IUnitOfWork uow, InventoryDocument document, CancellationToken ct)
+        {
+            if (!UsesReservation(document.Type)) return null;
+            if (document.Type != InventoryDocumentType.Transfer) return document.WorkOrderId;
+            if (!document.DestinationWarehouseId.HasValue) return null;
+            return await uow.Set<Warehouse>().AsNoTracking().Where(w => w.Id == document.DestinationWarehouseId.Value).Select(w => w.WorkOrderId).FirstOrDefaultAsync(ct);
+        }
 
         private static IEnumerable<InventoryDocumentLine> OutLines(InventoryDocument document) =>
             document.Lines.Where(l => document.Type != InventoryDocumentType.StageConversion || l.Direction == DocumentLineDirection.Out);
@@ -241,7 +253,7 @@ namespace Services.NasbNiro.ProjectBalance
             List<InventoryDocumentLine> lines = OutLines(document).ToList();
             if (lines.Count == 0) return null;
             List<int> ids = lines.Select(l => l.ItemId).Distinct().ToList();
-            int? workOrderId = document.WorkOrderId;
+            int? workOrderId = await ReservationWorkOrderAsync(uow, document, ct) ?? document.WorkOrderId; // H3: a transfer into the warehouse of a work order may use that work order's own reservation
             var held = await uow.Set<ProjectReservation>().AsNoTracking().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.IsHard && ids.Contains(r.ItemId) && (workOrderId == null || r.WorkOrderId != workOrderId.Value))
                 .Select(r => new { r.ItemId, r.ContractId, r.LotId, r.SerialUnitId, Left = r.Quantity - r.IssuedQuantity }).ToListAsync(ct);
             held = held.Where(h => h.Left > 0).ToList();
@@ -288,9 +300,10 @@ namespace Services.NasbNiro.ProjectBalance
         /// </summary>
         public static async Task ApplyIssueAsync(IUnitOfWork uow, InventoryDocument document, int userId, CancellationToken ct)
         {
-            if (!UsesReservation(document.Type) || !document.WorkOrderId.HasValue) return;
+            int? workOrderId = await ReservationWorkOrderAsync(uow, document, ct);
+            if (!workOrderId.HasValue) return;
             List<int> ids = document.Lines.Select(l => l.ItemId).Distinct().ToList();
-            List<ProjectReservation> mine = await uow.Set<ProjectReservation>().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.WorkOrderId == document.WorkOrderId.Value && ids.Contains(r.ItemId)).ToListAsync(ct);
+            List<ProjectReservation> mine = await uow.Set<ProjectReservation>().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.WorkOrderId == workOrderId.Value && ids.Contains(r.ItemId)).ToListAsync(ct);
             if (mine.Count == 0) return;
             DateTimeOffset now = DateTimeOffset.Now;
             foreach (InventoryDocumentLine line in document.Lines.OrderBy(l => l.RowNumber))
@@ -314,10 +327,11 @@ namespace Services.NasbNiro.ProjectBalance
         /// <summary>The issue is cancelled: what it used up of the reservations of its work order goes back to them (the reservation is active again when it had been fully issued).</summary>
         public static async Task UndoIssueAsync(IUnitOfWork uow, InventoryDocument document, int userId, CancellationToken ct)
         {
-            if (!UsesReservation(document.Type) || !document.WorkOrderId.HasValue) return;
+            int? workOrderId = await ReservationWorkOrderAsync(uow, document, ct);
+            if (!workOrderId.HasValue) return;
             List<InventoryDocumentLine> lines = await uow.Set<InventoryDocumentLine>().Include(l => l.Serials).Where(l => l.DocumentId == document.Id).ToListAsync(ct);
             List<int> ids = lines.Select(l => l.ItemId).Distinct().ToList();
-            List<ProjectReservation> mine = await uow.Set<ProjectReservation>().Where(r => !r.Deleted && (r.Status == ReservationStatus.Active || r.Status == ReservationStatus.FullyIssued) && r.WorkOrderId == document.WorkOrderId.Value && ids.Contains(r.ItemId) && r.IssuedQuantity > 0).ToListAsync(ct);
+            List<ProjectReservation> mine = await uow.Set<ProjectReservation>().Where(r => !r.Deleted && (r.Status == ReservationStatus.Active || r.Status == ReservationStatus.FullyIssued) && r.WorkOrderId == workOrderId.Value && ids.Contains(r.ItemId) && r.IssuedQuantity > 0).ToListAsync(ct);
             if (mine.Count == 0) return;
             DateTimeOffset now = DateTimeOffset.Now;
             foreach (InventoryDocumentLine line in lines.OrderByDescending(l => l.RowNumber))
