@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import CodeCheck from "@/components/inventory/CodeCheck.vue";
-import { getCodingValues, getItemRequests, reviewItemRequest, saveItemRequest } from "@/api/InventoryAPIs";
+import { checkItemTitle, getCodingValues, getItemRequests, reviewItemRequest, saveItemRequest } from "@/api/InventoryAPIs";
 import { fail, itemRequestStatuses, jalali, ok, printPage, trackingModes } from "@/composables/inventory";
 import { hasRole, InventoryRoles } from "@/composables/roles";
 
@@ -39,11 +39,23 @@ function newRequest() {
   };
 }
 
+// PB5 (R3): an equal title is refused by the API; a very similar one is a warning (the request is still saved)
+const titleMatches = ref<any[]>([]);
+
+async function checkTitle() {
+  titleMatches.value = [];
+  const text = (form.value?.title || "").trim();
+  if (text.length < 3) return;
+  const [data] = await checkItemTitle(text);
+  titleMatches.value = data?.matches || [];
+}
+
 async function send() {
   saving.value = true;
-  const [, error] = await saveItemRequest(form.value);
+  const [saved, error] = await saveItemRequest(form.value);
   saving.value = false;
   if (error) return fail(error);
+  if (saved?.titleWarnings?.length) ok(`عنوان مشابه وجود دارد: ${saved.titleWarnings.map((m: any) => m.title).join("، ")}`);
   form.value = null;
   ok("درخواست ثبت شد و برای برنامه‌ریزی ارسال شد.");
   load();
@@ -140,7 +152,10 @@ onMounted(async () => {
         <div class="row g-2">
           <div class="col-8">
             <label class="form-label small mb-0">شرح کالا *</label>
-            <input v-model="form.title" class="form-control form-control-sm" />
+            <input v-model="form.title" class="form-control form-control-sm" @blur="checkTitle" />
+            <div v-for="m in titleMatches" :key="m.kind + m.code" :class="m.exact ? 'text-danger' : 'text-warning'" class="small">
+              {{ m.exact ? "عنوان تکراری" : "عنوان مشابه" }}: {{ m.code }} - {{ m.title }}
+            </div>
           </div>
           <div class="col-4">
             <label class="form-label small mb-0">گروه *</label>

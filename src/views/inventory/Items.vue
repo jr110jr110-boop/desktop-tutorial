@@ -28,13 +28,13 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = 30;
 const loading = ref(false);
-const filters = ref({ Contains: "", ItemGroupId: null as number | null, TrackingMode: null as number | null, IsActive: null as boolean | null });
+const filters = ref({ Contains: "", ItemGroupId: null as number | null, TrackingMode: null as number | null, IsActive: null as boolean | null, Platform: "", EquipmentType: "", ValveModel: "", IranCode: "" });
 const selected = ref<number[]>([]);
 
 const emptyForm = () => ({
   id: null, code: "", title: "", itemGroupId: null, unit: "عدد", trackingMode: 0, technicalCode: "", material: "",
   standard: "", specification: "", weight: null, minStock: 0, maxStock: null, isActive: true, sepidarCode: "",
-  mescCode: "", legacyCode: "", requiresIncomingInspection: true, shelfLifeDays: null, requiredCertificateType: null,
+  mescCode: "", legacyCode: "", platform: "", equipmentType: "", valveModel: "", iranCode: "", reorderQuantity: null, leadTimeDays: null, requiresIncomingInspection: true, shelfLifeDays: null, requiredCertificateType: null,
 });
 const form = ref<any>(null);
 const saving = ref(false);
@@ -340,6 +340,9 @@ onMounted(() => {
 
       <div class="inv-filters mb-3">
         <input v-model="filters.Contains" class="form-control form-control-sm" placeholder="جستجو در کد، شرح، شماره نقشه" @keydown.enter="search" />
+        <input v-model="filters.Platform" class="form-control form-control-sm" placeholder="سکو" @keydown.enter="search" />
+        <input v-model="filters.EquipmentType" class="form-control form-control-sm" placeholder="نوع تجهیز" @keydown.enter="search" />
+        <input v-model="filters.ValveModel" class="form-control form-control-sm" placeholder="مدل شیر" @keydown.enter="search" />
         <select v-model="filters.ItemGroupId" class="form-select form-select-sm" @change="search">
           <option :value="null">همه گروه‌ها</option>
           <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.code }} - {{ g.title }}</option>
@@ -449,6 +452,12 @@ onMounted(() => {
           <div class="col-12"><label class="form-label small">مشخصات</label><textarea v-model="form.specification" class="form-control form-control-sm" rows="2"></textarea></div>
           <div class="col-md-3"><label class="form-label small">وزن (kg)</label><input v-model.number="form.weight" class="form-control form-control-sm" type="number" /></div>
           <div class="col-md-3"><label class="form-label small">نقطه سفارش</label><input v-model.number="form.minStock" class="form-control form-control-sm" type="number" /></div>
+          <div class="col-md-3"><label class="form-label small">مقدار سفارش مجدد</label><input v-model.number="form.reorderQuantity" class="form-control form-control-sm" type="number" /></div>
+          <div class="col-md-3"><label class="form-label small">زمان تامین (روز)</label><input v-model.number="form.leadTimeDays" class="form-control form-control-sm" type="number" /></div>
+          <div class="col-md-3"><label class="form-label small">سکو</label><input v-model="form.platform" class="form-control form-control-sm" /></div>
+          <div class="col-md-3"><label class="form-label small">نوع تجهیز</label><input v-model="form.equipmentType" class="form-control form-control-sm" /></div>
+          <div class="col-md-3"><label class="form-label small">مدل شیر</label><input v-model="form.valveModel" class="form-control form-control-sm" /></div>
+          <div class="col-md-3"><label class="form-label small">کد ایران‌کد</label><input v-model="form.iranCode" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-3"><label class="form-label small">حداکثر موجودی</label><input v-model.number="form.maxStock" class="form-control form-control-sm" type="number" /></div>
           <div class="col-md-3"><label class="form-label small">کد سپیدار</label><input v-model="form.sepidarCode" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-3"><label class="form-label small">کد MESC</label><input v-model="form.mescCode" class="form-control form-control-sm inv-ltr" /></div>

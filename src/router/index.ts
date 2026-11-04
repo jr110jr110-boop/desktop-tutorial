@@ -429,6 +429,11 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/ncr/:id", name: "InventoryNcrEdit", component: () => import("@/views/inventory/NcrEdit.vue") },
   { path: "/inventory/counts", name: "InventoryStockCounts", component: () => import("@/views/inventory/StockCounts.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
   { path: "/inventory/counts/:id", name: "InventoryStockCountEdit", component: () => import("@/views/inventory/StockCountEdit.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
+  { path: "/inventory/reports", name: "InventoryReports", component: () => import("@/views/inventory/Reports.vue"), meta: { access: "warehouse", roles: InventoryRoles.reports } },
+  { path: "/inventory/freight", name: "InventoryFreight", component: () => import("@/views/inventory/Freight.vue"), meta: { access: "warehouse", roles: InventoryRoles.freight } },
+  { path: "/inventory/reorder", name: "InventoryReorder", component: () => import("@/views/inventory/Reorder.vue"), meta: { access: "warehouse", roles: InventoryRoles.reports } },
+  { path: "/inventory/excel", name: "InventoryExcel", component: () => import("@/views/inventory/ExcelImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
+  { path: "/inventory/registers", name: "InventoryRegisters", component: () => import("@/views/inventory/Registers.vue"), meta: { access: "warehouse" } },
   { path: "/inventory/opening-import", name: "InventoryOpeningImport", component: () => import("@/views/inventory/OpeningImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.openingImport } },
   // Finance and cost accounting
   { path: "/procurement/settings", name: "ProcurementSettings", component: () => import("@/views/procurement/Settings.vue"), meta: { roles: ProcurementRoles.readers } },

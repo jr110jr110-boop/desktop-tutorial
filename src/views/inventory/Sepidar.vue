@@ -3,7 +3,7 @@ import { hasRole } from "@/composables/roles";
 // Link to Sepidar (finance): documents waiting to be posted, CSV export, and Sepidar codes of providers / work orders / contracts.
 import { computed, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
-import { exportSepidar, getSepidarCheck, getSepidarMappings, getSepidarOutbox, saveSepidarMapping } from "@/api/InventoryAPIs";
+import { exportSepidar, getDocument, getSepidarCheck, getSepidarMappings, getSepidarOutbox, saveSepidarMapping } from "@/api/InventoryAPIs";
 import { documentStatuses, documentTypes, fail, jalali, num, ok, sepidarStatuses } from "@/composables/inventory";
 
 const tab = ref<"outbox" | "codes">("outbox");
@@ -44,11 +44,27 @@ function toggleAll() {
 /** R1t D19: legacy CSV channel, finance manager only (and only when the company switched it on) */
 const legacyCsv = hasRole(["FINANCEMANAGER"]);
 
+// PB5 (F18): the user may choose single lines of a document instead of the whole document; a document is marked as sent only when all its lines were chosen
+const openLines = ref<Record<number, any[]>>({});
+const chosenLines = ref<number[]>([]);
+
+async function toggleLines(id: number) {
+  if (openLines.value[id]) {
+    const copy = { ...openLines.value };
+    delete copy[id];
+    openLines.value = copy;
+    return;
+  }
+  const [doc, error] = await getDocument(id);
+  if (error) return fail(error);
+  openLines.value = { ...openLines.value, [id]: doc.lines || [] };
+}
+
 async function doExport() {
   const ids = selected.value.length ? selected.value : rows.value.map((r) => r.id);
   if (!ids.length) return fail("سندی برای خروجی نیست.");
   busy.value = true;
-  const error = await exportSepidar(ids, markExported.value);
+  const error = await exportSepidar(ids, markExported.value, chosenLines.value);
   busy.value = false;
   if (error) return fail(error);
   ok(`${ids.length} سند در فایل CSV ذخیره شد.`);
@@ -127,12 +143,12 @@ onMounted(() => {
           <thead>
             <tr>
               <th><input :checked="allSelected" class="form-check-input" type="checkbox" @change="toggleAll" /></th>
-              <th>شماره</th><th>نوع</th><th>تاریخ</th><th>انبار</th><th>طرف حساب</th><th>مقدار کل</th><th>وضعیت سند</th><th>سپیدار</th><th>زمان خروجی</th>
+              <th>شماره</th><th>نوع</th><th>تاریخ</th><th>انبار</th><th>طرف حساب</th><th>مقدار کل</th><th>وضعیت سند</th><th>سپیدار</th><th>زمان خروجی</th><th></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!rows.length"><td class="text-center inv-muted" colspan="10">سندی نیست.</td></tr>
-            <tr v-for="d in rows" :key="d.id">
+            <tr v-if="!rows.length"><td class="text-center inv-muted" colspan="11">سندی نیست.</td></tr>
+            <template v-for="d in rows" :key="d.id"><tr>
               <td><input v-model="selected" :value="d.id" class="form-check-input" type="checkbox" /></td>
               <td><router-link :to="{ name: 'InventoryDocumentEdit', params: { id: d.id } }" class="inv-ltr">{{ d.number }}</router-link></td>
               <td>{{ documentTypes[d.type] }}</td>
@@ -143,7 +159,15 @@ onMounted(() => {
               <td>{{ documentStatuses[d.status] }}</td>
               <td>{{ sepidarStatuses[d.sepidarStatus] }}</td>
               <td>{{ jalali(d.sepidarExportedAt, true) }}</td>
+              <td><button class="btn btn-sm btn-outline-secondary py-0" @click="toggleLines(d.id)">ردیف‌ها</button></td>
             </tr>
+            <tr v-if="openLines[d.id]">
+              <td colspan="11">
+                <label v-for="l in openLines[d.id]" :key="l.id" class="me-3 small">
+                  <input v-model="chosenLines" :value="l.id" class="form-check-input" type="checkbox" /> {{ l.itemCode }} · {{ num(l.quantity) }}
+                </label>
+              </td>
+            </tr></template>
           </tbody>
         </table>
       </div>

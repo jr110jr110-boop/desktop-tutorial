@@ -1,4 +1,4 @@
-import { call, clean, http, postForFile, saveBlob, rowsOf, type Result } from "@/api/ApiClient";
+import { call, clean, fileErrorText, http, postForFile, saveBlob, rowsOf, type Result } from "@/api/ApiClient";
 
 // Warehouse, part traceability and Sepidar link (api/v1/inventory/...).
 // The shared client (token on every request, [data, error] results) lives in ApiClient.ts.
@@ -120,8 +120,8 @@ export const getSepidarMappings = (entityType: string) => call("get", base + "se
 export const saveSepidarMapping = (dto: any) => call("post", base + "sepidar/mappings", dto);
 
 /** Downloads the CSV export. Returns an error message, or null when the file was saved. */
-export const exportSepidar = (documentIds: number[], markExported: boolean): Promise<string | null> =>
-  postForFile(base + "sepidar/export", { documentIds, markExported }, "sepidar-export.csv");
+export const exportSepidar = (documentIds: number[], markExported: boolean, lineIds: number[] = []): Promise<string | null> =>
+  postForFile(base + "sepidar/export", { documentIds, markExported, lineIds }, "sepidar-export.csv");
 
 // shared helpers that use the existing endpoints
 export const getProviders = () => call("get", "Provider", undefined, { PageSize: 0 });
@@ -157,3 +157,70 @@ export async function downloadFile(documentId: string, fileName: string) {
 /** Purchase orders that can still be received (released or partly received); used by the purchase receipt. */
 export const getOpenPurchaseOrders = () => call("get", "procurement/orders", undefined, clean({ OpenForReceipt: true, PageSize: 200 }));
 export const getPurchaseOrderForReceipt = (id: number) => call("get", "procurement/orders/" + id);
+
+// ---- PB5: freight and landed cost, alerts, reorder list, reports, Excel, assets, conversions, ceilings
+
+/** FreightQuery { ReceiptDocumentId?, Status? } */
+export const getFreights = (params: any) => call("get", base + "freight", undefined, clean(params));
+export const getFreight = (id: number) => call("get", base + "freight/" + id);
+/** SaveFreightDto { id?, receiptDocumentId, freightDate, vehiclePlate, goodsType, billOfLadingNumber, carrierProviderId, amount (rial), description } */
+export const saveFreight = (dto: any) => call("post", base + "freight", dto);
+/** The accountant approves; never the person who prepared it, never in a closed period. */
+export const approveFreight = (id: number) => call("post", base + "freight/" + id + "/approve");
+export const voidFreight = (id: number, reason: string) => call("post", base + "freight/" + id + "/void", { reason });
+
+export const runWarehouseAlerts = () => call("post", base + "alerts/run");
+/** ReorderQuery { ItemGroupId?, Platform?, Contains? } */
+export const getReorderList = (params: any) => call("get", base + "alerts/reorder", undefined, clean(params));
+/** A draft purchase request; a person reviews and submits it. */
+export const draftReorder = (itemIds: number[]) => call("post", base + "alerts/reorder/draft", { itemIds });
+
+export const getReportCatalog = () => call("get", base + "reports/catalog");
+/** WarehouseReportQuery { Report, DateFrom?, DateTo?, WarehouseId?, WorkOrderId?, ItemId?, ItemGroupId?, ProviderId?, ContractId?, Platform?, EquipmentType?, ValveModel?, Contains?, RequestNumber?, Kind?, Bucket? } */
+export const getWarehouseReport = (params: any) => call("get", base + "reports", undefined, clean(params));
+export async function downloadWarehouseReport(params: any): Promise<string | null> {
+  try {
+    const response = await http.get(base + "reports/export", { params: clean(params), responseType: "blob" });
+    const type = response.headers["content-type"] || "";
+    if (type.includes("application/json")) return JSON.parse(await (response.data as Blob).text()).message || "خطا";
+    saveBlob(response.data, "warehouse-" + (params.Report || "report") + ".xlsx");
+    return null;
+  } catch (error: any) {
+    return fileErrorText(error);
+  }
+}
+
+/** kind: receipt, issue, count, items, opening */
+export async function downloadExcelTemplate(kind: string): Promise<string | null> {
+  try {
+    const response = await http.get(base + "excel/template/" + kind, { responseType: "blob" });
+    const type = response.headers["content-type"] || "";
+    if (type.includes("application/json")) return JSON.parse(await (response.data as Blob).text()).message || "خطا";
+    saveBlob(response.data, "template-" + kind + ".xlsx");
+    return null;
+  } catch (error: any) {
+    return fileErrorText(error);
+  }
+}
+/** ExcelImportRequestDto { Kind, WarehouseId, DocumentDate, ProviderId, MaterialRequestId, Description, Preview }: a preview checks every row; without it ONE draft is made (never confirmed). */
+export const importExcel = (fields: Record<string, any>, file: File) => {
+  const form = new FormData();
+  const sent = clean(fields);
+  Object.keys(sent).forEach((k) => form.append(k, String(sent[k])));
+  form.append("file", file);
+  return call("post", base + "excel/import", form);
+};
+
+export const getAssets = (params: any) => call("get", base + "register/assets", undefined, clean(params));
+export const saveAsset = (dto: any) => call("post", base + "register/assets", dto);
+export const getConversions = (itemId?: number | null) => call("get", base + "register/conversions", undefined, clean({ itemId }));
+export const saveConversion = (dto: any) => call("post", base + "register/conversions", dto);
+export const getCeilings = (itemId?: number | null, workOrderId?: number | null) => call("get", base + "register/ceilings", undefined, clean({ itemId, workOrderId }));
+export const saveCeiling = (dto: any) => call("post", base + "register/ceilings", dto);
+export const deleteCeiling = (id: number) => call("delete", base + "register/ceilings/" + id);
+
+// documents: PB5 steps
+export const rejectDocument = (id: number, reason: string) => call("post", base + "documents/" + id + "/reject", { reason });
+export const approveDocumentPrice = (id: number) => call("post", base + "documents/" + id + "/approve-price");
+export const createCorrection = (id: number) => call("post", base + "documents/" + id + "/correction");
+export const checkItemTitle = (title: string, exceptRequestId?: number | null) => call("get", base + "coding/title-check", undefined, clean({ title, exceptRequestId }));
