@@ -180,7 +180,8 @@ namespace Services.NasbNiro.ProjectBalance
             // open purchase requests (submitted or approved) less what is already on orders
             var prLines = await (from l in Uow.Set<PurchaseRequestLine>().AsNoTracking()
                                  join r in Uow.Set<PurchaseRequest>().AsNoTracking() on l.PurchaseRequestId equals r.Id
-                                 where l.ItemId != null && ids.Contains(l.ItemId.Value) && !r.Deleted && (r.Status == PurchaseRequestStatus.Submitted || r.Status == PurchaseRequestStatus.Approved)
+                                 where l.ItemId != null && ids.Contains(l.ItemId.Value) && !r.Deleted && (r.Status == PurchaseRequestStatus.Submitted || r.Status == PurchaseRequestStatus.Approved
+                                       || (r.Status == PurchaseRequestStatus.Returned && r.SupersededByRequestId == null)) // PB6: a returned request still covers the need until its revision exists
                                        && (r.WorkOrderId == b.WorkOrderId || (r.WorkOrderId == null && r.ContractId == contractId && leadOrder))
                                  select new { LineId = l.Id, ItemId = l.ItemId.Value, l.Quantity }).ToListAsync(ct);
             List<int> prLineIds = prLines.Select(l => l.LineId).ToList();

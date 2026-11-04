@@ -45,6 +45,19 @@ namespace Entities.Model.NasbNiro.Attachments
         PbBomHeader = 36,
         /// <summary>PB2: a revision of an OPC routing (process chart documents).</summary>
         PbOpcRouting = 37,
+        /// <summary>PB6: a progress statement (the cheque image, the supporting documents).</summary>
+        ProgressStatement = 27,
+        /// <summary>PB6: a guarantee of a supplier (the scan of the cheque or the bank guarantee).</summary>
+        SupplierGuarantee = 28,
+        /// <summary>PB6: a row of the petty-cash summary (invoice, bank slip, waybill, forms...).</summary>
+        PettyCashSummaryLine = 29,
+        PettyCashRequest = 30,
+        /// <summary>PB6: an addendum of a supplier contract.</summary>
+        ContractAddendum = 31,
+        CtDealRequest = 32,
+        CtTenderParticipant = 33,
+        CtContractDraft = 34,
+        PettyCashSummary = 35,
     }
 
     public enum AttachmentKind

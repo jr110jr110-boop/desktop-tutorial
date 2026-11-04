@@ -357,6 +357,9 @@ namespace Services.NasbNiro.Inventory
                 return ResponseDtoHelper.BadRequest<InspectionDto>(InventoryMessages.ConcurrencyConflict);
             }
             if (rejectedNcr != null) await Quality.NcrGates.SyncAsync(_notify, rejectedNcr, cancellationToken);
+            if (receipt.PurchaseOrderId.HasValue)
+                await Procurement.ProcOrderNotices.SendAsync(_uow, _notify, _user.UserId, receipt.PurchaseOrderId.Value, "qc:" + inspection.Id,
+                    dto.RejectedQuantity > 0 ? $"بازرسی ورودی {inspection.Number}: {dto.RejectedQuantity:0.###} مورد رد شد" : $"بازرسی ورودی {inspection.Number} تایید شد", cancellationToken);
             return await GetInspectionAsync(inspection.Id, cancellationToken);
         }
 

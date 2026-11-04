@@ -85,6 +85,15 @@ namespace Services.NasbNiro.Attachments
                 case AttachmentOwnerType.PcProjectPhoto: return "عکس پروژه";
                 case AttachmentOwnerType.PbBomHeader: return "BOM محصول";
                 case AttachmentOwnerType.PbOpcRouting: return "مسیر ساخت (OPC)";
+                case AttachmentOwnerType.ProgressStatement: return "صورت‌وضعیت";
+                case AttachmentOwnerType.SupplierGuarantee: return "ضمانت‌نامه تامین‌کننده";
+                case AttachmentOwnerType.PettyCashSummaryLine: return "ردیف صورت‌خلاصه تنخواه";
+                case AttachmentOwnerType.PettyCashRequest: return "درخواست تنخواه";
+                case AttachmentOwnerType.ContractAddendum: return "الحاقیه قرارداد";
+                case AttachmentOwnerType.CtDealRequest: return "درخواست معامله";
+                case AttachmentOwnerType.CtTenderParticipant: return "شرکت‌کننده مناقصه";
+                case AttachmentOwnerType.CtContractDraft: return "پیش‌نویس قرارداد";
+                case AttachmentOwnerType.PettyCashSummary: return "صورت‌خلاصه تنخواه";
                 default: return "رکورد";
             }
         }

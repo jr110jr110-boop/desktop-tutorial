@@ -174,6 +174,13 @@ namespace IocConfig
             services.AddHostedService<Services.NasbNiro.Finance.FinanceF2HostedService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
+            // PB6: supplier contracts, procurement reports, contracts system, progress statements, petty-cash flow
+            services.AddScoped<Services.NasbNiro.Procurement.ISupplierContractService, Services.NasbNiro.Procurement.SupplierContractService>();
+            services.AddHostedService<Services.NasbNiro.Procurement.ProcurementHostedService>();   // PB6: off unless Procurement:GuaranteeJob=true
+            services.AddScoped<Services.NasbNiro.Procurement.IProcurementReportsService, Services.NasbNiro.Procurement.ProcurementReportsService>();
+            services.AddScoped<Services.NasbNiro.ContractsSystem.IContractsSystemService, Services.NasbNiro.ContractsSystem.ContractsSystemService>();
+            services.AddScoped<Services.NasbNiro.ContractsSystem.IProgressStatementService, Services.NasbNiro.ContractsSystem.ProgressStatementService>();
+            services.AddScoped<Services.NasbNiro.ContractsSystem.IPettyCashFlowService, Services.NasbNiro.ContractsSystem.PettyCashFlowService>();
             // PB3: attachments through the whole chain, the request dossier
             services.AddScoped<Services.NasbNiro.Attachments.IAttachmentService, Services.NasbNiro.Attachments.AttachmentService>();
             services.AddScoped<Services.NasbNiro.Attachments.IDossierService, Services.NasbNiro.Attachments.DossierService>();

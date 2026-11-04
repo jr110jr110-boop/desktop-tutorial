@@ -52,9 +52,24 @@ namespace Services.NasbNiro.Procurement
 
         /// <summary>Called by the warehouse after a receipt or a return of an order is confirmed or cancelled.</summary>
         Task RefreshOrderAsync(int purchaseOrderId, CancellationToken cancellationToken);
+
+        // ------------------------------------------------------------------------------------------ PB6
+        /// <summary>PB6: the requester of the request behind an order is told about a step (received, QC passed or failed, invoiced, paid).</summary>
+        Task NotifyOrderEventAsync(int purchaseOrderId, string step, string title, CancellationToken cancellationToken);
+
+        Task<ResponseDto<PurchaseRequestDto>> ReturnRequestAsync(ProcurementActionDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<PurchaseRequestDto>> ReviseRequestAsync(ProcurementActionDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<RequestChainDto>> GetRequestChainAsync(int id, CancellationToken cancellationToken);
+
+        Task<ResponseDto<PagedList<ArchiveRecordDto>>> GetArchiveAsync(ArchiveQuery query, CancellationToken cancellationToken);
+        Task<ResponseDto<ArchiveRecordDto>> ArchiveAsync(ArchiveDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<ArchiveRecordDto>> RestoreAsync(ArchiveDto dto, CancellationToken cancellationToken);
+
+        Task<ResponseDto<List<LegacyBuyOrderDto>>> GetLegacyBuyOrdersAsync(bool openOnly, CancellationToken cancellationToken);
+        Task<ResponseDto<ConvertBuyOrderResultDto>> ConvertBuyOrderAsync(ConvertBuyOrderDto dto, CancellationToken cancellationToken);
     }
 
-    public class ProcurementService : IProcurementService
+    public partial class ProcurementService : IProcurementService
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -113,6 +128,9 @@ namespace Services.NasbNiro.Procurement
                 PlanningApprovedAt = r.PlanningApprovedAt, PlanningApprovedByUserId = r.PlanningApprovedByUserId,
                 ManagementApprovedAt = r.ManagementApprovedAt, ManagementApprovedByUserId = r.ManagementApprovedByUserId,
                 RejectedAt = r.RejectedAt, RejectReason = r.RejectReason,
+                Priority = r.Priority, FormType = r.FormType, Revision = r.Revision, PreviousRequestId = r.PreviousRequestId, SupersededByRequestId = r.SupersededByRequestId,
+                ReturnedAt = r.ReturnedAt, ReturnReason = r.ReturnReason, VehicleDate = r.VehicleDate, VehicleUnit = r.VehicleUnit, VehicleType = r.VehicleType,
+                VehicleOrigin = r.VehicleOrigin, VehicleDestination = r.VehicleDestination, RelatedOrderId = r.RelatedOrderId,
                 Lines = r.Lines.OrderBy(l => l.RowNumber).Select(l => new PurchaseRequestLineDto
                 {
                     Id = l.Id, RowNumber = l.RowNumber, ItemId = l.ItemId, ItemCode = l.Item.Code, ItemTitle = l.Item.Title,
@@ -144,6 +162,7 @@ namespace Services.NasbNiro.Procurement
                 r.NeedsBoard = r.EstimatedAmount >= s[ProcurementSettingKeys.MajorFrom];
                 foreach (PurchaseRequestLineDto l in r.Lines) l.OrderedQuantity = ordered.FirstOrDefault(o => o.Key == l.Id)?.Quantity ?? 0;
             }
+            await FillRequestProgressAsync(rows, cancellationToken);
         }
 
         public async Task<ResponseDto<PagedList<PurchaseRequestDto>>> GetRequestsAsync(PurchaseRequestQuery query, CancellationToken cancellationToken)
@@ -152,6 +171,7 @@ namespace Services.NasbNiro.Procurement
             IQueryable<PurchaseRequest> requests = _uow.Set<PurchaseRequest>().Where(r => !r.Deleted);
             if (query.Status.HasValue) requests = requests.Where(r => r.Status == query.Status.Value);
             if (query.WorkOrderId.HasValue) requests = requests.Where(r => r.WorkOrderId == query.WorkOrderId.Value);
+            requests = await ApplyRequestFiltersAsync(requests, query, cancellationToken);
             string text = Clean(query.Contains);
             if (text != null)
                 requests = requests.Where(r => r.Number.Contains(text) || r.Description.Contains(text) ||
@@ -165,7 +185,7 @@ namespace Services.NasbNiro.Procurement
         public async Task<ResponseDto<PurchaseRequestDto>> GetRequestAsync(int id, CancellationToken cancellationToken)
         {
             List<PurchaseRequestDto> list = await RequestProjection(_uow.Set<PurchaseRequest>().Where(r => r.Id == id && !r.Deleted)).ToListAsync(cancellationToken);
-            if (list.Count == 0) return ResponseDtoHelper.NotFound<PurchaseRequestDto>("درخواست خرید پیدا نشد.");
+            if (list.Count == 0 || !CanSeeRequest(list[0].CreatorUserId)) return ResponseDtoHelper.NotFound<PurchaseRequestDto>("درخواست خرید پیدا نشد.");
             await FillRequestsAsync(list, cancellationToken);
             return ResponseDtoHelper.Ok(list[0]);
         }
@@ -184,8 +204,11 @@ namespace Services.NasbNiro.Procurement
         public async Task<ResponseDto<PurchaseRequestDto>> SaveRequestAsync(SavePurchaseRequestDto dto, CancellationToken cancellationToken)
         {
             if (dto == null) return Bad<PurchaseRequestDto>("اطلاعات ارسال‌شده کامل نیست.");
+            if (dto.FormType.HasValue && !Enum.IsDefined(typeof(PurchaseFormType), dto.FormType.Value)) return Bad<PurchaseRequestDto>("نوع فرم درخواست نامعتبر است.");
+            if (dto.FormType.HasValue) dto.Kind = ProcFormTypes.KindOf(dto.FormType.Value);
             if (!Enum.IsDefined(typeof(PurchaseRequestSource), dto.Source) || !Enum.IsDefined(typeof(PurchaseKind), dto.Kind))
                 return Bad<PurchaseRequestDto>("نوع یا منبع درخواست نامعتبر است.");
+            if (dto.Priority.HasValue && !Enum.IsDefined(typeof(PurchaseRequestPriority), dto.Priority.Value)) return Bad<PurchaseRequestDto>("اولویت نامعتبر است.");
             if (dto.RequestDate == default) dto.RequestDate = DateTime.Today;
             if (dto.Source == PurchaseRequestSource.Bom && !_user.IsInRole(ProcurementRoles.Planning))
                 return Bad<PurchaseRequestDto>("درخواست خرید BOM را واحد برنامه‌ریزی و کنترل پروژه ثبت می‌کند.");
@@ -206,7 +229,11 @@ namespace Services.NasbNiro.Procurement
                 if (reviewError != null) return Bad<PurchaseRequestDto>(reviewError);
             }
 
+            PurchaseFormType formType = dto.FormType ?? ProcFormTypes.Derive(dto.Kind, dto.ContractId);
+            string formError = ProcFormTypes.Validate(formType, dto);
+            if (formError != null) return Bad<PurchaseRequestDto>(formError);
             List<SavePurchaseRequestLineDto> lines = (dto.Lines ?? new List<SavePurchaseRequestLineDto>()).Where(l => l != null).ToList();
+            if (lines.Count == 0 && ProcFormTypes.SyntheticLine(formType, dto) is SavePurchaseRequestLineDto synthetic) lines.Add(synthetic);
             if (lines.Count == 0) return Bad<PurchaseRequestDto>("درخواست حداقل یک ردیف لازم دارد.");
             List<int> itemIds = lines.Where(l => l.ItemId.HasValue).Select(l => l.ItemId.Value).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>().Where(i => itemIds.Contains(i.Id) && !i.Deleted).ToDictionaryAsync(i => i.Id, cancellationToken);
@@ -273,7 +300,7 @@ namespace Services.NasbNiro.Procurement
                 request = new PurchaseRequest
                 {
                     Number = await InventoryNumbers.NextNumberAsync(_uow, ProcurementNumbers.PurchaseRequest, "PRQ", dto.RequestDate, cancellationToken),
-                    Status = PurchaseRequestStatus.Draft, CreateDate = DateTimeOffset.Now, CreatorUserId = Me, Lines = new List<PurchaseRequestLine>(),
+                    Status = PurchaseRequestStatus.Draft, CreateDate = DateTimeOffset.Now, CreatorUserId = Me, Lines = new List<PurchaseRequestLine>(), Revision = 1,
                 };
                 _uow.Set<PurchaseRequest>().Add(request);
             }
@@ -285,6 +312,12 @@ namespace Services.NasbNiro.Procurement
             request.CostCenter = Clean(dto.CostCenter);
             request.MaterialRequestId = dto.MaterialRequestId;
             request.Description = Clean(dto.Description);
+            request.FormType = formType;
+            request.Priority = dto.Priority ?? (dto.Id.HasValue ? request.Priority : PurchaseRequestPriority.Normal);
+            if (request.Priority == 0) request.Priority = PurchaseRequestPriority.Normal;
+            request.VehicleDate = dto.VehicleDate?.Date; request.VehicleUnit = Clean(dto.VehicleUnit); request.VehicleType = Clean(dto.VehicleType);
+            request.VehicleOrigin = Clean(dto.VehicleOrigin); request.VehicleDestination = Clean(dto.VehicleDestination);
+            request.RelatedOrderId = dto.RelatedOrderId;
             int rowNumber = 1;
             foreach (SavePurchaseRequestLineDto l in lines)
             {
@@ -319,17 +352,22 @@ namespace Services.NasbNiro.Procurement
                 if (request.EstimatedAmount >= gateSettings[ProcurementSettingKeys.MediumFrom]) waitingRoles.Add(ProcurementRoles.Management);
                 await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "pr:" + request.Id, true, "procurement", "purchase-request", request.Id,
                     "تایید درخواست خرید " + request.Number, "/procurement/requests/" + request.Id, string.Join(",", waitingRoles), cancellationToken);
+                await NotifyRequesterAsync(request, "submitted", "درخواست خرید " + request.Number + " ارسال شد و منتظر تایید برنامه‌ریزی است.", cancellationToken);
             }
             return await GetRequestAsync(request.Id, cancellationToken);
         }
 
         public async Task<ResponseDto<PurchaseRequestDto>> RequestActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken)
         {
+            string requestAction = dto.Action?.Trim().ToLowerInvariant();
+            if (requestAction == "return") return await ReturnRequestAsync(dto, cancellationToken);
+            if (requestAction == "revise") return await ReviseRequestAsync(dto, cancellationToken);
             PurchaseRequest r = await _uow.Set<PurchaseRequest>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
             if (r == null) return ResponseDtoHelper.NotFound<PurchaseRequestDto>("درخواست خرید پیدا نشد.");
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
             DateTimeOffset now = DateTimeOffset.Now;
-            switch (dto.Action?.Trim().ToLowerInvariant())
+            PurchaseRequestStatus statusBefore = r.Status;
+            switch (requestAction)
             {
                 case "submit":
                     if (r.Status != PurchaseRequestStatus.Draft) return Bad<PurchaseRequestDto>("درخواست قبلاً ارسال شده است.");
@@ -408,6 +446,12 @@ namespace Services.NasbNiro.Procurement
                 await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "pr:" + r.Id, r.Status == PurchaseRequestStatus.Submitted && waiting.Count > 0, "procurement", "purchase-request", r.Id,
                     "تایید درخواست خرید " + r.Number, "/procurement/requests/" + r.Id, string.Join(",", waiting), cancellationToken);
             }
+            if (r.Status == PurchaseRequestStatus.Approved && statusBefore != PurchaseRequestStatus.Approved)
+                await NotifyRequesterAsync(r, "approved", "درخواست خرید " + r.Number + " تایید شد و برای استعلام به بازرگانی می‌رود.", cancellationToken);
+            else if (r.Status == PurchaseRequestStatus.Rejected)
+                await NotifyRequesterAsync(r, "rejected", "درخواست خرید " + r.Number + " رد شد: " + r.RejectReason, cancellationToken);
+            else if (r.Status == PurchaseRequestStatus.Submitted && statusBefore == PurchaseRequestStatus.Draft)
+                await NotifyRequesterAsync(r, "submitted", "درخواست خرید " + r.Number + " ارسال شد و منتظر تایید برنامه‌ریزی است.", cancellationToken);
             if (budgetNote != null) { var withNote = await GetRequestAsync(r.Id, cancellationToken); return withNote.Success ? ResponseDtoHelper.Ok(withNote.Data, budgetNote) : withNote; }
             return await GetRequestAsync(r.Id, cancellationToken);
         }
@@ -430,7 +474,7 @@ namespace Services.NasbNiro.Procurement
             Dictionary<int, SupplierProfile> profiles = await ProfilesAsync(rows.SelectMany(i => i.Quotes.Select(q => q.ProviderId)), cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(i => new int?[]
             {
-                i.FinancialApprovedByUserId, i.CommercialApprovedByUserId, i.TechnicalApprovedByUserId, i.ManagementApprovedByUserId,
+                i.FinancialApprovedByUserId, i.CommercialApprovedByUserId, i.TechnicalApprovedByUserId, i.ManagementApprovedByUserId, i.PlanningApprovedByUserId,
             }).Concat(rows.SelectMany(i => i.Quotes.Select(q => q.TechnicalReviewedByUserId))), cancellationToken);
             List<int> ids = rows.Select(i => i.Id).ToList();
             var orders = await _uow.Set<PurchaseOrder>().Where(o => o.InquiryId.HasValue && ids.Contains(o.InquiryId.Value) && o.Status != PurchaseOrderStatus.Cancelled && !o.Deleted)
@@ -457,6 +501,10 @@ namespace Services.NasbNiro.Procurement
                     TechnicalApprovedAt = i.TechnicalApprovedAt, TechnicalApprovedByName = names.Name(i.TechnicalApprovedByUserId),
                     ManagementApprovedAt = i.ManagementApprovedAt, ManagementApprovedByName = names.Name(i.ManagementApprovedByUserId),
                     CommitteeMinutes = i.CommitteeMinutes, PurchaseOrderId = order?.Id, PurchaseOrderNumber = order?.Number,
+                    PlanningRequired = s[ProcurementSettingKeys.InquiryPlanningRequired] > 0, PlanningApprovedAt = i.PlanningApprovedAt,
+                    PlanningApprovedByName = names.Name(i.PlanningApprovedByUserId), PlanningBudgetAmount = i.PlanningBudgetAmount, PlanningDeliveryDays = i.PlanningDeliveryDays,
+                    PlanningNote = i.PlanningNote, Revision = i.Revision == 0 ? 1 : i.Revision, PreviousInquiryId = i.PreviousInquiryId, SupersededByInquiryId = i.SupersededByInquiryId,
+                    ReturnedAt = i.ReturnedAt, ReturnReason = i.ReturnReason,
                     Quotes = i.Quotes.OrderBy(q => q.TotalAmount).Select(q => new QuoteDto
                     {
                         Id = q.Id, ProviderId = q.ProviderId, ProviderName = q.Provider?.Name,
@@ -566,6 +614,12 @@ namespace Services.NasbNiro.Procurement
             }
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
             inquiry.InquiryDate = dto.InquiryDate.Date;
+            if (inquiry.PlanningApprovedAt.HasValue)
+            {
+                // PB6 (D5): the approved budget and time belonged to the offers as they were; changed offers need the approval again
+                inquiry.PlanningApprovedAt = null; inquiry.PlanningApprovedByUserId = null; inquiry.PlanningBudgetAmount = null; inquiry.PlanningDeliveryDays = null;
+            }
+            if (inquiry.Revision == 0) inquiry.Revision = 1;
             inquiry.Description = Clean(dto.Description);
             inquiry.FewerQuotesReason = Clean(dto.FewerQuotesReason);
 
@@ -589,6 +643,7 @@ namespace Services.NasbNiro.Procurement
             inquiry.ModifyDate = DateTimeOffset.Now;
             inquiry.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncInquiryGateAsync(inquiry, request, cancellationToken);
             return await GetInquiryAsync(inquiry.Id, cancellationToken);
         }
 
@@ -621,6 +676,8 @@ namespace Services.NasbNiro.Procurement
                                                                               (o.Grade == SupplierGrade.A || o.Grade == SupplierGrade.B) && !o.Blocked))
                 return Bad<InquiryDto>("تامین‌کننده گرید C فقط وقتی انتخاب می‌شود که تامین‌کننده A یا B نباشد.");
 
+            string planningError = PlanningSelectionError(inquiry, quote, s, Clean(dto.Reason));
+            if (planningError != null) return Bad<InquiryDto>(planningError);
             decimal lowest = inquiry.Quotes.Where(q => q.TechnicallyAccepted).Min(q => q.TotalAmount);
             string reason = Clean(dto.Reason);
             if (quote.TotalAmount > lowest && reason == null)
@@ -634,6 +691,8 @@ namespace Services.NasbNiro.Procurement
             inquiry.Status = InquiryStatus.Selected;
             UpdateInquiryStatus(inquiry, quote.TotalAmount, inquiry.PurchaseRequest, s);
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncInquiryGateAsync(inquiry, inquiry.PurchaseRequest, cancellationToken);
+            await NotifyRequesterAsync(inquiry.PurchaseRequest, "inquiry-selected", "برای درخواست خرید " + inquiry.PurchaseRequest.Number + " برنده استعلام انتخاب شد.", cancellationToken);
             return await GetInquiryAsync(inquiry.Id, cancellationToken);
         }
 
@@ -655,6 +714,10 @@ namespace Services.NasbNiro.Procurement
             if (i == null) return ResponseDtoHelper.NotFound<InquiryDto>("استعلام پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             string action = dto.Action?.Trim().ToLowerInvariant();
+            if (action == "approve-planning") return await ApprovePlanningAsync(i, dto, cancellationToken);
+            if (action == "override-budget") return await OverrideBudgetAsync(i, dto, cancellationToken);
+            if (action == "return") return await ReturnInquiryAsync(i, dto, cancellationToken);
+            if (action == "revise") return await ReviseInquiryAsync(i, dto, cancellationToken);
             if (action == "cancel")
             {
                 if (!_user.IsInRole(ProcurementRoles.Commercial)) return Bad<InquiryDto>(NotAllowed);
@@ -665,7 +728,7 @@ namespace Services.NasbNiro.Procurement
                 return await GetInquiryAsync(i.Id, cancellationToken);
             }
             if (i.Status != InquiryStatus.Selected) return Bad<InquiryDto>("تایید کمیته بعد از انتخاب برنده و پیش از صدور سفارش است.");
-            var others = new[] { i.FinancialApprovedByUserId, i.CommercialApprovedByUserId, i.TechnicalApprovedByUserId, i.ManagementApprovedByUserId };
+            var others = new[] { i.FinancialApprovedByUserId, i.CommercialApprovedByUserId, i.TechnicalApprovedByUserId, i.ManagementApprovedByUserId, i.PlanningApprovedByUserId };
             if (others.Contains(Me) || i.SelectedByUserId == Me && action != "approve-commercial") return Bad<InquiryDto>(SameUser);
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
             bool referenceUsed = false;
@@ -700,6 +763,7 @@ namespace Services.NasbNiro.Procurement
             if (!referenceUsed && Clean(dto.Reference) != null) i.CommitteeMinutes = Clean(dto.Reference);
             UpdateInquiryStatus(i, i.Quotes.First(q => q.Id == i.SelectedQuoteId).TotalAmount, i.PurchaseRequest, s);
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncInquiryGateAsync(i, i.PurchaseRequest, cancellationToken);
             return await GetInquiryAsync(i.Id, cancellationToken);
         }
 
@@ -840,6 +904,7 @@ namespace Services.NasbNiro.Procurement
             if (query.Status.HasValue) orders = orders.Where(o => o.Status == query.Status.Value);
             if (query.ProviderId.HasValue) orders = orders.Where(o => o.ProviderId == query.ProviderId.Value);
             if (query.OpenForReceipt == true) orders = orders.Where(o => o.Status == PurchaseOrderStatus.Released || o.Status == PurchaseOrderStatus.PartlyReceived);
+            orders = await ArchiveFilterAsync(orders, ProcArchiveOwner.PurchaseOrder, query.Archive, cancellationToken);
             string text = Clean(query.Contains);
             if (text != null) orders = orders.Where(o => o.Number.Contains(text) || o.Provider.Name.Contains(text) || o.ContractNumber.Contains(text) ||
                                                          o.Lines.Any(l => l.Item.Code.Contains(text) || l.Description.Contains(text)));
@@ -1067,6 +1132,7 @@ namespace Services.NasbNiro.Procurement
             order.ModifyDate = DateTimeOffset.Now;
             order.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncOrderGateAsync(order, cancellationToken);
             return await GetOrderAsync(order.Id, cancellationToken);
         }
 
@@ -1096,6 +1162,12 @@ namespace Services.NasbNiro.Procurement
                         orderInquiry = await _uow.Set<PurchaseInquiry>().Include(i => i.PurchaseRequest).Include(i => i.Quotes).ThenInclude(q => q.Lines)
                             .FirstOrDefaultAsync(i => i.Id == o.InquiryId.Value, cancellationToken);
                         if (orderInquiry == null) return Bad<PurchaseOrderDto>("استعلام این سفارش پیدا نشد.");
+                    }
+                    // PB6 (M5): a revised order keeps within the volume limit of the contract against what was signed (the first frozen revision); a larger change is an addendum with its own approvals
+                    if (o.Revision > 1)
+                    {
+                        string volumeError = await RevisionVolumeErrorAsync(o, (await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken))[ProcurementSettingKeys.AddendumVolumePercent], cancellationToken);
+                        if (volumeError != null) return Bad<PurchaseOrderDto>(volumeError);
                     }
                     string authority = await AuthorityProblemAsync(orderInquiry, o.TotalAmount,
                         o.Lines.Where(l => l.RequestLineId.HasValue).Select(l => (l.RequestLineId.Value, Math.Round(l.Quantity * l.UnitPrice, 0))).ToList(), s, cancellationToken);
@@ -1185,6 +1257,9 @@ namespace Services.NasbNiro.Procurement
             o.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PurchaseOrderDto>("اطلاعات هم‌زمان تغییر کرد؛ دوباره تلاش کنید."); }
+            await SyncOrderGateAsync(o, cancellationToken);
+            if (o.Status == PurchaseOrderStatus.Released)
+                await NotifyOrderEventAsync(o.Id, "released", "سفارش " + o.Number + " به تامین‌کننده ابلاغ شد.", cancellationToken);
             if (orderBudgetNote != null) { var withNote = await GetOrderAsync(o.Id, cancellationToken); return withNote.Success ? ResponseDtoHelper.Ok(withNote.Data, orderBudgetNote) : withNote; }
             return await GetOrderAsync(o.Id, cancellationToken);
         }

@@ -3,6 +3,7 @@ using DataLayer.Configurations.EF.NasbNiro.Ai;
 using DataLayer.Configurations.EF.NasbNiro.Ceo;
 using DataLayer.Configurations.EF.NasbNiro.Finance;
 using DataLayer.Configurations.EF.NasbNiro.Office;
+using DataLayer.Configurations.EF.NasbNiro.Pb6;
 using DataLayer.Configurations.EF.NasbNiro.Tasks;
 using DataLayer.Configurations.EF.NasbNiro.Production;
 using DataLayer.Configurations.EF.NasbNiro.ProjectControl;
@@ -41,6 +42,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddProductBankConfigurations();
             builder.AddGenealogyConfigurations();
             builder.AddProjectBalanceConfigurations();
+            builder.AddPb6Configurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());

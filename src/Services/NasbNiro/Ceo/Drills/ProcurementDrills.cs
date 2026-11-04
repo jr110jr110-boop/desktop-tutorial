@@ -88,6 +88,7 @@ namespace Services.NasbNiro.Ceo.Drills
             PaymentRequestType.Advance => "پیش‌پرداخت",
             PaymentRequestType.Progress => "صورت‌وضعیت",
             PaymentRequestType.Invoice => "فاکتور",
+            PaymentRequestType.Retention => "حسن انجام کار",
             _ => "تسویه‌ی نهایی",
         };
 

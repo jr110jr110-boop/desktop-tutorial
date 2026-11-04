@@ -311,8 +311,13 @@ namespace MsTests
         private static Task<ResponseDto<InquiryDto>> SaveInquiry(ClaimsPrincipal who, SaveInquiryDto dto) => H.As(who, p => p.GetRequiredService<IProcurementService>().SaveInquiryAsync(dto, CancellationToken.None));
         private static Task<ResponseDto<InquiryDto>> TechReview(ClaimsPrincipal who, int inquiryId, int quoteId, bool accepted, decimal? score = null, string note = null) =>
             H.As(who, p => p.GetRequiredService<IProcurementService>().TechnicalReviewAsync(new TechnicalReviewDto { InquiryId = inquiryId, QuoteId = quoteId, Accepted = accepted, Score = score, Note = note }, CancellationToken.None));
-        private static Task<ResponseDto<InquiryDto>> SelectWinner(ClaimsPrincipal who, int inquiryId, int quoteId, string reason = null) =>
-            H.As(who, p => p.GetRequiredService<IProcurementService>().SelectQuoteAsync(new SelectQuoteDto { InquiryId = inquiryId, QuoteId = quoteId, Reason = reason }, CancellationToken.None));
+        private static readonly ClaimsPrincipal Planner = AppHost.Principal(51, "planner", "PLANNING");
+        // PB6 (D5): planning approves the budget and the delivery time of the inquiry before a winner is selected; the helper does it first (a refusal there, for example no technical acceptance yet, leaves the selection to refuse as before)
+        private static async Task<ResponseDto<InquiryDto>> SelectWinner(ClaimsPrincipal who, int inquiryId, int quoteId, string reason = null)
+        {
+            await H.As(Planner, p => p.GetRequiredService<IProcurementService>().InquiryActionAsync(new ProcurementActionDto { Id = inquiryId, Action = "approve-planning" }, CancellationToken.None));
+            return await H.As(who, p => p.GetRequiredService<IProcurementService>().SelectQuoteAsync(new SelectQuoteDto { InquiryId = inquiryId, QuoteId = quoteId, Reason = reason }, CancellationToken.None));
+        }
         private static Task<ResponseDto<InquiryDto>> InquiryAction(ClaimsPrincipal who, int id, string action, string reference = null) =>
             H.As(who, p => p.GetRequiredService<IProcurementService>().InquiryActionAsync(new ProcurementActionDto { Id = id, Action = action, Reference = reference }, CancellationToken.None));
         private static Task<ResponseDto<PurchaseOrderDto>> FromInquiry(ClaimsPrincipal who, int inquiryId) => H.As(who, p => p.GetRequiredService<IProcurementService>().CreateOrderFromInquiryAsync(inquiryId, CancellationToken.None));

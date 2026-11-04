@@ -12,7 +12,16 @@ namespace Services.NasbNiro.Procurement
     /// <summary>Roles (JWT names). Requester, approver, buyer, receiver and payer are kept apart by the services.</summary>
     public static class ProcurementRoles
     {
-        public const string Requesters = "PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING,ENGINEER,CONSTRUCTION,QC,ASSEMBLER,COMMERCIAL";
+        /// <summary>PB6: the unit managers who ask for a purchase but do not see the prices of the procurement chain: they read their own requests only.</summary>
+        public const string ExtraRequesters = "PRODUCTIONMANAGER,SHOPSUPERVISOR,SALES,SERVICE,PROJECTMANAGER,SECRETARIAT,HR";
+        /// <summary>PB6: every unit manager asks; COMMERCIAL is the buyer and does not (requester and buyer are kept apart, ISO 9001 8.4).</summary>
+        public const string Requesters = "PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING,ENGINEER,CONSTRUCTION,QC,ASSEMBLER,FINANCIAL,FINANCEMANAGER," + ExtraRequesters;
+        /// <summary>PB6: who may open the request screens: the procurement readers and the requesting unit managers (the latter see their own requests only).</summary>
+        public const string RequestReaders = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER," + ExtraRequesters;
+        /// <summary>PB6: archive and restore of procurement documents (with a reason).</summary>
+        public const string Archivers = "COMMERCIAL,PLANNING,FINANCIAL,FINANCEMANAGER,PMO";
+        /// <summary>PB6: the procurement reports (the unit that buys, plans and pays, and management).</summary>
+        public const string ReportReaders = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR";
         public const string Planning = "PLANNING,PMO";
         /// <summary>مدیرعامل (or management): medium/major purchases, committee above the CEO threshold, advance above the limit.</summary>
         public const string Management = "CEO,PMO";
@@ -60,6 +69,19 @@ namespace Services.NasbNiro.Procurement
         public const string EvalWeightPrice = "SupplierEvalWeightPrice";
         public const string EvalWeightService = "SupplierEvalWeightService";
 
+        // PB6
+        /// <summary>1 = planning approves the budget and the delivery time of an inquiry before the winner is selected (decision D5); 0 = off.</summary>
+        public const string InquiryPlanningRequired = "InquiryPlanningRequired";
+        /// <summary>The volume of a contract line may change by this percent of the original quantity through addenda (the company template says 25).</summary>
+        public const string AddendumVolumePercent = "AddendumVolumePercent";
+        /// <summary>An addendum that changes the value by this many rial or more also needs the managing director.</summary>
+        public const string AddendumCeoFrom = "AddendumCeoFrom";
+        public const string GuaranteeAlertDays = "GuaranteeAlertDays";
+        /// <summary>Days after the approval of a purchase request by which the first order should exist; beyond it the request is overdue.</summary>
+        public const string RequestToOrderDays = "RequestToOrderDays";
+        /// <summary>The cheque after the invoice is due this many days after the invoice date (the template says 60).</summary>
+        public const string ChequeAfterInvoiceDays = "ChequeAfterInvoiceDays";
+
         public static IEnumerable<ProcurementSetting> Defaults()
         {
             yield return new ProcurementSetting { Key = MediumFrom, Value = 10_000_000m, Title = "خرید متوسط از (تایید مدیرعامل)", Source = "BL-006 ماده 2 و 4" };
@@ -79,6 +101,12 @@ namespace Services.NasbNiro.Procurement
             yield return new ProcurementSetting { Key = EvalWeightDelivery, Value = 30m, Title = "وزن تحویل به‌موقع در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
             yield return new ProcurementSetting { Key = EvalWeightPrice, Value = 20m, Title = "وزن قیمت در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
             yield return new ProcurementSetting { Key = EvalWeightService, Value = 10m, Title = "وزن خدمات در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
+            yield return new ProcurementSetting { Key = InquiryPlanningRequired, Value = 1m, Title = "تایید بودجه و زمان تحویل استعلام توسط برنامه‌ریزی پیش از انتخاب برنده (۱ = بله)", Source = "تصمیم D5 برنامه" };
+            yield return new ProcurementSetting { Key = AddendumVolumePercent, Value = 25m, Title = "حداکثر تغییر حجم قرارداد با الحاقیه (درصد مقدار اولیه)", Source = "الگوی قرارداد FO-IP-040-04 ★ شرکت تایید کند" };
+            yield return new ProcurementSetting { Key = AddendumCeoFrom, Value = 10_000_000m, Title = "الحاقیه با تغییر مبلغ از این حد، تایید مدیرعامل لازم دارد (ریال)", Source = "★ پیشنهاد PMIS؛ شرکت تایید کند" };
+            yield return new ProcurementSetting { Key = GuaranteeAlertDays, Value = 30m, Title = "هشدار پایان اعتبار ضمانت‌نامه از چند روز قبل", Source = "★ پیشنهاد PMIS؛ شرکت تایید کند" };
+            yield return new ProcurementSetting { Key = RequestToOrderDays, Value = 14m, Title = "مهلت صدور سفارش پس از تایید درخواست خرید (روز)", Source = "★ پیشنهاد PMIS؛ شرکت تایید کند" };
+            yield return new ProcurementSetting { Key = ChequeAfterInvoiceDays, Value = 60m, Title = "چک پس از فاکتور: روز پس از تاریخ فاکتور", Source = "الگوی قرارداد FO-IP-040-04" };
             yield return new ProcurementSetting { Key = global::Services.NasbNiro.Attachments.AttachmentSettingKeys.MaxMegabytes, Value = global::Services.NasbNiro.Attachments.AttachmentRules.DefaultMaxMegabytes, Title = "حداکثر حجم هر فایل پیوست (مگابایت)", Source = "★ PB3؛ شرکت تایید کند" };
         }
 
@@ -111,6 +139,10 @@ namespace Services.NasbNiro.Procurement
         public const int Invoice = 304;
         public const int Payment = 305;
         public const int ServiceAcceptance = 306;
+
+        // PB6 (741..760 are the numbers of this package)
+        public const int Addendum = 741;
+        public const int Guarantee = 742;
     }
 
     public static class SupplierGrades

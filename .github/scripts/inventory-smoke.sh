@@ -187,6 +187,8 @@ tech_all() {
   local _q; for _q in $(jq -r '.data.quotes[].id' "$B"); do
     as "$ENG_TOKEN" POST procurement/inquiries/technical-review "{\"inquiryId\":$1,\"quoteId\":$_q,\"accepted\":true,\"score\":85}"
   done
+  # PB6 (D5): planning approves the budget and the delivery time of the inquiry before a winner is selected
+  as "$PLAN_TOKEN" POST procurement/inquiries/action "{\"id\":$1,\"action\":\"approve-planning\"}"
 }
 # R1c (H8): pcreview CONTRACTID : the contract review of a contract is saved fully ticked by planning, signed for the commercial unit by COM and for the PMO by the admin (three different people);
 # every contract that later gets a project code, a WBS, a baseline or project purchase requests goes through it (the contract needs its value in the terms first)
@@ -11218,6 +11220,45 @@ as "$PLAN_TOKEN" GET "$PC/daily-report/$P7DR"; check "p7a daily: one report by i
 as "$ADMIN_TOKEN" GET "$P7TK?Cartable=mine&PageSize=0"; [ "$CODE" = "200" ] && ok "p7a notifications: the task list answers for the PMO" || bad "p7a notifications: the task list answers for the PMO"
 as "$ADMIN_TOKEN" POST $P7TK/reminders/run; check "p7a notifications: the reminder job runs without an external call (counts only)" '.success and (.data.reminders|type) == "number"'
 as "$PLAN_TOKEN" POST $P7TK/reminders/run; r403 "p7a notifications: only the PMO or the CEO runs the reminders by hand (403)"
+TOKEN=$ADMIN_TOKEN
+
+# --- PB6: procurement completion, contracts system, progress statements, petty-cash flow
+P6PS=progress-statements; P6CS=contracts-system; P6PR=procurement
+as "$FIN_TOKEN" GET $P6PS/legal-rates; check "pb6 statements: the legal-rate table ships empty (no invented rate)" '.success and (.data|length) == 0'
+as "$FIN_TOKEN" POST $P6PS/legal-rates '{"code":"P6-T1","title":"نرخ آزمون","percent":5,"sourceReference":"مرجع آزمون"}'; check "pb6 statements: a rate is saved as a draft with its source" '.success and .data.status == 0 and .data.percent == 5'
+P6RT=$(val .data.id)
+as "$FIN_TOKEN" POST $P6PS/legal-rates/action "{\"id\":$P6RT,\"action\":\"verify\"}"; no "pb6 statements: the maker of a rate cannot verify it"
+as "$COM_TOKEN" POST $P6PS/legal-rates/action "{\"id\":$P6RT,\"action\":\"verify\"}"; no "pb6 statements: a buyer cannot verify a rate"
+as "$FM_TOKEN" POST $P6PS/legal-rates/action "{\"id\":$P6RT,\"action\":\"verify\"}"; check "pb6 statements: the finance manager verifies the rate" '.success and .data.status == 1'
+as "$FIN_TOKEN" POST $P6PS/legal-rates '{"code":"P6-T2","title":"بدون مرجع","percent":3}'; no "pb6 statements: a rate without a source is refused"
+as "$FIN_TOKEN" POST $P6PS '{"side":1,"periodFrom":"2026-10-01T00:00:00","periodTo":"2026-10-30T00:00:00","lines":[]}'; no "pb6 statements: only commercial prepares a statement (finance refused)"
+as "$COM_TOKEN" POST $P6PS '{"side":1,"periodFrom":"2026-10-01T00:00:00","periodTo":"2026-10-30T00:00:00","lines":[{"title":"x","quantity":1,"unitPrice":1}]}'; no "pb6 statements: a supplier statement names its order"
+as "$WH_TOKEN" GET $P6PS; r403 "pb6 statements: a warehouse user cannot read the statements (403)"
+
+as "$PLAN_TOKEN" POST $P6CS/deals '{"title":"معامله آزمون","subject":"موضوع آزمون","estimatedAmount":1000000,"dealLevel":1,"submit":true}'; check "pb6 contracts: a small deal request is submitted with one step" '.success and .data.status == 1 and (.data.steps|length) == 1'
+P6DL=$(val .data.id)
+as "$PLAN_TOKEN" POST $P6CS/deals/action "{\"id\":$P6DL,\"action\":\"approve\"}"; no "pb6 contracts: the maker does not approve his deal request"
+as "$COM_TOKEN" POST $P6CS/deals/action "{\"id\":$P6DL,\"action\":\"return\"}"; no "pb6 contracts: a return needs a reason"
+as "$COM_TOKEN" POST $P6CS/deals/action "{\"id\":$P6DL,\"action\":\"approve\"}"; check "pb6 contracts: commercial approves the small deal request" '.success and .data.status == 2'
+as "$COM_TOKEN" POST $P6CS/tenders "{\"dealRequestId\":$P6DL,\"method\":3,\"participants\":[{\"companyName\":\"الف\",\"offerAmount\":100},{\"companyName\":\"ب\",\"offerAmount\":90}]}"; check "pb6 contracts: a tender run with two participants" '.success and (.data.participants|length) == 2 and .data.status == 0'
+P6TN=$(val .data.id); P6PA=$(val '.data.participants[] | select(.companyName == "الف") | .id')
+as "$COM_TOKEN" POST $P6CS/tenders/select-winner "{\"tenderRunId\":$P6TN,\"participantId\":$P6PA}"; no "pb6 contracts: a winner that is not the lowest offer needs a reason"
+as "$COM_TOKEN" POST $P6CS/tenders/select-winner "{\"tenderRunId\":$P6TN,\"participantId\":$P6PA,\"reason\":\"امتیاز فنی\"}"; check "pb6 contracts: the winner is selected with a reason" '.success and .data.status == 1'
+as "$COM_TOKEN" POST $P6CS/tenders/action "{\"id\":$P6TN,\"action\":\"confirm-winner\"}"; no "pb6 contracts: the one who selected the winner does not confirm it"
+as "$FM_TOKEN" POST $P6CS/tenders/action "{\"id\":$P6TN,\"action\":\"confirm-winner\"}"; check "pb6 contracts: the finance manager confirms the winner" '.success and .data.status == 2'
+as "$WH_TOKEN" GET $P6CS/deals; r403 "pb6 contracts: a warehouse user cannot read the deal requests (403)"
+as "$COM_TOKEN" GET $P6CS/mapping; check "pb6 contracts: the mapping table has six rows" '.success and (.data|length) == 6'
+
+as "$COM_TOKEN" GET $P6PR/reports/catalog; check "pb6 reports: the catalogue lists six reports" '.success and (.data|length) == 6'
+as "$COM_TOKEN" GET "$P6PR/reports?report=overdue"; check "pb6 reports: the overdue report answers" '.success and .data.key == "overdue"'
+as "$COM_TOKEN" GET "$P6PR/reports?report=nothing"; no "pb6 reports: an unknown report is refused"
+as "$WH_TOKEN" GET "$P6PR/reports?report=orders"; [ "$CODE" != "200" ] && ok "pb6 reports: the warehouse does not open the money reports" || bad "pb6 reports: the warehouse does not open the money reports"
+as "$PLAN_TOKEN" GET $P6PR/guarantees; check "pb6 guarantees: the register answers" '.success'
+as "$COM_TOKEN" GET $P6PR/addenda; check "pb6 addenda: the list answers" '.success'
+as "$COM_TOKEN" POST $P6PR/legacy-buy-orders/convert '{"buyOrderId":0}'; no "pb6 bridge: a buy order that does not exist is refused"
+as "$COM_TOKEN" GET "$P6PR/reports/export?report=orders"; [ "$CODE" = "200" ] && ok "pb6 reports: the Excel export answers 200" || bad "pb6 reports: the Excel export answers 200"
+as "$WH_TOKEN" GET petty-cash-flow/requests; r403 "pb6 petty cash: a warehouse user cannot read the top-up requests (403)"
+as "$FIN_TOKEN" GET petty-cash-flow/requests; check "pb6 petty cash: finance reads the top-up requests" '.success'
 TOKEN=$ADMIN_TOKEN
 
 # --- PB4 trace centre, the chain of the brief: lot H-7781 -> kit issue of a production order -> production receipt -> genealogy -> product tree -> reverse trace from the heat number

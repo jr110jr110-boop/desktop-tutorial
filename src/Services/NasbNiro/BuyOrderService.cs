@@ -75,6 +75,10 @@ namespace Services.NasbNiro
 
         public async BuyOrderResult AddBuyOrderAsync(AddBuyOrderDto dto, CancellationToken cancellationToken)
         {
+            // PB6: the legacy buy order chain is frozen (read only). A new purchase starts as a purchase request of the new chain (درخواست خرید)
+            // and the open legacy orders are converted with the bridge of the procurement module.
+            return ResponseDtoHelper.BadRequest<ResponseBuyOrderDto>("ثبت سفارش خرید قدیمی بسته شده است؛ از «درخواست خرید» در بخش تدارکات استفاده کنید و سفارش‌های باز قدیمی را با ابزار تبدیل منتقل کنید.");
+#pragma warning disable CS0162
             if (dto is null)
             {
                 return ResponseDtoHelper.BadRequest<ResponseBuyOrderDto>(NasbNiroMessages.InvalidData);

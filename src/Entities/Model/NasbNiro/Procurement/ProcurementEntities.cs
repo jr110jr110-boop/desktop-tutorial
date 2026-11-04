@@ -43,6 +43,8 @@ namespace Entities.Model.NasbNiro.Procurement
         /// <summary>Everything is on purchase orders.</summary>
         Ordered = 3,
         Closed = 4,
+        /// <summary>PB6: sent back to the requester with a reason; the requester makes revision n+1 (a new request linked to this one). This row stays as it was.</summary>
+        Returned = 7,
         Rejected = 9,
     }
 
@@ -71,9 +73,6 @@ namespace Entities.Model.NasbNiro.Procurement
         public int? ProjectBaselineId { get; set; }
         public string BalanceGroupKey { get; set; }
 
-        /// <summary>PB2: 0 low, 1 normal, 2 high, 3 urgent (from the float of the procurement activities); 0 for the requests that are not drafted by the balance.</summary>
-        public int Priority { get; set; }
-
         /// <summary>Sum of the estimated amounts (rial): decides the approvals and the number of quotes.</summary>
         public decimal EstimatedAmount { get; set; }
 
@@ -91,6 +90,28 @@ namespace Entities.Model.NasbNiro.Procurement
         public DateTimeOffset? RejectedAt { get; set; }
         public int? RejectedByUserId { get; set; }
         public string RejectReason { get; set; }
+
+        // ---- PB6
+        public PurchaseRequestPriority Priority { get; set; } = PurchaseRequestPriority.Normal;
+        public PurchaseFormType FormType { get; set; }
+
+        /// <summary>The revision number of the request (1 = the original). A returned or rejected request is never changed: revision n+1 is a new request that points back at it.</summary>
+        public int Revision { get; set; } = 1;
+        public int? PreviousRequestId { get; set; }
+        public int? SupersededByRequestId { get; set; }
+        public DateTimeOffset? ReturnedAt { get; set; }
+        public int? ReturnedByUserId { get; set; }
+        public string ReturnReason { get; set; }
+
+        /// <summary>The form FO-HR-025-02 (vehicle request).</summary>
+        public DateTime? VehicleDate { get; set; }
+        public string VehicleUnit { get; set; }
+        public string VehicleType { get; set; }
+        public string VehicleOrigin { get; set; }
+        public string VehicleDestination { get; set; }
+
+        /// <summary>Progress-statement form: the order (contract) the statement is for.</summary>
+        public int? RelatedOrderId { get; set; }
 
         public ICollection<PurchaseRequestLine> Lines { get; set; }
 
@@ -139,6 +160,8 @@ namespace Entities.Model.NasbNiro.Procurement
         /// <summary>A quote has been chosen; waiting for the committee approvals.</summary>
         Selected = 1,
         Approved = 2,
+        /// <summary>PB6: sent back to the buyer with a reason; the buyer makes revision n+1 (a new inquiry linked to this one).</summary>
+        Returned = 5,
         Cancelled = 9,
     }
 
@@ -177,6 +200,26 @@ namespace Entities.Model.NasbNiro.Procurement
         public DateTimeOffset? ManagementApprovedAt { get; set; }
         public int? ManagementApprovedByUserId { get; set; }
         public string CommitteeMinutes { get; set; }
+
+        // ---- PB6 (decision D5): planning approves the budget and the delivery time before the final selection; the budget is also gated against the WBS budget
+        public DateTimeOffset? PlanningApprovedAt { get; set; }
+        public int? PlanningApprovedByUserId { get; set; }
+        public decimal? PlanningBudgetAmount { get; set; }
+        public int? PlanningDeliveryDays { get; set; }
+        public string PlanningNote { get; set; }
+
+        /// <summary>Return / revision, like the request.</summary>
+        public int Revision { get; set; } = 1;
+        /// <summary>The CEO's written decision to pass the budget gate for this inquiry (up to BudgetOverrideAmount); planning then approves with it.</summary>
+        public DateTimeOffset? BudgetOverrideAt { get; set; }
+        public int? BudgetOverrideByUserId { get; set; }
+        public string BudgetOverrideNote { get; set; }
+        public decimal? BudgetOverrideAmount { get; set; }
+        public int? PreviousInquiryId { get; set; }
+        public int? SupersededByInquiryId { get; set; }
+        public DateTimeOffset? ReturnedAt { get; set; }
+        public int? ReturnedByUserId { get; set; }
+        public string ReturnReason { get; set; }
 
         public ICollection<SupplierQuote> Quotes { get; set; }
 
@@ -307,7 +350,7 @@ namespace Entities.Model.NasbNiro.Procurement
         /// <summary>R1c (H6): the quote of the inquiry that this order was built from (supplier, lines, prices and quantities come from it).</summary>
         public int? QuoteId { get; set; }
 
-        /// <summary>R1c (M13): the revision number of the order (0 = the original). An approved or released order changes only through a revision: the old revision is frozen and the order needs a new approval.</summary>
+        /// <summary>R1c (M13): the revision number of the order (1 = the original). An approved or released order changes only through a revision: the old revision is frozen and the order needs a new approval.</summary>
         public int Revision { get; set; }
         public string RevisionReason { get; set; }
         public DateTimeOffset? RevisedAt { get; set; }
@@ -476,6 +519,8 @@ namespace Entities.Model.NasbNiro.Procurement
         /// <summary>Payment of an approved invoice.</summary>
         Invoice = 3,
         Final = 4,
+        /// <summary>PB6: the retention (حسن انجام کار) of a supplier contract, paid after final acceptance and the confirmed documents; needs no invoice.</summary>
+        Retention = 5,
     }
 
     public enum PaymentRequestStatus

@@ -87,7 +87,7 @@ namespace Services.NasbNiro.Attachments
             if (!Enum.IsDefined(typeof(AttachmentOwnerType), type)) return Bad<AttachmentPanelDto>(AttachmentText.OwnerNotFound);
             OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, type, ownerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<AttachmentPanelDto>(AttachmentText.OwnerNotFound);
-            if (!InRoles(facts.ReadRoles)) return ResponseDtoHelper.Forbidden<AttachmentPanelDto>(AttachmentText.NotAllowed);
+            if (!facts.CanRead(_user)) return ResponseDtoHelper.Forbidden<AttachmentPanelDto>(AttachmentText.NotAllowed);
 
             var panel = new AttachmentPanelDto
             {
@@ -293,10 +293,11 @@ namespace Services.NasbNiro.Attachments
 
             OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, form.OwnerType, form.OwnerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<AttachmentDto>(AttachmentText.OwnerNotFound);
-            if (!InRoles(facts.ReadRoles)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed);
+            if (!facts.CanRead(_user)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed);
             if (facts.Closed) return Bad<AttachmentDto>(AttachmentText.OwnerCancelled);
             if (!facts.CanWrite(_user)) return ResponseDtoHelper.Forbidden<AttachmentDto>(facts.Locked ? AttachmentText.NotAllowed + " (پس از تایید فقط نقش‌های مجاز ماژول با ذکر دلیل پیوست را ابطال یا جایگزین می‌کنند)" : AttachmentText.NotAllowed);
-            if (form.Kind == AttachmentKind.PaymentSlip && !_user.IsInRole(AttachmentRoles.PaymentWrite)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed + " (فیش واریزی را حسابداری یا خزانه‌داری پیوست می‌کند)");
+            bool pettyHolderOwn = (form.OwnerType == AttachmentOwnerType.PettyCashSummaryLine || form.OwnerType == AttachmentOwnerType.PettyCashRequest || form.OwnerType == AttachmentOwnerType.PettyCashSummary) && facts.CreatorUserId == Me && !facts.Locked;
+            if (form.Kind == AttachmentKind.PaymentSlip && !pettyHolderOwn && !_user.IsInRole(AttachmentRoles.PaymentWrite)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed + " (فیش واریزی را حسابداری یا خزانه‌داری پیوست می‌کند)");
 
             ResponseDto<string> fileRefusal = await CheckFileAsync(form.File, ct);
             if (fileRefusal != null) return Bad<AttachmentDto>(fileRefusal.Message);
@@ -388,7 +389,7 @@ namespace Services.NasbNiro.Attachments
             if (row == null) return ResponseDtoHelper.NotFound<AttachmentDto>(AttachmentText.NotFound);
             OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, row.OwnerType, row.OwnerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<AttachmentDto>(AttachmentText.OwnerNotFound);
-            if (!InRoles(facts.ReadRoles) || !facts.CanWrite(_user) || !MayTouch(row.Kind)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed);
+            if (!facts.CanRead(_user) || !facts.CanWrite(_user) || !MayTouch(row.Kind)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed);
             if (row.Voided) return Bad<AttachmentDto>(AttachmentText.AlreadyVoided);
             if (row.SupersededById.HasValue) return Bad<AttachmentDto>(AttachmentText.AlreadySuperseded);
             string reason = Clean(dto.Reason);
@@ -408,7 +409,7 @@ namespace Services.NasbNiro.Attachments
             if (row == null) return ResponseDtoHelper.NotFound<bool>(AttachmentText.NotFound);
             OwnerFacts facts = await AttachmentOwners.FactsAsync(_uow, row.OwnerType, row.OwnerId, ct, _rules);
             if (!facts.Exists) return ResponseDtoHelper.NotFound<bool>(AttachmentText.OwnerNotFound);
-            if (!InRoles(facts.ReadRoles)) return ResponseDtoHelper.Forbidden<bool>(AttachmentText.NotAllowed);
+            if (!facts.CanRead(_user)) return ResponseDtoHelper.Forbidden<bool>(AttachmentText.NotAllowed);
             // an approved record never loses a file: the answer says what to do instead (void with a reason, or supersede)
             if (facts.Locked) return Bad<bool>(AttachmentText.RemoveAfterApproval);
             if (!facts.CanWrite(_user) || !MayTouch(row.Kind)) return ResponseDtoHelper.Forbidden<bool>(AttachmentText.NotAllowed);

@@ -97,6 +97,7 @@ namespace Services.NasbNiro.ProjectBalance
                     {
                         Number = await InventoryNumbers.NextNumberAsync(Uow, ProcurementNumbers.PurchaseRequest, "PRQ", today, ct), Source = PurchaseRequestSource.Bom, Kind = PurchaseKind.Goods, Status = PurchaseRequestStatus.Draft,
                         RequestDate = today, WorkOrderId = run.WorkOrderId, ContractId = run.ContractId, ProjectBaselineId = b.Id, BalanceGroupKey = group.Key, Lines = new List<PurchaseRequestLine>(),
+                        FormType = PurchaseFormType.GoodsProject, Revision = 1,
                         CreateDate = now, CreatorUserId = Me,
                     };
                     Uow.Set<PurchaseRequest>().Add(pr);
@@ -145,7 +146,7 @@ namespace Services.NasbNiro.ProjectBalance
                 }
                 int row = 1;
                 foreach (PurchaseRequestLine l in pr.Lines.OrderBy(l => items.TryGetValue(l.ItemId ?? 0, out ItemFacts f) ? f.Code : "~", StringComparer.Ordinal)) l.RowNumber = row++;
-                pr.Priority = group.Max(l => l.Priority);
+                pr.Priority = (PurchaseRequestPriority)(group.Max(l => l.Priority) + 1); // balance 0..3 -> PB6 Low..Urgent (1..4)
                 pr.EstimatedAmount = Math.Round(pr.Lines.Sum(l => l.Quantity * (l.EstimatedUnitPrice ?? 0)), 0);
                 pr.Description = Cut("پیش‌نویس خودکار بالانس مواد پروژه (دستور کار " + woCode + "، BOM " + run.BomCode + " نسخه " + run.BomRevision.ToString("00", CultureInfo.InvariantCulture) + "، اجرای " + run.RunNumber
                     + "، گروه " + group.Key + "). مقدار هر ردیف کمبود پس از کسر موجودی، رزرو، درخواست‌ها و سفارش‌های در راه است. بررسی، ویرایش و ارسال با واحد برنامه‌ریزی است؛ سامانه خودش ارسال نمی‌کند.", 1000);
@@ -180,7 +181,7 @@ namespace Services.NasbNiro.ProjectBalance
                     foreach (ProjectMaterialBalanceLine bl in kv.Value) { bl.PurchaseRequestId = pr.Id; bl.PurchaseRequestLineId = line?.Id; }
                 }
                 if (s.LinkDocuments) linked = await LinkDocumentsAsync(b, run, pr, byItem, items, now, ct);
-                dto.Requests.Add(new BalanceDraftRequestDto { Id = pr.Id, Number = pr.Number, GroupKey = pr.BalanceGroupKey, Created = createdSet.Contains(pr), LineCount = pr.Lines.Count, LinkedDocuments = linked, Priority = pr.Priority });
+                dto.Requests.Add(new BalanceDraftRequestDto { Id = pr.Id, Number = pr.Number, GroupKey = pr.BalanceGroupKey, Created = createdSet.Contains(pr), LineCount = pr.Lines.Count, LinkedDocuments = linked, Priority = (int)pr.Priority - 1 });
             }
             await Uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(dto);
