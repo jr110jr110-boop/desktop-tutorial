@@ -262,8 +262,13 @@ namespace Services.NasbNiro.Procurement
                 // M2: money and supplier names are for the people who plan, buy and pay; the others (unit managers, warehouse, QC...) see quantities only
                 if (!_user.IsInRole(PriceRoles))
                 {
-                    r.InvoicedAmount = 0; r.PaidAmount = 0; r.SupplierNames = new List<string>(); r.EstimatedAmount = 0;
-                    foreach (var l in r.Lines) l.EstimatedUnitPrice = null;
+                    r.InvoicedAmount = 0; r.PaidAmount = 0; r.SupplierNames = new List<string>();
+                    // the estimate is the requester's own figure: the person who wrote the request keeps seeing it; the other non-price roles do not
+                    if (r.CreatorUserId != Me)
+                    {
+                        r.EstimatedAmount = 0;
+                        foreach (var l in r.Lines) l.EstimatedUnitPrice = null;
+                    }
                 }
                 if (r.PreviousRequestId.HasValue && reqNumbers.TryGetValue(r.PreviousRequestId.Value, out string pn)) r.PreviousRequestNumber = pn;
                 if (r.SupersededByRequestId.HasValue && reqNumbers.TryGetValue(r.SupersededByRequestId.Value, out string sn)) r.SupersededByRequestNumber = sn;

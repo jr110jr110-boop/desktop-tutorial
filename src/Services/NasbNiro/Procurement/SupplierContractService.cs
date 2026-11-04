@@ -19,9 +19,9 @@ namespace Services.NasbNiro.Procurement
         Task<ResponseDto<AddendumDto>> SaveAddendumAsync(SaveAddendumDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<AddendumDto>> AddendumActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken);
 
-        Task<ResponseDto<List<GuaranteeDto>>> GetGuaranteesAsync(int? providerId, int? purchaseOrderId, SupplierGuaranteeStatus? status, bool expiringOnly, CancellationToken cancellationToken);
-        Task<ResponseDto<GuaranteeDto>> SaveGuaranteeAsync(SaveGuaranteeDto dto, CancellationToken cancellationToken);
-        Task<ResponseDto<GuaranteeDto>> GuaranteeActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<List<ProcGuaranteeDto>>> GetGuaranteesAsync(int? providerId, int? purchaseOrderId, SupplierGuaranteeStatus? status, bool expiringOnly, CancellationToken cancellationToken);
+        Task<ResponseDto<ProcGuaranteeDto>> SaveGuaranteeAsync(SaveProcGuaranteeDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<ProcGuaranteeDto>> GuaranteeActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<GuaranteeAlertResultDto>> RunGuaranteeAlertsAsync(CancellationToken cancellationToken);
         /// <summary>The daily job (no signed-in user): the same alerts, run by the hosted service when Procurement:GuaranteeJob is true.</summary>
         Task<ResponseDto<GuaranteeAlertResultDto>> RunGuaranteeAlertsJobAsync(CancellationToken cancellationToken);
@@ -313,11 +313,11 @@ namespace Services.NasbNiro.Procurement
 
         // ------------------------------------------------------------------------------------------ guarantees
 
-        private GuaranteeDto ToDto(SupplierGuarantee g, Dictionary<int, string> names, int alertDays, Dictionary<int, int> files)
+        private ProcGuaranteeDto ToDto(SupplierGuarantee g, Dictionary<int, string> names, int alertDays, Dictionary<int, int> files)
         {
             int days = (int)(g.ExpiryDate.Date - DateTime.Today).TotalDays;
             bool open = g.Status == SupplierGuaranteeStatus.Active || g.Status == SupplierGuaranteeStatus.ReleaseRequested;
-            return new GuaranteeDto
+            return new ProcGuaranteeDto
             {
                 Id = g.Id, Number = g.Number, ProviderId = g.ProviderId, ProviderName = g.Provider?.Name, PurchaseOrderId = g.PurchaseOrderId, PurchaseOrderNumber = g.PurchaseOrder?.Number,
                 Kind = g.Kind, Purpose = g.Purpose, Amount = g.Amount, GuaranteeNumber = g.GuaranteeNumber, Issuer = g.Issuer, IssueDate = g.IssueDate, ExpiryDate = g.ExpiryDate, Status = g.Status,
@@ -328,9 +328,9 @@ namespace Services.NasbNiro.Procurement
             };
         }
 
-        public async Task<ResponseDto<List<GuaranteeDto>>> GetGuaranteesAsync(int? providerId, int? purchaseOrderId, SupplierGuaranteeStatus? status, bool expiringOnly, CancellationToken cancellationToken)
+        public async Task<ResponseDto<List<ProcGuaranteeDto>>> GetGuaranteesAsync(int? providerId, int? purchaseOrderId, SupplierGuaranteeStatus? status, bool expiringOnly, CancellationToken cancellationToken)
         {
-            if (!_user.IsInRole(SupplierContractRoles.Readers)) return Bad<List<GuaranteeDto>>(NotAllowed);
+            if (!_user.IsInRole(SupplierContractRoles.Readers)) return Bad<List<ProcGuaranteeDto>>(NotAllowed);
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
             int alertDays = (int)s[ProcurementSettingKeys.GuaranteeAlertDays];
             IQueryable<SupplierGuarantee> q = _uow.Set<SupplierGuarantee>().Include(g => g.Provider).Include(g => g.PurchaseOrder).Where(g => !g.Deleted);
@@ -351,31 +351,31 @@ namespace Services.NasbNiro.Procurement
             return ResponseDtoHelper.Ok(rows.Select(g => ToDto(g, names, alertDays, counts.ToDictionary(c => c.Key, c => c.Count))).ToList());
         }
 
-        private async Task<ResponseDto<GuaranteeDto>> GetGuaranteeAsync(int id, CancellationToken cancellationToken)
+        private async Task<ResponseDto<ProcGuaranteeDto>> GetGuaranteeAsync(int id, CancellationToken cancellationToken)
         {
-            ResponseDto<List<GuaranteeDto>> all = await GetGuaranteesAsync(null, null, null, false, cancellationToken);
-            GuaranteeDto one = all.Data?.FirstOrDefault(g => g.Id == id);
-            return one == null ? ResponseDtoHelper.NotFound<GuaranteeDto>("ضمانت‌نامه پیدا نشد.") : ResponseDtoHelper.Ok(one);
+            ResponseDto<List<ProcGuaranteeDto>> all = await GetGuaranteesAsync(null, null, null, false, cancellationToken);
+            ProcGuaranteeDto one = all.Data?.FirstOrDefault(g => g.Id == id);
+            return one == null ? ResponseDtoHelper.NotFound<ProcGuaranteeDto>("ضمانت‌نامه پیدا نشد.") : ResponseDtoHelper.Ok(one);
         }
 
-        public async Task<ResponseDto<GuaranteeDto>> SaveGuaranteeAsync(SaveGuaranteeDto dto, CancellationToken cancellationToken)
+        public async Task<ResponseDto<ProcGuaranteeDto>> SaveGuaranteeAsync(SaveProcGuaranteeDto dto, CancellationToken cancellationToken)
         {
-            if (dto == null) return Bad<GuaranteeDto>("اطلاعات ارسال‌شده کامل نیست.");
-            if (!_user.IsInRole(SupplierContractRoles.Registrars)) return Bad<GuaranteeDto>(NotAllowed);
-            if (!Enum.IsDefined(typeof(GuaranteeKind), dto.Kind) || !Enum.IsDefined(typeof(GuaranteePurpose), dto.Purpose)) return Bad<GuaranteeDto>("نوع یا هدف ضمانت‌نامه نامعتبر است.");
-            if (dto.Amount <= 0) return Bad<GuaranteeDto>("مبلغ باید بیشتر از صفر باشد.");
-            if (Clean(dto.GuaranteeNumber) == null) return Bad<GuaranteeDto>("شماره چک یا ضمانت‌نامه را بنویسید.");
-            if (Clean(dto.Issuer) == null) return Bad<GuaranteeDto>("صادرکننده (بانک یا صاحب چک) را بنویسید.");
-            if (dto.ExpiryDate.Date < dto.IssueDate.Date) return Bad<GuaranteeDto>("تاریخ پایان اعتبار از تاریخ صدور زودتر است.");
-            if (!await _uow.Set<global::Entities.Model.NasbNiro.Providers.Provider>().AnyAsync(p => p.Id == dto.ProviderId && !p.Deleted, cancellationToken)) return Bad<GuaranteeDto>("تامین‌کننده پیدا نشد.");
+            if (dto == null) return Bad<ProcGuaranteeDto>("اطلاعات ارسال‌شده کامل نیست.");
+            if (!_user.IsInRole(SupplierContractRoles.Registrars)) return Bad<ProcGuaranteeDto>(NotAllowed);
+            if (!Enum.IsDefined(typeof(GuaranteeKind), dto.Kind) || !Enum.IsDefined(typeof(GuaranteePurpose), dto.Purpose)) return Bad<ProcGuaranteeDto>("نوع یا هدف ضمانت‌نامه نامعتبر است.");
+            if (dto.Amount <= 0) return Bad<ProcGuaranteeDto>("مبلغ باید بیشتر از صفر باشد.");
+            if (Clean(dto.GuaranteeNumber) == null) return Bad<ProcGuaranteeDto>("شماره چک یا ضمانت‌نامه را بنویسید.");
+            if (Clean(dto.Issuer) == null) return Bad<ProcGuaranteeDto>("صادرکننده (بانک یا صاحب چک) را بنویسید.");
+            if (dto.ExpiryDate.Date < dto.IssueDate.Date) return Bad<ProcGuaranteeDto>("تاریخ پایان اعتبار از تاریخ صدور زودتر است.");
+            if (!await _uow.Set<global::Entities.Model.NasbNiro.Providers.Provider>().AnyAsync(p => p.Id == dto.ProviderId && !p.Deleted, cancellationToken)) return Bad<ProcGuaranteeDto>("تامین‌کننده پیدا نشد.");
             if (dto.PurchaseOrderId.HasValue && !await _uow.Set<PurchaseOrder>().AnyAsync(o => o.Id == dto.PurchaseOrderId.Value && o.ProviderId == dto.ProviderId && !o.Deleted, cancellationToken))
-                return Bad<GuaranteeDto>("سفارش پیدا نشد یا متعلق به این تامین‌کننده نیست.");
+                return Bad<ProcGuaranteeDto>("سفارش پیدا نشد یا متعلق به این تامین‌کننده نیست.");
             SupplierGuarantee g;
             if (dto.Id.HasValue)
             {
                 g = await _uow.Set<SupplierGuarantee>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
-                if (g == null) return ResponseDtoHelper.NotFound<GuaranteeDto>("ضمانت‌نامه پیدا نشد.");
-                if (g.Status != SupplierGuaranteeStatus.Active) return Bad<GuaranteeDto>("فقط ضمانت‌نامه فعال ویرایش می‌شود.");
+                if (g == null) return ResponseDtoHelper.NotFound<ProcGuaranteeDto>("ضمانت‌نامه پیدا نشد.");
+                if (g.Status != SupplierGuaranteeStatus.Active) return Bad<ProcGuaranteeDto>("فقط ضمانت‌نامه فعال ویرایش می‌شود.");
             }
             else
             {
@@ -394,44 +394,44 @@ namespace Services.NasbNiro.Procurement
             return await GetGuaranteeAsync(g.Id, cancellationToken);
         }
 
-        public async Task<ResponseDto<GuaranteeDto>> GuaranteeActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken)
+        public async Task<ResponseDto<ProcGuaranteeDto>> GuaranteeActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken)
         {
             SupplierGuarantee g = await _uow.Set<SupplierGuarantee>().Include(x => x.PurchaseOrder).FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
-            if (g == null) return ResponseDtoHelper.NotFound<GuaranteeDto>("ضمانت‌نامه پیدا نشد.");
+            if (g == null) return ResponseDtoHelper.NotFound<ProcGuaranteeDto>("ضمانت‌نامه پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             string note = Clean(dto.Note);
             switch (dto.Action?.Trim().ToLowerInvariant())
             {
                 case "request-release":
-                    if (!_user.IsInRole(SupplierContractRoles.Registrars)) return Bad<GuaranteeDto>(NotAllowed);
-                    if (g.Status != SupplierGuaranteeStatus.Active) return Bad<GuaranteeDto>("فقط ضمانت‌نامه فعال برای آزادسازی درخواست می‌شود.");
-                    if (note == null) return Bad<GuaranteeDto>("علت و شرط آزادسازی را بنویسید.");
+                    if (!_user.IsInRole(SupplierContractRoles.Registrars)) return Bad<ProcGuaranteeDto>(NotAllowed);
+                    if (g.Status != SupplierGuaranteeStatus.Active) return Bad<ProcGuaranteeDto>("فقط ضمانت‌نامه فعال برای آزادسازی درخواست می‌شود.");
+                    if (note == null) return Bad<ProcGuaranteeDto>("علت و شرط آزادسازی را بنویسید.");
                     // a guarantee of an order is released only when its obligation is over: the order is received or closed
                     if (g.PurchaseOrder != null && g.Purpose != GuaranteePurpose.Advance && g.PurchaseOrder.Status != PurchaseOrderStatus.Received && g.PurchaseOrder.Status != PurchaseOrderStatus.Closed)
-                        return Bad<GuaranteeDto>("ضمانت‌نامه حسن انجام کار پس از دریافت کامل یا بسته شدن سفارش آزاد می‌شود.");
+                        return Bad<ProcGuaranteeDto>("ضمانت‌نامه حسن انجام کار پس از دریافت کامل یا بسته شدن سفارش آزاد می‌شود.");
                     g.Status = SupplierGuaranteeStatus.ReleaseRequested; g.ReleaseRequestedAt = now; g.ReleaseRequestedByUserId = Me; g.ReleaseReason = note;
                     break;
                 case "release":
-                    if (g.Status != SupplierGuaranteeStatus.ReleaseRequested) return Bad<GuaranteeDto>("ابتدا درخواست آزادسازی ثبت شود.");
-                    if (!_user.IsInRole(SupplierContractRoles.GuaranteeReleasers)) return Bad<GuaranteeDto>(NotAllowed + " (مدیر مالی یا معاونت PMO)");
-                    if (g.ReleaseRequestedByUserId == Me || g.CreatorUserId == Me) return Bad<GuaranteeDto>(SameUser);
+                    if (g.Status != SupplierGuaranteeStatus.ReleaseRequested) return Bad<ProcGuaranteeDto>("ابتدا درخواست آزادسازی ثبت شود.");
+                    if (!_user.IsInRole(SupplierContractRoles.GuaranteeReleasers)) return Bad<ProcGuaranteeDto>(NotAllowed + " (مدیر مالی یا معاونت PMO)");
+                    if (g.ReleaseRequestedByUserId == Me || g.CreatorUserId == Me) return Bad<ProcGuaranteeDto>(SameUser);
                     g.Status = SupplierGuaranteeStatus.Released; g.ReleasedAt = now; g.ReleasedByUserId = Me;
                     break;
                 case "reject-release":
-                    if (g.Status != SupplierGuaranteeStatus.ReleaseRequested) return Bad<GuaranteeDto>("درخواست آزادسازی باز نیست.");
-                    if (!_user.IsInRole(SupplierContractRoles.GuaranteeReleasers)) return Bad<GuaranteeDto>(NotAllowed);
-                    if (g.ReleaseRequestedByUserId == Me) return Bad<GuaranteeDto>(SameUser);
-                    if (note == null) return Bad<GuaranteeDto>("علت رد را بنویسید.");
+                    if (g.Status != SupplierGuaranteeStatus.ReleaseRequested) return Bad<ProcGuaranteeDto>("درخواست آزادسازی باز نیست.");
+                    if (!_user.IsInRole(SupplierContractRoles.GuaranteeReleasers)) return Bad<ProcGuaranteeDto>(NotAllowed);
+                    if (g.ReleaseRequestedByUserId == Me) return Bad<ProcGuaranteeDto>(SameUser);
+                    if (note == null) return Bad<ProcGuaranteeDto>("علت رد را بنویسید.");
                     g.Status = SupplierGuaranteeStatus.Active; g.ReleaseRequestedAt = null; g.ReleaseRequestedByUserId = null; g.ReleaseReason = null;
                     break;
                 case "claim":
-                    if (g.Status != SupplierGuaranteeStatus.Active && g.Status != SupplierGuaranteeStatus.Expired) return Bad<GuaranteeDto>("این ضمانت‌نامه قابل مصادره نیست.");
-                    if (!_user.IsInRole("CEO")) return Bad<GuaranteeDto>(NotAllowed + " (مدیرعامل)");
-                    if (note == null) return Bad<GuaranteeDto>("علت مصادره را بنویسید.");
+                    if (g.Status != SupplierGuaranteeStatus.Active && g.Status != SupplierGuaranteeStatus.Expired) return Bad<ProcGuaranteeDto>("این ضمانت‌نامه قابل مصادره نیست.");
+                    if (!_user.IsInRole("CEO")) return Bad<ProcGuaranteeDto>(NotAllowed + " (مدیرعامل)");
+                    if (note == null) return Bad<ProcGuaranteeDto>("علت مصادره را بنویسید.");
                     g.Status = SupplierGuaranteeStatus.Claimed; g.ReleaseReason = note;
                     break;
                 default:
-                    return Bad<GuaranteeDto>("عمل نامعتبر است.");
+                    return Bad<ProcGuaranteeDto>("عمل نامعتبر است.");
             }
             g.ModifyDate = now; g.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);

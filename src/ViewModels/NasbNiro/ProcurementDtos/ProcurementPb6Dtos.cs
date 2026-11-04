@@ -140,7 +140,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
 
     // ---------------------------------------------------------------- guarantees
 
-    public class SaveGuaranteeDto
+    public class SaveProcGuaranteeDto
     {
         public int? Id { get; set; }
         public int ProviderId { get; set; }
@@ -155,7 +155,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string ReleaseConditions { get; set; }
     }
 
-    public class GuaranteeDto
+    public class ProcGuaranteeDto
     {
         public int Id { get; set; }
         public string Number { get; set; }

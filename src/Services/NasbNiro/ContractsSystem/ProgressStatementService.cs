@@ -110,7 +110,7 @@ namespace Services.NasbNiro.ContractsSystem
                 if (withDetails)
                 {
                     foreach (PsStatementLine l in s.Lines.OrderBy(x => x.RowNumber))
-                        d.Lines.Add(new StatementLineDto
+                        d.Lines.Add(new ProcStatementLineDto
                         {
                             Id = l.Id, RowNumber = l.RowNumber, Title = l.Title, SerialOrDrawing = l.SerialOrDrawing, ProjectCode = l.ProjectCode, EquipmentCode = l.EquipmentCode, Quantity = l.Quantity,
                             UnitPrice = l.UnitPrice, AdvanceAmount = l.AdvanceAmount, AfterDeliveryQcAmount = l.AfterDeliveryQcAmount, GoodPerformanceAmount = l.GoodPerformanceAmount,

@@ -279,13 +279,13 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string ReturnReason { get; set; }
         public string CreatorName { get; set; }
         public DateTimeOffset CreateDate { get; set; }
-        public List<StatementLineDto> Lines { get; set; } = new List<StatementLineDto>();
+        public List<ProcStatementLineDto> Lines { get; set; } = new List<ProcStatementLineDto>();
         public List<StatementPreviousDto> Previous { get; set; } = new List<StatementPreviousDto>();
         public List<StatementDeductionDto> Deductions { get; set; } = new List<StatementDeductionDto>();
         public List<string> Warnings { get; set; } = new List<string>();
     }
 
-    public class StatementLineDto : SaveStatementLineDto
+    public class ProcStatementLineDto : SaveStatementLineDto
     {
         public int Id { get; set; }
         public int RowNumber { get; set; }

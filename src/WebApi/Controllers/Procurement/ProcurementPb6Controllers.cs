@@ -78,7 +78,7 @@ namespace WebApi.Controllers
             Ok(await _contracts.GetGuaranteesAsync(providerId, purchaseOrderId, status, expiringOnly, ct));
 
         [HttpPost("guarantees")]
-        public async Task<IActionResult> SaveGuaranteeAsync([FromBody] SaveGuaranteeDto dto, CancellationToken ct) => Ok(await _contracts.SaveGuaranteeAsync(dto, ct));
+        public async Task<IActionResult> SaveGuaranteeAsync([FromBody] SaveProcGuaranteeDto dto, CancellationToken ct) => Ok(await _contracts.SaveGuaranteeAsync(dto, ct));
 
         [HttpPost("guarantees/action")]
         public async Task<IActionResult> GuaranteeActionAsync([FromBody] ProcurementActionDto dto, CancellationToken ct) => Ok(await _contracts.GuaranteeActionAsync(dto, ct));
