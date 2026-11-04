@@ -27,6 +27,8 @@ export const AttachmentOwner = {
   TmTask: 24,
   PcProgressSubmission: 25,
   PcProjectPhoto: 26,
+  PbBomHeader: 36,
+  PbOpcRouting: 37,
 } as const;
 
 export const attachmentKinds: Record<number, string> = {
