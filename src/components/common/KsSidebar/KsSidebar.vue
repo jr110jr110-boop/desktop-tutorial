@@ -446,6 +446,7 @@ const links = {
     { title: "سفارش خرید", routeName: "ProcurementOrders", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "فاکتور تامین‌کننده", routeName: "ProcurementInvoices", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "درخواست پرداخت", routeName: "ProcurementPayments", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "پرونده درخواست", routeName: "ProcurementDossier", disabled: !hasRole(ProcurementRoles.dossier) },
     { title: "لیست تامین‌کنندگان و ارزیابی", routeName: "ProcurementSuppliers", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "تنظیمات و آستانه‌های خرید", routeName: "ProcurementSettings", disabled: !hasRole(ProcurementRoles.readers) },
   ] as Links[],

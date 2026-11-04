@@ -84,7 +84,8 @@ export async function attachFileProcess(
 
 export async function detachFileProcess(
   processId: number | string,
-  fileId
+  fileId,
+  reason: string = ""
 ): Promise<[any, null] | [null, AxiosError] | undefined> {
   try {
     const { data } = await axiosInstance.delete(
@@ -93,6 +94,7 @@ export async function detachFileProcess(
         params: {
           processId,
           fileId,
+          reason,
         },
         headers: {
           Authorization: authToken,

@@ -202,12 +202,18 @@ const onTaskModalRequest = (
 
 const removeProcessAttachedFileForm = async () => {
   if (deleteModal.value.activeId) {
+    const reason = (window.prompt("فایل حذف نمی‌شود و باطل می‌شود؛ دلیل ابطال را بنویسید:") || "").trim();
+    if (reason.length < 3) {
+      if (reason.length > 0) window.alert("دلیل ابطال باید حداقل ۳ حرف باشد؛ فایل باطل نشد.");
+      return;
+    }
     state.deleteBtnLoading = deleteModal.value.activeIndex;
     const [data, error] = await detachFileProcess(
       userProccesses.value[taskModal.madeIndex].assemblies[
         taskModal.assemblyIndex
       ].boms[taskModal.bomIndex].proccesses[taskModal.activeIndex].id,
-      deleteModal.value.activeId
+      deleteModal.value.activeId,
+      reason
     );
     if (!data?.success) showErrorNotification(data?.message || error.message);
     else {

@@ -112,14 +112,17 @@ export async function attachFileContractProvider(
 
 export async function detachFileContractProvider(
   contractId: number | string,
-  fileId
+  fileId,
+  reason: string = ""
 ): Promise<[any, null] | [null, AxiosError] | undefined> {
   try {
     const { data } = await axiosInstance.delete(
       "Contracts/detach-file-from-contract?contractId=" +
         contractId +
         "&fileId=" +
-        fileId,
+        fileId +
+        "&reason=" +
+        encodeURIComponent(reason),
       {
         headers: {
           Authorization: authToken,

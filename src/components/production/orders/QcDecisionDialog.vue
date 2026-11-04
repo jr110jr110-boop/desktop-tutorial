@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { onMounted, ref } from "vue";
 import { getEquipmentList, getItpByWorkOrder } from "@/api/QualityAPIs";
 import { qcDecision } from "@/api/ProductionAPIs";
@@ -54,6 +56,7 @@ async function save() {
   <div class="inv-modal-backdrop" @click.self="emit('close')">
     <div class="inv-modal" style="max-width: 520px">
       <h2 class="inv-title mb-2">تصمیم بازرسی - مرحله {{ operation.sequence }} {{ operation.title }}</h2>
+      <AttachmentPanel :owner-type="AttachmentOwner.ProductionOperation" :owner-id="operation.id" title="عکس، برگه اندازه‌گیری و گزارش بازرسی" />
       <p class="inv-muted">مقدار بازرسی‌شده: {{ qtyText(operation.goodQty > 0 ? operation.goodQty : quantity) }}</p>
       <div v-if="operation.inspectionRequirement === 3" class="mb-2">
         <label class="form-label small mb-0">نقطه ITP<span v-if="operation.itpTestType"> ({{ testTypes[operation.itpTestType] }})</span></label>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // One warehouse document: header, lines (with lot / serial entry and barcode scanning), save / confirm / cancel.
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
@@ -1162,6 +1164,7 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    <AttachmentPanel v-if="doc?.id" :owner-type="AttachmentOwner.WarehouseDocument" :owner-id="doc.id" title="مدارک فنی درخواست و پیوست‌های سند انبار" />
   </div>
 </template>
 

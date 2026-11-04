@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { onMounted, ref } from "vue";
 import LookupBox from "@/components/fn/LookupBox.vue";
 import FnDate from "@/components/fn/FnDate.vue";
@@ -68,7 +70,7 @@ function open(s: any) {
   form.value = {
     id: s.id, number: s.number, pettyCashId: s.pettyCashId, date: String(s.date).slice(0, 10), status: s.status, holderName: s.holderName, creatorName: s.creatorName, approvedByName: s.approvedByName,
     lines: s.lines.map((l: any) => ({
-      description: l.description || "", account: { id: l.accountId, code: l.accountCode, title: "" }, amount: String(l.amount), vatAmount: l.vatAmount ? String(l.vatAmount) : "", supplierName: l.supplierName || "",
+      id: l.id, description: l.description || "", account: { id: l.accountId, code: l.accountCode, title: "" }, amount: String(l.amount), vatAmount: l.vatAmount ? String(l.vatAmount) : "", supplierName: l.supplierName || "",
       costCenterId: l.costCenterId, inventoryDocumentId: l.inventoryDocumentId,
     })),
   };
@@ -186,6 +188,9 @@ onMounted(async () => {
           تسویه تنخواه <span v-if="form.number" class="inv-ltr">{{ form.number }}</span>
           <span v-if="form.id" :class="badgeOfDoc(form.status)" class="inv-badge">{{ docStatuses[form.status] }}</span>
         </h2>
+        <template v-if="form.id">
+          <AttachmentPanel v-for="l in form.lines.filter((x: any) => x.id)" :key="'pl' + l.id" :owner-type="AttachmentOwner.PettyCashSettlementLine" :owner-id="l.id" :title="'فاکتور / رسید: ' + (l.description || l.supplierName)" collapsed />
+        </template>
         <div class="row g-2 mb-2">
           <div class="col-md-6"><label class="form-label small mb-0">تنخواه</label>
             <select v-model="form.pettyCashId" :disabled="!!form.id" class="form-select form-select-sm" @change="loadCandidates"><option v-for="p in petties.rows.value" :key="p.id" :value="p.id">{{ p.holderName }} (مانده {{ money(p.balance) }})</option></select>
