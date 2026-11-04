@@ -83,6 +83,8 @@ namespace Services.NasbNiro.Attachments
                 case AttachmentOwnerType.TmTask: return "وظیفه";
                 case AttachmentOwnerType.PcProgressSubmission: return "گزارش پیشرفت";
                 case AttachmentOwnerType.PcProjectPhoto: return "عکس پروژه";
+                case AttachmentOwnerType.PbBomHeader: return "BOM محصول";
+                case AttachmentOwnerType.PbOpcRouting: return "مسیر ساخت (OPC)";
                 default: return "رکورد";
             }
         }
@@ -109,6 +111,9 @@ namespace Services.NasbNiro.Attachments
         public const string PurchaseRequestLockedWrite = "PLANNING,PMO";
         public const string PurchaseRequestWrite = ProcurementRoles.Requesters + ",PLANNING,ENGINEERING";
         public const string NcrLockedWrite = "PMO,QC";
+        /// <summary>PB2: the documents of a product BOM or an OPC routing (drawings, specifications): engineering writes while the revision is a draft; after it is signed only engineering and the PMO void or replace, with a reason.</summary>
+        public const string ProductBankWrite = "PMO,ENGINEERING,ENGINEER";
+        public const string ProductBankLockedWrite = "PMO,ENGINEERING";
         public const string InquiryWrite = "COMMERCIAL,PLANNING,ENGINEERING,QC,CONSTRUCTION,PMO";
         public const string OrderWrite = "COMMERCIAL,PMO,CEO";
         public const string ReceiptWrite = "PMO,WAREHOUSE,WHSUPERVISOR,COMMERCIAL";

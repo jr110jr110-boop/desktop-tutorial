@@ -1,0 +1,247 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Common.Results;
+using DataLayer.Context;
+using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.Inventory;
+using Entities.Model.NasbNiro.ProjectBalance;
+using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Inventory;
+using Services.NasbNiro.ProductBank;
+using ViewModels.NasbNiro.ProjectBalanceDtos;
+
+namespace Services.NasbNiro.ProjectBalance
+{
+    public interface IProjectReservationService
+    {
+        Task<ResponseDto<List<ReservationDto>>> GetAsync(ReservationQuery query, CancellationToken ct);
+        Task<ResponseDto<ReservationDto>> UpdateAsync(UpdateReservationDto dto, CancellationToken ct);
+        Task<ResponseDto<ReservationDto>> RequestReleaseAsync(ReservationActionDto dto, CancellationToken ct);
+        Task<ResponseDto<ReservationDto>> DecideReleaseAsync(ReservationActionDto dto, CancellationToken ct);
+    }
+
+    /// <summary>
+    /// Stock held for a project. PLANNING edits a reservation with a reason (the audit trail keeps the before and after); releasing it is a decision of two people (one asks, another approves);
+    /// issuing the stock to the project uses it up. AI never approves a release.
+    /// </summary>
+    public sealed class ProjectReservationService : PbServiceBase, IProjectReservationService
+    {
+        public ProjectReservationService(IUnitOfWork uow, IInventoryUserContext user) : base(uow, user)
+        {
+        }
+
+        private static string Cut(string text, int max) => text == null ? null : text.Length <= max ? text : text.Substring(0, max);
+
+        private static decimal Remaining(ProjectReservation r) => r.Status == ReservationStatus.Active ? Math.Max(0m, r.Quantity - r.IssuedQuantity) : 0m;
+
+        public async Task<ResponseDto<List<ReservationDto>>> GetAsync(ReservationQuery query, CancellationToken ct)
+        {
+            query ??= new ReservationQuery();
+            IQueryable<ProjectReservation> q = Uow.Set<ProjectReservation>().AsNoTracking().Where(r => !r.Deleted);
+            if (query.WorkOrderId.HasValue) q = q.Where(r => r.WorkOrderId == query.WorkOrderId.Value);
+            if (query.ContractId.HasValue) q = q.Where(r => r.ContractId == query.ContractId.Value);
+            if (query.ItemId.HasValue) q = q.Where(r => r.ItemId == query.ItemId.Value);
+            if (query.Status.HasValue) q = q.Where(r => r.Status == query.Status.Value);
+            List<ProjectReservation> rows = await q.OrderByDescending(r => r.Id).Take(1000).ToListAsync(ct);
+            return ResponseDtoHelper.Ok(await DtosAsync(rows, query.Contains, ct));
+        }
+
+        private async Task<List<ReservationDto>> DtosAsync(List<ProjectReservation> rows, string contains, CancellationToken ct)
+        {
+            List<int> itemIds = rows.Select(r => r.ItemId).Concat(rows.Where(r => r.SubstituteForItemId.HasValue).Select(r => r.SubstituteForItemId.Value)).Distinct().ToList();
+            var items = itemIds.Count == 0 ? new Dictionary<int, (string Code, string Title, string Unit)>() : (await Uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).Select(i => new { i.Id, i.Code, i.Title, i.Unit }).ToListAsync(ct)).ToDictionary(i => i.Id, i => (i.Code, i.Title, i.Unit));
+            List<int> woIds = rows.Select(r => r.WorkOrderId).Distinct().ToList();
+            var orders = woIds.Count == 0 ? new Dictionary<int, (string Code, string Contract)>() : (await Uow.Set<WorkOrder>().AsNoTracking().Where(w => woIds.Contains(w.Id)).Select(w => new { w.Id, w.Code, Contract = w.Contract.Code }).ToListAsync(ct)).ToDictionary(w => w.Id, w => (w.Code, w.Contract));
+            List<int> lotIds = rows.Where(r => r.LotId.HasValue).Select(r => r.LotId.Value).Distinct().ToList();
+            Dictionary<int, string> lots = lotIds.Count == 0 ? new Dictionary<int, string>() : (await Uow.Set<InventoryLot>().AsNoTracking().Where(l => lotIds.Contains(l.Id)).Select(l => new { l.Id, l.LotNumber }).ToListAsync(ct)).ToDictionary(l => l.Id, l => l.LotNumber);
+            Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(Uow, rows.Select(r => r.ReleaseRequestedByUserId), ct);
+            int me = User.UserId;
+            bool planner = InRole(BalanceRoles.Planning) && !IsAi;
+            var list = rows.Select(r =>
+            {
+                items.TryGetValue(r.ItemId, out var it);
+                orders.TryGetValue(r.WorkOrderId, out var wo);
+                bool pending = r.ReleaseRequestedAt.HasValue && r.Status == ReservationStatus.Active;
+                return new ReservationDto
+                {
+                    Id = r.Id, ContractId = r.ContractId, ContractCode = wo.Contract, WorkOrderId = r.WorkOrderId, WorkOrderCode = wo.Code, BaselineId = r.BaselineId, ItemId = r.ItemId, ItemCode = it.Code, ItemTitle = it.Title, Unit = it.Unit,
+                    Quantity = r.Quantity, IssuedQuantity = r.IssuedQuantity, RemainingQuantity = Remaining(r), Status = r.Status, IsHard = r.IsHard, WarehouseId = r.WarehouseId, LotId = r.LotId,
+                    LotNumber = r.LotId.HasValue && lots.TryGetValue(r.LotId.Value, out string ln) ? ln : null, SerialUnitId = r.SerialUnitId, NeedDate = r.NeedDate, WbsNodeId = r.WbsNodeId, ActivityId = r.ActivityId,
+                    SubstituteForItemId = r.SubstituteForItemId, SubstituteForItemCode = r.SubstituteForItemId.HasValue && items.TryGetValue(r.SubstituteForItemId.Value, out var sf) ? sf.Code : null, Reason = r.Reason,
+                    ReleaseRequestedByUserId = r.ReleaseRequestedByUserId, ReleaseRequestedByName = names.Name(r.ReleaseRequestedByUserId), ReleaseRequestedAt = r.ReleaseRequestedAt, ReleaseReason = r.ReleaseReason,
+                    ReleasedAt = r.ReleasedAt, ReleasedQuantity = r.ReleasedQuantity, CreateDate = r.CreateDate,
+                    CanEdit = planner && r.Status == ReservationStatus.Active && !pending,
+                    CanRequestRelease = planner && r.Status == ReservationStatus.Active && !pending,
+                    CanApproveRelease = planner && pending && r.ReleaseRequestedByUserId != me,
+                };
+            }).ToList();
+            string text = string.IsNullOrWhiteSpace(contains) ? null : contains.Trim();
+            if (text != null) list = list.Where(r => (r.ItemCode ?? "").Contains(text, StringComparison.OrdinalIgnoreCase) || (r.ItemTitle ?? "").Contains(text, StringComparison.OrdinalIgnoreCase) || (r.WorkOrderCode ?? "").Contains(text, StringComparison.OrdinalIgnoreCase)).ToList();
+            return list;
+        }
+
+        private async Task<ReservationDto> OneAsync(int id, CancellationToken ct) =>
+            (await DtosAsync(await Uow.Set<ProjectReservation>().AsNoTracking().Where(r => r.Id == id).ToListAsync(ct), null, ct)).First();
+
+        public async Task<ResponseDto<ReservationDto>> UpdateAsync(UpdateReservationDto dto, CancellationToken ct)
+        {
+            if (!InRole(BalanceRoles.Planning)) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.NotAllowed);
+            if (IsAi) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.AiNeverApproves);
+            if (dto == null) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.InvalidData);
+            string reason = string.IsNullOrWhiteSpace(dto.Reason) ? null : dto.Reason.Trim();
+            if (reason == null) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.ReasonRequired);
+            ProjectReservation r = await Uow.Set<ProjectReservation>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
+            if (r == null) return ResponseDtoHelper.NotFound<ReservationDto>(BalanceMessages.NotFound);
+            if (r.Status != ReservationStatus.Active) return ResponseDtoHelper.BadRequest<ReservationDto>("فقط رزرو فعال ویرایش می‌شود.");
+            if (r.ReleaseRequestedAt.HasValue) return ResponseDtoHelper.BadRequest<ReservationDto>("درخواست آزادسازی این رزرو در انتظار تایید است؛ تا تصمیم گرفته نشده ویرایش نمی‌شود.");
+
+            if (dto.Quantity.HasValue)
+            {
+                decimal q = BalanceRules.Round(dto.Quantity.Value);
+                if (q <= 0) return ResponseDtoHelper.BadRequest<ReservationDto>("مقدار رزرو باید بیشتر از صفر باشد؛ برای برداشتن رزرو، آزادسازی بخواهید.");
+                if (q < r.IssuedQuantity) return ResponseDtoHelper.BadRequest<ReservationDto>("مقدار رزرو کمتر از مقدار حواله‌شده به پروژه (" + BalanceRules.Num(r.IssuedQuantity) + ") نمی‌شود.");
+                if (q > r.Quantity)
+                {
+                    BalanceSettings s = await BalanceSettingKeys.LoadAsync(Uow, ct);
+                    WarehouseKind[] kinds = s.WarehouseKinds.Select(k => (WarehouseKind)k).ToArray();
+                    decimal onHand = await (from sb in Uow.Set<StockBalance>().AsNoTracking() join w in Uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
+                                            where sb.ItemId == r.ItemId && !w.Deleted && w.IsActive && kinds.Contains(w.Kind) select sb.Quantity).SumAsync(ct);
+                    var held = await Uow.Set<ProjectReservation>().AsNoTracking().Where(x => !x.Deleted && x.Status == ReservationStatus.Active && x.ItemId == r.ItemId).Select(x => new { x.Quantity, x.IssuedQuantity }).ToListAsync(ct);
+                    decimal free = Math.Max(0m, onHand - held.Sum(x => Math.Max(0m, x.Quantity - x.IssuedQuantity)));
+                    if (q - r.Quantity > free) return ResponseDtoHelper.BadRequest<ReservationDto>("موجودی آزاد برای افزایش رزرو کافی نیست؛ آزاد: " + BalanceRules.Num(free) + ".");
+                }
+                r.Quantity = q;
+                if (r.Quantity <= r.IssuedQuantity) r.Status = ReservationStatus.FullyIssued;
+            }
+            if (dto.IsHard.HasValue) r.IsHard = dto.IsHard.Value;
+            if (dto.NeedDate.HasValue) r.NeedDate = dto.NeedDate.Value.Date;
+            if (dto.WarehouseId.HasValue)
+            {
+                if (!await Uow.Set<Warehouse>().AnyAsync(w => w.Id == dto.WarehouseId.Value && !w.Deleted && w.IsActive, ct)) return ResponseDtoHelper.BadRequest<ReservationDto>("انبار فعال پیدا نشد.");
+                r.WarehouseId = dto.WarehouseId;
+            }
+            if (dto.LotId.HasValue)
+            {
+                if (!await Uow.Set<InventoryLot>().AnyAsync(l => l.Id == dto.LotId.Value && l.ItemId == r.ItemId && !l.Deleted, ct)) return ResponseDtoHelper.BadRequest<ReservationDto>("بچ این کالا پیدا نشد.");
+                r.LotId = dto.LotId;
+            }
+            if (dto.SerialUnitId.HasValue)
+            {
+                if (!await Uow.Set<SerialUnit>().AnyAsync(u => u.Id == dto.SerialUnitId.Value && u.ItemId == r.ItemId && !u.Deleted, ct)) return ResponseDtoHelper.BadRequest<ReservationDto>("سریال این کالا پیدا نشد.");
+                r.SerialUnitId = dto.SerialUnitId;
+            }
+            r.Reason = Cut(reason, 500);
+            Stamp(r, false);
+            string saved = await TrySaveAsync(ct);
+            if (saved != null) return ResponseDtoHelper.BadRequest<ReservationDto>(saved);
+            return ResponseDtoHelper.Ok(await OneAsync(r.Id, ct));
+        }
+
+        public async Task<ResponseDto<ReservationDto>> RequestReleaseAsync(ReservationActionDto dto, CancellationToken ct)
+        {
+            if (!InRole(BalanceRoles.Planning)) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.NotAllowed);
+            if (IsAi) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.AiNeverApproves);
+            string reason = string.IsNullOrWhiteSpace(dto?.Reason) ? null : dto.Reason.Trim();
+            if (reason == null) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.ReasonRequired);
+            ProjectReservation r = await Uow.Set<ProjectReservation>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
+            if (r == null) return ResponseDtoHelper.NotFound<ReservationDto>(BalanceMessages.NotFound);
+            if (r.Status != ReservationStatus.Active) return ResponseDtoHelper.BadRequest<ReservationDto>("فقط رزرو فعال آزاد می‌شود.");
+            if (r.ReleaseRequestedAt.HasValue) return ResponseDtoHelper.BadRequest<ReservationDto>("درخواست آزادسازی قبلاً ثبت شده است.");
+            r.ReleaseRequestedByUserId = User.UserId; r.ReleaseRequestedAt = DateTimeOffset.Now; r.ReleaseReason = Cut(reason, 500);
+            Stamp(r, false);
+            string saved = await TrySaveAsync(ct);
+            if (saved != null) return ResponseDtoHelper.BadRequest<ReservationDto>(saved);
+            return ResponseDtoHelper.Ok(await OneAsync(r.Id, ct));
+        }
+
+        public async Task<ResponseDto<ReservationDto>> DecideReleaseAsync(ReservationActionDto dto, CancellationToken ct)
+        {
+            if (!InRole(BalanceRoles.Planning)) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.NotAllowed);
+            if (IsAi) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.AiNeverApproves);
+            if (dto == null) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.InvalidData);
+            ProjectReservation r = await Uow.Set<ProjectReservation>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
+            if (r == null) return ResponseDtoHelper.NotFound<ReservationDto>(BalanceMessages.NotFound);
+            if (r.Status != ReservationStatus.Active || !r.ReleaseRequestedAt.HasValue) return ResponseDtoHelper.BadRequest<ReservationDto>("درخواست آزادسازی در انتظار این رزرو نیست.");
+            if (r.ReleaseRequestedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.SameUser);
+            if (dto.Approve)
+            {
+                r.ReleasedQuantity = Remaining(r);
+                r.Status = ReservationStatus.Released;
+                r.ReleasedByUserId = User.UserId; r.ReleasedAt = DateTimeOffset.Now;
+            }
+            else
+            {
+                string note = string.IsNullOrWhiteSpace(dto.Reason) ? null : dto.Reason.Trim();
+                if (note == null) return ResponseDtoHelper.BadRequest<ReservationDto>("برای رد درخواست آزادسازی دلیل را بنویسید.");
+                r.ReleaseRequestedByUserId = null; r.ReleaseRequestedAt = null; r.ReleaseReason = Cut("رد شد: " + note, 500);
+            }
+            Stamp(r, false);
+            string saved = await TrySaveAsync(ct);
+            if (saved != null) return ResponseDtoHelper.BadRequest<ReservationDto>(saved);
+            return ResponseDtoHelper.Ok(await OneAsync(r.Id, ct));
+        }
+    }
+
+    /// <summary>The rules that tie the warehouse documents to the reservations.</summary>
+    public static class ProjectReservationRules
+    {
+        /// <summary>
+        /// An issue (or a shipment to a contractor) of an item that other projects hold under a hard reservation is refused when it would eat into what they hold. Null when the document may be confirmed.
+        /// A project may always use its own reservation.
+        /// </summary>
+        public static async Task<string> CheckIssueAsync(IUnitOfWork uow, InventoryDocument document, CancellationToken ct)
+        {
+            if (document.Type != InventoryDocumentType.Issue && document.Type != InventoryDocumentType.SubcontractIssue) return null;
+            var wanted = document.Lines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
+            List<int> ids = wanted.Keys.ToList();
+            var held = await uow.Set<ProjectReservation>().AsNoTracking().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.IsHard && ids.Contains(r.ItemId))
+                .Select(r => new { r.ItemId, r.ContractId, r.Quantity, r.IssuedQuantity }).ToListAsync(ct);
+            if (held.Count == 0) return null;
+            int? contractId = document.WorkOrderId.HasValue ? await uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == document.WorkOrderId.Value).Select(w => (int?)w.ContractId).FirstOrDefaultAsync(ct) : null;
+            BalanceSettings s = await BalanceSettingKeys.LoadAsync(uow, ct);
+            WarehouseKind[] kinds = s.WarehouseKinds.Select(k => (WarehouseKind)k).ToArray();
+            foreach (var item in wanted)
+            {
+                var others = held.Where(h => h.ItemId == item.Key && h.ContractId != contractId).ToList();
+                decimal reserved = others.Sum(h => Math.Max(0m, h.Quantity - h.IssuedQuantity));
+                if (reserved <= 0) continue;
+                decimal onHand = await (from sb in uow.Set<StockBalance>().AsNoTracking() join w in uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
+                                        where sb.ItemId == item.Key && !w.Deleted && w.IsActive && kinds.Contains(w.Kind) select sb.Quantity).SumAsync(ct);
+                if (onHand - reserved >= item.Value) continue;
+                string code = await uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == item.Key).Select(i => i.Code).FirstOrDefaultAsync(ct);
+                List<int> contracts = others.Select(h => h.ContractId).Distinct().ToList();
+                string projects = string.Join("، ", await uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(c => contracts.Contains(c.Id)).Select(c => c.Code).ToListAsync(ct));
+                return "کالای " + code + " برای پروژه دیگری رزرو شده است (" + projects + ")؛ موجودی " + BalanceRules.Num(onHand) + "، رزرو پروژه‌های دیگر " + BalanceRules.Num(reserved)
+                    + " و مقدار این حواله " + BalanceRules.Num(item.Value) + ". حواله بدون آزادسازی تاییدشدهٔ رزرو (برنامه‌ریزی) ممکن نیست.";
+            }
+            return null;
+        }
+
+        /// <summary>A confirmed issue to a work order uses up the reservations of that work order, earliest need first (the stock leaves the reservation and goes to the project).</summary>
+        public static async Task ApplyIssueAsync(IUnitOfWork uow, InventoryDocument document, int userId, CancellationToken ct)
+        {
+            if (document.Type != InventoryDocumentType.Issue || !document.WorkOrderId.HasValue) return;
+            var wanted = document.Lines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
+            List<int> ids = wanted.Keys.ToList();
+            List<ProjectReservation> mine = await uow.Set<ProjectReservation>().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.WorkOrderId == document.WorkOrderId.Value && ids.Contains(r.ItemId)).ToListAsync(ct);
+            if (mine.Count == 0) return;
+            DateTimeOffset now = DateTimeOffset.Now;
+            foreach (var item in wanted)
+            {
+                decimal left = item.Value;
+                foreach (ProjectReservation r in mine.Where(x => x.ItemId == item.Key).OrderBy(x => x.NeedDate ?? DateTime.MaxValue).ThenBy(x => x.Id))
+                {
+                    if (left <= 0) break;
+                    decimal take = Math.Min(left, Math.Max(0m, r.Quantity - r.IssuedQuantity));
+                    if (take <= 0) continue;
+                    r.IssuedQuantity += take; left -= take;
+                    if (r.IssuedQuantity >= r.Quantity) r.Status = ReservationStatus.FullyIssued;
+                    r.ModifyDate = now; r.ModifierUserId = userId;
+                }
+            }
+        }
+    }
+}

@@ -928,6 +928,10 @@ namespace Services.NasbNiro.Inventory
                 if (requestError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(requestError);
             }
 
+            // PB2: stock that another project holds under a hard reservation is not issued without an approved release
+            string reservedRefusal = await global::Services.NasbNiro.ProjectBalance.ProjectReservationRules.CheckIssueAsync(_uow, document, cancellationToken);
+            if (reservedRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(reservedRefusal);
+
             List<int> itemIds = document.Lines.Select(l => l.ItemId).Distinct().ToList();
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>()
                 .Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, cancellationToken);
@@ -1333,6 +1337,7 @@ namespace Services.NasbNiro.Inventory
             if (type == InventoryDocumentType.SupplierReturn && document.ProviderId.HasValue)
                 await _payables.OnSupplierReturnAsync(document.ProviderId.Value, document.Number, cancellationToken);
 
+            await global::Services.NasbNiro.ProjectBalance.ProjectReservationRules.ApplyIssueAsync(_uow, document, _user.UserId, cancellationToken);
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
             await RefreshPurchaseOrderAsync(document, cancellationToken);

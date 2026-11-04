@@ -90,6 +90,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
 
         /// <summary>P-B7a: the percent is rolled up from the tasks linked to the activity, weighted by their estimated hours.</summary>
         Tasks = 9,
+
+        /// <summary>PB2: "procured %": the share of the material the part needs that is already issued to the project or held for it, from the latest material balance of the project.</summary>
+        MaterialBalance = 10,
     }
 
     public enum PcActivityStatus { NotStarted = 0, InProgress = 1, Done = 2, OnHold = 3 }

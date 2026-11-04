@@ -41,6 +41,10 @@ namespace Entities.Model.NasbNiro.Attachments
         PcProgressSubmission = 25,
         /// <summary>P-B7a: a photo of the project photo library (the picture is the attachment).</summary>
         PcProjectPhoto = 26,
+        /// <summary>PB2: a revision of a product BOM (the BOM document, the drawings and specifications of the bank); linked to the purchase requests the project balance drafts.</summary>
+        PbBomHeader = 27,
+        /// <summary>PB2: a revision of an OPC routing (process chart documents).</summary>
+        PbOpcRouting = 28,
     }
 
     public enum AttachmentKind

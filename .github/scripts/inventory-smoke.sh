@@ -10955,6 +10955,56 @@ as "$ADMIN_TOKEN" POST $PB/coding/adopt-part-numbers; check "pb1: the backfill r
 as "$ADMIN_TOKEN" POST $PB/coding/adopt-part-numbers; check "pb1: the backfill runs once: the second call is a no-op" '.success and .data.alreadyDone == true and .data.adopted == 0'
 TOKEN=$ADMIN_TOKEN
 
+# --- PB2: automatic material balance, shortage purchase requests (drafts with linked technical documents), reservations and substitutes.
+# The FY product (seeded above, 81 project BOM lines: 47 bought parts, 8 raw materials of made parts, 26 parts whose raw material is not coded) goes into a new project of 2 units with no stock at all,
+# so every needed quantity is a shortage. PLANNING / ENGINEERING / COMMERCIAL users already exist; no new user is created, so no approve_grants is needed.
+PBL=project-balance
+printf '%%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%%%EOF\n' > "$OUT/pb2-bom.pdf"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/attachments" -H "Authorization: Bearer $ADMIN_TOKEN" -F "OwnerType=27" -F "OwnerId=$PBFYBOM" -F "Kind=2" -F "Title=BOM FY" -F "Revision=A" -F "File=@$OUT/pb2-bom.pdf"); check "pb2: the BOM document is attached to the released FY BOM revision (owner type 27)" '.success and .data.revision == "A"'
+call POST Contracts '{"code":"PB2-CT-01","title":"قرارداد آزمون بالانس مواد","status":1,"employer":"کارفرمای آزمون"}'; check "pb2: the test contract is created" '.success and .data.id > 0'; PB2CT=$(val .data.id)
+call POST Equipments '{"code":"PB2-EQ-T","title":"Test turbine PB2"}'; check "pb2: the test equipment is created" '.success and .data.id > 0'; PB2EQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PB2CT,\"equipmentId\":$PB2EQ,\"count\":1}"; check "pb2: the equipment is attached to the contract" '.success'
+call POST WorkOrders "{\"contractId\":$PB2CT,\"equipmentId\":$PB2EQ,\"code\":\"PB2-WO-1\",\"title\":\"Turbine PB2\",\"description\":\"x\",\"count\":2}"; check "pb2: work order created (2 units)" '.success and .data.id > 0'; PB2WO=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PB2CT,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"calendarId\":$PCCAL,\"dataDateWeekday\":3,\"scheduleStartDate\":\"2026-11-02T00:00:00\",\"clientReviewDays\":14,\"autoSnapshot\":false}"; check "pb2: contract terms" '.success'
+pcreview $PB2CT # the draft requests of a project need the accepted contract review
+as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; no "pb2: before the product is taken there is no balance run"
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB2WO,\"productId\":$PBFYPROD}"; check "pb2: the FY product is taken into the project (the balance runs by itself after it)" '.success and .data.count == 2'
+as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; check "pb2: run 1 was made by the instantiation: 81 lines, 55 short, 26 raw materials not coded" '.success and .data.runNumber == 1 and .data.trigger == "Instantiate" and .data.lineCount == 81 and .data.shortLineCount == 55 and .data.notCodedCount == 26 and .data.bomRevision == 0'
+check "pb2: a bought part: 2 units for 2 units of the product, nothing in stock, so the shortage is 2" '([.data.lines[]|select(.partNumber=="16.13.02.014.2" and .kind == 1)]|length) == 1 and ([.data.lines[]|select(.partNumber=="16.13.02.014.2")][0] | .grossQty == 2 and .scrapQty == 0 and .requiredQty == 2 and .onHandQty == 0 and .onOrderPrQty == 0 and .shortQty == 2)'
+check "pb2: the raw material of a made part (first stage of its OPC chart, 16 rings for 2 units) is short by 16" '([.data.lines[]|select(.itemCode=="16.11.01.012.2-CT")][0] | .kind == 2 and .requiredQty == 16 and .shortQty == 16)'
+check "pb2: a made part whose raw material is not coded is flagged and has no shortage line" '([.data.lines[]|select(.partNumber=="16.11.04.003.2")][0] | .kind == 3 and .itemId == null and .requiredQty == 8 and .shortQty == 0)'
+check "pb2: the shortages went into exactly two draft purchase requests (two item groups): all 55 short lines are on a request" '([.data.lines[]|select(.shortQty > 0 and .purchaseRequestId != null)]|length) == 55 and ([.data.lines[]|select(.purchaseRequestId != null)|.purchaseRequestId]|unique|length) == 2'
+PB2PR=$(jq -r '[.data.lines[]|select(.partNumber=="16.13.02.014.2")][0].purchaseRequestId' "$B"); PB2I1=$(jq -r '[.data.lines[]|select(.partNumber=="16.13.02.014.2")][0].itemId' "$B"); PB2I2=$(jq -r '[.data.lines[]|select(.partNumber=="16.13.02.017.2")][0].itemId' "$B"); PB2RUN=$(val .data.id)
+as "$PLAN_TOKEN" GET procurement/requests/$PB2PR; check "pb2: the request is a draft made from the BOM for the project, with the shortage quantity" '.success and .data.status == 0 and .data.source == 1 and .data.contractId == '$PB2CT' and ([.data.lines[]|select(.itemId == '$PB2I1')][0].quantity) == 2'
+call GET "attachments?ownerType=1&ownerId=$PB2PR"; check "pb2: the BOM document is visible on the request by link (exactly 1)" '.success and ([.data.items[]|select(.voided|not)]|length) == 1'
+as "$PLAN_TOKEN" POST $PBL/runs/$PB2RUN/drafts; check "pb2: making the drafts again creates nothing: both requests are updated in place" '.success and .data.created == 0 and (.data.requests|length) == 2'
+as "$WH_TOKEN" POST $PBL/run "{\"workOrderId\":$PB2WO}"; r403 "pb2: the warehouse cannot run the balance (403)"
+as "$PLAN_TOKEN" POST $PBL/run "{\"workOrderId\":$PB2WO}"; check "pb2: a manual run is run 2 and is compared with run 1" '.success and .data.runs[0].runNumber == 2 and .data.runs[0].previousRunId == '$PB2RUN
+PB2RUN2=$(jq -r '.data.runs[0].id' "$B")
+as "$PLAN_TOKEN" GET "$PBL/runs/$PB2RUN2/diff"; check "pb2: nothing changed between the runs: the diff is empty" '.success and .data.added == 0 and .data.removed == 0 and .data.changed == 0'
+as "$PLAN_TOKEN" GET "$PBL/reservations?workOrderId=$PB2WO"; check "pb2: no stock, so no reservation" '.success and (.data|length) == 0'
+as "$COM_TOKEN" GET $PBL/projects; check "pb2: the project list shows the run and the two draft requests" '.success and ([.data[]|select(.workOrderId == '$PB2WO')][0] | .latestRunNumber == 2 and .lineCount == 81 and .shortLineCount == 55 and .draftRequestCount == 2)'
+
+# substitutes: engineering proposes, another engineering user approves, never the proposer
+SUBJ="{\"itemId\":$PB2I1,\"substituteItemId\":$PB2I2,\"ratio\":2,\"scope\":1,\"reason\":\"هم‌ارز فنی\"}"
+as "$COM_TOKEN" POST $PBL/substitutes/save "$SUBJ"; r403 "pb2: commercial cannot propose a substitute (403)"
+as "$ENG_TOKEN" POST $PBL/substitutes/save "$(echo "$SUBJ" | jq -c '.ratio = 0')"; no "pb2: a ratio of zero is refused"
+as "$ENG_TOKEN" POST $PBL/substitutes/save "$SUBJ"; check "pb2: engineering proposes a substitute: it waits for approval" '.success and .data.status == 0 and .data.ratio == 2 and .data.canDecide == false'
+PB2SUB=$(val .data.id)
+as "$ENG_TOKEN" POST $PBL/substitutes/decide "{\"id\":$PB2SUB,\"action\":\"approve\"}"; nomsg "pb2: the proposer does not approve his own substitute" "فرد دیگری"
+as "$PLAN_TOKEN" POST $PBL/substitutes/decide "{\"id\":$PB2SUB,\"action\":\"approve\"}"; r403 "pb2: planning does not approve a substitute (403)"
+as "$ENG2_TOKEN" POST $PBL/substitutes/decide "{\"id\":$PB2SUB,\"action\":\"approve\"}"; check "pb2: another engineering user approves it" '.success and .data.status == 1'
+as "$ENG2_TOKEN" POST $PBL/substitutes/decide "{\"id\":$PB2SUB,\"action\":\"revoke\"}"; nomsg "pb2: revoking needs a reason" "دلیل"
+as "$ENG2_TOKEN" POST $PBL/substitutes/decide "{\"id\":$PB2SUB,\"action\":\"revoke\",\"note\":\"پایان آزمون\"}"; check "pb2: the PMO or engineering revokes it with a reason" '.success and .data.status == 3'
+
+# settings (provisional company decisions) and the kit job
+as "$PLAN_TOKEN" GET $PBL/settings; check "pb2: the settings are listed with their defaults (hard reservation, 7-day kits, metal lead time 30 days)" '.success and ([.data[]|select(.key=="Balance:ReservationHard")][0].value) == "true" and ([.data[]|select(.key=="Balance:KitDaysAhead")][0].value) == "7" and ([.data[]|select(.key=="Balance:LeadTimeMetalDays")][0].value) == "30" and ([.data[]|select(.key=="Balance:LeadTimeConsumableDays")][0].value) == "7"'
+as "$ENG_TOKEN" POST $PBL/settings '{"key":"Balance:KitDaysAhead","value":"10"}'; r403 "pb2: engineering cannot change the balance settings (403)"
+as "$PLAN_TOKEN" POST $PBL/settings '{"key":"Balance:KitDaysAhead","value":"x"}'; no "pb2: a number setting refuses text"
+as "$PLAN_TOKEN" POST $PBL/kits/run; check "pb2: the kit job drafts nothing: no stock is reserved" '.success and .data.drafted == 0'
+as "$WH_TOKEN" POST $PBL/kits/run; r403 "pb2: the warehouse cannot run the kit job (403)"
+TOKEN=$ADMIN_TOKEN
+
 # --- R1t D19: every pass-through of the legacy CSV actions (2 inventory exports, 1 events export, 1 events/mark) left one audit row, all by the finance manager
 TOKEN=$ADMIN_TOKEN
 as "$FM_TOKEN" GET "finance/audit?EntityType=SepidarLegacyCsv&Action=LegacyCsv&PageSize=0"; check "r1t d19: the legacy CSV pass-throughs are in the audit trail (5 rows: 2 inventory exports, 2 events exports - one is the finance manager's check of the protected labour event - and 1 events/mark, one user)" '.success and (.data.data|length) == 5 and ([.data.data[].userId]|unique|length) == 1'

@@ -46,10 +46,12 @@ namespace Services.NasbNiro.ProductBank
     public class PbProductService : PbServiceBase, IPbProductService
     {
         private readonly IPcProjectService _project;
+        private readonly global::Services.NasbNiro.ProjectBalance.IProjectBalanceService _balance;
 
-        public PbProductService(IUnitOfWork uow, IInventoryUserContext user, IPcProjectService project) : base(uow, user)
+        public PbProductService(IUnitOfWork uow, IInventoryUserContext user, IPcProjectService project, global::Services.NasbNiro.ProjectBalance.IProjectBalanceService balance = null) : base(uow, user)
         {
             _project = project ?? throw new ArgumentNullException(nameof(project));
+            _balance = balance;
         }
 
         // -------------------------------------------------------------------------------- products
@@ -293,6 +295,17 @@ namespace Services.NasbNiro.ProductBank
 
         public async Task<ResponseDto<PbBaselineDto>> InstantiateAsync(PbInstantiateDto dto, CancellationToken ct)
         {
+            var r = await InstantiateCoreAsync(dto, ct);
+            if (r.Success && _balance != null)
+            {
+                int wo = r.Data?.WorkOrderId ?? 0;
+                if (wo > 0) await _balance.AfterChangeAsync(wo, "Instantiate", ct);
+            }
+            return r;
+        }
+
+        private async Task<ResponseDto<PbBaselineDto>> InstantiateCoreAsync(PbInstantiateDto dto, CancellationToken ct)
+        {
             if (!InRole(PbRoles.Requesters)) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.NotAllowed);
             if (dto == null || dto.WorkOrderId <= 0 || dto.ProductId <= 0) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.InvalidData);
             WorkOrder wo = await Uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == dto.WorkOrderId && !w.Deleted, ct);
@@ -394,6 +407,17 @@ namespace Services.NasbNiro.ProductBank
 
         public async Task<ResponseDto<PbBaselineDto>> GenerateWbsAsync(PbGenerateWbsDto dto, CancellationToken ct)
         {
+            var r = await GenerateWbsCoreAsync(dto, ct);
+            if (r.Success && _balance != null)
+            {
+                int wo = r.Data?.WorkOrderId ?? 0;
+                if (wo > 0) await _balance.AfterChangeAsync(wo, "GenerateWbs", ct);
+            }
+            return r;
+        }
+
+        private async Task<ResponseDto<PbBaselineDto>> GenerateWbsCoreAsync(PbGenerateWbsDto dto, CancellationToken ct)
+        {
             if (!InRole(PbRoles.Planning + ",ENGINEERING")) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.NotAllowed);
             if (dto == null || dto.WorkOrderId <= 0) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.InvalidData);
             PbProjectBaseline b = await Uow.Set<PbProjectBaseline>().FirstOrDefaultAsync(x => x.WorkOrderId == dto.WorkOrderId && !x.Deleted && x.IsCurrent, ct);
@@ -417,6 +441,8 @@ namespace Services.NasbNiro.ProductBank
             }, r => r.Success, ct);
         }
 
+        private async Task<int> WorkOrderOfBaselineAsync(int baselineId, CancellationToken ct) => await Uow.Set<PbProjectBaseline>().AsNoTracking().Where(x => x.Id == baselineId).Select(x => x.WorkOrderId).FirstOrDefaultAsync(ct);
+
         private static PcPhase? PhaseOf(string code) => code == "E" ? PcPhase.Engineering : code == "P" ? PcPhase.Procurement : code == "C" ? PcPhase.Construction : (PcPhase?)null;
 
         private static string UnitOf(PbWbsTemplateNode n)
@@ -439,6 +465,7 @@ namespace Services.NasbNiro.ProductBank
         /// </summary>
         private async Task<string> GeneratePcWbsAsync(int baselineId, CancellationToken ct)
         {
+            bool procuredPercent = (await global::Services.NasbNiro.ProjectBalance.BalanceSettingKeys.LoadAsync(Uow, ct)).ProcuredPercent;
             PbProjectBaseline b = await Uow.Set<PbProjectBaseline>().FirstAsync(x => x.Id == baselineId, ct);
             if (!b.WbsTemplateId.HasValue) return "برای این محصول قالب WBS تاییدشده‌ای نیست؛ پس از تایید قالب، «ساخت WBS» را بزنید.";
             WorkOrder wo = await Uow.Set<WorkOrder>().AsNoTracking().FirstAsync(w => w.Id == b.WorkOrderId, ct);
@@ -496,7 +523,7 @@ namespace Services.NasbNiro.ProductBank
                 var act = new PcActivity
                 {
                     ContractId = contractId, WbsNode = parent, Code = pcode + "-" + (++seqNo).ToString("000"), Title = title.Length > 300 ? title.Substring(0, 300) : title, SourceType = PcSourceType.Manual,
-                    WorkOrderId = wo.Id, DurationDays = days, Phase = PhaseOf(n.PhaseCode), ResponsibleUnit = UnitOf(n), ProgressMethod = PcProgressMethod.Manual, Status = PcActivityStatus.NotStarted,
+                    WorkOrderId = wo.Id, DurationDays = days, Phase = PhaseOf(n.PhaseCode), ResponsibleUnit = UnitOf(n), ProgressMethod = n.PhaseCode == "P" && procuredPercent ? PcProgressMethod.MaterialBalance : PcProgressMethod.Manual, Status = PcActivityStatus.NotStarted,
                     Sort = ++counter, CreateDate = now, CreatorUserId = me, ModifyDate = now, ModifierUserId = me,
                 };
                 acts.Add(act);
@@ -743,6 +770,17 @@ namespace Services.NasbNiro.ProductBank
         }
 
         public async Task<ResponseDto<PbChangeDto>> ApplyChangeAsync(PbChangeActionDto dto, CancellationToken ct)
+        {
+            var r = await ApplyChangeCoreAsync(dto, ct);
+            if (r.Success && _balance != null)
+            {
+                int wo = r.Data == null ? 0 : await WorkOrderOfBaselineAsync(r.Data.BaselineId, ct);
+                if (wo > 0) await _balance.AfterChangeAsync(wo, "Deviation", ct);
+            }
+            return r;
+        }
+
+        private async Task<ResponseDto<PbChangeDto>> ApplyChangeCoreAsync(PbChangeActionDto dto, CancellationToken ct)
         {
             if (IsAi) return ResponseDtoHelper.BadRequest<PbChangeDto>(PbMessages.AiNeverApproves);
             var (c, err) = await LoadChangeAsync(dto, ct);

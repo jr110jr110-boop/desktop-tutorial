@@ -122,6 +122,13 @@ namespace DataLayer.Context
         public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBomChange> PbProjectBomChanges { get; set; }
         #endregion
 
+        #region Project material balance (PB2)
+        public virtual DbSet<Entities.Model.NasbNiro.ProjectBalance.ProjectMaterialBalance> ProjectMaterialBalances { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProjectBalance.ProjectMaterialBalanceLine> ProjectMaterialBalanceLines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProjectBalance.ProjectReservation> ProjectReservations { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProjectBalance.ItemSubstitute> ItemSubstitutes { get; set; }
+        #endregion
+
         #region BaseClass
 
         public virtual DbSet<AppLogItem> AppLogItems { get; set; }
