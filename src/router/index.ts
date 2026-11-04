@@ -545,6 +545,10 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/quality/management-reviews/:id", name: "QualityReviewEdit", component: () => import("@/views/quality/ReviewEdit.vue") },
   { path: "/quality/settings", name: "QualitySettings", component: () => import("@/views/quality/Settings.vue"), meta: { roles: QualityRoles.readers } },
   // Project control (PMO): the paths of the alert links of the API (/project-control/portfolio, guarantees, changes, milestones, transmittals, penalties) are kept
+  { path: "/tasks", name: "Tasks", component: () => import("@/views/tasks/Tasks.vue") },
+  { path: "/project-control/progress-approval", name: "ProjectControlProgressApproval", component: () => import("@/views/projectControl/ProgressApproval.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/registers", name: "ProjectControlRegisters", component: () => import("@/views/projectControl/Registers.vue"), meta: { roles: ProjectControlRoles.readers } },
+  { path: "/project-control/one-page", name: "ProjectControlOnePage", component: () => import("@/views/projectControl/OnePage.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/portfolio", name: "ProjectControlPortfolio", component: () => import("@/views/projectControl/Portfolio.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/project", name: "ProjectControlProject", component: () => import("@/views/projectControl/Project.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/wbs", name: "ProjectControlWbs", component: () => import("@/views/projectControl/Wbs.vue"), meta: { roles: ProjectControlRoles.readers } },

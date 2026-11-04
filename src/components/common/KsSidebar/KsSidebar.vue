@@ -476,6 +476,9 @@ const links = {
     { title: "ساختار شکست کار (WBS)", routeName: "ProjectControlWbs", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "فعالیت‌ها، وابستگی‌ها و تقویم", routeName: "ProjectControlActivities", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "کنترل زمان‌بندی (CPM)", routeName: "ProjectControlSchedule", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "کارتابل تایید پیشرفت", routeName: "ProjectControlProgressApproval", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "ثبت‌های PMBOK (ریسک، مساله، ...)", routeName: "ProjectControlRegisters", disabled: !hasRole(ProjectControlRoles.readers) },
+    { title: "خلاصه یک‌صفحه‌ای پروژه", routeName: "ProjectControlOnePage", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "نمودار گانت", routeName: "ProjectControlGantt", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "خط مبنا و هزینه", routeName: "ProjectControlBaselines", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "پیشرفت و منحنی S", routeName: "ProjectControlProgress", disabled: !hasRole(ProjectControlRoles.readers) },
@@ -595,6 +598,7 @@ onMounted(() => {
 onBeforeUnmount(() => inboxTimer && clearInterval(inboxTimer));
 const officeLinks = computed<Links[]>(() => [
   { title: "کارتابل اداری", routeName: "OfInbox", badge: inboxOpen.value },
+  { title: "وظایف من (کارتابل، بورد، تقویم)", routeName: "Tasks" },
   { title: "نامه‌ها", routeName: "OfLetters" },
   { title: "مدیریت نامه‌ها (قالب، شماره‌گذاری، آرشیو)", routeName: "OfLetterAdmin", disabled: !hasRole(OfficeRoles.letterAdmins) },
   { title: "جلسات", routeName: "OfMeetings" },

@@ -2,7 +2,8 @@
 import { onMounted, ref, watch } from "vue";
 import { confirmDailyReport, getDailyReport, saveDailyReport } from "@/api/ProjectControlAPIs";
 import JDate from "@/components/pc/JDate.vue";
-import { fail, jalali, ok, today } from "@/composables/inventory";
+import DailyExtras from "@/components/pc/progress/DailyExtras.vue";
+import { fail, jalali, ok, printPage, today } from "@/composables/inventory";
 import { unitOptions } from "@/composables/projectControl";
 import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
 
@@ -13,6 +14,7 @@ const unit = ref<string>("ALL");
 const date = ref<string | null>(today());
 const rep = ref<any>(null);
 const busy = ref(false);
+const sub = ref("manpower");
 const canWrite = hasRole(ProjectControlRoles.unitManagers);
 const role = currentRole();
 
@@ -55,6 +57,7 @@ watch(() => props.contractId, load);
       <button class="btn btn-sm btn-secondary" @click="load">نمایش</button>
     </div>
     <div v-if="rep">
+      <div class="d-print-none mb-2"><button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ گزارش</button></div>
       <p class="mb-2">
         گزارش روزانه {{ unit === "ALL" ? "همه واحدها" : unitOptions.find((u) => u[0] === unit)?.[1] }} — {{ jalali(rep.reportDate) }}
         <span :class="rep.state === 1 ? 'ok' : 'warn'" class="inv-badge">{{ rep.state === 1 ? "تایید شد " + jalali(rep.confirmedAt) : rep.id ? "ذخیره‌شده (تاییدنشده)" : "پیش‌نویس سیستم" }}</span>
@@ -77,9 +80,12 @@ watch(() => props.contractId, load);
           </tbody>
         </table>
       </div>
+      <h6 class="mt-3">نیروی انسانی، مصالح، ماشین‌آلات، موانع و HSE</h6>
+      <DailyExtras v-model:sub="sub" :rep="rep" :locked="rep.state === 1 || !canWrite" :activities="rep.lines" />
+      <p v-if="rep.creatorName" class="small inv-muted mb-2">تهیه‌کننده: {{ rep.creatorName }}<span v-if="rep.confirmedByName"> | تاییدکننده: {{ rep.confirmedByName }} {{ rep.confirmedAtText }}</span> (تاییدکننده نمی‌تواند تهیه‌کننده یا ویرایشگر گزارش باشد)</p>
       <div v-if="rep.state !== 1 && canWrite" class="d-flex gap-2 d-print-none">
         <button :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
-        <button v-if="mayConfirm()" :disabled="busy || !rep.lines.length" class="btn btn-sm btn-success" @click="confirm">تایید گزارش</button>
+        <button v-if="mayConfirm() && rep.canConfirm !== false" :disabled="busy || !rep.lines.length" class="btn btn-sm btn-success" @click="confirm">تایید گزارش</button>
       </div>
       <p class="inv-muted mt-2 mb-0">درصد این گزارش فقط یادداشت است و پیشرفت فعالیت را تغییر نمی‌دهد (پیشرفت از «درخواست‌های پیشرفت» یا رویدادهای سیستم می‌آید). برای فعالیت دارای تاخیر، کد و شرح دلیل و اقدام اصلاحی لازم است؛ تایید را مدیر همان واحد انجام می‌دهد.</p>
     </div>
