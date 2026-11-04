@@ -1,9 +1,12 @@
 <script setup lang="ts">
 // The generic dashboard: KPI cards, charts and tables of one dashboard answer. Every widget links to the page it comes from (a drill-down); money that the role may not see is shown as a dash.
 import DashChart from "@/components/dashboards/DashChart.vue";
+import { jalali } from "@/composables/inventory";
 
 defineProps<{ dashboard: any }>();
 const toneClass = (t: string) => (t === "ok" ? "ok" : t === "warn" ? "warn" : t === "bad" ? "bad" : "info");
+// dates travel as ISO (yyyy-MM-dd) and are shown in Shamsi
+const cellText = (c: any) => (typeof c === "string" && /^\d{4}-\d{2}-\d{2}/.test(c) ? jalali(c) : c);
 const fmt = (v: number | null | undefined) => (v === null || v === undefined ? "—" : Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("fa-IR") : Number(v.toFixed(2)).toLocaleString("fa-IR"));
 </script>
 
@@ -36,7 +39,7 @@ const fmt = (v: number | null | undefined) => (v === null || v === undefined ? "
             <tbody>
               <tr v-if="!t.rows.length"><td :colspan="t.columns.length" class="text-center inv-muted">موردی نیست.</td></tr>
               <tr v-for="(r, i) in t.rows" :key="i">
-                <td v-for="(cell, j) in r" :key="j"><router-link v-if="j === 0 && t.rowLinks && t.rowLinks[i]" :to="t.rowLinks[i]">{{ cell }}</router-link><template v-else>{{ cell }}</template></td>
+                <td v-for="(cell, j) in r" :key="j"><router-link v-if="j === 0 && t.rowLinks && t.rowLinks[i]" :to="t.rowLinks[i]">{{ cellText(cell) }}</router-link><template v-else>{{ cellText(cell) }}</template></td>
               </tr>
             </tbody>
           </table>

@@ -481,6 +481,8 @@ export const ProjectControlRoles = {
   /** EDMS (P-B7b): the PMO edits the approver matrix; DCC and PMO edit the distribution lists and cancel somebody else's check-out */
   edmsMatrix: list("PMO"),
   edmsManagers: list("DCC,PMO"),
+  /** history, links and register export of the documents (the floor roles read only the released revision) */
+  docReaders: list("PMO,CEO,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,AUDITOR"),
   edmsShop: list("PRODUCTIONMANAGER,SHOPSUPERVISOR,OPERATOR,MAINTENANCE,ASSEMBLER,CONSTRUCTION,QC,QA,PLANNING,PROJECTMANAGER,WAREHOUSE,WHSUPERVISOR,SECURITY,PMO,DCC,ENGINEERING,ENGINEER"),
   tenderWriters: list("COMMERCIAL,ENGINEERING,ENGINEER,DCC,PMO"),
   tenderReaders: list("COMMERCIAL,ENGINEERING,ENGINEER,DCC,PMO,CEO,PROJECTMANAGER,PLANNING"),
@@ -517,5 +519,5 @@ export const TraceRoles = {
 
 /** Management dashboards (P-B7b): the API lists the dashboards of the role (api/v1/dashboards); this list only shows the menu entry. */
 export const DashboardRoles = {
-  any: list("PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR,WAREHOUSE,WHSUPERVISOR,QC,QA,ENGINEERING,PRODUCTIONMANAGER,SHOPSUPERVISOR,HR,HRMANAGER"),
+  any: list("PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR,WAREHOUSE,WHSUPERVISOR,QC,QA,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,PRODUCTIONMANAGER,SHOPSUPERVISOR,HR,HRMANAGER"),
 };

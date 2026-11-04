@@ -24,7 +24,7 @@ async function load() {
 }
 const chart = computed(() => d.value && {
   key: "forecast", title: "", kind: "bar", masked: d.value.pricesMasked,
-  labels: d.value.buckets.map((b: any) => jalali(b.from)),
+  labels: d.value.buckets.map((b: any) => b.label),
   series: [
     { name: "سفارش‌ها", values: d.value.buckets.map((b: any) => b.openOrders) },
     { name: "استعلام‌ها", values: d.value.buckets.map((b: any) => b.inquiries) },
@@ -54,7 +54,7 @@ watch(pcContractId, load);
         <template v-else>
           <div class="d-flex flex-wrap gap-3 mb-3">
             <span>کل: <b>{{ money(d.total) }}</b></span><span>سفارش‌ها: <b>{{ money(d.openOrdersTotal) }}</b></span><span>استعلام‌ها: <b>{{ money(d.inquiriesTotal) }}</b></span>
-            <span>صورت‌وضعیت‌ها: <b>{{ money(d.statementsTotal) }}</b></span><span :class="d.overdue > 0 ? 'text-danger' : ''">سررسیدگذشته: <b>{{ money(d.overdue) }}</b></span>
+            <span>صورت‌وضعیت‌ها: <b>{{ money(d.statementsTotal) }}</b></span><span :class="d.overdue > 0 ? 'text-danger' : ''">سررسیدگذشته (جدا از بازه‌ها): <b>{{ money(d.overdue) }}</b></span><span>کل با سررسیدگذشته: <b>{{ money(d.totalWithOverdue) }}</b></span><span v-if="d.excludedForeignOrders" class="text-warning">سفارش ارزی بدون نرخ (خارج از جمع): <b>{{ d.excludedForeignOrders }}</b></span>
           </div>
           <DashChart v-if="chart" :chart="chart" :key="period + count + d.total" />
           <div class="table-responsive mt-3">

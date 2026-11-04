@@ -44,6 +44,7 @@ async function importExcel(e: Event) {
 const { job, run } = usePcPrint();
 const canDraft = hasRole(ProjectControlRoles.mdrDraft);
 const canEdit = hasRole(ProjectControlRoles.dcc);
+const canDocs = hasRole(ProjectControlRoles.docReaders);
 const canApprove = hasRole(ProjectControlRoles.internalApprove);
 
 async function load() {
@@ -110,7 +111,7 @@ defineExpose({ rows });
           <input v-model="text" class="form-control form-control-sm" placeholder="شماره یا عنوان" />
           <button v-if="canDraft && !mdl" :disabled="busy || !workOrderId" class="btn btn-sm btn-outline-primary" title="دستور ساخت را انتخاب کنید" @click="draft">ساخت پیش‌نویس از قالب</button>
           <button v-if="canEdit" class="btn btn-sm btn-primary" @click="form = blank()">سند جدید</button>
-          <button class="btn btn-sm btn-outline-secondary" @click="exportExcel()">خروجی Excel</button>
+          <button v-if="canDocs" class="btn btn-sm btn-outline-secondary" @click="exportExcel()">خروجی Excel</button>
           <template v-if="canEdit"><button class="btn btn-sm btn-outline-secondary" @click="exportExcel(true)">قالب Excel</button><button :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="excelFile?.click()">ورود از Excel</button><input ref="excelFile" type="file" accept=".xlsx" class="d-none" @change="importExcel" /></template>
         </div>
         <p class="mb-2">{{ rows.length }} سند — {{ approved }} تایید شده ({{ pct(rows.length ? (approved * 100) / rows.length : 0, 0) }})</p>
@@ -126,7 +127,7 @@ defineExpose({ rows });
                 <td class="small"><span class="inv-ltr">{{ r.lastTransmittalNumber }}</span> {{ jalali(r.lastTransmittalDate) }}</td>
                 <td v-if="mdl"><b class="inv-ltr">{{ r.clientResponseCode }}</b> {{ jalali(r.clientResponseDate) }}</td>
                 <td class="d-print-none text-nowrap">
-                  <button class="btn btn-sm btn-outline-secondary me-1" @click="edmsId = r.id">بازنگری‌ها</button>
+                  <button v-if="canDocs" class="btn btn-sm btn-outline-secondary me-1" @click="edmsId = r.id">بازنگری‌ها</button>
                   <template v-if="canEdit">
                     <button v-if="!r.clientSubmittal && r.issueState === 0" class="btn btn-sm btn-outline-primary me-1" @click="rev = { r, action: 'first-issue', revision: r.revision || 'A' }">ارسال اول</button>
                     <button v-if="!r.clientSubmittal && r.issueState === 1" class="btn btn-sm btn-outline-primary me-1" @click="rev = { r, action: 'second-issue', revision: r.revision }">ارسال دوم</button>

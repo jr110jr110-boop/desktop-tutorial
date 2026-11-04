@@ -38,7 +38,9 @@ export const acknowledgeNotice = (id: number) => call("post", `${base}/notices/$
 
 // shop floor
 export const getShopDocuments = (orderId: number, operationId?: number | null) => call("get", `${base}/shop/orders/${orderId}/documents`, undefined, clean({ operationId }));
-export const getControlledCopy = (revisionId: number, documentId?: string | null, print = true) => call("get", `${base}/controlled-copy`, undefined, clean({ revisionId, documentId, print }));
+export const getControlledCopy = (revisionId: number, documentId?: string | null) => call("get", `${base}/controlled-copy`, undefined, clean({ revisionId, documentId }));
+/** the print itself is logged: a POST */
+export const printControlledCopy = (revisionId: number, documentId?: string | null) => call("post", `${base}/controlled-copy/print`, { revisionId, documentId });
 
 // Excel
 export async function downloadMdrExcel(contractId: number, opts: { clientOnly?: boolean; workOrderId?: number | null; template?: boolean } = {}): Promise<string | null> {

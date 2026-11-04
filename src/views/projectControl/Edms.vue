@@ -17,6 +17,7 @@ const tabs = [["part", "اسناد یک قطعه / تگ"], ["tags", "ثبت تگ
 const canMatrix = hasRole(ProjectControlRoles.edmsMatrix);
 const canManage = hasRole(ProjectControlRoles.edmsManagers);
 const canTag = hasRole(ProjectControlRoles.dcc);
+const canDocs = hasRole(ProjectControlRoles.docReaders);
 const statusText: Record<number, string> = { 1: "پیش‌نویس", 2: "در حال بررسی", 3: "تاییدشده", 4: "منتشرشده", 5: "جایگزین‌شده", 6: "منسوخ", 7: "As-Built" };
 
 // ---- part / tag
@@ -116,7 +117,7 @@ watch([tab, pcContractId], refresh);
                 <td><b v-if="d.releasedCode" class="inv-ltr">{{ d.releasedCode }}</b><span v-else class="text-danger small">منتشر نشده</span> <span class="small">{{ jalali(d.releasedAt) }}</span></td>
                 <td>{{ d.latestStatus ? statusText[d.latestStatus] : "—" }}</td>
                 <td class="small"><div v-for="f in d.files" :key="f.id"><a href="#" @click.prevent="downloadFile(f.documentId, f.fileName)">{{ f.fileName }}</a></div></td>
-                <td><button v-if="d.deliverableId" class="btn btn-sm btn-outline-secondary" @click="panel = d.deliverableId">بازنگری‌ها</button></td>
+                <td><button v-if="d.deliverableId && canDocs" class="btn btn-sm btn-outline-secondary" @click="panel = d.deliverableId">بازنگری‌ها</button></td>
               </tr>
             </tbody>
           </table>

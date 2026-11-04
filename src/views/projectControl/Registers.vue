@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
@@ -17,7 +18,8 @@ import { printPage } from "@/composables/inventory";
 import { pcContractId } from "@/composables/projectControl";
 
 // PMBOK registers of the project: risks, issues, stakeholders, lessons learned, deliverables, photos, evaluations, weekly report, phase evaluation.
-const tab = ref("risks");
+const route = useRoute();
+const tab = ref(typeof route.query.tab === "string" && route.query.tab ? route.query.tab : "risks");
 const tabs = [
   { key: "risks", title: "ریسک‌ها" }, { key: "issues", title: "مسائل" }, { key: "stakeholders", title: "ذی‌نفعان" }, { key: "lessons", title: "درس‌های آموخته" },
   { key: "deliverables", title: "تحویلی‌ها" }, { key: "photos", title: "عکس‌های پروژه" }, { key: "evaluations", title: "ارزیابی پیمانکار و مشاور" },
