@@ -111,7 +111,7 @@ namespace Services.NasbNiro.Inventory
             }
 
             request.Issues = await _uow.Set<InventoryDocument>()
-                .Where(d => d.MaterialRequestId == id && !d.Deleted && d.Status != InventoryDocumentStatus.Draft)
+                .Where(d => d.MaterialRequestId == id && d.Type != InventoryDocumentType.ProductionReturn && !d.Deleted && d.Status != InventoryDocumentStatus.Draft)
                 .OrderBy(d => d.Id).Select(d => d.Number + (d.Status == InventoryDocumentStatus.Cancelled ? " (باطل)" : "")).ToListAsync(cancellationToken);
 
             var raw = await Requests.Where(r => r.Id == id).Select(r => new

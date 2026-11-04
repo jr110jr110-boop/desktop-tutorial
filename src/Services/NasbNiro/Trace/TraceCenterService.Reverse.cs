@@ -35,6 +35,25 @@ namespace Services.NasbNiro.Trace
 
         public async Task<ResponseDto<ReverseTraceDto>> ReverseAsync(ReverseTraceQuery query, CancellationToken ct)
         {
+            // a reader who may not see supplier names cannot find lots by a supplier name either (the answer would give the name away)
+            if (!SeesNames && (query?.ProviderId != null || string.Equals(Clean(query?.Kind), "supplier", StringComparison.OrdinalIgnoreCase)))
+                return Bad<ReverseTraceDto>("جست‌وجو بر اساس تامین‌کننده برای این نقش مجاز نیست.");
+            ResponseDto<ReverseTraceDto> result = await ReverseCoreAsync(query, ct);
+            if (result.Success && result.Data != null && !SeesNames)
+            {
+                ReverseTraceDto d = result.Data;
+                d.NamesMasked = true;
+                foreach (ReverseRootDto r in d.Roots) if (r.ProviderName != null) r.ProviderName = TraceRoles.Hidden;
+                foreach (ReverseProjectDto p in d.Projects) if (p.Customer != null) p.Customer = TraceRoles.Hidden;
+                foreach (ReverseDeliveryDto x in d.Deliveries) { if (x.Customer != null) x.Customer = TraceRoles.Hidden; if (x.Destination != null) x.Destination = TraceRoles.Hidden; }
+                foreach (ReverseConsumptionDto x in d.Consumptions) if (x.ProviderName != null) x.ProviderName = TraceRoles.Hidden;
+                foreach (ReverseInstalledDto x in d.Installed) if (x.Customer != null) x.Customer = TraceRoles.Hidden;
+            }
+            return result;
+        }
+
+        private async Task<ResponseDto<ReverseTraceDto>> ReverseCoreAsync(ReverseTraceQuery query, CancellationToken ct)
+        {
             string text = Clean(query?.Q);
             if (text == null && query?.LotId == null && query?.ProviderId == null) return Bad<ReverseTraceDto>("شماره بچ، شماره ذوب، تامین‌کننده، سفارش خرید یا درخواست خرید را وارد کنید.");
             int depth = Math.Max(1, Math.Min(query.Depth ?? DefaultReverseDepth, MaxReverseDepth));
@@ -218,7 +237,7 @@ namespace Services.NasbNiro.Trace
                 serials.UnionWith(await _uow.Set<SerialUnit>().AsNoTracking().Where(u => !u.Deleted && u.SerialNumber == text).Select(u => u.Id).ToListAsync(ct));
                 if (serials.Count > 0) return ("serial", lots, serials);
             }
-            if (kind == null)
+            if (kind == null && SeesNames)
             {
                 // a supplier by name, as the last try
                 List<int> providers = await _uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AsNoTracking().Where(p => !p.Deleted && p.Name.Contains(text)).OrderBy(p => p.Id).Select(p => p.Id).Take(5).ToListAsync(ct);
@@ -337,10 +356,63 @@ namespace Services.NasbNiro.Trace
             List<ReverseDeliveryDto> deliveries = await DeliveriesAsync(nodes.Values.Where(n => n.Kind == "lot").Select(n => n.Id).ToList(), nodes.Values.Where(n => n.Kind == "serial").Select(n => n.Id).ToList(), deliveryWorkOrders, ct);
             dto.Deliveries = deliveries;
 
+            // ---- material that left the stock outside a production order kit (project or activity issue, subcontractor, back to the supplier): the recall must reach it too
+            var lotNodeIds = nodes.Values.Where(n => n.Kind == "lot").Select(n => n.Id).ToList();
+            var serialNodeIds = nodes.Values.Where(n => n.Kind == "serial").Select(n => n.Id).ToList();
+            var consumptionWorkOrders = new List<int>();
+            if (lotNodeIds.Count > 0 || serialNodeIds.Count > 0)
+            {
+                IQueryable<int> orderKits = _uow.Set<MfProductionOrder>().AsNoTracking().Where(o => !o.Deleted && o.ProductionReceiptId != null && o.KitRequestId != null).Select(o => o.KitRequestId.Value);
+                var outside = await _uow.Set<StockTransaction>().AsNoTracking()
+                    .Where(t => !t.IsReversal && t.Quantity < 0 && !t.Document.Deleted && t.Document.Status == InventoryDocumentStatus.Confirmed
+                        && (t.Document.Type == InventoryDocumentType.Issue || t.Document.Type == InventoryDocumentType.SubcontractIssue || t.Document.Type == InventoryDocumentType.SupplierReturn)
+                        && ((t.SerialUnitId == null && t.LotId != null && lotNodeIds.Contains(t.LotId.Value)) || (t.SerialUnitId != null && serialNodeIds.Contains(t.SerialUnitId.Value)))
+                        && (t.Document.MaterialRequestId == null || !orderKits.Contains(t.Document.MaterialRequestId.Value)))
+                    .Select(t => new
+                    {
+                        t.LotId, t.SerialUnitId, t.Quantity, ItemCode = t.Item.Code, DocumentId = t.DocumentId, t.Document.Number, t.Document.DocumentDate, t.Document.Type, t.Document.WorkOrderId,
+                        WorkOrderCode = t.Document.WorkOrder.Code, ProviderName = t.Document.Provider.Name, LotNumber = t.Lot.LotNumber, SerialNumber = t.SerialUnit.SerialNumber,
+                    }).ToListAsync(ct);
+                consumptionWorkOrders.AddRange(outside.Where(r => r.WorkOrderId.HasValue).Select(r => r.WorkOrderId.Value));
+                foreach (var r in outside.OrderBy(r => r.DocumentDate).ThenBy(r => r.Number, StringComparer.Ordinal))
+                    dto.Consumptions.Add(new ReverseConsumptionDto
+                    {
+                        DocumentId = r.DocumentId, DocumentNumber = r.Number, DocumentDate = r.DocumentDate,
+                        Kind = r.Type == InventoryDocumentType.Issue ? "issue" : r.Type == InventoryDocumentType.SubcontractIssue ? "subcontract" : "supplierReturn",
+                        NodeKey = r.SerialUnitId.HasValue ? SerialKey(r.SerialUnitId.Value) : LotKey(r.LotId.Value), ItemCode = r.ItemCode,
+                        LotNumber = r.SerialUnitId.HasValue ? null : r.LotNumber, SerialNumber = r.SerialNumber, Quantity = -r.Quantity, WorkOrderCode = r.WorkOrderCode, ProviderName = r.ProviderName,
+                    });
+            }
+
+            // ---- the after-sales installed base: a traced serial piece that is a delivered product at a customer
+            var installedWorkOrders = new List<int>();
+            if (serialNodeIds.Count > 0)
+            {
+                var installed = await _uow.Set<Entities.Model.NasbNiro.AfterSales.SvInstalledUnit>().AsNoTracking()
+                    .Where(u => !u.Deleted && u.SerialUnitId != null && serialNodeIds.Contains(u.SerialUnitId.Value))
+                    .Select(u => new { SerialUnitId = u.SerialUnitId.Value, u.Tag, u.Title, u.WorkOrderId, u.HandoverDate, u.Decommissioned, ContractId = u.ContractId, SerialNumber = (string)null }).ToListAsync(ct);
+                var serialNumbers = serialNodeIds.Count == 0 ? new Dictionary<int, string>() : (await _uow.Set<SerialUnit>().AsNoTracking().Where(s => serialNodeIds.Contains(s.Id)).Select(s => new { s.Id, s.SerialNumber }).ToListAsync(ct)).ToDictionary(s => s.Id, s => s.SerialNumber);
+                List<int> contractIds = installed.Where(i => i.ContractId.HasValue).Select(i => i.ContractId.Value).Distinct().ToList();
+                var contracts = contractIds.Count == 0 ? new Dictionary<int, (string Code, string Employer)>()
+                    : (await _uow.Set<ContractEntity>().AsNoTracking().Where(c => contractIds.Contains(c.Id)).Select(c => new { c.Id, c.Code, c.Employer }).ToListAsync(ct)).ToDictionary(c => c.Id, c => (Code: c.Code, Employer: c.Employer));
+                installedWorkOrders.AddRange(installed.Where(i => i.WorkOrderId.HasValue).Select(i => i.WorkOrderId.Value));
+                foreach (var i in installed.OrderBy(i => i.SerialUnitId))
+                    dto.Installed.Add(new ReverseInstalledDto
+                    {
+                        NodeKey = SerialKey(i.SerialUnitId), SerialNumber = serialNumbers.TryGetValue(i.SerialUnitId, out string sn) ? sn : null, Tag = i.Tag, Title = i.Title, HandoverDate = i.HandoverDate, Decommissioned = i.Decommissioned,
+                        ContractCode = i.ContractId.HasValue && contracts.TryGetValue(i.ContractId.Value, out var ct2) ? ct2.Code : null, Customer = i.ContractId.HasValue && contracts.TryGetValue(i.ContractId.Value, out var ct3) ? ct3.Employer : null,
+                        WorkOrderCode = i.WorkOrderId.HasValue ? "#" + i.WorkOrderId.Value : null,
+                    });
+            }
+            deliveryWorkOrders.AddRange(consumptionWorkOrders);
+            deliveryWorkOrders.AddRange(installedWorkOrders);
+
             // ---- projects
             var projectCounts = nodes.Values.Where(n => n.WorkOrderId.HasValue).GroupBy(n => n.WorkOrderId.Value).ToDictionary(g => g.Key, g => g.Count());
             List<int> extraWorkOrders = deliveryWorkOrders.Distinct().Where(w => !workOrders.ContainsKey(w)).ToList();
             foreach (var kv in await LoadWorkOrdersAsync(extraWorkOrders, ct)) workOrders[kv.Key] = kv.Value;
+            foreach (ReverseInstalledDto inst in dto.Installed.Where(i => i.WorkOrderCode != null && i.WorkOrderCode.StartsWith("#")))
+                inst.WorkOrderCode = int.TryParse(inst.WorkOrderCode.Substring(1), out int iwId) && workOrders.TryGetValue(iwId, out WorkOrderInfo iw) ? iw.Code : null;
             foreach (int w in deliveryWorkOrders.Distinct()) if (!projectCounts.ContainsKey(w)) projectCounts[w] = 0;
             foreach (var kv in projectCounts.OrderBy(k => k.Key))
             {
@@ -351,7 +423,7 @@ namespace Services.NasbNiro.Trace
             dto.Counts = new ReverseCountsDto
             {
                 Roots = dto.Roots.Count, Nodes = dto.Nodes.Count, Items = dto.Items.Count, Lots = dto.Nodes.Count(n => n.Kind == "lot"), Serials = dto.Nodes.Count(n => n.Kind == "serial"),
-                Terminals = dto.Terminals.Count, Projects = dto.Projects.Count, Deliveries = dto.Deliveries.Count,
+                Terminals = dto.Terminals.Count, Projects = dto.Projects.Count, Deliveries = dto.Deliveries.Count, Consumptions = dto.Consumptions.Count, Installed = dto.Installed.Count,
             };
         }
 

@@ -33,7 +33,7 @@ namespace MsTests
             return entity;
         }
 
-        private sealed class Chain
+        internal sealed class Chain
         {
             public TraceGenealogyPb4Tests.Scenario S;
             public int OrderId, PartLot, StageLot, Assembly, DeliveryDoc, Pr, Po, ReceiptDoc;
@@ -43,7 +43,7 @@ namespace MsTests
         /// Heat H-1001 (lot A) was bought on PR-1 / PO-1 / receipt R-1, consumed by order PO-4001 (part lot), whose stage lot fed order PO-4002 (a second part lot),
         /// which was installed in the assembly serial SN-1, delivered to the customer. Lot B (heat H-2002) went into a separate part lot and nowhere else.
         /// </summary>
-        private static Chain SeedChain(AppHost host)
+        internal static Chain SeedChain(AppHost host)
         {
             var c = new Chain { S = TraceGenealogyPb4Tests.SeedBase(host) };
             var s = c.S;
@@ -216,12 +216,12 @@ namespace MsTests
         // ------------------------------------------------------------------------------------------ no N+1
 
         /// <summary>Counts how many times the service asks the context for a table: one call is one query, so the count must not depend on the number of lots.</summary>
-        private sealed class CountingUow : IUnitOfWork
+        internal sealed class CountingUow : IUnitOfWork
         {
             private readonly IUnitOfWork _inner;
             public int Calls;
             public CountingUow(IUnitOfWork inner) { _inner = inner; }
-            public DbSet<TEntity> Set<TEntity>() where TEntity : class { Calls++; return _inner.Set<TEntity>(); }
+            public DbSet<TEntity> Set<TEntity>() where TEntity : class { Calls++; if (ThrowOnSet) throw new NullReferenceException("simulated"); return _inner.Set<TEntity>(); }
             public void AddRange<TEntity>(IEnumerable<TEntity> entities) where TEntity : class => _inner.AddRange(entities);
             public void RemoveRange<TEntity>(IEnumerable<TEntity> entities) where TEntity : class => _inner.RemoveRange(entities);
             public Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class => _inner.Entry(entity);
@@ -234,6 +234,7 @@ namespace MsTests
             public int SaveChanges() => _inner.SaveChanges();
             public Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) => _inner.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
             public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => _inner.SaveChangesAsync(cancellationToken);
+            public bool ThrowOnSet;
             public void Dispose() { }
         }
 
@@ -270,6 +271,36 @@ namespace MsTests
             Assert.AreEqual(few, many, "same number of table reads for 3 and 28 nodes");
             var r = await Reverse(host, Pmo, new ReverseTraceQuery { Q = "H-1001" });
             Assert.AreEqual(28, r.Data.Nodes.Count);
+        }
+
+        [TestMethod]
+        public async Task The_Tree_Query_Count_Does_Not_Grow_With_The_Number_Of_Lots_Of_The_Part()
+        {
+            AppHost host = TraceGenealogyPb4Tests.NewHost("n2");
+            Chain c = SeedChain(host);
+            async Task<int> Counted()
+            {
+                int calls = 0;
+                await host.As(Pmo, async p =>
+                {
+                    var counting = new CountingUow(p.GetRequiredService<IUnitOfWork>());
+                    var svc = new TraceCenterService(counting, p.GetRequiredService<Services.NasbNiro.Inventory.IInventoryUserContext>(), p.GetRequiredService<Services.NasbNiro.Attachments.IAttachmentService>());
+                    var res = await svc.TreeAsync(new TraceQuery { Q = "99.22.01.001.2" }, Ct);
+                    Assert.IsTrue(res.Success, res.Message);
+                    calls = counting.Calls;
+                    return 0;
+                });
+                return calls;
+            }
+            int few = await Counted();
+            var s = c.S;
+            for (int i = 0; i < 25; i++)
+            {
+                var o = TraceGenealogyPb4Tests.SeedOrder(host, s, "PY-" + i, s.PartItem, 1, (s.RmItem, 1));
+                int lot = Seed(host, new InventoryLot { ItemId = s.PartItem, LotNumber = "PY-" + i }).Id;
+                Seed(host, new GenealogyLink { ProductionOrderId = o.Order, OutputItemId = s.PartItem, OutputLotId = lot, InputItemId = s.RmItem, InputLotId = s.LotA, Quantity = 1, ReceiptDocumentId = c.ReceiptDoc, LinkDate = DateTime.Today, Source = GenealogySource.Live });
+            }
+            Assert.AreEqual(few, await Counted(), "same number of table reads for 3 and 28 lots and orders");
         }
     }
 }

@@ -141,7 +141,7 @@ namespace Services.NasbNiro.Trace
 
             // ----- the reachable lines inside the depth and the part cap
             var byAsm = lines.GroupBy(l => l.Assembly).ToDictionary(g => g.Key, g => g.OrderBy(l => l.SortOrder).ThenBy(l => l.ItemNumber).ToList());
-            var partNumbers = new List<string>();
+            var partNumbers = new List<string> { rootPn };
             bool Walk(string asm, int level, HashSet<string> path, Action<StructLine, int> visit)
             {
                 bool cut = false;
@@ -165,6 +165,7 @@ namespace Services.NasbNiro.Trace
 
             // ----- everything around the parts (a fixed number of queries)
             await LoadPartScopeAsync(c, partNumbers, workOrderId, asDesigned ? (int?)null : chosen.Id, product.Id, depth, ct);
+            if (c.CapNotes.Count > 0) { dto.Truncated = true; dto.Notes.AddRange(c.CapNotes); }
 
             // ----- the nodes
             TraceNodeDto root = Node(c, "product", asDesigned ? "asDesigned" : "asBuilt", product.Title, product.Code);
@@ -179,8 +180,14 @@ namespace Services.NasbNiro.Trace
                 Fact(root, "تعداد محصول", chosen.Count.ToString(CultureInfo.InvariantCulture));
             }
             var cache = new Dictionary<string, List<TraceNodeDto>>();
+            root.Children.AddRange(PartDetails(c, rootPn));   // the product itself: its stage items, final-assembly orders, serials and deliveries
             root.Children.AddRange(BuildStructure(c, byAsm, rootPn, 0, depth, new HashSet<string> { rootPn }, cache));
             dto.Root = root;
+        }
+
+        private static void NoteCap(TreeCtx c, string note)
+        {
+            if (!c.CapNotes.Contains(note)) c.CapNotes.Add(note);
         }
 
         private List<TraceNodeDto> BuildStructure(TreeCtx c, Dictionary<string, List<StructLine>> byAsm, string asm, int level, int depth, HashSet<string> path, Dictionary<string, List<TraceNodeDto>> cache)
@@ -233,6 +240,7 @@ namespace Services.NasbNiro.Trace
             string itemTitle = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted && i.PartNumber == pn && i.StageCode2 == null).Select(i => i.Title).FirstOrDefaultAsync(ct);
             line ??= new StructLine { PartNumber = pn, Name = itemTitle ?? pn, Qty = 1, Mob = PbMakeOrBuy.Make };
             await LoadPartScopeAsync(c, new List<string> { pn }, null, null, null, MaxTreeDepth, ct);
+            if (c.CapNotes.Count > 0) { dto.Truncated = true; dto.Notes.AddRange(c.CapNotes); }
 
             TraceNodeDto root = PartNode(c, line, "part");
             root.Quantity = null;
@@ -307,7 +315,18 @@ namespace Services.NasbNiro.Trace
 
             // orders (the project's, else the latest few) and their operations
             IQueryable<MfProductionOrder> orders = _uow.Set<MfProductionOrder>().AsNoTracking().Where(o => o.ItemId != null && partItemIds.Contains(o.ItemId.Value));
-            orders = workOrderId.HasValue ? orders.Where(o => o.WorkOrderId == workOrderId.Value) : orders.OrderByDescending(o => o.Id).Take(20);
+            // PB4 review M5: without a project the newest few of EACH part (not of all parts together); the window shrinks as the tree grows and a note says when something was left out
+            int partCount = Math.Max(1, partItemIds.Count);
+            int perPartOrders = Math.Max(3, Math.Min(20, 600 / partCount));
+            int perPartUnits = Math.Max(3, Math.Min(MaxLotsPerPart, 800 / partCount));
+            if (workOrderId.HasValue) orders = orders.Where(o => o.WorkOrderId == workOrderId.Value);
+            else
+            {
+                var recent = await orders.OrderByDescending(o => o.Id).Select(o => new { o.Id, ItemId = o.ItemId.Value }).Take(perPartOrders * partCount + 1).ToListAsync(ct);
+                var keep = recent.GroupBy(o => o.ItemId).SelectMany(g => g.Take(perPartOrders)).Select(o => o.Id).ToList();
+                if (keep.Count < recent.Count) NoteCap(c, $"برای هر قطعه فقط {perPartOrders} دستور تولید آخر نشان داده شد.");
+                orders = _uow.Set<MfProductionOrder>().AsNoTracking().Where(o => keep.Contains(o.Id));
+            }
             await LoadOrdersAsync(c, orders, ct);
 
             // the units: made by those orders, bought on the project's orders, or (no project) the latest of the items
@@ -340,8 +359,13 @@ namespace Services.NasbNiro.Trace
             }
             else
             {
-                seedLots.UnionWith(await _uow.Set<InventoryLot>().AsNoTracking().Where(l => !l.Deleted && partItemIds.Contains(l.ItemId)).OrderByDescending(l => l.Id).Take(MaxLotsPerPart).Select(l => l.Id).ToListAsync(ct));
-                seedSerials.UnionWith(await _uow.Set<SerialUnit>().AsNoTracking().Where(u => !u.Deleted && partItemIds.Contains(u.ItemId)).OrderByDescending(u => u.Id).Take(MaxLotsPerPart).Select(u => u.Id).ToListAsync(ct));
+                var recentLots = await _uow.Set<InventoryLot>().AsNoTracking().Where(l => !l.Deleted && partItemIds.Contains(l.ItemId)).OrderByDescending(l => l.Id).Select(l => new { l.Id, l.ItemId }).Take(perPartUnits * partCount + 1).ToListAsync(ct);
+                var keptLots = recentLots.GroupBy(l => l.ItemId).SelectMany(g => g.Take(perPartUnits)).Select(l => l.Id).ToList();
+                var recentSerials = await _uow.Set<SerialUnit>().AsNoTracking().Where(u => !u.Deleted && partItemIds.Contains(u.ItemId)).OrderByDescending(u => u.Id).Select(u => new { u.Id, u.ItemId }).Take(perPartUnits * partCount + 1).ToListAsync(ct);
+                var keptSerials = recentSerials.GroupBy(u => u.ItemId).SelectMany(g => g.Take(perPartUnits)).Select(u => u.Id).ToList();
+                if (keptLots.Count < recentLots.Count || keptSerials.Count < recentSerials.Count) NoteCap(c, $"برای هر قطعه فقط {perPartUnits} بچ و {perPartUnits} سریال آخر نشان داده شد (برای دیدن بقیه، پروژه را انتخاب کنید).");
+                seedLots.UnionWith(keptLots);
+                seedSerials.UnionWith(keptSerials);
             }
             c.SeedLots = seedLots.ToList();
             c.SeedSerials = seedSerials.ToList();

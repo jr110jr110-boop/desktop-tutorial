@@ -37,7 +37,7 @@ namespace MsTests
 
         internal static AppHost NewHost(string name) => new AppHost("Pb4_" + name + "_" + Guid.NewGuid().ToString("N"));
 
-        private static T Seed<T>(AppHost host, T entity) where T : class
+        internal static T Seed<T>(AppHost host, T entity) where T : class
         {
             host.Write(uow => { AppHost.Add(uow, entity); uow.SaveChanges(); });
             return entity;
@@ -78,7 +78,7 @@ namespace MsTests
             return (order.Id, kit.Id, op0.Id, op1.Id);
         }
 
-        private static Task<ResponseDto<DocumentDto>> IssueAsync(AppHost host, Scenario s, int kit, params (int ItemId, decimal Qty, int? LotId)[] lines) =>
+        internal static Task<ResponseDto<DocumentDto>> IssueAsync(AppHost host, Scenario s, int kit, params (int ItemId, decimal Qty, int? LotId)[] lines) =>
             host.As(Pmo, async p =>
             {
                 var svc = p.GetRequiredService<IInventoryDocumentService>();
@@ -92,7 +92,7 @@ namespace MsTests
             });
 
         /// <summary>Draft and confirm the production receipt of an order; the order points at it (the production flow does the same).</summary>
-        private static Task<ResponseDto<DocumentDto>> ReceiptAsync(AppHost host, Scenario s, int orderId, string orderNumber, int itemId, decimal qty, List<string> serials = null) =>
+        internal static Task<ResponseDto<DocumentDto>> ReceiptAsync(AppHost host, Scenario s, int orderId, string orderNumber, int itemId, decimal qty, List<string> serials = null) =>
             host.As(Pmo, async p =>
             {
                 var svc = p.GetRequiredService<IInventoryDocumentService>();
@@ -111,7 +111,7 @@ namespace MsTests
                 return await svc.ConfirmAsync(saved.Data.Id, Ct);
             });
 
-        private static List<GenealogyLink> Links(AppHost host, int orderId, bool includeDeleted = false) =>
+        internal static List<GenealogyLink> Links(AppHost host, int orderId, bool includeDeleted = false) =>
             host.Read(u => u.Set<GenealogyLink>().Where(l => l.ProductionOrderId == orderId && (includeDeleted || !l.Deleted)).OrderBy(l => l.Id).ToList());
 
         // ------------------------------------------------------------------------------------------ links from issue + receipt

@@ -76,6 +76,11 @@ namespace Services.NasbNiro.Trace
             foreach (ReverseProjectDto p in d.Projects) projects.Rows.Add(new object[] { p.WorkOrderCode, p.WorkOrderTitle, p.ContractTitle ?? p.ContractCode, p.Customer, p.NodeCount });
             var deliveries = new XlsxSheet { Name = "تحویل به مشتری", Header = new List<string> { "سند", "تاریخ", "کد کالا", "سریال", "بچ", "مقدار", "پروژه", "قرارداد", "کارفرما", "مقصد" } };
             foreach (ReverseDeliveryDto x in d.Deliveries) deliveries.Rows.Add(new object[] { x.DocumentNumber, Shamsi(x.DocumentDate), x.ItemCode, x.SerialNumber, x.LotNumber, x.Quantity, x.WorkOrderCode, x.ContractCode, x.Customer, x.Destination });
+            var consumptions = new XlsxSheet { Name = "مصرف خارج از دستور تولید", Header = new List<string> { "سند", "تاریخ", "نوع", "کد کالا", "بچ", "سریال", "مقدار", "پروژه", "تامین‌کننده" } };
+            foreach (ReverseConsumptionDto x in d.Consumptions)
+                consumptions.Rows.Add(new object[] { x.DocumentNumber, Shamsi(x.DocumentDate), x.Kind == "issue" ? "حواله" : x.Kind == "subcontract" ? "ارسال به پیمانکار" : "برگشت به تامین‌کننده", x.ItemCode, x.LotNumber, x.SerialNumber, x.Quantity, x.WorkOrderCode, x.ProviderName });
+            var installed = new XlsxSheet { Name = "پایگاه نصب‌شده", Header = new List<string> { "سریال", "تگ", "عنوان", "پروژه", "قرارداد", "کارفرما", "تاریخ تحویل", "از رده خارج" } };
+            foreach (ReverseInstalledDto x in d.Installed) installed.Rows.Add(new object[] { x.SerialNumber, x.Tag, x.Title, x.WorkOrderCode, x.ContractCode, x.Customer, Shamsi(x.HandoverDate), x.Decommissioned ? "بله" : "" });
             var info = new XlsxSheet { Name = "مشخصات", Header = new List<string> { "عنوان", "مقدار" } };
             info.Rows.Add(new object[] { "جستجو", d.Query });
             info.Rows.Add(new object[] { "حالت", d.Mode });
@@ -84,7 +89,7 @@ namespace Services.NasbNiro.Trace
             info.Rows.Add(new object[] { "عمق جستجو", d.MaxDepth });
             if (d.Truncated) info.Rows.Add(new object[] { "هشدار", "نتیجه به سقف عمق یا تعداد رسید و ممکن است کامل نباشد." });
             foreach (string note in d.Notes) info.Rows.Add(new object[] { "یادداشت", note });
-            return ResponseDtoHelper.Ok(SimpleXlsx.Build(new List<XlsxSheet> { info, roots, items, nodes, projects, deliveries }));
+            return ResponseDtoHelper.Ok(SimpleXlsx.Build(new List<XlsxSheet> { info, roots, items, nodes, projects, deliveries, consumptions, installed }));
         }
 
         private static string ViaFa(string via) => via switch

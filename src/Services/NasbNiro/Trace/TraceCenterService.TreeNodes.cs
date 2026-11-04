@@ -29,7 +29,9 @@ namespace Services.NasbNiro.Trace
                 if (Full(c)) break;
                 c.Stages.TryGetValue(step.StageCode ?? "", out string stageFa);
                 TraceNodeDto n = Node(c, "stage", "asDesigned", $"{step.Seq}. {stageFa ?? step.StageCode} — {step.Title}", step.StageCode);
-                OpInfo op = allOps.FirstOrDefault(o => string.Equals((o.Title ?? "").Trim(), (step.Title ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
+                // an operation has no reference to the OPC step it came from: the same title and sequence is the best match, the same title alone the next best
+                bool SameTitle(OpInfo o) => string.Equals((o.Title ?? "").Trim(), (step.Title ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+                OpInfo op = allOps.FirstOrDefault(o => o.Sequence == step.Seq && SameTitle(o)) ?? allOps.FirstOrDefault(SameTitle);
                 if (op != null) { n.Status = TraceLabels.Operation(op.Status); n.Tone = TraceLabels.OperationTone(op.Status); n.Basis = "asBuilt"; }
                 Fact(n, "نقطه کنترل کیفیت", step.IsQc ? "بله" : null);
                 if (!string.IsNullOrWhiteSpace(step.Evidence))
@@ -172,7 +174,7 @@ namespace Services.NasbNiro.Trace
             List<int> docIds = rows.Select(r => r.DocumentId).Distinct().ToList();
             foreach (InspInfo i in c.Inspections.Where(i => (u.IsLot && i.LotId == u.Id) || docIds.Contains(i.ReceiptDocumentId)).GroupBy(i => i.Id).Select(g => g.First()).OrderBy(i => i.Id))
                 n.Children.Add(InspectionNode(c, i, rows.FirstOrDefault(r => r.DocumentId == i.ReceiptDocumentId)));
-            foreach (NcrInfo ncr in c.Ncrs.Where(x => u.IsLot ? x.LotId == u.Id : (x.ItemId == u.ItemId && !string.IsNullOrEmpty(x.SerialNumbers) && x.SerialNumbers.Contains(u.Number))).OrderBy(x => x.Id))
+            foreach (NcrInfo ncr in c.Ncrs.Where(x => u.IsLot ? x.LotId == u.Id : (x.ItemId == u.ItemId && !string.IsNullOrEmpty(x.SerialNumbers) && x.SerialNumbers.Split(new[] { ',', ';', '؛', '،', ' ', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Any(s => string.Equals(s.Trim(), u.Number, StringComparison.OrdinalIgnoreCase)))).OrderBy(x => x.Id))
                 n.Children.Add(NcrNode(c, ncr, rows.FirstOrDefault()));
             if (c.Deliveries.TryGetValue(key, out List<ReverseDeliveryDto> deliveries))
                 foreach (ReverseDeliveryDto d in deliveries)

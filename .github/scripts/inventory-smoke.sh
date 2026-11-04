@@ -11170,19 +11170,61 @@ as "$ADMIN_TOKEN" POST $P7TK/reminders/run; check "p7a notifications: the remind
 as "$PLAN_TOKEN" POST $P7TK/reminders/run; r403 "p7a notifications: only the PMO or the CEO runs the reminders by hand (403)"
 TOKEN=$ADMIN_TOKEN
 
-# --- PB4 trace centre: the heat number of the first receipt (H-7781) was issued to a material request, never to a production order, so the where-used walk finds the root and no consumer
-as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the heat number H-7781 resolves to exactly 1 lot and no part, assembly, project or delivery consumed it through a production order" '.success and (.data.roots|length) == 1 and .data.roots[0].heatNumber == "H-7781" and .data.counts.nodes == 0 and .data.counts.items == 0 and .data.counts.deliveries == 0 and .data.counts.projects == 0 and .data.truncated == false'
-as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781&Depth=1"; check "pb4 reverse: a depth limit of 1 is accepted for the same root" '.success and (.data.roots|length) == 1 and .data.maxDepth == 1'
-as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=NO-SUCH-HEAT-PB4"; check "pb4 reverse: an unknown heat number gives no root and says so" '(.success == false) or ((.data.roots|length) == 0)'
+# --- PB4 trace centre, the chain of the brief: lot H-7781 -> kit issue of a production order -> production receipt -> genealogy -> product tree -> reverse trace from the heat number
+# a work order of its own on the contract of the production section, one make process that consumes the raw material RAW and makes the lot-tracked item PB4PART
+call POST Equipments '{"code":"PB4-EQ","title":"Pump for genealogy test"}'; PB4EQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$MFCT,\"equipmentId\":$PB4EQ,\"count\":1}"
+call POST WorkOrders "{\"contractId\":$MFCT,\"equipmentId\":$PB4EQ,\"code\":\"PB4-WO-1\",\"title\":\"Genealogy work order\",\"description\":\"x\",\"count\":1}"; check "pb4 chain: the work order of the genealogy test is created" '.success and .data.id > 0'
+PB4WO=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PB4WO,\"contractId\":$MFCT,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"26\"}"; check "pb4 chain: its project code is built" '.success'
+call POST Assemblies "{\"title\":\"Genealogy casing\",\"code\":\"PB4-ASM-1\",\"workOrderId\":$PB4WO,\"assemblerDuration\":1}"; PB4ASM=$(val .data.id)
+item PB4PART "{\"code\":\"77.10.00.040.1\",\"title\":\"قطعه آزمون شجره\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "pb4 chain: finished lot item"
+call POST Boms "{\"positionNumber\":1,\"title\":\"قطعه آزمون شجره\",\"count\":1,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"assemblyId\":$PB4ASM}"; PB4BOM=$(val .data.id)
+call POST Processes "{\"exitCommodityCode\":\"77.10.00.040.1\",\"enterCommodityCode\":\"$C_RAW\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":5,\"sort\":1,\"programPrice\":0,\"title\":\"ساخت قطعه آزمون شجره\",\"bomId\":$PB4BOM}"; check "pb4 chain: the make process consumes the raw material and makes the part" '.success and .data.id > 0'
+call POST inventory/trace/templates "{\"itemId\":$PB4PART,\"sequence\":10,\"title\":\"تراشکاری شجره\"}"; PB4T=$(val .data.id)
+call POST $MF/operation-standards "{\"operationTemplateId\":$PB4T,\"workCenterId\":$MFWC1,\"setupHours\":0.5,\"runHoursPerUnit\":0.25}"; check "pb4 chain: the standard of the step" '.success'
+mfroute "$PB4PART" "pb4 part"
+as "$PLAN_TOKEN" POST $PC/wbs/generate "{\"contractId\":$MFCT,\"workOrderIds\":[$PB4WO]}"; check "pb4 chain: the WBS generation drafts the production order of the new work order" '.success'
+as "$MPM_TOKEN" GET "$MF/orders?WorkOrderId=$PB4WO&PageSize=0"; check "pb4 chain: exactly one draft production order for the new work order" '.success and (.data.data|length) == 1 and .data.data[0].status == 0 and .data.data[0].itemId == '"$PB4PART"
+PB4ORD=$(val '.data.data[0].id'); PB4ORDN=$(val '.data.data[0].number')
+as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$PB4ORD,\"components\":[{\"itemId\":$RAW,\"quantity\":2}]}"; check "pb4 chain: the components of the order are 2 of the raw material" '.success and (.data.components|length) == 1 and .data.components[0].quantity == 2'
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$PB4ORD}"; check "pb4 chain: the order is released with a kit (a draft material request)" '.success and .data.status == 1 and .data.kitRequestId > 0'
+PB4KIT=$(val .data.kitRequestId)
+as "$MSV_TOKEN" POST inventory/material-requests/action "{\"id\":$PB4KIT,\"action\":\"submit\"}"; check "pb4 chain: the kit is submitted" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" POST inventory/material-requests/action "{\"id\":$PB4KIT,\"action\":\"approve-planning\"}"; check "pb4 chain: planning (the PMO) approves the kit" '.success and .data.planningApproved == true'
+as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$PB4KIT,\"action\":\"approve-manufacturing\"}"; check "pb4 chain: manufacturing approves the kit" '.success and .data.status == 2'
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"2026-10-20T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$PB4KIT,\"lines\":[{\"itemId\":$RAW,\"quantity\":2,\"lotId\":$LOT}]}"; check "pb4 chain: the issue of 2 kg from lot H-7781 against the kit is drafted" '.success and .data.status == 0'
+PB4ISS=$(val .data.id)
+call POST "inventory/documents/$PB4ISS/confirm"; check "pb4 chain: the issue is confirmed" '.success and .data.status == 1'
+as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$PB4ORD,\"action\":\"kit-override\",\"reason\":\"آزمون شجره\"}"; check "pb4 chain: the supervisor refreshes the operation status (the kit is issued)" '.success and ([.data.operations[].status]) == [1]'
+PB4OP=$(val '.data.operations[0].id')
+call POST Machine '{"title":"ماشین آزمون شجره"}'; PB4M=$(val .data)
+call POST $MF/machines/info "{\"machineId\":$PB4M,\"workCenterId\":$MFWC1,\"status\":1}"; check "pb4 chain: a machine of its own" '.success'
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$PB4OP,\"machineId\":$PB4M}"; check "pb4 chain: the operator starts the step" '.success and .data.status == 2'
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PB4OP,\"goodQty\":1}"; check "pb4 chain: the step is finished with 1 good piece" '.success and .data.status == 4'
+as "$MPM_TOKEN" GET "$MF/orders/$PB4ORD"; check "pb4 chain: the order is completed with a receipt draft" '.success and .data.status == 3 and .data.productionReceiptId > 0'
+PB4RCT=$(val .data.productionReceiptId)
+as "$PLAN_TOKEN" GET "$PB4TR/genealogy/order/$PB4ORD"; check "pb4 chain: before the receipt is confirmed the order has no genealogy link" '.success and (.data|length) == 0'
+call POST "inventory/documents/$PB4RCT/confirm"; check "pb4 chain: the production receipt is confirmed" '.success and .data.status == 1'
+as "$PLAN_TOKEN" GET "$PB4TR/genealogy/order/$PB4ORD"; check "pb4 chain: confirming the receipt wrote exactly one link: 2 kg of lot H-7781 (heat H-7781) into the lot named like the order" ".success and (.data|length) == 1 and .data[0].inputLotId == $LOT and .data[0].inputHeatNumber == \"H-7781\" and .data[0].quantity == 2 and .data[0].outputLotNumber == \"$PB4ORDN\" and .data[0].isShared == false and .data[0].source == 1"
+as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/order/$PB4ORD/rebuild"; check "pb4 chain: the rebuild changes nothing" '.success and .data.linksCreated == 0 and .data.linksUpdated == 0 and .data.linksRemoved == 0'
+as "$QC_TOKEN" GET "$PB4TR/tree?Q=$PB4ORDN"; check "pb4 chain: the tree of the new lot shows the material lot H-7781 it was made from, with prices masked for QC" '.success and .data.pricesMasked == true and ([.. | objects | select(.kind? == "material")]|length) == 1 and ([.. | objects | select(.kind? == "material") | .facts[]? | select(.value? != null and (.value|tostring) == "H-7781")]|length) == 1'
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: heat H-7781 reaches exactly 2 nodes (the new lot by production, the rotor by assembly), 2 items and 1 consumption outside an order (the request issue)" ".success and (.data.roots|length) == 1 and .data.counts.nodes == 2 and ([.data.nodes[]|select(.via == \"production\" and .lotNumber == \"$PB4ORDN\")]|length) == 1 and ([.data.nodes[]|select(.via == \"assembly\" and .id == $RT)]|length) == 1 and .data.counts.items == 2 and .data.counts.consumptions == 1 and .data.counts.installed == 1 and .data.installed[0].tag == \"SV-UA\" and .data.truncated == false"
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781&Depth=1"; check "pb4 reverse: depth 1 shows both first-level nodes and says the walk was cut" '.success and .data.counts.nodes == 2 and .data.maxDepth == 1'
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=NO-SUCH-HEAT-PB4"; nomsg "pb4 reverse: an unknown heat number is refused" "پیدا نشد"
 as "$ADMIN_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the lot of heat H-7781 shows exactly 1 purchase receipt node and the prices are not masked for the PMO" '.success and .data.pricesMasked == false and ([.. | objects | select(.kind? == "receipt")]|length) == 1'
 as "$QC_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: QC sees the same chain with the prices masked and no price fact anywhere" '.success and .data.pricesMasked == true and ([.. | objects | select(.kind? == "receipt")]|length) == 1 and ([.. | objects | select(has("label")) | .label | select(contains("قیمت"))]|length) == 0'
+as "$SEC_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the security role reads the trace but the supplier name of the root shows as «محرمانه» (names masked)" '.success and .data.namesMasked == true and (.data.roots|length) == 1 and .data.roots[0].providerName == "محرمانه"'
+as "$ADMIN_TOKEN" GET "$PB4TR/reverse?Q=H-7781"; check "pb4 reverse: the PMO sees the supplier name (names not masked)" '.success and .data.namesMasked == false and .data.roots[0].providerName != "محرمانه"'
+as "$SEC_TOKEN" GET "$PB4TR/reverse?Q=x&Kind=supplier"; nomsg "pb4 reverse: the security role cannot search by supplier name" "مجاز نیست"
 as "$WH_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the warehouse keeper gets the prices masked too" '.success and .data.pricesMasked == true'
 as "$FM_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the finance manager sees the prices" '.success and .data.pricesMasked == false'
 as "$AUD_TOKEN" GET "$PB4TR/tree?Q=H-7781"; check "pb4 tree: the auditor reads the tree (read only)" '.success and .data.root != null'
 as "$ADMIN_TOKEN" GET "$PB4TR/tree?Q=H-7781&Depth=99"; check "pb4 tree: a depth above the limit is cut to 8" '.success and .data.maxDepth == 8'
 CODE=$(curl -s -o "$OUT/pb4-tree.xlsx" -w '%{http_code}' "$API/$PB4TR/tree/export?Q=H-7781" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pb4-tree.xlsx")" = "PK" ] && ok "pb4 export: the tree comes as an xlsx file (a zip starting with PK)" || bad "pb4 export: the tree comes as an xlsx file (HTTP $CODE)"
 CODE=$(curl -s -o "$OUT/pb4-reverse.xlsx" -w '%{http_code}' "$API/$PB4TR/reverse/export?Q=H-7781" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pb4-reverse.xlsx")" = "PK" ] && ok "pb4 export: the reverse trace comes as an xlsx file" || bad "pb4 export: the reverse trace comes as an xlsx file (HTTP $CODE)"
-as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/backfill"; check "pb4 genealogy: the backfill runs for every order with a production receipt, removes no link and reports its notes as a list" '.success and .data.linksRemoved == 0 and (.data.notes|type) == "array"'
+CODE=$(curl -s -o "$B" -w '%{http_code}' "$API/$PB4TR/reverse/export?Q=NO-SUCH-HEAT-PB4" -H "Authorization: Bearer $ADMIN_TOKEN"); [ "$CODE" = "400" ] && ok "pb4 export: a failed export answers HTTP 400 with the reason" || bad "pb4 export: a failed export answers HTTP 400 (got $CODE)"
+as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/backfill"; check "pb4 genealogy: the backfill is idempotent after the live links: it removes, creates and updates nothing and its notes are a list" '.success and .data.linksRemoved == 0 and .data.linksCreated == 0 and .data.linksUpdated == 0 and (.data.notes|type) == "array" and .data.ordersLinked == 1'
 as "$WH_TOKEN" POST "$PB4TR/genealogy/backfill"; r403 "pb4 genealogy: the warehouse keeper cannot start the backfill (403)"
 TOKEN=$ADMIN_TOKEN
 

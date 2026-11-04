@@ -164,6 +164,8 @@ namespace Services.NasbNiro.Trace
 
         private sealed class TreeCtx
         {
+            /// <summary>Notes about the windows applied to the as-built data of the parts (newest few per part).</summary>
+            public readonly List<string> CapNotes = new List<string>();
             public readonly Dictionary<string, UnitInfo> Units = new Dictionary<string, UnitInfo>();
             public readonly Dictionary<string, List<InputEdge>> Inputs = new Dictionary<string, List<InputEdge>>();
             public readonly Dictionary<int, (string Code, string Title, string PartNumber, string Stage)> Items = new Dictionary<int, (string, string, string, string)>();
@@ -193,6 +195,25 @@ namespace Services.NasbNiro.Trace
         // ------------------------------------------------------------------------------------------ entry
 
         public async Task<ResponseDto<TraceTreeDto>> TreeAsync(TraceQuery query, CancellationToken ct)
+        {
+            ResponseDto<TraceTreeDto> result = await TreeCoreAsync(query, ct);
+            if (result.Success && result.Data != null && !SeesNames)
+            {
+                result.Data.NamesMasked = true;
+                if (result.Data.Root != null) MaskNames(result.Data.Root);
+            }
+            return result;
+        }
+
+        private static readonly HashSet<string> NameLabels = new HashSet<string> { "تامین‌کننده", "کارفرما", "مقصد" };
+
+        private static void MaskNames(TraceNodeDto node)
+        {
+            foreach (TraceFactDto f in node.Facts) if (NameLabels.Contains(f.Label) && !string.IsNullOrEmpty(f.Value)) f.Value = TraceRoles.Hidden;
+            foreach (TraceNodeDto child in node.Children) MaskNames(child);
+        }
+
+        private async Task<ResponseDto<TraceTreeDto>> TreeCoreAsync(TraceQuery query, CancellationToken ct)
         {
             string text = Clean(query?.Q);
             if (text == null && query?.SerialUnitId == null && query?.LotId == null) return Bad<TraceTreeDto>("کد محصول، شماره قطعه، سریال یا شماره بچ/ذوب را وارد کنید.");

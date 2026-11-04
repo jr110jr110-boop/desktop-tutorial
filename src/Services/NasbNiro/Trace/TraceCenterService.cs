@@ -28,6 +28,14 @@ namespace Services.NasbNiro.Trace
         /// <summary>Everyone who reads the technical chain (purchase to stock to shop floor) and the quality and audit readers.</summary>
         public const string Readers = AttachmentRoles.TechnicalChain + ",QA,AUDITOR,PROJECTMANAGER";
 
+        /// <summary>
+        /// Who sees the names of suppliers and customers (QC, warehouse, procurement, project, engineering and management). Security, assembly and construction read the trace
+        /// but see the codes only: the names show as the word «محرمانه».
+        /// </summary>
+        public const string Names = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,ENGINEER,QC,QA,AUDITOR,PROJECTMANAGER,PRODUCTIONMANAGER,SHOPSUPERVISOR";
+
+        public const string Hidden = "محرمانه";
+
         /// <summary>Who sees unit prices and amounts of the purchase chain. QC, the warehouse and the shop floor never do.</summary>
         public const string Prices = AttachmentRoles.Prices;
 
@@ -60,6 +68,8 @@ namespace Services.NasbNiro.Trace
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _attachments = attachments ?? throw new ArgumentNullException(nameof(attachments));
         }
+
+        private bool SeesNames => _user.IsInRole(TraceRoles.Names);
 
         private bool SeesPrices => _user.IsInRole(TraceRoles.Prices);
 

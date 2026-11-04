@@ -190,6 +190,9 @@ namespace ViewModels.NasbNiro.TraceDtos
         /// <summary>The caller is not a price reader: unit prices and amounts are left out.</summary>
         public bool PricesMasked { get; set; }
 
+        /// <summary>True when the names of suppliers and customers are replaced by «محرمانه» for this reader.</summary>
+        public bool NamesMasked { get; set; }
+
         public bool Truncated { get; set; }
         public int NodeCount { get; set; }
         public int MaxDepth { get; set; }
@@ -283,8 +286,41 @@ namespace ViewModels.NasbNiro.TraceDtos
         public string Destination { get; set; }
     }
 
+    /// <summary>Material of the traced lots and serials that left the stock outside a production order kit: an issue to a project or activity, a subcontract issue or a return to the supplier.</summary>
+    public class ReverseConsumptionDto
+    {
+        public int DocumentId { get; set; }
+        public string DocumentNumber { get; set; }
+        public DateTime DocumentDate { get; set; }
+        /// <summary>issue, subcontract or supplierReturn</summary>
+        public string Kind { get; set; }
+        public string NodeKey { get; set; }
+        public string ItemCode { get; set; }
+        public string LotNumber { get; set; }
+        public string SerialNumber { get; set; }
+        public decimal Quantity { get; set; }
+        public string WorkOrderCode { get; set; }
+        public string ProviderName { get; set; }
+    }
+
+    /// <summary>A traced serial piece that is a delivered product in the after-sales installed base.</summary>
+    public class ReverseInstalledDto
+    {
+        public string NodeKey { get; set; }
+        public string SerialNumber { get; set; }
+        public string Tag { get; set; }
+        public string Title { get; set; }
+        public string WorkOrderCode { get; set; }
+        public string ContractCode { get; set; }
+        public string Customer { get; set; }
+        public DateTime? HandoverDate { get; set; }
+        public bool Decommissioned { get; set; }
+    }
+
     public class ReverseCountsDto
     {
+        public int Consumptions { get; set; }
+        public int Installed { get; set; }
         public int Roots { get; set; }
         public int Nodes { get; set; }
         public int Items { get; set; }
@@ -301,6 +337,7 @@ namespace ViewModels.NasbNiro.TraceDtos
         public string Mode { get; set; }
         public bool Truncated { get; set; }
         public int MaxDepth { get; set; }
+        public bool NamesMasked { get; set; }
         public List<ReverseRootDto> Roots { get; set; } = new List<ReverseRootDto>();
         public List<ReverseNodeDto> Nodes { get; set; } = new List<ReverseNodeDto>();
 
@@ -312,6 +349,8 @@ namespace ViewModels.NasbNiro.TraceDtos
 
         public List<ReverseProjectDto> Projects { get; set; } = new List<ReverseProjectDto>();
         public List<ReverseDeliveryDto> Deliveries { get; set; } = new List<ReverseDeliveryDto>();
+        public List<ReverseConsumptionDto> Consumptions { get; set; } = new List<ReverseConsumptionDto>();
+        public List<ReverseInstalledDto> Installed { get; set; } = new List<ReverseInstalledDto>();
         public ReverseCountsDto Counts { get; set; } = new ReverseCountsDto();
         public List<string> Notes { get; set; } = new List<string>();
     }

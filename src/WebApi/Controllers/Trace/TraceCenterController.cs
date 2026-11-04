@@ -33,7 +33,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> ExportTreeAsync([FromQuery] TraceQuery query, CancellationToken ct)
         {
             var result = await _service.ExportTreeAsync(query, ct);
-            if (!result.Success) return Ok(result);
+            if (!result.Success) return BadRequest(result);
             return File(result.Data, Xlsx, "product-tree.xlsx");
         }
 
@@ -45,7 +45,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> ExportReverseAsync([FromQuery] ReverseTraceQuery query, CancellationToken ct)
         {
             var result = await _service.ExportReverseAsync(query, ct);
-            if (!result.Success) return Ok(result);
+            if (!result.Success) return BadRequest(result);
             return File(result.Data, Xlsx, "reverse-trace.xlsx");
         }
 

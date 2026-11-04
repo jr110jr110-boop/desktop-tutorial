@@ -14,7 +14,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.ToTable("InvGenealogyLinks");
                 b.Property(x => x.Quantity).HasPrecision(18, 4);
                 b.Property(x => x.Note).HasMaxLength(300);
-                b.HasIndex(x => x.ProductionOrderId);
+                // PB4 review M7: one live row per link key (two confirms at the same time cannot both insert it); it also serves the lookups by order
+                b.HasIndex(x => new { x.ProductionOrderId, x.OutputItemId, x.OutputLotId, x.OutputSerialUnitId, x.InputItemId, x.InputLotId, x.InputSerialUnitId })
+                    .IsUnique().HasFilter("[Deleted] = 0").HasDatabaseName("UX_InvGenealogyLinks_Key");
                 b.HasIndex(x => x.OutputLotId);
                 b.HasIndex(x => x.OutputSerialUnitId);
                 b.HasIndex(x => x.InputLotId);

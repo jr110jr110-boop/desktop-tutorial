@@ -36,6 +36,7 @@ namespace Services.NasbNiro.Trace
             public int ItemId;
             public int? LotId;
             public int? SerialUnitId;
+            public decimal Weight;
         }
 
         private sealed class InputKey
@@ -74,9 +75,11 @@ namespace Services.NasbNiro.Trace
             {
                 // ----- outputs: what the receipt put into the stock
                 var outRows = await uow.Set<StockTransaction>().AsNoTracking().Where(t => t.DocumentId == receipt.Id && t.Quantity > 0 && !t.IsReversal)
-                    .Select(t => new { t.ItemId, t.LotId, t.SerialUnitId }).ToListAsync(ct);
-                List<OutputKey> outputs = outRows.Select(r => new OutputKey { ItemId = r.ItemId, LotId = r.LotId, SerialUnitId = r.SerialUnitId })
-                    .GroupBy(r => (r.ItemId, r.LotId, r.SerialUnitId)).Select(g => g.First()).ToList();
+                    .Select(t => new { t.ItemId, t.LotId, t.SerialUnitId, t.Quantity }).ToListAsync(ct);
+                // the weight of an output is what the receipt put in (a serial piece counts one): several outputs share each input in that proportion
+                List<OutputKey> outputs = outRows.GroupBy(r => (r.ItemId, r.LotId, r.SerialUnitId))
+                    .Select(g => new OutputKey { ItemId = g.Key.ItemId, LotId = g.Key.LotId, SerialUnitId = g.Key.SerialUnitId, Weight = g.Key.SerialUnitId.HasValue ? 1m : g.Sum(x => x.Quantity) }).ToList();
+                decimal totalWeight = outputs.Sum(o => o.Weight);
                 if (outputs.Any(o => !o.LotId.HasValue && !o.SerialUnitId.HasValue)) result.OutputsWithoutTracking++;
 
                 // ----- inputs: the confirmed issues (and returns) made against the kit of the order
@@ -110,13 +113,12 @@ namespace Services.NasbNiro.Trace
                 int? operationId = await uow.Set<MfOperation>().AsNoTracking().Where(o => o.OrderId == orderId && !o.Deleted && !o.IsRework)
                     .OrderBy(o => o.Sequence).ThenBy(o => o.Id).Select(o => (int?)o.Id).FirstOrDefaultAsync(ct);
 
-                int shareCount = outputs.Count(o => o.SerialUnitId.HasValue);
                 foreach (OutputKey output in outputs)
                 {
-                    bool shared = output.SerialUnitId.HasValue && shareCount > 1;
+                    bool shared = outputs.Count > 1 && totalWeight > 0;
                     foreach (InputKey input in consumed)
                     {
-                        decimal quantity = shared ? Math.Round(input.Quantity / shareCount, 4) : input.Quantity;
+                        decimal quantity = shared ? Math.Round(input.Quantity * output.Weight / totalWeight, 4) : input.Quantity;
                         desired.Add(new GenealogyLink
                         {
                             ProductionOrderId = orderId, OperationId = operationId,
@@ -169,20 +171,50 @@ namespace Services.NasbNiro.Trace
         /// </summary>
         public static async Task AfterDocumentAsync(IUnitOfWork uow, int userId, InventoryDocumentType type, int documentId, int? materialRequestId, CancellationToken ct)
         {
+            // the stock posting is already saved when this runs: a failure here must never turn a confirmed document into an error. The links are derived data;
+            // after a failure the order is repaired by the rebuild (POST trace/genealogy/order/{id}/rebuild) or the backfill.
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    var orderIds = new List<int>();
+                    if (type == InventoryDocumentType.ProductionReceipt)
+                        orderIds = await uow.Set<MfProductionOrder>().AsNoTracking().Where(o => o.ProductionReceiptId == documentId && !o.Deleted).Select(o => o.Id).ToListAsync(ct);
+                    else if ((type == InventoryDocumentType.Issue || type == InventoryDocumentType.ProductionReturn) && materialRequestId.HasValue)
+                        orderIds = await uow.Set<MfProductionOrder>().AsNoTracking().Where(o => o.KitRequestId == materialRequestId && o.ProductionReceiptId != null && !o.Deleted).Select(o => o.Id).ToListAsync(ct);
+                    if (orderIds.Count == 0) return;
+                    foreach (int id in orderIds) await SyncAsync(uow, userId, id, GenealogySource.Live, ct);
+                    await uow.SaveChangesAsync(ct);
+                    return;
+                }
+                catch (OperationCanceledException)
+                {
+                    Discard(uow);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // a unique-key violation means a concurrent confirm linked the same rows first: the second attempt reads them and finds nothing to add
+                    Discard(uow);
+                    System.Diagnostics.Trace.TraceWarning("Genealogy sync after document " + documentId + " failed (attempt " + (attempt + 1) + "): " + ex.GetType().Name);
+                }
+            }
+        }
+
+        /// <summary>Drops every unsaved change of the link rows from the unit of work (added, changed and soft-deleted ones), so that nothing half-done is saved later.</summary>
+        public static void Discard(IUnitOfWork uow)
+        {
             try
             {
-                var orderIds = new List<int>();
-                if (type == InventoryDocumentType.ProductionReceipt)
-                    orderIds = await uow.Set<MfProductionOrder>().AsNoTracking().Where(o => o.ProductionReceiptId == documentId && !o.Deleted).Select(o => o.Id).ToListAsync(ct);
-                else if ((type == InventoryDocumentType.Issue || type == InventoryDocumentType.ProductionReturn) && materialRequestId.HasValue)
-                    orderIds = await uow.Set<MfProductionOrder>().AsNoTracking().Where(o => o.KitRequestId == materialRequestId && o.ProductionReceiptId != null && !o.Deleted).Select(o => o.Id).ToListAsync(ct);
-                if (orderIds.Count == 0) return;
-                foreach (int id in orderIds) await SyncAsync(uow, userId, id, GenealogySource.Live, ct);
-                await uow.SaveChangesAsync(ct);
+                foreach (GenealogyLink link in uow.Set<GenealogyLink>().Local.ToList())
+                {
+                    EntityState state = uow.Entry(link).State;
+                    if (state != EntityState.Unchanged) uow.Entry(link).State = EntityState.Detached;
+                }
             }
-            catch (Exception ex) when (ex is DbUpdateException || ex is InvalidOperationException)
+            catch (Exception)
             {
-                foreach (GenealogyLink added in uow.Set<GenealogyLink>().Local.Where(l => l.Id == 0).ToList()) uow.Entry(added).State = EntityState.Detached;
+                // nothing more can be done here; the rebuild repairs the links
             }
         }
     }
@@ -222,7 +254,14 @@ namespace Services.NasbNiro.Trace
             if (Ai.AiActing.IsActing) return ResponseDtoHelper.Forbidden<GenealogySyncDto>("صندلی هوش مصنوعی پیوند شجره را بازسازی نمی‌کند.");
             if (!await _uow.Set<MfProductionOrder>().AnyAsync(o => o.Id == orderId && !o.Deleted, ct)) return ResponseDtoHelper.NotFound<GenealogySyncDto>("دستور تولید پیدا نشد.");
             GenealogySyncDto result = await GenealogyBuilder.SyncAsync(_uow, _user.UserId, orderId, GenealogySource.Backfill, ct);
-            await _uow.SaveChangesAsync(ct);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException)
+            {
+                // a confirm at the same moment linked the same rows: read again and save the difference
+                GenealogyBuilder.Discard(_uow);
+                result = await GenealogyBuilder.SyncAsync(_uow, _user.UserId, orderId, GenealogySource.Backfill, ct);
+                await _uow.SaveChangesAsync(ct);
+            }
             return ResponseDtoHelper.Ok(result);
         }
 
@@ -242,15 +281,18 @@ namespace Services.NasbNiro.Trace
                     total.LinksRemoved += one.LinksRemoved; total.OrdersWithoutKit += one.OrdersWithoutKit; total.OrdersReceiptNotConfirmed += one.OrdersReceiptNotConfirmed;
                     total.OrdersWithoutIssuedMaterial += one.OrdersWithoutIssuedMaterial; total.InputsWithoutTracking += one.InputsWithoutTracking; total.OutputsWithoutTracking += one.OutputsWithoutTracking;
                 }
-                await _uow.SaveChangesAsync(ct);
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { GenealogyBuilder.Discard(_uow); total.Notes.Add("بخشی از پیوندها هم‌زمان با تایید سند دیگری ساخته شده بود؛ بازسازی را یک بار دیگر اجرا کنید."); }
+                GenealogyBuilder.Discard(_uow);   // the loaded rows are not kept for the next batch
+                foreach (GenealogyLink kept in _uow.Set<GenealogyLink>().Local.ToList()) _uow.Entry(kept).State = EntityState.Detached;
                 after = ids[ids.Count - 1];
             }
-            if (total.OrdersWithoutKit > 0) total.Notes.Add($"{total.OrdersWithoutKit} دستور تولید کیت (درخواست مواد) نداشت: حواله‌های آن‌ها به دستور وصل نیست و پیوند ساخته نشد (حواله‌هایی که بدون ارجاع به کیت صادر شده‌اند قابل بازسازی نیستند).");
+            if (total.OrdersWithoutKit > 0) total.Notes.Add($"{total.OrdersWithoutKit} دستور تولید کیت (درخواست مواد) نداشت: حواله‌های آن‌ها به دستور وصل نیست و پیوند ساخته نشد (حواله‌ها و برگشت‌هایی که علیه درخواست دیگری جز کیت دستور صادر شده‌اند به دستور وصل نمی‌شوند).");
             if (total.OrdersReceiptNotConfirmed > 0) total.Notes.Add($"{total.OrdersReceiptNotConfirmed} دستور تولید رسید ساخت تاییدشده نداشت (پیش‌نویس یا باطل): با تایید رسید پیوند ساخته می‌شود.");
             if (total.OrdersWithoutIssuedMaterial > 0) total.Notes.Add($"{total.OrdersWithoutIssuedMaterial} دستور تولید با رسید تاییدشده هیچ حواله تاییدشده‌ای علیه کیت خود نداشت (مصرف ثبت نشده است).");
             if (total.InputsWithoutTracking > 0) total.Notes.Add($"در {total.InputsWithoutTracking} دستور، ورودی بدون بچ و سریال بود (کالای بدون ردیابی): پیوند فقط در سطح کالا ثبت شد و ردیابی معکوس از آن عبور نمی‌کند.");
             if (total.OutputsWithoutTracking > 0) total.Notes.Add($"در {total.OutputsWithoutTracking} دستور، خروجی بدون بچ و سریال بود: پیوند فقط در سطح کالا ثبت شد.");
-            total.Notes.Add("سهم هر ورودی از هر سریال خروجی (وقتی دستور چند سریال می‌سازد) برابر تقسیم مساوی است؛ مصرف واقعی هر قطعه جداگانه ثبت نشده بود. ورودی مصرف‌شده در عملیات مشخص نیز ثبت نشده بود: کیت برای اولین عملیات دستور ثبت می‌شود.");
+            total.Notes.Add("سهم هر ورودی از هر سریال خروجی (وقتی دستور چند سریال می‌سازد) برابر تقسیم مساوی است؛ مصرف واقعی هر قطعه جداگانه ثبت نشده بود. ورودی مصرف‌شده در عملیات مشخص نیز ثبت نشده بود: کیت برای اولین عملیات دستور ثبت می‌شود. ضایعات از مصرف کم نمی‌شود: کل مواد حواله‌شده به خروجی‌های خوب نسبت داده می‌شود (برای فراخوان محتاطانه است).");
             return ResponseDtoHelper.Ok(total);
         }
     }
