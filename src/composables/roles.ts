@@ -491,3 +491,11 @@ export const AiRoles = {
   /** the financial anomaly notes (FinanceJournal, BankLine, SupplierIbanChange) */
   financeNotes: list("FINANCEMANAGER,FINANCIAL"),
 };
+
+/** Trace centre (TraceRoles in the API): the technical chain of the request files plus quality assurance, the auditor and the project manager. The prices are for the money roles only. */
+export const TraceRoles = {
+  readers: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER,PRODUCTIONMANAGER,SHOPSUPERVISOR,SECURITY,QA,AUDITOR,PROJECTMANAGER"),
+  prices: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR"),
+  /** rebuild and backfill of the genealogy links */
+  admin: list("PMO,PLANNING,WHSUPERVISOR,QA"),
+};

@@ -300,7 +300,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles, TraceRoles } from "@/composables/roles";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -417,7 +417,7 @@ const links = {
     { title: "اسناد انبار (رسید، حواله، انتقال)", routeName: "InventoryDocuments", disabled: !accessList.includes("Warehouse") },
     { title: "موجودی", routeName: "InventoryStock", disabled: !accessList.includes("Warehouse") },
     { title: "کاردکس", routeName: "InventoryKardex", disabled: !accessList.includes("Warehouse") },
-    { title: "ردیابی قطعات (اسکن)", routeName: "InventoryTrace", disabled: !accessList.includes("Traceability") },
+    { title: "ردیابی و شجره‌نامه", routeName: "InventoryTrace", disabled: !hasRole(TraceRoles.readers) },
     { title: "کارتابل مراحل ساخت و QC", routeName: "InventoryOperations", disabled: !accessList.includes("Traceability") },
     { title: "مسیر ساخت", routeName: "InventoryRouting", disabled: !accessList.includes("Traceability") },
     { title: "کالاها و کدینگ", routeName: "InventoryItems", disabled: !accessList.includes("Warehouse") },
@@ -460,7 +460,6 @@ const links = {
     { title: "WPS و PQR", routeName: "QualityWps", disabled: !hasRole(QualityRoles.readers) },
     { title: "گزارش جوشکاری", routeName: "QualityWeldLogs", disabled: !hasRole(QualityRoles.readers) },
     { title: "گواهی‌های مواد (EN 10204)", routeName: "QualityCertificates", disabled: !hasRole(QualityRoles.readers) },
-    { title: "ردیابی سریال و بچ", routeName: "QualityTraceability", disabled: !hasRole(QualityRoles.readers) },
     // open to every signed-in user (R1q D13): the API shows a non-reader only the CAPAs he owns or has an action in
     { title: "اقدام اصلاحی و پیشگیرانه (CAPA)", routeName: "QualityCapas" },
     { title: "برگه‌های ترخیص", routeName: "QualityReleaseNotes", disabled: !hasRole(QualityRoles.readers) },
