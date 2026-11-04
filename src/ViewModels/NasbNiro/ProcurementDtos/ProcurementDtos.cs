@@ -580,6 +580,8 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public decimal Deductions { get; set; }
         public string DeductionNote { get; set; }
         public string Description { get; set; }
+        /// <summary>PB6: a payment term (milestone) of the supplier contract: no automatic advance recovery or retention is proposed, and all milestone payments together stay within the order total including the applied addenda.</summary>
+        public bool Milestone { get; set; }
         /// <summary>Deductions by kind (withholding, retention...). Their sum may not exceed Deductions; when Deductions is 0 it becomes their sum.</summary>
         public List<PaymentDeductionDto> DeductionLines { get; set; } = new List<PaymentDeductionDto>();
     }

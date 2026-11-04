@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.ContractsSystem;
+using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Procurement;
 using Entities.Model.NasbNiro.ProjectControl;
@@ -351,8 +352,17 @@ namespace Services.NasbNiro.ContractsSystem
             st.NonconformityDeductions = nonconformity; st.LegalDeductions = legal;
             st.PayableThisPeriod = gross - nonconformity - legal;
             if (st.PayableThisPeriod < 0) return Bad<StatementDto>("کسورات از مبلغ این دوره بیشتر است.");
-            // the cumulative claim (what was paid before and this period) may not pass the contract with its addenda
-            if (st.ContractAmount > 0 && previous + gross > st.ContractAmount) return Bad<StatementDto>($"مجموع پرداخت‌های قبلی ({previous:N0}) و این دوره ({gross:N0}) از مبلغ قرارداد ({st.ContractAmount:N0}) بیشتر می‌شود.");
+            // H4: the cap compares gross with gross: every other statement of the contract that is not a draft, rejected or returned (also the ones still in approval), the paid requests of the order that no
+            // statement carries (advances and the like, gross), the manual earlier payments and this period, all within the contract value (which already holds the applied addenda). The net figures are for display.
+            decimal committed = await _uow.Set<PsStatement>().AsNoTracking().Where(s => s.Id != selfId && !s.Deleted && s.Side == dto.Side && s.PurchaseOrderId == dto.PurchaseOrderId && s.ContractId == contractId
+                && s.Status != PsStatus.Draft && s.Status != PsStatus.Rejected && s.Status != PsStatus.Returned).SumAsync(s => (decimal?)s.GrossThisPeriod, cancellationToken) ?? 0;
+            if (order != null)
+            {
+                var carried = await _uow.Set<PsStatement>().AsNoTracking().Where(s => s.PaymentRequestId != null).Select(s => s.PaymentRequestId.Value).ToListAsync(cancellationToken);
+                committed += await _uow.Set<PaymentRequest>().AsNoTracking().Where(p => p.PurchaseOrderId == order.Id && p.Status == PaymentRequestStatus.Paid && !p.Deleted && !carried.Contains(p.Id)).SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
+            }
+            committed += st.PreviousPaymentRows.Where(r => !r.IsAuto).Sum(r => r.Amount);
+            if (st.ContractAmount > 0 && committed + gross > st.ContractAmount) return Bad<StatementDto>($"مجموع مطالبات قبلی ({committed:N0}) و این دوره ({gross:N0}) از مبلغ قرارداد با الحاقیه‌ها ({st.ContractAmount:N0}) بیشتر می‌شود.");
             st.EditorUserIds = LedgerMath.WithEditor(st.EditorUserIds, Me);
             st.Status = PsStatus.Draft; st.ReturnReason = null;
             st.ModifyDate = DateTimeOffset.Now; st.ModifierUserId = Me;
@@ -422,13 +432,25 @@ namespace Services.NasbNiro.ContractsSystem
                 }
                 case "request-payment":
                 {
+                    // M7: a rejected payment request returns the statement to "authorised" so a new request can be made
+                    if (s.Status == PsStatus.PaymentRequested && s.PaymentRequestId.HasValue
+                        && await _uow.Set<PaymentRequest>().AnyAsync(x => x.Id == s.PaymentRequestId.Value && x.Status == PaymentRequestStatus.Rejected, cancellationToken))
+                    { s.Status = PsStatus.PaymentAuthorised; s.PaymentRequestId = null; }
                     if (s.Status != PsStatus.PaymentAuthorised) return Bad<StatementDto>("پرداخت هنوز توسط مدیر پروژه مجاز نشده است.");
                     if (s.Side != PsSide.Supplier || !s.PurchaseOrderId.HasValue) return Bad<StatementDto>("درخواست پرداخت فقط برای صورت‌وضعیت تامین‌کننده یا پیمانکار است.");
                     if (!_user.IsInRole(PsRoles.Preparers)) return Bad<StatementDto>(NotAllowed + " (بازرگانی)");
                     decimal deductions = s.NonconformityDeductions + s.LegalDeductions;
                     decimal approved = s.SupervisionApprovedAmount ?? s.PayableThisPeriod;
+                    // M7: the legal deductions go typed (tax, insurance, good performance) so the GL liability and the Sepidar data carry them; the nonconformity deductions are "other"
+                    var typed = new List<PaymentDeductionDto>();
+                    var legalRows = await _uow.Set<PsDeduction>().AsNoTracking().Where(d => d.StatementId == s.Id && d.Kind == PsDeductionKind.Legal).ToListAsync(cancellationToken);
+                    var rateKinds = await _uow.Set<PsLegalRate>().AsNoTracking().Where(r => legalRows.Select(d => d.LegalRateId).Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.DeductionKind, cancellationToken);
+                    foreach (var g in legalRows.GroupBy(d => d.LegalRateId.HasValue && rateKinds.TryGetValue(d.LegalRateId.Value, out FnDeductionKind k) ? k : FnDeductionKind.Withholding))
+                        typed.Add(new PaymentDeductionDto { Kind = g.Key, Base = g.Sum(d => d.BaseAmount ?? 0), RatePercent = g.Count() == 1 ? g.First().Percent ?? 0 : 0, Amount = g.Sum(d => d.Amount), Note = "کسور قانونی صورت‌وضعیت " + s.Number });
+                    if (s.NonconformityDeductions > 0) typed.Add(new PaymentDeductionDto { Kind = FnDeductionKind.Other, Amount = s.NonconformityDeductions, Note = "کسورات عدم انطباق صورت‌وضعیت " + s.Number });
                     ResponseDto<PaymentRequestDto> made = await _payables.SavePaymentAsync(new SavePaymentRequestDto
                     {
+                        DeductionLines = typed,
                         Type = PaymentRequestType.Progress, RequestDate = DateTime.Today, PurchaseOrderId = s.PurchaseOrderId, Amount = approved + deductions, Deductions = deductions,
                         Description = $"صورت‌وضعیت {s.Number} (سریال {s.Serial})", DeductionNote = deductions > 0 ? "کسورات صورت‌وضعیت " + s.Number : null,
                     }, cancellationToken);
@@ -525,7 +547,7 @@ namespace Services.NasbNiro.ContractsSystem
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.SelectMany(r => new int?[] { r.CreatorUserId, r.VerifiedByUserId }), cancellationToken);
             return ResponseDtoHelper.Ok(rows.Select(r => new LegalRateDto
             {
-                Id = r.Id, Code = r.Code, Title = r.Title, Percent = r.Percent, BasisNote = r.BasisNote, SourceReference = r.SourceReference, EffectiveFrom = r.EffectiveFrom, Status = r.Status,
+                Id = r.Id, Code = r.Code, Title = r.Title, Percent = r.Percent, DeductionKind = r.DeductionKind, BasisNote = r.BasisNote, SourceReference = r.SourceReference, EffectiveFrom = r.EffectiveFrom, Status = r.Status,
                 VerifiedAt = r.VerifiedAt, VerifiedByName = names.Name(r.VerifiedByUserId), CreatorName = names.Name(r.CreatorUserId),
             }).ToList());
         }
@@ -536,13 +558,15 @@ namespace Services.NasbNiro.ContractsSystem
             if (!_user.IsInRole(PsRoles.RateEditors)) return Bad<LegalRateDto>(NotAllowed + " (مالی)");
             if (Clean(dto.Code) == null || Clean(dto.Title) == null) return Bad<LegalRateDto>("کد و عنوان نرخ را بنویسید.");
             if (dto.Percent < 0 || dto.Percent > 100) return Bad<LegalRateDto>("درصد باید بین ۰ و ۱۰۰ باشد.");
+            if (dto.DeductionKind != FnDeductionKind.Withholding && dto.DeductionKind != FnDeductionKind.InsuranceRetention && dto.DeductionKind != FnDeductionKind.PerformanceRetention && dto.DeductionKind != FnDeductionKind.Other)
+                return Bad<LegalRateDto>("نوع کسر باید مالیات، بیمه، حسن انجام کار یا سایر باشد.");
             if (Clean(dto.SourceReference) == null) return Bad<LegalRateDto>("مرجع نرخ (قانون، آیین‌نامه یا نامه) را بنویسید؛ نرخ بدون مرجع ثبت نمی‌شود.");
             PsLegalRate r;
             if (dto.Id.HasValue)
             {
                 r = await _uow.Set<PsLegalRate>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (r == null) return ResponseDtoHelper.NotFound<LegalRateDto>("نرخ پیدا نشد.");
-                if (r.Status == PsRateStatus.Verified && (r.Percent != dto.Percent)) return Bad<LegalRateDto>("نرخ تاییدشده تغییر نمی‌کند؛ آن را کنار بگذارید و نرخ تازه ثبت کنید.");
+                if (r.Status == PsRateStatus.Verified && (r.Percent != dto.Percent || r.DeductionKind != dto.DeductionKind)) return Bad<LegalRateDto>("نرخ تاییدشده تغییر نمی‌کند؛ آن را کنار بگذارید و نرخ تازه ثبت کنید.");
             }
             else
             {
@@ -550,7 +574,7 @@ namespace Services.NasbNiro.ContractsSystem
                 r = new PsLegalRate { Status = PsRateStatus.Draft, CreateDate = DateTimeOffset.Now, CreatorUserId = Me };
                 _uow.Set<PsLegalRate>().Add(r);
             }
-            r.Code = dto.Code.Trim(); r.Title = dto.Title.Trim(); r.Percent = dto.Percent; r.BasisNote = Clean(dto.BasisNote); r.SourceReference = Clean(dto.SourceReference); r.EffectiveFrom = dto.EffectiveFrom?.Date;
+            r.Code = dto.Code.Trim(); r.Title = dto.Title.Trim(); r.Percent = dto.Percent; r.DeductionKind = dto.DeductionKind; r.BasisNote = Clean(dto.BasisNote); r.SourceReference = Clean(dto.SourceReference); r.EffectiveFrom = dto.EffectiveFrom?.Date;
             if (r.Status == PsRateStatus.Verified) { /* only the notes changed */ }
             r.EditorUserIds = LedgerMath.WithEditor(r.EditorUserIds, Me);
             r.ModifyDate = DateTimeOffset.Now; r.ModifierUserId = Me;
@@ -624,12 +648,14 @@ namespace Services.NasbNiro.ContractsSystem
             if (items.Select(i => Clean(i.Code)).Distinct().Count() != items.Count || items.Any(i => Clean(i.Code) == null || Clean(i.Title) == null || i.Amount < 0)) return Bad<List<CbsItemDto>>("کد، عنوان و مبلغ هر بند را درست بنویسید؛ کدها تکراری نباشد.");
             foreach (SaveCbsItemDto i in items.Where(i => i.WbsNodeId.HasValue))
                 if (!await _uow.Set<PcWbsNode>().AnyAsync(n => n.Id == i.WbsNodeId.Value && n.ContractId == wbsContract && !n.Deleted, cancellationToken)) return Bad<List<CbsItemDto>>($"بند {i.Code}: گره WBS متعلق به پروژه این قرارداد نیست.");
-            IQueryable<CtCbsItem> existingQ = dto.PurchaseOrderId.HasValue ? _uow.Set<CtCbsItem>().Where(c => c.PurchaseOrderId == dto.PurchaseOrderId) : _uow.Set<CtCbsItem>().Where(c => c.ContractId == dto.ContractId && c.PurchaseOrderId == null);
+            IQueryable<CtCbsItem> existingQ = dto.PurchaseOrderId.HasValue ? _uow.Set<CtCbsItem>().Where(c => !c.Deleted && c.PurchaseOrderId == dto.PurchaseOrderId) : _uow.Set<CtCbsItem>().Where(c => !c.Deleted && c.ContractId == dto.ContractId && c.PurchaseOrderId == null);
             List<CtCbsItem> existing = await existingQ.ToListAsync(cancellationToken);
-            List<int> usedIds = existing.Select(c => c.Id).ToList();
-            if (await _uow.Set<PsStatementLine>().AnyAsync(l => l.CbsItemId != null && usedIds.Contains(l.CbsItemId.Value) && !items.Select(i => i.Code).Contains(existing.First(e => e.Id == l.CbsItemId.Value).Code), cancellationToken))
+            HashSet<string> keepCodes = items.Select(i => i.Code.Trim()).ToHashSet();
+            List<CtCbsItem> removed = existing.Where(e => !keepCodes.Contains(e.Code)).ToList();
+            List<int> removedIds = removed.Select(e => e.Id).ToList();
+            if (removedIds.Count > 0 && await _uow.Set<PsStatementLine>().AnyAsync(l => l.CbsItemId != null && removedIds.Contains(l.CbsItemId.Value), cancellationToken))
                 return Bad<List<CbsItemDto>>("بندی که در صورت‌وضعیت استفاده شده حذف نمی‌شود.");
-            foreach (CtCbsItem c in existing.Where(e => !items.Any(i => i.Code.Trim() == e.Code))) _uow.Set<CtCbsItem>().Remove(c);
+            foreach (CtCbsItem c in removed) { c.Delete(); c.ModifyDate = DateTimeOffset.Now; c.ModifierUserId = Me; }
             foreach (SaveCbsItemDto i in items)
             {
                 CtCbsItem c = existing.FirstOrDefault(e => e.Code == i.Code.Trim());

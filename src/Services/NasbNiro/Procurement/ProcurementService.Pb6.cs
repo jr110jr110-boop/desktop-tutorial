@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
+using Entities.Model.NasbNiro.Attachments;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Procurement;
@@ -192,6 +193,8 @@ namespace Services.NasbNiro.Procurement
 
         // ------------------------------------------------------------------------------------------ request listing
 
+        private const string PriceRoles = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR";
+
         private bool SeesAllRequests => _user.IsInRole("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER,AUDITOR");
 
         /// <summary>A unit manager who only asks reads his own requests; the procurement chain reads all of them.</summary>
@@ -256,6 +259,12 @@ namespace Services.NasbNiro.Procurement
                 r.SupplierNames = mine.Select(o => o.ProviderName).Distinct().ToList();
                 r.OrderNumbers = mine.Select(o => o.Number).Distinct().ToList();
                 r.IsArchived = archive.Any(a => a.OwnerId == r.Id);
+                // M2: money and supplier names are for the people who plan, buy and pay; the others (unit managers, warehouse, QC...) see quantities only
+                if (!_user.IsInRole(PriceRoles))
+                {
+                    r.InvoicedAmount = 0; r.PaidAmount = 0; r.SupplierNames = new List<string>(); r.EstimatedAmount = 0;
+                    foreach (var l in r.Lines) l.EstimatedUnitPrice = null;
+                }
                 if (r.PreviousRequestId.HasValue && reqNumbers.TryGetValue(r.PreviousRequestId.Value, out string pn)) r.PreviousRequestNumber = pn;
                 if (r.SupersededByRequestId.HasValue && reqNumbers.TryGetValue(r.SupersededByRequestId.Value, out string sn)) r.SupersededByRequestNumber = sn;
             }
@@ -317,11 +326,15 @@ namespace Services.NasbNiro.Procurement
                         EstimatedUnitPrice = l.EstimatedUnitPrice, TechnicalRequirements = l.TechnicalRequirements, BuyOrderId = l.BuyOrderId, MaterialRequestLineId = l.MaterialRequestLineId,
                     }).ToList(),
                 };
+                // TODO(PB2 merge): the revision copy must also carry ProjectBaselineId, BalanceGroupKey, the line WbsNodeId, BalanceLineId and ManuallyEdited (the coordinator wires these when PB2 is merged)
                 _uow.Set<PurchaseRequest>().Add(copy);
-                await _uow.SaveChangesAsync(cancellationToken);
-                r.SupersededByRequestId = copy.Id;
-                r.ModifyDate = now; r.ModifierUserId = Me;
-                await _uow.SaveChangesAsync(cancellationToken);
+                string linkError = await SaveLinkedAsync(async () =>
+                {
+                    r.SupersededByRequestId = copy.Id;
+                    r.ModifyDate = now; r.ModifierUserId = Me;
+                    await CopyAttachmentsAsync(AttachmentOwnerType.PurchaseRequest, r.Id, copy.Id, cancellationToken);
+                }, cancellationToken);
+                if (linkError != null) return Bad<PurchaseRequestDto>(linkError);
                 return await GetRequestAsync(copy.Id, cancellationToken);
             }
             if (r.Status != PurchaseRequestStatus.Approved) return Bad<PurchaseRequestDto>("فقط درخواست برگشتی، ردشده یا تاییدشده نسخه جدید می‌گیرد.");
@@ -396,7 +409,26 @@ namespace Services.NasbNiro.Procurement
                 .SumAsync(o => (decimal?)o.TotalAmount, cancellationToken) ?? 0;
             if (committed + amount <= budget) return null;
             if (overrideByManagement && Clean(note) != null) return null;
-            return $"بودجه WBS پروژه {budget:N0} ریال است و {committed:N0} ریال سفارش شده؛ با این مبلغ ({amount:N0}) از بودجه می‌گذرد. فقط مدیرعامل با نوشتن دلیل می‌تواند ادامه دهد.";
+            return $"بودجه WBS پروژه {budget:N0} ریال است و {committed:N0} ریال سفارش شده؛ با این مبلغ ({amount:N0}) از بودجه می‌گذرد. فقط مدیرعامل با نوشتن دلیل (عمل «عبور از بودجه») می‌تواند ادامه را مجاز کند.";
+        }
+
+        /// <summary>M3: only the CEO passes the budget gate, with a written reason; the planner (someone else) then approves with it.</summary>
+        private async Task<ResponseDto<InquiryDto>> OverrideBudgetAsync(PurchaseInquiry i, ProcurementActionDto dto, CancellationToken cancellationToken)
+        {
+            if (!_user.IsInRole("CEO")) return Bad<InquiryDto>(NotAllowed + " (مدیرعامل)");
+            if (i.Status != InquiryStatus.Open || i.PlanningApprovedAt.HasValue) return Bad<InquiryDto>("عبور از بودجه پیش از تایید برنامه‌ریزی و انتخاب برنده است.");
+            if (Clean(dto.Note) == null) return Bad<InquiryDto>("دلیل عبور از بودجه را بنویسید.");
+            List<SupplierQuote> accepted = i.Quotes.Where(q => q.TechnicallyAccepted).ToList();
+            decimal budget = dto.Amount ?? (accepted.Count == 0 ? 0 : accepted.Max(q => q.TotalAmount));
+            if (budget <= 0) return Bad<InquiryDto>("مبلغ باید بیشتر از صفر باشد (پیشنهاد دارای تایید فنی لازم است).");
+            var gate = await _budget.GateAsync(i.PurchaseRequest.CostCenter, i.PurchaseRequest.ContractId, budget, i.InquiryDate, i.PurchaseRequestId, null, dto.Note, cancellationToken);
+            if (!gate.Allowed) return Bad<InquiryDto>(gate.Message);
+            string wbs = await WbsBudgetErrorAsync(i.PurchaseRequest.ContractId, budget, i.Id, true, dto.Note, cancellationToken);
+            if (wbs != null) return Bad<InquiryDto>(wbs);
+            i.BudgetOverrideAt = DateTimeOffset.Now; i.BudgetOverrideByUserId = Me; i.BudgetOverrideNote = Clean(dto.Note); i.BudgetOverrideAmount = budget;
+            i.ModifyDate = DateTimeOffset.Now; i.ModifierUserId = Me;
+            await _uow.SaveChangesAsync(cancellationToken);
+            return await GetInquiryAsync(i.Id, cancellationToken);
         }
 
         private async Task<ResponseDto<InquiryDto>> ApprovePlanningAsync(PurchaseInquiry i, ProcurementActionDto dto, CancellationToken cancellationToken)
@@ -412,9 +444,11 @@ namespace Services.NasbNiro.Procurement
             int? days = dto.Days ?? accepted.Where(q => q.DeliveryDays.HasValue).Select(q => q.DeliveryDays).DefaultIfEmpty(null).Max();
             if (days.HasValue && days.Value < 0) return Bad<InquiryDto>("زمان تحویل نمی‌تواند منفی باشد.");
             // finance budget lines (the same gate the request passed) and the WBS budget of the project
-            var gate = await _budget.GateAsync(i.PurchaseRequest.CostCenter, i.PurchaseRequest.ContractId, budget, i.InquiryDate, i.PurchaseRequestId, null, dto.Note, cancellationToken);
-            if (!gate.Allowed) return Bad<InquiryDto>(gate.Message);
-            string wbs = await WbsBudgetErrorAsync(i.PurchaseRequest.ContractId, budget, i.Id, _user.IsInRole(ProcurementRoles.Management), dto.Note, cancellationToken);
+            var gate = await _budget.GateAsync(i.PurchaseRequest.CostCenter, i.PurchaseRequest.ContractId, budget, i.InquiryDate, i.PurchaseRequestId, null, null, cancellationToken);
+            bool overrideHeld = i.BudgetOverrideAt.HasValue && i.BudgetOverrideAmount.HasValue && budget <= i.BudgetOverrideAmount.Value;
+            if (!gate.Allowed && !overrideHeld) return Bad<InquiryDto>(gate.Message);
+            bool ceoPassed = i.BudgetOverrideAt.HasValue && i.BudgetOverrideAmount.HasValue && budget <= i.BudgetOverrideAmount.Value;
+            string wbs = await WbsBudgetErrorAsync(i.PurchaseRequest.ContractId, budget, i.Id, ceoPassed, i.BudgetOverrideNote, cancellationToken);
             if (wbs != null) return Bad<InquiryDto>(wbs);
             i.PlanningApprovedAt = DateTimeOffset.Now;
             i.PlanningApprovedByUserId = Me;
@@ -479,9 +513,12 @@ namespace Services.NasbNiro.Procurement
                 }).ToList(),
             };
             _uow.Set<PurchaseInquiry>().Add(copy);
-            await _uow.SaveChangesAsync(cancellationToken);
-            loaded.SupersededByInquiryId = copy.Id;
-            await _uow.SaveChangesAsync(cancellationToken);
+            string inquiryLinkError = await SaveLinkedAsync(async () =>
+            {
+                loaded.SupersededByInquiryId = copy.Id;
+                await CopyAttachmentsAsync(AttachmentOwnerType.Inquiry, loaded.Id, copy.Id, cancellationToken);
+            }, cancellationToken);
+            if (inquiryLinkError != null) return Bad<InquiryDto>(inquiryLinkError);
             return await GetInquiryAsync(copy.Id, cancellationToken);
         }
 
@@ -648,14 +685,79 @@ namespace Services.NasbNiro.Procurement
             };
             request.EstimatedAmount = Math.Round(quantity * (price ?? 0), 0);
             _uow.Set<PurchaseRequest>().Add(request);
-            await _uow.SaveChangesAsync(cancellationToken);
-            _uow.Set<ProcBuyOrderBridge>().Add(new ProcBuyOrderBridge { BuyOrderId = buy.Id, PurchaseRequestId = request.Id, Note = Clean(dto.Note), CreateDate = DateTimeOffset.Now, CreatorUserId = Me });
-            await _uow.SaveChangesAsync(cancellationToken);
+            string bridgeError = await SaveLinkedAsync(() =>
+            {
+                _uow.Set<ProcBuyOrderBridge>().Add(new ProcBuyOrderBridge { BuyOrderId = buy.Id, PurchaseRequestId = request.Id, Note = Clean(dto.Note), CreateDate = DateTimeOffset.Now, CreatorUserId = Me });
+                return Task.CompletedTask;
+            }, cancellationToken);
+            if (bridgeError != null) return Bad<ConvertBuyOrderResultDto>("این سفارش قدیمی هم‌زمان تبدیل شد یا قبلاً تبدیل شده است.");
             return ResponseDtoHelper.Ok(new ConvertBuyOrderResultDto
             {
                 BuyOrderId = buy.Id, PurchaseRequestId = request.Id, PurchaseRequestNumber = request.Number,
                 Message = "پیش‌نویس درخواست خرید ساخته شد؛ مسیر تایید و استعلام از زنجیره جدید ادامه می‌یابد.",
             });
+        }
+
+        /// <summary>M13: two saves that belong together (the new row, then the link) in one transaction; a concurrent second call gets a message instead of an exception and no orphan row stays.</summary>
+        private async Task<string> SaveLinkedAsync(Func<Task> second, CancellationToken cancellationToken)
+        {
+            const string conflict = "هم‌زمان کار دیگری روی همین سند انجام شد؛ صفحه را تازه کنید و دوباره تلاش کنید.";
+            try
+            {
+                if (!(_uow is Microsoft.EntityFrameworkCore.DbContext db) || !db.Database.IsRelational())
+                {
+                    await _uow.SaveChangesAsync(cancellationToken);
+                    await second();
+                    await _uow.SaveChangesAsync(cancellationToken);
+                    return null;
+                }
+                int attempt = 0;
+                string result = null;
+                await db.Database.CreateExecutionStrategy().ExecuteAsync(async token =>
+                {
+                    if (attempt++ > 0) { result = conflict; return; }
+                    await using var transaction = await db.Database.BeginTransactionAsync(token);
+                    await _uow.SaveChangesAsync(token);
+                    await second();
+                    await _uow.SaveChangesAsync(token);
+                    await transaction.CommitAsync(token);
+                }, cancellationToken);
+                return result;
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException) { return conflict; }
+        }
+
+        /// <summary>M-attachments: the files of the old revision are visible on the new one (the same stored document, a new row; the old revision keeps its own).</summary>
+        private async Task CopyAttachmentsAsync(AttachmentOwnerType ownerType, int fromId, int toId, CancellationToken cancellationToken)
+        {
+            List<RecordAttachment> files = await _uow.Set<RecordAttachment>().AsNoTracking()
+                .Where(a => a.OwnerType == ownerType && a.OwnerId == fromId && !a.Deleted && a.RemovedAt == null && !a.Voided && a.SupersededById == null).ToListAsync(cancellationToken);
+            foreach (RecordAttachment a in files)
+            {
+                _uow.Set<RecordAttachment>().Add(new RecordAttachment
+                {
+                    OwnerType = ownerType, OwnerId = toId, Kind = a.Kind, DocumentId = a.DocumentId, Title = a.Title, Revision = a.Revision, FileName = a.FileName, SizeBytes = a.SizeBytes,
+                    UploadedByUserId = a.UploadedByUserId, UploadedAt = a.UploadedAt, CreateDate = DateTimeOffset.Now, CreatorUserId = Me,
+                });
+            }
+        }
+
+        /// <summary>The lines of a revised order against the first frozen revision (what the supplier first received): quantity and unit price may move by the limit at most.</summary>
+        private async Task<string> RevisionVolumeErrorAsync(PurchaseOrder o, decimal limitPercent, CancellationToken cancellationToken)
+        {
+            string json = await _uow.Set<PurchaseOrderRevision>().AsNoTracking().Where(r => r.PurchaseOrderId == o.Id).OrderBy(r => r.Revision).Select(r => r.SnapshotJson).FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrEmpty(json)) return null;
+            using System.Text.Json.JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
+            foreach (System.Text.Json.JsonElement l in doc.RootElement.GetProperty("Lines").EnumerateArray())
+            {
+                int row = l.GetProperty("RowNumber").GetInt32();
+                PurchaseOrderLine now = o.Lines.FirstOrDefault(x => x.RowNumber == row);
+                if (now == null) return $"ردیف {row} نسبت به قرارداد امضاشده حذف شده؛ تغییر ساختار قرارداد الحاقیه می‌خواهد.";
+                decimal q0 = l.GetProperty("Quantity").GetDecimal(), p0 = l.GetProperty("UnitPrice").GetDecimal();
+                if (q0 > 0 && Math.Abs(now.Quantity - q0) / q0 * 100m > limitPercent) return $"ردیف {row}: تغییر حجم از {limitPercent:0.##} درصد قرارداد بیشتر است؛ الحاقیه لازم است.";
+                if (p0 > 0 && Math.Abs(now.UnitPrice - p0) / p0 * 100m > limitPercent) return $"ردیف {row}: تغییر قیمت از {limitPercent:0.##} درصد قرارداد بیشتر است؛ الحاقیه لازم است.";
+            }
+            return null;
         }
     }
 }

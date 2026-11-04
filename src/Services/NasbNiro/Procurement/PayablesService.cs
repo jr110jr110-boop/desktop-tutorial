@@ -392,8 +392,26 @@ namespace Services.NasbNiro.Procurement
             if (invoice != null) order ??= await _uow.Set<PurchaseOrder>().FirstAsync(o => o.Id == invoice.PurchaseOrderId, cancellationToken);
             bool qcApproved = false;
             bool needsConfirmation = false;
+            if (dto.Milestone)
+            {
+                // PB6 (H2): all milestone payments of an order together stay within the order total (the applied addenda are in it)
+                var termRequestIds = await _uow.Set<PurchaseOrderPaymentTerm>().Where(t => t.PurchaseOrderId == order.Id && t.PaymentRequestId != null).Select(t => t.PaymentRequestId.Value).ToListAsync(cancellationToken);
+                decimal milestoneBefore = await _uow.Set<PaymentRequest>().Where(p => termRequestIds.Contains(p.Id) && p.Status != PaymentRequestStatus.Rejected && !p.Deleted && p.Id != (dto.Id ?? 0))
+                    .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
+                if (milestoneBefore + dto.Amount > order.TotalAmount) return Bad<PaymentRequestDto>($"مجموع پرداخت‌های مراحل قرارداد ({milestoneBefore + dto.Amount:0}) از مبلغ سفارش با الحاقیه‌ها ({order.TotalAmount:0}) بیشتر می‌شود.");
+            }
             switch (dto.Type)
             {
+                case PaymentRequestType.Retention:
+                {
+                    if (!dto.Milestone) return Bad<PaymentRequestDto>("پرداخت حسن انجام کار از مرحله پرداخت قرارداد ثبت می‌شود.");
+                    if (order.Status < PurchaseOrderStatus.Released || order.Status == PurchaseOrderStatus.Cancelled) return Bad<PaymentRequestDto>("سفارش ابلاغ‌شده لازم است.");
+                    List<PurchaseOrderLine> rl = await _uow.Set<PurchaseOrderLine>().Where(l => l.PurchaseOrderId == order.Id).ToListAsync(cancellationToken);
+                    Dictionary<int, decimal> ra = await _procurement.AcceptedQuantitiesAsync(rl.Select(l => l.Id), cancellationToken);
+                    if (rl.Count == 0 || rl.Any(l => ra[l.Id] < l.Quantity)) return Bad<PaymentRequestDto>("حسن انجام کار پس از پذیرش نهایی همه ردیف‌ها پرداخت می‌شود.");
+                    qcApproved = true;
+                    break;
+                }
                 case PaymentRequestType.Advance:
                 {
                     if (order.Status < PurchaseOrderStatus.Released || order.Status == PurchaseOrderStatus.Cancelled) return Bad<PaymentRequestDto>("پیش‌پرداخت برای سفارش ابلاغ‌شده است.");
@@ -414,7 +432,7 @@ namespace Services.NasbNiro.Procurement
                     decimal noteCredits = await _uow.Set<FnSupplierNote>().Where(n => n.SupplierInvoiceId == invoice.Id && n.Kind == FnSupplierNoteKind.Credit && n.Status == FnSettlementStatus.Posted).SumAsync(n => (decimal?)n.TotalAmount, cancellationToken) ?? 0;
                     decimal noteDebits = await _uow.Set<FnSupplierNote>().Where(n => n.SupplierInvoiceId == invoice.Id && n.Kind == FnSupplierNoteKind.Debit && n.Status == FnSettlementStatus.Posted).SumAsync(n => (decimal?)n.TotalAmount, cancellationToken) ?? 0;
                     decimal payableLimit = invoice.TotalAmount - noteCredits + noteDebits;
-                    if (before + dto.Amount > payableLimit) return Bad<PaymentRequestDto>($"مبلغ از مانده فاکتور بیشتر است؛ مانده قابل پرداخت پس از یادداشت‌های بستانکار و بدهکار {Math.Max(0, payableLimit - before):0} ریال است.");
+                    if (!dto.Milestone && before + dto.Amount > payableLimit) return Bad<PaymentRequestDto>($"مبلغ از مانده فاکتور بیشتر است؛ مانده قابل پرداخت پس از یادداشت‌های بستانکار و بدهکار {Math.Max(0, payableLimit - before):0} ریال است.");
                     // supplier advances of the order are recovered from the invoice payments: what is still unrecovered is proposed as a deduction the approver sees
                     decimal advanced = await _uow.Set<PaymentRequest>().Where(p => p.PurchaseOrderId == order.Id && p.Type == PaymentRequestType.Advance && p.Status == PaymentRequestStatus.Paid && !p.Deleted)   // only advances really paid (review 2, finding 12)
                         .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0;
@@ -422,8 +440,8 @@ namespace Services.NasbNiro.Procurement
                                                                                        !d.PaymentRequest.Deleted && d.PaymentRequestId != (dto.Id ?? 0)).SumAsync(d => (decimal?)d.Amount, cancellationToken) ?? 0;
                     decimal unrecovered = Math.Max(0, advanced - recovered);
                     decimal givenRecovery = typedLines.Where(d => d.Kind == FnDeductionKind.AdvanceRecovery).Sum(d => Math.Round(d.Amount, 0));
-                    if (givenRecovery > unrecovered) return Bad<PaymentRequestDto>($"بازیابی پیش‌پرداخت ({givenRecovery:0}) از پیش‌پرداخت بازیابی‌نشده این سفارش ({unrecovered:0} ریال) بیشتر است.");
-                    if (givenRecovery == 0 && unrecovered > 0)
+                    if (!dto.Milestone && givenRecovery > unrecovered) return Bad<PaymentRequestDto>($"بازیابی پیش‌پرداخت ({givenRecovery:0}) از پیش‌پرداخت بازیابی‌نشده این سفارش ({unrecovered:0} ریال) بیشتر است.");
+                    if (!dto.Milestone && givenRecovery == 0 && unrecovered > 0)
                     {
                         decimal proposal = Math.Min(unrecovered, dto.Amount - totalDeductions);
                         if (proposal > 0)
@@ -435,6 +453,7 @@ namespace Services.NasbNiro.Procurement
 
                     // R1c (M13): the retention and the late penalty of the order terms are proposed too (when no line of that kind was typed); any line of these two kinds,
                     // proposed or typed, must be confirmed by finance before the request can be approved
+                    if (!dto.Milestone)
                     foreach (PaymentProposals.Proposal pr in await ProposalsAsync(order, invoice, dto, typedLines, totalDeductions, cancellationToken))
                     {
                         typedLines.Add(new PaymentDeductionDto { Kind = pr.Kind, Base = pr.Base, RatePercent = pr.RatePercent, Amount = pr.Amount, Note = pr.Note });

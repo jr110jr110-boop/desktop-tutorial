@@ -176,6 +176,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
             // PB6: supplier contracts, procurement reports, contracts system, progress statements, petty-cash flow
             services.AddScoped<Services.NasbNiro.Procurement.ISupplierContractService, Services.NasbNiro.Procurement.SupplierContractService>();
+            services.AddHostedService<Services.NasbNiro.Procurement.ProcurementHostedService>();   // PB6: off unless Procurement:GuaranteeJob=true
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementReportsService, Services.NasbNiro.Procurement.ProcurementReportsService>();
             services.AddScoped<Services.NasbNiro.ContractsSystem.IContractsSystemService, Services.NasbNiro.ContractsSystem.ContractsSystemService>();
             services.AddScoped<Services.NasbNiro.ContractsSystem.IProgressStatementService, Services.NasbNiro.ContractsSystem.ProgressStatementService>();

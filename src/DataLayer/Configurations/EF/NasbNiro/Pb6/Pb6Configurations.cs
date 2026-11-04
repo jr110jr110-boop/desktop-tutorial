@@ -25,15 +25,27 @@ namespace DataLayer.Configurations.EF.NasbNiro.Pb6
                 b.Property(x => x.VehicleType).HasMaxLength(Name);
                 b.Property(x => x.VehicleOrigin).HasMaxLength(Title);
                 b.Property(x => x.VehicleDestination).HasMaxLength(Title);
+                b.Property(x => x.Priority).HasDefaultValue(PurchaseRequestPriority.Normal);
+                b.Property(x => x.FormType).HasDefaultValue(PurchaseFormType.GoodsProject);
+                b.Property(x => x.Revision).HasDefaultValue(1);
                 b.HasIndex(x => x.FormType);
                 b.HasIndex(x => x.PreviousRequestId);
+                b.HasOne<PurchaseOrder>().WithMany().HasForeignKey(x => x.RelatedOrderId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<PurchaseRequest>().WithMany().HasForeignKey(x => x.SupersededByRequestId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.RelatedOrderId);
+                b.HasIndex(x => x.SupersededByRequestId);
             });
             builder.Entity<PurchaseInquiry>(b =>
             {
                 b.Property(x => x.ReturnReason).HasMaxLength(Text);
                 b.Property(x => x.PlanningNote).HasMaxLength(Text);
                 b.Property(x => x.PlanningBudgetAmount).HasPrecision(22, 2);
+                b.Property(x => x.Revision).HasDefaultValue(1);
+                b.Property(x => x.BudgetOverrideNote).HasMaxLength(Text);
+                b.Property(x => x.BudgetOverrideAmount).HasPrecision(22, 2);
                 b.HasIndex(x => x.PreviousInquiryId);
+                b.HasOne<PurchaseInquiry>().WithMany().HasForeignKey(x => x.SupersededByInquiryId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.SupersededByInquiryId);
             });
 
             builder.Entity<PurchaseRequestRevision>(b =>
@@ -186,6 +198,12 @@ namespace DataLayer.Configurations.EF.NasbNiro.Pb6
                 b.Property(x => x.AdvancePercent).HasPrecision(9, 4);
                 b.Property(x => x.RetentionPercent).HasPrecision(9, 4);
                 b.Property(x => x.PerformanceGuaranteePercent).HasPrecision(9, 4);
+                b.HasOne<CtDealRequest>().WithMany().HasForeignKey(x => x.DealRequestId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<CtTenderRun>().WithMany().HasForeignKey(x => x.TenderRunId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<PurchaseOrder>().WithMany().HasForeignKey(x => x.PurchaseOrderId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<Entities.Model.NasbNiro.Contracts.ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.DealRequestId);
+                b.HasIndex(x => x.PurchaseOrderId);
                 b.HasOne(x => x.Provider).WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<CtCbsItem>(b =>
@@ -196,6 +214,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Pb6
                 b.Property(x => x.Amount).HasPrecision(22, 2);
                 b.HasIndex(x => new { x.PurchaseOrderId, x.Code });
                 b.HasIndex(x => new { x.ContractId, x.Code });
+                b.HasOne<PurchaseOrder>().WithMany().HasForeignKey(x => x.PurchaseOrderId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<Entities.Model.NasbNiro.Contracts.ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ---------------------------------------------------------------------------------------------- progress statements
@@ -208,6 +228,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Pb6
                 b.HasIndex(x => new { x.ContractId, x.Serial }).HasFilter("[Deleted] = 0 AND [ContractId] IS NOT NULL AND [PurchaseOrderId] IS NULL");
                 b.HasIndex(x => x.Status);
                 b.Property(x => x.Subject).HasMaxLength(Title);
+                b.HasOne<Entities.Model.NasbNiro.Contracts.ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<PsStatement>().WithMany().HasForeignKey(x => x.ProvisionalStatementId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.ProvisionalStatementId);
+                b.HasIndex(x => x.PaymentRequestId);
                 b.Property(x => x.SupportingDocuments).HasMaxLength(Text);
                 b.Property(x => x.CounterpartyComments).HasMaxLength(LongText);
                 b.Property(x => x.ChequeNumber).HasMaxLength(Code);
@@ -233,6 +257,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Pb6
                     nameof(PsStatementLine.GoodPerformanceAmount), nameof(PsStatementLine.AfterFinalTestsAmount), nameof(PsStatementLine.ThisPeriodAmount) })
                     b.Property(money).HasPrecision(22, 2);
                 b.HasOne(x => x.Statement).WithMany(x => x.Lines).HasForeignKey(x => x.StatementId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<CtCbsItem>().WithMany().HasForeignKey(x => x.CbsItemId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<PurchaseOrderLine>().WithMany().HasForeignKey(x => x.OrderLineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.CbsItemId);
+                b.HasIndex(x => x.OrderLineId);
             });
             builder.Entity<PsPreviousPayment>(b =>
             {
@@ -259,6 +287,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Pb6
                 b.Property(x => x.BaseAmount).HasPrecision(22, 2);
                 b.Property(x => x.Amount).HasPrecision(22, 2);
                 b.HasOne(x => x.Statement).WithMany(x => x.Deductions).HasForeignKey(x => x.StatementId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<Entities.Model.NasbNiro.Inventory.NonConformance>().WithMany().HasForeignKey(x => x.NcrId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<PsLegalRate>().WithMany().HasForeignKey(x => x.LegalRateId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.NcrId);
+                b.HasIndex(x => x.LegalRateId);
             });
             builder.Entity<PsLegalRate>(b =>
             {
@@ -318,6 +350,12 @@ namespace DataLayer.Configurations.EF.NasbNiro.Pb6
                 b.Property(x => x.TrackingNumber).HasMaxLength(Name);
                 b.Property(x => x.Amount).HasPrecision(22, 2);
                 b.HasOne(x => x.Summary).WithMany(x => x.Lines).HasForeignKey(x => x.SummaryId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<FnPettyCashSettlementLine>().WithMany().HasForeignKey(x => x.SettlementLineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<PurchaseRequest>().WithMany().HasForeignKey(x => x.PurchaseRequestId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<Entities.Model.NasbNiro.Inventory.InventoryDocument>().WithMany().HasForeignKey(x => x.ReceiptDocumentId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.SettlementLineId);   // not unique: a rejected summary keeps its rows, the service refuses a second live use
+                b.HasIndex(x => x.PurchaseRequestId);
+                b.HasIndex(x => x.ReceiptDocumentId);
             });
             builder.Entity<FnPettyCashVehicleForm>(b =>
             {

@@ -296,7 +296,8 @@ namespace Services.NasbNiro.Attachments
             if (!facts.CanRead(_user)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed);
             if (facts.Closed) return Bad<AttachmentDto>(AttachmentText.OwnerCancelled);
             if (!facts.CanWrite(_user)) return ResponseDtoHelper.Forbidden<AttachmentDto>(facts.Locked ? AttachmentText.NotAllowed + " (پس از تایید فقط نقش‌های مجاز ماژول با ذکر دلیل پیوست را ابطال یا جایگزین می‌کنند)" : AttachmentText.NotAllowed);
-            if (form.Kind == AttachmentKind.PaymentSlip && !_user.IsInRole(AttachmentRoles.PaymentWrite)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed + " (فیش واریزی را حسابداری یا خزانه‌داری پیوست می‌کند)");
+            bool pettyHolderOwn = (form.OwnerType == AttachmentOwnerType.PettyCashSummaryLine || form.OwnerType == AttachmentOwnerType.PettyCashRequest || form.OwnerType == AttachmentOwnerType.PettyCashSummary) && facts.CreatorUserId == Me && !facts.Locked;
+            if (form.Kind == AttachmentKind.PaymentSlip && !pettyHolderOwn && !_user.IsInRole(AttachmentRoles.PaymentWrite)) return ResponseDtoHelper.Forbidden<AttachmentDto>(AttachmentText.NotAllowed + " (فیش واریزی را حسابداری یا خزانه‌داری پیوست می‌کند)");
 
             ResponseDto<string> fileRefusal = await CheckFileAsync(form.File, ct);
             if (fileRefusal != null) return Bad<AttachmentDto>(fileRefusal.Message);

@@ -234,6 +234,8 @@ namespace Entities.Model.NasbNiro.ContractsSystem
         public string ContractNumber { get; set; }
         public DateTime? SignedDate { get; set; }
         public int? SignedByUserId { get; set; }
+        /// <summary>M10: who agreed the draft; the same person does not sign it.</summary>
+        public int? AgreedByUserId { get; set; }
         public int ExchangeRound { get; set; }
         public string CounterpartyComments { get; set; }
 
@@ -468,6 +470,9 @@ namespace Entities.Model.NasbNiro.ContractsSystem
         public string Code { get; set; }
         public string Title { get; set; }
         public decimal Percent { get; set; }
+
+        /// <summary>M7: what kind of deduction the rate is, so the payment request carries it typed into the ledger and the Sepidar data (tax, insurance, good performance).</summary>
+        public Entities.Model.NasbNiro.Finance.FnDeductionKind DeductionKind { get; set; } = Entities.Model.NasbNiro.Finance.FnDeductionKind.Withholding;
 
         /// <summary>What the percent applies to (for example the gross amount of the statement).</summary>
         public string BasisNote { get; set; }

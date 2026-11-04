@@ -11196,7 +11196,7 @@ as "$COM_TOKEN" GET $P6CS/mapping; check "pb6 contracts: the mapping table has s
 as "$COM_TOKEN" GET $P6PR/reports/catalog; check "pb6 reports: the catalogue lists six reports" '.success and (.data|length) == 6'
 as "$COM_TOKEN" GET "$P6PR/reports?report=overdue"; check "pb6 reports: the overdue report answers" '.success and .data.key == "overdue"'
 as "$COM_TOKEN" GET "$P6PR/reports?report=nothing"; no "pb6 reports: an unknown report is refused"
-as "$WH_TOKEN" GET "$P6PR/reports?report=orders"; [ "$CODE" = "200" ] && ok "pb6 reports: a warehouse reader may open the reports" || bad "pb6 reports: a warehouse reader may open the reports"
+as "$WH_TOKEN" GET "$P6PR/reports?report=orders"; [ "$CODE" != "200" ] && ok "pb6 reports: the warehouse does not open the money reports" || bad "pb6 reports: the warehouse does not open the money reports"
 as "$PLAN_TOKEN" GET $P6PR/guarantees; check "pb6 guarantees: the register answers" '.success'
 as "$COM_TOKEN" GET $P6PR/addenda; check "pb6 addenda: the list answers" '.success'
 as "$COM_TOKEN" POST $P6PR/legacy-buy-orders/convert '{"buyOrderId":0}'; no "pb6 bridge: a buy order that does not exist is refused"

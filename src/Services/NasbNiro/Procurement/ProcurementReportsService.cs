@@ -128,9 +128,9 @@ namespace Services.NasbNiro.Procurement
                     Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
                     int days = query.OverdueDays ?? (int)s[ProcurementSettingKeys.RequestToOrderDays];
                     DateTimeOffset limit = DateTimeOffset.Now.AddDays(-days);
-                    var rows = await _uow.Set<PurchaseRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status == PurchaseRequestStatus.Approved && r.ManagementApprovedAt != null && r.ManagementApprovedAt < limit
+                    var rows = await _uow.Set<PurchaseRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status == PurchaseRequestStatus.Approved && (r.ManagementApprovedAt ?? r.PlanningApprovedAt) != null && (r.ManagementApprovedAt ?? r.PlanningApprovedAt) < limit
                         && !_uow.Set<PurchaseOrderLine>().Any(l => l.RequestLine.PurchaseRequestId == r.Id && l.PurchaseOrder.Status != PurchaseOrderStatus.Cancelled))
-                        .OrderBy(r => r.ManagementApprovedAt).Take(1000).Select(r => new { r.Number, r.ManagementApprovedAt, r.EstimatedAmount }).ToListAsync(cancellationToken);
+                        .OrderBy(r => r.ManagementApprovedAt ?? r.PlanningApprovedAt).Take(1000).Select(r => new { r.Number, ManagementApprovedAt = r.ManagementApprovedAt ?? r.PlanningApprovedAt, r.EstimatedAmount }).ToListAsync(cancellationToken);
                     foreach (var r in rows)
                         t.Rows.Add(new Dictionary<string, object> { ["number"] = r.Number, ["approved"] = r.ManagementApprovedAt.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["days"] = (int)(DateTimeOffset.Now - r.ManagementApprovedAt.Value).TotalDays, ["estimated"] = r.EstimatedAmount });
                     t.Totals["estimated"] = rows.Sum(r => r.EstimatedAmount);

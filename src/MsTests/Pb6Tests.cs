@@ -130,7 +130,78 @@ namespace MsTests
         [TestMethod]
         public void Form_types_are_validated()
         {
-            Assert.IsNotNull(typeof(ProcFormTypes));
+            Assert.AreEqual(PurchaseFormType.GoodsProject, ProcFormTypes.Derive(PurchaseKind.Goods, 5));
+            Assert.AreEqual(PurchaseFormType.GoodsMiscellaneous, ProcFormTypes.Derive(PurchaseKind.Goods, null));
+            Assert.AreEqual(PurchaseFormType.ServiceProject, ProcFormTypes.Derive(PurchaseKind.Service, 5));
+            Assert.AreEqual(PurchaseFormType.ServiceGeneral, ProcFormTypes.Derive(PurchaseKind.Service, null));
+            Assert.AreEqual(PurchaseFormType.ContractProject, ProcFormTypes.Derive(PurchaseKind.Subcontract, 5));
+            Assert.AreEqual(PurchaseKind.Goods, ProcFormTypes.KindOf(PurchaseFormType.GoodsMiscellaneous));
+            Assert.AreEqual(PurchaseKind.Service, ProcFormTypes.KindOf(PurchaseFormType.ServiceGeneral));
+            foreach (PurchaseFormType f in Enum.GetValues(typeof(PurchaseFormType)))
+                Assert.IsTrue(Enum.IsDefined(typeof(PurchaseKind), ProcFormTypes.KindOf(f)), f.ToString());
+        }
+
+        [TestMethod]
+        public async Task Cbs_can_be_saved_again_and_a_removed_item_is_soft_deleted()
+        {
+            NewHost("cbs");
+            int orderId = 0;
+            H.Write(uow =>
+            {
+                var o = AppHost.Add(uow, new PurchaseOrder { Number = "PO-CBS-1", ProviderId = 1, Status = PurchaseOrderStatus.Released, OrderDate = DateTime.Today, TotalAmount = 1000m });
+                uow.SaveChanges();
+                orderId = o.Id;
+            }, Seeder);
+            var first = await H.As(Buyer, p => p.GetRequiredService<IProgressStatementService>().SaveCbsAsync(new SaveCbsDto
+            {
+                PurchaseOrderId = orderId,
+                Items = new List<SaveCbsItemDto> { new SaveCbsItemDto { Code = "A", Title = "first", Amount = 600m }, new SaveCbsItemDto { Code = "B", Title = "second", Amount = 400m } },
+            }, CancellationToken.None));
+            Assert.IsTrue(first.Success, first.Message);
+            Assert.AreEqual(2, first.Data.Count);
+            var second = await H.As(Buyer, p => p.GetRequiredService<IProgressStatementService>().SaveCbsAsync(new SaveCbsDto
+            {
+                PurchaseOrderId = orderId,
+                Items = new List<SaveCbsItemDto> { new SaveCbsItemDto { Code = "A", Title = "first changed", Amount = 700m } },
+            }, CancellationToken.None));
+            Assert.IsTrue(second.Success, second.Message);
+            Assert.AreEqual(1, second.Data.Count);
+            int rows = 0, deleted = 0;
+            H.Write(uow => { rows = uow.Set<CtCbsItem>().Count(); deleted = uow.Set<CtCbsItem>().Count(c => c.Deleted); }, Seeder);
+            Assert.AreEqual(2, rows, "the removed item stays as a soft-deleted row");
+            Assert.AreEqual(1, deleted);
+        }
+
+        [TestMethod]
+        public async Task A_large_deal_cannot_use_the_small_chain()
+        {
+            NewHost("level");
+            var small = await H.As(Planner, p => p.GetRequiredService<IContractsSystemService>().SaveDealAsync(new SaveDealRequestDto { Title = "t", Subject = "s", EstimatedAmount = 9000000000m, DealLevel = CtDealLevel.Small, Submit = true }, CancellationToken.None));
+            Assert.IsFalse(small.Success, "the level follows the amount");
+        }
+
+        [TestMethod]
+        public async Task A_legal_rate_has_a_deduction_kind_and_late_penalty_is_not_one_of_them()
+        {
+            NewHost("ratekind");
+            var bad = await H.As(Finance, p => p.GetRequiredService<IProgressStatementService>().SaveRateAsync(new SaveLegalRateDto { Code = "K1", Title = "x", Percent = 5m, SourceReference = "s", DeductionKind = Entities.Model.NasbNiro.Finance.FnDeductionKind.LatePenalty }, CancellationToken.None));
+            Assert.IsFalse(bad.Success);
+            var ok = await H.As(Finance, p => p.GetRequiredService<IProgressStatementService>().SaveRateAsync(new SaveLegalRateDto { Code = "K2", Title = "x", Percent = 5m, SourceReference = "s", DeductionKind = Entities.Model.NasbNiro.Finance.FnDeductionKind.InsuranceRetention }, CancellationToken.None));
+            Assert.IsTrue(ok.Success, ok.Message);
+            Assert.AreEqual(Entities.Model.NasbNiro.Finance.FnDeductionKind.InsuranceRetention, ok.Data.DeductionKind);
+        }
+
+        [TestMethod]
+        public void Warehouse_does_not_read_the_money_reports()
+        {
+            Assert.IsFalse(ProcurementRoles.ReportReaders.Contains("WAREHOUSE"));
+            Assert.IsFalse(ProcurementRoles.ReportReaders.Contains("WHSUPERVISOR"));
+        }
+
+        [TestMethod]
+        public void Retention_is_its_own_payable_kind()
+        {
+            Assert.AreEqual(5, (int)PaymentRequestType.Retention);
         }
     }
 }

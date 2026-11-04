@@ -267,7 +267,7 @@ namespace WebApi.Controllers
         public PettyCashFlowController(IPettyCashFlowService service) { _service = service; }
 
         [HttpGet("requests")]
-        [Authorize(Roles = PettyFlowRoles.Readers)]
+        [Authorize]
         public async Task<IActionResult> RequestsAsync([FromQuery] FlowQuery query, CancellationToken ct) => Ok(await _service.GetRequestsAsync(query, ct));
 
         [HttpPost("requests")]
@@ -277,11 +277,11 @@ namespace WebApi.Controllers
         public async Task<IActionResult> RequestActionAsync([FromBody] FlowActionDto dto, CancellationToken ct) => Ok(await _service.RequestActionAsync(dto, ct));
 
         [HttpGet("summaries")]
-        [Authorize(Roles = PettyFlowRoles.Readers)]
+        [Authorize]
         public async Task<IActionResult> SummariesAsync([FromQuery] FlowQuery query, CancellationToken ct) => Ok(await _service.GetSummariesAsync(query, ct));
 
         [HttpGet("summaries/{id:int}")]
-        [Authorize(Roles = PettyFlowRoles.Readers)]
+        [Authorize]
         public async Task<IActionResult> SummaryAsync(int id, CancellationToken ct) => Ok(await _service.GetSummaryAsync(id, ct));
 
         [HttpPost("summaries/preview")]

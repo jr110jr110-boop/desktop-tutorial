@@ -21,7 +21,7 @@ namespace Services.NasbNiro.Procurement
         /// <summary>PB6: archive and restore of procurement documents (with a reason).</summary>
         public const string Archivers = "COMMERCIAL,PLANNING,FINANCIAL,FINANCEMANAGER,PMO";
         /// <summary>PB6: the procurement reports (the unit that buys, plans and pays, and management).</summary>
-        public const string ReportReaders = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,AUDITOR";
+        public const string ReportReaders = "PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR";
         public const string Planning = "PLANNING,PMO";
         /// <summary>مدیرعامل (or management): medium/major purchases, committee above the CEO threshold, advance above the limit.</summary>
         public const string Management = "CEO,PMO";

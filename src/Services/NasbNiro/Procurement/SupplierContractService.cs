@@ -23,6 +23,8 @@ namespace Services.NasbNiro.Procurement
         Task<ResponseDto<GuaranteeDto>> SaveGuaranteeAsync(SaveGuaranteeDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<GuaranteeDto>> GuaranteeActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<GuaranteeAlertResultDto>> RunGuaranteeAlertsAsync(CancellationToken cancellationToken);
+        /// <summary>The daily job (no signed-in user): the same alerts, run by the hosted service when Procurement:GuaranteeJob is true.</summary>
+        Task<ResponseDto<GuaranteeAlertResultDto>> RunGuaranteeAlertsJobAsync(CancellationToken cancellationToken);
 
         Task<ResponseDto<List<PaymentTermDto>>> GetPaymentTermsAsync(int purchaseOrderId, CancellationToken cancellationToken);
         Task<ResponseDto<List<PaymentTermDto>>> SavePaymentTermsAsync(SavePaymentTermsDto dto, CancellationToken cancellationToken);
@@ -50,10 +52,12 @@ namespace Services.NasbNiro.Procurement
         private readonly IInventoryUserContext _user;
         private readonly IPayablesService _payables;
         private readonly IProcurementService _procurement;
+        private readonly global::Services.NasbNiro.Finance.IBudgetService _budget;
         private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
-        public SupplierContractService(IUnitOfWork uow, IInventoryUserContext user, IPayablesService payables, IProcurementService procurement, global::Services.NasbNiro.Office.INotificationService notify)
+        public SupplierContractService(IUnitOfWork uow, IInventoryUserContext user, IPayablesService payables, IProcurementService procurement, global::Services.NasbNiro.Office.INotificationService notify, global::Services.NasbNiro.Finance.IBudgetService budget = null)
         {
+            _budget = budget;
             _procurement = procurement ?? throw new ArgumentNullException(nameof(procurement));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
@@ -145,6 +149,10 @@ namespace Services.NasbNiro.Procurement
                 decimal original = await OriginalQuantityAsync(line, dto.Id ?? 0, cancellationToken);
                 decimal change = original <= 0 ? 0 : Math.Abs(l.QuantityAfter - original) / original * 100m;
                 if (change > limit) return Bad<AddendumDto>($"ردیف {line.RowNumber}: تغییر حجم {change:0.##} درصد است و از سقف {limit:0.##} درصد قرارداد (جمعاً نسبت به مقدار اولیه) بیشتر است؛ سفارش تازه بدهید.");
+                decimal originalPrice = await _uow.Set<PurchaseOrderAddendumLine>().Where(x => x.OrderLineId == line.Id && x.Addendum.Status == AddendumStatus.Applied && x.AddendumId != (dto.Id ?? 0))
+                    .OrderBy(x => x.AddendumId).Select(x => (decimal?)x.UnitPriceBefore).FirstOrDefaultAsync(cancellationToken) ?? line.UnitPrice;
+                decimal priceChange = originalPrice <= 0 ? 0 : Math.Abs(l.UnitPriceAfter - originalPrice) / originalPrice * 100m;
+                if (priceChange > limit) return Bad<AddendumDto>($"ردیف {line.RowNumber}: تغییر قیمت {priceChange:0.##} درصد است و از سقف {limit:0.##} درصد بیشتر است؛ سفارش تازه بدهید.");
                 maxVolume = Math.Max(maxVolume, change);
                 kept.Add(new PurchaseOrderAddendumLine
                 {
@@ -190,7 +198,11 @@ namespace Services.NasbNiro.Procurement
             addendum.AmountBefore = order.TotalAmount; addendum.AmountAfter = after;
             addendum.DeliveryDateBefore = order.DeliveryDate; addendum.DeliveryDateAfter = timeChange ? newDate : null;
             addendum.MaxVolumeChangePercent = Math.Round(maxVolume, 2);
-            addendum.NeedsCeo = Math.Abs(after - order.TotalAmount) >= s[ProcurementSettingKeys.AddendumCeoFrom];
+            // PB6 (M5): the CEO threshold is judged on the cumulative change against the amount first signed, so small steps cannot dodge it
+            decimal? firstBefore = await _uow.Set<PurchaseOrderAddendum>().Where(a => a.PurchaseOrderId == order.Id && a.Status == AddendumStatus.Applied && !a.Deleted && a.Id != addendum.Id)
+                .OrderBy(a => a.Id).Select(a => (decimal?)a.AmountBefore).FirstOrDefaultAsync(cancellationToken);
+            decimal signedAmount = firstBefore ?? order.TotalAmount;
+            addendum.NeedsCeo = Math.Abs(after - signedAmount) >= s[ProcurementSettingKeys.AddendumCeoFrom] || Math.Abs(after - order.TotalAmount) >= s[ProcurementSettingKeys.AddendumCeoFrom];
             foreach (PurchaseOrderAddendumLine l in kept) addendum.Lines.Add(l);
             addendum.ModifyDate = DateTimeOffset.Now; addendum.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
@@ -268,11 +280,32 @@ namespace Services.NasbNiro.Procurement
                 if (l.QuantityAfter < line.ReceivedQuantity || l.QuantityAfter < line.InvoicedQuantity) return "مقدار جدید از مقدار تحویل‌شده یا فاکتورشده کمتر است.";
                 line.Quantity = l.QuantityAfter; line.UnitPrice = l.UnitPriceAfter;
             }
+            // PB6 (M5): the order as it stood is frozen before the change (append only, with a hash)
+            string snapshot = OrderSnapshot.Json(order);
+            _uow.Set<PurchaseOrderRevision>().Add(new PurchaseOrderRevision
+            {
+                PurchaseOrderId = order.Id, Revision = order.Revision, Reason = "الحاقیه " + a.Number + ": " + a.Reason, StatusWhenFrozen = order.Status, TotalAmount = order.TotalAmount,
+                SnapshotJson = snapshot, Hash = global::Services.NasbNiro.ProjectControl.PcText.Sha256(snapshot), FrozenAt = now, FrozenByUserId = Me,
+                ApprovedAt = order.ApprovedAt, ApprovedByUserId = order.ApprovedByUserId,
+            });
+            order.Revision++;
             if (a.DeliveryDateAfter.HasValue) order.DeliveryDate = a.DeliveryDateAfter;
+            decimal oldTotal = order.TotalAmount;
             order.TotalAmount = Math.Round(order.Lines.Sum(x => x.Quantity * x.UnitPrice), 0);
-            // the milestones that are still waiting follow the new value
-            List<PurchaseOrderPaymentTerm> terms = await _uow.Set<PurchaseOrderPaymentTerm>().Where(t => t.PurchaseOrderId == order.Id && t.Status == PaymentTermStatus.Pending).ToListAsync(cancellationToken);
-            foreach (PurchaseOrderPaymentTerm t in terms) t.Amount = Math.Round(order.TotalAmount * t.Percent / 100m, 0);
+            // an increase is a new commitment: the budget gate sees it as the order's value change (the CEO override is the budget gate's own rule)
+            if (order.TotalAmount > oldTotal && _budget != null)
+            {
+                string center = await _uow.Set<PurchaseOrderLine>().Where(l => l.PurchaseOrderId == order.Id && l.RequestLine != null).Select(l => l.RequestLine.PurchaseRequest.CostCenter).FirstOrDefaultAsync(cancellationToken);
+                int? requestId = await _uow.Set<PurchaseOrderLine>().Where(l => l.PurchaseOrderId == order.Id && l.RequestLine != null).Select(l => (int?)l.RequestLine.PurchaseRequestId).FirstOrDefaultAsync(cancellationToken);
+                var gate = await _budget.GateAsync(center, order.ContractId, order.TotalAmount, order.OrderDate, requestId, order.Id, a.Reason, cancellationToken);
+                if (!gate.Allowed) return gate.Message;
+            }
+            // the milestones that are still waiting follow the new value; the last one takes the rounding remainder so the terms still add up to the order
+            List<PurchaseOrderPaymentTerm> terms = await _uow.Set<PurchaseOrderPaymentTerm>().Where(t => t.PurchaseOrderId == order.Id).OrderBy(t => t.Id).ToListAsync(cancellationToken);
+            List<PurchaseOrderPaymentTerm> pending = terms.Where(t => t.Status == PaymentTermStatus.Pending).ToList();
+            foreach (PurchaseOrderPaymentTerm t in pending) t.Amount = Math.Round(order.TotalAmount * t.Percent / 100m, 0);
+            if (pending.Count > 0 && terms.Sum(t => t.Percent) == 100m)
+                pending[pending.Count - 1].Amount += order.TotalAmount - terms.Sum(t => t.Amount);
             a.Status = AddendumStatus.Applied; a.AppliedAt = now;
             order.ModifyDate = now; order.ModifierUserId = Me;
             return null;
@@ -411,6 +444,11 @@ namespace Services.NasbNiro.Procurement
         public async Task<ResponseDto<GuaranteeAlertResultDto>> RunGuaranteeAlertsAsync(CancellationToken cancellationToken)
         {
             if (!_user.IsInRole(SupplierContractRoles.Readers)) return Bad<GuaranteeAlertResultDto>(NotAllowed);
+            return await RunGuaranteeAlertsJobAsync(cancellationToken);
+        }
+
+        public async Task<ResponseDto<GuaranteeAlertResultDto>> RunGuaranteeAlertsJobAsync(CancellationToken cancellationToken)
+        {
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
             DateTime limit = DateTime.Today.AddDays((int)s[ProcurementSettingKeys.GuaranteeAlertDays]);
             List<SupplierGuarantee> open = await _uow.Set<SupplierGuarantee>().Where(g => !g.Deleted && g.Status == SupplierGuaranteeStatus.Active && g.ExpiryDate <= limit).ToListAsync(cancellationToken);
@@ -459,7 +497,7 @@ namespace Services.NasbNiro.Procurement
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
 
             Dictionary<int, decimal> accepted = new Dictionary<int, decimal>();
-            if (terms.Any(t => t.Kind == PaymentTermKind.AfterDeliveryQc))
+            if (terms.Any(t => t.Kind == PaymentTermKind.AfterDeliveryQc || t.Kind == PaymentTermKind.RetentionAfterDocuments))
             {
                 // the same rule the warehouse and the invoice use: QC-accepted receipts, receipts without inspection, accepted services
                 var lineIds = order.Lines.Select(l => l.Id).ToList();
@@ -467,7 +505,7 @@ namespace Services.NasbNiro.Procurement
             }
             SupplierInvoice invoice = await _uow.Set<SupplierInvoice>().Where(i => i.PurchaseOrderId == order.Id && i.Status == SupplierInvoiceStatus.Approved && !i.Deleted)
                 .OrderByDescending(i => i.InvoiceDate).FirstOrDefaultAsync(cancellationToken);
-            bool guarantee = await _uow.Set<SupplierGuarantee>().AnyAsync(g => g.PurchaseOrderId == order.Id && g.Purpose == GuaranteePurpose.Advance && g.Status == SupplierGuaranteeStatus.Active && !g.Deleted, cancellationToken);
+            var advanceGuarantees = await _uow.Set<SupplierGuarantee>().AsNoTracking().Where(g => g.PurchaseOrderId == order.Id && g.Purpose == GuaranteePurpose.Advance && g.Status == SupplierGuaranteeStatus.Active && !g.Deleted).Select(g => new { g.Amount, g.ExpiryDate }).ToListAsync(cancellationToken);
             bool released = order.Status >= PurchaseOrderStatus.Released && order.Status != PurchaseOrderStatus.Cancelled;
 
             var list = new List<PaymentTermDto>();
@@ -475,13 +513,15 @@ namespace Services.NasbNiro.Procurement
             {
                 var requested = requests.FirstOrDefault(r => r.Id == t.PaymentRequestId);
                 bool eligible = false; string why = null; DateTime? due = null;
-                if (t.Status != PaymentTermStatus.Pending) why = "درخواست پرداخت این مرحله ثبت شده است.";
+                bool reopened = requested != null && requested.Status == PaymentRequestStatus.Rejected;
+                if (t.Status != PaymentTermStatus.Pending && !reopened) why = "درخواست پرداخت این مرحله ثبت شده است.";
                 else if (!released) why = "سفارش هنوز ابلاغ نشده است.";
                 else switch (t.Kind)
                 {
                     case PaymentTermKind.Advance:
-                        eligible = guarantee || string.IsNullOrWhiteSpace(order.AdvanceGuarantee);
-                        if (!eligible) why = "برای پیش‌پرداخت ضمانت‌نامه فعال ثبت شود.";
+                        // M6: a guarantee must be active, not past its date and cover the advance; an order that names no guarantee waives it
+                        eligible = advanceGuarantees.Any(g => g.ExpiryDate.Date >= DateTime.Today && g.Amount >= t.Amount) || (advanceGuarantees.Count == 0 && string.IsNullOrWhiteSpace(order.AdvanceGuarantee));
+                        if (!eligible) why = advanceGuarantees.Count == 0 ? "برای پیش‌پرداخت ضمانت‌نامه فعال ثبت شود." : "ضمانت‌نامه پیش‌پرداخت منقضی است یا مبلغ آن پیش‌پرداخت را نمی‌پوشاند.";
                         break;
                     case PaymentTermKind.AfterDeliveryQc:
                         decimal ordered = order.Lines.Sum(l => l.Quantity);
@@ -497,6 +537,12 @@ namespace Services.NasbNiro.Procurement
                     case PaymentTermKind.RetentionAfterDocuments:
                         eligible = t.ConditionConfirmedAt.HasValue;
                         if (!eligible) why = "تحویل مدارک بازرسی و نقشه‌ها هنوز تایید نشده است.";
+                        else
+                        {
+                            bool allAccepted = order.Lines.Count > 0 && order.Lines.All(l => (accepted.TryGetValue(l.Id, out decimal q) ? q : 0) >= l.Quantity);
+                            eligible = allAccepted;
+                            if (!eligible) why = "پذیرش نهایی همه ردیف‌ها هنوز انجام نشده است.";
+                        }
                         break;
                     default:
                         eligible = true;
@@ -505,7 +551,7 @@ namespace Services.NasbNiro.Procurement
                 list.Add(new PaymentTermDto
                 {
                     Id = t.Id, PurchaseOrderId = t.PurchaseOrderId, RowNumber = t.RowNumber, Kind = t.Kind, Percent = t.Percent, Amount = t.Amount, DueDays = t.DueDays, Condition = t.Condition ?? TermTitle(t.Kind),
-                    Status = requested != null && requested.Status == PaymentRequestStatus.Paid ? PaymentTermStatus.Paid : t.Status, PaymentRequestId = t.PaymentRequestId, PaymentRequestNumber = requested?.Number,
+                    Status = requested != null && requested.Status == PaymentRequestStatus.Paid ? PaymentTermStatus.Paid : reopened ? PaymentTermStatus.Pending : t.Status, PaymentRequestId = t.PaymentRequestId, PaymentRequestNumber = requested?.Number,
                     Eligible = eligible, EligibleNote = eligible ? null : why, DueDate = due, ConditionConfirmedAt = t.ConditionConfirmedAt, ConditionConfirmedByName = names.Name(t.ConditionConfirmedByUserId),
                 });
             }
@@ -549,6 +595,8 @@ namespace Services.NasbNiro.Procurement
                     Condition = Clean(input[i].Condition), Status = PaymentTermStatus.Pending,
                 });
             }
+            // the advance allowed on the order is what the terms say (the payables service caps the advance request by it)
+            if (input.Any(t => t.Kind == PaymentTermKind.Advance)) order.AdvancePercent = input.Where(t => t.Kind == PaymentTermKind.Advance).Sum(t => t.Percent);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(await BuildTermsAsync(order, cancellationToken));
         }
@@ -574,10 +622,11 @@ namespace Services.NasbNiro.Procurement
             if (term == null) return ResponseDtoHelper.NotFound<PaymentRequestDto>("مرحله پرداخت پیدا نشد.");
             List<PaymentTermDto> terms = await BuildTermsAsync(term.PurchaseOrder, cancellationToken);
             PaymentTermDto view = terms.First(t => t.Id == term.Id);
+            if (term.Status != PaymentTermStatus.Pending && view.Status != PaymentTermStatus.Pending) return Bad<PaymentRequestDto>("درخواست پرداخت این مرحله ثبت شده است.");
             if (!view.Eligible) return Bad<PaymentRequestDto>("شرط این مرحله برقرار نیست: " + view.EligibleNote);
             var save = new SavePaymentRequestDto
             {
-                RequestDate = DateTime.Today, PurchaseOrderId = term.PurchaseOrderId, Amount = term.Amount,
+                RequestDate = DateTime.Today, PurchaseOrderId = term.PurchaseOrderId, Amount = term.Amount, Milestone = true,
                 Description = $"{TermTitle(term.Kind)} ({term.Percent:0.##} درصد) - سفارش {term.PurchaseOrder.Number}" + (Clean(dto.Note) != null ? " - " + Clean(dto.Note) : ""),
             };
             switch (term.Kind)
@@ -591,10 +640,9 @@ namespace Services.NasbNiro.Procurement
                         .Where(i => !dto.InvoiceId.HasValue || i.Id == dto.InvoiceId.Value).OrderByDescending(i => i.InvoiceDate).FirstOrDefaultAsync(cancellationToken);
                     if (invoice == null) return Bad<PaymentRequestDto>("فاکتور تاییدشده پیدا نشد.");
                     save.InvoiceId = invoice.Id;
-                    save.Amount = Math.Min(term.Amount, invoice.TotalAmount);
                     break;
                 }
-                default: save.Type = PaymentRequestType.Final; break;
+                default: save.Type = PaymentRequestType.Retention; break;
             }
             ResponseDto<PaymentRequestDto> made = await _payables.SavePaymentAsync(save, cancellationToken);
             if (!made.Success || made.Data == null) return made;
@@ -663,7 +711,7 @@ namespace Services.NasbNiro.Procurement
         private static readonly string[] Ones = { "", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "نه", "ده", "یازده", "دوازده", "سیزده", "چهارده", "پانزده", "شانزده", "هفده", "هجده", "نوزده" };
         private static readonly string[] Tens = { "", "", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود" };
         private static readonly string[] Hundreds = { "", "یکصد", "دویست", "سیصد", "چهارصد", "پانصد", "ششصد", "هفتصد", "هشتصد", "نهصد" };
-        private static readonly string[] Scales = { "", "هزار", "میلیون", "میلیارد", "تریلیون" };
+        private static readonly string[] Scales = { "", "هزار", "میلیون", "میلیارد", "تریلیون", "کوادریلیون", "کوینتیلیون" };
 
         public static string ToWords(decimal value)
         {

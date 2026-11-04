@@ -711,6 +711,7 @@ namespace Services.NasbNiro.Procurement
             DateTimeOffset now = DateTimeOffset.Now;
             string action = dto.Action?.Trim().ToLowerInvariant();
             if (action == "approve-planning") return await ApprovePlanningAsync(i, dto, cancellationToken);
+            if (action == "override-budget") return await OverrideBudgetAsync(i, dto, cancellationToken);
             if (action == "return") return await ReturnInquiryAsync(i, dto, cancellationToken);
             if (action == "revise") return await ReviseInquiryAsync(i, dto, cancellationToken);
             if (action == "cancel")
@@ -723,7 +724,7 @@ namespace Services.NasbNiro.Procurement
                 return await GetInquiryAsync(i.Id, cancellationToken);
             }
             if (i.Status != InquiryStatus.Selected) return Bad<InquiryDto>("تایید کمیته بعد از انتخاب برنده و پیش از صدور سفارش است.");
-            var others = new[] { i.FinancialApprovedByUserId, i.CommercialApprovedByUserId, i.TechnicalApprovedByUserId, i.ManagementApprovedByUserId };
+            var others = new[] { i.FinancialApprovedByUserId, i.CommercialApprovedByUserId, i.TechnicalApprovedByUserId, i.ManagementApprovedByUserId, i.PlanningApprovedByUserId };
             if (others.Contains(Me) || i.SelectedByUserId == Me && action != "approve-commercial") return Bad<InquiryDto>(SameUser);
             Dictionary<string, decimal> s = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
             bool referenceUsed = false;
@@ -1157,6 +1158,12 @@ namespace Services.NasbNiro.Procurement
                         orderInquiry = await _uow.Set<PurchaseInquiry>().Include(i => i.PurchaseRequest).Include(i => i.Quotes).ThenInclude(q => q.Lines)
                             .FirstOrDefaultAsync(i => i.Id == o.InquiryId.Value, cancellationToken);
                         if (orderInquiry == null) return Bad<PurchaseOrderDto>("استعلام این سفارش پیدا نشد.");
+                    }
+                    // PB6 (M5): a revised order keeps within the volume limit of the contract against what was signed (the first frozen revision); a larger change is an addendum with its own approvals
+                    if (o.Revision > 1)
+                    {
+                        string volumeError = await RevisionVolumeErrorAsync(o, (await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken))[ProcurementSettingKeys.AddendumVolumePercent], cancellationToken);
+                        if (volumeError != null) return Bad<PurchaseOrderDto>(volumeError);
                     }
                     string authority = await AuthorityProblemAsync(orderInquiry, o.TotalAmount,
                         o.Lines.Where(l => l.RequestLineId.HasValue).Select(l => (l.RequestLineId.Value, Math.Round(l.Quantity * l.UnitPrice, 0))).ToList(), s, cancellationToken);

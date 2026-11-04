@@ -3,7 +3,7 @@ namespace Services.NasbNiro.ContractsSystem
     /// <summary>PB6: roles of the contracts system, the progress statements and the petty-cash flow. One place, so the controllers, the services and the attachment rules agree.</summary>
     public static class CtRoles
     {
-        public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,SALES,PROJECTMANAGER,FINANCIAL,FINANCEMANAGER,ENGINEERING,AUDITOR";
+        public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,SALES,PROJECTMANAGER,FINANCIAL,FINANCEMANAGER,ENGINEERING,AUDITOR,PRODUCTIONMANAGER,SERVICE";
         /// <summary>Who may ask for a deal (the managers of the units; commercial prepares the paper work).</summary>
         public const string Requesters = "PMO,PLANNING,COMMERCIAL,SALES,PROJECTMANAGER,ENGINEERING,FINANCIAL,FINANCEMANAGER,PRODUCTIONMANAGER,SERVICE";
         public const string Commercial = "COMMERCIAL,PMO";
@@ -15,7 +15,7 @@ namespace Services.NasbNiro.ContractsSystem
 
     public static class PsRoles
     {
-        public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,PROJECTMANAGER,FINANCIAL,FINANCEMANAGER,TREASURY,QC,ENGINEERING,AUDITOR";
+        public const string Readers = "PMO,CEO,PLANNING,COMMERCIAL,PROJECTMANAGER,FINANCIAL,FINANCEMANAGER,TREASURY,QC,ENGINEERING,AUDITOR,CONSTRUCTION";
         /// <summary>The commercial unit prepares the statement.</summary>
         public const string Preparers = "COMMERCIAL";
         public const string TechnicalOffice = "ENGINEERING,PLANNING";

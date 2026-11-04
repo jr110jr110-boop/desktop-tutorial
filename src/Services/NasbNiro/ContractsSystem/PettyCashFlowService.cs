@@ -450,6 +450,11 @@ namespace Services.NasbNiro.ContractsSystem
                 if (l.Amount < 0) return Bad<PettySummaryDto>($"ردیف {i + 1}: مبلغ نمی‌تواند منفی باشد.");
                 if (l.Date.HasValue && (l.Date.Value.Date < from || l.Date.Value.Date > to)) return Bad<PettySummaryDto>($"ردیف {i + 1}: تاریخ بیرون از دوره است.");
             }
+            List<int> wantedSettlementLines = input.Where(l => l.SettlementLineId.HasValue).Select(l => l.SettlementLineId.Value).ToList();
+            if (wantedSettlementLines.Distinct().Count() != wantedSettlementLines.Count) return Bad<PettySummaryDto>("یک ردیف تسویه بیش از یک بار آمده است.");
+            if (wantedSettlementLines.Count > 0 && await _uow.Set<FnPettyCashSummaryLine>().AnyAsync(l => l.SettlementLineId != null && wantedSettlementLines.Contains(l.SettlementLineId.Value)
+                    && l.SummaryId != s.Id && l.Summary.Status != FnSummaryStatus.Rejected && !l.Summary.Deleted, cancellationToken))
+                return Bad<PettySummaryDto>("یکی از ردیف‌های تسویه در صورت‌خلاصه دیگری آمده است.");
             // existing rows keep their id (their attachments stay); the rest is replaced
             List<int> keep = input.Where(l => l.Id.HasValue).Select(l => l.Id.Value).ToList();
             List<FnPettyCashSummaryLine> dropped = s.Lines.Where(l => !keep.Contains(l.Id)).ToList();
@@ -495,8 +500,12 @@ namespace Services.NasbNiro.ContractsSystem
                 if (l.ExpenseKind == FnPettyExpenseKind.Miscellaneous && l.Misc != null)
                 {
                     if (m == null) { m = new FnPettyCashMiscForm { LineId = line.Id, RequestedByUserId = Me }; _uow.Set<FnPettyCashMiscForm>().Add(m); }
-                    m.RequestingUnit = Clean(l.Misc.RequestingUnit); m.ProjectCode = Clean(l.Misc.ProjectCode) ?? line.ProjectCode; m.WhyNoInvoice = Clean(l.Misc.WhyNoInvoice);
-                    m.Description = Clean(l.Misc.Description) ?? line.Description; m.Amount = line.Amount;
+                    string newUnit = Clean(l.Misc.RequestingUnit), newProject = Clean(l.Misc.ProjectCode) ?? line.ProjectCode, newWhy = Clean(l.Misc.WhyNoInvoice), newDesc = Clean(l.Misc.Description) ?? line.Description;
+                    // M8: a signature belongs to the content it was given on: changed content clears it
+                    if (m.SignedAt.HasValue && (m.RequestingUnit != newUnit || m.ProjectCode != newProject || m.WhyNoInvoice != newWhy || m.Description != newDesc || m.Amount != line.Amount))
+                    { m.SignedAt = null; m.UnitManagerUserId = null; }
+                    m.RequestingUnit = newUnit; m.ProjectCode = newProject; m.WhyNoInvoice = newWhy;
+                    m.Description = newDesc; m.Amount = line.Amount;
                     // the unit manager signs, not the holder: the signature is recorded by the "sign-misc" action of that manager
                 }
                 else if (m != null) _uow.Set<FnPettyCashMiscForm>().Remove(m);
@@ -505,7 +514,8 @@ namespace Services.NasbNiro.ContractsSystem
             s.PettyCashId = petty.Id; s.PeriodFrom = from; s.PeriodTo = to; s.Notes = Clean(dto.Notes);
             s.PreviousBalance = balances.Previous; s.Charge = balances.Charge;
             s.TotalAmount = s.Lines.Sum(l => l.Amount); s.Balance = s.PreviousBalance + s.Charge - s.TotalAmount; s.TotalInWords = PersianNumber.ToWords(s.TotalAmount) + " ریال";
-            s.AttachmentsCount = s.Lines.Count(l => l.DocType == FnPettyDocType.Invoice || l.DocType == FnPettyDocType.Receipt || l.DocType == FnPettyDocType.Payment);
+            List<int> savedLineIds = s.Lines.Select(l => l.Id).ToList();
+            s.AttachmentsCount = await _uow.Set<RecordAttachment>().CountAsync(a => a.OwnerType == AttachmentOwnerType.PettyCashSummaryLine && savedLineIds.Contains(a.OwnerId) && !a.Deleted && a.RemovedAt == null && !a.Voided && a.SupersededById == null, cancellationToken);
             s.Status = FnSummaryStatus.Draft; s.ReturnReason = null;
             s.EditorUserIds = LedgerMath.WithEditor(s.EditorUserIds, Me);
             s.ModifyDate = DateTimeOffset.Now; s.ModifierUserId = Me;
@@ -528,14 +538,17 @@ namespace Services.NasbNiro.ContractsSystem
             if (s == null) return ResponseDtoHelper.NotFound<PettySummaryDto>("صورت‌خلاصه پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             string note = Clean(dto.Note);
-            bool Touched(int user) => user == s.CreatorUserId || user == s.PettyCash.HolderUserId || user == s.ControlledByUserId || user == s.ApprovedByUserId || (s.EditorUserIds != null && s.EditorUserIds.Contains("," + user + ","));
+            // M8: whoever signed a miscellaneous form of this summary is part of its making and never approves it
+            List<int> formLineIds = s.Lines.Select(l => l.Id).ToList();
+            List<int> signers = await _uow.Set<FnPettyCashMiscForm>().Where(m => formLineIds.Contains(m.LineId) && m.UnitManagerUserId != null).Select(m => m.UnitManagerUserId.Value).ToListAsync(cancellationToken);
+            bool Touched(int user) => user == s.CreatorUserId || user == s.PettyCash.HolderUserId || user == s.ControlledByUserId || user == s.ApprovedByUserId || (s.EditorUserIds != null && s.EditorUserIds.Contains("," + user + ",")) || signers.Contains(user);
             switch (dto.Action?.Trim().ToLowerInvariant())
             {
                 case "sign-misc":
                 {
                     // the miscellaneous expense form is signed by the manager of the requesting unit: not the holder and not the maker of the summary
                     if (s.Status != FnSummaryStatus.Draft && s.Status != FnSummaryStatus.Returned) return Bad<PettySummaryDto>("فرم را فقط پیش از ارسال صورت‌خلاصه امضا می‌کنند.");
-                    if (Touched(Me)) return Bad<PettySummaryDto>("فرم هزینه متفرقه را مدیر واحد درخواست‌کننده امضا می‌کند، نه دارنده تنخواه.");
+                    if (Touched(Me) && !signers.Contains(Me) || s.CreatorUserId == Me || s.PettyCash.HolderUserId == Me) return Bad<PettySummaryDto>("فرم هزینه متفرقه را مدیر واحد درخواست‌کننده امضا می‌کند، نه دارنده تنخواه.");
                     if (!_user.IsInRole("PMO,PLANNING,PROJECTMANAGER,PRODUCTIONMANAGER,SHOPSUPERVISOR,SALES,SERVICE,ENGINEERING,QC,WAREHOUSE,WHSUPERVISOR,COMMERCIAL,HR,SECRETARIAT,FINANCEMANAGER")) return Bad<PettySummaryDto>(NotAllowed + " (مدیر واحد)");
                     List<int> lineIds = s.Lines.Select(l => l.Id).ToList();
                     FnPettyCashMiscForm form = await _uow.Set<FnPettyCashMiscForm>().FirstOrDefaultAsync(m => lineIds.Contains(m.LineId) && m.LineId == (dto.LineId ?? 0), cancellationToken);
@@ -568,6 +581,19 @@ namespace Services.NasbNiro.ContractsSystem
                     if (s.Status != FnSummaryStatus.Approved) return Bad<PettySummaryDto>("صورت‌خلاصه باید اول توسط مدیر مالی تایید شود.");
                     if (!_user.IsInRole(PettyFlowRoles.Ceo)) return Bad<PettySummaryDto>(NotAllowed + " (مدیرعامل)");
                     if (Touched(Me)) return Bad<PettySummaryDto>(SameUser);
+                    {
+                        // M8: the summary ties to the books: every row is backed by a settlement line of a posted settlement of this petty cash, and the totals are equal
+                        if (s.Lines.Any(l => !l.SettlementLineId.HasValue)) return Bad<PettySummaryDto>("هر ردیف صورت‌خلاصه باید به ردیف تسویه ثبت‌شده در دفتر وصل باشد؛ تسویه را ثبت و ردیف را وصل کنید.");
+                        List<int> settlementLineIds = s.Lines.Select(l => l.SettlementLineId.Value).ToList();
+                        if (settlementLineIds.Distinct().Count() != settlementLineIds.Count) return Bad<PettySummaryDto>("یک ردیف تسویه بیش از یک بار در صورت‌خلاصه آمده است.");
+                        var booked = await _uow.Set<FnPettyCashSettlementLine>().AsNoTracking().Where(l => settlementLineIds.Contains(l.Id))
+                            .Select(l => new { l.Id, l.Amount, l.VatAmount, l.Settlement.Status, l.Settlement.PettyCashId }).ToListAsync(cancellationToken);
+                        if (booked.Count != settlementLineIds.Count || booked.Any(b => b.Status != FnDocStatus.Posted || b.PettyCashId != s.PettyCashId))
+                            return Bad<PettySummaryDto>("ردیف‌های صورت‌خلاصه باید به تسویه‌های قطعی‌شده (ثبت‌شده در دفتر) همین تنخواه وصل باشند.");
+                        decimal bookedTotal = booked.Sum(b => b.Amount + b.VatAmount);
+                        if (Math.Round(bookedTotal, 0) != Math.Round(s.Lines.Sum(l => l.Amount), 0)) return Bad<PettySummaryDto>($"جمع صورت‌خلاصه ({s.Lines.Sum(l => l.Amount):N0}) با جمع تسویه‌های ثبت‌شده ({bookedTotal:N0}) برابر نیست.");
+                        if (s.TotalAmount != s.Lines.Sum(l => l.Amount)) return Bad<PettySummaryDto>("جمع کل صورت‌خلاصه با ردیف‌ها نمی‌خواند؛ دوباره ذخیره کنید.");
+                    }
                     s.Status = FnSummaryStatus.Final; s.FinalAt = now; s.FinalByUserId = Me;
                     List<int> settlements = await _uow.Set<FnPettyCashSettlementLine>().Where(l => s.Lines.Where(x => x.SettlementLineId != null).Select(x => x.SettlementLineId.Value).Contains(l.Id)).Select(l => l.SettlementId).Distinct().ToListAsync(cancellationToken);
                     if (settlements.Count == 1) s.SettlementId = settlements[0];

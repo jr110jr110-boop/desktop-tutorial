@@ -139,6 +139,10 @@ namespace Services.NasbNiro.ContractsSystem
             if (dto.EstimatedAmount <= 0) return Bad<DealRequestDto>("مبلغ برآوردی باید بیشتر از صفر باشد (ریال).");
             if (!Enum.IsDefined(typeof(CtDealFormKind), dto.FormKind) || !Enum.IsDefined(typeof(CtDealLevel), dto.DealLevel)) return Bad<DealRequestDto>("نوع فرم یا سطح معامله نامعتبر است.");
             if (dto.ContractId.HasValue && !await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AnyAsync(c => c.Id == dto.ContractId.Value && !c.Deleted, cancellationToken)) return Bad<DealRequestDto>("قرارداد پیدا نشد.");
+            // M10: the level is not a free choice; the amount sets the lowest level (the requester may go higher, never lower)
+            Dictionary<string, decimal> levelSettings = await ProcurementSettingKeys.LoadAsync(_uow, cancellationToken);
+            CtDealLevel minimum = dto.EstimatedAmount >= levelSettings[ProcurementSettingKeys.MajorFrom] ? CtDealLevel.Large : dto.EstimatedAmount >= levelSettings[ProcurementSettingKeys.MediumFrom] ? CtDealLevel.Medium : CtDealLevel.Small;
+            if (dto.DealLevel < minimum) return Bad<DealRequestDto>($"با این مبلغ سطح معامله دست‌کم «{minimum}» است و زنجیره تایید کوتاه‌تر مجاز نیست.");
             string[] chain = ChainFor(dto.DealLevel);
             foreach (KeyValuePair<string, int> kv in dto.Designated ?? new Dictionary<string, int>())
             {
@@ -480,12 +484,12 @@ namespace Services.NasbNiro.ContractsSystem
                     if (d.Status != CtDraftStatus.Exchanged && d.Status != CtDraftStatus.CommentsReceived) return Bad<ContractDraftDto>("پیش‌نویس در مرحله تبادل نیست.");
                     if (!_user.IsInRole("FINANCEMANAGER,CEO")) return Bad<ContractDraftDto>(NotAllowed);
                     if (LedgerMath.Touched(d.CreatorUserId, d.EditorUserIds, Me)) return Bad<ContractDraftDto>("تهیه‌کننده پیش‌نویس توافق آن را تایید نمی‌کند.");
-                    d.Status = CtDraftStatus.Agreed;
+                    d.Status = CtDraftStatus.Agreed; d.AgreedByUserId = Me;
                     break;
                 case "sign":
                     if (d.Status != CtDraftStatus.Agreed) return Bad<ContractDraftDto>("پیش‌نویس هنوز توافق نشده است.");
                     if (!_user.IsInRole("CEO")) return Bad<ContractDraftDto>(NotAllowed + " (مدیرعامل)");
-                    if (LedgerMath.Touched(d.CreatorUserId, d.EditorUserIds, Me)) return Bad<ContractDraftDto>("تهیه‌کننده پیش‌نویس آن را امضا نمی‌کند.");
+                    if (LedgerMath.Touched(d.CreatorUserId, d.EditorUserIds, Me) || d.AgreedByUserId == Me) return Bad<ContractDraftDto>("تهیه‌کننده یا تاییدکننده توافق پیش‌نویس آن را امضا نمی‌کند.");
                     d.Status = CtDraftStatus.Signed; d.SignedDate = (dto.Date ?? DateTime.Today).Date; d.SignedByUserId = Me;
                     d.ContractNumber = Clean(dto.Reference) ?? d.Number;
                     break;

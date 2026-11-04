@@ -91,8 +91,8 @@ namespace Entities.Model.NasbNiro.Procurement
         public PurchaseRequestPriority Priority { get; set; } = PurchaseRequestPriority.Normal;
         public PurchaseFormType FormType { get; set; }
 
-        /// <summary>The revision number of the request (0 = the original). A returned or rejected request is never changed: revision n+1 is a new request that points back at it.</summary>
-        public int Revision { get; set; }
+        /// <summary>The revision number of the request (1 = the original). A returned or rejected request is never changed: revision n+1 is a new request that points back at it.</summary>
+        public int Revision { get; set; } = 1;
         public int? PreviousRequestId { get; set; }
         public int? SupersededByRequestId { get; set; }
         public DateTimeOffset? ReturnedAt { get; set; }
@@ -198,7 +198,12 @@ namespace Entities.Model.NasbNiro.Procurement
         public string PlanningNote { get; set; }
 
         /// <summary>Return / revision, like the request.</summary>
-        public int Revision { get; set; }
+        public int Revision { get; set; } = 1;
+        /// <summary>The CEO's written decision to pass the budget gate for this inquiry (up to BudgetOverrideAmount); planning then approves with it.</summary>
+        public DateTimeOffset? BudgetOverrideAt { get; set; }
+        public int? BudgetOverrideByUserId { get; set; }
+        public string BudgetOverrideNote { get; set; }
+        public decimal? BudgetOverrideAmount { get; set; }
         public int? PreviousInquiryId { get; set; }
         public int? SupersededByInquiryId { get; set; }
         public DateTimeOffset? ReturnedAt { get; set; }
@@ -334,7 +339,7 @@ namespace Entities.Model.NasbNiro.Procurement
         /// <summary>R1c (H6): the quote of the inquiry that this order was built from (supplier, lines, prices and quantities come from it).</summary>
         public int? QuoteId { get; set; }
 
-        /// <summary>R1c (M13): the revision number of the order (0 = the original). An approved or released order changes only through a revision: the old revision is frozen and the order needs a new approval.</summary>
+        /// <summary>R1c (M13): the revision number of the order (1 = the original). An approved or released order changes only through a revision: the old revision is frozen and the order needs a new approval.</summary>
         public int Revision { get; set; }
         public string RevisionReason { get; set; }
         public DateTimeOffset? RevisedAt { get; set; }
@@ -503,6 +508,8 @@ namespace Entities.Model.NasbNiro.Procurement
         /// <summary>Payment of an approved invoice.</summary>
         Invoice = 3,
         Final = 4,
+        /// <summary>PB6: the retention (حسن انجام کار) of a supplier contract, paid after final acceptance and the confirmed documents; needs no invoice.</summary>
+        Retention = 5,
     }
 
     public enum PaymentRequestStatus

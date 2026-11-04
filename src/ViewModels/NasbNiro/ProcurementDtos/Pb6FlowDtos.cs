@@ -335,6 +335,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string Code { get; set; }
         public string Title { get; set; }
         public decimal Percent { get; set; }
+        public Entities.Model.NasbNiro.Finance.FnDeductionKind DeductionKind { get; set; }
         public string BasisNote { get; set; }
         public string SourceReference { get; set; }
         public DateTime? EffectiveFrom { get; set; }
@@ -350,6 +351,7 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string Code { get; set; }
         public string Title { get; set; }
         public decimal Percent { get; set; }
+        public Entities.Model.NasbNiro.Finance.FnDeductionKind DeductionKind { get; set; } = Entities.Model.NasbNiro.Finance.FnDeductionKind.Withholding;
         public string BasisNote { get; set; }
         public string SourceReference { get; set; }
         public DateTime? EffectiveFrom { get; set; }
