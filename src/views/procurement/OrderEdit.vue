@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import OrderContractPanel from "@/components/common/OrderContractPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -495,6 +496,7 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    <OrderContractPanel v-if="order?.id && order.status >= 2" :order-id="order.id" />
     <AttachmentPanel v-if="order?.id" :owner-type="AttachmentOwner.PurchaseOrder" :owner-id="order.id" title="مدارک فنی درخواست و پیوست‌های سفارش" />
   </div>
 </template>

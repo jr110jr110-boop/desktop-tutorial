@@ -9,6 +9,7 @@ import { getProviders, rowsOf, uploadFile } from "@/api/InventoryAPIs";
 import {
   createOrderFromInquiry, getInquiry, getPurchaseRequest, inquiryAction, saveInquiry, selectQuote, technicalReview,
 } from "@/api/ProcurementAPIs";
+import { inquiryPlanningAction } from "@/api/Pb6APIs";
 import { fail, jalali, num, ok, printPage, rial, today } from "@/composables/inventory";
 import { inquiryStatuses, supplierGrades } from "@/composables/procurement";
 import { hasRole, ProcurementRoles } from "@/composables/roles";
@@ -31,6 +32,8 @@ const open = computed(() => !inq.value?.id || inq.value.status === 0);
 const canCommercial = hasRole(ProcurementRoles.commercial);
 const canEdit = computed(() => open.value && canCommercial);
 const canFinancial = hasRole(ProcurementRoles.committeeFinancial);
+const canPlanningStep = hasRole(ProcurementRoles.planning);
+const plan = ref<{ amount: number | null; days: number | null; note: string }>({ amount: null, days: null, note: "" });
 const canTechnical = hasRole(ProcurementRoles.technical);
 const canManagement = hasRole(ProcurementRoles.management);
 const selected = computed(() => inq.value?.quotes?.find((q: any) => q.id === inq.value.selectedQuoteId));
@@ -106,6 +109,19 @@ async function sendReview() {
     const [d] = await getInquiry(inq.value.id);
     if (d) loadInquiry(d);
   }
+}
+
+async function planningStep(action: string) {
+  busy.value = true;
+  const [data, error] = await inquiryPlanningAction(inq.value.id, action, { note: plan.value.note, amount: plan.value.amount, days: plan.value.days });
+  busy.value = false;
+  if (error) return fail(error);
+  if (data?.id && data.id !== inq.value.id) {
+    router.replace({ name: "ProcurementInquiryEdit", params: { id: data.id } }).then(() => window.location.reload());
+    return;
+  }
+  loadInquiry(data);
+  ok("ثبت شد.");
 }
 
 async function act(action: string, reference?: string) {
@@ -322,6 +338,22 @@ onMounted(async () => {
         <div class="col-md-2"><button :disabled="busy" class="btn btn-sm btn-primary w-100" @click="choose">ثبت انتخاب</button></div>
       </div>
       <p v-if="inq.selectionReason" class="small mt-2 mb-0">دلیل انتخاب: {{ inq.selectionReason }}</p>
+    </div>
+
+    <!-- PB6 (D5): planning approves the budget and the delivery time before a winner is selected -->
+    <div v-if="!isNew && inq.planningRequired && (inq.status === 0 || inq.status === 5)" class="inv-card screen-only">
+      <h2 class="inv-title mb-2">تایید برنامه‌ریزی (بودجه و زمان تحویل)</h2>
+      <p v-if="inq.planningApprovedAt" class="small mb-1">تایید شد توسط {{ inq.planningApprovedByName }} — بودجه {{ rial(inq.planningBudgetAmount) }} ریال، زمان تحویل {{ inq.planningDeliveryDays ?? "-" }} روز <span v-if="inq.planningNote">({{ inq.planningNote }})</span></p>
+      <p v-else class="inv-muted small">پیش از انتخاب برنده، برنامه‌ریزی باید بودجه و زمان تحویل را تایید کند (دست‌کم یک پیشنهاد باید تایید فنی داشته باشد). تاییدکننده نباید ثبت‌کننده استعلام یا درخواست باشد.</p>
+      <div v-if="canPlanningStep" class="d-flex flex-wrap gap-2 align-items-center">
+        <input v-if="!inq.planningApprovedAt" v-model.number="plan.amount" class="form-control form-control-sm w-auto inv-ltr" type="number" placeholder="بودجه تاییدی (ریال، خالی = بیشترین پیشنهاد فنی)" />
+        <input v-if="!inq.planningApprovedAt" v-model.number="plan.days" class="form-control form-control-sm w-auto inv-ltr" type="number" placeholder="زمان تحویل (روز)" />
+        <input v-model="plan.note" class="form-control form-control-sm w-auto" placeholder="توضیح / علت برگشت" />
+        <button v-if="!inq.planningApprovedAt" :disabled="busy" class="btn btn-sm btn-outline-success" @click="planningStep('approve-planning')">تایید برنامه‌ریزی</button>
+        <button :disabled="busy" class="btn btn-sm btn-outline-warning" @click="planningStep('return')">برگشت به بازرگانی</button>
+      </div>
+      <div v-if="inq.status === 5" class="alert alert-warning small mt-2 mb-0">برگشت خورد<span v-if="inq.returnReason">: {{ inq.returnReason }}</span>. بازرگانی نسخه جدید می‌سازد.
+        <button :disabled="busy" class="btn btn-sm btn-outline-primary ms-2" @click="planningStep('revise')">ساخت نسخه جدید</button></div>
     </div>
 
     <!-- committee -->

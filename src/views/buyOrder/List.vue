@@ -225,6 +225,10 @@ onMounted(async () => {
 
 <template>
   <div class="background-color p-3 shadow-sm rounded-3 text-end">
+    <div class="alert alert-warning d-print-none">
+      ثبت سفارش خرید جدید در این بخش بسته شده است. نیاز تازه را از «درخواست خرید» شروع کنید؛ سفارش‌های قدیمیِ باز را از «تکمیل زنجیره خرید › پل سفارش‌های قدیمی» به زنجیره جدید منتقل کنید.
+      <router-link :to="{ name: 'ProcurementRequests' }">درخواست‌های خرید</router-link>
+    </div>
     <!--   Header   -->
     <KsButton
       :disabled="!state.workOrderId"
