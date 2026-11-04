@@ -371,6 +371,7 @@ function addPackingLine() {
 }
 
 const canFinance = hasRole(InventoryRoles.finance);
+const canApprovePrice = hasRole(InventoryRoles.freightApprovers);
 
 async function removeDoc() {
   if (!confirm("پیش‌نویس حذف شود؟")) return;
@@ -835,7 +836,7 @@ onMounted(async () => {
             <button :disabled="busy" class="btn btn-sm btn-success" @click="confirmDoc">تایید سند</button>
           </template>
           <button v-if="isDraft && !isNew && doc.state !== 3" :disabled="busy" class="btn btn-sm btn-outline-warning" @click="rejectReason = ''">رد سند</button>
-          <button v-if="doc.status === 1 && !doc.priceApprovedAt && canFinance && !doc.pricesMasked" :disabled="busy" class="btn btn-sm btn-outline-success" @click="approvePrice">تایید نهایی قیمت (مالی)</button>
+          <button v-if="doc.status === 1 && !doc.priceApprovedAt && canApprovePrice && !doc.pricesMasked" :disabled="busy" class="btn btn-sm btn-outline-success" @click="approvePrice">تایید نهایی قیمت (مالی)</button>
           <button v-if="doc.status === 2 && !doc.correctedByDocumentId && canEdit" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="makeCorrection">ساخت سند اصلاحی</button>
           <button
             v-if="doc.status === 1 && leaves && !doc.exitCheckedAt && canExitCheck"

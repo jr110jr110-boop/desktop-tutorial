@@ -82,7 +82,7 @@ onMounted(load);
           <tbody>
             <tr v-for="r in rows" :key="r.id">
               <td class="inv-ltr">{{ r.number }}</td><td class="inv-ltr">{{ r.receiptNumber }}</td><td>{{ jalali(r.freightDate) }}</td><td class="inv-ltr">{{ r.billOfLadingNumber }}</td>
-              <td class="text-end inv-ltr">{{ rial(r.amount) }}</td><td>{{ freightStatuses[r.status] }}</td>
+              <td class="text-end inv-ltr">{{ r.amount == null ? "محرمانه" : rial(r.amount) }}</td><td>{{ freightStatuses[r.status] }}</td>
               <td><button class="btn btn-sm btn-outline-primary" @click="open(r.id)">جزئیات</button></td>
             </tr>
             <tr v-if="!rows.length && !loading"><td class="inv-muted text-center" colspan="7">کرایه‌ای ثبت نشده است.</td></tr>
@@ -101,7 +101,7 @@ onMounted(load);
           <tbody>
             <tr v-for="a in detail.allocations" :key="a.documentLineId">
               <td>{{ a.rowNumber }}</td><td>{{ a.itemCode }} - {{ a.itemTitle }}</td><td>{{ freightBases[a.basis] }}</td>
-              <td class="text-end inv-ltr">{{ rial(a.basisAmount) }}</td><td class="text-end inv-ltr">{{ rial(a.amount) }}</td>
+              <td class="text-end inv-ltr">{{ a.basisAmount == null ? "محرمانه" : rial(a.basisAmount) }}</td><td class="text-end inv-ltr">{{ a.amount == null ? "محرمانه" : rial(a.amount) }}</td>
             </tr>
           </tbody>
         </table>

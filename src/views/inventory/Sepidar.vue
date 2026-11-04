@@ -44,9 +44,16 @@ function toggleAll() {
 /** R1t D19: legacy CSV channel, finance manager only (and only when the company switched it on) */
 const legacyCsv = hasRole(["FINANCEMANAGER"]);
 
-// PB5 (F18): the user may choose single lines of a document instead of the whole document; a document is marked as sent only when all its lines were chosen
+// PB5 (F18): the user may choose single lines of a document instead of the whole document; the whole document is chosen with its lines (the API refuses a partial selection)
 const openLines = ref<Record<number, any[]>>({});
 const chosenLines = ref<number[]>([]);
+
+// M6: the API refuses a partial selection inside one document, so ticking a line selects (or clears) every line of that document
+function toggleDocLines(id: number, on: boolean) {
+  const ids = (openLines.value[id] || []).map((l: any) => l.id);
+  const rest = chosenLines.value.filter((x) => !ids.includes(x));
+  chosenLines.value = on ? [...rest, ...ids] : rest;
+}
 
 async function toggleLines(id: number) {
   if (openLines.value[id]) {
@@ -164,7 +171,7 @@ onMounted(() => {
             <tr v-if="openLines[d.id]">
               <td colspan="11">
                 <label v-for="l in openLines[d.id]" :key="l.id" class="me-3 small">
-                  <input v-model="chosenLines" :value="l.id" class="form-check-input" type="checkbox" /> {{ l.itemCode }} · {{ num(l.quantity) }}
+                  <input :checked="chosenLines.includes(l.id)" class="form-check-input" type="checkbox" @change="toggleDocLines(d.id, ($event.target as HTMLInputElement).checked)" /> {{ l.itemCode }} · {{ num(l.quantity) }}
                 </label>
               </td>
             </tr></template>

@@ -163,3 +163,13 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style lang="scss">
+/* L7: A4 print of a warehouse report, B Zar, header from KsReportHeader (see report.scss); wide tables shrink instead of overflowing. */
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  .inv-page.ks-report { font-family: "B Zar", "BZar", Tahoma, sans-serif; direction: rtl; }
+  .inv-page.ks-report table { width: 100%; font-size: 9pt; }
+  .inv-page.ks-report .inv-card { border: 0; box-shadow: none; padding: 0; }
+}
+</style>
