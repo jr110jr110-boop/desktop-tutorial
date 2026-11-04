@@ -174,6 +174,9 @@ namespace IocConfig
             services.AddHostedService<Services.NasbNiro.Finance.FinanceF2HostedService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();
+            // PB3: attachments through the whole chain, the request dossier
+            services.AddScoped<Services.NasbNiro.Attachments.IAttachmentService, Services.NasbNiro.Attachments.AttachmentService>();
+            services.AddScoped<Services.NasbNiro.Attachments.IDossierService, Services.NasbNiro.Attachments.DossierService>();
 
             // quality module (QC + QA)
             services.AddScoped<Services.NasbNiro.Quality.IItpService, Services.NasbNiro.Quality.ItpService>();
@@ -257,7 +260,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcRegistersService, Services.NasbNiro.ProjectControl.PcRegistersService>();
             services.AddScoped<Services.NasbNiro.Office.INotificationGateway, Services.NasbNiro.Office.DisabledNotificationGateway>();
             services.AddScoped<Services.NasbNiro.Office.IWorkflowNotifier, Services.NasbNiro.Office.WorkflowNotifier>();
-            services.AddScoped<Services.NasbNiro.Files.IFileTaskRules, Services.NasbNiro.Tasks.FileTaskRules>();
+            services.AddScoped<Services.NasbNiro.Attachments.IAttachmentRecordRules, Services.NasbNiro.Tasks.RecordOwnerRules>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcCommercialService, Services.NasbNiro.ProjectControl.PcCommercialService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcMdrService, Services.NasbNiro.ProjectControl.PcMdrService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcScheduleService, Services.NasbNiro.ProjectControl.PcScheduleService>();

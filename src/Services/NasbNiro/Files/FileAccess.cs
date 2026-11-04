@@ -11,6 +11,7 @@ using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
 using Microsoft.EntityFrameworkCore;
 using Services.Identity.AccountServices;
+using Services.NasbNiro.Attachments;
 using Services.NasbNiro.Inventory;
 using Services.Services;
 using Services.NasbNiro.Office;
@@ -111,12 +112,6 @@ namespace Services.NasbNiro.Files
         }
     }
 
-    /// <summary>P-B7a: the read rule of the task module for the files attached to a task (the task's own visibility decides).</summary>
-    public interface IFileTaskRules
-    {
-        Task<bool> CanReadTaskAsync(int taskId, CancellationToken cancellationToken);
-    }
-
     /// <summary>The signed-in user, as the decision needs to know him.</summary>
     internal sealed class FileCaller
     {
@@ -206,14 +201,14 @@ namespace Services.NasbNiro.Files
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IFileOfficeRules _office;
-        private readonly IFileTaskRules _tasks;
+        private readonly global::Services.NasbNiro.Attachments.IAttachmentRecordRules _records;
 
-        public FileAccessService(IUnitOfWork uow, IInventoryUserContext user, IFileOfficeRules office, IFileTaskRules tasks = null)
+        public FileAccessService(IUnitOfWork uow, IInventoryUserContext user, IFileOfficeRules office, global::Services.NasbNiro.Attachments.IAttachmentRecordRules records = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _office = office ?? throw new ArgumentNullException(nameof(office));
-            _tasks = tasks;
+            _records = records;
         }
 
         private static readonly HashSet<string> Special = new HashSet<string>(FileOwners.Special, StringComparer.Ordinal);
@@ -295,6 +290,14 @@ namespace Services.NasbNiro.Files
             int me = _user.UserId;
             if (stopAtUploader && me > 0 && uploader == me) return facts;
 
+            // PB3: a file that a record attachment holds is read by whoever may read the owner record (a purchase request's technical documents: everyone downstream of it); prices stay with the price readers
+            bool? attachment = await AttachmentAccess.CanReadFileAsync(_uow, _user, id, ct, _records);
+            if (attachment.HasValue)
+            {
+                facts.Owners.Add(new FileOwner(nameof(Entities.Model.NasbNiro.Attachments.RecordAttachment), FileOwnerRule.Record, attachment.Value));
+                if (attachment.Value) return facts;
+            }
+
             // the stored signature picture of a user is read by that user
             int? signer = await _uow.Set<OfUserSignature>().AsNoTracking().Where(s => s.ImageDocumentId == id).Select(s => (int?)s.UserId).FirstOrDefaultAsync(ct);
             if (signer.HasValue)
@@ -317,14 +320,6 @@ namespace Services.NasbNiro.Files
             {
                 bool may = await _office.CanReadMeetingAsync(meetingId, ct);
                 facts.Owners.Add(new FileOwner(nameof(OfDecision), FileOwnerRule.Record, may));
-                if (may) return facts;
-            }
-
-            // a file attached to a task is read by whoever may see the task (a confidential task is seen by its parties only); without the task rules the file fails closed
-            foreach (int taskId in await _uow.Set<Entities.Model.NasbNiro.Tasks.TmTaskAttachment>().AsNoTracking().Where(a => a.DocumentId == id).Select(a => a.TaskId).Distinct().ToListAsync(ct))
-            {
-                bool may = _tasks != null && await _tasks.CanReadTaskAsync(taskId, ct);
-                facts.Owners.Add(new FileOwner("TmTaskAttachment", FileOwnerRule.Record, may));
                 if (may) return facts;
             }
 

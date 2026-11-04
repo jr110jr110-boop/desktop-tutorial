@@ -354,46 +354,9 @@ namespace Services.NasbNiro
                         .Where(x => x.EquipmentProcessId == equipmentProcess.Id)
                         .ToListAsync(cancellationToken);
 
-                    if (documents == null)
-                    {
-                        continue;
-                    }
-
-                    //foreach (EquipmentProcessFile document in documents)
-                    //{
-                    //    try
-                    //    {
-                    //        ResponseDocumentDto responseDocumentDto =
-                    //            await _documentService.DownloadDocumentAsync(document.Id);
-
-                    //        IFormFile formFile = new FormFile
-                    //            (responseDocumentDto.FileStream,
-                    //            0,
-                    //            responseDocumentDto.FileStream.Length,
-                    //            null,
-                    //            Path.GetFileName(document.Path));
-
-                    //        Guid newFileId = await _documentService.UploadDocumentAsync(new UploadFileDto()
-                    //        {
-                    //            File = formFile,
-                    //            Code = Code,
-                    //            Name = document.Name,
-                    //            Description = document.Description,
-                    //        });
-
-                    //        if (process.ProcessFiles == null)
-                    //            process.ProcessFiles = new List<ProcessFile>();
-
-                    //        process.ProcessFiles.Add(new ProcessFile()
-                    //        {
-                    //            DocumentId = newFileId
-                    //        });
-                    //    }
-                    //    catch (Exception ex)
-                    //    {
-                    //        errors.AppendLine(ex.Message);
-                    //    }
-                    //}
+                    // PB3: the documents of the bank process reach the project process as LINKS to the same stored files (never byte copies), with the revision of the bank file noted,
+                    // so a drawing is kept once, its hash is the same everywhere, and the project always points at the file the bank approved
+                    process.ProcessFiles = BankDocumentLinks.Build(documents, userId, DateTime.Now);
 
                     processes.Add(process);
                 }
@@ -517,6 +480,36 @@ namespace Services.NasbNiro
             userId = roleAndUsers.Users.Select(u => u.UserId).First();
 
             return userId;
+        }
+    }
+}
+
+namespace Services.NasbNiro
+{
+    /// <summary>PB3: the project process files that link to the documents of the product bank (equipment) process.</summary>
+    public static class BankDocumentLinks
+    {
+        public static System.Collections.Generic.List<Entities.Model.NasbNiro.Contracts.ProcessFile> Build(
+            System.Collections.Generic.IEnumerable<Entities.Model.NasbNiro.Equipments.EquipmentProcessFile> bankFiles, int userId, System.DateTime now)
+        {
+            var list = new System.Collections.Generic.List<Entities.Model.NasbNiro.Contracts.ProcessFile>();
+            // the bank may keep older revisions of a document as rows of their own: only the latest (highest major, then minor) of each document (same description) reaches the project
+            var all = System.Linq.Enumerable.ToList(bankFiles ?? System.Linq.Enumerable.Empty<Entities.Model.NasbNiro.Equipments.EquipmentProcessFile>());
+            var latest = System.Linq.Enumerable.Where(all, f => string.IsNullOrWhiteSpace(f.Description) || !System.Linq.Enumerable.Any(all, g =>
+                g != f && string.Equals((g.Description ?? "").Trim(), f.Description.Trim(), System.StringComparison.OrdinalIgnoreCase) && (g.major > f.major || (g.major == f.major && g.minor > f.minor))));
+            foreach (Entities.Model.NasbNiro.Equipments.EquipmentProcessFile f in latest)
+            {
+                list.Add(new Entities.Model.NasbNiro.Contracts.ProcessFile
+                {
+                    DocumentId = f.DocumentId,   // the same stored file: a link, not a copy
+                    Description = "[پیوند به سند بانک محصول، بازنگری " + f.major + "." + f.minor + "] " + f.Description,
+                    Major = f.major,
+                    Minor = f.minor,
+                    UserId = userId,
+                    RegDate = now,
+                });
+            }
+            return list;
         }
     }
 }

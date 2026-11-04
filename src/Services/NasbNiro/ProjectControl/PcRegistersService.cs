@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model;
+using Entities.Model.NasbNiro.Attachments;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.Procurement;
@@ -583,9 +584,12 @@ namespace Services.NasbNiro.ProjectControl
             List<int> actIds = rows.Where(r => r.ActivityId.HasValue).Select(r => r.ActivityId.Value).Distinct().ToList();
             Dictionary<int, string> acts = actIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<PcActivity>().AsNoTracking().Where(a => actIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.Code, ct);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, rows.Select(r => (int?)r.CreatorUserId), ct);
+            List<int> ids = rows.Select(r => r.Id).ToList();
+            var files = await _uow.Set<RecordAttachment>().AsNoTracking().Where(a => a.OwnerType == AttachmentOwnerType.PcProjectPhoto && ids.Contains(a.OwnerId) && !a.Deleted && !a.Voided && a.RemovedAt == null && a.SupersededById == null)
+                .Select(a => new { a.OwnerId, a.DocumentId, a.Id }).ToListAsync(ct);
             return rows.Select(r => new PcPhotoDto
             {
-                Id = r.Id, ContractId = r.ContractId, DocumentId = r.DocumentId, Caption = r.Caption, TakenDate = r.TakenDate, TakenDateText = OfficeText.Date(r.TakenDate), WbsNodeId = r.WbsNodeId, ActivityId = r.ActivityId,
+                Id = r.Id, ContractId = r.ContractId, DocumentId = files.Where(f => f.OwnerId == r.Id).OrderByDescending(f => f.Id).Select(f => (Guid?)f.DocumentId).FirstOrDefault(), AttachmentCount = files.Count(f => f.OwnerId == r.Id), Caption = r.Caption, TakenDate = r.TakenDate, TakenDateText = OfficeText.Date(r.TakenDate), WbsNodeId = r.WbsNodeId, ActivityId = r.ActivityId,
                 ActivityCode = r.ActivityId.HasValue && acts.TryGetValue(r.ActivityId.Value, out string c) ? c : null, IsVoid = r.IsVoid, VoidReason = r.VoidReason, UploadedByName = names.Name(r.CreatorUserId),
             }).ToList();
         }
@@ -604,21 +608,16 @@ namespace Services.NasbNiro.ProjectControl
 
         public async Task<ResponseDto<PcPhotoDto>> AddPhotoAsync(PcPhotoSaveDto dto, CancellationToken ct)
         {
-            if (dto == null || dto.DocumentId == Guid.Empty) return Bad<PcPhotoDto>(OfficeText.InvalidData);
+            if (dto == null) return Bad<PcPhotoDto>(OfficeText.InvalidData);
             if (!CanWrite) return Bad<PcPhotoDto>(Denied);
             string problem = await ContractProblemAsync(dto.ContractId, ct);
             if (problem != null) return NotFound<PcPhotoDto>(problem);
-            var doc = await _uow.Set<Document>().AsNoTracking().Where(d => d.Id == dto.DocumentId).Select(d => new { d.UploadedByUserId, d.MimType }).FirstOrDefaultAsync(ct);
-            if (doc == null) return NotFound<PcPhotoDto>("فایل پیدا نشد.");
-            if (doc.UploadedByUserId != Me) return Bad<PcPhotoDto>("فقط فایلی که خودتان بارگذاری کرده‌اید به کتابخانه عکس افزوده می‌شود.");
-            if (doc.MimType == null || !doc.MimType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return Bad<PcPhotoDto>("فایل باید تصویر باشد.");
-            if (await _uow.Set<PcProjectPhoto>().AnyAsync(p => p.DocumentId == dto.DocumentId && !p.Deleted, ct)) return Bad<PcPhotoDto>("این تصویر قبلاً در کتابخانه هست.");
             DateTime taken = (dto.TakenDate ?? DateTime.Today).Date;
             if (taken > DateTime.Today) return Bad<PcPhotoDto>("تاریخ عکس در آینده است.");
             if (dto.WbsNodeId.HasValue && !await _uow.Set<PcWbsNode>().AnyAsync(n => n.Id == dto.WbsNodeId.Value && n.ContractId == dto.ContractId && !n.Deleted, ct)) return Bad<PcPhotoDto>("گره WBS متعلق به این پروژه نیست.");
             if (await ActivityOkAsync(dto.ActivityId, dto.ContractId, ct) != 0) return Bad<PcPhotoDto>("فعالیت متعلق به این پروژه نیست.");
             DateTimeOffset now = DateTimeOffset.Now;
-            var r = new PcProjectPhoto { ContractId = dto.ContractId, DocumentId = dto.DocumentId, Caption = Cap(dto.Caption, 500), TakenDate = taken, WbsNodeId = dto.WbsNodeId, ActivityId = dto.ActivityId, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me };
+            var r = new PcProjectPhoto { ContractId = dto.ContractId, Caption = Cap(dto.Caption, 500), TakenDate = taken, WbsNodeId = dto.WbsNodeId, ActivityId = dto.ActivityId, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me };
             _uow.Set<PcProjectPhoto>().Add(r);
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await PhotoDtosAsync(new List<PcProjectPhoto> { r }, ct))[0]);
@@ -690,6 +689,7 @@ namespace Services.NasbNiro.ProjectControl
             if (scores.Any(s => Clean(s.Criterion) == null || s.Weight <= 0m || s.Weight > 100m || s.Score < 0m || s.Score > 5m)) return Bad<PcEvaluationDto>("وزن هر معیار بیشتر از صفر و امتیاز بین ۰ و ۵ است.");
             if (dto.Submit)
             {
+                if (!dto.ProviderId.HasValue) return Bad<PcEvaluationDto>("برای ارسال ارزیابی، پیمانکار یا مشاور را از فهرست تامین‌کنندگان انتخاب کنید.");
                 // the buyer who ordered from the party cannot judge it
                 if (dto.ProviderId.HasValue && await _uow.Set<PurchaseOrder>().AnyAsync(o => !o.Deleted && o.ProviderId == dto.ProviderId.Value && o.ContractId == dto.ContractId && o.CreatorUserId == Me, ct))
                     return Bad<PcEvaluationDto>(PcText.SameUser + " (خریداری که از این طرف خرید کرده، آن را ارزیابی نمی‌کند)");
@@ -733,6 +733,9 @@ namespace Services.NasbNiro.ProjectControl
             if (r == null) return NotFound<PcEvaluationDto>("ارزیابی پیدا نشد.");
             if (r.State != PcApprovalState.Submitted) return Bad<PcEvaluationDto>("این ارزیابی در انتظار تصمیم نیست.");
             if (r.EvaluatorUserId == Me) return Bad<PcEvaluationDto>(PcText.SameUser);
+            // the PMO who bought from the party does not decide on its evaluation either
+            if (r.ProviderId.HasValue && await _uow.Set<PurchaseOrder>().AnyAsync(o => !o.Deleted && o.ProviderId == r.ProviderId.Value && o.ContractId == r.ContractId && o.CreatorUserId == Me, ct))
+                return Bad<PcEvaluationDto>(PcText.SameUser + " (خریداری که از این طرف خرید کرده، درباره ارزیابی آن تصمیم نمی‌گیرد)");
             if (!dto.Approve && Clean(dto.Note) == null) return Bad<PcEvaluationDto>("دلیل رد را بنویسید.");
             r.State = dto.Approve ? PcApprovalState.Approved : PcApprovalState.Rejected; r.ModifyDate = DateTimeOffset.Now; r.ModifierUserId = Me;
             if (!dto.Approve) r.Comment = Cap((r.Comment == null ? "" : r.Comment + "\n") + "دلیل رد: " + dto.Note, 2000);
@@ -789,7 +792,7 @@ namespace Services.NasbNiro.ProjectControl
             auto.TasksClosed = await _uow.Set<TmTask>().CountAsync(t => !t.Deleted && t.ContractId == contractId && t.ClosedAt != null && t.ClosedAt >= start && t.ClosedAt < endDay, ct);
             auto.TasksOverdue = await _uow.Set<TmTask>().CountAsync(t => !t.Deleted && t.ContractId == contractId && t.DueDate != null && t.DueDate < today && t.Status != TmTaskStatus.Closed && t.Status != TmTaskStatus.Rejected, ct);
             auto.DailyReports = await _uow.Set<PcDailyReport>().CountAsync(d => !d.Deleted && d.ContractId == contractId && d.State == 1 && d.ReportDate >= start && d.ReportDate <= end.Date, ct);
-            auto.HseEvents = await _uow.Set<PcDailyHse>().CountAsync(h => h.Report.ContractId == contractId && h.Report.ReportDate >= start && h.Report.ReportDate <= end.Date, ct);
+            auto.HseEvents = await _uow.Set<PcDailyHse>().CountAsync(h => !h.Report.Deleted && h.Report.ContractId == contractId && h.Report.ReportDate >= start && h.Report.ReportDate <= end.Date, ct);
             if (auto.LateActivities > 0) auto.Highlights.Add(auto.LateActivities.ToString(CultureInfo.InvariantCulture) + " فعالیت دچار تاخیر است.");
             if (auto.HighRisks > 0) auto.Highlights.Add(auto.HighRisks.ToString(CultureInfo.InvariantCulture) + " ریسک با امتیاز بالا باز است.");
             if (auto.TasksOverdue > 0) auto.Highlights.Add(auto.TasksOverdue.ToString(CultureInfo.InvariantCulture) + " وظیفه معوق است.");
@@ -941,7 +944,6 @@ namespace Services.NasbNiro.ProjectControl
             if (evm.Success)
             {
                 dto.Spi = evm.Data.Spi; dto.Cpi = evm.Data.Cpi; dto.Health = evm.Data.SpiStatus == "red" || evm.Data.CpiStatus == "red" ? "red" : evm.Data.SpiStatus == "amber" || evm.Data.CpiStatus == "amber" ? "amber" : evm.Data.SpiStatus == "none" && evm.Data.CpiStatus == "none" ? "none" : "green";
-                dto.PlannedStart = evm.Data.BaselineFinish.HasValue ? (DateTime?)null : null;
             }
             List<DateTime?> bounds = await _uow.Set<PcActivity>().AsNoTracking().Where(a => !a.Deleted && a.ContractId == contractId).Select(a => (DateTime?)(a.ForecastStart ?? a.EarlyStart)).ToListAsync(ct);
             dto.PlannedStart = bounds.Where(b => b.HasValue).Select(b => b.Value).DefaultIfEmpty().Min() is DateTime ps && ps != default ? ps : (DateTime?)null;

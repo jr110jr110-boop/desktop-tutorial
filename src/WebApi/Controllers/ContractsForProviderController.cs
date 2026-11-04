@@ -70,9 +70,9 @@ namespace WebApi.Controllers
         [Authorize(Roles = LegacyRoles.ContractWriters)]
         [HttpDelete("detach-file-from-contract")]
         [ProducesResponseType(typeof(ResponseDto<bool>), (int)HttpStatusCode.OK)]
-        public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromContractAsync(int contractId, Guid fileId, CancellationToken cancellationToken)
+        public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromContractAsync(int contractId, Guid fileId, string reason, CancellationToken cancellationToken)
         {
-            return Ok(await _contractService.DetachFileFromContractAsync(contractId, documentId: fileId, cancellationToken: cancellationToken));
+            return Ok(await _contractService.DetachFileFromContractAsync(contractId, documentId: fileId, reason: reason, cancellationToken: cancellationToken));
         }
 
         [Authorize(Roles = LegacyRoles.Pmo)]

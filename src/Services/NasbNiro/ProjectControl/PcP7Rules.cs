@@ -2,7 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using DataLayer.Context;
 using Entities.Model.NasbNiro.ProjectControl;
+using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Inventory;
 
 namespace Services.NasbNiro.ProjectControl
 {
@@ -97,11 +102,41 @@ namespace Services.NasbNiro.ProjectControl
                 if ((role != null) == levels[i].PositionId.HasValue) return "سطح " + (i + 1).ToString(CultureInfo.InvariantCulture) + ": فقط یکی از «نقش» یا «سمت» را مشخص کنید.";
                 if (role != null && Array.IndexOf(AllowedRoles, role) < 0) return "سطح " + (i + 1).ToString(CultureInfo.InvariantCulture) + ": نقش نامعتبر است.";
             }
+            // the same role or position twice in a row would make one person the whole chain
+            for (int i = 1; i < levels.Count; i++)
+            {
+                string a = levels[i - 1].Role?.Trim().ToUpperInvariant(), b = levels[i].Role?.Trim().ToUpperInvariant();
+                if ((a != null && a == b) || (a == null && b == null && levels[i - 1].PositionId == levels[i].PositionId)) return "سطح " + (i + 1).ToString(CultureInfo.InvariantCulture) + ": نقش یا سمت پشت‌سرهم تکراری است؛ هر سطح باید شخص دیگری باشد.";
+            }
             string last = levels[levels.Count - 1].Role?.Trim().ToUpperInvariant();
             if (last != "PMO" && last != "PLANNING") return "آخرین سطح زنجیره باید PMO یا برنامه‌ریزی باشد؛ مقدار تاییدشده را او در برنامه می‌نویسد.";
             return null;
         }
 
         public static IList<(string Title, string Role)> DefaultChain() => new List<(string, string)> { ("مدیر پروژه", "PROJECTMANAGER"), ("PMO", "PMO") };
+    }
+
+    /// <summary>
+    /// Who may link a task to a WBS activity, change the weight (estimated hours) of such a task, or report progress of the activity: planning and the PMO, the unit manager of the activity (the holder of its responsible-unit role)
+    /// and the project manager of that contract. Nobody else, so a normal user cannot reshape the percent of an activity.
+    /// </summary>
+    public static class PcActivityAuthority
+    {
+        public static async Task<bool> MayAsync(IUnitOfWork uow, IInventoryUserContext user, int activityId, CancellationToken ct)
+        {
+            if (user.IsInRole("PMO,PLANNING")) return true;
+            var a = await uow.Set<PcActivity>().AsNoTracking().Where(x => x.Id == activityId && !x.Deleted).Select(x => new { x.ContractId, x.ResponsibleUnit }).FirstOrDefaultAsync(ct);
+            if (a == null) return false;
+            if (!string.IsNullOrWhiteSpace(a.ResponsibleUnit) && user.IsInRole(a.ResponsibleUnit)) return true;
+            return await IsProjectManagerAsync(uow, user, a.ContractId, ct);
+        }
+
+        /// <summary>The project manager recorded in the terms of the contract.</summary>
+        public static async Task<bool> IsProjectManagerAsync(IUnitOfWork uow, IInventoryUserContext user, int contractId, CancellationToken ct)
+        {
+            int me = user.UserId;
+            if (me <= 0) return false;
+            return await uow.Set<PcContractTerms>().AsNoTracking().AnyAsync(t => t.ContractId == contractId && !t.Deleted && t.ProjectManagerUserId == me, ct);
+        }
     }
 }

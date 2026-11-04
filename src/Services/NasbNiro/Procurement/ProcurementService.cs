@@ -241,8 +241,32 @@ namespace Services.NasbNiro.Procurement
                 bool seatDraft = await IsSeatDraftAsync(request, cancellationToken);
                 if (request.CreatorUserId != Me && !_user.IsInRole("PMO") && !(seatDraft && _user.IsInRole(ProcurementRoles.Requesters))) return Bad<PurchaseRequestDto>(NotAllowed);
                 if (seatDraft) request.CreatorUserId = Me;
-                _uow.Set<PurchaseRequestLine>().RemoveRange(request.Lines);
-                request.Lines = new List<PurchaseRequestLine>();
+                // PB3: a line sent with its id is updated in place (its attachments stay); the other lines are removed unless they still carry a file in force
+                List<int> sentIds = lines.Where(l => l.Id.HasValue).Select(l => l.Id.Value).ToList();
+                if (sentIds.Count != sentIds.Distinct().Count()) return Bad<PurchaseRequestDto>("یک ردیف بیش از یک بار ارسال شده است.");
+                HashSet<int> keepIds = sentIds.ToHashSet();
+                List<PurchaseRequestLine> dropped = request.Lines.Where(l => !keepIds.Contains(l.Id)).ToList();
+                if (dropped.Count > 0)
+                {
+                    List<int> droppedIds = dropped.Select(l => l.Id).ToList();
+                    var lineType = global::Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.PurchaseRequestLine;
+                    List<global::Entities.Model.NasbNiro.Attachments.RecordAttachment> held = await _uow.Set<global::Entities.Model.NasbNiro.Attachments.RecordAttachment>().IgnoreQueryFilters()
+                        .Where(a => a.OwnerType == lineType && droppedIds.Contains(a.OwnerId)).ToListAsync(cancellationToken);
+                    if (held.Any(a => !a.Deleted && a.RemovedAt == null && !a.Voided && a.SupersededById == null))
+                        return Bad<PurchaseRequestDto>("ردیفی که پیوست دارد حذف نمی‌شود؛ ابتدا پیوست‌های آن را ابطال کنید.");
+                    // the history of a dropped line (voided, replaced or removed files) is kept: it moves to the request itself with a note of the row it came from
+                    foreach (var att in held)
+                    {
+                        PurchaseRequestLine from = dropped.First(l => l.Id == att.OwnerId);
+                        string note = "[از ردیف حذف‌شده " + from.RowNumber + "] ";
+                        att.Title = note + (att.Title ?? att.FileName);
+                        if (att.Title.Length > 300) att.Title = att.Title.Substring(0, 300);
+                        att.OwnerType = global::Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.PurchaseRequest;
+                        att.OwnerId = request.Id;
+                    }
+                    _uow.Set<PurchaseRequestLine>().RemoveRange(dropped);
+                    foreach (PurchaseRequestLine d in dropped) request.Lines.Remove(d);
+                }
             }
             else
             {
@@ -264,12 +288,15 @@ namespace Services.NasbNiro.Procurement
             int rowNumber = 1;
             foreach (SavePurchaseRequestLineDto l in lines)
             {
-                request.Lines.Add(new PurchaseRequestLine
+                PurchaseRequestLine line = l.Id.HasValue ? request.Lines.FirstOrDefault(x => x.Id == l.Id.Value) : null;
+                if (line == null)
                 {
-                    RowNumber = rowNumber++, ItemId = l.ItemId, Description = Clean(l.Description) ?? (l.ItemId.HasValue ? items[l.ItemId.Value].Title : null),
-                    Unit = Clean(l.Unit) ?? "عدد", Quantity = l.Quantity, NeededBy = l.NeededBy?.Date, EstimatedUnitPrice = l.EstimatedUnitPrice,
-                    TechnicalRequirements = Clean(l.TechnicalRequirements), BuyOrderId = l.BuyOrderId, MaterialRequestLineId = l.MaterialRequestLineId,
-                });
+                    line = new PurchaseRequestLine();
+                    request.Lines.Add(line);
+                }
+                line.RowNumber = rowNumber++; line.ItemId = l.ItemId; line.Description = Clean(l.Description) ?? (l.ItemId.HasValue ? items[l.ItemId.Value].Title : null);
+                line.Unit = Clean(l.Unit) ?? "عدد"; line.Quantity = l.Quantity; line.NeededBy = l.NeededBy?.Date; line.EstimatedUnitPrice = l.EstimatedUnitPrice;
+                line.TechnicalRequirements = Clean(l.TechnicalRequirements); line.BuyOrderId = l.BuyOrderId; line.MaterialRequestLineId = l.MaterialRequestLineId;
             }
             request.EstimatedAmount = Math.Round(request.Lines.Sum(l => l.Quantity * (l.EstimatedUnitPrice ?? 0)), 0);
             if (dto.Submit)

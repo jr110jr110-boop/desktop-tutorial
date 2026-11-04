@@ -55,6 +55,8 @@ namespace MsTests
                 var c = AppHost.Add(u, new ContractEntity { Code = "C-" + Guid.NewGuid().ToString("N").Substring(0, 6), Title = "contract", Status = ContractStatus.Current });
                 u.SaveChanges();
                 id = c.Id;
+                AppHost.Add(u, new PcContractTerms { ContractId = id, ProjectManagerUserId = 22 });
+                u.SaveChanges();
             }, Seeder);
             return id;
         }
@@ -98,8 +100,9 @@ namespace MsTests
         [TestMethod]
         public void TheRollUpWeightsByEstimatedHoursAndLeavesRejectedTasksOut()
         {
-            decimal? p = TaskRules.RollUpPercent(new[] { (10m, 0m, TmTaskStatus.Closed), (30m, 0m, TmTaskStatus.Open) });
-            Assert.AreEqual(25m, p, "a closed task counts as 100, weighted by hours: 10 of 40");
+            decimal? p = TaskRules.RollUpPercent(new[] { (10m, 100m, TmTaskStatus.Closed), (30m, 0m, TmTaskStatus.Open) });
+            Assert.AreEqual(25m, p, "the approved percent is weighted by hours: 10 of 40");
+            Assert.AreEqual(0m, TaskRules.RollUpPercent(new[] { (10m, 0m, TmTaskStatus.Closed), (30m, 0m, TmTaskStatus.Open) }), "a closed task without an approved percent counts for nothing");
             Assert.AreEqual(50m, TaskRules.RollUpPercent(new[] { (10m, 100m, TmTaskStatus.InProgress), (10m, 0m, TmTaskStatus.InProgress) }));
             Assert.AreEqual(100m, TaskRules.RollUpPercent(new[] { (10m, 100m, TmTaskStatus.Closed), (500m, 0m, TmTaskStatus.Rejected) }), "a rejected task is left out");
             Assert.IsNull(TaskRules.RollUpPercent(new[] { (10m, 0m, TmTaskStatus.Rejected) }), "no counting task: no value");
@@ -182,23 +185,53 @@ namespace MsTests
         // ------------------------------------------------------------------------------------------------ roll-up into the activity
 
         [TestMethod]
-        public async Task ClosingTasksMovesThePercentOfTheActivityWithTheTasksMethod()
+        public async Task OnlyCartableApprovedPercentsMoveTheActivityAndAPersonalTaskNeverLinksToOne()
         {
             AppHost host = NewHost("Rollup");
             int contractId = NewContract(host);
             int activityId = NewActivity(host, contractId, PcProgressMethod.Tasks);
-            TmTaskDto a = (await Tasks(host, ProjectManager, s => s.SaveTaskAsync(new TmTaskSaveDto { Title = "a", Kind = TmTaskKind.Project, ActivityId = activityId, EstimatedHours = 10 }, CancellationToken.None))).Data;
-            TmTaskDto b = (await Tasks(host, ProjectManager, s => s.SaveTaskAsync(new TmTaskSaveDto { Title = "b", Kind = TmTaskKind.Project, ActivityId = activityId, EstimatedHours = 30 }, CancellationToken.None))).Data;
+            IPcProgressApprovalService Svc(IServiceProvider p) => p.GetRequiredService<IPcProgressApprovalService>();
+            // a stranger (warehouse) cannot link a task to the activity; a personal task never links
+            Assert.IsFalse((await Tasks(host, Warehouse, s => s.SaveTaskAsync(new TmTaskSaveDto { Title = "x", Kind = TmTaskKind.Project, ActivityId = activityId, EstimatedHours = 10 }, CancellationToken.None))).Success, "only the unit manager, planning, the PMO or the project manager of the contract link activities");
+            Assert.IsFalse((await Tasks(host, Planning, s => s.SaveTaskAsync(new TmTaskSaveDto { Title = "mine", Kind = TmTaskKind.Personal, ActivityId = activityId }, CancellationToken.None))).Success, "a personal task never links to an activity");
+
+            ResponseDto<TmTaskDto> aRes = await Tasks(host, ProjectManager, s => s.SaveTaskAsync(new TmTaskSaveDto
+            {
+                Title = "a", Kind = TmTaskKind.Project, ActivityId = activityId, EstimatedHours = 10,
+                Assignees = new List<TmAssignTargetDto> { new TmAssignTargetDto { UserId = 25, Role = TmAssigneeRole.Responsible } },
+            }, CancellationToken.None));
+            Assert.IsTrue(aRes.Success, aRes.Message);
+            TmTaskDto a = aRes.Data;
+            TmTaskDto b = (await Tasks(host, Planning, s => s.SaveTaskAsync(new TmTaskSaveDto { Title = "b", Kind = TmTaskKind.Project, ActivityId = activityId, EstimatedHours = 30 }, CancellationToken.None))).Data;
             Assert.AreEqual(contractId, a.ContractId, "the task takes its project from the activity");
             Assert.AreEqual(0m, host.Read(u => u.Set<PcActivity>().Single(x => x.Id == activityId).PercentCache));
-            await Tasks(host, ProjectManager, s => s.ActionAsync(new TmTaskActionDto { Id = a.Id, Action = "complete" }, CancellationToken.None));
-            await Tasks(host, Pmo, s => s.ActionAsync(new TmTaskActionDto { Id = a.Id, Action = "approve" }, CancellationToken.None));
-            Assert.AreEqual(25m, host.Read(u => u.Set<PcActivity>().Single(x => x.Id == activityId).PercentCache), "10 of 40 hours closed");
+
+            // the assignee cannot type the percent, and cannot complete a task whose approved percent is not 100
+            Assert.IsFalse((await Tasks(host, Warehouse, s => s.UpdateProgressAsync(new TmTaskProgressDto { TaskId = a.Id, Percent = 100 }, CancellationToken.None))).Success);
+            await Tasks(host, Warehouse, s => s.ActionAsync(new TmTaskActionDto { Id = a.Id, Action = "start" }, CancellationToken.None));
+            Assert.IsFalse((await Tasks(host, Warehouse, s => s.ActionAsync(new TmTaskActionDto { Id = a.Id, Action = "complete" }, CancellationToken.None))).Success, "closing is by the approved percent");
+            Assert.AreEqual(0m, host.Read(u => u.Set<PcActivity>().Single(x => x.Id == activityId).PercentCache), "nothing moved without the cartable");
+
+            // through the cartable: the default chain is approved by people other than the submitter, the last one is planning or the PMO
+            var save = new PcSubmissionSaveDto { ContractId = contractId, Target = PcSubmissionTarget.Task, TaskId = a.Id, Percent = 100, Comment = "done", Submit = true };
+            ResponseDto<PcSubmissionDto> sent = await host.As(Warehouse, p => Svc(p).SaveSubmissionAsync(save, CancellationToken.None));
+            Assert.IsTrue(sent.Success, sent.Message);
+            ResponseDto<PcChainDto> chain = await host.As(Pmo, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PLANNING" }, new PcChainLevelDto { Role = "PMO" } } }, CancellationToken.None));
+            Assert.IsFalse(chain.Success, "the chain does not change while a report is in approval");
+            ResponseDto<PcSubmissionDto> d = null;
+            for (int guard = 0; guard < 6 && (d == null || d.Data.State == PcSubmissionState.InApproval); guard++)
+            {
+                string role = d == null ? sent.Data.Steps.First().Role : d.Data.Steps.Where(x => x.Level == d.Data.CurrentLevel).Select(x => x.Role).First();
+                ClaimsPrincipal who = role == "PROJECTMANAGER" ? ProjectManager : role == "PMO" ? Pmo : Planning;
+                d = await host.As(who, p => Svc(p).DecideAsync(new PcSubmissionDecisionDto { Id = sent.Data.Id, Approve = true }, CancellationToken.None));
+                Assert.IsTrue(d.Success, d.Message);
+            }
+            Assert.AreEqual(PcSubmissionState.Approved, d.Data.State);
+            Assert.AreEqual(25m, host.Read(u => u.Set<PcActivity>().Single(x => x.Id == activityId).PercentCache), "10 of 40 hours, approved through the cartable");
+            Assert.AreEqual(100m, host.Read(u => u.Set<TmTask>().Single(x => x.Id == a.Id).ApprovedPercent));
+            Assert.AreEqual(0m, host.Read(u => u.Set<TmTask>().Single(x => x.Id == b.Id).ApprovedPercent));
             ResponseDto<List<TmTaskListDto>> listed = await Tasks(host, Planning, s => s.GetByActivityAsync(activityId, CancellationToken.None));
             Assert.AreEqual(2, listed.Data.Count, "the activity lists its tasks");
-            // the percent of a task linked to an activity is not typed by the assignee: it goes through the approval cartable
-            ResponseDto<TmTaskDto> typed = await Tasks(host, ProjectManager, s => s.UpdateProgressAsync(new TmTaskProgressDto { TaskId = b.Id, Percent = 50 }, CancellationToken.None));
-            Assert.IsFalse(typed.Success);
         }
 
         // ------------------------------------------------------------------------------------------------ the approval chain
@@ -223,12 +256,14 @@ namespace MsTests
             int activityId = NewActivity(host, contractId, PcProgressMethod.Manual);
             IPcProgressApprovalService Svc(IServiceProvider p) => p.GetRequiredService<IPcProgressApprovalService>();
 
-            ResponseDto<PcChainDto> bad = await host.As(ProjectManager, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PROJECTMANAGER" } } }, CancellationToken.None));
+            ResponseDto<PcChainDto> bad = await host.As(Pmo, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PROJECTMANAGER" } } }, CancellationToken.None));
             Assert.IsFalse(bad.Success, "the last level must be the PMO or planning");
             ResponseDto<PcChainDto> noRole = await host.As(Warehouse, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PMO" } } }, CancellationToken.None));
             Assert.IsFalse(noRole.Success);
             Assert.IsTrue((await host.As(ProjectManager, p => Svc(p).GetChainAsync(contractId, CancellationToken.None))).Data.IsDefault);
-            ResponseDto<PcChainDto> saved = await host.As(ProjectManager, p => Svc(p).SaveChainAsync(new PcChainSaveDto
+            Assert.IsFalse((await host.As(ProjectManager, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PMO" } } }, CancellationToken.None))).Success, "the chain is set by the PMO only");
+            Assert.IsFalse((await host.As(Pmo, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PMO" }, new PcChainLevelDto { Role = "PMO" } } }, CancellationToken.None))).Success, "the same role twice in a row is one person twice");
+            ResponseDto<PcChainDto> saved = await host.As(Pmo, p => Svc(p).SaveChainAsync(new PcChainSaveDto
             {
                 ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Title = "Planning", Role = "PLANNING" }, new PcChainLevelDto { Title = "PMO", Role = "PMO" } },
             }, CancellationToken.None));
@@ -285,13 +320,62 @@ namespace MsTests
             PcManualProgress row = host.Read(u => u.Set<PcManualProgress>().Single(m => m.ActivityId == activityId));
             Assert.AreEqual(1, row.State, "the manual path: an approved row");
             Assert.AreEqual(30m, row.Percent);
-            Assert.AreEqual(22, row.ProposedByUserId, "proposed by the submitter");
+            Assert.AreEqual(24, row.ProposedByUserId, "planning corrected the percent, so planning is the proposer and the PMO is a different person");
             Assert.AreEqual(11, row.DecidedByUserId, "decided by the PMO");
             Assert.AreEqual(30m, host.Read(u => u.Set<PcActivity>().Single(a => a.Id == activityId).PercentCache));
             CostEntry cost = host.Read(u => u.Set<CostEntry>().Single(c => c.Id == final.Data.CostEntryId.Value));
             Assert.AreEqual(22, cost.CreatedByUserId, "the cost is the submitter's entry, so a second finance person checks it");
             Assert.IsFalse(host.Read(u => u.Set<PcCostCheck>().Any(c => c.CostEntryId == cost.Id)), "and it is not yet checked");
             Assert.IsTrue((await host.As(Pmo, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PMO" } } }, CancellationToken.None))).Success, "with nothing in approval the chain can change");
+        }
+
+        [TestMethod]
+        public async Task OnePersonDecidesOneLevelAndACorrectionAtTheLastLevelGoesBackToTheSubmitter()
+        {
+            AppHost host = NewHost("LastEdit");
+            int contractId = NewContract(host);
+            int activityId = NewActivity(host, contractId, PcProgressMethod.Manual);
+            IPcProgressApprovalService Svc(IServiceProvider p) => p.GetRequiredService<IPcProgressApprovalService>();
+            ClaimsPrincipal both = AppHost.Principal(30, "both", "PLANNING", "PMO");
+            host.Write(u => { AppHost.Add(u, new User { Id = 30, UserName = "p7.user30", Email = "p7.user30@example.com", IsActive = true }); u.SaveChanges(); }, Seeder);
+            Assert.IsTrue((await host.As(Pmo, p => Svc(p).SaveChainAsync(new PcChainSaveDto { ContractId = contractId, Levels = new List<PcChainLevelDto> { new PcChainLevelDto { Role = "PLANNING" }, new PcChainLevelDto { Role = "PMO" } } }, CancellationToken.None))).Success);
+            var save = new PcSubmissionSaveDto { ContractId = contractId, Target = PcSubmissionTarget.Activity, ActivityId = activityId, Percent = 40, ActualStart = DateTime.Today.AddDays(-2), Submit = true };
+            int id = (await host.As(ProjectManager, p => Svc(p).SaveSubmissionAsync(save, CancellationToken.None))).Data.Id;
+
+            Assert.IsTrue((await host.As(both, p => Svc(p).DecideAsync(new PcSubmissionDecisionDto { Id = id, Approve = true }, CancellationToken.None))).Success, "level 1");
+            ResponseDto<PcSubmissionDto> twice = await host.As(both, p => Svc(p).DecideAsync(new PcSubmissionDecisionDto { Id = id, Approve = true }, CancellationToken.None));
+            Assert.IsFalse(twice.Success, "the same person does not decide the second level of the same round");
+
+            // the PMO corrects the value at the last level: nothing is written, the report goes back to the submitter
+            ResponseDto<PcSubmissionDto> edited = await host.As(Pmo, p => Svc(p).DecideAsync(new PcSubmissionDecisionDto { Id = id, Approve = true, Percent = 35 }, CancellationToken.None));
+            Assert.IsTrue(edited.Success, edited.Message);
+            Assert.AreEqual(PcSubmissionState.Returned, edited.Data.State);
+            Assert.AreEqual(35m, edited.Data.Percent);
+            Assert.IsFalse(host.Read(u => u.Set<PcManualProgress>().Any(m => m.ActivityId == activityId)), "nothing reached the plan");
+
+            save.Id = id;
+            ResponseDto<PcSubmissionDto> again = await host.As(ProjectManager, p => Svc(p).SaveSubmissionAsync(save, CancellationToken.None));
+            Assert.IsTrue(again.Success, again.Message);
+            Assert.AreEqual(PcSubmissionState.InApproval, again.Data.State);
+        }
+
+        [TestMethod]
+        public async Task TheProjectManagerLevelIsThePersonInTheContractTermsAndTheFinanceCheckExcludesEveryoneWhoTouchedTheAmount()
+        {
+            AppHost host = NewHost("PmLevel");
+            int contractId = NewContract(host);
+            int activityId = NewActivity(host, contractId, PcProgressMethod.Manual);
+            IPcProgressApprovalService Svc(IServiceProvider p) => p.GetRequiredService<IPcProgressApprovalService>();
+            ClaimsPrincipal otherPm = AppHost.Principal(25, "other.pm", "PROJECTMANAGER");
+            var save = new PcSubmissionSaveDto { ContractId = contractId, Target = PcSubmissionTarget.Activity, ActivityId = activityId, Percent = 10, ActualCost = 500, CostKind = (int)CostKind.Labour, CostNote = "wages", ActualStart = DateTime.Today.AddDays(-1), Submit = true };
+            int id = (await host.As(Planning, p => Svc(p).SaveSubmissionAsync(save, CancellationToken.None))).Data.Id;
+            Assert.IsFalse((await host.As(otherPm, p => Svc(p).DecideAsync(new PcSubmissionDecisionDto { Id = id, Approve = true }, CancellationToken.None))).Success, "the PROJECTMANAGER level is the project manager of this contract, not anybody holding the role");
+            Assert.IsTrue((await host.As(ProjectManager, p => Svc(p).DecideAsync(new PcSubmissionDecisionDto { Id = id, Approve = true, ActualCost = 450 }, CancellationToken.None))).Success);
+            ResponseDto<PcSubmissionDto> done = await host.As(Pmo, p => Svc(p).DecideAsync(new PcSubmissionDecisionDto { Id = id, Approve = true }, CancellationToken.None));
+            Assert.IsTrue(done.Success, done.Message);
+            CostEntry cost = host.Read(u => u.Set<CostEntry>().Single(c => c.Id == done.Data.CostEntryId.Value));
+            Assert.AreEqual(22, cost.CreatedByUserId, "the last person who set the amount is the maker of the cost entry");
+            Assert.AreEqual(450m, cost.Amount);
         }
 
         [TestMethod]

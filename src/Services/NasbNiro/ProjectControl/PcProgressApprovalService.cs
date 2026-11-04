@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model;
+using Entities.Model.NasbNiro.Attachments;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
@@ -67,8 +68,23 @@ namespace Services.NasbNiro.ProjectControl
 
         private async Task<List<int>> PositionsAsync(CancellationToken ct) => _positions ??= (await OfficeActors.ActingAsync(_uow, Me, ct)).Select(a => a.PositionId).ToList();
 
-        private async Task<bool> MatchesAsync(string role, int? positionId, CancellationToken ct) =>
-            role != null ? _user.IsInRole(role) : positionId.HasValue && (await PositionsAsync(ct)).Contains(positionId.Value);
+        /// <summary>
+        /// Whether the caller holds a level of the chain of THIS contract. The project-manager level is the project manager recorded in the terms of the contract (a role held company-wide is not enough);
+        /// when the contract has no project manager yet, the PMO stands in. Other roles and positions are as configured.
+        /// </summary>
+        private async Task<bool> MatchesAsync(string role, int? positionId, int contractId, CancellationToken ct)
+        {
+            if (role == "PROJECTMANAGER")
+            {
+                int? pm = await _uow.Set<PcContractTerms>().AsNoTracking().Where(t => t.ContractId == contractId && !t.Deleted).Select(t => t.ProjectManagerUserId).FirstOrDefaultAsync(ct);
+                return pm.HasValue ? pm.Value == Me : _user.IsInRole("PMO");
+            }
+            return role != null ? _user.IsInRole(role) : positionId.HasValue && (await PositionsAsync(ct)).Contains(positionId.Value);
+        }
+
+        /// <summary>Whether the person already approved a level of this round: one person decides one level only, so the chain cannot collapse into a single approver.</summary>
+        private static bool DecidedBefore(PcProgressSubmission s, int userId) =>
+            userId > 0 && (s.Steps ?? new List<PcProgressApproval>()).Any(x => x.Round == s.Round && x.State == PcApprovalStepState.Approved && x.DecidedByUserId == userId);
 
         // ============================================================================ chain
 
@@ -106,7 +122,7 @@ namespace Services.NasbNiro.ProjectControl
         public async Task<ResponseDto<PcChainDto>> SaveChainAsync(PcChainSaveDto dto, CancellationToken ct)
         {
             if (dto == null) return Bad<PcChainDto>(OfficeText.InvalidData);
-            if (!_user.IsInRole("PMO,PROJECTMANAGER,PLANNING")) return Bad<PcChainDto>(OfficeText.NotAllowed);
+            if (!_user.IsInRole("PMO")) return Bad<PcChainDto>(OfficeText.NotAllowed + " (زنجیره تایید را فقط PMO تنظیم می‌کند؛ مدیر پروژه و برنامه‌ریزی نمی‌توانند زنجیره‌ای را که خودشان در آن تایید می‌کنند تغییر دهند)");
             if (!await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == dto.ContractId && !c.Deleted, ct)) return OfficeText.NotFound<PcChainDto>(PcText.ContractNotFound);
             var levels = (dto.Levels ?? new List<PcChainLevelDto>()).Select(l => (Role: Clean(l.Role)?.ToUpperInvariant(), l.PositionId)).ToList();
             string problem = PcProgressChainRules.Problem(levels);
@@ -144,9 +160,8 @@ namespace Services.NasbNiro.ProjectControl
                 if (a == null || a.ContractId != dto.ContractId) return "فعالیت پیدا نشد یا متعلق به این پروژه نیست.";
                 if (a.ProgressMethod != PcProgressMethod.Manual && a.ProgressMethod != PcProgressMethod.Contractor && a.ProgressMethod != PcProgressMethod.Quantity)
                     return "پیشرفت این فعالیت از رویدادهای سیستم یا از وظایف محاسبه می‌شود؛ پیشرفت وظایف آن را گزارش کنید.";
-                bool mayReport = _user.IsInRole(ProjectControlRoles.UnitManagers + ",PMO")
-                    || await _uow.Set<TmTaskAssignee>().AnyAsync(t => t.UserId == Me && t.State == TmAssigneeState.Active && t.Task.ActivityId == a.Id && !t.Task.Deleted, ct);
-                if (!mayReport) return OfficeText.NotAllowed + " (گزارش پیشرفت فعالیت با مسئول آن است)";
+                // the report of an activity is made by the unit manager of the activity, planning, the PMO or the project manager of the contract (a task assignee reports the task, not the activity)
+                if (!await PcActivityAuthority.MayAsync(_uow, _user, a.Id, ct)) return OfficeText.NotAllowed + " (گزارش پیشرفت فعالیت با مسئول واحد آن، برنامه‌ریزی، PMO یا مدیر پروژه است)";
                 found(a.PercentCache, a.Code + " " + a.Title);
                 return null;
             }
@@ -180,14 +195,6 @@ namespace Services.NasbNiro.ProjectControl
             decimal previous = 0m;
             string problem = await LoadTargetAsync(dto, (p, _) => previous = p, ct);
             if (problem != null) return Bad<PcSubmissionDto>(problem);
-            List<Guid> files = (dto.AttachmentDocumentIds ?? new List<Guid>()).Where(g => g != Guid.Empty).Distinct().ToList();
-            if (files.Count > 20) return Bad<PcSubmissionDto>("حداکثر ۲۰ فایل پیوست می‌شود.");
-            if (files.Count > 0)
-            {
-                // only files the submitter uploaded himself
-                int own = await _uow.Set<Document>().CountAsync(d => files.Contains(d.Id) && d.UploadedByUserId == Me, ct);
-                if (own != files.Count) return Bad<PcSubmissionDto>("فقط فایل‌هایی که خودتان بارگذاری کرده‌اید پیوست می‌شود.");
-            }
             DateTimeOffset now = DateTimeOffset.Now;
             PcProgressSubmission s;
             if (dto.Id.HasValue)
@@ -210,7 +217,7 @@ namespace Services.NasbNiro.ProjectControl
             }
             s.Percent = PcText.Round2(dto.Percent); s.PreviousPercent = previous; s.ActualStart = dto.ActualStart?.Date; s.ActualFinish = dto.ActualFinish?.Date;
             s.ActualCost = PcText.Round2(dto.ActualCost); s.CostKind = dto.ActualCost > 0m ? dto.CostKind : 0; s.CostNote = OfficeText.Cap(Clean(dto.CostNote), 500); s.Comment = OfficeText.Cap(Clean(dto.Comment), 2000);
-            s.AttachmentDocumentIds = files.Count == 0 ? null : string.Join(",", files);
+            s.PercentSetByUserId = Me; s.CostSetByUserId = Me;
             s.ModifyDate = now; s.ModifierUserId = Me;
             List<PcProgressChainLevel> chain = null;
             if (dto.Submit)
@@ -260,7 +267,8 @@ namespace Services.NasbNiro.ProjectControl
             PcProgressApproval step = s.Steps.FirstOrDefault(x => x.Round == s.Round && x.Level == s.CurrentLevel && x.State == PcApprovalStepState.Pending);
             if (step == null) return Bad<PcSubmissionDto>("سطح تایید جاری پیدا نشد.");
             if (s.SubmittedByUserId == Me || s.CreatorUserId == Me) return Bad<PcSubmissionDto>(PcText.SameUser + " (ارسال‌کننده گزارش را تایید نمی‌کند)");
-            if (!await MatchesAsync(step.Role, step.PositionId, ct)) return Bad<PcSubmissionDto>(OfficeText.NotAllowed + " (نوبت تایید سطح «" + step.Title + "» است)");
+            if (!await MatchesAsync(step.Role, step.PositionId, s.ContractId, ct)) return Bad<PcSubmissionDto>(OfficeText.NotAllowed + " (نوبت تایید سطح «" + step.Title + "» است)");
+            if (DecidedBefore(s, Me)) return Bad<PcSubmissionDto>(PcText.SameUser + " (هر شخص فقط یک سطح از زنجیره را تایید می‌کند؛ شما در این دور سطح دیگری را تایید کرده‌اید)");
             if (!dto.Approve && Clean(dto.Note) == null) return Bad<PcSubmissionDto>("دلیل برگشت را بنویسید.");
             string note = OfficeText.Cap(Clean(dto.Note), 1000);
             DateTimeOffset now = DateTimeOffset.Now;
@@ -276,38 +284,50 @@ namespace Services.NasbNiro.ProjectControl
                 return await ReloadAsync(s.Id, ct);
             }
 
-            // the approver may correct the values before approving; every change is recorded
+            // the approver may correct the values before approving; every change is recorded and makes him the maker of that value (so the next level, and the finance check, must be someone else)
             var changes = new List<object>();
             if (dto.Percent.HasValue && dto.Percent.Value != s.Percent)
             {
                 if (dto.Percent.Value < 0m || dto.Percent.Value > 100m) return Bad<PcSubmissionDto>("درصد پیشرفت باید بین ۰ و ۱۰۰ باشد.");
-                changes.Add(new { field = "percent", from = s.Percent, to = PcText.Round2(dto.Percent.Value) }); s.Percent = PcText.Round2(dto.Percent.Value);
+                changes.Add(new { field = "percent", from = s.Percent, to = PcText.Round2(dto.Percent.Value) }); s.Percent = PcText.Round2(dto.Percent.Value); s.PercentSetByUserId = Me;
             }
             if (dto.ActualStart.HasValue && dto.ActualStart.Value.Date != s.ActualStart)
             {
                 if (dto.ActualStart.Value.Date > DateTime.Today) return Bad<PcSubmissionDto>("تاریخ شروع واقعی در آینده است.");
-                changes.Add(new { field = "actualStart", from = s.ActualStart, to = dto.ActualStart.Value.Date }); s.ActualStart = dto.ActualStart.Value.Date;
+                changes.Add(new { field = "actualStart", from = s.ActualStart, to = dto.ActualStart.Value.Date }); s.ActualStart = dto.ActualStart.Value.Date; s.PercentSetByUserId = Me;
             }
             if (dto.ActualFinish.HasValue && dto.ActualFinish.Value.Date != s.ActualFinish)
             {
                 if (dto.ActualFinish.Value.Date > DateTime.Today || (s.ActualStart.HasValue && dto.ActualFinish.Value.Date < s.ActualStart.Value)) return Bad<PcSubmissionDto>("تاریخ پایان واقعی نامعتبر است.");
-                changes.Add(new { field = "actualFinish", from = s.ActualFinish, to = dto.ActualFinish.Value.Date }); s.ActualFinish = dto.ActualFinish.Value.Date;
+                changes.Add(new { field = "actualFinish", from = s.ActualFinish, to = dto.ActualFinish.Value.Date }); s.ActualFinish = dto.ActualFinish.Value.Date; s.PercentSetByUserId = Me;
             }
             if (dto.ActualCost.HasValue && dto.ActualCost.Value != s.ActualCost)
             {
                 if (dto.ActualCost.Value < 0m || (dto.ActualCost.Value > 0m && s.Target != PcSubmissionTarget.Activity)) return Bad<PcSubmissionDto>("هزینه نامعتبر است.");
-                changes.Add(new { field = "actualCost", from = s.ActualCost, to = PcText.Round2(dto.ActualCost.Value) }); s.ActualCost = PcText.Round2(dto.ActualCost.Value);
+                changes.Add(new { field = "actualCost", from = s.ActualCost, to = PcText.Round2(dto.ActualCost.Value) }); s.ActualCost = PcText.Round2(dto.ActualCost.Value); s.CostSetByUserId = Me;
                 if (s.ActualCost > 0m && s.CostKind == 0) return Bad<PcSubmissionDto>("نوع هزینه در گزارش مشخص نیست؛ گزارش را برای اصلاح برگردانید.");
             }
-            if (Clean(dto.CostNote) != null && Clean(dto.CostNote) != s.CostNote) { changes.Add(new { field = "costNote", from = s.CostNote, to = Clean(dto.CostNote) }); s.CostNote = OfficeText.Cap(Clean(dto.CostNote), 500); }
+            if (Clean(dto.CostNote) != null && Clean(dto.CostNote) != s.CostNote) { changes.Add(new { field = "costNote", from = s.CostNote, to = Clean(dto.CostNote) }); s.CostNote = OfficeText.Cap(Clean(dto.CostNote), 500); s.CostSetByUserId = Me; }
             if (s.ActualCost > 0m && Clean(s.CostNote) == null) return Bad<PcSubmissionDto>("برای هزینه، توضیح تعهدی لازم است.");
             if (s.Percent >= 100m && !s.ActualFinish.HasValue) s.ActualFinish = DateTime.Today;
             string changesJson = changes.Count == 0 ? null : JsonSerializer.Serialize(changes);
             if (changes.Count > 0) AddHistory(s, "edited", step.Level, "اصلاح مقادیر توسط تاییدکننده", changesJson);
 
+            PcProgressApproval next = s.Steps.Where(x => x.Round == s.Round && x.Level > step.Level && x.State == PcApprovalStepState.Pending).OrderBy(x => x.Level).FirstOrDefault();
+            if (next == null && changes.Count > 0)
+            {
+                // the last level may approve only the values the submitter and the earlier levels already stood behind: a correction at the end goes back to the submitter, who confirms it by sending the report again
+                step.State = PcApprovalStepState.Returned; step.DecidedByUserId = Me; step.DecidedAt = now; step.Note = OfficeText.Cap("مقادیر در آخرین سطح اصلاح شد؛ ارسال‌کننده باید تایید و دوباره ارسال کند. " + note, 1000);
+                s.State = PcSubmissionState.Returned; s.CurrentLevel = 0; s.ResultNote = step.Note; s.ModifyDate = now; s.ModifierUserId = Me;
+                AddHistory(s, "returned", step.Level, "اصلاح در آخرین سطح؛ بازگشت به ارسال‌کننده برای تایید مقادیر", null);
+                await SaveAsync(ct);
+                await _notify.CloseAsync("pgs:" + s.Id.ToString(CultureInfo.InvariantCulture), "برای تایید مقادیر اصلاح‌شده برگشت", ct);
+                await NotifyUserAsync(s, "گزارش پیشرفت " + s.Number + " در آخرین سطح اصلاح شد؛ مقادیر را ببینید، تایید کنید و دوباره ارسال کنید.", ct);
+                return await ReloadAsync(s.Id, ct);
+            }
+
             step.State = PcApprovalStepState.Approved; step.DecidedByUserId = Me; step.DecidedAt = now; step.Note = note;
             AddHistory(s, "approved", step.Level, note, null);
-            PcProgressApproval next = s.Steps.Where(x => x.Round == s.Round && x.Level > step.Level && x.State == PcApprovalStepState.Pending).OrderBy(x => x.Level).FirstOrDefault();
             if (next != null)
             {
                 s.CurrentLevel = next.Level; s.ModifyDate = now; s.ModifierUserId = Me;
@@ -324,10 +344,12 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     ActivityId = s.ActivityId.Value, Percent = s.Percent, ActualStart = s.ActualStart, ActualFinish = s.ActualFinish, Comment = s.Comment, SubmittedByUserId = s.SubmittedByUserId ?? s.CreatorUserId,
                     ApprovedByUserId = Me, Cost = s.ActualCost, CostKind = s.CostKind, CostNote = s.CostNote,
+                    ProposerUserId = s.PercentSetByUserId, CostSetByUserId = s.CostSetByUserId, SubmissionId = s.Id, SubmissionNumber = s.Number,
                 }, ct);
                 if (!applied.Success) return Bad<PcSubmissionDto>(applied.Message ?? OfficeText.InvalidData);
                 s.State = PcSubmissionState.Approved; s.CurrentLevel = 0; s.AppliedAt = now; s.ResultNote = note;
                 AddHistory(s, "applied", step.Level, "مقدار در برنامه نوشته شد", null);
+                // one save: the last approval, the state of the report, the plan record and the cost entry go together
                 try { await _uow.SaveChangesAsync(ct); }
                 catch (DbUpdateConcurrencyException) { return Bad<PcSubmissionDto>(OfficeText.Concurrency); }
                 s.ManualProgressId = applied.Data.Manual.Id; s.CostEntryId = applied.Data.Cost?.Id;
@@ -340,7 +362,9 @@ namespace Services.NasbNiro.ProjectControl
                 if (!applied.Success) return Bad<PcSubmissionDto>(applied.Message ?? OfficeText.InvalidData);
                 s.State = PcSubmissionState.Approved; s.CurrentLevel = 0; s.AppliedAt = now; s.ResultNote = note;
                 AddHistory(s, "applied", step.Level, "مقدار در وظیفه نوشته شد", null);
+                // one save for the approval and the task; the roll-up of the activity follows (it is idempotent, the nightly engine does the same)
                 await SaveAsync(ct);
+                await _tasks.RollUpTaskActivityAsync(s.TaskId.Value, ct);
             }
             await _notify.CloseAsync("pgs:" + s.Id.ToString(CultureInfo.InvariantCulture), "تایید نهایی شد", ct);
             await NotifyUserAsync(s, "گزارش پیشرفت " + s.Number + " تایید و در برنامه ثبت شد.", ct);
@@ -367,7 +391,7 @@ namespace Services.NasbNiro.ProjectControl
         {
             if (s.CreatorUserId == Me || s.SubmittedByUserId == Me || _user.IsInRole(Managers)) return true;
             foreach (PcProgressApproval step in s.Steps ?? new List<PcProgressApproval>())
-                if (await MatchesAsync(step.Role, step.PositionId, ct)) return true;
+                if (await MatchesAsync(step.Role, step.PositionId, s.ContractId, ct)) return true;
             return false;
         }
 
@@ -402,7 +426,7 @@ namespace Services.NasbNiro.ProjectControl
             string target = (await TargetTitlesAsync(new[] { s }, ct)).GetValueOrDefault(s.Id);
             string contract = await _uow.Set<ContractEntity>().AsNoTracking().Where(c => c.Id == s.ContractId).Select(c => c.Title).FirstOrDefaultAsync(ct);
             PcProgressApproval current = s.State == PcSubmissionState.InApproval ? s.Steps.FirstOrDefault(x => x.Round == s.Round && x.Level == s.CurrentLevel) : null;
-            bool canDecide = current != null && current.State == PcApprovalStepState.Pending && s.SubmittedByUserId != Me && s.CreatorUserId != Me && await MatchesAsync(current.Role, current.PositionId, ct);
+            bool canDecide = current != null && current.State == PcApprovalStepState.Pending && s.SubmittedByUserId != Me && s.CreatorUserId != Me && !DecidedBefore(s, Me) && await MatchesAsync(current.Role, current.PositionId, s.ContractId, ct);
             string activityCode = null, taskNumber = null;
             if (s.ActivityId.HasValue) activityCode = await _uow.Set<PcActivity>().AsNoTracking().Where(a => a.Id == s.ActivityId.Value).Select(a => a.Code).FirstOrDefaultAsync(ct);
             if (s.TaskId.HasValue) taskNumber = await _uow.Set<TmTask>().AsNoTracking().Where(t => t.Id == s.TaskId.Value).Select(t => t.Number).FirstOrDefaultAsync(ct);
@@ -410,7 +434,7 @@ namespace Services.NasbNiro.ProjectControl
             {
                 Id = s.Id, Number = s.Number, ContractId = s.ContractId, ContractTitle = contract, Target = s.Target, ActivityId = s.ActivityId, ActivityCode = activityCode, TaskId = s.TaskId, TaskNumber = taskNumber, TargetTitle = target,
                 Percent = s.Percent, PreviousPercent = s.PreviousPercent, ActualStart = s.ActualStart, ActualStartText = OfficeText.Date(s.ActualStart), ActualFinish = s.ActualFinish, ActualFinishText = OfficeText.Date(s.ActualFinish),
-                ActualCost = s.ActualCost, CostKind = s.CostKind, CostNote = s.CostNote, Comment = s.Comment, AttachmentDocumentIds = ParseGuids(s.AttachmentDocumentIds), State = s.State, Round = s.Round, CurrentLevel = s.CurrentLevel,
+                ActualCost = s.ActualCost, CostKind = s.CostKind, CostNote = s.CostNote, Comment = s.Comment, AttachmentCount = await _uow.Set<RecordAttachment>().CountAsync(x => x.OwnerType == AttachmentOwnerType.PcProgressSubmission && x.OwnerId == s.Id && !x.Deleted && !x.Voided && x.RemovedAt == null, ct), State = s.State, Round = s.Round, CurrentLevel = s.CurrentLevel,
                 CurrentLevelTitle = current?.Title, SubmittedByName = names.Name(s.SubmittedByUserId ?? s.CreatorUserId), SubmittedAtText = OfficeText.Stamp(s.SubmittedAt), ResultNote = s.ResultNote, ManualProgressId = s.ManualProgressId, CostEntryId = s.CostEntryId,
                 Locked = !PcSubmissionRules.CanEdit(s.State), CanEdit = PcSubmissionRules.CanEdit(s.State) && s.CreatorUserId == Me, CanDecide = canDecide,
                 Steps = s.Steps.OrderBy(x => x.Round).ThenBy(x => x.Level).Select(x => new PcApprovalStepDto
@@ -420,9 +444,6 @@ namespace Services.NasbNiro.ProjectControl
                 History = history.Select(h => new PcSubmissionHistoryDto { Id = h.Id, Action = h.Action, ActionText = PcSubmissionRules.ActionText(h.Action), Round = h.Round, Level = h.Level, UserName = names.Name(h.UserId), AtText = OfficeText.Stamp(h.At), Note = h.Note, ChangesJson = h.ChangesJson }).ToList(),
             };
         }
-
-        private static List<Guid> ParseGuids(string csv) =>
-            string.IsNullOrWhiteSpace(csv) ? new List<Guid>() : csv.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(x => Guid.TryParse(x, out Guid g) ? g : Guid.Empty).Where(g => g != Guid.Empty).ToList();
 
         public async Task<ResponseDto<PagedList<PcSubmissionListDto>>> GetSubmissionsAsync(PcSubmissionQuery query, CancellationToken ct)
         {
@@ -446,7 +467,7 @@ namespace Services.NasbNiro.ProjectControl
                 foreach (PcProgressSubmission s in pending)
                 {
                     PcProgressApproval cur = s.Steps.FirstOrDefault(x => x.Round == s.Round && x.Level == s.CurrentLevel && x.State == PcApprovalStepState.Pending);
-                    if (cur != null && await MatchesAsync(cur.Role, cur.PositionId, ct)) rows.Add(s);
+                    if (cur != null && !DecidedBefore(s, me) && await MatchesAsync(cur.Role, cur.PositionId, s.ContractId, ct)) rows.Add(s);
                 }
             }
             else
@@ -504,7 +525,6 @@ namespace Services.NasbNiro.ProjectControl
             var lastProgress = await _uow.Set<TmTaskHistory>().AsNoTracking().Where(h => taskIds.Contains(h.TaskId) && h.Kind == TmHistoryKind.Progress).GroupBy(h => h.TaskId).Select(g => new { TaskId = g.Key, At = g.Max(h => h.At) }).ToListAsync(ct);
             Dictionary<int, string> userNames = await InventoryUsers.GetNamesAsync(_uow, tasks.SelectMany(t => t.Assignees).Select(a => a.UserId), ct);
             Dictionary<int, string> positions = await OfficeActors.PositionTitlesAsync(_uow, tasks.SelectMany(t => t.Assignees).Select(a => a.PositionId), ct);
-            Dictionary<int, string> contracts = await _uow.Set<ContractEntity>().AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Title, ct);
             foreach (TmTask t in tasks)
             {
                 DateTime last = (lastProgress.FirstOrDefault(x => x.TaskId == t.Id)?.At ?? t.Assignees.Where(a => a.Role != TmAssigneeRole.Observer).Select(a => a.AssignedAt).DefaultIfEmpty(t.CreateDate).Min()).LocalDateTime.Date;
@@ -512,7 +532,7 @@ namespace Services.NasbNiro.ProjectControl
                 if (since < days) continue;
                 result.Add(new PcNotUpdatedDto
                 {
-                    Target = PcSubmissionTarget.Task, ContractId = t.ContractId.Value, ContractTitle = contracts.GetValueOrDefault(t.ContractId.Value), TargetId = t.Id, Code = t.Number, Title = t.Title,
+                    Target = PcSubmissionTarget.Task, ContractId = t.ContractId.Value, TargetId = t.Id, Code = t.Number, Title = t.Title,
                     AssigneeNames = string.Join("، ", t.Assignees.Where(a => a.State == TmAssigneeState.Active && a.Role != TmAssigneeRole.Observer).Select(a => a.UserId.HasValue ? userNames.Name(a.UserId) : positions.Title(a.PositionId)).Where(n => n != null).Distinct()),
                     Percent = t.PercentComplete, LastUpdateText = OfficeText.Date(last), DaysSince = since,
                 });
@@ -532,10 +552,13 @@ namespace Services.NasbNiro.ProjectControl
                 if (since < days) continue;
                 result.Add(new PcNotUpdatedDto
                 {
-                    Target = PcSubmissionTarget.Activity, ContractId = a.ContractId, ContractTitle = contracts.GetValueOrDefault(a.ContractId), TargetId = a.Id, Code = a.Code, Title = a.Title, AssigneeNames = a.ResponsibleUnit,
+                    Target = PcSubmissionTarget.Activity, ContractId = a.ContractId, TargetId = a.Id, Code = a.Code, Title = a.Title, AssigneeNames = a.ResponsibleUnit,
                     Percent = a.PercentCache, LastUpdateText = lastManual.ContainsKey(a.Id) ? OfficeText.Date(last) : "هنوز گزارشی ثبت نشده", DaysSince = since,
                 });
             }
+            List<int> contractIds = result.Select(x => x.ContractId).Distinct().ToList();
+            Dictionary<int, string> contracts = contractIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<ContractEntity>().AsNoTracking().Where(c => contractIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Title, ct);
+            foreach (PcNotUpdatedDto x in result) x.ContractTitle = contracts.GetValueOrDefault(x.ContractId);
             return ResponseDtoHelper.Ok(result.OrderByDescending(r => r.DaysSince).ToList());
         }
 
@@ -547,7 +570,8 @@ namespace Services.NasbNiro.ProjectControl
             if (contractId.HasValue) q = q.Where(s => s.ContractId == contractId.Value);
             List<PcProgressSubmission> rows = await q.ToListAsync(ct);
             Dictionary<int, string> titles = await TargetTitlesAsync(rows, ct);
-            Dictionary<int, string> contracts = await _uow.Set<ContractEntity>().AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Title, ct);
+            List<int> contractIds = rows.Select(x => x.ContractId).Distinct().ToList();
+            Dictionary<int, string> contracts = contractIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<ContractEntity>().AsNoTracking().Where(c => contractIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Title, ct);
             DateTime today = DateTime.Today;
             var result = new List<PcOverdueUpdateDto>();
             foreach (PcProgressSubmission s in rows)

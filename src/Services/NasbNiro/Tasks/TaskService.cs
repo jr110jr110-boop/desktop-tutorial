@@ -11,6 +11,7 @@ using Entities.Model;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.ProjectControl;
+using Entities.Model.NasbNiro.Attachments;
 using Entities.Model.NasbNiro.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Files;
@@ -36,8 +37,6 @@ namespace Services.NasbNiro.Tasks
         Task<ResponseDto<TmTaskDto>> ChecklistAsync(TmTaskChecklistDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<TmTaskDto>> CommentAsync(TmTaskCommentDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<TmTaskDto>> WatchAsync(int taskId, bool watch, CancellationToken cancellationToken);
-        Task<ResponseDto<TmTaskDto>> AttachAsync(TmTaskAttachDto dto, CancellationToken cancellationToken);
-        Task<ResponseDto<TmTaskDto>> VoidAttachmentAsync(TmTaskVoidDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<List<TmBoardColumnDto>>> GetBoardAsync(TmTaskQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<List<TmAgendaDayDto>>> GetAgendaAsync(TmAgendaQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<List<TmTaskListDto>>> GetByActivityAsync(int activityId, CancellationToken cancellationToken);
@@ -51,14 +50,31 @@ namespace Services.NasbNiro.Tasks
         /// <summary>True when the caller may see the task (the rule that also decides who reads the files of a task).</summary>
         Task<bool> CanReadTaskAsync(int taskId, CancellationToken cancellationToken);
 
+        /// <summary>What the attachment layer needs about a task: who reads its files (the task's own visibility) and who adds or voids them.</summary>
+        Task<TaskFileRights> GetFileRightsAsync(int taskId, CancellationToken cancellationToken);
+
         /// <summary>The task as a plain row for the other modules (progress approval): null when it does not exist or the caller may not see it.</summary>
         Task<TmTask> FindVisibleAsync(int taskId, bool track, CancellationToken cancellationToken);
 
         /// <summary>
-        /// Used by the progress-approval cartable after the whole chain approved: sets the percent, hours and dates of the task, keeps the status machine honest (0 to more than 0 starts it), writes the history
-        /// and rolls the percent up into the WBS activity. The caller saves nothing else for the task.
+        /// Used by the progress-approval cartable after the whole chain approved: sets the approved percent and dates of the task, keeps the status machine honest (0 to more than 0 starts it) and writes the history.
+        /// It saves nothing: the cartable saves the approval together with this change and then calls RollUpTaskActivityAsync.
         /// </summary>
         Task<ResponseDto<bool>> ApplyApprovedProgressAsync(int taskId, decimal percent, DateTime? actualStart, DateTime? actualFinish, string note, int approvedByUserId, CancellationToken cancellationToken);
+
+        /// <summary>After the cartable saved the approval: recomputes the WBS activity of the task (idempotent; the nightly engine does the same).</summary>
+        Task RollUpTaskActivityAsync(int taskId, CancellationToken cancellationToken);
+    }
+
+    public sealed class TaskFileRights
+    {
+        public bool Exists { get; set; }
+        public string Number { get; set; }
+        public bool CanRead { get; set; }
+        /// <summary>Creator, a person who referred the task, an active assignee or the PMO.</summary>
+        public bool CanWrite { get; set; }
+        /// <summary>Closed or rejected: no new files.</summary>
+        public bool Closed { get; set; }
     }
 
     /// <summary>
@@ -111,7 +127,7 @@ namespace Services.NasbNiro.Tasks
         {
             int me = c.Me; List<int> pos = c.Positions; bool pmo = c.Pmo, ceo = c.Ceo, reader = c.Reader;
             return q.Where(t => !t.Deleted && (t.CreatorUserId == me
-                || t.Assignees.Any(a => a.UserId == me || (a.PositionId != null && pos.Contains(a.PositionId.Value)))
+                || t.Assignees.Any(a => (t.Confidentiality == OfClassification.Normal || a.State == TmAssigneeState.Active || a.State == TmAssigneeState.Done) && (a.UserId == me || (a.PositionId != null && pos.Contains(a.PositionId.Value))))
                 || t.Watchers.Any(w => w.UserId == me)
                 || (t.Kind != TmTaskKind.Personal && t.Confidentiality == OfClassification.Normal && (pmo || ceo || (reader && t.ContractId != null)))
                 || (t.Kind != TmTaskKind.Personal && t.Confidentiality == OfClassification.Confidential && ceo)));
@@ -121,6 +137,17 @@ namespace Services.NasbNiro.Tasks
         {
             Ctx c = await CtxAsync(ct);
             return await Visible(_uow.Set<TmTask>().AsNoTracking().Where(t => t.Id == taskId), c).AnyAsync(ct);
+        }
+
+        public async Task<TaskFileRights> GetFileRightsAsync(int taskId, CancellationToken ct)
+        {
+            Ctx c = await CtxAsync(ct);
+            TmTask t = await _uow.Set<TmTask>().AsNoTracking().Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == taskId && !x.Deleted, ct);
+            if (t == null) return new TaskFileRights();
+            // a task the caller cannot see does not exist for him (no probing by id)
+            if (!await Visible(_uow.Set<TmTask>().AsNoTracking().Where(x => x.Id == taskId), c).AnyAsync(ct)) return new TaskFileRights();
+            Rights r = RightsOf(t, c);
+            return new TaskFileRights { Exists = true, Number = t.Number, CanRead = true, CanWrite = r.Editor || r.IsAssignee || r.IsCreator, Closed = t.Status == TmTaskStatus.Closed || t.Status == TmTaskStatus.Rejected };
         }
 
         public async Task<TmTask> FindVisibleAsync(int taskId, bool track, CancellationToken ct)
@@ -238,7 +265,7 @@ namespace Services.NasbNiro.Tasks
 
         private async Task<TmTaskDto> ToDtoAsync(TmTask t, Ctx c, CancellationToken ct)
         {
-            TmTask full = await _uow.Set<TmTask>().AsNoTracking().AsSplitQuery().Include(x => x.Assignees).Include(x => x.Checklist).Include(x => x.Comments).Include(x => x.Watchers).Include(x => x.Attachments)
+            TmTask full = await _uow.Set<TmTask>().AsNoTracking().AsSplitQuery().Include(x => x.Assignees).Include(x => x.Checklist).Include(x => x.Comments).Include(x => x.Watchers)
                 .FirstAsync(x => x.Id == t.Id, ct);
             List<TmTaskHistory> history = await _uow.Set<TmTaskHistory>().AsNoTracking().Where(h => h.TaskId == t.Id).OrderBy(h => h.At).ThenBy(h => h.Id).ToListAsync(ct);
             List<TmTask> subs = await Visible(_uow.Set<TmTask>().AsNoTracking().Where(s => s.ParentTaskId == t.Id), c).OrderBy(s => s.Id).ToListAsync(ct);
@@ -248,8 +275,6 @@ namespace Services.NasbNiro.Tasks
             userIds.AddRange(full.Assignees.Select(a => a.EndedByUserId));
             userIds.AddRange(full.Checklist.Select(i => i.DoneByUserId));
             userIds.AddRange(full.Comments.Select(m => (int?)m.UserId));
-            userIds.AddRange(full.Attachments.Select(a => (int?)a.UploadedByUserId));
-            userIds.AddRange(full.Attachments.Select(a => a.VoidedByUserId));
             userIds.AddRange(history.Select(h => (int?)h.UserId));
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, userIds, ct);
             Dictionary<int, string> positions = await OfficeActors.PositionTitlesAsync(_uow, full.Assignees.Select(a => a.PositionId), ct);
@@ -274,12 +299,6 @@ namespace Services.NasbNiro.Tasks
             }).ToList();
             dto.Checklist = full.Checklist.OrderBy(i => i.Seq).ThenBy(i => i.Id).Select(i => new TmChecklistItemDto { Id = i.Id, Seq = i.Seq, Text = i.Text, Done = i.Done, DoneByName = names.Name(i.DoneByUserId), DoneAtText = OfficeText.Stamp(i.DoneAt) }).ToList();
             dto.Comments = full.Comments.OrderBy(m => m.At).ThenBy(m => m.Id).Select(m => new TmCommentDto { Id = m.Id, ParentId = m.ParentId, UserId = m.UserId, UserName = names.Name(m.UserId), Text = m.Text, At = m.At, AtText = OfficeText.Stamp(m.At) }).ToList();
-            dto.Attachments = full.Attachments.OrderBy(a => a.Id).Select(a => new TmAttachmentDto
-            {
-                Id = a.Id, DocumentId = a.DocumentId, FileName = a.FileName, UploadedByName = names.Name(a.UploadedByUserId), UploadedAtText = OfficeText.Stamp(a.UploadedAt), SupersedesId = a.SupersedesId, IsVoid = a.IsVoid,
-                VoidReason = a.VoidReason, VoidedByName = names.Name(a.VoidedByUserId),
-            }).ToList();
-            dto.AttachmentCount = dto.Attachments.Count(a => !a.IsVoid);
             dto.History = history.Select(h => new TmHistoryDto { Id = h.Id, Kind = h.Kind, UserName = names.Name(h.UserId), At = h.At, AtText = OfficeText.Stamp(h.At), FromValue = h.FromValue, ToValue = h.ToValue, Text = h.Text }).ToList();
             dto.WatcherUserIds = full.Watchers.Select(w => w.UserId).ToList();
             dto.Watching = full.Watchers.Any(w => w.UserId == c.Me);
@@ -295,7 +314,7 @@ namespace Services.NasbNiro.Tasks
             var assignees = await _uow.Set<TmTaskAssignee>().AsNoTracking().Where(a => ids.Contains(a.TaskId) && (a.State == TmAssigneeState.Active || a.State == TmAssigneeState.Done)).Select(a => new { a.TaskId, a.UserId, a.PositionId, a.Role }).ToListAsync(ct);
             var check = await _uow.Set<TmTaskChecklistItem>().AsNoTracking().Where(i => ids.Contains(i.TaskId)).GroupBy(i => i.TaskId).Select(g => new { TaskId = g.Key, Total = g.Count(), Done = g.Count(i => i.Done) }).ToListAsync(ct);
             var comments = await _uow.Set<TmTaskComment>().AsNoTracking().Where(m => ids.Contains(m.TaskId)).GroupBy(m => m.TaskId).Select(g => new { TaskId = g.Key, N = g.Count() }).ToListAsync(ct);
-            var files = await _uow.Set<TmTaskAttachment>().AsNoTracking().Where(a => ids.Contains(a.TaskId) && !a.IsVoid).GroupBy(a => a.TaskId).Select(g => new { TaskId = g.Key, N = g.Count() }).ToListAsync(ct);
+            var files = await _uow.Set<RecordAttachment>().AsNoTracking().Where(a => a.OwnerType == AttachmentOwnerType.TmTask && ids.Contains(a.OwnerId) && !a.Deleted && !a.Voided && a.RemovedAt == null).GroupBy(a => a.OwnerId).Select(g => new { TaskId = g.Key, N = g.Count() }).ToListAsync(ct);
             List<int> actIds = tasks.Where(t => t.ActivityId.HasValue).Select(t => t.ActivityId.Value).Distinct().ToList();
             Dictionary<int, string> actCodes = actIds.Count == 0 ? new Dictionary<int, string>() : await _uow.Set<PcActivity>().AsNoTracking().Where(a => actIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.Code, ct);
             var wanted = new List<int?>(tasks.Select(t => (int?)t.CreatorUserId));
@@ -413,12 +432,14 @@ namespace Services.NasbNiro.Tasks
             IQueryable<TmTask> q = Filter(Visible(_uow.Set<TmTask>().AsNoTracking(), c), query, c, !string.IsNullOrWhiteSpace(query.Cartable));
             int take = query.PageSize <= 0 || query.PageSize > 100 ? 40 : query.PageSize;
             var columns = new List<TmBoardColumnDto>();
+            // one grouped count, one page per column, and one pass for the list rows of all the pages together
+            Dictionary<TmTaskStatus, int> counts = (await q.GroupBy(t => t.Status).Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct)).ToDictionary(x => x.Key, x => x.N);
+            var pages = new Dictionary<TmTaskStatus, List<TmTask>>();
             foreach (TmTaskStatus status in new[] { TmTaskStatus.Open, TmTaskStatus.Assigned, TmTaskStatus.InProgress, TmTaskStatus.Pending, TmTaskStatus.Suspended, TmTaskStatus.Closed, TmTaskStatus.Rejected })
-            {
-                IQueryable<TmTask> col = q.Where(t => t.Status == status);
-                List<TmTask> items = await col.OrderBy(t => t.DueDate == null).ThenBy(t => t.DueDate).ThenByDescending(t => t.Id).Take(take).ToListAsync(ct);
-                columns.Add(new TmBoardColumnDto { Status = status, Count = await col.CountAsync(ct), Items = await ListDtoAsync<TmTaskListDto>(items, new Dictionary<int, string>(), ct, c) });
-            }
+                pages[status] = await q.Where(t => t.Status == status).OrderBy(t => t.DueDate == null).ThenBy(t => t.DueDate).ThenByDescending(t => t.Id).Take(take).ToListAsync(ct);
+            List<TmTaskListDto> rows = await ListDtoAsync<TmTaskListDto>(pages.Values.SelectMany(x => x).ToList(), new Dictionary<int, string>(), ct, c);
+            foreach (var page in pages)
+                columns.Add(new TmBoardColumnDto { Status = page.Key, Count = counts.TryGetValue(page.Key, out int n) ? n : 0, Items = page.Value.Select(t => rows.First(r => r.Id == t.Id)).ToList() });
             return ResponseDtoHelper.Ok(columns);
         }
 
@@ -521,6 +542,7 @@ namespace Services.NasbNiro.Tasks
         private async Task<string> ValidateLinksAsync(TmTaskSaveDto dto, TmTask existing, CancellationToken ct)
         {
             int? contractId = dto.ContractId;
+            if (dto.Kind == TmTaskKind.Personal && (dto.ActivityId.HasValue || dto.WbsNodeId.HasValue)) return "وظیفه شخصی به فعالیت یا گره WBS وصل نمی‌شود.";
             if (dto.ActivityId.HasValue)
             {
                 var a = await _uow.Set<PcActivity>().AsNoTracking().Where(x => x.Id == dto.ActivityId.Value && !x.Deleted).Select(x => new { x.ContractId, x.WbsNodeId }).FirstOrDefaultAsync(ct);
@@ -589,11 +611,12 @@ namespace Services.NasbNiro.Tasks
             TmTask t;
             bool isNew = !dto.Id.HasValue;
             var oldActivity = (int?)null;
+            decimal oldHours = 0m;
             if (isNew)
             {
                 string problem = await ValidateLinksAsync(dto, null, ct);
                 if (problem != null) return Bad<TmTaskDto>(problem);
-                t = new TmTask { CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me, Status = TmTaskStatus.Open, Assignees = new List<TmTaskAssignee>(), Checklist = new List<TmTaskChecklistItem>(), Watchers = new List<TmTaskWatcher>(), Comments = new List<TmTaskComment>(), Attachments = new List<TmTaskAttachment>() };
+                t = new TmTask { CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me, Status = TmTaskStatus.Open, Assignees = new List<TmTaskAssignee>(), Checklist = new List<TmTaskChecklistItem>(), Watchers = new List<TmTaskWatcher>(), Comments = new List<TmTaskComment>() };
                 t.Number = await InventoryNumbers.NextNumberAsync(_uow, TaskNumbers.Task, "TK", DateTime.Today, ct);
                 _uow.Set<TmTask>().Add(t);
             }
@@ -607,7 +630,18 @@ namespace Services.NasbNiro.Tasks
                 if (t.Kind != dto.Kind && (t.Kind == TmTaskKind.Personal || dto.Kind == TmTaskKind.Personal) && t.Assignees.Any()) return Bad<TmTaskDto>("نوع وظیفه شخصی با وظیفه ارجاع‌شده عوض نمی‌شود.");
                 string problem = await ValidateLinksAsync(dto, t, ct);
                 if (problem != null) return Bad<TmTaskDto>(problem);
-                oldActivity = t.ActivityId;
+                oldActivity = t.ActivityId; oldHours = t.EstimatedHours;
+            }
+
+            // linking a task to a WBS activity (or changing its weight) reshapes the percent of that activity: only planning, the PMO, the unit manager of the activity and the project manager of the contract
+            if (dto.ActivityId.HasValue != t.ActivityId.HasValue || dto.ActivityId != t.ActivityId || (t.ActivityId.HasValue && !isNew && dto.EstimatedHours != t.EstimatedHours))
+            {
+                foreach (int actId in new[] { dto.ActivityId, t.ActivityId }.Where(x => x.HasValue).Select(x => x.Value).Distinct())
+                    if (!await PcActivityAuthority.MayAsync(_uow, _user, actId, ct))
+                    {
+                        if (isNew) _uow.Entry(t).State = EntityState.Detached;
+                        return Bad<TmTaskDto>(NotAllowed + " (اتصال وظیفه به فعالیت WBS و تغییر وزن آن با برنامه‌ریزی، PMO، مسئول واحد فعالیت یا مدیر همان پروژه است)");
+                    }
             }
 
             // field changes into the history
@@ -656,7 +690,7 @@ namespace Services.NasbNiro.Tasks
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<TmTaskDto>(OfficeText.Concurrency); }
             if (newRows.Count > 0) await NotifyAssigneesAsync(t, newRows, "وظیفه جدید به شما ارجاع شد: ", ct);
-            await RollUpAsync(new int?[] { oldActivity, t.ActivityId }, ct);
+            if (oldActivity != t.ActivityId || oldHours != t.EstimatedHours) await RollUpAsync(new int?[] { oldActivity, t.ActivityId }, ct);
             return await ReloadAsync(t.Id, c, ct);
         }
 
@@ -813,6 +847,7 @@ namespace Services.NasbNiro.Tasks
                 case "complete":
                     if (!worker) return Bad<TmTaskDto>(NotAllowed + " (فقط گیرنده وظیفه انجام آن را گزارش می‌کند)");
                     if (t.Checklist.Any(i => !i.Done)) return Bad<TmTaskDto>("چک‌لیست وظیفه کامل نیست؛ موارد باقی‌مانده را انجام دهید.");
+                    if (t.ActivityId.HasValue && t.ApprovedPercent < 100m) return Bad<TmTaskDto>("وظیفه‌ای که به فعالیت WBS وصل است وقتی بسته می‌شود که گزارش پیشرفت ۱۰۰٪ آن در «کارتابل تایید پیشرفت» تایید شده باشد.");
                     t.StartedAt ??= now; t.CompletedAt = now; t.CompletedByUserId = Me;
                     foreach (TmTaskAssignee a in t.Assignees.Where(a => a.State == TmAssigneeState.Active && a.Role != TmAssigneeRole.Observer && (a.UserId == c.Me || (a.PositionId.HasValue && c.Positions.Contains(a.PositionId.Value))))) a.State = TmAssigneeState.Done;
                     if (personal) { to = TmTaskStatus.Closed; spawn = true; }
@@ -860,6 +895,7 @@ namespace Services.NasbNiro.Tasks
                     if (note == null) return Bad<TmTaskDto>("دلیل بازگشایی را بنویسید.");
                     t.ClosedAt = null; t.ClosedByUserId = null; t.CompletedAt = null; t.CompletedByUserId = null;
                     if (t.PercentComplete >= 100m) t.PercentComplete = 99m;
+                    if (t.ApprovedPercent >= 100m) t.ApprovedPercent = 99m;
                     foreach (TmTaskAssignee a in t.Assignees.Where(a => a.State == TmAssigneeState.Done)) a.State = TmAssigneeState.Active;
                     to = t.Assignees.Any(a => a.State == TmAssigneeState.Active && a.Role != TmAssigneeRole.Observer) ? TmTaskStatus.Assigned : TmTaskStatus.Open;
                     break;
@@ -884,7 +920,7 @@ namespace Services.NasbNiro.Tasks
             if (action == "return") await NotifyAssigneesAsync(t, t.Assignees.Where(a => a.State == TmAssigneeState.Active && a.Role != TmAssigneeRole.Observer), "وظیفه برای اصلاح برگشت: ", ct);
             if (to == TmTaskStatus.Rejected && !r.IsAssignee) await NotifyAssigneesAsync(t, t.Assignees.Where(a => a.State == TmAssigneeState.Active), "وظیفه رد شد: ", ct);
             if (next != null) await NotifyAssigneesAsync(next, next.Assignees, "وظیفه تکراری تازه: ", ct);
-            await RollUpAsync(new int?[] { t.ActivityId }, ct);
+            if (t.ActivityId.HasValue && (to == TmTaskStatus.Rejected || from == TmTaskStatus.Rejected || action == "reopen")) await RollUpAsync(new int?[] { t.ActivityId }, ct);
             return await ReloadAsync(t.Id, c, ct);
         }
 
@@ -902,7 +938,7 @@ namespace Services.NasbNiro.Tasks
                 StartDate = t.StartDate.HasValue && t.DueDate.HasValue ? due.Value.AddDays(-(t.DueDate.Value - t.StartDate.Value).TotalDays) : (DateTime?)null, DueDate = due, EstimatedHours = t.EstimatedHours, EstimatedCost = t.EstimatedCost,
                 Recurrence = t.Recurrence, RecurrenceInterval = t.RecurrenceInterval, RecurrenceEnd = t.RecurrenceEnd, RecurrenceSourceId = sourceId, ReminderDays = t.ReminderDays, ParentTaskId = t.ParentTaskId,
                 ContractId = t.ContractId, WbsNodeId = t.WbsNodeId, ActivityId = t.ActivityId, Status = TmTaskStatus.Open,
-                Assignees = new List<TmTaskAssignee>(), Checklist = new List<TmTaskChecklistItem>(), Watchers = new List<TmTaskWatcher>(), Comments = new List<TmTaskComment>(), Attachments = new List<TmTaskAttachment>(),
+                Assignees = new List<TmTaskAssignee>(), Checklist = new List<TmTaskChecklistItem>(), Watchers = new List<TmTaskWatcher>(), Comments = new List<TmTaskComment>(),
             };
             next.Number = await InventoryNumbers.NextNumberAsync(_uow, TaskNumbers.Task, "TK", DateTime.Today, ct);
             foreach (TmTaskChecklistItem item in t.Checklist ?? new List<TmTaskChecklistItem>()) next.Checklist.Add(new TmTaskChecklistItem { Seq = item.Seq, Text = item.Text });
@@ -933,7 +969,7 @@ namespace Services.NasbNiro.Tasks
             if (t.Status != TmTaskStatus.Open && t.Status != TmTaskStatus.Assigned && t.Status != TmTaskStatus.InProgress) return Bad<TmTaskDto>("در وضعیت «" + TaskRules.StatusText(t.Status) + "» پیشرفت ثبت نمی‌شود.");
             if (dto.Percent.HasValue && (dto.Percent.Value < 0m || dto.Percent.Value > 100m)) return Bad<TmTaskDto>("درصد پیشرفت باید بین ۰ و ۱۰۰ باشد.");
             if ((dto.ActualHours.HasValue && dto.ActualHours.Value < 0m) || (dto.ActualCost.HasValue && dto.ActualCost.Value < 0m)) return Bad<TmTaskDto>("زمان و هزینه واقعی منفی نیست.");
-            bool linked = t.ContractId.HasValue && t.ActivityId.HasValue && t.Kind != TmTaskKind.Personal;
+            bool linked = t.ActivityId.HasValue;
             if (dto.Percent.HasValue && linked && dto.Percent.Value != t.PercentComplete)
                 return Bad<TmTaskDto>("درصد پیشرفت وظیفه‌ای که به فعالیت WBS وصل است از «کارتابل تایید پیشرفت» و با تایید زنجیره ثبت می‌شود.");
             DateTimeOffset now = DateTimeOffset.Now;
@@ -952,7 +988,6 @@ namespace Services.NasbNiro.Tasks
             t.ModifyDate = now; t.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<TmTaskDto>(OfficeText.Concurrency); }
-            await RollUpAsync(new int?[] { t.ActivityId }, ct);
             return await ReloadAsync(t.Id, c, ct);
         }
 
@@ -964,7 +999,7 @@ namespace Services.NasbNiro.Tasks
             if (percent < 0m || percent > 100m) return Bad<bool>("درصد پیشرفت باید بین ۰ و ۱۰۰ باشد.");
             DateTimeOffset now = DateTimeOffset.Now;
             if (percent != t.PercentComplete) Hist(t, TmHistoryKind.Progress, t.PercentComplete.ToString("0.##", CultureInfo.InvariantCulture), percent.ToString("0.##", CultureInfo.InvariantCulture), "با تایید کارتابل پیشرفت" + (Clean(note) == null ? "" : ": " + Clean(note)));
-            t.PercentComplete = percent;
+            t.PercentComplete = percent; t.ApprovedPercent = percent;
             if (percent > 0m && (t.Status == TmTaskStatus.Open || t.Status == TmTaskStatus.Assigned))
             {
                 Hist(t, TmHistoryKind.Status, TaskRules.StatusText(t.Status), TaskRules.StatusText(TmTaskStatus.InProgress), null);
@@ -973,14 +1008,19 @@ namespace Services.NasbNiro.Tasks
             if (percent > 0m) t.StartedAt ??= actualStart.HasValue ? new DateTimeOffset(actualStart.Value.Date) : now;
             if (actualStart.HasValue && !t.StartDate.HasValue) t.StartDate = actualStart.Value.Date;
             t.ModifyDate = now; t.ModifierUserId = approvedByUserId;
-            await _uow.SaveChangesAsync(ct);
-            await RollUpAsync(new int?[] { t.ActivityId }, ct);
+            // nothing is saved here: the cartable saves the approval and this change in one step, then asks for the roll-up
             return ResponseDtoHelper.Ok(true);
+        }
+
+        public async Task RollUpTaskActivityAsync(int taskId, CancellationToken ct)
+        {
+            int? activityId = await _uow.Set<TmTask>().AsNoTracking().Where(x => x.Id == taskId).Select(x => x.ActivityId).FirstOrDefaultAsync(ct);
+            await RollUpAsync(new[] { activityId }, ct);
         }
 
         private async Task<(TmTask Task, Rights Rights, string Problem)> LoadForEditAsync(int taskId, bool allowClosed, Ctx c, CancellationToken ct)
         {
-            TmTask t = await _uow.Set<TmTask>().Include(x => x.Assignees).Include(x => x.Checklist).Include(x => x.Watchers).Include(x => x.Attachments).AsSplitQuery().FirstOrDefaultAsync(x => x.Id == taskId && !x.Deleted, ct);
+            TmTask t = await _uow.Set<TmTask>().Include(x => x.Assignees).Include(x => x.Checklist).Include(x => x.Watchers).AsSplitQuery().FirstOrDefaultAsync(x => x.Id == taskId && !x.Deleted, ct);
             if (t == null || !await CanReadTaskAsync(t.Id, ct)) return (null, null, NotFoundText);
             if (!allowClosed && (t.Status == TmTaskStatus.Closed || t.Status == TmTaskStatus.Rejected)) return (t, null, "وظیفه " + TaskRules.StatusText(t.Status) + " تغییر نمی‌کند.");
             return (t, RightsOf(t, c), null);
@@ -1071,50 +1111,6 @@ namespace Services.NasbNiro.Tasks
             return await ReloadAsync(t.Id, c, ct);
         }
 
-        public async Task<ResponseDto<TmTaskDto>> AttachAsync(TmTaskAttachDto dto, CancellationToken ct)
-        {
-            if (dto == null || dto.DocumentId == Guid.Empty) return Bad<TmTaskDto>(OfficeText.InvalidData);
-            Ctx c = await CtxAsync(ct);
-            var (t, r, problem) = await LoadForEditAsync(dto.TaskId, false, c, ct);
-            if (problem != null) return t == null ? OfficeText.NotFound<TmTaskDto>(problem) : Bad<TmTaskDto>(problem);
-            if (!(r.Editor || r.IsAssignee || r.IsCreator)) return Bad<TmTaskDto>(NotAllowed);
-            // the file must be the caller's own upload (a file of another record is never opened to the viewers of a task through this door)
-            var doc = await _uow.Set<Document>().AsNoTracking().Where(d => d.Id == dto.DocumentId).Select(d => new { d.Id, d.Name, d.UploadedByUserId }).FirstOrDefaultAsync(ct);
-            if (doc == null) return OfficeText.NotFound<TmTaskDto>("فایل پیدا نشد.");
-            if (doc.UploadedByUserId != Me) return Bad<TmTaskDto>("فقط فایلی که خودتان بارگذاری کرده‌اید پیوست می‌شود.");
-            if (await _uow.Set<TmTaskAttachment>().AnyAsync(a => a.TaskId == t.Id && a.DocumentId == dto.DocumentId && !a.IsVoid, ct)) return Bad<TmTaskDto>("این فایل قبلاً پیوست شده است.");
-            DateTimeOffset now = DateTimeOffset.Now;
-            TmTaskAttachment older = null;
-            if (dto.SupersedesId.HasValue)
-            {
-                older = t.Attachments.FirstOrDefault(a => a.Id == dto.SupersedesId.Value && !a.IsVoid);
-                if (older == null) return Bad<TmTaskDto>("پیوست قدیمی برای جایگزینی پیدا نشد.");
-                older.IsVoid = true; older.VoidedByUserId = Me; older.VoidedAt = now; older.VoidReason = "جایگزین شد با فایل تازه";
-            }
-            t.Attachments.Add(new TmTaskAttachment { DocumentId = dto.DocumentId, FileName = OfficeText.Cap(Clean(dto.FileName) ?? doc.Name, 300), UploadedByUserId = Me, UploadedAt = now, SupersedesId = older?.Id });
-            Hist(t, TmHistoryKind.Attachment, null, "پیوست شد", Clean(dto.FileName) ?? doc.Name);
-            await _uow.SaveChangesAsync(ct);
-            return await ReloadAsync(t.Id, c, ct);
-        }
-
-        public async Task<ResponseDto<TmTaskDto>> VoidAttachmentAsync(TmTaskVoidDto dto, CancellationToken ct)
-        {
-            if (dto == null) return Bad<TmTaskDto>(OfficeText.InvalidData);
-            string reason = Clean(dto.Reason);
-            if (reason == null) return Bad<TmTaskDto>("دلیل ابطال پیوست را بنویسید.");
-            Ctx c = await CtxAsync(ct);
-            var (t, r, problem) = await LoadForEditAsync(dto.TaskId, false, c, ct);
-            if (problem != null) return t == null ? OfficeText.NotFound<TmTaskDto>(problem) : Bad<TmTaskDto>(problem);
-            TmTaskAttachment a = t.Attachments.FirstOrDefault(x => x.Id == dto.AttachmentId);
-            if (a == null) return Bad<TmTaskDto>("پیوست پیدا نشد.");
-            if (a.IsVoid) return Bad<TmTaskDto>("این پیوست قبلاً باطل شده است.");
-            if (a.UploadedByUserId != Me && !r.Editor) return Bad<TmTaskDto>(NotAllowed + " (ابطال پیوست با بارگذارنده یا ثبت‌کننده وظیفه است)");
-            a.IsVoid = true; a.VoidedByUserId = Me; a.VoidedAt = DateTimeOffset.Now; a.VoidReason = OfficeText.Cap(reason, 1000);
-            Hist(t, TmHistoryKind.Attachment, a.FileName, "باطل شد", reason);
-            await _uow.SaveChangesAsync(ct);
-            return await ReloadAsync(t.Id, c, ct);
-        }
-
         // ============================================================================ meeting decisions, reminders
 
         public async Task<ResponseDto<TmTaskDto>> FromDecisionAsync(int decisionId, CancellationToken ct)
@@ -1196,12 +1192,5 @@ namespace Services.NasbNiro.Tasks
     internal sealed class PcPageOf<T> : PagedList<T>
     {
         public PcPageOf(IEnumerable<T> items, int count, int pageNumber, int pageSize) : base(items, count, pageNumber, pageSize) { }
-    }
-
-    public sealed class FileTaskRules : IFileTaskRules
-    {
-        private readonly ITaskService _tasks;
-        public FileTaskRules(ITaskService tasks) { _tasks = tasks ?? throw new ArgumentNullException(nameof(tasks)); }
-        public Task<bool> CanReadTaskAsync(int taskId, CancellationToken cancellationToken) => _tasks.CanReadTaskAsync(taskId, cancellationToken);
     }
 }

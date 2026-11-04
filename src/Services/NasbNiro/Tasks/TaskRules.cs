@@ -134,7 +134,7 @@ namespace Services.NasbNiro.Tasks
         }
 
         /// <summary>
-        /// The percent of a WBS activity from its tasks: the tasks weighted by their estimated hours (a task without an estimate counts as one hour); a closed task counts as 100, a rejected one is left out.
+        /// The percent of a WBS activity from its tasks: the tasks weighted by their estimated hours (a task without an estimate counts as one hour); the percent is the one the approval cartable approved (closing a task never counts as 100 by itself), a rejected one is left out.
         /// Null when no task counts.
         /// </summary>
         public static decimal? RollUpPercent(IEnumerable<(decimal EstimatedHours, decimal Percent, TmTaskStatus Status)> tasks)
@@ -144,7 +144,7 @@ namespace Services.NasbNiro.Tasks
             {
                 if (t.Status == TmTaskStatus.Rejected) continue;
                 decimal w = t.EstimatedHours > 0m ? t.EstimatedHours : 1m;
-                decimal p = t.Status == TmTaskStatus.Closed ? 100m : Math.Min(100m, Math.Max(0m, t.Percent));
+                decimal p = Math.Min(100m, Math.Max(0m, t.Percent));
                 weights += w; points += w * p;
             }
             return weights <= 0m ? (decimal?)null : Math.Round(points / weights, 4, MidpointRounding.AwayFromZero);

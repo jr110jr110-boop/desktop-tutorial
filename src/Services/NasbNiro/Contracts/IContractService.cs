@@ -22,7 +22,7 @@ namespace Services.NasbNiro.Contracts
         ValueTask<ResponseDto<PagedList<ResponseContractDto>>> GetAllResponseContractDtosAsync(ContractPaginationParams contractPaginationParams, CancellationToken cancellationToken);
         ValueTask<ResponseDto<ResponseContractDto>> GetResponseContractDtoAsync(GetContractDto dto, CancellationToken cancellationToken);
         ValueTask<ResponseDto<string>> AttachFileToContractAsync(AttachFileToEntityDto attachFileDto, CancellationToken cancellationToken);
-        ValueTask<ResponseDto<bool>> DetachFileFromContractAsync(int contractId, Guid documentId, CancellationToken cancellationToken);
+        ValueTask<ResponseDto<bool>> DetachFileFromContractAsync(int contractId, Guid documentId, string reason, CancellationToken cancellationToken);
         ValueTask<ContractEntity> GetContractByIdAsync(int contractId, CancellationToken cancellationToken, bool IncludeAllChildren = false);
         ValueTask<bool> ContractExistsAsync(int contractId, CancellationToken cancellationToken);
         ValueTask<bool> ContractExistsAsync(int contractId, bool isDeleted, CancellationToken cancellationToken);

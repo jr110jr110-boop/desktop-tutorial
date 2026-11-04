@@ -31,6 +31,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Tasks
                 b.Property(x => x.EstimatedCost).HasPrecision(22, 2);
                 b.Property(x => x.ActualCost).HasPrecision(22, 2);
                 b.Property(x => x.PercentComplete).HasPrecision(9, 4);
+                b.Property(x => x.ApprovedPercent).HasPrecision(9, 4);
                 b.HasIndex(x => x.Status);
                 b.HasIndex(x => x.DueDate);
                 b.HasIndex(x => x.ContractId);
@@ -57,7 +58,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Tasks
                 b.HasIndex(x => new { x.TaskId, x.State });
                 b.HasIndex(x => new { x.UserId, x.State });
                 b.HasIndex(x => new { x.PositionId, x.State });
-                b.HasOne(x => x.Task).WithMany(x => x.Assignees).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(x => x.Task).WithMany(x => x.Assignees).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<TmTaskAssignee>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<OfPosition>().WithMany().HasForeignKey(x => x.PositionId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -73,7 +74,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Tasks
                 b.ToTable("TmTaskComments");
                 b.Property(x => x.Text).HasMaxLength(4000).IsRequired();
                 b.HasIndex(x => x.TaskId);
-                b.HasOne(x => x.Task).WithMany(x => x.Comments).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(x => x.Task).WithMany(x => x.Comments).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<TmTaskComment>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<TmTaskWatcher>(b =>
@@ -83,15 +84,6 @@ namespace DataLayer.Configurations.EF.NasbNiro.Tasks
                 b.HasIndex(x => x.UserId);
                 b.HasOne(x => x.Task).WithMany(x => x.Watchers).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
             });
-            builder.Entity<TmTaskAttachment>(b =>
-            {
-                b.ToTable("TmTaskAttachments");
-                b.Property(x => x.FileName).HasMaxLength(300);
-                b.Property(x => x.VoidReason).HasMaxLength(1000);
-                b.HasIndex(x => x.TaskId);
-                b.HasIndex(x => x.DocumentId);
-                b.HasOne(x => x.Task).WithMany(x => x.Attachments).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
-            });
             builder.Entity<TmTaskHistory>(b =>
             {
                 b.ToTable("TmTaskHistory");
@@ -99,7 +91,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Tasks
                 b.Property(x => x.ToValue).HasMaxLength(500);
                 b.Property(x => x.Text).HasMaxLength(2000);
                 b.HasIndex(x => new { x.TaskId, x.At });
-                b.HasOne(x => x.Task).WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(x => x.Task).WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
             });
         }
     }

@@ -56,8 +56,11 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public string CostNote { get; set; }
         public string Comment { get; set; }
 
-        /// <summary>Comma separated ids of the uploaded files that explain the report.</summary>
-        public string AttachmentDocumentIds { get; set; }
+        /// <summary>The person who last chose the percent (the submitter, or the approver who corrected it at an intermediate level). He is the proposer of the plan record.</summary>
+        public int? PercentSetByUserId { get; set; }
+
+        /// <summary>The person who last chose the cost amount: the maker of the cost entry. The finance check excludes him and everyone who decided the report.</summary>
+        public int? CostSetByUserId { get; set; }
 
         public PcSubmissionState State { get; set; }
 
@@ -252,11 +255,10 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public byte[] RowVersion { get; set; }
     }
 
-    /// <summary>Project photo library. The image is an uploaded document; a photo is voided with a reason, never deleted.</summary>
+    /// <summary>Project photo library. The image is a record attachment (owner PcProjectPhoto, kind Photo); a photo is voided with a reason, never deleted.</summary>
     public class PcProjectPhoto : BaseEntity
     {
         public int ContractId { get; set; }
-        public Guid DocumentId { get; set; }
         public string Caption { get; set; }
         public DateTime TakenDate { get; set; }
         public int? WbsNodeId { get; set; }

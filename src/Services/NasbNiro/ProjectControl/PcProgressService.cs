@@ -33,6 +33,15 @@ namespace Services.NasbNiro.ProjectControl
         public decimal Cost { get; set; }
         public int CostKind { get; set; }
         public string CostNote { get; set; }
+
+        /// <summary>The person who last chose the percent (the submitter, or the approver who corrected it at an intermediate level): the manual proposal records him as the proposer.</summary>
+        public int? ProposerUserId { get; set; }
+
+        /// <summary>The person who last chose the cost amount: the maker of the cost entry. The second finance person must be someone else than him and than everyone who decided the report.</summary>
+        public int? CostSetByUserId { get; set; }
+
+        public int SubmissionId { get; set; }
+        public string SubmissionNumber { get; set; }
     }
 
     public class PcAppliedProgress
@@ -193,10 +202,10 @@ namespace Services.NasbNiro.ProjectControl
             var manualRows = await _uow.Set<PcManualProgress>().AsNoTracking().Where(m => manualIds.Contains(m.ActivityId) && m.State == 1).OrderBy(m => m.DecidedAt).ThenBy(m => m.Id)
                 .Select(m => new { m.ActivityId, m.Percent, m.DecidedAt }).ToListAsync(cancellationToken);
 
-            // P-B7a: tasks linked to the activity (weighted by estimated hours; a rejected task does not count)
+            // P-B7a: tasks linked to the activity: weighted by estimated hours, only the percent the approval cartable approved, never a personal task, a rejected task does not count
             List<int> taskActIds = calc.Activities.Where(a => a.ProgressMethod == PcProgressMethod.Tasks).Select(a => a.Id).ToList();
-            var taskRows = taskActIds.Count == 0 ? null : (await _uow.Set<Entities.Model.NasbNiro.Tasks.TmTask>().AsNoTracking().Where(t => !t.Deleted && t.ActivityId != null && taskActIds.Contains(t.ActivityId.Value) && t.Status != Entities.Model.NasbNiro.Tasks.TmTaskStatus.Rejected)
-                .Select(t => new { ActivityId = t.ActivityId.Value, t.EstimatedHours, t.PercentComplete, t.Status, t.StartedAt, t.ClosedAt }).ToListAsync(cancellationToken)).GroupBy(t => t.ActivityId).ToDictionary(g => g.Key, g => g.ToList());
+            var taskRows = taskActIds.Count == 0 ? null : (await _uow.Set<Entities.Model.NasbNiro.Tasks.TmTask>().AsNoTracking().Where(t => !t.Deleted && t.ActivityId != null && taskActIds.Contains(t.ActivityId.Value) && t.Kind != Entities.Model.NasbNiro.Tasks.TmTaskKind.Personal && t.Status != Entities.Model.NasbNiro.Tasks.TmTaskStatus.Rejected)
+                .Select(t => new { ActivityId = t.ActivityId.Value, t.EstimatedHours, Percent = t.ApprovedPercent, t.Status, t.ClosedAt }).ToListAsync(cancellationToken)).GroupBy(t => t.ActivityId).ToDictionary(g => g.Key, g => g.ToList());
 
             // engineering: the state of the register lines
             List<int> engOrders = calc.Activities.Where(a => a.ProgressMethod == PcProgressMethod.EngineeringIssue && a.WorkOrderId.HasValue).Select(a => a.WorkOrderId.Value).Distinct().ToList();
@@ -241,11 +250,11 @@ namespace Services.NasbNiro.ProjectControl
                     case PcProgressMethod.Tasks:
                         if (taskRows != null && taskRows.TryGetValue(a.Id, out var mineTasks))
                         {
-                            decimal? rolled = global::Services.NasbNiro.Tasks.TaskRules.RollUpPercent(mineTasks.Select(t => (t.EstimatedHours, t.PercentComplete, t.Status)));
+                            decimal? rolled = global::Services.NasbNiro.Tasks.TaskRules.RollUpPercent(mineTasks.Select(t => (t.EstimatedHours, t.Percent, t.Status)));
                             if (rolled.HasValue)
                             {
                                 pct = rolled.Value;
-                                start = mineTasks.Where(t => t.StartedAt.HasValue).Select(t => (DateTime?)t.StartedAt.Value.LocalDateTime.Date).Min();
+                                // the day of the fact is today (the day the approved value is seen), not the day the first task began: progress reached now is not written into the past
                                 if (pct >= 100m) finish = mineTasks.Where(t => t.ClosedAt.HasValue).Select(t => (DateTime?)t.ClosedAt.Value.LocalDateTime.Date).Max();
                             }
                         }
@@ -754,6 +763,10 @@ namespace Services.NasbNiro.ProjectControl
             if (e == null) return PcText.NotFound<PcCostEntryDto>("ردیف هزینه پیدا نشد.");
             if (e.SourceType != ManualCostSource) return Bad<PcCostEntryDto>("فقط هزینه‌ای که با دست در کنترل پروژه ثبت شده بررسی دوم می‌خواهد؛ هزینه‌های سیستمی از ماژول خودشان می‌آیند.");
             if (e.CreatedByUserId == Me) return Bad<PcCostEntryDto>(PcText.SameUser + " (ثبت‌کننده هزینه نمی‌تواند آن را بررسی کند)");
+            // a cost that came from a progress report: nobody who touched the amount (the submitter, the person who set it, every approver who decided the report) checks it
+            int me = Me;
+            if (await _uow.Set<PcProgressSubmission>().AsNoTracking().AnyAsync(sub => sub.CostEntryId == e.Id && (sub.SubmittedByUserId == me || sub.CreatorUserId == me || sub.CostSetByUserId == me || sub.Steps.Any(st => st.DecidedByUserId == me)), cancellationToken))
+                return Bad<PcCostEntryDto>(PcText.SameUser + " (کسی که گزارش را ارسال کرده، مبلغ را نوشته یا در زنجیره تایید تصمیم گرفته نمی‌تواند هزینه را بررسی کند)");
             if (await _uow.Set<PcCostCheck>().AnyAsync(c => c.CostEntryId == e.Id, cancellationToken)) return Bad<PcCostEntryDto>("این هزینه قبلاً بررسی شده است.");
             var check = new PcCostCheck { CostEntryId = e.Id, CheckedByUserId = Me, CheckedAt = DateTimeOffset.Now, Note = Clean(dto.Note) };
             _uow.Set<PcCostCheck>().Add(check);
@@ -1094,9 +1107,11 @@ namespace Services.NasbNiro.ProjectControl
             if (query.State.HasValue) q = q.Where(r => r.State == query.State.Value);
             if (query.From.HasValue) q = q.Where(r => r.ReportDate >= query.From.Value.Date);
             if (query.To.HasValue) q = q.Where(r => r.ReportDate <= query.To.Value.Date);
-            PagedList<PcDailyReport> page = await PagedList<PcDailyReport>.CreateAsync(q.Include(r => r.Lines).OrderByDescending(r => r.ReportDate).ThenBy(r => r.Unit), query.PageNumber, query.PageSize, cancellationToken);
+            PagedList<PcDailyReport> page = await PagedList<PcDailyReport>.CreateAsync(q.OrderByDescending(r => r.ReportDate).ThenBy(r => r.Unit), query.PageNumber, query.PageSize, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, page.Select(r => r.ConfirmedByUserId), cancellationToken);
-            List<PcDailyListDto> rows = page.Select(r => new PcDailyListDto { Id = r.Id, ContractId = r.ContractId, Unit = r.Unit, ReportDate = r.ReportDate, ReportDateText = OfficeText.Date(r.ReportDate), State = r.State, LineCount = r.Lines.Count, ConfirmedByName = names.Name(r.ConfirmedByUserId) }).ToList();
+            List<int> pageIds = page.Select(r => r.Id).ToList();
+            Dictionary<int, int> lineCounts = (await _uow.Set<PcDailyReportLine>().AsNoTracking().Where(l => pageIds.Contains(l.ReportId)).GroupBy(l => l.ReportId).Select(g => new { Id = g.Key, N = g.Count() }).ToListAsync(cancellationToken)).ToDictionary(x => x.Id, x => x.N);
+            List<PcDailyListDto> rows = page.Select(r => new PcDailyListDto { Id = r.Id, ContractId = r.ContractId, Unit = r.Unit, ReportDate = r.ReportDate, ReportDateText = OfficeText.Date(r.ReportDate), State = r.State, LineCount = lineCounts.GetValueOrDefault(r.Id), ConfirmedByName = names.Name(r.ConfirmedByUserId) }).ToList();
             return ResponseDtoHelper.Ok((PagedList<PcDailyListDto>)new PcPage<PcDailyListDto>(rows, page.TotalCount, page.CurrentPage, page.PageSize));
         }
 
@@ -1122,7 +1137,7 @@ namespace Services.NasbNiro.ProjectControl
             if (input.ActualFinish.HasValue && input.Percent >= 100m && !a.ActualFinish.HasValue) a.ActualFinish = input.ActualFinish.Value.Date;
             var row = new PcManualProgress
             {
-                ActivityId = a.Id, Percent = PcText.Round2(input.Percent), Comment = Clean(input.Comment), ProgressDate = day, ProposedByUserId = input.SubmittedByUserId, ProposedAt = now,
+                ActivityId = a.Id, Percent = PcText.Round2(input.Percent), Comment = Clean(input.Comment), ProgressDate = day, ProposedByUserId = input.ProposerUserId ?? input.SubmittedByUserId, ProposedAt = now,
                 State = 1, DecidedByUserId = input.ApprovedByUserId, DecidedAt = now, DecisionNote = "تایید زنجیره کارتابل تایید پیشرفت",
             };
             _uow.Set<PcManualProgress>().Add(row);
@@ -1133,8 +1148,8 @@ namespace Services.NasbNiro.ProjectControl
                 await PcR1Upgrade.EnsureAsync(_uow, cancellationToken);
                 cost = new CostEntry
                 {
-                    EntryDate = day, Kind = (CostKind)input.CostKind, ContractId = a.ContractId, WbsNodeId = a.WbsNodeId, Amount = PcText.Round2(input.Cost), Quantity = 0m, SourceType = ManualCostSource, SourceId = 0, SourceNumber = "PC",
-                    Description = Clean(input.CostNote) ?? "هزینه گزارش پیشرفت", CreatedAt = now, CreatedByUserId = input.SubmittedByUserId,
+                    EntryDate = day, Kind = (CostKind)input.CostKind, ContractId = a.ContractId, WbsNodeId = a.WbsNodeId, Amount = PcText.Round2(input.Cost), Quantity = 0m, SourceType = ManualCostSource, SourceId = input.SubmissionId, SourceNumber = Clean(input.SubmissionNumber) ?? "PC",
+                    Description = Clean(input.CostNote) ?? "هزینه گزارش پیشرفت", CreatedAt = now, CreatedByUserId = input.CostSetByUserId ?? input.SubmittedByUserId,
                 };
                 _uow.Set<CostEntry>().Add(cost);
             }

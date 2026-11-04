@@ -59,12 +59,6 @@ namespace WebApi.Controllers.Tasks
         [HttpPost("{id:int}/watch")]
         public async Task<IActionResult> WatchAsync(int id, [FromQuery] bool watch, CancellationToken ct) => Ok(await _tasks.WatchAsync(id, watch, ct));
 
-        [HttpPost("attach")]
-        public async Task<IActionResult> AttachAsync([FromBody] TmTaskAttachDto dto, CancellationToken ct) => Ok(await _tasks.AttachAsync(dto, ct));
-
-        [HttpPost("attach/void")]
-        public async Task<IActionResult> VoidAttachmentAsync([FromBody] TmTaskVoidDto dto, CancellationToken ct) => Ok(await _tasks.VoidAttachmentAsync(dto, ct));
-
         [HttpGet("board")]
         public async Task<IActionResult> BoardAsync([FromQuery] TmTaskQuery query, CancellationToken ct) => Ok(await _tasks.GetBoardAsync(query, ct));
 

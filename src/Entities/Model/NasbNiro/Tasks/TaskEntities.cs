@@ -61,6 +61,9 @@ namespace Entities.Model.NasbNiro.Tasks
         /// <summary>0..100. A closed task counts as 100 in the roll-up to the WBS activity.</summary>
         public decimal PercentComplete { get; set; }
 
+        /// <summary>The percent that the progress-approval cartable approved (written only by ITaskService.ApplyApprovedProgressAsync). Only this value rolls up into a WBS activity; a typed percent or a closed status never does.</summary>
+        public decimal ApprovedPercent { get; set; }
+
         public TmTaskStatus Status { get; set; }
 
         /// <summary>The status before the task was suspended (the status it returns to).</summary>
@@ -106,7 +109,6 @@ namespace Entities.Model.NasbNiro.Tasks
         public ICollection<TmTaskChecklistItem> Checklist { get; set; }
         public ICollection<TmTaskComment> Comments { get; set; }
         public ICollection<TmTaskWatcher> Watchers { get; set; }
-        public ICollection<TmTaskAttachment> Attachments { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
@@ -170,26 +172,6 @@ namespace Entities.Model.NasbNiro.Tasks
         public TmTask Task { get; set; }
         public int UserId { get; set; }
         public DateTimeOffset At { get; set; }
-    }
-
-    /// <summary>
-    /// The files of a task: a link between the task and an uploaded document (Documents upload). Minimal on purpose, so it folds into a generic record attachment later.
-    /// A file is voided with a reason (and may be superseded by a newer one); it is never removed.
-    /// </summary>
-    public class TmTaskAttachment
-    {
-        public int Id { get; set; }
-        public int TaskId { get; set; }
-        public TmTask Task { get; set; }
-        public Guid DocumentId { get; set; }
-        public string FileName { get; set; }
-        public int UploadedByUserId { get; set; }
-        public DateTimeOffset UploadedAt { get; set; }
-        public int? SupersedesId { get; set; }
-        public bool IsVoid { get; set; }
-        public int? VoidedByUserId { get; set; }
-        public DateTimeOffset? VoidedAt { get; set; }
-        public string VoidReason { get; set; }
     }
 
     /// <summary>The full history of a task (append only): status, referral, comment, field changes, links.</summary>

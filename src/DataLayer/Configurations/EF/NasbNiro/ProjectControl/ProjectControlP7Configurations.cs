@@ -32,7 +32,6 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.ActualCost).HasPrecision(22, 2);
                 b.Property(x => x.CostNote).HasMaxLength(1000);
                 b.Property(x => x.Comment).HasMaxLength(2000);
-                b.Property(x => x.AttachmentDocumentIds).HasMaxLength(1000);
                 b.Property(x => x.ResultNote).HasMaxLength(1000);
                 b.HasIndex(x => new { x.ContractId, x.State });
                 b.HasIndex(x => x.ActivityId);
@@ -48,7 +47,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.Role).HasMaxLength(30);
                 b.Property(x => x.Note).HasMaxLength(1000);
                 b.HasIndex(x => new { x.SubmissionId, x.Round, x.Level }).IsUnique();
-                b.HasOne(x => x.Submission).WithMany(x => x.Steps).HasForeignKey(x => x.SubmissionId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(x => x.Submission).WithMany(x => x.Steps).HasForeignKey(x => x.SubmissionId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<OfPosition>().WithMany().HasForeignKey(x => x.PositionId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<PcProgressSubmissionHistory>(b =>
@@ -58,7 +57,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.Note).HasMaxLength(1000);
                 b.Property(x => x.ChangesJson).HasMaxLength(2000);
                 b.HasIndex(x => new { x.SubmissionId, x.At });
-                b.HasOne(x => x.Submission).WithMany().HasForeignKey(x => x.SubmissionId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(x => x.Submission).WithMany().HasForeignKey(x => x.SubmissionId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // ------------------------------------------------------------------ registers

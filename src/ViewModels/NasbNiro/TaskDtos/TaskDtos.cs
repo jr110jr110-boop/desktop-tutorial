@@ -107,18 +107,6 @@ namespace ViewModels.NasbNiro.TaskDtos
         public string AtText { get; set; }
     }
 
-    public class TmAttachmentDto
-    {
-        public int Id { get; set; }
-        public Guid DocumentId { get; set; }
-        public string FileName { get; set; }
-        public string UploadedByName { get; set; }
-        public string UploadedAtText { get; set; }
-        public int? SupersedesId { get; set; }
-        public bool IsVoid { get; set; }
-        public string VoidReason { get; set; }
-        public string VoidedByName { get; set; }
-    }
 
     public class TmHistoryDto
     {
@@ -170,7 +158,6 @@ namespace ViewModels.NasbNiro.TaskDtos
         public List<TmAssigneeDto> Assignees { get; set; } = new List<TmAssigneeDto>();
         public List<TmChecklistItemDto> Checklist { get; set; } = new List<TmChecklistItemDto>();
         public List<TmCommentDto> Comments { get; set; } = new List<TmCommentDto>();
-        public List<TmAttachmentDto> Attachments { get; set; } = new List<TmAttachmentDto>();
         public List<TmHistoryDto> History { get; set; } = new List<TmHistoryDto>();
         public List<int> WatcherUserIds { get; set; } = new List<int>();
         public List<TmTaskListDto> SubTasks { get; set; } = new List<TmTaskListDto>();
@@ -286,22 +273,7 @@ namespace ViewModels.NasbNiro.TaskDtos
         public string Text { get; set; }
     }
 
-    public class TmTaskAttachDto
-    {
-        public int TaskId { get; set; }
-        public Guid DocumentId { get; set; }
-        public string FileName { get; set; }
 
-        /// <summary>The older attachment that this file replaces (it is voided).</summary>
-        public int? SupersedesId { get; set; }
-    }
-
-    public class TmTaskVoidDto
-    {
-        public int TaskId { get; set; }
-        public int AttachmentId { get; set; }
-        public string Reason { get; set; }
-    }
 
     public class TmReferralNodeDto
     {

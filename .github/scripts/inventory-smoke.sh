@@ -173,8 +173,8 @@ QC3_TOKEN=$(login qc3.ci 'Ci#Qc3-User-2026')
 # upload_as TOKEN NAME : uploads a small text file as that user and leaves the id of the stored document in UPLOADED. The file that proves an inspection and test plan activity must have been
 # uploaded lately by a QC, QA or engineering user (review M16), so the evidence of the quality scenarios is uploaded with the token of the user who owns the activity.
 upload_as() {
-  printf 'evidence %s %s\n' "$2" "$(date +%s%N)" > "$OUT/$2.txt"
-  curl -s -o "$B" -X POST "$API/Documents?Description=$2&Name=$2&Code=QUA" -H "Authorization: Bearer $1" -F "File=@$OUT/$2.txt"
+  printf '%%PDF-1.4 evidence %s %s\n' "$2" "$(date +%s%N)" > "$OUT/$2.pdf"
+  curl -s -o "$B" -X POST "$API/Documents?Description=$2&Name=$2&Code=QUA" -H "Authorization: Bearer $1" -F "File=@$OUT/$2.pdf"
   UPLOADED=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 }
 LONGREF=$(printf 'R%.0s' $(seq 1 301)); LONG1001=$(printf 'R%.0s' $(seq 1 1001))
@@ -644,8 +644,8 @@ call PUT inventory/trace/operations "{\"id\":$OP2,\"action\":\"finish\",\"result
 call POST inventory/trace/operations/qc "{\"id\":$OP2,\"status\":3}"; check "QC reject without note rejected" '.success == false'
 call POST inventory/trace/operations/qc "{\"id\":$OP2,\"status\":2,\"note\":\"OK\"}"; check "QC accept" '.success and .data.qcStatus == 2'
 call POST inventory/trace/operations/files "{\"partOperationId\":$OP2,\"documentId\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"title\":\"x\"}"; check "file link to unknown upload rejected" '.success == false'
-printf 'balance report G2.5\n' > "$OUT/balance-report.txt"
-curl -s -o "$B" -X POST "$API/Documents?Description=balance&Name=balance-report&Code=INV" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/balance-report.txt"
+printf '%%PDF-1.4 balance report G2.5\n' > "$OUT/balance-report.pdf"
+curl -s -o "$B" -X POST "$API/Documents?Description=balance&Name=balance-report&Code=INV" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/balance-report.pdf"
 DOCID=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 [ -n "$DOCID" ] && ok "file upload (Documents)" || bad "file upload (Documents)"
 call POST inventory/trace/operations/files "{\"partOperationId\":$OP2,\"documentId\":\"$DOCID\",\"title\":\"گزارش بالانس\"}"; check "operation file link" '.success and (.data.files|length) == 1'
@@ -1023,7 +1023,7 @@ as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO,\"action\":\"release
 call GET "procurement/requests/$PRQ"; check "request marked ordered" '.data.status == 3'
 
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO,\"referenceNumber\":\"حواله الف-1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":60,\"locationId\":$L2,\"purchaseOrderLineId\":$POL}]}"
-D=$(val .data.id); call POST "inventory/documents/$D/confirm"
+D=$(val .data.id); PB3RCPT=$D; call POST "inventory/documents/$D/confirm"
 check "receipt against the order: supplier and order price taken" ".success and .data.providerId == $PA and .data.lines[0].unitPrice == 390000"
 call GET "procurement/orders/$PO"; check "order partly received (60 of 100)" '.data.status == 3 and .data.lines[0].receivedQuantity == 60'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO,\"lines\":[{\"itemId\":$BOLT,\"quantity\":50,\"locationId\":$L2,\"purchaseOrderLineId\":$POL}]}"
@@ -1219,7 +1219,7 @@ upload_as "$QC_TOKEN" itp-a1-evidence; EV1=$UPLOADED
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\",\"evidenceDocumentId\":\"$EV1\",\"note\":\"Certificates EN 10204 3.1 reviewed\"}"; check "H point released and proven by the file the QC user uploaded -> activity done, ITP in use (the evidence stays on the activity)" ".success and ([.data.activities[]|select(.id==$A1)|.status][0] == 2) and ([.data.activities[]|select(.id==$A1)|.evidenceDocumentId][0] == \"$EV1\") and .data.status == 3"
 as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A6,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"organisation\":\"Vendor Co\",\"reference\":\"V-REL-6\"}"; check "vendor H release on the packing activity" '.success'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"done\",\"evidenceDocumentId\":\"$EV1\"}"; nomsg "r1q M16: the file that proved the first activity cannot prove a second one" "پیش‌تر مدرک فعالیت دیگری شده است"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$EV1" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/itp-a1-evidence.txt"); nomsg "r1q M16: the file that proves an activity cannot be replaced afterwards" "مدرک انجام یک فعالیت برنامه بازرسی"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$EV1" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/itp-a1-evidence.pdf"); nomsg "r1q M16: the file that proves an activity cannot be replaced afterwards" "مدرک انجام یک فعالیت برنامه بازرسی"
 as "$PROD_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"x\"}"; no "production cannot mark an activity not applicable"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\"}"; no "not applicable needs a reason"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"No run test for this pump order\",\"reference\":\"$LONGREF\"}"; nomsg "r1q H6: the reference of a not-applicable decision is at most 300 characters" "حداکثر 300 نویسه"
@@ -4884,8 +4884,8 @@ as "$OCHK_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; no
 as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; nomsg "office: a position other than the signer cannot sign (writer)" "فقط سمت امضاکننده"
 as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; nomsg "office: the signer needs a stored signature image" "تصویر امضا"
 # R1a2 (L10): a picture becomes somebody's signature only when he uploaded it himself, so every signer uploads his own image with his own token
-printf 'signature image bytes\n' > "$OUT/sig-image.txt"
-osigup() { curl -s -o "$B" -X POST "$API/Documents?Description=sig&Name=signature&Code=SIG" -H "Authorization: Bearer $1" -F "File=@$OUT/sig-image.txt"; SIGDOC=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1); }
+printf '%%PDF-1.4 signature image bytes\n' > "$OUT/sig-image.pdf"
+osigup() { curl -s -o "$B" -X POST "$API/Documents?Description=sig&Name=signature&Code=SIG" -H "Authorization: Bearer $1" -F "File=@$OUT/sig-image.pdf"; SIGDOC=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1); }
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$DOCID\"}"; nomsg "r1a2 l10: a file that somebody else uploaded (the administrator's) is not accepted as the signature of the signer" "خودتان بارگذاری کرده‌اید"
 osigup "$OEMP_TOKEN"; OEMP_SIG=$SIGDOC
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OEMP_SIG\"}"; nomsg "r1a2 l10: nor the picture of a colleague" "خودتان بارگذاری کرده‌اید"
@@ -4896,7 +4896,7 @@ osigup "$OMGR_TOKEN"; OMGR_SIG=$SIGDOC
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OMGR_SIG\"}"; check "office: signature image stored for the signer" '.success and .data.hasSignature == true'
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OMGR_SIG\"}"; check "r1a2 l10: saving the same picture again is accepted and changes nothing" ".success and .data.hasSignature == true and .data.signatureDocumentId == \"$OMGR_SIG\""
 as "$OEMP_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OMGR_SIG\"}"; nomsg "r1a2 l10: and a colleague cannot take the stored picture of the signer as his own" "خودتان بارگذاری کرده‌اید"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OMGR_SIG" -H "Authorization: Bearer $OMGR_TOKEN" -F "File=@$OUT/sig-image.txt"); nomsg "r1a2 l10: the stored signature picture can no longer be replaced, not even by its owner" "تغییر یا حذف آن مجاز نیست"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OMGR_SIG" -H "Authorization: Bearer $OMGR_TOKEN" -F "File=@$OUT/sig-image.pdf"); nomsg "r1a2 l10: the stored signature picture can no longer be replaced, not even by its owner" "تغییر یا حذف آن مجاز نیست"
 as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; check "office: signed: number by the rule pattern of the unit (exact), content hash and signature image stored" ".success and .data.status == 2 and .data.number == \"OUT-$OPY-OPS-0001\" and (.data.contentHash|length) > 0 and .data.signatureDocumentId == \"$OMGR_SIG\" and (.data.signedByName|length) > 0"
 as "$OEMP_TOKEN" POST $OF/letters "{\"id\":$OL1,\"kind\":2,\"subject\":\"تغییر پس از امضا\",\"senderPositionId\":$OP_EMP,\"recipients\":[{\"type\":1,\"partyId\":$OPARTY}]}"; nomsg "office: a signed letter cannot be edited" "قابل ویرایش نیست"
 as "$OMGR_TOKEN" GET $OF/letters/$OL1/verify; check "office: the stored hash equals the hash computed again from the content and the files, and no file changed" '.success and .data.signed == true and .data.valid == true and (.data.storedHash|length) > 0 and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
@@ -5047,36 +5047,36 @@ as "$OCHK_TOKEN" GET "$OF/letters?PageSize=100"; check "office r1 M1: and it is 
 ibx "$OCHK_TOKEN" "referral:$ORM"; check "office r1 M1: and from his inbox" '.success and (.data.data|length) == 0'
 
 # C1: the files of a letter. Upload two files; the first is attached to an internal letter, the second to a secret one
-printf 'attachment bytes C1\n' > "$OUT/letter-att.txt"; printf 'secret attachment bytes\n' > "$OUT/letter-att2.txt"; printf 'forged bytes\n' > "$OUT/letter-evil.txt"; printf 'control bytes\n' > "$OUT/letter-ctl.txt"
-curl -s -o "$B" -X POST "$API/Documents?Description=att&Name=letter-att&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att.txt"; OATT=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
-curl -s -o "$B" -X POST "$API/Documents?Description=att2&Name=letter-att2&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att2.txt"; OATT2=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
-curl -s -o "$B" -X POST "$API/Documents?Description=ctl&Name=letter-ctl&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-ctl.txt"; OCTL=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+printf '%%PDF-1.4 attachment bytes C1\n' > "$OUT/letter-att.pdf"; printf '%%PDF-1.4 secret attachment bytes\n' > "$OUT/letter-att2.pdf"; printf '%%PDF-1.4 forged bytes\n' > "$OUT/letter-evil.pdf"; printf '%%PDF-1.4 control bytes\n' > "$OUT/letter-ctl.pdf"
+curl -s -o "$B" -X POST "$API/Documents?Description=att&Name=letter-att&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att.pdf"; OATT=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+curl -s -o "$B" -X POST "$API/Documents?Description=att2&Name=letter-att2&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att2.pdf"; OATT2=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+curl -s -o "$B" -X POST "$API/Documents?Description=ctl&Name=letter-ctl&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-ctl.pdf"; OCTL=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 [ -n "$OATT" ] && [ -n "$OATT2" ] && [ -n "$OCTL" ] && ok "office r1 C1: three test files uploaded" || bad "office r1 C1: three test files uploaded"
 # R1a2 (H3): a loose file (no record refers to it yet) is changed only by the user who uploaded it or by the PMO; a signed-in stranger is refused and the bytes stay
 OCTLF=$(ls src/WebApi/UploadedDocuments/${OCTL}* 2>/dev/null | head -n1)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: a signed-in stranger cannot replace the bytes of a file somebody else uploaded" "فقط کاربری که بارگذاری کرده"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: a signed-in stranger cannot replace the bytes of a file somebody else uploaded" "فقط کاربری که بارگذاری کرده"
 { [ -n "$OCTLF" ] && grep -q "control bytes" "$OCTLF"; } && ok "r1a2 h3: and the stored bytes of the file are unchanged" || bad "r1a2 h3: and the stored bytes of the file are unchanged (file '$OCTLF')"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: a user with an office role but not the uploader is refused as well" "فقط کاربری که بارگذاری کرده"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: a user with an office role but not the uploader is refused as well" "فقط کاربری که بارگذاری کرده"
 curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $QC_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OCTL\",\"name\":\"renamed-by-stranger\",\"description\":\"x\",\"code\":\"X\"}"; nomsg "r1a2 h3: nor can a stranger edit the name and description of the file" "فقط کاربری که بارگذاری کرده"
 # control: change-file works for the uploader on an ordinary document (so the refusals below are not caused by the request format)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "office r1 C1: control: the uploader replaces the bytes of his own ordinary document" || bad "office r1 C1: control: the uploader replaces the bytes of his own ordinary document (code $CODE)"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "office r1 C1: control: the uploader replaces the bytes of his own ordinary document" || bad "office r1 C1: control: the uploader replaces the bytes of his own ordinary document (code $CODE)"
 { [ -n "$OCTLF" ] && grep -q "forged bytes" "$OCTLF"; } && ok "r1a2 h3: and the new bytes are stored" || bad "r1a2 h3: and the new bytes are stored (file '$OCTLF')"
 curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $OEMP_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OCTL\",\"name\":\"letter-ctl-renamed\",\"description\":\"ctl\",\"code\":\"OFC\"}"; jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the uploader edits the name and description of his file" || bad "r1a2 h3: the uploader edits the name and description of his file"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-ctl.txt"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the PMO may replace a loose file of somebody else" || bad "r1a2 h3: the PMO may replace a loose file of somebody else (code $CODE)"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-ctl.pdf"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the PMO may replace a loose file of somebody else" || bad "r1a2 h3: the PMO may replace a loose file of somebody else (code $CODE)"
 as "$FM_TOKEN" GET "$FAU?EntityType=Document&PageSize=0"; check "r1a2 h3: every replacement of file bytes is in the audit trail with the SHA-256 of the old and the new bytes" '.success and ([.data.data[]|select(.action == "FileReplaced" and ((.beforeJson|fromjson).sha256|test("^[A-Za-z0-9+/]{43}=$")) and ((.afterJson|fromjson).sha256|test("^[A-Za-z0-9+/]{43}=$")) and ((.beforeJson|fromjson).sha256 != (.afterJson|fromjson).sha256))]|length) >= 2'
-as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه داخلی با پیوست\",\"bodyHtml\":\"<p>متن</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CHK}],\"attachments\":[{\"documentId\":\"$OATT\",\"fileName\":\"letter-att.txt\"}]}"; check "office r1 C1: internal draft with an attachment saved" '.success and (.data.attachments|length) == 1'
+as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه داخلی با پیوست\",\"bodyHtml\":\"<p>متن</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CHK}],\"attachments\":[{\"documentId\":\"$OATT\",\"fileName\":\"letter-att.pdf\"}]}"; check "office r1 C1: internal draft with an attachment saved" '.success and (.data.attachments|length) == 1'
 OL3=$(val .data.id)
 # R1a2 (H3): once a record refers to a file it is changed only through the owner module: even the uploader, even the PMO is refused while the draft carries it (the refusal names the owner)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: the uploader cannot replace a file that a draft letter already carries" "پیوست شده است"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: nor the PMO" "پیوست شده است"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: the uploader cannot replace a file that a draft letter already carries" "پیوست شده است"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: nor the PMO" "پیوست شده است"
 jq -e '.message | contains("نامه")' "$B" >/dev/null 2>&1 && ok "r1a2 h3: and the refusal names the kind of the owner (a letter)" || bad "r1a2 h3: and the refusal names the kind of the owner (a letter)"
 curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $OEMP_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OATT\",\"name\":\"renamed\",\"description\":\"x\",\"code\":\"X\"}"; nomsg "r1a2 h3: nor can its name and description be edited through the generic endpoint" "پیوست شده است"
 as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL3,\"action\":\"submit\"}"; check "office r1 C1: submitted" '.success and .data.status == 1'
 as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL3,\"action\":\"sign\"}"; check "office r1 H5: the second internal letter of the unit gets the next number of the general rule" ".success and .data.status == 4 and .data.number == \"INN-د-$OPY-2\""
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/Documents?DocumentId=$OATT"); [ "$CODE" = "401" ] && ok "office r1 C1: an anonymous download of a letter file is refused (401)" || bad "office r1 C1: an anonymous download of a letter file is refused (401) got $CODE"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/Documents/get-file-info?fileId=$OATT"); [ "$CODE" = "401" ] && ok "office r1 C1: anonymous file information is refused (401)" || bad "office r1 C1: anonymous file information is refused (401) got $CODE"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "office r1 C1: a signed letter's attachment cannot be replaced by anybody (even a signed-in stranger)" "تغییر یا حذف آن مجاز نیست"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "office r1 C1: nor by the writer of the letter" "تغییر یا حذف آن مجاز نیست"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "office r1 C1: a signed letter's attachment cannot be replaced by anybody (even a signed-in stranger)" "تغییر یا حذف آن مجاز نیست"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "office r1 C1: nor by the writer of the letter" "تغییر یا حذف آن مجاز نیست"
 OATTF=$(ls src/WebApi/UploadedDocuments/${OATT}* 2>/dev/null | head -n1)
 [ -n "$OATTF" ] && grep -q "attachment bytes C1" "$OATTF" && ok "office r1 C1: the stored bytes of the attachment are unchanged after the attempts" || bad "office r1 C1: the stored bytes of the attachment are unchanged after the attempts (file '$OATTF')"
 as "$OCHK_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; { [ "$CODE" = "200" ] && grep -q "attachment bytes C1" "$B"; } && ok "office r1 C1: the recipient position downloads the attachment through the letter" || bad "office r1 C1: the recipient position downloads the attachment through the letter got $CODE"
@@ -5087,10 +5087,10 @@ as "$QC_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "404" ] && ok "r1t 
 as "$QC_TOKEN" GET "Documents/get-file-info?fileId=$OATT"; check "r1t d8: the name and hash of a letter file do not reach a stranger" '.success == false'
 
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: verify: signed, valid, the hashes agree and no file changed" '.success and .data.valid == true and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1t d8: even the writer cannot replace the file of a signed letter" "تغییر یا حذف آن مجاز نیست"
-printf 'forged bytes\n' > "$OATTF"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1t d8: even the writer cannot replace the file of a signed letter" "تغییر یا حذف آن مجاز نیست"
+printf '%%PDF-1.4 forged bytes\n' > "$OATTF"
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: after the bytes of the attachment are swapped on disk verify fails and names the file" ".success and .data.valid == false and (.data.changedDocumentIds|index(\"$OATT\")) != null"
-printf 'attachment bytes C1\n' > "$OATTF"
+printf '%%PDF-1.4 attachment bytes C1\n' > "$OATTF"
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: with the original bytes back the letter is valid again (the check reads the files, it is not a flag)" '.success and .data.valid == true and (.data.changedDocumentIds|length) == 0'
 
 # H5: numbering rules that can produce the same number are refused; a duplicate number is skipped forward
@@ -5160,8 +5160,8 @@ as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"وارده مناق
 as "$OSEC_TOKEN" GET "$OF/letters?Number=$(enc "INN-OFTND1405-$OPY-2")"; check "office R2: the search by number finds the tender letter and lists its link code" ".success and (.data.data|length) == 1 and .data.data[0].id == $OR2 and .data.data[0].linkCode == \"OFTND1405\""
 
 # --- answer 2: the secretariat reads the content of a Confidential letter, including its attachment; a Secret one stays register data only
-printf 'confidential attachment bytes R2\n' > "$OUT/letter-att3.txt"
-curl -s -o "$B" -X POST "$API/Documents?Description=att3&Name=letter-att3&Code=OFC" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-att3.txt"; OATT3=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+printf '%%PDF-1.4 confidential attachment bytes R2\n' > "$OUT/letter-att3.pdf"
+curl -s -o "$B" -X POST "$API/Documents?Description=att3&Name=letter-att3&Code=OFC" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-att3.pdf"; OATT3=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 [ -n "$OATT3" ] && ok "office R2: setup: file of the confidential letter uploaded" || bad "office R2: setup: file of the confidential letter uploaded"
 as "$OHR_TOKEN" POST $OF/letters "{\"kind\":2,\"subject\":\"صادره محرمانه R2\",\"classification\":1,\"bodyHtml\":\"<p>CONFWORD777</p>\",$OREC,\"attachments\":[{\"documentId\":\"$OATT3\",\"fileName\":\"conf.txt\"}]}"; check "office R2: confidential outgoing draft saved" '.success and .data.classification == 1'
 OR4=$(val .data.id)
@@ -10799,6 +10799,41 @@ as "$FM_TOKEN" POST $PC/guarantees/confirm-release "{\"guaranteeId\":$PCG3}"; ch
 # --- R1t D19: every pass-through of the legacy CSV actions (2 inventory exports, 1 events export, 1 events/mark) left one audit row, all by the finance manager
 TOKEN=$ADMIN_TOKEN
 as "$FM_TOKEN" GET "finance/audit?EntityType=SepidarLegacyCsv&Action=LegacyCsv&PageSize=0"; check "r1t d19: the legacy CSV pass-throughs are in the audit trail (5 rows: 2 inventory exports, 2 events exports - one is the finance manager's check of the protected labour event - and 1 events/mark, one user)" '.success and (.data.data|length) == 5 and ([.data.data[].userId]|unique|length) == 1'
+# --- PB3: attachments through the whole chain, void instead of delete, and the request dossier
+TOKEN=$ADMIN_TOKEN
+printf '%%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%%%EOF\n' > "$OUT/pb3-spec.pdf"; printf 'MZ not a pdf' > "$OUT/pb3-fake.pdf"; printf 'plain' > "$OUT/pb3-bad.exe"
+attach() { CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/attachments" -H "Authorization: Bearer $TOKEN" -F "OwnerType=$1" -F "OwnerId=$2" -F "Kind=${3:-3}" -F "Title=$4" -F "Revision=${5:-A}" -F "File=@$6"); }
+attach 1 $PRQ 3 "مشخصات فنی پیچ" A "$OUT/pb3-spec.pdf"; check "pb3: a technical document is attached to the purchase request" '.success and .data.revision == "A" and .data.kindTitle != null'
+PB3ATT=$(val .data.id)
+attach 1 $PRQ 3 "فایل اجرایی" A "$OUT/pb3-bad.exe"; check "pb3: an executable is refused in Persian" '.success == false'
+attach 1 $PRQ 3 "پی‌دی‌اف قلابی" A "$OUT/pb3-fake.pdf"; check "pb3: a file that only carries a PDF name is refused (magic bytes)" '.success == false'
+call GET "attachments?ownerType=1&ownerId=$PRQ"; check "pb3: the request lists its attachment" '.success and ([.data.items[]|select(.current)]|length) == 1'
+call GET "attachments?ownerType=5&ownerId=$PO"; check "pb3: the purchase order shows the request documents by link (exactly 1, read only, none of its own)" '.success and ([.data.propagated[].items[]]|length) == 1 and ([.data.items[]]|length) == 0'
+call GET "attachments?ownerType=6&ownerId=$PB3RCPT"; check "pb3: the receipt of the order shows the request documents by link (exactly 1)" '.success and ([.data.propagated[].items[]]|length) == 1'
+call GET "attachments?ownerType=11&ownerId=$SINV"; check "pb3: the supplier invoice shows the request documents by link (exactly 1)" '.success and ([.data.propagated[].items[]]|length) == 1'
+call DELETE "attachments/$PB3ATT"; nomsg "pb3: after the request is approved the file cannot be removed (the answer says to void it)" "تایید شده"
+call POST attachments/void "{\"id\":$PB3ATT,\"reason\":\"\"}"; nomsg "pb3: voiding needs a reason" "دلیل ابطال"
+call POST attachments/void "{\"id\":$PB3ATT,\"reason\":\"نقشه اشتباه بارگذاری شد\"}"; check "pb3: the file is voided with a reason, never deleted" '.success and .data.voided == true and .data.voidReason == "نقشه اشتباه بارگذاری شد"'
+call GET "attachments?ownerType=1&ownerId=$PRQ"; check "pb3: the voided file stays in the history with its reason" '.success and ([.data.items[]|select(.voided and .voidReason != null)]|length) == 1 and ([.data.items[]|select(.current)]|length) == 0'
+call GET "attachments?ownerType=5&ownerId=$PO"; check "pb3: a voided document no longer propagates (0)" '.success and ([.data.propagated[].items[]]|length) == 0'
+# no delete route exists for a stored file: the only ways to touch its bytes are refused for a file that an attachment points at
+PB3DOC=$(jq -r '.data.items[0].documentId // empty' <(curl -s "$API/attachments?ownerType=1&ownerId=$PRQ" -H "Authorization: Bearer $TOKEN"))
+if [ -n "$PB3DOC" ]; then
+  CODE=$(curl -s -o "$B" -w '%{http_code}' -X DELETE "$API/Documents/$PB3DOC" -H "Authorization: Bearer $TOKEN"); { [ "$CODE" = "404" ] || [ "$CODE" = "405" ]; } && ok "pb3: there is no route that deletes a stored file (HTTP $CODE)" || bad "pb3: there is no route that deletes a stored file (HTTP $CODE)"
+  CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$PB3DOC" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/pb3-spec.pdf"); nomsg "pb3: the bytes of the file of a voided attachment cannot be replaced (the referrer lock)" "پیوست شده است"
+else
+  bad "pb3: the document id of the voided attachment was found"
+fi
+attach 1 $PRQ 3 "مشخصات فنی پیچ" B "$OUT/pb3-spec.pdf"; check "pb3: a new revision is attached after the void" '.success and .data.revision == "B"'
+# a file that carries money: finance adds it to the invoice; QC (a reader of the invoice) never sees it
+TOKEN=$FIN_TOKEN attach 11 $SINV 9 "تصویر فاکتور اسکن" A "$OUT/pb3-spec.pdf"; check "pb3: finance attaches an invoice image to the supplier invoice" '.success and .data.kind == 9'
+as "$QC_TOKEN" GET "attachments?ownerType=11&ownerId=$SINV"; check "pb3: QC reads the invoice record but sees none of the money files (0 of kind 9 or 10)" '.success and ([.data.items[]|select(.kind == 9 or .kind == 10)]|length) == 0'
+as "$FIN_TOKEN" GET "attachments?ownerType=11&ownerId=$SINV"; check "pb3: finance sees exactly 1 money file on the invoice" '.success and ([.data.items[]|select(.kind == 9 and .current)]|length) == 1'
+call GET "procurement/orders/$PO"; PB3PONO=$(val .data.number)
+call GET "dossier?number=$PB3PONO"; check "pb3: the dossier by the order number lists exactly the steps of the chain, in order" '.success and ([.data.steps[].code | select(. != "QcInspection" and . != "Ncr" and . != "FinalReceipt")] == ["PurchaseRequest","Inquiry","Quote","PurchaseOrder","TemporaryReceipt","SupplierInvoice","PaymentRequest","TreasuryPayment"]) and .data.stepCount == (.data.steps|length) and .data.hiddenStepCount == 0'
+as "$QC_TOKEN" GET "dossier?number=$PB3PONO"; check "pb3: QC reads the dossier without the treasury step, which is only counted (1 step without access)" '.success and ([.data.steps[].code]|index("TreasuryPayment")) == null and .data.hiddenStepCount == 1 and .data.hiddenStepsText == "1 مرحله بدون دسترسی"'
+call GET "dossier?number=nonexistent-pb3"; nomsg "pb3: an unknown number gives no dossier" "پیدا نشد"
+TOKEN=$ADMIN_TOKEN
 # --- R1t D20: the whole audit trail of this run fits the hash chain
 as "$FM_TOKEN" GET finance/audit/verify; check "r1t d20: the audit trail fits the hash chain from the first sealed row to the last" '.success and .data.ok == true and .data.checked > 0'
 [ "$AIMOCK_STARTED" = 1 ] && { pkill -f mock_llm.py 2>/dev/null || true; }
@@ -10808,122 +10843,147 @@ rm -f "$OUT/ai-voice.wav" "$OUT/ai-voice.txt" "$OUT/ai-brief.wav"
 # =====================================================================================================================================================================
 # --- P-B7a: tasks (TMS), the progress-approval cartable, the PMBOK registers, the one-page dashboard and the extended daily site report
 # =====================================================================================================================================================================
-TK=tasks; RG=projectcontrol/registers; PA=projectcontrol/progress-approval
-ADM_UID=$(uid "$ADMIN_TOKEN"); PLAN_UID=$(uid "$PLAN_TOKEN"); PMU_UID=$(uid "$PM_TOKEN")
-as "$PM_TOKEN" POST $TK '{"title":""}'; nomsg "p7a tasks: a task without a title is refused" "عنوان"
-as "$PM_TOKEN" POST $TK '{"title":"وظیفه شخصی آزمون","kind":4,"priority":2,"importance":2,"confidentiality":0,"recurrence":0,"recurrenceInterval":1}'; check "p7a tasks: a personal task is created (open, a number TK-, the creator is the only party)" '.success and .data.status == 0 and (.data.number|startswith("TK")) and (.data.assignees|length) == 0'
-TKP=$(val .data.id)
-as "$PM_TOKEN" POST $TK '{"title":"شخصی با ارجاع","kind":4,"assignees":[{"userId":'$ADM_UID',"role":1}]}'; nomsg "p7a tasks: a personal task cannot be referred to another person" "شخصی"
-as "$PLAN_TOKEN" GET "$TK/$TKP"; no "p7a tasks: a personal task is invisible to another user (planning)"
-as "$ADMIN_TOKEN" GET "$TK/$TKP"; no "p7a tasks: and to the PMO"
-as "$PM_TOKEN" POST $TK/action "{\"id\":$TKP,\"action\":\"approve\"}"; no "p7a tasks: approve from the open state is refused (the machine)"
-as "$PM_TOKEN" POST $TK/action "{\"id\":$TKP,\"action\":\"start\"}"; check "p7a tasks: start moves the personal task to in-progress" '.success and .data.status == 1'
-as "$PM_TOKEN" POST $TK/action "{\"id\":$TKP,\"action\":\"complete\"}"; check "p7a tasks: a personal task needs no approval: complete closes it at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
-as "$PM_TOKEN" GET "$TK/$TKP"; check "p7a tasks: the history has the created, started and closed rows in order" '.success and ([.data.history[].kind]|length) >= 3 and .data.history[0].kind == 1'
+P7TK=tasks; P7RG=projectcontrol/registers; P7PA=projectcontrol/progress-approval
+ADM_UID=$(uid "$ADMIN_TOKEN"); PLAN_UID=$(uid "$PLAN_TOKEN"); P7WH_UID=$(uid "$WH_TOKEN")
+as "$PM_TOKEN" POST $P7TK '{"title":""}'; nomsg "p7a tasks: a task without a title is refused" "عنوان"
+as "$PM_TOKEN" POST $P7TK '{"title":"وظیفه شخصی آزمون","kind":4,"priority":2,"importance":2,"confidentiality":0,"recurrence":0,"recurrenceInterval":1}'; check "p7a tasks: a personal task is created (open, a number TK-, the creator is the only party)" '.success and .data.status == 0 and (.data.number|startswith("TK")) and (.data.assignees|length) == 0'
+P7TKP=$(val .data.id)
+as "$PM_TOKEN" POST $P7TK '{"title":"شخصی با ارجاع","kind":4,"assignees":[{"userId":'$ADM_UID',"role":1}]}'; nomsg "p7a tasks: a personal task cannot be referred to another person" "شخصی"
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKP"; no "p7a tasks: a personal task is invisible to another user (planning)"
+as "$ADMIN_TOKEN" GET "$P7TK/$P7TKP"; no "p7a tasks: and to the PMO"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKP,\"action\":\"approve\"}"; no "p7a tasks: approve from the open state is refused (the machine)"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKP,\"action\":\"start\"}"; check "p7a tasks: start moves the personal task to in-progress" '.success and .data.status == 1'
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKP,\"action\":\"complete\"}"; check "p7a tasks: a personal task needs no approval: complete closes it at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
+as "$PM_TOKEN" GET "$P7TK/$P7TKP"; check "p7a tasks: the history has the created, started and closed rows in order" '.success and ([.data.history[].kind]|length) == 3 and .data.history[0].kind == 1'
 # a project task referred to planning with a checklist
-as "$PM_TOKEN" POST $TK "{\"title\":\"بازبینی نقشه‌های پمپ\",\"kind\":2,\"contractId\":$PCT,\"priority\":3,\"importance\":2,\"dueDate\":\"$(dd 5)T00:00:00\",\"estimatedHours\":8,\"checklist\":[\"بررسی نقشه ۱\",\"بررسی نقشه ۲\"],\"assignees\":[{\"userId\":$PLAN_UID,\"role\":1,\"reason\":\"جهت اقدام\"}]}"
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"بازبینی نقشه‌های پمپ\",\"kind\":2,\"contractId\":$PCT,\"priority\":3,\"importance\":2,\"dueDate\":\"$(dd 5)T00:00:00\",\"estimatedHours\":8,\"checklist\":[\"بررسی نقشه ۱\",\"بررسی نقشه ۲\"],\"assignees\":[{\"userId\":$PLAN_UID,\"role\":1,\"reason\":\"جهت اقدام\"}]}"
 check "p7a tasks: a project task with two assignees fields: status assigned, one referral row with its reason" '.success and .data.status == 3 and (.data.assignees|length) == 1 and .data.assignees[0].reason == "جهت اقدام" and (.data.checklist|length) == 2'
-TKA=$(val .data.id); TKACHK=$(val '.data.checklist[0].id'); TKACHK2=$(val '.data.checklist[1].id')
-as "$PLAN_TOKEN" GET "$TK?Cartable=assigned-to-me&PageSize=0"; check "p7a tasks: the task is in the assignee cartable (assigned to me)" '.success and ([.data.data[]|select(.id == '$TKA')]|length) == 1'
-as "$PM_TOKEN" GET "$TK?Cartable=assigned-by-me&PageSize=0"; check "p7a tasks: and in the cartable of the person who assigned it (assigned by me)" '.success and ([.data.data[]|select(.id == '$TKA')]|length) == 1'
-as "$PM_TOKEN" POST $TK/action "{\"id\":$TKA,\"action\":\"start\"}"; no "p7a tasks: the creator who is not an assignee cannot start it"
-as "$PLAN_TOKEN" POST $TK/action "{\"id\":$TKA,\"action\":\"complete\"}"; nomsg "p7a tasks: complete is refused while the checklist is open" "چک‌لیست"
-as "$PLAN_TOKEN" POST $TK/checklist "{\"taskId\":$TKA,\"action\":\"toggle\",\"itemId\":$TKACHK}"; check "p7a tasks: a checklist item is ticked" '.success and .data.checklist[0].done == true'
-as "$PLAN_TOKEN" POST $TK/checklist "{\"taskId\":$TKA,\"action\":\"toggle\",\"itemId\":$TKACHK2}"; check "p7a tasks: the second item is ticked" '.success and ([.data.checklist[]|select(.done)]|length) == 2'
-as "$PLAN_TOKEN" POST $TK/transfer "{\"taskId\":$TKA,\"assigneeId\":0,\"toUserId\":$ADM_UID}"; no "p7a tasks: a transfer without a reason / a valid referral is refused"
-as "$PLAN_TOKEN" GET "$TK/$TKA"; TKREF=$(val '.data.assignees[0].id')
-as "$PLAN_TOKEN" POST $TK/transfer "{\"taskId\":$TKA,\"assigneeId\":$TKREF,\"toUserId\":$ADM_UID,\"reason\":\"تخصص لازم نزد مدیر است\"}"
+P7TKA=$(val .data.id); P7TKACHK=$(val '.data.checklist[0].id'); P7TKACHK2=$(val '.data.checklist[1].id')
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKA"; check "p7a tasks: the assignee opens the task with its checklist and the single referral" '.success and .data.id == '$P7TKA' and (.data.checklist|length) == 2 and (.data.assignees|length) == 1'
+as "$PLAN_TOKEN" GET "$P7TK?Cartable=assigned-to-me&PageSize=0"; check "p7a tasks: the task is in the assignee cartable (assigned to me)" '.success and ([.data.data[]|select(.id == '$P7TKA')]|length) == 1'
+as "$PM_TOKEN" GET "$P7TK?Cartable=assigned-by-me&PageSize=0"; check "p7a tasks: and in the cartable of the person who assigned it (assigned by me)" '.success and ([.data.data[]|select(.id == '$P7TKA')]|length) == 1'
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"start\"}"; no "p7a tasks: the creator who is not an assignee cannot start it"
+as "$PLAN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"complete\"}"; nomsg "p7a tasks: complete is refused while the checklist is open" "چک‌لیست"
+as "$PLAN_TOKEN" POST $P7TK/checklist "{\"taskId\":$P7TKA,\"action\":\"toggle\",\"itemId\":$P7TKACHK}"; check "p7a tasks: a checklist item is ticked" '.success and .data.checklist[0].done == true'
+as "$PLAN_TOKEN" POST $P7TK/checklist "{\"taskId\":$P7TKA,\"action\":\"toggle\",\"itemId\":$P7TKACHK2}"; check "p7a tasks: the second item is ticked" '.success and ([.data.checklist[]|select(.done)]|length) == 2'
+as "$PLAN_TOKEN" POST $P7TK/transfer "{\"taskId\":$P7TKA,\"assigneeId\":0,\"toUserId\":$ADM_UID}"; no "p7a tasks: a transfer without a reason / a valid referral is refused"
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKA"; P7TKREF=$(val '.data.assignees[0].id')
+as "$PLAN_TOKEN" POST $P7TK/transfer "{\"taskId\":$P7TKA,\"assigneeId\":$P7TKREF,\"toUserId\":$ADM_UID,\"reason\":\"تخصص لازم نزد مدیر است\"}"
 check "p7a tasks: transfer ends the old referral (transferred, with the reason) and adds a new one that points at it" '.success and ([.data.assignees[]|select(.state == 3)]|length) == 1 and ([.data.assignees[]|select(.parentId != null and .reason == "تخصص لازم نزد مدیر است")]|length) == 1'
-as "$PLAN_TOKEN" GET "$TK/$TKA"; check "p7a tasks: the first referral keeps who, why and when of its creation after the transfer (immutable history)" '.success and .data.assignees[0].reason == "جهت اقدام" and .data.assignees[0].assignedByName != null and .data.assignees[0].endReason == "تخصص لازم نزد مدیر است"'
-as "$PM_TOKEN" GET "$TK/$TKA/referrals"; check "p7a tasks: the referral tree has one root with one child" '.success and (.data|length) == 1 and (.data[0].children|length) == 1'
-as "$ADMIN_TOKEN" POST $TK/action "{\"id\":$TKA,\"action\":\"start\"}"; check "p7a tasks: the new holder starts the task" '.success and .data.status == 1'
-as "$ADMIN_TOKEN" POST $TK/action "{\"id\":$TKA,\"action\":\"complete\"}"; check "p7a tasks: complete sends it to pending approval" '.success and .data.status == 2'
-as "$ADMIN_TOKEN" POST $TK/action "{\"id\":$TKA,\"action\":\"approve\"}"; nomsg "p7a tasks: the person who reported it done cannot approve it (even as PMO)" "شخص دیگری"
-as "$PM_TOKEN" POST $TK/action "{\"id\":$TKA,\"action\":\"return\"}"; nomsg "p7a tasks: returning needs a reason" "دلیل"
-as "$PM_TOKEN" POST $TK/action "{\"id\":$TKA,\"action\":\"approve\"}"; check "p7a tasks: the creator approves: the task is closed at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
-as "$PLAN_TOKEN" GET "$TK/counts"; check "p7a tasks: the counts of the cartables are returned" '.success and (.data.assignedToMe|type) == "number"'
-as "$PLAN_TOKEN" GET "$TK/agenda?Mode=week"; check "p7a tasks: the weekly agenda has seven days" '.success and (.data|length) == 7'
-as "$PLAN_TOKEN" GET "$TK/board"; check "p7a tasks: the board has the seven status columns" '.success and (.data|length) == 7'
-as "$SEC_TOKEN" GET "$TK/$TKA"; no "p7a tasks: a user who is not a party and not a manager cannot open the task"
+as "$PLAN_TOKEN" GET "$P7TK/$P7TKA"; check "p7a tasks: the first referral keeps who, why and when of its creation after the transfer (immutable history)" '.success and .data.assignees[0].reason == "جهت اقدام" and .data.assignees[0].assignedByName != null and .data.assignees[0].endReason == "تخصص لازم نزد مدیر است"'
+as "$PM_TOKEN" GET "$P7TK/$P7TKA/referrals"; check "p7a tasks: the referral tree has one root with one child" '.success and (.data|length) == 1 and (.data[0].children|length) == 1'
+as "$ADMIN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"start\"}"; check "p7a tasks: the new holder starts the task" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"complete\"}"; check "p7a tasks: complete sends it to pending approval" '.success and .data.status == 2'
+as "$ADMIN_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"approve\"}"; nomsg "p7a tasks: the person who reported it done cannot approve it (even as PMO)" "شخص دیگری"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"return\"}"; nomsg "p7a tasks: returning needs a reason" "دلیل"
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7TKA,\"action\":\"approve\"}"; check "p7a tasks: the creator approves: the task is closed at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
+as "$PLAN_TOKEN" GET "$P7TK/counts"; check "p7a tasks: the counts of the cartables are returned" '.success and (.data.assignedToMe|type) == "number"'
+as "$PLAN_TOKEN" GET "$P7TK/agenda?Mode=week"; check "p7a tasks: the weekly agenda has seven days" '.success and (.data|length) == 7'
+as "$PLAN_TOKEN" GET "$P7TK/board"; check "p7a tasks: the board has the seven status columns" '.success and (.data|length) == 7'
+as "$SEC_TOKEN" GET "$P7TK/$P7TKA"; no "p7a tasks: a user who is not a party and not a manager cannot open the task"
 
-# the roll-up: a task linked to an activity whose method is "tasks" moves its percent
-call POST Contracts '{"code":"P7-CT-01","title":"قرارداد آزمون بسته هفت","status":1,"employer":"کارفرمای آزمون"}'; P7CT=$(val .data.id)
-as "$PLAN_TOKEN" POST $PC/activities "{\"contractId\":$P7CT,\"code\":\"P7-ACT\",\"title\":\"فعالیت مبتنی بر وظیفه\",\"sourceType\":7,\"durationDays\":4,\"responsibleUnit\":\"PLANNING\",\"progressMethod\":9,\"weight\":0,\"budgetAtCompletion\":1000000,\"phase\":3}"
+# the roll-up: a task linked to an activity whose method is "tasks" moves the activity only through the approval cartable
+call POST Contracts '{"code":"P7-CT-01","title":"قرارداد آزمون بسته هفت","status":1,"employer":"کارفرمای آزمون"}'; check "p7a tasks: the test contract is created" '.success and .data.id > 0'; P7CT=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/activities "{\"contractId\":$P7CT,\"code\":\"P7-ACT\",\"title\":\"فعالیت مبتنی بر وظیفه\",\"sourceType\":7,\"durationDays\":4,\"responsibleUnit\":\"PROJECTMANAGER\",\"progressMethod\":9,\"weight\":0,\"budgetAtCompletion\":1000000,\"phase\":3}"
 check "p7a tasks: an activity with the new progress method «tasks» can be created" '.success and .data.id > 0 and .data.progressMethod == 9'; P7ACT=$(val .data.id)
-as "$PM_TOKEN" POST $TK "{\"title\":\"کار الف\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":10}"; check "p7a tasks: a task linked to the activity takes its project from it" '.success and .data.activityId == '$P7ACT' and .data.contractId == '$P7CT; P7T1=$(val .data.id)
-as "$PM_TOKEN" POST $TK "{\"title\":\"کار ب\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":30}"; P7T2=$(val .data.id)
-as "$PM_TOKEN" POST $TK/action "{\"id\":$P7T1,\"action\":\"complete\"}"; check "p7a tasks: the creator of an unassigned task reports it done (pending)" '.success and .data.status == 2'
-as "$ADMIN_TOKEN" POST $TK/action "{\"id\":$P7T1,\"action\":\"approve\"}"; check "p7a tasks: the PMO approves (a person other than the reporter)" '.success and .data.status == 4'
-as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$P7CT&PageSize=0"; check "p7a tasks: the activity percent is the weighted roll-up: 10 of 40 hours done = 25 percent" '.success and ([.data.data[]|select(.id == '$P7ACT')][0].percentCache // 0) == 25'
-as "$PLAN_TOKEN" GET "$TK/by-activity/$P7ACT"; check "p7a tasks: the activity lists its two tasks" '.success and (.data|length) == 2'
-as "$PM_TOKEN" POST $TK/progress "{\"taskId\":$P7T2,\"percent\":50}"; nomsg "p7a tasks: the percent of a task linked to an activity goes through the approval cartable" "کارتابل تایید پیشرفت"
+as "$WH_TOKEN" POST $P7TK "{\"title\":\"کار ناموجه\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":10}"; no "p7a tasks: a user who is not the unit manager, planning, the PMO or the project manager cannot link a task to an activity"
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"شخصی متصل\",\"kind\":4,\"activityId\":$P7ACT}"; no "p7a tasks: a personal task never links to an activity"
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"کار الف\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":10,\"assignees\":[{\"userId\":$P7WH_UID,\"role\":1}]}"; check "p7a tasks: the unit manager links a task to the activity; it takes its project from it" '.success and .data.activityId == '$P7ACT' and .data.contractId == '$P7CT; P7T1=$(val .data.id)
+as "$PM_TOKEN" POST $P7TK "{\"title\":\"کار ب\",\"kind\":2,\"contractId\":$P7CT,\"activityId\":$P7ACT,\"estimatedHours\":30,\"assignees\":[{\"userId\":$P7WH_UID,\"role\":1}]}"; check "p7a tasks: the second task is linked" '.success and .data.activityId == '$P7ACT; P7T2=$(val .data.id)
+as "$WH_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"start\"}"; check "p7a tasks: the assignee starts the first task" '.success and .data.status == 1'
+as "$WH_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"complete\"}"; no "p7a tasks: a task linked to an activity cannot be closed before its approved percent is 100"
+as "$WH_TOKEN" POST $P7TK/progress "{\"taskId\":$P7T1,\"percent\":100}"; nomsg "p7a tasks: the percent of a task linked to an activity goes through the approval cartable" "کارتابل تایید پیشرفت"
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$P7CT&PageSize=0"; check "p7a tasks: nothing moved the activity yet (0 percent)" '.success and ([.data.data[]|select(.id == '$P7ACT')][0].percentCache // 0) == 0'
+as "$PLAN_TOKEN" GET "$P7TK/by-activity/$P7ACT"; check "p7a tasks: the activity lists its two tasks" '.success and (.data|length) == 2'
 
 # --- progress-approval cartable
-as "$PM_TOKEN" GET "$PA/chain/$P7CT"; check "p7a progress: a project with no chain of its own has the default one (project manager, PMO)" '.success and .data.isDefault == true and (.data.levels|length) == 2'
-as "$PM_TOKEN" POST $PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"برنامه‌ریزی\",\"role\":\"PLANNING\"},{\"title\":\"PMO\",\"role\":\"PMO\"}]}"; check "p7a progress: the chain is configured (planning, then PMO)" '.success and .data.isDefault == false and (.data.levels|length) == 2'
-as "$PM_TOKEN" POST $PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"فقط مدیر\",\"role\":\"PROJECTMANAGER\"}]}"; nomsg "p7a progress: the last level must be the PMO or planning" "آخرین سطح"
-as "$WH_TOKEN" POST $PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"}]}"; no "p7a progress: a warehouse user cannot configure the chain"
-as "$PLAN_TOKEN" POST $PC/activities "{\"contractId\":$P7CT,\"code\":\"P7-MAN\",\"title\":\"فعالیت با گزارش دستی\",\"sourceType\":7,\"durationDays\":4,\"responsibleUnit\":\"PLANNING\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":1000000,\"phase\":3}"; P7MAN=$(val .data.id)
-as "$PM_TOKEN" POST $PA/submissions "{\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"comment\":\"گزارش هفته\",\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":false}"
+as "$PM_TOKEN" GET "$P7PA/chain/$P7CT"; check "p7a progress: a project with no chain of its own has the default one (project manager, PMO)" '.success and .data.isDefault == true and (.data.levels|length) == 2'
+as "$PM_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"برنامه‌ریزی\",\"role\":\"PLANNING\"},{\"title\":\"PMO\",\"role\":\"PMO\"}]}"; no "p7a progress: the project manager cannot set the chain (the PMO does)"
+as "$PLAN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"برنامه‌ریزی\",\"role\":\"PLANNING\"},{\"title\":\"PMO\",\"role\":\"PMO\"}]}"; no "p7a progress: planning cannot set the chain it approves in"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"فقط مدیر\",\"role\":\"PROJECTMANAGER\"}]}"; nomsg "p7a progress: the last level must be the PMO or planning" "آخرین سطح"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"},{\"role\":\"PMO\"}]}"; no "p7a progress: the same role twice in a row is refused (one person would approve both)"
+as "$WH_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"}]}"; no "p7a progress: a warehouse user cannot configure the chain"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"title\":\"برنامه‌ریزی\",\"role\":\"PLANNING\"},{\"title\":\"PMO\",\"role\":\"PMO\"}]}"; check "p7a progress: the PMO configures the chain (planning, then PMO)" '.success and .data.isDefault == false and (.data.levels|length) == 2'
+# the roll-up through the cartable: the assignee reports the task at 100 percent, planning and the PMO approve
+as "$WH_TOKEN" POST $P7PA/submissions "{\"contractId\":$P7CT,\"target\":2,\"taskId\":$P7T1,\"percent\":100,\"comment\":\"کار الف تمام شد\",\"submit\":true}"; check "p7a progress: the assignee reports the task at 100 percent (in approval, level 1)" '.success and .data.state == 1 and .data.currentLevel == 1'; P7TSUB=$(val .data.id)
+as "$PM_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7TSUB,\"approve\":true}"; no "p7a progress: the project manager is not on the chain of this project and cannot decide"
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7TSUB,\"approve\":true}"; check "p7a progress: planning approves level 1" '.success and .data.state == 1 and .data.currentLevel == 2'
+as "$ADMIN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7TSUB,\"approve\":true}"; check "p7a progress: the PMO approves the last level: the task carries the approved 100 percent" '.success and .data.state == 2'
+as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$P7CT&PageSize=0"; check "p7a tasks: the activity percent is the weighted roll-up of the approved percents: 10 of 40 hours = 25 percent" '.success and ([.data.data[]|select(.id == '$P7ACT')][0].percentCache // 0) == 25'
+as "$WH_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"complete\"}"; check "p7a tasks: now the assignee may report the task done (pending approval)" '.success and .data.status == 2'
+as "$PM_TOKEN" POST $P7TK/action "{\"id\":$P7T1,\"action\":\"approve\"}"; check "p7a tasks: the creator approves the closing (a person other than the reporter): closed at 100 percent" '.success and .data.status == 4 and .data.percentComplete == 100'
+as "$PLAN_TOKEN" GET "$P7TK/$P7T2"; check "p7a tasks: the second task is untouched (zero percent)" '.success and .data.percentComplete == 0'
+as "$PLAN_TOKEN" POST $PC/activities "{\"contractId\":$P7CT,\"code\":\"P7-MAN\",\"title\":\"فعالیت با گزارش دستی\",\"sourceType\":7,\"durationDays\":4,\"responsibleUnit\":\"PROJECTMANAGER\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":1000000,\"phase\":3}"; check "p7a progress: the manual-method activity is created" '.success and .data.id > 0'; P7MAN=$(val .data.id)
+as "$PM_TOKEN" POST $P7PA/submissions "{\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"comment\":\"گزارش هفته\",\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":false}"
 check "p7a progress: a draft report is saved (draft, round 0, editable)" '.success and .data.state == 0 and .data.round == 0 and .data.canEdit == true'; P7SUB=$(val .data.id)
-as "$PM_TOKEN" POST $PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"actualCost\":2000000,\"costKind\":3,\"submit\":true}"; nomsg "p7a progress: a cost without the accrual note is refused" "تعهدی"
-as "$PM_TOKEN" POST $PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":true}"
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"actualCost\":2000000,\"costKind\":3,\"submit\":true}"; nomsg "p7a progress: a cost without the accrual note is refused" "تعهدی"
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":40,\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":true}"
 check "p7a progress: sending puts it in approval at level 1, locked for the submitter" '.success and .data.state == 1 and .data.round == 1 and .data.currentLevel == 1 and .data.locked == true and .data.canEdit == false'
-as "$PM_TOKEN" POST $PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":90,\"submit\":false}"; nomsg "p7a progress: the submitter cannot change a report in approval" "قفل"
-as "$PM_TOKEN" POST $PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: the submitter cannot approve his own report"
-as "$ADMIN_TOKEN" POST $PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: the PMO cannot jump over level 1 (it is planning's turn)"
-as "$PLAN_TOKEN" GET "$PA/submissions?Cartable=waiting"; check "p7a progress: the report is in the waiting cartable of planning" '.success and ([.data.data[]|select(.id == '$P7SUB')]|length) == 1'
-as "$PLAN_TOKEN" POST $PA/submissions/decide "{\"id\":$P7SUB,\"approve\":false}"; nomsg "p7a progress: a rejection needs a reason" "دلیل"
-as "$PLAN_TOKEN" POST $PA/submissions/decide "{\"id\":$P7SUB,\"approve\":false,\"note\":\"درصد با گزارش روزانه نمی‌خواند\"}"; check "p7a progress: rejection returns the report with the reason" '.success and .data.state == 3 and .data.resultNote == "درصد با گزارش روزانه نمی‌خواند"'
-as "$PM_TOKEN" POST $PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":35,\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":true}"; check "p7a progress: the submitter fixes and sends again: round 2, level 1" '.success and .data.state == 1 and .data.round == 2 and .data.currentLevel == 1'
-as "$PLAN_TOKEN" POST $PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true,\"percent\":30,\"note\":\"اصلاح درصد\"}"; check "p7a progress: planning edits the percent to 30 and approves level 1: the report moves to level 2" '.success and .data.state == 1 and .data.currentLevel == 2 and .data.percent == 30'
-as "$PLAN_TOKEN" POST $PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: planning cannot decide level 2 (the PMO)"
-as "$ADMIN_TOKEN" POST $PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; check "p7a progress: the PMO approves the last level: the value is applied (approved, a manual progress row, a cost entry)" '.success and .data.state == 2 and .data.manualProgressId > 0 and .data.costEntryId > 0'
-as "$PM_TOKEN" GET "$PA/submissions/$P7SUB"; check "p7a progress: the history shows the edit with its changed value, the return and the application" '.success and ([.data.history[].action]|index("edited")) != null and ([.data.history[].action]|index("returned")) != null and ([.data.history[].action]|index("applied")) != null and (.data.history[]|select(.action=="edited").changesJson|contains("percent"))'
-as "$PLAN_TOKEN" GET "$PC/manual-progress?ActivityId=$P7MAN&PageSize=0"; check "p7a progress: the progress row went through the manual path: approved, 30 percent, proposed by the submitter, decided by the PMO" '.success and ([.data.data[]|select(.state == 1 and .percent == 30)]|length) == 1'
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":90,\"submit\":false}"; nomsg "p7a progress: the submitter cannot change a report in approval" "قفل"
+as "$PM_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: the submitter cannot approve his own report"
+as "$ADMIN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: the PMO cannot jump over level 1 (it is planning's turn)"
+as "$PLAN_TOKEN" GET "$P7PA/submissions?Cartable=waiting"; check "p7a progress: the report is in the waiting cartable of planning" '.success and ([.data.data[]|select(.id == '$P7SUB')]|length) == 1'
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":false}"; nomsg "p7a progress: a rejection needs a reason" "دلیل"
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":false,\"note\":\"درصد با گزارش روزانه نمی‌خواند\"}"; check "p7a progress: rejection returns the report with the reason" '.success and .data.state == 3 and .data.resultNote == "درصد با گزارش روزانه نمی‌خواند"'
+as "$PM_TOKEN" POST $P7PA/submissions "{\"id\":$P7SUB,\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7MAN,\"percent\":35,\"actualCost\":2000000,\"costKind\":3,\"costNote\":\"دستمزد هفته\",\"actualStart\":\"$(dd -3)T00:00:00\",\"submit\":true}"; check "p7a progress: the submitter fixes and sends again: round 2, level 1" '.success and .data.state == 1 and .data.round == 2 and .data.currentLevel == 1'
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true,\"percent\":30,\"note\":\"اصلاح درصد\"}"; check "p7a progress: planning edits the percent to 30 and approves level 1: the report moves to level 2" '.success and .data.state == 1 and .data.currentLevel == 2 and .data.percent == 30'
+as "$PLAN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; no "p7a progress: planning cannot decide level 2 (the PMO)"
+as "$ADMIN_TOKEN" POST $P7PA/submissions/decide "{\"id\":$P7SUB,\"approve\":true}"; check "p7a progress: the PMO approves the last level: the value is applied (approved, a manual progress row, a cost entry)" '.success and .data.state == 2 and .data.manualProgressId > 0 and .data.costEntryId > 0'
+as "$PM_TOKEN" GET "$P7PA/submissions/$P7SUB"; check "p7a progress: the history shows the edit with its changed value, the return and the application" '.success and ([.data.history[].action]|index("edited")) != null and ([.data.history[].action]|index("returned")) != null and ([.data.history[].action]|index("applied")) != null and (.data.history[]|select(.action=="edited").changesJson|contains("percent"))'
+as "$PLAN_TOKEN" GET "$PC/manual-progress?ActivityId=$P7MAN&PageSize=0"; check "p7a progress: the progress row went through the manual path: approved, 30 percent, proposed by planning who corrected it, decided by the PMO" '.success and ([.data.data[]|select(.state == 1 and .percent == 30)]|length) == 1'
 as "$PLAN_TOKEN" GET "$PC/costs?ContractId=$P7CT&PageSize=0"; check "p7a progress: the cost entry waits for the second finance check (needs check, not checked)" '.success and ([.data.data[]|select(.amount == 2000000 and .needsCheck == true and .checked == false)]|length) == 1'
-as "$PM_TOKEN" POST $PA/submissions "{\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7ACT,\"percent\":10}"; nomsg "p7a progress: an activity measured from tasks is refused (report the tasks)" "وظایف"
-as "$PM_TOKEN" POST $PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"}]}"; check "p7a progress: with nothing in approval the chain can be changed again" '.success'
-as "$PLAN_TOKEN" GET "$PA/reports/not-updated?ContractId=$P7CT&Days=0"; check "p7a progress: the not-updated report answers" '.success'
-as "$PLAN_TOKEN" GET "$PA/reports/overdue-updates"; check "p7a progress: the overdue-updates report answers" '.success'
-as "$WH_TOKEN" GET "$PA/reports/not-updated"; no "p7a progress: a warehouse user cannot read the not-updated report"
+as "$PM_TOKEN" POST $P7PA/submissions "{\"contractId\":$P7CT,\"target\":1,\"activityId\":$P7ACT,\"percent\":10}"; nomsg "p7a progress: an activity measured from tasks is refused (report the tasks)" "وظایف"
+as "$ADMIN_TOKEN" POST $P7PA/chain "{\"contractId\":$P7CT,\"levels\":[{\"role\":\"PMO\"}]}"; check "p7a progress: with nothing in approval the chain can be changed again" '.success'
+as "$PLAN_TOKEN" GET "$P7PA/reports/not-updated?ContractId=$P7CT&Days=0"; check "p7a progress: the not-updated report answers" '.success'
+as "$PLAN_TOKEN" GET "$P7PA/reports/overdue-updates"; check "p7a progress: the overdue-updates report answers" '.success'
+as "$WH_TOKEN" GET "$P7PA/reports/not-updated"; no "p7a progress: a warehouse user cannot read the not-updated report"
 
 # --- PMBOK registers
-as "$PLAN_TOKEN" POST $RG/risks "{\"contractId\":$P7CT,\"title\":\"تاخیر در تحویل ورق\",\"probability\":4,\"impact\":5,\"cause\":\"تحریم\",\"event\":\"دیرکرد\",\"effect\":\"تاخیر در ساخت\"}"
-check "p7a risk: the score is probability x impact (20), level critical or high from the settings, status assessed" '.success and .data.score == 20 and (.data.level == "critical" or .data.level == "high") and .data.status == 1 and (.data.number|startswith("RK"))'; P7RK=$(val .data.id)
-as "$PLAN_TOKEN" POST $RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":6,\"impact\":2}"; nomsg "p7a risk: a probability above 5 is refused" "۱ و ۵"
-as "$WH_TOKEN" POST $RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":1,\"impact\":1}"; no "p7a risk: a warehouse user cannot write the register"
-as "$PLAN_TOKEN" GET "$RG/risks/heat-map/$P7CT"; check "p7a risk: the heat map has 25 cells and the risk sits in probability 4 x impact 5" '.success and (.data.cells|length) == 25 and ([.data.cells[]|select(.probability == 4 and .impact == 5)][0].count) == 1'
-as "$PLAN_TOKEN" POST $TK "{\"title\":\"اقدام پیشگیرانه ورق\",\"kind\":2,\"contractId\":$P7CT,\"riskId\":$P7RK}"; check "p7a risk: an action is a task linked to the risk" '.success and .data.riskId == '$P7RK; P7RKT=$(val .data.id)
-as "$PLAN_TOKEN" POST $RG/risks/status "{\"id\":$P7RK,\"status\":4,\"note\":\"برطرف شد\"}"; nomsg "p7a risk: a risk with an open action cannot be closed" "اقدام"
-as "$PLAN_TOKEN" POST $RG/issues "{\"contractId\":$P7CT,\"title\":\"کمبود جرثقیل\",\"priority\":2,\"category\":\"تجهیزات\"}"; check "p7a issue: an issue is logged open" '.success and .data.status == 0 and (.data.number|startswith("IS"))'; P7IS=$(val .data.id)
-as "$PLAN_TOKEN" POST $RG/issues/action "{\"id\":$P7IS,\"action\":\"resolve\"}"; nomsg "p7a issue: resolving needs the resolution text" "راه‌حل"
-as "$PLAN_TOKEN" POST $RG/issues/action "{\"id\":$P7IS,\"action\":\"resolve\",\"note\":\"جرثقیل استیجاری آمد\"}"; check "p7a issue: resolved" '.success and .data.status == 2'
-as "$PLAN_TOKEN" POST $RG/issues/action "{\"id\":$P7IS,\"action\":\"close\"}"; nomsg "p7a issue: the resolver cannot close it" "شخص دیگری"
-as "$ADMIN_TOKEN" POST $RG/issues/action "{\"id\":$P7IS,\"action\":\"close\"}"; check "p7a issue: another person closes it" '.success and .data.status == 3'
-as "$PLAN_TOKEN" POST $RG/stakeholders "{\"contractId\":$P7CT,\"name\":\"سازمان کارفرما\",\"organization\":\"کارفرما\",\"roleTitle\":\"مدیر پروژه کارفرما\",\"influence\":5,\"interest\":5,\"engagementCurrent\":3,\"engagementDesired\":4}"; check "p7a stakeholder: saved in the manage-closely quadrant with an engagement gap of one" '.success and .data.quadrant == "manage-closely" and .data.engagementGap == 1'
-as "$PLAN_TOKEN" GET "$RG/stakeholders/matrix/$P7CT"; check "p7a stakeholder: the matrix lists it under manage-closely" '.success and (.data.manageClosely|length) == 1'
-as "$PLAN_TOKEN" GET "$RG/stakeholders/$P7CT"; check "p7a stakeholder: the register carries no phone number or address field" '.success and ([.data[0]|keys[]|select(test("phone|mobile|address";"i"))]|length) == 0'
-as "$PLAN_TOKEN" POST $RG/lessons "{\"contractId\":$P7CT,\"phase\":3,\"category\":\"تدارکات\",\"whatHappened\":\"تاخیر در سفارش\",\"recommendation\":\"سفارش زودتر\",\"submit\":true}"; P7LL=$(val .data.id)
-as "$PLAN_TOKEN" POST $RG/lessons/decide "{\"id\":$P7LL,\"approve\":true}"; no "p7a lessons: only the PMO approves a lesson"
-as "$ADMIN_TOKEN" POST $RG/lessons/decide "{\"id\":$P7LL,\"approve\":true}"; check "p7a lessons: the PMO approves (not the author)" '.success and .data.state == 2'
-as "$PLAN_TOKEN" POST $RG/deliverables "{\"contractId\":$P7CT,\"code\":\"d-01\",\"title\":\"نقشه اجرایی پمپ\"}"; check "p7a deliverables: saved with an upper-case code" '.success and .data.code == "D-01" and .data.status == 0'; P7DL=$(val .data.id)
-as "$PLAN_TOKEN" POST $RG/deliverables/action "{\"id\":$P7DL,\"action\":\"deliver\"}"; as "$PLAN_TOKEN" POST $RG/deliverables/action "{\"id\":$P7DL,\"action\":\"accept\"}"; no "p7a deliverables: the one who delivered cannot accept"
-as "$ADMIN_TOKEN" POST $RG/deliverables/action "{\"id\":$P7DL,\"action\":\"accept\"}"; check "p7a deliverables: the PMO accepts" '.success and .data.status == 3'
-as "$ADMIN_TOKEN" GET "$RG/evaluations/template?kind=1"; check "p7a evaluation: the contractor questionnaire has criteria with weights summing to 100" '.success and ([.data.criteria[].weight]|add) == 100'
-as "$ADMIN_TOKEN" POST $RG/evaluations "{\"contractId\":$P7CT,\"partyKind\":1,\"partyName\":\"پیمانکار آزمون\",\"scores\":[{\"criterion\":\"کیفیت\",\"weight\":50,\"score\":5},{\"criterion\":\"زمان\",\"weight\":50,\"score\":3}],\"submit\":true}"; check "p7a evaluation: the weighted score is 80 and a grade is set" '.success and .data.totalScore == 80 and (.data.grade|length) == 1 and .data.state == 1'; P7EV=$(val .data.id)
-as "$ADMIN_TOKEN" POST $RG/evaluations/decide "{\"id\":$P7EV,\"approve\":true}"; no "p7a evaluation: the evaluator cannot approve his own evaluation"
-as "$ADMIN_TOKEN" POST $RG/weekly/generate "{\"contractId\":$P7CT}"; check "p7a weekly: the report is generated from the registers (draft, numbered WR)" '.success and .data.state == 0 and (.data.number|startswith("WR")) and (.data.auto.openRisks) >= 1'; P7WK=$(val .data.id)
-as "$ADMIN_TOKEN" POST $RG/weekly/$P7WK/release; nomsg "p7a weekly: the release needs the summary" "خلاصه"
-as "$PLAN_TOKEN" POST $RG/weekly "{\"id\":$P7WK,\"summary\":\"هفته عادی\",\"nextWeekPlan\":\"ادامه کار\"}"; check "p7a weekly: the summary is edited" '.success and .data.summary == "هفته عادی"'
-as "$PLAN_TOKEN" POST $RG/weekly/$P7WK/release; no "p7a weekly: planning cannot release (the PMO does)"
-as "$ADMIN_TOKEN" POST $RG/weekly/$P7WK/release; check "p7a weekly: the PMO releases it" '.success and .data.state == 1'
-as "$PLAN_TOKEN" POST $RG/weekly "{\"id\":$P7WK,\"summary\":\"تغییر بعد از انتشار\"}"; no "p7a weekly: a released report is read only"
-as "$PLAN_TOKEN" POST $RG/phase-evaluations "{\"contractId\":$P7CT,\"phase\":3,\"scheduleScore\":4,\"costScore\":3,\"qualityScore\":5,\"scopeScore\":4,\"achievements\":\"پیشرفت خوب\",\"decision\":2,\"submit\":true}"; check "p7a phase: the overall score is the mean of the four (4.00)" '.success and .data.overallScore == 4 and .data.state == 1'; P7PH=$(val .data.id)
-as "$PLAN_TOKEN" POST $RG/phase-evaluations/decide "{\"id\":$P7PH,\"approve\":true}"; no "p7a phase: only the PMO approves a phase evaluation"
-as "$ADMIN_TOKEN" POST $RG/phase-evaluations/decide "{\"id\":$P7PH,\"approve\":true}"; check "p7a phase: the PMO approves" '.success and .data.state == 2'
-as "$PLAN_TOKEN" GET "$RG/one-page/$P7CT"; check "p7a one-page: the project dashboard carries the registers (risks, deliverables, tasks, an S-curve array)" '.success and .data.risksOpen >= 1 and .data.deliverablesTotal == 1 and .data.deliverablesAccepted == 1 and (.data.sCurve|type) == "array" and (.data.topRisks|length) >= 1'
-as "$WH_TOKEN" GET "$RG/one-page/$P7CT"; no "p7a one-page: a warehouse user cannot read it"
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"تاخیر در تحویل ورق\",\"probability\":4,\"impact\":5,\"cause\":\"تحریم\",\"event\":\"دیرکرد\",\"effect\":\"تاخیر در ساخت\"}"
+check "p7a risk: the score is probability x impact (20), level critical or high from the settings, status assessed" '.success and .data.score == 20 and .data.level == "critical" and .data.status == 1 and (.data.number|startswith("RK"))'; P7RK=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":6,\"impact\":2}"; nomsg "p7a risk: a probability above 5 is refused" "۱ و ۵"
+as "$WH_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":1,\"impact\":1}"; no "p7a risk: a warehouse user cannot write the register"
+as "$PLAN_TOKEN" GET "$P7RG/risks/heat-map/$P7CT"; check "p7a risk: the heat map has 25 cells and the risk sits in probability 4 x impact 5" '.success and (.data.cells|length) == 25 and ([.data.cells[]|select(.probability == 4 and .impact == 5)][0].count) == 1'
+as "$PLAN_TOKEN" POST $P7TK "{\"title\":\"اقدام پیشگیرانه ورق\",\"kind\":2,\"contractId\":$P7CT,\"riskId\":$P7RK}"; check "p7a risk: an action is a task linked to the risk" '.success and .data.riskId == '$P7RK; P7RKT=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/risks/status "{\"id\":$P7RK,\"status\":4,\"note\":\"برطرف شد\"}"; nomsg "p7a risk: a risk with an open action cannot be closed" "اقدام"
+as "$PLAN_TOKEN" POST $P7RG/issues "{\"contractId\":$P7CT,\"title\":\"کمبود جرثقیل\",\"priority\":2,\"category\":\"تجهیزات\"}"; check "p7a issue: an issue is logged open" '.success and .data.status == 0 and (.data.number|startswith("IS"))'; P7IS=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"resolve\"}"; nomsg "p7a issue: resolving needs the resolution text" "راه‌حل"
+as "$PLAN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"resolve\",\"note\":\"جرثقیل استیجاری آمد\"}"; check "p7a issue: resolved" '.success and .data.status == 2'
+as "$PLAN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"close\"}"; nomsg "p7a issue: the resolver cannot close it" "شخص دیگری"
+as "$ADMIN_TOKEN" POST $P7RG/issues/action "{\"id\":$P7IS,\"action\":\"close\"}"; check "p7a issue: another person closes it" '.success and .data.status == 3'
+as "$PLAN_TOKEN" POST $P7RG/stakeholders "{\"contractId\":$P7CT,\"name\":\"سازمان کارفرما\",\"organization\":\"کارفرما\",\"roleTitle\":\"مدیر پروژه کارفرما\",\"influence\":5,\"interest\":5,\"engagementCurrent\":3,\"engagementDesired\":4}"; check "p7a stakeholder: saved in the manage-closely quadrant with an engagement gap of one" '.success and .data.quadrant == "manage-closely" and .data.engagementGap == 1'
+as "$PLAN_TOKEN" GET "$P7RG/stakeholders/matrix/$P7CT"; check "p7a stakeholder: the matrix lists it under manage-closely" '.success and (.data.manageClosely|length) == 1'
+as "$PLAN_TOKEN" GET "$P7RG/stakeholders/$P7CT"; check "p7a stakeholder: the register carries no phone number or address field" '.success and ([.data[0]|keys[]|select(test("phone|mobile|address";"i"))]|length) == 0'
+as "$PLAN_TOKEN" POST $P7RG/lessons "{\"contractId\":$P7CT,\"phase\":3,\"category\":\"تدارکات\",\"whatHappened\":\"تاخیر در سفارش\",\"recommendation\":\"سفارش زودتر\",\"submit\":true}"; check "p7a lessons: a lesson is saved and sent" '.success and .data.id > 0'; P7LL=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/lessons/decide "{\"id\":$P7LL,\"approve\":true}"; no "p7a lessons: only the PMO approves a lesson"
+as "$ADMIN_TOKEN" POST $P7RG/lessons/decide "{\"id\":$P7LL,\"approve\":true}"; check "p7a lessons: the PMO approves (not the author)" '.success and .data.state == 2'
+as "$PLAN_TOKEN" POST $P7RG/deliverables "{\"contractId\":$P7CT,\"code\":\"d-01\",\"title\":\"نقشه اجرایی پمپ\"}"; check "p7a deliverables: saved with an upper-case code" '.success and .data.code == "D-01" and .data.status == 0'; P7DL=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/deliverables/action "{\"id\":$P7DL,\"action\":\"deliver\"}"; check "p7a deliverables: delivered" '.success and .data.status == 2'; as "$PLAN_TOKEN" POST $P7RG/deliverables/action "{\"id\":$P7DL,\"action\":\"accept\"}"; no "p7a deliverables: the one who delivered cannot accept"
+as "$ADMIN_TOKEN" POST $P7RG/deliverables/action "{\"id\":$P7DL,\"action\":\"accept\"}"; check "p7a deliverables: the PMO accepts" '.success and .data.status == 3'
+as "$ADMIN_TOKEN" GET "$P7RG/evaluations/template?kind=1"; check "p7a evaluation: the contractor questionnaire has criteria with weights summing to 100" '.success and ([.data.criteria[].weight]|add) == 100'
+call POST Provider "{\"name\":\"پیمانکار آزمون بسته هفت\",\"categoryId\":${CAT:-0}}"; P7PRV=$(jq -r '.data.id // empty' "$B")
+as "$ADMIN_TOKEN" POST $P7RG/evaluations "{\"contractId\":$P7CT,\"partyKind\":1,\"partyName\":\"پیمانکار آزمون\",\"submit\":true,\"scores\":[{\"criterion\":\"کیفیت\",\"weight\":50,\"score\":5}]}"; nomsg "p7a evaluation: sending without choosing a provider from the list is refused" "تامین‌کنندگان"
+as "$ADMIN_TOKEN" POST $P7RG/evaluations "{\"contractId\":$P7CT,\"partyKind\":1,\"providerId\":$P7PRV,\"partyName\":\"پیمانکار آزمون\",\"scores\":[{\"criterion\":\"کیفیت\",\"weight\":50,\"score\":5},{\"criterion\":\"زمان\",\"weight\":50,\"score\":3}],\"submit\":true}"; check "p7a evaluation: the weighted score is 80 and a grade is set" '.success and .data.totalScore == 80 and (.data.grade|length) == 1 and .data.state == 1'; P7EV=$(val .data.id)
+as "$ADMIN_TOKEN" POST $P7RG/evaluations/decide "{\"id\":$P7EV,\"approve\":true}"; no "p7a evaluation: the evaluator cannot approve his own evaluation"
+as "$ADMIN_TOKEN" POST $P7RG/weekly/generate "{\"contractId\":$P7CT}"; check "p7a weekly: the report is generated from the registers (draft, numbered WR)" '.success and .data.state == 0 and (.data.number|startswith("WR")) and .data.auto.openRisks == 1'; P7WK=$(val .data.id)
+as "$ADMIN_TOKEN" POST $P7RG/weekly/$P7WK/release; nomsg "p7a weekly: the release needs the summary" "خلاصه"
+as "$PLAN_TOKEN" POST $P7RG/weekly "{\"id\":$P7WK,\"summary\":\"هفته عادی\",\"nextWeekPlan\":\"ادامه کار\"}"; check "p7a weekly: the summary is edited" '.success and .data.summary == "هفته عادی"'
+as "$PLAN_TOKEN" POST $P7RG/weekly/$P7WK/release; no "p7a weekly: planning cannot release (the PMO does)"
+as "$ADMIN_TOKEN" POST $P7RG/weekly/$P7WK/release; check "p7a weekly: the PMO releases it" '.success and .data.state == 1'
+as "$PLAN_TOKEN" POST $P7RG/weekly "{\"id\":$P7WK,\"summary\":\"تغییر بعد از انتشار\"}"; no "p7a weekly: a released report is read only"
+as "$PLAN_TOKEN" POST $P7RG/phase-evaluations "{\"contractId\":$P7CT,\"phase\":3,\"scheduleScore\":4,\"costScore\":3,\"qualityScore\":5,\"scopeScore\":4,\"achievements\":\"پیشرفت خوب\",\"decision\":2,\"submit\":true}"; check "p7a phase: the overall score is the mean of the four (4.00)" '.success and .data.overallScore == 4 and .data.state == 1'; P7PH=$(val .data.id)
+as "$PLAN_TOKEN" POST $P7RG/phase-evaluations/decide "{\"id\":$P7PH,\"approve\":true}"; no "p7a phase: only the PMO approves a phase evaluation"
+as "$ADMIN_TOKEN" POST $P7RG/phase-evaluations/decide "{\"id\":$P7PH,\"approve\":true}"; check "p7a phase: the PMO approves" '.success and .data.state == 2'
+as "$PLAN_TOKEN" POST $P7RG/photos "{\"contractId\":$P7CT,\"caption\":\"عکس پیشرفت\",\"takenDate\":\"$(dd 0)T00:00:00\"}"; check "p7a photos: the photo row is created first (no file field; the file goes through the attachment panel, owner type 26)" '.success and .data.id > 0 and .data.documentId == null and .data.attachmentCount == 0'; P7PH1=$(val .data.id)
+printf '%%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%%%EOF\n' > "$OUT/p7-photo.pdf"
+TOKEN=$PLAN_TOKEN; attach 26 $P7PH1 3 "عکس پیشرفت" A "$OUT/p7-photo.pdf"; TOKEN=$ADMIN_TOKEN; check "p7a photos: the file is attached through the generic panel to the photo (owner type 26)" '.success and .data.id > 0'
+as "$PLAN_TOKEN" GET "$P7RG/photos?ContractId=$P7CT&PageSize=0"; check "p7a photos: the register now shows the document and one attachment" '.success and ([.data.data[]|select(.id == '$P7PH1' and .attachmentCount == 1 and .documentId != null)]|length) == 1'
+# the files of a task go through the same panel: the assignee uploads, a stranger cannot
+TOKEN=$WH_TOKEN; attach 24 $P7T2 3 "برگه کار" A "$OUT/p7-photo.pdf"; TOKEN=$ADMIN_TOKEN; check "p7a tasks: the assignee attaches a file to his task through the generic panel (owner type 24)" '.success and .data.id > 0'
+TOKEN=$SEC_TOKEN; attach 24 $P7T2 3 "فایل غریبه" A "$OUT/p7-photo.pdf"; TOKEN=$ADMIN_TOKEN; check "p7a tasks: somebody who is not a party of the task cannot attach to it" '.success == false'
+as "$PM_TOKEN" GET "$P7TK/$P7T2"; check "p7a tasks: the task shows one attachment" '.success and .data.attachmentCount == 1'
+as "$PLAN_TOKEN" GET "$P7RG/one-page/$P7CT"; check "p7a one-page: the project dashboard carries the registers (risks, deliverables, tasks, an S-curve array)" '.success and .data.risksOpen == 1 and .data.deliverablesTotal == 1 and .data.deliverablesAccepted == 1 and (.data.sCurve|type) == "array" and (.data.topRisks|length) == 1'
+as "$WH_TOKEN" GET "$P7RG/one-page/$P7CT"; no "p7a one-page: a warehouse user cannot read it"
 
 # --- the extended daily site report: children, confirmer is not the author
 DJ="{\"contractId\":$P7CT,\"unit\":\"ALL\",\"reportDate\":\"$(dd 0)T00:00:00\",\"weather\":\"آفتابی\",\"notes\":\"روز عادی\",\"lines\":[],\"manpower\":[{\"kind\":1,\"title\":\"جوشکار\",\"count\":5,\"present\":4,\"absent\":1},{\"kind\":2,\"title\":\"شرکت پیمانکار آزمون\",\"activityType\":\"داربست\",\"personDays\":6}],\"materials\":[{\"description\":\"ورق ۱۰ میلی‌متر\",\"unit\":\"kg\",\"quantity\":120}],\"machinery\":[{\"name\":\"جرثقیل\",\"ownership\":2,\"present\":1,\"active\":1,\"hours\":6}],\"obstacles\":[{\"category\":\"هوا\",\"description\":\"باد شدید\",\"impactHours\":2}],\"hseEvents\":[{\"kind\":1,\"description\":\"سقوط ابزار بدون آسیب\",\"personsInvolved\":0}]}"
@@ -10938,9 +10998,9 @@ as "$PLAN_TOKEN" GET "$PC/daily-reports?ContractId=$P7CT"; check "p7a daily: the
 as "$PLAN_TOKEN" GET "$PC/daily-report/$P7DR"; check "p7a daily: one report by id returns its rows" '.success and (.data.manpower|length) == 2 and .data.canConfirm == false'
 
 # --- notifications: the unified inbox carries the assignment, and the gateway is off by default
-as "$ADMIN_TOKEN" GET "$TK?Cartable=mine&PageSize=0"; [ "$CODE" = "200" ] && ok "p7a notifications: the task list answers for the PMO" || bad "p7a notifications: the task list answers for the PMO"
-as "$ADMIN_TOKEN" POST $TK/reminders/run; check "p7a notifications: the reminder job runs without an external call (counts only)" '.success and (.data.reminders|type) == "number"'
-as "$PLAN_TOKEN" POST $TK/reminders/run; r403 "p7a notifications: only the PMO or the CEO runs the reminders by hand (403)"
+as "$ADMIN_TOKEN" GET "$P7TK?Cartable=mine&PageSize=0"; [ "$CODE" = "200" ] && ok "p7a notifications: the task list answers for the PMO" || bad "p7a notifications: the task list answers for the PMO"
+as "$ADMIN_TOKEN" POST $P7TK/reminders/run; check "p7a notifications: the reminder job runs without an external call (counts only)" '.success and (.data.reminders|type) == "number"'
+as "$PLAN_TOKEN" POST $P7TK/reminders/run; r403 "p7a notifications: only the PMO or the CEO runs the reminders by hand (403)"
 TOKEN=$ADMIN_TOKEN
 
 finished=1

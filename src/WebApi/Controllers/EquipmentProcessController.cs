@@ -115,9 +115,9 @@ namespace WebApi.Controllers
         [HttpDelete("detach-file-from-equipmentProcess")]
         [ProducesResponseType(typeof(ResponseDto<bool>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromEquipmentProcessAsync(
-            int equipmentProcessId, Guid fileId, CancellationToken cancellationToken)
+            int equipmentProcessId, Guid fileId, string reason, CancellationToken cancellationToken)
         {
-            return Ok(await _equipmentProcessService.DetachFileAsync(equipmentProcessId, documentId: fileId, cancellationToken: cancellationToken));
+            return Ok(await _equipmentProcessService.DetachFileAsync(equipmentProcessId, documentId: fileId, reason: reason, cancellationToken: cancellationToken));
         }
 
         [Authorize(Roles = LegacyRoles.EngineeringWriters)]

@@ -64,7 +64,6 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int CostKind { get; set; }
         public string CostNote { get; set; }
         public string Comment { get; set; }
-        public List<Guid> AttachmentDocumentIds { get; set; } = new List<Guid>();
 
         /// <summary>True sends the report into the chain (it is locked for the submitter from then on).</summary>
         public bool Submit { get; set; }
@@ -132,7 +131,7 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int CostKind { get; set; }
         public string CostNote { get; set; }
         public string Comment { get; set; }
-        public List<Guid> AttachmentDocumentIds { get; set; } = new List<Guid>();
+        public int AttachmentCount { get; set; }
         public PcSubmissionState State { get; set; }
         public int Round { get; set; }
         public int CurrentLevel { get; set; }
@@ -472,7 +471,6 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
     public class PcPhotoSaveDto
     {
         public int ContractId { get; set; }
-        public Guid DocumentId { get; set; }
         public string Caption { get; set; }
         public DateTime? TakenDate { get; set; }
         public int? WbsNodeId { get; set; }
@@ -483,7 +481,10 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
     {
         public int Id { get; set; }
         public int ContractId { get; set; }
-        public Guid DocumentId { get; set; }
+
+        /// <summary>The picture: the newest valid attachment of the photo (null until it is uploaded through the attachment panel).</summary>
+        public Guid? DocumentId { get; set; }
+        public int AttachmentCount { get; set; }
         public string Caption { get; set; }
         public DateTime TakenDate { get; set; }
         public string TakenDateText { get; set; }
