@@ -14,6 +14,7 @@ const depth = ref<number | null>(null);
 const data = ref<any>(null);
 const busy = ref(false);
 let last: any = null;
+const modeTitles: Record<string, string> = { product: "محصول", part: "قطعه", serial: "سریال", lot: "بچ", choices: "انتخاب" };
 
 function params(extra: any = {}) {
   return { Q: q.value.trim(), Depth: depth.value || undefined, ...extra };
@@ -71,8 +72,9 @@ if (q.value) run();
     <div v-if="data && data.root">
       <KsReportHeader title="درخت محصول و ردیابی" :subtitle="data.root.title" />
       <div class="small mb-2">
-        <span class="inv-badge" :class="data.mode === 'product' ? 'trace-b-info' : 'trace-b-ok'">{{ data.mode }}</span>
+        <span class="inv-badge" :class="data.mode === 'product' ? 'trace-b-info' : 'trace-b-ok'">{{ modeTitles[data.mode] || data.mode }}</span>
         <span v-if="data.pricesMasked" class="inv-badge trace-b-warn ms-2">قیمت‌ها برای این نقش نمایش داده نمی‌شود</span>
+        <span v-if="data.namesMasked" class="inv-badge trace-b-warn ms-2">نام تامین‌کننده و کارفرما محرمانه است</span>
         <span class="inv-muted ms-2">{{ data.nodeCount }} گره · عمق {{ data.maxDepth }}</span>
       </div>
       <div v-if="data.truncated" class="alert alert-warning py-1 small">درخت به سقف {{ data.maxParts }} قطعه یا عمق {{ data.maxDepth }} رسید و کوتاه شده است.</div>

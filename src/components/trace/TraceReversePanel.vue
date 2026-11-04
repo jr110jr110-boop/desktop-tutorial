@@ -70,12 +70,13 @@ if (q.value) run();
     <div v-if="data && data.roots.length">
       <KsReportHeader title="ردیابی معکوس (فراخوان)" :subtitle="data.query" />
       <div v-if="data.truncated" class="alert alert-warning py-1 small">نتیجه به سقف عمق ({{ data.maxDepth }}) یا تعداد گره‌ها رسید و کوتاه شده است.</div>
+      <div v-if="data.namesMasked" class="alert alert-secondary py-1 small">نام تامین‌کننده و کارفرما برای این نقش محرمانه است؛ فقط کدها نمایش داده می‌شود.</div>
       <ul v-if="(data.notes || []).length" class="small inv-muted">
         <li v-for="(n, i) in data.notes" :key="i">{{ n }}</li>
       </ul>
 
       <div class="row g-2 mb-3 text-center">
-        <div v-for="c in [['مبدا', data.counts.roots], ['گره', data.counts.nodes], ['کالا', data.counts.items], ['بچ', data.counts.lots], ['سریال', data.counts.serials], ['محصول نهایی', data.counts.terminals], ['پروژه', data.counts.projects], ['تحویل به مشتری', data.counts.deliveries]]" :key="c[0]" class="col-6 col-md-3 col-lg">
+        <div v-for="c in [['مبدا', data.counts.roots], ['گره', data.counts.nodes], ['کالا', data.counts.items], ['بچ', data.counts.lots], ['سریال', data.counts.serials], ['محصول نهایی', data.counts.terminals], ['پروژه', data.counts.projects], ['تحویل به مشتری', data.counts.deliveries], ['مصرف خارج از دستور', data.counts.consumptions], ['پایگاه نصب‌شده', data.counts.installed]]" :key="c[0]" class="col-6 col-md-3 col-lg">
           <div class="border rounded p-2"><div class="h5 mb-0">{{ c[1] }}</div><div class="small inv-muted">{{ c[0] }}</div></div>
         </div>
       </div>
@@ -116,6 +117,27 @@ if (q.value) run();
       <div v-if="!data.projects.length" class="inv-muted small mb-2">پروژه‌ای پیدا نشد.</div>
       <ul v-else class="small">
         <li v-for="p in data.projects" :key="p.workOrderId">{{ p.workOrderCode }} {{ p.workOrderTitle }} · قرارداد {{ p.contractCode }} · کارفرما: {{ p.customer }} ({{ p.nodeCount }} گره)</li>
+      </ul>
+
+      <h2 class="h6">مصرف خارج از دستور تولید</h2>
+      <div v-if="!data.consumptions.length" class="inv-muted small mb-2">موردی پیدا نشد.</div>
+      <div v-else class="table-responsive mb-3">
+        <table class="table table-sm">
+          <thead><tr><th>سند</th><th>تاریخ</th><th>نوع</th><th>کالا</th><th>بچ / سریال</th><th>مقدار</th><th>پروژه</th><th>تامین‌کننده</th></tr></thead>
+          <tbody>
+            <tr v-for="x in data.consumptions" :key="x.documentId + x.nodeKey">
+              <td class="inv-ltr">{{ x.documentNumber }}</td><td>{{ jalali(x.documentDate) }}</td>
+              <td>{{ x.kind === 'issue' ? 'حواله' : x.kind === 'subcontract' ? 'ارسال به پیمانکار' : 'برگشت به تامین‌کننده' }}</td>
+              <td class="inv-ltr">{{ x.itemCode }}</td><td class="inv-ltr">{{ x.serialNumber || x.lotNumber }}</td><td>{{ num(x.quantity) }}</td><td class="inv-ltr">{{ x.workOrderCode }}</td><td>{{ x.providerName }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="h6">پایگاه نصب‌شده (خدمات پس از فروش)</h2>
+      <div v-if="!data.installed.length" class="inv-muted small mb-2">موردی پیدا نشد.</div>
+      <ul v-else class="small mb-3">
+        <li v-for="x in data.installed" :key="x.nodeKey">{{ x.title }} · تگ {{ x.tag }} · سریال {{ x.serialNumber }} · پروژه {{ x.workOrderCode }} · کارفرما: {{ x.customer }} · تحویل {{ jalali(x.handoverDate) }}<span v-if="x.decommissioned"> (از رده خارج)</span></li>
       </ul>
 
       <h2 class="h6">تحویل به مشتری</h2>

@@ -300,7 +300,8 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles, TraceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { canOpenTrace } from "@/composables/traceAccess";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -417,7 +418,7 @@ const links = {
     { title: "اسناد انبار (رسید، حواله، انتقال)", routeName: "InventoryDocuments", disabled: !accessList.includes("Warehouse") },
     { title: "موجودی", routeName: "InventoryStock", disabled: !accessList.includes("Warehouse") },
     { title: "کاردکس", routeName: "InventoryKardex", disabled: !accessList.includes("Warehouse") },
-    { title: "ردیابی و شجره‌نامه", routeName: "InventoryTrace", disabled: !hasRole(TraceRoles.readers) },
+    { title: "ردیابی و شجره‌نامه", routeName: "InventoryTrace", disabled: !canOpenTrace() },
     { title: "کارتابل مراحل ساخت و QC", routeName: "InventoryOperations", disabled: !accessList.includes("Traceability") },
     { title: "مسیر ساخت", routeName: "InventoryRouting", disabled: !accessList.includes("Traceability") },
     { title: "کالاها و کدینگ", routeName: "InventoryItems", disabled: !accessList.includes("Warehouse") },

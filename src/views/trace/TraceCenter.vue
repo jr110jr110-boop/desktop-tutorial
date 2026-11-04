@@ -6,27 +6,34 @@ import TraceTreePanel from "@/components/trace/TraceTreePanel.vue";
 import TraceReversePanel from "@/components/trace/TraceReversePanel.vue";
 import ScanTrace from "@/views/inventory/Trace.vue";
 import QualityTrace from "@/views/quality/Traceability.vue";
+import { canTraceQuality, canTraceScan, canTraceTree } from "@/composables/traceAccess";
 
 const route = useRoute();
 const router = useRouter();
 
+const allowed: Record<string, () => boolean> = { tree: canTraceTree, reverse: canTraceTree, scan: canTraceScan, quality: canTraceQuality };
 const tabs = [
   { key: "tree", title: "درخت محصول" },
   { key: "reverse", title: "ردیابی معکوس (فراخوان)" },
   { key: "scan", title: "اسکن برچسب" },
   { key: "quality", title: "سریال و بچ (کیفیت)" },
-];
-// ?tab= wins; the old links (?serial= / ?lot= of the scan page, the quality route) land on their own tab
+].filter((t) => allowed[t.key]());
+// ?tab= wins; the old links (?serial= / ?lot= of the scan page, the quality route) land on their own tab; a tab the user may not open is never chosen
 const tab = computed(() => {
+  const open = (key: string) => tabs.some((t) => t.key === key);
   const asked = String(route.query.tab || "");
-  if (tabs.some((t) => t.key === asked)) return asked;
-  if (route.meta.tab) return String(route.meta.tab);
-  if (route.query.serial || route.query.lot) return "scan";
-  return "tree";
+  if (open(asked)) return asked;
+  if (route.meta.tab && open(String(route.meta.tab))) return String(route.meta.tab);
+  if ((route.query.serial || route.query.lot) && open("scan")) return "scan";
+  return tabs.length ? tabs[0].key : "";
 });
 
 function show(key: string) {
-  router.replace({ query: { tab: key } });
+  // the search text of the tree and the reverse tab is kept while the user moves between tabs
+  const keep: Record<string, any> = {};
+  if (route.query.q) keep.q = route.query.q;
+  if (route.query.rq) keep.rq = route.query.rq;
+  router.replace({ query: { ...keep, tab: key } });
 }
 </script>
 

@@ -3,7 +3,8 @@ import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
-import { AccountRoles, AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles, TraceRoles } from "@/composables/roles";
+import { canOpenTrace } from "@/composables/traceAccess";
+import { AccountRoles, AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -412,7 +413,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/documents/:id", name: "InventoryDocumentEdit", component: () => import("@/views/inventory/DocumentEdit.vue"), meta: { access: "warehouse" } },
   { path: "/inventory/stock", name: "InventoryStock", component: () => import("@/views/inventory/Stock.vue"), meta: { access: "warehouse" } },
   { path: "/inventory/kardex", name: "InventoryKardex", component: () => import("@/views/inventory/Kardex.vue"), meta: { access: "warehouse" } },
-  { path: "/inventory/trace", name: "InventoryTrace", component: () => import("@/views/trace/TraceCenter.vue"), meta: { roles: TraceRoles.readers } },
+  { path: "/inventory/trace", name: "InventoryTrace", component: () => import("@/views/trace/TraceCenter.vue"), meta: { traceAny: true } },
   { path: "/inventory/routing", name: "InventoryRouting", component: () => import("@/views/inventory/Routing.vue"), meta: { access: "traceability" } },
   { path: "/inventory/operations", name: "InventoryOperations", component: () => import("@/views/inventory/Operations.vue"), meta: { access: "traceability" } },
   { path: "/inventory/sepidar", name: "InventorySepidar", component: () => import("@/views/inventory/Sepidar.vue"), meta: { access: "sepidar" } },
@@ -528,7 +529,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/quality/wps", name: "QualityWps", component: () => import("@/views/quality/Wps.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/weld-logs", name: "QualityWeldLogs", component: () => import("@/views/quality/WeldLogs.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/certificates", name: "QualityCertificates", component: () => import("@/views/quality/Certificates.vue"), meta: { roles: QualityRoles.readers } },
-  { path: "/quality/traceability", name: "QualityTraceability", component: () => import("@/views/trace/TraceCenter.vue"), meta: { roles: TraceRoles.readers, tab: "quality" } },
+  { path: "/quality/traceability", name: "QualityTraceability", component: () => import("@/views/trace/TraceCenter.vue"), meta: { traceAny: true, tab: "quality" } },
   // the CAPA pages are open to every signed-in user (R1q D13): the API shows a non-reader only the CAPAs he owns or has an action in, and the owners of actions reach them from the inbox
   { path: "/quality/capa", name: "QualityCapas", component: () => import("@/views/quality/Capas.vue") },
   { path: "/quality/capa/:id", name: "QualityCapaEdit", component: () => import("@/views/quality/CapaEdit.vue") },
@@ -718,6 +719,8 @@ router.beforeEach((to, from, next) => {
   if (!loggedIn) return next({ name: "Login" });
   // the CEO starts on the CEO home page (the login page reloads to "/", which lands here)
   if (to.name === "Dashboard" && currentRole() === Roles.CEO) return next({ name: "CeoHome" });
+  // the trace page opens to the readers of any of its tabs (the old scan access, the quality readers, the new trace readers); each tab checks its own rule
+  if (to.meta.traceAny && !canOpenTrace()) return handleHasNoAccess(next);
   const claim = typeof to.meta.access === "string" ? claims[to.meta.access] : undefined;
   if (claim && !accessList.includes(claim)) return handleHasNoAccess(next);
   // features switched off by company decision (one company, rial only)

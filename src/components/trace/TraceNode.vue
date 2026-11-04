@@ -4,9 +4,11 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { downloadFile } from "@/api/InventoryAPIs";
 import { jalali, num } from "@/composables/inventory";
+import { hasRole, ProcurementRoles } from "@/composables/roles";
 
 const props = defineProps<{ node: any; level: number; open?: boolean }>();
 const router = useRouter();
+const canDossier = hasRole(ProcurementRoles.dossier);
 const expanded = ref(props.open !== undefined ? props.open : props.level < 2);
 
 const kindTitles: Record<string, string> = {
@@ -51,7 +53,7 @@ function dossier() {
       <span v-if="node.quantity !== null && node.quantity !== undefined" class="small">{{ num(node.quantity) }} {{ node.unit }}</span>
       <span v-if="node.date" class="inv-muted small">{{ jalali(node.date) }}</span>
       <button v-if="node.link && node.link.type" type="button" class="btn btn-sm btn-link p-0 d-print-none" @click="go">باز کردن {{ node.link.number || "" }}</button>
-      <button v-if="node.dossierNumber" type="button" class="btn btn-sm btn-link p-0 d-print-none" @click="dossier">پرونده خرید {{ node.dossierNumber }}</button>
+      <button v-if="node.dossierNumber && canDossier" type="button" class="btn btn-sm btn-link p-0 d-print-none" @click="dossier">پرونده خرید {{ node.dossierNumber }}</button>
     </div>
     <div v-show="expanded" class="trace-body">
       <ul v-if="(node.facts || []).length" class="trace-facts">
