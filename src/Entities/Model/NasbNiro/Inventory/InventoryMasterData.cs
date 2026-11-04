@@ -64,6 +64,15 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>Old code (RayDana or the Excel database), kept for searching only.</summary>
         public string LegacyCode { get; set; }
 
+        /// <summary>PB1: the BOM part number (16.11.01.001.2). The item of a part at an OPC stage has the same part number and a StageCode2; unique per part number and stage.</summary>
+        public string PartNumber { get; set; }
+
+        /// <summary>PB1: the two-letter OPC stage code (RW, CT, RL ...) of a stage item; empty for the part itself.</summary>
+        public string StageCode2 { get; set; }
+
+        /// <summary>PB1: the item of the part itself, for a stage item.</summary>
+        public int? PartItemId { get; set; }
+
         /// <summary>Receipts go to quarantine and wait for incoming inspection (true for every group except office consumables).</summary>
         public bool RequiresIncomingInspection { get; set; } = true;
 

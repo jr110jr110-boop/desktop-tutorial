@@ -250,6 +250,11 @@ namespace IocConfig
             services.AddHostedService(sp => sp.GetRequiredService<Services.NasbNiro.Ai.AiWorkQueue>());
             services.AddHostedService<Services.NasbNiro.Ai.AiSeatScheduler>();
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IPbCodingService, Services.NasbNiro.ProductBank.PbCodingService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IPbBomService, Services.NasbNiro.ProductBank.PbBomService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IPbRoutingService, Services.NasbNiro.ProductBank.PbRoutingService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IPbProductService, Services.NasbNiro.ProductBank.PbProductService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IPbSeedService, Services.NasbNiro.ProductBank.PbSeedService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcCommercialService, Services.NasbNiro.ProjectControl.PcCommercialService>();

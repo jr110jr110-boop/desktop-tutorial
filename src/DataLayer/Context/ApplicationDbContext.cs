@@ -103,6 +103,24 @@ namespace DataLayer.Context
         public virtual DbSet<AssemblyLink> AssemblyLinks { get; set; }
         #endregion
 
+        #region Product bank (PB1)
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbSetting> PbSettings { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbStage> PbStages { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbLegacyMapping> PbLegacyMappings { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProduct> PbProducts { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbBomHeader> PbBomHeaders { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbBomLine> PbBomLines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbOpcRouting> PbOpcRoutings { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbOpcStep> PbOpcSteps { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbWbsTemplate> PbWbsTemplates { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbWbsTemplateNode> PbWbsTemplateNodes { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbWbsTemplateLink> PbWbsTemplateLinks { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBaseline> PbProjectBaselines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBomLine> PbProjectBomLines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectRouting> PbProjectRoutings { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBomChange> PbProjectBomChanges { get; set; }
+        #endregion
+
         #region BaseClass
 
         public virtual DbSet<AppLogItem> AppLogItems { get; set; }

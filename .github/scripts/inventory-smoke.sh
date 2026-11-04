@@ -10796,6 +10796,164 @@ as "$FM_TOKEN" POST $PC/guarantees/request-release "$GRELB"; nomsg "r1 gaps: a s
 as "$FM_TOKEN" GET "$PC/guarantees?ContractId=$PCT&PageSize=0"; check "r1 gaps: the finance manager reads the guarantee with CanConfirmRelease true" '.success and ([.data.data[]|select(.no=="PC-G-3")][0]|(.canConfirmRelease == true and .canRequestRelease == false))'
 as "$FM_TOKEN" POST $PC/guarantees/confirm-release "{\"guaranteeId\":$PCG3}"; check "r1 gaps: confirm-release by another user releases it with the date and the note of the request" '.success and .data.status == 6 and ([.data.events[]|select(.kind == 4)]|length) == 1 and ([.data.events[]|select(.kind == 4)][0].note|contains("نامه بانک دو مرحله‌ای"))'
 
+# =====================================================================================================================================================================
+# --- PB1: part-number item coding, BOM master with revisions, OPC routings, product bank (FY seed, MSPDI template), project copy and deviations
+# ENGINEERING and PLANNING are not sensitive roles, so the two new users need no approve_grants; the PMO users (admin, pmo2.ci) already exist and are the approver and the releaser.
+PB=product-bank
+user2 eng2.ci 4 'Ci#Eng2-User-2026' 09120000081 0012345681
+user2 plan2.ci 11 'Ci#Plan2-User-2026' 09120000082 0012345682
+ENG2_TOKEN=$(login eng2.ci 'Ci#Eng2-User-2026'); PLAN2_TOKEN=$(login plan2.ci 'Ci#Plan2-User-2026')
+[ -n "$ENG2_TOKEN" ] && [ -n "$PLAN2_TOKEN" ] && ok "pb1: login the second engineering and the second planning user" || bad "pb1: login the second engineering and the second planning user"
+TOKEN=$ADMIN_TOKEN
+
+# --- stage dictionary and settings
+as "$ENG_TOKEN" GET $PB/coding/stages; check "pb1: the stage dictionary is seeded: 39 stages, no duplicate code, RW and RG are two different stages with Persian titles" '.success and (.data|length) == 39 and ([.data[].code]|unique|length) == 39 and ([.data[]|select(.code=="RW" or .code=="RG")]|length) == 2 and all(.data[]; (.titleFa|length) > 0 and (.code|length) == 2)'
+as "$ENG_TOKEN" GET $PB/coding/settings; check "pb1: the stage separator setting is a minus sign" '.success and ([.data[]|select(.key=="StageSeparator")][0].value) == "-"'
+check "pb1: the signature-distinctness and demo-data settings are both off by default" '.success and ([.data[]|select(.key=="BomSignatures:DistinctReviewers")][0].value) == "false" and ([.data[]|select(.key=="DemoData:Enabled")][0].value) == "false"'
+as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"DemoData:Enabled","value":"true"}'; r403 "pb1: only the PMO turns the demo data on (403)"
+as "$ENG_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"maybe"}'; no "pb1: a yes/no setting refuses other text"
+as "$WH_TOKEN" POST $PB/coding/settings '{"key":"StageSeparator","value":"/"}'; r403 "pb1: the warehouse cannot change the separator (403)"
+as "$ENG_TOKEN" POST $PB/coding/stages '{"code":"XX","titleFa":"آزمون","titleEn":"Test","kind":1}'; r403 "pb1: engineering cannot edit the stage dictionary (403)"
+as "$PLAN_TOKEN" POST $PB/coding/stages '{"code":"x1","titleFa":"آزمون","titleEn":"Test","kind":1}'; nomsg "pb1: a stage code must be two letters" "دو حرف"
+
+# --- item coding: the part, then the part at a stage
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.001.2","partTitle":"Wheel case","material":"WCB"}'; check "pb1: the item of a part has the part number as its code" '.success and .data.code == "88.11.01.001.2"'
+as "$ENG_TOKEN" GET "$PB/coding/preview?partNumber=88.11.01.001.2&stageCode2=RL"; check "pb1: the preview shows code = part number + minus + stage, and a Persian title with the stage" '.success and .data.code == "88.11.01.001.2-RL" and .data.exists == false and (.data.title|contains("Wheel case"))'
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.001.2","stageCode2":"RL"}'; check "pb1: the item of the part at stage RL is created with the derived code" '.success and .data.code == "88.11.01.001.2-RL"'
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.001.2","stageCode2":"RL"}'; no "pb1: the same part and stage cannot be coded twice"
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.001.2","stageCode2":"ZZ"}'; nomsg "pb1: a stage that is not in the dictionary is refused" "مرحله"
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.009.2","partTitle":"Wheel case"}'; no "pb1: the same title under another part number is a near-duplicate and needs confirmation"
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.009.2","partTitle":"Wheel case","confirmNearDuplicate":true}'; check "pb1: ... and is created once confirmed" '.success and .data.code == "88.11.01.009.2"'
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.001.2-RW","partTitle":"x"}'; nomsg "pb1: a part number that looks like part + stage is refused" "شماره قطعه"
+as "$ENG_TOKEN" POST $PB/coding/items '{"partNumber":"bad code!","partTitle":"x"}'; nomsg "pb1: a part number with spaces or symbols is refused" "شماره قطعه"
+as "$SEC_TOKEN" POST $PB/coding/items '{"partNumber":"88.11.01.010.2","partTitle":"Casing"}'; r403 "pb1: security cannot code items (403)"
+
+# --- BOM: draft, review, five different signers, release
+BOMLINES='[{"isHeading":true,"partName":"Casing"},{"itemNumber":1,"partNumber":"88.11.01.001.2","partName":"Wheel case","qty":1,"unit":"عدد","material":"WCB","makeOrBuy":1,"netWeight":10,"grossWeight":12,"parentIndex":0},{"itemNumber":2,"partNumber":"88.11.01.002.2","partName":"Casing Cover","qty":2,"unit":"عدد","material":"WCB","makeOrBuy":1,"netWeight":5,"grossWeight":6,"parentIndex":0},{"itemNumber":3,"partNumber":"88.11.01.003.2","partName":"Governor housing","qty":1,"unit":"عدد","material":"WCB","makeOrBuy":1,"parentIndex":0}]'
+as "$ENG_TOKEN" POST $PB/products '{"code":"88.11.00.000.2","title":"محصول آزمون","platform":"T"}'; check "pb1: the test product is saved" '.success and .data.code == "88.11.00.000.2"'
+PBPROD=$(val .data.id)
+as "$WH_TOKEN" POST $PB/boms "{\"productId\":$PBPROD,\"assemblyPartNumber\":\"88.11.00.000.2\",\"title\":\"BOM آزمون\",\"lines\":$BOMLINES}"; r403 "pb1: the warehouse cannot write a BOM (403)"
+as "$ENG_TOKEN" POST $PB/boms "{\"productId\":$PBPROD,\"assemblyPartNumber\":\"88.11.00.000.2\",\"title\":\"BOM آزمون\",\"lines\":$BOMLINES}"; check "pb1: BOM revision 00 is a draft with code <part>-BOM, three lines under one heading" '.success and .data.code == "88.11.00.000.2-BOM" and .data.revision == 0 and .data.status == 0 and (.data.lines|length) == 4 and .data.revisionText == "00"'
+PBB0=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/boms/submit "{\"id\":$PBB0}"; check "pb1: the draft is submitted (UnderReview) and the content hash is fixed" '.success and .data.status == 1 and (.data.contentHash|length) == 64'
+as "$ENG_TOKEN" POST $PB/boms "{\"id\":$PBB0,\"assemblyPartNumber\":\"88.11.00.000.2\",\"lines\":$BOMLINES}"; no "pb1: a revision under review is not edited"
+as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"true"}'; check "pb1: the company asks for four different reviewers (setting on)" '.success'
+as "$ENG_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":1}"; nomsg "pb1: the preparer does not check his own BOM" "فرد دیگری"
+as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":2}"; nomsg "pb1: QC cannot sign before the check (order)" "نوبت"
+as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":1}"; no "pb1: QC cannot do the engineering check (role)"
+as "$ENG2_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":1}"; check "pb1: the second engineer checks" '.success and .data.status == 1'
+as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":2}"; check "pb1: QC checks" '.success'
+as "$PROD_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":3}"; check "pb1: manufacturing (construction) checks" '.success'
+as "$ENG2_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":4}"; nomsg "pb1: with the setting on, the engineer who checked cannot also approve" "افراد متفاوت"
+as "$ADMIN_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":4}"; check "pb1: the PMO approves: five different people signed, the revision is Approved" '.success and .data.status == 2 and ([.data.signatures[]|select(.done)|.userId]|unique|length) == 5'
+as "$ENG_TOKEN" POST $PB/boms/release "{\"id\":$PBB0}"; no "pb1: the preparer does not release"
+as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PBB0}"; check "pb1: the second PMO user releases revision 00" '.success and .data.status == 3 and .data.canNewRevision == false'
+as "$ENG_TOKEN" POST $PB/boms "{\"id\":$PBB0,\"assemblyPartNumber\":\"88.11.00.000.2\",\"lines\":$BOMLINES}"; nomsg "pb1: a released revision is read-only" "پیش‌نویس"
+as "$ENG_TOKEN" DELETE "$PB/boms/$PBB0"; no "pb1: a released revision is not deleted"
+as "$ENG_TOKEN" GET "$PB/boms/$PBB0"; check "pb1: the released BOM is read back with its items made on the way (88.11.01.003.2 has an item)" '.success and ([.data.lines[]|select(.partNumber=="88.11.01.003.2")|.itemId]|.[0]) != null'
+
+# --- new revision, diff, where-used
+as "$ENG_TOKEN" POST $PB/boms/new-revision "{\"id\":$PBB0,\"note\":\"تعداد پوشش و قطعه جدید\"}"; check "pb1: the new revision is 01, a draft copy of 00 with the same 4 lines" '.success and .data.revision == 1 and .data.status == 0 and (.data.lines|length) == 4 and .data.supersedesId != null'
+PBB1=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/boms/new-revision "{\"id\":$PBB0,\"note\":\"دوباره\"}"; no "pb1: only one open revision at a time"
+BOMLINES1='[{"isHeading":true,"partName":"Casing"},{"itemNumber":1,"partNumber":"88.11.01.001.2","partName":"Wheel case","qty":1,"unit":"عدد","material":"WCB","makeOrBuy":1,"netWeight":10,"grossWeight":12,"parentIndex":0},{"itemNumber":2,"partNumber":"88.11.01.002.2","partName":"Casing Cover","qty":4,"unit":"عدد","material":"WCB","makeOrBuy":1,"netWeight":5,"grossWeight":6,"parentIndex":0},{"itemNumber":4,"partNumber":"88.11.01.004.2","partName":"Bearing cap","qty":1,"unit":"عدد","material":"WCB","makeOrBuy":1,"parentIndex":0}]'
+as "$ENG_TOKEN" POST $PB/boms "{\"id\":$PBB1,\"assemblyPartNumber\":\"88.11.00.000.2\",\"changeReason\":\"تعداد پوشش و قطعه جدید\",\"lines\":$BOMLINES1}"; check "pb1: the draft revision 01 is edited" '.success and .data.revision == 1'
+as "$ENG_TOKEN" GET "$PB/boms/diff?from=$PBB0&to=$PBB1"; check "pb1: the diff says exactly: added 88.11.01.004.2, removed 88.11.01.003.2, changed 88.11.01.002.2 (qty 2 -> 4), one line unchanged" '.success and ([.data.added[].partNumber]) == ["88.11.01.004.2"] and ([.data.removed[].partNumber]) == ["88.11.01.003.2"] and ([.data.changed[].partNumber]) == ["88.11.01.002.2"] and ([.data.changed[0].fields[]|select(.old=="2" and .new=="4")]|length) == 1 and .data.unchanged == 1'
+as "$ENG_TOKEN" GET "$PB/boms/where-used?partNumber=88.11.01.002.2"; check "pb1: where-used finds the part in both revisions of the BOM (qty 2 in 00, 4 in 01)" '.success and (.data.rows|length) == 2 and ([.data.rows[].qty]|sort) == [2,4]'
+as "$ENG_TOKEN" GET "$PB/boms?ProductId=$PBPROD&PageSize=0"; check "pb1: the list shows both revisions, newest first" '.success and (.data.data|length) == 2 and .data.data[0].revision == 1'
+as "$ADMIN_TOKEN" GET "finance/audit?EntityType=PbBomHeader&PageSize=0"; check "pb1: the BOM header changes are in the audit trail (create, submit, 4 signatures, release, new revision, edit = 8)" '.success and (.data.data|length) == 8'
+as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"false"}'; check "pb1: the setting is switched back off (default)" '.success'
+
+# --- mapping of legacy codes: imported draft, approved by engineering who is not the proposer
+as "$PLAN_TOKEN" POST $PB/coding/mappings/import '[{"legacyCode":"02101001000010","legacyTitle":"Wheel case -قطعه خام ریخته گری","partNumber":"88.11.01.001.2","stageCode2":"RW"},{"legacyCode":"02101001000010","partNumber":"88.11.01.001.2"},{"legacyCode":"","partNumber":"88.11.01.001.2"},{"legacyCode":"02101002000110","partNumber":"88.11.01.002.2","stageCode2":"ZZ"}]'; check "pb1: the mapping import creates 1 draft and skips 3 (duplicate old code, empty code, unknown stage)" '.success and .data.created == 1 and .data.skipped == 3 and (.data.errors|length) == 3'
+as "$ENG_TOKEN" GET "$PB/coding/mappings?Status=0&Contains=02101001000010&PageSize=0"; check "pb1: the draft mapping is a draft with confidence 100 and cannot be decided by its proposer's colleague in planning" '.success and (.data.data|length) == 1 and .data.data[0].confidence == 100 and .data.data[0].status == 0 and .data.data[0].stageCode2 == "RW"'
+PBMAP=$(jq -r '.data.data[0].id' "$B")
+as "$PLAN_TOKEN" POST $PB/coding/mappings/decide "{\"id\":$PBMAP,\"approve\":true}"; r403 "pb1: planning (the proposer) cannot approve a mapping (403: engineering only)"
+as "$ENG_TOKEN" POST $PB/coding/mappings/decide "{\"id\":$PBMAP,\"approve\":true}"; check "pb1: engineering approves the mapping (it was proposed by planning)" '.success and .data.status == 1'
+as "$ENG_TOKEN" GET "inventory/items?Contains=88.11.01.001.2-RW&PageSize=0"; check "pb1: the approved mapping made the stage item 88.11.01.001.2-RW (stage RW, part number kept) and gave it the 14-digit legacy code" '.success and ([.data.data[]|select(.code=="88.11.01.001.2-RW" and .stageCode2=="RW" and .partNumber=="88.11.01.001.2" and .legacyCode=="02101001000010")]|length) == 1'
+as "$ENG_TOKEN" POST $PB/coding/mappings/decide "{\"id\":$PBMAP,\"approve\":false}"; no "pb1: a decided mapping is not decided again"
+
+# --- the MSPDI import and the template approval
+PBXML='<?xml version=\"1.0\" encoding=\"UTF-8\"?><Project xmlns=\"http://schemas.microsoft.com/project\"><Name>T</Name><MinutesPerDay>480</MinutesPerDay><Tasks><Task><UID>0</UID><ID>0</ID><Name>T</Name><OutlineLevel>0</OutlineLevel></Task><Task><UID>1</UID><ID>1</ID><Name>Casing</Name><OutlineLevel>1</OutlineLevel><Summary>1</Summary><Duration>PT120H0M0S</Duration><Start>2026-01-04T08:00:00</Start></Task><Task><UID>2</UID><ID>2</ID><Name>Wheel case 88.11.01.001.2 MPL</Name><OutlineLevel>2</OutlineLevel><Summary>1</Summary><Duration>PT120H0M0S</Duration><Start>2026-01-04T08:00:00</Start></Task><Task><UID>3</UID><ID>3</ID><Name>E</Name><OutlineLevel>3</OutlineLevel><Duration>PT48H0M0S</Duration><Start>2026-01-04T08:00:00</Start></Task><Task><UID>4</UID><ID>4</ID><Name>P</Name><OutlineLevel>3</OutlineLevel><Duration>PT60H0M0S</Duration><Start>2026-01-10T08:00:00</Start><PredecessorLink><PredecessorUID>3</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task></Tasks></Project>'
+as "$ENG_TOKEN" POST $PB/templates/import-mspdi "{\"productId\":$PBPROD,\"xml\":\"not xml at all\"}"; no "pb1: a file that is not XML is refused with a message"
+as "$ENG_TOKEN" POST $PB/templates/import-mspdi "{\"productId\":$PBPROD,\"title\":\"قالب آزمون\",\"xml\":\"$PBXML\"}"; check "pb1: the MSPDI file becomes a template: 4 nodes, 1 link, 15 days, part number and make-or-buy read from the name, E is a phase" '.success and (.data.nodes|length) == 4 and (.data.links|length) == 1 and .data.totalDurationDays == 15 and .data.isApproved == false and ([.data.nodes[]|select(.partNumber=="88.11.01.001.2")|.makeOrBuy]|.[0]) == 1 and ([.data.nodes[]|select(.title=="E")|.phaseCode]|.[0]) == "E"'
+PBTPL=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/templates/$PBTPL/approve; nomsg "pb1: the importer does not approve the template" "فرد دیگری"
+as "$PLAN_TOKEN" POST $PB/templates/$PBTPL/approve; no "pb1: engineering signs first: planning cannot start the approval"
+as "$ENG2_TOKEN" POST $PB/templates/$PBTPL/approve; check "pb1: the second engineer gives the first approval (the template is still not approved)" '.success and .data.isApproved == false and .data.approvedByUserId != null'
+as "$ENG2_TOKEN" POST $PB/templates/$PBTPL/approve; no "pb1: the same person does not approve twice"
+as "$PLAN2_TOKEN" POST $PB/templates/$PBTPL/approve; check "pb1: a planner gives the second approval and the template is approved" '.success and .data.isApproved == true and .data.secondApprovedByUserId != null'
+
+# --- OPC routing: draft -> review -> check -> approve, stage items, MES publication
+OPCJ='{"productId":'$PBPROD',"partNumber":"88.11.01.001.2","title":"Wheel case","steps":[{"seq":1,"stageCode2":"CA","partName":"Wheel case","standardHours":1.5},{"seq":2,"stageCode2":"QC","requiredEvidence":"DIM,UT"},{"seq":3,"stageCode2":"RG","resourceClass":"CNC_MILLING","standardHours":2.5}]}'
+as "$ENG_TOKEN" POST $PB/routings '{"partNumber":"88.11.01.099.2","steps":[{"seq":1,"stageCode2":"QC","requiredEvidence":"XRAY"}]}'; no "pb1: an unknown inspection evidence kind is refused"
+as "$ENG_TOKEN" POST $PB/routings "$OPCJ"; check "pb1: the OPC routing revision 00 is saved with three steps, the QC step is a QC point" '.success and .data.revision == 0 and .data.status == 0 and (.data.steps|length) == 3 and ([.data.steps[]|select(.stageCode2=="QC")|.isQcPoint]|.[0]) == true'
+PBOPC=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/routings/submit "{\"id\":$PBOPC}"; check "pb1: on submission the stockable stage CA gets its stage item 88.11.01.001.2-CA and the QC step none" '.success and .data.status == 1 and ([.data.steps[]|select(.stageCode2=="CA")|.stageItemCode]|.[0]) == "88.11.01.001.2-CA" and ([.data.steps[]|select(.stageCode2=="QC")|.stageItemId]|.[0]) == null'
+as "$ENG_TOKEN" POST $PB/routings/check "{\"id\":$PBOPC}"; no "pb1: the preparer does not check the chart"
+as "$ENG2_TOKEN" POST $PB/routings/check "{\"id\":$PBOPC}"; check "pb1: the second engineer checks the chart" '.success'
+as "$ENG2_TOKEN" POST $PB/routings/approve "{\"id\":$PBOPC}"; no "pb1: the checker does not approve"
+as "$ADMIN_TOKEN" POST $PB/routings/approve "{\"id\":$PBOPC}"; check "pb1: the PMO approves the chart (three different people)" '.success and .data.status == 2'
+as "$ENG_TOKEN" POST $PB/routings "{\"id\":$PBOPC,\"partNumber\":\"88.11.01.001.2\",\"steps\":[{\"seq\":1,\"stageCode2\":\"CA\"}]}"; no "pb1: an approved chart is read-only"
+as "$QC_TOKEN" POST $PB/routings/publish "{\"id\":$PBOPC}"; r403 "pb1: QC cannot publish a chart to the MES routing (403)"
+as "$ADMIN_TOKEN" POST $PB/routings/publish "{\"id\":$PBOPC}"; check "pb1: publishing writes the operations into the MES routing (not a parallel engine)" '.success and .data.operationsWritten == 2 and (.data.skipped|length) == 0'
+
+# --- the FY seed from the company documents
+as "$ENG_TOKEN" POST $PB/seed-fy; r403 "pb1: only the PMO installs the FY data (403)"
+as "$ADMIN_TOKEN" POST $PB/seed-fy; nomsg "pb1: the demo data is refused while the DemoData setting is off" "DemoData"
+as "$ADMIN_TOKEN" POST $PB/coding/settings '{"key":"DemoData:Enabled","value":"true"}'; check "pb1: the PMO turns the demo-data setting on (test installation)" '.success'
+as "$ADMIN_TOKEN" POST $PB/seed-fy; check "pb1: the FY seed: 88 BOM lines, 7 OPC routings, 350 template nodes, mapping drafts suggested from the item lists" '.success and .data.alreadyInstalled == false and .data.bomLines == 88 and .data.routings == 7 and .data.templateNodes == 350 and .data.mappings == 7 and .data.items == 204 and .data.stages == 39'
+PBFYPROD=$(val .data.productId); PBFYBOM=$(val .data.bomId)
+as "$ADMIN_TOKEN" POST $PB/seed-fy; check "pb1: the seed runs once: the second call changes nothing" '.success and .data.alreadyInstalled == true and .data.productId == '$PBFYPROD
+as "$ENG_TOKEN" GET "$PB/boms/$PBFYBOM"; check "pb1: FY BOM revision 00 is Released from paper, with no signature person recorded and the paper note" '.success and .data.code == "16.11.00.000.2-BOM" and .data.status == 3 and .data.importedSigned == true and ([.data.signatures[]|select(.userId != null)]|length) == 0 and (.data.paperSignatureNote|length) > 0'
+as "$ENG_TOKEN" GET "$PB/boms/where-used?partNumber=16.11.01.001.2"; check "pb1: where-used finds the FY wheel case in FY BOM 00 only" '.success and (.data.rows|length) == 1 and .data.rows[0].bomCode == "16.11.00.000.2-BOM" and .data.rows[0].revision == 0'
+as "$ENG_TOKEN" GET "$PB/routings?productId=$PBFYPROD"; check "pb1: the seven FY charts are approved" '.success and ([.data[]|select(.status == 2 and .productId == '$PBFYPROD')]|length) == 7'
+as "$ENG_TOKEN" GET "$PB/products/$PBFYPROD"; check "pb1: the product bank page of FY: one released BOM, 7 routings, a WBS template still in Draft (never signed on paper)" '.success and .data.product.releasedRevision == 0 and (.data.routings|length) == 7 and ([.data.templates[]|select(.isApproved)]|length) == 0 and .data.templates[0].totalDurationDays == 108.5'
+PBFYTPL=$(jq -r '.data.templates[0].id' "$B")
+as "$ENG2_TOKEN" POST $PB/templates/$PBFYTPL/approve; check "pb1: engineering gives the first approval of the seeded template" '.success and .data.isApproved == false'
+as "$PLAN2_TOKEN" POST $PB/templates/$PBFYTPL/approve; check "pb1: planning gives the second approval of the seeded template" '.success and .data.isApproved == true'
+as "$ENG_TOKEN" GET "$PB/coding/mappings?Status=0&PageSize=0"; check "pb1: the suggested mappings are drafts with a confidence between 50 and 100 (nothing is approved by the seed)" '.success and (.data.data|length) == 7 and all(.data.data[]; .status == 0 and .confidence >= 50 and .confidence <= 100)'
+
+# --- project copy and deviations (a contract with no PC baseline yet)
+call POST Contracts '{"code":"PB-CT-01","title":"قرارداد آزمون بانک محصول","status":1,"employer":"کارفرمای آزمون"}'; check "pb1: the test contract is created" '.success and .data.id > 0'; PBCT=$(val .data.id)
+call POST Equipments '{"code":"PB-EQ-T","title":"Test turbine"}'; check "pb1: the test equipment is created" '.success and .data.id > 0'; PBEQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PBCT,\"equipmentId\":$PBEQ,\"count\":1}"; check "pb1: the equipment is attached to the contract" '.success'
+call POST WorkOrders "{\"contractId\":$PBCT,\"equipmentId\":$PBEQ,\"code\":\"PB-WO-1\",\"title\":\"Turbine 1\",\"description\":\"x\",\"count\":3}"; check "pb1: work order created (3 units)" '.success and .data.id > 0'
+PBWO=$(val .data.id)
+as "$COM_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; r403 "pb1: commercial cannot take a product into a project (403)"
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; check "pb1: the project takes the RELEASED revision 00 of the test product (not the draft 01): source recorded, quantities multiplied by 3, the heading is kept, the contract review is not accepted so no PC WBS yet and the answer says why" '.success and .data.sourceBomRevision == 0 and .data.sourceBomCode == "88.11.00.000.2-BOM" and .data.count == 3 and (.data.lines|length) == 4 and ([.data.lines[]|select(.partNumber=="88.11.01.002.2")|.totalQty]|.[0]) == 6 and .data.pcBaselineCurrent == false and (.data.pcWbs|length) == 0 and .data.pcProductNodeId == null and (.data.wbsNote|length) > 0 and .data.wbsTemplateVersion == 1'
+PBBASE=$(val .data.id); PBLINE=$(jq -r '[.data.lines[]|select(.partNumber=="88.11.01.002.2")][0].id' "$B")
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; no "pb1: a work order takes a product once"
+as "$PLAN_TOKEN" POST $PB/projects/generate-wbs "{\"workOrderId\":$PBWO}"; check "pb1: the PC WBS is not generated while the contract review is not accepted" '.success and .data.pcProductNodeId == null and (.data.wbsNote|length) > 0'
+as "$COM_TOKEN" POST $PB/projects/generate-wbs "{\"workOrderId\":$PBWO}"; r403 "pb1: commercial cannot generate the PC WBS (403)"
+as "$PROD_TOKEN" POST $PB/projects/changes "{\"baselineId\":$PBBASE,\"kind\":4,\"targetLineId\":$PBLINE,\"newQty\":5}"; nomsg "pb1: a deviation needs a reason" "دلیل"
+as "$PROD_TOKEN" POST $PB/projects/changes "{\"baselineId\":$PBBASE,\"kind\":4,\"targetLineId\":$PBLINE,\"newQty\":0,\"reason\":\"صفر\"}"; no "pb1: a quantity deviation to zero is refused"
+as "$PROD_TOKEN" POST $PB/projects/changes "{\"baselineId\":$PBBASE,\"kind\":4,\"targetLineId\":$PBLINE,\"newQty\":5,\"reason\":\"نیاز پروژه\"}"; check "pb1: the requester (construction) saves a quantity deviation: a draft with a number PBC-..." '.success and .data.status == 0 and (.data.number|startswith("PBC-"))'
+PBCH=$(val .data.id)
+as "$PLAN_TOKEN" POST $PB/projects/changes/submit "{\"id\":$PBCH}"; no "pb1: only the requester sends the deviation"
+as "$PROD_TOKEN" POST $PB/projects/changes/submit "{\"id\":$PBCH}"; check "pb1: the deviation is submitted" '.success and .data.status == 1'
+as "$PROD_TOKEN" POST $PB/projects/changes/approve-engineering "{\"id\":$PBCH}"; r403 "pb1: the requester is not engineering (403)"
+as "$ENG_TOKEN" POST $PB/projects/changes/apply "{\"id\":$PBCH}"; nomsg "pb1: an unapproved deviation is not applied" "تاییدشده"
+as "$ENG_TOKEN" POST $PB/projects/changes/approve-engineering "{\"id\":$PBCH}"; check "pb1: engineering approves (the deviation waits for planning)" '.success and .data.status == 1 and .data.engineeringApprovedByUserId != null'
+as "$ENG2_TOKEN" POST $PB/projects/changes/approve-engineering "{\"id\":$PBCH}"; no "pb1: engineering signs once"
+as "$PLAN2_TOKEN" POST $PB/projects/changes/approve-planning "{\"id\":$PBCH}"; check "pb1: planning approves: the deviation is Approved by two different people, neither the requester" '.success and .data.status == 2 and .data.requesterUserId != .data.engineeringApprovedByUserId and .data.requesterUserId != .data.planningApprovedByUserId and .data.engineeringApprovedByUserId != .data.planningApprovedByUserId'
+as "$ENG2_TOKEN" POST $PB/projects/changes/apply "{\"id\":$PBCH}"; check "pb1: applying changes the project copy only: 5 x 3 = 15" '.success and .data.status == 4'
+as "$PLAN_TOKEN" GET "$PB/projects/work-order/$PBWO"; check "pb1: the project line now needs 15 and says which deviation changed it" '.success and ([.data.lines[]|select(.id == '$PBLINE')|.totalQty]|.[0]) == 15 and ([.data.lines[]|select(.id == '$PBLINE')|.changedByChangeId]|.[0]) == '$PBCH
+as "$ENG_TOKEN" GET "$PB/boms/$PBB0"; check "pb1: the bank BOM is untouched by the project deviation (qty still 2)" '.success and ([.data.lines[]|select(.partNumber=="88.11.01.002.2")|.qty]|.[0]) == 2'
+
+# --- once the PC baseline of the contract is current its plan is locked: a product enters only through an approved change request that names the work order.
+# (the positive path - an approved request from the change board - and the deviation after the lock are covered in MsTests; the board flow is too long for this script)
+call POST WorkOrders "{\"contractId\":$PCT,\"equipmentId\":$PEQ,\"code\":\"PB-WO-2\",\"title\":\"Turbine 2\",\"description\":\"x\",\"count\":1}"; check "pb1: a work order on the contract with the current PC baseline is created" '.success and .data.id > 0'; PBWO2=$(val .data.id)
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO2,\"productId\":$PBPROD}"; nomsg "pb1: the locked plan refuses a product without an approved change request" "درخواست تغییر"
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO2,\"productId\":$PBPROD,\"changeRequestId\":999999}"; no "pb1: a change request that does not exist is refused"
+as "$PLAN_TOKEN" GET "$PB/projects/work-order/$PBWO2"; no "pb1: nothing was copied into the locked work order"
+
+# --- adoption of old items and the one-time backfill
+as "$ENG_TOKEN" POST $PB/coding/adopt-part-numbers; r403 "pb1: only the PMO runs the part-number backfill (403)"
+as "$ADMIN_TOKEN" POST $PB/coding/adopt-part-numbers; check "pb1: the backfill runs and leaves a marker" '.success and .data.alreadyDone == false and (.data.marker|length) > 0'
+as "$ADMIN_TOKEN" POST $PB/coding/adopt-part-numbers; check "pb1: the backfill runs once: the second call is a no-op" '.success and .data.alreadyDone == true and .data.adopted == 0'
+TOKEN=$ADMIN_TOKEN
+
 # --- R1t D19: every pass-through of the legacy CSV actions (2 inventory exports, 1 events export, 1 events/mark) left one audit row, all by the finance manager
 TOKEN=$ADMIN_TOKEN
 as "$FM_TOKEN" GET "finance/audit?EntityType=SepidarLegacyCsv&Action=LegacyCsv&PageSize=0"; check "r1t d19: the legacy CSV pass-throughs are in the audit trail (5 rows: 2 inventory exports, 2 events exports - one is the finance manager's check of the protected labour event - and 1 events/mark, one user)" '.success and (.data.data|length) == 5 and ([.data.data[].userId]|unique|length) == 1'

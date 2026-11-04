@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using LegacyContracts = Entities.Model.NasbNiro.Contracts;
 using Pc = Entities.Model.NasbNiro.ProjectControl;
 using Proc = Entities.Model.NasbNiro.Procurement;
+using Pb = Entities.Model.NasbNiro.ProductBank;
 
 namespace DataLayer.Context
 {
@@ -84,7 +85,7 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Iban" } },
             // quality and inventory (R1q): the decisions that release, scrap, waive or relax something; the quality settings; the item quality gates; the calibration waiver
             { typeof(Entities.Model.NasbNiro.Inventory.NonConformance), new[] { "Status", "Severity", "Disposition", "CancelReason", "CancelledByUserId", "QualityApprovedByUserId", "EngineeringApprovedByUserId", "ManufacturingApprovedByUserId", "ConcessionApprovedByUserId", "ExecutedByUserId", "ClosedByUserId", "ScrapDocumentId", "ScrappedSerialUnitId", "ReworkOperationId", "ReinspectionKind", "ReinspectionRecordId", "CapaId", "ResultDocumentId" } },
-            { typeof(Entities.Model.NasbNiro.Inventory.InventoryItem), new[] { "Code", "RequiresIncomingInspection", "RequiredCertificateType", "ShelfLifeDays" } },
+            { typeof(Entities.Model.NasbNiro.Inventory.InventoryItem), new[] { "Code", "PartNumber", "StageCode2", "LegacyCode", "RequiresIncomingInspection", "RequiredCertificateType", "ShelfLifeDays" } },
             { typeof(Entities.Model.NasbNiro.Inventory.ItemQualityChange), null },
             { typeof(Entities.Model.NasbNiro.Quality.QualitySetting), null },
             { typeof(Entities.Model.NasbNiro.Quality.MeasuringEquipment), new[] { "Code", "RequiresCalibration", "CalibrationWaiverReason", "CalibrationWaivedByUserId", "CalibrationWaiverRequestReason", "CalibrationWaiverRequestedByUserId", "Status", "OutOfServiceReason" } },
@@ -206,6 +207,22 @@ namespace DataLayer.Context
             { typeof(Proc.PaymentRequest), new[] { "Number", "Type", "Status", "RequestDate", "ProviderId", "PurchaseOrderId", "InvoiceId", "Amount", "Deductions", "DeductionNote", "QcApproved", "ApprovedAt", "ApprovedByUserId", "PaidAt", "PaidByUserId", "PaymentReference", "RejectedAt", "RejectReason", "Deleted" } },
             // R1c (M12): the technical judgement of a quote (who accepted it and when); the quotes of an open inquiry are rewritten when the buyer edits it
             { typeof(Proc.SupplierQuote), new[] { "InquiryId", "ProviderId", "QuoteNumber", "TotalAmount", "TechnicallyAccepted", "TechnicalScore", "TechnicalNote", "TechnicalReviewedByUserId", "TechnicalReviewedAt" } },
+            // PB1: the product bank. Everything that decides what a product is made of and how: the stage codes, the mappings, the BOM revisions with their signatures, the routings, the templates and the project deviations
+            { typeof(Pb.PbSetting), null },
+            { typeof(Pb.PbStage), null },
+            { typeof(Pb.PbLegacyMapping), null },
+            { typeof(Pb.PbProduct), null },
+            { typeof(Pb.PbBomHeader), new[] { "ProductId", "AssemblyPartNumber", "Code", "Revision", "Status", "EffectiveFrom", "ChangeReason", "SupersedesId", "ContentHash", "PreparedByUserId", "CheckedByUserId", "QcCheckedByUserId", "ManufacturingCheckedByUserId", "ApprovedByUserId", "ReleasedByUserId", "ImportedSigned", "Deleted" } },
+            { typeof(Pb.PbBomLine), null },
+            { typeof(Pb.PbOpcRouting), new[] { "ProductId", "PartNumber", "Revision", "Status", "ChangeReason", "SupersedesId", "ContentHash", "PreparedByUserId", "CheckedByUserId", "ApprovedByUserId", "ImportedSigned", "PublishedToMesAt", "Deleted" } },
+            { typeof(Pb.PbOpcStep), null },
+            { typeof(Pb.PbWbsTemplate), null },
+            { typeof(Pb.PbWbsTemplateNode), null },
+            { typeof(Pb.PbWbsTemplateLink), null },
+            { typeof(Pb.PbProjectBomLine), null },
+            { typeof(Pb.PbProjectRouting), null },
+            { typeof(Pb.PbProjectBaseline), null },
+            { typeof(Pb.PbProjectBomChange), null },
         };
 
         /// <summary>Persian label of the record types added in R1a, put in front of the number or code in the summary of the trail row.</summary>
@@ -255,6 +272,21 @@ namespace DataLayer.Context
             { typeof(FnCloseOverride), "تایید ویژه بستن دوره یا سال" },
             { typeof(Proc.SupplierQuote), "پیشنهاد قیمت تامین‌کننده" },
             { typeof(Proc.SupplierProfile), "پرونده تامین‌کننده" },
+            { typeof(Pb.PbSetting), "تنظیم بانک محصول" },
+            { typeof(Pb.PbStage), "کد مرحله OPC" },
+            { typeof(Pb.PbLegacyMapping), "نگاشت کد قدیم به شماره قطعه" },
+            { typeof(Pb.PbProduct), "محصول بانک محصول" },
+            { typeof(Pb.PbBomHeader), "فهرست مواد (BOM)" },
+            { typeof(Pb.PbBomLine), "سطر BOM" },
+            { typeof(Pb.PbOpcRouting), "مسیر ساخت OPC" },
+            { typeof(Pb.PbOpcStep), "مرحله OPC" },
+            { typeof(Pb.PbWbsTemplate), "قالب WBS" },
+            { typeof(Pb.PbWbsTemplateNode), "گره قالب WBS" },
+            { typeof(Pb.PbWbsTemplateLink), "وابستگی قالب WBS" },
+            { typeof(Pb.PbProjectBomLine), "سطر BOM پروژه" },
+            { typeof(Pb.PbProjectRouting), "چارت OPC پروژه" },
+            { typeof(Pb.PbProjectBaseline), "خط‌مبنای BOM پروژه" },
+            { typeof(Pb.PbProjectBomChange), "انحراف BOM پروژه" },
         };
 
         // R1c: columns added to entries above, kept apart so the entries stay as they were (merge friendly)

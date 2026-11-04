@@ -36,6 +36,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddAfterSalesConfigurations();
             builder.AddAiConfigurations();
             builder.AddCeoConfigurations();
+            builder.AddProductBankConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());
@@ -116,6 +117,12 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.HasIndex(x => x.MescCode);
             builder.HasIndex(x => x.LegacyCode);
             builder.HasIndex(x => x.TechnicalCode);
+            // PB1: one item per part number and stage (the part itself has no stage)
+            builder.Property(x => x.PartNumber).HasMaxLength(InventoryColumns.Code);
+            builder.Property(x => x.StageCode2).HasMaxLength(2);
+            builder.HasIndex(x => new { x.PartNumber, x.StageCode2 }).IsUnique().HasFilter("[Deleted] = 0 AND [PartNumber] IS NOT NULL");
+            builder.HasIndex(x => x.PartItemId);
+            builder.HasOne<InventoryItem>().WithMany().HasForeignKey(x => x.PartItemId).OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.ItemGroup).WithMany(x => x.Items).HasForeignKey(x => x.ItemGroupId).OnDelete(DeleteBehavior.Restrict);
         }
     }

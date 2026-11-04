@@ -139,6 +139,11 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string BaseCode { get; set; }
         public string MescCode { get; set; }
         public string LegacyCode { get; set; }
+
+        /// <summary>PB1: the BOM part number, the stage code of a stage item and the item of the part itself.</summary>
+        public string PartNumber { get; set; }
+        public string StageCode2 { get; set; }
+        public int? PartItemId { get; set; }
         public bool RequiresIncomingInspection { get; set; }
         public int? ShelfLifeDays { get; set; }
         public Entities.Model.NasbNiro.Quality.CertificateType? RequiredCertificateType { get; set; }

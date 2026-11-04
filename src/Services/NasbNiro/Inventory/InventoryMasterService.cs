@@ -184,6 +184,9 @@ namespace Services.NasbNiro.Inventory
                 BaseCode = i.BaseCode,
                 MescCode = i.MescCode,
                 LegacyCode = i.LegacyCode,
+                PartNumber = i.PartNumber,
+                StageCode2 = i.StageCode2,
+                PartItemId = i.PartItemId,
                 RequiresIncomingInspection = i.RequiresIncomingInspection,
                 ShelfLifeDays = i.ShelfLifeDays,
                 RequiredCertificateType = i.RequiredCertificateType,
@@ -200,7 +203,9 @@ namespace Services.NasbNiro.Inventory
             string text = InventoryText.Clean(query.Contains);
             if (text != null)
                 items = items.Where(i => i.Code.Contains(text) || i.Title.Contains(text) || i.TechnicalCode.Contains(text) ||
-                                         i.LegacyCode.Contains(text) || i.MescCode.Contains(text));
+                                         i.LegacyCode.Contains(text) || i.MescCode.Contains(text) || i.PartNumber.Contains(text) ||
+                                         // PB1: every approved legacy code of the part (or of the part at its stage) finds the item, not only the first one kept in LegacyCode
+                                         _uow.Set<Entities.Model.NasbNiro.ProductBank.PbLegacyMapping>().Any(m => !m.Deleted && m.Status == Entities.Model.NasbNiro.ProductBank.PbMappingStatus.Approved && m.LegacyCode.Contains(text) && m.PartNumber == i.PartNumber && m.StageCode2 == i.StageCode2));
             string groupCode = InventoryText.Clean(query.GroupCode);
             if (groupCode != null) items = items.Where(i => i.GroupCode == groupCode);
             string baseCode = InventoryText.Clean(query.BaseCode);
