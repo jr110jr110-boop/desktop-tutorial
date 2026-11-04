@@ -192,6 +192,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.Property(x => x.PartName).HasMaxLength(Title);
                 b.Property(x => x.Qty).HasPrecision(18, 4);
                 b.Property(x => x.TotalQty).HasPrecision(18, 4);
+                b.HasOne(x => x.ParentLine).WithMany().HasForeignKey(x => x.ParentLineId).OnDelete(DeleteBehavior.Restrict);
                 b.Property(x => x.Unit).HasMaxLength(20);
                 b.Property(x => x.Material).HasMaxLength(Name);
                 b.HasIndex(x => x.BaselineId);

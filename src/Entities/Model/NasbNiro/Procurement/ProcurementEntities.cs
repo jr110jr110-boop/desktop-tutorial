@@ -67,6 +67,13 @@ namespace Entities.Model.NasbNiro.Procurement
 
         public string Description { get; set; }
 
+        /// <summary>PB2: the project baseline (PbProjectBaseline) whose material balance drafted this request, and the group of the balance it covers (item group); with them a re-run updates the same draft.</summary>
+        public int? ProjectBaselineId { get; set; }
+        public string BalanceGroupKey { get; set; }
+
+        /// <summary>PB2: 0 low, 1 normal, 2 high, 3 urgent (from the float of the procurement activities); 0 for the requests that are not drafted by the balance.</summary>
+        public int Priority { get; set; }
+
         /// <summary>Sum of the estimated amounts (rial): decides the approvals and the number of quotes.</summary>
         public decimal EstimatedAmount { get; set; }
 
@@ -117,6 +124,13 @@ namespace Entities.Model.NasbNiro.Procurement
         public int? BuyOrderId { get; set; }
 
         public int? MaterialRequestLineId { get; set; }
+
+        /// <summary>PB2: the part node of the project WBS this line buys for, and the balance line behind it.</summary>
+        public int? WbsNodeId { get; set; }
+        public int? BalanceLineId { get; set; }
+
+        /// <summary>PB2: a person changed this line of an automatic draft (quantity or date): the next balance run leaves its quantity alone.</summary>
+        public bool ManuallyEdited { get; set; }
     }
 
     public enum InquiryStatus

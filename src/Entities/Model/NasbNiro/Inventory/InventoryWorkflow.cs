@@ -254,6 +254,9 @@ namespace Entities.Model.NasbNiro.Inventory
 
         public string Purpose { get; set; }
 
+        /// <summary>PB2: the project-control activity a point-of-use kit was drafted for (one kit per activity).</summary>
+        public int? ActivityId { get; set; }
+
         public DateTimeOffset? SubmittedAt { get; set; }
         public DateTimeOffset? PlanningApprovedAt { get; set; }
         public int? PlanningApprovedByUserId { get; set; }

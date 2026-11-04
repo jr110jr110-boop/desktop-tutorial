@@ -40,6 +40,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddCeoConfigurations();
             builder.AddProductBankConfigurations();
             builder.AddGenealogyConfigurations();
+            builder.AddProjectBalanceConfigurations();
             builder.ApplyConfiguration(new ItemGroupConfiguration());
             builder.ApplyConfiguration(new InventoryItemConfiguration());
             builder.ApplyConfiguration(new WarehouseConfiguration());

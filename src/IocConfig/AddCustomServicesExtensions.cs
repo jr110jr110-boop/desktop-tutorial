@@ -260,6 +260,10 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProductBank.IPbSeedService, Services.NasbNiro.ProductBank.PbSeedService>();
             services.AddScoped<Services.NasbNiro.Trace.ITraceCenterService, Services.NasbNiro.Trace.TraceCenterService>();
             services.AddScoped<Services.NasbNiro.Trace.IGenealogyService, Services.NasbNiro.Trace.GenealogyService>();
+            services.AddScoped<Services.NasbNiro.ProjectBalance.IProjectBalanceService, Services.NasbNiro.ProjectBalance.ProjectBalanceService>();
+            services.AddScoped<Services.NasbNiro.ProjectBalance.IProjectReservationService, Services.NasbNiro.ProjectBalance.ProjectReservationService>();
+            services.AddScoped<Services.NasbNiro.ProjectBalance.IItemSubstituteService, Services.NasbNiro.ProjectBalance.ItemSubstituteService>();
+            services.AddScoped<Services.NasbNiro.ProjectBalance.IKitService, Services.NasbNiro.ProjectBalance.KitService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();
             services.AddScoped<Services.NasbNiro.Tasks.ITaskService, Services.NasbNiro.Tasks.TaskService>();
@@ -274,6 +278,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcBaselineService, Services.NasbNiro.ProjectControl.PcBaselineService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcReportService, Services.NasbNiro.ProjectControl.PcReportService>();
             services.AddHostedService<Services.NasbNiro.ProjectControl.PcSnapshotHostedService>();
+            services.AddHostedService<Services.NasbNiro.ProjectBalance.ProjectBalanceHostedService>();
 
             // office automation (release O1): organisation, inbox, letters, meetings, attendance, leave and general requests
             services.AddScoped<Services.NasbNiro.Office.INotificationService, Services.NasbNiro.Office.NotificationService>();

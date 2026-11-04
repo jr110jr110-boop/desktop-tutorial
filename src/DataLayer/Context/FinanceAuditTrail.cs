@@ -15,6 +15,7 @@ using Pc = Entities.Model.NasbNiro.ProjectControl;
 using Proc = Entities.Model.NasbNiro.Procurement;
 using Pb = Entities.Model.NasbNiro.ProductBank;
 using Tm = Entities.Model.NasbNiro.Tasks;
+using Pbal = Entities.Model.NasbNiro.ProjectBalance;
 
 namespace DataLayer.Context
 {
@@ -224,6 +225,9 @@ namespace DataLayer.Context
             { typeof(Pb.PbProjectRouting), null },
             { typeof(Pb.PbProjectBaseline), null },
             { typeof(Pb.PbProjectBomChange), null },
+            // PB2: stock held for a project and the approved substitutes (the balance runs themselves are derived figures and are not audited)
+            { typeof(Pbal.ProjectReservation), null },
+            { typeof(Pbal.ItemSubstitute), null },
             // P-B7a: tasks (status, due date and links; the text of the description and comments is in the task history itself), the referral rows, the progress-approval cartable and the registers
             { typeof(Tm.TmTask), new[] { "Number", "Title", "Kind", "Priority", "Confidentiality", "DueDate", "EstimatedHours", "PercentComplete", "ApprovedPercent", "Status", "StatusReason", "ParentTaskId", "ContractId", "WbsNodeId", "ActivityId", "RiskId", "IssueId", "DecisionId", "CompletedByUserId", "ClosedByUserId", "Deleted" } },
             { typeof(Tm.TmTaskAssignee), new[] { "TaskId", "UserId", "PositionId", "Role", "State", "Reason", "AssignedByUserId", "ParentId", "EndedByUserId", "EndReason" } },
@@ -317,6 +321,8 @@ namespace DataLayer.Context
             { typeof(Pb.PbProjectRouting), "چارت OPC پروژه" },
             { typeof(Pb.PbProjectBaseline), "خط‌مبنای BOM پروژه" },
             { typeof(Pb.PbProjectBomChange), "انحراف BOM پروژه" },
+            { typeof(Pbal.ProjectReservation), "رزرو موجودی برای پروژه" },
+            { typeof(Pbal.ItemSubstitute), "کالای جایگزین" },
         };
 
         // R1c: columns added to entries above, kept apart so the entries stay as they were (merge friendly)

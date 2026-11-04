@@ -39,6 +39,13 @@ namespace Common.Results
                 .HasHttpStatusCode(HttpStatusCode.Unauthorized);
         }
 
+        /// <summary>Somebody else changed or created the same thing at the same moment: answer 409 with a message, never a 500.</summary>
+        public static ResponseDto<T> Conflict<T>(string message)
+        {
+            return Create(false, message, default(T))
+                .HasHttpStatusCode(HttpStatusCode.Conflict);
+        }
+
         /// <summary>The caller is signed in but the role or the rule does not allow the action (the HTTP answer stays 200, the code is in the body like the other helpers).</summary>
         public static ResponseDto<T> Forbidden<T>(string message)
         {

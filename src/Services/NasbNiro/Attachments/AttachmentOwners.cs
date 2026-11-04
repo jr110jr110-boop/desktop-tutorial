@@ -99,6 +99,10 @@ namespace Services.NasbNiro.Attachments
                 case AttachmentOwnerType.InventoryLot:
                 case AttachmentOwnerType.SerialUnit:
                     return AttachmentRoles.Operational;
+                case AttachmentOwnerType.PbBomHeader:
+                case AttachmentOwnerType.PbOpcRouting:
+                    // the drawings and specifications of a product: project, planning, engineering, warehouse, procurement, QC and management only; an AI seat has none of these roles unless it is granted one
+                    return AttachmentRoles.ProductBankRead;
                 case AttachmentOwnerType.TreasuryPayment:
                     return AttachmentRoles.Finance;
                 case AttachmentOwnerType.PettyCashSettlementLine:
@@ -330,6 +334,26 @@ namespace Services.NasbNiro.Attachments
                     var c = await uow.Set<SerialUnit>().AsNoTracking().Where(x => x.Id == id && !x.Deleted).Select(x => x.SerialNumber).FirstOrDefaultAsync(ct);
                     if (c == null) return f;
                     f.Exists = true; f.Number = c; f.Locked = true; f.ReadRoles = AttachmentRoles.Operational; f.WriteRoles = AttachmentRoles.StockMasterWrite;
+                    return f;
+                }
+                case AttachmentOwnerType.PbBomHeader:
+                {
+                    var h = await uow.Set<Entities.Model.NasbNiro.ProductBank.PbBomHeader>().AsNoTracking().Where(x => x.Id == id && !x.Deleted).Select(x => new { x.Code, x.Revision, x.Status, x.CreatorUserId }).FirstOrDefaultAsync(ct);
+                    if (h == null) return f;
+                    f.Exists = true; f.Number = h.Code + " / R" + h.Revision;
+                    f.Locked = h.Status != Entities.Model.NasbNiro.ProductBank.PbBomStatus.Draft; f.Closed = h.Status == Entities.Model.NasbNiro.ProductBank.PbBomStatus.Obsolete;
+                    f.ReadRoles = AttachmentRoles.ProductBankRead; f.WriteRoles = AttachmentRoles.ProductBankWrite; f.LockedWriteRoles = AttachmentRoles.ProductBankLockedWrite;
+                    f.CreatorUserId = h.CreatorUserId; f.CreatorEditsWhileOpen = true;
+                    return f;
+                }
+                case AttachmentOwnerType.PbOpcRouting:
+                {
+                    var h = await uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().AsNoTracking().Where(x => x.Id == id && !x.Deleted).Select(x => new { x.Title, x.Revision, x.Status, x.CreatorUserId }).FirstOrDefaultAsync(ct);
+                    if (h == null) return f;
+                    f.Exists = true; f.Number = h.Title + " / R" + h.Revision;
+                    f.Locked = h.Status != Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Draft; f.Closed = h.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Superseded;
+                    f.ReadRoles = AttachmentRoles.ProductBankRead; f.WriteRoles = AttachmentRoles.ProductBankWrite; f.LockedWriteRoles = AttachmentRoles.ProductBankLockedWrite;
+                    f.CreatorUserId = h.CreatorUserId; f.CreatorEditsWhileOpen = true;
                     return f;
                 }
                 default:

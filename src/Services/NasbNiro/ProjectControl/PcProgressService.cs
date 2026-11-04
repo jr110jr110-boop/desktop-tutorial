@@ -216,6 +216,23 @@ namespace Services.NasbNiro.ProjectControl
             List<int> poLineIds = calc.Activities.Where(a => (a.ProgressMethod == PcProgressMethod.SupplyReceipt || a.ProgressMethod == PcProgressMethod.ServiceDocs) && a.PurchaseOrderLineId.HasValue).Select(a => a.PurchaseOrderLineId.Value).Distinct().ToList();
             var supply = await SupplyAsync(poLineIds, settings, cancellationToken);
 
+            // PB2: the procured percent of the material balance (what is not short and not only asked for: stock issued or reserved, and goods ordered), from the latest run of the project
+            Dictionary<int, decimal> balanceRows = new Dictionary<int, decimal>();
+            List<int> balActIds = calc.Activities.Where(a => a.ProgressMethod == PcProgressMethod.MaterialBalance).Select(a => a.Id).ToList();
+            if (balActIds.Count > 0)
+            {
+                var runs = await _uow.Set<Entities.Model.NasbNiro.ProjectBalance.ProjectMaterialBalance>().AsNoTracking().Where(r => !r.Deleted).Select(r => new { r.Id, r.BaselineId, r.RunNumber }).ToListAsync(cancellationToken);
+                List<int> latest = runs.GroupBy(r => r.BaselineId).Select(g => g.OrderByDescending(r => r.RunNumber).First().Id).ToList();
+                var rows = await _uow.Set<Entities.Model.NasbNiro.ProjectBalance.ProjectMaterialBalanceLine>().AsNoTracking().Where(l => latest.Contains(l.BalanceId) && l.ActivityId != null && balActIds.Contains(l.ActivityId.Value) && l.RequiredQty > 0)
+                    .Select(l => new { ActivityId = l.ActivityId.Value, l.RequiredQty, l.ShortQty, l.OnOrderPrQty }).ToListAsync(cancellationToken);
+                foreach (var g in rows.GroupBy(r => r.ActivityId))
+                {
+                    decimal need = g.Sum(r => r.RequiredQty);
+                    decimal covered = g.Sum(r => Math.Min(r.RequiredQty, Math.Max(0m, r.RequiredQty - r.ShortQty - r.OnOrderPrQty)));
+                    balanceRows[g.Key] = need <= 0 ? 0m : Math.Round(covered / need * 100m, 2, MidpointRounding.AwayFromZero);
+                }
+            }
+
             // inspection plan points
             List<int> itpIds = calc.Activities.Where(a => a.ProgressMethod == PcProgressMethod.ItpPoints && a.ItpActivityId.HasValue).Select(a => a.ItpActivityId.Value).ToList();
             var itp = (await _uow.Set<ItpActivity>().AsNoTracking().Where(i => itpIds.Contains(i.Id)).Select(i => new { i.Id, i.Status, i.DoneAt }).ToListAsync(cancellationToken)).ToDictionary(i => i.Id);
@@ -274,6 +291,9 @@ namespace Services.NasbNiro.ProjectControl
                     case PcProgressMethod.SupplyReceipt:
                     case PcProgressMethod.ServiceDocs:
                         if (a.PurchaseOrderLineId.HasValue && supply.TryGetValue(a.PurchaseOrderLineId.Value, out var s)) { pct = s.Percent; start = s.First; finish = s.Last; }
+                        break;
+                    case PcProgressMethod.MaterialBalance:
+                        if (balanceRows.TryGetValue(a.Id, out decimal procured)) pct = procured;
                         break;
                     case PcProgressMethod.ItpPoints:
                         if (a.ItpActivityId.HasValue && itp.TryGetValue(a.ItpActivityId.Value, out var ia) && (ia.Status == ItpActivityStatus.Done || ia.Status == ItpActivityStatus.Waived || ia.Status == ItpActivityStatus.NotApplicable))
